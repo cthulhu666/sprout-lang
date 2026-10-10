@@ -1,0 +1,10 @@
+# field_access_no_such_field's direct twin: the receiver is a known record when
+# the read is inferred, so no obligation is parked. The miss gave the read a free
+# type, and only `ast_to_ir` rejected it, without a position.
+module main
+
+type P = (x: Int, y: Int)
+
+fn missing_field(p: P) -> Int = p.zzz
+
+fn main() -> Unit !{IO} = print(int_to_string(missing_field(P(x = 1, y = 2))))

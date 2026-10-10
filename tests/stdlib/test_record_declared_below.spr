@@ -1,0 +1,28 @@
+import stdlib.test (check_eq, run_suite)
+
+# Every function here sits above the record it uses. A record's fields are in
+# scope throughout the module, like its type name (spec §7).
+
+# The sort key's type comes from the field alone, and `Ord` dispatches on it.
+fn sorted_names(rows: List Row) -> List String =
+  vec_from_list(rows)
+    |> vec_sort_by(\l -> l.index)
+    |> vec_to_list
+    |> list_map(\r -> r.name)
+
+# Nothing but the field's declared type says which `ToString` instance this is.
+fn index_text(r: Row) -> String = to_string(r.index)
+
+fn make(i: Int, s: String) -> Row = Row(index = i, name = s)
+
+fn renamed(r: Row, s: String) -> Row = r with (name = s)
+
+type Row = (index: Int, name: String)
+
+fn main() -> Unit !{IO} =
+  run_suite("record_declared_below", [
+    check_eq("sort key on a field of a record below", sorted_names([make(2, "b"), make(1, "a"), make(3, "c")]), ["a", "b", "c"]),
+    check_eq("class dispatch on a field read", index_text(make(42, "x")), "42"),
+    check_eq("construct above the declaration", make(7, "y").name, "y"),
+    check_eq("update above the declaration", renamed(make(1, "a"), "z").name, "z")
+  ])

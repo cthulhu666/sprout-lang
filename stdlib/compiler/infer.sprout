@@ -6504,6 +6504,24 @@ fn unify_param_annotation(
 # Record inference
 # ---------------------------------------------------------------------------
 
+# Every record, before any body is checked: a record's fields are in scope
+# throughout its module, as its type name is (spec §7).
+fn register_record_decls(decls: List ast.Decl, alias_env: Dict types.Type,
+                         env: Dict types.Scheme) -> Dict types.Scheme =
+  list_fold(\ (acc, d) -> register_record_decl(d, alias_env, acc), env, decls)
+
+fn register_record_decl(decl: ast.Decl, alias_env: Dict types.Type,
+                        env: Dict types.Scheme) -> Dict types.Scheme =
+  match decl with
+  | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
+      mark_stored_fields(rec_name, type_params, ast.record_field_type_exprs(fields),
+        build_local_params(type_params, alias_env),
+        mark_phantom_params(rec_name, type_params, ast.record_field_type_exprs(fields),
+          mark_record_representation(rec_name, repr,
+            mark_type_multiplicity(rec_name, mult,
+              register_record_fields(rec_name, type_params, fields, alias_env, env)))))
+  | _ -> env
+
 fn register_record_fields(
   rec_name: String,
   type_params: List String,
@@ -6726,10 +6744,9 @@ fn lookup_record_field_typed(
     InferErr(pos, abstract_record_message(rec_name, field_name))
   else
   match dict_get(str_concat("@rec:", str_concat(rec_name, str_concat(":", field_name))), env) with
-  | Nothing ->
-      do
-        v <- unifier.fresh(state)
-        InferOk(typed_ast.TGetField(typed_rec, field_name, types.TVar(types.tyvar_id(v)), pos), subst, eff_subst, rec_eff)
+  # A miss is an error, as in discharge_against_record: a fresh variable would
+  # type the read as anything.
+  | Nothing -> InferErr(pos, record_name_error(rec_name, field_name, env))
   | Just field_scheme ->
       do
         field_t <- record_field_access_type(state, field_scheme, type_args)
@@ -7428,7 +7445,8 @@ fn typecheck_decls_resolved(
     # Mirrored once, up front: an annotation inside a body reads
     # aliases from the env, and a body may be checked above the
     # declaration whose alias it names.
-    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
+    let record_env = register_record_decls(decls, qual_env, scanned_env_with_types)
+    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(record_env)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
     | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
     | typed_ast.TypedOk prog schemes ->
         # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -9669,9 +9687,10 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # group, in place, and acts as a BARRIER that no FnDecl may cross.
 #
 # The barrier rule is not conservatism, it is what the environments allow.
-# RecordDecl, ClassDecl and InstanceDecl are registered by typecheck_decl as it
-# walks, not by pre_scan_fn_decls, so a FnDecl hoisted above one loses the fields,
-# methods or instance it needs. A top-level `let` is not pre-scanned either — a
+# ClassDecl and InstanceDecl are registered by typecheck_decl as it walks, not by
+# pre_scan_fn_decls, so a FnDecl hoisted above one loses the methods or instance it
+# needs. RecordDecl is registered before the walk and need not be a barrier, but
+# still is (BACKLOG). A top-level `let` is not pre-scanned either — a
 # forward reference to one is `Unknown variable` today, which this must not change.
 # And AliasDecl, despite BEING pre-scanned, is still a barrier: pre_scan's
 # alias_env is used only to build schemes inside pre_scan, while typecheck_decls
@@ -10189,15 +10208,8 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  | ast.RecordDecl rec_name type_params fields _ mult repr _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(mark_stored_fields(rec_name, type_params, ast.record_field_type_exprs(fields),
-          build_local_params(type_params, alias_env),
-          mark_phantom_params(rec_name, type_params, ast.record_field_type_exprs(fields),
-            mark_record_representation(rec_name, repr,
-              mark_type_multiplicity(rec_name, mult,
-                register_record_fields(rec_name, type_params, fields, alias_env, global_env_dict(env))))))),
-        env_ftv, subst)
+  # Registered before the walk, by register_record_decls.
+  | ast.RecordDecl _ _ _ _ _ _ _ -> TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
   | ast.FnDecl name _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,
       # which is the single implementation of infer-then-commit. This arm exists
