@@ -114,8 +114,6 @@ fn add_to_group(acc: Dict (List Piece), p: Piece) -> Dict (List Piece) =
   let key = int_to_string(piece_pos(p).index)
   in dict_set(key, Cons(p, maybe_with_default(Nil, dict_get(key, acc))), acc)
 
-# Declared above its readers: a field read in a sort key, above the type, leaves
-# the `Ord` dictionary unresolved (BACKLOG).
 type Line = (index: Int, text: String)
 
 # One line per site, sorted by position: `index` keys the sort and is dropped.

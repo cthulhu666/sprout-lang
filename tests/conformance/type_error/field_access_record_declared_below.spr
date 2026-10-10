@@ -1,0 +1,10 @@
+# A read above its record's declaration is typed by the field. Its fields were
+# registered in walk order, so the read missed, took a free type, and this
+# compiled: the Int came back as a String and printing it segfaulted.
+module main
+
+fn coerce(r: Row) -> String = r.index
+
+type Row = (index: Int, name: String)
+
+fn main() -> Unit !{IO} = print(coerce(Row(index = 7, name = "x")))

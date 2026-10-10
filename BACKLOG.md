@@ -78,13 +78,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (measured): a self-call at `Nest (a, a)` needs `Eq (a, a)`, deduced against the instance
   environment, which Sprout has no step for. Pinned by
   `tests/conformance/type_error/polymorphic_recursion_constrained.spr`.
-- [ ] `P1` **A class dictionary keyed on a deferred field read is never resolved.** A key lambda
-  reading a field of a record declared later in the file compiles, then fails at runtime:
-  `vec_sort_by(\l -> l.index, rows)` above `type Row = (index: Int, …)` panics "dispatched
-  through an unresolved typeclass dictionary for Ord__" on the first comparison. The field
-  obligation is discharged at the declaration boundary, after `Ord k` was injected with `k` still
-  open. Declaring the type first, or naming the key function, avoids it. Found by
-  `bind_census.census_lines`; a five-line repro is the sort above plus a `main`.
 - [ ] `P1` **A lambda with two `_` parameters emits invalid IR.** `\ (a, _, _) -> a` lowers to
   `define … (i64 %p$a, i64 %p$_, i64 %p$_)`, which `opt` rejects as "redefinition of argument".
   `--emit-ir` exits 0, so the error surfaces only at `opt`/`clang`, with no Sprout position. Each
@@ -107,6 +100,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   principled form makes a top-level `let` a binding-group member under the value restriction
   (Haskell Report §4.5.1). Until then `LetDecl` is a reordering barrier and `spec-v0.md` §7 rule
   16 says so.
+- [ ] `P3` **`RecordDecl` is still a `group_plan` barrier, for no remaining reason.** Records are
+  registered before the walk now (`register_record_decls`), so a `FnDecl` may cross one. Kept as
+  a barrier because dropping it changes check order, and a record's index must still land in the
+  plan exactly once. `docs/binding-group-inference-v0.md` §Barriers.
 - [ ] `P3` **`head_name_matches` suffix-matches the final dotted segment** (`infer.sprout:1917`), so
   `where Sh (Box a)` binds to another module's same-named type — two modules defining `Box` are
   indistinguishable and the scan takes whichever argument comes first. Fix: qualify the head at

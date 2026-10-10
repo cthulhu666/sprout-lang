@@ -2433,9 +2433,11 @@ Effect note for v0:
     and the groups are typed in dependency order, so a declaration is always
     typed after the declarations it refers to. Moving a declaration within a file
     cannot change whether the program is accepted, nor which declaration a
-    conflict is reported against. A `fn` may not be moved above a `record`,
-    `class`, `instance`, `let` or `alias` declaration it depends on; those
-    introduce names that must already be in scope, exactly as they must today.
+    conflict is reported against. A `record`'s fields are in scope throughout
+    its module, as its type name is: a `fn` above the declaration may read,
+    construct and update it. A `fn` may not be moved above a `class`,
+    `instance`, `let` or `alias` declaration it depends on; those introduce
+    names that must already be in scope, exactly as they must today.
 
     **Polymorphic recursion requires a complete, constraint-free signature.** A
     function may call itself at a *different* type than the one it was called with

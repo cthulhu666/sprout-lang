@@ -1,0 +1,8 @@
+# field_access_nonrecord_receiver's direct twin: the receiver is `Int` when the
+# read is inferred. The miss gave the read a free type, and only `ast_to_ir`
+# rejected it, without a position.
+module main
+
+fn coerce(n: Int) -> String = n.x
+
+fn main() -> Unit !{IO} = print(coerce(7))
