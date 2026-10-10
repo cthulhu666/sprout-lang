@@ -8,7 +8,7 @@ before it surfaces. This extracts the fence and runs it against stub agents, so
 
 The script reports every finding its passes returned and judges every one of
 them. It does not group, rank by agreement, or gate — the caller reads the list
-and decides what it means. Six behaviours are worth pinning beyond "it parses":
+and decides what it means. These behaviours are worth pinning beyond "it parses":
 
   1. Every finding reaches the skeptic. A lone low is judged like anything else:
      run 1790751683-30359 had eight findings, all low, and the gate sent the two
@@ -28,6 +28,9 @@ and decides what it means. Six behaviours are worth pinning beyond "it parses":
   7. Cleanup passes are a separate track: they never reach `found` or
      `confirmed`, and their count per level is pinned like N's. They have their
      own skeptic, cap and join, so neither track can evict or misnumber the other.
+  8. The cleanup skeptic scores worth apart from truth, and the script, not the
+     skeptic, applies the threshold. A bad score leaves a cleanup unscored,
+     never classified; a refuted or unjudged one is never classified at all.
 """
 import json
 import os
@@ -92,7 +95,8 @@ let vetCalls = 0
 const EFFORTS = []
 const agent = async (prompt, opts) => {
   const label = (opts && opts.label) || ''
-  EFFORTS.push({ label, effort: (opts && opts.effort) || null, prompt })
+  EFFORTS.push({ label, effort: (opts && opts.effort) || null, prompt,
+                schema: (opts && opts.schema) || null })
   const vet = label.startsWith('verify-cleanups:')
   if (vet || label.startsWith('verify:')) {
     // One skeptic per track gets that track's whole list, so the stub answers
@@ -113,7 +117,10 @@ const agent = async (prompt, opts) => {
       if (INDEX_MODE === 'one_based') idx += 1
       else if (INDEX_MODE === 'out_of_range') idx += 100
       else if (INDEX_MODE === 'duplicate') idx = 0
-      verdicts.push({ index: idx, refuted: !!(hit && hit.refuted), reason: 'stub' })
+      const v = { index: idx, refuted: !!(hit && hit.refuted), reason: 'stub' }
+      // Only when the case sets one, so "the skeptic gave no score" is testable.
+      if (hit && 'worth' in hit) Object.assign(v, { worth: hit.worth, worthReason: 'why ' + hit.worth })
+      verdicts.push(v)
     }
     return { verdicts }
   }
@@ -477,8 +484,18 @@ check("the cleanup pass gets the branch diff", True,
 vet = [e for e in field(out, "EFFORTS") if e["label"].startswith("verify-cleanups:")]
 check("the cleanup skeptic is not asked whether code fails", False,
       bool(vet) and "failure genuinely occurs" in vet[0]["prompt"])
-check("the cleanup skeptic is not asked whether it is worth doing", True,
-      bool(vet) and "not whether it is worth doing" in vet[0]["prompt"])
+check("the cleanup skeptic is asked whether it is worth doing", True,
+      bool(vet) and "WORTH DOING" in vet[0]["prompt"])
+check("the cleanup skeptic is told not to refute on worth", True,
+      bool(vet) and "Never refute a true cleanup" in vet[0]["prompt"])
+check("the cleanup skeptic is not told the threshold", False,
+      bool(vet) and "threshold" in vet[0]["prompt"].lower())
+check("the cleanup skeptic's schema requires a worth", True,
+      bool(vet) and "worth" in vet[0]["schema"]["properties"]["verdicts"]["items"]["required"])
+out_b, _ = run([[LONE_HIGH], [], []])
+bug_vet = [e for e in field(out_b, "EFFORTS") if e["label"].startswith("verify:")]
+check("the bug skeptic is not asked for a worth", False,
+      bool(bug_vet) and "worth" in json.dumps(bug_vet[0]["schema"]))
 check("the cleanup skeptic is asked about behaviour", True,
       bool(vet) and "keeps the code's behaviour" in vet[0]["prompt"])
 check("the cleanup skeptic sees the category", True,
@@ -564,6 +581,72 @@ check("cleanups are ordered by severity", ["big", "small"],
       [f["summary"] for f in field(out, "cleanups")])
 check("cleanup paths are canonicalised with the bugs'", "stdlib/prelude.sprout",
       field(out, "cleanups")[0]["file"] if field(out, "cleanups") else None)
+
+# --- worth: the skeptic scores, the script classifies -------------------------
+# Truth and worth are separate answers: a true cleanup not worth doing is
+# confirmed with a low score, never refuted. The cutoff is applied here, not
+# shown to the skeptic, so it cannot anchor the score to it.
+AT = "stdlib/net.sprout:"
+WORTH3 = dict(DUP_HELPER, line=1, summary="w3")
+WORTH2 = dict(DUP_HELPER, line=2, summary="w2")
+out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]],
+               verdicts=[{"at": AT + "1", "worth": 3}, {"at": AT + "2", "worth": 2}])
+check("the default threshold is 3", 3, out.get("doAt"))
+check("worth at the threshold is DO, below it SKIP", {"w3": "do", "w2": "skip"},
+      {f["summary"]: f.get("decision") for f in field(out, "cleanups")})
+check("cleanupsDo counts the DOs", 1, out.get("cleanupsDo"))
+check("a skipped cleanup is still confirmed", 2, out.get("cleanupsConfirmed"))
+check("the score and its reason are carried", [3, "why 3"],
+      [field(out, "cleanups")[0].get("worth"), field(out, "cleanups")[0].get("worthReason")]
+      if field(out, "cleanups") else None)
+
+out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]],
+               verdicts=[{"at": AT + "1", "worth": 3}, {"at": AT + "2", "worth": 2}],
+               args={"effort": "high", "target": "", "doAt": 4})
+check("doAt overrides the threshold", 4, out.get("doAt"))
+check("under doAt 4 a 3 is SKIP", 0, out.get("cleanupsDo"))
+
+# A bad threshold falls back loudly; an absent one silently.
+for bad in [0, 6, 2.5, "4"]:
+    out, err = run([[]] * 3, cleanups=[[WORTH3]], verdicts=[{"at": AT + "1", "worth": 3}],
+                   args={"effort": "high", "target": "", "doAt": bad})
+    check("doAt %r falls back to 3" % (bad,), 3, out.get("doAt"))
+    check("doAt %r is logged" % (bad,), 1, sum(1 for m in field(out, "LOGS") if "doAt" in m))
+out, err = run([[]] * 3, cleanups=[[WORTH3]], verdicts=[{"at": AT + "1", "worth": 3}],
+               args={"effort": "high", "target": ""})
+check("an absent doAt is not logged", 0, sum(1 for m in field(out, "LOGS") if "doAt" in m))
+
+# A bad score loses only its own classification, never the batch or the verdict.
+for bad in [7, 0, 2.5, "4", None]:
+    vs = [{"at": AT + "1", "worth": bad}, {"at": AT + "2", "worth": 4}]
+    out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]], verdicts=vs)
+    got = {f["summary"]: (f.get("worth"), f.get("decision")) for f in field(out, "cleanups")}
+    check("worth %r leaves the cleanup confirmed but unscored" % (bad,),
+          {"w3": (None, None), "w2": (4, "do")}, got)
+    check("worth %r is logged" % (bad,), 1, sum(1 for m in field(out, "LOGS") if "unscored" in m))
+out, err = run([[]] * 3, cleanups=[[WORTH3]])
+check("no score at all is unscored", [None], [f.get("decision") for f in field(out, "cleanups")])
+
+# Refuted and unjudged cleanups are never classified, whatever score came back.
+out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]],
+               verdicts=[{"at": AT + "1", "worth": 5, "refuted": True},
+                         {"at": AT + "2", "omit": True}])
+check("a refuted cleanup is not classified", [None],
+      [f.get("decision") for f in field(out, "cleanupsRefuted")])
+check("an unjudged cleanup is not classified", [None],
+      [f.get("decision") for f in field(out, "cleanupsUnverified")])
+check("neither counts as DO", 0, out.get("cleanupsDo"))
+
+# Worth orders the list, severity breaks ties, unscored goes last.
+HI2 = dict(DUP_HELPER, line=1, severity="high", summary="hi2")
+LO5 = dict(DUP_HELPER, line=2, severity="low", summary="lo5")
+MED_NONE = dict(DUP_HELPER, line=3, severity="medium", summary="none")
+LO2 = dict(DUP_HELPER, line=4, severity="low", summary="lo2")
+out, err = run([[]] * 3, cleanups=[[HI2, LO5, MED_NONE, LO2]],
+               verdicts=[{"at": AT + "1", "worth": 2}, {"at": AT + "2", "worth": 5},
+                         {"at": AT + "4", "worth": 2}])
+check("cleanups are ordered by worth, then severity", ["lo5", "hi2", "lo2", "none"],
+      [f["summary"] for f in field(out, "cleanups")])
 
 if failures:
     print("==> sprout-review script tests FAILED (%d)" % len(failures), file=sys.stderr)
