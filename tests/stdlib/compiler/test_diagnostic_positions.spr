@@ -107,5 +107,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "strip_headers blanks every header line before a body",
       source.strip_headers("module m\n# café\nimport a.b\n\nfn a() -> Int = 1\n")
         == "\n\n\n\nfn a() -> Int = 1\n")
+    # --- direct: is_header_line is the same rule for one line ---
+    assert_true(state, "is_header_line accepts every header shape",
+      all(source.is_header_line, ["", "module m", "import a.b", "# c", "no_prelude", "no_prelude\r"]))
+    assert_true(state, "is_header_line rejects a body line and a longer name",
+      any(source.is_header_line, ["fn a() -> Int = 1", "no_prelude_x", "\r", " import a"]) == false)
 
     summary(state)

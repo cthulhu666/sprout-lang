@@ -1,6 +1,5 @@
 module main
 import stdlib.compiler.lexer as lexer
-import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
@@ -9,10 +8,6 @@ import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.typed_ast as typed_ast
-import stdlib.compiler.sprout_ir as sprout_ir
-import stdlib.compiler.ast_to_ir as ast_to_ir
-import stdlib.compiler.ir_lowering as ir_lowering
-import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.iface_codec as iface_codec
 import stdlib.compiler.cse_census as cse_census
@@ -137,11 +132,14 @@ fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String, 
           | ast.Program decls _ -> dump_ast_decl_names(decls)
 
 # ---------------------------------------------------------------------------
-# Phase: check — bundle + HM typecheck, produces typed IR
+# Phases: check, lower, recheck. They differ only in how far `compile` goes: the
+# HM typecheck, dictionary-passing lowering, or a re-typecheck of the lowered AST
+# so typed nodes carry resolved types.
 
-fn run_file_check(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+fn run_file_typed(compile: source.FilePath -> source.StdlibRoot -> List String -> typed_ast.TypedResult !{IO},
+                  path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   do
-    result <- compiler.compile_phase_check_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
+    result <- compile(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->
@@ -245,8 +243,6 @@ fn run_file_bind_census(path: String, stdlib_root: String, extra_roots: List Str
     | typed_ast.TypedOk _ _ -> print_lines(bind_census.census_lines(path, pieces))
 
 # ---------------------------------------------------------------------------
-# Phase: lower — typeclass dictionary-passing lowering
-
 # Phase: cse-census — how many shareable repeated pure calls a program contains
 # (docs/opt-passes-v0.md §M1). Reports, never rewrites. Measured on the lowered
 # AST, which is where CSE would run and where `dce` already runs.
@@ -276,29 +272,6 @@ fn print_census_keys(entries: List (String, Int)) -> Unit !{IO} =
 fn census_key_line(entry: (String, Int)) -> String =
   match entry with
   | (key, n) -> "  x" ++ int_to_string(n) ++ " " ++ key
-
-fn run_file_lower(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
-  do
-    result <- compiler.compile_phase_lower_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
-    match result with
-    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
-    | typed_ast.TypedOk typed_prog env ->
-        do
-          print("OK")
-          checker.dump_typed_program_names(typed_prog, env)
-
-# ---------------------------------------------------------------------------
-# Phase: recheck — re-typecheck the lowered AST so typed nodes carry resolved types
-
-fn run_file_recheck(path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
-  do
-    result <- compiler.compile_phase_recheck_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
-    match result with
-    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
-    | typed_ast.TypedOk typed_prog env ->
-        do
-          print("OK")
-          checker.dump_typed_program_names(typed_prog, env)
 
 # ---------------------------------------------------------------------------
 # Mode: --emit-iface — Phase 1.x of iface-precompiled-modules-v1-draft.md
@@ -440,51 +413,93 @@ fn run_file_dump_qualify(path: String, stdlib_root: String) -> Unit !{IO} =
     print_lines(lines)
 
 # ---------------------------------------------------------------------------
-# Batch entry point: stdlib_root as argv[0], file paths as argv[1..N]
+# Phases. argv names one once and the batch dispatches on it per file.
+# `PhaseDefault` is the source check a bare `<stdlib-root> <file>...` runs;
+# `PhaseIrTyped` is the codegen `--emit-ir` runs.
+type Phase =
+  | PhaseDefault
+  | PhaseIrTyped
+  | PhaseBindCensus
+  | PhaseBundle
+  | PhaseCheck
+  | PhaseCseCensus
+  | PhaseCseKeys
+  | PhaseDumpQualify
+  | PhaseEffects
+  | PhaseLower
+  | PhaseRecheck
+  | PhaseScanInfo
+
+# Every phase `--phase` accepts, in the order messages list them.
+let named_phases: List Phase =
+  [PhaseBindCensus, PhaseBundle, PhaseCheck, PhaseCseCensus, PhaseCseKeys, PhaseDumpQualify,
+   PhaseEffects, PhaseIrTyped, PhaseLower, PhaseRecheck, PhaseScanInfo]
+
+# The `--phase` spelling. The default has none: no `--phase` selects it.
+fn phase_name(phase: Phase) -> String =
+  match phase with
+  | PhaseDefault -> ""
+  | PhaseIrTyped -> "ir-typed"
+  | PhaseBindCensus -> "bind-census"
+  | PhaseBundle -> "bundle"
+  | PhaseCheck -> "check"
+  | PhaseCseCensus -> "cse-census"
+  | PhaseCseKeys -> "cse-keys"
+  | PhaseDumpQualify -> "dump-qualify"
+  | PhaseEffects -> "effects"
+  | PhaseLower -> "lower"
+  | PhaseRecheck -> "recheck"
+  | PhaseScanInfo -> "scan-info"
+
+let known_phases: String = string.join("|", list_map(phase_name, named_phases))
+
+fn parse_phase(name: String) -> Maybe Phase =
+  find(\p -> phase_name(p) == name, named_phases)
+
+# scan-info and dump-qualify have no diagnostic path of their own — they panic on
+# a read failure — so they take no flag.
+fn run_phase(phase: Phase, path: String, stdlib_root: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+  match phase with
+  | PhaseDefault -> run_file(path, stdlib_root, failed)
+  | PhaseIrTyped -> run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
+  | PhaseBindCensus -> run_file_bind_census(path, stdlib_root, extra_roots, failed)
+  | PhaseBundle -> run_file_bundle(path, stdlib_root, extra_roots, failed)
+  | PhaseCheck -> run_file_typed(compiler.compile_phase_check_with_roots, path, stdlib_root, extra_roots, failed)
+  | PhaseCseCensus -> run_file_cse_census(path, stdlib_root, extra_roots, false, failed)
+  | PhaseCseKeys -> run_file_cse_census(path, stdlib_root, extra_roots, true, failed)
+  | PhaseDumpQualify -> run_file_dump_qualify(path, stdlib_root)
+  | PhaseEffects -> run_file_effects(path, stdlib_root, extra_roots, failed)
+  | PhaseLower -> run_file_typed(compiler.compile_phase_lower_with_roots, path, stdlib_root, extra_roots, failed)
+  | PhaseRecheck -> run_file_typed(compiler.compile_phase_recheck_with_roots, path, stdlib_root, extra_roots, failed)
+  | PhaseScanInfo -> run_file_scan_info(path, stdlib_root)
+
+# The IR phase's stdout is the artifact, so it gets no per-file header.
+fn prints_file_header(phase: Phase) -> Bool =
+  match phase with
+  | PhaseIrTyped -> false
+  | _ -> true
+
+# ---------------------------------------------------------------------------
+# Batch entry point: the file paths are argv[idx..N].
 # Prints "=== <path> ===" before each file's output (except the IR phase).
-#
-# phase: "" = default source check, "ir-typed" = --emit-ir --debug, or a key of
-# `phases`.
 
-# Every `--phase` name and what runs it. The dispatch and every message that
-# lists the phases read this, so they cannot drift. scan-info and dump-qualify
-# have no diagnostic path of their own — they panic on a read failure — so they
-# take no flag.
-let phases =
-  dict_from_list([
-    ("bundle", run_file_bundle),
-    ("check", run_file_check),
-    ("effects", run_file_effects),
-    ("bind-census", run_file_bind_census),
-    ("cse-census", run_file_cse_census(_, _, _, false, _)),
-    ("cse-keys", run_file_cse_census(_, _, _, true, _)),
-    ("lower", run_file_lower),
-    ("recheck", run_file_recheck),
-    ("scan-info", \ (path, root, _roots, _failed) -> run_file_scan_info(path, root)),
-    ("dump-qualify", \ (path, root, _roots, _failed) -> run_file_dump_qualify(path, root))])
-
-let known_phases: String = string.join("|", vec_to_list(dict_keys(phases)))
-
-fn run_batch(stdlib_root: String, idx: Int, phase: String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+fn run_batch(stdlib_root: String, idx: Int, phase: Phase, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   match argv_get(idx) with
   | Nothing -> ()
   | Just path ->
       do
-        if phase == "ir-typed" then ()
-        else print("=== " ++ path ++ " ===")
-        if phase == "ir-typed" then run_file_use_ir_codegen(path, stdlib_root, extra_roots, failed)
-        else if phase == "" then run_file(path, stdlib_root, failed)
-        else
-          match dict_get(phase, phases) with
-          | Just run -> run(path, stdlib_root, extra_roots, failed)
-          # An unrecognised phase used to fall through to the default source check
-          # and exit 0, so `--phase efects` silently ran something else and looked
-          # like it had worked. A gate asserting on a phase's output is only as good
-          # as the driver's willingness to admit the phase does not exist.
-          | Nothing -> report_error(failed, "ERROR: unknown phase `" ++ phase ++ "`: expected " ++ known_phases)
+        if prints_file_header(phase) then print("=== " ++ path ++ " ===") else ()
+        run_phase(phase, path, stdlib_root, extra_roots, failed)
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
+
+# An unknown phase is reported once, before any file is read and with no files
+# too, so a typo cannot run something else, or nothing, and exit 0.
+fn run_named_phase(name: String, stdlib_root: String, idx: Int, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+  match parse_phase(name) with
+  | Just phase -> run_batch(stdlib_root, idx, phase, extra_roots, failed)
+  | Nothing -> report_error(failed, "ERROR: unknown phase `" ++ name ++ "`: expected " ++ known_phases)
 
 # Exit status: 0 when nothing reported an error, 1 otherwise. `failed` is created
 # here, threaded down, and read back as main's result — see the "Diagnostic
@@ -498,22 +513,22 @@ fn main() -> Int !{IO} =
     args <- argv_all()
     match args with
     | ["--emit-ir", "--debug", stdlib_root | _] ->
-        run_batch(stdlib_root, 3, "ir-typed", Nil, failed)
+        run_batch(stdlib_root, 3, PhaseIrTyped, Nil, failed)
     | ["--emit-ir", "--debug" | _] ->
         report_error(failed, "ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
     # One extra package root, fixed right after <stdlib-root>: dotted non-stdlib
     # imports (e.g. postgres.*) resolve under <pkg-root> (docs/packaging-v0.md §10
     # phase 2). Single root, fixed position — the walking-skeleton surface.
     | ["--emit-ir", stdlib_root, "--package-root", dir | _] ->
-        run_batch(stdlib_root, 4, "ir-typed", Cons(dir, Nil), failed)
+        run_batch(stdlib_root, 4, PhaseIrTyped, Cons(dir, Nil), failed)
     | ["--emit-ir", stdlib_root | _] ->
-        run_batch(stdlib_root, 2, "ir-typed", Nil, failed)
+        run_batch(stdlib_root, 2, PhaseIrTyped, Nil, failed)
     | ["--emit-ir" | _] ->
         report_error(failed, "ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase", phase, stdlib_root, "--package-root", dir | _] ->
-        run_batch(stdlib_root, 5, phase, Cons(dir, Nil), failed)
+        run_named_phase(phase, stdlib_root, 5, Cons(dir, Nil), failed)
     | ["--phase", phase, stdlib_root | _] ->
-        run_batch(stdlib_root, 3, phase, Nil, failed)
+        run_named_phase(phase, stdlib_root, 3, Nil, failed)
     | ["--phase", _ | _] ->
         report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
     | ["--phase" | _] ->
@@ -536,7 +551,7 @@ fn main() -> Int !{IO} =
     | ["--check-iface" | _] ->
         report_error(failed, "ERROR: usage: compile-driver --check-iface <iface-file>")
     | [stdlib_root | _] ->
-        run_batch(stdlib_root, 1, "", Nil, failed)
+        run_batch(stdlib_root, 1, PhaseDefault, Nil, failed)
     | _ ->
         report_error(failed, "ERROR: usage: compile-driver [--phase " ++ known_phases ++ " | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
     code <- ref_read(failed)

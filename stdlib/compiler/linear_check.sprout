@@ -138,35 +138,6 @@ fn ctor_param_tys(t: types.Type) -> List types.Type =
   | types.TFunc p rest _ _ -> Cons(p, ctor_param_tys(rest))
   | _ -> Nil
 
-# Read off the constructor's tyvar instantiation by structurally aligning its
-# declared result type with the concrete scrutinee type. No unifier needed: the
-# scrutinee is already concrete, so each tyvar maps to the aligned subtree.
-fn struct_match(decl: types.Type, concrete: types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match decl with
-  | types.TVar name -> dict_set(types.tyvar_identity(name), concrete, acc)
-  | types.TApp f x ->
-      match concrete with
-      | types.TApp g y -> struct_match(x, y, struct_match(f, g, acc))
-      | _ -> acc
-  | types.TFunc a b _ _ ->
-      match concrete with
-      | types.TFunc c d _ _ -> struct_match(b, d, struct_match(a, c, acc))
-      | _ -> acc
-  | types.TThunk b _ ->
-      match concrete with
-      | types.TThunk d _ -> struct_match(b, d, acc)
-      | _ -> acc
-  | types.TTuple items ->
-      match concrete with
-      | types.TTuple citems -> struct_match_list(items, citems, acc)
-      | _ -> acc
-  | _ -> acc
-
-fn struct_match_list(ds: List types.Type, cs: List types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match (ds, cs) with
-  | (Cons d drest, Cons c crest) -> struct_match_list(drest, crest, struct_match(d, c, acc))
-  | _ -> acc
-
 fn apply_tvar_subst(sub: Dict types.Type, t: types.Type) -> types.Type =
   match t with
   | types.TVar name ->
@@ -186,7 +157,7 @@ fn ctor_field_types_at(ctor: String, value_type: types.Type, env: Dict types.Sch
   | Just scheme ->
       match scheme with
       | types.Scheme _ _ body _ _ ->
-          Just(list_map(\ft -> apply_tvar_subst(struct_match(ctor_result_ty(body), value_type, dict_empty()), ft),
+          Just(list_map(\ft -> apply_tvar_subst(types.match_type_vars(ctor_result_ty(body), value_type, dict_empty()), ft),
                         ctor_param_tys(body)))
 
 # The variables a pattern binds that carry a linear obligation, when matched
@@ -277,7 +248,7 @@ fn first_owned_linear_param(params: List ast.Param, lam_type: types.Type,
       match lam_type with
       | types.TFunc a b _ own ->
           if type_mentions_linear(a, env) && ! types.ownership_is_borrow (own)
-          then Just(LinBinder(param_name(prm), a))
+          then Just(LinBinder(ast.param_name(prm), a))
           else first_owned_linear_param(rest, b, env)
       | _ -> Nothing
 
@@ -292,7 +263,7 @@ fn borrowed_linear_params(params: List ast.Param, lam_type: types.Type,
       match lam_type with
       | types.TFunc a b _ own ->
           linear_param_cons(type_mentions_linear(a, env) && types.ownership_is_borrow(own),
-                            param_name(prm), borrowed_linear_params(rest, b, env))
+                            ast.param_name(prm), borrowed_linear_params(rest, b, env))
       | _ -> Nil
 
 # The accumulator of a comprehension's synthesized fold, dropped before the
@@ -316,7 +287,7 @@ fn drop_comp_acc_type(params: List ast.Param, t: types.Type) -> types.Type =
 fn first_param_is_comp_acc(params: List ast.Param) -> Bool =
   match params with
   | [] -> false
-  | [prm | _] -> str_starts_with(param_name(prm), ast.comp_binder_prefix)
+  | [prm | _] -> str_starts_with(ast.param_name(prm), ast.comp_binder_prefix)
 
 fn params_tail(ps: List ast.Param) -> List ast.Param =
   match ps with
@@ -643,9 +614,9 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
   | typed_ast.TCall callee args _ _ -> lin_call(callee, args, sc, env)
   | typed_ast.TBinary _ l r _ _ -> seq_list(Cons(l, Cons(r, Nil)), sc, env)
   | typed_ast.TRange lo hi _ _ -> seq_list(Cons(lo, Cons(hi, Nil)), sc, env)
-  | typed_ast.TRecord _ fields _ _ -> seq_list(record_field_exprs(fields), sc, env)
+  | typed_ast.TRecord _ fields _ _ -> seq_list(list_map(typed_ast.field_value, fields), sc, env)
   | typed_ast.TRecordUpdate base fields _ _ ->
-      seq_list(Cons(base, record_field_exprs(fields)), sc, env)
+      seq_list(Cons(base, list_map(typed_ast.field_value, fields)), sc, env)
   | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, sc, env)
   | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, sc, env)
   | typed_ast.TDo steps _ _ -> lin_do(steps, sc, env)
@@ -819,7 +790,7 @@ fn lin_once_lambda_body(borrowed: List String, params: List ast.Param,
   lin_once_captures(
     borrow_params_discharged(
       lin_consumed(body,
-        scope_add_borrowed(borrowed, scope_shadow(lambda_param_names(params), sc)), env),
+        scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)), env),
       borrowed),
     p)
 
@@ -886,13 +857,6 @@ fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Schem
   if type_is_linear(typed_ast.typed_expr_type(a), env)
   then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg)
   else lin_consumed(a, sc, env)
-
-fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
-  match fields with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField _ v -> Cons(v, record_field_exprs(rest))
 
 # Sequentially combine a list of subexpressions, left to right.
 fn seq_list(exprs: List typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
@@ -1416,13 +1380,8 @@ fn is_comprehension_fold(params: List ast.Param) -> Bool =
   match params with
   | Nil -> false
   | Cons prm rest ->
-      if str_starts_with(param_name(prm), ast.comp_binder_prefix) then true
+      if str_starts_with(ast.param_name(prm), ast.comp_binder_prefix) then true
       else is_comprehension_fold(rest)
-
-fn lambda_param_names(params: List ast.Param) -> List String =
-  match params with
-  | Nil -> Nil
-  | Cons prm rest -> Cons(param_name(prm), lambda_param_names(rest))
 
 # Every parameter SHADOWS first, then the borrowing linear ones are tracked —
 # shadowing afterwards would drop what was just added. `borrowed` is empty for
@@ -1432,7 +1391,7 @@ fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
                    params: List ast.Param, borrowed: List String,
                    sc: LinScope, env: Dict types.Scheme, from_comp: Bool) -> LinRes =
   match lin_consumed(body,
-          scope_add_borrowed(borrowed, scope_shadow(lambda_param_names(params), sc)),
+          scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)),
           env) with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk bc bb -> lin_lambda_close(borrow_params_discharged(LinOk(bc, bb), borrowed), p, from_comp)
@@ -1460,24 +1419,10 @@ fn lin_lambda_borrow_captures(borrowed: List LinUse, p: source.SourcePos,
 
 # --- parameter modes ---
 
-fn param_mode(p: ast.Param) -> ast.ParamMode =
-  match p with
-  | ast.Param _ _ m -> m
-
 fn mode_is_written(m: ast.ParamMode) -> Bool =
   match m with
   | ast.ModeDefault -> false
   | _ -> true
-
-fn mode_is_borrowing(m: ast.ParamMode) -> Bool =
-  match m with
-  | ast.ModeBorrowing -> true
-  | _ -> false
-
-fn mode_is_once(m: ast.ParamMode) -> Bool =
-  match m with
-  | ast.ModeOnce -> true
-  | _ -> false
 
 # THE single ParamMode -> Ownership collapse. It lived in three copies (infer,
 # iface_codec, here) and `iface_codec` documents that the declaration path and the
@@ -1488,7 +1433,7 @@ fn mode_is_once(m: ast.ParamMode) -> Bool =
 # This module is the home because it owns what a mode MEANS, and both other callers
 # can import it without a cycle.
 export fn ownership_of_param_mode(m: ast.ParamMode) -> types.Ownership =
-  types.ownership_of_mode(mode_is_borrowing(m), mode_is_once(m))
+  types.ownership_of_mode(ast.mode_is_borrowing(m), ast.mode_is_once(m))
 
 # True when any parameter carries a written modifier. Used to widen the M4.2
 # gate: a program with NO linear type at all must still reject a modifier on a
@@ -1497,7 +1442,7 @@ export fn any_param_mode_written(params: List ast.Param) -> Bool =
   match params with
   | Nil -> false
   | Cons prm rest ->
-      if mode_is_written(param_mode(prm)) || type_expr_writes_mode(param_type_expr(prm)) then true
+      if mode_is_written(ast.param_mode_of(prm)) || type_expr_writes_mode(param_type_expr(prm)) then true
       else any_param_mode_written(rest)
 
 # A mode written inside an ARROW counts too. The gate asked only about declared
@@ -1552,9 +1497,9 @@ export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
-      if ownership_agrees(param_mode(prm), class_type)
+      if ownership_agrees(ast.param_mode_of(prm), class_type)
       then method_mode_mismatch(rest, spine_rest(class_type))
-      else Just(method_mismatch_for(param_name(prm), ownership_of_param_mode(param_mode(prm)),
+      else Just(method_mismatch_for(ast.param_name(prm), ownership_of_param_mode(ast.param_mode_of(prm)),
                                     spine_own(class_type)))
 
 fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
@@ -1604,13 +1549,13 @@ fn first_bad_modifier(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
 fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
                      rest: List ast.Param, b: types.Type,
                      env: Dict types.Scheme) -> Maybe BadModifier =
-  match written_mode_fault(param_name(prm), param_type_expr(prm), a, env) with
+  match written_mode_fault(ast.param_name(prm), param_type_expr(prm), a, env) with
   | Just bad -> Just(bad)
   | Nothing ->
-      if mode_is_once(param_mode(prm)) then bad_once_here(prm, ret_te, a, rest, b, env)
-      else if ! mode_is_written (param_mode(prm)) then first_bad_modifier(rest, ret_te, b, env)
-      else if type_is_tyvar(a) then Just(BadOnTyvar(param_name(prm)))
-      else if ! type_is_linear (a, env) then Just(BadNonLinear(param_name(prm)))
+      if ast.mode_is_once(ast.param_mode_of(prm)) then bad_once_here(prm, ret_te, a, rest, b, env)
+      else if ! mode_is_written (ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
+      else if type_is_tyvar(a) then Just(BadOnTyvar(ast.param_name(prm)))
+      else if ! type_is_linear (a, env) then Just(BadNonLinear(ast.param_name(prm)))
       else first_bad_modifier(rest, ret_te, b, env)
 
 # The same rules, for a modifier written INSIDE a type rather than on a declared
@@ -1675,7 +1620,7 @@ fn written_mode_fault_list(name: String, tes: List ast.TypeExpr, ts: List types.
 # only one that says nothing the author wrote, so it is the only one skipped.
 fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
                        env: Dict types.Scheme) -> Maybe BadModifier =
-  if mode_is_once(mode) then
+  if ast.mode_is_once(mode) then
     if type_is_tyvar(a) then Just(BadOnceOnTyvar(name))
     else if ! type_is_func (a) then Just(BadOnceNonFunction(name))
     else Nothing
@@ -1700,9 +1645,9 @@ fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
 fn bad_once_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
                  rest: List ast.Param, b: types.Type,
                  env: Dict types.Scheme) -> Maybe BadModifier =
-  if type_is_tyvar(a) then Just(BadOnceOnTyvar(param_name(prm)))
+  if type_is_tyvar(a) then Just(BadOnceOnTyvar(ast.param_name(prm)))
   else if type_is_func(a) then first_bad_modifier(rest, ret_te, b, env)
-  else Just(BadOnceNonFunction(param_name(prm)))
+  else Just(BadOnceNonFunction(ast.param_name(prm)))
 
 fn type_is_tyvar(t: types.Type) -> Bool =
   match t with
@@ -1728,8 +1673,8 @@ fn owned_param_binders(params: List ast.Param, fn_type: types.Type,
   | Cons prm rest ->
       match fn_type with
       | types.TFunc a b _ _ ->
-          linear_binder_cons(type_mentions_linear(a, env) && ! mode_is_borrowing (param_mode(prm)),
-                             LinBinder(param_name(prm), a), owned_param_binders(rest, b, env))
+          linear_binder_cons(type_mentions_linear(a, env) && ! ast.mode_is_borrowing (ast.param_mode_of(prm)),
+                             LinBinder(ast.param_name(prm), a), owned_param_binders(rest, b, env))
       | _ -> Nil
 
 fn linear_binder_cons(keep: Bool, b: LinBinder, tail: List LinBinder) -> List LinBinder =
@@ -1748,16 +1693,12 @@ fn borrowed_param_names(params: List ast.Param, fn_type: types.Type,
   | Cons prm rest ->
       match fn_type with
       | types.TFunc a b _ _ ->
-          linear_param_cons(type_is_linear(a, env) && mode_is_borrowing(param_mode(prm)),
-                            param_name(prm), borrowed_param_names(rest, b, env))
+          linear_param_cons(type_is_linear(a, env) && ast.mode_is_borrowing(ast.param_mode_of(prm)),
+                            ast.param_name(prm), borrowed_param_names(rest, b, env))
       | _ -> Nil
 
 fn linear_param_cons(keep: Bool, nm: String, tail: List String) -> List String =
   if keep then Cons(nm, tail) else tail
-
-fn param_name(p: ast.Param) -> String =
-  match p with
-  | ast.Param name _ _ -> name
 
 # The annotation as WRITTEN. `Nothing` for an unannotated parameter, which has no
 # written modifier to validate by construction.
@@ -1801,7 +1742,7 @@ fn once_param_names(params: List ast.Param) -> List String =
   match params with
   | Nil -> Nil
   | Cons prm rest ->
-      linear_param_cons(mode_is_once(param_mode(prm)), param_name(prm),
+      linear_param_cons(ast.mode_is_once(ast.param_mode_of(prm)), ast.param_name(prm),
                         once_param_names(rest))
 
 # Check a body with no parameters (a top-level `let` declaration): there are no

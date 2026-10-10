@@ -496,172 +496,116 @@ fn lower_fns_parts(fns: List sprout_ir.IRFunction, fn_tables: Dict (Dict (String
 fn lower_fns(fns: List sprout_ir.IRFunction, fn_tables: Dict (Dict (String, Int))) -> String =
   string_concat_many(list_reverse(lower_fns_parts(fns, fn_tables, Nil)))
 
+# One runtime symbol the header declares, and its `declare` line.
+type RuntimeDeclare = (name: String, text: String)
+
+fn decl(ret: String, name: String, params: String) -> RuntimeDeclare =
+  RuntimeDeclare(name = name, text = "declare " ++ ret ++ " @" ++ name ++ "(" ++ params ++ ")\n")
+
+# Every symbol the header declares, in header order: the header text and the
+# extern filter (lower_extern_decls) both come from this list, so an extern
+# never re-declares one. The signatures mirror the runtime's C ones.
+let runtime_declares: List RuntimeDeclare =
+  [decl("i64", "str_concat", "i64, i64"),
+   # str_eq takes ptr/ptr and returns i1 (C: _Bool str_eq(const char*, const char*)).
+   # Strings are passed as i64 in the uniform ABI; IRStrEq lowering coerces with inttoptr.
+   decl("i1", "str_eq", "ptr, ptr"),
+   # Returns -1/0/1 for i64 String/Char handles; IRStrCompare compares it to 0.
+   decl("i64", "str_compare", "i64, i64"),
+   decl("i64", "str_slice", "i64, i64, i64"),
+   decl("i64", "int_to_string", "i64"),
+   # Encodes an i64 Char codepoint as a UTF-8 String, for ToString Char and print.
+   decl("i64", "char_to_string", "i64"),
+   decl("i64", "sprout_gc_push_i64_root", "ptr"),
+   decl("i64", "sprout_gc_pop_roots", "i64"),
+   decl("i64", "sprout_gc_register_i64_root", "ptr"),
+   decl("i64", "sprout_alloc_closure", "i64, i64"),
+   # Arity guard on every closure-value application; aborts on a mismatch rather
+   # than calling through with the wrong argument count.
+   decl("void", "sprout_closure_arity_check", "i64, i64"),
+   # A raw N * 8-byte blob for tuple storage; one declare covers all arities.
+   decl("i64", "sprout_alloc_tuple_blob", "i64"),
+   # Fills g_ctor_meta[] so find_ctor(tag) returns metadata and the GC traces
+   # heap-typed fields. Called once per constructor in @main's entry block.
+   decl("i64", "sprout_register_ctor", "i64, ptr, i64, ptr"),
+   decl("i64", "sprout_tag", "i64"),
+   decl("i64", "sprout_field", "i64, i64"),
+   RuntimeDeclare(name = "sprout_abort_match", text = "declare void @sprout_abort_match() noreturn\n"),
+   # Backs the IRPanic terminator of the `/` divide-by-zero guard.
+   decl("i64", "panic", "i64"),
+   # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
+   decl("ptr", "llvm.stacksave", ""),
+   decl("void", "llvm.stackrestore", "ptr"),
+   # Overflow-checked `+`/`-`/`*` and unary `-` (docs/bigint-v0.md §5.1). LLVM has
+   # no sdiv variant; INT_MIN / -1 is ast_to_ir.finish_checked_div's own check.
+   decl("{ i64, i1 }", "llvm.sadd.with.overflow.i64", "i64, i64"),
+   decl("{ i64, i1 }", "llvm.ssub.with.overflow.i64", "i64, i64"),
+   decl("{ i64, i1 }", "llvm.smul.with.overflow.i64", "i64, i64"),
+   # The arity-generic boxed-ADT constructor: IRMakeCtor is a call plus one store
+   # per field, so the only arity limit is ast_to_ir's max_boxed_arity.
+   decl("i64", "sprout_alloc_obj", "i64, i64"),
+   # Tier-1 CPR peephole: the { i64, i64 } variants of the Maybe-returning
+   # externs, called by IRCallUnboxed2. In step with ast_to_ir's
+   # unboxed_maybe_extern_name; test_ir_codegen_cpr_maybe_externs.spr pins both.
+   decl("{ i64, i64 }", "vector_get_unboxed", "i64, i64"),
+   decl("{ i64, i64 }", "map_get_unboxed", "i64, i64"),
+   decl("{ i64, i64 }", "map_nth_key_unboxed", "i64, i64"),
+   decl("{ i64, i64 }", "map_nth_value_unboxed", "i64, i64"),
+   decl("{ i64, i64 }", "bytes_get_unboxed", "i64, i64"),
+   decl("{ i64, i64 }", "str_char_at_unboxed", "i64, i64"),
+   decl("{ i64, i64 }", "argv_get_unboxed", "i64"),
+   decl("{ i64, i64 }", "env_get_unboxed", "i64"),
+   # print() of a String/Char is IRPrintStr -> @print_str; of an Int/Bool a
+   # plain IRCall of @print_value; eprint() -> @eprint_str. No runtime `@print`
+   # exists, so the prelude's `extern fn print` is filtered out (extern_skip_names).
+   decl("i64", "print_str", "ptr"),
+   decl("i64", "print_value", "i64"),
+   decl("i64", "eprint_str", "ptr"),
+   decl("i64", "argv_get", "i64"),
+   # The C main shim stashes argc/argv so argv_all()/argv_get() work.
+   decl("i64", "sprout_set_argv", "i32, ptr"),
+   # Compiler-bridge intrinsics, registered only via checker.analysis_entries()
+   # and synthesised into call sites, never as a TExternFnDecl. String args are
+   # `ptr` to match the C `const char*`.
+   decl("i64", "analysis_check_source", "ptr"),
+   decl("i64", "analysis_declared_names_in_source", "ptr"),
+   decl("i64", "analysis_exported_names_in_source", "ptr"),
+   decl("i64", "analysis_symbol_inventory_in_source", "ptr"),
+   decl("i64", "analysis_diagnostics_in_source", "ptr"),
+   decl("i64", "analysis_symbol_locations_in_source", "ptr"),
+   decl("i64", "analysis_type_of_in_source", "ptr, ptr"),
+   decl("i64", "analysis_eval_expr_in_source", "ptr, ptr"),
+   decl("i64", "analysis_instances_in_source", "ptr, ptr"),
+   decl("i64", "analysis_complete_in_state", "ptr, ptr, ptr")]
+
 # Header: the minimum prelude clang/opt accept.  Uses the
-# "unknown-unknown-unknown" target triple; the runtime `declare`s below
-# mirror the compiler-intrinsic signature table the runtime exports.
+# "unknown-unknown-unknown" target triple, then the runtime `declare`s.
 export fn ir_header() -> String =
   "; Generated by sprout ir_lowering.sprout (M2 PR 2.3)\n" ++
   "target triple = \"unknown-unknown-unknown\"\n" ++
-  "declare i64 @str_concat(i64, i64)\n" ++
-  # str_eq takes ptr/ptr and returns i1 (C: _Bool str_eq(const char*, const char*)).
-  # Strings are passed as i64 in the uniform ABI; IRStrEq lowering coerces with inttoptr.
-  "declare i1 @str_eq(ptr, ptr)\n" ++
-  # str_compare takes i64/i64 and returns i64 (C: long long str_compare(long long, long long)).
-  # Operands are already i64 String/Char handles — no inttoptr needed.
-  # Returns -1/0/1; IRStrCompare lowering compares result to 0 with icmp <pred>.
-  # Note: codegen.sprout's @str_compare(ptr,ptr) is a separate latent ABI bug (BACKLOG §1).
-  "declare i64 @str_compare(i64, i64)\n" ++
-  "declare i64 @str_slice(i64, i64, i64)\n" ++
-  "declare i64 @int_to_string(i64)\n" ++
-  # char_to_string: encodes an i64 Char codepoint to a UTF-8 String (heap ptr as i64).
-  # Declared here so callers compiled via the IR path (e.g. prelude ToString Char,
-  # print of a Char) link.
-  "declare i64 @char_to_string(i64)\n" ++
-  "declare i64 @sprout_gc_push_i64_root(ptr)\n" ++
-  "declare i64 @sprout_gc_pop_roots(i64)\n" ++
-  "declare i64 @sprout_gc_register_i64_root(ptr)\n" ++
-  "declare i64 @sprout_alloc_closure(i64, i64)\n" ++
-  # Arity guard on every closure-value application; aborts on a mismatch rather
-  # than calling through with the wrong argument count.
-  "declare void @sprout_closure_arity_check(i64, i64)\n" ++
-  # Heap-allocate a raw i64-array blob for tuple storage (N * 8 bytes).
-  # Called by IRMakeTuple lowering; one declaration covers all arities.
-  "declare i64 @sprout_alloc_tuple_blob(i64)\n" ++
-  # @sprout_register_ctor populates g_ctor_meta[] in the runtime so find_ctor(tag)
-  # returns metadata and sprout_heap_child_count traces heap-typed fields during GC.
-  # Called once per constructor in @main's entry block before any user code runs.
-  "declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)\n" ++
-  "declare i64 @sprout_tag(i64)\n" ++
-  "declare i64 @sprout_field(i64, i64)\n" ++
-  "declare void @sprout_abort_match() noreturn\n" ++
-  # W7/F-DIV: `panic` (long long panic(long long)) backs the IRPanic terminator
-  # emitted by the `/` divide-by-zero guard.
-  "declare i64 @panic(i64)\n" ++
-  # Stack save/restore intrinsics for TCO loops (reset per-iteration root allocas).
-  "declare ptr @llvm.stacksave()\n" ++
-  "declare void @llvm.stackrestore(ptr)\n" ++
-  # bigint-v0 Stage 1 (docs/bigint-v0.md §5.1): overflow-checked Int
-  # arithmetic backing `+`/`-`/`*` and unary `-`. IRCheckedArith lowering
-  # calls these directly; LLVM provides sadd/ssub/smul.with.overflow but no
-  # sdiv variant (division overflow — INT_MIN / -1 — is its own check in
-  # ast_to_ir.finish_checked_div).
-  "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)\n" ++
-  "declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)\n" ++
-  "declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)\n" ++
-  # Boxed-ADT constructors.  One arity-generic entry point replaces the former
-  # sprout_make0..sprout_make10 set: IRMakeCtor lowers to a call plus one store
-  # per field, so no arity needs its own declaration and the only remaining
-  # limit is the runtime header's arity field (ast_to_ir's max_boxed_arity).
-  "declare i64 @sprout_alloc_obj(i64, i64)\n" ++
-  # Tier-1 CPR peephole: unboxed { i64, i64 } (SproutUnboxed2) variants of the
-  # Maybe-returning externs.  Emitted by IRCallUnboxed2 when a `match` scrutinizes
-  # one of these directly.  Arg signatures mirror the boxed externs' uniform-i64
-  # ABI (env passes a pointer in an i64 register — identical to the boxed
-  # declares above them).  All 8 declared unconditionally; only the linked ones
-  # are used.  Must stay in sync with unboxed_maybe_extern_name in ast_to_ir.sprout;
-  # tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr pins both lists together.
-  # `regex_find_match_unboxed` and `term_read_line_unboxed` were dropped on
-  # 2026-08-19 along with their C definitions — they were the only two that
-  # allocated (see the note on unboxed_maybe_extern_name).
-  "declare { i64, i64 } @vector_get_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @map_get_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @map_nth_key_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @map_nth_value_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @bytes_get_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @str_char_at_unboxed(i64, i64)\n" ++
-  "declare { i64, i64 } @argv_get_unboxed(i64)\n" ++
-  "declare { i64, i64 } @env_get_unboxed(i64)\n" ++
-  # IO builtins used by programs after M3 PR 11 (do-block support) lands.
-  # print() dispatches by argument type (mirrors direct codegen's emit_print_call):
-  #   String/Char -> @print_str(ptr) via IRPrintStr;  Int/Bool -> @print_value(i64)
-  #   via a plain IRCall.  eprint() -> @eprint_str(ptr).  There is intentionally NO
-  #   `@print` symbol — the prelude `extern fn print` is suppressed in
-  #   is_hardcoded_intrinsic so lower_extern_decls does not emit a (runtime-absent)
-  #   @print declare.  All three take the C signatures literally (ptr for const char*).
-  # @argv_get is declared in prelude (extern fn argv_get(idx: Int) -> Maybe String !{IO})
-  # and called by argv_get_loop; it is always reachable via prelude.
-  # NOTE: @append is intentionally NOT declared here — it is a Semigroup typeclass
-  # method that gets DEFINED (not declared) in user programs via instance resolution;
-  # a blanket declare would conflict with the define in files that include Semigroup
-  # instances (produces "invalid redefinition" in LLVM). Files that call @append
-  # without a definition are a pre-existing typeclass dispatch gap (tracked in xfail).
-  "declare i64 @print_str(ptr)\n" ++
-  "declare i64 @print_value(i64)\n" ++
-  "declare i64 @eprint_str(ptr)\n" ++
-  "declare i64 @argv_get(i64)\n" ++
-  # The C-ABI main shim stashes argc/argv into the runtime so argv_all()/
-  # argv_get() work in typed-built binaries (mirrors direct codegen,
-  # codegen.sprout:3093/:3350).  i32/ptr match the C signature.
-  "declare i64 @sprout_set_argv(i32, ptr)\n" ++
-  # analysis_* intrinsics are runtime-implemented compiler bridge functions
-  # (sprout_runtime.c).  They are NOT represented as TExternFnDecl in any user
-  # source file — they are registered only via checker.sprout's analysis_entries()
-  # and synthesised directly into call sites.  Without these declares the emitted
-  # IR fails opt --passes=verify.  String args use `ptr` to match the C signature
-  # (`const char*`) as declared in the runtime's compiler-intrinsic table.
-  "declare i64 @analysis_check_source(ptr)\n" ++
-  "declare i64 @analysis_declared_names_in_source(ptr)\n" ++
-  "declare i64 @analysis_exported_names_in_source(ptr)\n" ++
-  "declare i64 @analysis_symbol_inventory_in_source(ptr)\n" ++
-  "declare i64 @analysis_diagnostics_in_source(ptr)\n" ++
-  "declare i64 @analysis_symbol_locations_in_source(ptr)\n" ++
-  "declare i64 @analysis_type_of_in_source(ptr, ptr)\n" ++
-  "declare i64 @analysis_eval_expr_in_source(ptr, ptr)\n" ++
-  "declare i64 @analysis_instances_in_source(ptr, ptr)\n" ++
-  "declare i64 @analysis_complete_in_state(ptr, ptr, ptr)\n\n"
+  string_concat_many(list_map(\d -> d.text, runtime_declares)) ++ "\n"
 
-# M3 PR 14: emit `declare i64 @<name>(i64, …)` for each user `extern fn`,
-# skipping any name that is already in the hardcoded ir_header list (LLVM
-# rejects duplicate declarations) or defined as a user fn (an `extern fn`
-# shadowed by a real define is a typeclass-instance pattern — let the define
-# win).  Also skips `append` since it is a typeclass method (see ir_header
-# comment).  Sprout's i64-uniform encoding means we emit i64 for every
-# parameter regardless of source type.
-export fn lower_extern_decls(externs: List (String, Int),
-                             fns: List sprout_ir.IRFunction) -> String =
-  lower_extern_decls_loop(externs, fns, set_empty(), "")
+# The header's names (LLVM rejects a duplicate declare), `print` and `eprint`
+# (lowered to print_str/eprint_str; no runtime symbol), and `append`: a Semigroup
+# method a program may DEFINE, so a blanket declare would be a redefinition.
+let extern_skip_names: Set =
+  set_from_list(list_append(["print", "eprint", "append"], list_map(\d -> d.name, runtime_declares)))
 
-fn lower_extern_decls_loop(externs: List (String, Int),
-                           fns: List sprout_ir.IRFunction,
-                           seen: Set, acc: String) -> String =
+# Emit `declare i64 @<name>(i64, …)` for each user `extern fn` once, skipping a
+# name in `defined` (a real define of an `extern fn` name is a typeclass-instance
+# pattern; the define wins) or in extern_skip_names. Sprout's i64-uniform
+# encoding means every parameter is i64 regardless of source type.
+export fn lower_extern_decls(externs: List (String, Int), defined: Set) -> String =
+  string_concat_many(list_reverse(lower_extern_decls_loop(externs, set_union(defined, extern_skip_names), Nil)))
+
+fn lower_extern_decls_loop(externs: List (String, Int), skip: Set, acc: List String) -> List String =
   match externs with
   | Nil -> acc
-  | Cons p rest ->
-      match p with
-      | (name, arity) ->
-          if extern_already_declared(name, fns, seen) then
-            lower_extern_decls_loop(rest, fns, seen, acc)
-          else
-            lower_extern_decls_loop(rest, fns, set_insert(name, seen),
-              acc ++ "declare i64 @" ++ name ++ "(" ++ i64_params(arity) ++ ")\n")
+  | Cons (name, arity) rest ->
+      if set_member(name, skip) then lower_extern_decls_loop(rest, skip, acc)
+      else lower_extern_decls_loop(rest, set_insert(name, skip),
+                                   Cons("declare i64 @" ++ name ++ "(" ++ i64_params(arity) ++ ")\n", acc))
 
-# Skip an extern decl if: it's already in the hardcoded ir_header list, it's
-# defined as a user IRFunction in the same module (the define wins), or this
-# specific decl name was already emitted (the bundled module loader can
-# include the same `extern fn` line via multiple importers).
-fn extern_already_declared(name: String, fns: List sprout_ir.IRFunction, seen: Set) -> Bool =
-  is_hardcoded_intrinsic(name) || has_fn_named(name, fns) || set_member(name, seen)
-
-fn is_hardcoded_intrinsic(name: String) -> Bool =
-  name == "str_concat" || name == "str_eq" || name == "str_compare" ||
-  name == "str_slice" ||
-  name == "int_to_string" || name == "char_to_string" ||
-  name == "sprout_gc_push_i64_root" || name == "sprout_gc_pop_roots" ||
-  name == "sprout_alloc_closure" || name == "sprout_closure_arity_check" ||
-  name == "sprout_alloc_tuple_blob" ||
-  name == "sprout_register_ctor" || name == "sprout_tag" || name == "sprout_field" ||
-  name == "sprout_abort_match" || name == "panic" ||
-  name == "sprout_alloc_obj" ||
-  name == "print" || name == "eprint" || name == "argv_get" ||
-  name == "print_str" || name == "print_value" || name == "eprint_str" ||
-  name == "append" ||
-  name == "analysis_check_source" || name == "analysis_declared_names_in_source" ||
-  name == "analysis_exported_names_in_source" ||
-  name == "analysis_symbol_inventory_in_source" ||
-  name == "analysis_diagnostics_in_source" ||
-  name == "analysis_symbol_locations_in_source" ||
-  name == "analysis_type_of_in_source" || name == "analysis_eval_expr_in_source" ||
-  name == "analysis_instances_in_source" || name == "analysis_complete_in_state"
 
 fn i64_params(arity: Int) -> String =
   if arity == 0 then "" else i64_params_loop(arity - 1, "i64")
@@ -780,17 +724,6 @@ fn main_ret(has_user_main: Bool, main_returns_int: Bool) -> String =
   if has_user_main && main_returns_int
   then "  %exit_code = trunc i64 %user_main_ret to i32\n  ret i32 %exit_code\n}\n"
   else "  ret i32 0\n}\n"
-
-# True if any IRFunction in the list has the given name.
-# Used to detect whether ast_to_ir produced @__sprout_user_main.
-# O(n) where n = number of functions.
-fn has_fn_named(name: String, fns: List sprout_ir.IRFunction) -> Bool =
-  match fns with
-  | Nil -> false
-  | Cons f rest ->
-      match f with
-      | sprout_ir.IRFunction fname _ _ _ ->
-          if fname == name then true else has_fn_named(name, rest)
 
 # Emit the @__sprout_init_globals() call after ctor registration, if there
 # are any runtime-computed top-level lets to initialize.  M3 PR 5; mirrors
@@ -922,8 +855,10 @@ fn lower_program_body(fns: List sprout_ir.IRFunction,
   ir_header() ++ extern_decls_text ++ str_globals_text ++ ctor_globals ++ let_globals_text ++
     (if str_globals_text == "" && ctor_globals == "" && let_globals_text == "" && extern_decls_text == "" then "" else "\n") ++
     lower_fns(fns, fn_tables) ++ main_shim(ctor_regs, any_runtime_global(let_globals),
-                                            has_fn_named("__sprout_user_main", fns) || has_fn_named("__sprout_user_main_int", fns),
-                                            has_fn_named("__sprout_user_main_int", fns))
+                                            set_member("__sprout_user_main", defined) || returns_int,
+                                            returns_int)
   where ctor_globals = collect_ctor_globals(ctor_regs)
         let_globals_text = lower_globals(let_globals)
-        extern_decls_text = lower_extern_decls(externs, fns)
+        defined = set_from_list(list_map(sprout_ir.ir_fn_name, fns))
+        returns_int = set_member("__sprout_user_main_int", defined)
+        extern_decls_text = lower_extern_decls(externs, defined)

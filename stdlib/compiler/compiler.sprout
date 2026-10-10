@@ -338,7 +338,7 @@ fn env_scheme(name: String, env: Dict types.Scheme) -> Maybe types.Scheme =
 # Replacing the list is safe — a method cannot declare a `where` clause, and
 # `infer.register_fn_decl_scheme` drops the marker for a function that takes the name.
 fn with_class_constraint(name: String, s: types.Scheme, env: Dict types.Scheme) -> types.Scheme =
-  match dict_get("@class:" ++ name, env) with
+  match dict_get(types.class_marker_key(name), env) with
   | Nothing -> s
   | Just marker ->
       match class_constraint_of(marker, types.scheme_vars(s)) with

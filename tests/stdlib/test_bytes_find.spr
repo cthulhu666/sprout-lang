@@ -63,5 +63,12 @@ fn main() -> Unit !{IO} =
     check_eq("needle containing a NUL byte",
       describe(bytes.find(nul_haystack(), nul_needle())), "3"),
     check_eq("a NUL in the haystack does not terminate the scan",
-      describe(bytes.find(nul_haystack(), of("c"))), "4")
+      describe(bytes.find(nul_haystack(), of("c"))), "4"),
+
+    # `get_or`, the bounds-safe read `find` scans with: the byte in range, the fallback outside.
+    check_eq("get_or in range", int_to_string(bytes.get_or(of("abc"), 1, -1)), "98"),
+    check_eq("get_or reads a NUL byte", int_to_string(bytes.get_or(nul_haystack(), 1, -1)), "0"),
+    check_eq("get_or negative index", int_to_string(bytes.get_or(of("abc"), -1, -1)), "-1"),
+    check_eq("get_or index == length", int_to_string(bytes.get_or(of("abc"), 3, 0)), "0"),
+    check_eq("get_or on empty", int_to_string(bytes.get_or(bytes.empty(), 0, 7)), "7")
   ])

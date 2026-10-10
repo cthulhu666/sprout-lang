@@ -170,15 +170,16 @@ fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List 
   match lines with
   | Nil -> list_reverse(acc)
   | Cons line rest ->
-      if str_starts_with(line, "module ") || line == "" || str_starts_with(line, "#") then
-        collect_imports_from_lines(rest, acc)
-      else if str_starts_with(line, "import ") then
+      if str_starts_with(line, "import ") then
         match join_wrapped_import(source.strip_line_comment(line), rest,
                                   source.line_paren_delta(line)) with
         | (joined, remaining) ->
             match parse_import_line(joined) with
             | Nothing -> collect_imports_from_lines(remaining, acc)
             | Just spec -> collect_imports_from_lines(remaining, Cons(spec, acc))
+      # The header block ends where `strip_headers` ends it, `no_prelude` included.
+      else if source.is_header_line(line) then
+        collect_imports_from_lines(rest, acc)
       else
         list_reverse(acc)
 

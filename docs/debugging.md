@@ -9,11 +9,17 @@ Tools and protocols to reach for **when something is broken** in the Sprout comp
 | `scan-info <stdlib> <file>` | Calls `bundler.scan_source_info` and prints `module:`, `export:`, `ctor:` lines. Diagnoses module-name extraction bugs without running the full bundler pipeline. |
 | `dump-qualify <stdlib> <file>` | Runs full collection + qualify and prints original→qualified name mapping per module, plus `ctx: EMPTY` or `ctx: populated` for each. A `ctx: EMPTY` line means `build_resolve_ctx` failed to find the module's path in `all_symbols` — all names stay unqualified, triggering the `[assert]` error. |
 | `bundle <stdlib> <file>` | Runs the full bundle phase and prints qualified decl names. Gold standard for detecting qualify-stage regressions; output must be identical between stage-0 and stage-1 (verified by `tests/stdlib/compiler/test_bundler.spr`). |
+| `check <stdlib> <file>` | Bundles and type-checks, then prints `OK` and the typed names. Stops before lowering. |
+| `lower <stdlib> <file>` | As `check`, after typeclass dictionary-passing lowering. |
+| `recheck <stdlib> <file>` | As `lower`, after re-type-checking the lowered AST so typed nodes carry resolved types. |
+| `ir-typed <stdlib> <file>` | What `--emit-ir` runs: LLVM IR on stdout, with no `=== <file> ===` header. |
+| `cse-census`, `cse-keys` | Counts of shareable repeated pure calls; see [below](#where-is-a-program-repeating-itself---phase-cse-census---phase-cse-keys). |
 | `effects <stdlib> <file>` | Prints one line per declaration — declared effect vs the effect its body was inferred to perform — plus a summary. Reports, never rejects — deliberately. Since 2026-08-16 an ordinary compile DOES enforce spec §7 rules 8 and 9 (`checker.enforce_effects`); this phase calls the un-enforcing entry point directly so the census instrument survives enforcement, which matters most while migrating a codebase against it. Read the count as a **lower bound**; nothing writes an inferred effect back to the env, so a mis-declared callee is flagged but its callers are not until it is annotated. Calibrated by `just effect-report-smoke` against `tests/effects/canaries.spr`; see `docs/effect-enforcement-v0.md`. |
 | `bind-census <stdlib> <file>` | The `try` migration's worklist (docs/try-propagate-v0.md §8 step 1a). One tab-separated line per site in the **entry file only**, sorted by position: `bind path:l:c <plain\|Maybe\|Result> rhs=<pure\|effectful\|unknown> pat=<shape> try=<no\|head\|chain>` for every `<-`; `discard path:l:c <Maybe\|Result>` for a fallible non-final `do` statement; `let path:l:c <do-let\|let-in\|top-level> <family> rhs=… pat=… try=<yes\|no>` for a `let` that is not pure or that discards a failure (`let _ = e`). `pat` is `name`, `wildcard`, `unit`, `tuple`, `destructure` or `destructure-else`. A `where` binding reports as `let-in`. Positions: `bind` and pattern `let`s at the statement start; `discard` and a plain `do`-`let` at the expression's own position, which is inside the statement but not its start (a call's is its `(`). Reports, never rejects. Calibrated by `just bind-census-smoke` against `tests/bind_census/canaries.spr` and `collide.spr` (an imported instance of the same class at the same offset must not leak into the entry's list). |
 
-An unrecognised phase is an error. It used to fall through to the default source
-check and exit 0, so a typo ran something else and looked like it had worked.
+An unrecognised phase is an error, reported once before any file is read, and the
+run exits 1 even with no files. A typo cannot run something else and look like it
+worked.
 
 **Troubleshooting `BundleErr("[assert] qualify_decl: FnDecl starts with '.'...")`:**
 1. Run `--phase scan-info` to confirm `scan_source_info` returns a valid non-empty module name.

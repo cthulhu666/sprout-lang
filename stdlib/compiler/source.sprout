@@ -291,12 +291,28 @@ export fn canonical_name_message(marked: String) -> String =
 export fn strip_headers(s: String) -> String =
   strip_headers_go(s, bytes_from_utf8(s), 0, 0, 0)
 
+# Is the line starting at byte `pos` a header line? The one rule for a whole
+# source and for a single line: an empty line is a `\n` at `pos`, or `pos` at the
+# end of a line string.
 fn is_header_line_byte(s: String, pos: Int) -> Bool =
+  pos >= str_byte_len(s) ||
+  str_starts_with_at_byte(s, pos, "\n") ||
   str_starts_with_at_byte(s, pos, "module ") ||
   str_starts_with_at_byte(s, pos, "import ") ||
   str_starts_with_at_byte(s, pos, "#") ||
-  str_starts_with_at_byte(s, pos, "\n") ||
   is_no_prelude_line_byte(s, pos)
+
+# The same rule for a line without its `\n`, as `str_split_lines` gives it.
+export fn is_header_line(line: String) -> Bool = is_header_line_byte(line, 0)
+
+# Unqualified and lowercase-initial: what makes a name a type or effect VARIABLE
+# rather than a constructor or label. Here so `ast`, `types` and every pass that
+# reads a name's case share one rule; neither of the first two imports the other.
+export fn is_lowercase_name(name: String) -> Bool =
+  if str_find(name, ".") != -1 then false
+  else match str_char_at(name, 0) with
+  | Nothing -> false
+  | Just c -> c >= 'a' && c <= 'z'
 
 # ── The `no_prelude` opt-out ─────────────────────────────────────────────────
 #

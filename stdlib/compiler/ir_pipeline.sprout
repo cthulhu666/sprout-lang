@@ -24,7 +24,7 @@ import stdlib.compiler.dce as dce
 #     loop.
 #   - next_str_idx is threaded in function-emission order so @.str.K numbering
 #     is identical to the batch path.
-#   - defined_names (Set) accumulates emitted fn names for lower_extern_decls_by_names.
+#   - defined_names (Set) accumulates emitted fn names for lower_extern_decls.
 #   - has_user_main is tracked as a Bool.
 #
 # Emission order (must match translate_decls + lower_program_body exactly):
@@ -47,9 +47,6 @@ import stdlib.compiler.dce as dce
 type StreamState (..) =
   StreamState Int (Ref (List String)) (Ref (List String)) Set Bool Bool (Dict Bool) (Dict (List (String, Int)))
 
-fn ir_fn_name(f: sprout_ir.IRFunction) -> String =
-  match f with | sprout_ir.IRFunction n _ _ _ -> n
-
 fn pair_first(p: (a, b)) -> a = match p with | (x, _) -> x
 fn pair_second(p: (a, b)) -> b = match p with | (_, y) -> y
 
@@ -63,7 +60,7 @@ fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
       # Mutual-TCO runs PRE-rooting (like self-TCO): once an eligible cross-function
       # tail call is an IRTailCall, ir_rooting emits no accumulating root for it.
       emit_one_fn_rooted(ir_rooting.rewrite_one_fn_with_summary(
-                           ast_to_ir.mutual_tco_rewrite_fn(f, ast_to_ir.mutual_eligible_for(ir_fn_name(f), eligible)),
+                           ast_to_ir.mutual_tco_rewrite_fn(f, ast_to_ir.mutual_eligible_for(sprout_ir.ir_fn_name(f), eligible)),
                            idx_map, summary),
                          next_idx, str_acc, bodies_acc, defined, has_user_main, main_returns_int, summary, eligible)
 
@@ -364,14 +361,8 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                                                                 let_globals, ctor_regs, externs)
 
 # Assemble the final LLVM IR text from accumulators.
-# Mirrors lower_program_body exactly.
-#
-# For extern-decl filtering we call lower_extern_decls(externs, filtered_fns)
-# where filtered_fns is a minimal stub list of IRFunction values — one per
-# name in defined_names.  lower_extern_decls_loop calls has_fn_named(name, fns)
-# which checks fn names; the stub functions have the right names and dummy
-# bodies, so the filter logic is identical to the batch path without any new
-# string literals in ir_lowering.sprout (which would shift @.str.K indices).
+# Mirrors lower_program_body exactly; `defined_names` is the batch path's set of
+# defined fn names.
 fn assemble_result(str_acc: Ref (List String), bodies_acc: Ref (List String),
                    defined_names: Set, has_user_main: Bool, main_returns_int: Bool,
                    let_globals: List sprout_ir.IRGlobalDecl,
@@ -385,8 +376,7 @@ fn assemble_result(str_acc: Ref (List String), bodies_acc: Ref (List String),
     let bodies_text = string_concat_many(list_reverse(body_chunks))
     let ctor_globals = ir_lowering.collect_ctor_globals(ctor_regs)
     let let_globals_text = ir_lowering.lower_globals(let_globals)
-    let stub_fns = set_names_to_stub_fns(set_to_list(defined_names))
-    let extern_decls_text = ir_lowering.lower_extern_decls(externs, stub_fns)
+    let extern_decls_text = ir_lowering.lower_extern_decls(externs, defined_names)
     let separator = if str_globals_text == "" && ctor_globals == "" &&
                        let_globals_text == "" && extern_decls_text == ""
                     then "" else "\n"
@@ -397,13 +387,3 @@ fn assemble_result(str_acc: Ref (List String), bodies_acc: Ref (List String),
                                         ir_lowering.any_runtime_global(let_globals),
                                         has_user_main, main_returns_int)
     Ok(full_ir)
-
-# Build a list of IRFunction stubs with the given names and empty bodies.
-# Used to pass to lower_extern_decls so it can filter out names that are
-# already defined, without adding any new string literals to ir_lowering.
-fn set_names_to_stub_fns(names: List String) -> List sprout_ir.IRFunction =
-  match names with
-  | Nil -> Nil
-  | Cons name rest ->
-      Cons(sprout_ir.IRFunction(name, Nil, "i64", Nil),
-           set_names_to_stub_fns(rest))

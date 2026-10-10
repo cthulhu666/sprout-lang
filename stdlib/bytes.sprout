@@ -35,6 +35,15 @@ export fn length(value: Bytes) -> Int =
 export fn get(value: Bytes, index: Int) -> Maybe Int =
   bytes_get(value, index)
 
+# O(1), and allocation-free: the byte at `index`, or `fallback` when it is out of range. Matched
+# directly so `bytes_get` reaches its CPR peephole; handing the `Maybe Int` to a function instead —
+# `maybe_with_default(fallback, ...)` — boxes one per byte read, ~15x on a whole-buffer scan.
+# Pinned by tests/stdlib/test_bytes_byte_at_unboxed.spr.
+export fn get_or(value: Bytes, index: Int, fallback: Int) -> Int =
+  match get(value, index) with
+  | Just b -> b
+  | Nothing -> fallback
+
 # O(count): allocates and copies the requested byte window. A negative `start` or
 # `count` clamps to empty rather than failing.
 export fn slice(value: Bytes, start: Int, count: Int) -> Bytes =
@@ -165,19 +174,10 @@ export fn read_u32_be(value: Bytes) -> Maybe Int =
     b3 <- get(value, 3)
     Just(b0 * 16777216 + b1 * 65536 + b2 * 256 + b3)
 
-# O(1), and allocation-free: matched directly so `bytes_get` reaches its CPR peephole. Handing the
-# `Maybe Int` to a function instead — `maybe_with_default(-1, ...)` — boxes one per byte read, which
-# is ~15x on a whole-buffer scan. Pinned by tests/stdlib/test_bytes_byte_at_unboxed.spr.
-#
-# -1 is outside the 0..255 byte range, so an out-of-bounds read never compares equal to a real byte.
-fn byte_at(value: Bytes, index: Int) -> Int =
-  match get(value, index) with
-  | Just b -> b
-  | Nothing -> -1
-
+# -1 is outside 0..255, so an out-of-bounds read never equals a real byte.
 fn matches_at(haystack: Bytes, needle: Bytes, at: Int, index: Int, needle_len: Int) -> Bool =
   if index >= needle_len then true
-  else if byte_at(haystack, at + index) == byte_at(needle, index) then
+  else if get_or(haystack, at + index, -1) == get_or(needle, index, -1) then
     matches_at(haystack, needle, at, index + 1, needle_len)
   else false
 

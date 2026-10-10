@@ -59,14 +59,13 @@ type Lst m = (id: widget.WidgetId, items: List String, on_select: Int -> m,
 
 type alias Reply m = Maybe(widget.Handled(Lst m) m)
 
+# A list asks for no work, so an answer addressed to it belongs to `update`
+# — unless the application gave a decoder that recognises the message as new
+# content. Declining is what keeps the rest of its traffic flowing past.
 fn lst_handler(l: Lst m, d: widget.Delivery m) -> Reply m =
-  match d with
-  # A list asks for no work, so an answer addressed to it belongs to `update`
-  # — unless the application gave a decoder that recognises the message as new
-  # content. Declining is what keeps the rest of its traffic flowing past.
-  | widget.ToMsg msg -> refilled(l, widget.decoded(l.opts.on_content, msg))
-  | widget.ToFocus x -> Just(((l with (has_focus = x)), Nil, Nil))
-  | widget.ToEvent e -> if l.has_focus then lst_event(l, e) else Nothing
+  widget.focus_gated(l.has_focus, \x -> ((l with (has_focus = x)), Nil, Nil),
+                     \msg -> refilled(l, widget.decoded(l.opts.on_content, msg)),
+                     lst_event(l, _), d)
 
 fn lst_event(l: Lst m, e: event.Event) -> Reply m =
   match e with

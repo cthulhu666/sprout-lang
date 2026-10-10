@@ -1,0 +1,41 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+
+# typed_ast.class_tables: the one reading of ClassDecls that lowering, resolve and
+# ast_to_ir share for witness-slot layout.
+
+fn p() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn sig(name: String) -> ast.ClassMethodSig = ast.ClassMethodSig(name, [], ast.TypeName("a"), Nothing, [])
+
+fn class_decl(name: String, params: List String, methods: List String, supers: List String) -> typed_ast.TypedDecl =
+  typed_ast.TPassThrough(ast.ClassDecl(name, params, list_map(sig, methods),
+                                       list_map(\s -> ast.TypeConstraint(s, [ast.TypeName("a")]), supers), p()))
+
+fn decls() -> List typed_ast.TypedDecl =
+  [class_decl("prelude.Eq", ["a"], ["eq", "neq"], []),
+   class_decl("main.Ord", ["t"], ["compare", "lt"], ["prelude.Eq"]),
+   typed_ast.TPassThrough(ast.AliasDecl("Unrelated", [], ast.TypeName("Int"), p())),
+   class_decl("Marker", [], [], [])]
+
+fn get_list(k: String, d: Dict (List String)) -> List String = maybe_with_default(["-"], dict_get(k, d))
+
+fn get(k: String, d: Dict String) -> String = maybe_with_default("-", dict_get(k, d))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let t = typed_ast.class_tables(decls())
+    assert_eq(state, "methods in declaration order", get_list("main.Ord", t.order), ["compare", "lt"])
+    assert_eq(state, "keyed as declared, not by short name", get_list("Ord", t.order), ["-"])
+    assert_eq(state, "a class with no methods", get_list("Marker", t.order), Nil)
+    assert_eq(state, "direct superclasses", get_list("main.Ord", t.supers), ["prelude.Eq"])
+    assert_eq(state, "no superclasses", get_list("prelude.Eq", t.supers), Nil)
+    assert_eq(state, "first type parameter", get("main.Ord", t.params), "t")
+    assert_eq(state, "params has no short keys", get("Ord", t.params), "-")
+    assert_eq(state, "params_with_short has both keys",
+      (get("main.Ord", t.params_with_short), get("Ord", t.params_with_short)), ("t", "t"))
+    assert_eq(state, "a parameterless class has no param", get("Marker", t.params_with_short), "-")
+    summary(state)

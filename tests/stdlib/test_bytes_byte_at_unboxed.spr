@@ -8,25 +8,25 @@ import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.typed_ast as typed_ast
 
-# Why `stdlib.bytes.byte_at` is spelled as a `match` and must stay that way.
+# Why `stdlib.bytes.get_or` is spelled as a `match` and must stay that way.
 #
 # `bytes_get` is on ast_to_ir.unboxed_maybe_extern_name, but the peephole only fires on a DIRECT
 # `match <extern>(..)` with simple arms. Hand the `Maybe Int` to any real function first — as
-# `maybe_with_default(-1, get(value, index))` did — and the call falls back to the boxed
+# `maybe_with_default(fallback, get(value, index))` does — and the call falls back to the boxed
 # `sprout_make1(find_ctor_tag_by_name("Just"), ..)`, one heap allocation per byte read.
 #
 # That cost was invisible while `matches_at` only ever scanned a 1-4 byte delimiter for `find`.
 # `instance Eq Bytes` reuses the same loop over whole buffers, which made it ~15x: 40 compares of
-# two equal 1 MiB values went 1.96s -> 0.13s user when byte_at stopped allocating.
+# two equal 1 MiB values went 1.96s -> 0.13s user when the read stopped allocating.
 #
-# This file pins the RULE, in both directions. The real `byte_at` body is pinned separately by the
+# This file pins the RULE, in both directions. The real `get_or` body is pinned separately by the
 # golden IR corpus (tests/golden/ir/), which carries its emitted call site.
 
 let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
 
 let bytes_get_decl = "extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int\n\n"
 
-# The shape byte_at had: the Maybe reaches a real function, so the peephole cannot fire.
+# The shape to avoid: the Maybe reaches a real function, so the peephole cannot fire.
 # `with_default` stands in for the prelude's `maybe_with_default`, which is out of scope here —
 # checker.typecheck_typed runs with an EMPTY environment, so the fixture declares what it uses.
 fn probe_via_helper() -> String =
@@ -39,7 +39,7 @@ fn probe_via_helper() -> String =
     ++ "fn probe(b: Bytes, i: Int) -> Int =\n"
     ++ "  with_default(0 - 1, bytes_get(b, i))\n"
 
-# The shape byte_at has.
+# The shape `get_or` has.
 fn probe_via_match() -> String =
   maybe_decl
     ++ bytes_get_decl

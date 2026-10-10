@@ -447,7 +447,7 @@ let test16_program =
     Nil), Nil, Nil, Nil)
 
 # ---------------------------------------------------------------------------
-# B2 (leaf-loop GC-root elision): op_triggers_gc peeks the callee name and
+# B2 (leaf-loop GC-root elision): the rooting pass peeks the callee name and
 # treats a verified allow-list of non-allocating read externs as NON-triggers.
 #
 # Test 17: a heap value (%p) live across a `vector_get_direct` call is NOT
@@ -496,7 +496,7 @@ fn test19_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # ---------------------------------------------------------------------------
-# B2 reach extension: op_triggers_gc also peeks the callee name for
+# B2 reach extension: the rooting pass also peeks the callee name for
 # IRCallUnboxed2 (the CPR-unboxed reads the Tier-1 peephole emits for
 # matched/do-bound Maybe-returning externs).  Non-allocating unboxed variants
 # become non-triggers; the two that allocate their payload stay triggers.

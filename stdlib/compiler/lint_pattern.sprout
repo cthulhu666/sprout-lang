@@ -120,7 +120,7 @@ fn free_vars(e: ast.Expr, bound: Set) -> Set =
   | ast.CallExpr callee args _ ->
       set_union(free_vars(callee, bound), free_vars_list(args, bound))
   | ast.LambdaExpr params body _ ->
-      free_vars(body, set_union(bound, names_to_set(param_names(params))))
+      free_vars(body, set_union(bound, names_to_set(ast.param_names(params))))
   | ast.BinaryExpr _ l r _ -> set_union(free_vars(l, bound), free_vars(r, bound))
   | ast.UnaryExpr _ operand _ -> free_vars(operand, bound)
   | ast.IntRangeExpr lo hi _ -> set_union(free_vars(lo, bound), free_vars(hi, bound))
@@ -133,11 +133,6 @@ fn free_vars(e: ast.Expr, bound: Set) -> Set =
   | ast.LetBindExpr pat value els body pos ->
       free_vars(ast.let_bind_match(pat, value, els, body, pos), bound)
   | ast.TryExpr operand _ -> free_vars(operand, bound)
-
-fn param_names(params: List ast.Param) -> List String =
-  match params with
-  | [] -> []
-  | [ast.Param n _ _ | rest] -> Cons(n, param_names(rest))
 
 # Pair two parameter lists, or refuse. A parameter's name is a binder and renames
 # freely; its ANNOTATION and its mode are shape, because substituting one lambda
@@ -627,7 +622,7 @@ fn go_heads(p: ast.Expr, s: ast.Expr, holes: List String, st: MState) -> Maybe M
             | Nothing -> Nothing
             | Just r2 ->
                 scoped(pb, sb, holes, st, r2,
-                       set_union(st.bound, names_to_set(param_names(sps)))))
+                       set_union(st.bound, names_to_set(ast.param_names(sps)))))
        | _ -> Nothing)
   # A pattern derived from a combinator is a single expression over `match` and
   # `if` (§5.3), so these three never carry a hole and are compared literally.

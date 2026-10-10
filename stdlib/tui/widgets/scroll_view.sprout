@@ -46,15 +46,14 @@ fn sv_route(v: Sv m, target: widget.WidgetId, d: widget.Delivery m) -> Reply m =
   if widget.id_eq(v.id, target) then sv_handler(v, d)
   else map(sv_repack(v, _), widget.deliver(v.child, target, d))
 
+# A scroll view asks for no work of its own, unless the application gave a
+# decoder that recognises the message as a new child. `sv_route` has already
+# forwarded anything addressed elsewhere, so this only ever sees the view's
+# own mail.
 fn sv_handler(v: Sv m, d: widget.Delivery m) -> Reply m =
-  match d with
-  # A scroll view asks for no work of its own, unless the application gave a
-  # decoder that recognises the message as a new child. `sv_route` has already
-  # forwarded anything addressed elsewhere, so this only ever sees the view's
-  # own mail.
-  | widget.ToMsg msg -> refilled(v, widget.decoded(v.opts.on_content, msg))
-  | widget.ToFocus x -> Just(((v with (has_focus = x)), Nil, Nil))
-  | widget.ToEvent e -> if v.has_focus then sv_event(v, e) else Nothing
+  widget.focus_gated(v.has_focus, \x -> ((v with (has_focus = x)), Nil, Nil),
+                     \msg -> refilled(v, widget.decoded(v.opts.on_content, msg)),
+                     sv_event(v, _), d)
 
 fn sv_event(v: Sv m, e: event.Event) -> Reply m =
   match e with

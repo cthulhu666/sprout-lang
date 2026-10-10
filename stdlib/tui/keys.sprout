@@ -21,11 +21,6 @@ import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
 import stdlib.unicode.utf8 as utf8
 
-fn byte_at(b: Bytes, i: Int) -> Int =
-  match bytes.get(b, i) with
-  | Just v -> v
-  | Nothing -> 0
-
 fn imod(n: Int, d: Int) -> Int = n - (n / d) * d
 
 # One decoding step: an event and where it ended, a consumed span with nothing
@@ -49,7 +44,7 @@ fn resume(b: Bytes, n: Int, i: Int, acc: List event.Event,
   | Skip next -> go(b, n, next, acc)
   | Incomplete -> (list_reverse(acc), bytes.drop(b, i))
 
-fn step(b: Bytes, n: Int, i: Int) -> Step = dispatch(b, n, i, byte_at(b, i))
+fn step(b: Bytes, n: Int, i: Int) -> Step = dispatch(b, n, i, bytes.get_or(b, i, 0))
 
 fn dispatch(b: Bytes, n: Int, i: Int, b0: Int) -> Step =
   if b0 == 27 then esc_step(b, n, i)
@@ -87,7 +82,7 @@ fn utf8_step(b: Bytes, n: Int, i: Int, b0: Int) -> Step =
 
 fn esc_step(b: Bytes, n: Int, i: Int) -> Step =
   if i + 1 >= n then Incomplete
-  else esc_body(b, n, i, byte_at(b, i + 1))
+  else esc_body(b, n, i, bytes.get_or(b, i + 1, 0))
 
 fn esc_body(b: Bytes, n: Int, i: Int, b1: Int) -> Step =
   if b1 == 91 then csi_step(b, n, i)
@@ -115,7 +110,7 @@ fn alt_event(e: event.Event) -> event.Event =
 # keypad mode.
 fn ss3_step(b: Bytes, n: Int, i: Int) -> Step =
   if i + 2 >= n then Incomplete
-  else ss3_final(byte_at(b, i + 2), i + 3)
+  else ss3_final(bytes.get_or(b, i + 2, 0), i + 3)
 
 fn ss3_final(f: Int, next: Int) -> Step =
   if f >= 80 && f <= 83 then plain(event.KF(f - 79), next) else Skip(next)
@@ -127,7 +122,7 @@ fn ss3_final(f: Int, next: Int) -> Step =
 # unrecognised sequence be dropped whole instead of leaking its tail.
 fn csi_final_index(b: Bytes, n: Int, j: Int) -> Int =
   if j >= n then -1
-  else scan_final(b, n, j, byte_at(b, j))
+  else scan_final(b, n, j, bytes.get_or(b, j, 0))
 
 fn scan_final(b: Bytes, n: Int, j: Int, v: Int) -> Int =
   if v >= 32 && v <= 63 then csi_final_index(b, n, j + 1)
@@ -139,7 +134,7 @@ fn csi_step(b: Bytes, n: Int, i: Int) -> Step =
 
 fn csi_at(b: Bytes, n: Int, i: Int, fin: Int) -> Step =
   if fin < 0 then Incomplete
-  else csi_parsed(b, n, i, fin, ascii(b, i + 2, fin - i - 2), byte_at(b, fin))
+  else csi_parsed(b, n, i, fin, ascii(b, i + 2, fin - i - 2), bytes.get_or(b, fin, 0))
 
 # CSI parameters are ASCII digits, `;` and `<`, so the decode never fails; the
 # fallback keeps this total without inventing an error path callers must handle.

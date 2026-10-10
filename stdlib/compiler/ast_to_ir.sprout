@@ -74,7 +74,7 @@ fn compute_free_vars(expr: typed_ast.TypedExpr, bound: Set) -> Set =
                 compute_free_vars_list(args, bound))
   | typed_ast.TLambda lparams body _ _ ->
       compute_free_vars(body,
-        set_union(bound, set_from_list(fv_param_names(lparams))))
+        set_union(bound, set_from_list(ast.param_names(lparams))))
   | typed_ast.TRange start end_ _ _ ->
       set_union(compute_free_vars(start, bound),
                 compute_free_vars(end_, bound))
@@ -100,15 +100,6 @@ fn compute_free_vars_list(exprs: List typed_ast.TypedExpr, bound: Set) -> Set =
   | Cons e rest ->
       set_union(compute_free_vars(e, bound),
                 compute_free_vars_list(rest, bound))
-
-# Extract param names for free-var computation (private to this section).
-# O(n).
-fn fv_param_names(params: List ast.Param) -> List String =
-  match params with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.Param n _ _ -> Cons(n, fv_param_names(rest))
 
 # Bind lambda param names (in order) to their argument SSA values in `captures` —
 # the beta-reduction substitution for an inlined immediately-applied lambda (arc (b),
@@ -246,10 +237,7 @@ fn build_captures_list_ir(frees: List String, params: List String,
 
 # Build the captures dict for a lifted lambda body.
 # For each free var at index i (0-based), the lifted body reads it from
-# env slot (i+1) as SSA name "%t$<base+i>".
-# The "%t$" prefix uses '$' which Sprout's lexer cannot produce in user
-# identifiers, so lifted-body SSA names are guaranteed disjoint from any
-# user-written lambda param name (e.g. "t0").  See FIX #4.
+# env slot (i+1) as temp `base + i` (sprout_ir.temp_ssa).
 # O(n).
 fn build_lifted_captures(frees: List String, base_idx: Int) -> Dict String =
   build_lifted_captures_go(frees, base_idx, 0, dict_empty())
@@ -260,7 +248,7 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
   | Nil -> acc
   | Cons v rest ->
       build_lifted_captures_go(rest, base_idx, i + 1,
-        dict_set(v, "%t$" ++ int_to_string(base_idx + i), acc))
+        dict_set(v, sprout_ir.temp_ssa(base_idx + i), acc))
 
 # Determine the IRLoadEnvSlot kind for a single captured variable:
 #   IRTScalar  — Int (no GC root needed)
@@ -309,12 +297,8 @@ fn ast_params_to_irtype_pairs(params: List ast.Param, names: List String) -> Lis
       Cons((n, ann_to_irtype(ann)), ast_params_to_irtype_pairs(rest_p, rest_n))
 
 # Build the IRLoadEnvSlot ops for the lifted lambda entry block.
-# Each free var at index i gets: IRLoadEnvSlot("%t$<base+i>", "%env$", i+1, kind).
+# Each free var at index i gets: IRLoadEnvSlot(temp base+i, "%p$env$", i+1, kind).
 # (Slot 0 is the code pointer; captures start at slot 1.)
-# "%t$" uses '$' which Sprout's lexer cannot produce in user identifiers,
-# so lifted-body SSA names are guaranteed disjoint from any user-written
-# lambda param name (e.g. "t0").
-# "%env$" is likewise '$'-safe; disjoint from any user-written lambda param.
 # FIX R4#7: accepts a `kinds` list (parallel to frees) for scalar vs heap.
 # O(n).
 fn build_load_env_ops(frees: List String, kinds: List sprout_ir.IRType, base_idx: Int) -> List sprout_ir.IROp =
@@ -327,10 +311,10 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
       match kinds with
       | Nil ->
           # Defensive: more frees than kinds (should not happen); treat as heap.
-          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), sprout_ir.param_ssa("env$"), i + 1, sprout_ir.IRTHeap),
+          Cons(sprout_ir.IRLoadEnvSlot(sprout_ir.temp_ssa(base_idx + i), sprout_ir.param_ssa("env$"), i + 1, sprout_ir.IRTHeap),
                build_load_env_ops_go(rest_frees, Nil, base_idx, i + 1))
       | Cons k rest_kinds ->
-          Cons(sprout_ir.IRLoadEnvSlot("%t$" ++ int_to_string(base_idx + i), sprout_ir.param_ssa("env$"), i + 1, k),
+          Cons(sprout_ir.IRLoadEnvSlot(sprout_ir.temp_ssa(base_idx + i), sprout_ir.param_ssa("env$"), i + 1, k),
                build_load_env_ops_go(rest_frees, rest_kinds, base_idx, i + 1))
 
 # ---------------------------------------------------------------------------
@@ -452,51 +436,14 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # and the flat CtorReg list (with field_kinds) used by ir_lowering for
 # @sprout_register_ctor emission.  Every ctor is registered — both boxed and
 # CPR-eligible — so the runtime's find_ctor(tag) never returns NULL.
-# class_order / super_map builders. Declaration-order extraction only (no
-# ordering heuristic that could diverge); the drift-prone traversal lives once in
-# types.witness_slots_for_class. Twins of lowering.collect_class_order /
-# collect_super_map — kept local to avoid a cross-pass import; both faithfully
-# extract the same (class → names-in-decl-order) content.
-fn ai_collect_class_order(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough (ast.ClassDecl class_name _ methods _ _) ->
-          ai_collect_class_order(rest, dict_set(class_name, ai_method_names(methods, Nil), acc))
-      | _ -> ai_collect_class_order(rest, acc)
-
-fn ai_method_names(methods: List ast.ClassMethodSig, acc: List String) -> List String =
-  match methods with
-  | Nil -> list_reverse(acc)
-  | Cons sig rest ->
-      match sig with
-      | ast.ClassMethodSig name _ _ _ _ -> ai_method_names(rest, Cons(name, acc))
-
-fn ai_collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough (ast.ClassDecl class_name _ _ supers _) ->
-          ai_collect_super_map(rest, dict_set(class_name, ai_super_names(supers, Nil), acc))
-      | _ -> ai_collect_super_map(rest, acc)
-
-fn ai_super_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
-  match supers with
-  | Nil -> list_reverse(acc)
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint super_name _ -> ai_super_names(rest, Cons(super_name, acc))
-
 # cenv = (class_order, super_map): class→methods and class→direct-supers, in
 # declaration order. Threaded so register_ctor_entries can size a constrained
 # existential's packed witness fields via types.witness_slots_for_class (the SAME
 # transitive-super method expansion the dict-lowering path uses), matching the
 # per-method witness args construction packs.
 export fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
-  build_ctor_table_acc(decls, 0, dict_empty(), Nil,
-                       (ai_collect_class_order(decls, dict_empty()), ai_collect_super_map(decls, dict_empty())))
+  build_ctor_table_acc(decls, 0, dict_empty(), Nil, (tables.order, tables.supers))
+  where tables = typed_ast.class_tables(decls)
 
 fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                         acc: Dict sprout_ir.CtorInfo,
@@ -672,22 +619,11 @@ export fn with_fresh_refs(penv: ProgEnv) -> ProgEnv !{IO} =
 # plus that function's lifted-lambda accumulator.
 type TxEnv = (prog: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction))
 
-# Fresh-name counter threaded through the translator.
-# ALL synthetic SSA temporaries use the "%t$" prefix → %t$0, %t$1, …
-# '$' cannot appear in a Sprout-source identifier (enforced by the lexer; see
-# tests/stdlib/test_lexer_dollar_reserved.spr), so synthetic temps are provably
-# disjoint from EVERY source-derived name — params, lets, pattern vars, lambda
-# params. A source parameter literally named `t0` lowers to `%t0`, which can
-# never collide with `%t$0`.
-#
-# DO NOT add a caller-supplied prefix. The prefix is hardcoded in this single
-# generator on purpose: every synthetic temp name flows through here, so the
-# disjointness invariant holds BY CONSTRUCTION — no call site can produce a
-# speakable `%tN` name.
+# Fresh-name counter threaded through the translator. Every synthetic temp is
+# sprout_ir.temp_ssa(idx), so none can collide with a source-derived name.
 # The same counter is reused for block labels via fresh_then/else/join_label
 # below — different namespaces, so uniqueness is preserved.
-fn fresh_name(idx: Int) -> String =
-  "%t$" ++ int_to_string(idx)
+fn fresh_name(idx: Int) -> String = sprout_ir.temp_ssa(idx)
 
 fn fresh_then_label(idx: Int) -> String =
   "then_" ++ int_to_string(idx)
@@ -1524,7 +1460,7 @@ fn find_capture_type(expr: typed_ast.TypedExpr, name: String) -> Maybe types.Typ
   | typed_ast.TLambda lparams body _ _ ->
       # FIX R4#1: if `name` is shadowed by the inner lambda's own param, stop —
       # the inner body's TVar resolves to the param, not the outer capture.
-      if param_known(name, fv_param_names(lparams))
+      if param_known(name, ast.param_names(lparams))
       then Nothing
       else find_capture_type(body, name)
   | typed_ast.TRange s e _ _ ->
@@ -1617,7 +1553,7 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
                     captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
-    let lam_param_names = fv_param_names(lparams)
+    let lam_param_names = ast.param_names(lparams)
     let capturable = filter_capturable(set_to_list(compute_free_vars(body, set_from_list(lam_param_names))),
                                        params, captures)
     lam_idx <- ref_read(env.prog.lambda_ctr_ref)
@@ -3741,7 +3677,7 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
         # (call-by-value), the body sees params shadowing it (lexical scope).
         (body_blocks, body_lbl, body_ops, body_result, idx2) <-
           translate_expr(lbody, params, env, idx1, arg_lbl, arg_ops,
-                         bind_params(fv_param_names(lparams), arg_names, captures))
+                         bind_params(ast.param_names(lparams), arg_names, captures))
         Ok((list_append(arg_blocks, body_blocks), body_lbl, body_ops,
              body_result, idx2))
   | typed_ast.TCall _ _ _ _ ->
@@ -4314,13 +4250,6 @@ fn param_known(name: String, params: List String) -> Bool =
   | Nil -> false
   | Cons p rest -> if p == name then true else param_known(name, rest)
 
-fn param_names(params: List ast.Param) -> List String =
-  match params with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.Param n _ _ -> Cons(n, param_names(rest))
-
 # True for the program entry point: bare `main`, or the bundler-qualified
 # `<module>.main` when the entry file declares a `module`.  Mirrors direct
 # codegen's is_entry_fn_name (codegen.sprout:1906).  O(name length).
@@ -4762,14 +4691,10 @@ fn mutual_ops_call_self(name: String, ops: List sprout_ir.IROp) -> Bool =
   | Cons op rest ->
       if mutual_op_calls(name, op) then true else mutual_ops_call_self(name, rest)
 
-# The three direct-call ops, same set as `ir_rooting.op_raw_callee` — a fourth one
-# has to be added in both places.
 fn mutual_op_calls(name: String, op: sprout_ir.IROp) -> Bool =
-  match op with
-  | sprout_ir.IRCall _ _ fname _ -> fname == name
-  | sprout_ir.IRCallUnboxed2 _ _ _ fname _ -> fname == name
-  | sprout_ir.IRCallUnboxed3 _ _ _ _ fname _ -> fname == name
-  | _ -> false
+  match sprout_ir.op_direct_callee(op) with
+  | Just fname -> fname == name
+  | Nothing -> false
 
 # Collect tagged hits for every eligible target: reuse tco_collect (finds tail
 # calls to a NAME within blocks) + tco_tail_safe_hits (result not consumed after),
@@ -4966,7 +4891,7 @@ fn pb_tail_callees_sc(body: typed_ast.TypedExpr, bound: Set) -> Set =
           # IIFE (let/where) at full arity: the let-body is the tail position; the
           # lambda params shadow within it.
           if list_length(lparams) == list_length(args)
-          then pb_tail_callees_sc(lbody, set_union(bound, set_from_list(param_names(lparams))))
+          then pb_tail_callees_sc(lbody, set_union(bound, set_from_list(ast.param_names(lparams))))
           else set_empty()
       | _ -> set_empty()
   | typed_ast.TIf _ t e _ _ -> set_union(pb_tail_callees_sc(t, bound), pb_tail_callees_sc(e, bound))
@@ -5044,7 +4969,7 @@ fn pb_tail_graph(decls: List typed_ast.TypedDecl, fnset: Set) -> Dict Set =
       match d with
       | typed_ast.TFnDecl name params _ _ _ body ->
           dict_set(name,
-                   pb_set_keep_in(pb_tail_callees_sc(body, set_from_list(param_names(params))), fnset),
+                   pb_set_keep_in(pb_tail_callees_sc(body, set_from_list(ast.param_names(params))), fnset),
                    pb_tail_graph(rest, fnset))
       | _ -> pb_tail_graph(rest, fnset)
 
@@ -5228,7 +5153,7 @@ fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, arities: Dict Int, m: 
       | typed_ast.TLambda lparams lbody lty lpos ->
           if list_length(lparams) == list_length(args)
           then typed_ast.TCall(typed_ast.TLambda(lparams,
-                 pb_retarget_tail(lbody, mset, arities, m, set_union(bound, set_from_list(param_names(lparams)))),
+                 pb_retarget_tail(lbody, mset, arities, m, set_union(bound, set_from_list(ast.param_names(lparams)))),
                  lty, lpos), args, ty, pos)
           else body
       | _ -> body
@@ -5267,7 +5192,7 @@ fn pb_gen_pair(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
                body: typed_ast.TypedExpr, m: Int, mset: Set, arities: Dict Int) -> List typed_ast.TypedDecl =
   Cons(typed_ast.TFnDecl(name, params, ret, eff, constraints, tramp_body),
     Cons(typed_ast.TFnDecl(name ++ "$u", list_append(params, pb_pad_params(list_length(params), m - list_length(params))),
-                           ret, eff, constraints, pb_retarget_tail(body, mset, arities, m, set_from_list(param_names(params)))),
+                           ret, eff, constraints, pb_retarget_tail(body, mset, arities, m, set_from_list(ast.param_names(params)))),
       Nil))
 where
   pos = typed_ast.typed_expr_pos(body)
@@ -5337,7 +5262,7 @@ fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.Typed
     | (tco_fn, next_idx2) ->
         Ok(Just((tco_fn, next_idx2, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
-        pnames = param_names(params)
+        pnames = ast.param_names(params)
         params_with_kinds = ast_params_to_irtype_pairs(params, pnames)
 
 # Validate that no TInstanceDecl method name starts with "__sprout_".
@@ -6472,11 +6397,11 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
   do
     lifted_ref <- ref_new(Nil)
     (blocks, next_idx) <-
-      translate_tail_unboxed(body, param_names(params), TxEnv(prog = penv, lifted_ref = lifted_ref), 0, "entry",
+      translate_tail_unboxed(body, ast.param_names(params), TxEnv(prog = penv, lifted_ref = lifted_ref), 0, "entry",
                              list_builder_empty, dict_empty(), result_adt_ctors, worker_set, self_name)
     lifted <- ref_read(lifted_ref)
     Ok((sprout_ir.IRFunction(worker_name,
-          ast_params_to_irtype_pairs(params, param_names(params)),
+          ast_params_to_irtype_pairs(params, ast.param_names(params)),
           worker_ret_ty(body), blocks),
         next_idx, list_reverse(lifted)))
 

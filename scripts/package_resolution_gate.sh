@@ -179,6 +179,16 @@ else
   fail=1
 fi
 
+# `no_prelude` is a header line, so an import after it is still read.
+npi="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_no_prelude_then_import.spr" 2>&1)"
+if echo "$npi" | grep -q '^OK$' && ! errors "$npi" >/dev/null; then
+  echo "PASS no_prelude: an import after the directive resolves"
+else
+  echo "FAIL no_prelude: the import after \`no_prelude\` was dropped"
+  errors "$npi" | head -3
+  fail=1
+fi
+
 # A clash inside an IMPORTED module is still reported, but without its position: a
 # line:col from demo.clashdep would be read against the entry file.
 dep="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_dep_ctor_clash.spr" 2>&1)"

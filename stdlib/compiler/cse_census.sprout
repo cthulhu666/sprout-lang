@@ -36,11 +36,12 @@ export type Census (..) = (
 
 export fn census(prog: typed_ast.TypedProgram) -> Census =
   let bodies = body_list(prog)
+      keyed = list_map(body_keys, bodies)
   in Census(
     bodies = list_length(bodies),
-    pure_calls = sum_int(list_map(body_call_count, bodies)),
-    candidate_keys = list_length(duplicate_keys(prog)),
-    dup_occurrences = sum_int(list_map(body_dup_count, bodies)),
+    pure_calls = sum_int(list_map(\keys -> vec_sum(dict_values(keys)), keyed)),
+    candidate_keys = list_length(excess_entries(keyed)),
+    dup_occurrences = sum_int(list_map(redundancy, keyed)),
     region_dups = sum_int(list_map(body_region_dups, bodies))
   )
 
@@ -52,10 +53,14 @@ export fn census(prog: typed_ast.TypedProgram) -> Census =
 # The reason to have this at all: a census whose top entry is nonsense is a broken
 # analysis, not a finding.
 export fn duplicate_keys(prog: typed_ast.TypedProgram) -> List (String, Int) =
-  dict_entries_list(list_fold(\ (acc, b) -> add_body_excess(b, acc), dict_empty(), body_list(prog)))
+  excess_entries(list_map(body_keys, body_list(prog)))
 
-fn add_body_excess(body: typed_ast.TypedExpr, acc: Dict Int) -> Dict Int =
-  list_fold(\ (a, e) -> add_excess(e, a), acc, dict_entries_list(body_keys(body)))
+# One entry per key repeated within some body, from each body's key counts.
+fn excess_entries(keyed: List (Dict Int)) -> List (String, Int) =
+  dict_entries_list(list_fold(\ (acc, keys) -> add_keys_excess(keys, acc), dict_empty(), keyed))
+
+fn add_keys_excess(keys: Dict Int, acc: Dict Int) -> Dict Int =
+  list_fold(\ (a, e) -> add_excess(e, a), acc, dict_entries_list(keys))
 
 fn add_excess(entry: (String, Int), acc: Dict Int) -> Dict Int =
   match entry with
@@ -81,7 +86,7 @@ fn add_entry_count(entry: (String, Int), acc: Dict Int) -> Dict Int =
 
 fn body_list(prog: typed_ast.TypedProgram) -> List typed_ast.TypedExpr =
   match prog with
-  | typed_ast.TypedProgram decls -> list_fold(\ (acc, d) -> acc ++ decl_bodies(d), [], decls)
+  | typed_ast.TypedProgram decls -> list_flat_map(decl_bodies, decls)
 
 fn decl_bodies(d: typed_ast.TypedDecl) -> List typed_ast.TypedExpr =
   match d with
@@ -97,12 +102,6 @@ fn method_body(m: typed_ast.TypedInstanceMethod) -> typed_ast.TypedExpr =
 
 fn body_keys(body: typed_ast.TypedExpr) -> Dict Int =
   collect(body, dict_empty())
-
-fn body_call_count(body: typed_ast.TypedExpr) -> Int =
-  vec_sum(dict_values(body_keys(body)))
-
-fn body_dup_count(body: typed_ast.TypedExpr) -> Int =
-  redundancy(body_keys(body))
 
 # Occurrences beyond the first, per key: what sharing would remove.
 fn redundancy(counts: Dict Int) -> Int =
@@ -136,7 +135,7 @@ fn call_key(e: typed_ast.TypedExpr) -> Maybe String =
   | _ -> Nothing
 
 fn collect_children(e: typed_ast.TypedExpr, acc: Dict Int) -> Dict Int =
-  list_fold(\ (a, c) -> collect(c, a), acc, children(e))
+  list_fold(\ (a, c) -> collect(c, a), acc, typed_ast.children(e))
 
 # ---------------------------------------------------------------------------
 # Region collection (the realistic figure)
@@ -179,11 +178,11 @@ fn scan_children(e: typed_ast.TypedExpr, seen: Dict Int, excess: Dict Int) -> (D
       | (s, x) -> (s, scan_arms([then_e, else_e], s, x))
   | typed_ast.TMatch scrut branches _ _ ->
       match scan(scrut, seen, excess) with
-      | (s, x) -> (s, scan_arms(list_map(branch_body, branches), s, x))
+      | (s, x) -> (s, scan_arms(list_map(typed_ast.branch_body, branches), s, x))
   | typed_ast.TLambda _ body _ _ ->
       match scan(body, dict_empty(), excess) with
       | (_, x) -> (seen, x)
-  | _ -> scan_list(children(e), seen, excess)
+  | _ -> scan_list(typed_ast.children(e), seen, excess)
 
 # Every arm starts from the same dominating `seen`; only the tally carries over.
 fn scan_arms(arms: List typed_ast.TypedExpr, dominating: Dict Int, excess: Dict Int) -> Dict Int =
@@ -199,48 +198,6 @@ fn scan_list(es: List typed_ast.TypedExpr, seen: Dict Int, excess: Dict Int) -> 
 fn scan_step(e: typed_ast.TypedExpr, state: (Dict Int, Dict Int)) -> (Dict Int, Dict Int) =
   match state with
   | (seen, excess) -> scan(e, seen, excess)
-
-# ---------------------------------------------------------------------------
-# Structure
-# ---------------------------------------------------------------------------
-
-fn children(e: typed_ast.TypedExpr) -> List typed_ast.TypedExpr =
-  match e with
-  | typed_ast.TVar _ _ _ -> []
-  | typed_ast.TInt _ _ _ -> []
-  | typed_ast.TFloat _ _ _ -> []
-  | typed_ast.TBool _ _ _ -> []
-  | typed_ast.TString _ _ _ -> []
-  | typed_ast.TChar _ _ _ -> []
-  | typed_ast.TUnit _ _ -> []
-  | typed_ast.TTuple items _ _ -> items
-  | typed_ast.TIf cond then_e else_e _ _ -> [cond, then_e, else_e]
-  | typed_ast.TMatch scrut branches _ _ -> [scrut] ++ list_map(branch_body, branches)
-  | typed_ast.TCall callee args _ _ -> [callee] ++ args
-  | typed_ast.TDict _ _ _ _ -> []
-  | typed_ast.TMethodRef _ _ _ _ _ -> []
-  | typed_ast.TLambda _ body _ _ -> [body]
-  | typed_ast.TBinary _ left right _ _ -> [left, right]
-  | typed_ast.TUnary _ operand _ _ -> [operand]
-  | typed_ast.TRange lo hi _ _ -> [lo, hi]
-  | typed_ast.TDo steps _ _ -> list_map(step_value, steps)
-  | typed_ast.TRecord _ fields _ _ -> list_map(field_value, fields)
-  | typed_ast.TGetField base _ _ _ -> [base]
-  | typed_ast.TRecordUpdate base fields _ _ -> [base] ++ list_map(field_value, fields)
-
-fn branch_body(b: typed_ast.TypedMatchBranch) -> typed_ast.TypedExpr =
-  match b with
-  | typed_ast.TypedMatchBranch _ body -> body
-
-fn step_value(s: typed_ast.TypedDoStep) -> typed_ast.TypedExpr =
-  match s with
-  | typed_ast.TDoBindStep _ value _ -> value
-  | typed_ast.TDoLetStep _ value -> value
-  | typed_ast.TDoExprStep value -> value
-
-fn field_value(f: typed_ast.TypedRecordField) -> typed_ast.TypedExpr =
-  match f with
-  | typed_ast.TypedRecordField _ value -> value
 
 # ---------------------------------------------------------------------------
 # Keys

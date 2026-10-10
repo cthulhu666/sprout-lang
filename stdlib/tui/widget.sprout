@@ -160,6 +160,18 @@ export fn route_when(mine: WidgetId,
                      d: Delivery m) -> Maybe (Handled s m) =
   if id_eq(mine, target) then handler(st, d) else Nothing
 
+# The focus rule every focusable leaf follows: an event reaches the widget only
+# while it holds focus, and a message or a focus change always does. Declining
+# an unfocused event leaves it to the application.
+export fn focus_gated(has_focus: Bool, on_focus: Bool -> Handled s m,
+                      on_msg: m -> Maybe(Handled s m),
+                      on_event: event.Event -> Maybe(Handled s m),
+                      d: Delivery m) -> Maybe (Handled s m) =
+  match d with
+  | ToMsg msg -> on_msg(msg)
+  | ToFocus now -> Just(on_focus(now))
+  | ToEvent e -> if has_focus then on_event(e) else Nothing
+
 # Run an optional decoder over an incoming message. A REUSABLE widget is
 # polymorphic in `m` and so cannot read one itself; the application supplies
 # this at construction, and `Nothing` — no decoder, or one that does not

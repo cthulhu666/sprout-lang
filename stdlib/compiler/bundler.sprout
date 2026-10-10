@@ -1319,13 +1319,6 @@ fn validate_imports(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
 # AST qualification
 # ---------------------------------------------------------------------------
 
-fn param_names(params: List ast.Param) -> List String =
-  match params with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.Param name _ _ -> Cons(name, param_names(rest))
-
 fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
   match params with
   | Nil -> Nil
@@ -1556,7 +1549,7 @@ fn dotted_value_field_access(
           match module_level_value(ctx, head) with
           | Nothing -> Nothing
           | Just canonical ->
-              Just(build_field_chain(ast.VarExpr(canonical, pos), rest, pos))
+              Just(ast.build_field_chain(ast.VarExpr(canonical, pos), rest, pos))
 
 # The head's canonical name: this module's own top-level values first, then names
 # imported unqualified.  Same two dictionaries `qualify_value_name` consults, in
@@ -1565,15 +1558,6 @@ fn module_level_value(ctx: ResolveCtx, head: String) -> Maybe String =
   match dict_get(head, ctx_value_locals(ctx)) with
   | Just canonical -> Just(canonical)
   | Nothing -> dict_get(head, ctx_unqual_values(ctx))
-
-# Fold a dotted remainder `from.x` into nested GetFieldExpr on `base`.  Mirrors
-# `infer.build_field_chain` and splits with the same `string.split_once`, so the
-# two phases cannot disagree about where a chain divides — that disagreement is
-# the defect this rule exists to close.
-fn build_field_chain(base: ast.Expr, rest: String, pos: source.SourcePos) -> ast.Expr =
-  match string.split_once(rest, ".") with
-  | Nothing -> ast.GetFieldExpr(base, rest, pos)
-  | Just (field, more) -> build_field_chain(ast.GetFieldExpr(base, field, pos), more, pos)
 
 # `scope` is the enclosing binders, so a constructor name whose head is a local
 # (`prelude.Nil` beside a parameter `prelude`) reads as that local, as in an
@@ -1672,7 +1656,7 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
   | ast.CallExpr callee args pos ->
       ast.CallExpr(qualify_expr(ctx, scope, callee), qualify_expr_list(ctx, scope, args), pos)
   | ast.LambdaExpr params body pos ->
-      ast.LambdaExpr(qualify_params(ctx, params), qualify_expr(ctx, list_append(scope, param_names(params)), body), pos)
+      ast.LambdaExpr(qualify_params(ctx, params), qualify_expr(ctx, list_append(scope, ast.param_names(params)), body), pos)
   | ast.BinaryExpr op left right pos ->
       ast.BinaryExpr(op, qualify_expr(ctx, scope, left), qualify_expr(ctx, scope, right), pos)
   | ast.UnaryExpr op operand pos ->
@@ -1748,7 +1732,7 @@ fn qualify_instance_methods(ctx: ResolveCtx, methods: List ast.InstanceMethodImp
                                       qualify_maybe_type(ctx, ret_type),
                                       effects,
                                       qualify_constraints(ctx, constraints),
-                                      qualify_expr(ctx, param_names(params), body)),
+                                      qualify_expr(ctx, ast.param_names(params), body)),
                qualify_instance_methods(ctx, rest))
 
 fn qualify_maybe_type(ctx: ResolveCtx, mt: Maybe ast.TypeExpr) -> Maybe ast.TypeExpr =
@@ -1790,7 +1774,7 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         qualify_maybe_type(ctx, ret_type),
         effects,
         qualify_constraints(ctx, constraints),
-        qualify_expr(ctx, param_names(params), body),
+        qualify_expr(ctx, ast.param_names(params), body),
         pos)
   | ast.TypeDecl name type_params ctors deriving_classes mult pos ->
       ast.TypeDecl(

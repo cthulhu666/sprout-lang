@@ -206,8 +206,10 @@ Drive it directly when you need a phase the recipes do not expose:
 | `--check-iface <iface-file>` | interface verification result |
 
 `<stdlib-root>` is a **path**, not a flag — pass the literal `stdlib` directory.
-`--phase` accepts `bundle`, `check`, `effects`, `lower`, `recheck`, `scan-info`, and
-`dump-qualify`; [debugging.md](./debugging.md) explains what each is for.
+`--phase` accepts `bind-census`, `bundle`, `check`, `cse-census`, `cse-keys`,
+`dump-qualify`, `effects`, `ir-typed`, `lower`, `recheck` and `scan-info`;
+[debugging.md](./debugging.md) explains what each is for. An unknown phase exits 1
+before any file is read.
 `just build-debug` passes `--emit-ir --debug` and then links with `clang -g -O0`. The `--debug` flag itself is currently a **no-op** — both `--emit-ir` arms dispatch identically, and the DWARF comes from `clang -g`; see [debugging.md §Debugging compiled programs](./debugging.md#debugging-compiled-programs-dwarf--lldb).
 
 Two invariants the driver guarantees, both gated by `just diagnostic-stream-smoke`:

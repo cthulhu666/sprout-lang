@@ -119,6 +119,7 @@ fn main() -> Unit !{IO} = do
   event_cases(state)
   hidden_state_cases(state)
   map_cases(state)
+  gate_cases(state)
   render_cases(state)
   summary(state)
 
@@ -194,6 +195,34 @@ fn map_cases(state: TestState) -> Unit !{IO} = do
             width_of(stepped(outer, event.TickEvent)), 6)
   assert_eq(state, "a mapped widget still advances twice",
             width_of(fed(outer, [event.TickEvent, event.TickEvent])), 7)
+
+# ── focus gating: events need focus, messages and focus changes do not ─────
+
+fn gate_focus(now: Bool) -> widget.Handled Int Msg = (if now then 1 else 0, Nil, Nil)
+
+fn gate_msg(m: Msg) -> Maybe(widget.Handled Int Msg) = Just((10, [m], Nil))
+
+fn gate_event(e: event.Event) -> Maybe(widget.Handled Int Msg) = Just((20, Nil, Nil))
+
+fn gated(has_focus: Bool, d: widget.Delivery Msg) -> String =
+  match widget.focus_gated(has_focus, gate_focus, gate_msg, gate_event, d) with
+  | Nothing -> "declined"
+  | Just r -> gate_reply(r)
+
+fn gate_reply(r: widget.Handled Int Msg) -> String =
+  match r with
+  | (n, ms, _) -> `${to_string(n)} ${to_string(ms)}`
+
+fn gate_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "an unfocused widget declines an event",
+            gated(false, widget.ToEvent(key)), "declined")
+  assert_eq(state, "a focused widget handles an event", gated(true, widget.ToEvent(key)), "20 []")
+  assert_eq(state, "an unfocused widget still handles a message",
+            gated(false, widget.ToMsg(Said("x"))), "10 [Said(x)]")
+  assert_eq(state, "a focused widget handles a message",
+            gated(true, widget.ToMsg(Bumped(1))), "10 [Bumped(1)]")
+  assert_eq(state, "an unfocused widget gains focus", gated(false, widget.ToFocus(true)), "1 []")
+  assert_eq(state, "a focused widget loses focus", gated(true, widget.ToFocus(false)), "0 []")
 
 # ── render reaches the screen, at the region's origin ───────────────────────
 

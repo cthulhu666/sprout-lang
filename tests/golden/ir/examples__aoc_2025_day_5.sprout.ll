@@ -129,20 +129,20 @@ declare i64 @fs_rename(i64, i64)
 @.str.19 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
 @.str.20 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
 @.str.21 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1950, column 58)\00" }
-@.str.22 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 61, column 30)\00" }
+@.str.22 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
 @.str.23 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.24 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 103, column 38)\00" }
 @.str.25 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.26 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 118, column 31)\00" }
 @.str.27 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 124, column 34)\00" }
-@.str.28 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 239, column 63)\00" }
-@.str.29 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 244, column 17)\00" }
-@.str.30 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 245, column 63)\00" }
+@.str.28 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 234, column 67)\00" }
+@.str.29 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 239, column 17)\00" }
+@.str.30 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 240, column 67)\00" }
 @.str.31 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.32 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 270, column 29)\00" }
+@.str.32 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 265, column 29)\00" }
 @.str.33 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.34 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 271, column 58)\00" }
-@.str.35 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 318, column 55)\00" }
+@.str.34 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 266, column 58)\00" }
+@.str.35 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 313, column 55)\00" }
 @.str.36 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
 @.str.37 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.38 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
@@ -2461,6 +2461,32 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @stdlib.bytes.get_or(i64 %p$value, i64 %p$index, i64 %p$fallback) {
+entry:
+  %t$0$st = call { i64, i64 } @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index)
+  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
+  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 1
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  br label %join_2
+arm_1_2:
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_2, label %arm_2_2
+body_1_2:
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$1, %body_0_2], [%p$fallback, %body_1_2]
+  ret i64 %t$3
+}
+
 define i64 @stdlib.bytes.slice(i64 %p$value, i64 %p$start, i64 %p$$l_count) {
 entry:
   %t$1 = alloca i64
@@ -2782,101 +2808,75 @@ join_17:
   ret i64 %t$18
 }
 
-define i64 @stdlib.string.byte_at_or0(i64 %p$b, i64 %p$index) {
-entry:
-  %t$0$st = call { i64, i64 } @stdlib.bytes.get_worker(i64 %p$b, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  br label %arm_0_2
-arm_0_2:
-  %t$4 = add i64 0, 1
-  %t$5 = icmp eq i64 %t$0, %t$4
-  br i1 %t$5, label %body_0_2, label %arm_1_2
-body_0_2:
-  br label %join_2
-arm_1_2:
-  %t$6 = add i64 0, 0
-  %t$7 = icmp eq i64 %t$0, %t$6
-  br i1 %t$7, label %body_1_2, label %arm_2_2
-body_1_2:
-  %t$8 = add i64 0, 0
-  br label %join_2
-arm_2_2:
-  call void @sprout_abort_match()
-  unreachable
-join_2:
-  %t$3 = phi i64 [%t$1, %body_0_2], [%t$8, %body_1_2]
-  ret i64 %t$3
-}
-
 define i64 @stdlib.string.scan_ws_fwd(i64 %p$b$in, i64 %p$i$in, i64 %p$n$in) {
 entry:
-  %t$15 = alloca i64
-  store i64 %p$b$in, ptr %t$15
   %t$16 = alloca i64
-  store i64 %p$i$in, ptr %t$16
+  store i64 %p$b$in, ptr %t$16
   %t$17 = alloca i64
-  store i64 %p$n$in, ptr %t$17
-  %t$18 = call ptr @llvm.stacksave()
+  store i64 %p$i$in, ptr %t$17
+  %t$18 = alloca i64
+  store i64 %p$n$in, ptr %t$18
+  %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$b = load i64, ptr %t$15
-  %p$i = load i64, ptr %t$16
-  %p$n = load i64, ptr %t$17
+  %p$b = load i64, ptr %t$16
+  %p$i = load i64, ptr %t$17
+  %p$n = load i64, ptr %t$18
   %t$0 = icmp sge i64 %p$i, %p$n
   %t$1 = zext i1 %t$0 to i64
-  %t$14 = trunc i64 %t$1 to i1
-  br i1 %t$14, label %then_2, label %else_2
+  %t$15 = trunc i64 %t$1 to i1
+  br i1 %t$15, label %then_2, label %else_2
 then_2:
   br label %join_2
 else_2:
-  %t$4 = call i64 @stdlib.string.byte_at_or0(i64 %p$b, i64 %p$i)
-  %t$5 = call i64 @stdlib.string.is_ws_byte(i64 %t$4)
-  %t$13 = trunc i64 %t$5 to i1
-  br i1 %t$13, label %then_6, label %else_6
-then_6:
-  %t$8 = add i64 0, 1
-  %t$9$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$8)
-  %t$9 = extractvalue { i64, i1 } %t$9$agg, 0
-  %t$9$ovf = extractvalue { i64, i1 } %t$9$agg, 1
-  br i1 %t$9$ovf, label %ovfpanic_9, label %ovfok_9
-ovfpanic_9:
-  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
-  %t$11 = ptrtoint ptr %t$10 to i64
-  call i64 @panic(i64 %t$11)
+  %t$4 = add i64 0, 0
+  %t$5 = call i64 @stdlib.bytes.get_or(i64 %p$b, i64 %p$i, i64 %t$4)
+  %t$6 = call i64 @stdlib.string.is_ws_byte(i64 %t$5)
+  %t$14 = trunc i64 %t$6 to i1
+  br i1 %t$14, label %then_7, label %else_7
+then_7:
+  %t$9 = add i64 0, 1
+  %t$10$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$9)
+  %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
+  %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1
+  br i1 %t$10$ovf, label %ovfpanic_10, label %ovfok_10
+ovfpanic_10:
+  %t$11 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
+  %t$12 = ptrtoint ptr %t$11 to i64
+  call i64 @panic(i64 %t$12)
   unreachable
-ovfok_9:
-  store i64 %p$b, ptr %t$15
-  store i64 %t$9, ptr %t$16
-  store i64 %p$n, ptr %t$17
-  call void @llvm.stackrestore(ptr %t$18)
+ovfok_10:
+  store i64 %p$b, ptr %t$16
+  store i64 %t$10, ptr %t$17
+  store i64 %p$n, ptr %t$18
+  call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
-else_6:
-  br label %join_6
-join_6:
-  %t$7 = phi i64 [%p$i, %else_6]
+else_7:
+  br label %join_7
+join_7:
+  %t$8 = phi i64 [%p$i, %else_7]
   br label %join_2
 join_2:
-  %t$3 = phi i64 [%p$n, %then_2], [%t$7, %join_6]
+  %t$3 = phi i64 [%p$n, %then_2], [%t$8, %join_7]
   ret i64 %t$3
 }
 
 define i64 @stdlib.string.scan_ws_bwd(i64 %p$b$in, i64 %p$i$in) {
 entry:
-  %t$20 = alloca i64
-  store i64 %p$b$in, ptr %t$20
   %t$21 = alloca i64
-  store i64 %p$i$in, ptr %t$21
-  %t$22 = call ptr @llvm.stacksave()
+  store i64 %p$b$in, ptr %t$21
+  %t$22 = alloca i64
+  store i64 %p$i$in, ptr %t$22
+  %t$23 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$b = load i64, ptr %t$20
-  %p$i = load i64, ptr %t$21
+  %p$b = load i64, ptr %t$21
+  %p$i = load i64, ptr %t$22
   %t$0 = add i64 0, 0
   %t$1 = icmp slt i64 %p$i, %t$0
   %t$2 = zext i1 %t$1 to i64
-  %t$19 = trunc i64 %t$2 to i1
-  br i1 %t$19, label %then_3, label %else_3
+  %t$20 = trunc i64 %t$2 to i1
+  br i1 %t$20, label %then_3, label %else_3
 then_3:
   %t$5 = add i64 0, 1
   %t$6$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$5)
@@ -2891,33 +2891,34 @@ ovfpanic_6:
 ovfok_6:
   br label %join_3
 else_3:
-  %t$9 = call i64 @stdlib.string.byte_at_or0(i64 %p$b, i64 %p$i)
-  %t$10 = call i64 @stdlib.string.is_ws_byte(i64 %t$9)
-  %t$18 = trunc i64 %t$10 to i1
-  br i1 %t$18, label %then_11, label %else_11
-then_11:
-  %t$13 = add i64 0, 1
-  %t$14$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$i, i64 %t$13)
-  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
-  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
-  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
-ovfpanic_14:
-  %t$15 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
-  %t$16 = ptrtoint ptr %t$15 to i64
-  call i64 @panic(i64 %t$16)
+  %t$9 = add i64 0, 0
+  %t$10 = call i64 @stdlib.bytes.get_or(i64 %p$b, i64 %p$i, i64 %t$9)
+  %t$11 = call i64 @stdlib.string.is_ws_byte(i64 %t$10)
+  %t$19 = trunc i64 %t$11 to i1
+  br i1 %t$19, label %then_12, label %else_12
+then_12:
+  %t$14 = add i64 0, 1
+  %t$15$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$i, i64 %t$14)
+  %t$15 = extractvalue { i64, i1 } %t$15$agg, 0
+  %t$15$ovf = extractvalue { i64, i1 } %t$15$agg, 1
+  br i1 %t$15$ovf, label %ovfpanic_15, label %ovfok_15
+ovfpanic_15:
+  %t$16 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
+  %t$17 = ptrtoint ptr %t$16 to i64
+  call i64 @panic(i64 %t$17)
   unreachable
-ovfok_14:
-  store i64 %p$b, ptr %t$20
-  store i64 %t$14, ptr %t$21
-  call void @llvm.stackrestore(ptr %t$22)
+ovfok_15:
+  store i64 %p$b, ptr %t$21
+  store i64 %t$15, ptr %t$22
+  call void @llvm.stackrestore(ptr %t$23)
   br label %tco_loop
-else_11:
-  br label %join_11
-join_11:
-  %t$12 = phi i64 [%p$i, %else_11]
+else_12:
+  br label %join_12
+join_12:
+  %t$13 = phi i64 [%p$i, %else_12]
   br label %join_3
 join_3:
-  %t$4 = phi i64 [%t$6, %ovfok_6], [%t$12, %join_11]
+  %t$4 = phi i64 [%t$6, %ovfok_6], [%t$13, %join_12]
   ret i64 %t$4
 }
 

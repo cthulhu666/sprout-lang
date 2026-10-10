@@ -228,21 +228,16 @@ export fn is_binary_digit(ch: Char) -> Bool =
 fn is_ws_byte(b: Int) -> Bool =
   b == 32 || b == 9 || b == 10 || b == 13
 
-fn byte_at_or0(b: Bytes, index: Int) -> Int =
-  match bytes.get(b, index) with
-  | Just v -> v
-  | Nothing -> 0
-
 # First index in [i, n) whose byte is not whitespace; n if the tail from i is all whitespace.
 fn scan_ws_fwd(b: Bytes, i: Int, n: Int) -> Int =
   if i >= n then n
-  else if is_ws_byte(byte_at_or0(b, i)) then scan_ws_fwd(b, i + 1, n)
+  else if is_ws_byte(bytes.get_or(b, i, 0)) then scan_ws_fwd(b, i + 1, n)
   else i
 
 # Last index in [0, i] whose byte is not whitespace; -1 if [0, i] is all whitespace.
 fn scan_ws_bwd(b: Bytes, i: Int) -> Int =
   if i < 0 then -1
-  else if is_ws_byte(byte_at_or0(b, i)) then scan_ws_bwd(b, i - 1)
+  else if is_ws_byte(bytes.get_or(b, i, 0)) then scan_ws_bwd(b, i - 1)
   else i
 
 # Decode the byte range [start, endx) back to a String. The range is always on codepoint boundaries
@@ -294,9 +289,9 @@ fn lower_byte_string(b: Int) -> String =
 # fresh run after it. At end, flush the final run [run, n).
 fn scan_lower(b: Bytes, run: Int, i: Int, n: Int, acc: List String) -> List String =
   if i >= n then Cons(byte_range_string(b, run, n), acc)
-  else if is_upper_byte(byte_at_or0(b, i)) then
+  else if is_upper_byte(bytes.get_or(b, i, 0)) then
     scan_lower(b, i + 1, i + 1, n,
-      Cons(lower_byte_string(byte_at_or0(b, i)), Cons(byte_range_string(b, run, i), acc)))
+      Cons(lower_byte_string(bytes.get_or(b, i, 0)), Cons(byte_range_string(b, run, i), acc)))
   else scan_lower(b, run, i + 1, n, acc)
 
 export fn is_empty(raw: String) -> Bool =

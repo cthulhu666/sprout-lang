@@ -134,7 +134,7 @@ per-call-site helpers. It computes per-op liveness and inserts `IRRoot` ops so t
 every heap SSA value stays reachable across GC-triggering ops. Type-awareness comes
 from classifying which SSA values are heap:
 
-- `op_triggers_gc` — which ops are GC-safe points (allocations, calls, etc.).
+- `op_triggers_gc` — which non-call ops are GC-safe points (allocations, closure calls, etc.). Direct calls are classified by callee: `op_raw_callee` drops the allow-listed non-allocating externs, and `op_triggers_gc_summary` looks the rest up in the may-trigger-GC summary.
 - `op_produces_simple_heap` — which op *results* are heap values that must be tracked. Scalars (`Int`/`Bool`/`Char`, via `type_kind.type_is_non_heap_scalar`) are excluded; an `IRCall` result is rooted unless its carried return `IRType` is `IRTScalar`.
 - `compute_heap_origin` / `roots_across` — track the heap-origin set and compute, for each op, the values that must be rooted across it (live-after ∪ heap operands the op exposes). It scans only `pending`, the heap values defined since the last trigger (or seeded at block entry): one passed over at a trigger is dead for the rest of the block, and one pushed is still rooted or was popped dead.
 
@@ -180,7 +180,10 @@ one exception — they reached the value namespace as the user wrote them, so
 `error: unable to create block named 'entry'`. The same was available for `join_N`,
 `arm_i_j`, `body_i_j` and `tco_loop`, all legal Sprout identifiers.
 
-`sprout_ir.param_ssa` is now the single source of that name (`%p$<name>`). **Three modules
+`sprout_ir.temp_ssa` is the single source of `%t$N`; the translator and the rooting
+pass both name temps through it, from one counter.
+
+`sprout_ir.param_ssa` is now the single source of a parameter's name (`%p$<name>`). **Three modules
 must agree on it** and all three go through the helper: `ast_to_ir` when it references a
 param, `ir_lowering.lower_params` when it renders the `define` line, and
 `ir_rooting.params_heap_origin_loop`, which keys its heap-origin set on these names — a

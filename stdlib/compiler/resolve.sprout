@@ -250,7 +250,8 @@ fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> Resol
 # ---------------------------------------------------------------------------
 
 fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
-  collect_tables(decls, Tables(dict_empty(), dict_empty(), env, collect_super_map(decls, dict_empty()), collect_class_params(decls, dict_empty())))
+  collect_tables(decls, Tables(dict_empty(), dict_empty(), env, classes.supers, classes.params))
+  where classes = typed_ast.class_tables(decls)
 
 fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
   match decls with
@@ -331,7 +332,7 @@ fn instance_exists(
   tables: Tables
 ) -> Bool =
   dict_member(constraint_key_str(class_bare, type_args), tables_exists(tables))
-  || dict_member("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables))
+  || dict_member(types.inst_marker_key(class_bare, type_expr_head_name(head_arg)), tables_env(tables))
 
 # Recurse into a matched instance's context constraints (substituted at the
 # concrete type args).  A context-free instance has no entry → Nothing.
@@ -449,7 +450,7 @@ fn unsupplied_context_var(
                       ++ unsupplied_remedy(kind, string.substring_after_last(class_name, "."), head_arg)))
 
 fn is_checked_var(name: String) -> Bool =
-  is_type_var_name(name) || types.is_unann_placeholder(name)
+  source.is_lowercase_name(name) || types.is_unann_placeholder(name)
 
 # What the message asks for depends on what can supply the dictionary. An
 # unannotated slot has no variable to constrain until it is annotated; a `where` on
@@ -598,7 +599,7 @@ fn produce_concrete_evidence(
 ) -> typed_ast.Evidence =
   if dict_member(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
     produce_instance_evidence(eff_class, constraint_key_str(class_bare, type_args), type_args, fwd_keys, tables)
-  else if dict_member("@inst:" ++ class_bare ++ ":" ++ type_expr_head_name(head_arg), tables_env(tables)) then
+  else if dict_member(types.inst_marker_key(class_bare, type_expr_head_name(head_arg)), tables_env(tables)) then
     typed_ast.EvUnresolved
   else
     typed_ast.EvMissing(ast.TypeConstraint(eff_class, type_args))
@@ -672,7 +673,7 @@ fn te_vars_list(tes: List ast.TypeExpr, acc: List String) -> List String =
 
 fn te_vars(te: ast.TypeExpr, acc: List String) -> List String =
   match te with
-  | ast.TypeName n -> if is_type_var_name(n) then Cons(n, acc) else acc
+  | ast.TypeName n -> if source.is_lowercase_name(n) then Cons(n, acc) else acc
   | ast.TypeApply base arg -> te_vars(arg, te_vars(base, acc))
   | ast.TupleType items -> te_vars_list(items, acc)
   | ast.TypeArrow p r _ _ -> te_vars(r, te_vars(p, acc))
@@ -691,121 +692,11 @@ fn constraint_args(c: ast.TypeConstraint) -> List ast.TypeExpr =
   match c with
   | ast.TypeConstraint _ type_args -> type_args
 
-# ---------------------------------------------------------------------------
-# Superclass expansion (ported verbatim from lowering.sprout so the effective-
-# class order and diamond-dedup match byte-for-byte)
-# ---------------------------------------------------------------------------
-
-fn collect_super_map(decls: List typed_ast.TypedDecl, acc: Dict (List String)) -> Dict (List String) =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough inner_decl ->
-          match inner_decl with
-          | ast.ClassDecl class_name _ _ supers _ ->
-              collect_super_map(rest, dict_set(class_name, extract_super_names(supers, Nil), acc))
-          | _ -> collect_super_map(rest, acc)
-      | _ -> collect_super_map(rest, acc)
-
-fn extract_super_names(supers: List ast.TypeConstraint, acc: List String) -> List String =
-  match supers with
-  | Nil -> list_reverse(acc)
-  | Cons c rest ->
-      match c with
-      | ast.TypeConstraint super_name _ ->
-          extract_super_names(rest, Cons(super_name, acc))
-
-# class_name → class-parameter name (e.g. "ToString" → "a"), the same table
-# lowering's ctx_class_params carries.  Used to derive a value-position class
-# method's head type from its (substituted) type.
-fn collect_class_params(decls: List typed_ast.TypedDecl, acc: Dict String) -> Dict String =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TPassThrough inner_decl ->
-          match inner_decl with
-          | ast.ClassDecl class_name params _ _ _ ->
-              collect_class_params(rest, add_class_param(class_name, params, acc))
-          | _ -> collect_class_params(rest, acc)
-      | _ -> collect_class_params(rest, acc)
-
-fn add_class_param(class_name: String, params: List String, acc: Dict String) -> Dict String =
-  match params with
-  | Nil -> acc
-  | [p | _] -> dict_set(class_name, p, acc)
-
 # Transitive-superclass DFS order now comes from the single shared source
 # types.class_with_transitive_supers (the same one ast_to_ir's existential
 # witness-slot count and lowering's unpack use), so resolve's PACK order and that
 # UNPACK order cannot drift apart — a divergence would mismap packed witnesses to
 # the wrong methods. See docs/gadts-v0.md §5b.
-
-# ---------------------------------------------------------------------------
-# Value-position class-method head derivation (ported from lowering.sprout so the
-# resolve pass can fill a TMethodRef's Evidence the same way lowering eta-expands
-# it). The `mr_` prefix avoids clashing with resolve's own helpers.
-# ---------------------------------------------------------------------------
-
-fn mr_first_concrete_head_str(t: types.Type) -> Maybe String =
-  match t with
-  | types.TConst name -> Just(types.type_id_display(name))
-  | types.TApp base _ -> mr_first_concrete_head_str(base)
-  | types.TTuple items -> Just(types.tuple_head(list_length(items)))
-  | types.TVar _ -> Nothing
-  | types.TFunc _ _ _ _ -> Nothing
-  | types.TThunk _ _ -> Nothing
-
-fn mr_class_param_for(class_name: String, class_params: Dict String) -> Maybe String =
-  match dict_get(class_name, class_params) with
-  | Just param -> Just(param)
-  | Nothing -> dict_get(string.after_last_dot(class_name), class_params)
-
-fn mr_eta_class_type(class_name: String, method_name: String, actual_type: types.Type, fallback: types.Type, class_params: Dict String, scheme_env: Dict types.Scheme) -> types.Type =
-  match mr_class_param_for(class_name, class_params) with
-  | Nothing -> fallback
-  | Just class_param ->
-      match mr_lookup_method_scheme(method_name, scheme_env) with
-      | Nothing -> fallback
-      | Just scheme -> mr_eta_class_type_from_scheme(class_param, types.scheme_type(scheme), actual_type, fallback)
-
-fn mr_lookup_method_scheme(method_name: String, scheme_env: Dict types.Scheme) -> Maybe types.Scheme =
-  match dict_get(method_name, scheme_env) with
-  | Just scheme -> Just(scheme)
-  | Nothing -> dict_get(string.after_last_dot(method_name), scheme_env)
-
-fn mr_eta_class_type_from_scheme(class_param: String, scheme_type: types.Type, actual_type: types.Type, fallback: types.Type) -> types.Type =
-  match dict_get(class_param, match_type_vars(scheme_type, actual_type, dict_empty())) with
-  | Nothing -> fallback
-  | Just class_type -> class_type
-
-fn match_type_vars(pattern: types.Type, actual: types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match pattern with
-  | types.TVar name -> dict_set(types.tyvar_identity(name), actual, acc)
-  | types.TConst _ -> acc
-  | types.TApp pbase parg ->
-      match actual with
-      | types.TApp abase aarg -> match_type_vars(parg, aarg, match_type_vars(pbase, abase, acc))
-      | _ -> acc
-  | types.TFunc pparam pret _ _ ->
-      match actual with
-      | types.TFunc aparam aret _ _ -> match_type_vars(pret, aret, match_type_vars(pparam, aparam, acc))
-      | _ -> acc
-  | types.TThunk pret _ ->
-      match actual with
-      | types.TThunk aret _ -> match_type_vars(pret, aret, acc)
-      | _ -> acc
-  | types.TTuple pitems ->
-      match actual with
-      | types.TTuple aitems -> match_type_var_lists(pitems, aitems, acc)
-      | _ -> acc
-
-fn match_type_var_lists(patterns: List types.Type, actuals: List types.Type, acc: Dict types.Type) -> Dict types.Type =
-  match (patterns, actuals) with
-  | (Nil, _) -> acc
-  | (_, Nil) -> acc
-  | (Cons p prest, Cons a arest) -> match_type_var_lists(prest, arest, match_type_vars(p, a, acc))
 
 # Value-position class method: derive the class-parameter head type from the
 # method's (substituted) type via the class-method scheme, then reuse
@@ -821,8 +712,8 @@ fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_ke
 # declaration wrote it; Nothing when the head is not a constructor.
 fn method_ref_constraint(method: String, class_name: String, t: types.Type,
                          tables: Tables) -> Maybe ast.TypeConstraint =
-  let class_type = mr_eta_class_type(class_name, method, t, t, tables_class_params(tables), tables_env(tables))
-      Just _ = mr_first_concrete_head_str(class_type) else Nothing
+  let class_type = types.eta_class_type(tables_class_params(tables), tables_env(tables), class_name, method, t, t)
+      Just _ = types.first_concrete_head_str(class_type) else Nothing
   in Just(ast.TypeConstraint(class_name, [named_type_expr(class_type, tables_env(tables))]))
 
 # The type with each signature variable named as it was declared, through the
@@ -831,7 +722,7 @@ fn method_ref_constraint(method: String, class_name: String, t: types.Type,
 fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   | types.TVar v ->
-      match dict_get("@eta_fwdvar:" ++ types.tyvar_identity(v), env) with
+      match dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), env) with
       | Just scheme -> typed_ast.type_to_type_expr(types.scheme_type(scheme))
       | Nothing -> typed_ast.type_to_type_expr(t)
   | types.TApp f x -> ast.TypeApply(named_type_expr(f, env), named_type_expr(x, env))
@@ -972,60 +863,16 @@ fn check_methods(
           | Just e -> Just(e)
           | Nothing -> check_methods(bound, inst_constraints, rest, tables)
 
+# A dictionary or a method reference answers for itself; every other node defers
+# to typed_ast.children, which lists every variant with no wildcard, so a new
+# TypedExpr constructor stops the build there instead of skipping this check.
 fn check_expr(e: typed_ast.TypedExpr, cover: VarCover, tables: Tables) -> Maybe(source.SourcePos, String) =
   match e with
   | typed_ast.TDict c _ pos _ -> check_constraint(c, pos, cover, tables)
-  | typed_ast.TCall callee args _ _ -> check_expr_list(Cons(callee, args), cover, tables)
-  | typed_ast.TIf cnd thn els _ _ -> check_expr_list([cnd, thn, els], cover, tables)
-  | typed_ast.TMatch scrut branches _ _ -> check_expr_list(Cons(scrut, branch_bodies(branches)), cover, tables)
-  | typed_ast.TLambda _ body _ _ -> check_expr(body, cover, tables)
-  | typed_ast.TTuple items _ _ -> check_expr_list(items, cover, tables)
-  | typed_ast.TBinary _ l r _ _ -> check_expr_list([l, r], cover, tables)
-  | typed_ast.TUnary _ x _ _ -> check_expr(x, cover, tables)
-  | typed_ast.TRange lo hi _ _ -> check_expr_list([lo, hi], cover, tables)
-  | typed_ast.TDo steps _ _ -> check_expr_list(do_step_exprs(steps), cover, tables)
-  | typed_ast.TRecord _ fields _ _ -> check_expr_list(record_field_exprs(fields), cover, tables)
-  | typed_ast.TGetField obj _ _ _ -> check_expr(obj, cover, tables)
-  | typed_ast.TRecordUpdate base fields _ _ -> check_expr_list(Cons(base, record_field_exprs(fields)), cover, tables)
   | typed_ast.TMethodRef method class_name t pos _ ->
       let Just c = method_ref_constraint(method, class_name, t, tables) else Nothing
       in check_constraint(c, pos, cover, tables)
-  | _ -> Nothing
-
-fn check_expr_list(
-  es: List typed_ast.TypedExpr,
-  cover: VarCover,
-  tables: Tables
-) -> Maybe(source.SourcePos, String) =
-  match es with
-  | Nil -> Nothing
-  | Cons e rest ->
-      match check_expr(e, cover, tables) with
-      | Just x -> Just(x)
-      | Nothing -> check_expr_list(rest, cover, tables)
-
-fn branch_bodies(branches: List typed_ast.TypedMatchBranch) -> List typed_ast.TypedExpr =
-  match branches with
-  | Nil -> Nil
-  | Cons b rest ->
-      match b with
-      | typed_ast.TypedMatchBranch _ body -> Cons(body, branch_bodies(rest))
-
-fn do_step_exprs(steps: List typed_ast.TypedDoStep) -> List typed_ast.TypedExpr =
-  match steps with
-  | Nil -> Nil
-  | Cons s rest ->
-      match s with
-      | typed_ast.TDoBindStep _ ex _ -> Cons(ex, do_step_exprs(rest))
-      | typed_ast.TDoLetStep _ ex -> Cons(ex, do_step_exprs(rest))
-      | typed_ast.TDoExprStep ex -> Cons(ex, do_step_exprs(rest))
-
-fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast.TypedExpr =
-  match fields with
-  | Nil -> Nil
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField _ ex -> Cons(ex, record_field_exprs(rest))
+  | _ -> find_map(check_expr(_, cover, tables), typed_ast.children(e))
 
 # ---------------------------------------------------------------------------
 # Type-expression helpers (ported from lowering; resolve owns its own copies)
@@ -1040,19 +887,6 @@ fn record_field_exprs(fields: List typed_ast.TypedRecordField) -> List typed_ast
 # dotted head (e.g. "main.Maybe") is concrete iff its last segment starts uppercase.
 fn head_is_concrete(te: ast.TypeExpr) -> Bool =
   types.type_id_is_concrete(types.type_id(type_expr_head_name(te)))
-
-fn is_type_var_name(name: String) -> Bool =
-  # A module-qualified name (dotted) is never a type variable — guard as
-  # ast.is_lowercase_name does (code-review finding 2, 2026-07-10).
-  if str_find(name, ".") != -1 then false
-  else match str_char_at(name, 0) with
-  | Nothing -> false
-  | Just c ->
-      c == 'a' || c == 'b' || c == 'c' || c == 'd' || c == 'e' || c == 'f' ||
-      c == 'g' || c == 'h' || c == 'i' || c == 'j' || c == 'k' || c == 'l' ||
-      c == 'm' || c == 'n' || c == 'o' || c == 'p' || c == 'q' || c == 'r' ||
-      c == 's' || c == 't' || c == 'u' || c == 'v' || c == 'w' || c == 'x' ||
-      c == 'y' || c == 'z'
 
 fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
   match c with
@@ -1096,7 +930,7 @@ fn unify_type_expr(
 ) -> Dict ast.TypeExpr =
   match pattern with
   | ast.TypeName name ->
-      if is_type_var_name(name) then dict_set(name, concrete, acc)
+      if source.is_lowercase_name(name) then dict_set(name, concrete, acc)
       else acc
   | ast.TypeApply pat_base pat_arg ->
       match concrete with

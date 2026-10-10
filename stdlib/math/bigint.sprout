@@ -460,16 +460,11 @@ export fn shr(value: BigInt, count: Int) -> BigInt =
 
 # --- bytes, fixed width ---
 
-fn byte_at(raw: Bytes, index: Int) -> Int =
-  match bytes.get(raw, index) with
-  | Just value -> value
-  | Nothing -> 0
-
 # Byte `index` counted from the LEAST significant end, zero past either edge, so a
 # limb window may overhang the top of the input.
 fn byte_at_le(raw: Bytes, total: Int, index: Int) -> Int =
   if index < 0 || index >= total then 0
-  else byte_at(raw, total - 1 - index)
+  else bytes.get_or(raw, total - 1 - index, 0)
 
 # Bits [offset, offset + 26) of the big-endian input, as one limb. Four bytes always
 # cover the span: offset is a multiple of 26, so offset mod 8 is 0, 2, 4 or 6, and
@@ -558,7 +553,7 @@ fn accumulate(raw: String, digits: Bytes, index: Int, total: Int, radix: Int,
               negative: Bool, acc: Vec Int) -> Result ParseError BigInt =
   if index == total then Ok(make(negative, acc))
   else
-    match digit_of_byte(byte_at(digits, index), radix) with
+    match digit_of_byte(bytes.get_or(digits, index, 0), radix) with
     | Nothing ->
         Err(BigIntBadDigit(index,
                            string.string_from_char(string.char_at_or(raw, index, ' '))))

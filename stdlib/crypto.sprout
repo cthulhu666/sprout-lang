@@ -49,7 +49,7 @@ export fn const_time_eq(left: Bytes, right: Bytes) -> Bool =
   | Ok difference -> or_all(difference, 0, bytes.length(difference), 0) == 0
 
 # OR of every byte, so the result is zero only if all of them are, with no branch on any
-# byte's value. `bytes.get` is matched directly to keep the Maybe unboxed (see `byte_at` in
+# byte's value. `bytes.get` is matched directly to keep the Maybe unboxed (see `get_or` in
 # stdlib/bytes.sprout). The unreachable arm answers -1, which never compares equal to 0.
 fn or_all(value: Bytes, index: Int, total: Int, acc: Int) -> Int =
   if index >= total then acc
