@@ -59,7 +59,9 @@ fn check_inlined(state: TestState, label: String, d: typed_ast.TypedDecl) -> Uni
   do
     ctr <- ref_new(0)
     lidx <- ref_new(dict_empty())
-    match ast_to_ir.translate_decl_with_idx(d, dict_empty(), set_empty(), set_empty(), dict_empty(), ctr, lidx) with
+    match ast_to_ir.translate_decl_with_idx(d, ast_to_ir.ProgEnv(
+            ctors = dict_empty(), top_level = set_empty(), let_names = set_empty(),
+            fn_arities = dict_empty(), lambda_ctr_ref = ctr, lifted_idx_ref = lidx)) with
     | Err msg -> assert_true(state, label ++ ": translate ok (got Err: " ++ msg ++ ")", false)
     | Ok maybe ->
         match maybe with

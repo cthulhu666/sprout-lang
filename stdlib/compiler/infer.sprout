@@ -973,10 +973,19 @@ fn merge_effects(a: types.Effect, b: types.Effect) -> types.Effect =
   | _ -> merge_effect_labels(a, b)
 
 fn merge_effect_labels(a: types.Effect, b: types.Effect) -> types.Effect =
-  match list_append(a_labels, list_dedup(list_diff(effect_labels(b), a_labels))) with
+  match list_append(a_labels, unseen_labels(effect_labels(b), seen, Nil)) with
   | [only] -> types.EffectVar(only)
   | labels -> types.EffectRow(labels)
   where a_labels = effect_labels(a)
+        seen = list_fold(\ (s, l) -> set_insert(l, s), set_empty(), a_labels)
+
+# `labels` absent from `seen`, first occurrence only, in order. O(n log n).
+fn unseen_labels(labels: List String, seen: Set, acc: List String) -> List String =
+  match labels with
+  | Nil -> list_reverse(acc)
+  | Cons l rest ->
+      if set_member(l, seen) then unseen_labels(rest, seen, acc)
+      else unseen_labels(rest, set_insert(l, seen), Cons(l, acc))
 
 fn effect_labels(e: types.Effect) -> List String =
   match e with
