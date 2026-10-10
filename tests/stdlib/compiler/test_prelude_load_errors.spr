@@ -1,0 +1,39 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.string as string
+
+# A prelude that cannot be read, lexed or parsed is a bundle error, not a crash.
+
+# The bundle error for a small entry under `root` as the stdlib root, or "" when it bundled.
+fn bundle_msg(root: String) -> String !{IO} =
+  do
+    load_env <- bundler.new_load_env()
+    result <- bundler.bundle_source_with_roots("module entry\n\nfn one() -> Int = 1\n", `${root}/entry.spr`,
+      source.StdlibRoot(root), Nil, load_env)
+    match result with
+    | bundler.BundleErr _ msg -> msg
+    | bundler.BundleOk _ -> ""
+
+fn with_prelude(root: String, text: String) -> String !{IO} =
+  do
+    fs.make_dir_all(root)
+    fs.write_text(`${root}/prelude.sprout`, text)
+    bundle_msg(root)
+
+fn has(s: String, part: String) -> Bool = string.contains(s, part)
+
+fn main() -> Unit !{IO} =
+  do
+    t <- new_state()
+    fs.make_dir_all("/tmp/sprout_prelude_missing")
+    missing <- bundle_msg("/tmp/sprout_prelude_missing")
+    assert_true(t, "a missing prelude names its path", has(missing, "cannot read the prelude /tmp/sprout_prelude_missing/prelude.sprout"))
+    lex <- with_prelude("/tmp/sprout_prelude_lex", "let s: String = \"abc\n")
+    assert_true(t, "a prelude that does not lex is a lex error", has(lex, "Lex error in prelude: "))
+    parse <- with_prelude("/tmp/sprout_prelude_parse", "fn f( -> Int = 1\n")
+    assert_true(t, "a prelude that does not parse is a parse error", has(parse, "Parse error in prelude: "))
+    summary(t)
