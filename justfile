@@ -315,7 +315,7 @@ check-iface-all: bootstrap-from-seed
 check file: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  "{{build_dir}}/compile_driver_bin_stage1" --phase check "{{stdlib_root}}" {{quote(file)}}
+  "{{build_dir}}/compile_driver_bin_stage1" --phase check "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}}
 
 # Compile {{file}} with stage-1 and run the resulting binary.
 [group('dev')]
@@ -325,7 +325,7 @@ run file: bootstrap-from-seed
   TMP_LL="/tmp/sprout_run_$$.ll"
   TMP_BIN="/tmp/sprout_run_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} -O2 {{clang_extra}} -o "$TMP_BIN"
   "$TMP_BIN"
 
@@ -341,7 +341,7 @@ gc-profile file: bootstrap-from-seed
   TMP_LL="/tmp/sprout_gcprof_$$.ll"
   TMP_BIN="/tmp/sprout_gcprof_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} -O2 -DSPROUT_GC_PROFILE {{clang_extra}} -o "$TMP_BIN"
   SPROUT_GC_PROFILE=1 "$TMP_BIN"
 
@@ -350,7 +350,7 @@ gc-profile file: bootstrap-from-seed
 compile file out: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > {{quote(out)}}
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > {{quote(out)}}
 
 # Compile {{file}} to a native binary at {{out}} using stage-1.
 # Whole-program linked (scripts/link_whole_program.sh): slower to link, ~38% faster
@@ -361,7 +361,7 @@ compile-native file out: bootstrap-from-seed
   set -euo pipefail
   TMP_LL="/tmp/sprout_compile_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   bash scripts/link_whole_program.sh "$TMP_LL" {{quote(out)}} {{clang_extra}}
 
 # Compile {{file}} to a debug binary at {{out}} using stage-1 (DWARF, no optimisation).
@@ -372,7 +372,7 @@ build-debug file out: bootstrap-from-seed
   set -euo pipefail
   TMP_LL="/tmp/sprout_debug_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} -g -O0 {{clang_extra}} -o {{quote(out)}}
 
 # Compile {{file}} with debug info and launch it under lldb.
@@ -383,7 +383,7 @@ debug-run file: bootstrap-from-seed
   TMP_LL="/tmp/sprout_debug_$$.ll"
   TMP_BIN="/tmp/sprout_debug_$$"
   trap 'rm -f "$TMP_LL" "$TMP_BIN"' EXIT
-  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" {{quote(file)}} > "$TMP_LL"
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir --debug "{{stdlib_root}}" --package-root "{{justfile_directory()}}" {{quote(file)}} > "$TMP_LL"
   clang "$TMP_LL" {{runtime_src}} -g -O0 {{clang_extra}} -o "$TMP_BIN"
   lldb "$TMP_BIN"
 
