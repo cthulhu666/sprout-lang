@@ -1,10 +1,10 @@
 module stdlib.tui.widgets.children
 
-# The four traversals every container needs, over a bare child list. Exported
-# rather than buried in `container` because `scroll_view`, `tabs` and `tree`
-# need the same four, and an application writing a container with its own
-# layout should not have to write a fifth copy. Design:
-# docs/tui-widget-set-v0.md §5.
+# The four traversals every container needs, over a bare child list, and
+# `respan`, which puts their results back. Exported rather than buried in
+# `container` because `scroll_view`, `tabs` and `tree` need the same, and an
+# application writing a container with its own layout should not have to write
+# another copy. Design: docs/tui-widget-set-v0.md §5.
 
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
@@ -62,6 +62,25 @@ fn deliver_hit(r: widget.Handled (widget.Widget m) m,
                seen: List (widget.Widget m)) -> widget.Handled(List(widget.Widget m)) m =
   match r with
   | (w2, msgs, cmds) -> (list_append(list_reverse(Cons(w2, seen)), rest), msgs, cmds)
+
+# ── putting them back ───────────────────────────────────────────────────────
+
+# A traversal hands back bare children in order; `put` sets each back in the
+# holder it came from — a slot, a tab — keeping the rest of the holder. The two
+# lists are the same length by construction, since the caller built `ws` from
+# `holders`, so a mismatch would be a bug there, not input.
+export fn respan(put: a -> widget.Widget m -> a, holders: List a,
+                 ws: List (widget.Widget m)) -> List a =
+  respan_go(put, holders, ws, list_builder_empty)
+
+fn respan_go(put: a -> widget.Widget m -> a, holders: List a,
+             ws: List (widget.Widget m), acc: ListBuilder a) -> List a =
+  match holders with
+  | Nil -> list_builder_build(acc)
+  | [h | hrest] ->
+      match ws with
+      | Nil -> list_builder_build(acc)
+      | [w | wrest] -> respan_go(put, hrest, wrest, list_builder_add(put(h, w), acc))
 
 # ── painting and measuring ──────────────────────────────────────────────────
 

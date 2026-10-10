@@ -105,19 +105,9 @@ fn box_on_event(b: Box m,
 fn box_repack(b: Box m,
               r: widget.Handled (List(widget.Widget m)) m) -> widget.Handled(Box m) m =
   match r with
-  | (ws, msgs, cmds) -> (b with (slots = respan(b.slots, ws)), msgs, cmds)
+  | (ws, msgs, cmds) -> (b with (slots = children.respan(reseat, b.slots, ws)), msgs, cmds)
 
-# Put the traversal's rebuilt children back in their slots, keeping each slot's
-# size. The two lists are the same length by construction — `box_kids` built
-# the second from the first — so a mismatch would be a bug here, not input.
-fn respan(slots: List (Slot m), ws: List (widget.Widget m)) -> List (Slot m) =
-  match slots with
-  | Nil -> Nil
-  | [s | srest] ->
-      match ws with
-      | Nil -> Nil
-      | [w | wrest] -> Cons(reseat(s, w), respan(srest, wrest))
-
+# A rebuilt child goes back in its slot, keeping the slot's size.
 fn reseat(s: Slot m, w: widget.Widget m) -> Slot m =
   match s with
   | SlotCells n _ -> SlotCells(n, w)

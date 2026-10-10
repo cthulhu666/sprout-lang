@@ -316,6 +316,10 @@ export fn deliver_first(target: WidgetId, d: Delivery m,
 export fn render_zip(regions: List Region, screen: Screen,
                      kids: List (Widget m)) -> Unit !{IO}
 export fn measure_all(avail: Size, kids: List (Widget m)) -> List Measured
+
+# Puts a traversal's rebuilt children back in the slots or tabs they came from.
+export fn respan(put: a -> Widget m -> a, holders: List a,
+                 ws: List (Widget m)) -> List a
 ```
 
 ```sprout
