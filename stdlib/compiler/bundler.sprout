@@ -440,24 +440,22 @@ fn stdlib_prefix_hint(mod_name: String, stdlib_root: String) -> String !{IO} =
           found <- fs.is_file(path)
           if found then `; did you mean \`stdlib.${mod_name}\`?` else ""
 
-# A dotted, non-stdlib name resolves to no path only when no package root is configured.
-fn unresolved_issue(importer: String, spec: module_loader.ImportSpec, stdlib_root: String) -> LoadIssue !{IO} =
+# An issue at an import's line, naming the module, with the stdlib-prefix hint.
+fn import_issue(importer: String, spec: module_loader.ImportSpec, detail: String, stdlib_root: String) -> LoadIssue !{IO} =
   do
     let mod_name = module_loader.import_module(spec)
     hint <- stdlib_prefix_hint(mod_name, stdlib_root)
-    LoadIssue(importer, module_loader.import_pos(spec),
-      `${importer}: import ${mod_name}: unknown module — it is not a stdlib module, and no package root is configured${hint}`)
+    LoadIssue(importer, module_loader.import_pos(spec), `${importer}: import ${mod_name}: ${detail}${hint}`)
+
+# A dotted, non-stdlib name resolves to no path only when no package root is configured.
+fn unresolved_issue(importer: String, spec: module_loader.ImportSpec, stdlib_root: String) -> LoadIssue !{IO} =
+  import_issue(importer, spec, "unknown module — it is not a stdlib module, and no package root is configured", stdlib_root)
 
 # A module that resolved to a path but could not be read. The entry has no import to blame.
 fn unreadable_issue(path: String, edge: Maybe ImportEdge, msg: String, stdlib_root: String) -> LoadIssue !{IO} =
   match edge with
   | Nothing -> LoadIssue(path, no_pos(), `cannot read ${path}: ${msg}`)
-  | Just e ->
-      do
-        let mod_name = module_loader.import_module(e.spec)
-        hint <- stdlib_prefix_hint(mod_name, stdlib_root)
-        LoadIssue(e.importer, module_loader.import_pos(e.spec),
-          `${e.importer}: import ${mod_name}: cannot read ${path}: ${msg}${hint}`)
+  | Just e -> import_issue(e.importer, e.spec, `cannot read ${path}: ${msg}`, stdlib_root)
 
 fn remove_str_from_list(s: String, lst: List String) -> List String =
   match lst with
@@ -836,26 +834,15 @@ fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, M
         | Ok src -> parse_prelude(path, src, load_env)
 
 fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIssue, Maybe ParsedModule) !{IO} =
-  match scan_source_info(src) with
-  | (_, exported, ctor_types) ->
-      match lexer.tokenize(source.strip_headers(src)) with
-      | Err e ->
-          match e with
-          | token.TokenizeError msg pos ->
-              (Just (LoadIssue(path, pos, str_concat("Lex error in prelude: ", msg))), Nothing)
-      | Ok tokens ->
-          match parser.parse_program(tokens) with
-          | Err e ->
-              match e with
-              | parser.ParseError msg pos ->
-                  (Just (LoadIssue(path, pos, str_concat("Parse error in prelude: ", msg))), Nothing)
-          | Ok prog ->
-              match prog with
-              | ast.Program decls _ ->
-                  do
-                    let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
-                    memoise_module(path, mod, load_env)
-                    (Nothing, Just(mod))
+  do
+    let Ok tokens = lexer.tokenize(source.strip_headers(src))
+      else Err (token.TokenizeError msg pos) -> (Just(LoadIssue(path, pos, `Lex error in prelude: ${msg}`)), Nothing)
+    let Ok(ast.Program decls _) = parser.parse_program(tokens)
+      else Err (parser.ParseError msg pos) -> (Just(LoadIssue(path, pos, `Parse error in prelude: ${msg}`)), Nothing)
+    let (_, exported, ctor_types) = scan_source_info(src)
+    let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
+    memoise_module(path, mod, load_env)
+    (Nothing, Just(mod))
 
 # ---------------------------------------------------------------------------
 # Symbol table building
@@ -1106,27 +1093,15 @@ fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict 
         apply_one_import(spec, all_symbols, stdlib_root, extra_roots, ctx))
 
 fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String, ctx: ResolveCtx) -> ResolveCtx =
-  match spec with
-  | module_loader.ImportAlias mod_name alias _ ->
-      match module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots) with
-      | Nothing -> ctx
-      | Just mod_path ->
-          match dict_get(mod_path, all_symbols) with
-          | Nothing -> ctx
-          | Just symbols ->
-              ctx_with_methods(
-                ctx_with_alias_type(
-                  ctx_with_alias_val(ctx, alias, sym_exported_vals(symbols)),
-                  alias, merge_type_exports(symbols)),
-                sym_method_names(symbols))
-  | module_loader.ImportSelective mod_name names _ ->
-      match module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots) with
-      | Nothing -> ctx
-      | Just mod_path ->
-          match dict_get(mod_path, all_symbols) with
-          | Nothing -> ctx
-          | Just symbols ->
-              apply_selective_names(names, symbols, ctx)
+  let Just symbols = spec_symbols(spec, all_symbols, stdlib_root, extra_roots) else ctx
+  in match spec with
+     | module_loader.ImportAlias _ alias _ ->
+         ctx_with_methods(
+           ctx_with_alias_type(
+             ctx_with_alias_val(ctx, alias, sym_exported_vals(symbols)),
+             alias, merge_type_exports(symbols)),
+           sym_method_names(symbols))
+     | module_loader.ImportSelective _ names _ -> apply_selective_names(names, symbols, ctx)
 
 fn merge_type_exports(symbols: ModuleSymbols) -> Dict String =
   dict_merge(sym_exported_types(symbols), sym_exported_cls(symbols))
