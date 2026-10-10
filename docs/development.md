@@ -316,6 +316,8 @@ Example classification:
 
 The stdlib prelude is included automatically when a stdlib root is provided; `just check` and `just run` always include it.
 
+The dev recipes (`check`, `run`, `compile`, `compile-native`, `gc-profile`, `build-debug`, `debug-run`) also pass the repo root as `--package-root`, so `ide.*`, `examples.*` and `testsupport.*` imports resolve: `just run ide/app.sprout` starts the IDE.
+
 Load HTTP and JSON helpers via imports such as `import stdlib.http (...)`, `import stdlib.http_client (...)`, `import stdlib.json as json`, and `import stdlib.string as string`.
 
 For programs that take program arguments (`argv_get`), use `just compile-native` and then run the binary directly. `just run` does not forward arguments.
