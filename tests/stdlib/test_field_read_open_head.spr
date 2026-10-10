@@ -1,0 +1,28 @@
+import stdlib.test (check_eq, run_suite)
+
+# A field read whose receiver is `f Int` with `f` still open: `pure(3)` names no
+# type constructor until a later use does. The read waits for the declaration's
+# final substitution, as a read on a bare type variable does.
+
+type Box a = (val: a)
+
+instance Functor Box
+  fn fmap(f: a -> b, xs: Box a) -> Box b = Box(val = f(xs.val))
+
+instance Applicative Box
+  fn pure(x: a) -> Box a = Box(val = x)
+  fn map2(g: a -> b -> c, xs: Box a, ys: Box b) -> Box c = Box(val = g(xs.val, ys.val))
+
+fn same_box(b: Box Int) -> Box Int = b
+
+# `b.val` is read before `same_box(b)` pins `f` to `Box`.
+fn read_then_pin() -> Int =
+  let b = pure(3)
+      n = b.val
+      c = same_box(b)
+  in n + c.val
+
+fn main() -> Unit !{IO} =
+  run_suite("field_read_open_head", [
+    check_eq("read before the head is pinned", read_then_pin(), 6)
+  ])

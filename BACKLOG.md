@@ -101,9 +101,15 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (Haskell Report §4.5.1). Until then `LetDecl` is a reordering barrier and `spec-v0.md` §7 rule
   16 says so.
 - [ ] `P3` **`RecordDecl` is still a `group_plan` barrier, for no remaining reason.** Records are
-  registered before the walk now (`register_record_decls`), so a `FnDecl` may cross one. Kept as
+  registered before the walk now (`pre_scan_fn_decls`), so a `FnDecl` may cross one. Kept as
   a barrier because dropping it changes check order, and a record's index must still land in the
   plan exactly once. `docs/binding-group-inference-v0.md` §Barriers.
+- [ ] `P3` **A `with` update on a receiver whose head is still a variable is rejected.** `let b =
+  pure(3)` then `b with (val = 4)`, with `f` pinned to `Box` only by a later use, reports "no
+  field `val` on `Unknown`": `record_head_name` turns an open head into the placeholder
+  `"Unknown"`. A field READ of the same shape waits for the final substitution
+  (`record_receiver`); an update has no such deferral. At least the message should not name a
+  type that does not exist.
 - [ ] `P3` **`head_name_matches` suffix-matches the final dotted segment** (`infer.sprout:1917`), so
   `where Sh (Box a)` binds to another module's same-named type — two modules defining `Box` are
   indistinguishable and the scan takes whichever argument comes first. Fix: qualify the head at
