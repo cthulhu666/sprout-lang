@@ -49,27 +49,86 @@ names that value. It replaces the classic rightward staircase where each `Err`
 arm re-reads its own payload:
 
 ```sprout
+# Given:
+#   fn require_int(req: Request, key: String) -> Result String Int
+#   fn require_str(req: Request, key: String) -> Result String String
+#   fn session(id: Int, kind: String) -> Session
+
 # Nested — each level re-matches to reach its own error payload:
 fn validate(req: Request) -> Result String Session =
   match require_int(req, "id") with
-  | Err msg -> Err(msg)
+  | Err msg -> Err(`id: ${msg}`)
   | Ok id ->
       match require_str(req, "kind") with
       | Err msg -> Err(`kind: ${msg}`)
       | Ok kind -> Ok(session(id, kind))
 
-# Idiomatic — the residual pattern binds the payload right at the `else`:
+# Idiomatic — the residual pattern binds each payload right at the `else`:
 fn validate(req: Request) -> Result String Session =
-  let Ok id   = require_int(req, "id")    else Err msg -> Err(msg)
-      Ok kind = require_str(req, "kind")  else Err msg -> Err(`kind: ${msg}`)
+  let Ok id   = require_int(req, "id")   else Err msg -> Err(`id: ${msg}`)
+      Ok kind = require_str(req, "kind") else Err msg -> Err(`kind: ${msg}`)
+  in Ok(session(id, kind))
+
+# When each failure passes on unchanged, `try` says it shorter:
+fn validate(req: Request) -> Result String Session =
+  let id   = try require_int(req, "id")
+      kind = try require_str(req, "kind")
   in Ok(session(id, kind))
 ```
+
+Pick by what happens to the failure: changed, a binding-`else`; passed on as it
+is, `try` (see "Pass a failure on with `try`" below). One group may mix the two.
 
 The residual (`Err msg`) is a *full* pattern spliced into the fallback arm: it
 binds `msg` for the handler, and a bare variable (`else other -> …`) would bind
 the whole failing value instead. A constant `else` and a binding-`else` are told
-apart by the `->`. The RHS must still be pure, but the body after `in` may be a
-`do` block — so a pure validation gate can guard an effectful action.
+apart by the `->`.
+
+The same bindings work as `do` statements, `else` included, so a validation gate
+sits in line with the effects it guards — no outer `let … in` needed (spec
+§5.2.1a, §5.2.2). An effectful step takes an `else` too:
+
+```sprout
+fn serve(req: Request) -> Unit !{IO} =
+  do
+    let Ok id = require_int(req, "id") else Err msg -> print(msg)
+    Found row <- load(id)              else print("no such row")
+    print(render(row))
+```
+
+**One trap.** When the effectful step returns a `Maybe`/`Result`, `<-` unwraps it
+first (spec §5.9), so `Just row <- find(id) else …` is a type error: the pattern
+meets the success value, not the `Maybe`. Match the call instead — or, when the
+block itself returns that `Maybe`/`Result`, pass the failure on with `try`.
+
+## Pass a failure on with `try`
+
+When a failure should end the block unchanged, write `try` in front of the call.
+`let x = try e` binds the success; on failure the enclosing `let … in` or `do` block
+— the function, when that block is its body — returns the failure as it is (spec
+§5.9.1). It needs no `do`:
+
+```sprout
+fn sum_pos(a: Int, b: Int) -> Result String Int =
+  let x = try check_pos(a)
+      y = try check_pos(b)
+  in Ok(x + y)
+```
+
+`try` marks each line that can end the block, so a reader sees the exits without
+knowing which calls return a `Maybe`/`Result`. It is legal only where the block
+returns the same shape: a `Maybe` failure in a `Result` block, or `Result String _`
+in a `Result Int _` block, is an error at the `try`. Change the error type first
+with `result_map_error`, or handle the failure in place with `let..else`.
+
+In a `do` block, `x <- try e` runs the step's effect and binds the success, and a
+bare `try e` statement passes a failure on and drops the success. A plain `x <- e`
+on a `Maybe`/`Result` still propagates without `try` (spec §5.9) until the
+migration in `docs/try-propagate-v0.md` §8 completes; write `try` in new code.
+
+`try` is not limited to `Maybe` and `Result`: a type with an instance of the
+prelude's `Propagate` class — one method, `branch`, splitting a value into
+`Continue(value)` or `Break(failure)` — works with it too.
 
 ## Reach for a combinator on a single `Maybe`/`Result`
 
@@ -107,6 +166,17 @@ itself, instead of a `match` per field whose only content is which error to give
 fields. It is not the easy way out of "parse, don't validate"
 ([guidelines.md](./guidelines.md) #4): when the check is "this is a valid X",
 return an `X` that cannot exist otherwise and let its absence be the error.
+
+Over a whole collection, all or nothing, use `traverse`: it runs a fallible step
+on each element and gives back every success, or the first failure. `sequence` is
+the same for a collection that already holds the wrappers. Both work on `List`,
+`Vec` and `Maybe`, and replace a fold that threads a `Maybe`/`Result` by hand:
+
+```sprout
+traverse(parse_int, ["1", "2"])         # Just([1, 2])
+traverse(parse_int, ["1", "x"])         # Nothing
+sequence([Ok(1), Err("e"), Err("f")])   # Err("e") — the first failure
+```
 
 **Eliminating a wrapper a call just produced? Match the call instead.**
 `maybe_with_default`/`result_with_default` are real calls, so the wrapper must be
@@ -171,7 +241,7 @@ Reach for `range_each` only when you genuinely need the index — a numeric loop
 writing into a `MutVec` by position:
 
 ```sprout
-range_each(\i -> print(to_string(i * i)), range(1, n))
+range_each(\i -> print(to_string(i * i)), 1..n)
 ```
 
 Indexed writes are for when you know the size. When you *don't* — the count is
@@ -384,10 +454,9 @@ the wrapper first. See "Reach for a combinator on a single `Maybe`/`Result`".
 
 ## Pick the accessor that matches what you know
 
-`try` on a `Maybe`/`Result` **passes the failure out of the enclosing block**, so it
-is only legal where that block returns the same shape (spec §5.9.1). A `<-` bind on a
-`Maybe`/`Result` still does the same without `try` (§5.9), until the migration to
-`try` completes. In a function that returns a plain value, say what you actually mean:
+`try` passes a failure out of the block, so it only works where the block returns
+the same shape (see "Pass a failure on with `try`"). In a function that returns a
+plain value, say what you actually mean:
 
 ```sprout
 # You know the index is in range (fixed layout, freshly sized buffer, loop bound).
@@ -406,19 +475,9 @@ match mutvec_get(v, i) with
 x <- try mutvec_get(v, i)
 ```
 
-`try` marks each line that can end the block. In pure code it needs no `do`:
-
-```sprout
-fn sum_pos(a: Int, b: Int) -> Result String Int =
-  let x = try check_pos(a)
-      y = try check_pos(b)
-  in Ok(x + y)
-```
-
-Reaching for `mutvec_get` and binding it was the common shape, and in a
-`-> Double` numeric kernel it was silently wrong: on `Nothing` the function
-returned the `Nothing` box read as a `Double`. `mutvec_at` is also faster — it
-allocates no `Maybe` per read, which dominates in a hot loop.
+Binding `mutvec_get` with `<-` in a `-> Double` kernel is a compile error — the
+block cannot carry the `Nothing` — so pick one of the four above. `mutvec_at` is
+also faster: it allocates no `Maybe` per read, which dominates in a hot loop.
 
 To run a fallible call for its effect and **continue** regardless, use it as a bare
 statement; `try e` and `_ <- e` do *not* mean that, they pass the failure on:
@@ -462,20 +521,21 @@ or a bind whose value feeds a later expression. When the whole block is a single
 bind that is immediately returned, the block *is* the call:
 
 ```sprout
+import stdlib.chan as chan
+...
 # Ceremony:
-fn body(ch: Chan Int) -> Int !{IO} =
+fn next(ch: chan.Chan Int) -> chan.Recv Int !{IO} =
   do
-    v <- chan_recv(ch)
-    v
+    r <- chan.chan_recv(ch)
+    r
 
 # Idiomatic — the function is the call:
-fn body(ch: Chan Int) -> Int !{IO} = chan_recv(ch)
+fn next(ch: chan.Chan Int) -> chan.Recv Int !{IO} = chan.chan_recv(ch)
 ```
 
-`chan_recv` returns a bare `Int !{IO}` — the `!{IO}` is an *effect*, not a value
-wrapper to peel off — so binding and returning it unchanged adds nothing. (This
-reduction is exact when the returned value is a bare effectful type; when it is a
-`Maybe`/`Result`, check the intended short-circuit before collapsing.)
+The `!{IO}` is an *effect*, not a value wrapper to peel off, so binding the result
+and returning it unchanged adds nothing. This holds for any result type except
+`Maybe`/`Result`, where `<-` unwraps (spec §5.9) and the two are not the same.
 
 ## Bind a constant with a top-level `let`, not a nullary `fn`
 
@@ -495,9 +555,11 @@ Top-level initializers must be pure, and may be `export`ed. Measured in
 `docs/bigint-v0.md` §9 Stage 4, where the function spelling was re-parsing the P-256
 group order twice on every signature verification.
 
-`lint/nullary-const-fn` reports this shape. It fires only on a **pure** `fn` whose
-body is a syntactic value, because a top-level `let` initializer must be pure
-(spec §5.2, not yet enforced) and, outside that set, a `let` is monomorphic.
+`lint/nullary-const-fn` reports this shape, but only on a **pure**, non-linear `fn`
+other than `main` whose body is a syntactic value: a top-level `let` initializer must
+be pure (spec §5.2, not yet enforced), and outside that set a `let` is monomorphic.
+So it does **not** flag the costly case above — a body that is a call. Spot that one
+yourself.
 
 **Carry the return type across** — `fn lengths() -> Vec Int = [1, 2, 3]` is a `Vec`
 *because* the return type says so (§5.5.1), and a bare `let lengths = [1, 2, 3]` is a
@@ -555,7 +617,8 @@ large:
 
 - **result under ~1 KB** (diagnostics, labels, keys) — `++` is faster, up to 2×
 - **result over ~3 KB** — the template is faster, 1.4× rising to ~9× at 13 KB
-- **accumulating in a loop** — use neither; both are O(n²) per iteration.
+- **accumulating in a loop** — use neither; both copy the whole result each
+  iteration, O(n²) in total.
   Collect into a `List String` and call `string.join` / `string_concat_many` once.
 
 Numbers, method, and the reasoning: **[string-building-v0.md](./string-building-v0.md)**
@@ -576,11 +639,25 @@ void main() { gl_Position = vec4(pos, 1.0); }
 ## Make illegal states unrepresentable
 
 Encode invariants in types rather than runtime checks or boolean flags, and return
-`Maybe`/`Result` for failure instead of panicking — every stdlib function is total.
+`Maybe`/`Result` for an expected failure instead of panicking.
 
 ```sprout
 type Visibility = Public | Private              # not is_public: Bool
 fn vec_get(index: Int, vec: Vec a) -> Maybe a   # not "trust me it's in range"
+```
+
+Two panics are by design and worth knowing. `mutvec_at` and `mutmatrix_at` are the
+sanctioned exception to totality: calling one asserts the index is in range, and a
+wrong index fails loudly. And `Int` arithmetic traps rather than wrap to a wrong
+answer: `+`, `-`, `*` and negation on overflow, `/` on a zero divisor or
+`INT_MIN / -1` (spec §8.1).
+When a value has no fixed bound — a factorial, a cryptographic field element — use
+`BigInt` from `stdlib.math.bigint`. Its arithmetic is named functions, not operators:
+
+```sprout
+import stdlib.math.bigint as bigint
+...
+let big = bigint.mul(bigint.from_int(9223372036854775807), bigint.from_int(2))
 ```
 
 ## Distinguish same-typed values with `wrap`
@@ -610,6 +687,16 @@ export fn port(n: Int) -> Maybe Port =
 
 export fn port_number(p: Port) -> Int =                 # the pattern is private too,
   match p with | Port n -> n                            # so export an accessor
+```
+
+A wrap may derive `Eq`, `Ord` and `ToString` (spec §8.6), so a key or an id needs
+no hand-written instance. `Eq` and `Ord` compare the inner value; `ToString` is
+structural, so `to_string(Uuid("a"))` shows the constructor, not just `a`. The
+clause goes **after** the right-hand side, as on a record; on a sum `type` it goes
+before the `=`:
+
+```sprout
+export wrap Uuid = String deriving (Eq, Ord)            # stdlib.uuid
 ```
 
 A wrap may take type parameters. One the right-hand side never mentions is
@@ -719,7 +806,7 @@ fn with_conn(host: String, port: Int, work: (borrowing TcpConnection) -> a !{IO}
   do
     let c = connect_or_fail(host, port)
     let r = work(c)
-    let _ = close(c)
+    close(c)
     r
 
 with_conn(host, 80, \c -> report(c, "response"))
