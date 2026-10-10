@@ -335,13 +335,9 @@ export fn typecheck_typed_with_effects(prog: ast.Program, extra: List (String, t
     -> (typed_ast.TypedResult, List unifier.EffectReport) !{IO} =
   do
     state <- unifier.new_state()
-    let desugared = desugar_program(prog)
-    match desugared with
-    | ast.Program decls _ ->
-        do
-          result <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
-          reports <- unifier.effect_reports(state)
-          (result, reports)
+    result <- typecheck_unenforced(state, prog, extra)
+    reports <- unifier.effect_reports(state)
+    (result, reports)
 
 # Like typecheck_typed_with_effects, but hands back the bind census of the
 # declarations named by `keys` (`--phase bind-census`). Rejects nothing either.
@@ -350,10 +346,17 @@ export fn typecheck_typed_with_census(prog: ast.Program, extra: List (String, ty
   do
     state <- unifier.new_state()
     unifier.census_start(state, keys)
-    let ast.Program decls _ = desugar_program(prog)
-    result <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+    result <- typecheck_unenforced(state, prog, extra)
     pieces <- unifier.census_pieces(state)
     (result, pieces)
+
+# Both report phases check one program the same way; each reads its report off
+# `state` afterwards.
+fn typecheck_unenforced(state: unifier.InferState, prog: ast.Program, extra: List (String, types.Scheme))
+    -> typed_ast.TypedResult !{IO} =
+  do
+    let ast.Program decls _ = desugar_program(prog)
+    infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
 
 # ---------------------------------------------------------------------------
 # String template / Vec-literal desugar pass

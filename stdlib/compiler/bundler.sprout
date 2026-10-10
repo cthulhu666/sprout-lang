@@ -1851,14 +1851,24 @@ fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-fn qualify_all_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
-                            stdlib_root: String, extra_roots: List String,
-                            canonical: Dict String, prelude: PreludeNames) -> List ast.Decl =
-  match modules with
-  | Nil -> Nil
-  | Cons mod rest ->
-      list_append(qualify_module_with(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude),
-                  qualify_all_modules_with(rest, all_symbols, stdlib_root, extra_roots, canonical, prelude))
+type QualifiedModule = (path: String, decls: List ast.Decl)
+
+# What every check of one bundle reads. Bundle-wide, so built once rather than
+# per module in build_resolve_ctx, which would make it quadratic in modules.
+type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, prelude: PreludeNames,
+                    qualified: List QualifiedModule)
+
+fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleNames =
+  let all_symbols = build_all_symbols(modules)
+      canonical = all_canonical_names(all_symbols)
+      prelude = prelude_names(all_symbols, stdlib_root)
+  in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude,
+                 qualified = list_map(qualify_one(_, all_symbols, stdlib_root, extra_roots, canonical, prelude), modules))
+
+fn qualify_one(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
+               extra_roots: List String, canonical: Dict String, prelude: PreludeNames) -> QualifiedModule =
+  QualifiedModule(path = module_path(mod),
+                  decls = qualify_module_with(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude))
 
 fn qualify_module_with(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                        extra_roots: List String, canonical: Dict String, prelude: PreludeNames) -> List ast.Decl =
@@ -2419,6 +2429,10 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
 # of it — under its own name, somewhere the import is not mentioned.
 fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_root: String,
                       extra_roots: List String) -> BundleResult =
+  check_bundle(modules, entry_path, stdlib_root, extra_roots, bundle_names(modules, stdlib_root, extra_roots))
+
+fn check_bundle(modules: List ParsedModule, entry_path: String, stdlib_root: String,
+                extra_roots: List String, names: BundleNames) -> BundleResult =
   match validate_imports(modules, all_symbols, stdlib_root, extra_roots) with
   | Just err_msg -> BundleErr(no_pos(), err_msg)
   | Nothing ->
@@ -2435,12 +2449,10 @@ fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_roo
             match deriving.validate_deriving_decls(qualified) with
             | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
             | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
-  where all_symbols = build_all_symbols(modules)
-        # Bundle-wide, so built once here rather than per module in build_resolve_ctx,
-        # which would make it quadratic in modules.
-        canonical = all_canonical_names(all_symbols)
-        prelude = prelude_names(all_symbols, stdlib_root)
-        qualified = qualify_all_modules_with(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
+  where all_symbols = names.all_symbols
+        canonical = names.canonical
+        prelude = names.prelude
+        qualified = list_flat_map(\m -> m.decls, names.qualified)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
   bundle_file_with_roots(path, stdlib_root, Nil)
@@ -2483,15 +2495,10 @@ export fn bundle_with_entry_decls(path: source.FilePath, stdlib_root: source.Std
     (err, modules) <- collect_modules(entry_path, root, extra_roots, load_env)
     match err with
     | Just issue -> (BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue)), Nil)
-    | Nothing -> (make_bundle_or_err(modules, entry_path, root, extra_roots), entry_decls(modules, entry_path, root, extra_roots))
-
-fn entry_decls(modules: List ParsedModule, entry_path: String, stdlib_root: String,
-               extra_roots: List String) -> List ast.Decl =
-  let all_symbols = build_all_symbols(modules)
-      canonical = all_canonical_names(all_symbols)
-      prelude = prelude_names(all_symbols, stdlib_root)
-  in list_flat_map(qualify_module_with(_, all_symbols, stdlib_root, extra_roots, canonical, prelude),
-                   list_filter(\mod -> module_path(mod) == entry_path, modules))
+    | Nothing ->
+        let names = bundle_names(modules, root, extra_roots)
+        in (check_bundle(modules, entry_path, root, extra_roots, names),
+            list_flat_map(\m -> if m.path == entry_path then m.decls else Nil, names.qualified))
 
 fn module_path(mod: ParsedModule) -> String =
   let ParsedModule _ path _ _ _ _ = mod

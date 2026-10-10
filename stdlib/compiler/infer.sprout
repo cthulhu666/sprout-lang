@@ -2109,8 +2109,9 @@ fn consumed_arrows_effect(t: types.Type, argc: Int) -> types.Effect =
 # (so `print(Int)`/`print(String)` need no prelude — importless-safe).
 #
 # The argument is inferred once here only to read its type; that result is
-# discarded (InferState accumulates no constraints — evidence lives in the
-# returned AST), and the rewritten call re-infers it normally.
+# discarded (evidence lives in the returned AST), and the rewritten call
+# re-infers it normally. The census is paused for the peek so its sites are
+# listed once.
 fn infer_print_call(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -2124,7 +2125,9 @@ fn infer_print_call(
   match args with
   | [single] ->
       do
+        recording <- unifier.census_pause(state)
         pr <- infer_expr(state, env, subst, eff_subst, single)
+        unifier.census_resume(state, recording)
         match pr with
         | InferErr _ _ ->
             infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
@@ -5012,7 +5015,8 @@ fn infer_match(
     | InferErr pos e -> InferErr(pos, e)
     | InferOk typed_scrut s1 es1 scrut_eff ->
         do
-          census_let(state, src, typed_scrut, scrut_eff, branches, pos)
+          on <- unifier.census_on(state)
+          if on then census_let(state, src, typed_scrut, scrut_eff, branches, pos) else ()
           v <- unifier.fresh(state)
           infer_branches(state, env, s1, es1, typed_scrut, types.TVar(types.tyvar_id(v)), branches, Nil, scrut_eff,
                          src, pos)
@@ -5061,7 +5065,8 @@ fn infer_try(
     | InferErr epos e -> InferErr(epos, e)
     | InferOk typed_operand s1 es1 operand_eff ->
         do
-          unifier.census_record(state, bind_census.Try(bind_pos, operand_eff, try_bind_shape(success)))
+          on <- unifier.census_on(state)
+          if on then unifier.census_record(state, bind_census.Try(bind_pos, operand_eff, try_bind_shape(success))) else ()
           fusions <- unifier.get_try_fusions(state)
           v <- unifier.fresh(state)
           let operand_ty = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_operand))
@@ -6003,14 +6008,16 @@ fn infer_do_steps(
   # per-step helpers below never see a DoPatStep.
   | [ast.DoPatStep kind pat value els bind_pos | rest] ->
       do
-        unifier.census_record(state, bind_census.Note(bind_pos, kind, bind_census.pattern_shape(pat, els)))
+        on <- unifier.census_on(state)
+        if on then unifier.census_record(state, bind_census.Note(bind_pos, kind, bind_census.pattern_shape(pat, els))) else ()
         infer_do_steps(state, env, subst, eff_subst,
                        ast.do_pat_steps(kind, pat, value, els, rest, bind_pos),
                        last_typed, acc_steps, acc_eff, family, pos)
   | [ast.DoExprStep(ast.TryExpr _ try_pos)] -> InferErr(try_pos, try_last_step_msg)
   | [ast.DoExprStep(ast.TryExpr operand try_pos), next | more] ->
       do
-        unifier.census_record(state, bind_census.TryStatement(try_pos))
+        on <- unifier.census_on(state)
+        if on then unifier.census_record(state, bind_census.TryStatement(try_pos)) else ()
         infer_do_steps(state, env, subst, eff_subst,
                        ast.try_statement_steps(operand, Cons(next, more), try_pos),
                        last_typed, acc_steps, acc_eff, family, pos)
@@ -6026,7 +6033,8 @@ fn infer_do_steps(
             | Ok new_family ->
                 do
                   typed_step <- typed_do_step(state, step, typed_step_expr, s1)
-                  census_step(state, typed_step, step_eff, is_nil_steps(rest))
+                  on <- unifier.census_on(state)
+                  if on then census_step(state, typed_step, step_eff, is_nil_steps(rest)) else ()
                   infer_do_steps(
                     state, extend_env_from_do_step(typed_step, s1, env),
                     s1, es1, rest, typed_step_expr, Cons(typed_step, acc_steps),
@@ -6043,8 +6051,8 @@ fn trailing_binding(steps: List typed_ast.TypedDoStep) -> Maybe InferResult =
       | typed_ast.TDoBindStep _ e _ -> Just(trailing_binding_err("`<-`", typed_ast.typed_expr_pos(e)))
       | typed_ast.TDoLetStep _ e -> Just(trailing_binding_err("`let`", typed_ast.typed_expr_pos(e)))
 
-# The census's view of one step. Types and effects are resolved at the
-# declaration boundary (unifier.census_flush).
+# The census's view of one step. Types and effects are resolved later
+# (unifier.census_flush, census_finish).
 fn census_step(state: unifier.InferState, step: typed_ast.TypedDoStep, eff: types.Effect, last: Bool) -> Unit !{IO} =
   match step with
   | typed_ast.TDoBindStep pat _ mode ->
@@ -7021,7 +7029,8 @@ fn infer_range(
 # The check phase's typed output is discarded; only the source kinds and the
 # substitution carry forward. Sources are therefore inferred twice, which costs
 # compile time only — the synthesized tree embeds each source expression ONCE,
-# so runtime evaluation multiplicity is D4's.
+# so runtime evaluation multiplicity is D4's. The census is paused for the check
+# phase so a source's sites are listed once.
 fn infer_comprehension(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -7032,7 +7041,9 @@ fn infer_comprehension(
   pos: source.SourcePos
 ) -> InferResult !{IO} =
   do
+    recording <- unifier.census_pause(state)
     cr <- check_comprehension_gens(state, env, subst, eff_subst, gens, Nil)
+    unifier.census_resume(state, recording)
     match cr with
     | CompErr cpos m -> InferErr(cpos, m)
     | CompOk kinds s1 es1 ->
@@ -9735,7 +9746,7 @@ fn partition_segment(seg: List (Int, ast.Decl)) -> List (List Int) =
   | Nil -> Nil
   | [_ | _] ->
       let names = segment_names(seg)
-          index = set_of_list(names, set_empty())
+          index = set_from_list(names)
       in groups_to_indices(
            scc.sccs_in_dependency_order(names, segment_graph(seg, index, dict_empty())),
            segment_index_map(seg, dict_empty()))
@@ -9769,11 +9780,6 @@ fn segment_index_map(seg: List (Int, ast.Decl), acc: Dict Int) -> Dict Int =
 fn i_of(m: (Int, ast.Decl)) -> Int =
   match m with
   | (i, _) -> i
-
-fn set_of_list(xs: List String, acc: Set) -> Set =
-  match xs with
-  | Nil -> acc
-  | Cons x rest -> set_of_list(rest, set_insert(x, acc))
 
 # A group's members are checked in SOURCE order. Nothing requires that — they are
 # mutually dependent, so no order among them is more correct — but a deterministic
@@ -9835,11 +9841,13 @@ fn typecheck_groups(
 ) -> typed_ast.TypedResult !{IO} =
   match groups with
   | Nil ->
-      # Unwrap GlobalEnv for the public TypedResult API, which still uses
-      # raw Dict types.Scheme.  The wrap discipline is internal to infer.
-      typed_ast.TypedOk(
-        typed_ast.TypedProgram(typed_decls_in_source_order(out, 0, total)),
-        global_env_dict(env))
+      do
+        unifier.census_finish(state, subst)
+        # Unwrap GlobalEnv for the public TypedResult API, which still uses
+        # raw Dict types.Scheme.  The wrap discipline is internal to infer.
+        typed_ast.TypedOk(
+          typed_ast.TypedProgram(typed_decls_in_source_order(out, 0, total)),
+          global_env_dict(env))
   | Cons g rest ->
       do
         r <- typecheck_group(state, decl_vec, g, env, subst, eff_subst, alias_env, out, env_ftv)
@@ -10215,9 +10223,12 @@ fn typecheck_decl(
         | InferErr pos e -> TypedDeclErr(pos, e)
         | InferOk typed_expr0 s1raw es1raw rhs_eff ->
           do
-            unifier.census_record(state,
-              bind_census.Let(let_pos, bind_census.TopLevelLet, typed_ast.typed_expr_type(typed_expr0), rhs_eff,
-                              bind_census.NameShape))
+            on <- unifier.census_on(state)
+            if on then
+              unifier.census_record(state,
+                bind_census.Let(let_pos, bind_census.TopLevelLet, typed_ast.typed_expr_type(typed_expr0), rhs_eff,
+                                bind_census.NameShape))
+            else ()
             # An optional `let x : T = e` annotation is checked against the
             # inferred RHS type before generalization, narrowing the scheme.
             match apply_let_annotation(anno, s1raw, es1raw, typed_ast.typed_expr_type(typed_expr0), alias_env, name) with

@@ -25,3 +25,7 @@ bind	tests/bind_census/canaries.spr:99:7	Maybe	rhs=pure	pat=name	try=no
 let	tests/bind_census/canaries.spr:102:1	top-level	Result	rhs=effectful	pat=name	try=no
 let	tests/bind_census/canaries.spr:106:22	do-let	Maybe	rhs=effectful	pat=name	try=no
 let	tests/bind_census/canaries.spr:111:7	let-in	plain	rhs=effectful	pat=wildcard	try=yes
+discard	tests/bind_census/canaries.spr:117:9	Maybe
+discard	tests/bind_census/canaries.spr:124:9	Maybe
+bind	tests/bind_census/canaries.spr:135:5	Maybe	rhs=effectful	pat=name	try=no
+bind	tests/bind_census/canaries.spr:140:5	plain	rhs=effectful	pat=name	try=no

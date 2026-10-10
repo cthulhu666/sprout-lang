@@ -360,11 +360,40 @@ export fn take_try_positions(state: InferState) -> List source.SourcePos !{IO} =
 
 # --- Bind census (`--phase bind-census`) ---
 # Off unless census_start ran. Pieces are recorded only inside a declaration
-# whose key is in `keys`, and resolved at its boundary, where the substitution
-# is final.
+# whose key is in `keys`. Effects are resolved at its boundary, where its effect
+# substitution is final; types once more by census_finish, since a later
+# declaration can still fix a type this one used (an unannotated callee's return).
 
 export fn census_start(state: InferState, keys: Set) -> Unit !{IO} =
   ref_write(state.census, bind_census.CensusOn(keys, false, Nil, Nil))
+
+# Whether a piece would be kept. Callers test it first, so a normal compile
+# builds no pieces.
+export fn census_on(state: InferState) -> Bool !{IO} =
+  do
+    c <- ref_read(state.census)
+    match c with
+    | bind_census.CensusOn _ on _ _ -> on
+    | bind_census.CensusOff -> false
+
+# Inference whose result is thrown away must not record. Pause around it and
+# resume with what this returns.
+export fn census_pause(state: InferState) -> Bool !{IO} =
+  do
+    c <- ref_read(state.census)
+    match c with
+    | bind_census.CensusOn keys on pending done ->
+        do
+          ref_write(state.census, bind_census.CensusOn(keys, false, pending, done))
+          on
+    | bind_census.CensusOff -> false
+
+export fn census_resume(state: InferState, on: Bool) -> Unit !{IO} =
+  do
+    c <- ref_read(state.census)
+    match c with
+    | bind_census.CensusOn keys _ pending done -> ref_write(state.census, bind_census.CensusOn(keys, on, pending, done))
+    | bind_census.CensusOff -> ()
 
 # A new declaration: record its pieces when it is one of the entry's.
 export fn census_enter(state: InferState, key: String) -> Unit !{IO} =
@@ -389,6 +418,16 @@ export fn census_flush(state: InferState, subst: Dict types.Type, eff_subst: Dic
     | bind_census.CensusOn keys on pending done ->
         let resolved = list_map(bind_census.map_piece(apply_subst(subst, _), apply_effect_subst(eff_subst, _), _), pending)
         in ref_write(state.census, bind_census.CensusOn(keys, on, Nil, list_append(resolved, done)))
+    | bind_census.CensusOff -> ()
+
+# After the last declaration, with the program's substitution.
+export fn census_finish(state: InferState, subst: Dict types.Type) -> Unit !{IO} =
+  do
+    c <- ref_read(state.census)
+    match c with
+    | bind_census.CensusOn keys on pending done ->
+        ref_write(state.census,
+          bind_census.CensusOn(keys, on, pending, list_map(bind_census.map_piece(apply_subst(subst, _), \e -> e, _), done)))
     | bind_census.CensusOff -> ()
 
 export fn census_pieces(state: InferState) -> List bind_census.Piece !{IO} =

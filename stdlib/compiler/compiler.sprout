@@ -514,10 +514,7 @@ export fn compile_phase_census_with_roots(path: source.FilePath, stdlib_root: so
     match bundle_result with
     | bundler.BundleErr pos msg -> (typed_ast.TypedErr(pos, "bundle: " ++ msg), Nil)
     | bundler.BundleOk prog ->
-        checker.typecheck_typed_with_census(prog, Nil, set_from_keys(list_filter_map(bind_census.decl_key, entry)))
-
-fn set_from_keys(keys: List String) -> Set =
-  list_fold(\ (acc, k) -> set_insert(k, acc), set_empty(), keys)
+        checker.typecheck_typed_with_census(prog, Nil, set_from_list(list_filter_map(bind_census.decl_key, entry)))
 
 export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do

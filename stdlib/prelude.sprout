@@ -893,6 +893,10 @@ export fn set_remove(target: String, xs: Set) -> Set =
   list_fold(\ (acc, x) -> if x == target then acc else set_insert(x, acc),
             set_empty(), set_to_list(xs))
 
+# O(n log n).
+export fn set_from_list(xs: List String) -> Set =
+  list_fold(\ (s, x) -> set_insert(x, s), set_empty(), xs)
+
 export class Semigroup t
   fn append(left: t, right: t) -> t
 
