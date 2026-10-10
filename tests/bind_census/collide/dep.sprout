@@ -1,0 +1,7 @@
+module collide.dep
+export type Foo (..) = Foo
+instance ToString Foo
+  fn to_string(x: Foo) -> String =
+    do
+      k <- str_len("foo")
+      int_to_string(k)

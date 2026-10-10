@@ -29,3 +29,4 @@ discard	tests/bind_census/canaries.spr:117:9	Maybe
 discard	tests/bind_census/canaries.spr:124:9	Maybe
 bind	tests/bind_census/canaries.spr:135:5	Maybe	rhs=effectful	pat=name	try=no
 bind	tests/bind_census/canaries.spr:140:5	plain	rhs=effectful	pat=name	try=no
+=== tests/bind_census/collide.spr ===

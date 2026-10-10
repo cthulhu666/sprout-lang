@@ -340,12 +340,13 @@ export fn typecheck_typed_with_effects(prog: ast.Program, extra: List (String, t
     (result, reports)
 
 # Like typecheck_typed_with_effects, but hands back the bind census of the
-# declarations named by `keys` (`--phase bind-census`). Rejects nothing either.
-export fn typecheck_typed_with_census(prog: ast.Program, extra: List (String, types.Scheme), keys: Set)
+# declarations in `entry`, the entry file's part of `prog` (`--phase bind-census`).
+# Rejects nothing either.
+export fn typecheck_typed_with_census(prog: ast.Program, extra: List (String, types.Scheme), entry: List ast.Decl)
     -> (typed_ast.TypedResult, List bind_census.Piece) !{IO} =
   do
     state <- unifier.new_state()
-    unifier.census_start(state, keys)
+    unifier.census_start(state, set_from_list(list_filter_map(infer.census_key, entry)))
     result <- typecheck_unenforced(state, prog, extra)
     pieces <- unifier.census_pieces(state)
     (result, pieces)
