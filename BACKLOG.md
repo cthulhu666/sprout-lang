@@ -982,11 +982,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   a multi-file example that imports a sibling fails to link, and library-style example modules with
   no `fn main` fail at the entry point. Both are in `XFAIL_EXAMPLES`; the fix needs a design
   decision on cross-example module resolution (subsumed by packaging above).
-- [ ] `P2` **Import diagnostics carry no source position.** `ImportSpec` has no `SourcePos`, so the
-  two checks in `bundler.make_bundle_or_err` report `no_pos()` and name the file in the message
-  text. Threading a pos through `parse_import_line` reaches four consumers and would let the LSP
-  squiggle the offending name. Wants both halves: positions from an *imported* file do not render
-  either (`issue_pos_for_entry` blanks any pos outside the entry file).
+- [ ] `P2` **An error inside an imported file has no position.** `issue_pos_for_entry` blanks any
+  pos outside the entry file, so an import or parse error in a dependency reports line 0 and names
+  the file only in the message text. An `ImportSpec` now carries its line; the entry's own import
+  errors point at it. Needs a diagnostic that can name a file other than the one being checked.
 - [ ] `P3` **`stdlib.collections` is a 7-line module exporting one function**, and after the import
   diagnostics deleted the stale entries no import line in the tree binds anything from it — its
   `vec_singleton` is a duplicate of the prelude's. Decide: grow it into the real collections surface

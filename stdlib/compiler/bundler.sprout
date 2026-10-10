@@ -406,9 +406,7 @@ type LoadIssue =
   | LoadIssue String source.SourcePos String
 
 fn spec_to_path(spec: module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> Maybe String =
-  match spec with
-  | module_loader.ImportAlias mod_name _ -> module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots)
-  | module_loader.ImportSelective mod_name _ -> module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots)
+  module_loader.resolve_module_path(source.ModuleName(module_loader.import_module(spec)), stdlib_root, extra_roots)
 
 fn specs_to_paths(specs: List module_loader.ImportSpec, stdlib_root: String, extra_roots: List String) -> List String =
   match specs with
@@ -1060,7 +1058,7 @@ fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict 
 
 fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String, ctx: ResolveCtx) -> ResolveCtx =
   match spec with
-  | module_loader.ImportAlias mod_name alias ->
+  | module_loader.ImportAlias mod_name alias _ ->
       match module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots) with
       | Nothing -> ctx
       | Just mod_path ->
@@ -1072,7 +1070,7 @@ fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymb
                   ctx_with_alias_val(ctx, alias, sym_exported_vals(symbols)),
                   alias, merge_type_exports(symbols)),
                 sym_method_names(symbols))
-  | module_loader.ImportSelective mod_name names ->
+  | module_loader.ImportSelective mod_name names _ ->
       match module_loader.resolve_module_path(source.ModuleName(mod_name), stdlib_root, extra_roots) with
       | Nothing -> ctx
       | Just mod_path ->
@@ -1182,8 +1180,8 @@ fn spec_bindings(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols
   | Nothing -> Nil
   | Just symbols ->
       match spec with
-      | module_loader.ImportAlias mod_name alias -> [ImportBinding (NsPrefix, alias, mod_name)]
-      | module_loader.ImportSelective _ names -> selective_names_bindings(names, symbols)
+      | module_loader.ImportAlias mod_name alias _ -> [ImportBinding (NsPrefix, alias, mod_name)]
+      | module_loader.ImportSelective _ names _ -> selective_names_bindings(names, symbols)
 
 fn selective_names_bindings(names: List String, symbols: ModuleSymbols) -> List ImportBinding =
   match names with
@@ -1191,25 +1189,24 @@ fn selective_names_bindings(names: List String, symbols: ModuleSymbols) -> List 
   | Cons name rest ->
       list_append(selective_name_bindings(name, symbols), selective_names_bindings(rest, symbols))
 
+# Each binding with the position of the import that makes it.
 fn all_import_bindings(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
-                       stdlib_root: String, extra_roots: List String) -> List ImportBinding =
-  match specs with
-  | Nil -> Nil
-  | Cons spec rest ->
-      list_append(spec_bindings(spec, all_symbols, stdlib_root, extra_roots),
-        all_import_bindings(rest, all_symbols, stdlib_root, extra_roots))
+                       stdlib_root: String, extra_roots: List String) -> List(source.SourcePos, ImportBinding) =
+  list_flat_map(\spec -> list_map(\b -> (module_loader.import_pos(spec), b),
+                                  spec_bindings(spec, all_symbols, stdlib_root, extra_roots)),
+                specs)
 
 # The first (namespace, name) bound to two DIFFERENT symbols, with the symbol it
 # was already bound to. The same symbol twice is legal — importing one name by
 # two routes leaves nothing ambiguous.
-fn first_import_conflict(bindings: List ImportBinding, seen: Dict String) -> Maybe (ImportBinding, String) =
+fn first_import_conflict(bindings: List (source.SourcePos, ImportBinding), seen: Dict String) -> Maybe(source.SourcePos, ImportBinding, String) =
   match bindings with
   | Nil -> Nothing
-  | Cons b rest ->
+  | Cons (pos, b) rest ->
       match dict_get(binding_key(b), seen) with
       | Just previous ->
           if previous == binding_target(b) then first_import_conflict(rest, seen)
-          else Just((b, previous))
+          else Just((pos, b, previous))
       | Nothing ->
           first_import_conflict(rest, dict_set(binding_key(b), binding_target(b), seen))
 
@@ -1288,31 +1285,31 @@ fn conflict_message(path: String, b: ImportBinding, previous: String) -> String 
 # Nothing for a whole-module import (it lists no names) and for a module that did
 # not resolve, so the three guards read as one "or this spec has nothing to say".
 fn unknown_name_in_spec(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
-                        stdlib_root: String, extra_roots: List String, path: String) -> Maybe String =
-  let module_loader.ImportSelective mod_name names = spec else Nothing
+                        stdlib_root: String, extra_roots: List String, path: String) -> Maybe LoadIssue =
+  let module_loader.ImportSelective mod_name names pos = spec else Nothing
       Just symbols = spec_symbols(spec, all_symbols, stdlib_root, extra_roots) else Nothing
       Just name = first_unbound_name(names, symbols) else Nothing
-  in Just(unknown_import_message(path, mod_name, name, symbols))
+  in Just(LoadIssue(path, pos, unknown_import_message(path, mod_name, name, symbols)))
 
 fn first_unknown_import(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols,
-                        stdlib_root: String, extra_roots: List String, path: String) -> Maybe String =
+                        stdlib_root: String, extra_roots: List String, path: String) -> Maybe LoadIssue =
   find_map(\spec -> unknown_name_in_spec(spec, all_symbols, stdlib_root, extra_roots, path), specs)
 
 fn module_import_error(mod: ParsedModule, all_symbols: Dict ModuleSymbols,
-                       stdlib_root: String, extra_roots: List String) -> Maybe String =
+                       stdlib_root: String, extra_roots: List String) -> Maybe LoadIssue =
   match mod with
   | ParsedModule _ path specs _ _ _ ->
       match first_unknown_import(specs, all_symbols, stdlib_root, extra_roots, path) with
-      | Just msg -> Just(msg)
+      | Just issue -> Just(issue)
       | Nothing ->
           match first_import_conflict(
                   all_import_bindings(specs, all_symbols, stdlib_root, extra_roots),
                   dict_empty()) with
           | Nothing -> Nothing
-          | Just (b, previous) -> Just(conflict_message(path, b, previous))
+          | Just (pos, b, previous) -> Just(LoadIssue(path, pos, conflict_message(path, b, previous)))
 
 fn validate_imports(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
-                    stdlib_root: String, extra_roots: List String) -> Maybe String =
+                    stdlib_root: String, extra_roots: List String) -> Maybe LoadIssue =
   find_map(\mod -> module_import_error(mod, all_symbols, stdlib_root, extra_roots), modules)
 
 # ---------------------------------------------------------------------------
@@ -2410,7 +2407,7 @@ fn validate_qualified_decls(decls: List ast.Decl) -> Maybe(source.SourcePos, Str
 fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_root: String,
                       extra_roots: List String, names: BundleNames) -> BundleResult =
   match validate_imports(modules, names.all_symbols, stdlib_root, extra_roots) with
-  | Just err_msg -> BundleErr(no_pos(), err_msg)
+  | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
   | Nothing ->
       match validate_qualified_decls(qualified) with
       | Just (pos, err_msg) -> BundleErr(pos, "[assert] qualify_decl: " ++ err_msg)

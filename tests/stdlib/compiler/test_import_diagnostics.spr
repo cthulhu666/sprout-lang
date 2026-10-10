@@ -34,6 +34,16 @@ fn bundle_msg(src: String, root: String) -> String !{IO} =
     | bundler.BundleErr _ msg -> msg
     | bundler.BundleOk _ -> ""
 
+# The line the bundle error points at, or 0 when it bundled cleanly.
+fn bundle_line(src: String, root: String) -> Int !{IO} =
+  do
+    load_env <- bundler.new_load_env()
+    result <- bundler.bundle_source_with_roots(src, "/tmp/sprout_import_diag.spr",
+      source.StdlibRoot(root), [package_root()], load_env)
+    match result with
+    | bundler.BundleErr pos _ -> pos.line
+    | bundler.BundleOk _ -> 0
+
 fn valid_import() -> String =
   `module entry
 import demo.dup_one (OneBox, JustOne, one_value)
@@ -176,5 +186,14 @@ fn main() -> Unit !{IO} =
 
           ext <- bundle_msg(extern_imported_by_name(), root)
           assert_eq(state, "importing an extern by name is accepted", ext, "")
+
+          # ── 4. Each rejection points at its import line ───────────────────
+          missing_line <- bundle_line(unexported_name(), root)
+          assert_eq(state, "an unexported name is reported at its import line", missing_line, 2)
+          # The second import is the one that makes the name ambiguous.
+          dup_line <- bundle_line(same_ctor_from_two_modules(), root)
+          assert_eq(state, "a collision is reported at the import that causes it", dup_line, 3)
+          prefix_line <- bundle_line(colliding_module_prefix(), root)
+          assert_eq(state, "a prefix collision is reported at the second import", prefix_line, 3)
 
     summary(state)

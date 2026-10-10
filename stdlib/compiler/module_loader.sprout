@@ -13,10 +13,22 @@ import stdlib.string as string
 # ImportSelective module_name names
 #   e.g. "import stdlib.collections (Vec, vec_get)" -> ImportSelective "stdlib.collections" ["Vec", "vec_get"]
 #   Only the listed names are exposed, unqualified.
+#
+# Both carry the position of the line the import starts on, where its diagnostics point.
 
 export type ImportSpec (..) =
-  | ImportAlias String String
-  | ImportSelective String (List String)
+  | ImportAlias String String source.SourcePos
+  | ImportSelective String (List String) source.SourcePos
+
+export fn import_module(spec: ImportSpec) -> String =
+  match spec with
+  | ImportAlias m _ _ -> m
+  | ImportSelective m _ _ -> m
+
+export fn import_pos(spec: ImportSpec) -> source.SourcePos =
+  match spec with
+  | ImportAlias _ _ pos -> pos
+  | ImportSelective _ _ pos -> pos
 
 # ---------------------------------------------------------------------------
 # Import header parsing
@@ -122,22 +134,23 @@ fn module_last_segment_go(s: String, i: Int, last_dot: Int) -> String =
 fn module_last_segment(module_name: String) -> String =
   module_last_segment_go(module_name, 0, 0)
 
-fn parse_import_after_module(rest: String, module_name: String, i: Int) -> Maybe ImportSpec =
+fn parse_import_after_module(rest: String, module_name: String, i: Int, pos: source.SourcePos) -> Maybe ImportSpec =
   match read_word(rest, i) with
   | ("as", i2) ->
       match read_word(rest, i2) with
       | ("", _) -> Nothing
-      | (alias, _) -> Just(ImportAlias(module_name, alias))
+      | (alias, _) -> Just(ImportAlias(module_name, alias, pos))
   | _ ->
       if str_starts_with(str_slice(rest, skip_spaces(rest, i), str_len(rest)), "(") then
-        Just(ImportSelective(module_name, parse_selective_names_acc(rest, skip_spaces(rest, i) + 1, Nil)))
-      else Just(ImportAlias(module_name, module_last_segment(module_name)))
+        Just(ImportSelective(module_name, parse_selective_names_acc(rest, skip_spaces(rest, i) + 1, Nil), pos))
+      else Just(ImportAlias(module_name, module_last_segment(module_name), pos))
 
-export fn parse_import_line(line: String) -> Maybe ImportSpec =
+# `pos` is where `line` starts in its file.
+export fn parse_import_line(line: String, pos: source.SourcePos) -> Maybe ImportSpec =
   if str_starts_with(line, "import ") then
     match read_word(line, 7) with
     | ("", _) -> Nothing
-    | (module_name, i2) -> parse_import_after_module(line, module_name, i2)
+    | (module_name, i2) -> parse_import_after_module(line, module_name, i2, pos)
   else Nothing
 
 # Joins the lines of ONE import whose parenthesised list is still open, so
@@ -157,34 +170,41 @@ export fn parse_import_line(line: String) -> Maybe ImportSpec =
 # comment anywhere in the list dropped every name below it, surfacing later and
 # elsewhere as `Unknown variable`. The depth scan already looks past comments;
 # this only brings the text into line with it.
-fn join_wrapped_import(joined: String, lines: List String, depth: Int) -> (String, List String) =
-  if depth <= 0 then (joined, lines)
+#
+# `next` is the start of the line after the last one joined.
+fn join_wrapped_import(joined: String, lines: List String, depth: Int, next: source.SourcePos) -> (String, List String, source.SourcePos) =
+  if depth <= 0 then (joined, lines, next)
   else
     match lines with
-    | Nil -> (joined, Nil)
+    | Nil -> (joined, Nil, next)
     | Cons l rest ->
         join_wrapped_import(joined ++ " " ++ source.strip_line_comment(l), rest,
-                            depth + source.line_paren_delta(l))
+                            depth + source.line_paren_delta(l), after_line(next, l))
 
-fn collect_imports_from_lines(lines: List String, acc: List ImportSpec) -> List ImportSpec =
+# The start of the line after `line`, which starts at `pos`. `str_split_lines`
+# drops only the `\n`, so the index advances by the line's codepoints plus one.
+fn after_line(pos: source.SourcePos, line: String) -> source.SourcePos =
+  source.SourcePos(index = pos.index + str_len(line) + 1, line = pos.line + 1, column = 1)
+
+fn collect_imports_from_lines(lines: List String, pos: source.SourcePos, acc: List ImportSpec) -> List ImportSpec =
   match lines with
   | Nil -> list_reverse(acc)
   | Cons line rest ->
       if str_starts_with(line, "import ") then
         match join_wrapped_import(source.strip_line_comment(line), rest,
-                                  source.line_paren_delta(line)) with
-        | (joined, remaining) ->
-            match parse_import_line(joined) with
-            | Nothing -> collect_imports_from_lines(remaining, acc)
-            | Just spec -> collect_imports_from_lines(remaining, Cons(spec, acc))
+                                  source.line_paren_delta(line), after_line(pos, line)) with
+        | (joined, remaining, next) ->
+            match parse_import_line(joined, pos) with
+            | Nothing -> collect_imports_from_lines(remaining, next, acc)
+            | Just spec -> collect_imports_from_lines(remaining, next, Cons(spec, acc))
       # The header block ends where `strip_headers` ends it, `no_prelude` included.
       else if source.is_header_line(line) then
-        collect_imports_from_lines(rest, acc)
+        collect_imports_from_lines(rest, after_line(pos, line), acc)
       else
         list_reverse(acc)
 
 export fn collect_imports(src: String) -> List ImportSpec =
-  collect_imports_from_lines(str_split_lines(src), Nil)
+  collect_imports_from_lines(str_split_lines(src), source.SourcePos(index = 0, line = 1, column = 1), Nil)
 
 # ---------------------------------------------------------------------------
 # Module path resolution
