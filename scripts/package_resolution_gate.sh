@@ -33,12 +33,12 @@ else
   fail=1
 fi
 
-# Negative: no extra root -> demo.greet is unresolvable (unknown variable).
+# Negative: no extra root -> the import of demo.greet is itself the error.
 neg="$("$DRV" --phase check "$STDLIB" "$APP" 2>&1)"
-if errors "$neg" >/dev/null; then
+if echo "$neg" | grep -q 'import demo.greet: unknown module'; then
   echo "PASS negative: unregistered dotted import correctly failed to resolve"
 else
-  echo "FAIL negative: demo.greet resolved WITHOUT --package-root (search path too wide)"
+  echo "FAIL negative: expected an unknown-module error on the demo.greet import without --package-root"
   fail=1
 fi
 

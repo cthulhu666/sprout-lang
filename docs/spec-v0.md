@@ -187,6 +187,13 @@ them unformattable.
 An aliased import binds the module name's **last segment** as its prefix, so
 `import demo.a.b` is reached as `b.<name>`; `as` overrides that.
 
+**An import must name a file that exists.** `stdlib.<path>` and a bare name
+resolve under the stdlib root; any other dotted name resolves under a package
+root (`--package-root`). An import with no file behind it is rejected at its
+line, naming the module and the path tried — as is a dotted name when no package
+root is configured. It used to be dropped, and the first sign was an unknown
+name at some later use.
+
 **Every listed name must be exported by the module it is listed under.** A name
 that module does not export — including one it declares without `export` — is
 rejected, naming both. The two cases are worded differently because the fix

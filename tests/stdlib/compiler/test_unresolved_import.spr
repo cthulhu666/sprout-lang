@@ -1,0 +1,97 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.analysis_service_driver as svc
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.json as json
+import stdlib.string as string
+import stdlib.env as env
+
+# An import with no file behind it is an error at its own line: a dotted name
+# with no package root, or a path that cannot be read. A REPL session survives it.
+
+let package_root: String =
+  "tests/conformance/package_resolution/roots"
+
+let entry_path: String =
+  "/tmp/sprout_unresolved_import.spr"
+
+# (line, message) of the bundle error for `src` as the entry, or (0, "") when it
+# bundled cleanly.
+fn bundle_err(src: String, root: String, roots: List String) -> (Int, String) !{IO} =
+  do
+    load_env <- bundler.new_load_env()
+    result <- bundler.bundle_source_with_roots(src, entry_path, source.StdlibRoot(root), roots, load_env)
+    match result with
+    | bundler.BundleErr pos msg -> (pos.line, msg)
+    | bundler.BundleOk _ -> (0, "")
+
+fn reply(state: svc.StartupState, line: String) -> String !{IO} =
+  do
+    resp <- svc.dispatch_line(line, state)
+    match json.stringify(resp) with
+    | Ok text -> text
+    | Err _ -> "<unprintable>"
+
+fn session_update(kind: String, line: String) -> String =
+  `{"op":"session_update","session_id":1,"kind":"${kind}","line":"${line}"}`
+
+fn has(s: String, part: String) -> Bool = string.contains(s, part)
+
+fn bundle_cases(t: TestState, root: String) -> Unit !{IO} =
+  do
+    (line, msg) <- bundle_err("module entry\n\nimport demo.greet (greeting)\n", root, Nil)
+    assert_true(t, "a dotted import with no package root names the module", has(msg, "import demo.greet"))
+    assert_true(t, "it says no package root is configured", has(msg, "no package root is configured"))
+    assert_eq(t, "it points at the import line", line, 3)
+
+    (line, msg) <- bundle_err("module entry\nimport demo.nope as nope\n", root, [package_root])
+    assert_true(t, "a missing file under a package root names the path", has(msg, "demo/nope.sprout"))
+    assert_eq(t, "a missing file is reported at the import line", line, 2)
+
+    (line, msg) <- bundle_err("module entry\nimport nope\n", root, Nil)
+    assert_true(t, "a bare name with no stdlib file names the path", has(msg, "nope.sprout"))
+    assert_eq(t, "a bare name is reported at the import line", line, 2)
+
+    (_, msg) <- bundle_err("module entry\nimport math.int as mi\n", root, Nil)
+    assert_true(t, "a stdlib module without its prefix gets a hint", has(msg, "did you mean `stdlib.math.int`?"))
+
+    (line, _) <- bundle_err("module entry\n# c\nimport stdlib.string (\n  join)\nimport demo.nope\n", root, Nil)
+    assert_eq(t, "a wrapped import above does not shift the line", line, 5)
+
+    # The position belongs to bad_dep.sprout, not to the entry, so it is blanked.
+    (line, msg) <- bundle_err("module entry\nimport demo.bad_dep (bad_dep_value)\n", root, [package_root])
+    assert_true(t, "a bad import inside a dependency names that file", has(msg, "bad_dep.sprout"))
+    assert_true(t, "and the module it could not find", has(msg, "demo.missing"))
+    assert_eq(t, "and carries no position into the entry", line, 0)
+
+    missing <- bundler.bundle_file(source.FilePath("/tmp/sprout_no_such_entry.spr"), source.StdlibRoot(root))
+    assert_true(t, "a missing entry file is a bundle error, not a crash",
+      match missing with
+      | bundler.BundleErr _ msg -> has(msg, "sprout_no_such_entry.spr")
+      | bundler.BundleOk _ -> false)
+
+fn repl_cases(t: TestState, root: String) -> Unit !{IO} =
+  do
+    state <- svc.build_startup_state(root)
+    created <- reply(state, "{\"op\":\"session_create\"}")
+    assert_eq(t, "the session the updates below address exists", created, "{\"ok\":true,\"value\":1}")
+    bad <- reply(state, session_update("import", "import foobar"))
+    assert_true(t, "a REPL import of a missing module is an error reply", has(bad, "foobar.sprout"))
+    unknown <- reply(state, session_update("import", "import ide.nope"))
+    assert_true(t, "a REPL import of an unknown module is an error reply", has(unknown, "no package root is configured"))
+    after <- reply(state, session_update("decl", "fn f() -> Int = 1"))
+    assert_eq(t, "the session still answers afterwards", after, "{\"ok\":true,\"value\":true}")
+
+fn main() -> Unit !{IO} =
+  do
+    t <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing ->
+        assert_true(t, "SPROUT_STDLIB_ROOT is set (the suite cannot bundle without it)", false)
+    | Just root ->
+        do
+          bundle_cases(t, root)
+          repl_cases(t, root)
+    summary(t)

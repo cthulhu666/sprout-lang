@@ -184,9 +184,10 @@ echo "$resp" | grep -q '"diagnostics":\[\]'
 check "a package-root import resolves when the root is registered" $?
 
 # Negative control: without the root it must still fail. A pass here would mean the
-# default search path had been widened, which is a different and worse bug.
+# default search path had been widened, which is a different and worse bug. The error
+# is on the import itself, not on a later use of a name it should have bound.
 resp="$(drive "$INIT" "$(open_doc "$PKG_URI" "$PKG_SRC")")"
-echo "$resp" | grep -q 'Unknown variable: greeting'
+echo "$resp" | grep -q 'import demo.greet: unknown module'
 check "the same import is unresolved with no root registered" $?
 
 # --- 6. go to definition ---------------------------------------------------------

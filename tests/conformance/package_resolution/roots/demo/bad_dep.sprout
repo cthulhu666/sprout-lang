@@ -1,0 +1,6 @@
+module demo.bad_dep
+
+# Fixture: an imported module whose own import names a file that does not exist.
+import demo.missing
+
+export fn bad_dep_value(n: Int) -> Int = n
