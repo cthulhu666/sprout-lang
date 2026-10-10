@@ -131,14 +131,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   - [ ] `P2` **Anonymous `any C` introduction — `let row : List (any C) = …`.** Needs a
     type-directed rewrite boxing each element into a per-value dictionary, so it cannot ride the
     Phase-1 syntactic coercion. Belongs to the existentials arc (`docs/gadts-v0.md` §6).
-- [ ] `P1` **A top-level `let`'s type annotation resolves only PRELUDE types.** `let x: mod.T = …`
-  is rejected with "unknown type `mod.T` … add it to that module's import list" even where the
-  module imports `mod` and a `fn` signature two lines away resolves that same name; a type declared
-  in the SAME file fails identically, advising an import of itself. So spec §5.2's annotation cannot
-  be written for a user type, which is most of them. That blocks the `fn` → `let` rewrite
-  `lint/nullary-const-fn` recommends: carrying the return type across is what keeps a list-literal
-  `Vec` from silently becoming a `List` (§5.5.1). Repro: `let favourite: Colour = Red` beneath the
-  `type Colour` that declares it.
 - [ ] `P2` **Ref sugar in do-notation:** `:=` for `ref_write`, `<~` for a ref-read bind step,
   `var x = expr` for `x <- ref_new(expr)`.
 - [ ] `P2` **B1 — an inline multi-line `do`-block lambda as a call argument is a parse error.**

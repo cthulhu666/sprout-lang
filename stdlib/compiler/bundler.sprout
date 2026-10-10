@@ -1813,7 +1813,7 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
       ast.LetDecl(
         dict_get_or(name, ctx_value_locals(ctx), name),
         qualify_expr(ctx, Nil, body),
-        anno,
+        qualify_maybe_type(ctx, anno),
         pos)
   | ast.ClassDecl name type_params methods superclasses pos ->
       ast.ClassDecl(
