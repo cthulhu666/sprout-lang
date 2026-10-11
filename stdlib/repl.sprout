@@ -138,12 +138,9 @@ fn contains_name(names: Vec String, value: String, index: Int) -> Bool =
   | Just item -> if item == value then true else contains_name(names, value, index + 1)
   | Nothing -> false
 
-export fn filter_names_by_prefix(prefix: String, lowered_prefix: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
-  match vec_get(index, names) with
-  | Just item ->
-      if string.starts_with(string.to_lower_ascii(item), lowered_prefix) then filter_names_by_prefix(prefix, lowered_prefix, names, index + 1, vec_append(item, acc))
-      else filter_names_by_prefix(prefix, lowered_prefix, names, index + 1, acc)
-  | Nothing -> acc
+export fn filter_names_by_prefix(prefix: String, names: Vec String) -> Vec String =
+  let lowered = string.to_lower_ascii(prefix)
+  in vec_filter(\n -> string.starts_with(string.to_lower_ascii(n), lowered), names)
 
 fn append_space_name_pair(acc: Vec String, pair: (String, String)) -> Vec String =
   match pair with
@@ -172,7 +169,6 @@ export fn stdlib_module_completion_names() -> Vec String =
       ++ "http_middleware http_server json linalg log math mutable net process regex "
       ++ "repl rng scram stamped string task template terminal test time url uuid version")
 
-# Read and parsed once per REPL session, not per TAB.
 # The prelude is in scope unqualified, so BOTH its exports and its externs are
 # offered bare. The externs are the ones that were missing entirely: `print`,
 # `panic`, `int_to_string`, `str_len` and 40 others.
@@ -285,8 +281,7 @@ fn module_path(module_name: String) -> String =
 # one it would accept. See docs/module-surface-authority-v0.md §6.
 #
 # It parses, which the line scan could not afford to. A parse of the largest module (the
-# prelude) measures ~80ms against ~40ms to tokenize it, so the REPL computes the prelude
-# names once per session and TAB reuses them.
+# prelude) measures ~80ms against ~40ms to tokenize it.
 
 export fn module_public_names(content: String) -> Vec String =
   match module_surface_names(content) with
@@ -430,56 +425,53 @@ fn gather_declaration_names(declarations: Vec String, index: Int, acc: Vec Strin
   | Just line -> gather_declaration_names(declarations, index + 1, append_declaration_names(acc, trim(line)))
   | Nothing -> acc
 
-# Everything spellable without a `.`: REPL commands, importable module names, the
-# prelude's exports AND externs, the session's own declarations, the leaf names and
-# selectively-imported names of its imports, and — new here — the externs of every
-# imported module.
-# The prelude names are parsed on the first TAB and kept for the session; a session
-# that never completes never reads the prelude.
-fn cached_prelude_names(cache: Ref (Maybe (Vec String))) -> Vec String !{IO} =
+# The REPL commands, importable module names and prelude names (exports and externs),
+# deduped. Session-invariant: built on the first TAB and kept for the session, so a
+# session that never completes never reads the prelude.
+fn cached_base_names(cache: Ref (Maybe (Vec String))) -> Vec String !{IO} =
   match ref_read(cache) with
   | Just names -> names
   | Nothing ->
       do
-        names <- prelude_completion_names()
+        prelude_names <- prelude_completion_names()
+        let names =
+          append_names_from_vec(
+            append_names_from_vec(
+              append_names_from_vec(vec_empty(), repl_command_names(), 0),
+              stdlib_module_completion_names(), 0),
+            prelude_names, 0)
         ref_write(cache, Just(names))
         names
 
-fn unqualified_candidates(session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String))) -> Vec String !{IO} =
+# Everything spellable without a `.`: the cached base, the session's own declarations,
+# the leaf names and selectively-imported names of its imports, and the externs of
+# every imported module.
+fn unqualified_candidates(session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> Vec String !{IO} =
   do
-    prelude_names <- cached_prelude_names(prelude_cache)
-    let base =
-      append_names_from_vec(
-        append_names_from_vec(
-          append_names_from_vec(vec_empty(), repl_command_names(), 0),
-          stdlib_module_completion_names(), 0),
-        prelude_names, 0)
+    base <- cached_base_names(completion_cache)
     with_globals <- append_imported_globals(base, compiler.stateful_session_imports(session), 0)
     gather_declaration_names(
       compiler.stateful_session_declarations(session),
       0,
       gather_import_names(compiler.stateful_session_imports(session), 0, with_globals))
 
-export fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String))) -> (String, Vec String) !{IO} =
+export fn completion_candidates_local(line_buffer: String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> (String, Vec String) !{IO} =
   match completion_prefix(line_buffer) with
   | prefix ->
       match string.find(prefix, ".") with
       | Nothing ->
-        match unqualified_candidates(session, prelude_cache) with
+        match unqualified_candidates(session, completion_cache) with
         | candidates ->
             (
               prefix,
-              filter_names_by_prefix(prefix, string.to_lower_ascii(prefix), candidates, 0, vec_empty())
+              filter_names_by_prefix(prefix, candidates)
             )
       | Just _ ->
         (
           prefix,
           filter_names_by_prefix(
             prefix,
-            string.to_lower_ascii(prefix),
-            dotted_completion_candidates(prefix, compiler.stateful_session_imports(session)),
-            0,
-            vec_empty()
+            dotted_completion_candidates(prefix, compiler.stateful_session_imports(session))
           )
         )
 
@@ -488,38 +480,38 @@ fn apply_completion(current: String, prefix: String, matches: Vec String) -> Str
   else if vec_length(matches) != 1 then current
   else string.drop_last(current, string.length(prefix)) ++ vec_get_or(0, prefix, matches)
 
-fn complete_current_line(prompt: String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String)), current: String, cursor: Int) -> Maybe String !{IO} =
-  match completion_candidates_local(current, session, prelude_cache) with
+fn complete_current_line(prompt: String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String)), current: String, cursor: Int) -> Maybe String !{IO} =
+  match completion_candidates_local(current, session, completion_cache) with
   | (prefix, matches) ->
-      if prefix == "" then interactive_read_line_loop(prompt, history, session, prelude_cache, current, string.length(current), -1, current)
-      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, -1, current)
+      if prefix == "" then interactive_read_line_loop(prompt, history, session, completion_cache, current, string.length(current), -1, current)
+      else if vec_length(matches) == 0 then interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, -1, current)
       else if vec_length(matches) == 1 then
         do
           let next = apply_completion(current, prefix, matches)
           redraw_input(prompt, next, string.length(next))
-          interactive_read_line_loop(prompt, history, session, prelude_cache, next, string.length(next), -1, next)
+          interactive_read_line_loop(prompt, history, session, completion_cache, next, string.length(next), -1, next)
       else
         do
           terminal.write("\r\n")
           render_interactive_match_lines(matches)
           redraw_input(prompt, current, cursor)
-          interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, -1, current)
+          interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, -1, current)
 
-fn step_cursor_left(prompt: String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
-  if cursor <= 0 then interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+fn step_cursor_left(prompt: String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  if cursor <= 0 then interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   else
     do
       redraw_input(prompt, current, cursor - 1)
-      interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor - 1, browse_index, draft)
+      interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor - 1, browse_index, draft)
 
-fn step_cursor_right(prompt: String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
-  if cursor >= string.length(current) then interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+fn step_cursor_right(prompt: String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+  if cursor >= string.length(current) then interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   else
     do
       redraw_input(prompt, current, cursor + 1)
-      interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor + 1, browse_index, draft)
+      interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor + 1, browse_index, draft)
 
-fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
+fn interactive_read_line_step(prompt: String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String, key: String) -> Maybe String !{IO} =
   match key with
   | "" -> Nothing
   | "ctrl-d" ->
@@ -527,74 +519,74 @@ fn interactive_read_line_step(prompt: String, history: Vec String, session: comp
         do
           terminal.write("\r\n")
           Nothing
-      else interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+      else interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   | "enter" ->
       do
         terminal.write("\r\n")
         Just(current)
   | "backspace" ->
-      if cursor <= 0 then interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+      if cursor <= 0 then interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
       else
         do
           let next = delete_before(current, cursor)
           redraw_input(prompt, next, cursor - 1)
-          interactive_read_line_loop(prompt, history, session, prelude_cache, next, cursor - 1, -1, next)
+          interactive_read_line_loop(prompt, history, session, completion_cache, next, cursor - 1, -1, next)
   | "escape" ->
-      interactive_read_line_step(prompt, history, session, prelude_cache, current, cursor, browse_index, draft, read_escape_token())
+      interactive_read_line_step(prompt, history, session, completion_cache, current, cursor, browse_index, draft, read_escape_token())
   | "tab" ->
-      complete_current_line(prompt, history, session, prelude_cache, current, cursor)
+      complete_current_line(prompt, history, session, completion_cache, current, cursor)
   | "left" ->  # ctrl-b is the readline alias
-      step_cursor_left(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+      step_cursor_left(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   | "ctrl-b" ->
-      step_cursor_left(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+      step_cursor_left(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   | "right" ->  # ctrl-f is the readline alias
-      step_cursor_right(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+      step_cursor_right(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   | "ctrl-f" ->
-      step_cursor_right(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+      step_cursor_right(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   | "ctrl-a" ->
       do
         redraw_input(prompt, current, 0)
-        interactive_read_line_loop(prompt, history, session, prelude_cache, current, 0, browse_index, draft)
+        interactive_read_line_loop(prompt, history, session, completion_cache, current, 0, browse_index, draft)
   | "ctrl-e" ->
       do
         redraw_input(prompt, current, string.length(current))
-        interactive_read_line_loop(prompt, history, session, prelude_cache, current, string.length(current), browse_index, draft)
+        interactive_read_line_loop(prompt, history, session, completion_cache, current, string.length(current), browse_index, draft)
   | "ctrl-l" ->
       do
         terminal.write(esc ++ "[2J" ++ esc ++ "[H")
         redraw_input(prompt, current, cursor)
-        interactive_read_line_loop(prompt, history, session, prelude_cache, current, cursor, browse_index, draft)
+        interactive_read_line_loop(prompt, history, session, completion_cache, current, cursor, browse_index, draft)
   | "up" ->
       match history_prev(current, history, browse_index, draft) with
       | (next_current, next_index, next_draft) ->
           do
             redraw_input(prompt, next_current, string.length(next_current))
-            interactive_read_line_loop(prompt, history, session, prelude_cache, next_current, string.length(next_current), next_index, next_draft)
+            interactive_read_line_loop(prompt, history, session, completion_cache, next_current, string.length(next_current), next_index, next_draft)
   | "down" ->
       match history_next(current, history, browse_index, draft) with
       | (next_current, next_index, next_draft) ->
           do
             redraw_input(prompt, next_current, string.length(next_current))
-            interactive_read_line_loop(prompt, history, session, prelude_cache, next_current, string.length(next_current), next_index, next_draft)
+            interactive_read_line_loop(prompt, history, session, completion_cache, next_current, string.length(next_current), next_index, next_draft)
   | _ ->
       do
         let next = insert_at(current, cursor, key)
         redraw_input(prompt, next, cursor + string.length(key))
-        interactive_read_line_loop(prompt, history, session, prelude_cache, next, cursor + string.length(key), -1, next)
+        interactive_read_line_loop(prompt, history, session, completion_cache, next, cursor + string.length(key), -1, next)
 
-fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
+fn interactive_read_line_loop(prompt: String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String)), current: String, cursor: Int, browse_index: Int, draft: String) -> Maybe String !{IO} =
   do
     key <- terminal.term_read_key_once()
-    interactive_read_line_step(prompt, history, session, prelude_cache, current, cursor, browse_index, draft, key)
+    interactive_read_line_step(prompt, history, session, completion_cache, current, cursor, browse_index, draft, key)
 
-fn interactive_read_line(prompt: String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String))) -> Maybe String !{IO} =
+fn interactive_read_line(prompt: String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> Maybe String !{IO} =
   do
     redraw_input(prompt, "", 0)
-    interactive_read_line_loop(prompt, history, session, prelude_cache, "", 0, -1, "")
+    interactive_read_line_loop(prompt, history, session, completion_cache, "", 0, -1, "")
 
-fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String))) -> Maybe String !{IO} =
+fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> Maybe String !{IO} =
   match prompt with
-  | Just text -> interactive_read_line(text, history, session, prelude_cache)
+  | Just text -> interactive_read_line(text, history, session, completion_cache)
   | Nothing -> terminal.term_read_line_once()
 
 fn append_submission_line(acc: String, line: String) -> String =
@@ -605,18 +597,18 @@ fn block_prompt(prompt: Maybe String) -> Maybe String =
   | Just _ -> Just("block| ")
   | Nothing -> Nothing
 
-fn read_block_submission(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String)), acc: String) -> ReadResult !{IO} =
-  match read_input_line(block_prompt(prompt), history, session, prelude_cache) with
+fn read_block_submission(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String)), acc: String) -> ReadResult !{IO} =
+  match read_input_line(block_prompt(prompt), history, session, completion_cache) with
   | Just line ->
       if trim(line) == ":}" then Submission(acc)
       else if trim(line) == ":cancel" || trim(line) == ":abort" then ReadNotice("cancelled block")
-      else read_block_submission(prompt, history, session, prelude_cache, append_submission_line(acc, line))
+      else read_block_submission(prompt, history, session, completion_cache, append_submission_line(acc, line))
   | Nothing -> ReadError("unterminated `:{` block; expected `:}` before end of input")
 
-fn read_submission(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String))) -> ReadResult !{IO} =
-  match read_input_line(prompt, history, session, prelude_cache) with
+fn read_submission(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> ReadResult !{IO} =
+  match read_input_line(prompt, history, session, completion_cache) with
   | Just line ->
-      if trim(line) == ":{" then read_block_submission(prompt, history, session, prelude_cache, "")
+      if trim(line) == ":{" then read_block_submission(prompt, history, session, completion_cache, "")
       else Submission(line)
   | Nothing -> EndInput
 
@@ -746,12 +738,12 @@ fn push_history(history: Vec String, raw: String) -> Vec String =
   if trim(raw) == "" then history
   else vec_append(raw, history)
 
-fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String, prelude_cache: Ref (Maybe (Vec String))) -> Unit !{IO} =
+fn continue_loop(result: SubmissionResult, prompt: Maybe String, history: Vec String, completion_cache: Ref (Maybe (Vec String))) -> Unit !{IO} =
   match result with
   | Continue lines next_session ->
       do
         render_lines(prompt, lines)
-        repl_loop_session(prompt, history, next_session, prelude_cache)
+        repl_loop_session(prompt, history, next_session, completion_cache)
   | Exit -> finish_loop(prompt)
 
 fn run_repl(prompt: Maybe String) -> Unit !{IO} =
@@ -767,20 +759,20 @@ fn start_repl(prompt: Maybe String, banner: String) -> Unit !{IO} =
       terminal.write(banner)
       run_repl(prompt)
 
-fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, prelude_cache: Ref (Maybe (Vec String))) -> Unit !{IO} =
-  match read_submission(prompt, history, session, prelude_cache) with
+fn repl_loop_session(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> Unit !{IO} =
+  match read_submission(prompt, history, session, completion_cache) with
   | Submission line ->
       match string.find(line, "\n") with
-      | Nothing -> continue_loop(handle_submission(line, session), prompt, push_history(history, line), prelude_cache)
-      | Just _ -> continue_loop(handle_block_submission(line, session), prompt, push_history(history, line), prelude_cache)
+      | Nothing -> continue_loop(handle_submission(line, session), prompt, push_history(history, line), completion_cache)
+      | Just _ -> continue_loop(handle_block_submission(line, session), prompt, push_history(history, line), completion_cache)
   | ReadNotice message ->
       do
         render_lines(prompt, single_line(message))
-        repl_loop_session(prompt, history, session, prelude_cache)
+        repl_loop_session(prompt, history, session, completion_cache)
   | ReadError message ->
       do
         render_lines(prompt, render_error(message))
-        repl_loop_session(prompt, history, session, prelude_cache)
+        repl_loop_session(prompt, history, session, completion_cache)
   | EndInput -> finish_loop(prompt)
 
 # Each line through `step`, in order. A line `step` rejects leaves the session as it was.

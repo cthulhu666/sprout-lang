@@ -10,7 +10,7 @@ fn grow(s: String, k: Int) -> String =
   if k <= 0 then s else grow(s ++ s, k - 1)
 
 fn matches(name: String) -> Bool =
-  vec_length(filter_names_by_prefix("ab", "ab", foldable_to_vec([name]), 0, vec_empty())) == 1
+  vec_length(filter_names_by_prefix("ab", foldable_to_vec([name]))) == 1
 
 fn main() -> Unit !{IO} =
   do
