@@ -49,6 +49,11 @@ fn main() -> Unit !{IO} =
     check_eq("a combining mark does not split", text.width(a_e_acute_b()), 3),
 
     # ── truncate ────────────────────────────────────────────────────────────
+    check_eq("truncate_clusters agrees with truncate",
+             text.from_clusters(text.truncate_clusters(text.clusters(a_shi_b()), 3)),
+             text.truncate(a_shi_b(), 3)),
+    check_eq("truncate_clusters to no columns is empty",
+             text.truncate_clusters(text.clusters("ab"), 0), Nil),
     check_eq("truncate shorter than the limit is identity", text.truncate("ab", 5), "ab"),
     check_eq("truncate at the limit is identity", text.truncate("abc", 3), "abc"),
     check_eq("truncate cuts to the column count", text.truncate("abcdef", 3), "abc"),

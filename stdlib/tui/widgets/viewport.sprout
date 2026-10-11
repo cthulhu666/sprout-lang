@@ -12,7 +12,6 @@ module stdlib.tui.widgets.viewport
 # Nothing is stored: `top` and the horizontal offset are derived from the caret
 # on every frame, so neither can drift out of step with it.
 
-import stdlib.string as string
 import stdlib.tui.buffer as buffer
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
@@ -59,7 +58,8 @@ fn caret_cluster(after: List (List Int)) -> String =
 # hold the keyboard shows, since a window only follows a caret that is there.
 export fn paint_at_top(screen: scr.Screen, region: geometry.Region,
                        b: buffer.Buffer, look: style.Style) -> Unit !{IO} =
-  paint.lines(screen, region, 0, buffer.buffer_lines(b), look)
+  paint.lines(screen, region, 0,
+              buffer.buffer_window(0, geometry.region_rows(region), b), look)
 
 # The window around the caret, caret included.
 export fn paint_at_caret(screen: scr.Screen, region: geometry.Region,
@@ -69,13 +69,14 @@ export fn paint_at_caret(screen: scr.Screen, region: geometry.Region,
 
 fn framed(screen: scr.Screen, region: geometry.Region, b: buffer.Buffer,
           look: focus.FocusStyle, w: Window) -> Unit !{IO} = do
-  paint.lines(screen, region, 0, list_map(shifted(w.off, _), visible(b, region, w)),
-              look.normal)
+  paint.lines_clusters(screen, region, 0,
+                       list_map(shifted(w.off, _), visible(b, region, w)),
+                       look.normal)
   paint.at(screen, region, w.row, w.col, w.caret, look.focused)
 
 # The lines the region shows, unshifted.
 fn visible(b: buffer.Buffer, r: geometry.Region, w: Window) -> List String =
-  list_take(geometry.region_rows(r), list_drop(w.top, buffer.buffer_lines(b)))
+  buffer.buffer_window(w.top, geometry.region_rows(r), b)
 
 # Every line shifts by the SAME number of columns, or the text would jump from
 # row to row as the caret moved.
@@ -85,12 +86,16 @@ fn visible(b: buffer.Buffer, r: geometry.Region, w: Window) -> List String =
 # owed are blanked rather than dropped. Dropping them would slide the rest of
 # THAT line left of every other line, which is the alignment the shared offset
 # exists to keep.
-fn shifted(off: Int, l: String) -> String =
+fn shifted(off: Int, l: String) -> List (List Int) =
   cut_left(text.clusters(l), off)
 
-fn cut_left(cs: List (List Int), off: Int) -> String =
-  if off <= 0 then string.repeat(" ", -off) ++ text.from_clusters(cs)
+fn cut_left(cs: List (List Int), off: Int) -> List (List Int) =
+  if off <= 0 then blanks(-off, cs)
   else
     match cs with
-    | Nil -> ""
+    | Nil -> Nil
     | [c | rest] -> cut_left(rest, off - text.cluster_width(c))
+
+# `n` blank clusters in front of `cs`.
+fn blanks(n: Int, cs: List (List Int)) -> List (List Int) =
+  if n <= 0 then cs else blanks(n - 1, Cons([32], cs))

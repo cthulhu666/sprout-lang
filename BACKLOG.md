@@ -724,13 +724,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   path reached `grapheme`; before that it was 22% of a core with a source file on screen. Separating
   the two — keep the deadline, emit a tick only when asked — needs somewhere in `App` to ask.
   Design: `docs/tui-core-v0.md` §3.2.
-- [ ] `P3` **TUI `viewport` — `render` builds the whole document every frame.** `visible` calls
-  `buffer_lines`, which is `list_append(list_reverse(above), Cons(line, below))`, then throws all
-  but `region_rows` of it away; the unfocused branch does the same. `above`/`below` are already
-  the two halves the window needs, so O(region rows) is reachable. The accessor's shape was open
-  pending the IDE pane; it now wants a window AND a line count, for a gutter as wide as its
-  largest number (`ide/editor.sprout`), so both `text_area` and the pane pay it twice per frame.
-  Harmless for a commit composer, not for a source file. Design: `docs/tui-text-area-v0.md` §4.6.
 - [ ] `P2` **TUI `text_area` — an application can send a caret in but never read one out.**
   `on_content` takes a `Maybe buffer.Caret`, and the only outbound is `on_change: String -> m`
   (`text_area.sprout:231`), so nothing hands a `Caret` back. `docs/tui-content-update-v0.md` §9.3

@@ -107,6 +107,86 @@ fn motion_cases(state: TestState) -> Unit !{IO} = do
 
 # ── the goal column (§4.7) ──────────────────────────────────────────────────
 
+# ── the cached row and line counts ──────────────────────────────────────────
+
+# `row/lines` as the O(1) counters report them, and whether they agree with the
+# document walked the slow way.
+fn counts(b: buf.Buffer) -> String =
+  let lines = buf.buffer_lines(b)
+      ok = buf.buffer_line_count(b) == list_length(lines)
+           && buf.buffer_row(b) == list_length(list_take(buf.buffer_row(b), lines))
+  in `${int_to_string(buf.buffer_row(b))}/${int_to_string(buf.buffer_line_count(b))}${if ok then "" else "!"}`
+
+fn downs(b: buf.Buffer, n: Int) -> buf.Buffer =
+  if n <= 0 then b else downs(buf.buffer_down(b), n - 1)
+
+fn count_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "an empty file is one line", counts(opened("")), "0/1")
+  assert_eq(state, "a trailing newline opens an empty last line", counts(opened("a\n")), "1/2")
+  assert_eq(state, "CRLF counts one break per pair", counts(opened("a\r\nb\r\nc")), "2/3")
+  assert_eq(state, "and a lone CR counts one", counts(opened("a\rb")), "1/2")
+  let three = opened("a\nb\nc")
+  assert_eq(state, "a typed newline adds a line and moves the caret down",
+            counts(typed(buf.buffer_home(three), "\n")), "3/4")
+  assert_eq(state, "a paste of several lines adds them all",
+            counts(typed(ups(three, 2), "x\ny\nz")), "2/5")
+  assert_eq(state, "backspace at a line start joins two lines",
+            counts(back(buf.buffer_home(three))), "1/2")
+  assert_eq(state, "backspace at the first line start changes nothing",
+            counts(back(buf.buffer_home(ups(three, 2)))), "0/3")
+  assert_eq(state, "delete at a line end pulls the next line up",
+            counts(del(ups(three, 1))), "1/2")
+  assert_eq(state, "delete at the document's end changes nothing",
+            counts(del(three)), "2/3")
+  assert_eq(state, "up and down move the row, not the total",
+            counts(buf.buffer_down(ups(three, 2))), "1/3")
+  assert_eq(state, "up at the top edge stays", counts(ups(three, 5)), "0/3")
+  assert_eq(state, "down at the bottom edge stays", counts(downs(three, 5)), "2/3")
+  assert_eq(state, "left at a line start wraps up a row",
+            counts(buf.buffer_left(buf.buffer_home(three))), "1/3")
+  assert_eq(state, "right at a line end wraps down a row",
+            counts(buf.buffer_right(ups(three, 2) |> buf.buffer_end)), "1/3")
+  assert_eq(state, "goto sets both counts", counts(buf.buffer_goto(buf.Caret(row = 1, col = 0), three)), "1/3")
+  assert_eq(state, "and clamps past the end",
+            counts(buf.buffer_goto(buf.Caret(row = 9, col = 0), three)), "2/3")
+  let edited = typed(three, "\n")
+  assert_eq(state, "undo restores the counts",
+            counts(maybe_with_default(edited, buf.buffer_undo(edited))), "2/3")
+
+# `buffer_window` against slicing the whole document.
+fn window_matches(b: buf.Buffer, top: Int, rows: Int) -> Bool =
+  buf.buffer_window(top, rows, b)
+    == list_take(rows, list_drop(imath_max0(top), buf.buffer_lines(b)))
+
+fn imath_max0(n: Int) -> Int = if n < 0 then 0 else n
+
+fn window_cases(state: TestState) -> Unit !{IO} = do
+  let doc = opened("a\nb\nc\nd\ne\nf")
+  let mid = ups(doc, 3)
+  assert_eq(state, "a window above the caret", window_matches(mid, 0, 2), true)
+  assert_eq(state, "a window across the caret", window_matches(mid, 1, 4), true)
+  assert_eq(state, "a window below the caret", window_matches(mid, 4, 2), true)
+  assert_eq(state, "a window past the end is short", window_matches(mid, 4, 9), true)
+  assert_eq(state, "a window starting past the end is empty", window_matches(mid, 9, 3), true)
+  assert_eq(state, "no rows is empty", window_matches(mid, 2, 0), true)
+  assert_eq(state, "the whole document", window_matches(doc, 0, 6), true)
+  assert_eq(state, "a window on the caret's last line", window_matches(doc, 5, 1), true)
+  assert_eq(state, "a negative top reads from the start", window_matches(mid, -2, 3), true)
+  assert_eq(state, "an empty document has its one line", window_matches(opened(""), 0, 5), true)
+
+# The goal is the caret's DISPLAY column, so wide clusters before it count two
+# and a combining mark counts none.
+fn goal_width_cases(state: TestState) -> Unit !{IO} = do
+  let wide = lefts(opened("abcdef\n" ++ cjk() ++ cjk() ++ "x"), 1)
+  assert_eq(state, "wide clusters before the caret count two columns each",
+            at(ups(wide, 1)), "0:4")
+  assert_eq(state, "and the goal carries back down onto the wide line",
+            at(buf.buffer_down(ups(wide, 1))), "1:2")
+  let marks = opened("abcdef\n" ++ e_acute() ++ e_acute() ++ e_acute())
+  assert_eq(state, "combining marks add no columns", at(ups(marks, 1)), "0:3")
+  assert_eq(state, "a caret at the line start has goal column zero",
+            at(ups(buf.buffer_home(opened("abcdef\nxyz")), 1)), "0:0")
+
 fn goal_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "the caret clamps while passing a short line",
             at(ups(opened("abcdef\nxy\nabcdef"), 1)), "1:2")
@@ -354,6 +434,9 @@ fn main() -> Unit !{IO} = do
   split_join_cases(state)
   motion_cases(state)
   goal_cases(state)
+  count_cases(state)
+  window_cases(state)
+  goal_width_cases(state)
   paste_cases(state)
   cluster_cases(state)
   nochange_cases(state)

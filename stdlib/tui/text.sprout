@@ -82,8 +82,11 @@ export fn widest(ls: List String) -> Int =
 # not a character, and a terminal asked to draw one would desynchronise the
 # column arithmetic for the rest of the line.
 export fn truncate(text: String, cols: Int) -> String =
-  if cols <= 0 then ""
-  else from_clusters(take_cols(clusters(text), cols, Nil))
+  from_clusters(truncate_clusters(clusters(text), cols))
+
+# `truncate` for a caller that already holds clusters.
+export fn truncate_clusters(cs: List (List Int), cols: Int) -> List (List Int) =
+  if cols <= 0 then Nil else take_cols(cs, cols, Nil)
 
 fn take_cols(cs: List (List Int), left: Int,
              acc: List (List Int)) -> List (List Int) =

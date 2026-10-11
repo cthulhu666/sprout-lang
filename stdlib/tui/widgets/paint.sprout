@@ -19,15 +19,23 @@ import stdlib.tui.text as text
 # row past the region's height paints nothing rather than painting below it.
 export fn line(screen: scr.Screen, region: geometry.Region, row: Int,
                content: String, style: sty.Style) -> Unit !{IO} =
+  line_clusters(screen, region, row, text.clusters(content), style)
+
+# `line` for a caller that already holds the clusters: the line is split once,
+# by whoever made them, and never rebuilt into a String.
+export fn line_clusters(screen: scr.Screen, region: geometry.Region, row: Int,
+                        content: List (List Int),
+                        style: sty.Style) -> Unit !{IO} =
   if row < 0 || row >= geometry.region_rows(region) then ()
   else write_clipped(screen, region, row, content, style)
 
 fn write_clipped(screen: scr.Screen, region: geometry.Region, row: Int,
-                 content: String, style: sty.Style) -> Unit !{IO} = do
-  end <- scr.screen_write(screen, geometry.region_col(region),
-                          geometry.region_row(region) + row,
-                          text.truncate(content, geometry.region_cols(region)),
-                          style)
+                 content: List (List Int), style: sty.Style) -> Unit !{IO} = do
+  end <- scr.screen_write_clusters(screen, geometry.region_col(region),
+                                   geometry.region_row(region) + row,
+                                   text.truncate_clusters(
+                                     content, geometry.region_cols(region)),
+                                   style)
   ()
 
 # The same, starting `col` columns in from the region's left edge. A widget
@@ -35,8 +43,13 @@ fn write_clipped(screen: scr.Screen, region: geometry.Region, row: Int,
 # at an offset without inventing the clipping again.
 export fn at(screen: scr.Screen, region: geometry.Region, row: Int, col: Int,
              content: String, style: sty.Style) -> Unit !{IO} =
+  at_clusters(screen, region, row, col, text.clusters(content), style)
+
+export fn at_clusters(screen: scr.Screen, region: geometry.Region, row: Int,
+                      col: Int, content: List (List Int),
+                      style: sty.Style) -> Unit !{IO} =
   if col < 0 || col >= geometry.region_cols(region) then ()
-  else line(screen, indented(region, col), row, content, style)
+  else line_clusters(screen, indented(region, col), row, content, style)
 
 fn indented(r: geometry.Region, col: Int) -> geometry.Region =
   geometry.Region(geometry.region_col(r) + col, geometry.region_row(r),
@@ -49,9 +62,22 @@ export fn lines(screen: scr.Screen, region: geometry.Region, from_row: Int,
   | Nil -> ()
   | [l | rest] ->
       if from_row >= geometry.region_rows(region) then ()
+      else do
+        line(screen, region, from_row, l, style)
+        lines(screen, region, from_row + 1, rest, style)
+
+# `lines` for lines already split into clusters.
+export fn lines_clusters(screen: scr.Screen, region: geometry.Region,
+                         from_row: Int, content: List (List (List Int)),
+                         style: sty.Style) -> Unit !{IO} =
+  match content with
+  | Nil -> ()
+  | [l | rest] ->
+      if from_row >= geometry.region_rows(region) then ()
       else lines_step(screen, region, from_row, l, rest, style)
 
-fn lines_step(screen: scr.Screen, region: geometry.Region, row: Int, l: String,
-              rest: List String, style: sty.Style) -> Unit !{IO} = do
-  line(screen, region, row, l, style)
-  lines(screen, region, row + 1, rest, style)
+fn lines_step(screen: scr.Screen, region: geometry.Region, row: Int,
+              l: List (List Int), rest: List (List (List Int)),
+              style: sty.Style) -> Unit !{IO} = do
+  line_clusters(screen, region, row, l, style)
+  lines_clusters(screen, region, row + 1, rest, style)

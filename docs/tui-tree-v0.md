@@ -120,7 +120,9 @@ silently collapse a tree the user spent ten keystrokes opening.
 
 Open paths are a `Dict Bool` keyed by the joined path, not a `List (List
 String)`: flattening asks "is this open?" once per visited node, and linear
-membership would make a repaint O(visible × open).
+membership would make a repaint O(visible × open). `render` and `measure` flatten
+once per call and share the rows; `flat_one` asks once per node and hands the
+answer to `mark_of`.
 
 ### 4.4 Expanding is a conversation, not a call
 

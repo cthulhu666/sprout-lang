@@ -154,7 +154,7 @@ This is not tidiness. `cluster_width` reports 1 for U+000A, `screen` stores it
 as an ordinary cell, and `diff_to_ansi` emits cell text in runs with no
 per-cell cursor move — so a pasted newline is written to the terminal verbatim,
 the real cursor drops a row, every later cell of that run lands on the wrong
-one, and `commit_rows` then marks them clean, so nothing repaints the damage.
+one, and the front buffer then takes them as drawn, so nothing repaints the damage.
 
 Replaced rather than dropped, as bubbles' `textinput` does
 (`runeutil.NewSanitizer(ReplaceTabs(" "), ReplaceNewlines(" "))`): losing the

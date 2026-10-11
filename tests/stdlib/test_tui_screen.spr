@@ -34,6 +34,8 @@ fn main() -> Unit !{IO} = do
   wide_cases(state)
   diff_cases(state)
   clip_cases(state)
+  frame_cases(state)
+  clear_clip_cases(state)
   summary(state)
 
 fn narrow_cases(state: TestState) -> Unit !{IO} = do
@@ -247,3 +249,77 @@ fn clip_cases(state: TestState) -> Unit !{IO} = do
                      \ (u) -> scr.screen_clear(s4, sty.with_bold(plain(), true)))
   survivor <- scr.text_at(s4, 0, 1)
   assert_eq(state, "a clear inside a clip leaves the cells outside it", survivor, "k")
+
+# A frame is judged against the one before it, so what the first leaves behind
+# decides what the second sends.
+fn frame_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(6, 2))
+  w(s, 0, 0, "abc", plain())
+  w(s, 0, 1, "xyz", plain())
+  first <- scr.diff_to_ansi(s)
+  assert_true(state, "the first frame sends everything written", string.length(first) > 0)
+
+  # One cell of an otherwise written screen: only it is sent.
+  w(s, 1, 0, "Q", plain())
+  one <- scr.diff_to_ansi(s)
+  assert_eq(state, "a second frame sends only the cell that changed", one,
+            cup(1, 2) ++ reset() ++ "Q" ++ reset())
+
+  # Putting the old value back is a change from the frame before, not a no-op.
+  w(s, 1, 0, "b", plain())
+  undone <- scr.diff_to_ansi(s)
+  assert_eq(state, "restoring a cell is sent", undone, cup(1, 2) ++ reset() ++ "b" ++ reset())
+
+  w(s, 0, 0, "abc", plain())
+  same <- scr.diff_to_ansi(s)
+  assert_eq(state, "rewriting identical content sends nothing", same, "")
+
+  # A wide pair overwritten by narrow cells: the continuation was part of the
+  # last frame, so both columns must be sent.
+  w(s, 3, 0, "日", plain())
+  pair <- scr.diff_to_ansi(s)
+  assert_eq(state, "a wide cell is sent once", pair, cup(1, 4) ++ reset() ++ "日" ++ reset())
+  w(s, 3, 0, "pq", plain())
+  narrowed <- scr.diff_to_ansi(s)
+  assert_eq(state, "narrow cells over a wide pair are both sent", narrowed,
+            cup(1, 4) ++ reset() ++ "pq" ++ reset())
+  w(s, 3, 0, "日", plain())
+  back <- scr.diff_to_ansi(s)
+  assert_eq(state, "and the pair can return", back, cup(1, 4) ++ reset() ++ "日" ++ reset())
+  w(s, 3, 0, "日", plain())
+  steady <- scr.diff_to_ansi(s)
+  assert_eq(state, "a wide pair left alone is not resent", steady, "")
+
+# `screen_clear` under a clip narrower than the screen on both axes.
+fn clear_clip_cases(state: TestState) -> Unit !{IO} = do
+  s <- scr.screen_new(g.Size(5, 4))
+  w(s, 0, 0, "aaaaa", plain())
+  w(s, 0, 1, "bbbbb", plain())
+  w(s, 0, 2, "ccccc", plain())
+  w(s, 0, 3, "ddddd", plain())
+  let bold = sty.with_bold(plain(), true)
+  scr.screen_clipped(s, g.Region(1, 1, 3, 2), \ (u) -> scr.screen_clear(s, bold))
+  inside <- scr.text_at(s, 2, 2)
+  inside_cell <- scr.cell_at(s, 1, 1)
+  corner <- scr.cell_at(s, 3, 2)
+  left <- scr.text_at(s, 0, 1)
+  right <- scr.text_at(s, 4, 2)
+  above <- scr.text_at(s, 2, 0)
+  below <- scr.text_at(s, 2, 3)
+  assert_eq(state, "a clear blanks the cells inside the clip", inside, " ")
+  assert_eq(state, "with the style it was given", scr.cell_style(inside_cell), bold)
+  assert_eq(state, "up to the clip's last column and row", scr.cell_style(corner), bold)
+  assert_eq(state, "leaves the column left of the clip", left, "b")
+  assert_eq(state, "and the column right of it", right, "c")
+  assert_eq(state, "and the row above it", above, "a")
+  assert_eq(state, "and the row below it", below, "d")
+
+  # An empty clip clears nothing; an unclipped clear reaches every cell.
+  scr.screen_clipped(s, g.Region(0, 0, 0, 4), \ (u) -> scr.screen_clear(s, plain()))
+  kept <- scr.text_at(s, 0, 0)
+  assert_eq(state, "a clear under an empty clip changes nothing", kept, "a")
+  scr.screen_clear(s, plain())
+  first <- scr.text_at(s, 0, 0)
+  last <- scr.text_at(s, 4, 3)
+  assert_eq(state, "an unclipped clear reaches the first cell", first, " ")
+  assert_eq(state, "and the last", last, " ")

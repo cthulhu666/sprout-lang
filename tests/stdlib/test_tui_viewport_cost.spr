@@ -1,0 +1,97 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.terminal as terminal
+import stdlib.time as time
+import stdlib.tui.buffer as buffer
+import stdlib.tui.geometry as g
+import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
+import stdlib.tui.widgets.focus as focus
+import stdlib.tui.widgets.viewport as viewport
+
+# A frame paints `region_rows` lines, so what it costs must not grow with the
+# document. `buffer_lines` rebuilt the whole document -- reverse `above`, append
+# the rest -- and the window then threw almost all of it away.
+#
+# The region and the repeat count are fixed; only the number of lines varies, and
+# each arm takes the minimum of several rounds. The measured microseconds are
+# printed whether or not the check passes.
+
+let rounds = 3
+let frames = 40
+let baseline_floor_us = 200
+let allowed_ratio = 40
+# A caret far below the top leaves a walk of `above`: no allocation, but still linear.
+let walk_ratio = 100
+
+# 2^k copies of `s`, by doubling: O(total).
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+# 2^k lines. `buffer_open` leaves the caret on the last one, so the document grows
+# ABOVE the window.
+fn document(k: Int) -> buffer.Buffer = buffer.buffer_open(grow("ab\n", k) ++ "ab")
+
+# The caret on the first line, so the document grows BELOW the window. With the caret
+# far below the top, reaching the top lines costs a non-allocating walk of `above`;
+# this arm pins the allocation, which is what a frame paying for the document meant.
+fn document_below(k: Int) -> buffer.Buffer =
+  buffer.buffer_goto(buffer.Caret(row = 0, col = 0), document(k))
+
+let region: g.Region = g.Region(0, 0, 8, 6)
+
+# The first and the last row both hold text, whichever end of the document the
+# window is on.
+fn painted_ok(s: scr.Screen) -> Bool !{IO} = do
+  top <- scr.text_at(s, 0, 0)
+  bottom <- scr.text_at(s, 0, 5)
+  top == "a" && bottom == "a"
+
+fn at_caret(b: buffer.Buffer, n: Int) -> Bool !{IO} =
+  if n <= 0 then true
+  else do
+    s <- scr.screen_new(g.Size(8, 6))
+    viewport.paint_at_caret(s, region, b, focus.focus_style_default())
+    ok <- painted_ok(s)
+    if ok then at_caret(b, n - 1) else false
+
+fn at_top(b: buffer.Buffer, n: Int) -> Bool !{IO} =
+  if n <= 0 then true
+  else do
+    s <- scr.screen_new(g.Size(8, 6))
+    viewport.paint_at_top(s, region, b, sty.style_default)
+    ok <- painted_ok(s)
+    if ok then at_top(b, n - 1) else false
+
+# -1 when a frame paints the wrong thing, so a probe that stopped working fails
+# rather than timing fast.
+fn min_us(paint: buffer.Buffer -> Int -> Bool !{IO}, b: buffer.Buffer, remaining: Int,
+          best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else do
+    t0 <- time.now_micros()
+    ok <- paint(b, frames)
+    t1 <- time.now_micros()
+    if ok then min_us(paint, b, remaining - 1, if t1 - t0 < best then t1 - t0 else best)
+    else -1
+
+fn budget_us(short_us: Int, ratio: Int) -> Int =
+  (if short_us < baseline_floor_us then baseline_floor_us else short_us) * ratio
+
+fn check(state: TestState, label: String, ratio: Int, build: Int -> buffer.Buffer,
+         paint: buffer.Buffer -> Int -> Bool !{IO}) -> Unit !{IO} = do
+  short_us <- min_us(paint, build(6), rounds, 1000000000)
+  long_us <- min_us(paint, build(16), rounds, 1000000000)
+  terminal.write("  [cost] " ++ label ++ ": 64 lines=" ++ int_to_string(short_us)
+                 ++ "us 65536 lines=" ++ int_to_string(long_us) ++ "us budget="
+                 ++ int_to_string(budget_us(short_us, ratio)) ++ "us\n")
+  assert_true(state, label ++ ": paints the window on both documents",
+              short_us >= 0 && long_us >= 0)
+  assert_true(state, label ++ ": 1024x the lines costs under " ++ int_to_string(ratio)
+              ++ "x", long_us <= budget_us(short_us, ratio))
+
+fn main() -> Unit !{IO} = do
+  state <- new_state()
+  check(state, "paint_at_caret", allowed_ratio, document, at_caret)
+  check(state, "paint_at_top", allowed_ratio, document_below, at_top)
+  check(state, "paint_at_top, caret far below", walk_ratio, document, at_top)
+  summary(state)

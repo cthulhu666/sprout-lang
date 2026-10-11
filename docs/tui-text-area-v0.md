@@ -293,10 +293,16 @@ both axes, over `line_zipper.zipper_at` for the column.
 `zipper_to_display_col` beside it is the same walk in cells, which is what a
 goal column needs and what a restored caret must not use. `buffer_line` keeps
 the caret query off the document walk — it reads the current line directly
-rather than indexing
-`buffer_lines`. `render` still calls `buffer_lines`, so it is O(document) per
-frame where O(region rows) is reachable; filed in `BACKLOG.md` §4 rather than
-guessed at, since the shape depends on what the IDE pane needs.
+rather than indexing `buffer_lines`.
+
+A frame does not walk the document either. `Fields` carries `n_above` and
+`n_below`, the lengths of `above` and `below`, kept by every construction site,
+so `buffer_row` and `buffer_line_count` are O(1) (the IDE gutter sizes itself
+from the count). `buffer_window(top, rows)` allocates only the lines it
+returns: the part of `above` before the window is skipped, not rebuilt.
+With the caret far below the top, `paint_at_top` still walks `above` to reach
+the first lines — a pointer walk with no allocation, since `above` is
+nearest-first.
 `line_zipper.sprout` exports `Zipper` and the single-line operations `input`
 needs.
 

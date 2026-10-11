@@ -118,19 +118,17 @@ fn rest_of(cs: List (List Int)) -> List (List Int) =
 # The caret sits ON the cluster after it, or on a blank cell at the end of the
 # line. Painted, because `app.run` hides the terminal's own cursor for the
 # session (docs/tui-focus-v0.md §9).
-fn caret_cluster(z: lz.Zipper) -> String =
+fn caret_cluster(z: lz.Zipper) -> List Int =
   match z.after with
-  | Nil -> " "
-  | [c | _] -> text.from_clusters([c])
-
-fn past_caret(z: lz.Zipper) -> String =
-  text.from_clusters(rest_of(z.after))
+  | Nil -> [32]
+  | [c | _] -> c
 
 # An unfocused field has no caret to keep in view, so it shows the start of
 # its value — the window only follows a caret that is there.
 fn field_render(f: Field m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   if f.has_focus then window_render(f, r, shown_before(f, r), s)
-  else paint.line(s, r, 0, lz.zipper_text(f.line), f.opts.look.normal)
+  else paint.line_clusters(s, r, 0, list_append(list_reverse(f.line.before), f.line.after),
+                           f.opts.look.normal)
 
 # The window is a function of the caret, so there is no scroll position to
 # drift out of step with it: keep the longest run of clusters before the caret
@@ -142,23 +140,26 @@ fn field_render(f: Field m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
 fn shown_before(f: Field m, r: geometry.Region) -> List (List Int) =
   text.truncate_left(budget, list_reverse(f.line.before))
 where
-  budget = geometry.region_cols(r) - text.width(caret_cluster(f.line))
+  budget = geometry.region_cols(r) - text.cluster_width(caret_cluster(f.line))
 
 # The caret is one cell painted in the focused style, between the two halves
 # of the line; `paint.at` clips each part at the region's edge.
 fn window_render(f: Field m, r: geometry.Region, pre: List (List Int),
                  s: scr.Screen) -> Unit !{IO} = do
-  paint.at(s, r, 0, 0, text.from_clusters(pre), f.opts.look.normal)
-  paint.at(s, r, 0, text.clusters_width(pre), caret_cluster(f.line),
-           f.opts.look.focused)
-  paint.at(s, r, 0, text.clusters_width(pre) + text.width(caret_cluster(f.line)),
-           past_caret(f.line), f.opts.look.normal)
+  paint.at_clusters(s, r, 0, 0, pre, f.opts.look.normal)
+  paint.at_clusters(s, r, 0, pre_cols, [caret], f.opts.look.focused)
+  paint.at_clusters(s, r, 0, pre_cols + text.cluster_width(caret),
+                    rest_of(f.line.after), f.opts.look.normal)
+where
+  pre_cols = text.clusters_width(pre)
+  caret = caret_cluster(f.line)
 
 # One row, and as wide as it is given: a field beside a label must not have to
 # be told a width, and a value longer than its region scrolls rather than
 # demanding more. The natural width includes the caret's own column.
 fn field_measure(f: Field m, avail: geometry.Size) -> widget.Measured =
-  widget.Measured(size = geometry.Size(text.width(lz.zipper_text(f.line)) + 1, 1),
+  widget.Measured(size = geometry.Size(text.clusters_width(f.line.before)
+                                         + text.clusters_width(f.line.after) + 1, 1),
                   cols = widget.Greedy, rows = widget.Fixed)
 
 fn field_widget(f: Field m) -> widget.Widget m =

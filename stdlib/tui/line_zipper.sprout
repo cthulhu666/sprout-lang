@@ -136,8 +136,7 @@ export fn zipper_after_text(z: Zipper) -> String = text.from_clusters(z.after)
 
 # The caret's DISPLAY column — what a goal column remembers (§4.7), and what
 # differs from `zipper_col` wherever a cluster is two cells wide.
-export fn zipper_display_col(z: Zipper) -> Int =
-  text.clusters_width(list_reverse(z.before))
+export fn zipper_display_col(z: Zipper) -> Int = text.clusters_width(z.before)
 
 # The cluster boundary at or before `cols` display columns. Landing before it
 # rather than after is what keeps a goal column from stepping into the middle

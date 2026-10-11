@@ -98,7 +98,7 @@ fn tr_plain(t: Tr m, k: event.Key) -> Reply m =
   | event.KPageDown -> moved_by(t, t.opts.page)
   | event.KPageUp -> moved_by(t, 0 - t.opts.page)
   | event.KHome -> moved_to(t, 0)
-  | event.KEnd -> moved_to(t, list_length(rows_of(t)) - 1)
+  | event.KEnd -> moved_to_end(t)
   | event.KRight -> went_right(t)
   | event.KLeft -> went_left(t)
   | event.KEnter -> chosen(t)
@@ -128,9 +128,10 @@ fn flat_nodes(t: Tr m, ns: List Node, here: List String, depth: Int,
 fn flat_one(t: Tr m, n: Node, here: List String, depth: Int,
             acc: List Row) -> List Row =
   let path = here ++ [n.label]
+      open = is_open(t, path)
       row = Row(path = path, label = n.label, depth = depth,
-                mark = mark_of(t, n, path))
-  in if is_open(t, path) then
+                mark = mark_of(n, open))
+  in if open then
        flat_kids(t, n.children, path, depth + 1, Cons(row, acc))
      else Cons(row, acc)
 
@@ -142,10 +143,10 @@ fn flat_kids(t: Tr m, c: Children, path: List String, depth: Int,
   | Loaded ns -> flat_nodes(t, ns, path, depth, acc)
   | _ -> acc
 
-fn mark_of(t: Tr m, n: Node, path: List String) -> Mark =
+fn mark_of(n: Node, open: Bool) -> Mark =
   match n.children with
   | NoChildren -> MLeaf
-  | _ -> if is_open(t, path) then MOpen else MClosed
+  | _ -> if open then MOpen else MClosed
 
 fn index_of(rows: List Row, path: List String, i: Int) -> Int =
   match rows with
@@ -196,6 +197,9 @@ fn without_last(xs: List a) -> List a =
 # ── where the selection goes ────────────────────────────────────────────────
 
 fn moved_to(t: Tr m, i: Int) -> Reply m = settled(t, rows_of(t), i)
+
+fn moved_to_end(t: Tr m) -> Reply m =
+  let rows = rows_of(t) in settled(t, rows, list_length(rows) - 1)
 
 fn moved_by(t: Tr m, d: Int) -> Reply m =
   landed(t, rows_of(t), d)
@@ -330,8 +334,9 @@ fn line_of(row: Row) -> String =
 # The window is a function of the selection, so there is no scroll position to
 # drift out of step with it (`list_view` §4.4).
 fn tr_render(t: Tr m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
-  drawn(t, r, s, rows_of(t), 0,
-        viewport.first_row(index_of(rows_of(t), t.sel, 0), geometry.region_rows(r)))
+  let rows = rows_of(t) in
+  drawn(t, r, s, rows, 0,
+        viewport.first_row(index_of(rows, t.sel, 0), geometry.region_rows(r)))
 
 fn drawn(t: Tr m, r: geometry.Region, s: scr.Screen, rows: List Row, i: Int,
          start: Int) -> Unit !{IO} =
@@ -355,8 +360,9 @@ fn style_at(t: Tr m, row: Row) -> style.Style =
 # Fills what it is given on both axes: a tree scrolls rather than demanding the
 # height its node count would ask for.
 fn tr_measure(t: Tr m, avail: geometry.Size) -> widget.Measured =
-  widget.greedy_size(geometry.Size(text.widest(list_map(line_of, rows_of(t))),
-                                   list_length(rows_of(t))))
+  let rows = rows_of(t) in
+  widget.greedy_size(geometry.Size(text.widest(list_map(line_of, rows)),
+                                   list_length(rows)))
 
 fn tr_widget(t: Tr m) -> widget.Widget m =
   # Everything a tree reacts to arrives addressed, so the broadcast is idle.
