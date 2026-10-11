@@ -1,0 +1,17 @@
+module main
+
+# A `once local` parameter handed to a `local` slot that is not `once`: the callee
+# there may run it twice, so a caller of `fwd` is licensed to move a linear value
+# into a closure that runs twice.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_twice(work: local Unit -> Int) -> Int = work(()) + work(())
+
+fn fwd(w: once local Unit -> Int) -> Int = run_twice(w)
+
+fn mover(f: File) -> Int = fwd(\_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(mover(File(1))))

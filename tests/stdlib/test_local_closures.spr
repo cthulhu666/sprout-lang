@@ -77,6 +77,17 @@ instance Runner Int
 
 fn probe_method(c: borrowing File) -> Int = run_it(100, \_ -> peek(c))
 
+# --- 8. forwarding to a slot that promises more ------------------------------
+# A `local` parameter may go to a `once local` slot (the slot promises more than the
+# parameter needs), and a `once local` one to another `once local` slot.
+fn forward_to_once_local(w: local Unit -> Int) -> Int = run_once_local(w)
+
+fn probe_to_once_local(c: borrowing File) -> Int = forward_to_once_local(\_ -> peek(c))
+
+fn forward_once_local(w: once local Unit -> Int) -> Int = run_once_local(w)
+
+fn move_forwarded(f: File) -> Int = forward_once_local(\_ -> release(f))
+
 fn main() -> Unit !{IO} =
   run_suite("local_closures", [
     check_eq("borrowed parameter lent to a local closure", on_file(1, probe), 7),
@@ -86,5 +97,7 @@ fn main() -> Unit !{IO} =
     check_eq("local parameter forwarded to a local slot", on_file(1, probe_forwarded), 7),
     check_eq("local parameter captured by a local lambda", on_file(1, probe_relayed), 8),
     check_eq("local slot after a leading argument", on_file(1, probe_second), 7),
-    check_eq("local parameter on a class method", on_file(1, probe_method), 107)
+    check_eq("local parameter on a class method", on_file(1, probe_method), 107),
+    check_eq("local parameter forwarded to a once local slot", on_file(1, probe_to_once_local), 7),
+    check_eq("once local parameter forwarded to a once local slot", move_forwarded(File(6)), 6)
   ])

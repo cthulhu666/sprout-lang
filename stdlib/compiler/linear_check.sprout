@@ -1875,10 +1875,10 @@ fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List 
   match lin_consumed(body, LinScope(binder_names(owned), borrowed, Nil), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk consumed _ ->
-      local_honesty_after(
+      escape_honesty_after(
         once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
                            once_names, body, env),
-        local_names, body)
+        local_names, once_names, body)
 
 # CALLEE-SIDE HONESTY (post-review). `once` is a promise the callee makes, and the
 # caller's whole licence to move a linear value into the closure rests on it — so
@@ -1915,30 +1915,40 @@ fn once_honesty(names: List String, body: typed_ast.TypedExpr,
       | LinErr p _ -> LinFail(p, once_reuse_msg(n))
       | LinOk _ _ -> once_honesty(rest, body, env)
 
-# CALLEE-SIDE ESCAPE CHECK (docs/local-closures-v0.md §6.3). A `local` parameter
-# is the callee's promise not to keep the closure, and a caller lends borrowed
-# values to it on that strength. Not lin_consumed: that records `p(x)`, `return p`
-# and `Cons(p, ..)` as the same use, and this check must tell them apart.
-#
-# `p` may be CALLED, passed at another `local` slot, or free inside a literal
-# lambda at such a slot (walked by these same rules, so a bare `p` as its result
-# is still an escape). Any other occurrence is an escape. Aliasing is not tracked:
-# `let q = p` is itself an escape. A binder named `p` stops the tracking.
-fn local_honesty_after(prior: LinCheck, local_names: List String,
-                       body: typed_ast.TypedExpr) -> LinCheck =
+# CALLEE-SIDE ESCAPE CHECK (docs/local-closures-v0.md §6.3). `p` may be CALLED,
+# passed at a slot making at least its promise (`local` for `local`, `once` for
+# `once`), or free in a literal lambda at such a slot, walked by the same rules.
+# Anything else, `let q = p` included, hands it to code that may keep it or run
+# it again; once_honesty's count cannot see that. `once local` is walked for both.
+fn escape_honesty_after(prior: LinCheck, local_names: List String, once_names: List String,
+                        body: typed_ast.TypedExpr) -> LinCheck =
   match prior with
   | LinFail p m -> LinFail(p, m)
-  | LinPass -> local_honesty(local_names, body)
+  | LinPass ->
+      match escape_honesty(EscLocal, local_names, body) with
+      | LinFail p m -> LinFail(p, m)
+      | LinPass -> escape_honesty(EscOnce, once_names, body)
 
-fn local_honesty(names: List String, body: typed_ast.TypedExpr) -> LinCheck =
+fn escape_honesty(k: EscKind, names: List String, body: typed_ast.TypedExpr) -> LinCheck =
   match names with
   | Nil -> LinPass
-  | Cons n rest -> esc_then(esc_value(n, body, InCall), rest, body)
+  | Cons n rest -> esc_then(k, esc_value(n, k, body, InCall), rest, body)
 
-fn esc_then(r: LinCheck, rest: List String, body: typed_ast.TypedExpr) -> LinCheck =
+fn esc_then(k: EscKind, r: LinCheck, rest: List String, body: typed_ast.TypedExpr) -> LinCheck =
   match r with
   | LinFail q m -> LinFail(q, m)
-  | LinPass -> local_honesty(rest, body)
+  | LinPass -> escape_honesty(k, rest, body)
+
+# Which promise the walk holds the parameter to.
+type EscKind (..) =
+  | EscLocal
+  | EscOnce
+
+# Whether a callee slot makes at least the promise the parameter made.
+fn esc_slot_ok(k: EscKind, own: types.Ownership) -> Bool =
+  match k with
+  | EscLocal -> types.own_is_local(own)
+  | EscOnce -> types.own_is_once(own)
 
 # Where an expression sits relative to the call: inside it (the closure is still
 # in the callee's hands), or inside a closure that could run after it returns.
@@ -1946,20 +1956,33 @@ type EscScope (..) =
   | InCall
   | InKeptClosure
 
-fn esc_reason(sc: EscScope) -> String =
+fn esc_reason(k: EscKind, sc: EscScope) -> String =
   match sc with
   | InCall -> "returned or stored"
-  | InKeptClosure -> "captured by a closure that may outlive the call"
+  | InKeptClosure ->
+      match k with
+      | EscLocal -> "captured by a closure that may outlive the call"
+      | EscOnce -> "captured by a closure that may run more than once"
 
-fn esc_fail(p: String, reason: String, at: source.SourcePos) -> LinCheck =
-  LinFail(at, "`local` parameter '" ++ p ++ "' may outlive the call: " ++ reason
-             ++ ". Declaring it `local` promises callers it does not, and that promise is what lets them lend it borrowed values")
+fn esc_passed_reason(k: EscKind) -> String =
+  match k with
+  | EscLocal -> "passed to a non-local parameter"
+  | EscOnce -> "passed to a parameter that does not promise `once`"
+
+fn esc_fail(p: String, k: EscKind, reason: String, at: source.SourcePos) -> LinCheck =
+  match k with
+  | EscLocal ->
+      LinFail(at, "`local` parameter '" ++ p ++ "' may outlive the call: " ++ reason
+                 ++ ". Declaring it `local` promises callers it does not, and that promise is what lets them lend it borrowed values")
+  | EscOnce ->
+      LinFail(at, "`once` parameter '" ++ p ++ "' may run more than once: " ++ reason
+                 ++ ". Declaring it `once` promises callers it runs at most once, and that promise is what lets them move linear values into it")
 
 # `e` sits in a VALUE position, where a bare `p` is kept. Every constructor is
 # named: a new one must decide here whether it can hold a closure.
-fn esc_value(p: String, e: typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
+fn esc_value(p: String, k: EscKind, e: typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
   match e with
-  | typed_ast.TVar name _ at -> if name == p then esc_fail(p, esc_reason(sc), at) else LinPass
+  | typed_ast.TVar name _ at -> if name == p then esc_fail(p, k, esc_reason(k, sc), at) else LinPass
   | typed_ast.TInt _ _ _ -> LinPass
   | typed_ast.TFloat _ _ _ -> LinPass
   | typed_ast.TBool _ _ _ -> LinPass
@@ -1968,27 +1991,28 @@ fn esc_value(p: String, e: typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
   | typed_ast.TUnit _ _ -> LinPass
   | typed_ast.TDict _ _ _ _ -> LinPass
   | typed_ast.TMethodRef _ _ _ _ _ -> LinPass
-  | typed_ast.TGetField base _ _ _ -> esc_value(p, base, sc)
-  | typed_ast.TUnary _ inner _ _ -> esc_value(p, inner, sc)
-  | typed_ast.TTuple items _ _ -> esc_all(p, items, sc)
-  | typed_ast.TBinary _ l r _ _ -> esc_all(p, Cons(l, Cons(r, Nil)), sc)
-  | typed_ast.TRange lo hi _ _ -> esc_all(p, Cons(lo, Cons(hi, Nil)), sc)
-  | typed_ast.TRecord _ fields _ _ -> esc_all(p, list_map(typed_ast.field_value, fields), sc)
+  | typed_ast.TGetField base _ _ _ -> esc_value(p, k, base, sc)
+  | typed_ast.TUnary _ inner _ _ -> esc_value(p, k, inner, sc)
+  | typed_ast.TTuple items _ _ -> esc_all(p, k, items, sc)
+  | typed_ast.TBinary _ l r _ _ -> esc_all(p, k, Cons(l, Cons(r, Nil)), sc)
+  | typed_ast.TRange lo hi _ _ -> esc_all(p, k, Cons(lo, Cons(hi, Nil)), sc)
+  | typed_ast.TRecord _ fields _ _ -> esc_all(p, k, list_map(typed_ast.field_value, fields), sc)
   | typed_ast.TRecordUpdate base fields _ _ ->
-      esc_all(p, Cons(base, list_map(typed_ast.field_value, fields)), sc)
-  | typed_ast.TIf c a b _ _ -> esc_all(p, Cons(c, Cons(a, Cons(b, Nil))), sc)
-  | typed_ast.TMatch scrut arms _ _ -> esc_after(esc_value(p, scrut, sc), esc_arms(p, arms, sc))
-  | typed_ast.TCall callee args _ _ -> esc_call(p, callee, args, sc)
-  | typed_ast.TDo steps _ _ -> esc_do(p, steps, sc)
-  | typed_ast.TLambda params body _ _ -> esc_lambda(p, params, body)
+      esc_all(p, k, Cons(base, list_map(typed_ast.field_value, fields)), sc)
+  | typed_ast.TIf c a b _ _ -> esc_all(p, k, Cons(c, Cons(a, Cons(b, Nil))), sc)
+  | typed_ast.TMatch scrut arms _ _ ->
+      esc_after(esc_value(p, k, scrut, sc), esc_arms(p, k, arms, sc))
+  | typed_ast.TCall callee args _ _ -> esc_call(p, k, callee, args, sc)
+  | typed_ast.TDo steps _ _ -> esc_do(p, k, steps, sc)
+  | typed_ast.TLambda params body _ _ -> esc_lambda(p, k, params, body)
 
-fn esc_all(p: String, es: List typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
+fn esc_all(p: String, k: EscKind, es: List typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
   match es with
   | Nil -> LinPass
   | Cons e rest ->
-      match esc_value(p, e, sc) with
+      match esc_value(p, k, e, sc) with
       | LinFail q m -> LinFail(q, m)
-      | LinPass -> esc_all(p, rest, sc)
+      | LinPass -> esc_all(p, k, rest, sc)
 
 # `next` is evaluated eagerly, so this is only for a cheap second walk; the
 # sequences below that can be long match on the result instead.
@@ -1997,84 +2021,86 @@ fn esc_after(first: LinCheck, next: LinCheck) -> LinCheck =
   | LinFail q m -> LinFail(q, m)
   | LinPass -> next
 
-fn esc_arms(p: String, arms: List typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
+fn esc_arms(p: String, k: EscKind, arms: List typed_ast.TypedMatchBranch,
+            sc: EscScope) -> LinCheck =
   match arms with
   | Nil -> LinPass
   | Cons br rest ->
-      match esc_arm(p, br, sc) with
+      match esc_arm(p, k, br, sc) with
       | LinFail q m -> LinFail(q, m)
-      | LinPass -> esc_arms(p, rest, sc)
+      | LinPass -> esc_arms(p, k, rest, sc)
 
-fn esc_arm(p: String, br: typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
+fn esc_arm(p: String, k: EscKind, br: typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
   match br with
   | typed_ast.TypedMatchBranch pat body ->
-      if list_member(p, ast.pattern_names(pat)) then LinPass else esc_value(p, body, sc)
+      if list_member(p, ast.pattern_names(pat)) then LinPass else esc_value(p, k, body, sc)
 
 # A lambda in value position may be kept: any free `p` in it is captured by a
-# closure that may outlive the call. A lambda at a `local` slot never gets here
-# (esc_local_arg).
-fn esc_lambda(p: String, params: List ast.Param, body: typed_ast.TypedExpr) -> LinCheck =
+# closure that may outlive the call, or run more than once. A lambda at a
+# qualifying slot never gets here (esc_slot_arg).
+fn esc_lambda(p: String, k: EscKind, params: List ast.Param, body: typed_ast.TypedExpr) -> LinCheck =
   if list_member(p, ast.param_names(params)) then LinPass
-  else esc_value(p, body, InKeptClosure)
+  else esc_value(p, k, body, InKeptClosure)
 
 # Inside a kept closure every mention is an escape, so the call needs no slot
 # analysis; inside the call, the slots decide.
-fn esc_call(p: String, callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
+fn esc_call(p: String, k: EscKind, callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
             sc: EscScope) -> LinCheck =
   match sc with
-  | InKeptClosure -> esc_all(p, Cons(callee, args), sc)
+  | InKeptClosure -> esc_all(p, k, Cons(callee, args), sc)
   | InCall ->
-      esc_after(esc_callee(p, callee),
-                esc_args(p, drop_leading_dicts(args), typed_ast.typed_expr_type(callee)))
+      esc_after(esc_callee(p, k, callee),
+                esc_args(p, k, drop_leading_dicts(args), typed_ast.typed_expr_type(callee)))
 
 # Calling `p`, or any other variable, keeps nothing.
-fn esc_callee(p: String, callee: typed_ast.TypedExpr) -> LinCheck =
+fn esc_callee(p: String, k: EscKind, callee: typed_ast.TypedExpr) -> LinCheck =
   match callee with
   | typed_ast.TVar _ _ _ -> LinPass
-  | _ -> esc_value(p, callee, InCall)
+  | _ -> esc_value(p, k, callee, InCall)
 
-fn esc_args(p: String, args: List typed_ast.TypedExpr, spine: types.Type) -> LinCheck =
+fn esc_args(p: String, k: EscKind, args: List typed_ast.TypedExpr, spine: types.Type) -> LinCheck =
   match args with
   | Nil -> LinPass
   | Cons a rest ->
-      match esc_arg(p, a, spine_own(spine)) with
+      match esc_arg(p, k, a, spine_own(spine)) with
       | LinFail q m -> LinFail(q, m)
-      | LinPass -> esc_args(p, rest, spine_rest(spine))
+      | LinPass -> esc_args(p, k, rest, spine_rest(spine))
 
-fn esc_arg(p: String, a: typed_ast.TypedExpr, own: types.Ownership) -> LinCheck =
-  if types.own_is_local(own) then esc_local_arg(p, a) else esc_plain_arg(p, a)
+fn esc_arg(p: String, k: EscKind, a: typed_ast.TypedExpr, own: types.Ownership) -> LinCheck =
+  if esc_slot_ok(k, own) then esc_slot_arg(p, k, a) else esc_plain_arg(p, k, a)
 
-# At a `local` slot: `p` itself is fine, and so is a literal lambda, whose body is
-# walked by the same rules.
-fn esc_local_arg(p: String, a: typed_ast.TypedExpr) -> LinCheck =
+# At a qualifying slot: `p` itself is fine, and so is a literal lambda, whose body
+# is walked by the same rules.
+fn esc_slot_arg(p: String, k: EscKind, a: typed_ast.TypedExpr) -> LinCheck =
   match a with
   | typed_ast.TVar _ _ _ -> LinPass
   | typed_ast.TLambda params body _ _ ->
-      if list_member(p, ast.param_names(params)) then LinPass else esc_value(p, body, InCall)
-  | _ -> esc_value(p, a, InCall)
+      if list_member(p, ast.param_names(params)) then LinPass else esc_value(p, k, body, InCall)
+  | _ -> esc_value(p, k, a, InCall)
 
-fn esc_plain_arg(p: String, a: typed_ast.TypedExpr) -> LinCheck =
+fn esc_plain_arg(p: String, k: EscKind, a: typed_ast.TypedExpr) -> LinCheck =
   match a with
   | typed_ast.TVar name _ at ->
-      if name == p then esc_fail(p, "passed to a non-local parameter", at) else LinPass
-  | _ -> esc_value(p, a, InCall)
+      if name == p then esc_fail(p, k, esc_passed_reason(k), at) else LinPass
+  | _ -> esc_value(p, k, a, InCall)
 
-fn esc_do(p: String, steps: List typed_ast.TypedDoStep, sc: EscScope) -> LinCheck =
+fn esc_do(p: String, k: EscKind, steps: List typed_ast.TypedDoStep, sc: EscScope) -> LinCheck =
   match steps with
   | Nil -> LinPass
   | Cons step rest ->
       match step with
-      | typed_ast.TDoLetStep name rhs -> esc_do_rest(esc_value(p, rhs, sc), name == p, p, rest, sc)
-      | typed_ast.TDoExprStep e -> esc_do_rest(esc_value(p, e, sc), false, p, rest, sc)
+      | typed_ast.TDoLetStep name rhs ->
+          esc_do_rest(esc_value(p, k, rhs, sc), name == p, p, k, rest, sc)
+      | typed_ast.TDoExprStep e -> esc_do_rest(esc_value(p, k, e, sc), false, p, k, rest, sc)
       | typed_ast.TDoBindStep pat e _ ->
-          esc_do_rest(esc_value(p, e, sc), list_member(p, ast.pattern_names(pat)), p, rest, sc)
+          esc_do_rest(esc_value(p, k, e, sc), list_member(p, ast.pattern_names(pat)), p, k, rest, sc)
 
 # A binder named `p` shadows it for the rest of the block.
-fn esc_do_rest(r: LinCheck, shadows: Bool, p: String, rest: List typed_ast.TypedDoStep,
-               sc: EscScope) -> LinCheck =
+fn esc_do_rest(r: LinCheck, shadows: Bool, p: String, k: EscKind,
+               rest: List typed_ast.TypedDoStep, sc: EscScope) -> LinCheck =
   match r with
   | LinFail q m -> LinFail(q, m)
-  | LinPass -> if shadows then LinPass else esc_do(p, rest, sc)
+  | LinPass -> if shadows then LinPass else esc_do(p, k, rest, sc)
 
 # Two opposite obligations. An OWNED linear parameter must appear in the consumed
 # set (else it leaked). A BORROWED one must NOT: consuming it spends a use that

@@ -216,6 +216,10 @@ This is a **dedicated escape walk** over the typed AST, not a reuse of `lin_cons
 this rule must tell them apart. It reads each argument's slot from the callee's type spine
 (`spine_own`), as `lin_call_args` does. Run after `once_honesty`; `once local` gets both.
 
+The same walk checks `once` parameters, with the slot required to be `once` rather than `local`
+(`docs/one-shot-closures-v0.md` §6.5). A `once local` parameter is checked for both, so it may be
+passed on only at a `once local` position: a plain `local` callee may call it many times.
+
 ### 6.4 `local` only on a function-typed parameter
 
 Rejected elsewhere, including on a type variable, for the reason `once a` is: the licence rests on
@@ -241,16 +245,25 @@ An `extern fn`'s body is C, so its parameter modes cannot be checked. They are t
 types and effects already are. One extern carries `local`:
 
 ```
-extern fn __task_fork(scope_id: Int, work: local Unit -> a !{IO}) -> Int !{IO}
+extern fn __task_fork(scope_id: Int, work: once local Unit -> a !{IO}) -> Int !{IO}
 ```
 
-This is the Sprout counterpart of Rust's `unsafe { spawn_unchecked(…) }`. It is sound only because
-of how it is used, so only the module that declares it may use it. **An extern with a `local` or
-`once local` parameter is reachable only from its declaring module.** This is the one exception to
-spec §Externs, which makes every other extern reachable by bare name from any importer. Without
-it, any module importing `stdlib.task` could lend a borrowed value to a task that outlives the
-owner's release. The bundler marks a reference from another module, and inference reports it
-(the `@canonical:` mechanism). Both uses are in `stdlib/task.sprout`:
+Its `once` is a claim about the C side (a task runs at most once), as `__scope_spawn`'s `once` is.
+Its `local` is different: the scheduler does keep the closure, so the claim holds only because of
+how the extern is called. This is the Sprout counterpart of Rust's `unsafe
+{ spawn_unchecked(…) }`, so only the module that declares it may use it. **An extern whose
+signature writes `local` anywhere is reachable only from its declaring module.** That covers a
+parameter, an arrow inside a parameter or return type, and an alias that expands to one, followed
+across modules. A returned `(local X) -> Y` hands the same unchecked licence to whoever calls it.
+The bundler decides on the qualified signature, so alias names are already canonical there. This is the one exception to spec §Externs, which makes
+every other extern reachable by bare name from any importer. Without it, any module importing
+`stdlib.task` could lend a borrowed value to a task that outlives the owner's release. The bundler
+marks a reference from another module, and inference reports it (the `@canonical:` mechanism).
+
+A module may redeclare an extern itself and then reach it, since the trust claim is then its own.
+That is safe only because several declarations of one extern must agree on the full signature.
+Inference keeps the first declaration's scheme, so a disagreeing redeclaration would otherwise be
+typed with someone else's `local`. Both uses are in `stdlib/task.sprout`:
 
 - `task_fork(scope, work: once Unit -> a)` passes a **non-local** closure. It cannot capture a
   borrow (§6.1 applies only at `local` positions), so the stronger declaration changes nothing.
@@ -286,8 +299,12 @@ frame that is gone. BACKLOG: *Tree-cancel cascade must drop a deadline's child b
 - Whole-call borrow: `"'conn' is lent to a `local` closure for the whole call and cannot be consumed
   in another argument of it"`.
 - `local` on a non-function parameter: mirrors the `once` message.
-- An extern with a `local` parameter, reached from another module (§6.5): it names the declaring
-  module and says the promise is kept only by that module's callers.
+- An extern whose signature writes `local`, reached from another module (§6.5): it names the
+  declaring module and says the promise is kept only by that module's callers.
+- An extern declared twice with different signatures: names it and shows both signatures.
+- A `once` parameter handed on where it could run again: `"`once` parameter 'w' may run more than
+  once: <returned or stored | passed to a parameter that does not promise `once` | captured by a
+  closure that may run more than once>"`, plus why the promise matters.
 - Mode mismatches name the axis that differs: `once`, `local`, or both. That holds at unification
   and between a class method and its instance.
 
@@ -298,7 +315,7 @@ more programs at `local` positions.
 
 - `stdlib/task.sprout`: `with_scope.body` becomes `once local`; `with_timeout.body` and
   `run_with_deadline.body` become `local`; `run_with_deadline` calls `__task_fork` directly;
-  `__task_fork.work` becomes `local`. `with_scope` keeps `once`, so existing moves into it still
+  `__task_fork.work` becomes `once local` and `__scope_spawn.work` becomes `once`. `with_scope` keeps `once`, so existing moves into it still
   compile.
 - **Bootstrap.** If no file in `compile_driver`'s closure writes `local`, the committed seed parses
   everything and no 2-step bootstrap is needed. `stdlib/task.sprout` is outside that closure — to be
@@ -337,6 +354,15 @@ TDD, each red before the change.
   `borrow_capture_at_ordinary_slot` (today's rule, still in force).
 - Private extern (§6.5): `private_local_extern_reached_from_another_module`,
   `private_local_extern_named_without_borrow`. `stdlib.task`'s own calls are the passing case.
+  In `tests/conformance/package_resolution/`, `local` in a return type, in a parameter type, via an
+  alias, and via an alias imported two hops away.
+- Redeclared externs: `extern_redeclared_signature_differs`,
+  `extern_task_fork_redeclared_without_local`; passing: `tests/stdlib/test_extern_redeclare.spr`
+  and `app_extern_redeclare_renamed_vars` (type and effect variables renamed).
+- Handing a mode on (§6.3): `once_local_forwarded_to_plain_local_slot`,
+  `once_param_forwarded_to_plain_slot`, `once_param_returned`, `once_param_let_bound_and_reused`,
+  `once_param_in_tuple`, `once_param_captured_by_ordinary_lambda`. The passing forwards are in
+  `test_once_closures.spr` and `test_local_closures.spr`.
 - Mismatch messages: `once_local_mismatch_names_once`, `once_vs_local_mismatch_names_both`,
   `local_instance_omits_class_local`, `once_local_instance_drops_local`,
   `once_local_instance_drops_both`.

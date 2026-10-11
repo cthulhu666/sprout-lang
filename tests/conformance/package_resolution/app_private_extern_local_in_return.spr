@@ -1,0 +1,13 @@
+module main
+import demo.locext (ping)
+
+# `local` written inside the RETURN type makes the extern private to demo.locext:
+# the returned function lends a borrowed value to a closure C may keep.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = match f with | File n -> n
+
+fn leak(f: borrowing File) -> Int = __mk_runner(0)(\_ -> peek(f))
+
+fn main() -> Unit !{IO} = print("x")

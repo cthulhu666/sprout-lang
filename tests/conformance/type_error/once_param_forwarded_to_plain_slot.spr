@@ -1,0 +1,15 @@
+module main
+
+# The same hole with plain `once`: forwarding it to an ordinary parameter.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn plain(g: Unit -> Int) -> Int = g(()) + g(())
+
+fn fwd(w: once Unit -> Int) -> Int = plain(w)
+
+fn mover(f: File) -> Int = fwd(\_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(mover(File(1))))

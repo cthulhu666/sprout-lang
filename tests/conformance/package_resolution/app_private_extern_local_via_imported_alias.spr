@@ -1,0 +1,8 @@
+module main
+import demo.aliasfar (ping)
+
+# The alias comes from a third module and names another alias: still private.
+
+let use_it: (local(Unit -> Int)) -> Int = __mk_far()
+
+fn main() -> Unit !{IO} = print("x")

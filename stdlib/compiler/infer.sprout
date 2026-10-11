@@ -8958,8 +8958,7 @@ fn written_type_expr(t: types.Type) -> ast.TypeExpr =
   | types.TApp f x -> ast.TypeApply(written_type_expr(f), written_type_expr(x))
   | types.TFunc p r e own ->
       ast.TypeArrow(written_type_expr(p), written_type_expr(r), effect_label_list(e),
-                    ast.mode_of_flags(types.ownership_is_borrow(own), types.own_is_once(own),
-                                  types.own_is_local(own)))
+                    typed_ast.mode_of_ownership(own))
   | types.TThunk r e -> ast.TypeThunk(written_type_expr(r), effect_label_list(e))
   | types.TTuple items -> ast.TupleType(list_map(written_type_expr, items))
   | types.TConst _ -> typed_ast.type_to_type_expr(t)
@@ -11284,19 +11283,29 @@ fn extern_decl_result(name: String, params: List ast.Param, ret_type_maybe: Mayb
           types.scheme_type(scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)),
           ext_pos, global_env_dict(env)) with
   | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
-  | linear_check.LinPass -> extern_decl_ok(name, params, ret_type_maybe, effects_maybe, alias_env, env, env_ftv, subst)
+  | linear_check.LinPass -> extern_decl_ok(name, params, ret_type_maybe, effects_maybe, ext_pos, alias_env, env, env_ftv, subst)
 
 fn extern_decl_ok(name: String, params: List ast.Param, ret_type_maybe: Maybe ast.TypeExpr,
-                  effects_maybe: Maybe (List String), alias_env: Dict types.Type,
-                  env: GlobalEnv, env_ftv: List String, subst: Dict types.Type) -> TypedDeclResult =
+                  effects_maybe: Maybe (List String), ext_pos: source.SourcePos,
+                  alias_env: Dict types.Type, env: GlobalEnv, env_ftv: List String,
+                  subst: Dict types.Type) -> TypedDeclResult =
   match dict_get(name, global_env_dict(env)) with
-  | Just _ ->
-      TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv, subst)
+  | Just kept ->
+      if types.scheme_alpha_eq(kept, declared)
+      then TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv, subst)
+      else TypedDeclErr(ext_pos, extern_redeclared_message(name, kept, declared))
   | Nothing ->
       TypedDeclOk(
         typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe),
-        GlobalEnv(dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), global_env_dict(env))),
+        GlobalEnv(dict_set(name, declared, global_env_dict(env))),
         env_ftv, subst)
+  where declared = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
+
+# The first declaration's scheme is the one kept, so a second that differs would be
+# typed with a signature it did not write.
+fn extern_redeclared_message(name: String, kept: types.Scheme, declared: types.Scheme) -> String =
+  "extern `" ++ name ++ "` is declared more than once with different signatures: `"
+    ++ types.scheme_to_string(kept) ++ "` and `" ++ types.scheme_to_string(declared) ++ "`"
 
 fn fn_linear_gate(params: List ast.Param, ret_te: Maybe ast.TypeExpr, s2: Dict types.Type,
                   inst_type: types.Type,

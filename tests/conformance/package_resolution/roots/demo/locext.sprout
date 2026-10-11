@@ -1,0 +1,8 @@
+module demo.locext
+
+# Externs whose `local` is written inside a type, not on a top-level parameter.
+# The C body cannot be checked, so each is private to this module.
+export let ping: Int = 1
+
+extern fn __mk_runner(n: Int) -> (local(Unit -> Int)) -> Int
+extern fn __run_with(run: (local(Unit -> Int)) -> Int) -> Int

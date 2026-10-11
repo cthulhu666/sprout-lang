@@ -380,10 +380,16 @@ qualified, never renamed, and never enters a module's exported set, so:
   `extern fn read_file` and `export fn read_text` in `stdlib.fs`, both
   `import stdlib.fs (read_file)` and `import stdlib.fs (read_text)` compile, and
   under either one a bare `read_file(…)` call resolves.
-- **Exception:** an extern with a `local` or `once local` parameter is reachable
-  only from the module that declares it. Its `local` is a promise the compiler
-  cannot check, kept only by that module's own callers; a reference from any
-  other module is a compile error naming the declaring module.
+- **Exception:** an extern whose signature writes `local` anywhere — a
+  parameter, or an arrow inside a parameter or return type, including through a
+  type alias — is reachable only
+  from the module that declares it. Its `local` is a promise the compiler cannot
+  check, kept only by that module's own callers; a reference from any other
+  module is a compile error naming the declaring module.
+- Several modules may declare the same extern only with the **same signature**
+  (types, parameter modes and effects, up to renaming of type variables);
+  otherwise it is a compile error. Each module's own declaration is its own, so
+  a module that declares an extern itself may always call it.
 
 The consequence for diagnostics is worth stating plainly, because it differs from
 the rule for type names above: a missing import for an extern produces **no
@@ -1919,6 +1925,13 @@ while `p(x) + p(x)` is not. Zero uses are legal: the bound is from above, so one
 path may invoke and another not (`if c then p(x) else 0`, or an invocation after
 a fallible `<-`).
 
+Every use of `p` other than a call must hand it to a position that makes the
+same promise. `p` may be passed at a `once` (or `once local`) position, or
+captured by a lambda that itself sits at one, whose result then counts as
+returned. Returning `p`, storing it, binding it with `let`, or passing it at an
+ordinary or plain `local` position is an error, because the receiver could
+invoke it again.
+
 `once` is only meaningful on a **function-typed** parameter; elsewhere it is an
 error. In particular it is rejected on a **type-variable** parameter, and for a
 reason of its own — not the universe argument that rejects `borrowing a`. The
@@ -1966,7 +1979,8 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   position, whose result then counts as returned. Returning it, storing it,
   binding it with `let`, passing it at an ordinary position or capturing it in
   an ordinary lambda is an error. The closure may be called any number of times
-  unless it is also `once`.
+  unless it is also `once`. A `once local` parameter must satisfy both rules, so
+  it may be passed on only at a `once local` position.
 - **Caller licence.** A lambda at a `local` position may capture **borrowed**
   values: a `borrowing` parameter, or an owned linear binding it only reads. The
   borrow lasts for the whole call, so the value may not be consumed by another
@@ -1978,8 +1992,8 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   check runs only over declared functions.
 - `local` is **erased** and is part of the function type, so it is compared
   invariantly at unification.
-- An `extern fn`'s modes cannot be checked and are trusted. An extern with a
-  `local` parameter is therefore reachable only from its declaring module
+- An `extern fn`'s modes cannot be checked and are trusted. An extern whose
+  signature writes `local` is therefore reachable only from its declaring module
   (§Externs). See `docs/local-closures-v0.md` §6.5.
 
 **At most once, not exactly once.** The type system bounds invocations from above

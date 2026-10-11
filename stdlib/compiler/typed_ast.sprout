@@ -284,11 +284,19 @@ export fn type_to_type_expr(t: types.Type) -> ast.TypeExpr =
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp f x -> ast.TypeApply(type_to_type_expr(f), type_to_type_expr(x))
   | types.TFunc a b _ own ->
-      ast.TypeArrow(type_to_type_expr(a), type_to_type_expr(b), Nothing,
-        ast.mode_of_flags(types.ownership_is_borrow(own), types.own_is_once(own),
-                        types.own_is_local(own)))
+      ast.TypeArrow(type_to_type_expr(a), type_to_type_expr(b), Nothing, mode_of_ownership(own))
   | types.TThunk b _ -> ast.TypeThunk(type_to_type_expr(b), Nothing)
   | types.TTuple items -> ast.TupleType(list_map(\i -> type_to_type_expr(i), items))
+
+# A resolved ownership read back as the mode that writes it. OwnConsume is
+# ModeConsuming, the spelling that survives a round trip (ast.mode_of_flags).
+export fn mode_of_ownership(own: types.Ownership) -> ast.ParamMode =
+  match own with
+  | types.OwnBorrow -> ast.ModeBorrowing
+  | types.OwnOnce -> ast.ModeOnce
+  | types.OwnLocal -> ast.ModeLocal
+  | types.OwnOnceLocal -> ast.ModeOnceLocal
+  | types.OwnConsume -> ast.ModeConsuming
 
 # ---------------------------------------------------------------------------
 # Node census

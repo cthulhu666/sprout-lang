@@ -655,8 +655,7 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
       types.TFunc(typeexpr_to_type_with_vars(param, local_vars),
                   typeexpr_to_type_with_vars(ret, local_vars),
                   types.effect_from_labels(effs),
-                  types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode),
-                                          ast.mode_is_local(mode)))
+                  linear_check.ownership_of_param_mode(mode))
   | ast.TypeThunk ret effs ->
       types.TThunk(typeexpr_to_type_with_vars(ret, local_vars),
                    types.effect_from_labels(effs))

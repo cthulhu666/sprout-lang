@@ -1202,6 +1202,47 @@ fn scheme_eq(left: Scheme, right: Scheme) -> Bool =
             else false
           else false
 
+# Equal up to renaming of the bound type and effect variables, paired by position.
+# Parameter modes compare as written; free variables compare by name.
+export fn scheme_alpha_eq(left: Scheme, right: Scheme) -> Bool =
+  scheme_eq(alpha_canonical(left), alpha_canonical(right))
+
+fn alpha_canonical(s: Scheme) -> Scheme =
+  match s with
+  | Scheme tvs evs t e cs ->
+      let erename = alpha_rename("$aeff", evs, 0, dict_empty())
+      in Scheme(alpha_names("$alpha", tvs, 0), alpha_names("$aeff", evs, 0),
+                rename_type_effects(erename, apply_rename_type(alpha_rename("$alpha", tvs, 0, dict_empty()), t)),
+                rename_effect(erename, e), cs)
+
+fn alpha_names(prefix: String, vars: List String, n: Int) -> List String =
+  match vars with
+  | Nil -> Nil
+  | Cons _ rest -> Cons(prefix ++ int_to_string(n), alpha_names(prefix, rest, n + 1))
+
+fn alpha_rename(prefix: String, vars: List String, n: Int, acc: Dict String) -> Dict String =
+  match vars with
+  | Nil -> acc
+  | Cons v rest -> alpha_rename(prefix, rest, n + 1, dict_set(v, prefix ++ int_to_string(n), acc))
+
+fn rename_effect(rename: Dict String, e: Effect) -> Effect =
+  match e with
+  | EffectVar name -> EffectVar(maybe_with_default(name, dict_get(name, rename)))
+  | EffectRow labels -> EffectRow(list_map(\l -> maybe_with_default(l, dict_get(l, rename)), labels))
+  | EffectPure -> e
+  | EffectIO -> e
+
+fn rename_type_effects(rename: Dict String, t: Type) -> Type =
+  match t with
+  | TVar _ -> t
+  | TConst _ -> t
+  | TApp base arg -> TApp(rename_type_effects(rename, base), rename_type_effects(rename, arg))
+  | TFunc param ret eff own ->
+      TFunc(rename_type_effects(rename, param), rename_type_effects(rename, ret),
+            rename_effect(rename, eff), own)
+  | TThunk ret eff -> TThunk(rename_type_effects(rename, ret), rename_effect(rename, eff))
+  | TTuple items -> TTuple(list_map(rename_type_effects(rename, _), items))
+
 # Element-wise equality of (head_token, class-name) constraint lists.
 fn constraints_eq(a: List (String, String), b: List (String, String)) -> Bool =
   match a with
