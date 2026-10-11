@@ -12,7 +12,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # On the unfixed compiler, type identity is keyed by BARE name: build_ctor_map
 # (infer.sprout, via after_last_dot) collapses `main.Maybe` and
 # `stdlib.prelude.Maybe` to the single key "Maybe", last-write-wins. The prelude's
-# OWN functions that match Just/Nothing (e.g. vec_prepend_into) then fail
+# OWN functions that match Just/Nothing (e.g. vec_get_or) then fail
 # exhaustiveness with a spurious "Non-exhaustive match on Maybe" — so this file
 # fails to COMPILE on the unfixed compiler (RED for the right reason: the
 # collision breaks unrelated correct code, not a crash or import error).

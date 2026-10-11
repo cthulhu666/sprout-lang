@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.json as json
 import stdlib.string as string
-import testsupport.cost (assert_scales)
+import testsupport.cost (assert_scales, grow)
 
 # Large JSON inputs: an HTTP or LSP body is untrusted, and 1 MiB of it must neither crash the
 # process nor cost more than linear time.
@@ -56,10 +56,6 @@ fn object_count(raw: String) -> Int =
   match json.parse(raw) with
   | Ok (json.JsonObject obj) -> object_in_order(obj, 0)
   | _ -> -1
-
-# 2^k copies of `s`, by doubling: O(total). `string.repeat` is quadratic.
-fn grow(s: String, k: Int) -> String =
-  if k <= 0 then s else grow(s ++ s, k - 1)
 
 # A string literal of 2^k repeats of `a\n`. Each escape appended to the decoded string used to copy
 # everything decoded so far.
