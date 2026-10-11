@@ -326,7 +326,7 @@ fn arrow_param_mode_at(tokens: Vec token.Token, i: Int) -> Maybe(ast.ParamMode, 
   | Just (_, i2) ->
       match param_mode_at(tokens, i2) with
       | ast.ModeDefault -> Nothing
-      | mode -> if arrow_follows_group(tokens, i) then Just((mode, i2 + 1)) else Nothing
+      | mode -> if arrow_follows_group(tokens, i) then Just((mode, i2 + mode_token_count(mode))) else Nothing
 
 # Whether the group opened by the `(` at `i` is followed by `->`. Counts nesting,
 # so a parenthesised type inside the group does not end the scan early.
@@ -1633,19 +1633,35 @@ fn parse_param(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Param,
 # requires a type atom to follow. Without this guard the modifier would be a
 # reserved word in all but name. See docs/linear-borrowing-v0.md §8.
 fn param_mode_at(tokens: Vec token.Token, i: Int) -> ast.ParamMode =
-  if ! (tok_is_ident(tok_at(tokens, i)) && starts_type_atom(tokens, i + 1)) then ast.ModeDefault
+  if once_local_at(tokens, i) then ast.ModeOnceLocal
+  else if ! (tok_is_ident(tok_at(tokens, i)) && starts_type_atom(tokens, i + 1)) then ast.ModeDefault
   else param_mode_of_text(token.token_text(tok_at(tokens, i)))
+
+# `once local T`, in that order. The same guard applies: a type atom must follow
+# `local`, so `once local` alone is `once` over the type named `local`.
+fn once_local_at(tokens: Vec token.Token, i: Int) -> Bool =
+  tok_is_ident(tok_at(tokens, i)) && token.token_text(tok_at(tokens, i)) == "once"
+    && tok_is_ident(tok_at(tokens, i + 1)) && token.token_text(tok_at(tokens, i + 1)) == "local"
+    && starts_type_atom(tokens, i + 2)
 
 fn param_mode_of_text(text: String) -> ast.ParamMode =
   if text == "borrowing" then ast.ModeBorrowing
   else if text == "consuming" then ast.ModeConsuming
   else if text == "once" then ast.ModeOnce
+  else if text == "local" then ast.ModeLocal
   else ast.ModeDefault
 
 fn skip_param_mode(tokens: Vec token.Token, i: Int) -> Int =
-  match param_mode_at(tokens, i) with
-  | ast.ModeDefault -> i
-  | _ -> i + 1
+  i + mode_token_count(param_mode_at(tokens, i))
+
+fn mode_token_count(mode: ast.ParamMode) -> Int =
+  match mode with
+  | ast.ModeDefault -> 0
+  | ast.ModeOnceLocal -> 2
+  | ast.ModeBorrowing -> 1
+  | ast.ModeConsuming -> 1
+  | ast.ModeOnce -> 1
+  | ast.ModeLocal -> 1
 
 fn parse_param_cont(tokens: Vec token.Token, i: Int, name: String) -> Result ParseError (ast.Param, Int) =
   match match_symbol(tokens, i, ":") with

@@ -1,0 +1,9 @@
+module main
+
+# A `local` parameter may not be stored in a tuple (or any constructor).
+
+fn stash(work: local Unit -> Int) -> (Unit -> Int, Int) = (work, 1)
+
+fn main() -> Unit !{IO} =
+  match stash(\_ -> 1) with
+  | (f, n) -> print(to_string(f(()) + n))

@@ -819,6 +819,20 @@ repeated — except on a lambda bound by a `let` first, which must spell it. Ins
 the work function may read the resource as often as it likes but may not release
 or return it; that stays the combinator's job, which is the point.
 
+To bound a read on a connection you hold, lend it to `with_timeout`: its body is a `local`
+closure, so it may borrow `conn`, and the release stays with you on `Completed` and `Expired`
+alike:
+
+```sprout
+fn timed_reply(conn: borrowing TcpConnection) -> TimeoutResult (Result TcpError Bytes) !{IO} =
+  with_timeout(500, \_ -> read_exact(conn, 4))
+
+# caller:
+let r = timed_reply(conn)
+close(conn)
+r
+```
+
 Reach for this when a type has a release operation. For plain data with no
 release, `linear` only gets in the way — see
 [spec-v0.md §5.8](./spec-v0.md).

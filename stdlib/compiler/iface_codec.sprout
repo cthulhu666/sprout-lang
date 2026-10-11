@@ -283,11 +283,13 @@ fn decode_tthunk_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.
 # carries it too, and the two must agree.
 fn encode_ownership(o: types.Ownership) -> String =
   if types.ownership_is_borrow(o) then "borrow"
-  else if types.ownership_is_once(o) then "once"
+  else if types.own_is_once(o) && types.own_is_local(o) then "oncelocal"
+  else if types.own_is_once(o) then "once"
+  else if types.own_is_local(o) then "local"
   else "consume"
 
 fn ownership_from_str(s: String) -> types.Ownership =
-  types.ownership_of_mode(s == "borrow", s == "once")
+  types.ownership_of_mode(s == "borrow", s == "once" || s == "oncelocal", s == "local" || s == "oncelocal")
 
 fn decode_ttuple_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   let Just(ts, j) = decode_type_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing
@@ -371,7 +373,7 @@ fn decode_type_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Li
 #
 # `version` is encoded as a bare atom and checked by string equality. When
 # v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 11 — see decode_iface_version for the change log.)
+# (Current version is 12 — see decode_iface_version for the change log.)
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -548,6 +550,8 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # v10: `(TypeArrow …)` gained a ParamMode field, so an arrow TypeExpr on the wire
 # now says how its parameter is taken. A v9 iface has no such field and would
 # decode every arrow as consuming — the same silent erasure as above, one layer up.
+# v12: the ownership tag gained `local` and `oncelocal` (docs/local-closures-v0.md).
+# A v11 reader would decode neither, so they take a new version.
 # v11: a tuple constraint subject writes a compound-head token (`#app:Tuple2:…`)
 # where v10 wrote `#none`, and a structured argument writes a nested token
 # (`[Maybe;b]`) where v10 wrote `#any`. A v10 file read back would dispatch a tuple
@@ -555,7 +559,7 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # `WrapDecl` gaining a type-parameter list did NOT bump this: an IfaceFile carries
 # schemes, ctors, classes and instances, never decls, so no on-disk iface holds one.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "11" then Just(11) else Nothing
+  if s == "12" then Just(12) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   decode_list_at(decode_named_scheme_at, s, bytes, i, total)
@@ -645,7 +649,8 @@ fn typeexpr_to_type_with_vars(te: ast.TypeExpr, local_vars: Dict types.Type) -> 
       types.TFunc(typeexpr_to_type_with_vars(param, local_vars),
                   typeexpr_to_type_with_vars(ret, local_vars),
                   types.effect_from_labels(effs),
-                  types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode)))
+                  types.ownership_of_mode(ast.mode_is_borrowing(mode), ast.mode_is_once(mode),
+                                          ast.mode_is_local(mode)))
   | ast.TypeThunk ret effs ->
       types.TThunk(typeexpr_to_type_with_vars(ret, local_vars),
                    types.effect_from_labels(effs))

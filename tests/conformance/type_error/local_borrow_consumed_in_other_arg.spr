@@ -1,0 +1,16 @@
+module main
+
+# The borrow lasts for the WHOLE call: `close(c)` is evaluated before the
+# closure runs, so lending `c` to the lambda and consuming it here is unsound.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn run_with(work: local Unit -> Int, n: Int) -> Int = work(()) + n
+
+fn lend_and_consume(c: File) -> Int = run_with(\_ -> peek(c), release(c))
+
+fn main() -> Unit !{IO} = print(to_string(lend_and_consume(File(1))))

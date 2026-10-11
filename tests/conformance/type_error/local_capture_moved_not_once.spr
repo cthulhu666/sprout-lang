@@ -1,0 +1,13 @@
+module main
+
+# A plain `local` closure may run many times, so it cannot take a moved value.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_local(work: local Unit -> Int) -> Int = work(())
+
+fn moved(f: File) -> Int = run_local(\_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(moved(File(1))))

@@ -1,8 +1,7 @@
 # Non-escaping closures (`local` parameters) — design note v0
 
-**Status:** approved 2026-10-11, after a review that changed §3, §6.3, §6.4, §6.5 and §8.
-Supporting, not normative — on landing, the normative text goes in `docs/spec-v0.md` §5.8 beside
-`once`.
+**Status:** implemented 2026-10-11 (approved after a review that changed §3, §6.3, §6.4, §6.5 and
+§8). Supporting, not normative: the normative text is `docs/spec-v0.md` §5.8, beside `once`.
 
 **Builds on:** `docs/one-shot-closures-v0.md` (`once`, M4.4a) and `docs/linear-borrowing-v0.md`
 (`borrowing`, M4.4b).
@@ -268,7 +267,7 @@ non-local.
 
 **Obligation on the deferred tree-cancel cascade.** Once a cancel may drop a deadline owner instead
 of aborting, it must drop the child first: otherwise the child runs against a value lent from a
-frame that is gone. Recorded in that BACKLOG entry when this lands.
+frame that is gone. BACKLOG: *Tree-cancel cascade must drop a deadline's child before its owner*.
 
 ## 7. Error-message impact
 

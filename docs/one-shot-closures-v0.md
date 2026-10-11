@@ -215,6 +215,9 @@ Sprout has no escaping/non-escaping or lifetime distinction to rule this out. Ru
 this line with `'static` on `thread::spawn`. Moves are safe because the value is gone from the
 caller; borrows are not.
 
+For a callee that is done with the closure before it returns, the `local` mode lifts this
+rejection: see `docs/local-closures-v0.md`.
+
 ### 6.4 `once` is only meaningful on a function-typed parameter
 
 Rejected elsewhere, mirroring "`borrowing` only on a linear type" — and for the same reason, that a

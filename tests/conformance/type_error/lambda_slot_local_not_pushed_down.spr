@@ -1,0 +1,13 @@
+module main
+
+# `local` is never pushed down from a slot onto an unannotated lambda parameter
+# (docs/local-closures-v0.md §6.4): nobody would check the promise, and `\w -> w`
+# would let the closure escape. Only `borrowing` is seeded, so the lambda stays
+# consuming and mismatches the `local` slot, as it does for `once`.
+
+fn runner(g: (local(Unit -> Int)) -> (Unit -> Int), n: Int) -> Int =
+  g(\_ -> n)(())
+
+fn bad(n: Int) -> Int = runner(\w -> w, n)
+
+fn main() -> Unit !{IO} = print(to_string(bad(5)))

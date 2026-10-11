@@ -1,0 +1,48 @@
+import stdlib.test (check_eq, run_suite)
+
+# `local` is a parameter mode (docs/local-closures-v0.md §4): alone, or as
+# `once local`. Stage A pins the syntax only. A `local` parameter behaves as an
+# ordinary consuming one, so these functions are simply called.
+#
+# `local` stays an ordinary identifier outside the mode slot.
+
+fn run_local(work: local Unit -> Int) -> Int = work(()) + work(())
+
+fn run_once_local(work: once local Unit -> Int) -> Int = work(())
+
+fn run_second(n: Int, work: local Int -> Int) -> Int = work(n)
+
+fn call_local(w: local Unit -> Int) -> Int = w(())
+
+fn call_once_local(w: once local Unit -> Int) -> Int = w(())
+
+# Only a declared function can fill a `local` arrow slot: a lambda parameter is
+# never `local` (see type_error/lambda_slot_local_not_pushed_down).
+fn run_arrow(g: (local(Unit -> Int)) -> Int) -> Int = g(\_ -> 4)
+
+fn run_once_arrow(g: (once local (Unit -> Int)) -> Int) -> Int = g(\_ -> 5)
+
+class Runner a
+  fn run_it(s: a, work: local Unit -> Int) -> Int
+
+instance Runner Int
+  fn run_it(s: Int, work: local Unit -> Int) -> Int = s + work(())
+
+# `local` as an ordinary name: function, parameter, and type variable.
+fn local(x: Int) -> Int = x + 1
+
+fn uses_local_name(local: Int) -> Int = local * 2
+
+fn local_tyvar(x: (local a)) -> Int = 0
+
+fn main() -> Unit !{IO} =
+  run_suite("local_mode_syntax", [
+    check_eq("local parameter", run_local(\_ -> 3), 6),
+    check_eq("once local parameter", run_once_local(\_ -> 7), 7),
+    check_eq("local at a non-leading position", run_second(4, \n -> n + 1), 5),
+    check_eq("local inside an arrow type", run_arrow(call_local), 4),
+    check_eq("once local inside an arrow type", run_once_arrow(call_once_local), 5),
+    check_eq("local on a class method", run_it(10, \_ -> 5), 15),
+    check_eq("local as a function name", local(1), 2),
+    check_eq("local as a parameter name", uses_local_name(4), 8)
+  ])

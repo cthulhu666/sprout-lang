@@ -1,0 +1,8 @@
+module main
+
+# A `local` parameter may not be returned: the caller lent it borrowed values on
+# the strength of the promise that the closure does not outlive the call.
+
+fn keep(work: local Unit -> Int) -> Unit -> Int = work
+
+fn main() -> Unit !{IO} = print(to_string(keep(\_ -> 1)(())))

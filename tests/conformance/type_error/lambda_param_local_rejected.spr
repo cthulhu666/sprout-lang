@@ -1,0 +1,10 @@
+module main
+
+# The `local` promise is checked only on declared functions, so a lambda's own
+# parameter cannot carry it: nobody would check it (docs/local-closures-v0.md §6.4).
+
+fn run(g: (Unit -> Int) -> Int) -> Int = g(\_ -> 1)
+
+fn bad() -> Int = run(\ (w: local Unit -> Int) -> w(()))
+
+fn main() -> Unit !{IO} = print(to_string(bad()))

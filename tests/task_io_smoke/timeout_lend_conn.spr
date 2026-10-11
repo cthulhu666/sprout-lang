@@ -1,0 +1,51 @@
+import stdlib.task as task
+import stdlib.net (TcpConnection, TcpListener, TcpError, accept, close, close_listener, connect, listen_local, read_exact)
+import stdlib.terminal as terminal
+
+# with_timeout's body is `local`: the server LENDS its accepted connection to the timed read, then
+# closes it itself. The client never sends, so the read parks in the poller and the deadline must
+# expire and force-drop it. The connection is still the server's afterwards: the borrow ended with
+# the call, and close(conn) below is the single release. Without `local` this does not compile.
+#
+# Marker discipline: "lent-read-expired" is printed on the success path only.
+
+fn lend_read(conn: borrowing TcpConnection) -> task.TimeoutResult(Result TcpError Bytes) !{IO} =
+  task.with_timeout(100, \_ -> read_exact(conn, 4))
+
+fn report(r: task.TimeoutResult (Result TcpError Bytes)) -> Unit !{IO} =
+  match r with
+  | task.Expired -> terminal.write("lent-read-expired\n")
+  | task.Completed _ -> terminal.write("MISMATCH: read completed against a silent peer\n")
+
+fn serve_conn(listener: consuming TcpListener, conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    report(lend_read(conn))
+    close(conn)
+    close_listener(listener)
+
+fn serve(listener: consuming TcpListener) -> Unit !{IO} =
+  match accept(listener) with
+  | Ok conn -> serve_conn(listener, conn)
+  | Err _ ->
+    do
+      terminal.write("MISMATCH: server could not accept\n")
+      close_listener(listener)
+
+# Connects and stays silent past the server's deadline, then hangs up.
+fn client(port: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      task.task_sleep(600)
+      close(conn)
+  | Err _ -> terminal.write("MISMATCH: client could not connect\n")
+
+fn run(s: task.Scope, port: Int) -> Unit !{IO} =
+  do
+    task.task_spawn(s, \_ -> client(port))
+    serve(listen_local(port))
+
+fn main() -> Unit !{IO} =
+  do
+    task.with_scope(\s -> run(s, 28970))
+    terminal.write("done\n")

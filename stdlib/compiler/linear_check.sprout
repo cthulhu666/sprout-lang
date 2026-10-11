@@ -403,6 +403,8 @@ type BadModifier (..) =
   | BadNonLinear String
   | BadOnceNonFunction String
   | BadOnceOnTyvar String
+  | BadLocalNonFunction String
+  | BadLocalOnTyvar String
   # A modifier written in the RETURN type, which names no parameter to blame.
   | BadInReturn
 
@@ -418,6 +420,8 @@ fn bad_modifier_message(b: BadModifier) -> String =
   | BadNonLinear name -> bad_modifier_msg(name)
   | BadOnceNonFunction name -> once_modifier_msg(name)
   | BadOnceOnTyvar name -> once_tyvar_msg(name)
+  | BadLocalNonFunction name -> local_modifier_msg(name)
+  | BadLocalOnTyvar name -> local_tyvar_msg(name)
   | BadInReturn -> return_modifier_msg
 
 
@@ -434,11 +438,22 @@ fn once_modifier_msg(name: String) -> String =
 fn once_tyvar_msg(name: String) -> String =
   "`once` cannot be used on a type variable (parameter '" ++ name ++ "'): the promise is that the callee INVOKES this parameter at most once, which it cannot do when the type is not known to be a function — while a caller could still move a linear value in and get it back out"
 
+fn local_modifier_msg(name: String) -> String =
+  "`local` applies only to a function-typed parameter (parameter '" ++ name ++ "'): it promises the callee does not keep the closure past the call"
+
+fn local_tyvar_msg(name: String) -> String =
+  "`local` cannot be used on a type variable (parameter '" ++ name ++ "'): the promise is that the callee does not keep this parameter past the call, which cannot be held when the type is not known to be a function — a value of unknown type can be returned"
+
+# A borrow lasts the whole call, and arguments are evaluated before the callee
+# runs the closure, so a consume in a sibling argument would release it first.
+fn lent_consumed_msg(name: String) -> String =
+  "'" ++ name ++ "' is lent to a `local` closure for the whole call and cannot be consumed in another argument of it"
+
 fn once_reuse_msg(name: String) -> String =
   "`once` parameter '" ++ name ++ "' is used more than once: declaring it `once` promises callers this function invokes it AT MOST once, and that promise is what licenses them to move a linear value into the closure they pass"
 
 fn once_borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure"
+  "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure; or, if the callee does not keep this closure past the call, also declare that parameter `local`"
 
 # The lambda restriction M4.4b did NOT lift — a CONSUMING linear parameter. It
 # names `borrowing` so the wall has a door in it: an author whose lambda only
@@ -487,7 +502,7 @@ fn owned_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
 
 fn borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead"
+  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee does not keep this closure past the call, declare that parameter `local`"
 
 # A comprehension elaborates to a fold over lambdas the user never wrote
 # (infer.build_comp_fold), so the two messages above misdescribe it three ways:
@@ -728,27 +743,45 @@ fn lin_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
   match lin_consumed(callee, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk cc cb ->
-      lin_call_args(drop_leading_dicts(args), typed_ast.typed_expr_type(callee), cc, cb, sc, env)
+      lin_call_args(drop_leading_dicts(args), typed_ast.typed_expr_type(callee), cc, cb, Nil, sc, env)
 
 # Arguments fold left-to-right (spec-v0.md §6.1), so `seq2` sees them in real
 # evaluation order and the borrow-after-consume rule is exact rather than
 # approximate.
+#
+# `lent` is what the lambdas at `local` slots so far borrow. That borrow lasts the
+# whole call, so a LATER argument may not consume it; seq2 cannot see that order
+# (borrow, then consume is the normal session shape), and the reverse order is
+# seq2's use-after-consume.
 fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
-                 ac: List LinUse, ab: List LinUse,
+                 ac: List LinUse, ab: List LinUse, lent: List LinUse,
                  sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match args with
   | Nil -> LinOk(ac, ab)
   | Cons a rest ->
       match lin_arg(a, spine_own(spine), sc, env) with
       | LinErr p m -> LinErr(p, m)
-      | LinOk c b -> lin_call_args_rest(rest, spine, ac, ab, c, b, sc, env)
+      | LinOk c b -> lin_call_args_rest(a, rest, spine, ac, ab, lent, c, b, sc, env)
 
-fn lin_call_args_rest(rest: List typed_ast.TypedExpr, spine: types.Type,
-                      ac: List LinUse, ab: List LinUse, c: List LinUse, b: List LinUse,
+fn lin_call_args_rest(a: typed_ast.TypedExpr, rest: List typed_ast.TypedExpr, spine: types.Type,
+                      ac: List LinUse, ab: List LinUse, lent: List LinUse,
+                      c: List LinUse, b: List LinUse,
                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match seq2(ac, ab, c, b) with
-  | LinErr p m -> LinErr(p, m)
-  | LinOk nc nb -> lin_call_args(rest, spine_rest(spine), nc, nb, sc, env)
+  match first_shared(c, lent) with
+  | Just u -> LinErr(luse_pos(u), lent_consumed_msg(luse_name(u)))
+  | Nothing ->
+      match seq2(ac, ab, c, b) with
+      | LinErr p m -> LinErr(p, m)
+      | LinOk nc nb ->
+          lin_call_args(rest, spine_rest(spine), nc, nb,
+                        list_append(lent_by_arg(a, spine_own(spine), b), lent), sc, env)
+
+# Only a literal lambda at a `local` slot lends: its borrowed captures are the
+# lent set. Any other argument's borrows are over when it returns.
+fn lent_by_arg(a: typed_ast.TypedExpr, own: types.Ownership, borrows: List LinUse) -> List LinUse =
+  match a with
+  | typed_ast.TLambda _ _ _ _ -> if types.own_is_local(own) then borrows else Nil
+  | _ -> Nil
 
 # One argument, dispatched on how the callee's type says that parameter is
 # received. At a `borrowing` position a LINEAR argument must be a bare variable: a
@@ -761,6 +794,8 @@ fn lin_arg(a: typed_ast.TypedExpr, own: types.Ownership, sc: LinScope, env: Dict
   match own with
   | types.OwnBorrow -> lin_borrow_arg(a, sc, env)
   | types.OwnOnce -> lin_once_arg(a, sc, env)
+  | types.OwnOnceLocal -> lin_local_arg(a, true, sc, env)
+  | types.OwnLocal -> lin_local_arg(a, false, sc, env)
   | types.OwnConsume -> lin_consumed(a, sc, env)
 
 # M4.4a. At a `once` position the callee promises to invoke this closure at most
@@ -788,23 +823,27 @@ fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
 # cannot sensibly be illegal here.
 fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
                    p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  lin_once_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), p)
+
+# The walk a lambda gets at a `once` or `local` slot: raw consumed and borrowed
+# captures, for the slot's own rule to judge. Owned linear parameters are
+# rejected here.
+fn lin_slot_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
+                   p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match first_owned_linear_param(params, lam_type, env) with
   | Just b -> LinErr(p, lambda_param_binder_msg(b, env))
   | Nothing ->
-      lin_once_lambda_body(borrowed_linear_params(params, lam_type, env), params, body, p, sc, env)
+      lin_slot_lambda_body(borrowed_linear_params(params, lam_type, env), params, body, sc, env)
 
 # The borrowing parameters are discharged first and on their own terms — not
-# consumed, then dropped from both sets — so what reaches lin_once_captures is
-# the captures alone, which is what its move rule is about.
-fn lin_once_lambda_body(borrowed: List String, params: List ast.Param,
-                        body: typed_ast.TypedExpr, p: source.SourcePos,
-                        sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  lin_once_captures(
-    borrow_params_discharged(
-      lin_consumed(body,
-        scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)), env),
-      borrowed),
-    p)
+# consumed, then dropped from both sets — so what the slot's rule sees is the
+# captures alone.
+fn lin_slot_lambda_body(borrowed: List String, params: List ast.Param,
+                        body: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  borrow_params_discharged(
+    lin_consumed(body,
+      scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)), env),
+    borrowed)
 
 # Shared by both lambda arms: a borrowing parameter may not be consumed, and once
 # that holds it is invisible to whatever rule the caller applies next.
@@ -845,6 +884,29 @@ fn lin_once_no_borrows(bc: List LinUse, bb: List LinUse, p: source.SourcePos) ->
   match bb with
   | Nil -> LinOk(bc, Nil)
   | [u | _] -> LinErr(p, once_borrow_capture_msg(luse_name(u)))
+
+# docs/local-closures-v0.md §6.1. At a `local` slot the callee does not keep the
+# closure, so a literal lambda may BORROW what it captures: the borrows become the
+# call's (the caller keeps ownership, and lin_call_args holds them for the whole
+# call). A MOVE needs `once` as well — a plain `local` closure may run many times.
+# Anything but a literal lambda captures nothing, so the ordinary walk applies.
+fn lin_local_arg(a: typed_ast.TypedExpr, moves_ok: Bool, sc: LinScope,
+                 env: Dict types.Scheme) -> LinRes =
+  match a with
+  | typed_ast.TLambda params body lam_type p ->
+      lin_local_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), moves_ok, p)
+  | _ -> lin_consumed(a, sc, env)
+
+# As lin_once_captures: a capture both borrowed and consumed is a move.
+fn lin_local_captures(res: LinRes, moves_ok: Bool, p: source.SourcePos) -> LinRes =
+  match res with
+  | LinErr ep m -> LinErr(ep, m)
+  | LinOk bc bb -> lin_local_moves(bc, luse_remove_all(list_map(luse_name, bc), bb), moves_ok, p)
+
+fn lin_local_moves(bc: List LinUse, bb: List LinUse, moves_ok: Bool, p: source.SourcePos) -> LinRes =
+  match bc with
+  | [u | _] -> if moves_ok then LinOk(bc, bb) else LinErr(p, lambda_capture_msg(luse_name(u), false))
+  | Nil -> LinOk(bc, bb)
 
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
   list_filter(\u -> ! list_member (luse_name(u), names), uses)
@@ -1450,7 +1512,7 @@ fn mode_is_written(m: ast.ParamMode) -> Bool =
 # This module is the home because it owns what a mode MEANS, and both other callers
 # can import it without a cycle.
 export fn ownership_of_param_mode(m: ast.ParamMode) -> types.Ownership =
-  types.ownership_of_mode(ast.mode_is_borrowing(m), ast.mode_is_once(m))
+  types.ownership_of_mode(ast.mode_is_borrowing(m), ast.mode_is_once(m), ast.mode_is_local(m))
 
 # True when any parameter carries a written modifier. Used to widen the M4.2
 # gate: a program with NO linear type at all must still reject a modifier on a
@@ -1523,7 +1585,7 @@ fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
   types.ownership_eq(ownership_of_param_mode(m), spine_own(class_type))
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
-  if types.ownership_is_once(inst) || types.ownership_is_once(cls)
+  if types.own_is_once(inst) || types.own_is_once(cls)
   then method_once_mismatch_msg(name)
   else method_mismatch_msg(name)
 
@@ -1569,7 +1631,8 @@ fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
   match written_mode_fault(ast.param_name(prm), param_type_expr(prm), a, env) with
   | Just bad -> Just(bad)
   | Nothing ->
-      if ast.mode_is_once(ast.param_mode_of(prm)) then bad_once_here(prm, ret_te, a, rest, b, env)
+      if ast.mode_is_local(ast.param_mode_of(prm)) then bad_local_here(prm, ret_te, a, rest, b, env)
+      else if ast.mode_is_once(ast.param_mode_of(prm)) then bad_once_here(prm, ret_te, a, rest, b, env)
       else if ! mode_is_written (ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
       else if type_is_tyvar(a) then Just(BadOnTyvar(ast.param_name(prm)))
       else if ! type_is_linear (a, env) then Just(BadNonLinear(ast.param_name(prm)))
@@ -1637,7 +1700,11 @@ fn written_mode_fault_list(name: String, tes: List ast.TypeExpr, ts: List types.
 # only one that says nothing the author wrote, so it is the only one skipped.
 fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
                        env: Dict types.Scheme) -> Maybe BadModifier =
-  if ast.mode_is_once(mode) then
+  if ast.mode_is_local(mode) then
+    if type_is_tyvar(a) then Just(BadLocalOnTyvar(name))
+    else if ! type_is_func (a) then Just(BadLocalNonFunction(name))
+    else Nothing
+  else if ast.mode_is_once(mode) then
     if type_is_tyvar(a) then Just(BadOnceOnTyvar(name))
     else if ! type_is_func (a) then Just(BadOnceNonFunction(name))
     else Nothing
@@ -1665,6 +1732,15 @@ fn bad_once_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
   if type_is_tyvar(a) then Just(BadOnceOnTyvar(ast.param_name(prm)))
   else if type_is_func(a) then first_bad_modifier(rest, ret_te, b, env)
   else Just(BadOnceNonFunction(ast.param_name(prm)))
+
+# `local` (and `once local`) follows the `once` rule, for the same reason: the
+# promise needs a parameter the callee can be held not to keep.
+fn bad_local_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
+                  rest: List ast.Param, b: types.Type,
+                  env: Dict types.Scheme) -> Maybe BadModifier =
+  if type_is_tyvar(a) then Just(BadLocalOnTyvar(ast.param_name(prm)))
+  else if type_is_func(a) then first_bad_modifier(rest, ret_te, b, env)
+  else Just(BadLocalNonFunction(ast.param_name(prm)))
 
 fn type_is_tyvar(t: types.Type) -> Bool =
   match t with
@@ -1749,7 +1825,7 @@ export fn check_fn_linear(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
   | Nothing ->
       linear_result(owned_param_binders(params, fn_type, env),
                     borrowed_param_names(params, fn_type, env),
-                    once_param_names(params), body, fn_pos, env)
+                    once_param_names(params), local_param_names(params), body, fn_pos, env)
 
 # The parameters declared `once`. Selected by MODE alone, not by type: `once` is
 # already restricted to a function-typed parameter by first_bad_modifier, and the
@@ -1762,6 +1838,15 @@ fn once_param_names(params: List ast.Param) -> List String =
       linear_param_cons(ast.mode_is_once(ast.param_mode_of(prm)), ast.param_name(prm),
                         once_param_names(rest))
 
+# The parameters declared `local` (including `once local`). By mode alone, like
+# once_param_names.
+fn local_param_names(params: List ast.Param) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      linear_param_cons(ast.mode_is_local(ast.param_mode_of(prm)), ast.param_name(prm),
+                        local_param_names(rest))
+
 # Check a body with no parameters (a top-level `let` declaration): there are no
 # linear params to leak, but do-`let`/pattern/lambda binders inside are still
 # enforced by the walk.
@@ -1771,13 +1856,15 @@ export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -
   | LinOk _ _ -> LinPass
 
 fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List String,
-                 body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
+                 local_names: List String, body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                  env: Dict types.Scheme) -> LinCheck =
   match lin_consumed(body, LinScope(binder_names(owned), borrowed, Nil), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk consumed _ ->
-      once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
-                         once_names, body, env)
+      local_honesty_after(
+        once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
+                           once_names, body, env),
+        local_names, body)
 
 # CALLEE-SIDE HONESTY (post-review). `once` is a promise the callee makes, and the
 # caller's whole licence to move a linear value into the closure rests on it — so
@@ -1813,6 +1900,161 @@ fn once_honesty(names: List String, body: typed_ast.TypedExpr,
       match lin_consumed(body, LinScope([n], Nil, [n]), env) with
       | LinErr p _ -> LinFail(p, once_reuse_msg(n))
       | LinOk _ _ -> once_honesty(rest, body, env)
+
+# CALLEE-SIDE ESCAPE CHECK (docs/local-closures-v0.md §6.3). A `local` parameter
+# is the callee's promise not to keep the closure, and a caller lends borrowed
+# values to it on that strength. Not lin_consumed: that records `p(x)`, `return p`
+# and `Cons(p, ..)` as the same use, and this check must tell them apart.
+#
+# `p` may be CALLED, passed at another `local` slot, or free inside a literal
+# lambda at such a slot (walked by these same rules, so a bare `p` as its result
+# is still an escape). Any other occurrence is an escape. Aliasing is not tracked:
+# `let q = p` is itself an escape. A binder named `p` stops the tracking.
+fn local_honesty_after(prior: LinCheck, local_names: List String,
+                       body: typed_ast.TypedExpr) -> LinCheck =
+  match prior with
+  | LinFail p m -> LinFail(p, m)
+  | LinPass -> local_honesty(local_names, body)
+
+fn local_honesty(names: List String, body: typed_ast.TypedExpr) -> LinCheck =
+  match names with
+  | Nil -> LinPass
+  | Cons n rest -> esc_then(esc_value(n, body, InCall), rest, body)
+
+fn esc_then(r: LinCheck, rest: List String, body: typed_ast.TypedExpr) -> LinCheck =
+  match r with
+  | LinFail q m -> LinFail(q, m)
+  | LinPass -> local_honesty(rest, body)
+
+# Where an expression sits relative to the call: inside it (the closure is still
+# in the callee's hands), or inside a closure that could run after it returns.
+type EscScope (..) =
+  | InCall
+  | InKeptClosure
+
+fn esc_reason(sc: EscScope) -> String =
+  match sc with
+  | InCall -> "returned or stored"
+  | InKeptClosure -> "captured by a closure that may outlive the call"
+
+fn esc_fail(p: String, reason: String, at: source.SourcePos) -> LinCheck =
+  LinFail(at, "`local` parameter '" ++ p ++ "' may outlive the call: " ++ reason
+             ++ ". Declaring it `local` promises callers it does not, and that promise is what lets them lend it borrowed values")
+
+# `e` sits in a VALUE position, where a bare `p` is kept. Every constructor is
+# named: a new one must decide here whether it can hold a closure.
+fn esc_value(p: String, e: typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
+  match e with
+  | typed_ast.TVar name _ at -> if name == p then esc_fail(p, esc_reason(sc), at) else LinPass
+  | typed_ast.TInt _ _ _ -> LinPass
+  | typed_ast.TFloat _ _ _ -> LinPass
+  | typed_ast.TBool _ _ _ -> LinPass
+  | typed_ast.TString _ _ _ -> LinPass
+  | typed_ast.TChar _ _ _ -> LinPass
+  | typed_ast.TUnit _ _ -> LinPass
+  | typed_ast.TDict _ _ _ _ -> LinPass
+  | typed_ast.TMethodRef _ _ _ _ _ -> LinPass
+  | typed_ast.TGetField base _ _ _ -> esc_value(p, base, sc)
+  | typed_ast.TUnary _ inner _ _ -> esc_value(p, inner, sc)
+  | typed_ast.TTuple items _ _ -> esc_all(p, items, sc)
+  | typed_ast.TBinary _ l r _ _ -> esc_all(p, Cons(l, Cons(r, Nil)), sc)
+  | typed_ast.TRange lo hi _ _ -> esc_all(p, Cons(lo, Cons(hi, Nil)), sc)
+  | typed_ast.TRecord _ fields _ _ -> esc_all(p, list_map(typed_ast.field_value, fields), sc)
+  | typed_ast.TRecordUpdate base fields _ _ ->
+      esc_all(p, Cons(base, list_map(typed_ast.field_value, fields)), sc)
+  | typed_ast.TIf c a b _ _ -> esc_all(p, Cons(c, Cons(a, Cons(b, Nil))), sc)
+  | typed_ast.TMatch scrut arms _ _ -> esc_after(esc_value(p, scrut, sc), esc_arms(p, arms, sc))
+  | typed_ast.TCall callee args _ _ -> esc_call(p, callee, args, sc)
+  | typed_ast.TDo steps _ _ -> esc_do(p, steps, sc)
+  | typed_ast.TLambda params body _ _ -> esc_lambda(p, params, body)
+
+fn esc_all(p: String, es: List typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
+  match es with
+  | Nil -> LinPass
+  | Cons e rest -> esc_after(esc_value(p, e, sc), esc_all(p, rest, sc))
+
+# `next` is evaluated eagerly, so this is only for a cheap second walk; the
+# sequences below that can be long match on the result instead.
+fn esc_after(first: LinCheck, next: LinCheck) -> LinCheck =
+  match first with
+  | LinFail q m -> LinFail(q, m)
+  | LinPass -> next
+
+fn esc_arms(p: String, arms: List typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
+  match arms with
+  | Nil -> LinPass
+  | Cons br rest -> esc_after(esc_arm(p, br, sc), esc_arms(p, rest, sc))
+
+fn esc_arm(p: String, br: typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
+  match br with
+  | typed_ast.TypedMatchBranch pat body ->
+      if list_member(p, ast.pattern_names(pat)) then LinPass else esc_value(p, body, sc)
+
+# A lambda in value position may be kept: any free `p` in it is captured by a
+# closure that may outlive the call. A lambda at a `local` slot never gets here
+# (esc_local_arg).
+fn esc_lambda(p: String, params: List ast.Param, body: typed_ast.TypedExpr) -> LinCheck =
+  if list_member(p, ast.param_names(params)) then LinPass
+  else esc_value(p, body, InKeptClosure)
+
+# Inside a kept closure every mention is an escape, so the call needs no slot
+# analysis; inside the call, the slots decide.
+fn esc_call(p: String, callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
+            sc: EscScope) -> LinCheck =
+  match sc with
+  | InKeptClosure -> esc_all(p, Cons(callee, args), sc)
+  | InCall ->
+      esc_after(esc_callee(p, callee),
+                esc_args(p, drop_leading_dicts(args), typed_ast.typed_expr_type(callee)))
+
+# Calling `p`, or any other variable, keeps nothing.
+fn esc_callee(p: String, callee: typed_ast.TypedExpr) -> LinCheck =
+  match callee with
+  | typed_ast.TVar _ _ _ -> LinPass
+  | _ -> esc_value(p, callee, InCall)
+
+fn esc_args(p: String, args: List typed_ast.TypedExpr, spine: types.Type) -> LinCheck =
+  match args with
+  | Nil -> LinPass
+  | Cons a rest ->
+      match esc_arg(p, a, spine_own(spine)) with
+      | LinFail q m -> LinFail(q, m)
+      | LinPass -> esc_args(p, rest, spine_rest(spine))
+
+fn esc_arg(p: String, a: typed_ast.TypedExpr, own: types.Ownership) -> LinCheck =
+  if types.own_is_local(own) then esc_local_arg(p, a) else esc_plain_arg(p, a)
+
+# At a `local` slot: `p` itself is fine, and so is a literal lambda, whose body is
+# walked by the same rules.
+fn esc_local_arg(p: String, a: typed_ast.TypedExpr) -> LinCheck =
+  match a with
+  | typed_ast.TVar _ _ _ -> LinPass
+  | typed_ast.TLambda params body _ _ ->
+      if list_member(p, ast.param_names(params)) then LinPass else esc_value(p, body, InCall)
+  | _ -> esc_value(p, a, InCall)
+
+fn esc_plain_arg(p: String, a: typed_ast.TypedExpr) -> LinCheck =
+  match a with
+  | typed_ast.TVar name _ at ->
+      if name == p then esc_fail(p, "passed to a non-local parameter", at) else LinPass
+  | _ -> esc_value(p, a, InCall)
+
+fn esc_do(p: String, steps: List typed_ast.TypedDoStep, sc: EscScope) -> LinCheck =
+  match steps with
+  | Nil -> LinPass
+  | Cons step rest ->
+      match step with
+      | typed_ast.TDoLetStep name rhs -> esc_do_rest(esc_value(p, rhs, sc), name == p, p, rest, sc)
+      | typed_ast.TDoExprStep e -> esc_do_rest(esc_value(p, e, sc), false, p, rest, sc)
+      | typed_ast.TDoBindStep pat e _ ->
+          esc_do_rest(esc_value(p, e, sc), list_member(p, ast.pattern_names(pat)), p, rest, sc)
+
+# A binder named `p` shadows it for the rest of the block.
+fn esc_do_rest(r: LinCheck, shadows: Bool, p: String, rest: List typed_ast.TypedDoStep,
+               sc: EscScope) -> LinCheck =
+  match r with
+  | LinFail q m -> LinFail(q, m)
+  | LinPass -> if shadows then LinPass else esc_do(p, rest, sc)
 
 # Two opposite obligations. An OWNED linear parameter must appear in the consumed
 # set (else it leaked). A BORROWED one must NOT: consuming it spends a use that

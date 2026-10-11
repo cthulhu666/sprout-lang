@@ -1,0 +1,10 @@
+module main
+
+# The lambda at a `local` slot is itself fine, but its RESULT is `p`, which
+# `id_thunk` hands straight back: the parameter escapes through the result.
+
+fn id_thunk(f: local Unit -> Unit -> Int) -> Unit -> Int = f(())
+
+fn leak(p: local Unit -> Int) -> Unit -> Int = id_thunk(\_ -> p)
+
+fn main() -> Unit !{IO} = print(to_string(leak(\_ -> 1)(())))

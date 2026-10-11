@@ -1,0 +1,10 @@
+module main
+
+# A lambda at an ordinary slot may outlive the call, so it cannot capture a
+# `local` parameter.
+
+fn run_plain(work: Unit -> Int) -> Int = work(())
+
+fn relay(work: local Unit -> Int) -> Int = run_plain(\_ -> work(()))
+
+fn main() -> Unit !{IO} = print(to_string(relay(\_ -> 1)))
