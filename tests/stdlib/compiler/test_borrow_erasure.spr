@@ -76,6 +76,31 @@ let once_absent_src =
   "fn zero(u: Unit) -> Int = 0\n" ++
   "fn main() -> Int !{IO} = run_once(zero) + release(File(42))\n"
 
+# `local` (docs/local-closures-v0.md): the same one-token comparison. The
+# helper names avoid the substring "local" so that the absence check below
+# cannot be satisfied by a symbol name.
+let local_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn peek(f: borrowing File) -> Int = 1\n" ++
+  "fn handoff(work: local Unit -> Int) -> Int = work(())\n" ++
+  "fn lend(f: File) -> Int = handoff(\\_ -> peek(f)) + release(f)\n" ++
+  "fn main() -> Int !{IO} = lend(File(42))\n"
+
+let local_plain_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn handoff(work: local Unit -> Int) -> Int = work(())\n" ++
+  "fn zero(u: Unit) -> Int = 0\n" ++
+  "fn main() -> Int !{IO} = handoff(zero) + release(File(42))\n"
+
+let local_absent_src =
+  "type linear File = File Int\n" ++
+  "fn release(f: consuming File) -> Int = match f with | File n -> n\n" ++
+  "fn handoff(work: Unit -> Int) -> Int = work(())\n" ++
+  "fn zero(u: Unit) -> Int = 0\n" ++
+  "fn main() -> Int !{IO} = handoff(zero) + release(File(42))\n"
+
 # Exercises a real borrow: `peek` borrows, `release` consumes.
 let borrowing_src =
   "type linear File = File Int\n" ++
@@ -110,6 +135,12 @@ fn main() -> Unit !{IO} =
           let once_path = "/tmp/sprout_test_borrow_erasure_once.sprout"
           let once_plain_path = "/tmp/sprout_test_borrow_erasure_once_plain.sprout"
           let once_absent_path = "/tmp/sprout_test_borrow_erasure_once_absent.sprout"
+          let local_path = "/tmp/sprout_test_borrow_erasure_local.sprout"
+          let local_plain_path = "/tmp/sprout_test_borrow_erasure_local_plain.sprout"
+          let local_absent_path = "/tmp/sprout_test_borrow_erasure_local_absent.sprout"
+          fs.write_text(local_path, local_src)
+          fs.write_text(local_plain_path, local_plain_src)
+          fs.write_text(local_absent_path, local_absent_src)
           fs.write_text(unmod_path, unmodified_src)
           fs.write_text(consuming_path, consuming_src)
           fs.write_text(borrowing_path, borrowing_src)
@@ -123,6 +154,9 @@ fn main() -> Unit !{IO} =
           r_once <- compiler.compile_full_ir(source.FilePath(once_path), source.StdlibRoot(stdlib_root))
           r_once_plain <- compiler.compile_full_ir(source.FilePath(once_plain_path), source.StdlibRoot(stdlib_root))
           r_once_absent <- compiler.compile_full_ir(source.FilePath(once_absent_path), source.StdlibRoot(stdlib_root))
+          r_local <- compiler.compile_full_ir(source.FilePath(local_path), source.StdlibRoot(stdlib_root))
+          r_local_plain <- compiler.compile_full_ir(source.FilePath(local_plain_path), source.StdlibRoot(stdlib_root))
+          r_local_absent <- compiler.compile_full_ir(source.FilePath(local_absent_path), source.StdlibRoot(stdlib_root))
 
           assert_true(state, "unmodified linear param compiles", ir_ok(r_unmod))
           assert_true(state, "consuming linear param compiles", ir_ok(r_consuming))
@@ -164,5 +198,12 @@ fn main() -> Unit !{IO} =
             ir_text(r_once_plain) == ir_text(r_once_absent))
           assert_false(state, "no 'once' token survives into IR",
             contains(ir_text(r_once), "once"))
+
+          # `local` erasure: one token of source, zero bytes of IR.
+          assert_true(state, "a borrow lent to a local closure compiles", ir_ok(r_local))
+          assert_true(state, "local emits byte-identical IR to an unannotated parameter",
+            ir_text(r_local_plain) == ir_text(r_local_absent))
+          assert_false(state, "no 'local' token survives into IR",
+            contains(ir_text(r_local), "local"))
 
     summary(state)

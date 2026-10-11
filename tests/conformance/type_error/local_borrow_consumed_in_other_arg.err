@@ -1,0 +1,1 @@
+'c' is lent to a `local` closure for the whole call and cannot be consumed in another argument of it

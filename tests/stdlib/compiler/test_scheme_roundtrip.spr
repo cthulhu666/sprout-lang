@@ -245,4 +245,14 @@ fn main() -> Unit !{IO} =
               iface_codec.decode_scheme("(Scheme () () (TFunc (TConst Int) (TConst Int) (EffectPure) borrow) (EffectPure) ())"),
               Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnBorrow))))
 
+    assert_eq(state, "tfunc local ownership round-trips",
+              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnLocal))),
+              Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnLocal))))
+    assert_eq(state, "tfunc once-local ownership round-trips",
+              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnOnceLocal))),
+              Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnOnceLocal))))
+    assert_eq(state, "tfunc once ownership round-trips",
+              roundtrip(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnOnce))),
+              Just(types.mono(types.TFunc(types.TConst(types.type_id("Int")), types.TConst(types.type_id("Int")), types.EffectPure, types.OwnOnce))))
+
     summary(state)

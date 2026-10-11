@@ -84,6 +84,30 @@ fn after_recv(log: Ref String) -> Int !{IO} =
     ref_write(log, string.concat(ref_read(log), "!"))
     77
 
+# with_timeout's body is a `local` closure: it may borrow a value the caller holds, and the caller
+# releases that value afterwards on Completed and Expired alike (docs/local-closures-v0.md).
+type linear Token = Token Int
+
+fn read_token(t: borrowing Token) -> Int =
+  match t with
+  | Token n -> n
+
+fn spend(t: consuming Token) -> Int =
+  match t with
+  | Token n -> n
+
+fn lend_completed(t: borrowing Token) -> task.TimeoutResult Int !{IO} =
+  task.with_timeout(10000, \_ -> read_token(t))
+
+fn read_token_late(t: borrowing Token, log: Ref String) -> Int !{IO} =
+  do
+    task.task_sleep(2000)
+    ref_write(log, string.concat(ref_read(log), "!"))
+    read_token(t)
+
+fn lend_expired(t: borrowing Token, log: Ref String) -> task.TimeoutResult Int !{IO} =
+  task.with_timeout(20, \_ -> read_token_late(t, log))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -121,6 +145,19 @@ fn main() -> Unit !{IO} =
     let r6 = select_timeout(slog)
     assert_true(state, "select-parked body times out", is_expired(r6))
     assert_eq(state, "select-parked body dropped before its side effect", ref_read(slog), "")
+    # 7. the body borrows a token the caller holds; the caller spends it after Completed.
+    let t7 = Token(5)
+    let r7 = lend_completed(t7)
+    assert_true(state, "borrowed token read inside body (Completed)", is_completed(r7, 5))
+    assert_eq(state, "token still owned by caller after Completed", spend(t7), 5)
+    # 8. the body would read the borrowed token after the deadline; it is dropped, Expired is
+    #    returned and the caller still owns (and spends) the token.
+    t8log <- ref_new("")
+    let t8 = Token(6)
+    let r8 = lend_expired(t8, t8log)
+    assert_true(state, "borrowed-token body times out", is_expired(r8))
+    assert_eq(state, "expired body never touched the token", ref_read(t8log), "")
+    assert_eq(state, "token still owned by caller after Expired", spend(t8), 6)
     summary(state)
 
 # The channel must outlive the with_timeout call, so it belongs to an enclosing scope — the body

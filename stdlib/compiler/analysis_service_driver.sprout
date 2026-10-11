@@ -320,7 +320,9 @@ fn te_arg_to_string(te: ast.TypeExpr) -> String =
 # syntax that produced it: `(borrowing File) -> Int`.
 fn te_arrow_param(l: ast.TypeExpr, mode: ast.ParamMode) -> String =
   if ast.mode_is_borrowing(mode) then "(borrowing " ++ te_to_string(l) ++ ")"
+  else if ast.mode_is_once(mode) && ast.mode_is_local(mode) then "(once local " ++ te_to_string(l) ++ ")"
   else if ast.mode_is_once(mode) then "(once " ++ te_to_string(l) ++ ")"
+  else if ast.mode_is_local(mode) then "(local " ++ te_to_string(l) ++ ")"
   else te_arrow_left(l)
 
 fn te_arrow_left(l: ast.TypeExpr) -> String =

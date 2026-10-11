@@ -91,37 +91,60 @@ export type ParamMode (..) =
   | ModeBorrowing  # `borrowing` — a non-consuming use; the caller keeps the obligation
   | ModeConsuming  # `consuming` — explicit spelling of the default, documents the API
   | ModeOnce  # `once` — the callee invokes this closure AT MOST ONCE (M4.4a)
+  | ModeLocal  # `local` — the callee does not keep this closure past the call
+  | ModeOnceLocal  # `once local` — both promises
 
 export type Param (..) =
   | Param String (Maybe TypeExpr) ParamMode
 
-# The distinctions that survive into the TYPE: `types.Ownership` is three-valued
-# (M4.4a), collapsing only ModeDefault and ModeConsuming, which are the same
-# ownership. Both predicates return Bool so `ast` need not depend on `types` —
+# The distinctions that survive into the TYPE: `types.Ownership` has five cases,
+# collapsing only ModeDefault and ModeConsuming, which are the same
+# ownership. The predicates return Bool so `ast` need not depend on `types` —
 # neither module imports the other — and the consumer pairs them with
 # `types.ownership_of_mode`.
 export fn mode_is_borrowing(m: ParamMode) -> Bool =
   match m with
   | ModeBorrowing -> true
-  | _ -> false
+  | ModeDefault -> false
+  | ModeConsuming -> false
+  | ModeOnce -> false
+  | ModeLocal -> false
+  | ModeOnceLocal -> false
 
 # `once` is orthogonal to borrow-vs-consume: it bounds how often the callee may
 # INVOKE the parameter, not how the parameter is taken. It shares the modifier
 # slot (and hence `Ownership`) because no parameter needs both — a one-shot
-# closure is passed by value like any other consuming argument.
+# closure is passed by value. `local` shares it too, combined as `once local`.
 export fn mode_is_once(m: ParamMode) -> Bool =
   match m with
   | ModeOnce -> true
-  | _ -> false
+  | ModeOnceLocal -> true
+  | ModeDefault -> false
+  | ModeBorrowing -> false
+  | ModeConsuming -> false
+  | ModeLocal -> false
+
+# `local` (docs/local-closures-v0.md): the closure does not outlive the call.
+# True for `once local` too, as `mode_is_once` is.
+export fn mode_is_local(m: ParamMode) -> Bool =
+  match m with
+  | ModeLocal -> true
+  | ModeOnceLocal -> true
+  | ModeDefault -> false
+  | ModeBorrowing -> false
+  | ModeConsuming -> false
+  | ModeOnce -> false
 
 # The way back, for a TypeExpr rebuilt from a resolved type (an eta wrapper's
-# annotation, a constraint key). Takes the same Bool pair the predicates above
-# return — `types.ownership_is_borrow`/`ownership_is_once` supply them — so the
-# two modules still need not know each other. ModeConsuming, not ModeDefault:
-# the two are the same ownership and only one of them survives a round trip.
-export fn mode_of_flags(is_borrow: Bool, is_once: Bool) -> ParamMode =
+# annotation, a constraint key). Takes the same Bools the predicates above return —
+# `types.ownership_is_borrow`/`own_is_once`/`own_is_local` supply them — so the two
+# modules still need not know each other. ModeConsuming, not ModeDefault: the two
+# are the same ownership and only one of them survives a round trip.
+export fn mode_of_flags(is_borrow: Bool, is_once: Bool, is_local: Bool) -> ParamMode =
   if is_borrow then ModeBorrowing
+  else if is_once && is_local then ModeOnceLocal
   else if is_once then ModeOnce
+  else if is_local then ModeLocal
   else ModeConsuming
 
 export fn param_mode_of(p: Param) -> ParamMode =

@@ -1772,7 +1772,9 @@ close(conn)                    # the single consuming use
   constrains a different thing: not how the parameter is taken, but how often the
   callee may invoke it.
 
-All three are **contextual keywords**: `borrowing`, `consuming` and `once` remain
+- `local` — see **Non-escaping closure parameters** below.
+
+All four are **contextual keywords**: `borrowing`, `consuming`, `once` and `local` remain
 ordinary identifiers everywhere else, including as type names (`x: borrowing` is
 the type named `borrowing`, since no type follows the word).
 
@@ -1936,15 +1938,44 @@ task_spawn(scope, \_ -> handle(conn))   # conn is MOVED into the closure
   reuse detection apply unchanged within it. Reading the moved value before
   consuming it inside the same closure is a normal borrow-then-consume and is
   allowed — `\_ -> do { write(c, x); close(c) }` is the intended shape.
-- A value the closure only **borrows** — reads without consuming — may still not
-  be captured, at a `once` parameter or anywhere else. The closure may run after
-  the owner has consumed the value, and Sprout has no escaping/non-escaping or
-  lifetime distinction to rule that out.
+- A value the closure only **borrows** — reads without consuming — may not be
+  captured at a `once` parameter alone: the closure may run after the owner has
+  consumed the value. Declaring the parameter `local` (below) supplies the
+  missing non-escaping promise.
 - A **consuming** linear lambda parameter is still rejected: `once` bounds how
   often the closure runs, not what may be handed to it on each run. A
   **borrowing** one is accepted, here as at any other position (§5.8).
 - `once` is **erased**, like the ownership modifiers, and is part of the function
   type, so it is compared invariantly at unification.
+
+**Non-escaping closure parameters (`local`).** A parameter may be declared
+`local`, alone or as `once local`; the mode is function-typed only:
+
+```
+export fn with_timeout(ms: Int, body: local Unit -> a !{IO}) -> TimeoutResult a !{IO} = …
+export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
+```
+
+- **Callee promise, checked.** The closure does not outlive the call. In the
+  callee the parameter may only be called, passed at another `local` (or
+  `once local`) position, or captured by a lambda that itself sits at a `local`
+  position, whose result then counts as returned. Returning it, storing it,
+  binding it with `let`, passing it at an ordinary position or capturing it in
+  an ordinary lambda is an error. The closure may be called any number of times
+  unless it is also `once`.
+- **Caller licence.** A lambda at a `local` position may capture **borrowed**
+  values: a `borrowing` parameter, or an owned linear binding it only reads. The
+  borrow lasts for the whole call, so the value may not be consumed by another
+  argument of that call. Moves into the closure are accepted only at
+  `once local`, as at `once`; at plain `local` the closure may run many times.
+- **Restrictions.** `local` is rejected on a non-function parameter and on a
+  type-variable parameter, for the reason given for `once`. It is never accepted
+  on a lambda's own parameter and never inferred onto one, because the callee
+  check runs only over declared functions.
+- `local` is **erased** and is part of the function type, so it is compared
+  invariantly at unification.
+- An `extern fn`'s modes cannot be checked and are trusted; the one extern that
+  carries `local` is private to `stdlib.task`. See `docs/local-closures-v0.md`.
 
 **At most once, not exactly once.** The type system bounds invocations from above
 only — matching Rust's `FnOnce` and OxCaml's `once`, both of which are also
@@ -1959,15 +1990,18 @@ released — while the program still type-checks as consume-exactly-once clean.
 Sprout has no destructors, so closing this requires cancellation-time resource
 release in the scheduler rather than a typing rule. Until it exists, do not move a
 linear resource into a task in a scope that may be cancelled or timed out: acquire
-it inside the task instead.
+it inside the task instead. For `with_timeout`, lend instead of move: its body is
+a `local` closure, so the caller keeps the value and releases it after either
+outcome.
 
 **Deferred (rejected with a diagnostic, never silently accepted):**
 
 - Higher-order linearity beyond the `once` case — a linear binding captured by a
   lambda at an **unannotated** parameter, and **consuming** linear lambda
   parameters, are not yet supported, nor is capturing a **borrowed** value
-  anywhere. This is why the combinator form (`list_each(xs, \x -> write(conn, x))`)
-  is still out of reach. Two shapes are no longer: the spawn-a-handler server, a
+  at a parameter that is not `local`. This is why the combinator form
+  (`list_each(xs, \x -> write(conn, x))`) is still out of reach: the prelude
+  combinators do not take `local` yet. Two shapes are no longer: the spawn-a-handler server, a
   move into a one-shot closure, so `stdlib.http_server` runs on the linear socket
   API throughout; and the with-resource combinator, whose work function takes the
   resource `borrowing` (§5.8).

@@ -1,0 +1,90 @@
+import stdlib.test (check_eq, run_suite)
+
+# A `local` parameter promises the callee does not keep the closure past the call
+# (docs/local-closures-v0.md), which licenses the caller to LEND borrowed values
+# to the lambda it passes. `once local` adds the move licence of `once`.
+#
+# Rejection counterparts: tests/conformance/type_error/{local_param_*,
+# local_capture_moved_not_once,local_borrow_consumed_in_other_arg,
+# borrow_capture_at_ordinary_slot}.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn peek(f: borrowing File) -> Int = 7
+
+fn drop_file(f: consuming File) -> Int = match f with | File _ -> 0
+
+# Runs `use` on a fresh file the caller then releases: a borrowing function
+# cannot be handed a freshly-built linear value directly.
+fn on_file(n: Int, use: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = use(f)
+    r + drop_file(f)
+
+fn run_local(work: local Unit -> Int) -> Int = work(())
+
+fn run_twice(work: local Unit -> Int) -> Int = work(()) + work(())
+
+fn run_once_local(work: once local Unit -> Int) -> Int = work(())
+
+# --- 1. a borrowed capture at a `local` slot ---------------------------------
+fn probe(c: borrowing File) -> Int = run_local(\_ -> peek(c))
+
+# An owned binding the lambda only reads, released after the call.
+fn lend_owned(f: File) -> Int =
+  do
+    let a = run_local(\_ -> peek(f))
+    a + release(f)
+
+# --- 2. a `local` closure may run many times ---------------------------------
+fn probe_twice(c: borrowing File) -> Int = run_twice(\_ -> peek(c))
+
+# --- 3. `once local`: a move AND a borrow ------------------------------------
+fn move_and_borrow(a: File, b: borrowing File) -> Int =
+  run_once_local(\_ -> peek(b) + release(a))
+
+fn move_and_borrow_owned(x: Int, y: Int) -> Int =
+  do
+    let b = File(y)
+    let r = move_and_borrow(File(x), b)
+    r + drop_file(b)
+
+# --- 4. a `local` parameter forwarded to another `local` slot ----------------
+fn forward(w: local Unit -> Int) -> Int = run_local(w)
+
+fn probe_forwarded(c: borrowing File) -> Int = forward(\_ -> peek(c))
+
+# --- 5. captured by a lambda at a `local` slot, and called there --------------
+fn relay(w: local Unit -> Int) -> Int = run_local(\_ -> w(()) + 1)
+
+fn probe_relayed(c: borrowing File) -> Int = relay(\_ -> peek(c))
+
+# --- 6. `local` position after a leading argument, and a branchy callee -------
+fn run_if(go: Bool, work: local Unit -> Int) -> Int = if go then work(()) else 0
+
+fn probe_second(c: borrowing File) -> Int = run_if(true, \_ -> peek(c))
+
+# --- 7. a `local` parameter on a class method --------------------------------
+# infer prepends a TDict node to the argument list; the slot must still line up.
+class Runner a
+  fn run_it(s: a, work: local Unit -> Int) -> Int
+
+instance Runner Int
+  fn run_it(s: Int, work: local Unit -> Int) -> Int = s + work(())
+
+fn probe_method(c: borrowing File) -> Int = run_it(100, \_ -> peek(c))
+
+fn main() -> Unit !{IO} =
+  run_suite("local_closures", [
+    check_eq("borrowed parameter lent to a local closure", on_file(1, probe), 7),
+    check_eq("owned binding lent, then released", lend_owned(File(5)), 12),
+    check_eq("local closure called twice", on_file(1, probe_twice), 14),
+    check_eq("once local takes a move and a borrow", move_and_borrow_owned(3, 9), 10),
+    check_eq("local parameter forwarded to a local slot", on_file(1, probe_forwarded), 7),
+    check_eq("local parameter captured by a local lambda", on_file(1, probe_relayed), 8),
+    check_eq("local slot after a leading argument", on_file(1, probe_second), 7),
+    check_eq("local parameter on a class method", on_file(1, probe_method), 107)
+  ])

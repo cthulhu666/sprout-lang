@@ -152,7 +152,8 @@ fn bind_params(ps: List ast.Param, ss: List ast.Param, r: Ren) -> Maybe Ren =
 # them as different would stop a rebuilt annotation matching its own source.
 fn mode_equal(a: ast.ParamMode, b: ast.ParamMode) -> Bool =
   ast.mode_is_borrowing(a) == ast.mode_is_borrowing(b) &&
-  ast.mode_is_once(a) == ast.mode_is_once(b)
+  ast.mode_is_once(a) == ast.mode_is_once(b) &&
+  ast.mode_is_local(a) == ast.mode_is_local(b)
 
 fn annotation_equal(a: Maybe ast.TypeExpr, b: Maybe ast.TypeExpr) -> Bool =
   match a with

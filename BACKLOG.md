@@ -1887,9 +1887,10 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   whether a captured borrow is sound depends on whether the closure escapes and outlives the
   consume — a distinction Sprout does not have. Known-hard: Linear Haskell shipped it incomplete.
   Landed: the move-into-a-one-shot-closure slice (M4.4a), and borrowing lambda parameters (M4.4b,
-  `docs/linear-borrowing-v0.md` §20). Left: a linear value captured at an UNANNOTATED parameter
-  (the true 0..n case, `list_each(xs, \x -> write(conn, x))`, whose borrow half needs an escape
-  notion); CONSUMING linear lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
+  `docs/linear-borrowing-v0.md` §20), and the escape notion for the borrow half (`local`,
+  `docs/local-closures-v0.md`). Left: marking the prelude combinators `local` (own entry); a linear
+  value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING linear
+  lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
 - [ ] `P1` **A lambda's `once` promise is never checked, so a moved-in linear value can be released
   twice.** `once_honesty` is what makes `once` a promise rather than a decoration, and it runs from
   `check_fn_linear` over a DECLARED parameter's written mode. A lambda reaches neither, so
@@ -1960,6 +1961,16 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   never closed. A *runtime* leak on the experimental cancellation path, not a checker hole, and
   equally true of the raw `Int` handles that preceded M4.4a. Fix belongs with cancellation-time
   resource release (a drop hook on force-drop), not the type system; spec §5.8 states the limit.
+- [ ] `P2` **Mark the prelude combinators' function arguments `local`.** `local` exists
+  (`docs/local-closures-v0.md`) but no prelude function declares it, so `list_each(xs, \x ->
+  write(conn, x))` still cannot capture a borrowed `conn`. Covers `list_each`/`list_fold`/
+  `list_map` and the `vec_` family. Each one must pass the callee check (§6.3) and `Functor.map`
+  needs a decision (design §8). Touches `stdlib/prelude.sprout`, so it needs the 2-step bootstrap.
+- [ ] `P3` **Tree-cancel cascade must drop a deadline's child before its owner.** A cancel of an
+  outer scope while a task is parked in `with_timeout` aborts loudly today (`force_drop_task`
+  refuses a task with `deadline_child`). Once a cancel may drop that owner instead, it must drop
+  the child first: `with_timeout`'s `local` body may borrow a value lent from the owner's frame,
+  and a surviving child would run against a frame that is gone (`docs/local-closures-v0.md` §6.5).
 - [ ] `P3` **A linear `TcpConnection` costs an allocation and a GC root per connection; `wrap` +
   `linear` would not.** Migrating `http_server.sprout` from raw `Int` handles turned `pop_roots(1)`
   into `pop_roots(2)` in the read loop, because a connection went from an unboxed integer to a boxed

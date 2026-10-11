@@ -77,7 +77,7 @@ list comprehensions (`[e for x in xs if p]`, over `List` and `IntRange`),
 `Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`,
 existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
 sugar — trait objects / heterogeneous collections), linear types with
-`consuming`/`borrowing`/`once` parameter modes, growable `MutVec` (`mutvec_push`),
+`consuming`/`borrowing`/`once`/`local` parameter modes, growable `MutVec` (`mutvec_push`),
 green-task concurrency with channels and a recv-only `select`, and
 `#@unstable`/`#@wip`-style declaration annotations. See the design drafts below.
 

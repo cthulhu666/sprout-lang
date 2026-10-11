@@ -6216,6 +6216,32 @@ fn infer_lambda_expected(
   expected: Maybe types.Type,
   pos: source.SourcePos
 ) -> InferResult !{IO} =
+  match first_local_param(params) with
+  | Just name -> InferErr(pos, lambda_local_msg(name))
+  | Nothing -> infer_lambda_seeded(state, env, subst, eff_subst, params, body, expected, pos)
+
+# `local` is checked only on declared functions (linear_check.check_fn_linear),
+# so on a lambda's own parameter nobody would check the callee's promise.
+fn first_local_param(params: List ast.Param) -> Maybe String =
+  match params with
+  | Nil -> Nothing
+  | Cons prm rest ->
+      if ast.mode_is_local(ast.param_mode_of(prm)) then Just(ast.param_name(prm))
+      else first_local_param(rest)
+
+fn lambda_local_msg(name: String) -> String =
+  "`local` cannot be written on a lambda parameter ('" ++ name ++ "'): the promise is checked only on a declared function's parameters, so on a lambda nobody would hold the body to it"
+
+fn infer_lambda_seeded(
+  state: unifier.InferState,
+  env: Dict types.Scheme,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  params: List ast.Param,
+  body: ast.Expr,
+  expected: Maybe types.Type,
+  pos: source.SourcePos
+) -> InferResult !{IO} =
   do
     fresh_params <- fresh_vars_for(state, params)
     let param_types = seed_param_types(fresh_params, expected)
@@ -6341,9 +6367,12 @@ fn modes_from_arrow(params: List ast.Param, expected: types.Type) -> List ast.Pa
 # compiled and released a moved-in linear value twice. Borrowing carries no such
 # obligation — it is a restriction on the body, and the body is walked.
 # Regression: tests/conformance/type_error/lambda_slot_once_not_pushed_down.
+#
+# `local` is not seeded either, for the same reason: it too is checked only on a
+# declared parameter. Pinned by type_error/lambda_slot_local_not_pushed_down.
 fn mode_or_slot(written: ast.ParamMode, own: types.Ownership) -> ast.ParamMode =
   match written with
-  | ast.ModeDefault -> ast.mode_of_flags(types.ownership_is_borrow(own), false)
+  | ast.ModeDefault -> ast.mode_of_flags(types.ownership_is_borrow(own), false, false)
   | _ -> written
 
 fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
@@ -8928,7 +8957,8 @@ fn written_type_expr(t: types.Type) -> ast.TypeExpr =
   | types.TApp f x -> ast.TypeApply(written_type_expr(f), written_type_expr(x))
   | types.TFunc p r e own ->
       ast.TypeArrow(written_type_expr(p), written_type_expr(r), effect_label_list(e),
-                    ast.mode_of_flags(types.ownership_is_borrow(own), types.ownership_is_once(own)))
+                    ast.mode_of_flags(types.ownership_is_borrow(own), types.own_is_once(own),
+                                  types.own_is_local(own)))
   | types.TThunk r e -> ast.TypeThunk(written_type_expr(r), effect_label_list(e))
   | types.TTuple items -> ast.TupleType(list_map(written_type_expr, items))
   | types.TConst _ -> typed_ast.type_to_type_expr(t)

@@ -1,0 +1,9 @@
+module main
+
+# Passing a `local` parameter to a non-local parameter lets the callee keep it.
+
+fn run_plain(work: Unit -> Int) -> Int = work(())
+
+fn pass_on(work: local Unit -> Int) -> Int = run_plain(work)
+
+fn main() -> Unit !{IO} = print(to_string(pass_on(\_ -> 1)))

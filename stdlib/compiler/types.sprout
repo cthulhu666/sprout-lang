@@ -29,7 +29,7 @@ export type Effect (..) =
 # name, silently discharging the caller's consume obligation. See
 # docs/linear-borrowing-v0.md §18.
 #
-# Three-valued, though `ast.ParamMode` has four: at the type level an unmodified
+# One case short of `ast.ParamMode`: at the type level an unmodified
 # parameter and a `consuming` one are the same thing. The written `consuming`
 # documents the contract at an API boundary and is kept in the AST for
 # diagnostics, but making it a distinct TYPE would mean `consuming File -> Int`
@@ -51,31 +51,52 @@ export type Ownership (..) =
   | OwnConsume
   | OwnBorrow
   | OwnOnce
+  | OwnLocal
+  | OwnOnceLocal
 
 export fn ownership_eq(a: Ownership, b: Ownership) -> Bool =
   match (a, b) with
   | (OwnConsume, OwnConsume) -> true
   | (OwnBorrow, OwnBorrow) -> true
   | (OwnOnce, OwnOnce) -> true
+  | (OwnLocal, OwnLocal) -> true
+  | (OwnOnceLocal, OwnOnceLocal) -> true
   | _ -> false
 
-# Paired with `ast.mode_is_borrowing` / `ast.mode_is_once` at each call site:
-# `types` and `ast` do not import each other, so the collapse from ParamMode to
-# Ownership is spelled as two Bools rather than as a direct mapping.
-export fn ownership_of_mode(is_borrow: Bool, is_once: Bool) -> Ownership =
+# Paired with `ast.mode_is_borrowing` / `mode_is_once` / `mode_is_local` at each
+# call site: `types` and `ast` do not import each other, so the collapse from
+# ParamMode to Ownership is spelled as three Bools rather than a direct mapping.
+export fn ownership_of_mode(is_borrow: Bool, is_once: Bool, is_local: Bool) -> Ownership =
   if is_borrow then OwnBorrow
+  else if is_once && is_local then OwnOnceLocal
   else if is_once then OwnOnce
+  else if is_local then OwnLocal
   else OwnConsume
 
 export fn ownership_is_borrow(o: Ownership) -> Bool =
   match o with
   | OwnBorrow -> true
-  | _ -> false
+  | OwnConsume -> false
+  | OwnOnce -> false
+  | OwnLocal -> false
+  | OwnOnceLocal -> false
 
-export fn ownership_is_once(o: Ownership) -> Bool =
+# `once` and `local` are separate axes that ride one tag; read them one at a time.
+export fn own_is_once(o: Ownership) -> Bool =
   match o with
   | OwnOnce -> true
-  | _ -> false
+  | OwnOnceLocal -> true
+  | OwnConsume -> false
+  | OwnBorrow -> false
+  | OwnLocal -> false
+
+export fn own_is_local(o: Ownership) -> Bool =
+  match o with
+  | OwnLocal -> true
+  | OwnOnceLocal -> true
+  | OwnConsume -> false
+  | OwnBorrow -> false
+  | OwnOnce -> false
 
 # ---------------------------------------------------------------------------
 # Types
@@ -796,6 +817,8 @@ fn ownership_prefix(own: Ownership) -> String =
   match own with
   | OwnBorrow -> "borrowing "
   | OwnOnce -> "once "
+  | OwnLocal -> "local "
+  | OwnOnceLocal -> "once local "
   | OwnConsume -> ""
 
 fn join_types(items: List Type) -> String =

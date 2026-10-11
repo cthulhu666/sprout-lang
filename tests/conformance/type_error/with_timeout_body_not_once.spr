@@ -1,0 +1,17 @@
+module main
+
+# with_timeout's body is `local`, not `once`: on Expired the body is dropped, so a value moved
+# into it would leak. A move into the body is rejected.
+
+import stdlib.task as task
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn moved(f: File) -> task.TimeoutResult Int !{IO} = task.with_timeout(100, \_ -> release(f))
+
+fn main() -> Unit !{IO} =
+  match moved(File(1)) with
+  | task.Completed _ -> print("c")
+  | task.Expired -> print("e")

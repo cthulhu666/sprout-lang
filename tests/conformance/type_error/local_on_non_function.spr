@@ -1,0 +1,8 @@
+module main
+
+# `local` says the callee does not keep a closure past the call, so it is
+# meaningful only on a function-typed parameter (docs/local-closures-v0.md §6.4).
+
+fn counts(n: local Int) -> Int = n + 1
+
+fn main() -> Unit !{IO} = print(to_string(counts(1)))

@@ -48,7 +48,10 @@ export type TaskStatus (..) =
 extern fn __scope_open() -> Int !{IO}
 extern fn __scope_join(scope_id: Int) -> Unit !{IO}
 extern fn __scope_spawn(scope_id: Int, work: Unit -> Unit !{IO}) -> Unit !{IO}
-extern fn __task_fork(scope_id: Int, work: Unit -> a !{IO}) -> Int !{IO}
+# `work` is `local`, and extern modes are unchecked: a caller passing a `local` closure must
+# ensure it never runs after that closure's owner returns. run_with_deadline does: with_timeout
+# parks in __await_deadline until the child finishes or is force-dropped, then joins the scope.
+extern fn __task_fork(scope_id: Int, work: local Unit -> a !{IO}) -> Int !{IO}
 extern fn __task_await(task_id: Int) -> a !{IO}
 extern fn __scope_cancel(scope_id: Int) -> Unit !{IO}
 extern fn __task_sleep(ms: Int) -> Unit !{IO}
@@ -76,7 +79,7 @@ export fn scope_handle(scope: Scope) -> Int =
 # and return the body's result. `body`'s result is bound with `let` (not `<-`)
 # so an `Err` value cannot short-circuit past `__scope_join` — the join is
 # unconditional, which is what prevents spawned tasks from leaking past the scope.
-export fn with_scope(body: once Scope -> a !{IO}) -> a !{IO} =
+export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} =
   do
     id <- __scope_open()
     let result = body(Scope(id))
@@ -188,8 +191,10 @@ export fn task_sleep(ms: Int) -> Unit !{IO} =
 # overshoot past `ms` is bounded by one scheduling step of the body — never by its next I/O wait,
 # which is what an earlier revision allowed and is how the call could block forever.
 # `ms <= 0` returns `Expired` at once WITHOUT running the body.
+# `body` is `local`, not `once`: it may borrow a value the caller holds (lend it; the caller
+# releases it after, on Completed and Expired alike). A moved value would leak on Expired.
 # See docs/concurrency-deadlines-design-2026-07-15.md.
-export fn with_timeout(ms: Int, body: Unit -> a !{IO}) -> TimeoutResult a !{IO} =
+export fn with_timeout(ms: Int, body: local Unit -> a !{IO}) -> TimeoutResult a !{IO} =
   if ms <= 0 then
     Expired
   else
@@ -197,12 +202,16 @@ export fn with_timeout(ms: Int, body: Unit -> a !{IO}) -> TimeoutResult a !{IO} 
 
 # The child is forked FIRST (so it exists before the deadline is armed), then awaited against the
 # deadline. do-binding sequences the two effects explicitly (not argument-evaluation order).
-fn run_with_deadline(scope: Scope, body: Unit -> a !{IO}, ms: Int) -> TimeoutResult a !{IO} =
+fn run_with_deadline(scope: Scope, body: local Unit -> a !{IO}, ms: Int) -> TimeoutResult a !{IO} =
   match scope with
   | Scope sid ->
     do
-      handle <- task_fork(scope, body)
+      handle <- fork_local(sid, body)
       await_and_finish(sid, handle, ms)
+
+# task_fork's `work` is a non-local `once` slot, so a `local` body cannot go through it.
+fn fork_local(sid: Int, body: local Unit -> a !{IO}) -> Task a !{IO} =
+  Task(__task_fork(sid, body))
 
 # `handle` is consumed by the match that extracts its task id (`tid`), which arms the deadline; the
 # id — not the linear handle — then drives the finish. Inspecting the handle exactly once (no

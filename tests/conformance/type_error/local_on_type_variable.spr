@@ -1,0 +1,9 @@
+module main
+
+# `local` on a type variable is rejected, as `once a` is: a value of unknown
+# type can be returned, so the callee cannot be held to its promise
+# (docs/local-closures-v0.md §6.4).
+
+fn keep(work: local a) -> a = work
+
+fn main() -> Unit !{IO} = print(to_string(keep(1)))
