@@ -1214,6 +1214,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   per-expression eval path (`analysis_service_driver.op_eval_expr_in_source`), most likely in how it
   synthesizes the throwaway program referencing prior session let-bindings. Next step: dump the
   synthesized source for `t2` and compile it standalone.
+- [ ] `P3` **REPL completion reads modules relative to the cwd.** `repl.module_path` builds
+  `stdlib/<m>.sprout` or `a/b/c.sprout` from the current directory, so a REPL started outside the
+  repo root panics on the first TAB (`prelude_completion_names`: "read_file: prelude"), while the
+  other two reads (`globals_of_module`, `dotted_completion_candidates`) silently offer nothing.
+  Fix: resolve through the same stdlib root and `--package-root` the compiler session uses.
 - [~] `P2` **Dispose of the obsolete negative corpora.** Entrypoint validation landed
   (`validate_entrypoint`): a defined `main` must be zero-arg, `Unit`/`Int`-returning and concretely
   `!{IO}`, gated via `test-executable-errors`. **Remaining:** the "missing main" check

@@ -1,0 +1,90 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.repl as repl
+import stdlib.compiler as compiler
+
+# Characterises what a TAB offers: prelude names, session declarations, import
+# leaf/alias namespaces, dotted module paths, imported externs and case-insensitive
+# prefix matching.
+
+fn has(name: String, names: Vec String) -> Bool =
+  list_member(name, vec_to_list(names))
+
+fn offered(state: TestState, session: compiler.StatefulSession, pn: Ref (Maybe (Vec String)), line: String, name: String) -> Unit !{IO} =
+  do
+    (_, names) <- repl.completion_candidates_local(line, session, pn)
+    assert_true(state, "`" ++ line ++ "` offers `" ++ name ++ "`", has(name, names))
+
+fn not_offered(state: TestState, session: compiler.StatefulSession, pn: Ref (Maybe (Vec String)), line: String, name: String) -> Unit !{IO} =
+  do
+    (_, names) <- repl.completion_candidates_local(line, session, pn)
+    assert_true(state, "`" ++ line ++ "` does not offer `" ++ name ++ "`", has(name, names) == false)
+
+fn is_filled(cache: Maybe (Vec String)) -> Bool =
+  match cache with
+  | Just _ -> true
+  | Nothing -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    pn <- ref_new(Nothing)
+    # Built directly: create_session needs the analysis service, absent in a plain test.
+    let session = compiler.StatefulSession(0,
+      foldable_to_vec(["import stdlib.string", "import stdlib.http_server as hs",
+                       "import stdlib.compiler.lexer", "import stdlib.bits"]),
+      foldable_to_vec(["fn my_helper_fn() -> Int = 1"]))
+
+    # prelude names, bare
+    offered(state, session, pn, "list_m", "list_map")
+    offered(state, session, pn, "pri", "print")
+    # case-insensitive prefix
+    offered(state, session, pn, "LIST_M", "list_map")
+    # commands and module names
+    offered(state, session, pn, ":he", ":help")
+    offered(state, session, pn, "htt", "http_server")
+    # session declaration
+    offered(state, session, pn, "my_hel", "my_helper_fn")
+    # import leaf names, bare
+    offered(state, session, pn, "lex", "lexer")
+    offered(state, session, pn, "st", "string")
+    # alias namespace
+    offered(state, session, pn, "hs.par", "hs.parse")
+    # leaf namespace of a plain import
+    offered(state, session, pn, "string.to_lower_a", "string.to_lower_ascii")
+    # case-insensitive namespace
+    offered(state, session, pn, "STRING.to_lower_a", "string.to_lower_ascii")
+    # dotted module path (`.` -> `/`) with leaf namespace
+    offered(state, session, pn, "lexer.tok", "lexer.tokenize")
+    # externs of an imported module, bare, never qualified
+    offered(state, session, pn, "bit_o", "bit_or")
+    not_offered(state, session, pn, "bits.bit_o", "bits.bit_or")
+    # prefix extraction: digits continue a name but cannot start one; `.` and `:` continue
+    (p1, _) <- repl.completion_candidates_local("1 + ab9", session, pn)
+    assert_true(state, "digit continues a prefix", p1 == "ab9")
+    (p2, _) <- repl.completion_candidates_local("9ab", session, pn)
+    assert_true(state, "digit cannot start a prefix", p2 == "")
+    (p3, _) <- repl.completion_candidates_local("f(a.b:c", session, pn)
+    assert_true(state, "dot and colon continue a prefix", p3 == "a.b:c")
+    (p4, _) <- repl.completion_candidates_local("x é", session, pn)
+    assert_true(state, "non-ASCII is not part of a prefix", p4 == "")
+    # the prelude names are cached: filled by the first call, reused by later ones
+    cold <- ref_new(Nothing)
+    (_, _) <- repl.completion_candidates_local("li", session, cold)
+    assert_true(state, "first completion fills the prelude cache", is_filled(ref_read(cold)))
+    seeded <- ref_new(Just(foldable_to_vec(["zz_stub"])))
+    offered(state, session, seeded, "zz_s", "zz_stub")
+    not_offered(state, session, seeded, "list_m", "list_map")
+    # unknown namespace offers nothing
+    (_, none) <- repl.completion_candidates_local("nope.x", session, pn)
+    assert_true(state, "unknown namespace offers nothing", vec_length(none) == 0)
+
+    # filter: non-ASCII is left alone by the lowercase
+    let names = foldable_to_vec(["Édit", "édit", "Edit", "edit"])
+    let upper = repl.filter_names_by_prefix("É", "É", names, 0, vec_empty())
+    assert_true(state, "non-ASCII prefix is not case-folded", vec_length(upper) == 1 && has("Édit", upper))
+    let lower = repl.filter_names_by_prefix("ED", "ed", names, 0, vec_empty())
+    assert_true(state, "ASCII prefix folds case", vec_length(lower) == 2)
+
+    summary(state)

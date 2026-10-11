@@ -1,0 +1,20 @@
+import stdlib.test (new_state, summary)
+import stdlib.repl (filter_names_by_prefix)
+import testsupport.cost (assert_scales)
+
+# Each TAB lowercases every candidate to test its prefix, so the lowercase must be linear in the
+# candidate's length. Rebuilding the result one character at a time with `acc ++` is quadratic.
+
+# 2^k copies of `s`, by doubling: O(total).
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+fn matches(name: String) -> Bool =
+  vec_length(filter_names_by_prefix("ab", "ab", foldable_to_vec([name]), 0, vec_empty())) == 1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 32x longer: linear ~32x, quadratic ~1024x; the bound sits between, ~5x from each.
+    assert_scales(state, "candidate lowercase", matches, grow("AB", 9), grow("AB", 14), 150)
+    summary(state)
