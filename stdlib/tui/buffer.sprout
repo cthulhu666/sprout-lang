@@ -18,12 +18,27 @@ import stdlib.tui.line_zipper as lz
 # vertical move forfeits the column; keeping it on a horizontal one drags the
 # caret back to a column the reader left several keystrokes ago.
 #
-# COUNT INVARIANT — `n_above` and `n_below` are `list_length` of `above` and
-# `below`. Every construction site states both, so the caret's row and the
-# document's line count are O(1) reads and a frame never walks the document to
-# find them.
-type Fields = (above: List String, line: lz.Zipper, below: List String,
-               n_above: Int, n_below: Int, goal: Maybe Int)
+type Fields = (above: Side, line: lz.Zipper, below: Side, goal: Maybe Int)
+
+# COUNT INVARIANT — `n` is `list_length` of `lines`, and only the helpers below
+# touch it. The caret's row and the document's line count are O(1) reads, so a
+# frame never walks the document to find them.
+type Side = (lines: List String, n: Int)
+
+# A line taken off the front of a side, and what is left.
+type Popped = (line: String, rest: Side)
+
+fn side_empty() -> Side = Side(lines = Nil, n = 0)
+
+fn side_of(ls: List String) -> Side = Side(lines = ls, n = list_length(ls))
+
+fn side_push(l: String, s: Side) -> Side =
+  Side(lines = Cons(l, s.lines), n = s.n + 1)
+
+fn side_pop(s: Side) -> Maybe Popped =
+  match s.lines with
+  | Nil -> Nothing
+  | [l | rest] -> Just (Popped(line = l, rest = Side(lines = rest, n = s.n - 1)))
 
 # What every edit and motion inside this module works on: one document, no
 # history. Internal, so nothing here can record a step by accident or lose one
@@ -149,11 +164,11 @@ export fn buffer_open(s: String) -> Buffer =
 
 fn opened_at(ls: List String) -> Doc =
   match list_reverse(ls) with
-  | Nil -> Buf (Fields(above = Nil, line = lz.zipper_empty(), below = Nil,
-                      n_above = 0, n_below = 0, goal = Nothing))
-  | [last | rest] -> Buf (Fields(above = rest, line = lz.zipper_open(last),
-                                below = Nil, n_above = list_length(rest),
-                                n_below = 0, goal = Nothing))
+  | Nil -> Buf (Fields(above = side_empty(), line = lz.zipper_empty(),
+                      below = side_empty(), goal = Nothing))
+  | [last | rest] -> Buf (Fields(above = side_of(rest),
+                                line = lz.zipper_open(last),
+                                below = side_empty(), goal = Nothing))
 
 # Split on LF, CRLF and a lone CR (§4.4), then flatten what is left: blanking
 # CR as a control character instead would put a trailing space on every line of
@@ -178,23 +193,23 @@ fn window_of_fields(top: Int, rows: Int, f: Fields) -> List String =
 where
   end = top + rows
 
-# `above` is nearest-first, so row `i` sits `n_above - 1 - i` entries in.
+# `above` is nearest-first, so row `i` sits `n - 1 - i` entries in.
 fn from_above(top: Int, end: Int, f: Fields) -> List String =
   if hi <= top then Nil
-  else list_reverse(list_take(hi - top, list_drop(f.n_above - hi, f.above)))
+  else list_reverse(list_take(hi - top, list_drop(f.above.n - hi, f.above.lines)))
 where
-  hi = imath.min(end, f.n_above)
+  hi = imath.min(end, f.above.n)
 
 fn here_row(top: Int, end: Int, f: Fields) -> List String =
-  if top <= f.n_above && f.n_above < end then [lz.zipper_text(f.line)] else Nil
+  if top <= f.above.n && f.above.n < end then [lz.zipper_text(f.line)] else Nil
 
 fn from_below(top: Int, end: Int, f: Fields) -> List String =
-  list_take(end - first, list_drop(first - f.n_above - 1, f.below))
+  list_take(end - first, list_drop(first - f.above.n - 1, f.below.lines))
 where
-  first = imath.max(top, f.n_above + 1)
+  first = imath.max(top, f.above.n + 1)
 
 # How many lines the document has, in O(1).
-export fn buffer_line_count(b: Buffer) -> Int = here(b).n_above + 1 + here(b).n_below
+export fn buffer_line_count(b: Buffer) -> Int = here(b).above.n + 1 + here(b).below.n
 
 # A position in the document. A record rather than two adjacent `Int`s, which
 # swap silently — and because both axes clamp, a swapped pair would land a
@@ -227,12 +242,13 @@ fn backed_onto(col: Int, above: List String) -> Doc =
 
 fn landed_at(col: Int, here: String, above: List String,
              below: List String) -> Doc =
-  Buf(Fields(above = above, line = lz.zipper_at(col, lz.zipper_open(here)),
-              below = below, n_above = list_length(above),
-              n_below = list_length(below), goal = Nothing))
+  Buf(Fields(above = side_of(above),
+              line = lz.zipper_at(col, lz.zipper_open(here)),
+              below = side_of(below), goal = Nothing))
 
 fn all_lines(f: Fields) -> List String =
-  list_append(list_reverse(f.above), Cons(lz.zipper_text(f.line), f.below))
+  list_append(list_reverse(f.above.lines),
+              Cons(lz.zipper_text(f.line), f.below.lines))
 
 # §4.8 pins the join: `\n` between lines, no trailing terminator, `""` when
 # empty. Every application mirrors this value, so an ambiguity here becomes N
@@ -240,13 +256,18 @@ fn all_lines(f: Fields) -> List String =
 export fn buffer_text(b: Buffer) -> String =
   string.join("\n", all_lines(b |> here))
 
-export fn buffer_row(b: Buffer) -> Int = here(b).n_above
+export fn buffer_row(b: Buffer) -> Int = here(b).above.n
 
 export fn buffer_col(b: Buffer) -> Int = lz.zipper_col(here(b).line)
 
 # The line the caret is on, read directly rather than indexed out of
 # `buffer_lines`, which costs a walk of the whole document.
 export fn buffer_line(b: Buffer) -> String = lz.zipper_text(here(b).line)
+
+# The same line as clusters, for a caller that measures or paints it and would
+# otherwise split the string `buffer_line` just joined.
+export fn buffer_line_clusters(b: Buffer) -> List (List Int) =
+  lz.zipper_clusters(here(b).line)
 
 # ── editing ─────────────────────────────────────────────────────────────────
 
@@ -277,12 +298,9 @@ fn extended(f: Fields, seg: String) -> Fields =
 fn broken_at(f: Fields, done: String, rest: List String,
              tail: String) -> Doc =
   match rest with
-  | Nil -> Buf (Fields(above = f.above, line = restarted(done, tail),
-                      below = f.below, n_above = f.n_above, n_below = f.n_below,
-                      goal = Nothing))
+  | Nil -> Buf((f with (line = restarted(done, tail), goal = Nothing)))
   | [next | more] ->
-      broken_at((f with (above = Cons(done, f.above), n_above = f.n_above + 1)),
-                next, more, tail)
+      broken_at((f with (above = side_push(done, f.above))), next, more, tail)
 
 fn restarted(head: String, tail: String) -> lz.Zipper =
   maybe_with_default(fresh, lz.zipper_insert(head, fresh))
@@ -302,13 +320,12 @@ fn with_line(f: Fields, z: lz.Zipper) -> Doc =
 # The caret lands at the seam, which is the end of what used to be the line
 # above — so the join is visible without moving the eye.
 fn joined_above(f: Fields) -> Maybe Doc =
-  match f.above with
-  | Nil -> Nothing
-  | [prev | rest] ->
-      Just(Buf (Fields(above = rest,
-                      line = seamed(prev, lz.zipper_text(f.line)),
-                      below = f.below, n_above = f.n_above - 1,
-                      n_below = f.n_below, goal = Nothing)))
+  match side_pop(f.above) with
+  | Nothing -> Nothing
+  | Just p ->
+      Just(Buf((f with (above = p.rest,
+                        line = seamed(p.line, lz.zipper_text(f.line)),
+                        goal = Nothing))))
 
 fn seamed(head: String, tail: String) -> lz.Zipper =
   lz.zipper_to_display_col(lz.zipper_display_col(lz.zipper_open(head)),
@@ -322,13 +339,11 @@ fn deleted(f: Fields) -> Maybe Doc =
   else map(with_line(f, _), lz.zipper_delete(f.line))
 
 fn pulled_up(f: Fields) -> Maybe Doc =
-  match f.below with
-  | Nil -> Nothing
-  | [next | rest] ->
-      Just(Buf (Fields(above = f.above,
-                      line = seamed(lz.zipper_text(f.line), next),
-                      below = rest, n_above = f.n_above,
-                      n_below = f.n_below - 1, goal = Nothing)))
+  match side_pop(f.below) with
+  | Nothing -> Nothing
+  | Just p ->
+      Just(Buf((f with (line = seamed(lz.zipper_text(f.line), p.line),
+                        below = p.rest, goal = Nothing))))
 
 # ── moving ──────────────────────────────────────────────────────────────────
 
@@ -343,13 +358,12 @@ fn stepped_left(f: Fields) -> Doc =
 # goal — leaving it set sends the next vertical move to a column the reader has
 # already left.
 fn wrapped_up(f: Fields) -> Doc =
-  match f.above with
-  | Nil -> Buf((f with (goal = Nothing)))
-  | [prev | rest] ->
-      Buf(Fields(above = rest, line = lz.zipper_open(prev),
-                 below = Cons(lz.zipper_text(f.line), f.below),
-                 n_above = f.n_above - 1, n_below = f.n_below + 1,
-                 goal = Nothing))
+  match side_pop(f.above) with
+  | Nothing -> Buf((f with (goal = Nothing)))
+  | Just p ->
+      Buf((f with (above = p.rest, line = lz.zipper_open(p.line),
+                   below = side_push(lz.zipper_text(f.line), f.below),
+                   goal = Nothing)))
 
 export fn buffer_right(b: Buffer) -> Buffer =
   moved_to(b, stepped_right(here(b)))
@@ -359,13 +373,12 @@ fn stepped_right(f: Fields) -> Doc =
   else Buf((f with (line = lz.zipper_right(f.line), goal = Nothing)))
 
 fn wrapped_down(f: Fields) -> Doc =
-  match f.below with
-  | Nil -> Buf((f with (goal = Nothing)))
-  | [next | rest] ->
-      Buf(Fields(above = Cons(lz.zipper_text(f.line), f.above),
-                 line = lz.zipper_open(next) |> lz.zipper_start, below = rest,
-                 n_above = f.n_above + 1, n_below = f.n_below - 1,
-                 goal = Nothing))
+  match side_pop(f.below) with
+  | Nothing -> Buf((f with (goal = Nothing)))
+  | Just p ->
+      Buf((f with (above = side_push(lz.zipper_text(f.line), f.above),
+                   line = lz.zipper_open(p.line) |> lz.zipper_start,
+                   below = p.rest, goal = Nothing)))
 
 export fn buffer_home(b: Buffer) -> Buffer =
   moved_to(b, anchored(here(b), lz.zipper_start))
@@ -379,20 +392,20 @@ fn anchored(f: Fields, to: lz.Zipper -> lz.Zipper) -> Doc =
 export fn buffer_up(b: Buffer) -> Buffer = moved_to(b, moved_up(here(b)))
 
 fn moved_up(f: Fields) -> Doc =
-  match f.above with
-  | Nil -> Buf(f)
-  | [prev | rest] ->
-      landed(prev, rest, Cons(lz.zipper_text(f.line), f.below),
-             f.n_above - 1, f.n_below + 1, goal_of(f))
+  match side_pop(f.above) with
+  | Nothing -> Buf(f)
+  | Just p ->
+      landed(p.line, p.rest, side_push(lz.zipper_text(f.line), f.below),
+             goal_of(f))
 
 export fn buffer_down(b: Buffer) -> Buffer = moved_to(b, moved_down(here(b)))
 
 fn moved_down(f: Fields) -> Doc =
-  match f.below with
-  | Nil -> Buf(f)
-  | [next | rest] ->
-      landed(next, Cons(lz.zipper_text(f.line), f.above), rest,
-             f.n_above + 1, f.n_below - 1, goal_of(f))
+  match side_pop(f.below) with
+  | Nothing -> Buf(f)
+  | Just p ->
+      landed(p.line, side_push(lz.zipper_text(f.line), f.above), p.rest,
+             goal_of(f))
 
 # The goal is taken from the caret only on the FIRST vertical move; after that
 # it is carried, which is what a run of Downs through short lines needs.
@@ -401,12 +414,10 @@ fn goal_of(f: Fields) -> Int =
   | Just g -> g
   | Nothing -> lz.zipper_display_col(f.line)
 
-fn landed(target: String, above: List String, below: List String, n_above: Int,
-          n_below: Int, goal: Int) -> Doc =
+fn landed(target: String, above: Side, below: Side, goal: Int) -> Doc =
   Buf(Fields(above = above,
              line = lz.zipper_to_display_col(goal, lz.zipper_open(target)),
-             below = below, n_above = n_above, n_below = n_below,
-             goal = Just(goal)))
+             below = below, goal = Just(goal)))
 
 # ── history ─────────────────────────────────────────────────────────────────
 

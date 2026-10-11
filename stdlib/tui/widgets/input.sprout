@@ -127,8 +127,7 @@ fn caret_cluster(z: lz.Zipper) -> List Int =
 # its value — the window only follows a caret that is there.
 fn field_render(f: Field m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   if f.has_focus then window_render(f, r, shown_before(f, r), s)
-  else paint.line_clusters(s, r, 0, list_append(list_reverse(f.line.before), f.line.after),
-                           f.opts.look.normal)
+  else paint.line_clusters(s, r, 0, lz.zipper_clusters(f.line), f.opts.look.normal)
 
 # The window is a function of the caret, so there is no scroll position to
 # drift out of step with it: keep the longest run of clusters before the caret

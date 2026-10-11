@@ -41,8 +41,11 @@ fn blanked(cp: Int) -> Int =
   if cp < 32 || (cp >= 127 && cp <= 159) || cp == 8232 || cp == 8233 then 32
   else cp
 
-export fn zipper_text(z: Zipper) -> String =
-  text.from_clusters(list_append(list_reverse(z.before), z.after))
+# The whole line in order, split at no boundary the caret did not already know.
+export fn zipper_clusters(z: Zipper) -> List (List Int) =
+  list_append(list_reverse(z.before), z.after)
+
+export fn zipper_text(z: Zipper) -> String = text.from_clusters(zipper_clusters(z))
 
 # `Nothing` where nothing changed: the key is still the field's — backspace at
 # the start must not reach the application — but no value moved, so nothing is

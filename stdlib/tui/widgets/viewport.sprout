@@ -22,7 +22,7 @@ import stdlib.tui.widgets.paint as paint
 
 # `top` lines and `off` display columns are dropped; the caret lands at
 # `row`/`col` within the region and is painted as the cluster it sits on.
-type Window = (top: Int, off: Int, row: Int, col: Int, caret: String)
+type Window = (top: Int, off: Int, row: Int, col: Int, caret: List Int)
 
 # Both axes drop until what precedes the caret fits.
 fn window_of(b: buffer.Buffer, r: geometry.Region) -> Window =
@@ -31,13 +31,13 @@ fn window_of(b: buffer.Buffer, r: geometry.Region) -> Window =
          caret = caret)
 where
   top = first_row(buffer.buffer_row(b), geometry.region_rows(r))
-  cs = text.clusters(buffer.buffer_line(b))
+  cs = buffer.buffer_line_clusters(b)
   before = list_take(buffer.buffer_col(b), cs)
   caret = caret_cluster(list_drop(buffer.buffer_col(b), cs))
   # The caret's OWN width is what the window reserves, not one column: on a CJK
   # or emoji cluster a single reserved column truncates it away, painting
   # neither the character nor the focus.
-  kept = text.truncate_left(geometry.region_cols(r) - text.width(caret), before)
+  kept = text.truncate_left(geometry.region_cols(r) - text.cluster_width(caret), before)
 
 # The first line of the frame: enough dropped that the caret's line is the last
 # one, and none dropped while the whole document still fits.
@@ -47,10 +47,10 @@ export fn first_row(row: Int, rows: Int) -> Int =
 # The caret sits ON the cluster after it, or on a blank cell at the end of the
 # line. Painted, because `app.run` hides the terminal's own cursor for the
 # session (docs/tui-focus-v0.md §9).
-fn caret_cluster(after: List (List Int)) -> String =
+fn caret_cluster(after: List (List Int)) -> List Int =
   match after with
-  | Nil -> " "
-  | [c | _] -> text.from_clusters([c])
+  | Nil -> [32]
+  | [c | _] -> c
 
 # ── painting ────────────────────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ fn framed(screen: scr.Screen, region: geometry.Region, b: buffer.Buffer,
   paint.lines_clusters(screen, region, 0,
                        list_map(shifted(w.off, _), visible(b, region, w)),
                        look.normal)
-  paint.at(screen, region, w.row, w.col, w.caret, look.focused)
+  paint.at_clusters(screen, region, w.row, w.col, [w.caret], look.focused)
 
 # The lines the region shows, unshifted.
 fn visible(b: buffer.Buffer, r: geometry.Region, w: Window) -> List String =
