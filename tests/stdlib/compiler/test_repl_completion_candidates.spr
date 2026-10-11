@@ -69,10 +69,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "dot and colon continue a prefix", p3 == "a.b:c")
     (p4, _) <- repl.completion_candidates_local("x é", session, pn)
     assert_true(state, "non-ASCII is not part of a prefix", p4 == "")
-    # the prelude names are cached: filled by the first call, reused by later ones
+    # the base names are cached: filled by the first call, reused by later ones
     cold <- ref_new(Nothing)
     (_, _) <- repl.completion_candidates_local("li", session, cold)
-    assert_true(state, "first completion fills the prelude cache", is_filled(ref_read(cold)))
+    assert_true(state, "first completion fills the base cache", is_filled(ref_read(cold)))
     seeded <- ref_new(Just(foldable_to_vec(["zz_stub"])))
     offered(state, session, seeded, "zz_s", "zz_stub")
     not_offered(state, session, seeded, "list_m", "list_map")
@@ -82,9 +82,9 @@ fn main() -> Unit !{IO} =
 
     # filter: non-ASCII is left alone by the lowercase
     let names = foldable_to_vec(["Édit", "édit", "Edit", "edit"])
-    let upper = repl.filter_names_by_prefix("É", "É", names, 0, vec_empty())
+    let upper = repl.filter_names_by_prefix("É", names)
     assert_true(state, "non-ASCII prefix is not case-folded", vec_length(upper) == 1 && has("Édit", upper))
-    let lower = repl.filter_names_by_prefix("ED", "ed", names, 0, vec_empty())
+    let lower = repl.filter_names_by_prefix("ED", names)
     assert_true(state, "ASCII prefix folds case", vec_length(lower) == 2)
 
     summary(state)
