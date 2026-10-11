@@ -252,7 +252,9 @@ any error the second walk reports can only be about this parameter.
 
 **Zero uses stay legal** — the bound is from above, so a callee may decline to invoke. That is why
 this is a reuse rule rather than the linear exactly-once rule, and it is also precisely the gap §9
-describes.
+describes. The second walk therefore holds the parameter *at most once*: the two exactly-once rules,
+branch convergence and the consume-after-fallible-bind check, do not apply to it, so
+`if c then p(x) else 0` is legal. The branches' uses union, so a later `p(x)` is still a reuse.
 
 ## 7. Error-message impact
 

@@ -1909,7 +1909,9 @@ This is a promise by the **callee**: it invokes `work` **at most once**, and doe
 not store or return it. The promise is **checked, not assumed** — a function
 declaring `once p` may use `p` at most once along any path, counted per
 control-flow path, so `if c then p(x) else p(x)` is one invocation and is legal
-while `p(x) + p(x)` is not. Zero uses are legal: the bound is from above.
+while `p(x) + p(x)` is not. Zero uses are legal: the bound is from above, so one
+path may invoke and another not (`if c then p(x) else 0`, or an invocation after
+a fallible `<-`).
 
 `once` is only meaningful on a **function-typed** parameter; elsewhere it is an
 error. In particular it is rejected on a **type-variable** parameter, and for a
