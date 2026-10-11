@@ -769,22 +769,17 @@ fn run_route(route: Route, req: HttpRequest) -> HttpServerResponse !{IO} =
   match route with
   | Route _ _ handler -> handler(req)
 
-fn dispatch_from(routes: Vec Route, index: Int, total: Int, method: String, path: String, req: HttpRequest) -> HttpServerResponse !{IO} =
-  if index >= total then not_found("not found")
-  else
-    match vec_get(index, routes) with
-    | Nothing -> not_found("not found")
-    | Just route ->
-        if route_matches(route, method, path) then run_route(route, req)
-        else dispatch_from(routes, index + 1, total, method, path, req)
-
 # Dispatch a parsed request to its route's handler, or a 404 response when none
 # matches. Runs the matched handler, so it carries the handler's `!{IO}` effect — but
 # it does no socket I/O of its own, so it still composes with `serve` as
 # `serve(port, \req -> dispatch(routes, req))` and is testable without sockets (drive
 # it from an already-parsed request and inspect the response).
 export fn dispatch(routes: Vec Route, req: HttpRequest) -> HttpServerResponse !{IO} =
-  dispatch_from(routes, 0, vec_length(routes), request_method(req), path_before_query(request_path(req)), req)
+  let method = request_method(req)
+      path = path_before_query(request_path(req))
+  in match find(\route -> route_matches(route, method, path), routes) with
+     | Nothing -> not_found("not found")
+     | Just route -> run_route(route, req)
 
 export fn request_method(req: HttpRequest) -> String =
   match req with
@@ -832,26 +827,10 @@ export fn request_header(name: String, req: HttpRequest) -> Maybe String =
 # convention: Go url.Values.Get, Werkzeug MultiDict.get); `_param_all` returns them
 # all (Werkzeug getlist). Values are percent/`+`-decoded (see stdlib.url).
 
-# First value for `name` in an ordered pair list, or Nothing.
-fn first_value(pairs: Vec (String, String), index: Int, total: Int, name: String) -> Maybe String =
-  if index >= total then Nothing
-  else
-    match vec_get(index, pairs) with
-    | Nothing -> Nothing
-    | Just pair ->
-        match pair with
-        | (key, value) -> if key == name then Just(value) else first_value(pairs, index + 1, total, name)
-
-# Every value for `name`, in order.
-fn all_values(pairs: Vec (String, String), index: Int, total: Int, name: String, acc: Vec String) -> Vec String =
-  if index >= total then acc
-  else
-    match vec_get(index, pairs) with
-    | Nothing -> acc
-    | Just pair ->
-        match pair with
-        | (key, value) ->
-            all_values(pairs, index + 1, total, name, if key == name then vec_append(value, acc) else acc)
+# The pair's value when its key is `name`; the lookups below find the first or keep all.
+fn value_for(name: String, pair: (String, String)) -> Maybe String =
+  match pair with
+  | (key, value) -> if key == name then Just(value) else Nothing
 
 # The raw query substring after the first `?` in the target, "" if there is none.
 export fn query_string(req: HttpRequest) -> String =
@@ -866,13 +845,13 @@ export fn query_pairs(req: HttpRequest) -> Vec (String, String) =
 
 # First value for `name` in the query string, or Nothing.
 export fn query_param(name: String, req: HttpRequest) -> Maybe String =
-  first_value(pairs, 0, vec_length(pairs), name)
+  find_map(\pair -> value_for(name, pair), pairs)
 where
   pairs = query_pairs(req)
 
 # Every query value for `name`, in order (empty if none).
 export fn query_param_all(name: String, req: HttpRequest) -> Vec String =
-  all_values(pairs, 0, vec_length(pairs), name, vec_empty())
+  vec_filter_map(\pair -> value_for(name, pair), pairs)
 where
   pairs = query_pairs(req)
 
@@ -903,13 +882,13 @@ export fn form_pairs(req: HttpRequest) -> Vec (String, String) =
 
 # First value for `name` in the form body, or Nothing.
 export fn form_param(name: String, req: HttpRequest) -> Maybe String =
-  first_value(pairs, 0, vec_length(pairs), name)
+  find_map(\pair -> value_for(name, pair), pairs)
 where
   pairs = form_pairs(req)
 
 # Every form value for `name`, in order (empty if none).
 export fn form_param_all(name: String, req: HttpRequest) -> Vec String =
-  all_values(pairs, 0, vec_length(pairs), name, vec_empty())
+  vec_filter_map(\pair -> value_for(name, pair), pairs)
 where
   pairs = form_pairs(req)
 
@@ -980,7 +959,7 @@ export fn cookie_pairs(req: HttpRequest) -> Vec (String, String) =
 # First value for `name`, or Nothing. A cookie's own name is case-SENSITIVE, unlike
 # the header it rides in.
 export fn request_cookie(name: String, req: HttpRequest) -> Maybe String =
-  first_value(pairs, 0, vec_length(pairs), name)
+  find_map(\pair -> value_for(name, pair), pairs)
 where
   pairs = cookie_pairs(req)
 
