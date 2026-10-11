@@ -130,7 +130,7 @@ literal bytes becomes one slice, each escape one byte, and the chunks are joined
 
 `cookie_pairs` / `request_cookie` mirror §5's shape — derived on demand, ordered,
 duplicate-preserving, first-wins — over `request_header("cookie", req)`. They reuse
-`first_value` and share no parser with the query side, which is the whole point.
+`value_for` and share no parser with the query side, which is the whole point.
 
 **What differs, and why it is not an oversight.** §2's "correct decoding: `%XX` and
 `+` → space" is a property of `application/x-www-form-urlencoded`, not of cookies.

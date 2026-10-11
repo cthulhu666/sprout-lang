@@ -108,18 +108,8 @@ export fn format_iso8601(micros: Int) -> String =
 
 # --- Record formatting (pure) ---------------------------------------------
 # Append the call fields onto the base fields (base first), preserving order.
-# O(f²) in the total field count f (vec_append copies): deliberately fine — a log
-# record carries a handful of fields, so the constant dominates and a persistent
-# copy per field is cheaper than threading a mutable builder through the API.
 fn all_fields(base: Vec (String, String), call: Vec (String, String)) -> Vec (String, String) =
-  append_all(call, 0, vec_length(call), base)
-
-fn append_all(src: Vec (String, String), i: Int, n: Int, acc: Vec (String, String)) -> Vec (String, String) =
-  if i >= n then acc
-  else
-    match vec_get(i, src) with
-    | Nothing -> acc
-    | Just pair -> append_all(src, i + 1, n, vec_append(pair, acc))
+  base ++ call
 
 # ` k=v` for each field, in order (leading space only when there are fields).
 fn render_fields(fields: Vec (String, String)) -> String =
