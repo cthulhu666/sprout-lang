@@ -42,3 +42,7 @@ export fn assert_scales(state: TestState, label: String, probe: a -> Bool, short
     assert_true(state, label ++ ": correct on both inputs", short_us >= 0 && long_us >= 0)
     assert_true(state, label ++ ": scales within " ++ int_to_string(ratio) ++ "x",
                 long_us <= budget_us(short_us, ratio))
+
+# 2^k copies of `s`, by doubling: O(total).
+export fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)

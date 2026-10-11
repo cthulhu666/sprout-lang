@@ -25,6 +25,9 @@ fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String
 fn show_pairs(ps: Vec (String, String)) -> String =
   show_pairs_from(ps, 0, vec_length(ps), "")
 
+fn show_vec(vs: Vec String) -> String =
+  string.join(",", vec_to_list(vs))
+
 fn with_req(raw: String, f: HttpRequest -> String) -> String =
   match parse(raw) with
   | Err _ -> "<PARSE_ERR>"
@@ -32,6 +35,9 @@ fn with_req(raw: String, f: HttpRequest -> String) -> String =
 
 fn fparam(raw: String, name: String) -> String =
   with_req(raw, \r -> maybe_str(form_param(name, r)))
+
+fn fall(raw: String, name: String) -> String =
+  with_req(raw, \r -> show_vec(form_param_all(name, r)))
 
 fn fpairs(raw: String) -> String =
   with_req(raw, \r -> show_pairs(form_pairs(r)))
@@ -52,6 +58,10 @@ let urlencoded_charset: String =
 let json_post: String =
   "POST /submit HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 3\r\n\r\na=1"
 
+# Repeated key; body "a=1&b=9&a=2&a=3" is 15 bytes.
+let urlencoded_repeated: String =
+  "POST /submit HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 15\r\n\r\na=1&b=9&a=2&a=3"
+
 # No Content-Type at all; body "a=1" is 3 bytes.
 let no_content_type: String =
   "POST /submit HTTP/1.1\r\nContent-Length: 3\r\n\r\na=1"
@@ -66,6 +76,13 @@ fn main() -> Unit !{IO} =
       fparam(urlencoded_plus, "name"), "Ada Lovelace"),
     check_eq("form params parse when Content-Type has a charset parameter",
       fparam(urlencoded_charset, "a"), "1"),
+
+    check_eq("form_param returns the FIRST of a repeated key",
+      fparam(urlencoded_repeated, "a"), "1"),
+    check_eq("form_param_all keeps order among other keys",
+      fall(urlencoded_repeated, "a"), "1,2,3"),
+    check_eq("form_param_all on an absent key is empty",
+      fall(urlencoded_post, "z"), ""),
 
     check_eq("a non-form Content-Type yields no form params",
       fpairs(json_post), ""),

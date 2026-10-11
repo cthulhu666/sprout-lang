@@ -845,13 +845,13 @@ export fn query_pairs(req: HttpRequest) -> Vec (String, String) =
 
 # First value for `name` in the query string, or Nothing.
 export fn query_param(name: String, req: HttpRequest) -> Maybe String =
-  find_map(\pair -> value_for(name, pair), pairs)
+  find_map(value_for(name, _), pairs)
 where
   pairs = query_pairs(req)
 
 # Every query value for `name`, in order (empty if none).
 export fn query_param_all(name: String, req: HttpRequest) -> Vec String =
-  vec_filter_map(\pair -> value_for(name, pair), pairs)
+  vec_filter_map(value_for(name, _), pairs)
 where
   pairs = query_pairs(req)
 
@@ -882,13 +882,13 @@ export fn form_pairs(req: HttpRequest) -> Vec (String, String) =
 
 # First value for `name` in the form body, or Nothing.
 export fn form_param(name: String, req: HttpRequest) -> Maybe String =
-  find_map(\pair -> value_for(name, pair), pairs)
+  find_map(value_for(name, _), pairs)
 where
   pairs = form_pairs(req)
 
 # Every form value for `name`, in order (empty if none).
 export fn form_param_all(name: String, req: HttpRequest) -> Vec String =
-  vec_filter_map(\pair -> value_for(name, pair), pairs)
+  vec_filter_map(value_for(name, _), pairs)
 where
   pairs = form_pairs(req)
 
@@ -959,7 +959,7 @@ export fn cookie_pairs(req: HttpRequest) -> Vec (String, String) =
 # First value for `name`, or Nothing. A cookie's own name is case-SENSITIVE, unlike
 # the header it rides in.
 export fn request_cookie(name: String, req: HttpRequest) -> Maybe String =
-  find_map(\pair -> value_for(name, pair), pairs)
+  find_map(value_for(name, _), pairs)
 where
   pairs = cookie_pairs(req)
 
