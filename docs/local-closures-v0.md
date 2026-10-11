@@ -244,8 +244,13 @@ types and effects already are. One extern carries `local`:
 extern fn __task_fork(scope_id: Int, work: local Unit -> a !{IO}) -> Int !{IO}
 ```
 
-This is the Sprout counterpart of Rust's `unsafe { spawn_unchecked(…) }`. It is sound because of
-how it is used, and both uses are in `stdlib/task.sprout`, where the extern is private:
+This is the Sprout counterpart of Rust's `unsafe { spawn_unchecked(…) }`. It is sound only because
+of how it is used, so only the module that declares it may use it. **An extern with a `local` or
+`once local` parameter is reachable only from its declaring module.** This is the one exception to
+spec §Externs, which makes every other extern reachable by bare name from any importer. Without
+it, any module importing `stdlib.task` could lend a borrowed value to a task that outlives the
+owner's release. The bundler marks a reference from another module, and inference reports it
+(the `@canonical:` mechanism). Both uses are in `stdlib/task.sprout`:
 
 - `task_fork(scope, work: once Unit -> a)` passes a **non-local** closure. It cannot capture a
   borrow (§6.1 applies only at `local` positions), so the stronger declaration changes nothing.
@@ -281,6 +286,10 @@ frame that is gone. BACKLOG: *Tree-cancel cascade must drop a deadline's child b
 - Whole-call borrow: `"'conn' is lent to a `local` closure for the whole call and cannot be consumed
   in another argument of it"`.
 - `local` on a non-function parameter: mirrors the `once` message.
+- An extern with a `local` parameter, reached from another module (§6.5): it names the declaring
+  module and says the promise is kept only by that module's callers.
+- Mode mismatches name the axis that differs: `once`, `local`, or both. That holds at unification
+  and between a class method and its instance.
 
 ## 8. Compatibility and migration
 
@@ -326,6 +335,11 @@ TDD, each red before the change.
   `local_on_type_variable`, `local_param_escapes_via_local_lambda_result`,
   `lambda_param_local_rejected`, `lambda_slot_local_not_pushed_down`, and
   `borrow_capture_at_ordinary_slot` (today's rule, still in force).
+- Private extern (§6.5): `private_local_extern_reached_from_another_module`,
+  `private_local_extern_named_without_borrow`. `stdlib.task`'s own calls are the passing case.
+- Mismatch messages: `once_local_mismatch_names_once`, `once_vs_local_mismatch_names_both`,
+  `local_instance_omits_class_local`, `once_local_instance_drops_local`,
+  `once_local_instance_drops_both`.
 - Erasure: one-token byte-identity case in `tests/stdlib/compiler/test_borrow_erasure.spr`.
 
 ## 10. Spec/docs

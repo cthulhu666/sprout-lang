@@ -1,0 +1,9 @@
+module main
+
+# `once` against `local` differ on both axes; the explanation must name both.
+
+fn run_once(w: once Unit -> Int) -> Int = w(())
+
+fn apply(g: (local(Unit -> Int)) -> Int) -> Int = g(\_ -> 1)
+
+fn main() -> Unit !{IO} = print(to_string(apply(run_once)))

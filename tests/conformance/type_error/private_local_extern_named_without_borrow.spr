@@ -1,0 +1,10 @@
+module main
+
+# Naming the extern is enough to reject it: the rule is about reachability,
+# not about what the closure captures.
+
+import stdlib.task (with_scope)
+
+fn spawn_plain(sid: Int) -> Int !{IO} = __task_fork(sid, \_ -> 1)
+
+fn main() -> Unit !{IO} = print("x")

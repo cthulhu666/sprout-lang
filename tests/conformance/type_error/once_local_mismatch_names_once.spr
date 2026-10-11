@@ -1,0 +1,10 @@
+module main
+
+# `once local` against `local` differ in `once` only; the explanation must name
+# `once`, not `local`.
+
+fn run_local(w: local Unit -> Int) -> Int = w(())
+
+fn apply(g: (once local (Unit -> Int)) -> Int) -> Int = g(\_ -> 1)
+
+fn main() -> Unit !{IO} = print(to_string(apply(run_local)))
