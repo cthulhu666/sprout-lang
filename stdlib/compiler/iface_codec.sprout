@@ -282,14 +282,20 @@ fn decode_tthunk_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.
 # re-parsed declaration — the other path (ast.Param -> params_to_func_type)
 # carries it too, and the two must agree.
 fn encode_ownership(o: types.Ownership) -> String =
-  if types.ownership_is_borrow(o) then "borrow"
-  else if types.own_is_once(o) && types.own_is_local(o) then "oncelocal"
-  else if types.own_is_once(o) then "once"
-  else if types.own_is_local(o) then "local"
-  else "consume"
+  match o with
+  | types.OwnBorrow -> "borrow"
+  | types.OwnOnceLocal -> "oncelocal"
+  | types.OwnOnce -> "once"
+  | types.OwnLocal -> "local"
+  | types.OwnConsume -> "consume"
 
+# An unknown tag decodes as the default, `consume`.
 fn ownership_from_str(s: String) -> types.Ownership =
-  types.ownership_of_mode(s == "borrow", s == "once" || s == "oncelocal", s == "local" || s == "oncelocal")
+  if s == "borrow" then types.OwnBorrow
+  else if s == "oncelocal" then types.OwnOnceLocal
+  else if s == "once" then types.OwnOnce
+  else if s == "local" then types.OwnLocal
+  else types.OwnConsume
 
 fn decode_ttuple_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe(types.Type, Int) =
   let Just(ts, j) = decode_type_list_at(s, bytes, skip_ws(s, bytes, i, total), total) else Nothing

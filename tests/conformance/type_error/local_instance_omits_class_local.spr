@@ -1,0 +1,13 @@
+module main
+
+# A call dispatches through the CLASS signature, so callers lend borrowed values
+# to the closure on the strength of the class's `local`. An instance free to keep
+# the closure would let it outlive those borrows.
+
+class Runner a
+  fn run_it(s: a, work: local Unit -> Int) -> Int
+
+instance Runner Int
+  fn run_it(s: Int, work: Unit -> Int) -> Int = s + work(())
+
+fn main() -> Unit !{IO} = print(to_string(run_it(1, \_ -> 2)))

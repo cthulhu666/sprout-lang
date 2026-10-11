@@ -1,0 +1,17 @@
+module main
+
+# An extern with a `local` parameter is reachable only from its declaring
+# module: `local` on an extern is unchecked, so a foreign caller could lend a
+# borrowed value to a forked task and release it while the task still runs.
+
+import stdlib.task (Scope, with_scope)
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn peek(f: borrowing File) -> Int = match f with | File n -> n
+
+fn leak(sid: Int, f: borrowing File) -> Int !{IO} = __task_fork(sid, \_ -> peek(f))
+
+fn main() -> Unit !{IO} = print("x")

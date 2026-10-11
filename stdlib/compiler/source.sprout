@@ -275,6 +275,32 @@ export fn canonical_name_message(marked: String) -> String =
         leaf = string.after_last_dot(bare)
         declaring_module = str_slice(bare, 0, str_len(bare) - str_len(leaf) - 1)
 
+# ── Private externs ──────────────────────────────────────────────────────────
+#
+# An extern whose own parameter list has a `local` parameter is reachable only from
+# the module that declares it. The bundler MARKS a bare reference from any other
+# module with this prefix, on the same terms as `canonical_marker` (no error channel
+# there; a marked name resolves nowhere; `infer` raises it). Shape:
+# `@private_extern:<module>:<name>`; the prelude's module name is empty.
+export let private_extern_marker: String = "@private_extern:"
+
+export fn mark_private_extern(module: String, name: String) -> String =
+  private_extern_marker ++ module ++ ":" ++ name
+
+export fn is_private_extern_marked(name: String) -> Bool =
+  string.starts_with(name, private_extern_marker)
+
+export fn private_extern_message(marked: String) -> String =
+  "`" ++ name ++ "` is private to " ++ describe_declaring_module(module)
+    ++ ": an extern with a `local` parameter is reachable only from the module that declares it, because `local` on an extern is a promise the compiler cannot check, kept only by that module's own callers (spec-v0 §Externs)"
+  where rest = string.drop(marked, string.length(private_extern_marker))
+        parts = string.split_once(rest, ":")
+        module = match parts with | Just (m, _) -> m | Nothing -> ""
+        name = match parts with | Just (_, n) -> n | Nothing -> rest
+
+fn describe_declaring_module(module: String) -> String =
+  if module == "" then "the prelude" else "`" ++ module ++ "`"
+
 # ── Header stripping ─────────────────────────────────────────────────────────
 #
 # strip_headers removes the leading block of `module` / `import` / comment /

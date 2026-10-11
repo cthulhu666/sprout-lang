@@ -380,6 +380,12 @@ fn is_placeholder_param(name: String) -> Bool =
 fn method_once_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration on `once`: a call dispatches through the CLASS signature, so callers move linear values into the closure they pass on the strength of the class's promise, and an instance free to invoke it repeatedly would consume those values more than once"
 
+fn method_local_mismatch_msg(name: String) -> String =
+  "instance method parameter '" ++ name ++ "' must match the class declaration on `local`: a call dispatches through the CLASS signature, so callers lend borrowed values to the closure they pass on the strength of the class's promise, and an instance free to keep the closure would let it outlive those borrows"
+
+fn method_once_local_mismatch_msg(name: String) -> String =
+  "instance method parameter '" ++ name ++ "' must match the class declaration on both `once` and `local`: callers move values into the closure on the strength of `once` and lend it borrowed values on the strength of `local`, and an instance that drops either lets the closure run more often or outlive those borrows"
+
 fn method_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that only borrows where the class consumes discharges the caller's obligation and leaks the value"
 
@@ -500,6 +506,11 @@ fn lambda_capture_msg(name: String, borrowed: Bool) -> String =
 
 fn owned_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)"
+
+# At a `local` slot plain `once` is no way out: it would then reject the
+# closure's borrowed captures. The slot needs both.
+fn local_move_capture_msg(name: String) -> String =
+  "linear value '" ++ name ++ "' captured by a lambda is not yet supported (a plain `local` closure may run many times, so it cannot take a move; if the callee invokes this closure at most once, declare that parameter `once local`)"
 
 fn borrow_capture_msg(name: String) -> String =
   "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee does not keep this closure past the call, declare that parameter `local`"
@@ -905,7 +916,7 @@ fn lin_local_captures(res: LinRes, moves_ok: Bool, p: source.SourcePos) -> LinRe
 
 fn lin_local_moves(bc: List LinUse, bb: List LinUse, moves_ok: Bool, p: source.SourcePos) -> LinRes =
   match bc with
-  | [u | _] -> if moves_ok then LinOk(bc, bb) else LinErr(p, lambda_capture_msg(luse_name(u), false))
+  | [u | _] -> if moves_ok then LinOk(bc, bb) else LinErr(p, local_move_capture_msg(luse_name(u)))
   | Nil -> LinOk(bc, bb)
 
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
@@ -1585,9 +1596,12 @@ fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
   types.ownership_eq(ownership_of_param_mode(m), spine_own(class_type))
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
-  if types.own_is_once(inst) || types.own_is_once(cls)
-  then method_once_mismatch_msg(name)
-  else method_mismatch_msg(name)
+  if types.ownership_is_borrow(inst) || types.ownership_is_borrow(cls) then method_mismatch_msg(name)
+  else if types.own_is_once(inst) != types.own_is_once(cls)
+  then (if types.own_is_local(inst) != types.own_is_local(cls)
+        then method_once_local_mismatch_msg(name)
+        else method_once_mismatch_msg(name))
+  else method_local_mismatch_msg(name)
 
 # Validate modifiers against a signature ALONE, with no body to walk. Used for
 # `extern fn`, which has no body and so never reaches check_fn_linear.
@@ -1971,7 +1985,10 @@ fn esc_value(p: String, e: typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
 fn esc_all(p: String, es: List typed_ast.TypedExpr, sc: EscScope) -> LinCheck =
   match es with
   | Nil -> LinPass
-  | Cons e rest -> esc_after(esc_value(p, e, sc), esc_all(p, rest, sc))
+  | Cons e rest ->
+      match esc_value(p, e, sc) with
+      | LinFail q m -> LinFail(q, m)
+      | LinPass -> esc_all(p, rest, sc)
 
 # `next` is evaluated eagerly, so this is only for a cheap second walk; the
 # sequences below that can be long match on the result instead.
@@ -1983,7 +2000,10 @@ fn esc_after(first: LinCheck, next: LinCheck) -> LinCheck =
 fn esc_arms(p: String, arms: List typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
   match arms with
   | Nil -> LinPass
-  | Cons br rest -> esc_after(esc_arm(p, br, sc), esc_arms(p, rest, sc))
+  | Cons br rest ->
+      match esc_arm(p, br, sc) with
+      | LinFail q m -> LinFail(q, m)
+      | LinPass -> esc_arms(p, rest, sc)
 
 fn esc_arm(p: String, br: typed_ast.TypedMatchBranch, sc: EscScope) -> LinCheck =
   match br with

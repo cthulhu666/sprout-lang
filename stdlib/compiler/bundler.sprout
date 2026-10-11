@@ -103,7 +103,7 @@ type ImportBinding =
 #              unqual_values unqual_types unqual_classes
 #              alias_val_exports alias_type_exports
 #              canonical_names
-#              prelude
+#              prelude foreign_externs
 #
 # `prelude` is what the prelude declares, for `prelude.X` and for renaming a local
 # that shares a prelude value's name (`local_name`).
@@ -120,6 +120,7 @@ type ResolveCtx =
       (Dict (Dict String)) (Dict (Dict String))
       (Dict String)
       PreludeNames
+      (Dict String)
 
 # The prelude's own symbol tables, held as they are, built once per bundle beside
 # `canonical`. `bare` is built, from two short lists: class methods and externs,
@@ -163,73 +164,76 @@ fn sym_extern_names(s: ModuleSymbols) -> List String =
 # ---------------------------------------------------------------------------
 
 fn ctx_value_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx v _ _ _ _ _ _ _ _ _ _ -> v
+  match c with | ResolveCtx v _ _ _ _ _ _ _ _ _ _ _ -> v
 
 fn ctx_type_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ t _ _ _ _ _ _ _ _ _ -> t
+  match c with | ResolveCtx _ t _ _ _ _ _ _ _ _ _ _ -> t
 
 fn ctx_class_locals(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ _ _ -> cl
+  match c with | ResolveCtx _ _ cl _ _ _ _ _ _ _ _ _ -> cl
 
 fn ctx_method_names(c: ResolveCtx) -> List String =
-  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ _ _ -> mn
+  match c with | ResolveCtx _ _ _ mn _ _ _ _ _ _ _ _ -> mn
 
 fn ctx_unqual_values(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ _ _ -> uv
+  match c with | ResolveCtx _ _ _ _ uv _ _ _ _ _ _ _ -> uv
 
 fn ctx_unqual_types(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ _ _ -> ut
+  match c with | ResolveCtx _ _ _ _ _ ut _ _ _ _ _ _ -> ut
 
 fn ctx_unqual_classes(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ _ _ -> uc
+  match c with | ResolveCtx _ _ _ _ _ _ uc _ _ _ _ _ -> uc
 
 fn ctx_alias_val_exports(c: ResolveCtx) -> Dict (Dict String) =
-  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ _ _ -> ave
+  match c with | ResolveCtx _ _ _ _ _ _ _ ave _ _ _ _ -> ave
 
 fn ctx_alias_type_exports(c: ResolveCtx) -> Dict (Dict String) =
-  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate _ _ -> ate
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ ate _ _ _ -> ate
 
 fn ctx_canonical_names(c: ResolveCtx) -> Dict String =
-  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ cn _ -> cn
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ cn _ _ -> cn
 
 fn ctx_prelude(c: ResolveCtx) -> PreludeNames =
-  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ _ pn -> pn
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ _ pn _ -> pn
+
+fn ctx_foreign_externs(c: ResolveCtx) -> Dict String =
+  match c with | ResolveCtx _ _ _ _ _ _ _ _ _ _ _ fe -> fe
 
 fn ctx_with_methods(c: ResolveCtx, extra: List String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
-      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate, cn, pn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn fe ->
+      ResolveCtx(vl, tl, cl, list_append(mn, extra), uv, ut, uc, ave, ate, cn, pn, fe)
 
 fn ctx_with_alias_val(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate, cn, pn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn fe ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, dict_set(alias, exports, ave), ate, cn, pn, fe)
 
 fn ctx_with_alias_type(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate), cn, pn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn fe ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, uc, ave, dict_set(alias, exports, ate), cn, pn, fe)
 
 fn ctx_with_unqual_value(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
-      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate, cn, pn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn fe ->
+      ResolveCtx(vl, tl, cl, mn, dict_set(name, canonical, uv), ut, uc, ave, ate, cn, pn, fe)
 
 fn ctx_with_unqual_type(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
-      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate, cn, pn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn fe ->
+      ResolveCtx(vl, tl, cl, mn, uv, dict_set(name, canonical, ut), uc, ave, ate, cn, pn, fe)
 
 fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> ResolveCtx =
   match c with
-  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn ->
-      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate, cn, pn)
+  | ResolveCtx vl tl cl mn uv ut uc ave ate cn pn fe ->
+      ResolveCtx(vl, tl, cl, mn, uv, ut, dict_set(name, canonical, uc), ave, ate, cn, pn, fe)
 
 fn empty_resolve_ctx() -> ResolveCtx =
   ResolveCtx(dict_empty(), dict_empty(), dict_empty(), Nil,
              dict_empty(), dict_empty(), dict_empty(),
              dict_empty(), dict_empty(), dict_empty(),
-             no_prelude_names())
+             no_prelude_names(), dict_empty())
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -1012,9 +1016,9 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
 
 fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                      extra_roots: List String, canonical: Dict String,
-                     prelude: PreludeNames) -> ResolveCtx =
+                     prelude: PreludeNames, externs: List (String, String)) -> ResolveCtx =
   match mod with
-  | ParsedModule _ path specs _ _ _ ->
+  | ParsedModule mod_name path specs _ _ _ ->
       match dict_get(path, all_symbols) with
       | Nothing -> empty_resolve_ctx()
       | Just own_syms ->
@@ -1024,7 +1028,40 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
                        sym_class_locals(own_syms),
                        sym_method_names(own_syms),
                        dict_empty(), dict_empty(), dict_empty(),
-                       dict_empty(), dict_empty(), canonical, prelude))
+                       dict_empty(), dict_empty(), canonical, prelude,
+                       foreign_externs(mod_name, externs)))
+
+# (module, name) for every extern in the bundle with a `local` parameter of its own
+# (not one inside an arrow type). Few, built once per bundle.
+fn private_externs_of(modules: List ParsedModule) -> List (String, String) =
+  list_flat_map(private_externs_in_module, modules)
+
+fn private_externs_in_module(mod: ParsedModule) -> List (String, String) =
+  match mod with
+  | ParsedModule mod_name _ _ _ _ decls -> list_filter_map(private_extern_in(mod_name, _), decls)
+
+fn private_extern_in(mod_name: String, d: ast.Decl) -> Maybe (String, String) =
+  match d with
+  | ast.ExternFnDecl name params _ _ _ ->
+      if any(\p -> ast.mode_is_local(ast.param_mode_of(p)), params)
+      then Just((mod_name, name))
+      else Nothing
+  | _ -> Nothing
+
+# The private externs a module may NOT reach: name -> declaring module. A module
+# declaring a name itself keeps it, even if another module declares the same one.
+fn foreign_externs(own: String, externs: List (String, String)) -> Dict String =
+  fold(add_foreign_extern(own, list_filter_map(own_extern_name(own, _), externs), _, _),
+       dict_empty(), externs)
+
+fn own_extern_name(own: String, entry: (String, String)) -> Maybe String =
+  match entry with
+  | (m, n) -> if m == own then Just(n) else Nothing
+
+fn add_foreign_extern(own: String, own_names: List String, acc: Dict String,
+                      entry: (String, String)) -> Dict String =
+  match entry with
+  | (m, n) -> if m == own || str_list_member(n, own_names) then acc else dict_set(n, m, acc)
 
 # Found by path, as `prelude_type_names` does. Empty when the bundle has no
 # prelude; under `no_prelude` it is the floor.
@@ -1463,7 +1500,7 @@ fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> Stri
         else
           match dict_get(name, ctx_unqual_values(ctx)) with
           | Just canonical -> canonical
-          | Nothing -> name
+          | Nothing -> guard_private_extern(ctx, name)
 
 # `prelude.X` is the prelude's `X`, after a local, an import alias or a top-level
 # value named `prelude` has declined it (docs/prelude-name-identity-v0.md §5). `Nothing` for an `X` the
@@ -1526,6 +1563,14 @@ fn guard_canonical(ctx: ResolveCtx, scope: List String, name: String) -> String 
     match dict_get(name, ctx_canonical_names(ctx)) with
     | Nothing -> name
     | Just _ -> source.canonical_marker ++ name
+
+# An extern with a `local` parameter is reachable only from its declaring module
+# (spec-v0 §Externs). `foreign_externs` holds the ones declared ELSEWHERE, so an
+# own-module reference stays bare. Marked for the reason `guard_canonical` marks.
+fn guard_private_extern(ctx: ResolveCtx, name: String) -> String =
+  match dict_get(name, ctx_foreign_externs(ctx)) with
+  | Nothing -> name
+  | Just module -> source.mark_private_extern(module, name)
 
 fn head_segment(name: String) -> String =
   match split_at_dot(name) with
@@ -1863,20 +1908,22 @@ type QualifiedModule = (path: String, decls: List ast.Decl)
 # What every check of one bundle reads. Bundle-wide, so built once rather than
 # per module in build_resolve_ctx, which would make it quadratic in modules.
 type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, prelude: PreludeNames,
-                    qualified: List QualifiedModule)
+                    externs: List (String, String), qualified: List QualifiedModule)
 
 fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleNames =
   let all_symbols = build_all_symbols(modules)
       canonical = all_canonical_names(all_symbols)
       prelude = prelude_names(all_symbols, stdlib_root)
-  in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude,
-                 qualified = list_map(qualify_one(_, all_symbols, stdlib_root, extra_roots, canonical, prelude), modules))
+      externs = private_externs_of(modules)
+  in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude, externs = externs,
+                 qualified = list_map(qualify_one(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs), modules))
 
 fn qualify_one(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
-               extra_roots: List String, canonical: Dict String, prelude: PreludeNames) -> QualifiedModule =
+               extra_roots: List String, canonical: Dict String, prelude: PreludeNames,
+               externs: List (String, String)) -> QualifiedModule =
   let ParsedModule _ path _ _ ctor_types decls = mod
   in QualifiedModule(path = path,
-                     decls = qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude),
+                     decls = qualify_decls(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs),
                                            publish_marked_records(ctor_types, decls)))
 
 # Settle each record's Representation from the module's EXPORT SURFACE. Runs
@@ -2384,7 +2431,7 @@ fn first_one_ctor_clash(ctx: ResolveCtx, vocab: TypeVocab,
 # Returns the module's path with the clash, since its position is in THAT file.
 fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String, canonical: Dict String,
-                       prelude: PreludeNames,
+                       prelude: PreludeNames, externs: List (String, String),
                        vocab: TypeVocab) -> Maybe (String, source.SourcePos, String) =
   match modules with
   | Nil -> Nothing
@@ -2392,12 +2439,12 @@ fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbo
       match mod with
       | ParsedModule _ path _ _ _ decls ->
           match list_filter_map(one_ctor_named_apart, decls) with
-          | [] -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, prelude, vocab)
+          | [] -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs, vocab)
           | candidates ->
-              match first_one_ctor_clash(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude),
+              match first_one_ctor_clash(build_resolve_ctx(mod, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs),
                                          vocab, candidates) with
               | Just (pos, msg) -> Just((path, pos, msg))
-              | Nothing -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, prelude, vocab)
+              | Nothing -> find_one_ctor_clash(rest, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs, vocab)
 
 # ---------------------------------------------------------------------------
 # Post-qualification assertion: no qualified name may start with '.'
@@ -2441,7 +2488,7 @@ fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_roo
           match validate_type_names(qualified) with
           | Just (pos, err_msg) -> BundleErr(pos, err_msg)
           | Nothing ->
-            match find_one_ctor_clash(modules, names.all_symbols, stdlib_root, extra_roots, names.canonical, names.prelude,
+            match find_one_ctor_clash(modules, names.all_symbols, stdlib_root, extra_roots, names.canonical, names.prelude, names.externs,
                                       type_vocab(names.all_symbols, stdlib_root)) with
             | Just (path, pos, err_msg) -> BundleErr(pos_for_entry(path, pos, entry_path), err_msg)
             | Nothing ->
@@ -2542,29 +2589,30 @@ fn qualify_debug_lines_acc(ctx: ResolveCtx, decls: List ast.Decl, acc: List Stri
       qualify_debug_lines_acc(ctx, rest, Cons(qualify_debug_line(ctx, d), acc))
 
 fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
-                       canonical: Dict String, prelude: PreludeNames) -> List String =
+                       canonical: Dict String, prelude: PreludeNames,
+                       externs: List (String, String)) -> List String =
   match mod with
   | ParsedModule mod_name path _ _ _ decls ->
       Cons(module_header_line(mod_name),
       Cons(ctx_status_line(path, all_symbols),
       qualify_debug_lines_acc(
-        build_resolve_ctx(mod, all_symbols, stdlib_root, Nil, canonical, prelude),
+        build_resolve_ctx(mod, all_symbols, stdlib_root, Nil, canonical, prelude, externs),
         decls, Nil)))
 
 # Same once-per-bundle rule as `make_bundle_or_err`: build the canonical table
 # here, not inside the per-module function, or the debug dump is quadratic.
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
   dump_qualify_modules_with(modules, all_symbols, stdlib_root, all_canonical_names(all_symbols),
-                            prelude_names(all_symbols, stdlib_root))
+                            prelude_names(all_symbols, stdlib_root), private_externs_of(modules))
 
 fn dump_qualify_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                              stdlib_root: String, canonical: Dict String,
-                             prelude: PreludeNames) -> List String =
+                             prelude: PreludeNames, externs: List (String, String)) -> List String =
   match modules with
   | Nil -> Nil
   | Cons mod rest ->
-      list_append(dump_qualify_module(mod, all_symbols, stdlib_root, canonical, prelude),
-                  dump_qualify_modules_with(rest, all_symbols, stdlib_root, canonical, prelude))
+      list_append(dump_qualify_module(mod, all_symbols, stdlib_root, canonical, prelude, externs),
+                  dump_qualify_modules_with(rest, all_symbols, stdlib_root, canonical, prelude, externs))
 
 export fn dump_qualify_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> List String !{IO} =
   do

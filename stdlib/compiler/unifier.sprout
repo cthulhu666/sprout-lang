@@ -930,10 +930,18 @@ let once_mismatch_reason: String =
 let local_mismatch_reason: String =
   "these differ only in whether the parameter is `local`, and that must match exactly: `local` promises the callee does not keep the closure past the call, which is what licenses a caller to lend it borrowed values — a function without the promise cannot stand in for one with it"
 
+let once_local_mismatch_reason: String =
+  "these differ in both `once` and `local`, and both must match exactly: `once` promises the callee invokes the closure at most once, which licenses moving a linear value into it, and `local` promises the callee does not keep it past the call, which licenses lending it borrowed values — a function without the promises cannot stand in for one with them"
+
+# Decided by which axes differ, not by which modifier either side mentions:
+# `once local` against `local` differs in `once` alone.
 fn ownership_mismatch_reason(o1: types.Ownership, o2: types.Ownership) -> String =
-  if types.own_is_local(o1) || types.own_is_local(o2) then local_mismatch_reason
-  else if types.own_is_once(o1) || types.own_is_once(o2) then once_mismatch_reason
-  else borrow_mismatch_reason
+  if types.ownership_is_borrow(o1) || types.ownership_is_borrow(o2) then borrow_mismatch_reason
+  else if types.own_is_once(o1) != types.own_is_once(o2)
+  then (if types.own_is_local(o1) != types.own_is_local(o2)
+        then once_local_mismatch_reason
+        else once_mismatch_reason)
+  else local_mismatch_reason
 
 
 

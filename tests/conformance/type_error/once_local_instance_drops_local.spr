@@ -1,0 +1,12 @@
+module main
+
+# Class `once local`, instance `once`: both are once, so the defect is `local`
+# only. The message must name `local`, not `once`.
+
+class Runner a
+  fn run_it(s: a, work: once local Unit -> Int) -> Int
+
+instance Runner Int
+  fn run_it(s: Int, work: once Unit -> Int) -> Int = s + work(())
+
+fn main() -> Unit !{IO} = print(to_string(run_it(1, \_ -> 2)))

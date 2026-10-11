@@ -380,6 +380,10 @@ qualified, never renamed, and never enters a module's exported set, so:
   `extern fn read_file` and `export fn read_text` in `stdlib.fs`, both
   `import stdlib.fs (read_file)` and `import stdlib.fs (read_text)` compile, and
   under either one a bare `read_file(…)` call resolves.
+- **Exception:** an extern with a `local` or `once local` parameter is reachable
+  only from the module that declares it. Its `local` is a promise the compiler
+  cannot check, kept only by that module's own callers; a reference from any
+  other module is a compile error naming the declaring module.
 
 The consequence for diagnostics is worth stating plainly, because it differs from
 the rule for type names above: a missing import for an extern produces **no
@@ -1974,8 +1978,9 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   check runs only over declared functions.
 - `local` is **erased** and is part of the function type, so it is compared
   invariantly at unification.
-- An `extern fn`'s modes cannot be checked and are trusted; the one extern that
-  carries `local` is private to `stdlib.task`. See `docs/local-closures-v0.md`.
+- An `extern fn`'s modes cannot be checked and are trusted. An extern with a
+  `local` parameter is therefore reachable only from its declaring module
+  (§Externs). See `docs/local-closures-v0.md` §6.5.
 
 **At most once, not exactly once.** The type system bounds invocations from above
 only — matching Rust's `FnOnce` and OxCaml's `once`, both of which are also

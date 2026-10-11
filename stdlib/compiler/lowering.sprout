@@ -721,11 +721,13 @@ fn mangle_effects_suffix(effects_maybe: Maybe (List String)) -> String =
 # rename every existing mangled name for no distinction. Only `borrowing` and
 # `once`/`local` are genuinely different types and earn a suffix.
 fn mangle_mode_suffix(mode: ast.ParamMode) -> String =
-  if ast.mode_is_borrowing(mode) then "_borrow"
-  else if ast.mode_is_once(mode) && ast.mode_is_local(mode) then "_once_local"
-  else if ast.mode_is_once(mode) then "_once"
-  else if ast.mode_is_local(mode) then "_local"
-  else ""
+  match mode with
+  | ast.ModeBorrowing -> "_borrow"
+  | ast.ModeOnceLocal -> "_once_local"
+  | ast.ModeOnce -> "_once"
+  | ast.ModeLocal -> "_local"
+  | ast.ModeDefault -> ""
+  | ast.ModeConsuming -> ""
 
 # ---------------------------------------------------------------------------
 # Eta-expansion of class methods in value position
