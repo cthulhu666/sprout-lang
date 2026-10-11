@@ -127,6 +127,16 @@ fn one_path(f: File, g: File, h: File) -> Int =
   run_if(true, \_ -> release(f)) + run_match(Just(10), \_ -> release(g))
   + maybe_with_default(0, run_after_bind(Just(100), \_ -> release(h)))
 
+# --- 8. a `once` parameter may only go where `once` is promised -------------
+# Forwarded bare to a `once` slot, or captured by a lambda at one: the lambda runs
+# at most once, so `w` does too. (Rejections: once_param_*, once_local_forwarded_*.)
+fn forward_once(w: once Unit -> Int) -> Int = run_once(w)
+
+fn forward_in_lambda(w: once Unit -> Int) -> Int = run_once(\_ -> w(()) + 1)
+
+fn move_forwarded(f: File, g: File) -> Int =
+  forward_once(\_ -> release(f)) + forward_in_lambda(\_ -> release(g))
+
 fn main() -> Unit !{IO} =
   run_suite("once_closures", [
     check_eq("linear value moved into a once closure", move_in(File(9)), 9),
@@ -137,5 +147,6 @@ fn main() -> Unit !{IO} =
     check_eq("borrow and consume inside the closure", borrow_and_move_inside(File(4)), 4),
     check_eq("callee may decline to invoke a once parameter", declines_to_run(), 5),
     check_eq("borrow before the move", borrow_then_move(File(3)), 3),
-    check_eq("callee invokes on one path only", one_path(File(1), File(2), File(3)), 116)
+    check_eq("callee invokes on one path only", one_path(File(1), File(2), File(3)), 116),
+    check_eq("once parameter forwarded to a once slot", move_forwarded(File(10), File(20)), 31)
   ])

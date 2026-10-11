@@ -1,0 +1,24 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.task (Scope, with_scope, scope_handle)
+
+# A module may declare an extern another module also declares, if the signatures
+# agree (equal up to renaming of type variables). `__task_fork` has `once local` in
+# stdlib.task, which makes it private to that module; declaring it here with the
+# same signature is this module's own claim, so its calls are its own.
+# Rejections: tests/conformance/type_error/extern_*_redeclared_*.
+
+extern fn __task_fork(scope_id: Int, work: once local Unit -> b !{IO}) -> Int !{IO}
+
+fn fork_seven(s: Scope) -> Int !{IO} =
+  do
+    let id = __task_fork(scope_handle(s), \_ -> 7)
+    __task_await(id)
+
+fn forked_value() -> Int !{IO} = with_scope(fork_seven)
+
+fn main() -> Unit !{IO} =
+  do
+    v <- forked_value()
+    run_suite("extern_redeclare", [
+      check_eq("an identical redeclaration is the module's own", v, 7)
+    ])

@@ -259,6 +259,15 @@ describes. The second walk therefore holds the parameter *at most once*: the two
 branch convergence and the consume-after-fallible-bind check, do not apply to it, so
 `if c then p(x) else 0` is legal. The branches' uses union, so a later `p(x)` is still a reuse.
 
+**Counting is not enough: `p` must not reach a receiver that could invoke it again.** The count
+treats `plain(p)`, `return p` and `let g = p` as one use each, yet each hands `p` to code that may
+call it many times. That released a moved-in value twice through `fn fwd(w: once …) = plain(w)`.
+So every use other than a call must pass `p` at a `once` (or `once local`) position, or capture it
+in a lambda at one, whose result counts as returned. This is the escape walk of
+`docs/local-closures-v0.md` §6.3, with the slot required to carry `once` rather than `local`. The
+two scheduler externs claim what the C side guarantees: `__scope_spawn` runs its thunk at most
+once, so its `work` is `once`, and `__task_fork`'s is `once local`.
+
 ## 7. Error-message impact
 
 - Borrowed capture at a `once` parameter:

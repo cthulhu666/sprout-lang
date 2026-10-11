@@ -1,0 +1,9 @@
+module main
+import demo.aliasext (ping)
+
+# `local` written inside an alias used by the extern's signature still makes the
+# extern private to its module.
+
+let use_it: (local(Unit -> Int)) -> Int = __mk_alias()
+
+fn main() -> Unit !{IO} = print("x")

@@ -1,0 +1,10 @@
+module main
+import demo.locext (ping)
+
+# `local` written inside a PARAMETER's type makes the extern private too.
+
+fn runner(h: local Unit -> Int) -> Int = h(())
+
+fn use_it() -> Int = __run_with(runner)
+
+fn main() -> Unit !{IO} = print("x")

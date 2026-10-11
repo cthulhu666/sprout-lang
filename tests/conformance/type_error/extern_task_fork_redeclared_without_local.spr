@@ -1,0 +1,13 @@
+module main
+
+# Redeclaring `__task_fork` without the `once local` that stdlib.task wrote would
+# be typed with stdlib.task's signature (the first declaration wins), so the
+# disagreement is an error rather than a silent reinterpretation.
+
+import stdlib.task (with_scope)
+
+extern fn __task_fork(scope_id: Int, work: Unit -> a !{IO}) -> Int !{IO}
+
+fn spawn_plain(sid: Int) -> Int !{IO} = __task_fork(sid, \_ -> 1)
+
+fn main() -> Unit !{IO} = print("x")

@@ -1,0 +1,9 @@
+module main
+
+# Aliasing is not tracked: binding a `once` parameter is itself an escape, since
+# the alias can be called twice.
+
+fn twice(w: once Unit -> Int) -> Int = g(()) + g(())
+  where g = w
+
+fn main() -> Unit !{IO} = print(to_string(twice(\_ -> 1)))

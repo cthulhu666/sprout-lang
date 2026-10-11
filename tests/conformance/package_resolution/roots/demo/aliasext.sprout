@@ -1,0 +1,8 @@
+module demo.aliasext
+
+# `local` reached through a type alias: the alias is declared beside the extern.
+export let ping: Int = 1
+
+export type alias Runner = (local(Unit -> Int)) -> Int
+
+extern fn __mk_alias() -> Runner

@@ -1,0 +1,8 @@
+module main
+
+# Returning a `once` parameter hands the caller a closure it may run any number of
+# times.
+
+fn keep(w: once Unit -> Int) -> (Unit -> Int) = w
+
+fn main() -> Unit !{IO} = print(to_string(keep(\_ -> 1)(())))

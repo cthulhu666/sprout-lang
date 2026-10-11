@@ -1,0 +1,7 @@
+module main
+
+# A `once` parameter stored in a tuple can be run from either copy.
+
+fn pair(w: once Unit -> Int) -> (Unit -> Int, Int) = (w, 1)
+
+fn main() -> Unit !{IO} = print("x")

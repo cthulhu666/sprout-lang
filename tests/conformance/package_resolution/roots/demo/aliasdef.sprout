@@ -1,0 +1,8 @@
+module demo.aliasdef
+
+# Aliases for `aliasfar`: the second names the first, so `local` is two hops away.
+export let ping: Int = 1
+
+export type alias Inner = (local(Unit -> Int)) -> Int
+
+export type alias Outer a = Inner

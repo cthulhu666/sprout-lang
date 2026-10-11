@@ -1,0 +1,9 @@
+module main
+
+# Two declarations of one extern that differ only in the names of their type and
+# effect variables are the same signature.
+
+extern fn __apply_eff(f: a -> b !{e}) -> b !{e}
+extern fn __apply_eff(f: x -> y !{g}) -> y !{g}
+
+fn main() -> Unit !{IO} = print("x")

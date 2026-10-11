@@ -47,11 +47,12 @@ export type TaskStatus (..) =
 # they require stack/context switching). See runtime/APPROVED_BUILTINS.
 extern fn __scope_open() -> Int !{IO}
 extern fn __scope_join(scope_id: Int) -> Unit !{IO}
-extern fn __scope_spawn(scope_id: Int, work: Unit -> Unit !{IO}) -> Unit !{IO}
-# `work` is `local`, and extern modes are unchecked: a caller passing a `local` closure must
-# ensure it never runs after that closure's owner returns. run_with_deadline does: with_timeout
+# Extern modes are unchecked. `work` is `once`: the scheduler runs a task at most once.
+extern fn __scope_spawn(scope_id: Int, work: once Unit -> Unit !{IO}) -> Unit !{IO}
+# `work` is `once local`: at most once, as above. `local` is a claim the caller must keep: a
+# `local` closure must never run after its owner returns. run_with_deadline does: with_timeout
 # parks in __await_deadline until the child finishes or is force-dropped, then joins the scope.
-extern fn __task_fork(scope_id: Int, work: local Unit -> a !{IO}) -> Int !{IO}
+extern fn __task_fork(scope_id: Int, work: once local Unit -> a !{IO}) -> Int !{IO}
 extern fn __task_await(task_id: Int) -> a !{IO}
 extern fn __scope_cancel(scope_id: Int) -> Unit !{IO}
 extern fn __task_sleep(ms: Int) -> Unit !{IO}

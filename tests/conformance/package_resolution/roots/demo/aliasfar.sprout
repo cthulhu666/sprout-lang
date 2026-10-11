@@ -1,0 +1,8 @@
+module demo.aliasfar
+
+# The alias is declared in another module, and names another alias.
+import demo.aliasdef (Outer)
+
+export let ping: Int = 1
+
+extern fn __mk_far() -> Outer Int

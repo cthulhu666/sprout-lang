@@ -200,5 +200,42 @@ else
   fail=1
 fi
 
+# An extern whose signature WRITES `local` anywhere is private to its module, not only
+# one with a top-level `local` parameter: `local` inside the return type or a
+# parameter's type lends a borrowed value to a closure the C body may keep.
+for shape in return param_type; do
+  pex="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_in_$shape.spr" 2>&1)"
+  if echo "$pex" | grep -qF 'is private to `demo.locext`'; then
+    echo "PASS private extern ($shape): a nested \`local\` makes the extern private to its module"
+  else
+    echo "FAIL private extern ($shape): expected the extern to be rejected as private to demo.locext"
+    echo "$pex" | tail -3
+    fail=1
+  fi
+done
+
+# `local` reached through a type alias counts: in the extern's own module, and from
+# another module through a chain of two aliases.
+for shape in alias imported_alias; do
+  pal="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_via_$shape.spr" 2>&1)"
+  if echo "$pal" | grep -qF 'is private to `demo.alias'; then
+    echo "PASS private extern ($shape): \`local\` behind an alias makes the extern private"
+  else
+    echo "FAIL private extern ($shape): expected the extern to be rejected as private"
+    echo "$pal" | tail -3
+    fail=1
+  fi
+done
+
+# Two declarations of one extern that differ only in variable names agree.
+rn="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_redeclare_renamed_vars.spr" 2>&1)"
+if echo "$rn" | grep -q '^OK$' && ! errors "$rn" >/dev/null; then
+  echo "PASS extern redeclaration: renamed type and effect variables are the same signature"
+else
+  echo "FAIL extern redeclaration: renamed variables were judged a different signature"
+  errors "$rn" | head -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

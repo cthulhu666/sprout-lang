@@ -1,0 +1,9 @@
+module main
+
+# Two declarations of one extern must agree: only the first scheme is kept, so a
+# disagreeing second one would be typed with a signature it did not write.
+
+extern fn __probe(n: Int) -> Int
+extern fn __probe(n: Int) -> String
+
+fn main() -> Unit !{IO} = print("x")
