@@ -2162,12 +2162,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   416-binary test path — a binary that runs once cannot repay any extra link.
   `docs/cross-tu-inlining-v0.md` §5.2.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
-  fires on `g_managed_heap_count >= g_gc_threshold`, and the count increments by 1 per managed
-  object regardless of size, so many-small over-collects and few-but-large under-collects,
-  amplified by the `adapt_factor` default of 3.0. First measured instance 2026-09-06 and the gap is
-  ~100,000×: one function holding a 1,600-element `Vec Int` literal peaks at 3,188 MB RSS to produce
-  767 KB of output. Vectors up to 508 elements now carry their elements inline, so those bytes ARE
-  counted (2026-09-25); a longer or push-grown one's buffer is still an invisible `malloc`.
+  fires on `g_managed_heap_count >= g_gc_threshold`, +1 per object whatever its size, so many-small
+  over-collects and few-but-large under-collects (`adapt_factor` 3.0 amplifies it). 2026-09-06, a
+  ~100,000× gap: a 1,600-element `Vec Int` literal peaks at 3,188 MB RSS for 767 KB of output.
+  Vectors ≤508 elements carry elements inline, so those bytes ARE counted (2026-09-25); a longer or
+  push-grown buffer is an invisible `malloc`. Cheap repro: `test_http_param_all_cost.spr` against
+  pre-#622 `http_server` peaks at ~3 GB RSS (2^15 pairs; 2^16 hit 16 GB) on ~n²/2 words of copies.
   `docs/gc-generational-v0.md` §11 has the measurements and three approaches already measured and
   rejected — do not re-derive them.
 - [ ] `P2` **`ir_lowering` assembles IR text with `++` in a recursion at all three nesting levels**
