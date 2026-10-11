@@ -74,8 +74,9 @@ fn main() -> Unit !{IO} =
       with_req("GET /?b=1 HTTP/1.1\r\n\r\n", \r -> int_to_string(vec_length(query_param_all("a", r)))) == "0")
     first_hit <- served("GET / HTTP/1.1\r\n\r\n")
     assert_true(state, "dispatch runs the first matching route", contains(first_hit, "first") && ! contains (first_hit, "second"))
-    # Cost: form 256x more pairs (linear ~250-600x, quadratic ~20000x). The query arm stops at 64 KiB
+    # Cost: form 128x more pairs (linear ~250x, quadratic ~3000x+). The query arm stops at 64 KiB
     # (max_header_bytes) with bare `a&` pairs: 32x more pairs (linear ~32x, quadratic ~1000x).
+    # Both stop at 2^15 pairs: a regression allocates O(n^2) bytes before failing (~3 GB here).
     assert_scales(state, "query_param_all", query_all_ok, query_request(10), query_request(15), 200)
-    assert_scales(state, "form_param_all", form_all_ok, form_request(8), form_request(16), 2500)
+    assert_scales(state, "form_param_all", form_all_ok, form_request(8), form_request(15), 1000)
     summary(state)
