@@ -1,0 +1,61 @@
+import stdlib.test (TestState, new_state, summary)
+import stdlib.string as string
+import stdlib.env as env
+import stdlib.terminal as terminal
+import testsupport.cost (assert_scales)
+
+# Cost guards for the string builders: a wrong complexity is invisible to a
+# correctness test, so each probe is timed on a short and a long input.
+
+# 2^k copies of `s`, by doubling: O(total).
+fn grow(s: String, k: Int) -> String =
+  if k <= 0 then s else grow(s ++ s, k - 1)
+
+fn replaces_crlf(s: String) -> Bool =
+  string.byte_length(string.replace_all("\r\n", "\n", s)) == string.byte_length(s) - string.byte_length(s) / 6
+
+fn replaces_many(s: String) -> Bool =
+  string.byte_length(string.replace_all("ab", "c", s)) == string.byte_length(s) / 2
+
+fn repeats(n: Int) -> Bool =
+  string.byte_length(string.repeat("ab", n)) == n * 2
+
+# A fixed number of calls, so only the INPUT length varies.
+fn empties_go(s: String, n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else empties_go(s, n - 1, if string.is_empty(s) then acc else acc + 1)
+
+fn is_empty_probe(s: String) -> Bool = empties_go(s, 2000, 0) == 2000
+
+fn ends_go(s: String, n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else ends_go(s, n - 1, if string.ends_with(s, "xy") then acc + 1 else acc)
+
+fn ends_with_probe(s: String) -> Bool = ends_go(s, 200, 0) == 200
+
+# Under SPROUT_GC_HDRCHECK=1 `str_byte_len` validates the header with a `strlen`, so
+# ends_with is O(|raw|) there and the arm would fail for a reason unrelated to the code.
+fn ends_with_arm(state: TestState) -> Unit !{IO} =
+  match env.get("SPROUT_GC_HDRCHECK") with
+  | Just _ -> terminal.write("  [cost] ends_with: skipped under SPROUT_GC_HDRCHECK\n")
+  | Nothing ->
+      assert_scales(state, "ends_with", ends_with_probe, grow("ab", 9) ++ "xy",
+                    grow("ab", 19) ++ "xy", 20)
+
+fn digits_ok(s: String) -> Bool =
+  vec_length(string.string_digits(s)) == string.byte_length(s) / 2
+
+fn chars_ok(s: String) -> Bool =
+  vec_length(string.string_chars(s)) == string.length(s)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 64x more matches: linear ~64x, quadratic ~4000x.
+    assert_scales(state, "replace_all, CRLF lines", replaces_crlf, grow("line\r\n", 9), grow("line\r\n", 15), 400)
+    assert_scales(state, "replace_all, many matches", replaces_many, grow("ab", 9), grow("ab", 15), 400)
+    assert_scales(state, "repeat", repeats, 1000, 64000, 400)
+    # Constant vs linear: 1 KiB vs 1 MiB.
+    assert_scales(state, "is_empty", is_empty_probe, grow("ab", 9), grow("ab", 19), 20)
+    _ <- ends_with_arm(state)
+    assert_scales(state, "string_digits", digits_ok, grow("1a", 9), grow("1a", 15), 400)
+    assert_scales(state, "string_chars", chars_ok, grow("aé", 9), grow("aé", 15), 400)
+    summary(state)

@@ -673,8 +673,8 @@ pure, so every algorithm here had to be written without a mutable accumulator:
   exceeds n+1 limbs and bringing a limb down is a prepend on a little-endian magnitude. The
   quotient-digit correction decrements and re-compares instead of doing Knuth's add-back: at these
   widths it is the same work, and it cannot get the add-back's carry cancellation wrong. Note
-  `vec_prepend` could NOT be used for the bring-down — it is O(n²), because `vector_append` copies
-  its input, so prepending one limb to an n-limb `Vec` costs n copies of a growing vector.
+  `vec_prepend` was NOT used for the bring-down — it was O(n²) then, because it copied
+  per element (it is now one `vector_concat`).
 
 **Measured, Apple Silicon, `-O2`, at P-256 width (10 limbs):**
 

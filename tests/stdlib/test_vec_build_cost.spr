@@ -1,0 +1,18 @@
+import stdlib.test (new_state, summary)
+import testsupport.cost (assert_scales)
+
+# vec_prepend and range_to_vec copied the whole vector per element.
+
+fn prepends(n: Int) -> Bool =
+  vec_length(vec_prepend(0, vec_from_list(range_to_list(0..n)))) == n + 2
+
+fn ranges(n: Int) -> Bool =
+  vec_length(range_to_vec(0..n)) == n + 1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 32x more elements: linear ~32x, quadratic ~1000x.
+    assert_scales(state, "vec_prepend", prepends, 2000, 64000, 200)
+    assert_scales(state, "range_to_vec", ranges, 2000, 64000, 200)
+    summary(state)

@@ -7,7 +7,7 @@ import stdlib.test (check_eq, check_true, run_suite)
 # BEFORE reaching any assertion. This file drives a 100k sort plus stability/edges.
 
 # Build [n-1, n-2, ..., 1, 0] as a List in O(n) (tail-recursive), avoiding the
-# O(n^2) range_to_vec path; then one O(n) vec_from_list.
+# range_to_vec; then one O(n) vec_from_list.
 fn desc_list(v: Int, acc: List Int) -> List Int =
   if v < 0 then acc
   else desc_list(v - 1, Cons(v, acc))

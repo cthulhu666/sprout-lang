@@ -2523,9 +2523,6 @@ acting.
 
 **Stdlib and prelude**
 
-- [ ] `P3` **`range_to_vec` is O(n²)** — `prelude.sprout:203` folds via copying `vec_append`,
-  already acknowledged in `test_vec_sort_stacksafe.spr`. Wants a doc note on the function, or a
-  `vec_from_list` single-allocation rewrite mirroring the one at `prelude.sprout:314`.
 - [ ] `P3` **Replace per-arity `ToString` tuple instances with a generic approach.** Arities 2–5
   are explicit declarations; a variadic form needs either a type-level natural-number index over
   tuple arities, a deriving mechanism generating instances to a compiler-defined max, or

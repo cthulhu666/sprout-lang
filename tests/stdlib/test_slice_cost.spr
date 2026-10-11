@@ -30,7 +30,7 @@ let rounds = 3
 let baseline_floor_us = 200
 let allowed_ratio = 20
 
-# O(total) doubling; `string.repeat` is itself quadratic.
+# O(total) doubling.
 fn grow(s: String, k: Int) -> String =
   if k <= 0 then s else grow(s ++ s, k - 1)
 

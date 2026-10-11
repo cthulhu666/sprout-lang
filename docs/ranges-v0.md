@@ -695,8 +695,6 @@ reviewer of this document does not have to cross-reference to see what was notic
    actively misleading once `range_count` means "elements in a closed interval".
 4. **The negative-literal shift rejection has no conformance fixture**, because no conformance
    category covers an `ast_to_ir`-phase rejection. This is the gap §7 declines to reproduce.
-5. **`range_to_vec`** (`prelude.sprout:203`) is O(n²) via copying `vec_append`, already noted at
-   `tests/stdlib/test_vec_sort_stacksafe.spr:10`. Worth a doc note.
 
 Deliberately **not** filed: there is no `range_map`, and none should be added until a caller asks
 for one — `range_to_list |> list_map` covers it, and the repo's convention is to add on demand
