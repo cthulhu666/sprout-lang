@@ -1,24 +1,17 @@
 import stdlib.test (new_state, assert_true, summary)
-import stdlib.http_server (Route, HttpRequest, HttpServerResponse, parse, query_param, query_param_all, form_param, form_param_all, dispatch, ok, render)
-import testsupport.cost (assert_scales)
-import stdlib.string as string
+import stdlib.http_server (parse, query_param_all, form_param_all)
+import testsupport.cost (assert_scales, grow)
 
 # `query_param_all` / `form_param_all` take every pair for a key, and the pair count is
 # attacker-controlled (`a&a&a...` up to the query and body limits), so they must be linear.
-
-# 2^k copies of `s`, by doubling: O(total).
-fn grow(s: String, k: Int) -> String =
-  if k <= 0 then s else grow(s ++ s, k - 1)
 
 fn query_request(k: Int) -> String =
   "GET /?" ++ grow("a&", k) ++ "a HTTP/1.1\r\n\r\n"
 
 fn form_request(k: Int) -> String =
-  "POST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: "
-  ++ int_to_string(4 * pow2(k) + 3) ++ "\r\n\r\n" ++ grow("a=x&", k) ++ "a=x"
-
-fn pow2(k: Int) -> Int =
-  if k <= 0 then 1 else 2 * pow2(k - 1)
+  let body = grow("a=x&", k) ++ "a=x"
+  in "POST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: "
+     ++ int_to_string(str_byte_len(body)) ++ "\r\n\r\n" ++ body
 
 fn all_eq(want: String, vs: Vec String) -> Bool =
   vec_length(vs) > 0 && vec_all(\v -> v == want, vs)
@@ -33,47 +26,9 @@ fn form_all_ok(raw: String) -> Bool =
   | Ok req -> all_eq("x", form_param_all("a", req))
   | Err _ -> false
 
-fn joined(vs: Vec String) -> String =
-  string.join(",", vec_to_list(vs))
-
-fn with_req(raw: String, f: HttpRequest -> String) -> String =
-  match parse(raw) with
-  | Ok req -> f(req)
-  | Err _ -> "PARSE_ERR"
-
-fn dup_a(req: HttpRequest) -> HttpServerResponse = ok("first")
-fn dup_b(req: HttpRequest) -> HttpServerResponse = ok("second")
-
-fn dup_routes() -> Vec Route =
-  [Route("GET", "/", dup_a), Route("GET", "/", dup_b)]
-
-fn served(raw: String) -> String !{IO} =
-  match parse(raw) with
-  | Err _ -> "PARSE_ERR"
-  | Ok req ->
-      do
-        resp <- dispatch(dup_routes(), req)
-        match render(resp) with
-        | Ok text -> text
-        | Err _ -> "RENDER_ERR"
-
-fn contains(hay: String, needle: String) -> Bool =
-  string.contains(hay, needle)
-
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    # Behaviour (passes before and after the fix): order, first-wins, route first-match.
-    assert_true(state, "query_param_all keeps order",
-      with_req("GET /?a=1&b=9&a=2&a=3 HTTP/1.1\r\n\r\n", \r -> joined(query_param_all("a", r))) == "1,2,3")
-    assert_true(state, "form_param_all keeps order",
-      with_req("POST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 15\r\n\r\na=1&b=9&a=2&a=3", \r -> joined(form_param_all("a", r))) == "1,2,3")
-    assert_true(state, "form_param returns the first of a repeated key",
-      with_req("POST / HTTP/1.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\na=1&a=2", \r -> maybe_with_default("none", form_param("a", r))) == "1")
-    assert_true(state, "param_all is empty for an absent key",
-      with_req("GET /?b=1 HTTP/1.1\r\n\r\n", \r -> int_to_string(vec_length(query_param_all("a", r)))) == "0")
-    first_hit <- served("GET / HTTP/1.1\r\n\r\n")
-    assert_true(state, "dispatch runs the first matching route", contains(first_hit, "first") && ! contains (first_hit, "second"))
     # Cost: form 128x more pairs (linear ~250x, quadratic ~3000x+). The query arm stops at 64 KiB
     # (max_header_bytes) with bare `a&` pairs: 32x more pairs (linear ~32x, quadratic ~1000x).
     # Both stop at 2^15 pairs: a regression allocates O(n^2) bytes before failing (~3 GB here).

@@ -113,16 +113,11 @@ fn all_fields(base: Vec (String, String), call: Vec (String, String)) -> Vec (St
 
 # ` k=v` for each field, in order (leading space only when there are fields).
 fn render_fields(fields: Vec (String, String)) -> String =
-  render_fields_from(fields, 0, vec_length(fields), "")
+  string_concat_many(vec_to_list(vec_map(render_field, fields)))
 
-fn render_fields_from(fields: Vec (String, String), i: Int, n: Int, acc: String) -> String =
-  if i >= n then acc
-  else
-    match vec_get(i, fields) with
-    | Nothing -> acc
-    | Just pair ->
-        match pair with
-        | (k, v) -> render_fields_from(fields, i + 1, n, acc ++ " " ++ k ++ "=" ++ v)
+fn render_field(pair: (String, String)) -> String =
+  match pair with
+  | (k, v) -> " " ++ k ++ "=" ++ v
 
 # One log record as a line WITHOUT a trailing newline: `<ts> <LEVEL> <msg> k=v …`.
 # The sink owns line termination (the default stderr sink's eprint appends "\n").

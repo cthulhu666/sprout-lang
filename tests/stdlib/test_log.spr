@@ -50,6 +50,9 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "formatted line: ts LEVEL msg then k=v fields in order",
       format_line("2026-07-18T14:03:21Z", Info, "request", two_fields),
       "2026-07-18T14:03:21Z INFO request method=GET status=200")
+    assert_eq(state, "one field",
+      format_line("2026-07-18T14:03:21Z", Info, "request", [("k", "v")]),
+      "2026-07-18T14:03:21Z INFO request k=v")
     assert_eq(state, "no fields: no trailing space",
       format_line("2026-07-18T14:03:21Z", Error, "boom", vec_empty()),
       "2026-07-18T14:03:21Z ERROR boom")

@@ -78,6 +78,11 @@ fn main() -> Unit !{IO} =
     check_eq("query_param_all returns every value of a repeated key",
       qall("GET /search?a=1&a=2 HTTP/1.1\r\n\r\n", "a"), "1,2"),
 
+    check_eq("query_param_all keeps order among other keys",
+      qall("GET /?a=1&b=9&a=2&a=3 HTTP/1.1\r\n\r\n", "a"), "1,2,3"),
+    check_eq("query_param_all on an absent key is empty",
+      qall("GET /?b=1 HTTP/1.1\r\n\r\n", "a"), ""),
+
     check_eq("query_pairs is the ordered decoded pair list",
       qpairs("GET /search?a=1&b=2 HTTP/1.1\r\n\r\n"), "a=1,b=2")
   ])

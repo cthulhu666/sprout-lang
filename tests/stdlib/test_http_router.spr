@@ -17,6 +17,12 @@ fn h_search(req: HttpRequest) -> HttpServerResponse = ok("search")
 fn routes() -> Vec Route =
   vec_append(Route("GET", "/", h_root), vec_append(Route("GET", "/search", h_search), vec_empty()))
 
+fn h_first(req: HttpRequest) -> HttpServerResponse = ok("first")
+fn h_second(req: HttpRequest) -> HttpServerResponse = ok("second")
+
+fn dup_routes() -> Vec Route =
+  [Route("GET", "/", h_first), Route("GET", "/", h_second)]
+
 fn rendered(resp: HttpServerResponse) -> String =
   match render(resp) with
   | Ok raw -> raw
@@ -25,13 +31,16 @@ fn rendered(resp: HttpServerResponse) -> String =
 # `dispatch` now carries the handler's `!{IO}` effect (handlers may do I/O), so drive
 # it in a do-block even though these handlers are pure — a pure handler subsumes into
 # the effectful route slot unchanged.
-fn served(raw: String) -> String !{IO} =
+fn served_in(table: Vec Route, raw: String) -> String !{IO} =
   match parse(raw) with
   | Err _ -> "PARSE_ERR"
   | Ok req ->
       do
-        resp <- dispatch(routes(), req)
+        resp <- dispatch(table, req)
         rendered(resp)
+
+fn served(raw: String) -> String !{IO} =
+  served_in(routes(), raw)
 
 fn contains(hay: String, needle: String) -> Bool =
   match string.find(hay, needle) with
@@ -54,4 +63,8 @@ fn main() -> Unit !{IO} =
     # Unknown path -> 404 fallback.
     assert_true(state, "unknown path falls through to 404",
       contains(served("GET /nope HTTP/1.1\r\n\r\n"), "404"))
+    # Duplicate routes: the first match wins.
+    first_hit <- served_in(dup_routes(), "GET / HTTP/1.1\r\n\r\n")
+    assert_true(state, "dispatch runs the first matching route",
+      contains(first_hit, "first") && ! contains (first_hit, "second"))
     summary(state)
