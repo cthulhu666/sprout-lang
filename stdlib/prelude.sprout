@@ -365,30 +365,19 @@ export fn vec_empty() -> Vec a =
 export fn vec_singleton(value: a) -> Vec a =
   vec_append(value, vec_empty())
 
-fn vec_prepend_into(acc: Vector a, first: a, source: Vector a, index: Int, total: Int) -> Vector a =
-  if index == 0 then
-    vec_prepend_into(vector_append(acc, first), first, source, 1, total)
-  else if index > total then acc
-  else
-    match vector_get(source, index - 1) with
-    | Nothing -> acc
-    | Just item -> vec_prepend_into(vector_append(acc, item), first, source, index + 1, total)
-
+# O(n): one `vector_concat`.
 export fn vec_prepend(value: a, vec: Vec a) -> Vec a =
   match vec with
-  | Vec raw ->
-      Vec(vec_prepend_into(vector_empty(), value, raw, 0, vector_length(raw)))
+  | Vec raw -> Vec(vector_concat(vector_append(vector_empty(), value), raw))
 
 # O(n): `vector_append` is persistent and copies the input vector.
 export fn vec_append(value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_append(raw, value))
 
-fn range_vec_step(acc: Vec Int, item: Int) -> Vec Int =
-  vec_append(item, acc)
-
+# O(n): materialises the list once, then one allocation.
 export fn range_to_vec(value: IntRange) -> Vec Int =
-  range_fold(range_vec_step, vec_empty(), value)
+  vec_from_list(range_to_list(value))
 
 export fn vec_length(vec: Vec a) -> Int =
   match vec with
