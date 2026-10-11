@@ -428,7 +428,7 @@ fn moved(p: Pane m, b: buffer.Buffer) -> Reply m =
 # the same caret over the same height.
 fn pane_render(p: Pane m, r: geometry.Region, s: scr.Screen) -> Unit !{IO} =
   drawn(p, r, s, viewport.first_row(top_row(p), geometry.region_rows(r)),
-        list_length(buffer.buffer_lines(p.body)))
+        buffer.buffer_line_count(p.body))
 
 # An unfocused pane has no caret to keep in view, so it shows the start of its
 # document — the window only follows a caret that is there.

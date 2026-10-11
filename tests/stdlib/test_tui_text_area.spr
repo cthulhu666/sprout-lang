@@ -262,6 +262,27 @@ fn render_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "a region of no columns terminates and paints nothing",
             none, "")
 
+# A region inside a wider screen, so what a line does at the region's edge is
+# visible rather than clipped by the screen itself.
+fn inset(w: widget.Widget Msg) -> String !{IO} = do
+  s <- scr.screen_new(g.Size(8, 1))
+  widget.render(w, g.Region(1, 0, 4, 1), s)
+  row_text(s, 0, 8, 0)
+
+fn paint_cases(state: TestState) -> Unit !{IO} = do
+  long <- inset(area_with(started("abcdef")))
+  assert_eq(state, "a line wider than its region stops at the region's edge", long,
+            " abcd   ")
+  split <- inset(area_with(started("abc" ++ cjk())))
+  assert_eq(state, "a wide cluster that does not fit is dropped whole", split, " abc    ")
+  fits <- inset(area_with(started("ab" ++ cjk())))
+  assert_eq(state, "and one that fits is painted", fits, " ab" ++ cjk() ++ "   ")
+  mark <- frame(live(started("ab" ++ utf8.from_codepoints([101, 769])), Nil), 4, 1)
+  assert_eq(state, "a combining mark is part of its cluster's width", mark,
+            "ab" ++ utf8.from_codepoints([101, 769]) ++ " ")
+  moved <- frame(live(started("e" ++ utf8.from_codepoints([769]) ++ "bcdef"), Nil), 4, 1)
+  assert_eq(state, "a window dropping a marked cluster drops it whole", moved, "def ")
+
 fn measure_cases(state: TestState) -> Unit !{IO} = do
   # Greedy on BOTH axes, with the offered size as the natural one: measuring
   # the document would walk it on every frame (§4.6).
@@ -359,5 +380,6 @@ fn main() -> Unit !{IO} = do
   content_cases(state)
   declining_cases(state)
   render_cases(state)
+  paint_cases(state)
   measure_cases(state)
   summary(state)

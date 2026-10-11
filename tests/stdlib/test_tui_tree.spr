@@ -1,7 +1,8 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.tui.event as event
 import stdlib.tui.geometry as g
 import stdlib.tui.screen as scr
+import stdlib.tui.style as sty
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.container as ct
 import stdlib.tui.widgets.focus as focus
@@ -212,6 +213,51 @@ fn flat_cases(state: TestState) -> Unit !{IO} = do
 
 # ── where the selection goes ────────────────────────────────────────────────
 
+# ── what it measures and scrolls ────────────────────────────────────────────
+
+fn size_of(w: widget.Widget Msg) -> g.Size = widget.measure(w, g.Size(40, 40)).size
+
+fn opened_docs() -> widget.Widget Msg =
+  after_told(view_of(roots(), plain()),
+             [focus_on, pressed(event.KDown), pressed(event.KRight)])
+
+# The last root is itself open, so the last VISIBLE row is its last child.
+fn open_last() -> widget.Widget Msg =
+  after_told(view_of([leaf("a"), loaded("b", [leaf("x"), leaf("y")])], lighting()),
+             [focus_on, pressed(event.KDown), pressed(event.KRight)])
+
+fn style_at_row(w: widget.Widget Msg, row: Int) -> sty.Style !{IO} = do
+  s <- painted(w, 10, 4)
+  c <- scr.cell_at(s, 0, row)
+  scr.cell_style(c)
+
+fn render_cases(state: TestState) -> Unit !{IO} = do
+  assert_eq(state, "closed nodes measure as the widest visible line and their count",
+            size_of(view_of(roots(), plain())), g.Size(8, 4))
+  assert_eq(state, "opening a node adds its children to the measure",
+            size_of(opened_docs()), g.Size(9, 6))
+  # An open UNREAD node has no children to show yet, but is marked open.
+  let unread_open = after_told(view_of(roots(), expanding()),
+                               [focus_on, pressed(event.KRight)])
+  assert_eq(state, "an open unread node adds no rows", size_of(unread_open), g.Size(8, 4))
+  mark <- shown(unread_open, 10, 1)
+  assert_eq(state, "but is marked open", mark, "v src     ")
+  # The window follows the selection: End on four rows in a three-row region.
+  scrolled <- shown(after_told(view_of(roots(), plain()), [focus_on, pressed(event.KEnd)]),
+                    10, 3)
+  assert_eq(state, "the window ends at the selected row", scrolled,
+            "> docs    |> empty   |  README  ")
+  deep <- shown(after_told(opened_docs(), [pressed(event.KEnd)]), 10, 3)
+  assert_eq(state, "and counts open subtrees in the rows it scrolls past", deep,
+            "    api   |> empty   |  README  ")
+  assert_eq(state, "End lands on the last row of an open last node",
+            fed(open_last(), [key(event.KEnd)]), "[Lit([b, y])]")
+  assert_eq(state, "and the measure counts that node's children",
+            size_of(open_last()), g.Size(5, 4))
+  sel <- style_at_row(opened_docs(), 1)
+  other <- style_at_row(opened_docs(), 0)
+  assert_true(state, "the selected row is painted in the selected style", sel != other)
+
 fn moving_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "Down moves to the next visible row",
             moved(lighting(), [key(event.KDown)]), "[Lit([docs])]")
@@ -369,6 +415,7 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
 fn main() -> Unit !{IO} = do
   state <- new_state()
   flat_cases(state)
+  render_cases(state)
   moving_cases(state)
   opening_cases(state)
   expand_cases(state)

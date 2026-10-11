@@ -381,6 +381,36 @@ fn measure_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "its natural height is that one row",
             g.size_rows(widget.measure(field(), g.Size(20, 5)).size), 1)
 
+fn holding(v: String) -> widget.Widget Msg =
+  ring_of(field_with(inp.input_opts() with (initial = v)))
+
+fn natural_cols(w: widget.Widget Msg) -> Int =
+  g.size_cols(widget.measure(w, g.Size(20, 5)).size)
+
+# Wide and combining clusters either side of the caret: every width the window
+# adds up has to count a cluster once, whichever half of the line it is in.
+fn mixed_cases(state: TestState) -> Unit !{IO} = do
+  let mid = after(holding("x" ++ cjk() ++ "y"), [key(event.KLeft), key(event.KLeft)])
+  on_wide <- shown(mid, 6)
+  assert_eq(state, "a caret on a wide cluster mid-line paints both halves", on_wide,
+            "x" ++ cjk() ++ "y  ")
+  lit <- caret_at(mid, 6, 1)
+  assert_eq(state, "the wide caret is lit", lit, true)
+  past <- caret_at(mid, 6, 3)
+  assert_eq(state, "and the text after it is not", past, false)
+  both <- shown(after(holding(cjk() ++ cjk()), Nil), 6)
+  assert_eq(state, "wide clusters before the caret push it two columns each", both,
+            cjk() ++ cjk() ++ "  ")
+  after_wide <- caret_at(after(holding(cjk() ++ cjk()), Nil), 6, 4)
+  assert_eq(state, "so the caret sits at their total width", after_wide, true)
+  tail <- shown(after(holding("ab" ++ cjk() ++ "cd"), [key(event.KLeft)]), 4)
+  assert_eq(state, "a narrow window drops whole clusters from the front, keeping the wide one that fits",
+            tail, cjk() ++ "cd")
+  assert_eq(state, "the natural width counts a wide cluster as two columns",
+            natural_cols(holding("ab" ++ cjk())), 5)
+  assert_eq(state, "and a combining mark as none", natural_cols(holding(e_acute() ++ "b")), 3)
+  assert_eq(state, "an empty field wants the caret's column", natural_cols(field()), 1)
+
 fn content_cases(state: TestState) -> Unit !{IO} = do
   # Replacement is SILENT (§9.1), so the value is observed by typing after it:
   # one character reveals both the new text and where the caret sits.
@@ -428,4 +458,5 @@ fn main() -> Unit !{IO} = do
   cluster_cases(state)
   render_cases(state)
   measure_cases(state)
+  mixed_cases(state)
   summary(state)

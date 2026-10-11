@@ -659,6 +659,9 @@ fn showing(body: String) -> widget.Widget Msg =
 fn unfocused_showing(body: String) -> widget.Widget Msg =
   opened(alone_unfocused(), at("a.txt"), body)
 
+fn downs(n: Int) -> List event.Event =
+  if n <= 0 then Nil else Cons(key(event.KDown), downs(n - 1))
+
 fn gutter_cases(state: TestState) -> Unit !{IO} = do
   # The gutter is what makes the pane an editor rather than a text area, and it
   # takes its columns before the document sees the region.
@@ -679,6 +682,14 @@ fn gutter_cases(state: TestState) -> Unit !{IO} = do
   away <- frame(unfocused_showing("a\nb"), 6, 2)
   assert_eq(state, "an unfocused pane numbers from the top", away,
             "1 a   \n2 b   ")
+  # The numbers follow the window: with the caret on the last of twelve lines a
+  # three-row pane shows lines 10 to 12, and each number stays on its line.
+  let twelve = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl"
+  let down = downs(11)
+  let (scrolled, _, _) = widget.feed(showing(twelve), down)
+  tail <- frame(scrolled, 6, 3)
+  assert_eq(state, "the gutter follows the window to the caret", tail,
+            "10 j  \n11 k  \n12 l  ")
   # A region too narrow for the gutter gives the document none of it. That the
   # text region can be empty rather than negative is `split_left`'s clamp, and
   # it is what keeps a very narrow split from painting outside itself.

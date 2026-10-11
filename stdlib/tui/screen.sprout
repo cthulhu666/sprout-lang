@@ -131,8 +131,8 @@ fn set_raw(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} = do
   show <- shows(s, col, row)
   if show then mutmatrix_set(back_of(s), row, col, c) else ()
 
-# The clip is consulted here and nowhere else on the write path, so a string
-# that starts outside it still walks into it (docs/tui-scroll-view-v0.md §4.3).
+# Writes consult the clip here, per cell, so a string that starts outside it
+# still walks into it (docs/tui-scroll-view-v0.md §4.3). `screen_clear` cuts it once.
 fn shows(s: Screen, col: Int, row: Int) -> Bool !{IO} = do
   clip <- screen_clip(s)
   in_bounds(s, col, row) && inside(clip, col, row)
@@ -212,6 +212,12 @@ export fn screen_write(s: Screen, col: Int, row: Int, text: String,
                        st: style.Style) -> Int !{IO} =
   write_go(s, col, row, cluster_list(text), st)
 
+# `screen_write` for a caller that already holds the clusters.
+export fn screen_write_clusters(s: Screen, col: Int, row: Int,
+                                clusters: List (List Int),
+                                st: style.Style) -> Int !{IO} =
+  write_go(s, col, row, clusters, st)
+
 fn cluster_list(s: String) -> List (List Int) = text.clusters(s)
 
 fn write_go(s: Screen, col: Int, row: Int, clusters: List (List Int),
@@ -229,20 +235,28 @@ fn write_next(s: Screen, col: Int, row: Int, rest: List (List Int),
               st: style.Style, used: Int) -> Int !{IO} =
   if used == 0 then col else write_go(s, col + used, row, rest, st)
 
-export fn screen_clear(s: Screen, st: style.Style) -> Unit !{IO} =
-  clear_rows(s, 0, Cell(32, Nil, st))
+# The clip is read once and cut to the grid, so the cells inside it are set
+# directly rather than each asking `shows`.
+export fn screen_clear(s: Screen, st: style.Style) -> Unit !{IO} = do
+  clip <- screen_clip(s)
+  let r = geometry.intersect(clip, geometry.region_at_origin(screen_size(s)))
+  clear_region(s, r, Cell(32, Nil, st))
 
-fn clear_rows(s: Screen, row: Int, c: Cell) -> Unit !{IO} =
-  if row >= screen_rows(s) then ()
-  else do
-    clear_cols(s, 0, row, c)
-    clear_rows(s, row + 1, c)
+fn clear_region(s: Screen, r: geometry.Region, c: Cell) -> Unit !{IO} =
+  if geometry.is_empty(r) then ()
+  else clear_rows(s, r, geometry.region_row(r), c)
 
-fn clear_cols(s: Screen, col: Int, row: Int, c: Cell) -> Unit !{IO} =
-  if col >= screen_cols(s) then ()
+fn clear_rows(s: Screen, r: geometry.Region, row: Int, c: Cell) -> Unit !{IO} =
+  if row >= geometry.region_bottom(r) then ()
   else do
-    set_raw(s, col, row, c)
-    clear_cols(s, col + 1, row, c)
+    clear_cols(s, geometry.region_right(r), row, geometry.region_col(r), c)
+    clear_rows(s, r, row + 1, c)
+
+fn clear_cols(s: Screen, right: Int, row: Int, col: Int, c: Cell) -> Unit !{IO} =
+  if col >= right then ()
+  else do
+    mutmatrix_set(back_of(s), row, col, c)
+    clear_cols(s, right, row, col + 1, c)
 
 # ── Diffing ─────────────────────────────────────────────────────────────────
 
@@ -263,10 +277,9 @@ export fn diff_to_ansi(s: Screen) -> String !{IO} = do
 fn finish(s: Screen, parts: List String) -> String !{IO} =
   match parts with
   | Nil -> ""
-  # Anything at all was emitted, so close with a reset and take the back
-  # buffer as the new front.
-  | [_ | _] -> do
-      commit_rows(s, 0)
+  # Anything at all was emitted, so close with a reset. `emit_cell` has
+  # already copied each emitted cell into the front buffer.
+  | [_ | _] ->
       string_concat_many(list_reverse(Cons(style.style_to_ansi(style.style_default), parts)))
 
 fn diff_rows(s: Screen, row: Int, acc: List String) -> List String !{IO} =
@@ -305,9 +318,12 @@ fn run_cells(s: Screen, row: Int, col: Int, acc: List String,
     changed <- cell_changed(s, col, row)
     if changed then emit_cell(s, row, col, acc, last) else diff_row(s, row, col, acc)
 
+# Every changed cell passes through here, continuations included, so this is
+# where the front buffer catches up with the back.
 fn emit_cell(s: Screen, row: Int, col: Int, acc: List String,
              last: Maybe style.Style) -> List String !{IO} = do
   c <- mutmatrix_at(back_of(s), row, col)
+  mutmatrix_set(front_of(s), row, col, c)
   emit_known(s, row, col, acc, last, c)
 
 # A `Continuation` is skipped: the wide cluster before it already wrote both
@@ -327,19 +343,6 @@ fn style_prefix(acc: List String, last: Maybe style.Style,
   match last with
   | Just prev -> if prev == st then acc else Cons(style.style_to_ansi(st), acc)
   | Nothing -> Cons(style.style_to_ansi(st), acc)
-
-fn commit_rows(s: Screen, row: Int) -> Unit !{IO} =
-  if row >= screen_rows(s) then ()
-  else do
-    commit_cols(s, row, 0)
-    commit_rows(s, row + 1)
-
-fn commit_cols(s: Screen, row: Int, col: Int) -> Unit !{IO} =
-  if col >= screen_cols(s) then ()
-  else do
-    c <- mutmatrix_at(back_of(s), row, col)
-    mutmatrix_set(front_of(s), row, col, c)
-    commit_cols(s, row, col + 1)
 
 # A resized screen is a NEW screen, blank in both buffers: the terminal's
 # contents after a resize are not something a program can know, so the next
