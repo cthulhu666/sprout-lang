@@ -3,7 +3,7 @@ module stdlib.unicode.utf8
 # Codepoint access for Strings.
 #
 # Sprout has `char_from_codepoint` (Int -> Char) but NO inverse: there is no
-# way to get a Char's numeric value. `string.string_chars` therefore yields
+# way to get a Char's numeric value. `string_chars` therefore yields
 # Chars that can be compared but not measured, so any property lookup — width,
 # grapheme class — has to decode the UTF-8 bytes itself. That is what this
 # module is for.
@@ -11,7 +11,6 @@ module stdlib.unicode.utf8
 # Strings are valid UTF-8 by construction (the runtime validates on every
 # String-producing boundary), so decoding assumes well-formed input.
 
-import stdlib.string as string
 import stdlib.bytes as bytes
 
 # Continuation bytes contribute 6 bits each; the lead byte carries the rest.
@@ -61,4 +60,4 @@ fn decode_step(b: Bytes, i: Int, n: Int, acc: List Int, b0: Int) -> List Int =
 
 # Rebuild a String from codepoints. One concat pass, not `++` in a loop.
 export fn from_codepoints(cps: List Int) -> String =
-  string_concat_many(list_map(\cp -> string.string_from_char(char_from_codepoint(cp)), cps))
+  string_concat_many(list_map(\cp -> char_to_string(char_from_codepoint(cp)), cps))

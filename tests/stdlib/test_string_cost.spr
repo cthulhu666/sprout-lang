@@ -2,14 +2,10 @@ import stdlib.test (TestState, new_state, summary)
 import stdlib.string as string
 import stdlib.env as env
 import stdlib.terminal as terminal
-import testsupport.cost (assert_scales)
+import testsupport.cost (assert_scales, grow)
 
 # Cost guards for the string builders: a wrong complexity is invisible to a
 # correctness test, so each probe is timed on a short and a long input.
-
-# 2^k copies of `s`, by doubling: O(total).
-fn grow(s: String, k: Int) -> String =
-  if k <= 0 then s else grow(s ++ s, k - 1)
 
 fn replaces_crlf(s: String) -> Bool =
   string.byte_length(string.replace_all("\r\n", "\n", s)) == string.byte_length(s) - string.byte_length(s) / 6

@@ -285,12 +285,11 @@ fn divmod_small(mag: Vec Int, divisor: Int) -> (Vec Int, Int) =
   let (digits, rem) = divmod_small_go(mag, divisor, vec_length(mag) - 1, 0, Nil)
   in (mag_of_low_first(digits), rem)
 
-# `rem * base + limb`, which on a little-endian magnitude is a prepend. Routed through
-# a list rather than `vec_prepend`, which is O(n^2) — `vector_append` copies its input,
-# so prepending one limb to an n-limb Vec costs n copies of a growing vector.
+# `rem * base + limb`, which on a little-endian magnitude is a prepend. `rem` is trimmed, so
+# a non-zero `rem` keeps its top limb; a zero `rem` has no limbs and must not gain a 0 limb.
 fn bring_down(rem: Vec Int, limb: Int) -> Vec Int =
   if mag_is_zero(rem) then small_mag(limb)
-  else mag_of_low_first(Cons(limb, vec_to_list(rem)))
+  else vec_prepend(limb, rem)
 
 # The estimate overshoots by at most two under a normalised divisor, so this decrements
 # rather than doing Knuth's separate add-back step: a compare-and-retry is the same

@@ -2,6 +2,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.string as string
 import stdlib.terminal as terminal
 import stdlib.time as time
+import testsupport.cost (grow)
 
 # Pins the property that makes `string.slice` and `string.take` usable on large
 # inputs: taking a PREFIX costs O(count), not O(|s|). A wrong cost is invisible to a correctness
@@ -29,10 +30,6 @@ let iterations = 20000
 let rounds = 3
 let baseline_floor_us = 200
 let allowed_ratio = 20
-
-# O(total) doubling.
-fn grow(s: String, k: Int) -> String =
-  if k <= 0 then s else grow(s ++ s, k - 1)
 
 # Hand-rolled recursion rather than a combinator: a list of results would allocate
 # per iteration and the allocation, not the slice, would dominate the measurement.

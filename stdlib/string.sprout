@@ -1,5 +1,6 @@
 module stdlib.string
 import stdlib.bytes as bytes
+import stdlib.unicode.utf8 as utf8
 
 # String primitives owned by this module rather than by the prelude.
 #
@@ -362,7 +363,7 @@ fn copies(s: String, n: Int, acc: List String) -> List String =
 export fn repeat(s: String, n: Int) -> String =
   string_concat_many(copies(s, n, Nil))
 
-# O(|s|): one `split` scan, one join. An empty `from` returns `s`.
+# O(|s| * |from|): `split` compares `from` at each byte, then one join. An empty `from` returns `s`.
 export fn replace_all(from: String, to: String, s: String) -> String =
   join(to, split(s, from))
 
@@ -402,18 +403,13 @@ export fn string_digits(raw: String) -> Vec Int =
   let b = bytes.from_string(raw)
   in vec_from_list(list_reverse(digits_loop(b, 0, bytes.length(b), Nil)))
 
-# Width in bytes of the UTF-8 codepoint whose lead byte is `lead`.
-fn utf8_width(lead: Int) -> Int =
-  if lead < 128 then 1 else if lead < 224 then 2 else if lead < 240 then 3 else 4
-
-fn chars_loop(raw: String, b: Bytes, i: Int, n: Int, acc: List Char) -> List Char =
+fn chars_loop(b: Bytes, i: Int, n: Int, acc: List Char) -> List Char =
   if i >= n then acc
   else
-    let w = utf8_width(bytes.get_or(b, i, 0))
-    in chars_loop(raw, b, i + w, n,
-         Cons(char_at_or(str_slice_bytes(raw, i, w), 0, '?'), acc))
+    chars_loop(b, i + utf8.seq_length(bytes.get_or(b, i, 0)), n,
+               Cons(char_from_codepoint(utf8.codepoint_at(b, i)), acc))
 
-# O(bytes): steps by each codepoint's UTF-8 width and decodes one small slice per step.
+# O(bytes): steps by each codepoint's UTF-8 width and decodes it in place.
 export fn string_chars(raw: String) -> Vec Char =
   let b = bytes.from_string(raw)
-  in vec_from_list(list_reverse(chars_loop(raw, b, 0, bytes.length(b), Nil)))
+  in vec_from_list(list_reverse(chars_loop(b, 0, bytes.length(b), Nil)))

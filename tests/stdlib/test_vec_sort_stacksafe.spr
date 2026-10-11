@@ -6,12 +6,6 @@ import stdlib.test (check_eq, check_true, run_suite)
 # above ~50-60k aborted with `sprout_gc_push_root: GC root pool exhausted` (exit 1)
 # BEFORE reaching any assertion. This file drives a 100k sort plus stability/edges.
 
-# Build [n-1, n-2, ..., 1, 0] as a List in O(n) (tail-recursive), avoiding the
-# range_to_vec; then one O(n) vec_from_list.
-fn desc_list(v: Int, acc: List Int) -> List Int =
-  if v < 0 then acc
-  else desc_list(v - 1, Cons(v, acc))
-
 # Tail-recursive non-decreasing check over a Vec Int (no O(n) stack growth).
 fn is_sorted_go(v: Vec Int, i: Int, n: Int) -> Bool =
   if i + 1 >= n then true
@@ -19,7 +13,7 @@ fn is_sorted_go(v: Vec Int, i: Int, n: Int) -> Bool =
   else false
 
 fn main() -> Unit !{IO} =
-  let big = vec_sort(vec_from_list(list_reverse(desc_list(99999, Nil))))
+  let big = vec_sort(vec_from_list(list_reverse(range_to_list(0..99999))))
   in run_suite("vec_sort_stacksafe", [
     # --- large sort: the stack-safety gate (crashes on the old code) ---
     check_eq("100k length preserved", vec_length(big), 100000),
