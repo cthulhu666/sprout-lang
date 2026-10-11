@@ -1,0 +1,17 @@
+module main
+
+# `once` is checked per path, so a branch that declines to invoke is legal
+# (test_once_closures.spr `one_path`). The branches' uses still UNION: an
+# invocation on one branch followed by another after the `if` is two on that
+# path, and stays rejected.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn maybe_twice(go: Bool, work: once Unit -> Int) -> Int =
+  (if go then work(()) else 0) + work(())
+
+fn oops(f: File) -> Int = maybe_twice(true, \_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(oops(File(1))))

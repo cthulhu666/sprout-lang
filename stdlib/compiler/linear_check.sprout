@@ -541,33 +541,44 @@ fn seq2_after_reuse(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List 
 # Two alternative branches. Consumed sets must be EQUAL (an obligation discharged
 # on one path must be discharged on all). Borrowed sets merely UNION: a borrow
 # carries no obligation, so borrowing in one arm and not the other is harmless.
+# An `at_most` name carries no obligation either, so its uses UNION too: a use
+# after the branches still meets the one inside them as a reuse.
 fn alt_converge(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse,
-                at: source.SourcePos, try_pos: Maybe source.SourcePos) -> LinRes =
-  match first_missing(ac, bc) with
+                at: source.SourcePos, try_pos: Maybe source.SourcePos,
+                at_most: List String) -> LinRes =
+  match first_missing(luse_remove_all(at_most, ac), bc) with
   | Just n -> diverge_err(n, at, try_pos)
-  | Nothing -> alt_converge_rev(ac, ab, bc, bb, at, try_pos)
+  | Nothing -> alt_converge_rev(ac, ab, bc, bb, at, try_pos, at_most)
 
 fn alt_converge_rev(ac: List LinUse, ab: List LinUse, bc: List LinUse, bb: List LinUse,
-                    at: source.SourcePos, try_pos: Maybe source.SourcePos) -> LinRes =
-  match first_missing(bc, ac) with
+                    at: source.SourcePos, try_pos: Maybe source.SourcePos,
+                    at_most: List String) -> LinRes =
+  match first_missing(luse_remove_all(at_most, bc), ac) with
   | Just n -> diverge_err(n, at, try_pos)
-  | Nothing -> LinOk(ac, list_append(ab, bb))
+  | Nothing ->
+      LinOk(list_append(ac, luse_remove_all(list_map(luse_name, ac), bc)), list_append(ab, bb))
 
 # --- the linear bindings in scope, split by mode ---
 #
 # `owned` must each be consumed exactly once (a parameter with no modifier or
 # with `consuming`, a do-`let`, a `<-` bind, a pattern binder). `borrowed` is a
 # `borrowing` parameter: it carries NO consume obligation here — that stayed with
-# the caller — and must not be consumed at all.
-export type LinScope (..) = LinScope(List String) (List String)
+# the caller — and must not be consumed at all. `at_most` is the subset of
+# `owned` held to AT MOST once instead (a `once` parameter, see once_honesty):
+# a reuse is still an error, a path that skips the use is not.
+export type LinScope (..) = LinScope(List String) (List String) (List String)
 
 fn scope_owned(sc: LinScope) -> List String =
   match sc with
-  | LinScope o _ -> o
+  | LinScope o _ _ -> o
 
 fn scope_borrowed(sc: LinScope) -> List String =
   match sc with
-  | LinScope _ b -> b
+  | LinScope _ b _ -> b
+
+fn scope_at_most(sc: LinScope) -> List String =
+  match sc with
+  | LinScope _ _ m -> m
 
 fn scope_is_owned(name: String, sc: LinScope) -> Bool = list_member(name, scope_owned(sc))
 
@@ -576,7 +587,7 @@ fn scope_is_borrowed(name: String, sc: LinScope) -> Bool = list_member(name, sco
 fn scope_is_linear(name: String, sc: LinScope) -> Bool =
   scope_is_owned(name, sc) || scope_is_borrowed(name, sc)
 
-# Drop every entry for `names` from BOTH lists. A new binder SHADOWS whatever the
+# Drop every entry for `names` from ALL lists. A new binder SHADOWS whatever the
 # name meant before, so its old tracking must go — otherwise a non-linear binder
 # shadowing a linear one leaves the stale entry behind, and a use of the shadow
 # is credited as a consume of the shadowed resource. That satisfied the leak
@@ -587,13 +598,14 @@ fn scope_is_linear(name: String, sc: LinScope) -> Bool =
 # The lists model an environment, so every introduction must shadow, not append.
 # Regression: tests/conformance/type_error/borrow_shadowed_linear_binder.
 fn scope_shadow(names: List String, sc: LinScope) -> LinScope =
-  LinScope(list_diff(scope_owned(sc), names), list_diff(scope_borrowed(sc), names))
+  LinScope(list_diff(scope_owned(sc), names), list_diff(scope_borrowed(sc), names),
+           list_diff(scope_at_most(sc), names))
 
 fn scope_add_owned(names: List String, sc: LinScope) -> LinScope =
   scope_add_owned_after(names, scope_shadow(names, sc))
 
 fn scope_add_owned_after(names: List String, sc: LinScope) -> LinScope =
-  LinScope(list_append(names, scope_owned(sc)), scope_borrowed(sc))
+  LinScope(list_append(names, scope_owned(sc)), scope_borrowed(sc), scope_at_most(sc))
 
 # --- the recursive walk ---
 
@@ -878,7 +890,8 @@ fn lin_if(c: typed_ast.TypedExpr, a: typed_ast.TypedExpr, b: typed_ast.TypedExpr
   let LinOk cc cb = lin_consumed(c, sc, env) else LinErr ep m -> LinErr(ep, m)
       LinOk ac ab = lin_consumed(a, sc, env) else LinErr ep m -> LinErr(ep, m)
       LinOk bc bb = lin_consumed(b, sc, env) else LinErr ep m -> LinErr(ep, m)
-      LinOk mc mb = alt_converge(ac, ab, bc, bb, p, Nothing) else LinErr ep m -> LinErr(ep, m)
+      LinOk mc mb = alt_converge(ac, ab, bc, bb, p, Nothing, scope_at_most(sc))
+                    else LinErr ep m -> LinErr(ep, m)
   in seq2(cc, cb, mc, mb)
 
 fn lin_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
@@ -925,7 +938,7 @@ fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: Lis
                  from_borrow: Bool, try_pos: Maybe source.SourcePos, env: Dict types.Scheme) -> LinRes =
   match arm_sets(rest, sc, scrut_type, from_borrow, try_pos, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at, try_pos)
+  | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at, try_pos, scope_at_most(sc))
 
 # `pattern_linear_binders` reports only the binders carrying obligations;
 # `scope_shadow` gets EVERY binder, because a non-linear pattern variable must still
@@ -953,7 +966,7 @@ fn scope_add(names: List String, from_borrow: Bool, sc: LinScope) -> LinScope =
   else scope_add_owned(names, sc)
 
 fn scope_add_borrowed(names: List String, sc: LinScope) -> LinScope =
-  LinScope(scope_owned(sc), list_append(names, scope_borrowed(sc)))
+  LinScope(scope_owned(sc), list_append(names, scope_borrowed(sc)), scope_at_most(sc))
 
 fn scope_close(binders: List LinBinder, from_borrow: Bool, consumed: List LinUse,
                borrowed: List LinUse, leak_pos: source.SourcePos,
@@ -1055,14 +1068,16 @@ fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                     sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_do(rest, scope_add_owned(binder_names(binders), sc), env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk restc restb -> lin_do_bind_close(binders, ec, eb, restc, restb, e, fallible, env)
+  | LinOk restc restb ->
+      lin_do_bind_close(binders, ec, eb, restc, restb, e, fallible, scope_at_most(sc), env)
 
 fn lin_do_bind_close(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                      restc: List LinUse, restb: List LinUse,
-                     e: typed_ast.TypedExpr, fallible: Bool, env: Dict types.Scheme) -> LinRes =
+                     e: typed_ast.TypedExpr, fallible: Bool, at_most: List String,
+                     env: Dict types.Scheme) -> LinRes =
   match unconsumed_binder(binders, restc) with
   | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_binder_msg(leaked, env))
-  | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, fallible)
+  | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, fallible, at_most)
 
 # When THIS bind is fallible the steps after it are conditional, so a consume of a
 # binding introduced OUTSIDE the block is not guaranteed to run:
@@ -1072,16 +1087,18 @@ fn lin_do_bind_close(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
 # was accepted with `close` counted as executed, yet on any Err the block returns
 # early and the socket leaks for the process lifetime — the very shape M4.5 makes
 # idiomatic. The bind's OWN binders are exempt: they do not exist on the
-# short-circuit path, so they owe nothing there.
+# short-circuit path, so they owe nothing there. So are `at_most` names: skipping
+# one owes nothing either.
 #
 # Regressions: tests/conformance/type_error/borrow_after_fallible_bind (a `Result`
 # block) and .../consume_after_fallible_bind_effect_block (a `Unit !{IO}` block,
 # which the old block-type keying missed entirely — see `lin_do`).
 fn lin_do_bind_after(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                      restc: List LinUse, restb: List LinUse,
-                     fallible: Bool) -> LinRes =
+                     fallible: Bool, at_most: List String) -> LinRes =
   match conditional_consume(fallible,
-                            luse_remove_all(binder_names(binders), restc)) with
+                            luse_remove_all(list_append(binder_names(binders), at_most),
+                                            restc)) with
   | Just u -> LinErr(luse_pos(u), after_fallible_msg(luse_name(u)))
   | Nothing -> seq2(ec, eb, luse_remove_all(binder_names(binders), restc),
                     luse_remove_all(binder_names(binders), restb))
@@ -1749,14 +1766,14 @@ fn once_param_names(params: List ast.Param) -> List String =
 # linear params to leak, but do-`let`/pattern/lambda binders inside are still
 # enforced by the walk.
 export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
-  match lin_consumed(body, LinScope (Nil, Nil), env) with
+  match lin_consumed(body, LinScope (Nil, Nil, Nil), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk _ _ -> LinPass
 
 fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List String,
                  body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
                  env: Dict types.Scheme) -> LinCheck =
-  match lin_consumed(body, LinScope(binder_names(owned), borrowed), env) with
+  match lin_consumed(body, LinScope(binder_names(owned), borrowed, Nil), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk consumed _ ->
       once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
@@ -1776,10 +1793,12 @@ fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List 
 # only be about this parameter.
 #
 # ZERO uses stay legal. `once` bounds invocations from ABOVE ("at most once", per
-# Rust's FnOnce and OxCaml's `once`), so a callee may decline to invoke; that is
-# also why this is a reuse rule and not the linear exactly-once rule.
-# Regression: tests/conformance/type_error/once_callee_invokes_twice, and
-# tests/stdlib/test_once_closures.spr `declines_to_run` for the zero-use side.
+# Rust's FnOnce and OxCaml's `once`), so a callee may decline to invoke, on any
+# path. The name is therefore walked `at_most`: a branch or a fallible bind may
+# skip it, and only a reuse is an error.
+# Regression: tests/conformance/type_error/once_callee_{invokes_twice,
+# branch_then_reuse}, and tests/stdlib/test_once_closures.spr `declines_to_run`
+# and `one_path` for the skipped side.
 fn once_honesty_after(prior: LinCheck, once_names: List String,
                       body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
   match prior with
@@ -1791,7 +1810,7 @@ fn once_honesty(names: List String, body: typed_ast.TypedExpr,
   match names with
   | Nil -> LinPass
   | Cons n rest ->
-      match lin_consumed(body, LinScope (Cons(n, Nil), Nil), env) with
+      match lin_consumed(body, LinScope([n], Nil, [n]), env) with
       | LinErr p _ -> LinFail(p, once_reuse_msg(n))
       | LinOk _ _ -> once_honesty(rest, body, env)
 
