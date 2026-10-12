@@ -25,6 +25,10 @@ fn open_journal(title: String) -> Journal !{IO} =
     lines <- ref_new([title])
     Journal(lines)
 
+# Closing a Journal frees nothing: its Ref is garbage-collected like any value.
+# The release only ends the value's life, which is what the compiler checks. For
+# a real resource the consuming function does the work: `net.close` shuts the
+# socket.
 fn close_journal(j: consuming Journal) -> List String !{IO} =
   match j with
   | Journal lines -> ref_read(lines)

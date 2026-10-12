@@ -127,7 +127,7 @@ declare i64 @task_yield()
 @.str.16 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"--- 4. once ---\00" }
 @.str.17 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"four\00" }
 @.str.18 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" | \00" }
-@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 129, column 57)\00" }
+@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 133, column 57)\00" }
 @.str.20 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"attempt \00" }
 @.str.21 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"attempt \00" }
 @.str.22 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c" failed\00" }
@@ -145,7 +145,7 @@ declare i64 @task_yield()
 @.str.34 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"scratch\00" }
 @.str.35 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"keep\00" }
 @.str.36 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" | \00" }
-@.str.37 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 129, column 57)\00" }
+@.str.37 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 133, column 57)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
