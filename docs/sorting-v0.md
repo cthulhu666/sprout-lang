@@ -34,8 +34,12 @@ Apple M3 Pro, `clang -O2`, random Ints in [0, 65536), ns per element.
 1. **Generic `Ord` dispatch: about 2×.** A `where Ord a` function receives the `Ord` and `Eq`
    dictionaries, and every comparison is an indirect `compare` call. The compiler does not
    specialise a generic function for a concrete type, so `Int` pays the same as any type.
-2. **Small generic wrappers are not inlined.** `ord_lt(x, y)` is just `compare(x, y) < 0`, yet
-   calling it instead of `compare` costs ~40% of the sort. `mutvec_sort` calls `compare` directly.
+2. **A wrapper's GC roots survive inlining.** `ord_lt(x, y)` is just `compare(x, y) < 0`, and
+   LLVM does inline it, yet calling it instead of `compare` costs ~40% of the sort. The rooting
+   pass roots the heap operands of every call, because some runtime builtins allocate before they
+   read their arguments (`op_exposes_operands` in `ir_rooting.sprout`). So `ord_lt` pushes its
+   four arguments (two values, two dictionaries) around its call to `compare`, and LLVM cannot
+   delete a call to `sprout_gc_push_i64_root`. `mutvec_sort` calls `compare` directly.
 3. **Sprout vs C on the same algorithm: about 5×, cause unknown.** Each element of each pass
    makes three runtime calls (`vector_get_direct` twice, `vector_mutset` once), each with null,
    bounds and ageprof checks, plus overflow-checked arithmetic. Two cheap guesses changed
@@ -51,6 +55,7 @@ Apple M3 Pro, `clang -O2`, random Ints in [0, 65536), ns per element.
 | C. C sort builtins for primitive vectors (`Int` radix, `Double`) | 50–500× over `vec_sort` | approval for new builtins; a way to reach them (below) |
 | D. Generic C sort calling a Sprout comparator | removes item 3, keeps item 1 | a builtin, and C→Sprout callbacks; not checked whether the runtime supports them safely |
 | E. Local mutation in pure code (ST-style) | lets pure `vec_sort` use the in-place sort, ~5× | language design |
+| F. Root call operands only for runtime builtins, not for calls to Sprout functions | item 2, program-wide | a GC-safety argument; compiler change |
 
 Option C is safe for the collector: an `Int` element is a plain word in the vector, the collector
 follows a slot only when it looks up as a heap object, and a C sort allocates nothing. It also

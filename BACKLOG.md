@@ -1684,11 +1684,17 @@ deferral happened, not for current behaviour. Still open:
   chunked reads are filed in §2.
 - [ ] `P2` **Specialise generic functions at concrete types.** A `where Ord a` function takes the
   `Ord` and `Eq` dictionaries and makes an indirect `compare` per comparison, so `mutvec_sort` on
-  `Int` runs ~2× slower than a hand-specialised copy. Small generic wrappers are not inlined
-  either: calling `ord_lt` instead of `compare` costs ~40% of the sort. Specialisation would also
-  let `vec_sort` at `Int` reach a primitive sort under its own name. Numbers:
+  `Int` runs ~2× slower than a hand-specialised copy. Specialisation would also let `vec_sort` at
+  `Int` reach a primitive sort under its own name. Numbers:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
   "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry.
+- [ ] `P2` **Calls to Sprout functions root their operands, though the callee roots what it
+  needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots the heap operands of every `IRCall`,
+  because a runtime builtin like `ref_new` may allocate before it reads them. A Sprout callee roots
+  its own parameters before its first GC trigger, so for a direct call to one the caller's pushes
+  look redundant — and LLVM cannot delete them, so they survive inlining: `ord_lt` in place of
+  `compare` costs ~40% of `mutvec_sort` (`docs/sorting-v0.md`). Narrowing the rule to externs
+  needs a written GC-safety argument first (a missing root corrupts the heap) and a measurement.
 - [ ] `P3` **Profile the ~5× gap between a `MutVec` loop in Sprout and the same loop in C.** With
   `Ord` taken out, the in-place merge sort still runs ~5× slower than its C transcription. Each
   element of each pass makes three runtime calls (`vector_get_direct` twice, `vector_mutset`),
