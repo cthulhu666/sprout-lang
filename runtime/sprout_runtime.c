@@ -9209,9 +9209,24 @@ long long map_set(long long map_h, long long key_val, long long value) {
   return result;
 }
 
+/* Whether `key` is stored, by key alone: bst_get's LLONG_MIN "absent" is also a
+   storable Int. Allocates nothing. */
+static int bst_has_key(long long h, const char* key) {
+  while (h != 0) {
+    BSTNode* node = (BSTNode*)(uintptr_t)h;
+    int cmp = strcmp(key, node->key);
+    if (cmp == 0) return 1;
+    h = (cmp < 0) ? node->left : node->right;
+  }
+  return 0;
+}
+
 long long map_remove(long long map_h, long long key_val) {
   const char* key = (const char*)key_val;
   if (key == NULL) sprout_fail("map_remove: null key");
+  /* An absent key changes nothing: return the map itself, and do not intern the
+     key, since an interned copy is permanent. A present key is interned already. */
+  if (!bst_has_key(map_h, key)) return map_h;
   const char* ikey = intern_string(key);
   long long rm = map_h;
   SPROUT_GC_PUSH_I64_LOCAL(rm);

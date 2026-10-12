@@ -872,11 +872,15 @@ export fn set_size(s: Set) -> Int =
 export fn set_union(xs: Set, ys: Set) -> Set =
   list_fold(\ (acc, y) -> set_insert(y, acc), xs, set_to_list(ys))
 
-# O(n log(n+m)) where n = |xs|, m = |ys|: walks xs (O(n)), checks ys
-# membership (O(log m)), inserts kept items into a fresh set (O(log n)).
+# O(min(n, m) log(n+m)) where n = |xs|, m = |ys|: walks the smaller set. A smaller
+# ys is removed from xs; otherwise the xs not in ys go into a fresh set.
 export fn set_diff(xs: Set, ys: Set) -> Set =
-  list_fold(\ (acc, x) -> if set_member(x, ys) then acc else set_insert(x, acc),
-            set_empty(), set_to_list(xs))
+  if set_size(ys) < set_size(xs)
+  then list_fold(\ (acc, y) -> set_remove(y, acc), xs, set_to_list(ys))
+  else list_fold(\ (acc, x) -> keep_unless_in(ys, acc, x), set_empty(), set_to_list(xs))
+
+fn keep_unless_in(ys: Set, acc: Set, x: String) -> Set =
+  if set_member(x, ys) then acc else set_insert(x, acc)
 
 # O(log n): AVL delete; path-copies the search path and rebalances.
 export fn set_remove(target: String, xs: Set) -> Set =
