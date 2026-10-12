@@ -500,28 +500,25 @@ fn patterns_in_template_part(p: ast.TemplateExprPart) -> List ast.Pattern =
   | ast.LitPart _ -> Nil
   | ast.InterpPart e -> patterns_in_expr(e)
 
-fn is_written_as_ctor(src: String, line: Int, col: Int) -> Bool =
-  string.starts_with(rest_of_line(src, line, col), ast.list_ctor_cons)
-  || string.starts_with(rest_of_line(src, line, col), ast.list_ctor_nil)
+fn is_written_as_ctor(lines: Vec String, line: Int, col: Int) -> Bool =
+  string.starts_with(rest, ast.list_ctor_cons) || string.starts_with(rest, ast.list_ctor_nil)
+  where rest = rest_of_line(lines, line, col)
 
-fn rest_of_line(src: String, line: Int, col: Int) -> String =
+# The text of 1-based `line` from `col` on, "" when the line does not exist.
+fn rest_of_line(lines: Vec String, line: Int, col: Int) -> String =
   str_slice(text, col - 1, str_len(text) - (col - 1))
-  where text = nth_line(str_split_lines(src), line, 1)
+  where text = if line < 1 then "" else vec_get_or(line - 1, "", lines)
 
-fn nth_line(lines: List String, target: Int, cur: Int) -> String =
-  match lines with
-  | Nil -> ""
-  | Cons l rest -> if cur == target then l else nth_line(rest, target, cur + 1)
-
-fn drop_desugared_list_patterns(src: String, positions: List source.SourcePos) -> List source.SourcePos =
-  filter(\pos -> is_written_as_ctor(src, pos.line, pos.column), positions)
+fn drop_desugared_list_patterns(lines: Vec String, positions: List source.SourcePos) -> List source.SourcePos =
+  filter(\pos -> is_written_as_ctor(lines, pos.line, pos.column), positions)
 
 # Hand-written Cons chains among `pats` whose tail satisfies `terminates`,
-# reported as `rule`. Both list rules run over one collected `pats`.
-fn chain_findings(src: String, pats: List ast.Pattern, terminates: ast.Pattern -> Bool,
+# reported as `rule`. Both list rules run over one collected `pats`; `lines` is
+# the source split once.
+fn chain_findings(lines: Vec String, pats: List ast.Pattern, terminates: ast.Pattern -> Bool,
                   rule: String, message: String) -> List LintFinding =
   map(\pos -> mk_finding(pos, rule, message),
-      drop_desugared_list_patterns(src, find_chain_roots_in(terminates, pats)))
+      drop_desugared_list_patterns(lines, find_chain_roots_in(terminates, pats)))
 
 # ---------------------------------------------------------------------------
 # Rule: list-prefix-pattern
@@ -1448,10 +1445,11 @@ fn ast_findings(src: String) -> List LintFinding =
           # The rules match the matches bindings mean, as inference sees them.
           let prog = ast.elaborate_bindings(parsed)
               pats = program_patterns(prog)
+              lines = vec_from_list(str_split_lines(src))
           in list_append(guarded_program_findings(src, written_matches(toks), prog),
-               list_append(chain_findings(src, pats, chain_terminates_in_nil, "list-shape-pattern",
+               list_append(chain_findings(lines, pats, chain_terminates_in_nil, "list-shape-pattern",
                                           list_shape_message),
-                 list_append(chain_findings(src, pats, chain_terminates_in_wildcard,
+                 list_append(chain_findings(lines, pats, chain_terminates_in_wildcard,
                                             "list-prefix-pattern", list_prefix_message),
                              brace_body_findings(toks))))
 

@@ -52,9 +52,7 @@ fn run_fmt_check(path: String) -> Int !{IO} =
   | Err msg -> read_failed(path, msg)
   | Ok src ->
       do
-        let formatted = formatter.format_source(src)
-        let current = if string.ends_with(src, "\n") then src else src ++ "\n"
-        if formatted == current
+        if formatter.is_formatted(src)
         then do
           print("ok: " ++ path)
           0
@@ -68,8 +66,7 @@ fn run_fmt_write(path: String) -> Int !{IO} =
   | Ok src ->
       do
         let formatted = formatter.format_source(src)
-        let current = if string.ends_with(src, "\n") then src else src ++ "\n"
-        if formatted == current
+        if formatted == formatter.with_trailing_newline(src)
         then do
           print("ok: " ++ path)
           0

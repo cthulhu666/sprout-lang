@@ -112,5 +112,31 @@ fn main() -> Unit !{IO} =
     check_eq("try keeps the space before a parenthesised operand",
       formatter.format_source("  let x = try (s |> parse)\n"), "  let x = try (s |> parse)\n"),
     check_eq("try leaves its operand's call tight",
-      formatter.format_source("  let x = try parse(s)\n"), "  let x = try parse(s)\n")
+      formatter.format_source("  let x = try parse(s)\n"), "  let x = try parse(s)\n"),
+
+    # Minus spacing reads whether an `=` follows on the line.
+    check_eq("minus before and after an equals sign",
+      formatter.format_source("fn h(a: Int) -> Int = f(a)-1\n  where x = a-1\n"),
+      "fn h(a: Int) -> Int = f(a) - 1\n  where x = a - 1\n"),
+    check_eq("unary minus stays tight",
+      formatter.format_source("fn g(a: Int) -> Int = -a\n  foo(-1)\nf(a, -1)\n"),
+      "fn g(a: Int) -> Int = -a\n  foo(-1)\nf(a, -1)\n"),
+
+    # is_formatted: the format_source fixed-point test, trailing newline optional.
+    check_eq("is_formatted: formatted source",
+      formatter.is_formatted("let x = 1\n"), true),
+    check_eq("is_formatted: no final newline is still formatted",
+      formatter.is_formatted("let x = 1"), true),
+    check_eq("is_formatted: unformatted source",
+      formatter.is_formatted("let x=1\n"), false),
+    check_eq("is_formatted: empty source",
+      formatter.is_formatted(""), true),
+    check_eq("lint_source reports an unformatted file",
+      issue_count("let x=1\n"), 1),
+    check_eq("lint_source: formatted file is clean",
+      issue_count("let x = 1\n"), 0),
+    check_eq("lint_source: unformatted and missing newline",
+      issue_count("let x=1"), 2),
+    check_eq("lint_source: bad tokenization still lints lines",
+      issue_count("let s = \"abc  \n"), 2)
   ])

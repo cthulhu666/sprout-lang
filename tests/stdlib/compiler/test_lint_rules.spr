@@ -362,6 +362,19 @@ let nested_fixed_length_in_head =
   "  | Nil -> 0\n" ++
   "  | Cons (Cons a (Cons b Nil)) t -> a + b\n"
 
+# Sugar and hand-written patterns on different lines: only the hand-written ones count.
+let mixed_sugar_and_hand_written =
+  "fn a(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | [x, y] -> x + y\n" ++
+  "  | _ -> 0\n" ++
+  "fn b(xs: List Int) -> Int =\n" ++
+  "  match xs with\n" ++
+  "  | Cons x (Cons y Nil) -> x + y\n" ++
+  "  | [z] -> z\n" ++
+  "  | Cons w _ -> w\n" ++
+  "  | _ -> 0\n"
+
 let non_list_pattern_unaffected =
   "fn f(x: Maybe Int) -> Int =\n" ++
   "  match x with\n" ++
@@ -891,6 +904,8 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "non-list ADT pattern (Maybe): is a combinator",
       count_by_rule(lint_rules.lint_ast(non_list_pattern_unaffected), "hand-rolled-combinator"), 1)
 
+    assert_eq(state, "mixed sugar and hand-written: one list-shape finding", count_by_rule(lint_rules.lint_ast(mixed_sugar_and_hand_written), "list-shape-pattern"), 1)
+    assert_eq(state, "mixed sugar and hand-written: one list-prefix finding", count_by_rule(lint_rules.lint_ast(mixed_sugar_and_hand_written), "list-prefix-pattern"), 1)
     assert_eq(state, "hand-written Cons h t pattern in a do-bind: no finding (var tail, not fixed-length)", count_list(lint_rules.lint_ast(do_bind_hand_written_var_tail)), 0)
 
     assert_eq(state, "hand-written fixed-length pattern in a do-bind: reported", count_list(lint_rules.lint_ast(do_bind_hand_written_fixed_length)), 1)
