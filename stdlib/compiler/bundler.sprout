@@ -28,15 +28,15 @@ export type BundleResult (..) =
 #             edits, and an entry "file" that may have no path at all — and this is how
 #             they enter the bundle. Every open dirty buffer can be supplied, not just
 #             the active one, which the env path could never do.
-#   parsed  : memo of path → ParsedModule, so a session that checks the same file after
-#             each keystroke re-reads and re-parses its imports once instead of always.
+#   parsed  : memo of path → (source text, ParsedModule), so a session that checks the
+#             same file after each keystroke re-parses its imports once instead of always.
 #
-# Overlay paths are deliberately never memoised: they are dirty by definition.
-# The memo is keyed by path with no mtime check, matching the cache it replaces — an
-# external edit to an already-parsed file is not noticed. That is why the overlay, and
-# not the memo, is what an editor's live buffers go through.
+# A memo hit needs the source just read to equal the source the module was parsed from,
+# so an import edited on disk is re-parsed. The read is the cost of that check; mtime
+# would skip it but has whole-second resolution and would miss a save-then-eval.
+# Overlay paths are never memoised: they are dirty by definition.
 export type LoadEnv (..) =
-  | LoadEnv (Dict String) (Ref (Dict ParsedModule))
+  | LoadEnv (Dict String) (Ref (Dict (String, ParsedModule)))
 
 export fn new_load_env() -> LoadEnv !{IO} =
   do
@@ -51,7 +51,7 @@ export fn load_env_with_overlay(overlay: Dict String, base: LoadEnv) -> LoadEnv 
 fn load_env_overlay(e: LoadEnv) -> Dict String =
   match e with | LoadEnv o _ -> o
 
-fn load_env_parsed(e: LoadEnv) -> Ref (Dict ParsedModule) =
+fn load_env_parsed(e: LoadEnv) -> Ref (Dict (String, ParsedModule)) =
   match e with | LoadEnv _ p -> p
 
 # ---------------------------------------------------------------------------
@@ -462,14 +462,16 @@ fn module_source(path: String, load_env: LoadEnv) -> Result String String !{IO} 
   | Just src -> Ok(src)
   | Nothing -> fs.read_text(path)
 
-# A memoised parse, only when the caller has not overridden this path in memory.
-fn memoised_module(path: String, load_env: LoadEnv) -> Maybe ParsedModule !{IO} =
+# A memoised parse of `src`, only when the caller has not overridden this path in memory.
+fn memoised_module(path: String, src: String, load_env: LoadEnv) -> Maybe ParsedModule !{IO} =
   match dict_get(path, load_env_overlay(load_env)) with
   | Just _ -> Nothing
   | Nothing ->
       do
         parsed <- ref_read(load_env_parsed(load_env))
-        dict_get(path, parsed)
+        match dict_get(path, parsed) with
+        | Just (old_src, mod) -> if old_src == src then Just(mod) else Nothing
+        | Nothing -> Nothing
 
 fn process_wi_record(
   mod: ParsedModule,
@@ -506,21 +508,21 @@ fn process_wi_visit(
           Cons(LoadIssue(path, no_pos(), "Import cycle detected involving: " ++ path), Nil)
         else
           do
-            # A memo hit carries the module's own import specs, so it skips the read and
-            # the parse while still walking exactly the same dependency edges.
-            # Matched at the call, not bound with `<-`: a do-bind unwraps a Maybe returned
-            # from an effectful function and would lose the miss case.
-            match memoised_module(path, load_env) with
-            | Just mod ->
-                enqueue_module(path, parsed_specs(mod), WIRecord(mod),
-                  work, visiting, visiting_list, stdlib_root, extra_roots)
-            | Nothing ->
-                match module_source(path, load_env) with
-                | Err msg ->
-                    do
-                      issue <- unreadable_issue(path, edge, msg, stdlib_root)
-                      [issue]
-                | Ok src ->
+            match module_source(path, load_env) with
+            | Err msg ->
+                do
+                  issue <- unreadable_issue(path, edge, msg, stdlib_root)
+                  [issue]
+            | Ok src ->
+                # A memo hit carries the module's own import specs, so it skips the lex
+                # and the parse while still walking exactly the same dependency edges.
+                # Matched at the call, not bound with `<-`: a do-bind unwraps a Maybe
+                # returned from an effectful function and would lose the miss case.
+                match memoised_module(path, src, load_env) with
+                | Just mod ->
+                    enqueue_module(path, parsed_specs(mod), WIRecord(mod),
+                      work, visiting, visiting_list, stdlib_root, extra_roots)
+                | Nothing ->
                     do
                       let specs = module_loader.collect_imports(src)
                       enqueue_module(path, specs, WIFinalize(path, src, specs),
@@ -604,7 +606,7 @@ fn process_wi_finalize(
                       let surface = parser.scan_module_surface(tokens)
                       let mod = ParsedModule(scan_module_name(src), path, specs,
                         parser.surface_exported(surface), parser.surface_ctor_types(surface), decls)
-                      memoise_module(path, mod, load_env)
+                      memoise_module(path, src, mod, load_env)
                       ordered_now <- ref_read(ordered)
                       ref_write(ordered, Cons(mod, ordered_now))
                       seen_now <- ref_read(seen)
@@ -613,13 +615,13 @@ fn process_wi_finalize(
 
 # Record a parse for reuse — unless the caller supplied this path's source in memory, in
 # which case it is a dirty buffer and memoising it would serve a stale parse next time.
-fn memoise_module(path: String, mod: ParsedModule, load_env: LoadEnv) -> Unit !{IO} =
+fn memoise_module(path: String, src: String, mod: ParsedModule, load_env: LoadEnv) -> Unit !{IO} =
   match dict_get(path, load_env_overlay(load_env)) with
   | Just _ -> ()
   | Nothing ->
       do
         parsed <- ref_read(load_env_parsed(load_env))
-        ref_write(load_env_parsed(load_env), dict_set(path, mod, parsed))
+        ref_write(load_env_parsed(load_env), dict_set(path, (src, mod), parsed))
 
 fn visit_module_iter(
   entry_path: String,
@@ -775,17 +777,17 @@ fn name_entry_module(mods: List ParsedModule, entry_path: String) -> List Parsed
           else Cons(mod, name_entry_module(rest, entry_path))
 
 # The prelude as a ParsedModule, memoised like any other module. Without the memo it is
-# re-read and re-parsed on every bundle, and it is the largest file in the tree — which is
+# re-parsed on every bundle, and it is the largest file in the tree — which is
 # the single biggest cost an editor pays per keystroke.
 fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, Maybe ParsedModule) !{IO} =
   do
     let path = prelude_path(stdlib_root)
-    match memoised_module(path, load_env) with
-    | Just mod -> (Nothing, Just(mod))
-    | Nothing ->
-        match module_source(path, load_env) with
-        | Err msg -> (Just(LoadIssue(path, no_pos(), `cannot read the prelude ${path}: ${msg}`)), Nothing)
-        | Ok src -> parse_prelude(path, src, load_env)
+    match module_source(path, load_env) with
+    | Err msg -> (Just(LoadIssue(path, no_pos(), `cannot read the prelude ${path}: ${msg}`)), Nothing)
+    | Ok src ->
+        match memoised_module(path, src, load_env) with
+        | Just mod -> (Nothing, Just(mod))
+        | Nothing -> parse_prelude(path, src, load_env)
 
 fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIssue, Maybe ParsedModule) !{IO} =
   do
@@ -795,7 +797,7 @@ fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIss
       else Err (parser.ParseError msg pos) -> (Just(LoadIssue(path, pos, `Parse error in prelude: ${msg}`)), Nothing)
     let surface = parser.scan_module_surface(tokens)
     let mod = ParsedModule("", path, Nil, parser.surface_exported(surface), parser.surface_ctor_types(surface), decls)
-    memoise_module(path, mod, load_env)
+    memoise_module(path, src, mod, load_env)
     (Nothing, Just(mod))
 
 # ---------------------------------------------------------------------------

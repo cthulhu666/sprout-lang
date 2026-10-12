@@ -570,7 +570,8 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
 #      - Unit !{IO}      → add fn main = sentinel (runs the IO action directly)
 #      - Other T !{IO}   → error (cannot auto-print effectful non-Unit expressions)
 #   3. Compile the augmented source to LLVM IR in memory (compile_source_full_ir),
-#      reusing the session's LoadEnv; `eval_source_path` only names the buffer.
+#      reusing the session's LoadEnv (imports edited on disk are re-parsed);
+#      `eval_source_path` only names the buffer.
 #   4. Write the IR to a fixed /tmp path.
 #   5. Link IR against every runtime object (whole runtime/*.c) with clang.
 #   6. Execute the binary, capture stdout, return as a JSON array of lines.

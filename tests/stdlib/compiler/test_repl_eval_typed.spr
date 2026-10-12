@@ -92,4 +92,23 @@ fn main() -> Unit !{IO} =
           assert_true(state, "reverting the source restores the IR", ir_text(c1) == ir_text(c3))
           assert_true(state, "cached eval Fails on an unresolved name", is_ir_fail(c_bad))
           assert_true(state, "a failed eval does not poison the cache", ir_text(c1) == ir_text(c_after_bad))
+
+          # An import edited on disk between two compiles through one LoadEnv is re-read:
+          # a memo hit needs the same source text, so eval never sees a stale module.
+          let pkg_root = "/tmp/sprout_test_memo_pkg"
+          let mod_path = pkg_root ++ "/memo_pkg/foo.sprout"
+          fs.make_dir_all(pkg_root ++ "/memo_pkg")
+          fs.write_text(mod_path, "module memo_pkg.foo\n\nexport fn answer() -> Int = 42\n")
+          let user_src = "import memo_pkg.foo (answer)\n\nfn use_it() -> Int = answer()\n"
+          let user_path = "/tmp/sprout_test_memo_user.sprout"
+          memo_cache <- bundler.new_load_env()
+          m1 <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], memo_cache)
+          m1_again <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], memo_cache)
+          fs.write_text(mod_path, "module memo_pkg.foo\n\nexport fn answer() -> Int = 43\n")
+          m2 <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], memo_cache)
+          m2_fresh <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], bundler.new_load_env())
+          assert_true(state, "import compiles through the shared cache", ir_has_define(m1))
+          assert_true(state, "an unchanged import gives identical IR on a memo hit", ir_text(m1) == ir_text(m1_again))
+          assert_true(state, "an import edited on disk changes the IR", ir_text(m1) != ir_text(m2))
+          assert_true(state, "the cached result equals a cold compile of the edited import", ir_text(m2) == ir_text(m2_fresh) && ir_text(m2) != "")
     summary(state)
