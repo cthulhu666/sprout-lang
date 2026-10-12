@@ -1,0 +1,99 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# Pins the per-module declaration checks in infer: type aliases (registration,
+# cycles, use before the declaration), the declared type and class vocabularies,
+# and instance-method signatures checked against their class.
+
+fn run_check(src: String) -> checker.CheckResult !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> checker.CheckErr(source.SourcePos(index = 0, line = 0, column = 0), "lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> checker.CheckErr(source.SourcePos(index = 0, line = 0, column = 0), "parse error")
+      | Ok prog -> checker.check_program(prog)
+
+fn is_ok(r: checker.CheckResult) -> Bool =
+  match r with
+  | checker.CheckOk _ -> true
+  | checker.CheckErr _ _ -> false
+
+fn fails_with(r: checker.CheckResult, needle: String) -> Bool =
+  match r with
+  | checker.CheckErr _ msg -> string.contains(msg, needle)
+  | checker.CheckOk _ -> false
+
+fn err_line(r: checker.CheckResult) -> Int =
+  match r with
+  | checker.CheckErr pos _ -> pos.line
+  | checker.CheckOk _ -> -1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Aliases
+    a1 <- run_check("type alias Score = Int\nfn f(x: Score) -> Int = x + 1")
+    assert_true(state, "alias used after its declaration", is_ok(a1))
+
+    a2 <- run_check("fn f(x: Score) -> Int = x + 1\ntype alias Score = Int")
+    assert_true(state, "alias used above its declaration", is_ok(a2))
+
+    a3 <- run_check("type alias P a = (a, a)\ntype alias Q = P Int\nfn f(x: Q) -> Int =\n  match x with\n  | (a, b) -> a + b")
+    assert_true(state, "parameterized alias chain", is_ok(a3))
+
+    a4 <- run_check("type alias A = Int\ntype alias B = A\ntype alias C = B\nfn f(x: C) -> String = x")
+    assert_true(state, "alias chain expands to the base type", fails_with(a4, "Int"))
+
+    a5 <- run_check("type alias A = B\ntype alias B = A\nfn f() -> Int = 1")
+    assert_true(state, "alias cycle rejected", fails_with(a5, "type alias cycle"))
+
+    a6 <- run_check("type alias Ok = Int\ntype alias A = B\ntype alias B = A")
+    assert_true(state, "alias cycle reports a line", err_line(a6) >= 2)
+
+    a7 <- run_check("type alias A = Int\ntype alias A = Bool")
+    assert_true(state, "duplicate alias rejected", fails_with(a7, "declared more than once"))
+
+    a8 <- run_check("type alias A = A")
+    assert_true(state, "self-referential alias rejected", fails_with(a8, "type alias cycle"))
+
+    a9 <- run_check("")
+    assert_true(state, "no aliases at all", is_ok(a9))
+
+    # Type vocabulary
+    v1 <- run_check("type T = | T Int\nfn f(x: T) -> Int = 1")
+    assert_true(state, "declared type name accepted", is_ok(v1))
+
+    v2 <- run_check("type T = | T Nope")
+    assert_true(state, "unknown type name rejected", fails_with(v2, "unknown type name `Nope`"))
+
+    v3 <- run_check("type T = | T Int | Node R\ntype R = | R T (Vector Bool)")
+    assert_true(state, "mutually recursive and builtin types accepted", is_ok(v3))
+
+    # Class vocabulary and instance signatures
+    c1 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Int) -> Int = x")
+    assert_true(state, "instance of a declared class", is_ok(c1))
+
+    c2 <- run_check("fn f(x: a) -> a where Nope a = x")
+    assert_true(state, "unknown class in where rejected", fails_with(c2, "`Nope` is not a class"))
+
+    c3 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Bool) -> Int = 1")
+    assert_true(state, "instance signature against the class", fails_with(c3, "class Sz declares"))
+
+    c4 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x) = x + 1")
+    assert_true(state, "bare slot takes the class type", is_ok(c4))
+
+    c5 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x) = true")
+    assert_true(state, "bare slot body mismatch rejected",! is_ok (c5))
+
+    c6 <- run_check("class Sz t\n  fn sz(x: t) -> Int\n  fn tw(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Int) -> Int = x\n  fn tw(x: Bool) -> Int = 1")
+    assert_true(state, "second method signature checked", fails_with(c6, "class Sz declares"))
+
+    c7 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Int) -> Int = x\ninstance Sz Bool\n  fn sz(x: Int) -> Int = x")
+    assert_true(state, "second instance signature checked", fails_with(c7, "class Sz declares"))
+
+    summary(state)
