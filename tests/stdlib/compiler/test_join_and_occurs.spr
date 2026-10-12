@@ -1,0 +1,78 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.compiler.types as types
+import stdlib.compiler.iface_codec as iface_codec
+import stdlib.compiler.unifier as unifier
+
+# Pins the exact wire form of list encodings (empty, one, many) and the
+# occurs check through substitution chains.
+
+fn tc(n: String) -> types.Type = types.TConst(types.type_id(n))
+
+fn tv(n: String) -> types.Type = types.TVar(types.tyvar_id(n))
+
+fn ns(name: String) -> iface_codec.NamedScheme = iface_codec.NamedScheme(name, types.mono(tc("Int")))
+
+fn ctor(n: String) -> iface_codec.CtorInfo = iface_codec.CtorInfo(n, "T", Cons(tc("Int"), Cons(tc("Bool"), Nil)))
+
+fn cls(n: String) -> iface_codec.ClassInfo = iface_codec.ClassInfo(n, Cons("a", Cons("b", Nil)), Nil, Cons(ns("m"), Nil))
+
+fn inst(n: String) -> iface_codec.InstanceInfo = iface_codec.InstanceInfo(n, tc("Int"), "d")
+
+fn is_err(u: unifier.Unified) -> Bool =
+  match u with
+  | unifier.UnifyErr _ -> true
+  | unifier.UnifyOk _ _ -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- iface lists: 0, 1, many ---
+    assert_eq(state, "empty iface",
+              iface_codec.encode_iface_file(iface_codec.IfaceFile(2, "m", Nil, Nil, Nil, Nil)),
+              "(IfaceFile 2 m () () () ())")
+    assert_eq(state, "one of each",
+              iface_codec.encode_iface_file(iface_codec.IfaceFile(2, "m", [ns("x")], [ctor("C")], [cls("K")], [inst("I")])),
+              "(IfaceFile 2 m ((NamedScheme x (Scheme () () (TConst Int) (EffectPure) ()))) ((CtorInfo C T ((TConst Int) (TConst Bool)))) ((ClassInfo K (a b) () ((NamedScheme m (Scheme () () (TConst Int) (EffectPure) ())))))"
+                ++ " ((InstanceInfo I (TConst Int) d)))")
+    assert_eq(state, "many of each",
+              iface_codec.encode_iface_file(iface_codec.IfaceFile(2, "m", [ns("x"), ns("y")], [ctor("C"), ctor("D")], [cls("K"), cls("L")], [inst("I"), inst("J")])),
+              "(IfaceFile 2 m ((NamedScheme x (Scheme () () (TConst Int) (EffectPure) ())) (NamedScheme y (Scheme () () (TConst Int) (EffectPure) ())))"
+                ++ " ((CtorInfo C T ((TConst Int) (TConst Bool))) (CtorInfo D T ((TConst Int) (TConst Bool))))"
+                ++ " ((ClassInfo K (a b) () ((NamedScheme m (Scheme () () (TConst Int) (EffectPure) ()))))"
+                ++ " (ClassInfo L (a b) () ((NamedScheme m (Scheme () () (TConst Int) (EffectPure) ())))))"
+                ++ " ((InstanceInfo I (TConst Int) d) (InstanceInfo J (TConst Int) d)))")
+
+    # --- scheme lists: tvars, evars, constraints, tuple items ---
+    let s0 = types.Scheme(Nil, Nil, tc("Int"), types.EffectPure, Nil)
+    assert_eq(state, "scheme empty lists", iface_codec.encode_scheme(s0),
+              "(Scheme () () (TConst Int) (EffectPure) ())")
+    let s1 = types.Scheme(["a"], ["e"], types.TTuple([tc("Int")]), types.EffectPure, [("#pos:0", "Eq")])
+    assert_eq(state, "scheme one each", iface_codec.encode_scheme(s1),
+              "(Scheme (a) (e) (TTuple ((TConst Int))) (EffectPure) ((#pos:0 Eq)))")
+    let s3 = types.Scheme(["a", "b", "c"], ["e", "f"], types.TTuple([tc("Int"), tc("Bool"), tv("a")]),
+                          types.EffectRow(["IO", "Net"]), [("#pos:0", "Eq"), ("Foo", "Ord")])
+    assert_eq(state, "scheme many each", iface_codec.encode_scheme(s3),
+              "(Scheme (a b c) (e f) (TTuple ((TConst Int) (TConst Bool) (TVar a))) (EffectRow (IO Net)) ((#pos:0 Eq) (Foo Ord)))")
+
+    # --- occurs: direct, through a chain, inside each node kind, and absent ---
+    let list_a = types.TApp(tc("List"), tv("a"))
+    assert_true(state, "a ~ List a rejected",
+                is_err(unifier.unify_join(dict_empty(), dict_empty(), tv("a"), list_a)))
+    let chain = dict_set("b", list_a, dict_empty())
+    assert_true(state, "a ~ Maybe b rejected when b = List a",
+                is_err(unifier.unify_join(chain, dict_empty(), tv("a"), types.TApp(tc("Maybe"), tv("b")))))
+    let fn_ty = types.TFunc(tc("Int"), tv("b"), types.EffectPure, types.OwnConsume)
+    assert_true(state, "a ~ Int -> b rejected when b = List a",
+                is_err(unifier.unify_join(chain, dict_empty(), tv("a"), fn_ty)))
+    assert_true(state, "a ~ (Int, b) rejected when b = List a",
+                is_err(unifier.unify_join(chain, dict_empty(), tv("a"), types.TTuple([tc("Int"), tv("b")]))))
+    assert_true(state, "a ~ thunk b rejected when b = List a",
+                is_err(unifier.unify_join(chain, dict_empty(), tv("a"), types.TThunk(tv("b"), types.EffectPure))))
+    assert_true(state, "a ~ List c accepted",
+                ! is_err (unifier.unify_join(chain, dict_empty(), tv("a"), types.TApp(tc("List"), tv("c")))))
+    assert_true(state, "a ~ (Int, b) accepted when b = Bool",
+                ! is_err (unifier.unify_join(dict_set("b", tc("Bool"), dict_empty()), dict_empty(), tv("a"),
+                                           types.TTuple([tc("Int"), tv("b")]))))
+
+    summary(state)

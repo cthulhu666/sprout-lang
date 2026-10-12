@@ -491,18 +491,22 @@ fn apply_full_subst_list(subst: Dict types.Type, eff_subst: Dict types.Effect, i
 # ---------------------------------------------------------------------------
 
 fn occurs(name: String, subst: Dict types.Type, t: types.Type) -> Bool =
-  match apply_subst(subst, t) with
+  occurs_in(name, apply_subst(subst, t))
+
+# `t` is already substituted, so a walk without lookups finds every occurrence.
+fn occurs_in(name: String, t: types.Type) -> Bool =
+  match t with
   | types.TVar n -> types.tyvar_identity(n) == name
   | types.TConst _ -> false
-  | types.TApp base arg -> occurs(name, subst, base) || occurs(name, subst, arg)
-  | types.TFunc param ret _ _ -> occurs(name, subst, param) || occurs(name, subst, ret)
-  | types.TThunk ret _ -> occurs(name, subst, ret)
-  | types.TTuple items -> occurs_list(name, subst, items)
+  | types.TApp base arg -> occurs_in(name, base) || occurs_in(name, arg)
+  | types.TFunc param ret _ _ -> occurs_in(name, param) || occurs_in(name, ret)
+  | types.TThunk ret _ -> occurs_in(name, ret)
+  | types.TTuple items -> occurs_list(name, items)
 
-fn occurs_list(name: String, subst: Dict types.Type, items: List types.Type) -> Bool =
+fn occurs_list(name: String, items: List types.Type) -> Bool =
   match items with
   | Nil -> false
-  | Cons h t -> if occurs(name, subst, h) then true else occurs_list(name, subst, t)
+  | Cons h t -> if occurs_in(name, h) then true else occurs_list(name, t)
 
 # ---------------------------------------------------------------------------
 # bind_var — extend substitution, with occurs check

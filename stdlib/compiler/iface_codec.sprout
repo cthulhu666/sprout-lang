@@ -54,13 +54,7 @@ export fn encode_scheme(s: types.Scheme) -> String =
 # "#none"); all are atom-safe (no whitespace/parens — a ':' is fine, "#pos:" and
 # "#app:" both carry one). Mirrors encode_str_list / encode_type_list.
 fn encode_constraints(cs: List (String, String)) -> String =
-  string_concat_many(["(", join_constraints(cs), ")"])
-
-fn join_constraints(cs: List (String, String)) -> String =
-  match cs with
-  | [] -> ""
-  | [c] -> encode_constraint(c)
-  | [c | rest] -> string_concat_many([encode_constraint(c), " ", join_constraints(rest)])
+  string_concat_many(["(", string.join(" ", list_map(encode_constraint, cs)), ")"])
 
 fn encode_constraint(c: (String, String)) -> String =
   match c with
@@ -89,23 +83,10 @@ export fn encode_effect(e: types.Effect) -> String =
   | types.EffectVar n -> string_concat_many(["(EffectVar ", n, ")"])
 
 fn encode_str_list(xs: List String) -> String =
-  string_concat_many(["(", join_strs(xs), ")"])
-
-# Join with single-space separator. O(n).
-fn join_strs(xs: List String) -> String =
-  match xs with
-  | [] -> ""
-  | [x] -> x
-  | [x | rest] -> string_concat_many([x, " ", join_strs(rest)])
+  string_concat_many(["(", string.join(" ", xs), ")"])
 
 fn encode_type_list(ts: List types.Type) -> String =
-  string_concat_many(["(", join_types(ts), ")"])
-
-fn join_types(ts: List types.Type) -> String =
-  match ts with
-  | [] -> ""
-  | [t] -> encode_type(t)
-  | [t | rest] -> string_concat_many([encode_type(t), " ", join_types(rest)])
+  string_concat_many(["(", string.join(" ", list_map(encode_type, ts)), ")"])
 
 # ----------------------------------------------------------------------------
 # Decoder — String -> Maybe Scheme
@@ -445,13 +426,7 @@ export fn encode_iface_file(f: IfaceFile) -> String =
       ])
 
 fn encode_named_scheme_list(ns: List NamedScheme) -> String =
-  string_concat_many(["(", join_named_schemes(ns), ")"])
-
-fn join_named_schemes(ns: List NamedScheme) -> String =
-  match ns with
-  | [] -> ""
-  | [n] -> encode_named_scheme(n)
-  | [n | rest] -> string_concat_many([encode_named_scheme(n), " ", join_named_schemes(rest)])
+  string_concat_many(["(", string.join(" ", list_map(encode_named_scheme, ns)), ")"])
 
 fn encode_named_scheme(n: NamedScheme) -> String =
   match n with
@@ -459,13 +434,7 @@ fn encode_named_scheme(n: NamedScheme) -> String =
       string_concat_many(["(NamedScheme ", name, " ", encode_scheme(s), ")"])
 
 fn encode_ctor_info_list(cs: List CtorInfo) -> String =
-  string_concat_many(["(", join_ctor_infos(cs), ")"])
-
-fn join_ctor_infos(cs: List CtorInfo) -> String =
-  match cs with
-  | [] -> ""
-  | [c] -> encode_ctor_info(c)
-  | [c | rest] -> string_concat_many([encode_ctor_info(c), " ", join_ctor_infos(rest)])
+  string_concat_many(["(", string.join(" ", list_map(encode_ctor_info, cs)), ")"])
 
 fn encode_ctor_info(c: CtorInfo) -> String =
   match c with
@@ -475,13 +444,7 @@ fn encode_ctor_info(c: CtorInfo) -> String =
       ])
 
 fn encode_class_info_list(cs: List ClassInfo) -> String =
-  string_concat_many(["(", join_class_infos(cs), ")"])
-
-fn join_class_infos(cs: List ClassInfo) -> String =
-  match cs with
-  | [] -> ""
-  | [c] -> encode_class_info(c)
-  | [c | rest] -> string_concat_many([encode_class_info(c), " ", join_class_infos(rest)])
+  string_concat_many(["(", string.join(" ", list_map(encode_class_info, cs)), ")"])
 
 fn encode_class_info(c: ClassInfo) -> String =
   match c with
@@ -495,13 +458,7 @@ fn encode_class_info(c: ClassInfo) -> String =
       ])
 
 fn encode_instance_info_list(is: List InstanceInfo) -> String =
-  string_concat_many(["(", join_instance_infos(is), ")"])
-
-fn join_instance_infos(is: List InstanceInfo) -> String =
-  match is with
-  | [] -> ""
-  | [i] -> encode_instance_info(i)
-  | [i | rest] -> string_concat_many([encode_instance_info(i), " ", join_instance_infos(rest)])
+  string_concat_many(["(", string.join(" ", list_map(encode_instance_info, is)), ")"])
 
 fn encode_instance_info(i: InstanceInfo) -> String =
   match i with
