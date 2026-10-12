@@ -1,8 +1,6 @@
 module stdlib.compiler.ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
-# Load-bearing though the alias is unused: `bytes_from_utf8` / `bytes_get` are stdlib.bytes
-# externs, and an extern resolves by bare name only once its module is imported.
 import stdlib.bytes as bytes
 
 # LLVM string escaping (encode_str_for_ir / global len).
@@ -22,11 +20,11 @@ fn is_escaped_byte(c: Int) -> Bool =
   c == 92 || c == 34 || c == 10 || c == 13 || c == 9
 
 fn encode_str_for_ir(s: String) -> String =
-  string_concat_many(list_reverse(encode_bytes_for_ir(s, bytes_from_utf8(s), 0, 0, Nil)))
+  string_concat_many(list_reverse(encode_bytes_for_ir(s, bytes.from_string(s), 0, 0, Nil)))
 
 # `start` is where the current plain run began; `parts` is reversed.
 fn encode_bytes_for_ir(s: String, b: Bytes, start: Int, i: Int, parts: List String) -> List String =
-  match bytes_get(b, i) with
+  match bytes.get(b, i) with
   | Nothing -> push_run(s, start, i, parts)
   | Just c ->
       if is_escaped_byte(c)

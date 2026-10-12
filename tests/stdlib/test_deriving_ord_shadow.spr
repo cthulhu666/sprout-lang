@@ -1,9 +1,10 @@
 import stdlib.test (check_true, run_suite)
 
-# A module-level `compare` must not reach the code `deriving (Ord)` generates for an
-# all-nullary type: it orders by declaration index alone and calls no `compare`.
+# Derived Ord calls `compare` on the constructor indexes. A module-level `compare` of the
+# same type, reversed, must not reach it: the bundler qualifies the user's to `main.compare`,
+# so derived code still gets the class method and the order stays by declaration.
 
-fn compare(a: String, b: String) -> String = a ++ b
+fn compare(a: Int, b: Int) -> Int = b - a
 
 type Rank (..) deriving (Eq, Ord) =
   | Low
@@ -15,5 +16,5 @@ fn main() -> Unit !{IO} =
     check_true("Low < High", ord_lt(Low, High)),
     check_true("High > Mid", ord_gt(High, Mid)),
     check_true("Mid <= Mid", ord_lte(Mid, Mid)),
-    check_true("the local compare is still callable", compare("a", "b") == "ab")
+    check_true("the local compare is still the reversed one", compare(1, 2) == 1)
   ])
