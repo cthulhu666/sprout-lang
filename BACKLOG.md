@@ -324,14 +324,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (blocked: a tuple return has no `adt_index` entry); #5 confirm bare-vs-qualified callee names at
   the pre-lowering seam; #6 collapse the duplicated tail-position grammar walk; #9 restore T19's
   exact-name assertion; #10 the vacuous `build_ret_i64` eligibility map.
-- [ ] `P3` **Mutual TCO Phase A and the may-trigger-GC fixpoint are quadratic in call depth.**
-  `ast_to_ir.mutual_filter_targets` calls `mutual_reaches(g, f)` per same-arity tail callee:
-  per-link arena bytes 387k / 486k / 700k at 100 -> 800 links. `ir_rooting.fixpoint_iterate` is
-  Jacobi (a round reads only the last round's map), so a fact moves one call per round: a chain
-  whose last link allocates costs 745k / 955k / 1.39M per link. 1.1% and 0.2% of self-compile
-  allocation (2026-10-05). `scripts/scc_cost_gate.sh` alternates arity to dodge Phase A. Fix for
-  both: one `scc.sccs_in_dependency_order` pass — Phase A compares components, the fixpoint walks
-  them callees first — then drop the alternation from the gate's fixtures.
+- [ ] `P3` **The may-trigger-GC fixpoint is quadratic in call depth.**
+  `ir_rooting.fixpoint_iterate` is Jacobi (a round reads only the last round's map), so a fact
+  moves one call per round: a chain whose last link allocates costs 745k / 955k / 1.39M per link
+  as it grows, 0.2% of self-compile allocation (2026-10-05). Fix: walk
+  `scc.sccs_in_dependency_order` callees first, as mutual TCO Phase A now does. Phase A is linear,
+  so `scripts/scc_cost_gate.sh` no longer needs its fixtures to alternate arity to dodge it.
 - [ ] `P3` **Two `@fwd:` marker lookups still walk the whole type environment.**
   `infer.forwarded_tdict_for_tyvar` (after a direct-key miss) and `resolve_via_fwd_for_prog_var`
   turn `dict_entries(env)` into a list to find `@fwd:*:<class>` markers: 2.9% and 1.0% of
@@ -464,6 +462,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   correctly-rounded `parse_double` being written in Sprout, which is why that entry currently
   reads "or a `strtod`-backed builtin". One primitive unblocks both. Prior art: Rust
   `u64::widening_mul`, C `__int128`, Go `bits.Mul64`.
+- [ ] `P2` **A second `type T` in one module is accepted silently.** `type T = | A` then
+  `type T = | B` passes `--phase check` with no error, while a second `fn f` is rejected with
+  "is defined more than once in this module" (`infer.check_duplicate_fn_decls`). Which `T` the
+  rest of the module sees is not something a user can know. That check looks at `FnDecl` only;
+  extend it to type, alias and class declarations, each in its own namespace.
 
 ### 2) Networking and HTTP Client
 
@@ -2180,6 +2183,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   dylib, new expressions linked on the fly at native speed with no fork. Requires embedding LLVM as
   a library rather than shelling out to `--emit-ir` + clang. Precedent: cling, clang-repl,
   `lli --jit`. Revisit after the in-Sprout interpreter works.
+- [ ] `P3` **The analysis service never re-reads an imported module edited on disk.** Its
+  `LoadEnv` (`state_cache` in `analysis_service_driver.sprout`) memoises every parsed import for
+  the daemon's life and nothing evicts an entry, so `:type`, diagnostics, the eval preflight and
+  eval itself all see the version first loaded: edit `foo.sprout`, re-eval `import foo`, get the
+  old `foo`. Eval shares the cache since the #599 fixes; it re-read imports per eval before.
+  Fix: key each memo entry on the file's mtime, or drop it when the editor reports a change.
 
 ### GC & Runtime Performance
 
@@ -2520,10 +2529,9 @@ acting.
   `--phase check`, so this is the COMPILER's own root stack recursing over the literal, not emitted
   roots, and 22 × 6,000 ≈ 132,000 matches the pool exactly. The O(N²) compiler memory that used to
   dominate is fixed (800 → 48 MB, 2,000 → 179 MB, from 825 MB / 4,631 MB): see
-  `docs/gates.md` §Compiling one long block. A big STRING literal is superlinear (20/40/80 KB:
-  0.5/1.6/5.3 s), but in `ir_lowering.encode_str_for_ir` (#599), not lexing: `--phase check` is
-  flat at 0.2 s (2026-10-12). Shipping the table as a STRING literal decoded at startup remains
-  the smaller-IR option: emitted IR is constant-size whatever the table.
+  `docs/gates.md` §Compiling one long block. A big STRING literal compiles in linear time
+  (80 KB: 0.13 s), so shipping the table as a STRING literal decoded at startup remains the
+  smaller-IR option: emitted IR is constant-size whatever the table.
 - [ ] `P2` **A long `do` block hits the same root-pool ceiling.** One `do` block of 4,400 plain
   `print(...)` steps fails with `GC root pool exhausted`; 4,200 compiles. Cost is linear below it
   (27 / 42 / 69 MB at 600 / 1,200 / 2,400 steps).
@@ -2537,6 +2545,12 @@ acting.
   it; their RSS still grows 2.5× per doubling. `--phase check` is flat, so it is past type checking.
   Cause not found; `sra_core_eligible(name, e, rest, …)` reads all of `rest` at each `let`, so check
   it first. Neither cost gate covers it: both fixtures are flat blocks with no bindings.
+- [ ] `P2` **A long `match`, or a `do` block of many `if`s, compiles in superlinear time.** A
+  function whose body is one `match` of 100 / 200 / 400 arms allocates 2.5M / 3.0M / 4.7M objects
+  (arena 2.7× per doubling at the top), tail-recursive or not, so it is not TCO. A `do` block of
+  150 vs 300 `if` steps takes 0.86 s vs 3.46 s. Liveness (`ir_rooting.compute_live_out`) is ruled
+  out: indexing it moved 600 of 14.4M objects. Found by the #599 fixes (2026-10-12); may share a
+  cause with the chained-`let` entry above. Neither cost gate has a branching fixture.
 - [ ] `P2` **Add a `module prelude` header to `prelude.sprout`** so all its symbols get an
   `@prelude.` prefix in emitted IR, eliminating future POSIX/libc symbol collisions — the `pipe`
   → `pipe_apply` rename is the tactical fix, this is the principled one. Requires a
