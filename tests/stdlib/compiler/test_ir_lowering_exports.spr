@@ -50,6 +50,24 @@ fn global_text(idx: Int, s: String) -> String =
   match ir_lowering.emit_str_global(idx, s) with
   | (decl, _, _) -> decl
 
+fn str_body(s: String) -> String =
+  "c\"" ++ s ++ "\\00\" }\n"
+
+fn escape_ok(raw: String, encoded: String, len: Int) -> Bool =
+  global_text(3, raw) ==
+    "@.str.3 = private unnamed_addr constant { i64, [" ++ int_to_string(len) ++ " x i8] } { i64 "
+      ++ int_to_string(10 + (len - 1) * 16384) ++ ", [" ++ int_to_string(len) ++ " x i8] "
+      ++ str_body(encoded)
+
+let ctor_regs =
+  Cons(sprout_ir.CtorReg("Foo", 7, 2, "ip"),
+  Cons(sprout_ir.CtorReg("Ba\"r", 8, 0, ""),
+  Cons(sprout_ir.CtorReg("Baz", 9, 1, "s"), Nil)))
+
+let let_globals =
+  Cons(sprout_ir.IRGlobalDecl("a", "i64", sprout_ir.GlobalConst("5")),
+  Cons(sprout_ir.IRGlobalDecl("b", "i64", sprout_ir.GlobalZeroInit), Nil))
+
 fn table_names(raw: String, table: Dict (String, Int), gname: String, len: Int) -> Bool =
   match dict_get(raw, table) with
   | Just (g, l) -> g == gname && l == len
@@ -95,5 +113,42 @@ fn main() -> Unit !{IO} =
             next_idx == 8)
           assert_true(state, "the table maps each raw name to its global and byte length",
             table_names("%a_raw", table, "@.str.5", 2) && table_names("%c_raw", table, "@.str.7", 4))
+
+    assert_true(state, "backslash is escaped", escape_ok("\\", "\\5C", 2))
+    assert_true(state, "quote is escaped", escape_ok("\"", "\\22", 2))
+    assert_true(state, "newline is escaped", escape_ok("\n", "\\0A", 2))
+    assert_true(state, "carriage return is escaped", escape_ok("\r", "\\0D", 2))
+    assert_true(state, "tab is escaped", escape_ok("\t", "\\09", 2))
+    assert_true(state, "adjacent escapes", escape_ok("\\\"\n\r\t", "\\5C\\22\\0A\\0D\\09", 6))
+    assert_true(state, "escape first and last", escape_ok("\nab\"", "\\0Aab\\22", 5))
+    assert_true(state, "empty string is just the NUL", escape_ok("", "", 1))
+    assert_true(state, "plain text is copied", escape_ok("hello world", "hello world", 12))
+    assert_true(state, "non-ASCII stays raw bytes", escape_ok("é", "é", 3))
+    assert_true(state, "mix of ASCII, escapes and non-ASCII",
+      escape_ok("aé\"b\\ü\nz", "aé\\22b\\5Cü\\0Az", 11))
+
+    assert_true(state, "ctor globals: name and fkinds per reg, in order",
+      ir_lowering.collect_ctor_globals(ctor_regs) ==
+        "@.cname.7 = private unnamed_addr constant [4 x i8] c\"Foo\\00\"\n"
+        ++ "@.cfkinds.7 = private unnamed_addr constant [3 x i8] c\"ip\\00\"\n"
+        ++ "@.cname.8 = private unnamed_addr constant [5 x i8] c\"Ba\\22r\\00\"\n"
+        ++ "@.cfkinds.8 = private unnamed_addr constant [1 x i8] c\"\\00\"\n"
+        ++ "@.cname.9 = private unnamed_addr constant [4 x i8] c\"Baz\\00\"\n"
+        ++ "@.cfkinds.9 = private unnamed_addr constant [2 x i8] c\"s\\00\"\n")
+    assert_true(state, "ctor globals: no regs is empty",
+      ir_lowering.collect_ctor_globals(Nil) == "")
+
+    let shim = ir_lowering.main_shim(ctor_regs, false, false, false)
+    assert_true(state, "main_shim: ctor registrations in order, then ret",
+      string.contains(shim, "%creg_7 = call i64 @sprout_register_ctor(i64 7, ptr %cname_ptr_7, i64 2, ptr %cfkinds_ptr_7)\n  %cname_ptr_8")
+        && string.contains(shim, "%creg_8 = call i64 @sprout_register_ctor(i64 8, ptr %cname_ptr_8, i64 0, ptr %cfkinds_ptr_8)\n  %cname_ptr_9")
+        && string.ends_with(shim, "ptr %cfkinds_ptr_9)\n  ret i32 0\n}\n"))
+    assert_true(state, "main_shim: no regs has no registrations",
+      ! string.contains (ir_lowering.main_shim(Nil, false, false, false), "sprout_register_ctor"))
+
+    assert_true(state, "lower_globals: one line per global, in order",
+      ir_lowering.lower_globals(let_globals) ==
+        "@a = private constant i64 5\n@b = global i64 zeroinitializer\n")
+    assert_true(state, "lower_globals: empty", ir_lowering.lower_globals(Nil) == "")
 
     summary(state)

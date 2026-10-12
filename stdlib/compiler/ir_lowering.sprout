@@ -1,23 +1,40 @@
 module stdlib.compiler.ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
+# Load-bearing though the alias is unused: `bytes_from_utf8` / `bytes_get` are stdlib.bytes
+# externs, and an extern resolves by bare name only once its module is imported.
+import stdlib.bytes as bytes
 
-# LLVM string/char escaping (escape_char_for_ir / encode_str_for_ir / global len).
-fn escape_char_for_ir(ch: Char) -> String =
-  if s == "\\" then "\\5C"
-  else if s == "\"" then "\\22"
-  else if s == "\n" then "\\0A"
-  else if s == "\r" then "\\0D"
-  else if s == "\t" then "\\09"
-  else s
-  where s = char_to_string(ch)
+# LLVM string escaping (encode_str_for_ir / global len).
+#
+# Only ASCII `\`, `"`, newline, CR and tab are escaped. A UTF-8 lead or continuation
+# byte is never one of them, so the walk is over bytes: each plain run is one
+# slice, always cut at an ASCII byte or the end, never inside a codepoint.
+# `c` is one of the bytes is_escaped_byte accepts, so the last arm is the tab.
+fn escape_byte_for_ir(c: Int) -> String =
+  if c == 92 then "\\5C"
+  else if c == 34 then "\\22"
+  else if c == 10 then "\\0A"
+  else if c == 13 then "\\0D"
+  else "\\09"
 
-fn encode_str_for_ir(s: String, i: Int, acc: String) -> String =
-  if i >= str_len(s) then acc
-  else
-    match str_char_at(s, i) with
-    | Nothing -> acc
-    | Just ch -> encode_str_for_ir(s, i + 1, acc ++ escape_char_for_ir(ch))
+fn is_escaped_byte(c: Int) -> Bool =
+  c == 92 || c == 34 || c == 10 || c == 13 || c == 9
+
+fn encode_str_for_ir(s: String) -> String =
+  string_concat_many(list_reverse(encode_bytes_for_ir(s, bytes_from_utf8(s), 0, 0, Nil)))
+
+# `start` is where the current plain run began; `parts` is reversed.
+fn encode_bytes_for_ir(s: String, b: Bytes, start: Int, i: Int, parts: List String) -> List String =
+  match bytes_get(b, i) with
+  | Nothing -> push_run(s, start, i, parts)
+  | Just c ->
+      if is_escaped_byte(c)
+      then encode_bytes_for_ir(s, b, i + 1, i + 1, Cons(escape_byte_for_ir(c), push_run(s, start, i, parts)))
+      else encode_bytes_for_ir(s, b, start, i + 1, parts)
+
+fn push_run(s: String, start: Int, stop: Int, parts: List String) -> List String =
+  if stop > start then Cons(str_slice_bytes(s, start, stop - start), parts) else parts
 
 # ---------------------------------------------------------------------------
 # Sprout-IR → LLVM IR text lowering.
@@ -623,26 +640,22 @@ fn i64_params_loop(remaining: Int, acc: String) -> String =
 # Naming by tag (not name) avoids collisions across modules.
 
 export fn collect_ctor_globals(regs: List sprout_ir.CtorReg) -> String =
-  collect_ctor_globals_loop(regs, "")
+  string_concat_many(list_map(emit_ctor_globals, regs))
 
-fn collect_ctor_globals_loop(regs: List sprout_ir.CtorReg, acc: String) -> String =
-  match regs with
-  | Nil -> acc
-  | Cons reg rest ->
-      match reg with
-      | sprout_ir.CtorReg name tag _ fkinds ->
-          collect_ctor_globals_loop(rest, acc ++ emit_ctor_name_global(tag, name) ++
-                                          emit_ctor_fkinds_global(tag, fkinds))
+fn emit_ctor_globals(reg: sprout_ir.CtorReg) -> String =
+  match reg with
+  | sprout_ir.CtorReg name tag _ fkinds ->
+      emit_ctor_name_global(tag, name) ++ emit_ctor_fkinds_global(tag, fkinds)
 
 fn emit_ctor_name_global(tag: Int, name: String) -> String =
   "@.cname." ++ int_to_string(tag) ++ " = private unnamed_addr constant [" ++
     int_to_string(str_byte_len(name) + 1) ++ " x i8] c\"" ++
-    encode_str_for_ir(name, 0, "") ++ "\\00\"\n"
+    encode_str_for_ir(name) ++ "\\00\"\n"
 
 fn emit_ctor_fkinds_global(tag: Int, fkinds: String) -> String =
   "@.cfkinds." ++ int_to_string(tag) ++ " = private unnamed_addr constant [" ++
     int_to_string(str_byte_len(fkinds) + 1) ++ " x i8] c\"" ++
-    encode_str_for_ir(fkinds, 0, "") ++ "\\00\"\n"
+    encode_str_for_ir(fkinds) ++ "\\00\"\n"
 
 # Emit one @sprout_register_ctor call for a single CtorReg.
 # Shape (verbatim from legacy codegen.sprout:3222-3226):
@@ -674,10 +687,7 @@ fn emit_ctor_reg_call_body(name: String, tag: Int, arity: Int, fkinds: String) -
         reg_reg = "%creg_" ++ int_to_string(tag)
 
 fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg) -> String =
-  match regs with
-  | Nil -> ""
-  | Cons reg rest ->
-      emit_ctor_reg_call(reg) ++ emit_ctor_reg_calls(rest)
+  string_concat_many(list_map(emit_ctor_reg_call, regs))
 
 # Synthetic C-ABI main shim.  Emits ctor registrations + optional init
 # call + optional call to @__sprout_user_main (produced by ast_to_ir when
@@ -738,17 +748,16 @@ fn init_call(has_init: Bool) -> String =
 # with zeroinit and are populated by @__sprout_init_globals at startup.
 # M3 PR 5; mirrors codegen.sprout:3950-3966.
 export fn lower_globals(globals: List sprout_ir.IRGlobalDecl) -> String =
-  match globals with
-  | Nil -> ""
-  | Cons g rest ->
-      match g with
-      | sprout_ir.IRGlobalDecl name lltype init_form ->
-          (match init_form with
-           | sprout_ir.GlobalConst ir_literal ->
-               "@" ++ name ++ " = private constant " ++ lltype ++ " " ++ ir_literal ++ "\n"
-           | sprout_ir.GlobalZeroInit ->
-               "@" ++ name ++ " = global " ++ lltype ++ " zeroinitializer\n")
-          ++ lower_globals(rest)
+  string_concat_many(list_map(lower_global, globals))
+
+fn lower_global(g: sprout_ir.IRGlobalDecl) -> String =
+  match g with
+  | sprout_ir.IRGlobalDecl name lltype init_form ->
+      match init_form with
+      | sprout_ir.GlobalConst ir_literal ->
+          "@" ++ name ++ " = private constant " ++ lltype ++ " " ++ ir_literal ++ "\n"
+      | sprout_ir.GlobalZeroInit ->
+          "@" ++ name ++ " = global " ++ lltype ++ " zeroinitializer\n"
 
 # True if any IRGlobalDecl in the list uses GlobalZeroInit (a runtime-let).
 # Used by main_shim to decide whether to emit the init-fn call.
@@ -833,7 +842,7 @@ export fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
      " x i8] c\"" ++ body ++ "\" }\n",
    len, gname)
   where gname = "@.str." ++ int_to_string(idx)
-        body = encode_str_for_ir(s, 0, "") ++ "\\00"
+        body = encode_str_for_ir(s) ++ "\\00"
         byte_len = str_byte_len(s)
         len = byte_len + 1
         hdr = 10 + byte_len * 16384
