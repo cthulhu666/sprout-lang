@@ -1067,6 +1067,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `sentinel_name`), 35 fixtures testing the nullary-`fn` shape itself. Blocked on the pragma
   above. Then narrow it, rewrite the real site, and mark the fixtures
   `# lint: allow(nullary-const-fn)`.
+- [ ] `P3` **Lint a redundant to-string conversion inside a template slot.** A `${…}` slot already
+  calls `ToString`, so `${int_to_string(n)}` and `${to_string(x)}` convert twice; `${n}` prints the
+  same text. 102 sites today across `examples/`, `stdlib/`, `ide/` and `tests/` (47
+  `int_to_string`, 54 `to_string`, 1 `double_to_string`). The linter is untyped, so derive the
+  names from the prelude's `instance ToString T` bodies that only call `f(value)`, as
+  `docs/lint-rules-v0.md` §5 derives patterns, and skip a name the module shadows. `to_string`
+  itself is always redundant there. Rewriting a site changes golden IR, not output.
 - [~] `P2` **Formatter/linter beyond the baseline.** Eight AST lint rules shipped
   (`staircase-of-doom`, `redundant-vec-from-list`, `list-shape-pattern`, `list-prefix-pattern`,
   `multi-line-lambda-arg`, `deprecated-brace-body`, `nullary-const-fn`, `hand-rolled-combinator`) on
