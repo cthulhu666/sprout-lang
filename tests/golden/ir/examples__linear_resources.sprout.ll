@@ -141,13 +141,12 @@ declare i64 @task_yield()
 @.str.30 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"succeeded at \00" }
 @.str.31 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"gave up: \00" }
 @.str.32 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" | \00" }
-@.str.33 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"merged \00" }
-@.str.34 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.35 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"--- 6. once local ---\00" }
-@.str.36 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"scratch\00" }
-@.str.37 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"keep\00" }
-@.str.38 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" | \00" }
-@.str.39 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 139, column 57)\00" }
+@.str.33 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"spawned a task for scratch\00" }
+@.str.34 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"--- 6. once local ---\00" }
+@.str.35 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"scratch\00" }
+@.str.36 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"keep\00" }
+@.str.37 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" | \00" }
+@.str.38 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 139, column 57)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -2065,126 +2064,51 @@ join_10:
   ret i64 %t$40
 }
 
-define i64 @examples.linear_resources.run_once_local(i64 %p$work) {
+define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$_) {
 entry:
-  %t$0 = add i64 0, 0
-  call void @sprout_closure_arity_check(i64 %p$work, i64 1)
-  %t$1$env_ptr = inttoptr i64 %p$work to ptr
-  %t$1$code = load ptr, ptr %t$1$env_ptr
-  %t$1 = call i64 (i64, i64) %t$1$code(i64 %p$work, i64 %t$0)
+  %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
+  %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
+  %t$0 = load i64, ptr %t$0$slot_ptr
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @examples.linear_resources.print_and_close(i64 %t$0)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_15(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
+define i64 @examples.linear_resources.spawn_and_note(i64 %p$s, i64 %p$scratch, i64 %p$keep) {
 entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_16(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
-define i64 @examples.linear_resources.merge_into(i64 %p$src, i64 %p$dst) {
-entry:
+  %t$5 = alloca i64
+  store i64 %p$scratch, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %p$s, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$9 = alloca i64
+  store i64 %p$keep, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
+  %t$0$raw = inttoptr i64 %t$0 to ptr
+  store ptr @__sprout_ir_lambda_15, ptr %t$0$raw
+  %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
+  store i64 %p$scratch, ptr %t$0$raw$slot$1
+  %t$11 = alloca i64
+  store i64 %t$0, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$1 = call i64 @stdlib.task.task_spawn(i64 %p$s, i64 %t$0)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$2 = getelementptr inbounds { i64, [27 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
   %t$14 = alloca i64
-  store i64 %p$src, ptr %t$14
+  store i64 %t$3, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$16 = alloca i64
-  store i64 %p$dst, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0 = call i64 @examples.linear_resources.close_journal(i64 %p$src)
-  %t$1 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
-  %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
-  %t$4 = ptrtoint ptr %t$3 to i64
-  %t$18 = alloca i64
-  store i64 %t$0, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$20 = alloca i64
-  store i64 %t$2, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %t$4, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$5 = call i64 @sprout_alloc_closure(i64 8, i64 3)
-  %t$5$raw = inttoptr i64 %t$5 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_15, ptr %t$5$raw
-  %t$24 = alloca i64
-  store i64 %t$5, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 4)
-  %t$6$raw = inttoptr i64 %t$6 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_16, ptr %t$6$raw
-  %t$26 = alloca i64
-  store i64 %t$6, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$7 = call i64 @stdlib.string.join(i64 %t$4, i64 %t$0, i64 %t$5, i64 %t$6)
-  %t$28 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$8 = call i64 @__tc_ToString_String_to_string(i64 %t$7)
-  %t$29 = alloca i64
-  store i64 %t$8, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$9 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$31 = alloca i64
-  store i64 %t$9, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$10 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$10$ptr = inttoptr i64 %t$10 to ptr
-  %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
-  store i64 %t$8, ptr %t$10$f0
-  %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
-  store i64 %t$9, ptr %t$10$f1
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$34 = alloca i64
-  store i64 %t$10, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$11 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$11$ptr = inttoptr i64 %t$11 to ptr
-  %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
-  store i64 %t$2, ptr %t$11$f0
-  %t$11$f1 = getelementptr i64, ptr %t$11$ptr, i64 1
-  store i64 %t$10, ptr %t$11$f1
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$37 = alloca i64
-  store i64 %t$11, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$12 = call i64 @string_concat_many(i64 %t$11)
-  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$40 = alloca i64
-  store i64 %t$12, ptr %t$40
-  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$13 = call i64 @examples.linear_resources.write_line(i64 %p$dst, i64 %t$12)
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %t$13
+  %t$4 = call i64 @examples.linear_resources.write_line(i64 %p$keep, i64 %t$3)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 4)
+  ret i64 %t$4
 }
 
-define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$s) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -2193,17 +2117,20 @@ entry:
   %t$1$slot_ptr = getelementptr i64, ptr %t$1$env_ptr, i64 2
   %t$1 = load i64, ptr %t$1$slot_ptr
   %t$3 = alloca i64
-  store i64 %t$0, ptr %t$3
+  store i64 %p$s, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
-  store i64 %t$1, ptr %t$5
+  store i64 %t$0, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$2 = call i64 @examples.linear_resources.merge_into(i64 %t$1, i64 %t$0)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$7 = alloca i64
+  store i64 %t$1, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$2 = call i64 @examples.linear_resources.spawn_and_note(i64 %p$s, i64 %t$1, i64 %t$0)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_18(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
+define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_17(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a2, ptr %t$0
@@ -2219,7 +2146,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_19(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
+define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_18(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a3, ptr %t$0
@@ -2240,18 +2167,18 @@ entry:
 
 define i64 @examples.linear_resources.section6() {
 entry:
-  %t$0 = getelementptr inbounds { i64, [22 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [22 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2$ptr = inttoptr i64 %t$1 to ptr
   %t$2 = call i64 @print_str(ptr %t$2$ptr)
-  %t$3 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
+  %t$3 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   %t$18 = alloca i64
   store i64 %t$4, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$5 = call i64 @examples.linear_resources.open_journal(i64 %t$4)
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$6 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.37, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$21 = alloca i64
   store i64 %t$5, ptr %t$21
@@ -2266,7 +2193,7 @@ entry:
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$9 = call i64 @sprout_alloc_closure(i64 24, i64 1)
   %t$9$raw = inttoptr i64 %t$9 to ptr
-  store ptr @__sprout_ir_lambda_17, ptr %t$9$raw
+  store ptr @__sprout_ir_lambda_16, ptr %t$9$raw
   %t$9$raw$slot$1 = getelementptr i64, ptr %t$9$raw, i64 1
   store i64 %t$8, ptr %t$9$raw$slot$1
   %t$9$raw$slot$2 = getelementptr i64, ptr %t$9$raw, i64 2
@@ -2274,11 +2201,11 @@ entry:
   %t$28 = alloca i64
   store i64 %t$9, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$10 = call i64 @examples.linear_resources.run_once_local(i64 %t$9)
+  %t$10 = call i64 @stdlib.task.with_scope(i64 %t$9)
   %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = call i64 @examples.linear_resources.close_journal(i64 %t$8)
   %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$12 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.38, i64 0, i32 1, i64 0
+  %t$12 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.37, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
   %t$32 = alloca i64
   store i64 %t$11, ptr %t$32
@@ -2288,13 +2215,13 @@ entry:
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$14 = call i64 @sprout_alloc_closure(i64 8, i64 3)
   %t$14$raw = inttoptr i64 %t$14 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_18, ptr %t$14$raw
+  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_17, ptr %t$14$raw
   %t$36 = alloca i64
   store i64 %t$14, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$15 = call i64 @sprout_alloc_closure(i64 8, i64 4)
   %t$15$raw = inttoptr i64 %t$15 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_19, ptr %t$15$raw
+  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_18, ptr %t$15$raw
   %t$38 = alloca i64
   store i64 %t$15, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
@@ -2440,7 +2367,7 @@ else_15:
   %t$19$ovf = extractvalue { i64, i1 } %t$19$agg, 1
   br i1 %t$19$ovf, label %ovfpanic_19, label %ovfok_19
 ovfpanic_19:
-  %t$20 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.39, i64 0, i32 1, i64 0
+  %t$20 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.38, i64 0, i32 1, i64 0
   %t$21 = ptrtoint ptr %t$20 to i64
   call i64 @panic(i64 %t$21)
   unreachable

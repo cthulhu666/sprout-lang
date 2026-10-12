@@ -1,6 +1,6 @@
 module examples.linear_resources
 import stdlib.string (join)
-import stdlib.task (TimeoutResult, Completed, Expired, task_spawn, with_scope, with_timeout)
+import stdlib.task (Scope, TimeoutResult, Completed, Expired, task_spawn, with_scope, with_timeout)
 
 # A tour of linear resources. A Journal is a handle that must be consumed exactly
 # once, by `close_journal`, which releases it. The compiler checks this; the
@@ -168,23 +168,22 @@ fn section5() -> Unit !{IO} =
 # 6. once local: move one value in, borrow another
 # ---------------------------------------------------------------------------
 #
-# `once local` combines both licences. One lambda may consume a moved journal
-# and also borrow a second one that the caller keeps. The price is `once`'s:
-# the callee may call the closure only once.
+# `with_scope`'s body is `once local`: it runs once, and inside the call. So one
+# lambda may move a journal in and also borrow one the caller keeps. Here the
+# body hands `scratch` on to a task and writes to `keep`. The price of the move
+# is `once`'s: the callee may call the closure only once.
 
-fn run_once_local(work: once local Unit -> a !{IO}) -> a !{IO} = work(())
-
-fn merge_into(src: consuming Journal, dst: borrowing Journal) -> Unit !{IO} =
+fn spawn_and_note(s: Scope, scratch: consuming Journal, keep: borrowing Journal) -> Unit !{IO} =
   do
-    lines <- close_journal(src)
-    write_line(dst, `merged ${join(", ", lines)}`)
+    task_spawn(s, \_ -> print_and_close(scratch))
+    write_line(keep, "spawned a task for scratch")
 
 fn section6() -> Unit !{IO} =
   do
     print("--- 6. once local ---")
     scratch <- open_journal("scratch")
     keep <- open_journal("keep")
-    run_once_local(\_ -> merge_into(scratch, keep))
+    with_scope(\s -> spawn_and_note(s, scratch, keep))
     lines <- close_journal(keep)
     print(join(" | ", lines))
 
