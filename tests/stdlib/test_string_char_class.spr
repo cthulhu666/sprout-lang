@@ -21,6 +21,7 @@ fn main() -> Unit !{IO} =
     check_eq("is_ascii_digit", kept(string.is_ascii_digit), "09"),
     check_eq("is_ascii_alpha", kept(string.is_ascii_alpha), "AZaz"),
     check_eq("is_ascii_lower", kept(string.is_ascii_lower), "az"),
+    check_eq("is_ascii_upper", kept(string.is_ascii_upper), "AZ"),
     check_eq("is_ascii_alnum", kept(string.is_ascii_alnum), "09AZaz"),
     check_eq("is_ident_start", kept(string.is_ident_start), "AZaz_"),
     check_eq("is_ident_continue", kept(string.is_ident_continue), "09AZaz_"),

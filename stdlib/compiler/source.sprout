@@ -462,8 +462,13 @@ export fn peek(cursor: SourceCursor) -> Maybe Char =
   | Nothing -> Nothing
   | Just (ch, _) -> Just(ch)
 
-fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
-  if ch == '\n' || ch == '\r' then
+# The one place that says which bytes end a line: `\n` and `\r`. Only an ASCII
+# byte can, so a decoded non-ASCII char never does.
+fn starts_line(b: Int) -> Bool =
+  b == 10 || b == 13
+
+fn advance_position(pos: SourcePos, new_line: Bool) -> SourcePos =
+  if new_line then
     SourcePos(index = pos.index + 1, line = pos.line + 1, column = 1)
   else
     SourcePos(index = pos.index + 1, line = pos.line, column = pos.column + 1)
@@ -480,12 +485,12 @@ export fn next(cursor: SourceCursor) -> Maybe (Char, SourceCursor) =
           # An ASCII byte is its own codepoint; skip the decoder's tuples.
           if b < 128 then
             let ch = char_from_codepoint(b)
-            in Just((ch, SourceCursor(raw, bytes, byte_offset + 1, advance_position(pos, ch))))
+            in Just((ch, SourceCursor(raw, bytes, byte_offset + 1, advance_position(pos, starts_line(b)))))
           else
             match decode_char_at(bytes, byte_offset) with
             | Nothing -> Nothing
             | Just (ch, next_off) ->
-                Just((ch, SourceCursor(raw, bytes, next_off, advance_position(pos, ch))))
+                Just((ch, SourceCursor(raw, bytes, next_off, advance_position(pos, false))))
 
 # take_while: advance past every codepoint satisfying pred; returns the advanced
 # cursor.  Text extraction is slice-based and the caller's job (record the start
@@ -502,7 +507,7 @@ fn take_run(raw: String, bytes: Bytes, pred: Char -> Bool, off: Int, index: Int,
   | Just b ->
       if b < 128 then
         if pred(char_from_codepoint(b)) then
-          if b == 10 || b == 13 then take_run(raw, bytes, pred, off + 1, index + 1, line + 1, 1)
+          if starts_line(b) then take_run(raw, bytes, pred, off + 1, index + 1, line + 1, 1)
           else take_run(raw, bytes, pred, off + 1, index + 1, line, column + 1)
         else cursor_at(raw, bytes, off, index, line, column)
       else
