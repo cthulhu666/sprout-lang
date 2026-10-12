@@ -14195,40 +14195,29 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %p$last, i64 0)
+  %t$6 = call i64 @__tc_Eq_stdlib_tui_style_Style_eq(i64 %t$5, i64 %p$st)
+  %t$11 = trunc i64 %t$6 to i1
+  br i1 %t$11, label %then_7, label %else_7
+then_7:
+  br label %join_7
+else_7:
   %t$16 = alloca i64
   store i64 %p$st, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$18 = alloca i64
   store i64 %p$acc, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$20 = alloca i64
-  store i64 %t$5, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$6 = call i64 @__tc_Eq_stdlib_tui_style_Style_eq(i64 %t$5, i64 %p$st)
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$11 = trunc i64 %t$6 to i1
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 2)
-  br i1 %t$11, label %then_7, label %else_7
-then_7:
-  br label %join_7
-else_7:
-  %t$24 = alloca i64
-  store i64 %p$st, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$26 = alloca i64
-  store i64 %p$acc, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$9 = call i64 @stdlib.tui.style.style_to_ansi(i64 %p$st)
-  %t$28 = alloca i64
-  store i64 %t$9, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$20 = alloca i64
+  store i64 %t$9, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$10 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$10$ptr = inttoptr i64 %t$10 to ptr
   %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
   store i64 %t$9, ptr %t$10$f0
   %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
   store i64 %p$acc, ptr %t$10$f1
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_7
 join_7:
   %t$8 = phi i64 [%p$acc, %then_7], [%t$10, %else_7]
@@ -14238,23 +14227,23 @@ arm_1_1:
   %t$13 = icmp eq i64 %t$0, %t$12
   br i1 %t$13, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$31 = alloca i64
-  store i64 %p$st, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$33 = alloca i64
-  store i64 %p$acc, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$23 = alloca i64
+  store i64 %p$st, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$25 = alloca i64
+  store i64 %p$acc, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
   %t$14 = call i64 @stdlib.tui.style.style_to_ansi(i64 %p$st)
-  %t$35 = alloca i64
-  store i64 %t$14, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$27 = alloca i64
+  store i64 %t$14, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$15 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$15$ptr = inttoptr i64 %t$15 to ptr
   %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
   store i64 %t$14, ptr %t$15$f0
   %t$15$f1 = getelementptr i64, ptr %t$15$ptr, i64 1
   store i64 %p$acc, ptr %t$15$f1
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_1
 arm_2_1:
   call void @sprout_abort_match()
@@ -33618,229 +33607,192 @@ entry:
 
 define i64 @__tc_Eq_stdlib_tui_style_Color_eq(i64 %p$left, i64 %p$right) {
 entry:
-  %t$49 = alloca i64
-  store i64 %p$right, ptr %t$49
-  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$51 = alloca i64
-  store i64 %p$left, ptr %t$51
-  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$0 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t$0$ptr = inttoptr i64 %t$0 to ptr
-  %t$0$s0 = getelementptr i64, ptr %t$0$ptr, i64 0
-  store i64 %p$left, ptr %t$0$s0
-  %t$0$s1 = getelementptr i64, ptr %t$0$ptr, i64 1
-  store i64 %p$right, ptr %t$0$s1
-  %t$53 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$0 = call i64 @sprout_tag(i64 %p$left)
   br label %arm_0_1
 arm_0_1:
-  %t$3$ptr = inttoptr i64 %t$0 to ptr
-  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 0
-  %t$3 = load i64, ptr %t$3$gep
-  %t$4 = call i64 @sprout_tag(i64 %t$3)
-  %t$5 = add i64 0, 84
-  %t$6 = icmp eq i64 %t$4, %t$5
-  br i1 %t$6, label %ntest_3, label %arm_1_1
-ntest_3:
-  %t$7$ptr = inttoptr i64 %t$0 to ptr
-  %t$7$gep = getelementptr i64, ptr %t$7$ptr, i64 1
-  %t$7 = load i64, ptr %t$7$gep
-  %t$8 = call i64 @sprout_tag(i64 %t$7)
-  %t$9 = add i64 0, 84
-  %t$10 = icmp eq i64 %t$8, %t$9
-  br i1 %t$10, label %ntest_7, label %arm_1_1
-ntest_7:
-  %t$11 = add i64 0, 1
-  br label %join_1
-arm_1_1:
-  %t$12$ptr = inttoptr i64 %t$0 to ptr
-  %t$12$gep = getelementptr i64, ptr %t$12$ptr, i64 0
-  %t$12 = load i64, ptr %t$12$gep
-  %t$13 = call i64 @sprout_tag(i64 %t$12)
-  %t$14 = add i64 0, 85
-  %t$15 = icmp eq i64 %t$13, %t$14
-  br i1 %t$15, label %ntest_12, label %arm_2_1
-ntest_12:
-  %t$16 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$17$ptr = inttoptr i64 %t$0 to ptr
-  %t$17$gep = getelementptr i64, ptr %t$17$ptr, i64 1
-  %t$17 = load i64, ptr %t$17$gep
-  %t$18 = call i64 @sprout_tag(i64 %t$17)
-  %t$19 = add i64 0, 85
-  %t$20 = icmp eq i64 %t$18, %t$19
-  br i1 %t$20, label %ntest_17, label %arm_2_1
-ntest_17:
-  %t$21 = call i64 @sprout_field(i64 %t$17, i64 0)
-  %t$22 = call i64 @__tc_Eq_Int_eq(i64 %t$16, i64 %t$21)
-  br label %join_1
-arm_2_1:
-  %t$23$ptr = inttoptr i64 %t$0 to ptr
-  %t$23$gep = getelementptr i64, ptr %t$23$ptr, i64 0
-  %t$23 = load i64, ptr %t$23$gep
-  %t$24 = call i64 @sprout_tag(i64 %t$23)
-  %t$25 = add i64 0, 86
-  %t$26 = icmp eq i64 %t$24, %t$25
-  br i1 %t$26, label %ntest_23, label %arm_3_1
-ntest_23:
-  %t$27 = call i64 @sprout_field(i64 %t$23, i64 0)
-  %t$28 = call i64 @sprout_field(i64 %t$23, i64 1)
-  %t$29 = call i64 @sprout_field(i64 %t$23, i64 2)
-  %t$30$ptr = inttoptr i64 %t$0 to ptr
-  %t$30$gep = getelementptr i64, ptr %t$30$ptr, i64 1
-  %t$30 = load i64, ptr %t$30$gep
-  %t$31 = call i64 @sprout_tag(i64 %t$30)
-  %t$32 = add i64 0, 86
-  %t$33 = icmp eq i64 %t$31, %t$32
-  br i1 %t$33, label %ntest_30, label %arm_3_1
-ntest_30:
-  %t$34 = call i64 @sprout_field(i64 %t$30, i64 0)
-  %t$35 = call i64 @sprout_field(i64 %t$30, i64 1)
-  %t$36 = call i64 @sprout_field(i64 %t$30, i64 2)
-  %t$37 = call i64 @__tc_Eq_Int_eq(i64 %t$27, i64 %t$34)
-  %t$42 = trunc i64 %t$37 to i1
-  br i1 %t$42, label %then_38, label %else_38
-then_38:
-  %t$40 = call i64 @__tc_Eq_Int_eq(i64 %t$28, i64 %t$35)
-  br label %join_38
-else_38:
-  %t$41 = add i64 0, 0
-  br label %join_38
-join_38:
-  %t$39 = phi i64 [%t$40, %then_38], [%t$41, %else_38]
-  %t$47 = trunc i64 %t$39 to i1
-  br i1 %t$47, label %then_43, label %else_43
-then_43:
-  %t$45 = call i64 @__tc_Eq_Int_eq(i64 %t$29, i64 %t$36)
-  br label %join_43
-else_43:
-  %t$46 = add i64 0, 0
-  br label %join_43
-join_43:
-  %t$44 = phi i64 [%t$45, %then_43], [%t$46, %else_43]
-  br label %join_1
-arm_3_1:
-  %t$48 = add i64 0, 0
-  br label %join_1
-arm_4_1:
+  %t$3 = add i64 0, 84
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_6
+arm_0_6:
+  %t$8 = add i64 0, 84
+  %t$9 = icmp eq i64 %t$5, %t$8
+  br i1 %t$9, label %body_0_6, label %arm_1_6
+body_0_6:
+  %t$10 = add i64 0, 1
+  br label %join_6
+arm_1_6:
+  %t$11 = add i64 0, 0
+  br label %join_6
+arm_2_6:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$11, %ntest_7], [%t$22, %ntest_17], [%t$44, %join_43], [%t$48, %arm_3_1]
-  ret i64 %t$2
-}
-
-define i64 @__tc_Eq_stdlib_tui_style_Style_eq(i64 %p$left, i64 %p$right) {
-entry:
-  %t$43 = alloca i64
-  store i64 %p$right, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$45 = alloca i64
-  store i64 %p$left, ptr %t$45
-  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$0 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t$0$ptr = inttoptr i64 %t$0 to ptr
-  %t$0$s0 = getelementptr i64, ptr %t$0$ptr, i64 0
-  store i64 %p$left, ptr %t$0$s0
-  %t$0$s1 = getelementptr i64, ptr %t$0$ptr, i64 1
-  store i64 %p$right, ptr %t$0$s1
-  %t$47 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %arm_0_1
-arm_0_1:
-  %t$3$ptr = inttoptr i64 %t$0 to ptr
-  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 0
-  %t$3 = load i64, ptr %t$3$gep
-  %t$4 = call i64 @sprout_tag(i64 %t$3)
-  %t$5 = add i64 0, 87
-  %t$6 = icmp eq i64 %t$4, %t$5
-  br i1 %t$6, label %ntest_3, label %arm_1_1
-ntest_3:
-  %t$7 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %t$3, i64 1)
-  %t$9 = call i64 @sprout_field(i64 %t$3, i64 2)
-  %t$10 = call i64 @sprout_field(i64 %t$3, i64 3)
-  %t$11 = call i64 @sprout_field(i64 %t$3, i64 4)
-  %t$12$ptr = inttoptr i64 %t$0 to ptr
-  %t$12$gep = getelementptr i64, ptr %t$12$ptr, i64 1
-  %t$12 = load i64, ptr %t$12$gep
-  %t$13 = call i64 @sprout_tag(i64 %t$12)
-  %t$14 = add i64 0, 87
-  %t$15 = icmp eq i64 %t$13, %t$14
-  br i1 %t$15, label %ntest_12, label %arm_1_1
-ntest_12:
-  %t$16 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$17 = call i64 @sprout_field(i64 %t$12, i64 1)
-  %t$18 = call i64 @sprout_field(i64 %t$12, i64 2)
-  %t$19 = call i64 @sprout_field(i64 %t$12, i64 3)
-  %t$20 = call i64 @sprout_field(i64 %t$12, i64 4)
-  %t$48 = alloca i64
-  store i64 %t$8, ptr %t$48
-  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
-  %t$50 = alloca i64
-  store i64 %t$7, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$52 = alloca i64
-  store i64 %t$16, ptr %t$52
-  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$54 = alloca i64
-  store i64 %t$17, ptr %t$54
-  %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$21 = call i64 @__tc_Eq_stdlib_tui_style_Color_eq(i64 %t$7, i64 %t$16)
-  %t$26 = trunc i64 %t$21 to i1
-  %t$56 = call i64 @sprout_gc_pop_roots(i64 4)
-  br i1 %t$26, label %then_22, label %else_22
-then_22:
-  %t$57 = alloca i64
-  store i64 %t$8, ptr %t$57
-  %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$59 = alloca i64
-  store i64 %t$17, ptr %t$59
-  %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$24 = call i64 @__tc_Eq_stdlib_tui_style_Color_eq(i64 %t$8, i64 %t$17)
-  %t$61 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %join_22
-else_22:
-  %t$25 = add i64 0, 0
-  br label %join_22
-join_22:
-  %t$23 = phi i64 [%t$24, %then_22], [%t$25, %else_22]
-  %t$31 = trunc i64 %t$23 to i1
-  br i1 %t$31, label %then_27, label %else_27
-then_27:
-  %t$29 = call i64 @__tc_Eq_Bool_eq(i64 %t$9, i64 %t$18)
-  br label %join_27
-else_27:
-  %t$30 = add i64 0, 0
-  br label %join_27
-join_27:
-  %t$28 = phi i64 [%t$29, %then_27], [%t$30, %else_27]
-  %t$36 = trunc i64 %t$28 to i1
-  br i1 %t$36, label %then_32, label %else_32
-then_32:
-  %t$34 = call i64 @__tc_Eq_Bool_eq(i64 %t$10, i64 %t$19)
-  br label %join_32
-else_32:
-  %t$35 = add i64 0, 0
-  br label %join_32
-join_32:
-  %t$33 = phi i64 [%t$34, %then_32], [%t$35, %else_32]
-  %t$41 = trunc i64 %t$33 to i1
+join_6:
+  %t$7 = phi i64 [%t$10, %body_0_6], [%t$11, %arm_1_6]
+  br label %join_1
+arm_1_1:
+  %t$12 = add i64 0, 85
+  %t$13 = icmp eq i64 %t$0, %t$12
+  br i1 %t$13, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$14 = call i64 @sprout_field(i64 %p$left, i64 0)
+  %t$15 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_16
+arm_0_16:
+  %t$18 = add i64 0, 85
+  %t$19 = icmp eq i64 %t$15, %t$18
+  br i1 %t$19, label %body_0_16, label %arm_1_16
+body_0_16:
+  %t$20 = call i64 @sprout_field(i64 %p$right, i64 0)
+  %t$21 = call i64 @__tc_Eq_Int_eq(i64 %t$14, i64 %t$20)
+  br label %join_16
+arm_1_16:
+  %t$22 = add i64 0, 0
+  br label %join_16
+arm_2_16:
+  call void @sprout_abort_match()
+  unreachable
+join_16:
+  %t$17 = phi i64 [%t$21, %body_0_16], [%t$22, %arm_1_16]
+  br label %join_1
+arm_2_1:
+  %t$23 = add i64 0, 86
+  %t$24 = icmp eq i64 %t$0, %t$23
+  br i1 %t$24, label %body_2_1, label %arm_3_1
+body_2_1:
+  %t$25 = call i64 @sprout_field(i64 %p$left, i64 0)
+  %t$26 = call i64 @sprout_field(i64 %p$left, i64 1)
+  %t$27 = call i64 @sprout_field(i64 %p$left, i64 2)
+  %t$28 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_29
+arm_0_29:
+  %t$31 = add i64 0, 86
+  %t$32 = icmp eq i64 %t$28, %t$31
+  br i1 %t$32, label %body_0_29, label %arm_1_29
+body_0_29:
+  %t$33 = call i64 @sprout_field(i64 %p$right, i64 0)
+  %t$34 = call i64 @sprout_field(i64 %p$right, i64 1)
+  %t$35 = call i64 @sprout_field(i64 %p$right, i64 2)
+  %t$36 = call i64 @__tc_Eq_Int_eq(i64 %t$25, i64 %t$33)
+  %t$41 = trunc i64 %t$36 to i1
   br i1 %t$41, label %then_37, label %else_37
 then_37:
-  %t$39 = call i64 @__tc_Eq_Bool_eq(i64 %t$11, i64 %t$20)
+  %t$39 = call i64 @__tc_Eq_Int_eq(i64 %t$26, i64 %t$34)
   br label %join_37
 else_37:
   %t$40 = add i64 0, 0
   br label %join_37
 join_37:
   %t$38 = phi i64 [%t$39, %then_37], [%t$40, %else_37]
+  %t$46 = trunc i64 %t$38 to i1
+  br i1 %t$46, label %then_42, label %else_42
+then_42:
+  %t$44 = call i64 @__tc_Eq_Int_eq(i64 %t$27, i64 %t$35)
+  br label %join_42
+else_42:
+  %t$45 = add i64 0, 0
+  br label %join_42
+join_42:
+  %t$43 = phi i64 [%t$44, %then_42], [%t$45, %else_42]
+  br label %join_29
+arm_1_29:
+  %t$47 = add i64 0, 0
+  br label %join_29
+arm_2_29:
+  call void @sprout_abort_match()
+  unreachable
+join_29:
+  %t$30 = phi i64 [%t$43, %join_42], [%t$47, %arm_1_29]
   br label %join_1
-arm_1_1:
-  %t$42 = add i64 0, 0
-  br label %join_1
-arm_2_1:
+arm_3_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$38, %join_37], [%t$42, %arm_1_1]
+  %t$2 = phi i64 [%t$7, %join_6], [%t$17, %join_16], [%t$30, %join_29]
+  ret i64 %t$2
+}
+
+define i64 @__tc_Eq_stdlib_tui_style_Style_eq(i64 %p$left, i64 %p$right) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %p$left)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 87
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %p$left, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %p$left, i64 1)
+  %t$7 = call i64 @sprout_field(i64 %p$left, i64 2)
+  %t$8 = call i64 @sprout_field(i64 %p$left, i64 3)
+  %t$9 = call i64 @sprout_field(i64 %p$left, i64 4)
+  %t$10 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_11
+arm_0_11:
+  %t$13 = add i64 0, 87
+  %t$14 = icmp eq i64 %t$10, %t$13
+  br i1 %t$14, label %body_0_11, label %arm_1_11
+body_0_11:
+  %t$15 = call i64 @sprout_field(i64 %p$right, i64 0)
+  %t$16 = call i64 @sprout_field(i64 %p$right, i64 1)
+  %t$17 = call i64 @sprout_field(i64 %p$right, i64 2)
+  %t$18 = call i64 @sprout_field(i64 %p$right, i64 3)
+  %t$19 = call i64 @sprout_field(i64 %p$right, i64 4)
+  %t$20 = call i64 @__tc_Eq_stdlib_tui_style_Color_eq(i64 %t$5, i64 %t$15)
+  %t$25 = trunc i64 %t$20 to i1
+  br i1 %t$25, label %then_21, label %else_21
+then_21:
+  %t$23 = call i64 @__tc_Eq_stdlib_tui_style_Color_eq(i64 %t$6, i64 %t$16)
+  br label %join_21
+else_21:
+  %t$24 = add i64 0, 0
+  br label %join_21
+join_21:
+  %t$22 = phi i64 [%t$23, %then_21], [%t$24, %else_21]
+  %t$30 = trunc i64 %t$22 to i1
+  br i1 %t$30, label %then_26, label %else_26
+then_26:
+  %t$28 = call i64 @__tc_Eq_Bool_eq(i64 %t$7, i64 %t$17)
+  br label %join_26
+else_26:
+  %t$29 = add i64 0, 0
+  br label %join_26
+join_26:
+  %t$27 = phi i64 [%t$28, %then_26], [%t$29, %else_26]
+  %t$35 = trunc i64 %t$27 to i1
+  br i1 %t$35, label %then_31, label %else_31
+then_31:
+  %t$33 = call i64 @__tc_Eq_Bool_eq(i64 %t$8, i64 %t$18)
+  br label %join_31
+else_31:
+  %t$34 = add i64 0, 0
+  br label %join_31
+join_31:
+  %t$32 = phi i64 [%t$33, %then_31], [%t$34, %else_31]
+  %t$40 = trunc i64 %t$32 to i1
+  br i1 %t$40, label %then_36, label %else_36
+then_36:
+  %t$38 = call i64 @__tc_Eq_Bool_eq(i64 %t$9, i64 %t$19)
+  br label %join_36
+else_36:
+  %t$39 = add i64 0, 0
+  br label %join_36
+join_36:
+  %t$37 = phi i64 [%t$38, %then_36], [%t$39, %else_36]
+  br label %join_11
+arm_1_11:
+  call void @sprout_abort_match()
+  unreachable
+join_11:
+  %t$12 = phi i64 [%t$37, %join_36]
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$12, %join_11]
   ret i64 %t$2
 }
 
@@ -33852,119 +33804,105 @@ entry:
 
 define i64 @__tc_Eq_stdlib_tui_screen_Cell_eq(i64 %p$left, i64 %p$right) {
 entry:
-  %t$39 = alloca i64
-  store i64 %p$right, ptr %t$39
-  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$41 = alloca i64
-  store i64 %p$left, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$0 = call i64 @sprout_alloc_tuple_blob(i64 16)
-  %t$0$ptr = inttoptr i64 %t$0 to ptr
-  %t$0$s0 = getelementptr i64, ptr %t$0$ptr, i64 0
-  store i64 %p$left, ptr %t$0$s0
-  %t$0$s1 = getelementptr i64, ptr %t$0$ptr, i64 1
-  store i64 %p$right, ptr %t$0$s1
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$0 = call i64 @sprout_tag(i64 %p$left)
   br label %arm_0_1
 arm_0_1:
-  %t$3$ptr = inttoptr i64 %t$0 to ptr
-  %t$3$gep = getelementptr i64, ptr %t$3$ptr, i64 0
-  %t$3 = load i64, ptr %t$3$gep
-  %t$4 = call i64 @sprout_tag(i64 %t$3)
-  %t$5 = add i64 0, 89
-  %t$6 = icmp eq i64 %t$4, %t$5
-  br i1 %t$6, label %ntest_3, label %arm_1_1
-ntest_3:
-  %t$7 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$8 = call i64 @sprout_field(i64 %t$3, i64 1)
-  %t$9 = call i64 @sprout_field(i64 %t$3, i64 2)
-  %t$10$ptr = inttoptr i64 %t$0 to ptr
-  %t$10$gep = getelementptr i64, ptr %t$10$ptr, i64 1
-  %t$10 = load i64, ptr %t$10$gep
-  %t$11 = call i64 @sprout_tag(i64 %t$10)
-  %t$12 = add i64 0, 89
-  %t$13 = icmp eq i64 %t$11, %t$12
-  br i1 %t$13, label %ntest_10, label %arm_1_1
-ntest_10:
-  %t$14 = call i64 @sprout_field(i64 %t$10, i64 0)
-  %t$15 = call i64 @sprout_field(i64 %t$10, i64 1)
-  %t$16 = call i64 @sprout_field(i64 %t$10, i64 2)
-  %t$17 = call i64 @__tc_Eq_Int_eq(i64 %t$7, i64 %t$14)
-  %t$23 = trunc i64 %t$17 to i1
-  br i1 %t$23, label %then_18, label %else_18
-then_18:
+  %t$3 = add i64 0, 89
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %p$left, i64 0)
+  %t$6 = call i64 @sprout_field(i64 %p$left, i64 1)
+  %t$7 = call i64 @sprout_field(i64 %p$left, i64 2)
+  %t$8 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_9
+arm_0_9:
+  %t$11 = add i64 0, 89
+  %t$12 = icmp eq i64 %t$8, %t$11
+  br i1 %t$12, label %body_0_9, label %arm_1_9
+body_0_9:
+  %t$13 = call i64 @sprout_field(i64 %p$right, i64 0)
+  %t$14 = call i64 @sprout_field(i64 %p$right, i64 1)
+  %t$15 = call i64 @sprout_field(i64 %p$right, i64 2)
+  %t$16 = call i64 @__tc_Eq_Int_eq(i64 %t$5, i64 %t$13)
+  %t$22 = trunc i64 %t$16 to i1
+  br i1 %t$22, label %then_17, label %else_17
+then_17:
+  %t$38 = alloca i64
+  store i64 %t$7, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$40 = alloca i64
+  store i64 %t$6, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$42 = alloca i64
+  store i64 %t$15, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
   %t$44 = alloca i64
-  store i64 %t$9, ptr %t$44
+  store i64 %t$14, ptr %t$44
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$19 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$19$raw = inttoptr i64 %t$19 to ptr
+  store ptr @__sprout_ir_eta___tc_Eq_Int_eq_134, ptr %t$19$raw
   %t$46 = alloca i64
-  store i64 %t$8, ptr %t$46
+  store i64 %t$19, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$48 = alloca i64
-  store i64 %t$16, ptr %t$48
-  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
-  %t$50 = alloca i64
-  store i64 %t$15, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$20 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$20$raw = inttoptr i64 %t$20 to ptr
-  store ptr @__sprout_ir_eta___tc_Eq_Int_eq_134, ptr %t$20$raw
-  %t$52 = alloca i64
-  store i64 %t$20, ptr %t$52
-  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$21 = call i64 @__tc_Eq_List_a_eq(i64 %t$8, i64 %t$15, i64 %t$20)
-  %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$55 = call i64 @sprout_gc_pop_roots(i64 3)
-  br label %join_18
-else_18:
-  %t$22 = add i64 0, 0
-  br label %join_18
-join_18:
-  %t$19 = phi i64 [%t$21, %then_18], [%t$22, %else_18]
-  %t$28 = trunc i64 %t$19 to i1
-  br i1 %t$28, label %then_24, label %else_24
-then_24:
-  %t$56 = alloca i64
-  store i64 %t$9, ptr %t$56
-  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$58 = alloca i64
-  store i64 %t$16, ptr %t$58
-  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$26 = call i64 @__tc_Eq_stdlib_tui_style_Style_eq(i64 %t$9, i64 %t$16)
-  %t$60 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %join_24
-else_24:
-  %t$27 = add i64 0, 0
-  br label %join_24
-join_24:
-  %t$25 = phi i64 [%t$26, %then_24], [%t$27, %else_24]
+  %t$20 = call i64 @__tc_Eq_List_a_eq(i64 %t$6, i64 %t$14, i64 %t$19)
+  %t$48 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$49 = call i64 @sprout_gc_pop_roots(i64 3)
+  br label %join_17
+else_17:
+  %t$21 = add i64 0, 0
+  br label %join_17
+join_17:
+  %t$18 = phi i64 [%t$20, %then_17], [%t$21, %else_17]
+  %t$27 = trunc i64 %t$18 to i1
+  br i1 %t$27, label %then_23, label %else_23
+then_23:
+  %t$25 = call i64 @__tc_Eq_stdlib_tui_style_Style_eq(i64 %t$7, i64 %t$15)
+  br label %join_23
+else_23:
+  %t$26 = add i64 0, 0
+  br label %join_23
+join_23:
+  %t$24 = phi i64 [%t$25, %then_23], [%t$26, %else_23]
+  br label %join_9
+arm_1_9:
+  %t$28 = add i64 0, 0
+  br label %join_9
+arm_2_9:
+  call void @sprout_abort_match()
+  unreachable
+join_9:
+  %t$10 = phi i64 [%t$24, %join_23], [%t$28, %arm_1_9]
   br label %join_1
 arm_1_1:
-  %t$29$ptr = inttoptr i64 %t$0 to ptr
-  %t$29$gep = getelementptr i64, ptr %t$29$ptr, i64 0
-  %t$29 = load i64, ptr %t$29$gep
-  %t$30 = call i64 @sprout_tag(i64 %t$29)
-  %t$31 = add i64 0, 90
-  %t$32 = icmp eq i64 %t$30, %t$31
-  br i1 %t$32, label %ntest_29, label %arm_2_1
-ntest_29:
-  %t$33$ptr = inttoptr i64 %t$0 to ptr
-  %t$33$gep = getelementptr i64, ptr %t$33$ptr, i64 1
-  %t$33 = load i64, ptr %t$33$gep
-  %t$34 = call i64 @sprout_tag(i64 %t$33)
-  %t$35 = add i64 0, 90
-  %t$36 = icmp eq i64 %t$34, %t$35
-  br i1 %t$36, label %ntest_33, label %arm_2_1
-ntest_33:
-  %t$37 = add i64 0, 1
+  %t$29 = add i64 0, 90
+  %t$30 = icmp eq i64 %t$0, %t$29
+  br i1 %t$30, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$31 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_32
+arm_0_32:
+  %t$34 = add i64 0, 90
+  %t$35 = icmp eq i64 %t$31, %t$34
+  br i1 %t$35, label %body_0_32, label %arm_1_32
+body_0_32:
+  %t$36 = add i64 0, 1
+  br label %join_32
+arm_1_32:
+  %t$37 = add i64 0, 0
+  br label %join_32
+arm_2_32:
+  call void @sprout_abort_match()
+  unreachable
+join_32:
+  %t$33 = phi i64 [%t$36, %body_0_32], [%t$37, %arm_1_32]
   br label %join_1
 arm_2_1:
-  %t$38 = add i64 0, 0
-  br label %join_1
-arm_3_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$25, %join_24], [%t$37, %ntest_33], [%t$38, %arm_2_1]
+  %t$2 = phi i64 [%t$10, %join_9], [%t$33, %join_32]
   ret i64 %t$2
 }
 

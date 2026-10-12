@@ -82,37 +82,36 @@ fn build_eq_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
 
 # --- Eq emitter --------------------------------------------------------------
 
-# Build one match branch for a single same-ctor case:
-#   (Ctor l0 l1 ..., Ctor r0 r1 ...) -> eq(l0, r0) && eq(l1, r1) && ...
-fn build_eq_same_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
-  match ctor with
-  | ast.TypeConstructor name _ _ _ ->
-      ast.MatchBranch(
-        ast.TuplePattern(
-          [build_ctor_var_pattern(name, DLeft, ctor_arity(ctor), pos),
-           build_ctor_var_pattern(name, DRight, ctor_arity(ctor), pos)],
-          pos),
-        build_eq_conjunction(ctor_arity(ctor), pos))
+# One arm of the outer match:
+#   Ctor l0 .. -> match right with | Ctor r0 .. -> eq(l0, r0) && .. | <fallthrough>
+fn build_eq_ctor_branch(ctor: ast.TypeConstructor, fallthrough: List ast.MatchBranch,
+                        pos: source.SourcePos) -> ast.MatchBranch =
+  let ast.TypeConstructor name _ _ _ = ctor in
+  let arity = ctor_arity(ctor) in
+  ast.MatchBranch(
+    build_ctor_var_pattern(name, DLeft, arity, pos),
+    ast.MatchExpr(
+      ast.VarExpr("right", pos),
+      Cons(ast.MatchBranch(build_ctor_var_pattern(name, DRight, arity, pos),
+                           build_eq_conjunction(arity, pos)),
+           fallthrough),
+      pos))
 
-fn build_eq_same_ctor_branches(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
+# `_ -> false` for a right side with another constructor. A one-constructor type
+# gets none: the arm would be unreachable, which is a compile error.
+fn eq_fallthrough_branches(ctors: List ast.TypeConstructor,
+                           pos: source.SourcePos) -> List ast.MatchBranch =
   match ctors with
-  | Nil -> Nil
-  | Cons c rest -> Cons(build_eq_same_ctor_branch(c, pos), build_eq_same_ctor_branches(rest, pos))
+  | [_] -> []
+  | _ -> [ast.MatchBranch(ast.WildcardPattern(pos), ast.BoolExpr(false, pos))]
 
-# The wildcard fall-through arm: any (Ctor_i, Ctor_j) pair with i != j -> false.
-fn eq_fallthrough_branch(pos: source.SourcePos) -> ast.MatchBranch =
-  ast.MatchBranch(ast.WildcardPattern(pos), ast.BoolExpr(false, pos))
-
-# Build the match expression body: `match (left, right) with | (C0 ..., C0 ...) -> ... | _ -> false`.
-# O(n_ctors) — list_append walks the same-ctor branch list once to append the fallthrough.
+# `match left with | C0 .. -> (match right with ..) | ..`. One side at a time, so
+# no `(left, right)` tuple is allocated per call.
 fn build_eq_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  let fallthrough = eq_fallthrough_branches(ctors, pos) in
   ast.MatchExpr(
-    ast.TupleExpr(
-      [ast.VarExpr("left", pos), ast.VarExpr("right", pos)],
-      pos),
-    list_append(
-      build_eq_same_ctor_branches(ctors, pos),
-      [eq_fallthrough_branch(pos)]),
+    ast.VarExpr("left", pos),
+    list_map(\c -> build_eq_ctor_branch(c, fallthrough, pos), ctors),
     pos)
 
 # Build a TypeExpr representing the instance head: TypeName(name) for a

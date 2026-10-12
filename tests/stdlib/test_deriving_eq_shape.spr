@@ -1,0 +1,68 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.deriving as deriving
+import stdlib.string as string
+
+# The derived `eq` matches `left`, then `right` inside each arm. Matching on the
+# tuple `(left, right)` allocated that tuple on every call, which made `x == Red`
+# about 3× a hand-written match (#627).
+
+# The eq body as a string: each `match` shows its scrutinee and arms, each arm its
+# constructor or `_`; anything else is `body`.
+fn shape(e: ast.Expr) -> String =
+  match e with
+  | ast.MatchExpr scrut branches _ -> `match ${scrut_shape(scrut)} [${arms_shape(branches)}]`
+  | _ -> "body"
+
+fn scrut_shape(e: ast.Expr) -> String =
+  match e with
+  | ast.VarExpr name _ -> name
+  | ast.TupleExpr _ _ -> "tuple"
+  | _ -> "other"
+
+fn arms_shape(branches: List ast.MatchBranch) -> String =
+  string.join(", ", list_map(arm_shape, branches))
+
+fn arm_shape(b: ast.MatchBranch) -> String =
+  let ast.MatchBranch pat body = b in `${pat_shape(pat)} -> ${shape(body)}`
+
+fn pat_shape(p: ast.Pattern) -> String =
+  match p with
+  | ast.ConstructorPattern name _ _ -> name
+  | ast.WildcardPattern _ -> "_"
+  | _ -> "other"
+
+fn eq_body(d: ast.Decl) -> Maybe ast.Expr =
+  match d with
+  | ast.InstanceDecl _ _ [ast.InstanceMethodImpl "eq" _ _ _ _ body] _ -> Just(body)
+  | _ -> Nothing
+
+# The shape of the first derived `eq` in `src`, or a string starting "ERR: ".
+fn derived_eq_shape(src: String) -> String =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          let ast.Program decls _ = prog in
+          match find_map(eq_body, deriving.expand_deriving_decls(decls)) with
+          | Just body -> shape(body)
+          | Nothing -> "ERR: no derived eq"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    _ <- assert_eq(state, "two constructors",
+      derived_eq_shape("type Color deriving (Eq) =\n  | Red\n  | Green\n"),
+      "match left [Red -> match right [Red -> body, _ -> body], Green -> match right [Green -> body, _ -> body]]")
+    # One constructor: an inner `_` arm would be unreachable, a compile error.
+    _ <- assert_eq(state, "one constructor",
+      derived_eq_shape("type Pair deriving (Eq) =\n  | Pair Int Int\n"),
+      "match left [Pair -> match right [Pair -> body]]")
+    _ <- assert_eq(state, "wrap",
+      derived_eq_shape("wrap Line = Int deriving (Eq)\n"),
+      "match left [Line -> match right [Line -> body]]")
+    summary(state)

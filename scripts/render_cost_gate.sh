@@ -24,7 +24,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${SPROUT_RENDER_COST_BIN:-$ROOT/build/render_cost}"
 
-# Per painted cell. Observed 18 objects / 42 swept on 2026-09-11.
+# Per painted cell. Observed 18 objects / 42 swept on 2026-09-11; 8 / 27 on
+# 2026-10-12, after derived `eq` stopped allocating a tuple per call.
 #
 # BOTH counters are budgeted, and gc_swept is the one that bites. Verified by
 # building this probe against the pre-fast-path `grapheme`: `sprout_obj` barely
@@ -38,10 +39,10 @@ MAX_SWEPT_PER_CELL=60
 # A FLOOR, because "cheap" and "did nothing" are the same number to a budget. A
 # layout regression that yields empty regions, or a list that renders no rows,
 # would otherwise leave this gate green while measuring an empty screen — and
-# nothing else in the repo exercises tests/cost/. Set near half the observed
-# value: far below any real improvement, far above a collapse (a probe rendering
-# two labels and nothing else scores 5 and 6).
-MIN_OBJ_PER_CELL=9
+# nothing else in the repo exercises tests/cost/. Each floor sits between a
+# collapse (a probe rendering two labels and nothing else scores 5 and 6) and
+# the observed value (8 and 27).
+MIN_OBJ_PER_CELL=6
 MIN_SWEPT_PER_CELL=20
 
 if [ ! -x "$BIN" ]; then

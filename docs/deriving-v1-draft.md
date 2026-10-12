@@ -226,13 +226,17 @@ type Tree a (..) deriving (Eq) = | Leaf | Node (Tree a) a (Tree a)
 
 # Generates:
 instance Eq (Tree a) where Eq a {
-  fn eq(left, right) = match (left, right) with
-    | (Leaf, Leaf) -> true
-    | (Node l1 v1 r1, Node l2 v2 r2) ->
-        eq(l1, l2) && eq(v1, v2) && eq(r1, r2)
-    | _ -> false
+  fn eq(left, right) = match left with
+    | Leaf -> (match right with | Leaf -> true | _ -> false)
+    | Node l1 v1 r1 -> (match right with
+        | Node l2 v2 r2 -> eq(l1, l2) && eq(v1, v2) && eq(r1, r2)
+        | _ -> false)
 }
 ```
+
+The body matches `left`, then `right`, rather than the tuple `(left, right)`,
+which allocated a tuple on every call (#627). A type with one constructor gets
+no `_ -> false` arm: it would be unreachable, which is a compile error.
 
 The constraint `where Eq a` (not `where Eq a, Eq (Tree a)`) is correct because
 once the instance resolver has `Eq a`, the synthesized `instance Eq (Tree a)`
