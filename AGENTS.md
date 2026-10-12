@@ -103,6 +103,8 @@ Both hooks scope to the worktree named by the session's `cwd`. Budgets, failure 
 6. Explicitly call out any proposal to add a new builtin or to keep functionality in the host runtime instead of implementing it in Sprout; builtin/runtime additions require user approval up front.
 7. Prefer fixing root-cause issues over introducing workarounds when the root cause is reasonably tractable.
 8. When editing Sprout source examples, stdlib code, or user-facing snippets, follow `docs/style-guide-v0.md`; adhere to `docs/guidelines.md` for stdlib/compiler code; deviations require justification.
+9. Offer a fix at each layer — caller, function, representation — and say why the rejected ones
+   lose. "X is Y underneath" points at the representation.
 
 ## Docs & Spec
 
