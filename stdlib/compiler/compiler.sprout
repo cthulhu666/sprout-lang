@@ -185,15 +185,19 @@ export fn compile_source_with_cache_roots(src: String, stdlib_root: source.Stdli
 export fn compile_source_at_with_cache_roots(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
                                              extra_roots: List String, cache: bundler.LoadEnv) -> CompileResult !{IO} =
   do
+    result <- check_source_at(src, entry_path, stdlib_root, extra_roots, cache)
+    match result with
+    | typed_ast.TypedErr pos msg -> CompileFail(Cons(diag_error(pos, msg), Nil))
+    | typed_ast.TypedOk _ env -> CompileOk(unqualify_entry_names(bundler.scan_module_name(src), env))
+
+# Bundle a buffer (reusing the caller's LoadEnv) and check it.
+fn check_source_at(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
+                   extra_roots: List String, cache: bundler.LoadEnv) -> typed_ast.TypedResult !{IO} =
+  do
     bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
     match bundled with
-    | bundler.BundleErr pos msg -> CompileFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
-    | bundler.BundleOk prog ->
-        do
-          result <- check_bundled(prog)
-          match result with
-          | typed_ast.TypedErr pos msg -> CompileFail(Cons(diag_error(pos, msg), Nil))
-          | typed_ast.TypedOk _ env -> CompileOk(unqualify_entry_names(bundler.scan_module_name(src), env))
+    | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
+    | bundler.BundleOk prog -> check_bundled(prog)
 
 # Bundling qualifies a named module's own top-level names (`examples.foo.bar`), but every
 # consumer of this env looks them up as written in the file — the REPL's sentinel, the
@@ -606,14 +610,9 @@ export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot)
 export fn compile_source_full_ir(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
                                  extra_roots: List String, cache: bundler.LoadEnv) -> IrFullResult !{IO} =
   do
-    bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
-    match bundled with
-    | bundler.BundleErr pos msg -> IrFullFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
-    | bundler.BundleOk prog ->
-        do
-          checked <- check_bundled(prog)
-          lowered <- lower_checked(checked)
-          emit_ir(lowered)
+    checked <- check_source_at(src, entry_path, stdlib_root, extra_roots, cache)
+    lowered <- lower_checked(checked)
+    emit_ir(lowered)
 
 fn emit_ir(lowered: typed_ast.TypedResult) -> IrFullResult !{IO} =
   match lowered with

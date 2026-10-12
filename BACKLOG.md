@@ -2183,12 +2183,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   dylib, new expressions linked on the fly at native speed with no fork. Requires embedding LLVM as
   a library rather than shelling out to `--emit-ir` + clang. Precedent: cling, clang-repl,
   `lli --jit`. Revisit after the in-Sprout interpreter works.
-- [ ] `P3` **The analysis service never re-reads an imported module edited on disk.** Its
-  `LoadEnv` (`state_cache` in `analysis_service_driver.sprout`) memoises every parsed import for
-  the daemon's life and nothing evicts an entry, so `:type`, diagnostics, the eval preflight and
-  eval itself all see the version first loaded: edit `foo.sprout`, re-eval `import foo`, get the
-  old `foo`. Eval shares the cache since the #599 fixes; it re-read imports per eval before.
-  Fix: key each memo entry on the file's mtime, or drop it when the editor reports a change.
 
 ### GC & Runtime Performance
 

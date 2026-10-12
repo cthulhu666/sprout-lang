@@ -285,8 +285,9 @@ it. So the migration is one function body, not a scattered sweep; the ~30 call s
 - **`bundler.bundle_source_with_roots`** bundles from SOURCE rather than a path.
 - **`bundler.LoadEnv`** carries a *source overlay* (in-memory buffers that take precedence over the
   filesystem — how an unsaved buffer, or an entry with no file at all, enters a bundle) and two
-  memos (parsed modules by path; the prelude's schemes). Overlay paths are never memoised: they are
-  dirty by definition.
+  memos (parsed modules by path; the prelude's schemes). A parsed module is reused only while the
+  file still reads as the source it was parsed from, so an edit on disk is picked up. Overlay paths
+  are never memoised: they are dirty by definition.
 - **`compiler.check_bundled`** is the shared post-bundle pipeline (typecheck → resolve →
   dispatch-verify), so checking a FILE and checking a BUFFER cannot diverge by construction.
 - Bundling qualifies a named module's own top-level names, so the entry module's names are
