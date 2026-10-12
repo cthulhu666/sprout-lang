@@ -24,8 +24,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${SPROUT_RENDER_COST_BIN:-$ROOT/build/render_cost}"
 
-# Per painted cell. Observed 18 objects / 42 swept on 2026-09-11; 8 / 27 on
-# 2026-10-12, after derived `eq` stopped allocating a tuple per call.
+# Per painted cell. Observed: 8 objects / 27 swept. Each ceiling allows ~1.4x
+# that, so a 2x regression fails.
 #
 # BOTH counters are budgeted, and gc_swept is the one that bites. Verified by
 # building this probe against the pre-fast-path `grapheme`: `sprout_obj` barely
@@ -33,15 +33,15 @@ BIN="${SPROUT_RENDER_COST_BIN:-$ROOT/build/render_cost}"
 # and that bug was `str_slice` churn, so an objects-only budget would have
 # passed the worst performance bug the TUI has had. Do not drop the swept budget
 # as redundant; it is the only one that sees strings.
-MAX_OBJ_PER_CELL=26
-MAX_SWEPT_PER_CELL=60
+MAX_OBJ_PER_CELL=11
+MAX_SWEPT_PER_CELL=38
 
 # A FLOOR, because "cheap" and "did nothing" are the same number to a budget. A
 # layout regression that yields empty regions, or a list that renders no rows,
 # would otherwise leave this gate green while measuring an empty screen — and
 # nothing else in the repo exercises tests/cost/. Each floor sits between a
 # collapse (a probe rendering two labels and nothing else scores 5 and 6) and
-# the observed value (8 and 27).
+# the observed value above.
 MIN_OBJ_PER_CELL=6
 MIN_SWEPT_PER_CELL=20
 

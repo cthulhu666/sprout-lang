@@ -293,6 +293,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   through `translate_do_bind_*` instead of resetting it); **heap-field tuples**
   (`IRCallUnboxed{2,3}` slots holding heap values must be rooted at the call site, and `op_heap_def`
   must report multiple slots).
+- [ ] `P3` **`match (a, b) with` allocates the tuple it matches.** `translate_match` lowers a
+  literal tuple scrutinee through `TTuple` → `IRMakeTuple` → `sprout_alloc_tuple_blob`, then takes
+  it apart. ~60 hand-written sites in `stdlib/`, `ide/` and `examples/` (e.g. `unifier.sprout`)
+  pay one allocation per call; derived `Eq` paid it too (#627: 30 → 16 ns/op once removed). Fix:
+  when the scrutinee is a literal tuple and every arm is a tuple pattern or `_`, bind the elements
+  directly and build no tuple.
 - [ ] `P2` **The CPR peephole unboxes a `Maybe` that a `match` consumes, and any wrapper that
   returns one, but not one passed as an argument — so an escaping `Maybe` costs 12–90x.**
   `match vec_get(i, v) with` lowers to a two-word `@vec_get_worker` and allocates nothing, and

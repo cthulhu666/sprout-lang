@@ -17,9 +17,8 @@ import stdlib.test (check_eq, check_true, run_suite)
 # The second face is why this file tests values, not just liveness: a fix that
 # only stopped the crash could still take the wrong arm.
 #
-# This shape is what `deriving (Eq)` on a wrap emits (a tuple of two wrap ctor
-# patterns), so the bug blocked wrap deriving entirely — but it is reachable
-# from hand-written code with no deriving involved, as the cases below are.
+# Derived `Eq` no longer emits this shape (it matches one side at a time), so
+# only hand-written code reaches it, as the cases below do.
 
 wrap Line = Int
 wrap Name = String
