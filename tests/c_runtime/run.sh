@@ -320,6 +320,14 @@ if [ "$gap" -lt 1900 ] || [ "$gap" -gt 2100 ]; then
   echo "  (distinct=$d repeated=$r); expected ~1999. It is not counting distinct keys." >&2
   exit 1
 fi
+# Removing 2000 keys the map does not hold must intern none of them: at most the
+# repeated run's one key, so the excess over it stays near 0, not near 2000.
+x=$(intern_of remove)
+if [ -z "$x" ] || [ $(( x - r )) -gt 50 ]; then
+  echo "  removing 2000 absent keys grew intern= to $x (repeated=$r); expected ~$r." >&2
+  echo "  map_remove interns a key it then fails to find, a permanent leak per key." >&2
+  exit 1
+fi
 # The census reports the table too, on its own line and labelled off-heap, so a
 # reader cannot add it to the live set.
 SPROUT_DEBUG_GC=1 "$TMP_DIR/intern_table_report" repeated > /dev/null 2> "$TMP_DIR/intern_gc.err"

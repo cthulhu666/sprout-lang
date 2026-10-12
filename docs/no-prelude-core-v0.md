@@ -86,13 +86,17 @@ the lowerer's untouched. The two were never the same set.
   string (`:472`–`:482`), which are emitted into every program regardless of the
   prelude.
 
+> Since 2026-10-12 `Set` wraps `Map Unit`: the five `native_set_*` externs are gone
+> and `map_keys` joined the map family. Below, 40, 31 and 25 are 36, 27 and 21
+> today; 9 and 15 are unchanged. The counts are left as measured.
+
 Those sets overlap on 9 names and disagree on 31. Measured on `0e1e6fd2`, in a
 `no_prelude` file:
 
 | group | n | today | if the seeding is simply deleted |
 |---|---|---|---|
 | extern **and** intrinsic — `argv_get char_to_string eprint int_to_string panic print str_compare str_concat str_slice` | 9 | compiles, links, **runs** | **rejected** — regression |
-| extern only — `str_len str_find str_starts_with double_to_string char_to_str char_from_codepoint to_double string_concat_many str_char_at vector_* map_* ref_*` | 27 | typechecks, then `clang: use of undefined value '@str_len'` | correct diagnostic |
+| extern only — `str_len str_find str_starts_with double_to_string char_to_str char_from_codepoint to_double string_concat_many str_char_at vector_* map_* native_set_* ref_*` | 31 | typechecks, then `clang: use of undefined value '@str_len'` | correct diagnostic |
 | prelude Sprout `fn` — `range_count`, … | — | typechecks, then `clang: use of undefined value '@range_count'` | correct diagnostic |
 
 Verified end to end, not inferred: `int_to_string` prints `7`, `eprint` prints
@@ -282,13 +286,14 @@ str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
 ```
 
 Their signatures range over `String`, `Int`, `Char`, `Double`, `Unit` and bare
-type variables — nothing else. The remaining 21 mention `Maybe`, `List`,
-`Vector`, `Map` or `Ref`:
+type variables — nothing else. The remaining 25 mention `Maybe`, `List`,
+`Vector`, `Map`, `NativeSet` or `Ref`:
 
 | family | names | type mentioned |
 |---|---|---|
 | vectors | `vector_empty vector_length vector_get vector_set vector_append vector_concat vector_from_list` | `Vector`, `Maybe`, `List` |
-| maps | `map_empty map_get map_set map_remove map_size map_keys map_nth_key map_nth_value` | `Map`, `Maybe`, `List` |
+| maps | `map_empty map_get map_set map_remove map_size map_nth_key map_nth_value` | `Map`, `Maybe` |
+| sets | `native_set_empty native_set_insert native_set_member native_set_to_list native_set_size` | `NativeSet`, `List` |
 | refs | `ref_new ref_read ref_write` | `Ref` |
 | other | `argv_get str_char_at string_concat_many` | `Maybe`, `List` |
 
@@ -374,8 +379,8 @@ preserves a scheme-with-no-declaration path — the original bug's exact shape,
 narrowed rather than closed. Viable as an interim if the floor needs more time
 than the defect can wait.
 
-**Bundle the whole extern block (all 36) unconditionally.** Not type-closed: 21
-of the signatures mention `Maybe`/`List`/`Vector`/`Map`/`Ref`, so it
+**Bundle the whole extern block (all 40) unconditionally.** Not type-closed: 25
+of the signatures mention `Maybe`/`List`/`Vector`/`Map`/`NativeSet`/`Ref`, so it
 requires those type declarations too, which drags prelude ADTs into `no_prelude`
 files and re-triggers both open qualification items (§4.1 property 3). Strictly
 more expensive for names that belong in the library anyway.
@@ -656,8 +661,8 @@ corrected the design rather than silently conforming to it.
   bundled in: it is a diagnostics change with its own tests, and shipping it with
   a semantics change would make both harder to review.
 - **The wider floor (§4.3).** Switching `floor_type_names` to
-  `undeclared_type_names` widens the floor from 15 externs to ~27, admitting
-  the `vector_*` / `map_*` / `ref_*` families. It is a one-word
+  `undeclared_type_names` widens the floor from 15 externs to ~31, admitting
+  the `vector_*` / `map_*` / `native_set_*` / `ref_*` families. It is a one-word
   change, needs no new code, and is arguably the more principled criterion
   ("everything that needs nothing the prelude declares"). Not taken, for the
   reasons in §4.1 — but the code is shaped so the decision is one constant.

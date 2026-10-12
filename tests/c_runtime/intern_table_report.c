@@ -12,6 +12,8 @@
  *
  *   distinct — KEYS computed keys must add KEYS entries.
  *   repeated — the same key KEYS times must add one.
+ *   remove   — removing KEYS computed keys a map does not hold must add none:
+ *              only a key that is stored needs a permanent copy.
  *
  * run.sh reads the number from the exit REPORT rather than the counters, which
  * are static. That is the better assertion anyway: the report is the product, so
@@ -25,6 +27,7 @@
 long long sprout_set_argv(int argc, char** argv);
 long long map_empty(void);
 long long map_set(long long map_h, long long key_val, long long value);
+long long map_remove(long long map_h, long long key_val);
 long long int_to_string(long long value);
 long long sprout_gc_push_i64_root(void* slot);
 long long sprout_gc_pop_roots(long long count);
@@ -34,11 +37,12 @@ long long sprout_gc_pop_roots(long long count);
 int main(int argc, char** argv) {
   sprout_set_argv(argc, argv);
   if (argc < 2) {
-    fprintf(stderr, "usage: %s distinct|repeated\n", argv[0]);
+    fprintf(stderr, "usage: %s distinct|repeated|remove\n", argv[0]);
     return 2;
   }
   int distinct = strcmp(argv[1], "distinct") == 0;
-  if (!distinct && strcmp(argv[1], "repeated") != 0) {
+  int remove = strcmp(argv[1], "remove") == 0;
+  if (!distinct && !remove && strcmp(argv[1], "repeated") != 0) {
     fprintf(stderr, "unknown selector '%s'\n", argv[1]);
     return 2;
   }
@@ -50,13 +54,13 @@ int main(int argc, char** argv) {
   sprout_gc_push_i64_root(&m);
   sprout_gc_push_i64_root(&key);
 
-  if (!distinct) key = int_to_string(7);
+  if (!distinct && !remove) key = int_to_string(7);
   for (long long i = 0; i < KEYS; i++) {
-    if (distinct) key = int_to_string(i);
-    m = map_set(m, key, i);
+    if (distinct || remove) key = int_to_string(i);
+    m = remove ? map_remove(m, key) : map_set(m, key, i);
   }
 
   sprout_gc_pop_roots(2);
-  printf("intern-probe-%s\n", distinct ? "distinct" : "repeated");
+  printf("intern-probe-%s\n", argv[1]);
   return 0;
 }
