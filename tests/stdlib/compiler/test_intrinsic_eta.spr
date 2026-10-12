@@ -45,7 +45,8 @@ fn lower_all(d: typed_ast.TypedDecl) -> Result String String !{IO} =
     lidx <- ref_new(dict_empty())
     match ast_to_ir.translate_decl_with_idx(d, ast_to_ir.ProgEnv(
             ctors = dict_empty(), top_level = set_empty(), let_names = set_empty(),
-            fn_arities = print_arities(), lambda_ctr_ref = ctr, lifted_idx_ref = lidx)) with
+            fn_arities = print_arities(), lambda_ctr_ref = ctr, lifted_idx_ref = lidx,
+            adt_index = dict_empty())) with
     | Err msg -> Err(msg)
     | Ok maybe ->
         match maybe with

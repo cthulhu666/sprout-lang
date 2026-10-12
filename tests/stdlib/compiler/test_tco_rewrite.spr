@@ -63,6 +63,21 @@ fn make_nested_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%m1"), Nil))),
     Nil))))))))
 
+# make_nested_fn plus a second phi in join1 that carries the same (value, pred)
+# pair as the incoming dropped from join2. The drop is keyed by the phi's own
+# block, so join1's copy stays.
+fn make_same_pair_fn() -> sprout_ir.IRFunction =
+  match make_nested_fn() with
+  | sprout_ir.IRFunction name params ret blocks ->
+      sprout_ir.IRFunction(name, params, ret, list_map(add_same_pair, blocks))
+
+fn add_same_pair(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
+  match b with
+  | sprout_ir.IRBlock "join1" ops ->
+      sprout_ir.IRBlock("join1",
+        Cons(sprout_ir.IRPhi("%same", "i64", Cons(("%rx", "else2"), Cons(("%base1", "then1"), Nil))), ops))
+  | _ -> b
+
 # Pre-rooting IR for a SINGLE-ARM tuple-destructure tail call:
 #   h(n) = if c1 then base1
 #          else (match scan(n) with | (x, _) -> h(x))
@@ -183,6 +198,14 @@ fn main() -> Unit !{IO} =
             string.contains(wir, "[%r_0, %arm_0]") == false && string.contains(wir, "[%r_5, %arm_5]") == false)
           assert_true(state, "wide: non-tail and base incomings stay",
             string.contains(wir, "[%r_2, %arm_2]") && string.contains(wir, "[%b, %base]"))
+    match ast_to_ir.tco_rewrite(make_same_pair_fn(), 700) with
+    | (sp, _nisp) ->
+        do
+          let spir = ir_lowering.lower_fn_with_table(sp, dict_empty())
+          assert_true(state, "same pair: join1's own incoming stays",
+            string.contains(spir, "%same = phi i64 [%rx, %else2]"))
+          assert_true(state, "same pair: join2's incoming is dropped",
+            string.contains(spir, "%m2 = phi i64 [%base2, %then2]"))
     match ast_to_ir.tco_rewrite(make_no_self_call_fn(), 500) with
     | (unchanged, _ni5) ->
         do
