@@ -67,9 +67,12 @@ consuming use."* That is a **borrow**.
   `Scope`; do not claim it.
 - **The combinator-over-a-borrow form** — `list_each(\x -> write(conn, x), xs)` — is **not** in v0.
   It captures the borrowed value into a lambda, and soundness then depends on whether that lambda
-  escapes (§7). Sprout has no escaping/non-escaping-closure distinction yet, so v0 covers the
+  escapes (§7). v0 had no escaping/non-escaping-closure distinction, so it covers the
   **straight-line and recursive** session shapes (no lambda capturing the resource) and defers the
-  combinator shape to the same escaping-closure work M4.4 needs.
+  combinator shape. That distinction now exists: a `local` callback parameter
+  (`docs/local-closures-v0.md`). The form compiles against any combinator whose callback is
+  `local`; the prelude's are not yet (BACKLOG *Mark the prelude combinators' function arguments
+  `local`*).
 - **First-class references as values** (store a borrow in a record, return it, two independent
   borrows threaded) — the full Rust/Austral regioned-reference system; out of scope, likely
   permanently (§6, Option A).
