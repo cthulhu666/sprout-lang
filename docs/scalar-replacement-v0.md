@@ -293,12 +293,12 @@ is scalar-replaced: no heap tuple, the fields flow as N SSA scalars, an `if`-pro
 N per-field phis (`build_tuple_phis`), and fn producers (`river_rgb`/`biome_rgb`-style) become
 width-w workers. Two consumers share one **shadow-free** eligibility oracle `sra_core_eligible`:
 worker-collection (`collect_wc_sra_producers`, emits the producer workers) and `translate_do` (fires
-the rewrite, adding a shadow gate and the `cpr_result_known` filter `collect_worker_callees` applies
-to the collected set → translation ⊆ collection, so a called worker is always emitted; a producer
-with a type-variable result, such as `range_fold`, keeps the let boxed). Producer lowering is
-`translate_tuple_scalars` (tuple literal / width-w worker call /
-`if`-with-N-phi). Soundness rests on a **default-deny** escape/linearity check (`sra_escape_ok`, using
-the exhaustive `compute_free_vars`): `x` must escape nowhere but the single consuming scrutinee — any
+the rewrite once `worker_callee_routable` holds for every producer, which adds the shadow check and
+the `cpr_result_known` filter `collect_worker_callees` applies → translation ⊆ collection, so a
+called worker is always emitted; a producer with a type-variable result, such as `range_fold`, keeps
+the let boxed). Producer lowering is `translate_tuple_scalars` (tuple literal / width-w worker call
+/ `if`-with-N-phi). Soundness rests on a **default-deny** escape/linearity check (`sra_escape_ok`,
+using the exhaustive `compute_free_vars`): `x` must escape nowhere but the single consuming scrutinee — any
 rebind, second use, or use in another step denies. A `sra_rest_plain` guard requires no Maybe/Result
 do-bind in the continuation (those route to `translate_do_bind_*`, which reset the SRA map to empty),
 so no SRA binding is ever live across such a boundary — this keeps the change to `translate_do` only,
@@ -330,9 +330,11 @@ instantiation at another, and without monomorphization both can occur in one pro
 
 So every router gates on `cpr_result_known` (`ast_to_ir.sprout`), which reads the `cpr_result` flag
 that `build_fn_arities` computes per fn from the same oracle the emitter uses
-(`adt_ctors_of_type` non-empty, or `scalar_tuple_width` present). There are four gated sites — the
-Tier-2 ADT router, the tuple router, the do-bind router, and `collect_worker_callees` (which must
-agree, because `translate_tail_chain` chains worker-to-worker through the collected set). The
+(`adt_ctors_of_type` non-empty, or `scalar_tuple_width` present). The four routers — Tier-2 ADT,
+tuple, do-bind and do-block SRA — all ask it through one helper, `worker_callee_routable`; the
+do-block SRA router once checked only shadowing and called workers that were never emitted (#631).
+`collect_worker_callees` applies the same filter to the collected set (it must agree, because
+`translate_tail_chain` chains worker-to-worker through that set). The
 `translate_tail_catchall` fallback now hard-errors instead of assuming "no ctor list ⇒ tuple", so a
 future convention gap is a compile error rather than silent mis-lowering.
 
