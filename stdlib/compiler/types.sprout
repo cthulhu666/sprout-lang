@@ -200,10 +200,12 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @class:<method or class>        @inst:<class>:<head>      @arity:<ctor>
 #   @fwd:<tyvar>:<class>            @eta_fwd:<tyvar>:<class>   @eta_fwdvar:<tyvar>
 #   @super:<class>:<superclass>     @rec:<record>:<field>
+#   @type:<TypeName>
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
 export let rec_marker_tag: String = "@rec:"
+export let type_marker_tag: String = "@type:"
 
 export fn class_marker_key(name: String) -> String = class_marker_tag ++ name
 export fn inst_marker_key(class_name: String, head: String) -> String = "@inst:" ++ class_name ++ ":" ++ head
