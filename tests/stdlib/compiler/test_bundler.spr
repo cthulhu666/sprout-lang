@@ -83,4 +83,12 @@ fn main() -> Unit !{IO} =
     assert_false(state, "non-exported type alias not in exports",
       list_member("Foo", exports_of("module foo\ntype alias Foo = Int")))
 
+    # A source that does not lex still reports its header, and no surface.
+    assert_eq(state, "unlexable source keeps its module name",
+      module_name_of("module foo\nexport fn f() -> String = \"open"),
+      "foo")
+
+    assert_true(state, "unlexable source has no exports",
+      list_length(exports_of("module foo\nexport fn f() -> String = \"open")) == 0)
+
     summary(state)

@@ -289,6 +289,18 @@ fn mode_tag(m: ast.ParamMode) -> String =
   | ast.ModeLocal -> "local"
   | ast.ModeOnceLocal -> "once-local"
 
+# What the first match arm's pattern parses to: "ctor", "var", "wild" or "other".
+fn first_arm_pattern_kind(src: String) -> String =
+  let Just(ast.MatchExpr _ [ast.MatchBranch pat _ | _] _) = first_fn_body(src) else "no-match"
+  in match pat with
+  | ast.ConstructorPattern _ _ _ -> "ctor"
+  | ast.VarPattern _ _ -> "var"
+  | ast.WildcardPattern _ -> "wild"
+  | _ -> "other"
+
+fn arm_kind(pat: String) -> String =
+  first_arm_pattern_kind("fn f(x: Int) -> Int = match x with | " ++ pat ++ " -> 0")
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -614,5 +626,17 @@ fn main() -> Unit !{IO} =
       parse_fails("let x = try g()\n"))
     assert_true(state, "try: is a keyword",
       parse_fails("fn f() -> Int =\n  let try = 1\n  in try"))
+
+    # Constructor vs variable patterns: the last dotted component decides.
+    assert_eq(state, "pattern: bare upper is a ctor", arm_kind("Foo"), "ctor")
+    assert_eq(state, "pattern: bare lower is a var", arm_kind("foo"), "var")
+    assert_eq(state, "pattern: wildcard", arm_kind("_"), "wild")
+    assert_eq(state, "pattern: qualified ctor", arm_kind("ast.Foo"), "ctor")
+    assert_eq(state, "pattern: deep qualified ctor", arm_kind("a.b.c.Foo"), "ctor")
+    assert_eq(state, "pattern: qualified lower is a var", arm_kind("ast.foo"), "var")
+    assert_eq(state, "pattern: upper module, lower name", arm_kind("Foo.bar"), "var")
+    assert_eq(state, "pattern: single upper letter", arm_kind("X"), "ctor")
+    assert_eq(state, "pattern: underscore start is a var", arm_kind("_x"), "var")
+    assert_eq(state, "pattern: ctor with arg", arm_kind("ast.Foo y"), "ctor")
 
     summary(state)

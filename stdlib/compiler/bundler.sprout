@@ -208,9 +208,9 @@ fn dict_get_or(key: String, d: Dict String, default: String) -> String =
   | Just v -> v
 
 fn split_at_dot(name: String) -> (String, String) =
-  if dot_pos == -1 then ("", name)
-  else (str_slice(name, 0, dot_pos), str_slice(name, dot_pos + 1, str_len(name)))
-  where dot_pos = str_find(name, ".")
+  match string.split_once(name, ".") with
+  | Just parts -> parts
+  | Nothing -> ("", name)
 
 fn vec_to_str_list(v: Vec String, i: Int) -> List String =
   if i >= vec_length(v) then Nil
@@ -793,8 +793,8 @@ fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIss
       else Err (token.TokenizeError msg pos) -> (Just(LoadIssue(path, pos, `Lex error in prelude: ${msg}`)), Nothing)
     let Ok(ast.Program decls _) = parser.parse_program(tokens)
       else Err (parser.ParseError msg pos) -> (Just(LoadIssue(path, pos, `Parse error in prelude: ${msg}`)), Nothing)
-    let (_, exported, ctor_types) = scan_source_info(src)
-    let mod = ParsedModule("", path, Nil, exported, ctor_types, decls)
+    let surface = parser.scan_module_surface(tokens)
+    let mod = ParsedModule("", path, Nil, parser.surface_exported(surface), parser.surface_ctor_types(surface), decls)
     memoise_module(path, mod, load_env)
     (Nothing, Just(mod))
 
@@ -878,13 +878,16 @@ fn add_value_names(mod_name: String, exported: List String, names: List String, 
       add_value_names(mod_name, exported, rest,
         add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc))
 
+fn canonical_of(mod_name: String, name: String) -> String =
+  source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
+
 fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
   | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       ModuleSymbols(dict_set(name, canonical, vl), tl, cl,
                     if is_exported then dict_set(name, canonical, ev) else ev,
                     et, ec, mn, ce, xs)
-  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
+  where canonical = canonical_of(mod_name, name)
 
 # A record declares BOTH a type and a constructor under one name, the same shape
 # `wrap` has. Registering the constructor in the value maps is what subjects
@@ -907,7 +910,7 @@ fn add_record_ctor(mod_name: String, name: String, export_ctor: Bool, acc: Modul
                     # sum's constructors — one rule, one code path.
                     if export_ctor then dict_set(name, dict_set(name, canonical, dict_empty()), ce) else ce,
                     xs)
-  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
+  where canonical = canonical_of(mod_name, name)
 
 fn add_type_name_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -915,7 +918,7 @@ fn add_type_name_to_symbols(mod_name: String, name: String, is_exported: Bool, a
       ModuleSymbols(vl, dict_set(name, canonical, tl), cl, ev,
                     if is_exported then dict_set(name, canonical, et) else et,
                     ec, mn, ce, xs)
-  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
+  where canonical = canonical_of(mod_name, name)
 
 fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -923,7 +926,7 @@ fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassM
       ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
                     if is_exported then dict_set(name, canonical, ec) else ec,
                     list_append(mn, extract_method_names(methods)), ce, xs)
-  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
+  where canonical = canonical_of(mod_name, name)
 
 fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
   match methods with
@@ -945,7 +948,7 @@ fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.Type
                         ec, mn,
                         if export_ctors then dict_set(type_name, ctor_map, ce) else ce,
                         xs)
-  where canonical = source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(type_name)))
+  where canonical = canonical_of(mod_name, type_name)
         is_type_exported = str_list_member(type_name, exported)
         export_ctors = str_list_member(type_name, ctor_types)
 
@@ -955,10 +958,11 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
   | Cons ctor rest ->
       match ctor with
       | ast.TypeConstructor ctor_name _ _ _ ->
-          add_ctors(mod_name, rest, export_ctors,
-            dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), vl),
-            if export_ctors then dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), ev) else ev,
-            if export_ctors then dict_set(ctor_name, source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(ctor_name))), ctor_map) else ctor_map)
+          let canonical = canonical_of(mod_name, ctor_name)
+          in add_ctors(mod_name, rest, export_ctors,
+            dict_set(ctor_name, canonical, vl),
+            if export_ctors then dict_set(ctor_name, canonical, ev) else ev,
+            if export_ctors then dict_set(ctor_name, canonical, ctor_map) else ctor_map)
 
 # ---------------------------------------------------------------------------
 # Resolution context from imports
@@ -1713,7 +1717,7 @@ fn qualify_match_branches(ctx: ResolveCtx, scope: List String, branches: List as
       match b with
       | ast.MatchBranch pat body ->
           Cons(ast.MatchBranch(qualify_pattern(ctx, scope, pat),
-                               qualify_expr(ctx, list_append(scope, ast.pattern_names(pat)), body)),
+                               qualify_expr(ctx, list_append(ast.pattern_names(pat), scope), body)),
                qualify_match_branches(ctx, scope, rest))
 
 fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep) -> List ast.DoStep =
@@ -1723,7 +1727,7 @@ fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep)
       match step with
       | ast.DoBindStep pat expr ->
           Cons(ast.DoBindStep(qualify_pattern(ctx, scope, pat), qualify_expr(ctx, scope, expr)),
-               qualify_do_steps(ctx, list_append(scope, ast.pattern_names(pat)), rest))
+               qualify_do_steps(ctx, list_append(ast.pattern_names(pat), scope), rest))
       | ast.DoLetStep name expr ->
           Cons(ast.DoLetStep(local_name(ctx, name), qualify_expr(ctx, scope, expr)),
                qualify_do_steps(ctx, Cons(name, scope), rest))
@@ -1733,7 +1737,7 @@ fn qualify_do_steps(ctx: ResolveCtx, scope: List String, steps: List ast.DoStep)
       | ast.DoPatStep kind pat value els pos ->
           Cons(ast.DoPatStep(kind, qualify_pattern(ctx, scope, pat), qualify_expr(ctx, scope, value),
                              qualify_let_else(ctx, scope, els), pos),
-               qualify_do_steps(ctx, list_append(scope, ast.pattern_names(pat)), rest))
+               qualify_do_steps(ctx, list_append(ast.pattern_names(pat), scope), rest))
 
 # The handler runs where the pattern failed, so only the residual's names are in scope.
 fn qualify_let_else(ctx: ResolveCtx, scope: List String, els: Maybe ast.LetElse) -> Maybe ast.LetElse =
@@ -1742,7 +1746,7 @@ fn qualify_let_else(ctx: ResolveCtx, scope: List String, els: Maybe ast.LetElse)
   | Just (ast.LetElse Nothing handler) -> Just(ast.LetElse(Nothing, qualify_expr(ctx, scope, handler)))
   | Just (ast.LetElse(Just residual) handler) ->
       Just(ast.LetElse(Just(qualify_pattern(ctx, scope, residual)),
-                       qualify_expr(ctx, list_append(scope, ast.pattern_names(residual)), handler)))
+                       qualify_expr(ctx, list_append(ast.pattern_names(residual), scope), handler)))
 
 fn qualify_expr_list(ctx: ResolveCtx, scope: List String, exprs: List ast.Expr) -> List ast.Expr =
   match exprs with
@@ -1770,7 +1774,7 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
   | ast.CallExpr callee args pos ->
       ast.CallExpr(qualify_expr(ctx, scope, callee), qualify_expr_list(ctx, scope, args), pos)
   | ast.LambdaExpr params body pos ->
-      ast.LambdaExpr(qualify_params(ctx, params), qualify_expr(ctx, list_append(scope, ast.param_names(params)), body), pos)
+      ast.LambdaExpr(qualify_params(ctx, params), qualify_expr(ctx, list_append(ast.param_names(params), scope), body), pos)
   | ast.BinaryExpr op left right pos ->
       ast.BinaryExpr(op, qualify_expr(ctx, scope, left), qualify_expr(ctx, scope, right), pos)
   | ast.UnaryExpr op operand pos ->
@@ -1798,7 +1802,7 @@ fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr
   | ast.LetBindExpr pat value els body pos ->
       ast.LetBindExpr(qualify_pattern(ctx, scope, pat), qualify_expr(ctx, scope, value),
                       qualify_let_else(ctx, scope, els),
-                      qualify_expr(ctx, list_append(scope, ast.pattern_names(pat)), body), pos)
+                      qualify_expr(ctx, list_append(ast.pattern_names(pat), scope), body), pos)
   | ast.TryExpr operand pos -> ast.TryExpr(qualify_expr(ctx, scope, operand), pos)
 
 # Each generator's pattern scopes over its own guards, every later generator's
@@ -1811,7 +1815,7 @@ fn qualify_comprehension_gens(ctx: ResolveCtx, scope: List String, gens: List as
       | ast.ComprehensionGen pat src guards ->
           let qsrc = qualify_expr(ctx, scope, src)
           in let qpat = qualify_pattern(ctx, scope, pat)
-          in let inner_scope = list_append(scope, ast.pattern_names(pat))
+          in let inner_scope = list_append(ast.pattern_names(pat), scope)
           in let qguards = qualify_expr_list(ctx, inner_scope, guards)
           in let (qrest, final_scope) = qualify_comprehension_gens(ctx, inner_scope, rest)
           in (Cons(ast.ComprehensionGen(qpat, qsrc, qguards), qrest), final_scope)

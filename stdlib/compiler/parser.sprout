@@ -272,23 +272,12 @@ fn expected_ident_msg(label: String, tok: token.Token, pos: source.SourcePos) ->
   | _ ->
       string.concat("Expected ", string.concat(label, string.concat(" at ", pos_str(pos))))
 
-# Finds the start index of the last dot-separated component.
-# E.g., "ast.TypeEffect" → 4 (index of 'T'), "Foo" → 0.
-fn last_component_start(name: String, i: Int, last: Int) -> Int =
-  if i >= str_len(name) then last
-  else
-    match string.char_at(name, i) with
-    | Nothing -> last
-    | Just ch ->
-        if ch == '.' then last_component_start(name, i + 1, i + 1)
-        else last_component_start(name, i + 1, last)
-
 # A name is a constructor (or qualified constructor) if its last component starts uppercase.
 # Handles both "Foo" and "ast.Foo" forms.
 fn is_constructor_name(name: String) -> Bool =
-  match string.char_at(name, last_component_start(name, 0, 0)) with
+  match str_char_at(string.after_last_dot(name), 0) with
   | Nothing -> false
-  | Just ch -> string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch))
+  | Just ch -> string.is_ascii_upper(ch)
 
 # ---------------------------------------------------------------------------
 # Type expression parsing
