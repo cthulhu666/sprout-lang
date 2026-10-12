@@ -780,7 +780,7 @@ Three things to know:
 
 ### Sorting a `MutVec`
 
-`mutvec_sort(v)` (where `Ord a`) and `mutvec_sort_by(f, v)` (where `Ord k`) sort ascending, in place and stable. Each makes O(n log n) comparisons and allocates one n-slot scratch vector when n > 16, nothing below that. On Ints they run about 5× faster than `vec_sort`, which builds lists. `mutvec_sort_by` calls `f` twice per comparison, where `vec_sort_by` computes each key once; for a costly key, sort `(key, value)` pairs. Measurements and the faster options not taken yet: [sorting-v0.md](sorting-v0.md).
+`mutvec_sort(v)` (where `Ord a`) and `mutvec_sort_by(f, v)` (where `Ord k`) sort ascending, in place and stable. Each makes O(n log n) comparisons and allocates a comparator closure per call, plus one n-slot scratch vector when n > 16. On Ints they run about 5× faster than `vec_sort`, which builds lists. `mutvec_sort_by` calls `f` twice per comparison, where `vec_sort_by` computes each key once; for a costly key, sort `(key, value)` pairs. Measurements and the faster options not taken yet: [sorting-v0.md](sorting-v0.md).
 
 If you find yourself repeatedly appending small fragments to a `String`, reach for `bytes.Builder` (collect fragments as `Bytes`, finalize once) or the `string_concat_many` builtin (one allocation for an arbitrary list of `String`s). String interpolation with `` `pre${x}post` `` desugars to `string_concat_many` automatically.
 

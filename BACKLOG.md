@@ -1689,18 +1689,14 @@ deferral happened, not for current behaviour. Still open:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
   "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry.
 - [ ] `P2` **Calls to Sprout functions root their operands, though the callee roots what it
-  needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots the heap operands of every `IRCall`,
-  because a runtime builtin like `ref_new` may allocate before it reads them. A Sprout callee roots
-  its own parameters before its first GC trigger, so for a direct call to one the caller's pushes
-  look redundant — and LLVM cannot delete them, so they survive inlining: `ord_lt` in place of
-  `compare` costs ~40% of `mutvec_sort` (`docs/sorting-v0.md`). Narrowing the rule to externs
-  needs a written GC-safety argument first (a missing root corrupts the heap) and a measurement.
-- [ ] `P3` **Profile the ~5× gap between a `MutVec` loop in Sprout and the same loop in C.** With
-  `Ord` taken out, the in-place merge sort still runs ~5× slower than its C transcription. Each
-  element of each pass makes three runtime calls (`vector_get_direct` twice, `vector_mutset`),
-  each with null, bounds and ageprof checks. LTO across the runtime and merging the recursive
-  merge functions changed nothing. Profile, then consider lowering `MutVec` access to inline
-  loads and stores. Numbers: `docs/sorting-v0.md`.
+  needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots every call's heap operands, for
+  runtime builtins that allocate before reading them; for a call to a Sprout function the pushes
+  look redundant, and they survive LLVM inlining, so small wrappers cost real time. Narrowing the
+  rule needs a written GC-safety argument first, since a missing root corrupts the heap.
+  Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
+- [ ] `P3` **Profile the ~5× gap between a `MutVec` loop in Sprout and the same loop in C.** The
+  cause is unknown and two cheap guesses failed; profile before choosing a fix such as inline
+  `MutVec` loads and stores. Evidence: `docs/sorting-v0.md` §Where the time goes, item 3.
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.

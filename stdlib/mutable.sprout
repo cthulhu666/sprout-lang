@@ -348,9 +348,9 @@ fn mutvec_sort_with(less: a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
     _ <- sort_blocks(less, mutvec_raw(v), 0, n)
     if n <= sort_block then () else sort_merge_all(less, mutvec_raw(v), n)
 
-# O(n log n) comparisons; allocates one n-slot scratch vector when n > 16. Sorts
-# ascending, in place and stable. The fast path for a hot loop: `vec_sort` builds
-# lists and costs several times more per element.
+# Ascending, in place and stable, in O(n log n) comparisons. Allocates a comparator
+# closure per call, plus an n-slot scratch vector when n > 16. The fast path for a
+# hot loop: `vec_sort` builds lists and costs several times more per element.
 export fn mutvec_sort(v: MutVec a) -> Unit !{IO} where Ord a =
   mutvec_sort_with(\ (x, y) -> compare(x, y) < 0, v)
 
