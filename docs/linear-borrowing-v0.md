@@ -65,7 +65,7 @@ consuming use."* That is a **borrow**.
   linear value **captured in a closure**, which is higher-order linearity (**M4.4**, deferred), *on
   top of* the multiple-use problem borrowing solves. Borrowing is necessary but not sufficient for
   `Scope`; do not claim it.
-- **The combinator-over-a-borrow form** — `list_each(xs, \x -> write(conn, x))` — is **not** in v0.
+- **The combinator-over-a-borrow form** — `list_each(\x -> write(conn, x), xs)` — is **not** in v0.
   It captures the borrowed value into a lambda, and soundness then depends on whether that lambda
   escapes (§7). Sprout has no escaping/non-escaping-closure distinction yet, so v0 covers the
   **straight-line and recursive** session shapes (no lambda capturing the resource) and defers the

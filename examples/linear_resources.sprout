@@ -1,0 +1,186 @@
+module examples.linear_resources
+import stdlib.string (join)
+import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
+
+# A tour of linear resources. A Journal is a handle that must be released exactly
+# once. The compiler checks it; the modes below say how a function may use it.
+#
+# Run:
+#   mise exec -- just run examples/linear_resources.sprout
+
+# ---------------------------------------------------------------------------
+# 1. type linear + a consuming release
+# ---------------------------------------------------------------------------
+#
+# A `linear` value must be consumed exactly once. `consuming` takes ownership.
+# Opening a Journal and never releasing it is a compile error: "linear value
+# 'j' is never used".
+
+type linear Journal = Journal(Ref (List String))
+
+fn open_journal(title: String) -> Journal !{IO} =
+  do
+    lines <- ref_new([title])
+    Journal(lines)
+
+fn close_journal(j: consuming Journal) -> List String !{IO} =
+  match j with
+  | Journal lines -> ref_read(lines)
+
+fn section1() -> Unit !{IO} =
+  do
+    print("--- 1. release once ---")
+    j <- open_journal("one")
+    lines <- close_journal(j)
+    print(join(" | ", lines))
+
+# ---------------------------------------------------------------------------
+# 2. borrowing operations
+# ---------------------------------------------------------------------------
+#
+# `borrowing` reads or writes without taking ownership, any number of times.
+# A borrowing function cannot release the value: "'j' is a borrowing parameter
+# and cannot be consumed".
+
+fn write_line(j: borrowing Journal, line: String) -> Unit !{IO} =
+  match j with
+  | Journal lines ->
+      do
+        old <- ref_read(lines)
+        ref_write(lines, old ++ [line])
+
+fn line_count(j: borrowing Journal) -> Int !{IO} =
+  match j with
+  | Journal lines ->
+      do
+        old <- ref_read(lines)
+        list_length(old)
+
+fn section2() -> Unit !{IO} =
+  do
+    print("--- 2. borrow many times ---")
+    j <- open_journal("two")
+    write_line(j, "first")
+    write_line(j, "second")
+    n <- line_count(j)
+    print(`${int_to_string(n)} lines`)
+    lines <- close_journal(j)
+    print(join(" | ", lines))
+
+# ---------------------------------------------------------------------------
+# 3. a borrowing combinator
+# ---------------------------------------------------------------------------
+#
+# `with_journal` opens, runs the work and releases, so callers never write the
+# release. The work function takes the journal `borrowing`, so a lambda that
+# tries to close it is rejected: "cannot be consumed".
+
+fn with_journal(title: String, work: (borrowing Journal) -> a !{IO}) -> a !{IO} =
+  do
+    j <- open_journal(title)
+    r <- work(j)
+    lines <- close_journal(j)
+    print(`  released with ${int_to_string(list_length(lines))} lines`)
+    r
+
+fn note_and_count(j: borrowing Journal) -> Int !{IO} =
+  do
+    write_line(j, "inside work")
+    line_count(j)
+
+fn section3() -> Unit !{IO} =
+  do
+    print("--- 3. with_journal ---")
+    n <- with_journal("three", note_and_count)
+    print(`counted ${int_to_string(n)}`)
+
+# ---------------------------------------------------------------------------
+# 4. once: move a linear value into a closure
+# ---------------------------------------------------------------------------
+#
+# A `once` parameter promises the callee calls the closure at most once. So the
+# caller may move a linear value into it, and the lambda releases it. A callee
+# that calls a `once` parameter twice is rejected: "used more than once".
+
+fn run_once(work: once Unit -> a !{IO}) -> a !{IO} = work(())
+
+fn section4() -> Unit !{IO} =
+  do
+    print("--- 4. once ---")
+    j <- open_journal("four")
+    lines <- run_once(\_ -> close_journal(j))
+    print(join(" | ", lines))
+
+# ---------------------------------------------------------------------------
+# 5. local: lend a borrowed value to a closure
+# ---------------------------------------------------------------------------
+#
+# A `local` parameter promises the closure does not outlive the call. So the
+# lambda may capture a borrowed journal and may run many times; the caller
+# releases the journal afterwards. `with_timeout` takes its body `local` too.
+# Storing or returning a `local` closure is rejected: "may outlive the call".
+# A plain parameter cannot take a borrowed capture at all.
+
+fn retry(times: Int, body: local Unit -> Result String a !{IO}) -> Result String a !{IO} =
+  match body(()) with
+  | Ok v -> Ok(v)
+  | Err e -> if times <= 1 then Err(e) else retry(times - 1, body)
+
+fn flaky(j: borrowing Journal) -> Result String Int !{IO} =
+  do
+    n <- line_count(j)
+    write_line(j, `attempt ${int_to_string(n)}`)
+    if n >= 3 then Ok(n) else Err(`attempt ${int_to_string(n)} failed`)
+
+fn timed(j: borrowing Journal) -> TimeoutResult Int !{IO} =
+  with_timeout(1000, \_ -> line_count(j))
+
+fn report_timeout(r: TimeoutResult Int) -> Unit !{IO} =
+  match r with
+  | Completed n -> print(`completed with ${int_to_string(n)} lines`)
+  | Expired -> print("expired")
+
+fn section5() -> Unit !{IO} =
+  do
+    print("--- 5. local ---")
+    j <- open_journal("five")
+    match retry(5, \_ -> flaky(j)) with
+    | Ok n -> print(`succeeded at ${int_to_string(n)}`)
+    | Err e -> print(`gave up: ${e}`)
+    r <- timed(j)
+    report_timeout(r)
+    lines <- close_journal(j)
+    print(join(" | ", lines))
+
+# ---------------------------------------------------------------------------
+# 6. once local: move one value in, borrow another
+# ---------------------------------------------------------------------------
+#
+# `once local` combines both licences. One lambda may consume a moved journal
+# and also borrow a second one that the caller keeps. The price is `once`'s:
+# the callee may call the closure only once.
+
+fn run_once_local(work: once local Unit -> a !{IO}) -> a !{IO} = work(())
+
+fn merge_into(src: consuming Journal, dst: borrowing Journal) -> Unit !{IO} =
+  do
+    lines <- close_journal(src)
+    write_line(dst, `merged ${join(", ", lines)}`)
+
+fn section6() -> Unit !{IO} =
+  do
+    print("--- 6. once local ---")
+    scratch <- open_journal("scratch")
+    keep <- open_journal("keep")
+    run_once_local(\_ -> merge_into(scratch, keep))
+    lines <- close_journal(keep)
+    print(join(" | ", lines))
+
+fn main() -> Unit !{IO} =
+  do
+    section1()
+    section2()
+    section3()
+    section4()
+    section5()
+    section6()

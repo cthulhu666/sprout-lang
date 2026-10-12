@@ -1659,6 +1659,8 @@ deferral happened, not for current behaviour. Still open:
   only use is the call it is passed to, and specialising an `IRApplyClosure` whose arity is
   statically known so the check is dropped. The closure allocation also feeds the collection rate,
   so it is upstream of the GC entries in §1. Profile: `bench/results-2026-09-20-gc-root-stack.md`.
+  A `local` parameter states that non-escape at the slot and the callee check proves it, so the
+  first lever needs no analysis once the combinators take `local` (`docs/local-closures-v0.md` §11).
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Keep-alive and
   chunked reads are filed in §2.
@@ -1962,9 +1964,9 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   equally true of the raw `Int` handles that preceded M4.4a. Fix belongs with cancellation-time
   resource release (a drop hook on force-drop), not the type system; spec §5.8 states the limit.
 - [ ] `P2` **Mark the prelude combinators' function arguments `local`.** `local` exists
-  (`docs/local-closures-v0.md`) but no prelude function declares it, so `list_each(xs, \x ->
-  write(conn, x))` still cannot capture a borrowed `conn`. Covers `list_each`/`list_fold`/
-  `list_map` and the `vec_` family. Each one must pass the callee check (§6.3) and `Functor.map`
+  (`docs/local-closures-v0.md`) but no prelude function declares it, so `list_each(\x ->
+  write(conn, x), xs)` still cannot capture a borrowed `conn`. Covers `list_each`/`list_fold`/
+  `list_map` and the `vec_` family. Each one must pass the callee check (§6.3) and `Functor.fmap`
   needs a decision (design §8). Touches `stdlib/prelude.sprout`, so it needs the 2-step bootstrap.
 - [ ] `P3` **Tree-cancel cascade must drop a deadline's child before its owner.** A cancel of an
   outer scope while a task is parked in `with_timeout` aborts loudly today (`force_drop_task`
