@@ -227,6 +227,29 @@ for shape in alias imported_alias; do
   fi
 done
 
+# ...and through any type definition the signature names: a sum's constructor
+# field, a record field, a wrap. The recursive type has no `local`, so its extern
+# stays public: that guards the cycle check and against over-marking.
+for shape in adt record wrap; do
+  pty="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_local_in_$shape.spr" 2>&1)"
+  if echo "$pty" | grep -qF 'is private to `demo.adtext`'; then
+    echo "PASS private extern ($shape): \`local\` in a type definition makes the extern private"
+  else
+    echo "FAIL private extern ($shape): expected the extern to be rejected as private to demo.adtext"
+    echo "$pty" | tail -3
+    fail=1
+  fi
+done
+
+rec="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_recursive_type_stays_public.spr" 2>&1)"
+if echo "$rec" | grep -q '^OK$' && ! errors "$rec" >/dev/null; then
+  echo "PASS private extern: a recursive type with no \`local\` leaves its extern public"
+else
+  echo "FAIL private extern: an extern naming a recursive type with no \`local\` was rejected"
+  errors "$rec" | head -3
+  fail=1
+fi
+
 # Two declarations of one extern that differ only in variable names agree.
 rn="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_redeclare_renamed_vars.spr" 2>&1)"
 if echo "$rn" | grep -q '^OK$' && ! errors "$rn" >/dev/null; then

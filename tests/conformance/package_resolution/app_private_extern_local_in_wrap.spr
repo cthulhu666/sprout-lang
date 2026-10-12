@@ -1,0 +1,8 @@
+module main
+import demo.adtext (ping, RunWrap)
+
+# `local` in the type a `wrap` wraps makes the extern private.
+
+let use_it: RunWrap = __mk_wrap_runner(0)
+
+fn main() -> Unit !{IO} = print("x")

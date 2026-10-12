@@ -936,12 +936,11 @@ let once_local_mismatch_reason: String =
 # Decided by which axes differ, not by which modifier either side mentions:
 # `once local` against `local` differs in `once` alone.
 fn ownership_mismatch_reason(o1: types.Ownership, o2: types.Ownership) -> String =
-  if types.ownership_is_borrow(o1) || types.ownership_is_borrow(o2) then borrow_mismatch_reason
-  else if types.own_is_once(o1) != types.own_is_once(o2)
-  then (if types.own_is_local(o1) != types.own_is_local(o2)
-        then once_local_mismatch_reason
-        else once_mismatch_reason)
-  else local_mismatch_reason
+  match types.mode_diff(o1, o2) with
+  | types.DiffBorrow -> borrow_mismatch_reason
+  | types.DiffOnceLocal -> once_local_mismatch_reason
+  | types.DiffOnce -> once_mismatch_reason
+  | types.DiffLocal -> local_mismatch_reason
 
 
 

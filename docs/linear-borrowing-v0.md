@@ -680,7 +680,8 @@ opposite places. `borrowing` is a restriction on the **body**, and the body is w
 appears, lambda or not. `once` is a promise about **invocation count**, and the walk that makes it
 real (`once_honesty`) runs from `check_fn_linear` over a *declared* parameter's written mode. A
 lambda has no declaration, so a `once` taken from the slot is a promise nobody checks. The seed is
-therefore `ast.mode_of_flags(ownership_is_borrow(own), false)` — the `false` is load-bearing.
+therefore borrowing or consuming only (`infer.mode_or_slot`), never `once` or `local`, and that
+is load-bearing.
 
 This narrows, but does not close, a hole that predates M4.4b: the same program with the mode
 **written** (`\(w: once Unit -> Int) -> …`) is accepted on master too. Filed `P1` in `BACKLOG.md`;

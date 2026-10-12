@@ -214,7 +214,8 @@ fn leak(p: local Unit -> Int) -> Unit -> Int = id_thunk(\_ -> p)  # p comes back
 This is a **dedicated escape walk** over the typed AST, not a reuse of `lin_consumed` as
 `once_honesty` is: `lin_consumed` records `p(x)`, `return p` and `Cons(p, …)` as the same use, and
 this rule must tell them apart. It reads each argument's slot from the callee's type spine
-(`spine_own`), as `lin_call_args` does. Run after `once_honesty`; `once local` gets both.
+(`spine_own`), as `lin_call_args` does. It runs before `once_honesty`, which reports every error
+as a reuse, so an escape is named as an escape. `once local` gets both.
 
 The same walk checks `once` parameters, with the slot required to be `once` rather than `local`
 (`docs/one-shot-closures-v0.md` §6.5). A `once local` parameter is checked for both, so it may be
@@ -252,13 +253,20 @@ Its `once` is a claim about the C side (a task runs at most once), as `__scope_s
 Its `local` is different: the scheduler does keep the closure, so the claim holds only because of
 how the extern is called. This is the Sprout counterpart of Rust's `unsafe
 { spawn_unchecked(…) }`, so only the module that declares it may use it. **An extern whose
-signature writes `local` anywhere is reachable only from its declaring module.** That covers a
-parameter, an arrow inside a parameter or return type, and an alias that expands to one, followed
-across modules. A returned `(local X) -> Y` hands the same unchecked licence to whoever calls it.
-The bundler decides on the qualified signature, so alias names are already canonical there. This is the one exception to spec §Externs, which makes
-every other extern reachable by bare name from any importer. Without it, any module importing
-`stdlib.task` could lend a borrowed value to a task that outlives the owner's release. The bundler
-marks a reference from another module, and inference reports it (the `@canonical:` mechanism).
+signature writes `local` anywhere is reachable only from its declaring module.** That covers:
+
+- a parameter;
+- an arrow inside a parameter or return type;
+- any type the signature names, followed across modules, with a guard for recursive types:
+  aliases, and the fields of sum types, records and `wrap`s.
+
+A returned `(local X) -> Y`, bare or inside a constructor, hands the same unchecked licence to
+whoever calls it. The bundler decides on the qualified signature, so type names are already
+canonical there. `prelude.X` goes through the same check as a bare `X`. This is the one exception
+to spec §Externs, which makes every other extern reachable by bare name from any importer. Without
+it, any module importing `stdlib.task` could lend a borrowed value to a task that outlives the
+owner's release. The bundler marks a reference from another module, and inference reports it (the
+`@canonical:` mechanism).
 
 A module may redeclare an extern itself and then reach it, since the trust claim is then its own.
 That is safe only because several declarations of one extern must agree on the full signature.
@@ -355,13 +363,16 @@ TDD, each red before the change.
 - Private extern (§6.5): `private_local_extern_reached_from_another_module`,
   `private_local_extern_named_without_borrow`. `stdlib.task`'s own calls are the passing case.
   In `tests/conformance/package_resolution/`, `local` in a return type, in a parameter type, via an
-  alias, and via an alias imported two hops away.
+  alias, via an alias imported two hops away, and in a sum-type, record or `wrap` field; a
+  recursive type without `local` stays public. `prelude.X`:
+  `tests/stdlib/compiler/test_bundle_prelude_private_extern.spr`.
 - Redeclared externs: `extern_redeclared_signature_differs`,
   `extern_task_fork_redeclared_without_local`; passing: `tests/stdlib/test_extern_redeclare.spr`
   and `app_extern_redeclare_renamed_vars` (type and effect variables renamed).
 - Handing a mode on (§6.3): `once_local_forwarded_to_plain_local_slot`,
   `once_param_forwarded_to_plain_slot`, `once_param_returned`, `once_param_let_bound_and_reused`,
-  `once_param_in_tuple`, `once_param_captured_by_ordinary_lambda`. The passing forwards are in
+  `once_param_in_tuple`, `once_param_captured_by_ordinary_lambda`,
+  `once_local_relayed_through_plain_local_slot`. The passing forwards are in
   `test_once_closures.spr` and `test_local_closures.spr`.
 - Mismatch messages: `once_local_mismatch_names_once`, `once_vs_local_mismatch_names_both`,
   `local_instance_omits_class_local`, `once_local_instance_drops_local`,

@@ -1,7 +1,6 @@
 module main
 
-# The returned closure can run many times, and each run invokes `w`. Already
-# rejected by the use count, which sees the capture as a second use.
+# The returned closure can run many times, and each run invokes `w`.
 
 fn keep(w: once Unit -> Int) -> (Unit -> Int) = \_ -> w(())
 

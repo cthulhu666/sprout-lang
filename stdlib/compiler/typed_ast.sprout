@@ -289,7 +289,7 @@ export fn type_to_type_expr(t: types.Type) -> ast.TypeExpr =
   | types.TTuple items -> ast.TupleType(list_map(\i -> type_to_type_expr(i), items))
 
 # A resolved ownership read back as the mode that writes it. OwnConsume is
-# ModeConsuming, the spelling that survives a round trip (ast.mode_of_flags).
+# ModeConsuming, the spelling that survives a round trip (see `mode_equal` in lint_pattern).
 export fn mode_of_ownership(own: types.Ownership) -> ast.ParamMode =
   match own with
   | types.OwnBorrow -> ast.ModeBorrowing

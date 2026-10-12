@@ -188,7 +188,7 @@ hole bindings. It must also provide, because nothing else in the compiler does:
   parameter's type annotation or its mode: those are shape, because substituting one lambda for
   another substitutes one annotation for the other. Mode compares by *ownership*, since
   `ModeDefault` and `ModeConsuming` are one mode and only one survives a round trip
-  (`ast.mode_of_flags`). An effect row compares as a set;
+  (`typed_ast.mode_of_ownership`). An effect row compares as a set;
 - **free variables of an `ast.Expr`**, which §5.2's closedness check needs. Also absent over `ast`,
   but `dce.is_free` and `ast_to_ir.compute_free_vars` are
   close structural templates — both over `typed_ast`, and `dce`'s binder half already works on

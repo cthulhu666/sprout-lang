@@ -148,7 +148,7 @@ fn bind_params(ps: List ast.Param, ss: List ast.Param, r: Ren) -> Maybe Ren =
           else bind_params(prest, srest, ren_bind(pn, sn, r))
 
 # Compared by OWNERSHIP, not by constructor: ModeDefault and ModeConsuming are one
-# mode, and only one of them survives a round trip (ast.mode_of_flags), so reading
+# mode, and only one of them survives a round trip (typed_ast.mode_of_ownership), so reading
 # them as different would stop a rebuilt annotation matching its own source.
 fn mode_equal(a: ast.ParamMode, b: ast.ParamMode) -> Bool =
   ast.mode_is_borrowing(a) == ast.mode_is_borrowing(b) &&

@@ -6373,7 +6373,7 @@ fn modes_from_arrow(params: List ast.Param, expected: types.Type) -> List ast.Pa
 # declared parameter. Pinned by type_error/lambda_slot_local_not_pushed_down.
 fn mode_or_slot(written: ast.ParamMode, own: types.Ownership) -> ast.ParamMode =
   match written with
-  | ast.ModeDefault -> ast.mode_of_flags(types.ownership_is_borrow(own), false, false)
+  | ast.ModeDefault -> if types.ownership_is_borrow(own) then ast.ModeBorrowing else ast.ModeConsuming
   | _ -> written
 
 fn extend_env_with_params(params: List ast.Param, param_types: List types.Type, env: Dict types.Scheme) -> Dict types.Scheme =

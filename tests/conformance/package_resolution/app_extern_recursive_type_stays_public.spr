@@ -1,0 +1,9 @@
+module main
+import demo.adtext (ping, IntList)
+
+# A recursive type with no `local` anywhere: its extern stays public. Guards the
+# cycle check and against marking every extern that names a type.
+
+let use_it: IntList = __mk_list(0)
+
+fn main() -> Unit !{IO} = print("x")
