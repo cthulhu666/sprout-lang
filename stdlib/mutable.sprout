@@ -340,8 +340,8 @@ fn sort_merge_all(less: a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =
     in_scratch <- sort_passes(less, raw, scratch, n, sort_block, false)
     if in_scratch then sort_copy(scratch, raw, 0, n, 0) else ()
 
-# The comparators below call `compare` directly: going through `ord_lt` adds a
-# generic call per comparison, about 40% of the sort (docs/sorting-v0.md).
+# The comparators below call `compare` directly: `ord_lt` inlines, but its GC
+# root pushes stay, about 40% of the sort (docs/sorting-v0.md).
 fn mutvec_sort_with(less: a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
   do
     n <- mutvec_len(v)

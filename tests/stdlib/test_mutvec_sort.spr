@@ -30,6 +30,14 @@ fn first(p: (Int, Int)) -> Int =
   match p with
   | (k, _) -> k
 
+fn descending(p: (Int, Int)) -> Int = 0 - first(p)
+
+fn sorted_by_descending(xs: List (Int, Int)) -> List (Int, Int) !{IO} =
+  do
+    v <- from_list(xs)
+    _ <- mutvec_sort_by(descending, v)
+    to_list(v)
+
 fn sorted(xs: List a) -> List a !{IO} where Ord a =
   do
     v <- from_list(xs)
@@ -57,6 +65,9 @@ fn main() -> Unit !{IO} =
     _ <- list_each(\n -> check_ints(state, n, 1000), [0, 1, 2, 15, 16, 17, 33, 100, 1001])
     _ <- check_ints(state, 500, 3)
     _ <- list_each(\n -> check_stable(state, n), [3, 5, 16, 17, 48, 1001])
+    # A key that reverses the order: descending by key, equal keys still in input order.
+    _ <- assert_eq(state, "mutvec_sort_by descending key", sorted_by_descending(keyed(200, 4)),
+      vec_to_list(vec_sort_by(descending, vec_from_list(keyed(200, 4)))))
     _ <- assert_eq(state, "already sorted", sorted(range_to_list(0..99)), range_to_list(0..99))
     _ <- assert_eq(state, "reversed", sorted(list_reverse(range_to_list(0..99))), range_to_list(0..99))
     _ <- assert_eq(state, "strings", sorted(["pear", "fig", "apple", "fig"]), ["apple", "fig", "fig", "pear"])
