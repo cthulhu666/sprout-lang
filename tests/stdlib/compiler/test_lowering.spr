@@ -292,6 +292,35 @@ fn lowered_fn_match_branch_has_lambda_first_arg(result: LowerOutcome, fname: Str
               | Nothing -> false
               | Just branch_body -> body_first_arg_is_lambda(branch_body)
 
+fn last_match_branch_body(branches: List typed_ast.TypedMatchBranch) -> Maybe typed_ast.TypedExpr =
+  match branches with
+  | Nil -> Nothing
+  | [typed_ast.TypedMatchBranch _ b] -> Just(b)
+  | [_ | rest] -> last_match_branch_body(rest)
+
+fn lowered_fn_last_branch_has_lambda_first_arg(result: LowerOutcome, fname: String) -> Bool =
+  match result with
+  | LErr _ -> false
+  | LOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          let Just body = first_fn_body_named(decls, fname) else false
+              typed_ast.TMatch _ branches _ _ = body else false
+              Just branch_body = last_match_branch_body(branches) else false
+          in body_first_arg_is_lambda(branch_body)
+
+# True when the body is `outer(\p -> inner(...))` and `inner`'s first arg is a lambda.
+fn lowered_fn_lambda_body_has_lambda_first_arg(result: LowerOutcome, fname: String) -> Bool =
+  match result with
+  | LErr _ -> false
+  | LOk prog ->
+      match prog with
+      | typed_ast.TypedProgram decls ->
+          let Just body = first_fn_body_named(decls, fname) else false
+              typed_ast.TCall _ args _ _ = body else false
+              [typed_ast.TLambda _ lam_body _ _ | _] = args else false
+          in body_first_arg_is_lambda(lam_body)
+
 # Dig into the last TDoExprStep of a TDo expression.
 fn last_do_expr_step_body(steps: List typed_ast.TypedDoStep) -> Maybe typed_ast.TypedExpr =
   match steps with
@@ -453,6 +482,29 @@ fn main() -> Unit !{IO} =
     # Uses extern to supply an IO-wrapped value; last step is io_of(h(myshow)).
     r_do_bind <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nextern fn io_of(x: a) -> a !{IO}\nfn test(h: (Int -> String) -> String) -> String !{IO} =\n  do\n    myshow <- io_of(\\x -> \"local\")\n    io_of(h(myshow))")
     assert_true(state, "do-bind-binder shadow: lowers ok", is_lower_ok(r_do_bind))
+
+    # The class of a value-position method is found among several classes (here the second).
+    r_two_cls <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\nclass MyTag a {\n  fn mytag(x: a) -> String\n  fn mytag2(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\ninstance MyTag Int {\n  fn mytag(x: Int) -> String = \"t\"\n  fn mytag2(x: Int) -> String = \"t2\"\n}\nfn test(h: (Int -> String) -> String) -> String = h(mytag2)")
+    assert_true(state, "second class method: lowers ok", is_lower_ok(r_two_cls))
+    assert_true(state, "second class method: eta-expanded", lowered_fn_body_has_lambda_first_arg(r_two_cls, "test"))
+    assert_true(state, "second class method: resolves to MyTag instance",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_two_cls, "test"), "__tc_MyTag_"))
+
+    # A binder stays in scope through many later steps, not just the next one.
+    r_do_far <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nfn test(h: (Int -> String) -> String) -> String =\n  do\n    let myshow = \\x -> \"local\"\n    let a = 1\n    let b = 2\n    let c = 3\n    h(myshow)")
+    assert_true(state, "do-let far binder: lowers ok", is_lower_ok(r_do_far))
+    assert_false(state, "do-let far binder: myshow NOT eta-expanded", lowered_fn_do_last_step_has_lambda_first_arg(r_do_far, "test"))
+
+    # A binder is scoped to its own branch: the sibling branch sees the class method.
+    r_sibling <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\ntype Val = Val (Int -> String) | Other\nfn test(v: Val, h: (Int -> String) -> String) -> String =\n  match v with\n  | Val myshow -> h(myshow)\n  | Other -> h(myshow)")
+    assert_true(state, "sibling branch: lowers ok", is_lower_ok(r_sibling))
+    assert_false(state, "sibling branch: binder branch NOT eta-expanded", lowered_fn_match_branch_has_lambda_first_arg(r_sibling, "test"))
+    assert_true(state, "sibling branch: other branch IS eta-expanded", lowered_fn_last_branch_has_lambda_first_arg(r_sibling, "test"))
+
+    # A lambda param shadows the class method inside the lambda body.
+    r_lam_shadow <- run_lower("class MyShow a {\n  fn myshow(x: a) -> String\n}\ninstance MyShow Int {\n  fn myshow(x: Int) -> String = \"int\"\n}\nfn test(h: (Int -> String) -> String, k: ((Int -> String) -> String) -> String) -> String = k(\\myshow -> h(myshow))")
+    assert_true(state, "lambda param shadow: lowers ok", is_lower_ok(r_lam_shadow))
+    assert_false(state, "lambda param shadow: myshow NOT eta-expanded", lowered_fn_lambda_body_has_lambda_first_arg(r_lam_shadow, "test"))
 
     # P1b-concrete-inner: eta-expansion for an instance (MyEq (Box a) where MyEq a) at a
     # CONCRETE instantiation (Box Int) must still thread the inner MyEq Int dict.
