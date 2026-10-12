@@ -379,5 +379,15 @@ fn main() -> Unit !{IO} =
       free("match v with | Just a -> a | Nothing -> b", "v"), true)
     assert_eq(state, "an unbound branch body name is free",
       free("match v with | Just a -> a | Nothing -> b", "b"), true)
+    assert_eq(state, "a name used at several depths counts once",
+      free_count("if p then f(y, g(y, h(y))) else y"), 5)
+    assert_eq(state, "a binder shadows only inside its own branch",
+      free_count("match v with | Just a -> a | Nothing -> a"), 2)
+    assert_eq(state, "do steps bind sequentially",
+      free_count("do\n  x <- f(y)\n  g(x, z, y)"), 4)
+    assert_eq(state, "a comprehension guard sees its generator's binder",
+      free_count("[x for x in xs if x > n]"), 2)
+    assert_eq(state, "a template interpolation reports its names",
+      free_count("`${a} and ${b} and ${a}`"), 2)
 
     summary(state)

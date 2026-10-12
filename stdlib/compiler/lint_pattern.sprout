@@ -93,46 +93,46 @@ fn names_to_set(names: List String) -> Set =
 # is the reference and `message` is a field label. A module-qualified call yields
 # the alias for the same reason, which over-reports nothing that matters — an alias
 # is never a branch binder, so it never collides with the set this is tested against.
-export fn expr_free_vars(e: ast.Expr) -> Set = free_vars(e, set_empty())
+export fn expr_free_vars(e: ast.Expr) -> Set = free_vars(e, set_empty(), set_empty())
 
-# `bound` is the names a binder has brought into scope at this point.
-fn free_vars(e: ast.Expr, bound: Set) -> Set =
+# `bound` is the names a binder has brought into scope at this point; `acc` is the
+# free names found so far, threaded through so each name is inserted once.
+fn free_vars(e: ast.Expr, bound: Set, acc: Set) -> Set =
   match e with
   # The HEAD is the reference — `e.message` mentions `e`, and nothing else in it is
   # a name. Inserting the whole dotted string here is what made a capture
   # projecting a field off a branch binder look closed (§5.2a).
   | ast.VarExpr name _ ->
       let head = name_head(name)
-      in if set_member(head, bound) then set_empty() else set_insert(head, set_empty())
-  | ast.IntExpr _ _ -> set_empty()
-  | ast.FloatExpr _ _ -> set_empty()
-  | ast.BoolExpr _ _ -> set_empty()
-  | ast.StringExpr _ _ -> set_empty()
-  | ast.CharExpr _ _ -> set_empty()
-  | ast.UnitExpr _ -> set_empty()
-  | ast.StringTemplateExpr parts _ -> free_vars_parts(parts, bound)
-  | ast.TupleExpr items _ -> free_vars_list(items, bound)
+      in if set_member(head, bound) then acc else set_insert(head, acc)
+  | ast.IntExpr _ _ -> acc
+  | ast.FloatExpr _ _ -> acc
+  | ast.BoolExpr _ _ -> acc
+  | ast.StringExpr _ _ -> acc
+  | ast.CharExpr _ _ -> acc
+  | ast.UnitExpr _ -> acc
+  | ast.StringTemplateExpr parts _ -> free_vars_parts(parts, bound, acc)
+  | ast.TupleExpr items _ -> free_vars_list(items, bound, acc)
   | ast.IfExpr cond thn els _ ->
-      set_union(free_vars(cond, bound),
-                set_union(free_vars(thn, bound), free_vars(els, bound)))
+      free_vars(els, bound, free_vars(thn, bound, free_vars(cond, bound, acc)))
   | ast.MatchExpr scrut branches _ ->
-      set_union(free_vars(scrut, bound), free_vars_branches(branches, bound))
+      free_vars_branches(branches, bound, free_vars(scrut, bound, acc))
   | ast.CallExpr callee args _ ->
-      set_union(free_vars(callee, bound), free_vars_list(args, bound))
+      free_vars_list(args, bound, free_vars(callee, bound, acc))
   | ast.LambdaExpr params body _ ->
-      free_vars(body, set_union(bound, names_to_set(ast.param_names(params))))
-  | ast.BinaryExpr _ l r _ -> set_union(free_vars(l, bound), free_vars(r, bound))
-  | ast.UnaryExpr _ operand _ -> free_vars(operand, bound)
-  | ast.IntRangeExpr lo hi _ -> set_union(free_vars(lo, bound), free_vars(hi, bound))
-  | ast.DoExpr steps _ -> free_vars_steps(steps, bound)
-  | ast.RecordExpr _ fields _ -> free_vars_fields(fields, bound)
-  | ast.GetFieldExpr obj _ _ -> free_vars(obj, bound)
+      free_vars(body, set_union(bound, names_to_set(ast.param_names(params))), acc)
+  | ast.BinaryExpr _ l r _ -> free_vars(r, bound, free_vars(l, bound, acc))
+  | ast.UnaryExpr _ operand _ -> free_vars(operand, bound, acc)
+  | ast.IntRangeExpr lo hi _ -> free_vars(hi, bound, free_vars(lo, bound, acc))
+  | ast.DoExpr steps _ -> free_vars_steps(steps, bound, acc)
+  | ast.RecordExpr _ fields _ -> free_vars_fields(fields, bound, acc)
+  | ast.GetFieldExpr obj _ _ -> free_vars(obj, bound, acc)
   | ast.RecordUpdateExpr base fields _ ->
-      set_union(free_vars(base, bound), free_vars_fields(fields, bound))
-  | ast.ComprehensionExpr elem gens _ -> free_vars_gens(gens, elem, bound)
+      free_vars_fields(fields, bound, free_vars(base, bound, acc))
+  | ast.ComprehensionExpr elem gens _ -> free_vars_gens(gens, elem, bound, acc)
   | ast.LetBindExpr pat value els body pos ->
-      free_vars(ast.let_bind_match(pat, value, els, body, pos), bound)
-  | ast.TryExpr operand _ -> free_vars(operand, bound)
+      free_vars(ast.let_bind_match(pat, value, els, body, pos), bound, acc)
+  | ast.TryExpr operand _ -> free_vars(operand, bound, acc)
 
 # Pair two parameter lists, or refuse. A parameter's name is a binder and renames
 # freely; its ANNOTATION and its mode are shape, because substituting one lambda
@@ -205,61 +205,54 @@ fn labels_equal(a: List String, b: List String) -> Bool =
 fn same_members(a: Set, b: Set) -> Bool =
   set_size(a) == set_size(b) && set_size(set_diff(a, b)) == 0
 
-fn free_vars_list(es: List ast.Expr, bound: Set) -> Set =
+fn free_vars_list(es: List ast.Expr, bound: Set, acc: Set) -> Set =
   match es with
-  | [] -> set_empty()
-  | [e | rest] -> set_union(free_vars(e, bound), free_vars_list(rest, bound))
+  | [] -> acc
+  | [e | rest] -> free_vars_list(rest, bound, free_vars(e, bound, acc))
 
-fn free_vars_parts(parts: List ast.TemplateExprPart, bound: Set) -> Set =
+fn free_vars_parts(parts: List ast.TemplateExprPart, bound: Set, acc: Set) -> Set =
   match parts with
-  | [] -> set_empty()
-  | [p | rest] ->
-      set_union(
-        (match p with
-         | ast.LitPart _ -> set_empty()
-         | ast.InterpPart e -> free_vars(e, bound)),
-        free_vars_parts(rest, bound))
+  | [] -> acc
+  | [ast.LitPart _ | rest] -> free_vars_parts(rest, bound, acc)
+  | [ast.InterpPart e | rest] -> free_vars_parts(rest, bound, free_vars(e, bound, acc))
 
-fn free_vars_branches(branches: List ast.MatchBranch, bound: Set) -> Set =
+fn free_vars_branches(branches: List ast.MatchBranch, bound: Set, acc: Set) -> Set =
   match branches with
-  | [] -> set_empty()
+  | [] -> acc
   | [ast.MatchBranch pat body | rest] ->
-      set_union(free_vars(body, set_union(bound, names_to_set(ast.pattern_names(pat)))),
-                free_vars_branches(rest, bound))
+      free_vars_branches(rest, bound,
+        free_vars(body, set_union(bound, names_to_set(ast.pattern_names(pat))), acc))
 
-fn free_vars_fields(fields: List ast.RecordField, bound: Set) -> Set =
+fn free_vars_fields(fields: List ast.RecordField, bound: Set, acc: Set) -> Set =
   match fields with
-  | [] -> set_empty()
-  | [ast.RecordField _ v | rest] ->
-      set_union(free_vars(v, bound), free_vars_fields(rest, bound))
+  | [] -> acc
+  | [ast.RecordField _ v | rest] -> free_vars_fields(rest, bound, free_vars(v, bound, acc))
 
 # Do steps bind sequentially: a step's binder is in scope for the steps below it
 # but not for its own right-hand side.
-fn free_vars_steps(steps: List ast.DoStep, bound: Set) -> Set =
+fn free_vars_steps(steps: List ast.DoStep, bound: Set, acc: Set) -> Set =
   match steps with
-  | [] -> set_empty()
+  | [] -> acc
   | [step | rest] ->
       match step with
       | ast.DoBindStep pat e ->
-          set_union(free_vars(e, bound),
-                    free_vars_steps(rest, set_union(bound, names_to_set(ast.pattern_names(pat)))))
+          free_vars_steps(rest, set_union(bound, names_to_set(ast.pattern_names(pat))),
+                          free_vars(e, bound, acc))
       | ast.DoLetStep name e ->
-          set_union(free_vars(e, bound),
-                    free_vars_steps(rest, set_insert(name, bound)))
-      | ast.DoExprStep e -> set_union(free_vars(e, bound), free_vars_steps(rest, bound))
+          free_vars_steps(rest, set_insert(name, bound), free_vars(e, bound, acc))
+      | ast.DoExprStep e -> free_vars_steps(rest, bound, free_vars(e, bound, acc))
       | ast.DoPatStep kind pat e els pos ->
-          free_vars_steps(ast.do_pat_steps(kind, pat, e, els, rest, pos), bound)
+          free_vars_steps(ast.do_pat_steps(kind, pat, e, els, rest, pos), bound, acc)
 
 # Generators scope left to right, and a guard belongs to the generator it
 # follows, so it sees that generator's binders.
-fn free_vars_gens(gens: List ast.ComprehensionGen, elem: ast.Expr, bound: Set) -> Set =
+fn free_vars_gens(gens: List ast.ComprehensionGen, elem: ast.Expr, bound: Set, acc: Set) -> Set =
   match gens with
-  | [] -> free_vars(elem, bound)
+  | [] -> free_vars(elem, bound, acc)
   | [ast.ComprehensionGen pat src guards | rest] ->
       let inner = set_union(bound, names_to_set(ast.pattern_names(pat)))
-      in set_union(free_vars(src, bound),
-                   set_union(free_vars_list(guards, inner),
-                             free_vars_gens(rest, elem, inner)))
+      in free_vars_gens(rest, elem, inner,
+                        free_vars_list(guards, inner, free_vars(src, bound, acc)))
 
 # ---------------------------------------------------------------------------
 # Alpha-equivalence

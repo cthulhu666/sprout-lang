@@ -357,14 +357,14 @@ fn tok_is_template(tok: token.Token) -> Bool =
 fn tok_text_is_eq(tok: token.Token) -> Bool =
   token.token_text(tok) == "="
 
-fn has_equals_from(toks: Vec token.Token, start: Int, total: Int) -> Bool =
-  if start >= total then false
+# Index of the last `=` at or before `i`, or -1. An `=` lies ahead of token k
+# exactly when this index (taken from the end) exceeds k.
+fn last_equals_index(toks: Vec token.Token, i: Int) -> Int =
+  if i < 0 then -1
   else
-    match vec_get(start, toks) with
-    | Nothing -> false
-    | Just t ->
-        if tok_text_is_eq(t) then true
-        else has_equals_from(toks, start + 1, total)
+    match vec_get(i, toks) with
+    | Nothing -> -1
+    | Just t -> if tok_text_is_eq(t) then i else last_equals_index(toks, i - 1)
 
 fn code_step_parts(add_space: Bool, rendered: String, parts: List String) -> List String =
   if add_space then Cons(rendered, Cons(" ", parts))
@@ -382,10 +382,10 @@ fn code_state_prev_prev(state: CodeState) -> Maybe token.Token =
   match state with
   | CodeState _ pp _ -> pp
 
-fn format_code_step(toks: Vec token.Token, total: Int, state: CodeState, i: Int, tok: token.Token) -> CodeState =
+fn format_code_step(toks: Vec token.Token, last_eq: Int, state: CodeState, i: Int, tok: token.Token) -> CodeState =
   CodeState(
     code_step_parts(
-      needs_space(code_state_prev_prev(state), code_state_prev(state), tok, vec_get(i + 1, toks), has_equals_from(toks, i + 1, total)),
+      needs_space(code_state_prev_prev(state), code_state_prev(state), tok, vec_get(i + 1, toks), last_eq > i),
       render_token(tok),
       code_state_parts(state)),
     code_state_prev(state),
@@ -394,15 +394,15 @@ fn format_code_step(toks: Vec token.Token, total: Int, state: CodeState, i: Int,
 let init_code_state =
   CodeState(Nil, Nothing, Nothing)
 
-fn run_format_fold_go(non_eof: Vec token.Token, total: Int, state: CodeState, i: Int) -> CodeState =
+fn run_format_fold_go(non_eof: Vec token.Token, total: Int, last_eq: Int, state: CodeState, i: Int) -> CodeState =
   if i >= total then state
   else
     match vec_get(i, non_eof) with
     | Nothing -> state
-    | Just tok -> run_format_fold_go(non_eof, total, format_code_step(non_eof, total, state, i, tok), i + 1)
+    | Just tok -> run_format_fold_go(non_eof, total, last_eq, format_code_step(non_eof, last_eq, state, i, tok), i + 1)
 
 fn run_format_fold(non_eof: Vec token.Token, total: Int) -> CodeState =
-  run_format_fold_go(non_eof, total, init_code_state, 0)
+  run_format_fold_go(non_eof, total, last_equals_index(non_eof, total - 1), init_code_state, 0)
 
 fn lint_state_issues(state: LintState) -> List LintIssue =
   match state with
@@ -529,7 +529,13 @@ fn format_per_line(src: String) -> String =
   string.join("\n", list_map(format_line, drop_trailing_empty(str_split_lines(src)))) ++ "\n"
 
 export fn format_source(src: String) -> String =
-  match lexer.tokenize(source.strip_headers(src)) with
+  format_tokenized(src, tokenize_source(src))
+
+fn tokenize_source(src: String) -> Result token.TokenizeError (Vec token.Token) =
+  lexer.tokenize(source.strip_headers(src))
+
+fn format_tokenized(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> String =
+  match tokenized with
   | Err _ -> format_per_line(src)
   | Ok toks ->
       string.join("\n",
@@ -588,24 +594,32 @@ fn add_missing_newline_issue(src: String, lines: List String, issues: List LintI
   else if string.ends_with(src, "\n") then issues
   else Cons(LintIssue(last_line_no(lines), str_len(last_line_text(lines)) + 1, "missing trailing newline"), issues)
 
-fn add_format_issue(src: String, issues: List LintIssue) -> List LintIssue =
-  if format_source(src) != (if string.ends_with(src, "\n") then src else src ++ "\n") then
+fn add_format_issue(src: String, formatted: String, issues: List LintIssue) -> List LintIssue =
+  if formatted != with_trailing_newline(src) then
     Cons(LintIssue(1, 1, "file is not formatted"), issues)
   else issues
+
+export fn with_trailing_newline(src: String) -> String =
+  if string.ends_with(src, "\n") then src else src ++ "\n"
+
+export fn is_formatted(src: String) -> Bool =
+  format_source(src) == with_trailing_newline(src)
 
 fn run_lint_fold(spans: List TplSpan, lines: List String) -> LintState =
   list_fold(\ (st, raw_line) -> lint_line_spanned(spans, st, raw_line), LintState (Nil, 1), lines)
 
-fn lint_spans(src: String) -> List TplSpan =
-  match lexer.tokenize(source.strip_headers(src)) with
+fn lint_spans(tokenized: Result token.TokenizeError (Vec token.Token)) -> List TplSpan =
+  match tokenized with
   | Err _ -> Nil
   | Ok toks -> collect_spans(toks)
 
+# One tokenization feeds both the template spans and the format check.
 export fn lint_source(src: String) -> List LintIssue =
-  run_lint_fold(lint_spans(src), lines)
+  run_lint_fold(lint_spans(tokenized), lines)
     |> lint_state_issues
     |> add_missing_newline_issue(src, lines)
-    |> add_format_issue(src)
+    |> add_format_issue(src, format_tokenized(src, tokenized))
     |> list_reverse
   where
     lines = str_split_lines(src)
+    tokenized = tokenize_source(src)
