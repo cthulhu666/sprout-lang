@@ -278,8 +278,9 @@ extern-CPR path above — these workers are **Sprout-defined and Sprout-called**
 - **Intra-function SRA (do-block-localized).** `let x = <producer>; …; match x with (tuple-pat)`
   is scalar-replaced: the tuple never allocates, an `if`-producer merges fields via N per-field
   phis, and fn producers become width-w workers. Worker-collection and `translate_do` share the
-  shadow-free `sra_core_eligible` oracle (translation adds a shadow gate ⇒ translation ⊆
-  collection, so every worker called is emitted). Soundness = a **default-deny** escape check
+  shadow-free `sra_core_eligible` oracle (translation adds a shadow gate and the
+  `cpr_result_known` filter ⇒ translation ⊆ collection, so every worker called is emitted).
+  Soundness = a **default-deny** escape check
   (`sra_escape_ok` over the exhaustive `compute_free_vars`): `x` may escape nowhere but the one
   consuming scrutinee. A `sra_rest_plain` guard bars a Maybe/Result do-bind in the continuation
   (those reset the SRA map), confining the change to `translate_do`.
