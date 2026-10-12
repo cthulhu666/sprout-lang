@@ -613,4 +613,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "pinned by annotation, second constraint: resolves to slot 1",
       str_starts_with(lowered_fn_lambda_inner_callee(r_pinned_two, "test"), "__tc_Make_1_"))
 
+    # Method-to-class table: each of two classes' methods resolves to its own class.
+    r_two_cls <- run_lower("class Ca a {\n  fn ca(x: a) -> Int\n}\nclass Cb a {\n  fn cb(x: a) -> Int\n}\nfn test(f: (a -> Int) -> Int) -> Int where Cb a = f(cb)")
+    assert_true(state, "two-classes: lowers ok", is_lower_ok(r_two_cls))
+    assert_true(state, "two-classes: second class method uses its own slot",
+      str_starts_with(lowered_fn_lambda_inner_callee(r_two_cls, "test"), "__tc_Cb_0_"))
+
     summary(state)

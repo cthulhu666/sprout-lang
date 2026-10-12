@@ -32,13 +32,13 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
       super_map = tables.supers
   in
   match lower_decls(decls,
-                    LowerEnv(class_order,
-                             collect_instance_table(decls, dict_empty()),
-                             super_map,
-                             collect_inst_meta(decls, class_order, super_map, dict_empty()),
-                             scheme_env,
-                             tables.params_with_short,
-                             method_class_table(class_order)),
+                    LowerEnv(class_order = class_order,
+                             inst_table = collect_instance_table(decls, dict_empty()),
+                             super_map = super_map,
+                             inst_meta = collect_inst_meta(decls, class_order, super_map, dict_empty()),
+                             scheme_env = scheme_env,
+                             class_params = tables.params_with_short,
+                             method_class = method_class_table(class_order)),
                     Nil, Nil, Nil) with
   | (user_rev, wrapper_rev, inst_rev) ->
       typed_ast.TypedProgram(
@@ -62,8 +62,14 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
 #                  assign types to generated nodes so types survive lowering.
 #   class_params – class_name → primary class type parameter name
 #   method_class – method short name → first class in class_order that declares it
-type LowerEnv =
-  | LowerEnv (Dict (List String)) (Dict (Dict String)) (Dict (List String)) (Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int))) (Dict types.Scheme) (Dict String) (Dict String)
+type LowerEnv = (
+  class_order: Dict (List String),
+  inst_table: Dict (Dict String),
+  super_map: Dict (List String),
+  inst_meta: Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)),
+  scheme_env: Dict types.Scheme,
+  class_params: Dict String,
+  method_class: Dict String)
 
 # LowerCtx: per-function context passed during expression lowering.
 #   env   – the program-wide LowerEnv
@@ -71,41 +77,6 @@ type LowerEnv =
 #   bound – locally bound names (fn params, lambda params, pattern and do binders)
 #           that must NOT be eta-expanded; a Set so each binder is O(log n)
 type LowerCtx = (env: LowerEnv, fwd: Dict (Dict String), bound: Set)
-
-fn env_class_order(env: LowerEnv) -> Dict (List String) =
-  match env with | LowerEnv co _ _ _ _ _ _ -> co
-
-fn env_inst_table(env: LowerEnv) -> Dict (Dict String) =
-  match env with | LowerEnv _ it _ _ _ _ _ -> it
-
-fn env_super_map(env: LowerEnv) -> Dict (List String) =
-  match env with | LowerEnv _ _ sm _ _ _ _ -> sm
-
-fn env_inst_meta(env: LowerEnv) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) =
-  match env with | LowerEnv _ _ _ im _ _ _ -> im
-
-fn env_scheme_env(env: LowerEnv) -> Dict types.Scheme =
-  match env with | LowerEnv _ _ _ _ se _ _ -> se
-
-fn env_class_params(env: LowerEnv) -> Dict String =
-  match env with | LowerEnv _ _ _ _ _ cp _ -> cp
-
-fn env_method_class(env: LowerEnv) -> Dict String =
-  match env with | LowerEnv _ _ _ _ _ _ mc -> mc
-
-fn ctx_class_order(ctx: LowerCtx) -> Dict (List String) = env_class_order(ctx.env)
-
-fn ctx_fwd(ctx: LowerCtx) -> Dict (Dict String) = ctx.fwd
-
-fn ctx_inst(ctx: LowerCtx) -> Dict (Dict String) = env_inst_table(ctx.env)
-
-fn ctx_super_map(ctx: LowerCtx) -> Dict (List String) = env_super_map(ctx.env)
-
-fn ctx_inst_meta(ctx: LowerCtx) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) = env_inst_meta(ctx.env)
-
-fn ctx_scheme_env(ctx: LowerCtx) -> Dict types.Scheme = env_scheme_env(ctx.env)
-
-fn ctx_class_params(ctx: LowerCtx) -> Dict String = env_class_params(ctx.env)
 
 fn ctx_is_bound(name: String, ctx: LowerCtx) -> Bool = set_member(name, ctx.bound)
 
@@ -272,7 +243,7 @@ fn lower_one_decl(
       # re-drop it: the existential witness count needs it post-lowering.
       | ast.ClassDecl class_name _ methods _ _ ->
           (Cons(typed_ast.TPassThrough(inner), user_rev),
-           prepend_decls(generate_class_wrappers(class_name, methods, env_class_order(env), env_super_map(env), env_scheme_env(env)), wrapper_rev),
+           prepend_decls(generate_class_wrappers(class_name, methods, env.class_order, env.super_map, env.scheme_env), wrapper_rev),
            inst_rev)
       # Drop InstanceDecl — replaced by generated instance fns.
       | ast.InstanceDecl _ _ _ _ ->
@@ -494,7 +465,7 @@ fn generate_one_instance_fn(
       # Site B of the hidden-argument order documented at generate_one_class_wrapper:
       # instance-head dictionaries first, then the method's own.
       match build_hidden_for_constraints(list_append(inst_constraints, method_constraints),
-                                         env_class_order(env), env_super_map(env)) with
+                                         env.class_order, env.super_map) with
       | (hidden_params, fwd_map) ->
           typed_ast.TFnDecl(
             instance_fn_name(constraint, method_name),
@@ -517,7 +488,7 @@ fn lower_fn_decl(
   body: typed_ast.TypedExpr,
   env: LowerEnv
 ) -> typed_ast.TypedDecl =
-  match build_hidden_for_constraints(constraints, env_class_order(env), env_super_map(env)) with
+  match build_hidden_for_constraints(constraints, env.class_order, env.super_map) with
   | (hidden_params, fwd_map) ->
       typed_ast.TFnDecl(
         name,
@@ -739,7 +710,7 @@ fn mangle_mode_suffix(mode: ast.ParamMode) -> String =
 # infer-injected TDict nodes in direct calls expand correctly.
 
 fn find_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String =
-  dict_get(string.after_last_dot(method_name), env_method_class(ctx.env))
+  dict_get(string.after_last_dot(method_name), ctx.env.method_class)
 
 # Built once per program: the first class in entry order wins, as a linear scan would.
 fn method_class_table(class_order: Dict (List String)) -> Dict String =
@@ -751,15 +722,13 @@ fn add_class_methods(table: Dict String, entry: (String, List String)) -> Dict S
       list_fold(\ (t, m) -> add_method_class(string.after_last_dot(m), class_name, t), table, methods)
 
 fn add_method_class(short: String, class_name: String, table: Dict String) -> Dict String =
-  match dict_get(short, table) with
-  | Just _ -> table
-  | Nothing -> dict_set(short, class_name, table)
+  if dict_member(short, table) then table else dict_set(short, class_name, table)
 
 fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
   # after_last_dot: class_order stores bundler-qualified names (e.g. "prelude.ToString")
   # but inst_table keys are always stripped (built via constraint_key_from_tc which calls
   # after_last_dot).  Strip here so both sides of the lookup use the same key form.
-  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx_inst(ctx)) with
+  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx.env.inst_table) with
   | Nothing -> Nothing
   | Just method_map -> dict_get_method(method_name, method_map)
 
@@ -773,7 +742,7 @@ fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String
 # prefer the forwarded slot over the concrete instance, avoiding an unresolvable
 # inner-dict reference at eta-expansion time.
 fn find_fwd_method_for_key(method_name: String, key: String, ctx: LowerCtx) -> Maybe String =
-  match dict_get(key, ctx_fwd(ctx)) with
+  match dict_get(key, ctx.fwd) with
   | Nothing -> Nothing
   | Just method_map -> dict_get_method(method_name, method_map)
 
@@ -789,7 +758,7 @@ fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
   | types.TApp base arg -> ast.TypeApply(eta_named_typeexpr(base, ctx), eta_named_typeexpr(arg, ctx))
   | types.TTuple items -> ast.TupleType(list_map(\i -> eta_named_typeexpr(i, ctx), items))
   | types.TVar v ->
-      match dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), ctx_scheme_env(ctx)) with
+      match dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), ctx.env.scheme_env) with
       | Just scheme ->
           match types.scheme_type(scheme) with
           | types.TConst prog_var -> ast.TypeName(types.type_id_name(prog_var))
@@ -930,7 +899,7 @@ fn tvar_position(t: types.Type) -> Maybe types.Type =
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let Just param = eta_class_position(t) else Nothing
-      Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx_fwd(ctx)))) else Nothing
+      Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx.fwd))) else Nothing
   in Just(make_eta_lambda(impl_name, t, no_pos()))
 
 # The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
@@ -982,7 +951,7 @@ fn find_eta_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String 
   | Nothing -> lookup_class_marker(method_name, ctx)
 
 fn lookup_class_marker(method_name: String, ctx: LowerCtx) -> Maybe String =
-  match lookup_class_marker_scheme(method_name, ctx_scheme_env(ctx)) with
+  match lookup_class_marker_scheme(method_name, ctx.env.scheme_env) with
   | Nothing -> Nothing
   | Just scheme ->
       match types.scheme_type(scheme) with
@@ -996,7 +965,7 @@ fn lookup_class_marker_scheme(method_name: String, scheme_env: Dict types.Scheme
 
 fn try_eta_in_class(class_name: String, name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let types.TFunc param _ _ _ = t else Nothing
-  in eta_in_class_by_head(class_name, name, t, types.eta_class_type(ctx_class_params(ctx), ctx_scheme_env(ctx), class_name, name, t, param), ctx)
+  in eta_in_class_by_head(class_name, name, t, types.eta_class_type(ctx.env.class_params, ctx.env.scheme_env, class_name, name, t, param), ctx)
 
 # Split on whether the class type has a concrete head: a concrete head resolves to an instance
 # (or its forwarded slot); an abstract (tvar) head forwards via the @eta_fwd marker.
@@ -1012,7 +981,7 @@ fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: 
   | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
 
 fn eta_in_class_with_impl(class_name: String, t: types.Type, head: String, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx_inst_meta(ctx)) with
+  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx.env.inst_meta) with
   | Just (_, [ast.TypeConstraint inner _ | _], _) -> eta_inner_dict_unreachable(inner, no_pos())
   | _ -> Just(make_eta_lambda(impl_name, t, no_pos()))
 
@@ -1050,9 +1019,9 @@ fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, pr
   | Nothing -> Nothing
 
 fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
-  match dict_get(types.eta_fwd_marker_key(tvar_name, class_name), ctx_scheme_env(ctx)) with
+  match dict_get(types.eta_fwd_marker_key(tvar_name, class_name), ctx.env.scheme_env) with
   | Just scheme -> Just(scheme)
-  | Nothing -> dict_get(types.eta_fwd_marker_key(tvar_name, string.after_last_dot(class_name)), ctx_scheme_env(ctx))
+  | Nothing -> dict_get(types.eta_fwd_marker_key(tvar_name, string.after_last_dot(class_name)), ctx.env.scheme_env)
 
 # lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
 # Direct class method calls already have TDict nodes injected by infer; rewriting the
@@ -1154,7 +1123,7 @@ fn concrete_block_providing(mname: String, blocks: List typed_ast.Evidence, ctx:
 
 fn block_impl_if_resolved(mname: String, key: String, children: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe String =
   if evidence_list_fully_resolved(children) then
-    match dict_get(key, ctx_inst(ctx)) with
+    match dict_get(key, ctx.env.inst_table) with
     | Just method_map -> dict_get_method(mname, method_map)
     | Nothing -> Nothing
   else Nothing
@@ -1354,7 +1323,7 @@ fn evidence_unresolved_witnesses(
   ctx: LowerCtx
 ) -> List typed_ast.TypedExpr =
   unresolved_witnesses_for_classes(
-    types.class_with_transitive_supers(class_name, ctx_super_map(ctx)), type_args, pos, ctx)
+    types.class_with_transitive_supers(class_name, ctx.env.super_map), type_args, pos, ctx)
 
 fn unresolved_witnesses_for_classes(
   classes: List String,
@@ -1370,7 +1339,7 @@ fn unresolved_witnesses_for_classes(
           \_ -> typed_ast.TVar(
             "__unresolved_" ++ constraint_key_str(string.after_last_dot(eff_class), type_args),
             types.TVar(types.tyvar_id("?gen")), pos),
-          types.class_methods_for(eff_class, ctx_class_order(ctx))),
+          types.class_methods_for(eff_class, ctx.env.class_order)),
         unresolved_witnesses_for_classes(rest, type_args, pos, ctx))
 
 fn evidence_fully_resolved(ev: typed_ast.Evidence) -> Bool =
@@ -1408,29 +1377,29 @@ fn consume_blocks(blocks: List typed_ast.Evidence, pos: source.SourcePos, ctx: L
 fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match ev with
   | typed_ast.EvForward class_name key ->
-      match dict_get(key, ctx_fwd(ctx)) with
+      match dict_get(key, ctx.fwd) with
       | Just method_map ->
-          list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx_scheme_env(ctx)),
-                   types.class_methods_for(class_name, ctx_class_order(ctx)))
+          list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx.env.scheme_env),
+                   types.class_methods_for(class_name, ctx.env.class_order))
       | Nothing ->
           list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar(types.tyvar_id("?gen")), pos),
-                   types.class_methods_for(class_name, ctx_class_order(ctx)))
+                   types.class_methods_for(class_name, ctx.env.class_order))
   | typed_ast.EvInstance class_name key children ->
-      match dict_get(key, ctx_inst(ctx)) with
+      match dict_get(key, ctx.env.inst_table) with
       | Just method_map ->
           resolve_tdict_apply_inner_dicts(
             key, pos, method_map,
-            types.class_methods_for(class_name, ctx_class_order(ctx)),
+            types.class_methods_for(class_name, ctx.env.class_order),
             evidence_inst_arities(key, ctx),
             consume_inner_dicts(children, pos, ctx),
-            ctx_scheme_env(ctx))
+            ctx.env.scheme_env)
       | Nothing ->
           panic("lowering: instance dict '" ++ key ++ "' at " ++ pos_loc(pos) ++
                 " absent from ctx_inst — resolve/lowering table disagreement")
   | _ -> panic("lowering: consume_block expected EvForward/EvInstance (internal error)")
 
 fn evidence_inst_arities(key: String, ctx: LowerCtx) -> Dict (Int, Int) =
-  match dict_get(key, ctx_inst_meta(ctx)) with
+  match dict_get(key, ctx.env.inst_meta) with
   | Just (_, _, method_arities) -> method_arities
   | Nothing -> dict_empty()
 
@@ -1468,7 +1437,7 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
   # A ctx_fwd miss (a phantom fresh tyvar resolve emitted EvForward for
   # optimistically) returns Nothing, so lower_value_var null-fills exactly as today.
   | typed_ast.EvForward _ key ->
-      match dict_get(key, ctx_fwd(ctx)) with
+      match dict_get(key, ctx.fwd) with
       | Nothing -> Nothing
       | Just method_map ->
           match dict_get_method(method, method_map) with
@@ -1477,7 +1446,7 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
   | _ -> Nothing
 
 fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match dict_get(key, ctx_inst(ctx)) with
+  match dict_get(key, ctx.env.inst_table) with
   | Nothing -> Nothing
   | Just method_map ->
       match dict_get_method(method, method_map) with
@@ -1494,7 +1463,7 @@ fn misses_named_forward(evs: List typed_ast.Evidence, ctx: LowerCtx) -> Bool =
 fn named_forward_miss(ev: typed_ast.Evidence, ctx: LowerCtx) -> Bool =
   match ev with
   | typed_ast.EvForward class_name key ->
-      match dict_get(key, ctx_fwd(ctx)) with
+      match dict_get(key, ctx.fwd) with
       | Just _ -> false
       | Nothing -> unnamed_forward(class_name, key) == false
   | typed_ast.EvInstance _ _ children -> misses_named_forward(children, ctx)
@@ -1597,7 +1566,7 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
 fn enrich_existential_branch(pat: ast.Pattern, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
   match pat with
   | ast.ConstructorPattern name fields ppos ->
-      match dict_get(name, ctx_scheme_env(ctx)) with
+      match dict_get(name, ctx.env.scheme_env) with
       | Just scheme -> existential_branch_build(name, fields, ppos, scheme, ctx)
       | Nothing -> (pat, ctx)
   | _ -> (pat, ctx)
@@ -1609,8 +1578,8 @@ fn existential_branch_build(name: String, fields: List ast.Pattern, ppos: source
       match scheme_param_types(types.scheme_type(scheme)) with
       | param_types ->
           (ast.ConstructorPattern(name,
-             list_append(fields, witness_patterns_for(cons, param_types, fields, ppos, ctx_class_order(ctx), ctx_super_map(ctx))), ppos),
-           ctx_with_fwd(seed_fwd_for_cons(cons, param_types, fields, ctx_fwd(ctx), ctx_class_order(ctx), ctx_super_map(ctx)), ctx))
+             list_append(fields, witness_patterns_for(cons, param_types, fields, ppos, ctx.env.class_order, ctx.env.super_map)), ppos),
+           ctx_with_fwd(seed_fwd_for_cons(cons, param_types, fields, ctx.fwd, ctx.env.class_order, ctx.env.super_map), ctx))
 
 # One appended witness pattern PER SLOT — per method across the constraint's class
 # and its transitive superclasses, in types.witness_slots_for_class order, which
