@@ -847,8 +847,9 @@ retry(5, \_ -> flaky(journal))     # journal is borrowed; the caller releases it
 
 Pick the callback's mode by what the caller's lambda must capture: plain for ordinary values,
 `once` to move a linear value in (the callee calls it at most once), `local` to borrow one (the
-callee does not keep it), `once local` for both. A callback the callee keeps — a handler, the work
-given to `task_spawn` — cannot be `local`. `examples/linear_resources.sprout` walks through every
+callee does not keep it), `once local` for both. Marking a callback `local` and then keeping it —
+storing a handler, returning it, handing it to `task_spawn` — is a compile error in that function.
+`examples/linear_resources.sprout` walks through every
 mode on one resource; [local-closures-v0.md §11](./local-closures-v0.md) has the table.
 
 Reach for this when a type has a release operation. For plain data with no

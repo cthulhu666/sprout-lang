@@ -416,7 +416,8 @@ a recursive function that takes the resource `borrowing`.
 
 - A callback the callee keeps: an HTTP handler, middleware (`http_middleware.with_logging` returns
   a closure holding `handler`), `task_spawn`/`task_fork` (the work runs after the call returns).
-  §6.3 rejects `local` on each.
+  Marking any of these `local` is a compile error in the function that keeps it (§6.3); an
+  extern is trusted instead (§6.5).
 - A plain value: `local` is function-typed only (§6.4); `borrowing` already lends a linear value.
 - A class method whose instances may keep the function: `local` in the class binds every instance
   (the `Functor.fmap` question, §8).
