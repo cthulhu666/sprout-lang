@@ -474,18 +474,46 @@ fn advance_position(pos: SourcePos, ch: Char) -> SourcePos =
 export fn next(cursor: SourceCursor) -> Maybe (Char, SourceCursor) =
   match cursor with
   | SourceCursor raw bytes byte_offset pos ->
-      match decode_char_at(bytes, byte_offset) with
+      match bytes_get(bytes, byte_offset) with
       | Nothing -> Nothing
-      | Just (ch, next_off) ->
-          Just((ch, SourceCursor(raw, bytes, next_off, advance_position(pos, ch))))
+      | Just b ->
+          # An ASCII byte is its own codepoint; skip the decoder's tuples.
+          if b < 128 then
+            let ch = char_from_codepoint(b)
+            in Just((ch, SourceCursor(raw, bytes, byte_offset + 1, advance_position(pos, ch))))
+          else
+            match decode_char_at(bytes, byte_offset) with
+            | Nothing -> Nothing
+            | Just (ch, next_off) ->
+                Just((ch, SourceCursor(raw, bytes, next_off, advance_position(pos, ch))))
 
 # take_while: advance past every codepoint satisfying pred; returns the advanced
 # cursor.  Text extraction is slice-based and the caller's job (record the start
 # cursor, then slice between byte offsets) — O(run), no per-char concatenation.
 export fn take_while(cursor: SourceCursor, pred: Char -> Bool) -> SourceCursor =
-  match next(cursor) with
-  | Nothing -> cursor
-  | Just (ch, c2) -> if pred(ch) then take_while(c2, pred) else cursor
+  match cursor with
+  | SourceCursor raw bytes off pos -> take_run(raw, bytes, pred, off, pos.index, pos.line, pos.column)
+
+# The run walks on plain Ints and builds one cursor where it stops, so an ASCII
+# char allocates nothing. Line and column move as in advance_position.
+fn take_run(raw: String, bytes: Bytes, pred: Char -> Bool, off: Int, index: Int, line: Int, column: Int) -> SourceCursor =
+  match bytes_get(bytes, off) with
+  | Nothing -> cursor_at(raw, bytes, off, index, line, column)
+  | Just b ->
+      if b < 128 then
+        if pred(char_from_codepoint(b)) then
+          if b == 10 || b == 13 then take_run(raw, bytes, pred, off + 1, index + 1, line + 1, 1)
+          else take_run(raw, bytes, pred, off + 1, index + 1, line, column + 1)
+        else cursor_at(raw, bytes, off, index, line, column)
+      else
+        match decode_char_at(bytes, off) with
+        | Nothing -> cursor_at(raw, bytes, off, index, line, column)
+        | Just (ch, next_off) ->
+            if pred(ch) then take_run(raw, bytes, pred, next_off, index + 1, line, column + 1)
+            else cursor_at(raw, bytes, off, index, line, column)
+
+fn cursor_at(raw: String, bytes: Bytes, off: Int, index: Int, line: Int, column: Int) -> SourceCursor =
+  SourceCursor(raw, bytes, off, SourcePos(index = index, line = line, column = column))
 
 # advance_one: advance past one codepoint (no-op at end).  Internal helper for
 # match_string's character-by-character walk over a known-present prefix.

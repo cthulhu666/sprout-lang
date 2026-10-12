@@ -332,12 +332,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   allocation (2026-10-05). `scripts/scc_cost_gate.sh` alternates arity to dodge Phase A. Fix for
   both: one `scc.sccs_in_dependency_order` pass — Phase A compares components, the fixpoint walks
   them callees first — then drop the alternation from the gate's fixtures.
-- [ ] `P3` **The lexer is a third of the compiler's self-compile allocation.** 35% sits under a
-  `lexer.` frame in a stage-2 self-compile (2.72 GB, 2026-10-05): mostly `source.next` (11.4%)
-  and `source.decode_char_at` / `decode_codepoint_at` (6.1% each), then
-  `try_multi_char_symbol_worker` and `advance_position`. It is paid per character, so every compile
-  pays it. Profile per token first. The unverified superlinear-lexing report in the list-literal
-  root-pool entry is the same code: confirm or drop it in that pass.
 - [ ] `P3` **Two `@fwd:` marker lookups still walk the whole type environment.**
   `infer.forwarded_tdict_for_tyvar` (after a direct-key miss) and `resolve_via_fwd_for_prog_var`
   turn `dict_entries(env)` into a list to find `@fwd:*:<class>` markers: 2.9% and 1.0% of
@@ -1232,6 +1226,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   repo root panics on the first TAB (`prelude_completion_names`: "read_file: prelude"), while the
   other two reads (`globals_of_module`, `dotted_completion_candidates`) silently offer nothing.
   Fix: resolve through the same stdlib root and `--package-root` the compiler session uses.
+- [ ] `P3` **A CRLF file reports every line number doubled.** `source.advance_position` and
+  `take_run` start a new line at `\r` and again at `\n`, so an error on line 3 of a CRLF file is
+  reported at 5:11. Columns are right. Fix: `\r` starts a line only when no `\n` follows it.
 - [~] `P2` **Dispose of the obsolete negative corpora.** Entrypoint validation landed
   (`validate_entrypoint`): a defined `main` must be zero-arg, `Unit`/`Int`-returning and concretely
   `!{IO}`, gated via `test-executable-errors`. **Remaining:** the "missing main" check
@@ -2523,11 +2520,10 @@ acting.
   `--phase check`, so this is the COMPILER's own root stack recursing over the literal, not emitted
   roots, and 22 × 6,000 ≈ 132,000 matches the pool exactly. The O(N²) compiler memory that used to
   dominate is fixed (800 → 48 MB, 2,000 → 179 MB, from 825 MB / 4,631 MB): see
-  `docs/gates.md` §Compiling one long block. Lexing is reported superlinear in literal length
-  (80 KB → 1.9 GB) on a string-literal source; still unverified. It is not the list-literal
-  growth once blamed on it: `--phase bundle` is flat to 1,920 elements. Shipping the table as a
-  STRING literal decoded at startup remains the smaller-IR option: emitted IR is constant-size
-  whatever the table.
+  `docs/gates.md` §Compiling one long block. A big STRING literal is superlinear (20/40/80 KB:
+  0.5/1.6/5.3 s), but in `ir_lowering.encode_str_for_ir` (#599), not lexing: `--phase check` is
+  flat at 0.2 s (2026-10-12). Shipping the table as a STRING literal decoded at startup remains
+  the smaller-IR option: emitted IR is constant-size whatever the table.
 - [ ] `P2` **A long `do` block hits the same root-pool ceiling.** One `do` block of 4,400 plain
   `print(...)` steps fails with `GC root pool exhausted`; 4,200 compiles. Cost is linear below it
   (27 / 42 / 69 MB at 600 / 1,200 / 2,400 steps).
