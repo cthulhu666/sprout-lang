@@ -2,8 +2,9 @@ module examples.linear_resources
 import stdlib.string (join)
 import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
 
-# A tour of linear resources. A Journal is a handle that must be released exactly
-# once. The compiler checks it; the modes below say how a function may use it.
+# A tour of linear resources. A Journal is a handle that must be consumed exactly
+# once, by `close_journal`, which releases it. The compiler checks this; the
+# modes below say how a function may use the journal.
 #
 # Run:
 #   mise exec -- just run examples/linear_resources.sprout
@@ -12,9 +13,10 @@ import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
 # 1. type linear + a consuming release
 # ---------------------------------------------------------------------------
 #
-# A `linear` value must be consumed exactly once. `consuming` takes ownership.
-# Opening a Journal and never releasing it is a compile error: "linear value
-# 'j' is never used".
+# A `linear` value must be consumed exactly once: passed to a `consuming`
+# parameter, which takes ownership. For a Journal that is `close_journal`, the
+# release. Opening a Journal and never closing it is a compile error: "linear
+# value 'j' is never used".
 
 type linear Journal = Journal(Ref (List String))
 
@@ -39,8 +41,8 @@ fn section1() -> Unit !{IO} =
 # ---------------------------------------------------------------------------
 #
 # `borrowing` reads or writes without taking ownership, any number of times.
-# A borrowing function cannot release the value: "'j' is a borrowing parameter
-# and cannot be consumed".
+# A borrowing function cannot consume the value, so it cannot close it: "'j' is
+# a borrowing parameter and cannot be consumed".
 
 fn write_line(j: borrowing Journal, line: String) -> Unit !{IO} =
   match j with
