@@ -199,4 +199,45 @@ fn main() -> Unit !{IO} =
                Cons(("b", (false, set_empty())), Nil))
     let elig2 = ast_to_ir.mutual_build_eligible(raw2, arities, rets)
     assert_true(state, "eligible: one-way a->b not a cycle", list_length(ast_to_ir.mutual_eligible_for("a", elig2)) == 0)
+
+    # 8. SCC membership decides eligibility, not just one-step reachability.
+    # a->b, b->c, c->b, c->ext (ext has no node entry): b<->c is a cycle, a is not
+    # on it, ext is outside the graph.
+    let raw3 = Cons(("a", (false, set_from_list(["b"]))),
+               Cons(("b", (false, set_from_list(["c"]))),
+               Cons(("c", (false, set_from_list(["b", "ext"]))), Nil)))
+    let ar3 = dict_set("a", ast_to_ir.fn_info(1, false), dict_set("b", ast_to_ir.fn_info(1, false),
+                dict_set("c", ast_to_ir.fn_info(1, false), dict_set("ext", ast_to_ir.fn_info(1, false), dict_empty()))))
+    let rt3 = dict_set("a", true, dict_set("b", true, dict_set("c", true, dict_set("ext", true, dict_empty()))))
+    let elig3 = ast_to_ir.mutual_build_eligible(raw3, ar3, rt3)
+    assert_true(state, "eligible: edge into a cycle from outside is not eligible",
+      list_length(ast_to_ir.mutual_eligible_for("a", elig3)) == 0)
+    assert_true(state, "eligible: b->c on the cycle",
+      ast_to_ir.mutual_eligible_for("b", elig3) == [("c", 1)])
+    assert_true(state, "eligible: c->b kept, c->ext (outside the graph) dropped",
+      ast_to_ir.mutual_eligible_for("c", elig3) == [("b", 1)])
+
+    # 9. Arity and return kind still gate an edge on a cycle.
+    let ar4 = dict_set("a", ast_to_ir.fn_info(2, false), dict_set("b", ast_to_ir.fn_info(3, false), dict_empty()))
+    let elig4 = ast_to_ir.mutual_build_eligible(raw, ar4, rets)
+    assert_true(state, "eligible: arity mismatch on a cycle is not eligible",
+      list_length(ast_to_ir.mutual_eligible_for("a", elig4)) == 0)
+    let rt5 = dict_set("a", true, dict_set("b", false, dict_empty()))
+    let elig5 = ast_to_ir.mutual_build_eligible(raw, arities, rt5)
+    assert_true(state, "eligible: non-i64 partner on a cycle is not eligible",
+      list_length(ast_to_ir.mutual_eligible_for("a", elig5)) == 0)
+
+    # 10. Two disjoint 3-rings of equal arity: every ring edge is eligible, and a
+    # one-way bridge between the rings is not.
+    let names6 = ["r0", "r1", "r2", "s0", "s1", "s2"]
+    let ring_raw = [("r0", (false, set_from_list(["r1", "s0"]))), ("r1", (false, set_from_list(["r2"]))),
+                    ("r2", (false, set_from_list(["r0"]))), ("s0", (false, set_from_list(["s1"]))),
+                    ("s1", (false, set_from_list(["s2"]))), ("s2", (false, set_from_list(["s0"])))]
+    let ring_ar = dict_from_list(list_map(\ (n: String) -> (n, ast_to_ir.fn_info(1, false)), names6))
+    let ring_rt = dict_from_list(list_map(\ (n: String) -> (n, true), names6))
+    let ring_el = ast_to_ir.mutual_build_eligible(ring_raw, ring_ar, ring_rt)
+    assert_true(state, "eligible: ring edge r0->r1 only, bridge r0->s0 dropped",
+      ast_to_ir.mutual_eligible_for("r0", ring_el) == [("r1", 1)])
+    assert_true(state, "eligible: ring edge s2->s0",
+      ast_to_ir.mutual_eligible_for("s2", ring_el) == [("s0", 1)])
     summary(state)

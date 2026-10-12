@@ -1,0 +1,45 @@
+module main
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn int_lit(n: Int) -> typed_ast.TypedExpr =
+  typed_ast.TInt(n, types.TConst(types.type_id("Int")), no_pos())
+
+fn fn_decl(name: String, n: Int) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil, int_lit(n))
+
+# The literal a looked-up fn decl returns, or -1 when it is not a fn decl.
+fn body_of(found: Maybe typed_ast.TypedDecl) -> Int =
+  match found with
+  | Just (typed_ast.TFnDecl _ _ _ _ _ (typed_ast.TInt n _ _)) -> n
+  | _ -> -1
+
+fn absent(found: Maybe typed_ast.TypedDecl) -> Bool =
+  match found with
+  | Nothing -> true
+  | Just _ -> false
+
+fn is_extern(found: Maybe typed_ast.TypedDecl) -> Bool =
+  match found with
+  | Just (typed_ast.TExternFnDecl _ _ _ _) -> true
+  | _ -> false
+
+fn main() -> Unit !{IO} =
+  run_suite("worker_decls",
+    [
+      check_eq("the first declaration of a name wins", 1, body_of(dict_get("f", ix))),
+      check_eq("a later fn is indexed", 3, body_of(dict_get("g", ix))),
+      check_true("entry main is left out", absent(dict_get("main", ix))),
+      check_true("a module-qualified entry is left out", absent(dict_get("app.main", ix))),
+      check_true("an extern is indexed", is_extern(dict_get("ext", ix))),
+      check_true("an unknown name is absent", absent(dict_get("nope", ix))),
+      check_true("no decls, empty index", absent(dict_get("f", ast_to_ir.build_worker_decls(Nil))))
+    ])
+  where ix = ast_to_ir.build_worker_decls(
+               [fn_decl("f", 1), fn_decl("main", 9), fn_decl("f", 2), fn_decl("app.main", 8),
+                typed_ast.TExternFnDecl("ext", Nil, Nothing, Nothing), fn_decl("g", 3)])

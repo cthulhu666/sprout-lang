@@ -4300,69 +4300,90 @@ fn tco_self_call_args(val: String, self_name: String, ops: List sprout_ir.IROp) 
           else tco_self_call_args(val, self_name, rest)
       | _ -> tco_self_call_args(val, self_name, rest)
 
+# Lookups over a function's blocks, built once: block by label and phi by result
+# name (-> defining block label, incomings). The first definition wins.
+type TcoIndex = (by_label: Dict sprout_ir.IRBlock, phis: Dict (String, List (String, String)))
+
+fn tco_index(blocks: List sprout_ir.IRBlock) -> TcoIndex =
+  TcoIndex(by_label = tco_index_labels(blocks, dict_empty()), phis = tco_index_phis(blocks, dict_empty()))
+
+fn tco_index_labels(blocks: List sprout_ir.IRBlock, acc: Dict sprout_ir.IRBlock) -> Dict sprout_ir.IRBlock =
+  match blocks with
+  | Nil -> acc
+  | Cons b rest ->
+      tco_index_labels(rest, if dict_member(tco_block_label(b), acc) then acc else dict_set(tco_block_label(b), b, acc))
+
+fn tco_index_phis(blocks: List sprout_ir.IRBlock, acc: Dict (String, List (String, String))) ->
+    Dict(String, List (String, String)) =
+  match blocks with
+  | Nil -> acc
+  | Cons b rest -> tco_index_phis(rest, tco_index_phi_ops(tco_block_label(b), tco_block_ops(b), acc))
+
+fn tco_index_phi_ops(lbl: String, ops: List sprout_ir.IROp, acc: Dict (String, List (String, String))) ->
+    Dict(String, List (String, String)) =
+  match ops with
+  | Nil -> acc
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi r _ inc ->
+          tco_index_phi_ops(lbl, rest, if dict_member(r, acc) then acc else dict_set(r, (lbl, inc), acc))
+      | _ -> tco_index_phi_ops(lbl, rest, acc)
+
 # A tail-call hit: (pred_label, args, call_result, phi_block).
 # phi_block == "" means a direct `call; ret` (no phi incoming to drop).
-fn tco_collect(self_name: String, blocks: List sprout_ir.IRBlock, all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+fn tco_collect(self_name: String, blocks: List sprout_ir.IRBlock, ix: TcoIndex) -> List (String, List String, String, String) =
   match blocks with
   | Nil -> Nil
   | Cons b rest ->
-      list_append(tco_hits_for_block(self_name, b, all), tco_collect(self_name, rest, all))
+      list_append(tco_hits_for_block(self_name, b, ix), tco_collect(self_name, rest, ix))
 
-fn tco_hits_for_block(self_name: String, b: sprout_ir.IRBlock, all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+fn tco_hits_for_block(self_name: String, b: sprout_ir.IRBlock, ix: TcoIndex) -> List (String, List String, String, String) =
   match tco_ret_value(ops) with
   | Nothing -> Nil
   | Just rv ->
       match tco_self_call_args(rv, self_name, ops) with
       | Just args -> Cons((tco_block_label(b), args, rv, ""), Nil)
-      | Nothing -> tco_trace_phis(self_name, all, Cons(rv, Nil), set_empty(), Nil)
+      | Nothing -> tco_trace_phis(self_name, ix, Cons(rv, Nil), set_empty(), Nil)
   where ops = tco_block_ops(b)
 
 # Find the phi defining `val` anywhere: (phi_block_label, incomings).
-fn tco_find_phi(val: String, blocks: List sprout_ir.IRBlock) -> Maybe (String, List (String, String)) =
-  match blocks with
-  | Nil -> Nothing
-  | Cons b rest ->
-      match tco_phi_incomings(val, tco_block_ops(b)) with
-      | Just inc -> Just((tco_block_label(b), inc))
-      | Nothing -> tco_find_phi(val, rest)
+fn tco_find_phi(val: String, ix: TcoIndex) -> Maybe (String, List (String, String)) =
+  dict_get(val, ix.phis)
 
 # Args of a self-call defining `val` specifically in block `pred`.
-fn tco_self_call_in_block(val: String, self_name: String, pred: String, blocks: List sprout_ir.IRBlock) -> Maybe (List String) =
-  match blocks with
-  | Nil -> Nothing
-  | Cons b rest ->
-      if tco_block_label(b) == pred
-      then tco_self_call_args(val, self_name, tco_block_ops(b))
-      else tco_self_call_in_block(val, self_name, pred, rest)
+fn tco_self_call_in_block(val: String, self_name: String, pred: String, ix: TcoIndex) -> Maybe (List String) =
+  match dict_get(pred, ix.by_label) with
+  | Just b -> tco_self_call_args(val, self_name, tco_block_ops(b))
+  | Nothing -> Nothing
 
 # Trace returned values through (possibly nested) phis to collect tail self-calls.
 # worklist holds phi-result names still to expand; visited prevents cycles.
-fn tco_trace_phis(self_name: String, all: List sprout_ir.IRBlock, worklist: List String,
+fn tco_trace_phis(self_name: String, ix: TcoIndex, worklist: List String,
                   visited: Set, acc: List (String, List String, String, String)) -> List (String, List String, String, String) =
   match worklist with
   | Nil -> acc
   | Cons v rest ->
       if set_member(v, visited)
-      then tco_trace_phis(self_name, all, rest, visited, acc)
+      then tco_trace_phis(self_name, ix, rest, visited, acc)
       else
-        match tco_find_phi(v, all) with
-        | Nothing -> tco_trace_phis(self_name, all, rest, set_insert(v, visited), acc)
+        match tco_find_phi(v, ix) with
+        | Nothing -> tco_trace_phis(self_name, ix, rest, set_insert(v, visited), acc)
         | Just (phi_block, incomings) ->
-            match tco_scan_incomings(self_name, all, incomings, phi_block, rest, acc) with
-            | (wl2, acc2) -> tco_trace_phis(self_name, all, wl2, set_insert(v, visited), acc2)
+            match tco_scan_incomings(self_name, ix, incomings, phi_block, rest, acc) with
+            | (wl2, acc2) -> tco_trace_phis(self_name, ix, wl2, set_insert(v, visited), acc2)
 
 # Each (val, pred) incoming: a self-call -> a hit; otherwise enqueue val (it may
 # itself be a nested phi).
-fn tco_scan_incomings(self_name: String, all: List sprout_ir.IRBlock, incomings: List (String, String),
+fn tco_scan_incomings(self_name: String, ix: TcoIndex, incomings: List (String, String),
                       phi_block: String, worklist: List String,
                       acc: List (String, List String, String, String)) ->
     (List String, List (String, List String, String, String)) =
   match incomings with
   | Nil -> (worklist, acc)
   | Cons (val, pred) rest ->
-      match tco_self_call_in_block(val, self_name, pred, all) with
-      | Just args -> tco_scan_incomings(self_name, all, rest, phi_block, worklist, Cons((pred, args, val, phi_block), acc))
-      | Nothing -> tco_scan_incomings(self_name, all, rest, phi_block, Cons(val, worklist), acc)
+      match tco_self_call_in_block(val, self_name, pred, ix) with
+      | Just args -> tco_scan_incomings(self_name, ix, rest, phi_block, worklist, Cons((pred, args, val, phi_block), acc))
+      | Nothing -> tco_scan_incomings(self_name, ix, rest, phi_block, Cons(val, worklist), acc)
 
 # Per-param slot info: (orig_name, slot_ssa, in_name=%p$<p>$in, kind).
 # in_name must go through param_ssa: tco_rename_params moves `<p>$in` into the
@@ -4417,52 +4438,57 @@ fn tco_filter_call_and_term(ops: List sprout_ir.IROp, call_result: String) -> Li
       | sprout_ir.IRRet _ -> tco_filter_call_and_term(rest, call_result)
       | _ -> Cons(op, tco_filter_call_and_term(rest, call_result))
 
-fn tco_find_hit_for_pred(lbl: String, hits: List (String, List String, String, String)) -> Maybe (List String, String) =
+# pred label -> (args, call_result) of its first hit.
+fn tco_hits_by_pred(hits: List (String, List String, String, String),
+                    acc: Dict (List String, String)) -> Dict (List String, String) =
   match hits with
-  | Nil -> Nothing
+  | Nil -> acc
   | Cons (pred, args, call_result, _phi) rest ->
-      if pred == lbl then Just((args, call_result)) else tco_find_hit_for_pred(lbl, rest)
+      tco_hits_by_pred(rest, if dict_member(pred, acc) then acc else dict_set(pred, (args, call_result), acc))
 
-fn tco_rewrite_block_if_pred(b: sprout_ir.IRBlock, hits: List (String, List String, String, String),
+fn tco_rewrite_block_if_pred(b: sprout_ir.IRBlock, by_pred: Dict (List String, String),
                              slots: List (String, String, String, sprout_ir.IRType), sp: String) -> sprout_ir.IRBlock =
-  match tco_find_hit_for_pred(tco_block_label(b), hits) with
+  match dict_get(tco_block_label(b), by_pred) with
   | Nothing -> b
   | Just (args, call_result) ->
       sprout_ir.IRBlock(tco_block_label(b),
         tco_rewrite_pred_ops(tco_block_ops(b), call_result, tco_zip_stores(slots, args), sp))
 
-# Remove (removed_val, pred) from every IRPhi's incomings in `ops`.
-fn tco_fix_phi_in_ops(ops: List sprout_ir.IROp, removed_val: String, pred: String) -> List sprout_ir.IROp =
+# Key of the phi incoming (removed_val, pred) in block phi_block.
+fn tco_phi_key(phi_block: String, removed_val: String, pred: String) -> String =
+  phi_block ++ "\n" ++ removed_val ++ "\n" ++ pred
+
+fn tco_phi_drop_keys(hits: List (String, List String, String, String), acc: Set) -> Set =
+  match hits with
+  | Nil -> acc
+  | Cons (pred, _args, call_result, phi_block) rest ->
+      tco_phi_drop_keys(rest, if phi_block == "" then acc else set_insert(tco_phi_key(phi_block, call_result, pred), acc))
+
+# Drop the dead incomings from every IRPhi of block `lbl`.
+fn tco_fix_phi_in_ops(ops: List sprout_ir.IROp, lbl: String, drop: Set) -> List sprout_ir.IROp =
   match ops with
   | Nil -> Nil
   | Cons op rest ->
       match op with
       | sprout_ir.IRPhi r ty inc ->
-          Cons(sprout_ir.IRPhi(r, ty, tco_drop_incoming(inc, removed_val, pred)), tco_fix_phi_in_ops(rest, removed_val, pred))
-      | _ -> Cons(op, tco_fix_phi_in_ops(rest, removed_val, pred))
+          Cons(sprout_ir.IRPhi(r, ty, tco_drop_incoming(inc, lbl, drop)), tco_fix_phi_in_ops(rest, lbl, drop))
+      | _ -> Cons(op, tco_fix_phi_in_ops(rest, lbl, drop))
 
-fn tco_drop_incoming(inc: List (String, String), removed_val: String, pred: String) -> List (String, String) =
+fn tco_drop_incoming(inc: List (String, String), lbl: String, drop: Set) -> List (String, String) =
   match inc with
   | Nil -> Nil
   | Cons (v, p) rest ->
-      if v == removed_val && p == pred then tco_drop_incoming(rest, removed_val, pred)
-      else Cons((v, p), tco_drop_incoming(rest, removed_val, pred))
+      if set_member(tco_phi_key(lbl, v, p), drop) then tco_drop_incoming(rest, lbl, drop)
+      else Cons((v, p), tco_drop_incoming(rest, lbl, drop))
 
-fn tco_fix_phi_block(blocks: List sprout_ir.IRBlock, phi_block: String, removed_val: String, pred: String) -> List sprout_ir.IRBlock =
+# One pass over the blocks, whatever the number of hits.
+fn tco_fix_all_phis(blocks: List sprout_ir.IRBlock, hits: List (String, List String, String, String)) -> List sprout_ir.IRBlock =
   list_map(fix_block, blocks)
 where
+  drop = tco_phi_drop_keys(hits, set_empty())
   fix_block = \ (b: sprout_ir.IRBlock) ->
-    if tco_block_label(b) == phi_block
-    then sprout_ir.IRBlock(phi_block, tco_fix_phi_in_ops(tco_block_ops(b), removed_val, pred))
-    else b
-
-fn tco_fix_all_phis(blocks: List sprout_ir.IRBlock, hits: List (String, List String, String, String)) -> List sprout_ir.IRBlock =
-  match hits with
-  | Nil -> blocks
-  | Cons (pred, _args, call_result, phi_block) rest ->
-      if phi_block == ""
-      then tco_fix_all_phis(blocks, rest)
-      else tco_fix_all_phis(tco_fix_phi_block(blocks, phi_block, call_result, pred), rest)
+    if set_size(drop) == 0 then b
+    else sprout_ir.IRBlock(tco_block_label(b), tco_fix_phi_in_ops(tco_block_ops(b), tco_block_label(b), drop))
 
 # Rename the old "entry" block to "tco_loop" and prepend the per-param reloads.
 fn tco_make_loop_blocks(blocks: List sprout_ir.IRBlock, slots: List (String, String, String, sprout_ir.IRType)) -> List sprout_ir.IRBlock =
@@ -4556,21 +4582,18 @@ fn tco_prune_dead_blocks(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlo
 # call through the join phi, but the result is also `h`'s operand, and converting
 # the call to an IRTcoBack back-edge would drop the value `h` needs (an SSA
 # use-of-undefined).  Such hits are filtered out and stay normal IRCalls.
-fn tco_tail_safe_hits(hits: List (String, List String, String, String), all: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+fn tco_tail_safe_hits(hits: List (String, List String, String, String), ix: TcoIndex) -> List (String, List String, String, String) =
   match hits with
   | Nil -> Nil
   | Cons (pred, args, call_result, phi_block) rest ->
-      if tco_call_in_tail_position(call_result, pred, all)
-      then Cons((pred, args, call_result, phi_block), tco_tail_safe_hits(rest, all))
-      else tco_tail_safe_hits(rest, all)
+      if tco_call_in_tail_position(call_result, pred, ix)
+      then Cons((pred, args, call_result, phi_block), tco_tail_safe_hits(rest, ix))
+      else tco_tail_safe_hits(rest, ix)
 
-fn tco_call_in_tail_position(call_result: String, pred: String, blocks: List sprout_ir.IRBlock) -> Bool =
-  match blocks with
-  | Nil -> false
-  | Cons b rest ->
-      if tco_block_label(b) == pred
-      then tco_ops_after_call_are_terminators(tco_block_ops(b), call_result)
-      else tco_call_in_tail_position(call_result, pred, rest)
+fn tco_call_in_tail_position(call_result: String, pred: String, ix: TcoIndex) -> Bool =
+  match dict_get(pred, ix.by_label) with
+  | Just b -> tco_ops_after_call_are_terminators(tco_block_ops(b), call_result)
+  | Nothing -> false
 
 # Find the IRCall defining call_result; true iff only terminators (IRBr/IRRet)
 # follow it in the block.
@@ -4593,12 +4616,16 @@ fn tco_only_terminators(ops: List sprout_ir.IROp) -> Bool =
       | sprout_ir.IRRet _ -> tco_only_terminators(rest)
       | _ -> false
 
+fn tco_tail_hits(name: String, blocks: List sprout_ir.IRBlock) -> List (String, List String, String, String) =
+  tco_tail_safe_hits(tco_collect(name, blocks, ix), ix)
+  where ix = tco_index(blocks)
+
 export fn tco_rewrite(f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       if ret_ty == "i64"
       then
-        match tco_tail_safe_hits(tco_collect(name, blocks, blocks), blocks) with
+        match tco_tail_hits(name, blocks) with
         | Nil -> (f, next_idx)
         | hits ->
             match tco_build_slots(params, next_idx, Nil) with
@@ -4610,7 +4637,8 @@ fn tco_assemble(name: String, params: List (String, sprout_ir.IRType), ret_ty: S
                 slots: List (String, String, String, sprout_ir.IRType), sp: String, idx2: Int) ->
     (sprout_ir.IRFunction, Int) =
   (sprout_ir.IRFunction(name, tco_rename_params(params), ret_ty, new_blocks), idx2)
-  where rewritten = tco_fix_all_phis(list_map(\b -> tco_rewrite_block_if_pred(b, hits, slots, sp), blocks), hits)
+  where by_pred = tco_hits_by_pred(hits, dict_empty())
+        rewritten = tco_fix_all_phis(list_map(\b -> tco_rewrite_block_if_pred(b, by_pred, slots, sp), blocks), hits)
         loop_blocks = tco_make_loop_blocks(rewritten, slots)
         entry_block = sprout_ir.IRBlock("entry",
                         Cons(sprout_ir.IRTcoEntry(tco_entry_slot_list(slots), sp),
@@ -4683,12 +4711,16 @@ fn mutual_op_calls(name: String, op: sprout_ir.IROp) -> Bool =
 # is a no-op, never an illegal musttail.  Each hit is tagged with its callee.
 fn mutual_collect_hits(targets: List (String, Int), blocks: List sprout_ir.IRBlock) ->
     List(String, (String, List String, String, String)) =
+  mutual_collect_hits_ix(targets, blocks, tco_index(blocks))
+
+fn mutual_collect_hits_ix(targets: List (String, Int), blocks: List sprout_ir.IRBlock, ix: TcoIndex) ->
+    List(String, (String, List String, String, String)) =
   match targets with
   | Nil -> Nil
   | Cons (g, g_arity) rest ->
       list_append(
-        mutual_tag_hits(g, g_arity, tco_tail_safe_hits(tco_collect(g, blocks, blocks), blocks)),
-        mutual_collect_hits(rest, blocks))
+        mutual_tag_hits(g, g_arity, tco_tail_safe_hits(tco_collect(g, blocks, ix), ix)),
+        mutual_collect_hits_ix(rest, blocks, ix))
 
 fn mutual_tag_hits(g: String, g_arity: Int,
                    hits: List (String, List String, String, String)) ->
@@ -4710,24 +4742,22 @@ fn mutual_untag(tagged: List (String, (String, List String, String, String))) ->
 # Rewrite a hit-predecessor block: drop the IRCall + its terminator, append the
 # IRTailCall (musttail; ret).  sp_save is "" — Phase A skips self-TCO'd fns, so
 # there is never an enclosing loop stack to restore.
-fn mutual_rewrite_block(b: sprout_ir.IRBlock,
-                        tagged: List (String, (String, List String, String, String))) ->
+fn mutual_rewrite_block(b: sprout_ir.IRBlock, by_pred: Dict (String, List String, String)) ->
     sprout_ir.IRBlock =
-  match mutual_find_hit_for_pred(tco_block_label(b), tagged) with
+  match dict_get(tco_block_label(b), by_pred) with
   | Nothing -> b
   | Just (g, args, call_result) ->
       sprout_ir.IRBlock(tco_block_label(b),
         list_append(tco_filter_call_and_term(tco_block_ops(b), call_result),
                     Cons(sprout_ir.IRTailCall(call_result, g, args, ""), Nil)))
 
-fn mutual_find_hit_for_pred(lbl: String,
-                            tagged: List (String, (String, List String, String, String))) ->
-    Maybe(String, List String, String) =
+# pred label -> (callee, args, call_result) of its first hit.
+fn mutual_hits_by_pred(tagged: List (String, (String, List String, String, String)),
+                       acc: Dict (String, List String, String)) -> Dict (String, List String, String) =
   match tagged with
-  | Nil -> Nothing
+  | Nil -> acc
   | Cons (g, (pred, args, call_result, _phi)) rest ->
-      if pred == lbl then Just((g, args, call_result))
-      else mutual_find_hit_for_pred(lbl, rest)
+      mutual_hits_by_pred(rest, if dict_member(pred, acc) then acc else dict_set(pred, (g, args, call_result), acc))
 
 # Assemble: rewrite each hit-pred block, then fix the join phis that lost an
 # incoming and prune blocks that became unreachable — identical to self-TCO's
@@ -4736,7 +4766,8 @@ fn mutual_assemble(blocks: List sprout_ir.IRBlock,
                    tagged: List (String, (String, List String, String, String))) ->
     List sprout_ir.IRBlock =
   tco_prune_dead_blocks(
-    tco_fix_all_phis(list_map(\b -> mutual_rewrite_block(b, tagged), blocks), mutual_untag(tagged)))
+    tco_fix_all_phis(list_map(\b -> mutual_rewrite_block(b, by_pred), blocks), mutual_untag(tagged)))
+  where by_pred = mutual_hits_by_pred(tagged, dict_empty())
 
 # Rewrite f's eligible mutual tail calls to IRTailCall.  No-op unless ret is i64,
 # f is not self-TCO'd, and at least one eligible tail call survives the guards.
@@ -4777,27 +4808,38 @@ export fn build_ret_i64(decls: List typed_ast.TypedDecl) -> Dict Bool =
           dict_set(name, llvm_ret_type(typed_ast.typed_expr_type(body)) == "i64", build_ret_i64(rest))
       | _ -> build_ret_i64(rest)
 
-fn mutual_graph_of(raw: List (String, (Bool, Set))) -> Dict Set =
+# fn name -> index of its strongly connected component.
+fn mutual_scc_ids(raw: List (String, (Bool, Set))) -> Dict Int =
+  scc.sccs_in_dependency_order(set_to_list(nodes), mutual_scc_graph(raw, nodes, dict_empty()))
+  |> mutual_index_sccs(_, 0, dict_empty())
+where
+  nodes = set_from_list(list_map(mutual_raw_name, raw))
+
+fn mutual_raw_name(entry: (String, (Bool, Set))) -> String =
+  match entry with | (name, _) -> name
+
+# The call graph restricted to the fns in `raw`: scc takes no edges to outside names.
+# A name listed twice keeps its first entry.
+fn mutual_scc_graph(raw: List (String, (Bool, Set)), nodes: Set, acc: Dict Set) -> Dict Set =
   match raw with
-  | Nil -> dict_empty()
-  | Cons (name, (_gc, callees)) rest -> dict_set(name, callees, mutual_graph_of(rest))
+  | Nil -> acc
+  | Cons (name, (_gc, callees)) rest ->
+      if dict_member(name, acc) then mutual_scc_graph(rest, nodes, acc)
+      else mutual_scc_graph(rest, nodes,
+        dict_set(name, set_from_list(list_filter(set_member(_, nodes), set_to_list(callees))), acc))
 
-fn mutual_neighbors(n: String, graph: Dict Set) -> List String =
-  match dict_get(n, graph) with
-  | Just s -> set_to_list(s)
-  | Nothing -> Nil
+fn mutual_index_sccs(sccs: List (List String), i: Int, acc: Dict Int) -> Dict Int =
+  match sccs with
+  | Nil -> acc
+  | Cons members rest -> mutual_index_sccs(rest, i + 1, mutual_index_members(members, i, acc))
 
-# Does `start` reach `target` over the call graph?  Visited-guarded DFS worklist.
-fn mutual_reaches(start: String, target: String, graph: Dict Set) -> Bool =
-  mutual_reaches_loop(Cons(start, Nil), target, graph, set_empty())
+fn mutual_index_members(members: List String, i: Int, acc: Dict Int) -> Dict Int =
+  match members with
+  | Nil -> acc
+  | Cons m rest -> mutual_index_members(rest, i, dict_set(m, i, acc))
 
-fn mutual_reaches_loop(work: List String, target: String, graph: Dict Set, seen: Set) -> Bool =
-  match work with
-  | Nil -> false
-  | Cons n rest ->
-      if n == target then true
-      else if set_member(n, seen) then mutual_reaches_loop(rest, target, graph, seen)
-      else mutual_reaches_loop(list_append(mutual_neighbors(n, graph), rest), target, graph, set_insert(n, seen))
+fn mutual_scc_of(name: String, ids: Dict Int) -> Int =
+  match dict_get(name, ids) with | Just i -> i | Nothing -> -1
 
 fn mutual_arity_of(name: String, arities: Dict FnInfo) -> Int =
   match dict_get(name, arities) with | Just info -> info.arity | Nothing -> -1
@@ -4807,31 +4849,32 @@ fn mutual_ret_i64_of(name: String, ret_i64: Dict Bool) -> Bool =
 
 export fn mutual_build_eligible(raw: List (String, (Bool, Set)), arities: Dict FnInfo, ret_i64: Dict Bool) ->
     Dict(List (String, Int)) =
-  mutual_eligible_loop(raw, mutual_graph_of(raw), arities, ret_i64, dict_empty())
+  mutual_eligible_loop(raw, mutual_scc_ids(raw), arities, ret_i64, dict_empty())
 
-fn mutual_eligible_loop(raw: List (String, (Bool, Set)), graph: Dict Set, arities: Dict FnInfo,
+fn mutual_eligible_loop(raw: List (String, (Bool, Set)), ids: Dict Int, arities: Dict FnInfo,
                         ret_i64: Dict Bool, acc: Dict (List (String, Int))) -> Dict (List (String, Int)) =
   match raw with
   | Nil -> acc
   | Cons (name, (_gc, callees)) rest ->
-      mutual_eligible_loop(rest, graph, arities, ret_i64,
-        dict_set(name, mutual_targets_for(name, set_to_list(callees), graph, arities, ret_i64), acc))
+      mutual_eligible_loop(rest, ids, arities, ret_i64,
+        dict_set(name, mutual_targets_for(name, set_to_list(callees), ids, arities, ret_i64), acc))
 
-fn mutual_targets_for(f: String, callees: List String, graph: Dict Set, arities: Dict FnInfo,
+fn mutual_targets_for(f: String, callees: List String, ids: Dict Int, arities: Dict FnInfo,
                       ret_i64: Dict Bool) -> List (String, Int) =
   if mutual_ret_i64_of(f, ret_i64) && mutual_arity_of(f, arities) >= 0
-  then mutual_filter_targets(callees, f, mutual_arity_of(f, arities), graph, arities, ret_i64)
+  then mutual_filter_targets(callees, f, mutual_arity_of(f, arities), ids, arities, ret_i64)
   else Nil
 
-fn mutual_filter_targets(callees: List String, f: String, f_arity: Int, graph: Dict Set,
+# An edge f->g lies on a cycle exactly when g is in f's component.
+fn mutual_filter_targets(callees: List String, f: String, f_arity: Int, ids: Dict Int,
                          arities: Dict FnInfo, ret_i64: Dict Bool) -> List (String, Int) =
   match callees with
   | Nil -> Nil
   | Cons g rest ->
       if ! (g == f) && mutual_ret_i64_of(g, ret_i64) && mutual_arity_of(g, arities) == f_arity
-         && mutual_reaches(g, f, graph)
-      then Cons((g, f_arity), mutual_filter_targets(rest, f, f_arity, graph, arities, ret_i64))
-      else mutual_filter_targets(rest, f, f_arity, graph, arities, ret_i64)
+         && mutual_scc_of(g, ids) == mutual_scc_of(f, ids) && mutual_scc_of(f, ids) >= 0
+      then Cons((g, f_arity), mutual_filter_targets(rest, f, f_arity, ids, arities, ret_i64))
+      else mutual_filter_targets(rest, f, f_arity, ids, arities, ret_i64)
 
 # Look up a fn's eligible targets (empty if absent, e.g. lifted lambdas/workers).
 export fn mutual_eligible_for(name: String, eligible: Dict (List (String, Int))) -> List (String, Int) =
@@ -6388,24 +6431,37 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
           worker_ret_ty(body), blocks),
         next_idx, list_reverse(lifted)))
 
-# Look up the (params, body, result-ADT-ctors) for a matched worker callee.
-# Skips entry `main`, lets, and ctors (they are never routed to a worker).
-fn worker_source_for(name: String, decls: List typed_ast.TypedDecl,
-                     adt_index: Dict (List (Int, Int))) ->
-    Maybe(List ast.Param, typed_ast.TypedExpr, List (Int, Int)) =
+# Fn and extern decls by name, first declaration wins. Entry `main` is left out:
+# it is never routed to a worker. Built once; worker_source_for reads it per name.
+export fn build_worker_decls(decls: List typed_ast.TypedDecl) -> Dict typed_ast.TypedDecl =
+  build_worker_decls_go(decls, dict_empty())
+
+fn build_worker_decls_go(decls: List typed_ast.TypedDecl, acc: Dict typed_ast.TypedDecl) ->
+    Dict typed_ast.TypedDecl =
   match decls with
-  | Nil -> Nothing
+  | Nil -> acc
   | Cons d rest ->
       match d with
-      | typed_ast.TFnDecl fname fparams _ _ _ fbody ->
-          if fname == name && ! is_entry_fn_name (name)
-          then Just((fparams, fbody, adt_ctors_of_type(typed_ast.typed_expr_type(fbody), adt_index)))
-          else worker_source_for(name, rest, adt_index)
-      | typed_ast.TExternFnDecl ename eparams eret _ ->
-          if ename == name
-          then Just((eparams, synth_extern_body(name, eparams), adt_ctors_of_typeexpr(eret, adt_index)))
-          else worker_source_for(name, rest, adt_index)
-      | _ -> worker_source_for(name, rest, adt_index)
+      | typed_ast.TFnDecl fname _ _ _ _ _ ->
+          build_worker_decls_go(rest, if dict_member(fname, acc) || is_entry_fn_name(fname) then acc else dict_set(fname, d, acc))
+      | typed_ast.TExternFnDecl ename _ _ _ ->
+          build_worker_decls_go(rest, if dict_member(ename, acc) then acc else dict_set(ename, d, acc))
+      | _ -> build_worker_decls_go(rest, acc)
+
+# Look up the (params, body, result-ADT-ctors) for a matched worker callee.
+# Skips entry `main`, lets, and ctors (they are never routed to a worker).
+fn worker_source_for(name: String, worker_decls: Dict typed_ast.TypedDecl,
+                     adt_index: Dict (List (Int, Int))) ->
+    Maybe(List ast.Param, typed_ast.TypedExpr, List (Int, Int)) =
+  match dict_get(name, worker_decls) with
+  | Nothing -> Nothing
+  | Just d ->
+      match d with
+      | typed_ast.TFnDecl _ fparams _ _ _ fbody ->
+          Just((fparams, fbody, adt_ctors_of_type(typed_ast.typed_expr_type(fbody), adt_index)))
+      | typed_ast.TExternFnDecl _ eparams eret _ ->
+          Just((eparams, synth_extern_body(name, eparams), adt_ctors_of_typeexpr(eret, adt_index)))
+      | _ -> Nothing
 
 # A synthetic `name(p0, p1, …)` used as an extern shim's body: the catch-all
 # translates it to a boxed `call @name(…)` and repacks the result.
@@ -6430,7 +6486,7 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
 # Nothing when `name` is not a top-level fn/extern (a let/ctor over-collected by
 # the shadow-free scan).  Exported: the active streaming pipeline (ir_pipeline)
 # calls this per-name so each worker is rooted+lowered like any other fn.
-export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl, penv: ProgEnv,
+export fn emit_worker_for(name: String, worker_decls: Dict typed_ast.TypedDecl, penv: ProgEnv,
                           adt_index: Dict (List (Int, Int)), worker_set: Set) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   # Guard: `@<name>_worker` shares the LLVM symbol namespace with user fns.  If a
@@ -6440,7 +6496,7 @@ export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl, penv: P
   if set_member(name ++ "_worker", penv.top_level)
   then Err("ast_to_ir: CPR worker name '" ++ name ++ "_worker' collides with an existing top-level definition")
   else
-  match worker_source_for(name, decls, adt_index) with
+  match worker_source_for(name, worker_decls, adt_index) with
   | Nothing -> Ok(Nothing)
   | Just (params, body, radt) ->
       do
@@ -6452,11 +6508,11 @@ export fn emit_worker_for(name: String, decls: List typed_ast.TypedDecl, penv: P
 fn tier2_augment_fns(decls: List typed_ast.TypedDecl, penv: ProgEnv,
                      fns0: List sprout_ir.IRFunction, idx_map0: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
-  emit_all_workers(set_to_list(wset), wset, decls, penv,
+  emit_all_workers(set_to_list(wset), wset, build_worker_decls(decls), penv,
                    build_adt_ctor_index(decls, penv.ctors), fns0, idx_map0)
   where wset = collect_worker_callees(decls, penv)
 
-fn emit_all_workers(names: List String, worker_set: Set, decls: List typed_ast.TypedDecl,
+fn emit_all_workers(names: List String, worker_set: Set, worker_decls: Dict typed_ast.TypedDecl,
                     penv: ProgEnv, adt_index: Dict (List (Int, Int)),
                     acc_fns: List sprout_ir.IRFunction, acc_idx: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
@@ -6464,10 +6520,10 @@ fn emit_all_workers(names: List String, worker_set: Set, decls: List typed_ast.T
   | Nil -> Ok((acc_fns, acc_idx))
   | Cons name rest ->
       do
-        maybe_w <- emit_worker_for(name, decls, penv, adt_index, worker_set)
+        maybe_w <- emit_worker_for(name, worker_decls, penv, adt_index, worker_set)
         match maybe_w with
-        | Nothing -> emit_all_workers(rest, worker_set, decls, penv, adt_index, acc_fns, acc_idx)
+        | Nothing -> emit_all_workers(rest, worker_set, worker_decls, penv, adt_index, acc_fns, acc_idx)
         | Just (wfn, wnext, wlifted) ->
-            emit_all_workers(rest, worker_set, decls, penv, adt_index,
+            emit_all_workers(rest, worker_set, worker_decls, penv, adt_index,
                              Cons(wfn, list_append(wlifted, acc_fns)),
                              dict_set(name ++ "_worker", wnext, acc_idx))
