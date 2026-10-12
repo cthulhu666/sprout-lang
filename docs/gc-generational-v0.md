@@ -321,7 +321,7 @@ primitive)". Enumerated:
   `runtime/sprout_scheduler.c`). They are rooted by address (`/* rooted via
   &r->chan_pending */`) and `sprout_gc_collect` scans every registered per-task root
   context, so a minor collection visits them regardless of generation.
-- **Persistent, so no barrier:** `vector_set`, `map_set`, `native_set_insert` and the
+- **Persistent, so no barrier:** `vector_set`, `map_set` (which backs `Set` too) and the
   string `Builder` path all return new objects rather than writing into existing ones.
 
 ## 8. Recommendation

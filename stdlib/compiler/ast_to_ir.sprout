@@ -2287,7 +2287,6 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 # (translate_match_arms/…), so boxed matches are byte-identical to before.
 
 # Maybe-returning externs with a runtime `<name>_unboxed` (SproutUnboxed2) variant.
-# Width-3 (native_set_to_list) is excluded — different sret ABI, not Tier 1.
 #
 # NO name here can trigger a collection or return a GC-managed object.  That is a
 # load-bearing property, not a coincidence: it is what lets the runtime's CPR block

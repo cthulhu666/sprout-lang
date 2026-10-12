@@ -68,13 +68,9 @@ declare i64 @map_get(i64, i64)
 declare i64 @map_set(i64, i64, i64)
 declare i64 @map_remove(i64, i64)
 declare i64 @map_size(i64)
+declare i64 @map_keys(i64)
 declare i64 @map_nth_key(i64, i64)
 declare i64 @map_nth_value(i64, i64)
-declare i64 @native_set_empty()
-declare i64 @native_set_insert(i64, i64)
-declare i64 @native_set_member(i64, i64)
-declare i64 @native_set_to_list(i64)
-declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
@@ -115,7 +111,7 @@ declare i64 @term_read_avail(i64, i64)
 @.str.22 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.23 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 9: \00" }
 @.str.24 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@.str.25 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1309, column 26)\00" }
+@.str.25 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1310, column 26)\00" }
 @.str.26 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
 @.str.27 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"Just(\00" }
 @.str.28 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }

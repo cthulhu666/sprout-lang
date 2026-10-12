@@ -68,13 +68,9 @@ declare i64 @map_get(i64, i64)
 declare i64 @map_set(i64, i64, i64)
 declare i64 @map_remove(i64, i64)
 declare i64 @map_size(i64)
+declare i64 @map_keys(i64)
 declare i64 @map_nth_key(i64, i64)
 declare i64 @map_nth_value(i64, i64)
-declare i64 @native_set_empty()
-declare i64 @native_set_insert(i64, i64)
-declare i64 @native_set_member(i64, i64)
-declare i64 @native_set_to_list(i64)
-declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
@@ -122,13 +118,13 @@ declare i64 @fs_rename(i64, i64)
 @.str.12 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 496, column 49)\00" }
 @.str.13 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 546, column 30)\00" }
 @.str.14 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 585, column 55)\00" }
-@.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1904, column 10)\00" }
+@.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1905, column 10)\00" }
 @.str.16 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.17 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1909, column 39)\00" }
-@.str.18 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1931, column 33)\00" }
-@.str.19 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1931, column 43)\00" }
-@.str.20 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1931, column 49)\00" }
-@.str.21 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1939, column 58)\00" }
+@.str.17 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1910, column 39)\00" }
+@.str.18 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1932, column 33)\00" }
+@.str.19 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1932, column 43)\00" }
+@.str.20 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1932, column 49)\00" }
+@.str.21 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1940, column 58)\00" }
 @.str.22 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
 @.str.23 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.24 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 104, column 38)\00" }
@@ -148,7 +144,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.38 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.39 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.40 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"read_file: \00" }
-@.str.41 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1309, column 26)\00" }
+@.str.41 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1310, column 26)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"

@@ -1,6 +1,6 @@
 no_prelude
 
-# The floor stops at scalars. `vector_*`, `map_*`, `native_set_*` and `ref_*` are
+# The floor stops at scalars. `vector_*`, `map_*` and `ref_*` are
 # runtime backing stores, and a data structure is what a standard library is for
 # (docs/no-prelude-core-v0.md §4.1).
 #

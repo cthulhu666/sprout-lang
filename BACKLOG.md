@@ -370,12 +370,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   live range holds more GC roots across more triggers. CSE (the sibling pass) was measured and
   declined: its sites were real but ran a handful of times each. Gate this on an A/B of a
   hand-applied hoist, not on a count of invariant parameters. `docs/opt-passes-v0.md` §M2.
-- [ ] `P3` **The width-3 `sret` extern ABI is documented but no longer exists.** The sret call
-  path lived in `codegen.sprout`, deleted with the direct backend (`5f29b9da`, 2026-07-12);
-  `ir_lowering` declares only width-2 `_unboxed` externs. Nothing calls
-  `native_set_to_list_unboxed` in `runtime/sprout_runtime.c`, yet `docs/compiler-internals.md`
-  §CPR extern ABI and the status note of `docs/unboxed-adt-returns-v1-draft.md` describe the path
-  as live. Delete the function and correct both docs.
 
 **GC and runtime**
 
@@ -845,9 +839,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Document true complexity inline or fix to linear.
   Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
   `list_builder_*` fixes the list-append half: O(1) per add, one reverse at the end.
-  Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
-  available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
-  O(n) allocations instead of O(log n), and it needs a `native_set_remove` extern, so ASK FIRST.
+- [ ] `P3` **`Dict` and `Set` box their map, so every update allocates a wrapper.** Both are
+  one-constructor `type`s over the runtime `Map` (`prelude.sprout`), so `dict_set`, `set_insert`
+  and `set_remove` each allocate a 12-byte box (`sprout_alloc_obj(12, 1)`) around the new tree,
+  and every read unwraps one. `wrap Dict v = Map v` and `wrap Set = Map Unit` would make them the
+  tree itself (`ListBuilder` is already a `wrap`). Measure on a self-compile before and after.
 
 - [ ] `P2` **A `Dict` key is interned permanently, so computed keys leak for the process's life.**
   `map_set` routes every key through `intern_string`, which mallocs outside the arena and never

@@ -1784,8 +1784,7 @@ void sprout_roots_free(SproutRoots* r) {
 /* CPR unboxed return types: returned in registers by _unboxed extern variants.
  * The caller (codegen) extracts tag + fields via LLVM extractvalue and never
  * heap-allocates the ADT wrapper when the result is immediately pattern-matched. */
-typedef struct { int64_t tag; int64_t f0; }             SproutUnboxed2;
-typedef struct { int64_t tag; int64_t f0; int64_t f1; } SproutUnboxed3;
+typedef struct { int64_t tag; int64_t f0; } SproutUnboxed2;
 
 #define SPROUT_HANDLE_TABLE_SIZE 1024
 typedef int32_t SproutHandle;
@@ -9247,56 +9246,15 @@ long long map_nth_value(long long map_h, long long index) {
   return out;
 }
 
-/* ── NativeSet ─────────────────────────────────────────────────────────────
-   Backed by the persistent BST with value=0 (dummy). Keys are interned.
-   SPROUT_HEAP_MAP nodes; GC sees value/left/right as children.
-*/
-
-long long native_set_empty(void) {
-  return 0; /* empty BST */
-}
-
-long long native_set_insert(long long item_val, long long set_h) {
-  const char* item = (const char*)item_val;
-  if (item == NULL) sprout_fail("native_set_insert: null item");
-  const char* ikey = intern_string(item);
-  long long rs = set_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rs);
-  if (bst_get(rs, ikey) != LLONG_MIN) { /* already present */
-    SPROUT_GC_POP_LOCALS(1);
-    return rs;
-  }
-  long long result = bst_insert_node(rs, ikey, 0LL);
-  SPROUT_GC_POP_LOCALS(1);
-  return result;
-}
-
-long long native_set_member(long long item_val, long long set_h) {
-  const char* item = (const char*)item_val;
-  if (item == NULL) return 0;
-  return bst_get(set_h, item) != LLONG_MIN ? 1 : 0;
-}
-
-long long native_set_to_list(long long set_h) {
-  long long rs = set_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rs);
+/* The keys in order, as a List String: one in-order walk, O(n). `Set` is a
+   `Map Unit` (prelude), so this is also its `set_to_list`. */
+long long map_keys(long long map_h) {
+  long long rm = map_h;
+  SPROUT_GC_PUSH_I64_LOCAL(rm);
   long long list_nil = sprout_make0(find_ctor_tag_by_name("Nil"));
-  long long result = bst_to_list_acc(rs, list_nil);
+  long long result = bst_to_list_acc(rm, list_nil);
   SPROUT_GC_POP_LOCALS(1);
   return result;
-}
-
-SproutUnboxed3 native_set_to_list_unboxed(long long set_h) {
-  long long list = native_set_to_list(set_h);
-  long long tag = sprout_tag(list);
-  long long nil_tag = find_ctor_tag_by_name("Nil");
-  if (tag == nil_tag)
-    return (SproutUnboxed3){ tag, 0, 0 };
-  return (SproutUnboxed3){ tag, sprout_field(list, 0), sprout_field(list, 1) };
-}
-
-long long native_set_size(long long set_h) {
-  return (long long)bst_size(set_h);
 }
 
 long long bytes_empty(void) {

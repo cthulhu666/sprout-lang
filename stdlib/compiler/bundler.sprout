@@ -2034,10 +2034,10 @@ fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
 # roster is the second source of truth this whole change exists to avoid.
 #
 # WHY SCALARS AND NOT `undeclared_type_names` (just below). That list — the builtin
-# type constants — also carries `Vector`, `Map`, `NativeSet`, `Ref`, `Bytes`,
+# type constants — also carries `Vector`, `Map`, `Ref`, `Bytes`,
 # `Builder`, which are runtime backing stores the prelude does NOT declare. Using
-# it here is a one-word change and would widen the floor from 15 externs to ~31,
-# admitting the `vector_*` / `map_* `/ `native_set_*` / `ref_*` families. It is a
+# it here is a one-word change and would widen the floor from 15 externs to ~27,
+# admitting the `vector_*` / `map_*` / `ref_*` families. It is a
 # coherent alternative and costs no extra code — see docs/no-prelude-core-v0.md
 # §4.3. The narrower cut was chosen because those families are data structures,
 # which is what a standard library is for, and because a smaller floor is a
@@ -2048,7 +2048,7 @@ let floor_type_names: List String =
 # Names that are legitimately used in a type position with no declaration to
 # find. The first row is the language's primitives; the second is opaque
 # C-runtime types that back stdlib declarations (`Vector` for Vec/MutVec, `Map`
-# for Dict, `NativeSet` for Set, `Ref` for a mutable cell, `Builder` for the
+# for Dict and Set, `Ref` for a mutable cell, `Builder` for the
 # bytes builder in stdlib/bytes.sprout).
 #
 # The list is derived from the `extern fn` signatures in `stdlib/`, not guessed:
@@ -2058,7 +2058,7 @@ let floor_type_names: List String =
 # the pre-existing type-validation pass in infer does not cover.
 let undeclared_type_names: List String =
   ["Int", "Double", "Bool", "String", "Char", "Unit", "Bytes",
-   "Vector", "Map", "NativeSet", "Ref", "Builder"]
+   "Vector", "Map", "Ref", "Builder"]
 
 
 # Deliberately NOT unresolved_in_type: that helper admits every name in

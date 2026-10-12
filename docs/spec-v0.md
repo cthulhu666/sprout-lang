@@ -354,7 +354,7 @@ str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
 
 Nothing else the prelude declares is in scope. Naming any other prelude name —
 a function, a type, a class, or an off-floor extern such as `argv_get`,
-`vector_*`, `map_*`, `native_set_*` or `ref_*` — is an `Unknown variable` error
+`vector_*`, `map_*` or `ref_*` — is an `Unknown variable` error
 from the typechecker, reported with a source position.
 
 The floor carries no types, classes or instances, which is precisely what leaves
@@ -1094,7 +1094,7 @@ and is not one. So it is a compile error when a type has **exactly one**
 constructor, that constructor's name differs from the type's own, and the name
 resolves to a type in that module:
 
-- written bare: a primitive type, a runtime type (`Vector`, `Map`, `NativeSet`,
+- written bare: a primitive type, a runtime type (`Vector`, `Map`,
   `Ref`, `Builder`), a prelude type, a type of the same module, or one imported
   by name — unless a class the module declares or imports has that name, which
   hides the primitive, runtime or prelude type;

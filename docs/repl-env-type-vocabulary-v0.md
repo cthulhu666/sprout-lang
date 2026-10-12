@@ -52,7 +52,7 @@ ok
 
    `collect_declared_type_names` (`infer.sprout:4798`) walks **only the module's own decls**, seeded
    with a hardcoded primitive list (`infer.sprout:4791-4795`): `Int Double Bool String Char Unit
-   Bytes IntRange` plus the C-runtime opaques `Vector Map NativeSet Ref`. `Result`, `Maybe`, `Vec`,
+   Bytes IntRange` plus the C-runtime opaques `Vector Map Ref`. `Result`, `Maybe`, `Vec`,
    `Dict` and `MutVec` are none of those — they are ordinary declarations in `stdlib/prelude.sprout`
    (lines 36, 4, 58, 61).
 

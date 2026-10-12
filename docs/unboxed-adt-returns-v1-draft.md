@@ -1,10 +1,11 @@
 # CPR (Constructed Product Result) Unboxing — V1 Implementation Notes
 
-> **Status (2026-06-03): shipped + width=3 sret ABI follow-up landed.** CPR
-> v1 (extern unboxed variants) and v2 (worker/wrapper for non-recursive
-> user-defined functions) merged from `perf/cpr-unboxing` in May 2026.
-> Width=3 unboxed externs were migrated to the sret ABI on 2026-06-03
-> (see `git log -- stdlib/compiler/codegen.sprout`). The "draft" suffix is
+> **Status: shipped.** CPR v1 (extern unboxed variants) and v2
+> (worker/wrapper for non-recursive user-defined functions) merged from
+> `perf/cpr-unboxing` in May 2026. No width=3 unboxed extern exists, and
+> neither does the sret path one would need: it lived in `codegen.sprout`,
+> deleted with the direct backend (`5f29b9da`). See
+> `docs/compiler-internals.md` §CPR extern ABI. The "draft" suffix is
 > retained because the file name is referenced from BACKLOG.md; it is not
 > a current design proposal.
 
@@ -49,8 +50,8 @@ Allowlisted 12 functions (all have C `_unboxed` implementations):
 > membership now lives in `ast_to_ir.unboxed_maybe_extern_name` and is **8**:
 > `vector_get`, `map_get`, `map_nth_key`, `map_nth_value`, `bytes_get`,
 > `str_char_at`, `argv_get`, `env_get`. The four that left, so the arithmetic is
-> checkable: `native_set_to_list` moved to the width-3 sret ABI (per the status
-> note above, so not Tier 1); `str_char_at_byte` went with
+> checkable: `native_set_to_list` is gone (`Set` is a `Map Unit`, listed by
+> `map_keys`), and the width-3 sret path it needed went with the direct backend; `str_char_at_byte` went with
 > `str_char_width_at_byte`, replaced by the total `decode_char_at` over `Bytes` in
 > `stdlib.compiler.source` (review F3); and `regex_find_range` was
 > renamed `regex_find_match` and then removed along with `term_read_line` on

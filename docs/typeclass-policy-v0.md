@@ -94,7 +94,7 @@ question #1 is exactly it. A primitive type has no declaring module, so "the typ
 never be satisfied for one, and every `instance PreludeClass Primitive` outside the prelude is an
 orphan by construction. The same holds for two further ownerless groups the census turned up:
 **tuple heads** (16 instances, 12 of them in the prelude) and the `c_runtime_type_names` set
-(`Vector`, `Map`, `NativeSet`, `Ref` — `infer.sprout` `c_runtime_type_names`).
+(`Vector`, `Map`, `Ref` — `infer.sprout` `c_runtime_type_names`).
 
 **A hole in the rule as stated, found while reviewing this doc.** An alias-headed instance is
 accepted today and silently never selected: `type alias Name = String` with `instance Label Name`
@@ -202,7 +202,7 @@ also what would close the record-opacity bypass above.
 
 **Open question #1 — who owns an ownerless type?** Three groups have no declaring module, so the
 "type is local" clause is unsatisfiable for them: primitives (`Bytes`, `Int`, `String`, …), tuple
-heads, and the `c_runtime_type_names` set (`Vector`, `Map`, `NativeSet`, `Ref`). Three options:
+heads, and the `c_runtime_type_names` set (`Vector`, `Map`, `Ref`). Three options:
 
 - **(a) Primitives are owned by the prelude.** Clean rule, no carve-out. Forces `instance Eq Bytes`
   into `prelude.sprout`, which contradicts the stated reason it is not there (no bytes externs in
