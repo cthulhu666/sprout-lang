@@ -138,9 +138,51 @@ fn make_non_tail_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%m"), Nil))),
     Nil)))))
 
+# A wide dispatcher: arms 0..5 each call main.wide and branch to one join phi;
+# arm 2 uses its result after the call (not a tail call), arm 6 is the base.
+fn wide_arm(i: Int) -> sprout_ir.IRBlock =
+  sprout_ir.IRBlock("arm_" ++ int_to_string(i),
+    Cons(sprout_ir.IRConst("%x_" ++ int_to_string(i), i),
+    Cons(sprout_ir.IRCall("%r_" ++ int_to_string(i), sprout_ir.IRTScalar, "main.wide",
+           Cons("%x_" ++ int_to_string(i), Nil)),
+    if i == 2
+    then Cons(sprout_ir.IRIAdd("%w", "%r_2", "%r_2"), Cons(sprout_ir.IRBr("join"), Nil))
+    else Cons(sprout_ir.IRBr("join"), Nil))))
+
+fn wide_incoming(i: Int) -> (String, String) =
+  ("%r_" ++ int_to_string(i), "arm_" ++ int_to_string(i))
+
+fn make_wide_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.wide",
+    Cons(("n", sprout_ir.IRTScalar), Nil),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%c", 1), Cons(sprout_ir.IRCondBr("%c", "arm_0", "base"), Nil))),
+    list_append(list_map(wide_arm, [0, 1, 2, 3, 4, 5]),
+    Cons(sprout_ir.IRBlock("base",
+      Cons(sprout_ir.IRConst("%b", 10), Cons(sprout_ir.IRBr("join"), Nil))),
+    Cons(sprout_ir.IRBlock("join",
+      Cons(sprout_ir.IRPhi("%m", "i64",
+             list_append(list_map(wide_incoming, [0, 1, 2, 3, 4, 5]), Cons(("%b", "base"), Nil))),
+      Cons(sprout_ir.IRRet("%m"), Nil))),
+    Nil)))))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    match ast_to_ir.tco_rewrite(make_wide_fn(), 600) with
+    | (wide, _niw) ->
+        do
+          let wir = ir_lowering.lower_fn_with_table(wide, dict_empty())
+          # Five back-edges plus the entry block's jump into the loop.
+          assert_true(state, "wide: five tail arms become back-edges",
+            list_length(string.split(wir, "br label %tco_loop")) == 7)
+          assert_true(state, "wide: the non-tail arm keeps its call",
+            list_length(string.split(wir, "call i64 @main.wide")) == 2)
+          assert_true(state, "wide: tail arms drop their phi incoming",
+            string.contains(wir, "[%r_0, %arm_0]") == false && string.contains(wir, "[%r_5, %arm_5]") == false)
+          assert_true(state, "wide: non-tail and base incomings stay",
+            string.contains(wir, "[%r_2, %arm_2]") && string.contains(wir, "[%b, %base]"))
     match ast_to_ir.tco_rewrite(make_no_self_call_fn(), 500) with
     | (unchanged, _ni5) ->
         do
