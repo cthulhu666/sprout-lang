@@ -169,13 +169,12 @@ fn is_tab(ch: Char) -> Bool =
 export fn is_ascii_whitespace(ch: Char) -> Bool =
   is_space(ch) || is_tab(ch) || is_newline(ch) || is_carriage_return(ch)
 
+# Range compares, since the lexer asks these of every identifier and number char.
 fn is_ascii_digit_char(ch: Char) -> Bool =
-  match digit_value(ch) with | Just _ -> true | Nothing -> false
+  ch >= '0' && ch <= '9'
 
 fn is_ascii_alpha_char(ch: Char) -> Bool =
-  match find("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", string_from_char(ch)) with
-  | Just _ -> true
-  | Nothing -> false
+  is_ascii_lower(ch) || (ch >= 'A' && ch <= 'Z')
 
 export fn is_ascii_digit(ch: Char) -> Bool =
   is_ascii_digit_char(ch)
@@ -186,9 +185,7 @@ export fn is_ascii_alpha(ch: Char) -> Bool =
 # Case-sensitive, which `is_ascii_alpha` cannot express. For callers that
 # classify BY case — a name that must begin lowercase to mean what it says.
 export fn is_ascii_lower(ch: Char) -> Bool =
-  match find("abcdefghijklmnopqrstuvwxyz", string_from_char(ch)) with
-  | Just _ -> true
-  | Nothing -> false
+  ch >= 'a' && ch <= 'z'
 
 export fn is_ascii_alnum(ch: Char) -> Bool =
   is_ascii_alpha_char(ch) || is_ascii_digit_char(ch)
@@ -200,8 +197,8 @@ export fn is_ident_continue(ch: Char) -> Bool =
   is_ident_start(ch) || is_ascii_digit_char(ch)
 
 # Radix digits, for `0x` / `0b` integer literals. The index of the character in
-# the digit string IS its value — the same trick as digit_value below. Both cases
-# are accepted, so `0xFF` and `0xff` agree.
+# the digit string IS its value. Both cases are accepted, so `0xFF` and `0xff`
+# agree.
 #
 # Binary digits deliberately have no separate value function: they are a subset of
 # hex, so a caller decoding base 2 uses hex_digit_value and rejects any value >= 2.
@@ -212,7 +209,7 @@ export fn hex_digit_value(ch: Char) -> Maybe Int =
   | Nothing -> find("0123456789ABCDEF", string_from_char(ch))
 
 export fn is_hex_digit(ch: Char) -> Bool =
-  match hex_digit_value(ch) with | Just _ -> true | Nothing -> false
+  is_ascii_digit_char(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 
 export fn is_binary_digit(ch: Char) -> Bool =
   ch == '0' || ch == '1'
@@ -387,9 +384,6 @@ fn finalize_lines(xs: List String) -> List String =
 # ~650 KB input grind for many seconds.)
 export fn string_lines(raw: String) -> Vec String =
   vec_from_list(finalize_lines(str_split_lines(raw)))
-
-fn digit_value(ch: Char) -> Maybe Int =
-  find("0123456789", string_from_char(ch))
 
 fn digits_loop(b: Bytes, i: Int, n: Int, acc: List Int) -> List Int =
   if i >= n then acc

@@ -1,0 +1,29 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string as string
+
+# The ASCII class tests at their range edges: each probe string holds the chars
+# on both sides of every range, plus a non-ASCII letter.
+let probe: String = "/09:@AZ[`az{_é"
+
+fn kept(pred: Char -> Bool) -> String =
+  string_concat_many(list_map(string.string_from_char, list_filter(pred, vec_to_list(string.string_chars(probe)))))
+
+fn hex_value(ch: Char) -> String =
+  match string.hex_digit_value(ch) with
+  | Just v -> int_to_string(v)
+  | Nothing -> "-"
+
+fn hex_values(s: String) -> String =
+  string.join(" ", list_map(hex_value, vec_to_list(string.string_chars(s))))
+
+fn main() -> Unit !{IO} =
+  run_suite("string char class", [
+    check_eq("is_ascii_digit", kept(string.is_ascii_digit), "09"),
+    check_eq("is_ascii_alpha", kept(string.is_ascii_alpha), "AZaz"),
+    check_eq("is_ascii_lower", kept(string.is_ascii_lower), "az"),
+    check_eq("is_ascii_alnum", kept(string.is_ascii_alnum), "09AZaz"),
+    check_eq("is_ident_start", kept(string.is_ident_start), "AZaz_"),
+    check_eq("is_ident_continue", kept(string.is_ident_continue), "09AZaz_"),
+    check_eq("is_hex_digit", kept(string.is_hex_digit), "09Aa"),
+    check_eq("hex_digit_value", hex_values("/09:@AFG`afgé"), "- 0 9 - - 10 15 - - 10 15 - -")
+  ])

@@ -47,11 +47,7 @@ fn scan_int_end(cursor: source.SourceCursor) -> source.SourceCursor =
   source.take_while(cursor, string.is_ascii_digit)
 
 fn skip_comment(raw: String, cursor: source.SourceCursor) -> source.SourceCursor =
-  match source.next(cursor) with
-  | Just (ch, c1) ->
-      if ch == '\n' then cursor
-      else skip_comment(raw, c1)
-  | Nothing -> cursor
+  source.take_while(cursor, \ch -> ch != '\n')
 
 fn is_keyword(raw: String) -> Bool =
   raw == "export" ||
@@ -213,7 +209,7 @@ fn scan_interp_body(raw: String, cursor: source.SourceCursor, start_pos: source.
         # Nested template: emit TEMPLATE_START then recurse into scan_template_content.
         scan_nested_template(raw, cursor, start_pos, depth, toks_acc)
       else if string.is_ascii_whitespace(ch) then
-        scan_interp_body(raw, c1, start_pos, depth, toks_acc)
+        scan_interp_body(raw, source.take_while(c1, string.is_ascii_whitespace), start_pos, depth, toks_acc)
       else if ch == '#' then
         scan_interp_body(raw, skip_comment(raw, c1), start_pos, depth, toks_acc)
       else
@@ -423,7 +419,7 @@ fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: List token.Token
       if ch == '`' then
         scan_template_from(raw, cursor, acc)
       else if string.is_ascii_whitespace(ch) then
-        tokenize_from(raw, c1, acc)
+        tokenize_from(raw, source.take_while(c1, string.is_ascii_whitespace), acc)
       else if ch == '#' then
         tokenize_from(raw, skip_comment(raw, c1), acc)
       else
@@ -434,13 +430,17 @@ fn tokenize_from(raw: String, cursor: source.SourceCursor, acc: List token.Token
 # One token from the arms both loops share; `cursor` is at `ch`, `c1` just past
 # it. Each loop checks its own characters first — braces and backticks — and
 # skips whitespace and comments itself, so neither pays for a result there.
+# No operator starts with a letter, `_` or a digit, so those skip the operators.
 fn scan_token(raw: String, cursor: source.SourceCursor, ch: Char, c1: source.SourceCursor) -> Result token.TokenizeError (source.SourceCursor, token.Token) =
+  if string.is_ident_start(ch) then Ok(scan_ident_next(raw, cursor))
+  else if string.is_ascii_digit(ch) then Ok(scan_int_next(raw, cursor))
+  else scan_symbol_or_literal(raw, cursor, ch, c1)
+
+fn scan_symbol_or_literal(raw: String, cursor: source.SourceCursor, ch: Char, c1: source.SourceCursor) -> Result token.TokenizeError (source.SourceCursor, token.Token) =
   match try_multi_char_symbol(cursor) with
   | Just nxt -> Ok((nxt, emit_token(token.TokenSymbolKind, raw, cursor, nxt)))
   | Nothing ->
-      if string.is_ident_start(ch) then Ok(scan_ident_next(raw, cursor))
-      else if string.is_ascii_digit(ch) then Ok(scan_int_next(raw, cursor))
-      else if ch == '"' then scan_string_next(cursor, cursor_position(cursor))
+      if ch == '"' then scan_string_next(cursor, cursor_position(cursor))
       else if ch == '\'' then scan_char_next(cursor, cursor_position(cursor))
       else if single_symbol(ch) then Ok((c1, emit_token(token.TokenSymbolKind, raw, cursor, c1)))
       else Err(unexpected_char_error(ch, cursor))

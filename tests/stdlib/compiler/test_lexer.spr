@@ -60,6 +60,13 @@ fn tok_dump(src: String) -> String =
   | Err _ -> "lex_error"
   | Ok toks -> string_concat_many(list_map(\t -> kind_str(t) ++ ":" ++ token.token_text(t) ++ " ", vec_to_list(toks)))
 
+# Token n's position as `index:line:column`; index counts codepoints.
+fn tok_pos(src: String, n: Int) -> String =
+  let Ok toks = lexer.tokenize(src) else "lex_error"
+      Just t = vec_get(n, toks) else "missing"
+      pos = token.token_position(t)
+  in `${pos.index}:${pos.line}:${pos.column}`
+
 fn token_count(src: String) -> Int =
   match lexer.tokenize(src) with
   | Err _ -> -1
@@ -175,6 +182,17 @@ fn main() -> Unit !{IO} =
     # Comments are skipped
     check_eq("comment skipped kind", tok_kind_at("# a comment\nfoo", 0), "ident"),
     check_eq("comment skipped text", tok_text_at("# a comment\nfoo", 0), "foo"),
+
+    # Positions after each kind of run: a comment with a non-ASCII char counts it
+    # as one codepoint; whitespace runs cross tabs and newlines.
+    check_eq("position after a non-ASCII comment", tok_pos("# é c\n  foo", 0), "8:2:3"),
+    check_eq("position after a whitespace run", tok_pos("a \t\n\n  b", 1), "7:3:3"),
+    check_eq("position after an ident run", tok_pos("abc_1 x", 1), "6:1:7"),
+    check_eq("position after a non-ASCII string", tok_pos("\"é\" x", 1), "4:1:5"),
+    check_eq("eof after a trailing comment", tok_pos("x # é", 1), "5:1:6"),
+    # Operators lex after an identifier or digit run with no space between.
+    check_eq("operators right after ident and int runs", tok_dump("x==1->y"),
+      "ident:x symbol:== int:1 symbol:-> ident:y eof: "),
 
     # Error case
     check_false("at-sign is lex error", lex_ok("@")),
