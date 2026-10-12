@@ -1960,16 +1960,19 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   owned record's only consume, and relaxing the leak rule to compensate would stop an unclosed
   socket being a leak. The owned case needs a real consuming exit: a `RecordPattern`. Blocked on
   that.
-- [ ] `P3` **Resources moved into a cancelled task's closure are never released.** M4.4a's guarantee
-  is **at most once** — as are Rust's `FnOnce` and OxCaml's `once`, both verified. Rust affords
-  the weaker bound because a never-called `FnOnce` still runs `Drop`; Sprout has no destructors, so
-  leak-freedom for a moved value depends on the callee's runtime contract that the closure *does*
-  run. `with_scope` binds its body with `let` rather than `<-` precisely so `__scope_join` is
-  unconditional — except on the cancellation path, where `__scope_cancel` force-drops parked tasks
-  and a spawned task has not started yet, so its closure runs zero times and a moved-in socket is
-  never closed. A *runtime* leak on the experimental cancellation path, not a checker hole, and
-  equally true of the raw `Int` handles that preceded M4.4a. Fix belongs with cancellation-time
-  resource release (a drop hook on force-drop), not the type system; spec §5.8 states the limit.
+- [ ] `P3` **Linear values held by a force-dropped task are never released.** `__scope_cancel`
+  and a `with_timeout` expiry drop tasks parked on I/O, a sleep, a channel or `select`; a dropped
+  task never finishes, so what it holds at the park (moved in or created inside) is never closed,
+  though the program type-checks. Unstarted tasks are not dropped and run normally.
+  `test_task_cancel.spr` pins today's behaviour. Rust survives the same at-most-once bound because
+  a dropped `FnOnce` still runs `Drop`; Sprout has no destructors. A runtime leak on the
+  experimental cancellation path, not a checker hole. Fix: release-on-drop in the scheduler, not
+  the type system; spec §5.8 states the limit.
+- [ ] `P3` **`with_timeout` cannot stop a body that only yields.** `__await_deadline` sets the
+  timed-out reason and drops the body only when it is parked; a body in the run queue is
+  re-queued, so a loop on `task_yield` runs past the deadline and `task_cancelled()` never turns
+  true (1 ms timeout: 2,000,000 steps, `Completed`). Setting the reason on that path would let a
+  cooperative body see it and return. `TimedOut` is unobservable for the same reason.
 - [ ] `P2` **Mark the prelude combinators' function arguments `local`.** `local` exists
   (`docs/local-closures-v0.md`) but no prelude function declares it, so `list_each(\x ->
   write(conn, x), xs)` still cannot capture a borrowed `conn`. Covers `list_each`/`list_fold`/

@@ -503,9 +503,11 @@ TDD order (failing first, per AGENTS.md Definition of Ready):
    timer/fd ordering no test can schedule, so this is covered indirectly (see §5.2's note).
 5. **`task_status` transitions** — a body that parks between bursts observes `Running` then
    `TimedOut`; under `scope_cancel` observes `Cancelled`; a scopeless/task-0 context reports
-   `Running`.
-6. **`task_cancelled` still fires on timeout** — an L0.5-style cooperative body using only
-   `task_cancelled()` stops when its `with_timeout` deadline fires.
+   `Running`. *Not delivered for `TimedOut`:* the runtime sets it only when it drops the body,
+   so no body observes it (`test_task_status.spr` covers `Running`/`Cancelled`).
+6. ~~**`task_cancelled` still fires on timeout**~~ — *not delivered*: a body that only yields is
+   never stopped and never sees `task_cancelled()` turn true. BACKLOG *`with_timeout` cannot stop
+   a body that only yields*.
 7. **Nesting isolation** — inner `with_timeout` `Expired` does not mark an outer scope; an
    outer `scope_cancel` does not read as `TimedOut` inside an unrelated inner scope.
 8. **Nested-cancel loud-fail** (regression for the §5.5 hazard) — outer `scope_cancel` while a

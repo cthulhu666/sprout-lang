@@ -2003,16 +2003,17 @@ at-most-once. Leak-freedom for a moved value therefore also depends on the
 callee's runtime contract that the closure *does* run: for `stdlib.task` that is
 `with_scope`'s unconditional join.
 
-**Leak-freedom for moved values holds absent scope cancellation.** Cancelling a
-scope force-drops tasks that have not started, and every `with_timeout` expiry
-reaches the same path, so a value moved into such a task's closure is never
-released — while the program still type-checks as consume-exactly-once clean.
-Sprout has no destructors, so closing this requires cancellation-time resource
-release in the scheduler rather than a typing rule. Until it exists, do not move a
-linear resource into a task in a scope that may be cancelled or timed out: acquire
-it inside the task instead. For `with_timeout`, lend instead of move: its body is
-a `local` closure, so the caller keeps the value and releases it after either
-outcome.
+**Leak-freedom holds absent scope cancellation.** Cancelling a scope force-drops
+its tasks that are parked (on I/O, `task_sleep`, a channel or `select`); a task
+that has not started yet still runs. Every `with_timeout` expiry drops its body the
+same way. A dropped task never finishes its closure, so a linear value it holds at
+that park, whether moved in or created inside the task, is never released — while
+the program still type-checks as consume-exactly-once clean. Sprout has no
+destructors, so closing this requires release-on-drop in the scheduler rather than
+a typing rule. Until it exists, do not cancel a scope whose tasks hold a linear
+resource across a park, and do not let a `with_timeout` body create one it holds
+across a park. Lending is safe: a `with_timeout` body is a `local` closure, so the
+caller keeps a borrowed value and releases it after either outcome.
 
 **Deferred (rejected with a diagnostic, never silently accepted):**
 

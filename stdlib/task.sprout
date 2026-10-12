@@ -1,28 +1,16 @@
 module stdlib.task
 
-# Layer-0 structured concurrency (EXPERIMENTAL): cooperative green tasks on a
-# single OS thread. `with_scope` opens a scope, runs the body, then joins — it
-# cannot return until every task spawned into the scope has finished.
+# Structured concurrency (EXPERIMENTAL): cooperative green tasks on one OS thread.
+# `with_scope` opens a scope, runs the body, then joins: it returns only once every
+# task spawned into the scope has finished or been dropped by a cancel.
 #
-# Two ways to spawn:
-#   task_spawn — fire-and-forget (no result); the task is reclaimed when it
-#                finishes. Use for work whose completion you don't await
-#                individually (e.g. a per-connection handler in an accept loop).
-#   task_fork  — awaitable; returns a `Task a` whose value you retrieve with
-#                task_await. The result is kept alive until it is awaited.
+#   task_spawn — fire-and-forget; the task is reclaimed when it finishes.
+#   task_fork  — returns a linear `Task a`, consumed by `task_await` (its value) or
+#                `detach`. A dropped or twice-awaited handle is a compile error.
 #
-# Error handling is manual: task_await returns the task's value RAW, so a task
-# producing `Result e b` hands you `Result e b` to match on. There is no
-# cancellation yet — if one task fails, `with_scope` still waits for its
-# siblings (see docs/concurrency-layer0-io-park-design.md and the exploration
-# doc §4.A). Fail-fast cancellation is a later increment.
-#
-# Linear (Model C M4, landed): `Task a` is a `type linear` — a forked handle must
-# be consumed exactly once, by `task_await` (retrieve the value) or `detach`
-# (relinquish it; the scope reclaims a never-awaited result). Double-await and a
-# dropped handle are compile errors. See docs/linear-task-v0.md. (task_spawn stays
-# a distinct fire-and-forget primitive; collapsing it into fork+detach is a
-# deferred follow-up.)
+# task_await returns the task's value as-is: a task producing `Result e b` hands back
+# `Result e b`. A failing task does not stop its siblings; the owner calls
+# `scope_cancel` (docs/concurrency-cancellation-design-2026-07-15.md).
 
 export type Scope =
   | Scope Int
@@ -30,9 +18,9 @@ export type Scope =
 export type linear Task a =
   | Task Int
 
-# The outcome of a timed operation (L0.7). `Completed a` carries the body's result; `Expired`
-# means the deadline fired first and the body's task was cancelled. Value-based, not an
-# exception — Sprout has none (Go's ctx.Err()/Trio move_on_after family, not a throw).
+# The outcome of `with_timeout`. `Completed a` carries the body's result. `Expired` means the
+# deadline fired first and the body was dropped, or `ms <= 0` and the body never ran. A value,
+# not an exception: Sprout has none.
 export type TimeoutResult a (..) =
   | Completed a
   | Expired
@@ -56,10 +44,9 @@ extern fn __task_fork(scope_id: Int, work: once local Unit -> a !{IO}) -> Int !{
 extern fn __task_await(task_id: Int) -> a !{IO}
 extern fn __scope_cancel(scope_id: Int) -> Unit !{IO}
 extern fn __task_sleep(ms: Int) -> Unit !{IO}
-# L0.7 deadlines. __await_deadline arms a deadline timer on the owner and parks until the forked
-# child (already forked by with_timeout) finishes (returns True) or the deadline fires (returns
-# False, child force-dropped). __task_stop_reason returns the current scope's stop-reason
-# (0 none / 1 cancelled / 2 timed-out) — task_cancelled and task_status are built on it in Sprout.
+# __await_deadline arms a deadline timer on the owner and parks until the already-forked child
+# finishes (True) or the deadline fires (False, child dropped). __task_stop_reason returns the
+# current scope's stop reason: 0 none, 1 cancelled, 2 timed out.
 extern fn __await_deadline(scope_id: Int, task_id: Int, ms: Int) -> Bool !{IO}
 extern fn __task_stop_reason() -> Int !{IO}
 
@@ -77,9 +64,8 @@ export fn scope_handle(scope: Scope) -> Int =
   | Scope id -> id
 
 # Open a scope, run `body`, then block until all tasks spawned into it finish,
-# and return the body's result. `body`'s result is bound with `let` (not `<-`)
-# so an `Err` value cannot short-circuit past `__scope_join` — the join is
-# unconditional, which is what prevents spawned tasks from leaking past the scope.
+# and return the body's result. The join runs whatever `body` returns, so no
+# spawned task outlives the scope.
 export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} =
   do
     id <- __scope_open()
@@ -87,15 +73,13 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} =
     __scope_join(id)
     result
 
-# Spawn `work` as a fire-and-forget green task belonging to `scope`. It becomes
-# runnable but does not start until the current task yields or the scope joins.
+# Spawn `work` as a fire-and-forget task in `scope`. It is queued, and starts once the
+# current task yields, parks or joins.
 #
-# `once` (M4.4a) is the promise that makes this usable with resources: the
-# scheduler invokes the thunk at most once and user code never holds it, so a
-# caller may MOVE a linear value into the closure — which is how http_server hands
-# an accepted TcpConnection to its handler. Note the bound is at-MOST-once; that a
-# spawned task actually runs is `with_scope`'s unconditional join, not the type.
-# Scope cancellation force-drops unstarted tasks and so breaks that half (BACKLOG).
+# `work` is `once`: the scheduler calls it at most once and user code never holds it, so a
+# caller may move a linear value in (http_server moves each accepted connection to its
+# handler). That the task runs at all comes from `with_scope`'s join, not the type, and a
+# cancel that finds the task parked drops it with what it holds (see `scope_cancel`).
 export fn task_spawn(scope: Scope, work: once Unit -> Unit !{IO}) -> Unit !{IO} =
   match scope with
   | Scope id -> __scope_spawn(id, work)
@@ -115,51 +99,36 @@ export fn task_await(task: Task a) -> a !{IO} =
   | Task id -> __task_await(id)
 
 # Relinquish a task handle without awaiting its result — the linear consume for
-# the "I will not await this" path (a timeout's expired branch, or a conditional
-# fork). No runtime action: a never-awaited fork is already reclaimed when the
-# scope closes, so `detach` exists only so the discard is an explicit linear
-# consume rather than a leak. Mirrors C++ std::thread::detach / dropping a Rust
-# JoinHandle.
+# the "I will not await this" path (e.g. a conditional fork). No runtime action:
+# a never-awaited fork is already reclaimed when the scope closes, so `detach`
+# exists only so the discard is an explicit linear consume rather than a leak.
+# Mirrors C++ std::thread::detach / dropping a Rust JoinHandle.
 export fn detach(task: Task a) -> Unit =
   match task with
   | Task _ -> ()
 
-# Request cancellation of every still-running task in `scope` (L0.5, EXPERIMENTAL).
-# Owner-only: may be called only by the task that opened `scope` (the `with_scope`
-# body); the runtime loud-fails otherwise. Cancellation is cooperative — a
-# ready/yield-parked task stops by observing `task_cancelled`; a task blocked on I/O
-# is dropped by the scheduler. No siblings are auto-cancelled on failure yet; the body
-# drives fail-fast (match a result, then `scope_cancel`). See the cancellation design.
+# Cancel the tasks in `scope` (EXPERIMENTAL). Only the task that opened it (the `with_scope`
+# body) may call this; anyone else aborts the program. A task parked on I/O, `task_sleep`, a
+# channel or `select` is dropped. A running or yielding task sees `task_cancelled()` and returns
+# on its own; a task not yet started runs normally; one waiting in a nested join or
+# `task_await` is left alone.
 #
-# !! RESOURCE WARNING. A dropped task never runs its closure, so anything MOVED into
-# that closure is never released — a `TcpConnection` moved in via `task_spawn`'s
-# `once` parameter leaks its fd, and the compiler will have reported the program
-# consume-exactly-once clean, because `once` bounds invocations from above only
-# (at most once, per Rust's FnOnce). The exactly-once half comes from `with_scope`'s
-# unconditional join, and cancelling is precisely how that half is skipped. The same
-# path is reached by every `with_timeout` expiry, not just an explicit cancel.
-#
-# Sprout has no destructors, so this cannot be closed by the type system or by this
-# module; it needs cancellation-time resource release in the scheduler. Until then:
-# do not move a linear resource into a task in a scope you may cancel — acquire it
-# inside the task, or keep ownership outside and pass a borrow-free handle. Tracked
-# in BACKLOG.md; stated normatively in docs/spec-v0.md §5.8.
+# LEAK: a dropped task never finishes, so a linear value it holds, moved in or created inside,
+# is never released, though the program type-checks. Until the scheduler releases on drop, do
+# not cancel a scope whose tasks hold a linear resource across a park (spec §5.8).
 export fn scope_cancel(scope: Scope) -> Unit !{IO} =
   match scope with
   | Scope id -> __scope_cancel(id)
 
-# True if the current task's scope is stopping — cancelled OR timed out (Go's `ctx.Done()`).
-# A cancellable task checks this at its own loop/yield points and returns when it sees `true`.
-# Built on the stop-reason so a with_timeout deadline also stops an L0.5-style cooperative body.
+# True once the current task's scope is cancelled (Go's `ctx.Done()`). A cancellable task
+# checks it at its loop or yield points and returns. A `with_timeout` deadline does not set it
+# for a body that only yields; see `with_timeout`.
 export fn task_cancelled() -> Bool !{IO} =
   __task_stop_reason() != 0
 
-# WHY the current task's scope is stopping (Go's `ctx.Err()`): `Running` normally, `Cancelled`
-# after `scope_cancel`, `TimedOut` after a `with_timeout` deadline fired on this task's scope.
-# NOTE (L0.7 MVP): `TimedOut` is set on the scope but is NOT yet observable by a timed body —
-# with_timeout force-drops the body DURING its park, before it re-checks status, and the scope
-# holds exactly one task. `TimedOut` is forward-compat scaffolding; only `Running`/`Cancelled`
-# are observable today (see test_task_status.spr).
+# Why the current task's scope is stopping (Go's `ctx.Err()`): `Running`, or `Cancelled` after
+# `scope_cancel`. `TimedOut` is never observed today: the runtime sets it only when it drops
+# the timed body, which is the scope's one task.
 export fn task_status() -> TaskStatus !{IO} =
   match __task_stop_reason() with
   | 1 -> Cancelled
@@ -171,30 +140,25 @@ export fn task_status() -> TaskStatus !{IO} =
 # `delay`). Timing is best-effort: at least `ms`, then whenever the scheduler next runs
 # this task. `ms <= 0` yields once to siblings without arming a timer (a zero-length timer
 # is a backend-divergent no-op/hang). A task sleeping in a cancelled scope is dropped by
-# the scheduler, exactly like one parked on I/O. See the task_sleep design doc.
+# the scheduler, exactly like one parked on I/O
+# (docs/concurrency-task-sleep-design-2026-07-15.md).
 export fn task_sleep(ms: Int) -> Unit !{IO} =
   if ms <= 0 then
     task_yield()
   else
     __task_sleep(ms)
 
-# Run `body` as a child green task; if it does not finish within ~`ms` milliseconds, cancel it
-# and return `Expired`, otherwise `Completed(result)`. Timing is best-effort (>= ms). Delivery is
-# cooperative + scheduler-drop, like Go/Kotlin/Trio (Sprout has no exceptions to inject).
+# Run `body` as a child task. If it is still parked when ~`ms` milliseconds pass, drop it and
+# return `Expired`; otherwise `Completed(result)`. `ms <= 0` returns `Expired` without running it.
 #
-# MVP boundary (direct-I/O only): the body may park DIRECTLY on I/O or `task_sleep` — it is
-# force-dropped when the deadline fires. A body blocked in a NESTED `with_scope` join (i.e. one
-# that wraps structured concurrent work) loud-fails on timeout — the tree-cancel cascade is a
-# later increment. This includes a NESTED with_timeout: if the OUTER deadline fires while the
-# body is inside an inner with_timeout, it loud-fails (aborts) too. A body whose I/O goes ready in
-# the deadline's exact poll batch is allowed to run on to completion (best-effort ≥ ms); if it
-# instead re-parks, it is dropped like any other parked body and the answer is `Expired`. So the
-# overshoot past `ms` is bounded by one scheduling step of the body — never by its next I/O wait,
-# which is what an earlier revision allowed and is how the call could block forever.
-# `ms <= 0` returns `Expired` at once WITHOUT running the body.
-# `body` is `local`, not `once`: it may borrow a value the caller holds (lend it; the caller
-# releases it after, on Completed and Expired alike). A moved value would leak on Expired.
-# See docs/concurrency-deadlines-design-2026-07-15.md.
+# Only a body that parks (I/O, `task_sleep`, a channel or `select`) can be timed out. One that
+# only yields runs to completion past the deadline. One blocked in a nested `with_scope`,
+# `task_await` or `with_timeout` aborts the program when the deadline fires. Overshoot past
+# `ms` is at most one scheduling step of the body.
+#
+# `body` is `local`: it may borrow a value the caller holds, and the caller releases it after
+# either outcome. Moving a value in is a compile error, since `Expired` would leak it
+# (docs/concurrency-deadlines-design-2026-07-15.md).
 export fn with_timeout(ms: Int, body: local Unit -> a !{IO}) -> TimeoutResult a !{IO} =
   if ms <= 0 then
     Expired

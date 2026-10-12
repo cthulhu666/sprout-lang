@@ -333,14 +333,13 @@ migrated. That is exactly why the one-token byte-identity test exists alongside 
 ## 9. Known limitation: at most once, not exactly once
 
 The type system will give **at-most-once**, matching Rust and OxCaml. Leak-freedom needs
-exactly-once, and the missing half comes from the runtime contract: `stdlib/task.sprout:79`'s
-`with_scope` binds its body's result with `let` rather than `<-` specifically so `__scope_join` is
-unconditional, so every spawned task runs before the scope closes.
+exactly-once, and the missing half comes from the runtime contract: `with_scope` joins whatever its
+body returns, so every spawned task runs before the scope closes.
 
 **That contract has one hole, and it is pre-existing.** In `runtime/sprout_scheduler.c`,
-`__scope_cancel` walks parked tasks and force-drops them, freeing their roots, and a spawned task
-does not start until the current task yields. A cancelled task's closure can therefore run zero
-times, and a moved-in connection is never closed.
+`__scope_cancel` force-drops the scope's parked tasks, freeing their roots; a task that has not
+started is left in the run queue and still runs. A dropped task never finishes its closure, so a
+moved-in connection it holds at the park is never closed.
 
 This is a *runtime* leak on the experimental cancellation path (L0.5), not a soundness hole in the
 checker, and it is already true today of the raw `Int` handles http_server uses — adopting linear
