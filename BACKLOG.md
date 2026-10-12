@@ -836,8 +836,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
   and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `mconcat`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
-  `vec_sort_by`'s doc comment claims O(n log n) and rebuilds O(n²). Document true complexity inline
-  or fix to linear. Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
+  Document true complexity inline or fix to linear.
+  Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
   `list_builder_*` fixes the list-append half: O(1) per add, one reverse at the end.
   Also `set_remove`: it reinserts every element into a fresh set where an AVL delete is already
   available — `NativeSet` IS the `Map` BST with value 0, and `map_remove` calls `bst_remove_node`.
@@ -945,6 +945,17 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   enforces itself, a `NonEmptyVec` would need representation opacity — shipped for ordinary modules
   (spec §5.6.4) but NOT for the prelude, where this type would live (§6), and without the total
   `head`/`minimum` the arms go but the `Maybe`s stay. Ergonomics gate on `[a, b | tail]` above.
+- [ ] `P3` **Primitive sort builtins for `Int`/`Double` vectors — needs approval first.** A C radix
+  sort runs at ~2 ns/element against `mutvec_sort`'s ~190 and `vec_sort`'s ~970 (n=440). Safe for
+  the collector, and it gives a fast pure `vec_sort` (copy, sort, return). Open: how generic code
+  reaches it — separate `_ints` names, or specialisation. Deferred until a caller needs it
+  (`docs/sorting-v0.md` §Options).
+- [ ] `P3` **`vec_sort` sorts lists of `(key, index, value)` tuples**, ~n·(log2 n + 3) allocations.
+  Cheaper with the same contract: drop the index (adjacent runs merged in input order, ties to the
+  left, are already stable — but `vec_sort_by`'s comments say run order is irrelevant; rewrite them
+  and add a duplicate-key test at odd run counts first), store no key for `vec_sort`, seed runs from
+  ascending stretches, and call `compare`, not `ord_lt`. Measure; random input gains little from
+  natural runs. Numbers: `docs/sorting-v0.md`.
 
 ### 6) Modules and Packaging
 
@@ -1671,6 +1682,19 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Keep-alive and
   chunked reads are filed in §2.
+- [ ] `P2` **Specialise generic functions at concrete types.** A `where Ord a` function takes the
+  `Ord` and `Eq` dictionaries and makes an indirect `compare` per comparison, so `mutvec_sort` on
+  `Int` runs ~2× slower than a hand-specialised copy. Small generic wrappers are not inlined
+  either: calling `ord_lt` instead of `compare` costs ~40% of the sort. Specialisation would also
+  let `vec_sort` at `Int` reach a primitive sort under its own name. Numbers:
+  `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
+  "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry.
+- [ ] `P3` **Profile the ~5× gap between a `MutVec` loop in Sprout and the same loop in C.** With
+  `Ord` taken out, the in-place merge sort still runs ~5× slower than its C transcription. Each
+  element of each pass makes three runtime calls (`vector_get_direct` twice, `vector_mutset`),
+  each with null, bounds and ageprof checks. LTO across the runtime and merging the recursive
+  merge functions changed nothing. Profile, then consider lowering `MutVec` access to inline
+  loads and stores. Numbers: `docs/sorting-v0.md`.
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.

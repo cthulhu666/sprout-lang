@@ -170,6 +170,7 @@ declare i64 @wall_time_micros()
 @pow10_exact_max = private constant i64 22
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+@stdlib.mutable.sort_block = private constant i64 16
 
 define i64 @stdlib.math.int.int_abs(i64 %p$value) {
 entry:

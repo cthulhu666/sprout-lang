@@ -252,6 +252,115 @@ export fn mutvec_map_inplace(f: a -> a !{IO}, v: MutVec a) -> Unit !{IO} =
   mutvec_map_inplace_go(f, mutvec_raw(v), 0, mutvec_len(v))
 
 # ---------------------------------------------------------------------------
+# Sorting: insertion sort on blocks of `sort_block`, then bottom-up merge passes
+# between the vector and one scratch buffer. Stable: an element moves ahead of
+# another only when strictly less, so equal elements keep their input order.
+# ---------------------------------------------------------------------------
+
+let sort_block = 16
+
+fn sort_shift(less: a -> a -> Bool, raw: Vector a, x: a, j: Int, lo: Int, prev: a) -> Unit !{IO} =
+  do
+    _ <- vector_mutset(raw, j, prev)
+    sort_insert(less, raw, x, j - 1, lo)
+
+# Slide `x` down from slot `j` past every element greater than it, stopping at `lo`.
+fn sort_insert(less: a -> a -> Bool, raw: Vector a, x: a, j: Int, lo: Int) -> Unit !{IO} =
+  if j <= lo then vector_mutset(raw, j, x)
+  else
+    do
+      prev <- vector_get_direct(raw, j - 1)
+      if less(x, prev) then sort_shift(less, raw, x, j, lo, prev) else vector_mutset(raw, j, x)
+
+fn sort_insertion(less: a -> a -> Bool, raw: Vector a, i: Int, lo: Int, hi: Int) -> Unit !{IO} =
+  if i >= hi then ()
+  else
+    do
+      x <- vector_get_direct(raw, i)
+      _ <- sort_insert(less, raw, x, i, lo)
+      sort_insertion(less, raw, i + 1, lo, hi)
+
+fn sort_blocks(less: a -> a -> Bool, raw: Vector a, lo: Int, n: Int) -> Unit !{IO} =
+  if lo >= n then ()
+  else
+    do
+      _ <- sort_insertion(less, raw, lo + 1, lo, min_int(lo + sort_block, n))
+      sort_blocks(less, raw, lo + sort_block, n)
+
+fn sort_copy(src: Vector a, dst: Vector a, i: Int, stop: Int, k: Int) -> Unit !{IO} =
+  if i >= stop then ()
+  else
+    do
+      x <- vector_get_direct(src, i)
+      _ <- vector_mutset(dst, k, x)
+      sort_copy(src, dst, i + 1, stop, k + 1)
+
+fn sort_take(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: Int, j: Int, hi: Int,
+             k: Int, x: a) -> Unit !{IO} =
+  do
+    _ <- vector_mutset(dst, k, x)
+    sort_merge(less, src, dst, i, mid, j, hi, k + 1)
+
+# Merge `src[i, mid)` and `src[j, hi)` into `dst` from `k`. A tie takes the left run.
+fn sort_merge(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: Int, j: Int, hi: Int,
+              k: Int) -> Unit !{IO} =
+  if i >= mid then sort_copy(src, dst, j, hi, k)
+  else if j >= hi then sort_copy(src, dst, i, mid, k)
+  else
+    do
+      x <- vector_get_direct(src, i)
+      y <- vector_get_direct(src, j)
+      if less(y, x) then sort_take(less, src, dst, i, mid, j + 1, hi, k, y)
+      else sort_take(less, src, dst, i + 1, mid, j, hi, k, x)
+
+fn sort_pass(less: a -> a -> Bool, src: Vector a, dst: Vector a, lo: Int, n: Int, w: Int) -> Unit !{IO} =
+  if lo >= n then ()
+  else
+    do
+      let mid = min_int(lo + w, n)
+      let hi = min_int(lo + 2 * w, n)
+      _ <- sort_merge(less, src, dst, lo, mid, mid, hi, lo)
+      sort_pass(less, src, dst, hi, n, w)
+
+# Each pass merges runs of width `w` from `src` into `dst`, then the two swap.
+# Returns whether the last pass wrote the scratch buffer.
+fn sort_passes(less: a -> a -> Bool, src: Vector a, dst: Vector a, n: Int, w: Int,
+               in_scratch: Bool) -> Bool !{IO} =
+  if w >= n then in_scratch
+  else
+    do
+      _ <- sort_pass(less, src, dst, 0, n, w)
+      let swapped = ! in_scratch
+      sort_passes(less, dst, src, n, w * 2, swapped)
+
+fn sort_merge_all(less: a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =
+  do
+    fill <- vector_get_direct(raw, 0)
+    scratch <- vec_make_filled(n, fill)
+    in_scratch <- sort_passes(less, raw, scratch, n, sort_block, false)
+    if in_scratch then sort_copy(scratch, raw, 0, n, 0) else ()
+
+# The comparators below call `compare` directly: going through `ord_lt` adds a
+# generic call per comparison, about 40% of the sort (docs/sorting-v0.md).
+fn mutvec_sort_with(less: a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
+  do
+    n <- mutvec_len(v)
+    _ <- sort_blocks(less, mutvec_raw(v), 0, n)
+    if n <= sort_block then () else sort_merge_all(less, mutvec_raw(v), n)
+
+# O(n log n) comparisons; allocates one n-slot scratch vector when n > 16. Sorts
+# ascending, in place and stable. The fast path for a hot loop: `vec_sort` builds
+# lists and costs several times more per element.
+export fn mutvec_sort(v: MutVec a) -> Unit !{IO} where Ord a =
+  mutvec_sort_with(\ (x, y) -> compare(x, y) < 0, v)
+
+# As `mutvec_sort`, ordered by `f`. Unlike `vec_sort_by`, which computes each key
+# once, this calls `f` twice per comparison; when `f` is costly, sort (key, value)
+# pairs instead.
+export fn mutvec_sort_by(f: a -> k, v: MutVec a) -> Unit !{IO} where Ord k =
+  mutvec_sort_with(\ (x, y) -> compare(f(x), f(y)) < 0, v)
+
+# ---------------------------------------------------------------------------
 # MutMatrix — a 2-D row-major mutable array backed by one MutVec
 # ---------------------------------------------------------------------------
 # Element (r, c) lives at flat index r * cols + c. get/set bounds-check both

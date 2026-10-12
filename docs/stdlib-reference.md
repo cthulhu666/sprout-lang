@@ -47,7 +47,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `vec_sum(vec)`
   - `vec_sum_by(f, vec)`
   - `vec_sort(vec)` where `Ord a` (initial built-in coverage: `Int`, `Bool`, `String`)
-  - `vec_sort_by(key, vec)` where `Ord key`
+  - `vec_sort_by(key, vec)` where `Ord key`; for an in-place sort, see `mutvec_sort` below
 - `Dict v` plus foundational helpers:
   - `dict_empty()`
   - `dict_get(key, dict) -> Maybe v`
@@ -777,6 +777,10 @@ Three things to know:
 - **All five are total.** `remove` and `pop` return `Maybe a` — out of range is `Nothing`, like `mutvec_get`. `insert` returns `Bool`, `false` when the index is outside `[0, len]`; note `len` itself is in range, since inserting there is an append. `truncate` takes any `Int`: a negative `n` empties the vector and an `n` at or past the length has no effect. In every out-of-range case the vector is left untouched.
 - **`truncate` and `clear` are O(len − n), not O(1).** Shrinking zeroes every slot it drops, so `clear` on a large vector is a full pass over the live region, and truncating to a *small* `n` is the expensive direction. Zeroing is what keeps spare capacity free of stale handles; if you are clearing a large vector every iteration of a loop, that pass is the cost to weigh.
 - **Shrinking is in place**, like growth, so every copy of the handle sees the new length.
+
+### Sorting a `MutVec`
+
+`mutvec_sort(v)` (where `Ord a`) and `mutvec_sort_by(f, v)` (where `Ord k`) sort ascending, in place and stable. Each makes O(n log n) comparisons and allocates one n-slot scratch vector when n > 16, nothing below that. On Ints they run about 5× faster than `vec_sort`, which builds lists. `mutvec_sort_by` calls `f` twice per comparison, where `vec_sort_by` computes each key once; for a costly key, sort `(key, value)` pairs. Measurements and the faster options not taken yet: [sorting-v0.md](sorting-v0.md).
 
 If you find yourself repeatedly appending small fragments to a `String`, reach for `bytes.Builder` (collect fragments as `Bytes`, finalize once) or the `string_concat_many` builtin (one allocation for an arbitrary list of `String`s). String interpolation with `` `pre${x}post` `` desugars to `string_concat_many` automatically.
 

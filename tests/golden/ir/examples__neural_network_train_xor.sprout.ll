@@ -143,6 +143,7 @@ declare i64 @vector_truncate(i64, i64)
 @pow10_exact_max = private constant i64 22
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+@stdlib.mutable.sort_block = private constant i64 16
 @examples.neural_network_train_xor.idx_b2 = private constant i64 8
 
 define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
