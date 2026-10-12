@@ -129,30 +129,19 @@ fn stream_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                         | Err msg -> Err(msg)
                         | Ok s2 -> stream_decls(rest, penv, s2)
 
-# What the worker passes (pre-pass and emit) both need, built once per compile:
-# the matched callees, the fn/extern decls by name and the ADT ctor index.
-type WorkerPlan = (callees: Set, decls: Dict typed_ast.TypedDecl, adt_index: Dict (List (Int, Int)))
-
-fn worker_plan(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
-               ctors: Dict sprout_ir.CtorInfo) -> WorkerPlan =
-  WorkerPlan(callees = ast_to_ir.collect_worker_callees(decls, penv),
-             decls = ast_to_ir.build_worker_decls(decls),
-             adt_index = ast_to_ir.build_adt_ctor_index(decls, ctors))
-
 # Tier-2 CPR: stream an unboxed { i64, i64 } worker for each matched callee,
 # AFTER all boxed decls (so an escaping use resolves to the boxed original).
 # Each worker is rooted + lowered through emit_one_fn like any other fn.
-fn stream_workers(names: List String, worker_set: Set, worker_decls: Dict typed_ast.TypedDecl,
-                  penv: ast_to_ir.ProgEnv, adt_index: Dict (List (Int, Int)),
-                  state: StreamState) -> Result String StreamState !{IO} =
+fn stream_workers(names: List String, plan: ast_to_ir.WorkerPlan,
+                  penv: ast_to_ir.ProgEnv, state: StreamState) -> Result String StreamState !{IO} =
   match names with
   | Nil -> Ok(state)
   | Cons name rest ->
-      match ast_to_ir.emit_worker_for(name, worker_decls, penv, adt_index, worker_set) with
+      match ast_to_ir.emit_worker_for(name, plan, penv) with
       | Err msg -> Err(msg)
       | Ok maybe_w ->
           match maybe_w with
-          | Nothing -> stream_workers(rest, worker_set, worker_decls, penv, adt_index, state)
+          | Nothing -> stream_workers(rest, plan, penv, state)
           | Just wtriple ->
               match wtriple with
               | (wfn, wnext, wlifted) ->
@@ -163,7 +152,7 @@ fn stream_workers(names: List String, worker_set: Set, worker_decls: Dict typed_
                         let idx_map = dict_set(wname, wnext, lifted_idx)
                         match emit_lifted_then_fn(wlifted, wfn, idx_map, state) with
                         | Err msg -> Err(msg)
-                        | Ok s2 -> stream_workers(rest, worker_set, worker_decls, penv, adt_index, s2)
+                        | Ok s2 -> stream_workers(rest, plan, penv, s2)
 
 # ---------------------------------------------------------------------------
 # Alloc-summary pre-pass (Option A).
@@ -206,23 +195,21 @@ fn summarize_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
               | (f, _idx, lifted) ->
                   summarize_decls(rest, penv, summarize_lifted_then_fn(lifted, f, acc))
 
-fn summarize_workers(names: List String, worker_set: Set, worker_decls: Dict typed_ast.TypedDecl,
-                     penv: ast_to_ir.ProgEnv, adt_index: Dict (List (Int, Int)),
+fn summarize_workers(names: List String, plan: ast_to_ir.WorkerPlan, penv: ast_to_ir.ProgEnv,
                      acc: List (String, (Bool, Set))) ->
     Result String (List (String, (Bool, Set))) !{IO} =
   match names with
   | Nil -> Ok(acc)
   | Cons name rest ->
-      match ast_to_ir.emit_worker_for(name, worker_decls, penv, adt_index, worker_set) with
+      match ast_to_ir.emit_worker_for(name, plan, penv) with
       | Err msg -> Err(msg)
       | Ok maybe_w ->
           match maybe_w with
-          | Nothing -> summarize_workers(rest, worker_set, worker_decls, penv, adt_index, acc)
+          | Nothing -> summarize_workers(rest, plan, penv, acc)
           | Just wtriple ->
               match wtriple with
               | (wfn, _wnext, wlifted) ->
-                  summarize_workers(rest, worker_set, worker_decls, penv, adt_index,
-                                    summarize_lifted_then_fn(wlifted, wfn, acc))
+                  summarize_workers(rest, plan, penv, summarize_lifted_then_fn(wlifted, wfn, acc))
 
 # Combine the raw per-fn summary list into BOTH the may-trigger-GC summary and the
 # mutual-TCO eligible-edge map (same call graph, two consumers).
@@ -234,7 +221,7 @@ fn finalize_summaries(raw: List (String, (Bool, Set)), arities: Dict ast_to_ir.F
 # Build the may-trigger-GC summary via the pre-pass.  Uses its own fresh Refs so it
 # does not perturb the emit pass's lambda/index state.
 fn build_alloc_summary(decls: List typed_ast.TypedDecl, emit_penv: ast_to_ir.ProgEnv,
-                       plan: WorkerPlan, ret_i64: Dict Bool,
+                       plan: ast_to_ir.WorkerPlan, ret_i64: Dict Bool,
                        runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     Result String (Dict Bool, Dict (List (String, Int))) !{IO} =
   do
@@ -242,8 +229,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl, emit_penv: ast_to_ir.Pro
     match summarize_decls(decls, penv, Nil) with
     | Err msg -> Err(msg)
     | Ok after_decls ->
-        match summarize_workers(set_to_list(plan.callees), plan.callees, plan.decls, penv,
-                                plan.adt_index, after_decls) with
+        match summarize_workers(set_to_list(plan.callees), plan, penv, after_decls) with
         | Err msg -> Err(msg)
         | Ok after_workers -> summarize_init_tail(runtime_lets, penv, after_workers, ret_i64)
 
@@ -270,7 +256,7 @@ fn summarize_init_tail(runtime_lets: List (source.GlobalName, typed_ast.TypedExp
 # still reported by the real stream_decls pass that runs afterward, so this
 # swallows no real diagnostics.
 fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
-                          plan: WorkerPlan, ret_i64: Dict Bool,
+                          plan: ast_to_ir.WorkerPlan, ret_i64: Dict Bool,
                           runtime_lets: List (source.GlobalName, typed_ast.TypedExpr)) ->
     (Dict Bool, Dict (List (String, Int))) !{IO} =
   do
@@ -322,7 +308,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                       # the mutual-TCO eligible-edge map (fresh Refs, IR discarded).  Never
                       # fails the compile — a pre-pass error falls back to conservative
                       # rooting + no mutual-TCO.
-                      let plan = worker_plan(decls, penv, ctors)
+                      let plan = ast_to_ir.worker_plan(decls, penv)
                       summaries <- alloc_summary_or_empty(decls, penv, plan, ret_i64, runtime_lets)
                       str_acc_ref <- ref_new(Nil)
                       bodies_acc_ref <- ref_new(Nil)
@@ -332,8 +318,7 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
                       match stream_decls(decls, penv, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
-                        match stream_workers(set_to_list(plan.callees), plan.callees, plan.decls, penv,
-                                             plan.adt_index, after_decls) with
+                        match stream_workers(set_to_list(plan.callees), plan, penv, after_decls) with
                         | Err msg -> Err(msg)
                         | Ok after_workers ->
                           match after_workers with

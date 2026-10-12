@@ -596,16 +596,18 @@ fn witness_slot_count(exist_constraints: List ast.TypeConstraint,
 # next-idx map. Built once per program.
 export type ProgEnv (..) = (ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                             fn_arities: Dict FnInfo, lambda_ctr_ref: Ref Int,
-                            lifted_idx_ref: Ref (Dict Int))
+                            lifted_idx_ref: Ref (Dict Int), adt_index: Dict (List (Int, Int)))
 
 export fn new_prog_env(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo) -> ProgEnv !{IO} =
   do
     lambda_ctr_ref <- ref_new(0)
     lifted_idx_ref <- ref_new(dict_empty())
+    let adt_index = build_adt_ctor_index(decls, ctors)
     ProgEnv(ctors = ctors, top_level = build_top_level_set(decls, ctors),
             let_names = build_top_level_let_names(decls),
-            fn_arities = build_fn_arities(decls, build_adt_ctor_index(decls, ctors)),
-            lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref)
+            fn_arities = build_fn_arities(decls, adt_index),
+            lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref,
+            adt_index = adt_index)
 
 # The same tables with fresh refs, for a pass that re-runs translation without
 # disturbing another pass's lambda names and indices.
@@ -4307,11 +4309,14 @@ type TcoIndex = (by_label: Dict sprout_ir.IRBlock, phis: Dict (String, List (Str
 fn tco_index(blocks: List sprout_ir.IRBlock) -> TcoIndex =
   TcoIndex(by_label = tco_index_labels(blocks, dict_empty()), phis = tco_index_phis(blocks, dict_empty()))
 
+# Insert only when the key is new: the first insert wins.
+fn dict_set_absent(k: String, v: a, d: Dict a) -> Dict a =
+  if dict_member(k, d) then d else dict_set(k, v, d)
+
 fn tco_index_labels(blocks: List sprout_ir.IRBlock, acc: Dict sprout_ir.IRBlock) -> Dict sprout_ir.IRBlock =
   match blocks with
   | Nil -> acc
-  | Cons b rest ->
-      tco_index_labels(rest, if dict_member(tco_block_label(b), acc) then acc else dict_set(tco_block_label(b), b, acc))
+  | Cons b rest -> tco_index_labels(rest, dict_set_absent(tco_block_label(b), b, acc))
 
 fn tco_index_phis(blocks: List sprout_ir.IRBlock, acc: Dict (String, List (String, String))) ->
     Dict(String, List (String, String)) =
@@ -4326,7 +4331,7 @@ fn tco_index_phi_ops(lbl: String, ops: List sprout_ir.IROp, acc: Dict (String, L
   | Cons op rest ->
       match op with
       | sprout_ir.IRPhi r _ inc ->
-          tco_index_phi_ops(lbl, rest, if dict_member(r, acc) then acc else dict_set(r, (lbl, inc), acc))
+          tco_index_phi_ops(lbl, rest, dict_set_absent(r, (lbl, inc), acc))
       | _ -> tco_index_phi_ops(lbl, rest, acc)
 
 # A tail-call hit: (pred_label, args, call_result, phi_block).
@@ -4444,7 +4449,7 @@ fn tco_hits_by_pred(hits: List (String, List String, String, String),
   match hits with
   | Nil -> acc
   | Cons (pred, args, call_result, _phi) rest ->
-      tco_hits_by_pred(rest, if dict_member(pred, acc) then acc else dict_set(pred, (args, call_result), acc))
+      tco_hits_by_pred(rest, dict_set_absent(pred, (args, call_result), acc))
 
 fn tco_rewrite_block_if_pred(b: sprout_ir.IRBlock, by_pred: Dict (List String, String),
                              slots: List (String, String, String, sprout_ir.IRType), sp: String) -> sprout_ir.IRBlock =
@@ -4454,41 +4459,51 @@ fn tco_rewrite_block_if_pred(b: sprout_ir.IRBlock, by_pred: Dict (List String, S
       sprout_ir.IRBlock(tco_block_label(b),
         tco_rewrite_pred_ops(tco_block_ops(b), call_result, tco_zip_stores(slots, args), sp))
 
-# Key of the phi incoming (removed_val, pred) in block phi_block.
-fn tco_phi_key(phi_block: String, removed_val: String, pred: String) -> String =
-  phi_block ++ "\n" ++ removed_val ++ "\n" ++ pred
+# Key of the phi incoming (removed_val, pred) within one phi block.
+fn tco_phi_key(removed_val: String, pred: String) -> String =
+  removed_val ++ "\n" ++ pred
 
-fn tco_phi_drop_keys(hits: List (String, List String, String, String), acc: Set) -> Set =
+# Phi block label -> keys of the incomings to drop from its phis.
+fn tco_phi_drop_keys(hits: List (String, List String, String, String), acc: Dict Set) -> Dict Set =
   match hits with
   | Nil -> acc
   | Cons (pred, _args, call_result, phi_block) rest ->
-      tco_phi_drop_keys(rest, if phi_block == "" then acc else set_insert(tco_phi_key(phi_block, call_result, pred), acc))
+      tco_phi_drop_keys(rest,
+        if phi_block == "" then acc
+        else dict_set(phi_block, set_insert(tco_phi_key(call_result, pred), tco_drop_set_of(phi_block, acc)), acc))
 
-# Drop the dead incomings from every IRPhi of block `lbl`.
-fn tco_fix_phi_in_ops(ops: List sprout_ir.IROp, lbl: String, drop: Set) -> List sprout_ir.IROp =
+fn tco_drop_set_of(phi_block: String, drop: Dict Set) -> Set =
+  match dict_get(phi_block, drop) with
+  | Just keys -> keys
+  | Nothing -> set_empty()
+
+# Drop the dead incomings from every IRPhi in `ops`.
+fn tco_fix_phi_in_ops(ops: List sprout_ir.IROp, drop: Set) -> List sprout_ir.IROp =
   match ops with
   | Nil -> Nil
   | Cons op rest ->
       match op with
       | sprout_ir.IRPhi r ty inc ->
-          Cons(sprout_ir.IRPhi(r, ty, tco_drop_incoming(inc, lbl, drop)), tco_fix_phi_in_ops(rest, lbl, drop))
-      | _ -> Cons(op, tco_fix_phi_in_ops(rest, lbl, drop))
+          Cons(sprout_ir.IRPhi(r, ty, tco_drop_incoming(inc, drop)), tco_fix_phi_in_ops(rest, drop))
+      | _ -> Cons(op, tco_fix_phi_in_ops(rest, drop))
 
-fn tco_drop_incoming(inc: List (String, String), lbl: String, drop: Set) -> List (String, String) =
+fn tco_drop_incoming(inc: List (String, String), drop: Set) -> List (String, String) =
   match inc with
   | Nil -> Nil
   | Cons (v, p) rest ->
-      if set_member(tco_phi_key(lbl, v, p), drop) then tco_drop_incoming(rest, lbl, drop)
-      else Cons((v, p), tco_drop_incoming(rest, lbl, drop))
+      if set_member(tco_phi_key(v, p), drop) then tco_drop_incoming(rest, drop)
+      else Cons((v, p), tco_drop_incoming(rest, drop))
 
-# One pass over the blocks, whatever the number of hits.
+# One pass over the blocks, whatever the number of hits. Only the blocks that
+# lose a phi incoming are rebuilt.
 fn tco_fix_all_phis(blocks: List sprout_ir.IRBlock, hits: List (String, List String, String, String)) -> List sprout_ir.IRBlock =
   list_map(fix_block, blocks)
 where
-  drop = tco_phi_drop_keys(hits, set_empty())
+  drop = tco_phi_drop_keys(hits, dict_empty())
   fix_block = \ (b: sprout_ir.IRBlock) ->
-    if set_size(drop) == 0 then b
-    else sprout_ir.IRBlock(tco_block_label(b), tco_fix_phi_in_ops(tco_block_ops(b), tco_block_label(b), drop))
+    match dict_get(tco_block_label(b), drop) with
+    | Nothing -> b
+    | Just keys -> sprout_ir.IRBlock(tco_block_label(b), tco_fix_phi_in_ops(tco_block_ops(b), keys))
 
 # Rename the old "entry" block to "tco_loop" and prepend the per-param reloads.
 fn tco_make_loop_blocks(blocks: List sprout_ir.IRBlock, slots: List (String, String, String, sprout_ir.IRType)) -> List sprout_ir.IRBlock =
@@ -4757,7 +4772,7 @@ fn mutual_hits_by_pred(tagged: List (String, (String, List String, String, Strin
   match tagged with
   | Nil -> acc
   | Cons (g, (pred, args, call_result, _phi)) rest ->
-      mutual_hits_by_pred(rest, if dict_member(pred, acc) then acc else dict_set(pred, (g, args, call_result), acc))
+      mutual_hits_by_pred(rest, dict_set_absent(pred, (g, args, call_result), acc))
 
 # Assemble: rewrite each hit-pred block, then fix the join phis that lost an
 # incoming and prune blocks that became unreachable — identical to self-TCO's
@@ -4824,9 +4839,8 @@ fn mutual_scc_graph(raw: List (String, (Bool, Set)), nodes: Set, acc: Dict Set) 
   match raw with
   | Nil -> acc
   | Cons (name, (_gc, callees)) rest ->
-      if dict_member(name, acc) then mutual_scc_graph(rest, nodes, acc)
-      else mutual_scc_graph(rest, nodes,
-        dict_set(name, set_from_list(list_filter(set_member(_, nodes), set_to_list(callees))), acc))
+      mutual_scc_graph(rest, nodes,
+        dict_set_absent(name, set_from_list(list_filter(set_member(_, nodes), set_to_list(callees))), acc))
 
 fn mutual_index_sccs(sccs: List (List String), i: Int, acc: Dict Int) -> Dict Int =
   match sccs with
@@ -6431,6 +6445,15 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
           worker_ret_ty(body), blocks),
         next_idx, list_reverse(lifted)))
 
+# What the worker passes (pre-pass and emit) both need, built once per compile:
+# the matched callees, the fn/extern decls by name and the ADT ctor index.
+export type WorkerPlan (..) = (callees: Set, decls: Dict typed_ast.TypedDecl,
+                               adt_index: Dict (List (Int, Int)))
+
+export fn worker_plan(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> WorkerPlan =
+  WorkerPlan(callees = collect_worker_callees(decls, penv),
+             decls = build_worker_decls(decls), adt_index = penv.adt_index)
+
 # Fn and extern decls by name, first declaration wins. Entry `main` is left out:
 # it is never routed to a worker. Built once; worker_source_for reads it per name.
 export fn build_worker_decls(decls: List typed_ast.TypedDecl) -> Dict typed_ast.TypedDecl =
@@ -6443,9 +6466,9 @@ fn build_worker_decls_go(decls: List typed_ast.TypedDecl, acc: Dict typed_ast.Ty
   | Cons d rest ->
       match d with
       | typed_ast.TFnDecl fname _ _ _ _ _ ->
-          build_worker_decls_go(rest, if dict_member(fname, acc) || is_entry_fn_name(fname) then acc else dict_set(fname, d, acc))
+          build_worker_decls_go(rest, if is_entry_fn_name(fname) then acc else dict_set_absent(fname, d, acc))
       | typed_ast.TExternFnDecl ename _ _ _ ->
-          build_worker_decls_go(rest, if dict_member(ename, acc) then acc else dict_set(ename, d, acc))
+          build_worker_decls_go(rest, dict_set_absent(ename, d, acc))
       | _ -> build_worker_decls_go(rest, acc)
 
 # Look up the (params, body, result-ADT-ctors) for a matched worker callee.
@@ -6486,8 +6509,7 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
 # Nothing when `name` is not a top-level fn/extern (a let/ctor over-collected by
 # the shadow-free scan).  Exported: the active streaming pipeline (ir_pipeline)
 # calls this per-name so each worker is rooted+lowered like any other fn.
-export fn emit_worker_for(name: String, worker_decls: Dict typed_ast.TypedDecl, penv: ProgEnv,
-                          adt_index: Dict (List (Int, Int)), worker_set: Set) ->
+export fn emit_worker_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   # Guard: `@<name>_worker` shares the LLVM symbol namespace with user fns.  If a
   # top-level fn is literally named `<name>_worker`, both emit `define @<name>_worker`
@@ -6496,11 +6518,11 @@ export fn emit_worker_for(name: String, worker_decls: Dict typed_ast.TypedDecl, 
   if set_member(name ++ "_worker", penv.top_level)
   then Err("ast_to_ir: CPR worker name '" ++ name ++ "_worker' collides with an existing top-level definition")
   else
-  match worker_source_for(name, worker_decls, adt_index) with
+  match worker_source_for(name, plan.decls, plan.adt_index) with
   | Nothing -> Ok(Nothing)
   | Just (params, body, radt) ->
       do
-        wres <- emit_worker_fn(name ++ "_worker", name, params, body, radt, penv, worker_set)
+        wres <- emit_worker_fn(name ++ "_worker", name, params, body, radt, penv, plan.callees)
         Ok(Just(wres))
 
 # Batch worker emission for translate_program (the non-streaming path used by the
@@ -6508,22 +6530,20 @@ export fn emit_worker_for(name: String, worker_decls: Dict typed_ast.TypedDecl, 
 fn tier2_augment_fns(decls: List typed_ast.TypedDecl, penv: ProgEnv,
                      fns0: List sprout_ir.IRFunction, idx_map0: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
-  emit_all_workers(set_to_list(wset), wset, build_worker_decls(decls), penv,
-                   build_adt_ctor_index(decls, penv.ctors), fns0, idx_map0)
-  where wset = collect_worker_callees(decls, penv)
+  emit_all_workers(set_to_list(plan.callees), plan, penv, fns0, idx_map0)
+  where plan = worker_plan(decls, penv)
 
-fn emit_all_workers(names: List String, worker_set: Set, worker_decls: Dict typed_ast.TypedDecl,
-                    penv: ProgEnv, adt_index: Dict (List (Int, Int)),
+fn emit_all_workers(names: List String, plan: WorkerPlan, penv: ProgEnv,
                     acc_fns: List sprout_ir.IRFunction, acc_idx: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
   match names with
   | Nil -> Ok((acc_fns, acc_idx))
   | Cons name rest ->
       do
-        maybe_w <- emit_worker_for(name, worker_decls, penv, adt_index, worker_set)
+        maybe_w <- emit_worker_for(name, plan, penv)
         match maybe_w with
-        | Nothing -> emit_all_workers(rest, worker_set, worker_decls, penv, adt_index, acc_fns, acc_idx)
+        | Nothing -> emit_all_workers(rest, plan, penv, acc_fns, acc_idx)
         | Just (wfn, wnext, wlifted) ->
-            emit_all_workers(rest, worker_set, worker_decls, penv, adt_index,
+            emit_all_workers(rest, plan, penv,
                              Cons(wfn, list_append(wlifted, acc_fns)),
                              dict_set(name ++ "_worker", wnext, acc_idx))
