@@ -1,12 +1,12 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
-import stdlib.task (Scope, with_scope, task_spawn, task_yield, scope_cancel, task_cancelled)
+import stdlib.task (Scope, with_scope, task_spawn, task_yield, task_sleep, scope_cancel, task_cancelled)
 import stdlib.string as string
 
 # L0.5 cancellation (EXPERIMENTAL). `scope_cancel(scope)` requests cancellation of a
 # scope's tasks (owner-only). A ready/yield-parked task cooperatively observes
-# `task_cancelled()` and returns; only I/O-parked tasks are force-dropped by the
-# scheduler (covered by a separate socket smoke test). No exceptions are injected —
-# stopping is cooperative, exactly like Go's `ctx.Done()`.
+# `task_cancelled()` and returns. Tasks parked on I/O, `task_sleep`, a channel or
+# `select` are force-dropped by the scheduler; a spawned-but-unstarted task runs
+# normally. No exceptions are injected — stopping is cooperative, like Go's `ctx.Done()`.
 
 # A worker marks "x" and yields each iteration, up to `budget`, but stops early with
 # "!" once its scope is cancelled. The bound means a broken implementation fails with
@@ -35,6 +35,39 @@ fn coop_body(s: Scope, log: Ref String) -> Unit !{IO} =
 fn run_body(s: Scope, log: Ref String) -> Unit !{IO} =
   task_spawn(s, \_ -> coop_worker(log, 3))
 
+# A linear value whose release appends "r" to its log.
+type linear Res = Res(Ref String)
+
+fn release(r: consuming Res) -> Unit !{IO} =
+  match r with
+  | Res log -> ref_write(log, string.concat(ref_read(log), "r"))
+
+fn sleep_then_release(r: consuming Res) -> Unit !{IO} =
+  do
+    task_sleep(50)
+    release(r)
+
+# Creates the value inside the task, then parks in a sleep.
+fn make_sleep_release(log: Ref String) -> Unit !{IO} =
+  sleep_then_release(Res(log))
+
+fn unstarted_body(s: Scope, b: consuming Res) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> release(b))
+    scope_cancel(s)  # no yield: the task has not started
+
+fn parked_body(s: Scope, log: Ref String) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> make_sleep_release(log))
+    task_yield()  # the task starts and parks in its sleep
+    scope_cancel(s)
+
+fn moved_parked_body(s: Scope, b: consuming Res) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> sleep_then_release(b))
+    task_yield()
+    scope_cancel(s)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -46,4 +79,15 @@ fn main() -> Unit !{IO} =
     ctl <- ref_new("")
     with_scope(\s -> run_body(s, ctl))
     assert_eq(state, "uncancelled scope runs worker to budget (control)", ref_read(ctl), "xxx#")
+    # A spawned task that has not started is not parked, so it still runs after cancel.
+    ulog <- ref_new("")
+    with_scope(\s -> unstarted_body(s, Res(ulog)))
+    assert_eq(state, "unstarted task runs after scope_cancel and releases its value", ref_read(ulog), "r")
+    # A parked task is dropped and never finishes its closure. Pins today's behaviour.
+    plog <- ref_new("")
+    with_scope(\s -> parked_body(s, plog))
+    assert_eq(state, "a sleep-parked task is dropped; the value it holds is not released", ref_read(plog), "")
+    mlog <- ref_new("")
+    with_scope(\s -> moved_parked_body(s, Res(mlog)))
+    assert_eq(state, "a sleep-parked task is dropped; the value moved into it is not released", ref_read(mlog), "")
     summary(state)

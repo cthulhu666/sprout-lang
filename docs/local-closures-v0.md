@@ -66,8 +66,8 @@ that this shape's borrow half "needs an escape notion". `list_each` calls `f` an
 
 - **Moving into `with_timeout`.** Its body stays non-`once`; a move would leak (§1).
 - **Region or lifetime types.** No `Scope s` tag, no rank-2 types (§3, rejected).
-- **Cancellation-time resource release.** A value *moved* into a cancelled task still leaks
-  (one-shot-closures-v0 §9). Unchanged here; lending sidesteps it.
+- **Cancellation-time resource release.** A linear value a task holds when a cancel
+  drops it still leaks (one-shot-closures-v0 §9). Unchanged here; lending sidesteps it.
 - **Borrowed captures in spawned tasks.** `task_spawn`/`task_fork` stay non-`local`.
 
 ## 3. Prior-art survey
