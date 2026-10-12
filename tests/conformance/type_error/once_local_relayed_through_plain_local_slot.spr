@@ -1,0 +1,17 @@
+module main
+
+# `w` appears once, but the lambda wrapping it sits at a `local` slot that is not
+# `once`, so `run_twice` may run the lambda, and with it `w`, twice. The cause is
+# the closure, not a second use of `w`.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn run_twice(work: local Unit -> Int) -> Int = work(()) + work(())
+
+fn relay(w: once local Unit -> Int) -> Int = run_twice(\_ -> w(()))
+
+fn mover(f: File) -> Int = relay(\_ -> release(f))
+
+fn main() -> Unit !{IO} = print(to_string(mover(File(1))))

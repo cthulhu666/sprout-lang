@@ -1,0 +1,63 @@
+module main
+import stdlib.test (new_state, assert_true, assert_false, summary)
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.string as string
+
+# An extern whose signature writes `local` is private to its declaring module,
+# and `prelude.<name>` is no way round that: it must be marked like the bare name.
+# The real prelude declares no such extern, so the suite bundles against a
+# stand-in stdlib root holding a one-extern prelude.
+
+let root: String = "/tmp/sprout_prelude_private_extern_root"
+
+let prelude_src: String =
+  "extern fn __pre_priv(f: local Unit -> Int) -> Int\nextern fn __pre_pub(n: Int) -> Int\n"
+
+let entry_src: String =
+  "fn via_prelude() -> Int = prelude.__pre_priv(\\_ -> 1)\n\nfn via_bare() -> Int = __pre_priv(\\_ -> 1)\n\nfn via_public() -> Int = prelude.__pre_pub(1)\n"
+
+# The name a function's body calls, or "" when the body is not a plain call.
+fn called_name(d: ast.Decl) -> String =
+  match d with
+  | ast.FnDecl _ _ _ _ _ body _ ->
+      match body with
+      | ast.CallExpr (ast.VarExpr n _) _ _ -> n
+      | _ -> ""
+  | _ -> ""
+
+fn decl_called(decls: List ast.Decl, fn_name: String) -> String =
+  match decls with
+  | Nil -> "<missing>"
+  | Cons d rest -> if is_fn_named(d, fn_name) then called_name(d) else decl_called(rest, fn_name)
+
+fn is_fn_named(d: ast.Decl, fn_name: String) -> Bool =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ -> name == fn_name
+  | _ -> false
+
+fn marked(n: String) -> Bool = string.starts_with(n, source.private_extern_marker)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    fs.make_dir_all(root)
+    fs.write_text(root ++ "/prelude.sprout", prelude_src)
+    fs.write_text("/tmp/sprout_prelude_private_extern_entry.spr", entry_src)
+    r <- bundler.bundle_file(source.FilePath("/tmp/sprout_prelude_private_extern_entry.spr"),
+                             source.StdlibRoot(root))
+    match r with
+    | bundler.BundleErr _ msg -> assert_true(state, "the entry bundles: " ++ msg, false)
+    | bundler.BundleOk prog ->
+        match prog with
+        | ast.Program decls _ ->
+            do
+              assert_true(state, "bare reference to a private prelude extern is marked",
+                marked(decl_called(decls, "$entry.via_bare")))
+              assert_true(state, "prelude.<name> reference to a private prelude extern is marked",
+                marked(decl_called(decls, "$entry.via_prelude")))
+              assert_false(state, "prelude.<name> reference to a public prelude extern is not marked",
+                marked(decl_called(decls, "$entry.via_public")))
+    summary(state)

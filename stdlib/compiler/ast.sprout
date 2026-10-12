@@ -101,7 +101,7 @@ export type Param (..) =
 # collapsing only ModeDefault and ModeConsuming, which are the same
 # ownership. The predicates return Bool so `ast` need not depend on `types` —
 # neither module imports the other — and the consumer pairs them with
-# `types.ownership_of_mode`.
+# `linear_check.ownership_of_param_mode`.
 export fn mode_is_borrowing(m: ParamMode) -> Bool =
   match m with
   | ModeBorrowing -> true
@@ -134,18 +134,6 @@ export fn mode_is_local(m: ParamMode) -> Bool =
   | ModeBorrowing -> false
   | ModeConsuming -> false
   | ModeOnce -> false
-
-# The way back, for a TypeExpr rebuilt from a resolved type (an eta wrapper's
-# annotation, a constraint key). Takes the same Bools the predicates above return —
-# `types.ownership_is_borrow`/`own_is_once`/`own_is_local` supply them — so the two
-# modules still need not know each other. ModeConsuming, not ModeDefault: the two
-# are the same ownership and only one of them survives a round trip.
-export fn mode_of_flags(is_borrow: Bool, is_once: Bool, is_local: Bool) -> ParamMode =
-  if is_borrow then ModeBorrowing
-  else if is_once && is_local then ModeOnceLocal
-  else if is_once then ModeOnce
-  else if is_local then ModeLocal
-  else ModeConsuming
 
 export fn param_mode_of(p: Param) -> ParamMode =
   match p with

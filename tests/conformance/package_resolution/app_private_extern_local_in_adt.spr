@@ -1,0 +1,8 @@
+module main
+import demo.adtext (ping, Runner)
+
+# `local` in a constructor field of the extern's result type makes it private.
+
+let use_it: Runner = __mk_adt_runner(0)
+
+fn main() -> Unit !{IO} = print("x")

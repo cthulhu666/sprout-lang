@@ -1523,7 +1523,13 @@ fn mode_is_written(m: ast.ParamMode) -> Bool =
 # This module is the home because it owns what a mode MEANS, and both other callers
 # can import it without a cycle.
 export fn ownership_of_param_mode(m: ast.ParamMode) -> types.Ownership =
-  types.ownership_of_mode(ast.mode_is_borrowing(m), ast.mode_is_once(m), ast.mode_is_local(m))
+  match m with
+  | ast.ModeDefault -> types.OwnConsume
+  | ast.ModeConsuming -> types.OwnConsume
+  | ast.ModeBorrowing -> types.OwnBorrow
+  | ast.ModeOnce -> types.OwnOnce
+  | ast.ModeLocal -> types.OwnLocal
+  | ast.ModeOnceLocal -> types.OwnOnceLocal
 
 # True when any parameter carries a written modifier. Used to widen the M4.2
 # gate: a program with NO linear type at all must still reject a modifier on a
@@ -1596,12 +1602,11 @@ fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
   types.ownership_eq(ownership_of_param_mode(m), spine_own(class_type))
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
-  if types.ownership_is_borrow(inst) || types.ownership_is_borrow(cls) then method_mismatch_msg(name)
-  else if types.own_is_once(inst) != types.own_is_once(cls)
-  then (if types.own_is_local(inst) != types.own_is_local(cls)
-        then method_once_local_mismatch_msg(name)
-        else method_once_mismatch_msg(name))
-  else method_local_mismatch_msg(name)
+  match types.mode_diff(inst, cls) with
+  | types.DiffBorrow -> method_mismatch_msg(name)
+  | types.DiffOnceLocal -> method_once_local_mismatch_msg(name)
+  | types.DiffOnce -> method_once_mismatch_msg(name)
+  | types.DiffLocal -> method_local_mismatch_msg(name)
 
 # Validate modifiers against a signature ALONE, with no body to walk. Used for
 # `extern fn`, which has no body and so never reaches check_fn_linear.
@@ -1645,8 +1650,10 @@ fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
   match written_mode_fault(ast.param_name(prm), param_type_expr(prm), a, env) with
   | Just bad -> Just(bad)
   | Nothing ->
-      if ast.mode_is_local(ast.param_mode_of(prm)) then bad_local_here(prm, ret_te, a, rest, b, env)
-      else if ast.mode_is_once(ast.param_mode_of(prm)) then bad_once_here(prm, ret_te, a, rest, b, env)
+      if ast.mode_is_local(ast.param_mode_of(prm))
+      then bad_function_only_here(BadLocalOnTyvar, BadLocalNonFunction, prm, ret_te, a, rest, b, env)
+      else if ast.mode_is_once(ast.param_mode_of(prm))
+      then bad_function_only_here(BadOnceOnTyvar, BadOnceNonFunction, prm, ret_te, a, rest, b, env)
       else if ! mode_is_written (ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
       else if type_is_tyvar(a) then Just(BadOnTyvar(ast.param_name(prm)))
       else if ! type_is_linear (a, env) then Just(BadNonLinear(ast.param_name(prm)))
@@ -1714,14 +1721,8 @@ fn written_mode_fault_list(name: String, tes: List ast.TypeExpr, ts: List types.
 # only one that says nothing the author wrote, so it is the only one skipped.
 fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
                        env: Dict types.Scheme) -> Maybe BadModifier =
-  if ast.mode_is_local(mode) then
-    if type_is_tyvar(a) then Just(BadLocalOnTyvar(name))
-    else if ! type_is_func (a) then Just(BadLocalNonFunction(name))
-    else Nothing
-  else if ast.mode_is_once(mode) then
-    if type_is_tyvar(a) then Just(BadOnceOnTyvar(name))
-    else if ! type_is_func (a) then Just(BadOnceNonFunction(name))
-    else Nothing
+  if ast.mode_is_local(mode) then function_only_fault(BadLocalOnTyvar, BadLocalNonFunction, name, a)
+  else if ast.mode_is_once(mode) then function_only_fault(BadOnceOnTyvar, BadOnceNonFunction, name, a)
   else if ! mode_is_written (mode) then Nothing
   else if type_is_tyvar(a) then Just(BadOnTyvar(name))
   else if ! type_is_linear (a, env) then Just(BadNonLinear(name))
@@ -1740,21 +1741,25 @@ fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
 # invoke it at all (the type is not known to be a function), so the promise is
 # vacuous, while the value stays freely returnable and duplicable. `once a` is
 # therefore strictly worse than a dishonestly-annotated concrete parameter.
-fn bad_once_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
-                 rest: List ast.Param, b: types.Type,
-                 env: Dict types.Scheme) -> Maybe BadModifier =
-  if type_is_tyvar(a) then Just(BadOnceOnTyvar(ast.param_name(prm)))
-  else if type_is_func(a) then first_bad_modifier(rest, ret_te, b, env)
-  else Just(BadOnceNonFunction(ast.param_name(prm)))
+#
+# `local` (and `once local`) follows the same rule, for the same reason: the
+# promise needs a parameter the callee can be held not to keep. The two
+# constructors name the modifier in the diagnostic.
+fn bad_function_only_here(on_tyvar: String -> BadModifier, on_non_func: String -> BadModifier,
+                          prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
+                          rest: List ast.Param, b: types.Type,
+                          env: Dict types.Scheme) -> Maybe BadModifier =
+  match function_only_fault(on_tyvar, on_non_func, ast.param_name(prm), a) with
+  | Just bad -> Just(bad)
+  | Nothing -> first_bad_modifier(rest, ret_te, b, env)
 
-# `local` (and `once local`) follows the `once` rule, for the same reason: the
-# promise needs a parameter the callee can be held not to keep.
-fn bad_local_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
-                  rest: List ast.Param, b: types.Type,
-                  env: Dict types.Scheme) -> Maybe BadModifier =
-  if type_is_tyvar(a) then Just(BadLocalOnTyvar(ast.param_name(prm)))
-  else if type_is_func(a) then first_bad_modifier(rest, ret_te, b, env)
-  else Just(BadLocalNonFunction(ast.param_name(prm)))
+# A modifier that is only meaningful on a function-typed parameter, against the
+# type it was written on.
+fn function_only_fault(on_tyvar: String -> BadModifier, on_non_func: String -> BadModifier,
+                       name: String, a: types.Type) -> Maybe BadModifier =
+  if type_is_tyvar(a) then Just(on_tyvar(name))
+  else if ! type_is_func (a) then Just(on_non_func(name))
+  else Nothing
 
 fn type_is_tyvar(t: types.Type) -> Bool =
   match t with
@@ -1875,10 +1880,10 @@ fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List 
   match lin_consumed(body, LinScope(binder_names(owned), borrowed, Nil), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk consumed _ ->
-      escape_honesty_after(
-        once_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
-                           once_names, body, env),
-        local_names, once_names, body)
+      once_honesty_after(
+        escape_honesty_after(param_obligations(owned, borrowed, consumed, fn_pos, env),
+                             local_names, once_names, body),
+        once_names, body, env)
 
 # CALLEE-SIDE HONESTY (post-review). `once` is a promise the callee makes, and the
 # caller's whole licence to move a linear value into the closure rests on it — so
@@ -1892,6 +1897,10 @@ fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List 
 # reject it. Run strictly AFTER the main walk has passed, which is what makes the
 # attribution sound — with no other name tracked, any error this walk reports can
 # only be about this parameter.
+#
+# Runs AFTER the escape walk, because every error here is reported as a reuse: a
+# run hidden behind a closure at a non-`once` slot also trips the count, and the
+# escape walk names that cause correctly.
 #
 # ZERO uses stay legal. `once` bounds invocations from ABOVE ("at most once", per
 # Rust's FnOnce and OxCaml's `once`), so a callee may decline to invoke, on any

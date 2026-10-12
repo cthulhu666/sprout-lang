@@ -984,45 +984,73 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
 
 # (module, name) for every extern in the bundle whose signature writes `local`
 # anywhere: a parameter mode, or one inside a parameter or return type, seen
-# through type aliases. Few, built once per bundle.
+# through every type definition the signature names (alias, sum, record, wrap),
+# transitively. Few, built once per bundle.
 #
-# Decided on the signature as QUALIFIED, so an alias name is canonical and finds
-# its body in the table whichever module declared it. The contexts are built
+# Decided on the signature as QUALIFIED, so a type name is canonical and finds its
+# definition in the table whichever module declared it. The contexts are built
 # without private externs: those only rename value names, never type names.
 fn private_externs_of(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                       stdlib_root: String, extra_roots: List String, canonical: Dict String,
                       prelude: PreludeNames) -> List (String, String) =
-  list_flat_map(private_externs_in_module(_, aliases, ctx_of), modules)
+  list_flat_map(private_externs_in_module(_, defs, ctx_of), modules)
   where ctx_of = build_resolve_ctx(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, Nil)
-        aliases = alias_bodies(modules, ctx_of)
+        defs = type_bodies(modules, ctx_of)
 
-# Canonical alias name -> its qualified right-hand side.
-fn alias_bodies(modules: List ParsedModule, ctx_of: ParsedModule -> ResolveCtx) -> Dict ast.TypeExpr =
-  fold(add_module_aliases(ctx_of, _, _), dict_empty(), modules)
+# Canonical type name -> the qualified type expressions of its definition: an
+# alias's right-hand side, every constructor field, every record field, or the
+# wrapped type.
+fn type_bodies(modules: List ParsedModule, ctx_of: ParsedModule -> ResolveCtx) -> Dict (List ast.TypeExpr) =
+  fold(add_module_defs(ctx_of, _, _), dict_empty(), modules)
 
-fn add_module_aliases(ctx_of: ParsedModule -> ResolveCtx, acc: Dict ast.TypeExpr,
-                      mod: ParsedModule) -> Dict ast.TypeExpr =
+fn add_module_defs(ctx_of: ParsedModule -> ResolveCtx, acc: Dict (List ast.TypeExpr),
+                   mod: ParsedModule) -> Dict (List ast.TypeExpr) =
   match mod with
   | ParsedModule _ _ _ _ _ decls ->
-      if any(is_alias_decl, decls) then fold(add_alias_body(ctx_of(mod), _, _), acc, decls) else acc
+      if any(defines_type, decls) then fold(add_type_bodies(ctx_of(mod), _, _), acc, decls) else acc
 
-fn is_alias_decl(d: ast.Decl) -> Bool =
+fn defines_type(d: ast.Decl) -> Bool =
   match d with
   | ast.AliasDecl _ _ _ _ -> true
-  | _ -> false
+  | ast.TypeDecl _ _ _ _ _ _ -> true
+  | ast.RecordDecl _ _ _ _ _ _ _ -> true
+  | ast.WrapDecl _ _ _ _ _ -> true
+  | ast.FnDecl _ _ _ _ _ _ _ -> false
+  | ast.ExternFnDecl _ _ _ _ _ -> false
+  | ast.LetDecl _ _ _ _ -> false
+  | ast.ClassDecl _ _ _ _ _ -> false
+  | ast.InstanceDecl _ _ _ _ -> false
 
-fn add_alias_body(ctx: ResolveCtx, acc: Dict ast.TypeExpr, d: ast.Decl) -> Dict ast.TypeExpr =
+fn add_type_bodies(ctx: ResolveCtx, acc: Dict (List ast.TypeExpr), d: ast.Decl) -> Dict (List ast.TypeExpr) =
   match d with
-  | ast.AliasDecl name _ rhs _ ->
-      dict_set(dict_get_or(name, ctx.type_locals, name), qualify_type_expr(ctx, rhs), acc)
-  | _ -> acc
+  | ast.AliasDecl name _ rhs _ -> add_type_body(ctx, name, [rhs], acc)
+  | ast.TypeDecl name _ ctors _ _ _ -> add_type_body(ctx, name, list_flat_map(ctor_field_types, ctors), acc)
+  | ast.RecordDecl name _ fields _ _ _ _ -> add_type_body(ctx, name, list_map(record_field_type, fields), acc)
+  | ast.WrapDecl name _ inner _ _ -> add_type_body(ctx, name, [inner], acc)
+  | ast.FnDecl _ _ _ _ _ _ _ -> acc
+  | ast.ExternFnDecl _ _ _ _ _ -> acc
+  | ast.LetDecl _ _ _ _ -> acc
+  | ast.ClassDecl _ _ _ _ _ -> acc
+  | ast.InstanceDecl _ _ _ _ -> acc
 
-fn private_externs_in_module(mod: ParsedModule, aliases: Dict ast.TypeExpr,
+fn add_type_body(ctx: ResolveCtx, name: String, bodies: List ast.TypeExpr,
+                 acc: Dict (List ast.TypeExpr)) -> Dict (List ast.TypeExpr) =
+  dict_set(dict_get_or(name, ctx.type_locals, name), list_map(qualify_type_expr(ctx, _), bodies), acc)
+
+fn ctor_field_types(c: ast.TypeConstructor) -> List ast.TypeExpr =
+  match c with
+  | ast.TypeConstructor _ fields _ _ -> fields
+
+fn record_field_type(f: ast.RecordFieldDecl) -> ast.TypeExpr =
+  match f with
+  | ast.RecordFieldDecl _ te -> te
+
+fn private_externs_in_module(mod: ParsedModule, defs: Dict (List ast.TypeExpr),
                              ctx_of: ParsedModule -> ResolveCtx) -> List (String, String) =
   match mod with
   | ParsedModule mod_name _ _ _ _ decls ->
       if any(is_extern_decl, decls)
-      then list_filter_map(private_extern_in(mod_name, ctx_of(mod), aliases, _), decls)
+      then list_filter_map(private_extern_in(mod_name, ctx_of(mod), defs, _), decls)
       else Nil
 
 fn is_extern_decl(d: ast.Decl) -> Bool =
@@ -1030,41 +1058,46 @@ fn is_extern_decl(d: ast.Decl) -> Bool =
   | ast.ExternFnDecl _ _ _ _ _ -> true
   | _ -> false
 
-fn private_extern_in(mod_name: String, ctx: ResolveCtx, aliases: Dict ast.TypeExpr,
+fn private_extern_in(mod_name: String, ctx: ResolveCtx, defs: Dict (List ast.TypeExpr),
                      d: ast.Decl) -> Maybe (String, String) =
   match d with
   | ast.ExternFnDecl name params ret _ _ ->
-      if any(param_writes_local(ctx, aliases, _), params) || type_writes_local(ctx, aliases, ret)
+      if any(param_writes_local(ctx, defs, _), params) || type_writes_local(ctx, defs, ret)
       then Just((mod_name, name))
       else Nothing
   | _ -> Nothing
 
-fn param_writes_local(ctx: ResolveCtx, aliases: Dict ast.TypeExpr, p: ast.Param) -> Bool =
+fn param_writes_local(ctx: ResolveCtx, defs: Dict (List ast.TypeExpr), p: ast.Param) -> Bool =
   match p with
-  | ast.Param _ te mode -> ast.mode_is_local(mode) || type_writes_local(ctx, aliases, te)
+  | ast.Param _ te mode -> ast.mode_is_local(mode) || type_writes_local(ctx, defs, te)
 
-fn type_writes_local(ctx: ResolveCtx, aliases: Dict ast.TypeExpr, te: Maybe ast.TypeExpr) -> Bool =
+fn type_writes_local(ctx: ResolveCtx, defs: Dict (List ast.TypeExpr), te: Maybe ast.TypeExpr) -> Bool =
   match te with
   | Nothing -> false
-  | Just written -> expr_writes_local(aliases, Nil, qualify_type_expr(ctx, written))
+  | Just written -> reaches_local(defs, [qualify_type_expr(ctx, written)], set_empty())
 
-# `seen` is the aliases being expanded, so a cyclic alias ends the walk.
-fn expr_writes_local(aliases: Dict ast.TypeExpr, seen: List String, te: ast.TypeExpr) -> Bool =
-  match te with
-  | ast.TypeName name -> alias_writes_local(aliases, seen, name)
-  | ast.TypeArrow p r _ mode ->
-      ast.mode_is_local(mode) || expr_writes_local(aliases, seen, p) || expr_writes_local(aliases, seen, r)
-  | ast.TypeApply f x -> expr_writes_local(aliases, seen, f) || expr_writes_local(aliases, seen, x)
-  | ast.TupleType parts -> any(expr_writes_local(aliases, seen, _), parts)
-  | ast.TypeEffect inner _ -> expr_writes_local(aliases, seen, inner)
-  | ast.TypeThunk r _ -> expr_writes_local(aliases, seen, r)
+# A worklist over every type expression the signature reaches. Each definition is
+# expanded once, so a shared type costs one visit and a recursive one ends.
+fn reaches_local(defs: Dict (List ast.TypeExpr), pending: List ast.TypeExpr, seen: Set) -> Bool =
+  match pending with
+  | Nil -> false
+  | Cons te rest ->
+      match te with
+      | ast.TypeName name ->
+          if set_member(name, seen) then reaches_local(defs, rest, seen)
+          else reaches_local(defs, list_append(def_bodies(name, defs), rest), set_insert(name, seen))
+      | ast.TypeArrow p r _ mode ->
+          ast.mode_is_local(mode) || reaches_local(defs, Cons(p, Cons(r, rest)), seen)
+      | ast.TypeApply f x -> reaches_local(defs, Cons(f, Cons(x, rest)), seen)
+      | ast.TupleType parts -> reaches_local(defs, list_append(parts, rest), seen)
+      | ast.TypeEffect inner _ -> reaches_local(defs, Cons(inner, rest), seen)
+      | ast.TypeThunk r _ -> reaches_local(defs, Cons(r, rest), seen)
 
-fn alias_writes_local(aliases: Dict ast.TypeExpr, seen: List String, name: String) -> Bool =
-  if str_list_member(name, seen) then false
-  else
-    match dict_get(name, aliases) with
-    | Just body -> expr_writes_local(aliases, Cons(name, seen), body)
-    | Nothing -> false
+# A type parameter or a builtin type has no definition to expand.
+fn def_bodies(name: String, defs: Dict (List ast.TypeExpr)) -> List ast.TypeExpr =
+  match dict_get(name, defs) with
+  | Just bodies -> bodies
+  | Nothing -> Nil
 
 # The private externs a module may NOT reach: name -> declaring module. `own` is
 # every extern the module declares itself. Two declarations of a name must agree
@@ -1503,7 +1536,7 @@ fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> Stri
       | Just canonical -> canonical
       | Nothing ->
           match prelude_qualified(ctx, name, \symbol -> prelude_value(ctx.prelude, symbol)) with
-          | Just canonical -> canonical
+          | Just canonical -> guard_private_extern(ctx, canonical)
           | Nothing -> guard_canonical(ctx, scope, name)
   else
     match dict_get(name, ctx.value_locals) with

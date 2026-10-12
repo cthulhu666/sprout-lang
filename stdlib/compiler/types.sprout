@@ -63,15 +63,20 @@ export fn ownership_eq(a: Ownership, b: Ownership) -> Bool =
   | (OwnOnceLocal, OwnOnceLocal) -> true
   | _ -> false
 
-# Paired with `ast.mode_is_borrowing` / `mode_is_once` / `mode_is_local` at each
-# call site: `types` and `ast` do not import each other, so the collapse from
-# ParamMode to Ownership is spelled as three Bools rather than a direct mapping.
-export fn ownership_of_mode(is_borrow: Bool, is_once: Bool, is_local: Bool) -> Ownership =
-  if is_borrow then OwnBorrow
-  else if is_once && is_local then OwnOnceLocal
-  else if is_once then OwnOnce
-  else if is_local then OwnLocal
-  else OwnConsume
+# Which axis two ownership tags differ on, for the diagnostics that name it.
+# Decided by the axes, not by which modifier either side mentions: `once local`
+# against `local` differs in `once` alone. Only meaningful for unequal tags.
+export type ModeDiff (..) =
+  | DiffBorrow
+  | DiffOnce
+  | DiffLocal
+  | DiffOnceLocal
+
+export fn mode_diff(a: Ownership, b: Ownership) -> ModeDiff =
+  if ownership_is_borrow(a) || ownership_is_borrow(b) then DiffBorrow
+  else if own_is_once(a) != own_is_once(b)
+  then (if own_is_local(a) != own_is_local(b) then DiffOnceLocal else DiffOnce)
+  else DiffLocal
 
 export fn ownership_is_borrow(o: Ownership) -> Bool =
   match o with

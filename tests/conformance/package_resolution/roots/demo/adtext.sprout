@@ -1,0 +1,21 @@
+module demo.adtext
+
+# Externs whose signature names a type definition that holds a `local` arrow: a
+# sum constructor field, a record field and a wrap. Each is private to this module.
+# `__mk_list` names a recursive type with no `local`, and stays public.
+export let ping: Int = 1
+
+export type Runner (..) = Runner((local(Unit -> Int)) -> Int)
+
+export type RunRec = (run: (local(Unit -> Int)) -> Int)
+
+export wrap RunWrap = (local(Unit -> Int)) -> Int
+
+export type IntList (..) =
+  | LNil
+  | LCons Int IntList
+
+extern fn __mk_adt_runner(n: Int) -> Runner
+extern fn __mk_rec_runner(n: Int) -> RunRec
+extern fn __mk_wrap_runner(n: Int) -> RunWrap
+extern fn __mk_list(n: Int) -> IntList

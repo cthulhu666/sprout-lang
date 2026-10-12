@@ -382,7 +382,8 @@ qualified, never renamed, and never enters a module's exported set, so:
   under either one a bare `read_file(…)` call resolves.
 - **Exception:** an extern whose signature writes `local` anywhere — a
   parameter, or an arrow inside a parameter or return type, including through a
-  type alias — is reachable only
+  type alias or the fields of a sum type, record or `wrap` it names — is
+  reachable only
   from the module that declares it. Its `local` is a promise the compiler cannot
   check, kept only by that module's own callers; a reference from any other
   module is a compile error naming the declaring module.
