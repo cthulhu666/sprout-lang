@@ -66,9 +66,41 @@ fn escape_arg(state: TestState, k: Int, label: String, expected: Int) -> Unit !{
     _ <- new_state()
     assert_eq(state, label, sum_triple(t), expected)
 
+fn step(acc: (Int, Int), i: Int) -> (Int, Int) =
+  match acc with
+  | (a, b) -> (a + i, b + 1)
+
+fn same(x: a) -> a = x
+
+# NEGATIVE (#631): a producer whose declared result is a type variable gets no worker, so the let
+# must stay boxed. These emitted calls to an undefined @range_fold_worker / @list_fold_worker.
+fn fold_range(state: TestState, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let r = range_fold(step, (0, 0), 1..10)
+    match r with
+    | (a, b) -> assert_eq(state, label, (a * 100) + b, expected)
+
+fn fold_list(state: TestState, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let r = list_fold(step, (0, 0), [1, 2, 3])
+    match r with
+    | (a, b) -> assert_eq(state, label, (a * 100) + b, expected)
+
+# One polymorphic branch keeps the whole `if` producer boxed, the monomorphic one included.
+fn poly_branch(state: TestState, cond: Bool, k: Int, label: String, expected: Int) -> Unit !{IO} =
+  do
+    let t = if cond then pair_a(k) else same((k, k))
+    match t with
+    | (a, b) -> assert_eq(state, label, (a * 10) + b, expected)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    # NEGATIVE: type-variable-result producers stay boxed
+    fold_range(state, "range_fold tuple acc 1..10 -> (55,10)", 5510)
+    fold_list(state, "list_fold tuple acc [1,2,3] -> (6,3)", 603)
+    poly_branch(state, true, 3, "poly_branch true 3 -> (3,4) -> 34", 34)
+    poly_branch(state, false, 3, "poly_branch false 3 -> (3,3) -> 33", 33)
     # if-branch producers (pick_a / pick_b) → the N-phi merge path
     blend_check(state, true, 1, "blend true 1 -> (1,2,3) -> 123", 123)
     blend_check(state, false, 1, "blend false 1 -> (11,21,31) -> 1341", 1341)

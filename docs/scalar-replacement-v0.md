@@ -293,8 +293,10 @@ is scalar-replaced: no heap tuple, the fields flow as N SSA scalars, an `if`-pro
 N per-field phis (`build_tuple_phis`), and fn producers (`river_rgb`/`biome_rgb`-style) become
 width-w workers. Two consumers share one **shadow-free** eligibility oracle `sra_core_eligible`:
 worker-collection (`collect_wc_sra_producers`, emits the producer workers) and `translate_do` (fires
-the rewrite, adding only a shadow gate → translation ⊆ collection, so a called worker is always
-emitted). Producer lowering is `translate_tuple_scalars` (tuple literal / width-w worker call /
+the rewrite, adding a shadow gate and the `cpr_result_known` filter `collect_worker_callees` applies
+to the collected set → translation ⊆ collection, so a called worker is always emitted; a producer
+with a type-variable result, such as `range_fold`, keeps the let boxed). Producer lowering is
+`translate_tuple_scalars` (tuple literal / width-w worker call /
 `if`-with-N-phi). Soundness rests on a **default-deny** escape/linearity check (`sra_escape_ok`, using
 the exhaustive `compute_free_vars`): `x` must escape nowhere but the single consuming scrutinee — any
 rebind, second use, or use in another step denies. A `sra_rest_plain` guard requires no Maybe/Result

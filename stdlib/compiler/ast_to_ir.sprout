@@ -1156,11 +1156,11 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
                translate_do_expr_step(e, captures, rest, params, env, idx, cur_label, cur_ops, sra))
       | typed_ast.TDoLetStep name e ->
           # SRA producer: if `let name = e` is scalar-replaceable (shared oracle) and its producers are
-          # unshadowed, lower `e` to its field scalars, record name→scalars in the SRA map, and DO NOT
+          # routable, lower `e` to its field scalars, record name→scalars in the SRA map, and DO NOT
           # bind name as a boxed value. Otherwise fall back to the ordinary boxed let.
           match sra_core_eligible(name, e, rest, env.prog.top_level) with
           | Just (width, _producers, _binders, _body) ->
-              if sra_producers_unshadowed(e, params, captures, env.prog)
+              if sra_producers_routable(e, params, captures, env.prog)
               then translate_do_let_sra(name, e, width, rest, params, env, idx, cur_label, cur_ops,
                                         captures, sra)
               else translate_do_let_boxed(name, e, rest, params, env, idx, cur_label, cur_ops, captures, sra)
@@ -2621,8 +2621,8 @@ fn chain_width(body: typed_ast.TypedExpr) -> Int =
 # scalar-replaced: no heap tuple is allocated, an `if` producer merges the fields via per-field phis,
 # and any fn producers become width-w workers. Two consumers share the core eligibility oracle:
 # collect_wc (emits the producer workers; shadow-FREE superset) and translate_do (fires the rewrite,
-# after an extra shadow gate). Shared oracle ⇒ they cannot disagree on WHETHER a producer is
-# workerized, so translation never calls an un-emitted @<f>_worker (the C1 divergence class).
+# after a shadow + representation gate). Shared oracle ⇒ they cannot disagree on WHETHER a
+# producer is workerized, so translation never calls an un-emitted @<f>_worker (the C1 divergence class).
 
 # Callees inside a scalar-tuple PRODUCER `e` that must be workerized: Nil for a tuple literal, [f] for
 # a bare top-level call f(args), the union for an `if` of producers. Nothing if `e` is not a lowerable
@@ -2643,19 +2643,22 @@ fn sra_producer_callees(e: typed_ast.TypedExpr, width: Int, top_level: Set) -> M
        | Nothing -> Nothing)
   | _ -> Nothing
 
-# Translation-time shadow gate: every producer call's callee must be an unshadowed top-level fn (so
-# @<f>_worker is a real target). Recurses like sra_producer_callees. Keeps translation ⊆ collection.
-fn sra_producers_unshadowed(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
-                            penv: ProgEnv) -> Bool =
+# Translation-time gate: every producer call's callee must be an unshadowed top-level fn whose
+# declared result is lowerable, the filter collect_worker_callees applies, so @<f>_worker is emitted.
+# Recurses like sra_producer_callees. Keeps translation ⊆ collection.
+fn sra_producers_routable(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
+                          penv: ProgEnv) -> Bool =
   match e with
   | typed_ast.TTuple _ _ _ -> true
   | typed_ast.TCall callee _ _ _ ->
       (match callee with
-       | typed_ast.TVar name _ _ -> ! callee_name_shadowed (name, params, captures, penv)
+       | typed_ast.TVar name _ _ ->
+           cpr_result_known(name, penv.fn_arities)
+           && ! callee_name_shadowed (name, params, captures, penv)
        | _ -> false)
   | typed_ast.TIf _ thn els _ _ ->
-      sra_producers_unshadowed(thn, params, captures, penv)
-      && sra_producers_unshadowed(els, params, captures, penv)
+      sra_producers_routable(thn, params, captures, penv)
+      && sra_producers_routable(els, params, captures, penv)
   | _ -> false
 
 # The shape of a consuming step: a `match name with | (p0..) -> body` where scrutinee is exactly
@@ -5995,7 +5998,8 @@ fn collect_wc_dosteps(steps: List typed_ast.TypedDoStep, top_level: Set,
         # An SRA-eligible `let name = e` (C2) makes e's tuple producers (river_rgb/biome_rgb-style)
         # into width-w workers even though they are never a match scrutinee. Shadow-free superset:
         # collection consults the SAME oracle translate_do uses, so a producer worker is emitted for
-        # exactly the lets that fire (translation adds only a shadow gate → translation ⊆ collection).
+        # exactly the lets that fire (translation adds a shadow gate and the cpr_result filter
+        # collect_worker_callees applies → translation ⊆ collection).
         | typed_ast.TDoLetStep name e ->
             collect_wc_expr(e, top_level, ctors, collect_wc_sra_producers(name, e, rest, top_level, acc))
         | typed_ast.TDoExprStep e -> collect_wc_expr(e, top_level, ctors, acc))
