@@ -29,8 +29,47 @@ type Inner (..) deriving (Eq, Ord) =
 type Outer (..) deriving (Eq, Ord) =
   | Outer Inner Int
 
+type Five (..) deriving (Eq, Ord) =
+  | F0
+  | F1
+  | F2
+  | F3
+  | F4
+
+type Mixed (..) deriving (Eq, Ord) =
+  | M0
+  | M1 Int
+  | M2 Int Int
+  | M3 Rank
+  | M4
+
+# Strictly ascending in the derived order.
+let five_ascending: List Five = [F0, F1, F2, F3, F4]
+
+let mixed_ascending: List Mixed =
+  [M0, M1(1), M1(2), M2(1, 1), M2(1, 2), M2(2, 0), M3 (Low), M3 (High), M4]
+
+fn sign(n: Int) -> Int = if n < 0 then 0 - 1 else if n > 0 then 1 else 0
+
+# Every pair (i, j) of an ascending list must compare as sign(i - j).
+fn pairwise_ok(xs: List a) -> Bool where Ord a =
+  all(\p -> row_ok(p, indexed(xs)), indexed(xs))
+
+fn row_ok(p: (Int, a), ys: List (Int, a)) -> Bool where Ord a =
+  let (i, x) = p in
+  all(\q -> let (j, y) = q in sign(compare(x, y)) == sign(i - j), ys)
+
+fn indexed(xs: List a) -> List (Int, a) = indexed_from(0, xs)
+
+fn indexed_from(i: Int, xs: List a) -> List (Int, a) =
+  match xs with
+  | [] -> []
+  | [x | rest] -> Cons((i, x), indexed_from(i + 1, rest))
+
 fn main() -> Unit !{IO} =
   run_suite("deriving_ord", [
+    check_true("Five: every pair", pairwise_ok(five_ascending)),
+    check_true("Mixed: every pair", pairwise_ok(mixed_ascending)),
     # Nullary: same-ctor → 0.
     check_eq("compare Low Low", compare(Low, Low), 0),
     check_eq("compare Mid Mid", compare(Mid, Mid), 0),

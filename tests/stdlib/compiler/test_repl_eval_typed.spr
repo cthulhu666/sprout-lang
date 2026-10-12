@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
+import stdlib.compiler.bundler as bundler
 import stdlib.fs as fs
 import stdlib.env as env
 
@@ -29,6 +30,11 @@ fn ir_has_define(r: compiler.IrFullResult) -> Bool =
   match r with
   | compiler.IrFullFail _ -> false
   | compiler.IrFullOk ir -> str_find(ir, "define ") != -1
+
+fn ir_text(r: compiler.IrFullResult) -> String =
+  match r with
+  | compiler.IrFullFail _ -> ""
+  | compiler.IrFullOk ir -> ir
 
 fn is_ir_fail(r: compiler.IrFullResult) -> Bool =
   match r with
@@ -70,4 +76,20 @@ fn main() -> Unit !{IO} =
           assert_true(state, "compile_full_ir returns Fail for type error", is_ir_fail(r_type_err))
           assert_true(state, "type-error diagnostic starts with 'check: '",
             str_starts_with(first_diag_msg(r_type_err), "check: "))
+
+          # The cached, in-memory entry the daemon's eval uses: the same IR as the
+          # file path, and a shared LoadEnv never serves one eval's source to the next.
+          cache <- bundler.new_load_env()
+          let root = source.StdlibRoot(stdlib_root)
+          c1 <- compiler.compile_source_full_ir("fn answer() -> Int = 42\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
+          c2 <- compiler.compile_source_full_ir("fn answer() -> Int = 43\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
+          c3 <- compiler.compile_source_full_ir("fn answer() -> Int = 42\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
+          c_bad <- compiler.compile_source_full_ir("fn broken() -> Int = undefined_name_xyz_99887766\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
+          c_after_bad <- compiler.compile_source_full_ir("fn answer() -> Int = 42\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
+          assert_true(state, "cached eval entry emits a `define ` block", ir_has_define(c1))
+          assert_true(state, "cached eval IR equals the file path's IR", ir_text(c1) == ir_text(r) && ir_text(c1) != "")
+          assert_true(state, "a changed source changes the IR", ir_text(c1) != ir_text(c2))
+          assert_true(state, "reverting the source restores the IR", ir_text(c1) == ir_text(c3))
+          assert_true(state, "cached eval Fails on an unresolved name", is_ir_fail(c_bad))
+          assert_true(state, "a failed eval does not poison the cache", ir_text(c1) == ir_text(c_after_bad))
     summary(state)

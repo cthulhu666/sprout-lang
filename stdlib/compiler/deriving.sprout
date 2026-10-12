@@ -308,55 +308,68 @@ fn build_wildcard_field_patterns(i: Int, arity: Int, pos: source.SourcePos) -> L
   if i >= arity then Nil
   else Cons(ast.WildcardPattern(pos), build_wildcard_field_patterns(i + 1, arity, pos))
 
-# One inner-match branch: `| Ctor_j(...) -> result`.
-# When idx == outer_idx: bind right-side fields and return chained compare.
-# When idx < outer_idx: right ctor declared earlier than left → left is greater → 1.
-# When idx > outer_idx: right ctor declared later than left → left is smaller → -1.
-fn build_ord_inner_branch(c: ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> ast.MatchBranch =
-  match c with
-  | ast.TypeConstructor name fields _ _ ->
-      if idx == outer_idx then
-        ast.MatchBranch(
-          build_ctor_var_pattern(name, DRight, list_length(fields), pos),
-          build_ord_same_ctor_body(list_length(fields), pos))
-      else
-        ast.MatchBranch(
-          build_ctor_wildcard_pattern(name, list_length(fields), pos),
-          ast.IntExpr(if idx < outer_idx then 1 else 0 - 1, pos))
-
-fn build_ord_inner_branches(remaining: List ast.TypeConstructor, idx: Int, outer_idx: Int, pos: source.SourcePos) -> List ast.MatchBranch =
-  match remaining with
-  | Nil -> Nil
-  | Cons c rest ->
-      Cons(build_ord_inner_branch(c, idx, outer_idx, pos),
-           build_ord_inner_branches(rest, idx + 1, outer_idx, pos))
-
-fn build_ord_inner_match(outer_idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+# `match <var> with | C0 _.. -> 0 | C1 _.. -> 1 | ..`: the declaration index of
+# `var`'s constructor. O(n) arms.
+fn build_ord_ordinal(var: String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
   ast.MatchExpr(
-    ast.VarExpr("right", pos),
-    build_ord_inner_branches(all_ctors, 0, outer_idx, pos),
+    ast.VarExpr(var, pos),
+    ord_ordinal_branches(0, ctors, pos),
     pos)
 
-# Outer branch binds left-side fields for same-ctor comparison.
-# O(arity).
-fn build_ord_outer_branch(c: ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
-  match c with
-  | ast.TypeConstructor name fields _ _ ->
-      ast.MatchBranch(
-        build_ctor_var_pattern(name, DLeft, list_length(fields), pos),
-        build_ord_inner_match(idx, all_ctors, pos))
-
-fn build_ord_outer_branches(remaining: List ast.TypeConstructor, idx: Int, all_ctors: List ast.TypeConstructor, pos: source.SourcePos) -> List ast.MatchBranch =
-  match remaining with
+fn ord_ordinal_branches(i: Int, ctors: List ast.TypeConstructor,
+                        pos: source.SourcePos) -> List ast.MatchBranch =
+  match ctors with
   | Nil -> Nil
   | Cons c rest ->
-      Cons(build_ord_outer_branch(c, idx, all_ctors, pos),
-           build_ord_outer_branches(rest, idx + 1, all_ctors, pos))
+      let ast.TypeConstructor name _ _ _ = c in
+      Cons(ast.MatchBranch(build_ctor_wildcard_pattern(name, ctor_arity(c), pos), ast.IntExpr(i, pos)),
+           ord_ordinal_branches(i + 1, rest, pos))
 
-fn build_ord_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+# Both sides built with the same constructor: `match left with | C l.. ->
+# match right with | C r.. -> <field chain> | _ -> 0`. The `_` arm is dead
+# (the ordinals already agreed) and absent for a one-constructor type, where
+# it would be unreachable.
+fn build_ord_same_ctor_match(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  let dead = match ctors with
+    | [_] -> []
+    | _ -> [ast.MatchBranch(ast.WildcardPattern(pos), ast.IntExpr(0, pos))] in
   ast.MatchExpr(
     ast.VarExpr("left", pos),
-    build_ord_outer_branches(ctors, 0, ctors, pos),
+    list_map(\c -> build_ord_same_ctor_branch(c, dead, pos), ctors),
+    pos)
+
+fn build_ord_same_ctor_branch(ctor: ast.TypeConstructor, dead: List ast.MatchBranch,
+                              pos: source.SourcePos) -> ast.MatchBranch =
+  let ast.TypeConstructor name _ _ _ = ctor in
+  let arity = ctor_arity(ctor) in
+  ast.MatchBranch(
+    build_ctor_var_pattern(name, DLeft, arity, pos),
+    ast.MatchExpr(
+      ast.VarExpr("right", pos),
+      Cons(ast.MatchBranch(build_ctor_var_pattern(name, DRight, arity, pos),
+                           build_ord_same_ctor_body(arity, pos)),
+           dead),
+      pos))
+
+# Different constructors order by declaration index; the same constructor
+# orders by its fields. Linear in the constructor count: one ordinal match per
+# side plus one same-constructor match, not an n-way match under each of n arms.
+#   compare(ordinal(left), ordinal(right)) with | 0 -> <same ctor> | c -> c
+fn build_ord_match_body(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  match ctors with
+  | [_] -> build_ord_same_ctor_match(ctors, pos)
+  | _ ->
+      if all(\c -> ctor_arity(c) == 0, ctors) then build_ord_compare_ordinals(ctors, pos)
+      else ast.MatchExpr(
+        build_ord_compare_ordinals(ctors, pos),
+        [ast.MatchBranch(ast.IntPattern(0, pos), build_ord_same_ctor_match(ctors, pos)),
+         ast.MatchBranch(ast.VarPattern("__d_c", pos), ast.VarExpr("__d_c", pos))],
+        pos)
+
+fn build_ord_compare_ordinals(ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Expr =
+  ast.CallExpr(
+    ast.VarExpr("compare", pos),
+    [build_ord_ordinal("left", ctors, pos), build_ord_ordinal("right", ctors, pos)],
     pos)
 
 fn emit_ord_instance(name: String, type_params: List String, ctors: List ast.TypeConstructor, pos: source.SourcePos) -> ast.Decl =
