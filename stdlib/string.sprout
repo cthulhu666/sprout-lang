@@ -174,7 +174,7 @@ fn is_ascii_digit_char(ch: Char) -> Bool =
   ch >= '0' && ch <= '9'
 
 fn is_ascii_alpha_char(ch: Char) -> Bool =
-  is_ascii_lower(ch) || (ch >= 'A' && ch <= 'Z')
+  is_ascii_lower(ch) || is_ascii_upper(ch)
 
 export fn is_ascii_digit(ch: Char) -> Bool =
   is_ascii_digit_char(ch)
@@ -183,9 +183,13 @@ export fn is_ascii_alpha(ch: Char) -> Bool =
   is_ascii_alpha_char(ch)
 
 # Case-sensitive, which `is_ascii_alpha` cannot express. For callers that
-# classify BY case — a name that must begin lowercase to mean what it says.
+# classify BY case — a name that must begin lowercase (or uppercase) to mean
+# what it says.
 export fn is_ascii_lower(ch: Char) -> Bool =
   ch >= 'a' && ch <= 'z'
+
+export fn is_ascii_upper(ch: Char) -> Bool =
+  ch >= 'A' && ch <= 'Z'
 
 export fn is_ascii_alnum(ch: Char) -> Bool =
   is_ascii_alpha_char(ch) || is_ascii_digit_char(ch)

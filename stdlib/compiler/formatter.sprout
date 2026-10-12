@@ -109,15 +109,10 @@ fn split_comment(line: String) -> (String, String) =
 # ---------------------------------------------------------------------------
 # looks_like_type_group: detect Type( pattern
 
-fn is_ascii_upper_char(ch: Char) -> Bool =
-  match string.find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", string.string_from_char(ch)) with
-  | Just _ -> true
-  | Nothing -> false
-
 fn first_char_is_upper(s: String) -> Bool =
   match str_char_at(s, 0) with
   | Nothing -> false
-  | Just ch -> is_ascii_upper_char(ch)
+  | Just ch -> string.is_ascii_upper(ch)
 
 fn looks_like_type_group(prev_tok: token.Token, next_tok: Maybe token.Token) -> Bool =
   if first_char_is_upper(token.token_text(prev_tok)) then

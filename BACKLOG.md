@@ -1226,9 +1226,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   repo root panics on the first TAB (`prelude_completion_names`: "read_file: prelude"), while the
   other two reads (`globals_of_module`, `dotted_completion_candidates`) silently offer nothing.
   Fix: resolve through the same stdlib root and `--package-root` the compiler session uses.
-- [ ] `P3` **A CRLF file reports every line number doubled.** `source.advance_position` and
-  `take_run` start a new line at `\r` and again at `\n`, so an error on line 3 of a CRLF file is
-  reported at 5:11. Columns are right. Fix: `\r` starts a line only when no `\n` follows it.
+- [ ] `P3` **A CRLF file reports every line number doubled.** `source.starts_line` says both `\r`
+  and `\n` start a line, so an error on line 3 of a CRLF file is reported at 5:11. Columns are
+  right. Fix: `\r` starts a line only when no `\n` follows it, which needs one byte of lookahead.
 - [~] `P2` **Dispose of the obsolete negative corpora.** Entrypoint validation landed
   (`validate_entrypoint`): a defined `main` must be zero-arg, `Unit`/`Int`-returning and concretely
   `!{IO}`, gated via `test-executable-errors`. **Remaining:** the "missing main" check
