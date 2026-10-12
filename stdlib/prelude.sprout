@@ -73,7 +73,7 @@ export type Dict v =
   | Dict (Map v)
 
 export type Set =
-  | Set NativeSet
+  | Set (Map Unit)
 
 # An inclusive interval walked in a FIXED direction: start, end, step.
 #
@@ -771,17 +771,10 @@ export fn dict_remove(key: String, dict: Dict v) -> Dict v =
   match dict with
   | Dict raw -> Dict(map_remove(raw, key))
 
-fn dict_keys_from(raw: Map v, index: Int, total: Int, acc: List String) -> List String =
-  if index >= total then acc
-  else
-    match map_nth_key(raw, index) with
-    | Nothing -> acc
-    | Just key -> dict_keys_from(raw, index + 1, total, Cons(key, acc))
-
-# O(n log n): n indexed map_nth_key lookups, each an O(log n) order-statistic descent.
+# O(n): one in-order walk.
 export fn dict_keys(dict: Dict v) -> Vec String =
   match dict with
-  | Dict raw -> vec_from_list(list_reverse_go(dict_keys_from(raw, 0, map_size(raw), Nil), Nil))
+  | Dict raw -> vec_from_list(map_keys(raw))
 
 fn dict_values_from(raw: Map v, index: Int, total: Int, acc: List v) -> List v =
   if index >= total then acc
@@ -842,29 +835,37 @@ export fn dict_entries_with_prefix(prefix: String, dict: Dict v) -> Vec (String,
         dict_prefix_from(raw, prefix, map_lower_bound(raw, prefix, 0, map_size(raw)), map_size(raw), Nil),
         Nil))
 
+# A `Set` is a `Dict`'s map with no values, so it shares the map's AVL delete.
+
 # O(1).
 export fn set_empty() -> Set =
-  Set(native_set_empty())
+  Set(map_empty())
 
-# O(log n): persistent AVL tree (self-balancing) with path-copying on insert.
+# O(log n): AVL insert with path-copying; an item already present returns `s` itself.
 export fn set_insert(item: String, s: Set) -> Set =
   match s with
-  | Set raw -> Set(native_set_insert(item, raw))
+  | Set raw ->
+      match map_get(raw, item) with
+      | Just _ -> s
+      | Nothing -> Set(map_set(raw, item, ()))
 
 # O(log n): AVL binary search.
 export fn set_member(item: String, s: Set) -> Bool =
   match s with
-  | Set raw -> native_set_member(item, raw)
+  | Set raw ->
+      match map_get(raw, item) with
+      | Just _ -> true
+      | Nothing -> false
 
 # O(n): in-order traversal; the returned list is sorted by interned-key order.
 export fn set_to_list(s: Set) -> List String =
   match s with
-  | Set raw -> native_set_to_list(raw)
+  | Set raw -> map_keys(raw)
 
 # O(1): the AVL nodes cache `size`.
 export fn set_size(s: Set) -> Int =
   match s with
-  | Set raw -> native_set_size(raw)
+  | Set raw -> map_size(raw)
 
 # O(m log(n+m)) where n = |xs|, m = |ys|: walks ys (O(m)), set_inserts each
 # into xs (O(log(n+m)) per insert as the tree grows).
@@ -877,10 +878,10 @@ export fn set_diff(xs: Set, ys: Set) -> Set =
   list_fold(\ (acc, x) -> if set_member(x, ys) then acc else set_insert(x, acc),
             set_empty(), set_to_list(xs))
 
-# O(n log n): reinserts every element into a fresh set, dropping the target.
+# O(log n): AVL delete; path-copies the search path and rebalances.
 export fn set_remove(target: String, xs: Set) -> Set =
-  list_fold(\ (acc, x) -> if x == target then acc else set_insert(x, acc),
-            set_empty(), set_to_list(xs))
+  match xs with
+  | Set raw -> Set(map_remove(raw, target))
 
 # O(n log n).
 export fn set_from_list(xs: List String) -> Set =
@@ -2248,21 +2249,15 @@ extern fn vector_append(v: Vector a, val: a) -> Vector a
 extern fn vector_concat(a: Vector x, b: Vector x) -> Vector x
 extern fn vector_from_list(xs: List a) -> Vector a
 
-# Raw map (string-keyed hash map)
+# Raw map: a persistent AVL tree keyed by String. `Dict` and `Set` both wrap it.
 extern fn map_empty() -> Map v
 extern fn map_get(m: Map v, key: String) -> Maybe v
 extern fn map_set(m: Map v, key: String, val: v) -> Map v
 extern fn map_remove(m: Map v, key: String) -> Map v
 extern fn map_size(m: Map v) -> Int
+extern fn map_keys(m: Map v) -> List String
 extern fn map_nth_key(m: Map v, n: Int) -> Maybe String
 extern fn map_nth_value(m: Map v, n: Int) -> Maybe v
-
-# Raw native set (string-keyed hash set)
-extern fn native_set_empty() -> NativeSet
-extern fn native_set_insert(key: String, s: NativeSet) -> NativeSet
-extern fn native_set_member(key: String, s: NativeSet) -> Bool
-extern fn native_set_to_list(s: NativeSet) -> List String
-extern fn native_set_size(s: NativeSet) -> Int
 
 # Bytes primitives are NOT declared here. They live in stdlib.bytes, which declares the full set
 # (these seven plus bytes_to_utf8 and the bytes_builder_* family) and must be imported explicitly.

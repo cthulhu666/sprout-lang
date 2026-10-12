@@ -31,6 +31,10 @@ fn main() -> Unit !{IO} =
     check_false("dict eq differs (length)", d == d2),
 
     check_eq("dict_keys count", vec_sum_by(\_ -> 1, keys), 3),
+    check_eq("dict_keys in key order", dict_keys({gamma: 3, alpha: 1, beta: 2}),
+      foldable_to_vec(["alpha", "beta", "gamma"])),
+    check_eq("dict_keys after remove", dict_keys(d2), foldable_to_vec(["alpha", "gamma"])),
+    check_eq("dict_keys of empty", vec_length(dict_keys(dict_remove("alpha", {alpha: 1}))), 0),
     check_eq("dict_values sum", vec_sum_by(\x -> x, vals), 6),
 
     check_eq("dict_remove reduces count", vec_sum_by(\_ -> 1, vals2), 2),

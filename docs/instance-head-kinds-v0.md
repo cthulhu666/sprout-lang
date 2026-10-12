@@ -117,9 +117,9 @@ Four notes the first revision got wrong:
    `build_class_super_map`. If neither constrains the variable, the class is
    unconstrained and every instance of it is accepted.
 3. **Runtime types take parameters.** `c_runtime_type_names` is
-   `["Vector", "Map", "NativeSet", "Ref"]` in `infer.sprout`, and
+   `["Vector", "Map", "Ref"]` in `infer.sprout`, and
    `instance Peek (Vector a)` compiles and runs today. They need an explicit table
-   — Vector 1, Map 1, Ref 1, NativeSet 0 — not the blanket 0 revision 1 gave every
+   — Vector 1, Map 1, Ref 1 — not the blanket 0 revision 1 gave every
    builtin. `primitive_type_names` are genuinely 0.
 4. **Constraints, not only instances.** `fn wrap_pp(x: Tagged Bool Int) -> String
    where Pretty Tagged` is a wrong-kind head in a `where` clause. An instance-only

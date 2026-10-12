@@ -1,0 +1,22 @@
+import stdlib.test (new_state, summary)
+import testsupport.cost (assert_scales)
+
+# `set_remove` must cost O(log n). It rebuilt the whole set per call, which made
+# the type checker's removal of every checked name quadratic: about 60% of a
+# self-compile (#599). The probe removes the same 50 names from a set of 64 and
+# of 16384: O(log n) puts the ratio near 2, a rebuild near 600.
+
+let removed = 50
+
+fn names(n: Int) -> Set = set_from_list([`k${int_to_string(i)}` for i in 0..n - 1])
+
+fn removes_one(s: Set, i: Int) -> Bool =
+  set_size(set_remove(`k${int_to_string(i)}`, s)) == set_size(s) - 1
+
+fn remove_each(s: Set) -> Bool = all(removes_one(s, _), range_to_list(0..removed - 1))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    _ <- assert_scales(state, "set_remove", remove_each, names(64), names(16384), 20)
+    summary(state)

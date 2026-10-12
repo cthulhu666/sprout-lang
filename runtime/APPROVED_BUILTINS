@@ -89,16 +89,12 @@ json_parse
 json_stringify
 map_empty
 map_get
+map_keys  # In-order key list, O(n). Replaces native_set_to_list when Set became a Map Unit, so set_remove can use map_remove (O(log n)) instead of rebuilding the set: that rebuild was ~60% of a self-compile (#599). From Sprout the keys are reachable only through map_nth_key, one O(log n) descent and one Just per key. Approved 2026-10-12; the five native_set_* go, so 4 fewer builtins net.
 map_nth_key
 map_nth_value
 map_remove
 map_set
 map_size
-native_set_empty
-native_set_insert
-native_set_member
-native_set_size
-native_set_to_list
 panic  # Declared PURE (`panic : String -> a`), despite writing to stderr and calling exit(1) via sprout_fail. Not an oversight, and not a carve-out: ~187 sprout_fail sites already sit behind builtins declared pure (vector_length aborts on a null vector), so aborting-is-not-an-effect was the de facto rule and panic — the only builtin whose sole purpose is to abort — was the lone inconsistency. An abort has no continuation, so nothing downstream can observe the write, and the bottom-shaped return type already says it does not come back. Decided 2026-08-16; normative in spec §6, survey in docs/effect-enforcement-v0.md §6, pinned by tests/effects/canaries.spr `unreachable_arm`.
 print_int
 print_newline

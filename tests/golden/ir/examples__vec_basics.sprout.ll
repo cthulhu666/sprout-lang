@@ -68,13 +68,9 @@ declare i64 @map_get(i64, i64)
 declare i64 @map_set(i64, i64, i64)
 declare i64 @map_remove(i64, i64)
 declare i64 @map_size(i64)
+declare i64 @map_keys(i64)
 declare i64 @map_nth_key(i64, i64)
 declare i64 @map_nth_value(i64, i64)
-declare i64 @native_set_empty()
-declare i64 @native_set_insert(i64, i64)
-declare i64 @native_set_member(i64, i64)
-declare i64 @native_set_to_list(i64)
-declare i64 @native_set_size(i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
@@ -91,8 +87,8 @@ declare i64 @ref_write(i64, i64)
 @.str.10 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 522, column 49)\00" }
 @.str.11 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 539, column 50)\00" }
 @.str.12 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 585, column 55)\00" }
-@.str.13 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1758, column 47)\00" }
-@.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1759, column 38)\00" }
+@.str.13 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1759, column 47)\00" }
+@.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1760, column 38)\00" }
 @.str.15 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 20, column 12)\00" }
 @.str.17 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 20, column 42)\00" }
@@ -110,7 +106,7 @@ declare i64 @ref_write(i64, i64)
 @.str.29 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"reversed:      \00" }
 @.str.30 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"middle 3:      \00" }
 @.str.31 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"joined:        \00" }
-@.str.32 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1309, column 26)\00" }
+@.str.32 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1310, column 26)\00" }
 @.str.33 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"[\00" }
 @.str.34 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"]\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
