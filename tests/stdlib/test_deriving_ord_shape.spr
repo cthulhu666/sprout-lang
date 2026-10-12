@@ -1,0 +1,58 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.ast as ast
+import stdlib.compiler.deriving as deriving
+import stdlib.string as string
+
+# The derived `compare` must stay linear in the constructor count: an n-way inner
+# match inside each of n outer arms made it n^2 branches.
+
+fn expr_branches(e: ast.Expr) -> Int =
+  match e with
+  | ast.MatchExpr scrut branches _ ->
+      expr_branches(scrut) + list_fold(\ (acc, b) -> acc + arm_branches(b), 0, branches)
+  | ast.CallExpr callee args _ ->
+      expr_branches(callee) + list_fold(\ (acc, a) -> acc + expr_branches(a), 0, args)
+  | _ -> 0
+
+fn arm_branches(b: ast.MatchBranch) -> Int =
+  let ast.MatchBranch _ body = b in 1 + expr_branches(body)
+
+fn compare_body(d: ast.Decl) -> Maybe ast.Expr =
+  match d with
+  | ast.InstanceDecl _ _ [ast.InstanceMethodImpl "compare" _ _ _ _ body] _ -> Just(body)
+  | _ -> Nothing
+
+# Number of match arms in the first derived `compare` in `src`, or -1.
+fn derived_ord_branches(src: String) -> Int =
+  match lexer.tokenize(src) with
+  | Err _ -> 0 - 1
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> 0 - 1
+      | Ok prog ->
+          let ast.Program decls _ = prog in
+          match find_map(compare_body, deriving.expand_deriving_decls(decls)) with
+          | Just body -> expr_branches(body)
+          | Nothing -> 0 - 1
+
+fn ctor_lines(i: Int, n: Int, with_field: Bool) -> List String =
+  if i >= n then []
+  else Cons("  | C" ++ int_to_string(i) ++ (if with_field then " Int" else "") ++ "\n",
+            ctor_lines(i + 1, n, with_field))
+
+fn enum_src(n: Int, with_field: Bool) -> String =
+  "type T deriving (Ord) =\n" ++ string.join("", ctor_lines(0, n, with_field))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    _ <- assert_true(state, "20 nullary ctors stay linear",
+      derived_ord_branches(enum_src(20, false)) <= 6 * 20)
+    _ <- assert_true(state, "20 field ctors stay linear",
+      derived_ord_branches(enum_src(20, true)) <= 6 * 20)
+    _ <- assert_true(state, "doubling ctors at most doubles arms",
+      derived_ord_branches(enum_src(40, true)) <= 2 * derived_ord_branches(enum_src(20, true)) + 4)
+    _ <- assert_true(state, "parses", derived_ord_branches(enum_src(2, true)) > 0)
+    summary(state)

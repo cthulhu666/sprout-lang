@@ -579,12 +579,15 @@ export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibR
 export fn compile_phase_lower_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
     check_result <- compile_phase_check_with_roots(path, stdlib_root, extra_roots)
-    match check_result with
-    | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
-    | typed_ast.TypedOk typed_prog env ->
-        do
-          optimised <- run_opt_passes(lowering.lower_program(typed_prog, env))
-          typed_ast.TypedOk(optimised, env)
+    lower_checked(check_result)
+
+fn lower_checked(check_result: typed_ast.TypedResult) -> typed_ast.TypedResult !{IO} =
+  match check_result with
+  | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
+  | typed_ast.TypedOk typed_prog env ->
+      do
+        optimised <- run_opt_passes(lowering.lower_program(typed_prog, env))
+        typed_ast.TypedOk(optimised, env)
 
 export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_recheck_with_roots(path, stdlib_root, Nil)
@@ -595,9 +598,27 @@ export fn compile_phase_recheck_with_roots(path: source.FilePath, stdlib_root: s
 export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot) -> IrFullResult !{IO} =
   do
     recheck_result <- compile_phase_recheck(path, stdlib_root)
-    match recheck_result with
-    | typed_ast.TypedErr pos msg -> IrFullFail(Cons(diag_error(pos, msg), Nil))
-    | typed_ast.TypedOk typed_lowered _ ->
-        match ir_pipeline.compile_program_streaming(typed_lowered) with
-        | Err msg -> IrFullFail(Cons(diag_error(no_pos(), "codegen: " ++ msg), Nil))
-        | Ok ir_text -> IrFullOk(ir_text)
+    emit_ir(recheck_result)
+
+# As compile_full_ir for a buffer, reusing a caller-owned LoadEnv so a session that
+# compiles one buffer after another re-reads and re-parses only the buffer, not the
+# prelude and imports. `entry_path` is the buffer's key in the overlay; it need not exist.
+export fn compile_source_full_ir(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
+                                 extra_roots: List String, cache: bundler.LoadEnv) -> IrFullResult !{IO} =
+  do
+    bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
+    match bundled with
+    | bundler.BundleErr pos msg -> IrFullFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
+    | bundler.BundleOk prog ->
+        do
+          checked <- check_bundled(prog)
+          lowered <- lower_checked(checked)
+          emit_ir(lowered)
+
+fn emit_ir(lowered: typed_ast.TypedResult) -> IrFullResult !{IO} =
+  match lowered with
+  | typed_ast.TypedErr pos msg -> IrFullFail(Cons(diag_error(pos, msg), Nil))
+  | typed_ast.TypedOk typed_lowered _ ->
+      match ir_pipeline.compile_program_streaming(typed_lowered) with
+      | Err msg -> IrFullFail(Cons(diag_error(no_pos(), "codegen: " ++ msg), Nil))
+      | Ok ir_text -> IrFullOk(ir_text)

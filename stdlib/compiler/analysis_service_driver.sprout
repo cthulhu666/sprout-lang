@@ -569,8 +569,9 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
 #      - Pure type T     → add fn main = print(sentinel); requires ToString T
 #      - Unit !{IO}      → add fn main = sentinel (runs the IO action directly)
 #      - Other T !{IO}   → error (cannot auto-print effectful non-Unit expressions)
-#   3. Write the full augmented source to a fixed /tmp path.
-#   4. Compile to LLVM IR via the internal compiler pipeline (compile_full_ir).
+#   3. Compile the augmented source to LLVM IR in memory (compile_source_full_ir),
+#      reusing the session's LoadEnv; `eval_source_path` only names the buffer.
+#   4. Write the IR to a fixed /tmp path.
 #   5. Link IR against every runtime object (whole runtime/*.c) with clang.
 #   6. Execute the binary, capture stdout, return as a JSON array of lines.
 #
@@ -758,12 +759,10 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
             | Ok _ -> run_eval_binary()
 
 fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
-  match fs.write_text(eval_source_path, src) with
-  | Err msg -> panic("write_file: eval_source: " ++ msg)
-  | Ok _ ->
-      do
-        ir_result <- compiler.compile_full_ir(source.FilePath(eval_source_path), source.StdlibRoot(state_stdlib_root(state)))
-        link_and_run_eval(ir_result, state)
+  do
+    ir_result <- compiler.compile_source_full_ir(src, eval_source_path,
+      source.StdlibRoot(state_stdlib_root(state)), Nil, state_cache(state))
+    link_and_run_eval(ir_result, state)
 
 export fn is_function_scheme(s: types.Scheme) -> Bool =
   match types.scheme_type(s) with

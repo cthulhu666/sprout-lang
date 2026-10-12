@@ -1,0 +1,19 @@
+import stdlib.test (check_true, run_suite)
+
+# A module-level `compare` must not reach the code `deriving (Ord)` generates for an
+# all-nullary type: it orders by declaration index alone and calls no `compare`.
+
+fn compare(a: String, b: String) -> String = a ++ b
+
+type Rank (..) deriving (Eq, Ord) =
+  | Low
+  | Mid
+  | High
+
+fn main() -> Unit !{IO} =
+  run_suite("deriving_ord_shadow", [
+    check_true("Low < High", ord_lt(Low, High)),
+    check_true("High > Mid", ord_gt(High, Mid)),
+    check_true("Mid <= Mid", ord_lte(Mid, Mid)),
+    check_true("the local compare is still callable", compare("a", "b") == "ab")
+  ])
