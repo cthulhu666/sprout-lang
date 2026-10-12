@@ -46,7 +46,7 @@ that is not I/O, as one unit.
 **2. Effectful combinators over a held resource.**
 
 ```
-list_each(xs, \x -> write_all(conn, x))
+list_each(\x -> write_all(conn, x), xs)
 ```
 
 Rejected for the same reason. BACKLOG *Higher-order linearity (M4.4) — the general case* records
@@ -335,9 +335,9 @@ more programs at `local` positions.
 
 **Follow-up (separate change).** Mark the prelude's effectful combinators' function arguments
 `local` — `list_each`, `list_fold`, `list_map`, the `vec_` family — closing the borrow half of the
-BACKLOG M4.4 entry. Its design must decide `Functor.map`: left plain, `map(\x -> peek(c) + x, xs)`
+BACKLOG M4.4 entry. Its design must decide `Functor.fmap`: left plain, `map(\x -> peek(c) + x, xs)`
 is rejected where `list_map` accepts it; made `local` in the class, it forbids any instance whose
-`map` keeps the function (a function functor). No such instance exists today. A comprehension
+`fmap` keeps the function (a function functor). No such instance exists today. A comprehension
 reading a borrowed value becomes legal there too, since comprehensions elaborate to folds. The `_`
 placeholder form, `list_each(\x -> write(c, x), _)`, desugars to an ordinary lambda and stays
 rejected. The prelude is in the compiler's closure, so this one needs the 2-step
@@ -385,5 +385,44 @@ TDD, each red before the change.
   the leak paragraph gains "lend instead of move" for `with_timeout`.
 - `docs/one-shot-closures-v0.md` §6.3: point at this note for the borrow case.
 - `docs/idiomatic-sprout.md` §"Let the compiler enforce release it exactly once": the
-  `with_timeout` lending shape.
+  `with_timeout` lending shape, and how to write your own lending combinator.
 - `BACKLOG.md`: the M4.4 entry's "escape notion" line points here until the prelude follow-up lands.
+- `examples/linear_resources.sprout`: every parameter mode on one resource, offline.
+
+## 11. Where `local` fits
+
+`local` belongs on a callback the callee calls, or hands on, and is done with before it returns:
+"run this inside my call".
+
+**Choosing a mode.** Pick by what the caller's lambda must capture:
+
+| callback parameter | callee may | caller's lambda may also |
+|---|---|---|
+| plain | keep it, call it any number of times | — (unrestricted values only) |
+| `once` | keep it, call it at most once | move a linear value in |
+| `local` | call it any number of times, not keep it | borrow a linear value |
+| `once local` | call it at most once, not keep it | move in and borrow |
+
+**In use.** `stdlib.task`: `with_timeout` (`local`) and `with_scope` (`once local`).
+
+**Your own combinators.** A retry loop, a timing wrapper, a "run in a transaction" helper: each
+calls its body and returns, so marking the body `local` lets callers lend it a borrowed resource.
+The callee check (§6.3) holds the combinator to it. `examples/linear_resources.sprout` has one.
+
+**Planned: the prelude combinators** (§8). Until `list_each` and the rest take `local`, iterate in
+a recursive function that takes the resource `borrowing`.
+
+**Where it does not fit.**
+
+- A callback the callee keeps: an HTTP handler, middleware (`http_middleware.with_logging` returns
+  a closure holding `handler`), `task_spawn`/`task_fork` (the work runs after the call returns).
+  §6.3 rejects `local` on each.
+- A plain value: `local` is function-typed only (§6.4); `borrowing` already lends a linear value.
+- A class method whose instances may keep the function: `local` in the class binds every instance
+  (the `Functor.fmap` question, §8).
+
+**Not a speed feature yet.** Modes are erased (§2), so a closure at a `local` slot is
+heap-allocated like any other. OxCaml's `local` exists mainly to stack-allocate. A `local` slot
+gives Sprout the same fact without escape analysis (BACKLOG *Non-escaping combinator closures
+allocate*), but using it is a separate design: it touches rooting and codegen, a `with_timeout`
+body runs in a child task, and externs are trusted rather than checked (§6.5).

@@ -2020,7 +2020,7 @@ outcome.
   lambda at an **unannotated** parameter, and **consuming** linear lambda
   parameters, are not yet supported, nor is capturing a **borrowed** value
   at a parameter that is not `local`. This is why the combinator form
-  (`list_each(xs, \x -> write(conn, x))`) is still out of reach: the prelude
+  (`list_each(\x -> write(conn, x), xs)`) is still out of reach: the prelude
   combinators do not take `local` yet. Two shapes are no longer: the spawn-a-handler server, a
   move into a one-shot closure, so `stdlib.http_server` runs on the linear socket
   API throughout; and the with-resource combinator, whose work function takes the
