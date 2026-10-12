@@ -1,6 +1,6 @@
 module examples.linear_resources
 import stdlib.string (join)
-import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
+import stdlib.task (TimeoutResult, Completed, Expired, task_spawn, with_scope, with_timeout)
 
 # A tour of linear resources. A Journal is a handle that must be consumed exactly
 # once, by `close_journal`, which releases it. The compiler checks this; the
@@ -104,18 +104,24 @@ fn section3() -> Unit !{IO} =
 # 4. once: move a linear value into a closure
 # ---------------------------------------------------------------------------
 #
-# A `once` parameter promises the callee calls the closure at most once. So the
-# caller may move a linear value into it, and the lambda releases it. A callee
-# that calls a `once` parameter twice is rejected: "used more than once".
+# `task_spawn` runs its work later, in another task, at most once: its parameter
+# is `once`. That promise lets the caller move a linear value into the closure,
+# and the task releases it. `with_scope` waits for the tasks it spawned, so the
+# journal is closed before it returns; a cancelled scope would drop the task and
+# leak it. A callee that calls a `once` parameter twice is rejected: "used more
+# than once".
 
-fn run_once(work: once Unit -> a !{IO}) -> a !{IO} = work(())
+fn print_and_close(j: consuming Journal) -> Unit !{IO} =
+  do
+    lines <- close_journal(j)
+    print(`task closed: ${join(" | ", lines)}`)
 
 fn section4() -> Unit !{IO} =
   do
     print("--- 4. once ---")
     j <- open_journal("four")
-    lines <- run_once(\_ -> close_journal(j))
-    print(join(" | ", lines))
+    with_scope(\s -> task_spawn(s, \_ -> print_and_close(j)))
+    print("scope joined")
 
 # ---------------------------------------------------------------------------
 # 5. local: lend a borrowed value to a closure
