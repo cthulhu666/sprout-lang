@@ -69,7 +69,7 @@ fn section2() -> Unit !{IO} =
     write_line(j, "first")
     write_line(j, "second")
     n <- line_count(j)
-    print(`${int_to_string(n)} lines`)
+    print(`${n} lines`)
     lines <- close_journal(j)
     print(join(" | ", lines))
 
@@ -86,7 +86,7 @@ fn with_journal(title: String, work: (borrowing Journal) -> a !{IO}) -> a !{IO} 
     j <- open_journal(title)
     r <- work(j)
     lines <- close_journal(j)
-    print(`  released with ${int_to_string(list_length(lines))} lines`)
+    print(`  released with ${list_length(lines)} lines`)
     r
 
 fn note_and_count(j: borrowing Journal) -> Int !{IO} =
@@ -98,7 +98,7 @@ fn section3() -> Unit !{IO} =
   do
     print("--- 3. with_journal ---")
     n <- with_journal("three", note_and_count)
-    print(`counted ${int_to_string(n)}`)
+    print(`counted ${n}`)
 
 # ---------------------------------------------------------------------------
 # 4. once: move a linear value into a closure
@@ -135,15 +135,15 @@ fn retry(times: Int, body: local Unit -> Result String a !{IO}) -> Result String
 fn flaky(j: borrowing Journal) -> Result String Int !{IO} =
   do
     n <- line_count(j)
-    write_line(j, `attempt ${int_to_string(n)}`)
-    if n >= 3 then Ok(n) else Err(`attempt ${int_to_string(n)} failed`)
+    write_line(j, `attempt ${n}`)
+    if n >= 3 then Ok(n) else Err(`attempt ${n} failed`)
 
 fn timed(j: borrowing Journal) -> TimeoutResult Int !{IO} =
   with_timeout(1000, \_ -> line_count(j))
 
 fn report_timeout(r: TimeoutResult Int) -> Unit !{IO} =
   match r with
-  | Completed n -> print(`completed with ${int_to_string(n)} lines`)
+  | Completed n -> print(`completed with ${n} lines`)
   | Expired -> print("expired")
 
 fn section5() -> Unit !{IO} =
@@ -151,7 +151,7 @@ fn section5() -> Unit !{IO} =
     print("--- 5. local ---")
     j <- open_journal("five")
     match retry(5, \_ -> flaky(j)) with
-    | Ok n -> print(`succeeded at ${int_to_string(n)}`)
+    | Ok n -> print(`succeeded at ${n}`)
     | Err e -> print(`gave up: ${e}`)
     r <- timed(j)
     report_timeout(r)
