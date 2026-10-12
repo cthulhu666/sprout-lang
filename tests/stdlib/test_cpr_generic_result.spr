@@ -25,11 +25,26 @@ fn through_ident(m: Maybe Int) -> Int =
   | Just v -> v
   | Nothing -> 0
 
+# The same callee through the tuple-match and do-bind routers.
+fn sum_through_ident(a: Int, b: Int) -> Int =
+  match ident((a, b)) with
+  | (x, y) -> x + y
+
+fn bump_through_ident(m: Maybe Int) -> Maybe Int =
+  do
+    v <- ident(m)
+    Just(v + 1)
+
 fn main() -> Unit !{IO} =
   run_suite("cpr_generic_result", [
     check_eq("fold finding nothing returns the Nothing arm", first_gt([1, 2, 3], 99), 0),
     check_eq("fold finding a payload returns it", first_gt([1, 5, 3], 4), 5),
     check_eq("payload equal to a ctor tag is not misread", first_gt([1, 5, 3], 0), 1),
     check_eq("Just through a generic identity", through_ident(Just(7)), 7),
-    check_eq("Nothing through a generic identity", through_ident(Nothing), 0)
+    check_eq("Nothing through a generic identity", through_ident(Nothing), 0),
+    check_eq("tuple through a generic identity", sum_through_ident(3, 4), 7),
+    check_eq("do-bind Just through a generic identity",
+      maybe_with_default(-1, bump_through_ident(Just(7))), 8),
+    check_eq("do-bind Nothing through a generic identity",
+      maybe_with_default(-1, bump_through_ident(Nothing)), -1)
   ])

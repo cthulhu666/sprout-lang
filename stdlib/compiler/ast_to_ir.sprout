@@ -1159,8 +1159,8 @@ fn translate_do(steps: List typed_ast.TypedDoStep,
           # routable, lower `e` to its field scalars, record name→scalars in the SRA map, and DO NOT
           # bind name as a boxed value. Otherwise fall back to the ordinary boxed let.
           match sra_core_eligible(name, e, rest, env.prog.top_level) with
-          | Just (width, _producers, _binders, _body) ->
-              if sra_producers_routable(e, params, captures, env.prog)
+          | Just (width, producers, _binders, _body) ->
+              if all(\n -> worker_callee_routable(n, params, captures, env.prog), producers)
               then translate_do_let_sra(name, e, width, rest, params, env, idx, cur_label, cur_ops,
                                         captures, sra)
               else translate_do_let_boxed(name, e, rest, params, env, idx, cur_label, cur_ops, captures, sra)
@@ -1289,22 +1289,13 @@ fn prelude_ctor_tag(name: String, ctors: Dict sprout_ir.CtorInfo) -> Int =
 fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
                         penv: ProgEnv) ->
     Maybe String =
-  match e with
-  | typed_ast.TCall callee _ _ _ ->
-      match callee with
-      | typed_ast.TVar name _ _ ->
-          if ! callee_name_shadowed (name, params, captures, penv)
-          then match unboxed_maybe_extern_name(name) with
-               | Just ufn -> Just(ufn)
-               | Nothing ->
-                   # Same representation gate as translate_match's routers: a
-                   # callee whose declared result is a type variable has no
-                   # lowerable worker convention.
-                   if set_member(name, penv.top_level) && cpr_result_known(name, penv.fn_arities)
-                   then Just(name ++ "_worker") else Nothing
-          else Nothing
-      | _ -> Nothing
-  | _ -> Nothing
+  let typed_ast.TCall(typed_ast.TVar name _ _) _ _ _ = e else Nothing
+  in
+    match unboxed_maybe_extern_name(name) with
+    | Just ufn -> if callee_name_shadowed(name, params, captures, penv) then Nothing else Just(ufn)
+    | Nothing ->
+        if worker_callee_routable(name, params, captures, penv)
+        then Just(name ++ "_worker") else Nothing
 
 # Lower a wrapper-strip `pat <- e`: `e` yields Maybe (MaybeBind) or Result
 # (ResultBind), `pat` binds the payload, and Nothing / Err short-circuits as
@@ -2397,6 +2388,15 @@ fn callee_name_shadowed(name: String, params: List String, captures: Dict String
   || set_member(name, penv.let_names)
   || dict_member(name, penv.ctors)
 
+# A direct call to `name` may route to `@<name>_worker`: an unshadowed top-level fn whose declared
+# result is lowerable. The last is the filter collect_worker_callees applies, so the worker exists.
+# Every worker router asks this; one that skips the representation check calls an un-emitted symbol.
+fn worker_callee_routable(name: String, params: List String, captures: Dict String,
+                          penv: ProgEnv) -> Bool =
+  set_member(name, penv.top_level)
+  && cpr_result_known(name, penv.fn_arities)
+  && ! callee_name_shadowed (name, params, captures, penv)
+
 # Returns Just (unboxed_fn_name, call_args) when the peephole applies.
 # Shared Tier-2 SHAPE core (shadow-free): `name` is a non-extern callee whose
 # match arms are all simple width-2 patterns anchored by a real ctor.  The single
@@ -2436,10 +2436,8 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
         # describes the callee's declared result, which is what fixes the
         # worker's convention. Both must hold: a polymorphic callee's arms look
         # identical here while its worker cannot know the representation.
-        if set_member(name, penv.top_level)
-           && cpr_result_known(name, penv.fn_arities)
+        if worker_callee_routable(name, params, captures, penv)
            && tier2_worker_shape(name, arms, penv.ctors)
-           && ! callee_name_shadowed (name, params, captures, penv)
         then Just((name ++ "_worker", args))
         else Nothing
 
@@ -2621,8 +2619,9 @@ fn chain_width(body: typed_ast.TypedExpr) -> Int =
 # scalar-replaced: no heap tuple is allocated, an `if` producer merges the fields via per-field phis,
 # and any fn producers become width-w workers. Two consumers share the core eligibility oracle:
 # collect_wc (emits the producer workers; shadow-FREE superset) and translate_do (fires the rewrite,
-# after a shadow + representation gate). Shared oracle ⇒ they cannot disagree on WHETHER a
-# producer is workerized, so translation never calls an un-emitted @<f>_worker (the C1 divergence class).
+# once worker_callee_routable holds for every producer). Shared oracle ⇒ they cannot disagree on
+# WHETHER a producer is workerized, so translation never calls an un-emitted @<f>_worker (the C1
+# divergence class).
 
 # Callees inside a scalar-tuple PRODUCER `e` that must be workerized: Nil for a tuple literal, [f] for
 # a bare top-level call f(args), the union for an `if` of producers. Nothing if `e` is not a lowerable
@@ -2642,24 +2641,6 @@ fn sra_producer_callees(e: typed_ast.TypedExpr, width: Int, top_level: Set) -> M
                       | Nothing -> Nothing)
        | Nothing -> Nothing)
   | _ -> Nothing
-
-# Translation-time gate: every producer call's callee must be an unshadowed top-level fn whose
-# declared result is lowerable, the filter collect_worker_callees applies, so @<f>_worker is emitted.
-# Recurses like sra_producer_callees. Keeps translation ⊆ collection.
-fn sra_producers_routable(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
-                          penv: ProgEnv) -> Bool =
-  match e with
-  | typed_ast.TTuple _ _ _ -> true
-  | typed_ast.TCall callee _ _ _ ->
-      (match callee with
-       | typed_ast.TVar name _ _ ->
-           cpr_result_known(name, penv.fn_arities)
-           && ! callee_name_shadowed (name, params, captures, penv)
-       | _ -> false)
-  | typed_ast.TIf _ thn els _ _ ->
-      sra_producers_routable(thn, params, captures, penv)
-      && sra_producers_routable(els, params, captures, penv)
-  | _ -> false
 
 # The shape of a consuming step: a `match name with | (p0..) -> body` where scrutinee is exactly
 # `TVar name`, with one simple w-wide tuple arm. Returns (binders, arm_body).
@@ -2890,9 +2871,7 @@ fn unboxed_tuple_match_target(scrut: typed_ast.TypedExpr,
     # polymorphic callee can be instantiated at a tuple here and at an ADT
     # elsewhere, and one worker symbol cannot answer both — so gate on the
     # callee's declared result too.
-    if set_member(name, penv.top_level)
-       && cpr_result_known(name, penv.fn_arities)
-       && ! callee_name_shadowed (name, params, captures, penv)
+    if worker_callee_routable(name, params, captures, penv)
        && tuple_worker_shape(arms, typed_ast.typed_expr_type(scrut))
     then Just((name ++ "_worker", args, pats, body))
     else Nothing
@@ -5998,8 +5977,9 @@ fn collect_wc_dosteps(steps: List typed_ast.TypedDoStep, top_level: Set,
         # An SRA-eligible `let name = e` (C2) makes e's tuple producers (river_rgb/biome_rgb-style)
         # into width-w workers even though they are never a match scrutinee. Shadow-free superset:
         # collection consults the SAME oracle translate_do uses, so a producer worker is emitted for
-        # exactly the lets that fire (translation adds a shadow gate and the cpr_result filter
-        # collect_worker_callees applies → translation ⊆ collection).
+        # exactly the lets that fire (translation adds worker_callee_routable, whose
+        # cpr_result_known check is the filter collect_worker_callees applies → translation ⊆
+        # collection).
         | typed_ast.TDoLetStep name e ->
             collect_wc_expr(e, top_level, ctors, collect_wc_sra_producers(name, e, rest, top_level, acc))
         | typed_ast.TDoExprStep e -> collect_wc_expr(e, top_level, ctors, acc))
