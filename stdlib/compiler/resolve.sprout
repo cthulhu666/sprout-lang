@@ -238,8 +238,7 @@ export fn resolve_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) 
 # Two passes over the typed decls: check first (produce the diagnostic the type
 # checker owes for an unsatisfiable concrete-head constraint), then, only if the
 # program is well-formed, rewrite every TDict's Evidence field with the resolved
-# instance/forward tree.  The rewrite is dormant today — lowering still resolves
-# dictionaries itself and ignores the field — but M3b-3 makes lowering consume it.
+# instance/forward tree, which lowering consumes (evidence_to_witness).
 fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> ResolveResult =
   match check_decls(decls, tables) with
   | Just (pos, msg) -> ResolveErr(pos, msg)
