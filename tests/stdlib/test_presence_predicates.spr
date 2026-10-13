@@ -1,7 +1,7 @@
 import stdlib.test (check_eq, run_suite)
 
 # `is_just`/`is_nothing`/`is_ok`/`is_err` answer a yes/no question about which
-# constructor a value has. Callers wrote the three-line match privately: six test
+# constructor a value has. Callers wrote the three-line match privately: five test
 # files here and two modules downstream carried copies.
 
 type Fault = Broken
