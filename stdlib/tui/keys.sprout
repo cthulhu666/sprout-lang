@@ -16,6 +16,7 @@ module stdlib.tui.keys
 # needs a timeout, and that belongs to the pump, not here.
 
 import stdlib.bytes as bytes
+import stdlib.list as list
 import stdlib.string as string
 import stdlib.tui.event as event
 import stdlib.tui.geometry as geometry
@@ -156,7 +157,7 @@ fn params_of(params: String) -> List Int =
   list_map(\raw -> maybe_with_default(0, parse_int(raw)), string.split(params, ";"))
 
 fn param_at(ps: List Int, k: Int) -> Int =
-  match list_drop(k, ps) with
+  match list.drop(k, ps) with
   | [p | _] -> p
   | [] -> 0
 

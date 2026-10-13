@@ -6,6 +6,7 @@ module stdlib.tui.widgets.tree
 # flattening, so an index below an expanded node names a different node the
 # moment it opens (§4.1).
 
+import stdlib.list as list
 import stdlib.math.int as imath
 import stdlib.string as string
 import stdlib.tui.event as event
@@ -211,7 +212,7 @@ fn landed(t: Tr m, rows: List Row, d: Int) -> Reply m =
 # there. An empty forest has no path to name, so the key is still claimed —
 # the application must not see a stray Down — and nothing is announced.
 fn settled(t: Tr m, rows: List Row, want: Int) -> Reply m =
-  match list_drop(imath.clamp(want, 0, list_length(rows) - 1), rows) with
+  match list.drop(imath.clamp(want, 0, list_length(rows) - 1), rows) with
   | [r | _] -> spoken(t, r.path)
   | [] -> Just((t, Nil, Nil))
 

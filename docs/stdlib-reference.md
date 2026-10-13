@@ -25,8 +25,6 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `count(predicate, xs) -> Int` (`where Foldable c`)
 - `member(x, xs) -> Bool` (`where Foldable c, Eq a`)
 - `list_filter(predicate, list) -> List`, `list_filter_map`, `list_partition`
-- `list_take(n, list)` / `list_drop(n, list)` — the first `n` elements / the rest; total, O(n).
-  There is no index lookup on `List`: match the head of `list_drop(i, xs)`, or use a `Vec`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
   - `vec_empty()`
@@ -473,6 +471,22 @@ fn payload() -> json.Json =
 `200`, `201`, `202`, `204`, `400`, `401`, `403`, `404`, `405`, `409`, `410`,
 `422`, `429`, `500`, `501`, `502`, `503`, and `504`. Unsupported codes return
 `Err(HttpUnsupportedStatus(code))` instead of being silently rewritten.
+
+## stdlib.list
+
+Slicing a `List` (in `stdlib/list.sprout`; `import stdlib.list as list`). Data-last, so
+`xs |> list.take(3)` works. A count below zero acts as zero and past the end as the end, so none
+fails; each walks once, in constant stack.
+
+- `take(n, xs)` / `drop(n, xs)` — the first `n` elements / the rest; O(n)
+- `take_last(n, xs)` / `drop_last(n, xs)` — the last `n` / all but the last `n`; O(|xs|)
+- `split_at(n, xs)` — `(take(n, xs), drop(n, xs))` in one walk
+- `take_while(pred, xs)` / `drop_while(pred, xs)` — the leading run where `pred` holds / the rest
+- `span(pred, xs)` — `(take_while(pred, xs), drop_while(pred, xs))` in one walk; unlike
+  `partition`, it stops at the first element that fails `pred`
+
+There is no index lookup on `List`. A loop that needs the index is `fold_indexed`; a position
+kept as state wants a `Vec`.
 
 ## stdlib.math and stdlib.math.int
 

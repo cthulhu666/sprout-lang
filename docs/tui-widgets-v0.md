@@ -184,7 +184,7 @@ already places them.
 
 That shared need drives a small refactor: the cluster segmentation currently private inside
 `screen.sprout` (`cluster_list`, `split_clusters`, `cluster_width`) moves into `text.sprout`
-and is exported (its list helpers are now the prelude's `list_take`/`list_drop`), and
+and is exported (its list helpers are now `stdlib.list`'s `split_at`/`take`/`drop`), and
 `screen.sprout` imports it. Behaviour is unchanged; this is deduplication, not a redesign, and it keeps one definition of "how wide
 is this text" for the placer and the wrapper to share.
 

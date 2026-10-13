@@ -8,6 +8,7 @@ module stdlib.unicode.grapheme
 # carry U+0000 — it is a NUL-terminated C string, so a String-level API could
 # not even represent the conformance suite's NUL cases.
 
+import stdlib.list as list
 import stdlib.unicode.lookup as lookup
 import stdlib.unicode.tables as tables
 import stdlib.unicode.utf8 as utf8
@@ -144,5 +145,6 @@ fn build(cps: List Int, sizes: List Int, acc: List String) -> List String =
   match sizes with
   | Nil -> list_reverse(acc)
   | Cons n rest ->
-      build(list_drop(n, cps), rest, Cons(utf8.from_codepoints(list_take(n, cps)), acc))
+      let (cluster, after) = list.split_at(n, cps)
+      in build(after, rest, Cons(utf8.from_codepoints(cluster), acc))
 

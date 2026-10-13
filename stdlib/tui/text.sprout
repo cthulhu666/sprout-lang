@@ -13,6 +13,7 @@ module stdlib.tui.text
 # and the failure mode — a wrapper that breaks a line the placer then draws at
 # a different width — is a drifting cursor rather than an error.
 
+import stdlib.list as list
 import stdlib.math.int as imath
 import stdlib.unicode.grapheme as grapheme
 import stdlib.unicode.utf8 as utf8
@@ -36,7 +37,8 @@ fn split_clusters(cps: List Int, sizes: List Int,
   match sizes with
   | Nil -> list_reverse(acc)
   | Cons n rest ->
-      split_clusters(list_drop(n, cps), rest, Cons(list_take(n, cps), acc))
+      let (cluster, after) = list.split_at(n, cps)
+      in split_clusters(after, rest, Cons(cluster, acc))
 
 # The width of the PRIMARY codepoint, not the sum over the cluster. Summing
 # would make an emoji ZWJ sequence four columns wide; tcell measures the same
@@ -226,8 +228,10 @@ fn chunk(w: List (List Int), rest: List (List (List Int)),
   # whole line. Emitting it alone overflows by one column, which is visible;
   # emitting nothing would never terminate, which is not.
   match head with
-  | Nil -> chunk_rest(list_drop(1, w), rest, Cons(list_take(1, w), acc), cols)
-  | [_ | _] -> chunk_rest(list_drop(list_length(head), w), rest, Cons(head, acc), cols)
+  | Nil ->
+      let (first, after) = list.split_at(1, w)
+      in chunk_rest(after, rest, Cons(first, acc), cols)
+  | [_ | _] -> chunk_rest(list.drop(list_length(head), w), rest, Cons(head, acc), cols)
 
 fn chunk_rest(tail: List (List Int), rest: List (List (List Int)),
               acc: List (List (List Int)), cols: Int) -> List (List (List Int)) =
