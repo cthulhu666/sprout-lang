@@ -2,7 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
-import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_with)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, default_config, ok, request_path, serve_with)
 import stdlib.terminal as terminal
 
 # REGRESSION (concurrency review C3): descriptor exhaustion must shed LOAD, not the process.
@@ -60,8 +60,8 @@ fn handle(req: HttpRequest) -> HttpServerResponse =
 # deadline would let each handler 408 and free its descriptor before the next connection arrives, and
 # the exhaustion this exists to test would never happen.
 fn flood_config() -> ServerConfig =
-  ServerConfig(header_ms = 2500, body_ms = 2500, max_header_bytes = 65536,
-               write_ms = 2500, max_body_bytes = 65536, min_rate_bps = 1024, idle_ms = 2000, max_idle_connections = 256)
+  default_config() with (header_ms = 2500, body_ms = 2500, write_ms = 2500, max_body_bytes = 65536,
+               idle_ms = 2000)
 
 # Opens `n` connections and holds them ALL open simultaneously, one per stack frame, closing them on
 # the way back out. A `Vec TcpConnection` would be the obvious shape and is not available: a container

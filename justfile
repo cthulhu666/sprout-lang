@@ -2083,6 +2083,17 @@ task-io-smoke: bootstrap-from-seed
       echo "task-io-smoke: link failed for $1" >&2; cat "$TMPD/link.err" >&2; exit 1
     fi
   }
+  check_out() {  # $1 = label, $2 = required substring
+    if ! grep -q "$2" "$TMPD/run.out"; then
+      echo "task-io-smoke [$1]: missing expected output '$2'" >&2
+      cat "$TMPD/run.out" >&2; exit 1
+    fi
+    # A fixture names a failed check inside its MISMATCH line, so the marker alone matches a failure.
+    if grep -q '^MISMATCH' "$TMPD/run.out"; then
+      echo "task-io-smoke [$1]: a check failed" >&2
+      cat "$TMPD/run.out" >&2; exit 1
+    fi
+  }
   run_once() {  # $1 = label, $2 = required substring; env (e.g. SPROUT_GC_STRESS) from caller
     local label="$1" want="$2"
     set +e
@@ -2095,10 +2106,7 @@ task-io-smoke: bootstrap-from-seed
       echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
       exit 1
     fi
-    if ! grep -q "$want" "$TMPD/run.out"; then
-      echo "task-io-smoke [$label]: missing expected output '$want'" >&2
-      cat "$TMPD/run.out" >&2; exit 1
-    fi
+    check_out "$label" "$want"
   }
   run_stdin() {  # $1 = label, $2 = required substring, $3 = stdin spec
     # run_once inherits whatever stdin the caller had, which is exactly what a stdin
@@ -2141,10 +2149,7 @@ task-io-smoke: bootstrap-from-seed
       echo "--- stdout ---" >&2; cat "$TMPD/run.out" >&2; echo "--- stderr ---" >&2; cat "$TMPD/run.err" >&2
       exit 1
     fi
-    if ! grep -q "$want" "$TMPD/run.out"; then
-      echo "task-io-smoke [$label]: missing expected output '$want'" >&2
-      cat "$TMPD/run.out" >&2; exit 1
-    fi
+    check_out "$label" "$want"
   }
   # (1) minimal read-park: reader parks, sibling write wakes it (assert interleaved order).
   build tests/task_io_smoke/concurrent_read.spr
@@ -2417,16 +2422,27 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-head" "head-has-no-body"
   run_once "http-head/length" "head-keeps-length"
   run_once "http-head/get" "get-has-body"
-  # Keep-alive under serve_n: reuse on one socket, a `close` option, pipelined requests, HTTP/1.0,
-  # a handler's close, an error's close, HEAD then GET, a quiet idle close, and the idle cap. RED:
-  # every response said `connection: close`, so the reuse markers never print.
+  # Keep-alive under serve_n: reuse on one socket, a `close` option (also in a repeated Connection
+  # line), pipelined requests, HTTP/1.0, a handler's close, an error's close, HEAD then GET, a stray
+  # CRLF after a body, a quiet idle close, and the idle cap. RED: every response said
+  # `connection: close`, so the reuse markers never print.
   build tests/task_io_smoke/http_keep_alive.spr
   run_once "http-keep-alive" "done"
   for m in first-kept second-on-same-socket close-token-closes pipelined-both-answered http10-closes \
-           handler-close-closes error-closes head-kept-no-body get-after-head idle-closes-quietly idle-cap-closes; do
+           handler-close-closes error-closes head-kept-no-body get-after-head idle-closes-quietly \
+           repeated-connection-close post-before-crlf stray-crlf-ignored post-then-crlf \
+           stray-crlf-idles-quietly idle-cap-closes; do
     grep -qx "$m" "$TMPD/run.out" || { echo "task-io-smoke [http-keep-alive]: missing $m" >&2; cat "$TMPD/run.out" >&2; exit 1; }
   done
   SPROUT_GC_STRESS=1 run_once "http-keep-alive/stress" "idle-cap-closes"
+  # Keep-alive under load: the idle cap holds while writes park, 500 pipelined requests, and 5000
+  # requests on one socket in constant space. RED: all three parked writes kept their connections,
+  # and the 5000 exhausted the GC root pool. Too slow for a GC-stress run.
+  build tests/task_io_smoke/http_keep_alive_load.spr
+  run_once "http-keep-alive-load" "done"
+  for m in parked-writes-respect-cap pipelined-many-answered long-lived-connection; do
+    grep -qx "$m" "$TMPD/run.out" || { echo "task-io-smoke [http-keep-alive-load]: missing $m" >&2; cat "$TMPD/run.out" >&2; exit 1; }
+  done
   # Keep-alive under serve_pooled: three idle connections fill a 4-worker pool's reserve, so the
   # fourth response closes; a response closes while a connection is queued; and the queued one is
   # served within a fraction of idle_ms. RED: no connection was held.

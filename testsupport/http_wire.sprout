@@ -1,6 +1,6 @@
 module testsupport.http_wire
 
-import stdlib.net (TcpConnection, TcpEndOfStream, connect, close, read_avail_timeout, read_exact)
+import stdlib.net (TcpConnection, TcpEndOfStream, connect, close, read_avail_timeout, read_exact, write_all_utf8)
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.terminal as terminal
@@ -17,6 +17,16 @@ export fn with_conn(port: Int, work: local (borrowing TcpConnection) -> Unit !{I
         work(conn)
         close(conn)
   | Err _ -> terminal.write(`MISMATCH: connect to ${int_to_string(port)} failed\n`)
+
+# A check's label when it passed, or a MISMATCH line with what was seen instead.
+export fn mark(label: String, pass: Bool, detail: String) -> Unit !{IO} =
+  if pass then terminal.write(`${label}\n`)
+  else terminal.write(`MISMATCH: ${label}: ${detail}\n`)
+
+export fn send(conn: borrowing TcpConnection, request: String) -> Unit !{IO} =
+  match write_all_utf8(conn, request) with
+  | Ok _ -> ()
+  | Err _ -> terminal.write("MISMATCH: write failed\n")
 
 # The header block (through its blank line) and the body, framed by `content-length`.
 export fn read_response(conn: borrowing TcpConnection) -> Result String (String, String) !{IO} =

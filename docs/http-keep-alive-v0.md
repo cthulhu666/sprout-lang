@@ -27,7 +27,8 @@ sent back to back are served in order, one after another.
 After a response, the connection stays open only if all of these hold:
 
 1. The request is `HTTP/1.1` and its `Connection` options do not include `close` (RFC 9112 §9.3;
-   options are a comma list, case-insensitive, RFC 9110 §7.6.1).
+   options are a comma list, case-insensitive, RFC 9110 §7.6.1). Repeated `Connection` lines join
+   with a comma (RFC 9110 §5.3), so a `close` in any of them counts.
 2. The handler did not set `connection: close`.
 3. The read succeeded. After a failed read (400, 408, 413, 431, 501) the framing of what follows is
    unknown, so the reply closes.
@@ -39,7 +40,9 @@ A closing response says `connection: close` (RFC 9112 §9.6), overriding any oth
 set. A kept response sends no `connection` header, persistence being HTTP/1.1's default.
 
 Bytes read past the end of a request are the start of the next one and are served without
-waiting. Otherwise the server waits up to `idle_ms` for the next request's first byte; the header
+waiting. They are kept as the read buffer plus an offset, so a buffer of many pipelined requests is
+not copied once per request. Empty lines before a request line are skipped (RFC 9112 §2.2): some
+clients send a CRLF after a body, and it must not start a request. Otherwise the server waits up to `idle_ms` for the next request's first byte; the header
 budget (`header_ms`) starts at that byte. When the wait expires, or the client closes or resets,
 the server closes and sends nothing: no request was made, so none is answered.
 
@@ -63,6 +66,12 @@ wait on a socket and a channel at once. Two rules, both checked before the respo
 The decision is never made during the idle wait. A client told `connection: close` does not reuse
 the connection; one closed while idle can race a request the client is already sending, and nginx
 does not retry a non-idempotent request that hit a closed connection (`proxy_next_upstream`).
+
+A kept connection takes its place in the idle count when the decision is made, and holds it through
+the write and the idle wait until its next request starts or it closes. Counting only during the
+wait let a write that parks — a large response to a slow reader — pass the same check as others, so
+the caps could be exceeded by the number of writes in flight. With ¾ of 1 rounded down to 0, a
+one-worker pool never keeps a connection.
 
 The counters are `Ref Int`s shared by the accept loop and the workers. The scheduler runs one task
 at a time and nothing parks between a counter's read and its write, so they need no lock. A
@@ -102,8 +111,9 @@ gunicorn `docs/source/design.rst`; yhbt.net/unicorn `PHILOSOPHY.html`.
 - **Pooled keep-alive turns mostly off under more clients than workers.** The fix is a task that
   holds every idle socket and hands readable ones to the workers, as Apache's event MPM and Puma's
   reactor do. It needs a runtime primitive (a wait over many handles). BACKLOG.
-- **No lingering close.** An error reply sent with request bytes still unread can be lost to a RST
-  (RFC 9112 §9.6). Go half-closes and waits; that needs `tcp_shutdown_write`. BACKLOG.
+- **No lingering close.** A closing reply sent with request bytes still unread can be lost to a RST
+  (RFC 9112 §9.6): an error reply, or any reply that closes a connection the client is pipelining
+  on. Go half-closes and waits; that needs `tcp_shutdown_write`. BACKLOG.
 - **Behind nginx older than 1.29.7**, upstream keep-alive needs both `keepalive N;` in the
   `upstream` block and `proxy_set_header Connection "";`, since `proxy_set_header` defaults to
   `Connection close`. nginx 1.29.7 turned upstream keepalive on by default.

@@ -12,7 +12,8 @@ import stdlib.terminal as terminal
 
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
 
-# Everything the server sends, up to its close.
+# Everything the server sends, up to its close. Each request asks for that close, so a leaked body
+# shows up here as bytes after the header block. http_keep_alive.spr checks HEAD on a kept connection.
 fn read_to_end(conn: borrowing TcpConnection, acc: Bytes) -> String !{IO} =
   match read_avail_timeout(conn, 2000) with
   | Ok chunk -> read_to_end(conn, bytes.append(acc, chunk))
@@ -36,10 +37,10 @@ fn report(label: String, pass: Bool, reply: String) -> Unit !{IO} =
 
 fn client(port: Int) -> Unit !{IO} =
   do
-    head <- exchange(port, "HEAD / HTTP/1.1\r\nHost: x\r\n\r\n")
+    head <- exchange(port, "HEAD / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
     report("head-keeps-length", string.contains(head, "content-length: 5\r\n"), head)
     report("head-has-no-body", string.ends_with(head, "\r\n\r\n"), head)
-    get <- exchange(port, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    get <- exchange(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
     report("get-has-body", string.ends_with(get, "\r\n\r\nhello"), get)
 
 fn run(s: Scope) -> Unit !{IO} =

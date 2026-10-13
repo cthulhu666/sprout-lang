@@ -59,6 +59,16 @@ fn main() -> Unit !{IO} =
     check_eq("terminator not at the start",
       describe(bytes.find(of("X\r\n\r\nY"), of("\r\n\r\n"))), "1"),
 
+    # `find_from` starts at an offset and answers in the haystack's own indices.
+    check_eq("find_from skips a match before the start",
+      describe(bytes.find_from(of("abcabc"), of("abc"), 1)), "3"),
+    check_eq("find_from matches at the start itself",
+      describe(bytes.find_from(of("abcabc"), of("abc"), 3)), "3"),
+    check_eq("find_from past the last match", describe(bytes.find_from(of("abcabc"), of("abc"), 4)), "none"),
+    check_eq("find_from from a negative start searches from 0",
+      describe(bytes.find_from(of("abc"), of("a"), -5)), "0"),
+    check_eq("find_from from past the end", describe(bytes.find_from(of("abc"), of("c"), 9)), "none"),
+
     # The cases that justify the function's existence.
     check_eq("needle containing a NUL byte",
       describe(bytes.find(nul_haystack(), nul_needle())), "3"),

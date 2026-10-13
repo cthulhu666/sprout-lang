@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
-import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, request_body, response, serve_n_with)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, request_body, response, serve_n_with)
 import stdlib.terminal as terminal
 
 # `Content-Length` counts BYTES; the body path used to measure and cut in CODEPOINTS (concurrency
@@ -89,8 +89,8 @@ fn split_codepoint_client(port: Int) -> Unit !{IO} =
 # exactly the confusion the bug produced.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 4000, body_ms = 4000, max_header_bytes = 65536,
-                                       write_ms = 4000, max_body_bytes = 65536, min_rate_bps = 1024, idle_ms = 2000, max_idle_connections = 256), listen_or_die(port), 3, handle))
+    task_spawn(s, \_ -> serve_n_with(default_config() with (header_ms = 4000, body_ms = 4000,
+                                       write_ms = 4000, max_body_bytes = 65536, idle_ms = 2000), listen_or_die(port), 3, handle))
     task_spawn(s, \_ -> split_client(port))
     task_spawn(s, \_ -> inline_client(port))
     task_spawn(s, \_ -> split_codepoint_client(port))

@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
-import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, serve_n_with)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
 import stdlib.terminal as terminal
 
 # The two bounds that make handler occupancy FINITE, which is the prerequisite for a bounded worker
@@ -83,8 +83,9 @@ fn prompt_body_client(port: Int) -> Unit !{IO} =
 # client finishes inside the same budget.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 200, max_header_bytes = 65536, write_ms = 2000,
-                                       max_body_bytes = 65536, min_rate_bps = 100, idle_ms = 2000, max_idle_connections = 256), listen_or_die(port), 3, handle))
+    task_spawn(s, \_ -> serve_n_with(default_config() with (header_ms = 2000, body_ms = 200,
+                                       write_ms = 2000, max_body_bytes = 65536, min_rate_bps = 100,
+                                       idle_ms = 2000), listen_or_die(port), 3, handle))
     task_spawn(s, \_ -> huge_body_client(port))
     task_spawn(s, \_ -> slow_body_client(port))
     task_spawn(s, \_ -> prompt_body_client(port))
