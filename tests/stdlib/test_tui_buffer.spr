@@ -1,3 +1,4 @@
+import stdlib.list as list
 import stdlib.string as string
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.tui.buffer as buf
@@ -114,7 +115,7 @@ fn motion_cases(state: TestState) -> Unit !{IO} = do
 fn counts(b: buf.Buffer) -> String =
   let lines = buf.buffer_lines(b)
       ok = buf.buffer_line_count(b) == list_length(lines)
-           && buf.buffer_row(b) == list_length(list_take(buf.buffer_row(b), lines))
+           && buf.buffer_row(b) == list_length(list.take(buf.buffer_row(b), lines))
   in `${int_to_string(buf.buffer_row(b))}/${int_to_string(buf.buffer_line_count(b))}${if ok then "" else "!"}`
 
 fn downs(b: buf.Buffer, n: Int) -> buf.Buffer =
@@ -156,7 +157,7 @@ fn count_cases(state: TestState) -> Unit !{IO} = do
 # `buffer_window` against slicing the whole document.
 fn window_matches(b: buf.Buffer, top: Int, rows: Int) -> Bool =
   buf.buffer_window(top, rows, b)
-    == list_take(rows, list_drop(imath_max0(top), buf.buffer_lines(b)))
+    == list.take(rows, list.drop(imath_max0(top), buf.buffer_lines(b)))
 
 fn imath_max0(n: Int) -> Int = if n < 0 then 0 else n
 

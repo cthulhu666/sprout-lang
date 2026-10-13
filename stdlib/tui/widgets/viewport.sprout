@@ -12,6 +12,7 @@ module stdlib.tui.widgets.viewport
 # Nothing is stored: `top` and the horizontal offset are derived from the caret
 # on every frame, so neither can drift out of step with it.
 
+import stdlib.list as list
 import stdlib.tui.buffer as buffer
 import stdlib.tui.geometry as geometry
 import stdlib.tui.screen as scr
@@ -32,8 +33,8 @@ fn window_of(b: buffer.Buffer, r: geometry.Region) -> Window =
 where
   top = first_row(buffer.buffer_row(b), geometry.region_rows(r))
   cs = buffer.buffer_line_clusters(b)
-  before = list_take(buffer.buffer_col(b), cs)
-  caret = caret_cluster(list_drop(buffer.buffer_col(b), cs))
+  before = list.take(buffer.buffer_col(b), cs)
+  caret = caret_cluster(list.drop(buffer.buffer_col(b), cs))
   # The caret's OWN width is what the window reserves, not one column: on a CJK
   # or emoji cluster a single reserved column truncates it away, painting
   # neither the character nor the focus.

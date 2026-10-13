@@ -2385,8 +2385,6 @@ acting.
   `Step` and `Update` aliases are private, so `ide/app.sprout` (7 sites), the `tui_files` and
   `tui_dashboard` examples write `(widget.Widget Msg, app.Flow, Asks)`: export them.
   `ide/app.sprout`'s `bar_handler`, `refilled` and `keys_on_event` write `widget.Handled` by hand.
-  `grapheme.build` and `text.split_clusters` are one take/drop loop over `cluster_sizes`, walking
-  each prefix twice; a `list_split_at` (#608) does it in one pass.
 - [ ] `P3` **TUI: a private reverse-onto, a misplaced `first_row`, a duplicate assert.**
   `text.reverse_onto` copies the prelude's private `list_reverse_go`, and `no_prelude_core.sprout`
   and `children.sprout:64` do the same job: export a `list_reverse_onto`. `list_view` and `tree`

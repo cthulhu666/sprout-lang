@@ -1,0 +1,72 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.list as list
+
+# `stdlib.list`: the slicing family. Every function clamps an out-of-range count
+# instead of failing, and each pair has a law tying it to its parts, checked over
+# every count from -1 to one past the end.
+
+fn below(limit: Int) -> Int -> Bool =
+  \n -> n < limit
+
+# `split_at` is `(take, drop)` at every count, out-of-range ones included.
+fn split_at_law(xs: List Int) -> Bool =
+  all(\n -> list.split_at(n, xs) == (list.take(n, xs), list.drop(n, xs)),
+      range_to_list(range_up(-1, list_length(xs) + 1)))
+
+# `span` is `(take_while, drop_while)` for any cut point.
+fn span_law(xs: List Int) -> Bool =
+  all(\k -> span_splits(below(k), xs), range_to_list(range_up(0, 6)))
+
+fn span_splits(pred: Int -> Bool, xs: List Int) -> Bool =
+  list.span(pred, xs) == (list.take_while(pred, xs), list.drop_while(pred, xs))
+
+# `drop_last` then `take_last` give back the list.
+fn last_law(xs: List Int) -> Bool =
+  all(\n -> list.drop_last(n, xs) ++ list.take_last(n, xs) == xs,
+      range_to_list(range_up(-1, list_length(xs) + 1)))
+
+fn front_length(halves: (List Int, List Int)) -> Int =
+  match halves with
+  | (front, _) -> list_length(front)
+
+fn main() -> Unit !{IO} =
+  let xs = [1, 2, 3, 4, 5]
+      big = range_to_list(range_up(1, 200000))
+  in run_suite("stdlib.list", [
+    check_eq("take", list.take(2, xs), [1, 2]),
+    check_eq("take past the end", list.take(9, xs), xs),
+    check_eq("take negative", list.take(-1, xs), []),
+    check_eq("drop", list.drop(2, xs), [3, 4, 5]),
+    check_eq("drop past the end", list.drop(9, xs), []),
+    check_eq("drop negative", list.drop(-1, xs), xs),
+
+    check_eq("take_last", list.take_last(2, xs), [4, 5]),
+    check_eq("take_last past the end", list.take_last(9, xs), xs),
+    check_eq("take_last negative", list.take_last(-1, xs), []),
+    check_eq("drop_last", list.drop_last(2, xs), [1, 2, 3]),
+    check_eq("drop_last past the end", list.drop_last(9, xs), []),
+    check_eq("drop_last negative", list.drop_last(-1, xs), xs),
+
+    check_eq("split_at", list.split_at(2, xs), ([1, 2], [3, 4, 5])),
+    check_eq("split_at on empty", list.split_at(1, []), ([], [])),
+
+    check_eq("take_while", list.take_while(below(3), xs), [1, 2]),
+    check_eq("take_while stops at the first failure", list.take_while(below(3), [1, 5, 2]), [1]),
+    check_eq("drop_while", list.drop_while(below(3), xs), [3, 4, 5]),
+    check_eq("drop_while keeps later matches", list.drop_while(below(3), [1, 5, 2]), [5, 2]),
+    check_eq("span", list.span(below(3), [1, 2, 5, 1, 0]), ([1, 2], [5, 1, 0])),
+    check_eq("span when all match", list.span(below(9), xs), (xs, [])),
+    check_eq("span when none match", list.span(below(0), xs), ([], xs)),
+
+    check_eq("split_at is (take, drop) at every count", split_at_law(xs), true),
+    check_eq("span is (take_while, drop_while)", span_law(xs), true),
+    check_eq("drop_last ++ take_last is the list", last_law(xs), true),
+
+    # Stack safety: each walks 200k elements without deep recursion.
+    check_eq("take, long", list_length(list.take(199999, big)), 199999),
+    check_eq("take_last, long", list_length(list.take_last(199999, big)), 199999),
+    check_eq("drop_last, long", list_length(list.drop_last(1, big)), 199999),
+    check_eq("split_at, long", front_length(list.split_at(199999, big)), 199999),
+    check_eq("take_while, long", list_length(list.take_while(below(200000), big)), 199999),
+    check_eq("span, long", front_length(list.span(below(200000), big)), 199999)
+  ])

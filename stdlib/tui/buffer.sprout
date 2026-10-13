@@ -6,6 +6,7 @@ module stdlib.tui.buffer
 # `above` is reversed, so moving between adjacent lines is a head operation on
 # both sides — the same trick the line zipper plays on clusters, one level up.
 
+import stdlib.list as list
 import stdlib.math.int as imath
 import stdlib.string as string
 import stdlib.tui.line_zipper as lz
@@ -196,7 +197,7 @@ where
 # `above` is nearest-first, so row `i` sits `n - 1 - i` entries in.
 fn from_above(top: Int, end: Int, f: Fields) -> List String =
   if hi <= top then Nil
-  else list_reverse(list_take(hi - top, list_drop(f.above.n - hi, f.above.lines)))
+  else list_reverse(list.take(hi - top, list.drop(f.above.n - hi, f.above.lines)))
 where
   hi = imath.min(end, f.above.n)
 
@@ -204,7 +205,7 @@ fn here_row(top: Int, end: Int, f: Fields) -> List String =
   if top <= f.above.n && f.above.n < end then [lz.zipper_text(f.line)] else Nil
 
 fn from_below(top: Int, end: Int, f: Fields) -> List String =
-  list_take(end - first, list_drop(first - f.above.n - 1, f.below.lines))
+  list.take(end - first, list.drop(first - f.above.n - 1, f.below.lines))
 where
   first = imath.max(top, f.above.n + 1)
 
