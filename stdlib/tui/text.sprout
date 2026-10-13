@@ -28,17 +28,7 @@ let newline: Int = 10
 # The text as grapheme clusters, each a non-empty list of codepoints whose head
 # is the primary. O(n) in codepoints.
 export fn clusters(text: String) -> List (List Int) =
-  let cps = utf8.codepoints(text)
-  in
-  split_clusters(cps, grapheme.cluster_sizes(cps), Nil)
-
-fn split_clusters(cps: List Int, sizes: List Int,
-                  acc: List (List Int)) -> List (List Int) =
-  match sizes with
-  | Nil -> list_reverse(acc)
-  | Cons n rest ->
-      let (cluster, after) = list.split_at(n, cps)
-      in split_clusters(after, rest, Cons(cluster, acc))
+  grapheme.clusters(utf8.codepoints(text))
 
 # The width of the PRIMARY codepoint, not the sum over the cluster. Summing
 # would make an emoji ZWJ sequence four columns wide; tcell measures the same

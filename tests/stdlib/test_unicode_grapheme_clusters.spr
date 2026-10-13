@@ -1,0 +1,27 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.tui.text as text
+import stdlib.unicode.grapheme as grapheme
+import stdlib.unicode.utf8 as utf8
+
+# `grapheme.clusters` cuts codepoints at the boundaries `cluster_sizes` finds;
+# `graphemes` and `text.clusters` are both built on it. The boundary rules
+# themselves are the conformance suite's job — these check the cutting.
+
+let e_acute: List Int = [101, 769]
+
+let crlf: List Int = [13, 10]
+
+# U+1F468 ZWJ U+1F469: one cluster of three codepoints.
+let couple: List Int = [128104, 8205, 128105]
+
+fn main() -> Unit !{IO} =
+  let mixed = [97] ++ e_acute ++ crlf ++ couple ++ [98]
+      expected = [[97], e_acute, crlf, couple, [98]]
+  in run_suite("grapheme clusters", [
+    check_eq("empty", grapheme.clusters([]), []),
+    check_eq("one cluster per ASCII codepoint", grapheme.clusters([97, 98]), [[97], [98]]),
+    check_eq("combining mark, CR LF and ZWJ stay whole", grapheme.clusters(mixed), expected),
+    check_eq("graphemes is clusters as Strings",
+      grapheme.graphemes(utf8.from_codepoints(mixed)), list_map(utf8.from_codepoints, expected)),
+    check_eq("text.clusters agrees", text.clusters(utf8.from_codepoints(mixed)), expected)
+  ])

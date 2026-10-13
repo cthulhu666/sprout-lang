@@ -136,14 +136,14 @@ declare i64 @fs_rename(i64, i64)
 @.str.5 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 443, column 50)\00" }
 @.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 533, column 47)\00" }
 @.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 537, column 39)\00" }
-@.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 671, column 45)\00" }
-@.str.9 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1932, column 10)\00" }
+@.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 652, column 45)\00" }
+@.str.9 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1913, column 10)\00" }
 @.str.10 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.11 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1937, column 39)\00" }
-@.str.12 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1959, column 33)\00" }
-@.str.13 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1959, column 43)\00" }
-@.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1959, column 49)\00" }
-@.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1967, column 58)\00" }
+@.str.11 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1918, column 39)\00" }
+@.str.12 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1940, column 33)\00" }
+@.str.13 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1940, column 43)\00" }
+@.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1940, column 49)\00" }
+@.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1948, column 58)\00" }
 @.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
 @.str.17 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.18 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 64, column 18)\00" }
@@ -963,7 +963,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.832 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
 @.str.833 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c":help :quit :q :exit :type :t :instances :i\00" }
 @.str.834 = private unnamed_addr constant { i64, [78 x i8] } { i64 1261578, [78 x i8] c"args bits bytes chan collections compiler crypto env fs hex http http_client \00" }
-@.str.835 = private unnamed_addr constant { i64, [76 x i8] } { i64 1228810, [76 x i8] c"http_middleware http_server json linalg log math mutable net process regex \00" }
+@.str.835 = private unnamed_addr constant { i64, [81 x i8] } { i64 1310730, [81 x i8] c"http_middleware http_server json linalg list log math mutable net process regex \00" }
 @.str.836 = private unnamed_addr constant { i64, [80 x i8] } { i64 1294346, [80 x i8] c"repl rng scram stamped string task template terminal test time url uuid version\00" }
 @.str.837 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"stdlib.prelude\00" }
 @.str.838 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"read_file: prelude: \00" }
@@ -58351,7 +58351,7 @@ entry:
   %t$0 = call i64 @vec_empty()
   %t$1 = getelementptr inbounds { i64, [78 x i8] }, ptr @.str.834, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = getelementptr inbounds { i64, [76 x i8] }, ptr @.str.835, i64 0, i32 1, i64 0
+  %t$3 = getelementptr inbounds { i64, [81 x i8] }, ptr @.str.835, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   %t$10 = alloca i64
   store i64 %t$0, ptr %t$10
