@@ -572,7 +572,7 @@ deadlines and a 413 size cap before any pooling landed, because bounded concurre
 unbounded per-connection occupancy from a memory cost into a total-availability one. Regression:
 `tests/task_io_smoke/http_pooled_serve.spr`. Gotcha A3 is moot for `panic`: it ends the whole
 process (`panic` → `sprout_fail` → `exit(1)`) under either serving mode, so neither contains it.
-Containing it is task-boundary panic isolation (`BACKLOG.md` §1).
+Containing it is task-boundary panic isolation (`BACKLOG.md` §2).
 
 **Experimental.** L0 concurrency is not part of normative v0, so neither design changes normative
 text. §7.4's hole *does* touch `docs/spec-v0.md` §5.8's enforcement bullets, which state the

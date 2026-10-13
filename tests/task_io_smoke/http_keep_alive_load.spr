@@ -1,0 +1,103 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, local_port)
+import testsupport.listen (listen_or_die)
+import testsupport.http_wire (mark, read_response, read_to_end, says_close, send, with_conn)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with)
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# Keep-alive under `serve_n` with load no small exchange shows: writes that park, a long pipeline,
+# and thousands of requests on one connection. Separate from http_keep_alive.spr because it is too
+# slow to run under GC stress.
+
+# Larger than a socket's send and receive buffers together, so writing it parks until the client
+# reads.
+let big = string.repeat("x", 8388608)
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  if request_path(req) == "/big" then ok(big) else ok("hello")
+
+fn ask_big(conn: borrowing TcpConnection) -> Unit !{IO} =
+  send(conn, "GET /big HTTP/1.1\r\nHost: x\r\n\r\n")
+
+fn big_closes(conn: borrowing TcpConnection) -> Int !{IO} =
+  match read_response(conn) with
+  | Ok (head, _) -> if says_close(head) then 1 else 0
+  | Err _ -> -100
+
+# Three responses too large to write at once, all decided before any write finishes. The cap is 2,
+# so exactly one of them closes: a write that parks still holds its connection's place.
+fn parked_writes(a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    ask_big(a)
+    ask_big(b)
+    ask_big(c)
+    task_sleep(300)
+    ca <- big_closes(a)
+    cb <- big_closes(b)
+    cc <- big_closes(c)
+    mark("parked-writes-respect-cap", ca + cb + cc == 1, int_to_string(ca + cb + cc))
+
+fn racing(port: Int) -> Unit !{IO} =
+  with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> parked_writes(a, b, c))))
+
+fn count_of(hay: String, needle: String, acc: Int) -> Int =
+  match string.find(hay, needle) with
+  | Nothing -> acc
+  | Just at -> count_of(string.drop(hay, at + string.length(needle)), needle, acc + 1)
+
+# Many requests in one write, each answered from the bytes left over by the one before.
+fn pipelined_many(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, string.repeat("GET / HTTP/1.1\r\nHost: x\r\n\r\n", 499) ++ "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+    match read_to_end(conn) with
+    | Ok all -> all_answered(all)
+    | Err e -> mark("pipelined-many-answered", false, e)
+
+fn all_answered(all: String) -> Unit !{IO} =
+  mark("pipelined-many-answered", answered == 500, int_to_string(answered))
+where
+  answered = count_of(all, "HTTP/1.1 200", 0)
+
+# One request at a time, thousands of them on one connection. The loop that serves a connection must
+# run in constant space: a frame kept per request exhausts the task's GC root pool after a few
+# thousand.
+fn many_requests(conn: borrowing TcpConnection, left: Int, served: Int) -> Int !{IO} =
+  if left == 0 then served
+  else
+    do
+      send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+      ok <- served_once(conn)
+      many_requests(conn, left - 1, served + ok)
+
+fn served_once(conn: borrowing TcpConnection) -> Int !{IO} =
+  match read_response(conn) with
+  | Ok (_, body) -> if body == "hello" then 1 else 0
+  | Err _ -> 0
+
+fn long_lived(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    served <- many_requests(conn, 5000, 0)
+    mark("long-lived-connection", served == 5000, int_to_string(served))
+
+fn clients(port: Int) -> Unit !{IO} =
+  do
+    racing(port)
+    # Let the server see those three closes before anything else counts idle connections.
+    task_sleep(100)
+    with_conn(port, pipelined_many)
+    with_conn(port, long_lived)
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(0)
+    port <- local_port(listener)
+    task_spawn(s, \_ -> serve_n_with(config, listener, 5, handle))
+    task_spawn(s, \_ -> clients(port))
+where
+  config = default_config() with (idle_ms = 300, max_idle_connections = 2)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    terminal.write("done\n")

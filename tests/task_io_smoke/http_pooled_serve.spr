@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
-import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, response, request_path, serve_pooled_n_with)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, response, serve_pooled_n_with)
 import stdlib.terminal as terminal
 
 # `serve_pooled`: a FIXED pool of long-lived workers pulling owned connections off a channel, instead
@@ -58,8 +58,8 @@ fn clients(port: Int) -> Unit !{IO} =
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> serve_pooled_n_with(
-      ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 2000,
-                   max_body_bytes = 65536, min_rate_bps = 1000, idle_ms = 2000, max_idle_connections = 256),
+      default_config() with (header_ms = 2000, body_ms = 2000, write_ms = 2000,
+                   max_body_bytes = 65536, min_rate_bps = 1000, idle_ms = 2000),
       listen_or_die(port), 2, 2, 5, handle))
     # Spawned, not called: a direct call runs the first client before the server task has been
     # scheduled at all, so it connects before `listen_or_die` has bound and the run then hangs waiting

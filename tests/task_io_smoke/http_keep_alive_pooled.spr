@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, local_port, write_all_utf8)
 import testsupport.listen (listen_or_die)
-import testsupport.http_wire (read_response, says_close, with_conn)
+import testsupport.http_wire (mark, read_response, says_close, with_conn)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_pooled_n_with)
 import stdlib.time as time
 import stdlib.terminal as terminal
@@ -16,10 +16,6 @@ fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
       task_sleep(300)
       ok("slow")
   else ok("hello")
-
-fn mark(label: String, pass: Bool, detail: String) -> Unit !{IO} =
-  if pass then terminal.write(`${label}\n`)
-  else terminal.write(`MISMATCH: ${label}: ${detail}\n`)
 
 fn ask(conn: borrowing TcpConnection, path: String) -> Result String (String, String) !{IO} =
   match write_all_utf8(conn, "GET " ++ path ++ " HTTP/1.1\r\nHost: x\r\n\r\n") with

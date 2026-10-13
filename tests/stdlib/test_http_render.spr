@@ -91,6 +91,10 @@ fn main() -> Unit !{IO} =
       count_from(rendered(add_header("content-length", "999", add_header("content-length", "998", ok("hi")))), "content-length: ", 0), 1),
     check_true("the surviving content-length is the body's",
       contains(rendered(add_header("content-length", "999", ok("hi"))), "content-length: 2\r\n")),
+    # A transfer-encoding would override the content-length (RFC 9112 §6.3), and the body is not
+    # chunked, so a client would misread it and the next response on the connection.
+    check_true("a caller's transfer-encoding never reaches the wire",
+      ! contains (rendered(add_header("Transfer-Encoding", "chunked", ok("hi"))), "transfer-encoding")),
 
     # --- 204 No Content -------------------------------------------------------------------------
     # RFC 9110 §8.6: no Content-Length on a 204. §15.3.5: a 204 has no content, so a body the

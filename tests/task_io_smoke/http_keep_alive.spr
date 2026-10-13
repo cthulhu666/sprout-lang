@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpConnection, local_port, write_all_utf8)
+import stdlib.net (TcpConnection, local_port)
 import testsupport.listen (listen_or_die)
-import testsupport.http_wire (read_response, read_head_reply, read_to_end, says_close, with_conn)
+import testsupport.http_wire (mark, read_response, read_head_reply, read_to_end, says_close, send, with_conn)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with, with_header)
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -13,15 +13,6 @@ import stdlib.terminal as terminal
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
   if request_path(req) == "/close" then with_header("connection", "close", ok("bye"))
   else ok("hello")
-
-fn mark(label: String, pass: Bool, detail: String) -> Unit !{IO} =
-  if pass then terminal.write(`${label}\n`)
-  else terminal.write(`MISMATCH: ${label}: ${detail}\n`)
-
-fn send(conn: borrowing TcpConnection, request: String) -> Unit !{IO} =
-  match write_all_utf8(conn, request) with
-  | Ok _ -> ()
-  | Err _ -> terminal.write("MISMATCH: write failed\n")
 
 # A kept response: the body arrived and nothing said close.
 fn expect_kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
@@ -94,6 +85,34 @@ fn idle_expiry(conn: borrowing TcpConnection) -> Unit !{IO} =
     | Ok rest -> mark("idle-closes-quietly", rest == "", rest)
     | Err e -> mark("idle-closes-quietly", false, e)
 
+# RFC 9110 §5.3 lets repeated list fields join, so the `close` in the first line still counts.
+fn repeated_close(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\nConnection: x-foo\r\n\r\n")
+    expect_closed(conn, "repeated-connection-close")
+
+# Some clients send a CRLF after a body. RFC 9112 §2.2: a server SHOULD ignore at least one empty
+# line before a request line.
+fn post_with_crlf(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  do
+    send(conn, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc\r\n")
+    expect_kept(conn, label)
+
+fn stray_crlf(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    post_with_crlf(conn, "post-before-crlf")
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "stray-crlf-ignored")
+
+# With nothing after the CRLF the connection is idle, not part-way into a request: it closes quietly
+# at `idle_ms`, with no 408.
+fn stray_crlf_idle(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    post_with_crlf(conn, "post-then-crlf")
+    match read_to_end(conn) with
+    | Ok rest -> mark("stray-crlf-idles-quietly", rest == "", rest)
+    | Err e -> mark("stray-crlf-idles-quietly", false, e)
+
 fn one_request(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
     send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -119,13 +138,16 @@ fn clients(port: Int) -> Unit !{IO} =
     with_conn(port, error_close)
     with_conn(port, head_then_get)
     with_conn(port, idle_expiry)
+    with_conn(port, repeated_close)
+    with_conn(port, stray_crlf)
+    with_conn(port, stray_crlf_idle)
     capped(port)
 
 fn run(s: Scope) -> Unit !{IO} =
   do
     listener <- listen_or_die(0)
     port <- local_port(listener)
-    task_spawn(s, \_ -> serve_n_with(config, listener, 10, handle))
+    task_spawn(s, \_ -> serve_n_with(config, listener, 13, handle))
     task_spawn(s, \_ -> clients(port))
 where
   config = default_config() with (idle_ms = 300, max_idle_connections = 2)

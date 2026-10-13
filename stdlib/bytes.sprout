@@ -181,10 +181,10 @@ fn matches_at(haystack: Bytes, needle: Bytes, at: Int, index: Int, needle_len: I
     matches_at(haystack, needle, at, index + 1, needle_len)
   else false
 
-fn find_from(haystack: Bytes, needle: Bytes, start: Int, last: Int, needle_len: Int) -> Maybe Int =
+fn scan_from(haystack: Bytes, needle: Bytes, start: Int, last: Int, needle_len: Int) -> Maybe Int =
   if start > last then Nothing
   else if matches_at(haystack, needle, start, 0, needle_len) then Just(start)
-  else find_from(haystack, needle, start + 1, last, needle_len)
+  else scan_from(haystack, needle, start + 1, last, needle_len)
 
 # Byte-exact substring search: the index of the first occurrence of `needle`, or Nothing.
 #
@@ -203,7 +203,13 @@ fn find_from(haystack: Bytes, needle: Bytes, start: Int, last: Int, needle_len: 
 #
 # An empty needle matches at 0, following str_find and the same convention as C's strstr.
 export fn find(haystack: Bytes, needle: Bytes) -> Maybe Int =
-  find_from(haystack, needle, 0, length(haystack) - needle_len, needle_len)
+  find_from(haystack, needle, 0)
+
+# `find` from byte `start` on, answering an index into the whole haystack. It searches a buffer in
+# place, where `find(drop(haystack, start), needle)` would copy everything past `start` first. A
+# negative `start` searches from 0.
+export fn find_from(haystack: Bytes, needle: Bytes, start: Int) -> Maybe Int =
+  scan_from(haystack, needle, if start < 0 then 0 else start, length(haystack) - needle_len, needle_len)
 where
   needle_len = length(needle)
 

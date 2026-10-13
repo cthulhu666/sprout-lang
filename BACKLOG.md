@@ -312,7 +312,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
   carrying an `IRTcoEntry`. No miscompile, but the mutual edge builds a native frame per
   iteration, so a long input overflows the stack: `json`'s string decoder died at 2^15 escapes
-  until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a.
+  until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a. Hit again
+  by `http_server`'s keep-alive loop: ~2,700 requests on one connection exhausted the root pool.
 - [ ] `P3` **Phase B / Tier-2 CPR: `emit_repack_one` emits width-2 only.** A match-routed cycle
   member returning a ≥2-field-ctor ADT would drop fields. Unreachable today (worker routing is
   gated on max-ctor-arity ≤ 1), so latent. Widening needs `{tag, f0, f1}` and a `{i64,i64,i64}`
@@ -557,7 +558,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   which is the argument for this entry, not against it. Needs an accessor beside `request_header`
   (Go `map[string][]string`; Rust `HeaderMap` multi-map).
 - [ ] `P3` **A `render` error reaches the client as a bare 500, its reason dropped.**
-  `render_response_or_fallback` in `stdlib/http_server.sprout` answers any `Err` from `render`
+  `wire_parts` in `stdlib/http_server.sprout` answers any `Err` from `render`
   with a fixed "internal server error", and `http_server` has no log, so the handler's body and
   headers and the `HttpServerError` saying why are all lost. Only a status outside `stdlib.http`'s
   table reaches it today. Wants a way to report it, e.g. a log hook on `ServerConfig`.
@@ -2358,10 +2359,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   which needs a runtime primitive: a wait over many handles, or readable-then-send. A builtin; ask
   first.
   `docs/http-keep-alive-v0.md` §6.
-- [ ] `P3` **Error replies close without a lingering close.** `tcp_close` is a bare `close()`. A
-  413, 431 or 501 sent while request bytes are still unread can make the kernel answer with a RST
-  that discards the reply before the client reads it (RFC 9112 §9.6). Go half-closes and waits 500
-  ms. Needs `tcp_shutdown_write`, a builtin; ask first. `docs/http-keep-alive-v0.md` §6.
+- [ ] `P3` **Closing replies close without a lingering close.** `tcp_close` is a bare `close()`.
+  A reply that closes while request bytes are still unread can make the kernel answer with a RST
+  that discards it before the client reads it (RFC 9112 §9.6): a 413, 431 or 501, and any reply that
+  closes a connection the client is pipelining on (HTTP/1.0, a handler's close, capacity). Go
+  half-closes and waits 500 ms. Needs `tcp_shutdown_write`, a builtin; ask first.
+  `docs/http-keep-alive-v0.md` §6.
 - [ ] `P3` **Make `SPROUT_TASK_STACK_BYTES` an env knob** (a compile-time `#define` today). Worth
   3× on the HTTP server for a recursion-depth tradeoff the deployment should own. The 1 MiB default
   has never been measured against real handler depth — measure that too.
