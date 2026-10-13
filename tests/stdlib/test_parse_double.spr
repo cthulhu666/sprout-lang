@@ -16,11 +16,6 @@ fn approx(m: Maybe Double, target: Double, eps: Double) -> Bool =
   | Nothing -> false
   | Just x -> abs_d(x - target) < eps
 
-fn is_nothing(m: Maybe Double) -> Bool =
-  match m with
-  | Nothing -> true
-  | Just _ -> false
-
 # Relative tolerance, for targets far outside the range where a fixed `eps` means
 # anything: at 1e20 the gap between adjacent Doubles is already ~16384.
 fn approx_rel(m: Maybe Double, target: Double, rel: Double) -> Bool =

@@ -51,6 +51,15 @@ fn result_from_maybe(m: Maybe Item) -> Int =
   | Nothing -> 0
   | Just x -> x.id
 
+# `is_ok` on a domain type, not `Result`: six test files here define `is_ok` or
+# `is_err` on `CompileResult` and its kin, and uncharted-suns has `is_none` on its own ADTs.
+type Outcome = Passed | Failed
+
+fn is_ok(o: Outcome) -> Bool =
+  match o with
+  | Passed -> true
+  | Failed -> false
+
 fn is_odd_id(x: Item) -> Bool = x.id - (x.id / 2) * 2 == 1
 
 fn main() -> Unit !{IO} =
@@ -72,6 +81,10 @@ fn main() -> Unit !{IO} =
     check_eq("a local `result_from_maybe` shadows the prelude's",
       result_from_maybe(Just (Item(id = 7, label = "seven"))), 7),
     check_eq("the local `result_from_maybe` on Nothing", result_from_maybe(no_item), 0),
+    check_eq("a local `is_ok` shadows the prelude's", is_ok(Passed), true),
+    check_eq("the local `is_ok` on its false branch", is_ok(Failed), false),
+    # The prelude's sibling, unshadowed, still resolves beside it.
+    check_eq("prelude `is_err` still resolves here", is_err(Err (Failed)), true),
 
     # The unshadowed prelude combinators are unaffected in the same module.
     check_eq("prelude `filter` still resolves here",

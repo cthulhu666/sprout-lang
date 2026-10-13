@@ -13,11 +13,6 @@ import stdlib.string as string
 fn decoded(r: Result Utf8Error String) -> String =
   result_with_default("<ERR>", r)
 
-fn is_err(r: Result Utf8Error String) -> Bool =
-  match r with
-  | Ok _ -> false
-  | Err _ -> true
-
 # Render pairs canonically as "k=v,k=v" so we can assert on a plain String.
 fn show_pairs_from(ps: Vec (String, String), index: Int, total: Int, acc: String) -> String =
   if index >= total then acc

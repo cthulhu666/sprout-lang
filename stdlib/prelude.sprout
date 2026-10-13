@@ -1707,6 +1707,29 @@ export fn maybe_or_else(primary: Maybe a, fallback: Maybe a) -> Maybe a =
   | Just x -> Just(x)
   | Nothing -> fallback
 
+# O(1) presence predicates, named after the constructors as in Haskell, Rust and OCaml.
+# Unlike `m != Nothing` they need no `Eq a`. To use the payload too, match instead:
+# testing first and unwrapping after asks the same question twice.
+export fn is_just(m: Maybe a) -> Bool =
+  match m with
+  | Just _ -> true
+  | Nothing -> false
+
+export fn is_nothing(m: Maybe a) -> Bool =
+  match m with
+  | Just _ -> false
+  | Nothing -> true
+
+export fn is_ok(r: Result e a) -> Bool =
+  match r with
+  | Ok _ -> true
+  | Err _ -> false
+
+export fn is_err(r: Result e a) -> Bool =
+  match r with
+  | Ok _ -> false
+  | Err _ -> true
+
 export fn after(effect: Unit !{IO}, value: a) -> a !{IO} =
   value
 

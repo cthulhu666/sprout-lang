@@ -36,11 +36,6 @@ fn just_eq(m: Maybe Int, v: Int) -> Bool =
   | Just x -> x == v
   | Nothing -> false
 
-fn is_nothing(m: Maybe Int) -> Bool =
-  match m with
-  | Just _ -> false
-  | Nothing -> true
-
 fn inf() -> Double = 1.0 / 0.0
 
 # --- Round-trip sweep -------------------------------------------------------

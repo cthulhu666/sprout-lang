@@ -13,6 +13,8 @@ Modules not yet documented are listed in `scripts/stdlib_reference_gate.sh`.
 Standard library (Sprout source in `stdlib/prelude.sprout`):
 
 - `Maybe a` (`Just`, `Nothing`)
+- `is_just(m)` / `is_nothing(m)` and `is_ok(r)` / `is_err(r)` — which constructor a `Maybe` or
+  `Result` holds; O(1), no `Eq` needed. To use the payload too, `match` instead
 - `map(fn, list) -> List`
 - `fold(fn, init, list) -> value`
 - `filter(predicate, xs) -> c a` (`where Filterable c` — `List` or `Vec`, container preserved)

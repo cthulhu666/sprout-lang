@@ -3,36 +3,6 @@ import stdlib.json as json
 import stdlib.string as string
 import stdlib.math
 
-fn is_ok(r: Result json.JsonError json.Json) -> Bool =
-  match r with
-  | Ok _ -> true
-  | Err _ -> false
-
-fn is_err(r: Result json.JsonError json.Json) -> Bool =
-  match r with
-  | Ok _ -> false
-  | Err _ -> true
-
-fn is_nothing_json(m: Maybe json.Json) -> Bool =
-  match m with
-  | Nothing -> true
-  | Just _ -> false
-
-fn is_nothing_string(m: Maybe String) -> Bool =
-  match m with
-  | Nothing -> true
-  | Just _ -> false
-
-fn is_nothing_int(m: Maybe Int) -> Bool =
-  match m with
-  | Nothing -> true
-  | Just _ -> false
-
-fn is_nothing_array(m: Maybe json.JsonArray) -> Bool =
-  match m with
-  | Nothing -> true
-  | Just _ -> false
-
 # `stringify` reports a refusal in its result type, so the round-trip helpers unwrap it. The
 # fallback is deliberately "", which is NOT valid JSON: an unexpected Err then surfaces as a
 # parse failure in the test that used it, rather than passing quietly.
@@ -92,7 +62,7 @@ fn top_float_has_bits(input: String, reference: Double) -> Bool =
 # answers Just either way and cannot see the collapse this pins.
 fn float_stays_float(x: Double) -> Bool =
   let Ok v = json.parse(stringified(json.JsonFloat(x))) else false
-  in is_nothing_int(json.json_get_int(v))
+  in is_nothing(json.json_get_int(v))
 
 fn float_round_trip_bits(x: Double) -> Bool =
   let Ok v = json.parse(stringified(json.JsonFloat(x))) else false
@@ -152,7 +122,7 @@ fn refused_value_is_nan(value: json.Json) -> Bool =
 fn int_on_float_is_nothing(input: String) -> Bool =
   match json.parse(input) with
   | Err _ -> false
-  | Ok v -> is_nothing_int(json.json_get_int(v))
+  | Ok v -> is_nothing(json.json_get_int(v))
 
 fn bool_of(input: String) -> Maybe Bool =
   match json.parse(input) with
@@ -161,11 +131,6 @@ fn bool_of(input: String) -> Maybe Bool =
 
 fn is_just_true(m: Maybe Bool) -> Bool =
   maybe_with_default(false, m)
-
-fn is_nothing_bool(m: Maybe Bool) -> Bool =
-  match m with
-  | Nothing -> true
-  | Just _ -> false
 
 fn main() -> Unit !{IO} =
   let obj_result = json.parse("{\"name\": \"Alice\", \"age\": 30}")
@@ -233,13 +198,13 @@ fn main() -> Unit !{IO} =
 
     # --- Edge cases for json_get_* helpers on valid JSON ---
 
-    check_true("json_get_field missing key returns Nothing", is_nothing_json(missing_key_result)),
+    check_true("json_get_field missing key returns Nothing", is_nothing(missing_key_result)),
 
-    check_true("json_get_string on non-string returns Nothing", is_nothing_string(str_on_nonstring)),
+    check_true("json_get_string on non-string returns Nothing", is_nothing(str_on_nonstring)),
 
-    check_true("json_get_int on non-int returns Nothing", is_nothing_int(int_on_nonint)),
+    check_true("json_get_int on non-int returns Nothing", is_nothing(int_on_nonint)),
 
-    check_true("json_get_array on non-array returns Nothing", is_nothing_array(arr_on_nonarr)),
+    check_true("json_get_array on non-array returns Nothing", is_nothing(arr_on_nonarr)),
 
     # --- json_stringify round-trip ---
 
@@ -335,7 +300,7 @@ fn main() -> Unit !{IO} =
     check_true("negative zero survives the full round trip", float_round_trip_bits(neg_zero())),
     check_true("a plain JsonInt is still an int", is_ok(json.parse(stringified(json.JsonInt(2))))),
     check_true("a plain JsonInt does not become a float",
-               int_on_float_is_nothing("2.5") && (! is_nothing_int (json.json_get_int(json.JsonInt(2))))),
+               int_on_float_is_nothing("2.5") && (! is_nothing (json.json_get_int(json.JsonInt(2))))),
 
     # --- non-finite Doubles are refused, never coerced ---
     # RFC 8259 §6 states outright that values outside the `number` grammar, "such as Infinity and
@@ -377,7 +342,7 @@ fn main() -> Unit !{IO} =
     # --- json_get_bool (accessor for the JsonBool variant) ---
     check_true("json_get_bool on true", is_just_true(bool_of("true"))),
     check_false("json_get_bool on false", is_just_true(bool_of("false"))),
-    check_true("json_get_bool on a non-bool returns Nothing", is_nothing_bool(bool_of("42"))),
+    check_true("json_get_bool on a non-bool returns Nothing", is_nothing(bool_of("42"))),
 
     # --- non-ASCII input (regression: this ABORTED the process) ---
     # `byte1(s, i) = str_slice_bytes(s, i, 1)` sliced one byte for character dispatch. On the LEAD
