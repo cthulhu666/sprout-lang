@@ -41,10 +41,14 @@ set. A kept response sends no `connection` header, persistence being HTTP/1.1's 
 
 Bytes read past the end of a request are the start of the next one and are served without
 waiting. They are kept as the read buffer plus an offset, so a buffer of many pipelined requests is
-not copied once per request. Empty lines before a request line are skipped (RFC 9112 §2.2): some
-clients send a CRLF after a body, and it must not start a request. Otherwise the server waits up to `idle_ms` for the next request's first byte; the header
-budget (`header_ms`) starts at that byte. When the wait expires, or the client closes or resets,
-the server closes and sends nothing: no request was made, so none is answered.
+not copied once per request. Otherwise the server waits up to `idle_ms` from the response for the
+next request's first byte; the header budget (`header_ms`) starts at that byte. When the wait
+expires, or the client closes or resets, the server closes and sends nothing: no request was made,
+so none is answered.
+
+Empty lines before a request line are skipped (RFC 9112 §2.2): some clients send a CRLF after a
+body, and it must not start a request. They do not restart the wait, so a client sending only
+CRLFs is closed at `idle_ms` like a silent one, rather than held open indefinitely.
 
 HEAD replies carry no body and 204 replies carry neither body nor `content-length`. Close hid both
 mistakes before; on a kept connection the stray bytes would be read as the next response. That fix

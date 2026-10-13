@@ -30,16 +30,16 @@ export fn send(conn: borrowing TcpConnection, request: String) -> Unit !{IO} =
 
 # The header block (through its blank line) and the body, framed by `content-length`.
 export fn read_response(conn: borrowing TcpConnection) -> Result String (String, String) !{IO} =
-  match read_head(conn, bytes.empty()) with
-  | Err e -> Err(e)
-  | Ok parts -> read_body(conn, parts)
+  do
+    parts <- try read_head(conn, bytes.empty())
+    read_body(conn, parts)
 
 # A reply to HEAD: its `content-length` describes a body that is not sent, so only the header block
 # is read. Any bytes past it belong to the next response, and are what a leaked body would look like.
 export fn read_head_reply(conn: borrowing TcpConnection) -> Result String (String, String) !{IO} =
-  match read_head(conn, bytes.empty()) with
-  | Err e -> Err(e)
-  | Ok parts -> Ok(as_text(parts))
+  do
+    parts <- try read_head(conn, bytes.empty())
+    Ok(as_text(parts))
 
 fn as_text(parts: (String, Bytes)) -> (String, String) =
   (head, text(early))
@@ -79,12 +79,9 @@ export fn content_length(head: String) -> Int =
   | Just at -> digits(string.drop(head, at + 16))
 
 fn digits(rest: String) -> Int =
-  match string.find(rest, "\r\n") with
-  | Nothing -> 0
-  | Just end ->
-      match parse_int(string.take(rest, end)) with
-      | Just n -> n
-      | Nothing -> 0
+  let Just end = string.find(rest, "\r\n") else 0
+      Just n = parse_int(string.take(rest, end)) else 0
+  in n
 
 # Everything left on the connection until the server closes it. Empty when the server closed without
 # sending anything more.
