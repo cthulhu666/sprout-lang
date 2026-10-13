@@ -2068,7 +2068,8 @@ task-io-smoke: bootstrap-from-seed
       || { echo "task-io-smoke: runtime compile failed ($src)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
   build() {  # $1 = fixture -> $TMPD/bin
-    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$1" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
+    # --package-root: fixtures share their bind helpers through testsupport.listen.
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$1" > "$TMPD/out.ll" 2>"$TMPD/emit.err"; then
       echo "task-io-smoke: emit-IR failed for $1" >&2; cat "$TMPD/emit.err" >&2; exit 1
     fi
     if ! clang "$TMPD/out.ll" "$TMPD/rt"/*.o -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then

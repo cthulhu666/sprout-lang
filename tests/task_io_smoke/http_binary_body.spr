@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.bytes as bytes
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, request_body_bytes, response, serve_n_with)
 import stdlib.terminal as terminal
@@ -75,7 +76,7 @@ fn split_client(port: Int) -> Unit !{IO} =
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 4000, body_ms = 4000, max_header_bytes = 65536,
-                                       write_ms = 4000, max_body_bytes = 65536, min_rate_bps = 1024), port, 2, handle))
+                                       write_ms = 4000, max_body_bytes = 65536, min_rate_bps = 1024), listen_or_die(port), 2, handle))
     task_spawn(s, \_ -> inline_client(port))
     task_spawn(s, \_ -> split_client(port))
 

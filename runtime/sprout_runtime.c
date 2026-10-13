@@ -10008,39 +10008,75 @@ static void tcp_set_nonblocking(int fd) {
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) sprout_fail("tcp: fcntl F_SETFL failed");
 }
 
-long long tcp_listen(long long port) {
-  if (port < 1 || port > 65535) sprout_fail("tcp_listen: port out of range");
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) sprout_fail("tcp_listen: socket failed");
-  int one = 1;
-  if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
-    close(fd);
-    sprout_fail("tcp_listen: setsockopt failed");
+static long long tcp_net_ok(long long payload);
+static long long tcp_net_err1(const char* ctor_name, long long payload);
+
+/* Err(TcpListenFailed "<step> <host>:<port>: <reason>"), closing `fd` if one is open. The message
+ * is built on the stack, so it is copied to a managed string: tcp_net_err1 keeps the pointer as is.
+ * `reason` is read before the close, which could overwrite errno. */
+static long long tcp_listen_fail(int fd, const char* step, const char* host, long long port,
+                                 const char* reason) {
+  char detail[160];
+  snprintf(detail, sizeof(detail), "%s %s:%lld: %s", step, host, port, reason);
+  if (fd >= 0) close(fd);
+  return tcp_net_err1("stdlib.net.TcpListenFailed",
+                      (long long)(uintptr_t)dup_managed_cstr(detail, "tcp_listen: out of memory"));
+}
+
+/* Bind and listen on an IPv4 literal; port 0 lets the OS pick, and tcp_listener_port reads it back.
+ * Every failure is an Err except an fcntl failure in tcp_set_nonblocking, which still aborts.
+ * IPv6 is not supported yet: binding `::` needs an IPV6_V6ONLY choice, whose default differs by
+ * platform. Names are not resolved, unlike tcp_connect — a bind wants an address. */
+long long tcp_listen(const char* host, long long port) {
+  if (host == NULL) sprout_fail("tcp_listen: null host");
+  if (port < 0 || port > 65535) {
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument", (long long)(uintptr_t)"port must be in 0..65535");
   }
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_port = htons((unsigned short)port);
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+    struct in6_addr a6;
+    const char* why = inet_pton(AF_INET6, host, &a6) == 1
+      ? "IPv6 is not supported yet; host must be an IPv4 address"
+      : "host must be an IPv4 address such as 127.0.0.1";
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument", (long long)(uintptr_t)why);
+  }
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return tcp_listen_fail(-1, "socket", host, port, strerror(errno));
+  int one = 1;
+  if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
+    return tcp_listen_fail(fd, "setsockopt", host, port, strerror(errno));
+  }
   if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-    close(fd);
-    sprout_fail("tcp_listen: bind failed");
+    return tcp_listen_fail(fd, "bind", host, port, strerror(errno));
   }
   if (listen(fd, 16) < 0) {
-    close(fd);
-    sprout_fail("tcp_listen: listen failed");
+    return tcp_listen_fail(fd, "listen", host, port, strerror(errno));
   }
   tcp_set_nonblocking(fd);   /* so tcp_accept parks on EAGAIN rather than blocking */
   /* Arm the EMFILE reserve now, while descriptors are plentiful — a no-op after the first listener. */
   accept_reserve_arm();
   long long h = alloc_listener_handle();
-  if (h < 0) {
-    close(fd);
-    sprout_fail("tcp_listen: handle table full");
-  }
+  if (h < 0) return tcp_listen_fail(fd, "listen", host, port, "listener table full");
   g_listener_fd[h] = fd;
   g_listener_used[h] = 1;
-  return h;
+  return tcp_net_ok(h);
+}
+
+/* The port a listener is bound to — the OS's choice when it was opened on port 0. A live listening
+ * socket always has a bound address, so only a bad handle can fail, and that is a bug. */
+long long tcp_listener_port(long long listener) {
+  if (listener <= 0 || listener >= 2048 || !g_listener_used[listener]) {
+    sprout_fail("tcp_listener_port: unknown listener handle");
+  }
+  struct sockaddr_in addr;
+  socklen_t len = (socklen_t)sizeof(addr);
+  if (getsockname(g_listener_fd[listener], (struct sockaddr*)&addr, &len) < 0) {
+    sprout_fail("tcp_listener_port: getsockname failed");
+  }
+  return (long long)ntohs(addr.sin_port);
 }
 
 static long long tcp_net_ok(long long payload) {

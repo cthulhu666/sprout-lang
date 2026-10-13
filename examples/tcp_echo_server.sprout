@@ -43,7 +43,9 @@ fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
     | Err err -> terminal.write(`accept failed: ${tcp_error_message(err)}\n`)
 
 fn main() -> Unit !{IO} =
-  do
-    listener <- listen_local(8081)
-    serve_loop(listener, 1000000)
-    close_listener(listener)
+  match listen_local(8081) with
+  | Err err -> terminal.write(`cannot listen on 8081: ${tcp_error_message(err)}\n`)
+  | Ok listener ->
+      do
+        serve_loop(listener, 1000000)
+        close_listener(listener)

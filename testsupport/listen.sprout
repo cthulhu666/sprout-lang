@@ -1,0 +1,16 @@
+module testsupport.listen
+
+import stdlib.net (TcpListener, listen_local, tcp_error_message, tcp_listen)
+
+# Fixture binds. A fixture cannot recover from a failed bind, so it ends the run with the full error.
+
+export fn listen_or_die(port: Int) -> TcpListener !{IO} =
+  match listen_local(port) with
+  | Ok listener -> listener
+  | Err e -> panic(`listen_local(${port}): ${tcp_error_message(e)}`)
+
+# The raw handle, for fixtures whose tasks are force-dropped and so cannot hold a linear listener.
+export fn tcp_listen_or_die(port: Int) -> Int !{IO} =
+  match tcp_listen("127.0.0.1", port) with
+  | Ok handle -> handle
+  | Err e -> panic(`tcp_listen(${port}): ${tcp_error_message(e)}`)

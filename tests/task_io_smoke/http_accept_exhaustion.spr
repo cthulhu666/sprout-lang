@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_with)
 import stdlib.terminal as terminal
 
@@ -108,7 +109,7 @@ fn client(port: Int, done: Chan Int) -> Unit !{IO} =
 fn body(s: Scope, port: Int) -> Unit !{IO} =
   do
     done <- chan_new(s, 1)
-    task_spawn(s, \_ -> serve_with(flood_config(), port, handle))
+    task_spawn(s, \_ -> serve_with(flood_config(), listen_or_die(port), handle))
     task_spawn(s, \_ -> client(port, done))
     _ <- chan_recv(done)
     # `serve_with` never returns on its own, so the owner force-drops it once the assertion is in.

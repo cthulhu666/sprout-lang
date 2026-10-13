@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpConnection, close, close_listener, connect, accept, listen_local, read_avail_timeout, write_all_utf8)
+import stdlib.net (TcpConnection, close, close_listener, connect, accept, read_avail_timeout, write_all_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.terminal as terminal
@@ -57,7 +58,7 @@ fn run(s: Scope, server: consuming TcpConnection, client: consuming TcpConnectio
 
 fn main() -> Unit !{IO} =
   do
-    listener <- listen_local(28999)
+    listener <- listen_or_die(28999)
     match connect("127.0.0.1", 28999) with
     | Ok conn ->
         match accept(listener) with

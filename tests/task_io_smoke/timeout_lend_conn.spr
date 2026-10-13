@@ -1,5 +1,6 @@
 import stdlib.task as task
-import stdlib.net (TcpConnection, TcpListener, TcpError, accept, close, close_listener, connect, listen_local, read_exact)
+import stdlib.net (TcpConnection, TcpListener, TcpError, accept, close, close_listener, connect, read_exact)
+import testsupport.listen (listen_or_die)
 import stdlib.terminal as terminal
 
 # with_timeout's body is `local`: the server LENDS its accepted connection to the timed read, then
@@ -43,7 +44,7 @@ fn client(port: Int) -> Unit !{IO} =
 fn run(s: task.Scope, port: Int) -> Unit !{IO} =
   do
     task.task_spawn(s, \_ -> client(port))
-    serve(listen_local(port))
+    serve(listen_or_die(port))
 
 fn main() -> Unit !{IO} =
   do

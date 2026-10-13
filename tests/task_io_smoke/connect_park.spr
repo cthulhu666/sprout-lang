@@ -1,5 +1,6 @@
 import stdlib.task as task
-import stdlib.net (tcp_listen, tcp_close_listener, tcp_connect, tcp_close, tcp_error_message)
+import stdlib.net (tcp_close_listener, tcp_connect, tcp_close, tcp_error_message)
+import testsupport.listen (tcp_listen_or_die)
 import stdlib.terminal as terminal
 
 let port: Int = 28994
@@ -46,7 +47,7 @@ let dead_port: Int = 28993
 # connect, are the two ways this could regress.
 fn refused_is_reported() -> Bool !{IO} =
   do
-    l <- tcp_listen(dead_port)
+    l <- tcp_listen_or_die(dead_port)
     tcp_close_listener(l)
     match tcp_connect("127.0.0.1", dead_port) with
     | Ok (_) -> false
@@ -82,7 +83,7 @@ fn attempts(remaining: Int, expired: Int) -> Int !{IO} =
 fn main() -> Unit !{IO} =
   do
     refused <- refused_is_reported()
-    _ <- tcp_listen(port)  # never accepted: the accept queue fills and stays full
+    _ <- tcp_listen_or_die(port)  # never accepted: the accept queue fills and stays full
     let stalled = attempts(80, 0)
     if refused then
       if stalled > 0 then

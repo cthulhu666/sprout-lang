@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve_n)
 import stdlib.terminal as terminal
 
@@ -8,7 +9,7 @@ import stdlib.terminal as terminal
 # handler is spawned as a green task, so a slow first connection must NOT block a
 # second connection from being accepted and served.
 #
-# Two clients hit one `serve_n(port, 2, handle)`:
+# Two clients hit one `serve_n(listener, 2, handle)`:
 #   * client1 is accepted FIRST (a `ready` channel makes it connect first), sends a
 #     PARTIAL request (no header terminator), sleeps, then completes it. Its handler
 #     parks in read_until_headers the whole time.
@@ -69,7 +70,7 @@ fn connect_and_report(port: Int) -> Unit !{IO} =
 
 fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n(port, 2, handle))
+    task_spawn(s, \_ -> serve_n(listen_or_die(port), 2, handle))
     task_spawn(s, \_ -> slow_client(port, ready))
     task_spawn(s, \_ -> fast_client(port, ready))
 

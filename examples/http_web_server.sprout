@@ -3,6 +3,7 @@ module examples.http_web_server
 import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, bad_request, not_found, response, with_header, see_other, request_method, request_path, request_body, query_param, form_param)
 import stdlib.http_middleware (with_logging)
 import stdlib.log as log
+import stdlib.net (listen_local, tcp_error_message)
 import stdlib.template (Template, compile, render)
 import stdlib.json (Json, JsonObject, JsonObjectCons, JsonObjectNil, string, int, array_from_list)
 import stdlib.string as string
@@ -217,7 +218,9 @@ fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Rou
 # dispatch handler so every request emits one INFO line to stderr; stdout stays
 # clean for the program's own output.
 fn serve_crud(lg: log.Logger, list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Unit !{IO} =
-  serve(8082, with_logging(lg, \req -> dispatch(rs, req)))
+  match listen_local(8082) with
+  | Err e -> log.error(lg, `cannot listen on 8082: ${tcp_error_message(e)}`)
+  | Ok listener -> serve(listener, with_logging(lg, \req -> dispatch(rs, req)))
 where
   rs = routes(list_tmpl, form_tmpl, store)
 

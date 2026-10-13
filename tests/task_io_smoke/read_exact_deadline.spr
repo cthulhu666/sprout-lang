@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
-import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpInvalidArgument, accept, close, close_listener, connect, listen_local, read_exact_by, read_exact_utf8_by, write_all, write_all_utf8)
+import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpInvalidArgument, accept, close, close_listener, connect, read_exact_by, read_exact_utf8_by, write_all, write_all_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.bytes as bytes
 import stdlib.time as time
 import stdlib.terminal as terminal
@@ -294,7 +295,7 @@ fn client(port: Int) -> Unit !{IO} =
 
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve(listen_local(port)))
+    task_spawn(s, \_ -> serve(listen_or_die(port)))
     task_spawn(s, \_ -> client(port))
 
 fn main() -> Unit !{IO} =

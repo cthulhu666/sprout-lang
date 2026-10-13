@@ -1,5 +1,6 @@
 module examples.http_echo_server
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_body, request_path, serve, with_header)
+import stdlib.net (listen_local, tcp_error_message)
 
 # Always-on concurrent HTTP echo server (experimental helper surface): `serve`
 # accepts requests forever, handling each connection in its own green task, so one
@@ -25,4 +26,6 @@ fn echo_text(req: HttpRequest) -> String =
   | Err _ -> "<body is not valid UTF-8>"
 
 fn main() -> Unit !{IO} =
-  serve(8081, handle)
+  match listen_local(8081) with
+  | Err e -> eprint(`cannot listen on 8081: ${tcp_error_message(e)}`)
+  | Ok listener -> serve(listener, handle)
