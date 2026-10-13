@@ -43,8 +43,9 @@ fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
     | Err err -> terminal.write(`accept failed: ${tcp_error_message(err)}\n`)
 
 fn main() -> Unit !{IO} =
+  # A server that cannot listen has nothing to do, and panic exits non-zero with the reason.
   match listen_local(8081) with
-  | Err err -> terminal.write(`cannot listen on 8081: ${tcp_error_message(err)}\n`)
+  | Err err -> panic(`cannot listen on 8081: ${tcp_error_message(err)}`)
   | Ok listener ->
       do
         serve_loop(listener, 1000000)

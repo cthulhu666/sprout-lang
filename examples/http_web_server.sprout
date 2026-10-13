@@ -218,8 +218,9 @@ fn routes(list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Vec Rou
 # dispatch handler so every request emits one INFO line to stderr; stdout stays
 # clean for the program's own output.
 fn serve_crud(lg: log.Logger, list_tmpl: Template, form_tmpl: Template, store: Ref Store) -> Unit !{IO} =
+  # A server that cannot listen has nothing to do, and panic exits non-zero with the reason.
   match listen_local(8082) with
-  | Err e -> log.error(lg, `cannot listen on 8082: ${tcp_error_message(e)}`)
+  | Err e -> panic(`cannot listen on 8082: ${tcp_error_message(e)}`)
   | Ok listener -> serve(listener, with_logging(lg, \req -> dispatch(rs, req)))
 where
   rs = routes(list_tmpl, form_tmpl, store)

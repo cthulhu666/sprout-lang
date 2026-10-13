@@ -11077,25 +11077,28 @@ body_0_3:
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$14 = call i64 @string_concat_many(i64 %t$13)
   %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15$ptr = inttoptr i64 %t$14 to ptr
-  %t$15 = call i64 @eprint_str(ptr %t$15$ptr)
+  %t$33 = alloca i64
+  store i64 %t$14, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$15 = call i64 @panic(i64 %t$14)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_3
 arm_1_3:
   %t$16 = add i64 0, 7
   %t$17 = icmp eq i64 %t$1, %t$16
   br i1 %t$17, label %body_1_3, label %arm_2_3
 body_1_3:
-  %t$33 = alloca i64
-  store i64 %t$2, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$36 = alloca i64
+  store i64 %t$2, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$18 = call i64 @sprout_alloc_closure(i64 8, i64 1)
   %t$18$raw = inttoptr i64 %t$18 to ptr
   store ptr @__sprout_ir_eta_examples.http_echo_server.handle_35, ptr %t$18$raw
-  %t$35 = alloca i64
-  store i64 %t$18, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$38 = alloca i64
+  store i64 %t$18, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$19 = call i64 @stdlib.http_server.serve(i64 %t$2, i64 %t$18)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$40 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_3
 arm_2_3:
   call void @sprout_abort_match()
