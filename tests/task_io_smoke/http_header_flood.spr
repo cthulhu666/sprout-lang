@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
 import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
 import stdlib.string as string
@@ -106,7 +107,7 @@ fn serve_check(port: Int, first: Int) -> Unit !{IO} =
 fn run(s: Scope, port: Int, done: Chan Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 2048, write_ms = 2000,
-                                       max_body_bytes = 65536, min_rate_bps = 1000000), port, 2, handle))
+                                       max_body_bytes = 65536, min_rate_bps = 1000000), listen_or_die(port), 2, handle))
     task_spawn(s, \_ -> flooding_client(port, done))
     task_spawn(s, \_ -> prompt_client(port, done))
 

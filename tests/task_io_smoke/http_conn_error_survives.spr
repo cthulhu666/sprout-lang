@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, write_all_utf8, read_exact_utf8, close)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve_n)
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -14,7 +15,7 @@ import stdlib.terminal as terminal
 # fails RECOVERABLY, the connection is dropped, both handlers finish, `with_scope`
 # joins, and "done" prints (exit 0 — GREEN).
 #
-# `serve_n(port, 2)` accepts exactly the two connections. A `ready` channel orders them
+# `serve_n(listener, 2)` accepts exactly the two connections. A `ready` channel orders them
 # so the crashing connection is accepted first; the good client (small /ok response it
 # fully reads) is served second and proves the server stayed alive.
 
@@ -77,7 +78,7 @@ fn good_report(conn: borrowing TcpConnection) -> Unit !{IO} =
 
 fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_n(port, 2, handle))
+    task_spawn(s, \_ -> serve_n(listen_or_die(port), 2, handle))
     task_spawn(s, \_ -> crash_client(port, ready))
     task_spawn(s, \_ -> good_client(port, ready))
 

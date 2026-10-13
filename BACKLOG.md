@@ -614,6 +614,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (documented as a limit in `docs/builtins-reference.md`). **Fix:** park with the remaining
   budget (`scheduler_park_on_unowned_fd_timeout`) and abandon the lookup on expiry the way
   force-drop already does (`docs/async-dns-v0.md` §6), so no thread or fd leaks.
+- [ ] `P3` **`net.listen_on` binds IPv4 only; IPv6 is not supported yet.** An IPv6 literal is
+  `Err TcpInvalidArgument` saying so (`tcp_listen` in `runtime/sprout_runtime.c`). Deferred, not
+  refused: nothing needs it yet. The open decision is `IPV6_V6ONLY` for `::`: off (dual-stack) by
+  default on macOS, the `net.ipv6.bindv6only` sysctl on Linux, so the runtime must set it. 1 keeps
+  "what you write is what you bind"; 0 makes one `::` listener serve IPv4 too. Adding IPv6 later
+  breaks no caller.
 
 ### 2.5) Binary Data and Protocol Primitives
 
@@ -2733,9 +2739,9 @@ acting.
   parallel needs a per-fixture `out.ll`/`bin` path (all share one today).
 - [ ] `P3` **`task-io-smoke` fixtures bind fixed ports, so two worktrees running it collide.**
   Each fixture listens on a hard-coded port (e.g. `read_exact_deadline.spr` on 28982). Two
-  sessions running the gate at once fail with `tcp_listen: bind failed`, which reads as a parking
-  hang (seen 2026-10-04). Fix wants port 0 plus a way to read the bound port, which `listen_local`
-  lacks (#335/#336). Parallel fixtures inside the gate would need this too.
+  sessions running the gate at once fail to bind (seen 2026-10-04). The primitives now exist:
+  `listen_local(0)` and `net.local_port`. What remains is moving each fixture to port 0 and
+  passing the bound port to its client tasks. Parallel fixtures inside the gate need this too.
 - [ ] `P3` **CI has no arm64 Linux job, and `linux-smoke`'s value is latency, not OS coverage.**
   `linux-smoke` adds no OS coverage — `ci.yml` is `ubuntu-latest` with the same env and
   `ci-fast-gates` already contains `task-io-smoke`. What it covers is the *architecture*: its

@@ -347,7 +347,8 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `request_body_bytes(req) -> Bytes` — the body exactly as it arrived, byte for byte; total
 - `request_body(req) -> Result Utf8Error String` — the body decoded as UTF-8. A `Result` because an HTTP body is a byte sequence and nothing guarantees it is text (a PNG upload, a protobuf message, or a `Content-Length` cutting a character in half all reach a handler legitimately). Follows Go (`Body io.ReadCloser`), ASGI (`body` is a byte string) and Jakarta Servlet (`getInputStream` binary / `getReader` character) in treating bytes as the primitive. The body is fully **buffered** and capped by `max_body_bytes`, so binary payloads work up to that cap — not large file uploads, which need streaming
 - `request_header(name, req) -> Maybe String`
-- `serve_n(port, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning
+- Every `serve*` (`serve`, `serve_n`, `serve_pooled` and their `_with` forms) takes a listener the caller has bound with `net.listen_on` or `net.listen_local`, so a bind failure is the caller's `Err`
+- `serve_n(listener, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning
 
 Request params (low-level, lossless — derived on demand from the parsed request, so pure and socket-free). Values are percent/`+`-decoded via `stdlib.url`. `_param` returns the FIRST value for a key (the Go `url.Values.Get` / Werkzeug `MultiDict.get` convention); `_param_all` returns every value; `_pairs` is the ordered, duplicate-preserving source of truth:
 
@@ -584,7 +585,7 @@ then call helpers like `imath.mod(...)`, `imath.gcd(...)`, `math.exp(...)`.
 TCP client helper types (in `stdlib/net.sprout`):
 
 - uses foundational prelude `Result`
-- `TcpError` variants (`TcpInvalidArgument`, `TcpInvalidHandle`, `TcpConnectFailed`, `TcpReadFailed`, `TcpWriteFailed`, `TcpEndOfStream`, `TcpTimeout`, `TcpWouldBlock`, `TcpAcceptFailed`)
+- `TcpError` variants (`TcpInvalidArgument`, `TcpInvalidHandle`, `TcpConnectFailed`, `TcpReadFailed`, `TcpWriteFailed`, `TcpEndOfStream`, `TcpTimeout`, `TcpWouldBlock`, `TcpAcceptFailed`, `TcpListenFailed`)
 - `TcpConnection`
 - `TcpListener`
 - `connect(host, port) -> Result TcpError TcpConnection`
@@ -593,7 +594,9 @@ TCP client helper types (in `stdlib/net.sprout`):
 - `read_exact_utf8(conn, count) -> Result TcpError String`
 - `write_all_utf8(conn, payload) -> Result TcpError Int`
 - `close(conn) -> Unit !{IO}`
-- `listen_local(port) -> TcpListener`
+- `listen_on(host, port) -> Result TcpError TcpListener` — `host` is an IPv4 literal (`"127.0.0.1"`, `"0.0.0.0"`); a host name is `Err TcpInvalidArgument`, and so is an IPv6 literal: IPv6 is not supported yet. Port 0 lets the OS pick. A failed bind or listen is `Err TcpListenFailed`, naming the step, address, port and errno text
+- `listen_local(port) -> Result TcpError TcpListener` — `listen_on("127.0.0.1", port)`
+- `local_port(listener) -> Int !{IO}` — the bound port, e.g. the one the OS picked for port 0
 - `accept(listener) -> Result TcpError TcpConnection`
 - `close_listener(listener) -> Unit !{IO}`
 - `tcp_error_message(err) -> String`

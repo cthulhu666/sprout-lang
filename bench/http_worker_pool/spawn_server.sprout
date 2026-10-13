@@ -1,5 +1,11 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.net (TcpListener, TcpConnection, listen_local, accept, close, close_listener, read_avail_timeout, write_all_utf8)
+import stdlib.net (TcpListener, TcpConnection, listen_local, accept, close, close_listener, read_avail_timeout, write_all_utf8, tcp_error_message)
+
+# The bind cannot be recovered from here, so a failure ends the run with its full error.
+fn listen_or_die(port: Int) -> TcpListener !{IO} =
+  match listen_local(port) with
+  | Ok listener -> listener
+  | Err e -> panic(`listen_local(${port}): ${tcp_error_message(e)}`)
 
 # Identical in both variants, so the ONLY difference measured is the concurrency
 # model: task-per-connection vs a fixed worker pool fed by a channel.
@@ -35,4 +41,4 @@ fn serve_loop(scope: Scope, listener: consuming TcpListener) -> Unit !{IO} =
   | Err _ -> close_listener(listener)
 
 fn main() -> Unit !{IO} =
-  with_scope(\s -> serve_loop(s, listen_local(8099)))
+  with_scope(\s -> serve_loop(s, listen_or_die(8099)))

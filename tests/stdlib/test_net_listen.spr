@@ -1,0 +1,60 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.net (TcpError, TcpInvalidArgument, TcpListenFailed, TcpListener, close_listener, listen_local, listen_on, local_port, tcp_error_message)
+import stdlib.string (contains, starts_with)
+
+# A failed listen is an Err, not an exit. Every listener here asks for port 0, so the OS picks a
+# free port and two runs of this suite never collide.
+
+# Closes an Ok listener and reduces the result to a comparable string.
+fn outcome(r: Result TcpError TcpListener) -> String !{IO} =
+  match r with
+  | Ok l ->
+      do
+        close_listener(l)
+        "ok"
+  | Err (TcpInvalidArgument msg) -> `invalid: ${msg}`
+  | Err (TcpListenFailed msg) -> `failed: ${msg}`
+  | Err e -> `other: ${tcp_error_message(e)}`
+
+fn is_invalid(r: Result TcpError TcpListener) -> Bool !{IO} =
+  starts_with(outcome(r), "invalid: ")
+
+fn check_held_port(state: TestState, first: borrowing TcpListener) -> Unit !{IO} =
+  do
+    let port = local_port(first)
+    assert_true(state, "port 0 binds an OS-chosen port", port > 0)
+    let again = outcome(listen_local(port))
+    assert_true(state, `a held port is a TcpListenFailed (${again})`, starts_with(again, "failed: "))
+    assert_true(state, `the error names the address and port (${again})`, contains(again, `127.0.0.1:${port}`))
+    assert_true(state, `the error carries the errno text (${again})`, contains(again, "in use"))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    match listen_local(0) with
+    | Err e -> assert_true(state, `listen_local(0) succeeds (${tcp_error_message(e)})`, false)
+    | Ok first ->
+        do
+          check_held_port(state, first)
+          let port = local_port(first)
+          close_listener(first)
+          assert_eq(state, "a closed listener frees its port", outcome(listen_local(port)), "ok")
+
+    match listen_on("0.0.0.0", 0) with
+    | Err e -> assert_true(state, `listen_on 0.0.0.0 succeeds (${tcp_error_message(e)})`, false)
+    | Ok any ->
+        do
+          assert_true(state, "listen_on 0.0.0.0 reports its port", local_port(any) > 0)
+          close_listener(any)
+
+    let v6 = outcome(listen_on("::1", 0))
+    assert_true(state, `an IPv6 literal is TcpInvalidArgument (${v6})`, starts_with(v6, "invalid: "))
+    assert_true(state, `the IPv6 error says not yet (${v6})`, contains(v6, "IPv6 is not supported yet"))
+
+    assert_true(state, "a host name is rejected, not resolved", is_invalid(listen_on("localhost", 0)))
+    assert_true(state, "an empty host is rejected", is_invalid(listen_on("", 0)))
+    assert_true(state, "port 65536 is rejected", is_invalid(listen_local(65536)))
+    assert_true(state, "a negative port is rejected", is_invalid(listen_local(-1)))
+
+    summary(state)

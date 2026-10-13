@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, serve_n)
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -70,7 +71,7 @@ fn send_request(port: Int) -> Unit !{IO} =
         close(conn)
   | Err _ -> terminal.write("client connect failed\n")
 
-# Read the status line so the request completes and serve_n(port, 1, ...) returns, letting the scope
+# Read the status line so the request completes and serve_n(listener, 1, ...) returns, letting the scope
 # join. Borrowing (the owner closes); the response is not asserted on — the assertion is entirely the
 # probe's liveness verdict.
 fn drain(conn: borrowing TcpConnection) -> Unit !{IO} =
@@ -89,7 +90,7 @@ fn run(s: Scope, port: Int, ready: Chan Int) -> Unit !{IO} =
 fn serve_here(port: Int, ready: Chan Int) -> Unit !{IO} =
   do
     chan_send(ready, 1)
-    serve_n(port, 1, handler)
+    serve_n(listen_or_die(port), 1, handler)
 
 fn body(s: Scope) -> Unit !{IO} =
   do

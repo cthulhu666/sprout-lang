@@ -1,5 +1,6 @@
 import stdlib.task as task
-import stdlib.net (tcp_listen, tcp_accept)
+import stdlib.net (tcp_accept)
+import testsupport.listen (tcp_listen_or_die)
 import stdlib.terminal as terminal
 
 # L0.7 MVP boundary (EXPERIMENTAL). with_timeout can force-drop a body parked DIRECTLY on I/O,
@@ -26,7 +27,7 @@ fn structured_body(listener: Int) -> Int !{IO} =
 
 fn main() -> Unit !{IO} =
   do
-    la <- tcp_listen(28999)
+    la <- tcp_listen_or_die(28999)
     match task.with_timeout(50, \_ -> structured_body(la)) with
     | task.Completed (_) -> terminal.write("UNEXPECTED completed\n")
     | task.Expired -> terminal.write("UNEXPECTED expired\n")

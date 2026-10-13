@@ -175,6 +175,7 @@ tcp_close
 tcp_close_listener
 tcp_connect
 tcp_listen
+tcp_listener_port  # getsockname on a listener: the only way to learn the port the OS picked when a listener binds port 0. Cannot be Sprout: the bound address lives in the kernel, and no other primitive reads it.
 tcp_read_exact
 tcp_write
 tcp_write_all

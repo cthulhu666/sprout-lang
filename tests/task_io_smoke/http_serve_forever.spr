@@ -1,15 +1,16 @@
 import stdlib.task (Scope, with_scope, task_spawn, scope_cancel)
 import stdlib.chan (Chan, chan_new, chan_send, chan_recv)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, request_path, serve)
 import stdlib.terminal as terminal
 
 # stdlib.http_server.serve is the UNBOUNDED accept loop: unlike serve_n it never
 # stops on a connection count, so it must keep accepting past any small bound.
 #
-# One `serve(port, handle)` is spawned as a fire-and-forget green task; a client
+# One `serve(listener, handle)` is spawned as a fire-and-forget green task; a client
 # then opens THREE sequential connections, each a full request, and each must be
-# answered `HTTP/1.1 200`. A bounded mis-implementation (e.g. serve_n(port, 1))
+# answered `HTTP/1.1 200`. A bounded mis-implementation (e.g. serve_n(listener, 1))
 # would close the listener after the first connection, so `req2`/`req3` would fail
 # to connect — the assertion on `req3 ok` is what distinguishes unbounded serving
 # from a one-shot server.
@@ -55,7 +56,7 @@ fn client(port: Int, done: Chan Int) -> Unit !{IO} =
 fn body(s: Scope, port: Int) -> Unit !{IO} =
   do
     done <- chan_new(s, 1)
-    task_spawn(s, \_ -> serve(port, handle))
+    task_spawn(s, \_ -> serve(listen_or_die(port), handle))
     task_spawn(s, \_ -> client(port, done))
     _ <- chan_recv(done)  # owner parks until all three responses are read
     scope_cancel(s)  # force-drop the serve task still parked in tcp_accept

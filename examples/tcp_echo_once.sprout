@@ -25,9 +25,11 @@ fn echo(conn: consuming TcpConnection) -> Unit !{IO} =
     close(conn)
 
 fn main() -> Unit !{IO} =
-  do
-    listener <- listen_local(8081)
-    match accept(listener) with
-    | Ok conn -> echo(conn)
-    | Err err -> terminal.write(`accept failed: ${tcp_error_message(err)}\n`)
-    close_listener(listener)
+  match listen_local(8081) with
+  | Err err -> terminal.write(`cannot listen on 8081: ${tcp_error_message(err)}\n`)
+  | Ok listener ->
+      do
+        match accept(listener) with
+        | Ok conn -> echo(conn)
+        | Err err -> terminal.write(`accept failed: ${tcp_error_message(err)}\n`)
+        close_listener(listener)

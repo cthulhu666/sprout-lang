@@ -237,7 +237,7 @@ fn with_logging(lg: log.Logger, handler: HttpRequest -> HttpServerResponse !{IO}
 
 # wiring, in examples/http_web_server.sprout main:
 #   lg = log.stderr_logger(log.Info)          # threaded through boot -> serve_crud
-#   serve(8082, with_logging(lg, \req -> dispatch(rs, req)))
+#   serve(listener, with_logging(lg, \req -> dispatch(rs, req)))
 ```
 
 Two clocks, used correctly and deliberately: **monotonic** (`time_now_micros`)

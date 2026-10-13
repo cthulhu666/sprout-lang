@@ -1,9 +1,15 @@
 import stdlib.http_client (http_get)
 import stdlib.http (HttpResponse, http_response_body)
-import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, write_all)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_local, read_avail_timeout, write_all, tcp_error_message)
 import stdlib.bytes as bytes
 import stdlib.string as string
 import stdlib.terminal as terminal
+
+# The bind cannot be recovered from here, so a failure ends the run with its full error.
+fn listen_or_die(port: Int) -> TcpListener !{IO} =
+  match listen_local(port) with
+  | Ok listener -> listener
+  | Err e -> panic(`listen_local(${port}): ${tcp_error_message(e)}`)
 
 # Regression (code review, finding 8): the HTTP CLIENT must deliver a response body byte-for-byte,
 # including 0x00 and bytes that are not valid UTF-8.
@@ -130,7 +136,7 @@ fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
 
 fn run_server(port: Int) -> Unit !{IO} =
   do
-    listener <- listen_local(port)
+    listener <- listen_or_die(port)
     # The readiness marker the gate waits on, printed only once the listener is bound.
     terminal.write("ready\n")
     serve_loop(listener, 2)

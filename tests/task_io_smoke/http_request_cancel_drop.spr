@@ -1,5 +1,6 @@
 import stdlib.task (TimeoutResult, Completed, Expired, with_timeout)
-import stdlib.net (TcpListener, close_listener, listen_local)
+import stdlib.net (close_listener)
+import testsupport.listen (listen_or_die)
 import stdlib.http_client (http_get)
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -70,6 +71,6 @@ fn report(expired: Int) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   do
-    listener <- listen_local(port)
+    listener <- listen_or_die(port)
     report(drive(expected, 0))
     close_listener(listener)

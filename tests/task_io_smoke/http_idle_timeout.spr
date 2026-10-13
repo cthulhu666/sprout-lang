@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
+import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ServerConfig, ok, request_path, serve_n_with)
 import stdlib.terminal as terminal
 
@@ -68,7 +69,7 @@ fn prompt_client(port: Int) -> Unit !{IO} =
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 300, body_ms = 300, max_header_bytes = 65536, write_ms = 2000,
-                                       max_body_bytes = 65536, min_rate_bps = 1000000), port, 2, handle))
+                                       max_body_bytes = 65536, min_rate_bps = 1000000), listen_or_die(port), 2, handle))
     task_spawn(s, \_ -> silent_client(port))
     task_spawn(s, \_ -> prompt_client(port))
 

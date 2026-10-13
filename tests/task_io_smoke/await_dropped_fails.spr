@@ -1,5 +1,6 @@
 import stdlib.task (Scope, Task, with_scope, task_fork, task_await, task_yield, scope_cancel)
-import stdlib.net (tcp_listen, tcp_accept, tcp_close)
+import stdlib.net (tcp_accept, tcp_close)
+import testsupport.listen (tcp_listen_or_die)
 import stdlib.string as string
 import stdlib.terminal as terminal
 
@@ -31,6 +32,6 @@ fn body(s: Scope, listener: Int) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   do
-    listener <- tcp_listen(28995)
+    listener <- tcp_listen_or_die(28995)
     with_scope(\s -> body(s, listener))
     terminal.write("unreachable done\n")

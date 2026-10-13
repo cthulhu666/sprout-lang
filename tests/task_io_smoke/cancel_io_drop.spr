@@ -1,5 +1,6 @@
 import stdlib.task (Scope, with_scope, task_fork, detach, task_spawn, task_yield, scope_cancel)
-import stdlib.net (tcp_listen, tcp_accept, tcp_close)
+import stdlib.net (tcp_accept, tcp_close)
+import testsupport.listen (tcp_listen_or_die)
 import stdlib.string as string
 import stdlib.terminal as terminal
 
@@ -44,7 +45,7 @@ fn body(s: Scope, la: Int, lb: Int) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} =
   do
-    la <- tcp_listen(28996)
-    lb <- tcp_listen(28997)
+    la <- tcp_listen_or_die(28996)
+    lb <- tcp_listen_or_die(28997)
     with_scope(\s -> body(s, la, lb))
     terminal.write("done\n")  # reached only if both parked tasks were dropped by cancel
