@@ -1,0 +1,39 @@
+import stdlib.net (listen_local, tcp_error_message)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ok, serve, serve_pooled, with_header)
+import stdlib.env as env
+import stdlib.terminal as terminal
+
+# The server bench.sh drives. The same source is compiled against the stdlib before keep-alive and
+# after it, so the stdlib is the only difference between the two binaries. `MODE` picks `serve`
+# (a task per connection) or `serve_pooled` (8 workers); `PORT` defaults to 8099.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  with_header("content-type", "application/json", ok("{\"status\":\"ok\"}"))
+
+fn port() -> Int !{IO} =
+  match env.get("PORT") with
+  | Just raw ->
+      match parse_int(raw) with
+      | Just p -> p
+      | Nothing -> 8099
+  | Nothing -> 8099
+
+type Mode =
+  | PerConnection
+  | Pooled
+
+fn mode() -> Mode !{IO} =
+  match env.get("MODE") with
+  | Just raw -> if raw == "pool" then Pooled else PerConnection
+  | Nothing -> PerConnection
+
+fn main() -> Unit !{IO} =
+  do
+    p <- port()
+    m <- mode()
+    match listen_local(p) with
+    | Ok listener ->
+        match m with
+        | Pooled -> serve_pooled(listener, handle)
+        | PerConnection -> serve(listener, handle)
+    | Err e -> panic(`cannot listen on ${int_to_string(p)}: ${tcp_error_message(e)}`)

@@ -1,0 +1,82 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, local_port, write_all_utf8)
+import testsupport.listen (listen_or_die)
+import testsupport.http_wire (read_response, says_close, with_conn)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_pooled_n_with)
+import stdlib.time as time
+import stdlib.terminal as terminal
+
+# Keep-alive under `serve_pooled`. A worker waiting on an idle connection serves nothing else, so the
+# pool keeps a quarter of its workers free of idle connections, and a response closes its connection
+# while another connection is queued. With 4 workers, 3 may hold idle connections.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  if request_path(req) == "/slow" then
+    do
+      task_sleep(300)
+      ok("slow")
+  else ok("hello")
+
+fn mark(label: String, pass: Bool, detail: String) -> Unit !{IO} =
+  if pass then terminal.write(`${label}\n`)
+  else terminal.write(`MISMATCH: ${label}: ${detail}\n`)
+
+fn ask(conn: borrowing TcpConnection, path: String) -> Result String (String, String) !{IO} =
+  match write_all_utf8(conn, "GET " ++ path ++ " HTTP/1.1\r\nHost: x\r\n\r\n") with
+  | Ok _ -> read_response(conn)
+  | Err _ -> Err("write failed")
+
+fn expect(conn: borrowing TcpConnection, path: String, closes: Bool, label: String) -> Unit !{IO} =
+  match ask(conn, path) with
+  | Ok (head, body) -> mark(label, says_close(head) == closes, head ++ body)
+  | Err e -> mark(label, false, e)
+
+# The slow request occupies the one worker left; its response closes because `queued` is waiting.
+fn slow_client(port: Int) -> Unit !{IO} =
+  with_conn(port, \e -> expect(e, "/slow", true, "busy-with-queue-closes"))
+
+fn queued_ask(f: borrowing TcpConnection) -> Unit !{IO} =
+  match ask(f, "/") with
+  | Ok (_, body) -> mark("queued-not-starved", body == "hello", body)
+  | Err e -> mark("queued-not-starved", false, e)
+
+# Arrives while every worker is held, and is served once the slow one closes: well inside idle_ms.
+fn queued_client(port: Int) -> Unit !{IO} =
+  do
+    task_sleep(50)
+    start <- time.now_micros()
+    with_conn(port, queued_ask)
+    stop <- time.now_micros()
+    mark("queued-served-promptly", stop - start < 1500000, int_to_string((stop - start) / 1000))
+
+fn contention(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> slow_client(port))
+    task_spawn(s, \_ -> queued_client(port))
+
+# Three held idle connections fill the reserve, so the fourth response closes, and then a slow
+# request plus a queued one exercise the queue rule.
+fn held(port: Int, a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    expect(a, "/", false, "a-held-idle")
+    expect(b, "/", false, "b-held-idle")
+    expect(c, "/", false, "c-held-idle")
+    with_conn(port, \d -> expect(d, "/", true, "reserve-full-closes"))
+    with_scope(\s -> contention(s, port))
+
+fn clients(port: Int) -> Unit !{IO} =
+  with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> held(port, a, b, c))))
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(0)
+    port <- local_port(listener)
+    task_spawn(s, \_ -> serve_pooled_n_with(config, listener, 4, 8, 6, handle))
+    task_spawn(s, \_ -> clients(port))
+where
+  config = default_config() with (idle_ms = 3000)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    terminal.write("done\n")

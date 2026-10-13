@@ -84,7 +84,7 @@ fn prompt_body_client(port: Int) -> Unit !{IO} =
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> serve_n_with(ServerConfig(header_ms = 2000, body_ms = 200, max_header_bytes = 65536, write_ms = 2000,
-                                       max_body_bytes = 65536, min_rate_bps = 100), listen_or_die(port), 3, handle))
+                                       max_body_bytes = 65536, min_rate_bps = 100, idle_ms = 2000, max_idle_connections = 256), listen_or_die(port), 3, handle))
     task_spawn(s, \_ -> huge_body_client(port))
     task_spawn(s, \_ -> slow_body_client(port))
     task_spawn(s, \_ -> prompt_body_client(port))

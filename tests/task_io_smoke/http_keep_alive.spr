@@ -1,0 +1,136 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, local_port, write_all_utf8)
+import testsupport.listen (listen_or_die)
+import testsupport.http_wire (read_response, read_head_reply, read_to_end, says_close, with_conn)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with, with_header)
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# HTTP/1.1 persistent connections under `serve_n`: a connection stays open after a response unless
+# the request, the handler, an error or the idle cap says close, and a connection says close by
+# sending `connection: close` and then closing.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
+  if request_path(req) == "/close" then with_header("connection", "close", ok("bye"))
+  else ok("hello")
+
+fn mark(label: String, pass: Bool, detail: String) -> Unit !{IO} =
+  if pass then terminal.write(`${label}\n`)
+  else terminal.write(`MISMATCH: ${label}: ${detail}\n`)
+
+fn send(conn: borrowing TcpConnection, request: String) -> Unit !{IO} =
+  match write_all_utf8(conn, request) with
+  | Ok _ -> ()
+  | Err _ -> terminal.write("MISMATCH: write failed\n")
+
+# A kept response: the body arrived and nothing said close.
+fn expect_kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  match read_response(conn) with
+  | Ok (head, body) -> mark(label, body == "hello" && ! says_close (head), head ++ body)
+  | Err e -> mark(label, false, e)
+
+# A closing response: it says close, then the server closes with nothing more.
+fn expect_closed(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  match read_response(conn) with
+  | Ok (head, _) ->
+      match read_to_end(conn) with
+      | Ok rest -> mark(label, says_close(head) && rest == "", `${head}| then: ${rest}`)
+      | Err e -> mark(label, false, e)
+  | Err e -> mark(label, false, e)
+
+fn count_of(hay: String, needle: String, acc: Int) -> Int =
+  match string.find(hay, needle) with
+  | Nothing -> acc
+  | Just at -> count_of(string.drop(hay, at + string.length(needle)), needle, acc + 1)
+
+fn reuse(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "first-kept")
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "second-on-same-socket")
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\nConnection: keep-alive, Close\r\n\r\n")
+    expect_closed(conn, "close-token-closes")
+
+# Two requests in one write. The second must not be lost with the first one's read.
+fn pipelined(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+    match read_to_end(conn) with
+    | Ok all -> mark("pipelined-both-answered", count_of(all, "HTTP/1.1 200", 0) == 2, all)
+    | Err e -> mark("pipelined-both-answered", false, e)
+
+fn http10(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.0\r\nHost: x\r\n\r\n")
+    expect_closed(conn, "http10-closes")
+
+fn handler_close(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET /close HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_closed(conn, "handler-close-closes")
+
+fn error_close(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "NONSENSE\r\n\r\n")
+    expect_closed(conn, "error-closes")
+
+# A HEAD reply carries no body, so the GET after it reads its own response, not leftovers.
+fn head_then_get(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "HEAD / HTTP/1.1\r\nHost: x\r\n\r\n")
+    match read_head_reply(conn) with
+    | Ok (head, extra) -> mark("head-kept-no-body", extra == "" && ! says_close (head), head ++ extra)
+    | Err e -> mark("head-kept-no-body", false, e)
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "get-after-head")
+
+# Past `idle_ms` with no request, the server closes and sends nothing: no 408.
+fn idle_expiry(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "before-idle")
+    match read_to_end(conn) with
+    | Ok rest -> mark("idle-closes-quietly", rest == "", rest)
+    | Err e -> mark("idle-closes-quietly", false, e)
+
+fn one_request(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "held-idle")
+
+# Two connections sit idle, which is the cap, so a third response closes its connection.
+fn idle_cap(a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    one_request(a)
+    one_request(b)
+    send(c, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_closed(c, "idle-cap-closes")
+
+fn capped(port: Int) -> Unit !{IO} =
+  with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> idle_cap(a, b, c))))
+
+fn clients(port: Int) -> Unit !{IO} =
+  do
+    with_conn(port, reuse)
+    with_conn(port, pipelined)
+    with_conn(port, http10)
+    with_conn(port, handler_close)
+    with_conn(port, error_close)
+    with_conn(port, head_then_get)
+    with_conn(port, idle_expiry)
+    capped(port)
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(0)
+    port <- local_port(listener)
+    task_spawn(s, \_ -> serve_n_with(config, listener, 10, handle))
+    task_spawn(s, \_ -> clients(port))
+where
+  config = default_config() with (idle_ms = 300, max_idle_connections = 2)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    terminal.write("done\n")

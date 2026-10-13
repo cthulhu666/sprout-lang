@@ -59,7 +59,7 @@ fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> serve_pooled_n_with(
       ServerConfig(header_ms = 2000, body_ms = 2000, max_header_bytes = 65536, write_ms = 2000,
-                   max_body_bytes = 65536, min_rate_bps = 1000),
+                   max_body_bytes = 65536, min_rate_bps = 1000, idle_ms = 2000, max_idle_connections = 256),
       listen_or_die(port), 2, 2, 5, handle))
     # Spawned, not called: a direct call runs the first client before the server task has been
     # scheduled at all, so it connects before `listen_or_die` has bound and the run then hangs waiting

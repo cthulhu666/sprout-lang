@@ -61,7 +61,7 @@ fn handle(req: HttpRequest) -> HttpServerResponse =
 # the exhaustion this exists to test would never happen.
 fn flood_config() -> ServerConfig =
   ServerConfig(header_ms = 2500, body_ms = 2500, max_header_bytes = 65536,
-               write_ms = 2500, max_body_bytes = 65536, min_rate_bps = 1024)
+               write_ms = 2500, max_body_bytes = 65536, min_rate_bps = 1024, idle_ms = 2000, max_idle_connections = 256)
 
 # Opens `n` connections and holds them ALL open simultaneously, one per stack frame, closing them on
 # the way back out. A `Vec TcpConnection` would be the obvious shape and is not available: a container

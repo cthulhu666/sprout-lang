@@ -570,9 +570,9 @@ caller opts into, defaulting to 8 workers on a 64-deep bounded channel. §5.2's 
 "bound occupancy first, then pool": the body and response phases were given size-scaled total
 deadlines and a 413 size cap before any pooling landed, because bounded concurrency turns an
 unbounded per-connection occupancy from a memory cost into a total-availability one. Regression:
-`tests/task_io_smoke/http_pooled_serve.spr`. Gotcha A3 remains open and is filed in `BACKLOG.md` —
-a panicking handler still kills its worker, which a pool cannot contain the way spawn-per-connection
-did.
+`tests/task_io_smoke/http_pooled_serve.spr`. Gotcha A3 is moot for `panic`: it ends the whole
+process (`panic` → `sprout_fail` → `exit(1)`) under either serving mode, so neither contains it.
+Containing it is task-boundary panic isolation (`BACKLOG.md` §1).
 
 **Experimental.** L0 concurrency is not part of normative v0, so neither design changes normative
 text. §7.4's hole *does* touch `docs/spec-v0.md` §5.8's enforcement bullets, which state the
@@ -620,11 +620,9 @@ To be filed in `BACKLOG.md`:
 10. **The accept loop is the next bottleneck** (§5.3): worker count is irrelevant from w=2 to
     w=256, so once task creation is off the per-request path the single accept task is the limit.
     Any further server work should start there, not at the handler.
-11. **`Connection: close` makes any high-throughput HTTP measurement here port-bound.** 16,384
-    ephemeral ports against ~32k req/s is about half a second of headroom, after which the client
-    stalls on `TIME_WAIT` recycling — §5.3's p99 column. Server-side **keep-alive** would remove the
-    constraint and is what would make tail numbers meaningful at all; until then read only
-    throughput and p50/p90 from long runs.
+11. ~~**`Connection: close` makes any high-throughput HTTP measurement here port-bound.**~~ Landed:
+    server-side keep-alive, `docs/http-keep-alive-v0.md`. This bench's servers still write their
+    own `connection: close` responses, so its p99 column keeps the caveat above.
 
 ## 14. Sources
 

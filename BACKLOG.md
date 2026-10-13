@@ -1688,8 +1688,8 @@ deferral happened, not for current behaviour. Still open:
   A `local` parameter states that non-escape at the slot and the callee check proves it, so the
   first lever needs no analysis once the combinators take `local` (`docs/local-closures-v0.md` §11).
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
-  handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Keep-alive and
-  chunked reads are filed in §2.
+  handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Chunked reads are
+  filed in §2.
 - [ ] `P2` **Specialise generic functions at concrete types.** A `where Ord a` function takes the
   `Ord` and `Eq` dictionaries and makes an indirect `compare` per comparison, so `mutvec_sort` on
   `Int` runs ~2× slower than a hand-specialised copy. Specialisation would also let `vec_sort` at
@@ -2347,22 +2347,21 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `stackMin = 2048`) — and cannot follow Go's answer of growing small stacks, because growth needs
   `copystack`'s pointer adjustment and Sprout's rooting is non-moving by design. Independent of
   which pooling design lands. `docs/green-task-pool-v0.md` §3.1.
-- [ ] `P2` **A panicking handler kills its pool worker, and Sprout cannot catch it.** With
-  spawn-per-connection a panic killed one connection; in a pool it permanently removes capacity, and
-  a server that loses all workers stops answering with nothing logged. Ordinary client misbehaviour
-  is already contained — `handle_connection` consumes the connection on every path — so this is
-  strictly about a `panic` in user handler code. Both honest fixes are language-level: catchable
-  failures, or a supervisor that observes worker exit and respawns. Same item as task-boundary panic
-  isolation in §2.
-- [ ] `P2` **HTTP keep-alive: without it, no high-throughput measurement here is server-bound.**
-  `Connection: close` means one TCP connection per request; this machine has 16,384 ephemeral ports,
-  so a 4 s run at ~32k req/s opens ~131k connections — 8× the range — and the client stalls on
-  `TIME_WAIT` recycling. That, not the server, is the worker-pool benchmark's p99 tail: drained and
-  kept inside the port range the same server measures **p50 = 35 µs / p99 = 243 µs**, versus 536
-  µs / 66 ms on a long run. A real feature gap besides.
 - [ ] `P3` **The accept loop is the next server bottleneck.** Worker count is irrelevant from w=2 to
   w=256, so once task creation leaves the per-request path the single accept task is the limit. Any
   further HTTP-server work should start there, not at the handler.
+- [ ] `P3` **Idle keep-alive connections hold a pool worker each.** `serve_pooled` cannot wait on a
+  socket and its channel at once, so a worker waiting for a connection's next request serves nothing
+  else, and the pool caps idle holders at ¾ of its workers and closes while a connection is queued.
+  Under more clients than workers that turns keep-alive mostly off. The fix is one task holding
+  every idle socket and handing readable ones to the workers (Apache's event MPM, Puma's reactor),
+  which needs a runtime primitive: a wait over many handles, or readable-then-send. A builtin; ask
+  first.
+  `docs/http-keep-alive-v0.md` §6.
+- [ ] `P3` **Error replies close without a lingering close.** `tcp_close` is a bare `close()`. A
+  413, 431 or 501 sent while request bytes are still unread can make the kernel answer with a RST
+  that discards the reply before the client reads it (RFC 9112 §9.6). Go half-closes and waits 500
+  ms. Needs `tcp_shutdown_write`, a builtin; ask first. `docs/http-keep-alive-v0.md` §6.
 - [ ] `P3` **Make `SPROUT_TASK_STACK_BYTES` an env knob** (a compile-time `#define` today). Worth
   3× on the HTTP server for a recursion-depth tradeoff the deployment should own. The 1 MiB default
   has never been measured against real handler depth — measure that too.

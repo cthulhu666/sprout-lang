@@ -64,6 +64,13 @@ bench-string-concat: bootstrap-from-seed
 bench-opt pass="dle": bootstrap-from-seed
   bash bench/optpasses/bench.sh {{quote(pass)}}
 
+# HTTP keep-alive A/B: one server, compiled against the stdlib from before keep-alive and from this
+# tree, driven by wrk (`brew install wrk`); adds an nginx-proxied run when nginx is on PATH. NOT a
+# gate — wall-clock numbers. Env: BASE, DUR, CONNS, ROUNDS (bench/http_keep_alive/bench.sh).
+[group('dev')]
+bench-keep-alive: bootstrap-from-seed
+  bash bench/http_keep_alive/bench.sh
+
 # Launch the interactive Sprout REPL via sproutd (self-configuring).
 # Prerequisites: just build-sproutd
 [group('dev')]
@@ -2410,6 +2417,26 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-head" "head-has-no-body"
   run_once "http-head/length" "head-keeps-length"
   run_once "http-head/get" "get-has-body"
+  # Keep-alive under serve_n: reuse on one socket, a `close` option, pipelined requests, HTTP/1.0,
+  # a handler's close, an error's close, HEAD then GET, a quiet idle close, and the idle cap. RED:
+  # every response said `connection: close`, so the reuse markers never print.
+  build tests/task_io_smoke/http_keep_alive.spr
+  run_once "http-keep-alive" "done"
+  for m in first-kept second-on-same-socket close-token-closes pipelined-both-answered http10-closes \
+           handler-close-closes error-closes head-kept-no-body get-after-head idle-closes-quietly idle-cap-closes; do
+    grep -qx "$m" "$TMPD/run.out" || { echo "task-io-smoke [http-keep-alive]: missing $m" >&2; cat "$TMPD/run.out" >&2; exit 1; }
+  done
+  SPROUT_GC_STRESS=1 run_once "http-keep-alive/stress" "idle-cap-closes"
+  # Keep-alive under serve_pooled: three idle connections fill a 4-worker pool's reserve, so the
+  # fourth response closes; a response closes while a connection is queued; and the queued one is
+  # served within a fraction of idle_ms. RED: no connection was held.
+  build tests/task_io_smoke/http_keep_alive_pooled.spr
+  run_once "http-keep-alive-pooled" "done"
+  for m in a-held-idle b-held-idle c-held-idle reserve-full-closes busy-with-queue-closes \
+           queued-not-starved queued-served-promptly; do
+    grep -qx "$m" "$TMPD/run.out" || { echo "task-io-smoke [http-keep-alive-pooled]: missing $m" >&2; cat "$TMPD/run.out" >&2; exit 1; }
+  done
+  SPROUT_GC_STRESS=1 run_once "http-keep-alive-pooled/stress" "queued-not-starved"
   # (26) Binary request bodies, now that the body is Bytes rather than String. The payload is
   # 0x00 0xFF 0x41 so each old failure mode is separately fatal: a strlen-based accumulator stops at
   # the NUL, a UTF-8 validator rejects the 0xFF, and the trailing 'A' is missing if anything truncated.
