@@ -1,0 +1,30 @@
+import stdlib.test (check_eq, run_suite)
+
+# `is_just`/`is_nothing`/`is_ok`/`is_err` answer a yes/no question about which
+# constructor a value has. Callers wrote the three-line match privately: six test
+# files here and two modules downstream carried copies.
+
+type Fault = Broken
+
+fn main() -> Unit !{IO} =
+  run_suite("presence predicates", [
+    check_eq("is_just on Just", is_just(Just(1)), true),
+    check_eq("is_just on Nothing", is_just(Nothing), false),
+    check_eq("is_nothing on Nothing", is_nothing(Nothing), true),
+    check_eq("is_nothing on Just", is_nothing(Just("x")), false),
+    # A payload that reads as "empty" is still present.
+    check_eq("Just(0) is present", is_just(Just(0)), true),
+    check_eq("Just(Nothing) is present", is_just(Just (Nothing)), true),
+    # No Eq on the payload is needed, unlike `m != Nothing`.
+    check_eq("payload without Eq", is_just(Just(\x -> x + 1)), true),
+
+    check_eq("is_ok on Ok", is_ok(Ok(1)), true),
+    check_eq("is_ok on Err", is_ok(Err (Broken)), false),
+    check_eq("is_err on Err", is_err(Err (Broken)), true),
+    check_eq("is_err on Ok", is_err(Ok("x")), false),
+    check_eq("Ok(Err) is ok", is_ok(Ok (Err (Broken))), true),
+
+    # As function values, the shape `filter`, `count` and `any` callers want.
+    check_eq("filter by is_just", list_length(filter(is_just, [Just(1), Nothing, Just(3)])), 2),
+    check_eq("count by is_err", count(is_err, [Ok(1), Err (Broken), Err (Broken)]), 2)
+  ])

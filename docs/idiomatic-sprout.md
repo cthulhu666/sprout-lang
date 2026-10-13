@@ -151,7 +151,15 @@ result_from_maybe(NoPort, dict_get("port", d))   # -> Result ConfigError String
 
 # state a precondition as a Result, so a `do` block can bind it:
 guard(port > 0, BadPort)                     # Bool -> Result ConfigError Unit
+
+# ask only which constructor it is — the payload is not needed:
+count(is_err, results)                       # vs. a match whose arms are true/false
 ```
+
+`is_just`/`is_nothing`/`is_ok`/`is_err` answer yes/no and nothing more. Testing
+`is_just(m)` and then unwrapping `m` asks twice; `match` once. A key's presence
+in a `Dict` is `dict_member`, not `is_just(dict_get(…))`, which boxes the result
+(below).
 
 `map` and `and_then` work over any `Functor`/`Monad` — `Maybe`, `Result`, and
 `List` — so the same two names cover every container; `Result` adds

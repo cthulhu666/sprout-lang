@@ -20,11 +20,6 @@ fn is_ok_5(r: Result DivByZero Int) -> Bool =
   | Ok n -> n == 5
   | Err _ -> false
 
-fn is_err(r: Result DivByZero Int) -> Bool =
-  match r with
-  | Ok _ -> false
-  | Err _ -> true
-
 fn main() -> Unit !{IO} =
   run_suite("safe_div", [
     check_true("safe_div 10 2 = Ok 5", is_ok_5(safe_div(10, 2))),
