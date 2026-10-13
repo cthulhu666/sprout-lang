@@ -26,6 +26,7 @@ fn echo_text(req: HttpRequest) -> String =
   | Err _ -> "<body is not valid UTF-8>"
 
 fn main() -> Unit !{IO} =
+  # A server that cannot listen has nothing to do, and panic exits non-zero with the reason.
   match listen_local(8081) with
-  | Err e -> eprint(`cannot listen on 8081: ${tcp_error_message(e)}`)
+  | Err e -> panic(`cannot listen on 8081: ${tcp_error_message(e)}`)
   | Ok listener -> serve(listener, handle)
