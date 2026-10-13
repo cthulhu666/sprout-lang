@@ -203,8 +203,8 @@ detector instruments. Caveats, stated rather than buried:
 
 Both in-tree flags are the safe direction, a pure handler entering an effectful slot:
 
-- `examples/http_echo_server.sprout:28` — `serve(8081, handle)`, `handle` pure.
-- `examples/http_web_server.sprout:204` — `Route("GET", "/", \req -> see_other("/users"))`,
+- `examples/http_echo_server.sprout`, `main` — `serve(listener, handle)`, `handle` pure.
+- `examples/http_web_server.sprout`, `routes` — `Route("GET", "/", \req -> see_other("/users"))`,
   whose own comment reads "a pure handler subsumes into the effectful route slot
   unchanged."
 
