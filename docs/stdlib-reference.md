@@ -350,6 +350,8 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `request_header(name, req) -> Maybe String`
 - Every `serve*` (`serve`, `serve_n`, `serve_pooled` and their `_with` forms) takes a listener the caller has bound with `net.listen_on` or `net.listen_local`, so a bind failure is the caller's `Err`
 - `serve_n(listener, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning
+- HTTP/1.1 persistent connections: a connection serves request after request until a side says close. The server closes, sending `connection: close`, when the request is HTTP/1.0 or carries the `close` option, when the handler set `connection: close`, after an error reply or the 500 fallback, or when it is at capacity: `max_idle_connections` connections already waiting under `serve`, or ¾ of the workers already waiting, or a connection queued, under `serve_pooled`. Requests sent back to back are served in order. A connection with no request for `idle_ms` is closed with nothing sent ([http-keep-alive-v0.md](http-keep-alive-v0.md))
+- `ServerConfig` — record of per-connection bounds: `header_ms`, `body_ms`, `max_header_bytes`, `write_ms`, `max_body_bytes`, `min_rate_bps`, `idle_ms` (wait for the next request, default 65 s), `max_idle_connections` (default 256); `default_config()`, adjusted with record update
 
 Request params (low-level, lossless — derived on demand from the parsed request, so pure and socket-free). Values are percent/`+`-decoded via `stdlib.url`. `_param` returns the FIRST value for a key (the Go `url.Values.Get` / Werkzeug `MultiDict.get` convention); `_param_all` returns every value; `_pairs` is the ordered, duplicate-preserving source of truth:
 
@@ -395,9 +397,9 @@ Current experimental scope:
 - HTTP/1.1 request line parsing plus header parsing into a `Dict String`
 - `Content-Length` request bodies
 - query-string and `application/x-www-form-urlencoded` body param access (see above); a merged `param`/`params` bag over both is planned
-- `Connection: close` responses only
+- HTTP/1.1 persistent connections; HTTP/1.0 keep-alive is not implemented
 - sequential request handling per accepted connection
-- no keep-alive, chunked transfer encoding for server responses, TLS server support, or concurrent connection handling yet
+- no chunked transfer encoding for server responses or TLS server support yet
 - no path/route params (e.g. `/users/:id`) yet — routing matches exact paths
 
 Request framing is strict, because a parser that disagrees with the proxy in front of it is a

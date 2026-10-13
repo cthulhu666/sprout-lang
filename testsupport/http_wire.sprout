@@ -1,0 +1,92 @@
+module testsupport.http_wire
+
+import stdlib.net (TcpConnection, TcpEndOfStream, connect, close, read_avail_timeout, read_exact)
+import stdlib.string as string
+import stdlib.bytes as bytes
+import stdlib.terminal as terminal
+
+# A client's view of HTTP/1.1 responses, for fixtures that send several requests on one socket.
+# Each read takes exactly one response off the connection, so the next read starts at the next one.
+
+# A connection to the local `port` for the length of `work`, then closed. `work` is `local`, so a
+# nested call's lambda may capture an outer connection.
+export fn with_conn(port: Int, work: local (borrowing TcpConnection) -> Unit !{IO}) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+      do
+        work(conn)
+        close(conn)
+  | Err _ -> terminal.write(`MISMATCH: connect to ${int_to_string(port)} failed\n`)
+
+# The header block (through its blank line) and the body, framed by `content-length`.
+export fn read_response(conn: borrowing TcpConnection) -> Result String (String, String) !{IO} =
+  match read_head(conn, bytes.empty()) with
+  | Err e -> Err(e)
+  | Ok parts -> read_body(conn, parts)
+
+# A reply to HEAD: its `content-length` describes a body that is not sent, so only the header block
+# is read. Any bytes past it belong to the next response, and are what a leaked body would look like.
+export fn read_head_reply(conn: borrowing TcpConnection) -> Result String (String, String) !{IO} =
+  match read_head(conn, bytes.empty()) with
+  | Err e -> Err(e)
+  | Ok parts -> Ok(as_text(parts))
+
+fn as_text(parts: (String, Bytes)) -> (String, String) =
+  (head, text(early))
+where
+  (head, early) = parts
+
+let header_end = bytes.from_string("\r\n\r\n")
+
+# The header block and whatever body bytes arrived with it.
+fn read_head(conn: borrowing TcpConnection, acc: Bytes) -> Result String (String, Bytes) !{IO} =
+  match bytes.find(acc, header_end) with
+  | Just at -> Ok((text(bytes.take(acc, at + 4)), bytes.drop(acc, at + 4)))
+  | Nothing ->
+      match read_avail_timeout(conn, 2000) with
+      | Ok chunk -> read_head(conn, bytes.append(acc, chunk))
+      | Err TcpEndOfStream -> Err("closed before the header block ended")
+      | Err _ -> Err("read failed before the header block ended")
+
+fn read_body(conn: borrowing TcpConnection, parts: (String, Bytes)) -> Result String (String, String) !{IO} =
+  if missing <= 0 then Ok((head, text(early)))
+  else
+    match read_exact(conn, missing) with
+    | Ok rest -> Ok((head, text(bytes.append(early, rest))))
+    | Err _ -> Err("read failed inside the body")
+where
+  (head, early) = parts
+  missing = content_length(head) - bytes.length(early)
+
+fn text(data: Bytes) -> String =
+  match bytes.to_string(data) with
+  | Ok decoded -> decoded
+  | Err _ -> "NOT UTF-8"
+
+export fn content_length(head: String) -> Int =
+  match string.find(head, "content-length: ") with
+  | Nothing -> 0
+  | Just at -> digits(string.drop(head, at + 16))
+
+fn digits(rest: String) -> Int =
+  match string.find(rest, "\r\n") with
+  | Nothing -> 0
+  | Just end ->
+      match parse_int(string.take(rest, end)) with
+      | Just n -> n
+      | Nothing -> 0
+
+# Everything left on the connection until the server closes it. Empty when the server closed without
+# sending anything more.
+export fn read_to_end(conn: borrowing TcpConnection) -> Result String String !{IO} =
+  collect(conn, Nil)
+
+# `parts` is newest-first; joined once at the end rather than copied per chunk.
+fn collect(conn: borrowing TcpConnection, parts: List Builder) -> Result String String !{IO} =
+  match read_avail_timeout(conn, 3000) with
+  | Ok chunk -> collect(conn, Cons(bytes.builder_bytes(chunk), parts))
+  | Err TcpEndOfStream -> Ok(text(bytes.builder_build(bytes.builder_concat(list_reverse(parts)))))
+  | Err _ -> Err("no close within 3 s")
+
+export fn says_close(head: String) -> Bool =
+  string.contains(head, "connection: close\r\n")
