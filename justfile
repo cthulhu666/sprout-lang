@@ -2436,11 +2436,13 @@ task-io-smoke: bootstrap-from-seed
   done
   SPROUT_GC_STRESS=1 run_once "http-keep-alive/stress" "idle-cap-closes"
   # Keep-alive under load: the idle cap holds while writes park, 500 pipelined requests, and 5000
-  # requests on one socket in constant space. RED: all three parked writes kept their connections,
-  # and the 5000 exhausted the GC root pool. Too slow for a GC-stress run.
+  # requests on one socket in constant space, and CRLFs that must not restart the idle wait. RED: all
+  # three parked writes kept their connections, the 5000 exhausted the GC root pool, and each CRLF
+  # re-armed idle_ms. Too slow, and too timing-bound, for a GC-stress run.
   build tests/task_io_smoke/http_keep_alive_load.spr
   run_once "http-keep-alive-load" "done"
-  for m in parked-writes-respect-cap pipelined-many-answered long-lived-connection; do
+  for m in parked-writes-respect-cap pipelined-many-answered long-lived-connection \
+           crlf-does-not-extend-idle; do
     grep -qx "$m" "$TMPD/run.out" || { echo "task-io-smoke [http-keep-alive-load]: missing $m" >&2; cat "$TMPD/run.out" >&2; exit 1; }
   done
   # Keep-alive under serve_pooled: three idle connections fill a 4-worker pool's reserve, so the

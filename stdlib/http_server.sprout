@@ -1132,6 +1132,18 @@ fn take_below(count: Ref Int, cap: Int) -> Bool !{IO} =
 fn release(adm: Admission) -> Unit !{IO} =
   bump(idle_count(adm), -1)
 
+# An accepted connection handed to the pool's queue, and one a worker took off it.
+fn enqueue(adm: Admission) -> Unit !{IO} =
+  queue_by(adm, 1)
+
+fn dequeue(adm: Admission) -> Unit !{IO} =
+  queue_by(adm, -1)
+
+fn queue_by(adm: Admission, by: Int) -> Unit !{IO} =
+  match adm with
+  | Pooled _ queued _ -> bump(queued, by)
+  | Spawned _ _ -> ()
+
 fn idle_count(adm: Admission) -> Ref Int =
   match adm with
   | Spawned idle _ -> idle
@@ -1161,26 +1173,20 @@ fn closes_connection(pair: (String, String)) -> Bool =
 where
   (name, value) = pair
 
-# The response parts to send on a connection that stays open. Nothing when the handler said close,
-# or when the response has no exact length: the 500 fallback is framed only by the close.
-fn kept_parts(resp: HttpServerResponse) -> Maybe (String, String) =
+fn handler_closes(resp: HttpServerResponse) -> Bool =
   match resp with
-  | HttpServerResponse _ headers _ _ ->
-      if vec_any(closes_connection, headers) then Nothing
-      else
-        match render_parts(resp) with
-        | Ok parts -> Just(parts)
-        | Err _ -> Nothing
+  | HttpServerResponse _ headers _ _ -> vec_any(closes_connection, headers)
 
 # One connection, request after request. Every path consumes `conn` exactly once: by a close, or by
 # the next turn of the loop, which owns it from then on.
 #
-# THE LOOP — handle_connection, respond, send_kept, next_request, next_from, idle_wait. Two
-# invariants hold across it; check both before changing any of them:
+# THE LOOP — handle_connection, respond, send_kept, write_kept, next_request, next_from, idle_wait.
+# Two invariants hold across it; check both before changing any of them:
 # A. Every call from one to the next is a tail call, and none calls itself: a call that is not a tail
 #    call keeps a frame per request, and the task's GC root pool runs out after a few thousand.
-# B. A place taken by `reserve` is given back exactly once: by `send_kept` when the write fails, by
-#    `next_from` when the next request starts, or by `idle_wait` when the wait ends without one.
+# B. A place taken by `reserve` is given back exactly once: by `send_kept` when the response does not
+#    render, by `write_kept` when the write fails, by `next_from` when the next request starts, or by
+#    `idle_wait` when the wait ends without one.
 fn handle_connection(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
                      handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int)) -> Unit !{IO} =
   match read_request(conn, config, pending) with
@@ -1194,18 +1200,27 @@ fn handle_connection(config: ServerConfig, adm: Admission, conn: consuming TcpCo
 
 fn respond(config: ServerConfig, adm: Admission, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO},
            method: String, resp: HttpServerResponse, rest: (Bytes, Int)) -> Unit !{IO} =
-  match kept_parts(resp) with
-  | Nothing -> close_with(conn, method, resp, config)
-  | Just parts ->
-      do
-        kept <- reserve(adm)
-        if kept then send_kept(config, adm, conn, handler, for_method(method, parts), rest)
-        else close_with(conn, method, resp, config)
+  if handler_closes(resp) then close_with(conn, method, resp, config)
+  else
+    do
+      kept <- reserve(adm)
+      if kept then send_kept(config, adm, conn, handler, method, resp, rest)
+      else close_with(conn, method, resp, config)
 
-# A response on a connection that stays open. Its place in `idle` is given back here when the write
-# fails, and otherwise by `next_request`.
+# Rendered only once the connection is known to stay open, so a response that closes is rendered
+# once, with its `connection: close`. A response that does not render gets the 500 fallback, which
+# only the close frames.
 fn send_kept(config: ServerConfig, adm: Admission, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO},
-             payload: String, rest: (Bytes, Int)) -> Unit !{IO} =
+             method: String, resp: HttpServerResponse, rest: (Bytes, Int)) -> Unit !{IO} =
+  match render_parts(resp) with
+  | Ok parts -> write_kept(config, adm, conn, handler, for_method(method, parts), rest)
+  | Err _ ->
+      do
+        release(adm)
+        close_with(conn, method, resp, config)
+
+fn write_kept(config: ServerConfig, adm: Admission, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO},
+              payload: String, rest: (Bytes, Int)) -> Unit !{IO} =
   match write_by_deadline(conn, payload, config) with
   | Ok _ -> next_request(config, adm, conn, handler, rest)
   | Err _ -> release_and_close(adm, conn)
@@ -1222,32 +1237,34 @@ fn closing(resp: HttpServerResponse) -> HttpServerResponse =
 fn close_with(conn: consuming TcpConnection, method: String, resp: HttpServerResponse, config: ServerConfig) -> Unit !{IO} =
   write_and_close(conn, for_method(method, wire_parts(closing(resp))), config)
 
-# The next request starts in the bytes already read past the last one, or else after an idle wait.
-# Either way the connection's place in `idle` is given back. Empty lines before a request line are
-# skipped (RFC 9112 §2.2), so a CRLF a client sent after a body leaves the connection idle rather
-# than part-way into a request.
+# The next request starts in the bytes already read past the last one, or else after an idle wait of
+# at most `idle_ms` from now. Either way the connection's place in `idle` is given back.
 fn next_request(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
                 handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int)) -> Unit !{IO} =
-  next_from(config, adm, conn, handler, buf, past_empty_lines(buf, at))
-where
-  (buf, at) = pending
+  do
+    deadline <- deadline_in(config.idle_ms)
+    next_from(config, adm, conn, handler, pending, deadline)
 
+# Empty lines before a request line are skipped (RFC 9112 §2.2), so a CRLF a client sent after a body
+# leaves the connection idle rather than part-way into a request. They do not move `deadline`: a
+# client sending only CRLFs is closed at `idle_ms` like a silent one.
 fn next_from(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
-             handler: HttpRequest -> HttpServerResponse !{IO}, buf: Bytes, from: Int) -> Unit !{IO} =
+             handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int), deadline: Int) -> Unit !{IO} =
   if bytes.length(buf) > from then
     do
       release(adm)
       handle_connection(config, adm, conn, handler, (buf, from))
-  else idle_wait(config, adm, conn, handler)
+  else idle_wait(config, adm, conn, handler, deadline)
+where
+  (buf, at) = pending
+  from = past_empty_lines(buf, at)
 
 # Takes no buffer, so the last request's, which may hold a large body, is not kept alive for
 # `idle_ms`.
 fn idle_wait(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
-             handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  match read_avail_timeout(conn, config.idle_ms) with
-  # Through `next_request`, not straight to `next_from`: a function that calls itself is compiled
-  # as a loop, and its call to `handle_connection` then stops being a tail call.
-  | Ok first -> next_request(config, adm, conn, handler, (first, 0))
+             handler: HttpRequest -> HttpServerResponse !{IO}, deadline: Int) -> Unit !{IO} =
+  match read_avail_timeout(conn, remaining_ms(deadline)) with
+  | Ok first -> next_from(config, adm, conn, handler, (first, 0), deadline)
   # Expired, closed by the client, or reset: nothing was asked, so nothing is answered.
   | Err _ -> release_and_close(adm, conn)
 
@@ -1392,24 +1409,24 @@ export fn serve_with(config: ServerConfig, listener: consuming TcpListener, hand
 # `handle_connection` consumes the connection on every path including its error paths, so ordinary
 # client misbehaviour — malformed requests, timeouts, resets — cannot end a worker. A `panic` in a
 # user handler ends the whole process, in this mode and in `serve` alike.
-fn pool_worker(ch: Chan TcpConnection, queued: Ref Int, config: ServerConfig, adm: Admission, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+fn pool_worker(ch: Chan TcpConnection, config: ServerConfig, adm: Admission, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match chan_recv(ch) with
   | Got conn ->
       do
-        bump(queued, -1)
+        dequeue(adm)
         handle_connection(config, adm, conn, handler, (bytes.empty(), 0))
-        pool_worker(ch, queued, config, adm, handler)
+        pool_worker(ch, config, adm, handler)
   # The channel closed: the accept loop is done, so the worker exits cleanly. This arm binds no
   # connection, so it discharges no obligation — which is what makes shutdown expressible at all.
   | Closed -> task_yield()
 
-fn spawn_pool(scope: Scope, ch: Chan TcpConnection, queued: Ref Int, config: ServerConfig, adm: Admission,
+fn spawn_pool(scope: Scope, ch: Chan TcpConnection, config: ServerConfig, adm: Admission,
               handler: HttpRequest -> HttpServerResponse !{IO}, remaining: Int) -> Unit !{IO} =
   if remaining <= 0 then task_yield()
   else
     do
-      task_spawn(scope, \_ -> pool_worker(ch, queued, config, adm, handler))
-      spawn_pool(scope, ch, queued, config, adm, handler, remaining - 1)
+      task_spawn(scope, \_ -> pool_worker(ch, config, adm, handler))
+      spawn_pool(scope, ch, config, adm, handler, remaining - 1)
 
 # The accept loop owns the listener and MOVES each connection into the channel. A bounded channel is
 # what turns "more load than the pool can serve" into backpressure rather than unbounded growth:
@@ -1418,7 +1435,7 @@ fn spawn_pool(scope: Scope, ch: Chan TcpConnection, queued: Ref Int, config: Ser
 #
 # `remaining < 0` means "forever" — the same body serves both the bounded and unbounded entry points,
 # since the only difference is whether the counter is ever allowed to reach zero.
-fn pooled_accept_loop(ch: Chan TcpConnection, queued: Ref Int, listener: consuming TcpListener, remaining: Int) -> Unit !{IO} =
+fn pooled_accept_loop(ch: Chan TcpConnection, adm: Admission, listener: consuming TcpListener, remaining: Int) -> Unit !{IO} =
   if remaining == 0 then
     do
       # Closing the channel is what lets the workers exit, and it must happen BEFORE the scope join:
@@ -1430,9 +1447,9 @@ fn pooled_accept_loop(ch: Chan TcpConnection, queued: Ref Int, listener: consumi
     match accept(listener) with
     | Ok conn ->
         do
-          bump(queued, 1)
+          enqueue(adm)
           chan_send(ch, conn)
-          pooled_accept_loop(ch, queued, listener, remaining - 1)
+          pooled_accept_loop(ch, adm, listener, remaining - 1)
     | Err err ->
         do
           # Same ordering constraint as the clean-shutdown path above: the channel must be closed
@@ -1455,8 +1472,9 @@ fn pooled_run(scope: Scope, config: ServerConfig, listener: consuming TcpListene
     ch <- chan_new(scope, queue_depth)
     idle <- ref_new(0)
     queued <- ref_new(0)
-    spawn_pool(scope, ch, queued, config, Pooled(idle, queued, workers * 3 / 4), handler, workers)
-    pooled_accept_loop(ch, queued, listener, remaining)
+    let adm = Pooled(idle, queued, workers * 3 / 4)
+    spawn_pool(scope, ch, config, adm, handler, workers)
+    pooled_accept_loop(ch, adm, listener, remaining)
 
 # 8 workers and a queue 64 deep. Worker count is a CAPACITY decision the deployment owns: throughput
 # is flat from 2 to 256 (the server is accept-bound), so 8 is chosen for headroom against handlers
