@@ -476,7 +476,7 @@ fn payload() -> json.Json =
 
 Slicing a `List` (in `stdlib/list.sprout`; `import stdlib.list as list`). Data-last, so
 `xs |> list.take(3)` works. A count below zero acts as zero and past the end as the end, so none
-fails; each walks once, in constant stack.
+fails. All run in constant stack; `take_last` and `drop_last` count the list first.
 
 - `take(n, xs)` / `drop(n, xs)` — the first `n` elements / the rest; O(n)
 - `take_last(n, xs)` / `drop_last(n, xs)` — the last `n` / all but the last `n`; O(|xs|)

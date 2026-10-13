@@ -1,8 +1,8 @@
 module stdlib.list
 
 # Slicing a List. A count below zero acts as zero and one past the end as the
-# end, so none of these fails. Data-last, so `xs |> list.take(3)` works. Each
-# walks the list once, in constant stack.
+# end, so none of these fails. Data-last, so `xs |> list.take(3)` works. All run
+# in constant stack; `take_last` and `drop_last` count the list first.
 
 fn take_go(n: Int, xs: List a, acc: List a) -> List a =
   if n <= 0 then list_reverse(acc)
@@ -27,9 +27,10 @@ export fn drop(n: Int, xs: List a) -> List a =
 export fn take_last(n: Int, xs: List a) -> List a =
   if n <= 0 then [] else drop(list_length(xs) - n, xs)
 
-# O(|xs|): all but the last `n` elements.
+# O(|xs|): all but the last `n` elements. The guard keeps `length - n` from
+# overflowing for a very negative `n`, as in `take_last`.
 export fn drop_last(n: Int, xs: List a) -> List a =
-  take(list_length(xs) - n, xs)
+  if n <= 0 then xs else take(list_length(xs) - n, xs)
 
 fn split_at_go(n: Int, xs: List a, acc: List a) -> (List a, List a) =
   if n <= 0 then (list_reverse(acc), xs)

@@ -137,14 +137,17 @@ fn step(more: List Int, prev: String, st: BreakState, run: Int,
 # String-level convenience. Cannot represent a cluster containing U+0000; the
 # codepoint API above is the one to use when that matters.
 export fn graphemes(s: String) -> List String =
-  let cps = utf8.codepoints(s)
-  in
-  build(cps, cluster_sizes(cps), Nil)
+  list_map(utf8.from_codepoints, clusters(utf8.codepoints(s)))
 
-fn build(cps: List Int, sizes: List Int, acc: List String) -> List String =
+# O(n): `cps` cut at the boundaries `cluster_sizes` finds, each cluster a
+# non-empty list whose head is the primary codepoint.
+export fn clusters(cps: List Int) -> List (List Int) =
+  cut(cps, cluster_sizes(cps), Nil)
+
+fn cut(cps: List Int, sizes: List Int, acc: List (List Int)) -> List (List Int) =
   match sizes with
   | Nil -> list_reverse(acc)
   | Cons n rest ->
       let (cluster, after) = list.split_at(n, cps)
-      in build(after, rest, Cons(utf8.from_codepoints(cluster), acc))
+      in cut(after, rest, Cons(cluster, acc))
 

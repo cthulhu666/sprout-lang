@@ -5,6 +5,10 @@ import stdlib.list as list
 # instead of failing, and each pair has a law tying it to its parts, checked over
 # every count from -1 to one past the end.
 
+let int_min: Int = -9223372036854775807 - 1
+
+let int_max: Int = 9223372036854775807
+
 fn below(limit: Int) -> Int -> Bool =
   \n -> n < limit
 
@@ -46,6 +50,11 @@ fn main() -> Unit !{IO} =
     check_eq("drop_last", list.drop_last(2, xs), [1, 2, 3]),
     check_eq("drop_last past the end", list.drop_last(9, xs), []),
     check_eq("drop_last negative", list.drop_last(-1, xs), xs),
+    # A count at either end of Int must not overflow the length arithmetic.
+    check_eq("take_last of Int's minimum", list.take_last(int_min, xs), []),
+    check_eq("drop_last of Int's minimum", list.drop_last(int_min, xs), xs),
+    check_eq("take_last of Int's maximum", list.take_last(int_max, xs), xs),
+    check_eq("drop_last of Int's maximum", list.drop_last(int_max, xs), []),
 
     check_eq("split_at", list.split_at(2, xs), ([1, 2], [3, 4, 5])),
     check_eq("split_at on empty", list.split_at(1, []), ([], [])),
