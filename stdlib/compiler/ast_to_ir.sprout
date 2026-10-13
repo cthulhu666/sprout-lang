@@ -4281,16 +4281,6 @@ fn tco_ret_value(ops: List sprout_ir.IROp) -> Maybe String =
       | sprout_ir.IRRet v -> Just(v)
       | _ -> tco_ret_value(rest)
 
-# Incomings of the IRPhi defining `name`, if present in ops.
-fn tco_phi_incomings(name: String, ops: List sprout_ir.IROp) -> Maybe (List (String, String)) =
-  match ops with
-  | Nil -> Nothing
-  | Cons op rest ->
-      match op with
-      | sprout_ir.IRPhi r _ inc ->
-          if r == name then Just(inc) else tco_phi_incomings(name, rest)
-      | _ -> tco_phi_incomings(name, rest)
-
 # Args of `IRCall(val, _, self_name, args)` within ops, if present.
 fn tco_self_call_args(val: String, self_name: String, ops: List sprout_ir.IROp) -> Maybe (List String) =
   match ops with
