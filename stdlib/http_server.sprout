@@ -562,19 +562,27 @@ fn with_default_header(name: String, value: String, headers: Vec (String, String
   if vec_any(\pair -> header_named(name, pair), headers) then headers
   else vec_append((name, value), headers)
 
+# A 204 has no content (RFC 9110 §15.3.5), so a body the handler passed is not sent, and it carries
+# no Content-Length (§8.6).
+fn has_content(status: Int) -> Bool =
+  status != 204
+
 # The final header lines written to the wire: caller headers in order, defaulted content-type and
-# connection, and an *always* byte-accurate content-length. Framing is the server's
-# responsibility, so every caller-supplied content-length is dropped, however it was added.
-fn response_headers(headers: Vec (String, String), body: String) -> Vec (String, String) =
-  without_header("content-length", headers)
+# connection, and a byte-accurate content-length wherever the status has content. Framing is the
+# server's responsibility, so every caller-supplied content-length is dropped, however it was added.
+fn response_headers(status: Int, headers: Vec (String, String), body: String) -> Vec (String, String) =
+  if has_content(status) then vec_append(("content-length", int_to_string(string.byte_length(body))), framed)
+  else framed
+where
+  framed = without_header("content-length", headers)
     |> with_default_header("content-type", "text/plain")
     |> with_default_header("connection", "close")
-    |> vec_append(("content-length", int_to_string(string.byte_length(body))))
 
-# Cookies go after the other headers. `header_line` sanitises them too, so a CR or LF in a
-# cookie's name, path or domain is as inert as one in any header.
-fn assemble_response(line: String, headers: Vec (String, String), cookies: Vec SetCookie, body: String) -> String =
-  string.join("", [line ++ "\r\n"] ++ header_lines ++ cookie_lines ++ ["\r\n", body])
+# Everything up to and including the blank line that ends the header block. Cookies go after the
+# other headers. `header_line` sanitises them too, so a CR or LF in a cookie's name, path or domain
+# is as inert as one in any header.
+fn assemble_head(line: String, headers: Vec (String, String), cookies: Vec SetCookie) -> String =
+  string.join("", [line ++ "\r\n"] ++ header_lines ++ cookie_lines ++ ["\r\n"])
 where
   header_lines = list_map(header_line, vec_to_list(headers))
   cookie_lines = list_map(\c -> header_line(("set-cookie", set_cookie_text(c))), vec_to_list(cookies))
@@ -973,11 +981,27 @@ fn as_server_error(err: HttpStatusError) -> HttpServerError =
   | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
 
 export fn render(resp: HttpServerResponse) -> ServerResult String =
+  match render_parts(resp) with
+  | Ok parts -> Ok(joined(parts))
+  | Err err -> Err(err)
+
+# The header block and the body apart, so a HEAD reply can send the first alone.
+fn render_parts(resp: HttpServerResponse) -> ServerResult (String, String) =
   match resp with
   | HttpServerResponse status headers cookies body ->
-      do
-        line <- status_line(status) |> result_map_error(as_server_error)
-        Ok(assemble_response(line, response_headers(headers, body), cookies, body))
+      match status_line(status) with
+      | Ok line -> Ok(framed_parts(line, status, headers, cookies, body))
+      | Err err -> Err(as_server_error(err))
+
+fn framed_parts(line: String, status: Int, headers: Vec (String, String), cookies: Vec SetCookie, body: String) -> (String, String) =
+  (assemble_head(line, response_headers(status, headers, content), cookies), content)
+where
+  content = if has_content(status) then body else ""
+
+fn joined(parts: (String, String)) -> String =
+  head ++ body
+where
+  (head, body) = parts
 
 # Recoverable, TOTALLY bounded write: a send to a peer that has vanished (reset/EPIPE) fails as an
 # Err rather than aborting the process, and a peer that stops reading — or reads too slowly to count
@@ -1025,23 +1049,31 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
 
 fn handle_connection(config: ServerConfig, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   match read_request(conn, config) with
-  | Err err -> write_and_close(conn, read_error_response(err) |> render_response_or_fallback, config)
+  | Err err -> write_and_close(conn, joined(wire_parts(read_error_response(err))), config)
   | Ok req ->
       do
         resp <- handler(req)
-        write_and_close(conn, render_response_or_fallback(resp), config)
+        write_and_close(conn, for_method(request_method(req), wire_parts(resp)), config)
+
+# A HEAD reply is the header block a GET would get, Content-Length included, and no body (RFC 9110
+# §9.3.2). The method is case-sensitive (§9.1), so only `HEAD` qualifies.
+fn for_method(method: String, parts: (String, String)) -> String =
+  if method == "HEAD" then head else joined(parts)
+where
+  (head, _) = parts
 
 # The 500 fallback (reachable only when a handler returns a status outside the
 # supported table) still uses http_response's fixed format — no Content-Length, its own
 # Content-Type — rather than the dict-assembled `render`. Acceptable for this rare
-# internal-error path; the normal response path goes through `render`.
-fn render_response_or_fallback(resp: HttpServerResponse) -> String =
-  match render(resp) with
-  | Ok raw -> raw
+# internal-error path; the normal response path goes through `render`. Its body is part of the
+# head, so a HEAD gets it too, framed by the close.
+fn wire_parts(resp: HttpServerResponse) -> (String, String) =
+  match render_parts(resp) with
+  | Ok parts -> parts
   | Err _ ->
       match http_response(500, "internal server error") with
-      | Ok raw -> raw
-      | Err _ -> "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\ninternal server error"
+      | Ok raw -> (raw, "")
+      | Err _ -> ("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\ninternal server error", "")
 
 # Each accepted connection is handled in its own fire-and-forget green task, so a
 # slow connection (one dribbling its request) cannot block others: `tcp_accept`

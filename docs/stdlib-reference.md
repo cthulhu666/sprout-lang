@@ -334,7 +334,8 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `HttpServerResponse` response values built via helper functions
 - `HttpServerError` variants (`HttpInvalidRequest`, `HttpServerUnsupportedStatus`)
 - `parse(raw) -> Result HttpServerError HttpRequest`
-- `render(resp) -> Result HttpServerError String`
+- `render(resp) -> Result HttpServerError String` — a byte-accurate `content-length` on every status but 204, which carries neither that header nor a body (RFC 9110 §8.6, §15.3.5)
+- A reply to `HEAD` is the header block a `GET` would get, `content-length` included, with no body (RFC 9110 §9.3.2)
 - `response(status, body) -> HttpServerResponse`
 - `ok(body) -> HttpServerResponse`
 - `bad_request(body) -> HttpServerResponse`
