@@ -90,5 +90,13 @@ fn main() -> Unit !{IO} =
     check_eq("a caller's content-length is replaced by the real one",
       count_from(rendered(add_header("content-length", "999", add_header("content-length", "998", ok("hi")))), "content-length: ", 0), 1),
     check_true("the surviving content-length is the body's",
-      contains(rendered(add_header("content-length", "999", ok("hi"))), "content-length: 2\r\n"))
+      contains(rendered(add_header("content-length", "999", ok("hi"))), "content-length: 2\r\n")),
+
+    # --- 204 No Content -------------------------------------------------------------------------
+    # RFC 9110 §8.6: no Content-Length on a 204. §15.3.5: a 204 has no content, so a body the
+    # handler passed anyway is not sent — on a persistent connection it would be the next response.
+    check_true("a 204 carries no content-length",
+      ! contains (rendered(response(204, "")), "content-length")),
+    check_true("a 204 sends no body, even when given one",
+      string.ends_with(rendered(response(204, "stray")), "\r\n\r\n"))
   ])

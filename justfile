@@ -2404,6 +2404,12 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-utf8-body/inline" "inline-multibyte-200"
   run_once "http-utf8-body/cut" "split-codepoint-400"
   SPROUT_GC_STRESS=1 run_once "http-utf8-body/stress" "split-multibyte-200"
+  # HEAD: the headers a GET gets, and no body (RFC 9110 §9.3.2). RED: the body follows the header
+  # block, so "head-has-no-body" is missing. The GET control proves the handler body is there to leak.
+  build tests/task_io_smoke/http_head_no_body.spr
+  run_once "http-head" "head-has-no-body"
+  run_once "http-head/length" "head-keeps-length"
+  run_once "http-head/get" "get-has-body"
   # (26) Binary request bodies, now that the body is Bytes rather than String. The payload is
   # 0x00 0xFF 0x41 so each old failure mode is separately fatal: a strlen-based accumulator stops at
   # the NUL, a UTF-8 validator rejects the 0xFF, and the trailing 'A' is missing if anything truncated.
