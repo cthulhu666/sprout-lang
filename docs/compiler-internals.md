@@ -369,9 +369,8 @@ Before that it checked the session source alone, against an env of imported
 `(name, Scheme)` pairs and `@`-prefixed markers, and a decl-scan there saw nothing.
 That bit twice: a `where ToString a` using a prelude class was rejected in the REPL,
 and type-name validation rejected `Vec`, `Dict` and `Result`, making 11 of 27
-top-level stdlib modules unloadable there. `infer.class_names_from_env` and
-`infer.type_names_from_env`, which fold the `@class:` and `@type:` markers into the
-decl-derived set, date from then
+top-level stdlib modules unloadable there. `infer.marker_names`, which folds the
+`@class:` and `@type:` markers into the decl-derived set, dates from then
 ([docs/repl-env-type-vocabulary-v0.md](repl-env-type-vocabulary-v0.md)).
 
 The env path's loader, `module_loader.load_module`, is deleted (2026-10-09): every

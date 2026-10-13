@@ -81,6 +81,12 @@ fn main() -> Unit !{IO} =
     c2 <- run_check("fn f(x: a) -> a where Nope a = x")
     assert_true(state, "unknown class in where rejected", fails_with(c2, "`Nope` is not a class"))
 
+    c2b <- run_check("class Sz t\n  fn sz(x: t) -> Int\nfn g(x: a) -> Int where Sz a = sz(x)")
+    assert_true(state, "declared class in where accepted", is_ok(c2b))
+
+    c2c <- run_check("class A t\n  fn a(x: t) -> Int\nclass B t\n  fn b(x: t) -> Int\nfn h(x: t) -> Int where A t, B t = a(x) + b(x)")
+    assert_true(state, "two declared classes in one where accepted", is_ok(c2c))
+
     c3 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Bool) -> Int = 1")
     assert_true(state, "instance signature against the class", fails_with(c3, "class Sz declares"))
 
