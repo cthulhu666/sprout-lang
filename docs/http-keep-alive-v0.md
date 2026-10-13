@@ -47,8 +47,12 @@ expires, or the client closes or resets, the server closes and sends nothing: no
 so none is answered.
 
 Empty lines before a request line are skipped (RFC 9112 §2.2): some clients send a CRLF after a
-body, and it must not start a request. They do not restart the wait, so a client sending only
-CRLFs is closed at `idle_ms` like a silent one, rather than held open indefinitely.
+body, and it must not start a request, even when its CR and LF arrive in separate reads. They do
+not restart the wait, and the deadline is checked before every read, so a client sending only CRLFs
+is closed at `idle_ms` like a silent one, however fast it sends them.
+
+`max_header_bytes` is checked on every header block, including one already read with the request
+before it.
 
 HEAD replies carry no body and 204 replies carry neither body nor `content-length`. Close hid both
 mistakes before; on a kept connection the stray bytes would be read as the next response. That fix

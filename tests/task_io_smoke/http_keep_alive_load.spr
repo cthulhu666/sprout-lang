@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, local_port)
 import testsupport.listen (listen_or_die)
-import testsupport.http_wire (mark, read_response, read_to_end, says_close, send, with_conn)
+import testsupport.http_wire (count_of, mark, read_response, read_to_end, says_close, send, with_conn)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with)
 import stdlib.string as string
 import stdlib.time as time
@@ -42,11 +42,6 @@ fn parked_writes(a: borrowing TcpConnection, b: borrowing TcpConnection, c: borr
 fn racing(port: Int) -> Unit !{IO} =
   with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> parked_writes(a, b, c))))
 
-fn count_of(hay: String, needle: String, acc: Int) -> Int =
-  match string.find(hay, needle) with
-  | Nothing -> acc
-  | Just at -> count_of(string.drop(hay, at + string.length(needle)), needle, acc + 1)
-
 # Many requests in one write, each answered from the bytes left over by the one before.
 fn pipelined_many(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
@@ -58,7 +53,7 @@ fn pipelined_many(conn: borrowing TcpConnection) -> Unit !{IO} =
 fn all_answered(all: String) -> Unit !{IO} =
   mark("pipelined-many-answered", answered == 500, int_to_string(answered))
 where
-  answered = count_of(all, "HTTP/1.1 200", 0)
+  answered = count_of(all, "HTTP/1.1 200")
 
 # One request at a time, thousands of them on one connection. The loop that serves a connection must
 # run in constant space: a frame kept per request exhausts the task's GC root pool after a few
