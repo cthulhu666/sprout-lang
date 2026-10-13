@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, local_port)
 import testsupport.listen (listen_or_die)
-import testsupport.http_wire (mark, read_response, read_head_reply, read_to_end, says_close, send, with_conn)
+import testsupport.http_wire (count_of, mark, read_response, read_head_reply, read_to_end, says_close, send, with_conn)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with, with_header)
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -29,11 +29,6 @@ fn expect_closed(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
       | Err e -> mark(label, false, e)
   | Err e -> mark(label, false, e)
 
-fn count_of(hay: String, needle: String, acc: Int) -> Int =
-  match string.find(hay, needle) with
-  | Nothing -> acc
-  | Just at -> count_of(string.drop(hay, at + string.length(needle)), needle, acc + 1)
-
 fn reuse(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
     send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -48,7 +43,7 @@ fn pipelined(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
     send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
     match read_to_end(conn) with
-    | Ok all -> mark("pipelined-both-answered", count_of(all, "HTTP/1.1 200", 0) == 2, all)
+    | Ok all -> mark("pipelined-both-answered", count_of(all, "HTTP/1.1 200") == 2, all)
     | Err e -> mark("pipelined-both-answered", false, e)
 
 fn http10(conn: borrowing TcpConnection) -> Unit !{IO} =
@@ -129,6 +124,22 @@ fn idle_cap(a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing
 fn capped(port: Int) -> Unit !{IO} =
   with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> idle_cap(a, b, c))))
 
+# A CR at the end of one read and its LF at the start of the next are still one empty line.
+fn split_crlf(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\n\r\nabc\r")
+    expect_kept(conn, "post-before-split-crlf")
+    send(conn, "\nGET / HTTP/1.1\r\nHost: x\r\n\r\n")
+    expect_kept(conn, "split-crlf-ignored")
+
+# `max_header_bytes` (2048 here) holds for a request read together with the one before it.
+fn pipelined_oversize(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\nX-Pad: " ++ string.repeat("a", 4000) ++ "\r\n\r\n")
+    match read_to_end(conn) with
+    | Ok all -> mark("pipelined-headers-capped", count_of(all, "HTTP/1.1 200") == 1 && string.contains(all, "HTTP/1.1 431"), all)
+    | Err e -> mark("pipelined-headers-capped", false, e)
+
 fn clients(port: Int) -> Unit !{IO} =
   do
     with_conn(port, reuse)
@@ -141,16 +152,18 @@ fn clients(port: Int) -> Unit !{IO} =
     with_conn(port, repeated_close)
     with_conn(port, stray_crlf)
     with_conn(port, stray_crlf_idle)
+    with_conn(port, split_crlf)
+    with_conn(port, pipelined_oversize)
     capped(port)
 
 fn run(s: Scope) -> Unit !{IO} =
   do
     listener <- listen_or_die(0)
     port <- local_port(listener)
-    task_spawn(s, \_ -> serve_n_with(config, listener, 13, handle))
+    task_spawn(s, \_ -> serve_n_with(config, listener, 15, handle))
     task_spawn(s, \_ -> clients(port))
 where
-  config = default_config() with (idle_ms = 300, max_idle_connections = 2)
+  config = default_config() with (max_header_bytes = 2048, idle_ms = 300, max_idle_connections = 2)
 
 fn main() -> Unit !{IO} =
   do

@@ -378,8 +378,8 @@ fn parse_block(raw: Bytes, body_start: Int) -> ServerResult HttpRequest =
 #    data, without looking at the clock;
 #  * `Err TcpTimeout` covers the ordinary idle peer.
 #
-# The size check runs on the ACCUMULATED block before the next read, so the cap can be overshot by
-# at most one chunk (64 KiB).
+# The size check runs on the ACCUMULATED block before the next read, and on the block itself once its
+# terminator is found, so a block past the cap is refused however its bytes arrived.
 #
 # ONE accumulator now, where there used to be two. The second existed only because the terminator
 # search needed a String, and it is gone: `bytes.find` searches the bytes directly. The accumulator
@@ -459,13 +459,18 @@ fn read_request(conn: borrowing TcpConnection, config: ServerConfig, pending: (B
 # copied once and the socket is read for the rest.
 fn header_block(conn: borrowing TcpConnection, pending: (Bytes, Int), deadline: Int, max_bytes: Int) -> ServerResult (Bytes, Int, Int) !{IO} =
   match bytes.find_from(buf, crlf_crlf(), from) with
-  | Just at -> Ok((buf, from, at + 4))
+  | Just at -> capped((buf, from, at + 4), max_bytes)
   | Nothing ->
       do
         block <- try scan_for_terminator(conn, Nil, 0, bytes.empty(), bytes.drop(buf, from), deadline, max_bytes)
-        Ok(from_start(block))
+        capped(from_start(block), max_bytes)
 where
   (buf, from) = pending
+
+fn capped(block: (Bytes, Int, Int), max_bytes: Int) -> ServerResult (Bytes, Int, Int) =
+  if body_start - start > max_bytes then Err(HttpHeadersTooLarge) else Ok(block)
+where
+  (_, start, body_start) = block
 
 fn from_start(block: (Bytes, Int)) -> (Bytes, Int, Int) =
   (raw, 0, body_start)
@@ -1250,23 +1255,33 @@ fn next_request(config: ServerConfig, adm: Admission, conn: consuming TcpConnect
 # client sending only CRLFs is closed at `idle_ms` like a silent one.
 fn next_from(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
              handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int), deadline: Int) -> Unit !{IO} =
-  if bytes.length(buf) > from then
+  if bytes.length(buf) > from && ! held_cr then
     do
       release(adm)
       handle_connection(config, adm, conn, handler, (buf, from))
-  else idle_wait(config, adm, conn, handler, deadline)
+  else idle_wait(config, adm, conn, handler, deadline, held_cr)
 where
   (buf, at) = pending
   from = past_empty_lines(buf, at)
+  # A CR ending the read may be half of an empty line whose LF has not arrived.
+  held_cr = bytes.length(buf) == from + 1 && bytes.get_or(buf, from, -1) == 13
 
 # Takes no buffer, so the last request's, which may hold a large body, is not kept alive for
-# `idle_ms`.
+# `idle_ms`. The deadline is checked before each read, since a read that finds data returns without
+# looking at the clock: a client keeping the socket readable is still closed at `idle_ms`.
 fn idle_wait(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
-             handler: HttpRequest -> HttpServerResponse !{IO}, deadline: Int) -> Unit !{IO} =
-  match read_avail_timeout(conn, remaining_ms(deadline)) with
-  | Ok first -> next_from(config, adm, conn, handler, (first, 0), deadline)
-  # Expired, closed by the client, or reset: nothing was asked, so nothing is answered.
-  | Err _ -> release_and_close(adm, conn)
+             handler: HttpRequest -> HttpServerResponse !{IO}, deadline: Int, held_cr: Bool) -> Unit !{IO} =
+  do
+    budget <- remaining_ms(deadline)
+    if budget <= 0 then release_and_close(adm, conn)
+    else
+      match read_avail_timeout(conn, budget) with
+      | Ok first -> next_from(config, adm, conn, handler, (after_cr(held_cr, first), 0), deadline)
+      # Expired, closed by the client, or reset: nothing was asked, so nothing is answered.
+      | Err _ -> release_and_close(adm, conn)
+
+fn after_cr(held_cr: Bool, first: Bytes) -> Bytes =
+  if held_cr then bytes.append(bytes.singleton(13), first) else first
 
 fn past_empty_lines(buf: Bytes, at: Int) -> Int =
   if bytes.get_or(buf, at, -1) == 13 && bytes.get_or(buf, at + 1, -1) == 10 then past_empty_lines(buf, at + 2)

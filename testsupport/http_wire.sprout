@@ -95,5 +95,9 @@ fn collect(conn: borrowing TcpConnection, parts: List Builder) -> Result String 
   | Err TcpEndOfStream -> Ok(text(bytes.builder_build(bytes.builder_concat(list_reverse(parts)))))
   | Err _ -> Err("no close within 3 s")
 
+# How many times `needle` occurs in `hay`, without overlap.
+export fn count_of(hay: String, needle: String) -> Int =
+  list_length(string.split(hay, needle)) - 1
+
 export fn says_close(head: String) -> Bool =
   string.contains(head, "connection: close\r\n")

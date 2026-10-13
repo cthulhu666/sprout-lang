@@ -1,0 +1,18 @@
+import stdlib.net (local_port)
+import testsupport.listen (listen_or_die)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
+import stdlib.terminal as terminal
+
+# Serves one connection with `idle_ms` = 300 and prints its port, for http_idle_flood.pl: a client
+# that, after one response, keeps the socket readable with empty lines. They are skipped before a
+# request line but must not keep the connection past `idle_ms`.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
+
+fn main() -> Unit !{IO} =
+  do
+    listener <- listen_or_die(0)
+    port <- local_port(listener)
+    terminal.write(`port ${int_to_string(port)}\n`)
+    serve_n_with(default_config() with (idle_ms = 300), listener, 1, handle)
+    terminal.write("done\n")
