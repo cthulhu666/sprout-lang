@@ -273,12 +273,11 @@ rejected**:
 
 - *Not GC.* `SPROUT_DEBUG_GC` shows max pause 6.9 ms, 21 ms total across 6 s — an order of
   magnitude short of the tail.
-- *Not the listen backlog.* `tcp_listen` (`runtime/sprout_runtime.c`) hardcodes
+- *Not the listen backlog.* `tcp_listen` (`runtime/sprout_runtime.c`) then hardcoded
   `listen(fd, 16)`, which looked like an obvious culprit at ~30k accepts/s. Raising it to
   `SOMAXCONN` (128 here) changed p99 **not at all** (74–120 ms before and after, 3
-  interleaved rounds). Hypothesis discarded — recorded
-  because it is a plausible-looking diagnosis that measurement killed, and the backlog is not the
-  thing to go fix.
+  interleaved rounds). Hypothesis discarded for this workload. A different one later showed the
+  backlog does matter behind nginx, and it is now `SOMAXCONN` — follow-up 9.
 
 The actual cause is **client-side ephemeral-port exhaustion**. `Connection: close` means one TCP
 connection per request; this machine has **16,384 ephemeral ports** (`net.inet.ip.portrange`
@@ -611,12 +610,13 @@ To be filed in `BACKLOG.md`:
    and `force_drop_task` frees only the green stack (so `getaddrinfo`'s malloc'd list had to be
    copied onto the stack and released before the first park). **Anything held across a park must live
    on the task stack.**
-9. **`listen(fd, 16)`** — a 16-deep accept backlog, well below every convention (`SOMAXCONN`,
-   nginx's 511). **Measured NOT to affect this workload's p99** (§5.3), so it is hardening rather
-   than a fix, and it still has **no hermetic regression test available**: a too-small backlog
-   manifests as an unbounded park — the kernel drops the SYN and no error reaches either side, so
-   there is nothing to assert on. Follow-up 8's fix removes the *second* blocker (a park can now be
-   timed out), but a timeout still cannot distinguish "backlog too small" from "peer slow".
+9. ~~**`listen(fd, 16)`** — a 16-deep accept backlog.~~ **FIXED 2026-10-14:** `tcp_listen` passes
+   `SOMAXCONN` (4096 on Linux, 128 on macOS). It did not affect this workload's p99 (§5.3), but
+   behind nginx it was the tail: upstream connects past the 16th were dropped and waited out a ~1 s
+   SYN retransmit (p99 ~310 → 52–69 ms with a large backlog; 377 `ListenOverflows` → 0). The test
+   this item said was unavailable exists: `tests/task_io_smoke/listen_backlog.spr` connects to a
+   loopback listener that never accepts, with a deadline far past a handshake, so only a full queue
+   can make a connect expire — "peer slow" cannot happen there.
 10. **The accept loop is the next bottleneck** (§5.3): worker count is irrelevant from w=2 to
     w=256, so once task creation is off the per-request path the single accept task is the limit.
     Any further server work should start there, not at the handler.

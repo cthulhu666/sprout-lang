@@ -10246,10 +10246,11 @@ void accept_reserve_arm(void) {
  * on EMFILE cannot drain anything: the listener stays readable, the level-triggered park returns at
  * once, and the loop spins at 100% CPU until a descriptor frees elsewhere. This is the classic libev
  * reserve-fd technique for that: close the one reserved descriptor to free a slot, then accept+close
- * the whole backlog (each accept reuses the freed slot, each close returns it, so one reserve drains
- * the entire queue sequentially), then reopen the reserve. Shedding sends the waiting clients a prompt
- * FIN instead of leaving them queued behind an exhausted server, and — the point — empties the accept
- * queue so the caller's subsequent park is a real wait rather than a spin.
+ * up to ACCEPT_SHED_MAX_PER_CALL queued connections (each accept reuses the freed slot, each close
+ * returns it, so one reserve serves them all), then reopen the reserve. Shedding sends the waiting
+ * clients a prompt FIN instead of leaving them queued behind an exhausted server, and — the point —
+ * empties the accept queue, over one visit or several, so the caller's park becomes a real wait
+ * rather than a spin.
  *
  * If the reserve is unarmed (open failed at listen time, or a prior reopen failed), returns 0 without
  * shedding; the caller then parks park-only, which is the pre-fix 100% CPU spin described above — not
@@ -10360,9 +10361,10 @@ retry:
      * actually shed a connection.
      *
      * accept_shed_backlog makes the convergence real: it spends the reserve descriptor to accept+close
-     * the whole backlog, emptying the accept queue so the park below is a genuine wait rather than a
-     * spin, and giving the queued clients a prompt FIN. Then we park; when a new connection arrives the
-     * listener becomes readable and we resume. */
+     * up to ACCEPT_SHED_MAX_PER_CALL queued connections, giving those clients a prompt FIN. Then we
+     * park. While the queue still holds connections the listener stays readable, so the park returns
+     * at once and the retried accept either succeeds (a descriptor freed) or sheds the next batch;
+     * once the queue is empty the park is a genuine wait until a new connection arrives. */
     if (errno == EMFILE || errno == ENFILE) {
       accept_shed_backlog(g_listener_fd[listener]);
       scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);

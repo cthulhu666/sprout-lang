@@ -86,8 +86,8 @@ fn main() -> Unit !{IO} =
   do
     refused <- refused_is_reported()
     _ <- tcp_listen_or_die(port)  # never accepted: the accept queue fills and stays full
-    # Room for Linux's 4096-deep queue plus the expiries. A host whose somaxconn is raised near
-    # 10000 never fills it here, and the run reports how few connects parked.
+    # Room for the deepest queue the runtime asks for (SOMAXCONN, 4096 on Linux) plus the expiries.
+    # The kernel only lowers a backlog to its sysctl, never raises it, so no host queues more.
     let stalled = attempts(10000, 0)
     if refused then
       if stalled >= wanted_expiries then
