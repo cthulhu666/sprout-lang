@@ -2314,6 +2314,10 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/connect_park.spr
   ( ulimit -n 64; run_once "connect-park" "connect-park-ok" )
   ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "connect-park/stress" "connect-park-ok" )
+  # (18b) listen-backlog: a listener that never accepts must queue 100 connects. The backlog was 16,
+  # so connect #17 was dropped and waited out a ~1 s SYN retransmit — behind nginx, the p99 tail.
+  build tests/task_io_smoke/listen_backlog.spr
+  run_once "listen-backlog" "listen-backlog-ok"
   # (19) http_server idle-connection timeout (C3): a peer that connects and sends NOTHING must be
   # answered 408 and closed on a TOTAL header deadline, instead of parking its handler forever and
   # leaking the connection handle (slowloris). The same fixture's prompt client must still get 200,
@@ -2617,7 +2621,7 @@ task-io-smoke: bootstrap-from-seed
   # happens. It needs a cancel or timeout ACROSS a park, which is what this adds.
   build tests/task_io_smoke/stdin_cancel_keeps_fd.spr
   run_stdin "stdin-cancel-keeps-fd" "stdin-survived-cancel" "silent:3"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

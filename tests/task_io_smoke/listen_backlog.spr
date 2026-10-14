@@ -1,0 +1,37 @@
+import stdlib.task as task
+import stdlib.net (tcp_connect, tcp_close)
+import testsupport.listen (tcp_listen_or_die)
+import stdlib.terminal as terminal
+
+let port: Int = 28981
+
+# Regression: `tcp_listen` passed a backlog of 16, so a listener held at most 16 completed
+# handshakes nobody had accepted yet. Past that the kernel drops the SYN without telling either side;
+# the client retries after ~1 s. Behind nginx that was the p99 tail: a short pause in a
+# single-threaded server queued more than 16 upstream connects, and each extra one stalled 1–3 s.
+#
+# A listener that never accepts must now hold `wanted` connects. Each gets far longer than a
+# loopback handshake needs, so only a full queue can make one expire. `wanted` stays under macOS's
+# default `kern.ipc.somaxconn` (128), the cap the kernel puts on any backlog there.
+let wanted: Int = 100
+
+fn fill(made: Int) -> Int !{IO} =
+  if made >= wanted then made
+  else
+    match task.with_timeout(2000, \_ -> tcp_connect("127.0.0.1", port)) with
+    | task.Expired -> made
+    | task.Completed r ->
+      match r with
+      | Ok h ->
+        # The connection stays queued after our end closes; closing keeps the fd count flat.
+        do
+          tcp_close(h)
+          fill(made + 1)
+      | Err _ -> made
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- tcp_listen_or_die(port)  # never accepted
+    let made = fill(0)
+    if made >= wanted then terminal.write("listen-backlog-ok\n")
+    else terminal.write(`FAILED: only ${int_to_string(made)} of ${int_to_string(wanted)} connects completed; the accept queue is full\n`)

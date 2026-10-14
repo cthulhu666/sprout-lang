@@ -2389,12 +2389,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   on a long transfer. Both reference APIs offer both knobs (reqwest `timeout` + `read_timeout`; Go
   `Client.Timeout` + `Transport.ResponseHeaderTimeout`). Additive — it can wait for a caller that
   actually streams.
-- [ ] `P2` **`listen(fd, 16)` — a 16-deep accept backlog**, well below every convention
-  (`SOMAXCONN` 128 on macOS, nginx 511). Raising it left p99 unchanged in one setup, but behind
-  nginx (256 clients, upstream `keepalive 64`, so connects churn) it is the tail: 16 gave p99
-  ~310 ms, max 1.1–1.4 s, up to 57 × 504; 1024 gave p99 52–69 ms, no errors (3 interleaved
-  rounds). No hermetic regression is available: the kernel drops the SYN, so a too-small backlog
-  shows only as a ~1 s retransmit wait, with no error on either side.
+- [ ] `P3` **`http_keep_alive_pooled` is flaky under `SPROUT_GC_STRESS=1`** (task-io-smoke). 2 of
+  15 stress runs on master print `MISMATCH`: `a-held-idle` gets `connection: close` though it
+  should stay open, and `reserve-full-closes` and `busy-with-queue-closes` stay open though they
+  should close — the admission counts see a different state than the fixture sets up. The
+  non-stress run passes. Likely the fixture's timing assumptions, which stress slows; unconfirmed.
 
 ### Prelude-helper cleanup arc (#602, #603) — review residuals
 
@@ -2629,6 +2628,10 @@ acting.
   §5.9 both name it; the prelude has `result_map_error`. Pinned by
   `tests/conformance/type_error/fallible_bind_error_type_mismatch.err`. Rename in all three;
   the diagnostic is compiler source, so it needs a reseed.
+- [ ] `P2` **`fmt` rewrites a `#` inside a backtick template as if it began a comment**, padding it
+  to two spaces: `` print(`a #${x} b`) `` becomes `` print(`a  #${x} b`) ``, and `` `a # b` ``
+  becomes `` `a  # b` ``. That changes what the program prints, and `fmt` reports the file
+  formatted. Double-quoted strings are left alone. Found when `just fmt` rewrote a task-io fixture.
 - [ ] `P3` **`fmt` skips normalization on any line containing a backtick template.** Two adjacent
   lines of the same construct format differently: `\(s: String) -> s` is rewritten to
   `\ (s: String)` while `\(s: String) -> ` + a template is left alone — and `fmt` reports both
