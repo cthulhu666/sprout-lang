@@ -270,26 +270,26 @@ export fn trim(raw: String) -> String =
 
 # ── ASCII lowercasing, O(n) ─────────────────────────────────────────────────────────────────────
 # Lowercase A..Z; every other byte is left exactly as-is. The old `http_server` copy rebuilt the
-# String one codepoint at a time (Θ(n²)). This scans for an upper byte; an already-lowercase input,
-# the header-name common case, comes back as is with no further copy. Otherwise it walks the bytes
-# once more, coalescing maximal runs that need no change into a single verbatim slice and emitting
-# each upper byte as a lowercased one, then joins the pieces in one O(total) `string_concat_many`
-# pass. Only bytes 0x41..0x5A are ever split on, and those are single-codepoint, so every slice
-# boundary is a codepoint boundary — multibyte UTF-8 (and any non-ASCII uppercase such as É) passes
-# through untouched.
+# String one codepoint at a time (Θ(n²)). This finds the first upper byte; an already-lowercase
+# input, the header-name common case, comes back as is. Otherwise the walk goes on from that byte,
+# coalescing maximal runs that need no change into a single verbatim slice and emitting each upper
+# byte as a lowercased one, then joins the pieces in one O(total) `string_concat_many` pass. Only
+# bytes 0x41..0x5A are ever split on, and those are single-codepoint, so every slice boundary is a
+# codepoint boundary — multibyte UTF-8 (and any non-ASCII uppercase such as É) passes through
+# untouched.
 export fn to_lower_ascii(raw: String) -> String =
-  if has_upper(b, 0, n) then string_concat_many(list_reverse(scan_lower(b, 0, 0, n, Nil))) else raw
+  if first == n then raw else string_concat_many(list_reverse(scan_lower(b, 0, first, n, Nil)))
 where
   b = bytes.from_string(raw)
   n = bytes.length(b)
+  first = first_upper(b, 0, n)
 
 fn is_upper_byte(b: Int) -> Bool =
   b >= 65 && b <= 90
 
-fn has_upper(b: Bytes, i: Int, n: Int) -> Bool =
-  if i >= n then false
-  else if is_upper_byte(bytes.get_or(b, i, 0)) then true
-  else has_upper(b, i + 1, n)
+# The index of the first upper byte at or after `i`, or `n` when there is none.
+fn first_upper(b: Bytes, i: Int, n: Int) -> Int =
+  if i >= n || is_upper_byte(bytes.get_or(b, i, 0)) then i else first_upper(b, i + 1, n)
 
 # Byte `b` (guaranteed 0x41..0x5A) as a one-character lowercase String, via a single-byte Bytes.
 fn lower_byte_string(b: Int) -> String =
@@ -343,8 +343,12 @@ export fn split_once(raw: String, sep: String) -> Maybe (String, String) =
 # self-synchronising: no encoded character occurs as a subsequence of another, so
 # a match can only ever begin on a character boundary.
 export fn split(raw: String, sep: String) -> List String =
-  if str_byte_len(sep) == 0 then Cons(raw, Nil)
-  else list_reverse(split_go(raw, sep, str_byte_len(sep), str_byte_len(raw), 0, 0, Nil))
+  if str_byte_len(sep) == 0 then Cons(raw, Nil) else split_from(raw, sep, 0)
+
+# `split` of a non-empty `sep`, scanning from byte `pos`, before which no match starts. `pos` may
+# fall inside a codepoint: a match cannot start there.
+fn split_from(raw: String, sep: String, pos: Int) -> List String =
+  list_reverse(split_go(raw, sep, str_byte_len(sep), str_byte_len(raw), pos, 0, Nil))
 
 fn split_go(raw: String, sep: String, sep_bytes: Int, total: Int,
             pos: Int, start: Int, acc: List String) -> List String =
@@ -361,9 +365,11 @@ fn join_step(sep: String, acc: List String, s: String) -> List String =
   | Nil -> Cons(s, Nil)
   | _ -> Cons(s, Cons(sep, acc))
 
-# O(n + total_bytes): one O(n) fold building reversed interleaved list + O(B) concat.
+# O(n + total_bytes): one O(n) fold building reversed interleaved list + O(B) concat. An empty
+# `sep` is not interleaved.
 export fn join(sep: String, xs: f String) -> String where Foldable f =
-  string_concat_many(list_reverse(fold(\ (acc, s) -> join_step(sep, acc, s), Nil, xs)))
+  if sep == "" then string_concat_many(list_reverse(fold(\ (acc, s) -> Cons(s, acc), Nil, xs)))
+  else string_concat_many(list_reverse(fold(\ (acc, s) -> join_step(sep, acc, s), Nil, xs)))
 
 fn copies(s: String, n: Int, acc: List String) -> List String =
   if n <= 0 then acc else copies(s, n - 1, Cons(s, acc))
@@ -374,9 +380,12 @@ export fn repeat(s: String, n: Int) -> String =
 
 # O(|s| * |from|): `split` compares `from` at each byte, then one join. An empty `from` returns `s`.
 # Without a match `s` comes back as is, after one native search and no allocation: the common case
-# for a sanitiser, such as `http_server`'s on every header line.
+# for a sanitiser, such as `http_server`'s on every header line. With one, the split starts at the
+# match's codepoint index, a lower bound on its byte offset.
 export fn replace_all(from: String, to: String, s: String) -> String =
-  if str_find(s, from) < 0 then s else join(to, split(s, from))
+  if at < 0 || str_byte_len(from) == 0 then s else join(to, split_from(s, from, at))
+where
+  at = str_find(s, from)
 
 # Strip a single trailing '\r' — for a CRLF line that str_split_lines split on the '\n'.
 fn strip_trailing_cr(s: String) -> String =
