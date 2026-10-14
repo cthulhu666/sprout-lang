@@ -10052,7 +10052,10 @@ long long tcp_listen(const char* host, long long port) {
   if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
     return tcp_listen_fail(fd, "bind", host, port, strerror(errno));
   }
-  if (listen(fd, 16) < 0) {
+  /* SOMAXCONN (4096 on Linux, 128 on macOS); the kernel caps it at its own somaxconn. A full queue
+   * drops SYNs silently and each client waits a ~1 s retransmit: 16 here made a short server pause
+   * behind nginx into a 1–3 s stall for every connect past the 16th. */
+  if (listen(fd, SOMAXCONN) < 0) {
     return tcp_listen_fail(fd, "listen", host, port, strerror(errno));
   }
   tcp_set_nonblocking(fd);   /* so tcp_accept parks on EAGAIN rather than blocking */
@@ -10268,11 +10271,11 @@ void accept_reserve_arm(void) {
  * blocking the pump is a strictly worse failure than the CPU spin this function was written to fix
  * (that spin at least re-entered the pump on every iteration, so siblings kept running).
  *
- * ACCEPT_SHED_MAX_PER_CALL bounds one visit at 4x the listen backlog (`listen(fd, 16)`), so a queue
- * that is merely full is always drained whole and the cap is reached only under an arrival rate that
- * outpaces accept+close. Hitting it is not a failure: the listener is still readable, so the caller's
- * park returns at once and the next call sheds the next batch. That yields the same throughput with
- * the pump serviced between batches — bounded work per visit instead of an open-ended freeze. */
+ * ACCEPT_SHED_MAX_PER_CALL bounds one visit at 64 accepts. The listen backlog is SOMAXCONN (up to
+ * 4096 on Linux), so a full queue can take several visits to drain. Hitting the cap is not a
+ * failure: the listener is still readable, so the caller's park returns at once and the next call
+ * sheds the next batch. That yields the same throughput with the pump serviced between batches —
+ * bounded work per visit instead of an open-ended freeze. */
 #define ACCEPT_SHED_MAX_PER_CALL 64
 
 int accept_shed_backlog(int listener_fd) {

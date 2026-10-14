@@ -14,9 +14,8 @@ let port: Int = 28994
 #
 # The stall is produced HERMETICALLY, over loopback, with no external network and no timing luck:
 # a listener that never accepts fills its accept queue after `backlog` completed handshakes, after
-# which the kernel silently drops further SYNs. Verified on macOS: with the runtime's backlog the
-# first 16 connects complete and attempt #17 onward never complete. Linux drops SYNs on a full
-# queue the same way.
+# which the kernel silently drops further SYNs. The backlog is SOMAXCONN (128 on macOS, 4096 on
+# Linux), so the fixture connects until the queue is full rather than assuming where that is.
 #
 # The fixture asserts THREE things, and prints its success marker only if all hold:
 #
@@ -27,7 +26,7 @@ let port: Int = 28994
 #  2. Force-dropping a connect-parked task CLOSES its in-progress socket. That fd is bare — not yet
 #     in the handle table — so nothing else can ever close it, and a leak costs one descriptor per
 #     timed-out connect. The recipe runs this under `ulimit -n 64`, so a leak exhausts the table
-#     part-way through the 80 attempts and socket() starts failing; that surfaces here as `Err
+#     part-way through the 80 timed-out attempts and socket() starts failing; that surfaces as `Err
 #     Too many open files`, which is reported verbatim instead of the success marker.
 #
 # Assertion 2 is a descriptor-budget assertion, so it catches ANY per-timeout descriptor leak on the
@@ -53,11 +52,14 @@ fn refused_is_reported() -> Bool !{IO} =
     | Ok (_) -> false
     | Err (_) -> true
 
-# Make `remaining` deadline-bounded connects, counting how many PARKED long enough to be dropped.
+# Deadline-bounded connects until `wanted_expiries` have PARKED long enough to be dropped, or
+# `remaining` runs out (a queue that never fills). The queued ones before the fill point are fast.
 # Past the fill point an `Err` can only mean socket() failed, i.e. assertion 2 broke — so report the
 # message verbatim (it names the cause: "Too many open files") and end the run.
+let wanted_expiries: Int = 80
+
 fn attempts(remaining: Int, expired: Int) -> Int !{IO} =
-  if remaining <= 0 then
+  if remaining <= 0 || expired >= wanted_expiries then
     expired
   else
     match task.with_timeout(20, \_ -> tcp_connect("127.0.0.1", port)) with
@@ -84,11 +86,13 @@ fn main() -> Unit !{IO} =
   do
     refused <- refused_is_reported()
     _ <- tcp_listen_or_die(port)  # never accepted: the accept queue fills and stays full
-    let stalled = attempts(80, 0)
+    # Room for Linux's 4096-deep queue plus the expiries. A host whose somaxconn is raised near
+    # 10000 never fills it here, and the run reports how few connects parked.
+    let stalled = attempts(10000, 0)
     if refused then
-      if stalled > 0 then
+      if stalled >= wanted_expiries then
         terminal.write("connect-park-ok\n")
       else
-        terminal.write("FAILED: no connect ever parked past its deadline\n")
+        terminal.write(`FAILED: only ${int_to_string(stalled)} connects parked past their deadline\n`)
     else
       terminal.write("FAILED: connect to a dead port did not report an error\n")
