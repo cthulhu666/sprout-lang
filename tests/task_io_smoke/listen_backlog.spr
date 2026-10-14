@@ -1,5 +1,5 @@
 import stdlib.task as task
-import stdlib.net (tcp_connect, tcp_close)
+import stdlib.net (tcp_connect, tcp_close, tcp_error_message)
 import testsupport.listen (tcp_listen_or_die)
 import stdlib.terminal as terminal
 
@@ -15,11 +15,12 @@ let port: Int = 28981
 # default `kern.ipc.somaxconn` (128), the cap the kernel puts on any backlog there.
 let wanted: Int = 100
 
-fn fill(made: Int) -> Int !{IO} =
-  if made >= wanted then made
+# Err says why the run stopped short: an expiry is a full queue, an error is reported as itself.
+fn fill(made: Int) -> Result String Int !{IO} =
+  if made >= wanted then Ok(made)
   else
     match task.with_timeout(2000, \_ -> tcp_connect("127.0.0.1", port)) with
-    | task.Expired -> made
+    | task.Expired -> Err(`the accept queue is full after ${int_to_string(made)} of ${int_to_string(wanted)} connects`)
     | task.Completed r ->
       match r with
       | Ok h ->
@@ -27,11 +28,11 @@ fn fill(made: Int) -> Int !{IO} =
         do
           tcp_close(h)
           fill(made + 1)
-      | Err _ -> made
+      | Err e -> Err(`connect ${int_to_string(made + 1)} failed: ${tcp_error_message(e)}`)
 
 fn main() -> Unit !{IO} =
   do
     _ <- tcp_listen_or_die(port)  # never accepted
-    let made = fill(0)
-    if made >= wanted then terminal.write("listen-backlog-ok\n")
-    else terminal.write(`FAILED: only ${int_to_string(made)} of ${int_to_string(wanted)} connects completed; the accept queue is full\n`)
+    match fill(0) with
+    | Ok _ -> terminal.write("listen-backlog-ok\n")
+    | Err why -> terminal.write(`FAILED: ${why}\n`)
