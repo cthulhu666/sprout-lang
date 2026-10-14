@@ -1,5 +1,5 @@
 import stdlib.test (check_true, check_eq, run_suite)
-import stdlib.http_server (HttpServerResponse, ok, response, with_header, add_header, render)
+import stdlib.http_server (HttpServerResponse, ok, response, with_header, add_header, render, cookie, cookie_name, cookie_value, with_cookie)
 import stdlib.string as string
 
 # Regression: `render` used to lean on http.http_response, whose base line hardcodes
@@ -14,6 +14,11 @@ fn rendered(resp: HttpServerResponse) -> String =
   match render(resp) with
   | Ok raw -> raw
   | Err _ -> "RENDER_ERR"
+
+fn with_plain_cookie(name: String, resp: HttpServerResponse) -> HttpServerResponse =
+  match (cookie_name(name), cookie_value("1")) with
+  | (Just n, Just v) -> with_cookie(cookie(n, v), resp)
+  | _ -> resp
 
 fn contains(hay: String, needle: String) -> Bool =
   match string.find(hay, needle) with
@@ -107,5 +112,10 @@ fn main() -> Unit !{IO} =
     # content-type, content-length, one blank line, the body.
     check_eq("the full message, in order",
       rendered(with_header("x-b", "2", with_header("x-a", "1", ok("hi")))),
-      "HTTP/1.1 200 OK\r\nx-a: 1\r\nx-b: 2\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi")
+      "HTTP/1.1 200 OK\r\nx-a: 1\r\nx-b: 2\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi"),
+    check_eq("cookies come after every other header, in the order set",
+      rendered(with_plain_cookie("b", with_plain_cookie("a", with_header("x-a", "1", ok("hi"))))),
+      "HTTP/1.1 200 OK\r\nx-a: 1\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n"
+        ++ "set-cookie: a=1; Path=/; HttpOnly; SameSite=Lax\r\n"
+        ++ "set-cookie: b=1; Path=/; HttpOnly; SameSite=Lax\r\n\r\nhi")
   ])

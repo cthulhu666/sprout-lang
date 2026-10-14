@@ -567,9 +567,11 @@ where
 fn read_body(conn: borrowing TcpConnection, early: Bytes, content_length: Int, deadline: Int) -> ServerResult Bytes !{IO} =
   read_remaining_body(conn, [bytes.builder_bytes(early)], content_length - bytes.length(early), deadline)
 
-fn header_line(pair: (String, String)) -> String =
+# One header line's pieces, pushed onto `acc` last piece first. Pieces rather than a line, so the
+# head is concatenated once.
+fn push_header(acc: List String, pair: (String, String)) -> List String =
   match pair with
-  | (name, value) -> sanitize_field(name) ++ ": " ++ sanitize_field(value) ++ "\r\n"
+  | (name, value) -> Cons("\r\n", Cons(sanitize_field(value), Cons(": ", Cons(sanitize_field(name), acc))))
 
 # CR and LF are the response's STRUCTURE — one ends a header line, two end the header block — so a
 # name or value carrying either does not merely look odd on the wire, it changes what the message is.
@@ -628,14 +630,13 @@ where
     |> with_default_header("content-type", "text/plain")
 
 # Everything up to and including the blank line that ends the header block. Cookies go after the
-# other headers. `header_line` sanitises them too, so a CR or LF in a cookie's name, path or domain
-# is as inert as one in any header. One concatenation: `string.join` with no separator would fold,
-# reverse and then concatenate the same list.
+# other headers. `push_header` sanitises them too, so a CR or LF in a cookie's name, path or domain
+# is as inert as one in any header.
 fn assemble_head(line: String, headers: Vec (String, String), cookies: Vec SetCookie) -> String =
-  string_concat_many([line ++ "\r\n"] ++ header_lines ++ cookie_lines ++ ["\r\n"])
+  string_concat_many(list_reverse(Cons("\r\n", with_cookies)))
 where
-  header_lines = list_map(header_line, vec_to_list(headers))
-  cookie_lines = list_map(\c -> header_line(("set-cookie", set_cookie_text(c))), vec_to_list(cookies))
+  with_headers = vec_fold(push_header, ["\r\n", line], headers)
+  with_cookies = vec_fold(\ (acc, c) -> push_header(acc, ("set-cookie", set_cookie_text(c))), with_headers, cookies)
 
 export fn response(status: Int, body: String) -> HttpServerResponse =
   HttpServerResponse(status, vec_empty(), vec_empty(), body)

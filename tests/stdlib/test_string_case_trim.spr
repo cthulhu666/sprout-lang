@@ -26,6 +26,8 @@ fn main() -> Unit !{IO} =
     # An input with no upper byte is returned as is, so the check must reach the last byte.
     check_eq("lower only last byte upper", string.to_lower_ascii("content-typE"), "content-type"),
     check_eq("lower only first byte upper", string.to_lower_ascii("Host"), "host"),
+    check_eq("lower multibyte before the first upper", string.to_lower_ascii("caféX-y"), "caféx-y"),
+    check_eq("lower single upper byte", string.to_lower_ascii("Q"), "q"),
 
     # ── trim ────────────────────────────────────────────────────────────────────────────────────
     check_eq("trim both sides", string.trim("  hi  "), "hi"),
