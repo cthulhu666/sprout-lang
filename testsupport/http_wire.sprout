@@ -1,6 +1,6 @@
 module testsupport.http_wire
 
-import stdlib.net (TcpConnection, TcpEndOfStream, connect, close, read_avail_timeout, read_exact, write_all_utf8)
+import stdlib.net (TcpConnection, TcpEndOfStream, TcpTimeout, connect, close, read_avail_timeout, read_exact, tcp_error_message, write_all_utf8)
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.terminal as terminal
@@ -93,7 +93,8 @@ fn collect(conn: borrowing TcpConnection, parts: List Builder) -> Result String 
   match read_avail_timeout(conn, 3000) with
   | Ok chunk -> collect(conn, Cons(bytes.builder_bytes(chunk), parts))
   | Err TcpEndOfStream -> Ok(text(bytes.builder_build(bytes.builder_concat(list_reverse(parts)))))
-  | Err _ -> Err("no close within 3 s")
+  | Err TcpTimeout -> Err("no close within 3 s")
+  | Err e -> Err(tcp_error_message(e))
 
 # How many times `needle` occurs in `hay`, without overlap.
 export fn count_of(hay: String, needle: String) -> Int =

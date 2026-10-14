@@ -76,16 +76,17 @@ fn long_lived(conn: borrowing TcpConnection) -> Unit !{IO} =
     served <- many_requests(conn, 5000, 0)
     mark("long-lived-connection", served == 5000, int_to_string(served))
 
-# Empty lines are skipped before a request, but they do not restart the idle wait: CRLFs at 150 and
-# 250 ms still close at `idle_ms` (300), not 300 ms after the last one.
+# Empty lines are skipped before a request, but they do not restart the idle wait: CRLFs at 300 and
+# 600 ms still close at `idle_ms` (1000), not 1000 ms after the last one. The last CRLF lands well
+# before the deadline: one arriving after the close is answered with a reset, not a FIN.
 fn crlf_trickle(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
     send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
     kept <- served_once(conn)
     start <- time.now_micros()
-    task_sleep(150)
+    task_sleep(300)
     send(conn, "\r\n")
-    task_sleep(100)
+    task_sleep(300)
     send(conn, "\r\n")
     match read_to_end(conn) with
     | Ok rest -> idle_closed(start, kept == 1 && rest == "")
@@ -94,7 +95,7 @@ fn crlf_trickle(conn: borrowing TcpConnection) -> Unit !{IO} =
 fn idle_closed(start: Int, quiet: Bool) -> Unit !{IO} =
   do
     stop <- time.now_micros()
-    mark("crlf-does-not-extend-idle", quiet && stop - start < 450000, int_to_string((stop - start) / 1000))
+    mark("crlf-does-not-extend-idle", quiet && stop - start < 1300000, int_to_string((stop - start) / 1000))
 
 fn clients(port: Int) -> Unit !{IO} =
   do
@@ -112,7 +113,7 @@ fn run(s: Scope) -> Unit !{IO} =
     task_spawn(s, \_ -> serve_n_with(config, listener, 6, handle))
     task_spawn(s, \_ -> clients(port))
 where
-  config = default_config() with (idle_ms = 300, max_idle_connections = 2)
+  config = default_config() with (idle_ms = 1000, max_idle_connections = 2)
 
 fn main() -> Unit !{IO} =
   do
