@@ -2341,6 +2341,18 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
 **Server and scheduler**
 
+- [ ] `P2` **A green-task switch costs ~4 syscalls on macOS.** libc `swapcontext` runs
+  `getcontext` → `populate_signal_stack_context` (`sigprocmask`, `getrlimit`, `sigaltstack`), then
+  `setcontext` (`sigprocmask`). 10.7% of server CPU on keep-alive `/health` (`sample`, M3 Pro).
+  Linux glibc not measured. A switch that saves only callee-saved registers would drop all four.
+- [ ] `P2` **`find_ctor_tag_by_name` is a linear `strcmp` scan**, called each time C builds a
+  `Cons`, `Nil`, `Ok` or `Err` (`string_concat_many`, `bytes_to_utf8`, the net builtins). 3.8–4.9%
+  of keep-alive `/health` CPU through `http_server`. The tags are fixed after registration, so a
+  per-name cache would make it O(1).
+- [ ] `P3` **`http_server` costs ~4 µs/request more than a hand-written keep-alive loop** (17.2 vs
+  13.3 µs server CPU on `/health`, after header rendering stopped allocating). What is left is
+  request parsing and the GC it drives; no single function stands out.
+
 - [ ] `P2` **`serve` is a client-driven memory exposure.** ~1.4 MiB of stack per concurrent
   connection, fully resident because `makecontext` zeroes it: 40 `wrk` connections hold 130–237
   MB, and the shape scales with client-chosen concurrency. Sprout copied Go's
@@ -2377,12 +2389,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   on a long transfer. Both reference APIs offer both knobs (reqwest `timeout` + `read_timeout`; Go
   `Client.Timeout` + `Transport.ResponseHeaderTimeout`). Additive — it can wait for a caller that
   actually streams.
-- [ ] `P3` **`listen(fd, 16)` — a 16-deep accept backlog**, well below every convention
-  (`SOMAXCONN` 128 on macOS, nginx 511). **Downgraded from "sole cause of the p99 tail": measured
-  not to matter here** — raising it to `SOMAXCONN` left p99 unchanged over 3 interleaved rounds.
-  Hardening, not a fix, recorded because it was a plausible diagnosis that measurement killed. No
-  hermetic regression is available: a too-small backlog manifests as an unbounded park, since the
-  kernel drops the SYN and no error reaches either side.
+- [ ] `P2` **`listen(fd, 16)` — a 16-deep accept backlog**, well below every convention
+  (`SOMAXCONN` 128 on macOS, nginx 511). Raising it left p99 unchanged in one setup, but behind
+  nginx (256 clients, upstream `keepalive 64`, so connects churn) it is the tail: 16 gave p99
+  ~310 ms, max 1.1–1.4 s, up to 57 × 504; 1024 gave p99 52–69 ms, no errors (3 interleaved
+  rounds). No hermetic regression is available: the kernel drops the SYN, so a too-small backlog
+  shows only as a ~1 s retransmit wait, with no error on either side.
 
 ### Prelude-helper cleanup arc (#602, #603) — review residuals
 

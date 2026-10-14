@@ -270,18 +270,26 @@ export fn trim(raw: String) -> String =
 
 # ── ASCII lowercasing, O(n) ─────────────────────────────────────────────────────────────────────
 # Lowercase A..Z; every other byte is left exactly as-is. The old `http_server` copy rebuilt the
-# String one codepoint at a time (Θ(n²)); this walks the bytes once, coalescing maximal runs that
-# need no change into a single verbatim slice and emitting each upper byte as a lowercased one, then
-# joins the pieces in one O(total) `string_concat_many` pass. Only bytes 0x41..0x5A are ever split
-# on, and those are single-codepoint, so every slice boundary is a codepoint boundary — multibyte
-# UTF-8 (and any non-ASCII uppercase such as É) passes through untouched. An already-lowercase input
-# is one verbatim slice with no per-byte allocation, which is the header-name common case.
+# String one codepoint at a time (Θ(n²)). This scans for an upper byte; an already-lowercase input,
+# the header-name common case, comes back as is with no further copy. Otherwise it walks the bytes
+# once more, coalescing maximal runs that need no change into a single verbatim slice and emitting
+# each upper byte as a lowercased one, then joins the pieces in one O(total) `string_concat_many`
+# pass. Only bytes 0x41..0x5A are ever split on, and those are single-codepoint, so every slice
+# boundary is a codepoint boundary — multibyte UTF-8 (and any non-ASCII uppercase such as É) passes
+# through untouched.
 export fn to_lower_ascii(raw: String) -> String =
-  let b = bytes.from_string(raw)
-  in string_concat_many(list_reverse(scan_lower(b, 0, 0, bytes.length(b), Nil)))
+  if has_upper(b, 0, n) then string_concat_many(list_reverse(scan_lower(b, 0, 0, n, Nil))) else raw
+where
+  b = bytes.from_string(raw)
+  n = bytes.length(b)
 
 fn is_upper_byte(b: Int) -> Bool =
   b >= 65 && b <= 90
+
+fn has_upper(b: Bytes, i: Int, n: Int) -> Bool =
+  if i >= n then false
+  else if is_upper_byte(bytes.get_or(b, i, 0)) then true
+  else has_upper(b, i + 1, n)
 
 # Byte `b` (guaranteed 0x41..0x5A) as a one-character lowercase String, via a single-byte Bytes.
 fn lower_byte_string(b: Int) -> String =
@@ -365,8 +373,10 @@ export fn repeat(s: String, n: Int) -> String =
   string_concat_many(copies(s, n, Nil))
 
 # O(|s| * |from|): `split` compares `from` at each byte, then one join. An empty `from` returns `s`.
+# Without a match `s` comes back as is, after one native search and no allocation: the common case
+# for a sanitiser, such as `http_server`'s on every header line.
 export fn replace_all(from: String, to: String, s: String) -> String =
-  join(to, split(s, from))
+  if str_find(s, from) < 0 then s else join(to, split(s, from))
 
 # Strip a single trailing '\r' — for a CRLF line that str_split_lines split on the '\n'.
 fn strip_trailing_cr(s: String) -> String =

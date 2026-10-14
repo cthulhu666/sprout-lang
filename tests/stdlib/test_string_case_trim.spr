@@ -23,6 +23,9 @@ fn main() -> Unit !{IO} =
     # pass through byte-for-byte, and an ASCII 'B' adjacent to it must still lowercase.
     check_eq("lower keeps É, lowers ASCII", string.to_lower_ascii("aÉB"), "aÉb"),
     check_eq("lower all-nonascii unchanged", string.to_lower_ascii("café"), "café"),
+    # An input with no upper byte is returned as is, so the check must reach the last byte.
+    check_eq("lower only last byte upper", string.to_lower_ascii("content-typE"), "content-type"),
+    check_eq("lower only first byte upper", string.to_lower_ascii("Host"), "host"),
 
     # ── trim ────────────────────────────────────────────────────────────────────────────────────
     check_eq("trim both sides", string.trim("  hi  "), "hi"),

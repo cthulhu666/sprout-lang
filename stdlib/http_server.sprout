@@ -629,9 +629,10 @@ where
 
 # Everything up to and including the blank line that ends the header block. Cookies go after the
 # other headers. `header_line` sanitises them too, so a CR or LF in a cookie's name, path or domain
-# is as inert as one in any header.
+# is as inert as one in any header. One concatenation: `string.join` with no separator would fold,
+# reverse and then concatenate the same list.
 fn assemble_head(line: String, headers: Vec (String, String), cookies: Vec SetCookie) -> String =
-  string.join("", [line ++ "\r\n"] ++ header_lines ++ cookie_lines ++ ["\r\n"])
+  string_concat_many([line ++ "\r\n"] ++ header_lines ++ cookie_lines ++ ["\r\n"])
 where
   header_lines = list_map(header_line, vec_to_list(headers))
   cookie_lines = list_map(\c -> header_line(("set-cookie", set_cookie_text(c))), vec_to_list(cookies))
