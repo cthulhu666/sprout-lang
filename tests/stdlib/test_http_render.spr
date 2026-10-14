@@ -102,5 +102,10 @@ fn main() -> Unit !{IO} =
     check_true("a 204 carries no content-length",
       ! contains (rendered(response(204, "")), "content-length")),
     check_true("a 204 sends no body, even when given one",
-      string.ends_with(rendered(response(204, "stray")), "\r\n\r\n"))
+      string.ends_with(rendered(response(204, "stray")), "\r\n\r\n")),
+    # The whole message, byte for byte: status line, caller headers in order, the defaulted
+    # content-type, content-length, one blank line, the body.
+    check_eq("the full message, in order",
+      rendered(with_header("x-b", "2", with_header("x-a", "1", ok("hi")))),
+      "HTTP/1.1 200 OK\r\nx-a: 1\r\nx-b: 2\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi")
   ])
