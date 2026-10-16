@@ -32,26 +32,26 @@ fn rendered_bool(r: Result scram.ScramError Bool) -> String =
   | Ok value -> to_string(value)
   | Err err -> `err:${scram.error_message(err)}`
 
-fn with_final(bare: String, f: (scram.ScramClientFinal) -> String) -> String =
-  match scram.parse_server_first(server_first_raw) with
-  | Err err -> `err:${scram.error_message(err)}`
-  | Ok server ->
-      match scram.client_final("pencil", bare, server, scram.no_channel_binding) with
-      | Err err -> `err:${scram.error_message(err)}`
-      | Ok final -> f(final)
+fn final_for(bare: String) -> Result scram.ScramError scram.ScramClientFinal =
+  scram.parse_server_first(server_first_raw)
+    |> and_then(\server -> scram.client_final("pencil", bare, server, scram.no_channel_binding))
+
+# Built once: each `client_final` runs a 4096-iteration PBKDF2.
+let rfc_final: Result scram.ScramError scram.ScramClientFinal = final_for(client_bare)
 
 fn final_text(bare: String) -> String =
-  with_final(bare, scram.client_final_text)
+  rendered_text(map(scram.client_final_text, final_for(bare)))
 
 # The `raw` argument is a whole server-final message, as it arrives on the wire.
 fn verify(raw: String) -> String =
-  with_final(client_bare, \final -> rendered_bool(scram.verify_server_final(final, raw)))
+  rendered_bool(and_then(\final -> scram.verify_server_final(final, raw), rfc_final))
 
 fn main() -> Unit !{IO} =
   run_suite("scram client-final and server-final verification", [
     # --- the RFC vector, so the expectations below are not self-referential ---
     check_eq("client-first-bare matches RFC 7677 §3", client_bare, "n=user,r=rOprNGfwEbeRWgbNEkqO"),
-    check_eq("client-final matches RFC 7677 §3", final_text(client_bare), rfc_client_final),
+    check_eq("client-final matches RFC 7677 §3", rendered_text(map(scram.client_final_text, rfc_final)),
+      rfc_client_final),
 
     # --- verify_server_final: the mutual-auth decision ---
     check_eq("genuine server signature verifies", verify(`v=${rfc_server_signature}`), "true"),
