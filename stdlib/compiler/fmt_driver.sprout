@@ -83,8 +83,9 @@ fn run_lint_file(path: String) -> Int !{IO} =
   | Err msg -> read_failed(path, msg)
   | Ok src ->
       do
-        let issues = formatter.lint_source(src)
-        let findings = lint_rules.lint_ast(src)
+        let tokenized = formatter.tokenize_source(src)
+        let issues = formatter.lint_tokens(src, tokenized)
+        let findings = lint_rules.lint_ast_tokens(src, tokenized)
         print_issues(path, issues)
         print_findings(path, findings)
         match (issues, findings) with

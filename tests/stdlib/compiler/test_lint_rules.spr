@@ -1,5 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.compiler.lint_rules as lint_rules
+import stdlib.compiler.formatter as formatter
 
 fn count_list(lst: List a) -> Int =
   match lst with
@@ -32,6 +33,10 @@ fn first_message(findings: List lint_rules.LintFinding) -> String =
   match findings with
   | [] -> ""
   | [f | _] -> finding_message(f)
+
+# `just lint` tokenizes a file once and gives the tokens to both lint passes.
+fn shared_tokens(src: String) -> List lint_rules.LintFinding =
+  lint_rules.lint_ast_tokens(src, formatter.tokenize_source(src))
 
 fn mentions_let_else(msg: String) -> Bool =
   str_find(msg, "let..else") != -1
@@ -797,6 +802,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "ignore-all: missing explanation suppresses nothing", count_by_rule(lint_rules.lint_ast(suppression_no_reason), "unparsed"), 1)
     assert_eq(state, "ignore-all: category needs the lint/ prefix", count_by_rule(lint_rules.lint_ast(suppression_bad_category), "malformed-suppression"), 1)
     assert_eq(state, "ignore-all: cannot suppress its own malformed-directive report", count_by_rule(lint_rules.lint_ast(suppression_self_shield), "malformed-suppression"), 1)
+    assert_eq(state, "shared tokens: a parse failure is reported", first_rule(shared_tokens(unparseable)), "unparsed")
+    assert_eq(state, "shared tokens: a lex failure is anchored", first_line(shared_tokens(unlexable)), 1)
+    assert_eq(state, "shared tokens: an AST rule fires", first_line(shared_tokens(three_deep_chain)), 2)
+    assert_eq(state, "shared tokens: a header directive suppresses", count_list(shared_tokens(suppressed_staircase)), 0)
 
     assert_eq(state, "docs example (depth 2): below min_staircase_depth=3, no finding", count_list(lint_rules.lint_ast(docs_example)), 0)
 

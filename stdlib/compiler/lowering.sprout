@@ -160,7 +160,7 @@ fn build_inst_method_map(
 #
 # For each constrained TInstanceDecl (e.g. instance Eq (Maybe a) where Eq a),
 # map constraint_key → (instance_type_args, instance_constraints, method_arities).
-# This is used by resolve_tdict_with_key to build lambda wrappers that capture
+# consume_block and the eta path read it to build lambda wrappers that capture
 # inner dicts at call sites where the type parameter is concrete (e.g. Maybe Int).
 
 fn collect_inst_meta(
@@ -766,8 +766,8 @@ fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
       | Nothing -> ast.TypeName("_")
   | _ -> ast.TypeName("_")
 
-# Returns true if any dict in the list is the __unresolved_* sentinel emitted by
-# resolve_tdict_with_key when a key is absent from both ctx_fwd and ctx_inst.
+# Returns true if any dict in the list is the __unresolved_* sentinel consume_block
+# emits for an EvForward whose key is absent from ctx_fwd.
 # Used to detect the P2 case: concrete instance found but inner constraint is not
 # in scope — fall back to the forwarded slot instead of emitting a bad IR node.
 # Note: checks __unresolved_* (dict-resolution sentinel) only; __eta_unresolved_*
@@ -1404,7 +1404,7 @@ fn evidence_inst_arities(key: String, ctx: LowerCtx) -> Dict (Int, Int) =
   | Nothing -> dict_empty()
 
 # Each child is an EvClasses for one (super-expanded) context constraint; flatten
-# them in declaration order, matching resolve_inner_constraint_dicts.
+# them in declaration order.
 fn consume_inner_dicts(children: List typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match children with
   | Nil -> Nil

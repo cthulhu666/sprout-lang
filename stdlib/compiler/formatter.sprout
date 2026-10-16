@@ -531,7 +531,7 @@ fn format_per_line(src: String) -> String =
 export fn format_source(src: String) -> String =
   format_tokenized(src, tokenize_source(src))
 
-fn tokenize_source(src: String) -> Result token.TokenizeError (Vec token.Token) =
+export fn tokenize_source(src: String) -> Result token.TokenizeError (Vec token.Token) =
   lexer.tokenize(source.strip_headers(src))
 
 fn format_tokenized(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> String =
@@ -613,8 +613,12 @@ fn lint_spans(tokenized: Result token.TokenizeError (Vec token.Token)) -> List T
   | Err _ -> Nil
   | Ok toks -> collect_spans(toks)
 
-# One tokenization feeds both the template spans and the format check.
 export fn lint_source(src: String) -> List LintIssue =
+  lint_tokens(src, tokenize_source(src))
+
+# `tokenized` is `tokenize_source(src)`. One tokenization feeds both the template
+# spans and the format check.
+export fn lint_tokens(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> List LintIssue =
   run_lint_fold(lint_spans(tokenized), lines)
     |> lint_state_issues
     |> add_missing_newline_issue(src, lines)
@@ -622,4 +626,3 @@ export fn lint_source(src: String) -> List LintIssue =
     |> list_reverse
   where
     lines = str_split_lines(src)
-    tokenized = tokenize_source(src)

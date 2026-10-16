@@ -1435,8 +1435,8 @@ fn unparsed_finding(pos: source.SourcePos, reason: String) -> LintFinding =
   mk_finding(pos, "unparsed", reason ++ " — no lint rule could be checked")
 
 # Every AST-based rule over a source file, before suppression is applied.
-fn ast_findings(src: String) -> List LintFinding =
-  match lexer.tokenize(source.strip_headers(src)) with
+fn ast_findings(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> List LintFinding =
+  match tokenized with
   | Err (token.TokenizeError msg pos) -> [unparsed_finding(pos, msg)]
   | Ok toks ->
       match parser.parse_program(toks) with
@@ -1468,7 +1468,12 @@ fn guarded_program_findings(src: String, written: Set, prog: ast.Program) -> Lis
          else list_filter(\ (f: LintFinding) -> finding_rule_id(f) != combinator_rule_id, found)
 
 export fn lint_ast(src: String) -> List LintFinding =
-  list_append(list_filter_map(directive_malformed, ds), list_filter(kept, ast_findings(src)))
+  lint_ast_tokens(src, lexer.tokenize(source.strip_headers(src)))
+
+# `tokenized` is `lexer.tokenize(source.strip_headers(src))`, so a caller that also
+# runs `formatter.lint_tokens` tokenizes once.
+export fn lint_ast_tokens(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> List LintFinding =
+  list_append(list_filter_map(directive_malformed, ds), list_filter(kept, ast_findings(src, tokenized)))
 where
   ds = file_directives(src)
   suppressed = list_filter_map(directive_rule, ds)
