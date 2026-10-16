@@ -32,17 +32,9 @@ export fn random_nonce(count: Int) -> Result crypto.CryptoError String !{IO} =
   | Err err -> Err(err)
   | Ok value -> Ok(crypto.base64_encode(value))
 
-fn char_at(raw: String, index: Int) -> Char =
-  string.char_at_or(raw, index, '?')
-
-fn escape_username_from(raw: String, index: Int, total: Int, acc: String) -> String =
-  if index >= total then acc
-  else if char_at(raw, index) == ',' then escape_username_from(raw, index + 1, total, string.concat(acc, "=2C"))
-  else if char_at(raw, index) == '=' then escape_username_from(raw, index + 1, total, string.concat(acc, "=3D"))
-  else escape_username_from(raw, index + 1, total, string.concat(acc, string.string_from_char(char_at(raw, index))))
-
+# RFC 5802 §5.1. "=" goes first, or the "=" of "=2C" would be escaped again.
 fn escape_username(raw: String) -> String =
-  escape_username_from(raw, 0, string.length(raw), "")
+  string.replace_all(",", "=2C", string.replace_all("=", "=3D", raw))
 
 export fn client_first_bare(username: String, nonce: String) -> String =
   string.concat("n=", string.concat(escape_username(username), string.concat(",r=", nonce)))
@@ -174,40 +166,33 @@ fn server_signature_with_inputs(salted: Bytes, auth: Bytes) -> String =
 where
   server_key = crypto.hmac_sha256(salted, bytes.from_string("Server Key"))
 
-fn signatures_unchecked(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult (String, String, String) =
-  match salted_password(password, server) with
-  | Err err -> Err(err)
-  | Ok salted ->
-      match client_proof_with_inputs(salted, auth) with
-      | Err err -> Err(err)
-      | Ok proof_b64 -> Ok((client_final_without_proof_raw, proof_b64, server_signature_with_inputs(salted, auth)))
+# The client-final message and the server signature it expects back. One PBKDF2 run makes
+# both, so an exchange pays for it once. Opaque, so the signature cannot be sent by mistake.
+export type ScramClientFinal =
+  | ScramClientFinal String String
+
+fn signed_final(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult ScramClientFinal =
+  let salted = try salted_password(password, server)
+      proof_b64 = try client_proof_with_inputs(salted, auth)
+  in Ok(ScramClientFinal(`${without_proof},p=${proof_b64}`, server_signature_with_inputs(salted, auth)))
 where
-  client_final_without_proof_raw = client_final_without_proof(channel_binding, server)
-  auth = auth_message(client_first_bare_raw, server, client_final_without_proof_raw)
+  without_proof = client_final_without_proof(channel_binding, server)
+  auth = auth_message(client_first_bare_raw, server, without_proof)
 
-fn signatures(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult (String, String, String) =
-  match client_nonce_from_bare(client_first_bare_raw) with
-  | Nothing -> Err(ScramInvalidNonce("SCRAM client-first-bare message missing nonce"))
-  | Just client_nonce ->
-      if string.starts_with(server_nonce(server), client_nonce) then
-        signatures_unchecked(password, client_first_bare_raw, server, channel_binding)
-      else
-        Err(ScramInvalidNonce("SCRAM server nonce does not extend client nonce"))
+export fn client_final(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult ScramClientFinal =
+  let Just client_nonce = client_nonce_from_bare(client_first_bare_raw) else Err(ScramInvalidNonce("SCRAM client-first-bare message missing nonce"))
+  in
+    if string.starts_with(server_nonce(server), client_nonce) then
+      signed_final(password, client_first_bare_raw, server, channel_binding)
+    else Err(ScramInvalidNonce("SCRAM server nonce does not extend client nonce"))
 
-export fn client_proof(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult String =
-  do
-    (_, proof_b64, _) <- signatures(password, client_first_bare_raw, server, channel_binding)
-    Ok(proof_b64)
+export fn client_final_text(final: ScramClientFinal) -> String =
+  match final with
+  | ScramClientFinal text _ -> text
 
-export fn client_final_message(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult String =
-  do
-    (client_final_without_proof_raw, proof_b64, _) <- signatures(password, client_first_bare_raw, server, channel_binding)
-    Ok(string.concat(client_final_without_proof_raw, string.concat(",p=", proof_b64)))
-
-export fn server_signature(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String) -> ScramResult String =
-  do
-    (_, _, signature_b64) <- signatures(password, client_first_bare_raw, server, channel_binding)
-    Ok(signature_b64)
+fn expected_signature(final: ScramClientFinal) -> String =
+  match final with
+  | ScramClientFinal _ signature -> signature
 
 fn server_final_verifier(raw: String) -> ScramResult String =
   match attr_value(raw, "e") with
@@ -216,13 +201,10 @@ fn server_final_verifier(raw: String) -> ScramResult String =
       result_from_maybe(ScramInvalidMessage("SCRAM server-final message missing verifier"),
         attr_value(raw, "v"))
 
-export fn verify_server_final(password: String, client_first_bare_raw: String, server: ScramServerFirst, channel_binding: String, raw: String) -> ScramResult Bool =
+export fn verify_server_final(final: ScramClientFinal, raw: String) -> ScramResult Bool =
   match server_final_verifier(raw) with
   | Err err -> Err(err)
-  | Ok verifier ->
-      match server_signature(password, client_first_bare_raw, server, channel_binding) with
-      | Err err -> Err(err)
-      # Constant-time: the verifier arrives from the network and `expected` is derived
-      # from the password, so a compare that stops at the first difference tells a
-      # malicious server how much of the signature it guessed.
-      | Ok expected -> Ok(crypto.const_time_eq(bytes.from_string(verifier), bytes.from_string(expected)))
+  # Constant-time: the verifier arrives from the network and the expected one is derived
+  # from the password, so a compare that stops at the first difference tells a
+  # malicious server how much of the signature it guessed.
+  | Ok verifier -> Ok(crypto.const_time_eq(bytes.from_string(verifier), bytes.from_string(expected_signature(final))))

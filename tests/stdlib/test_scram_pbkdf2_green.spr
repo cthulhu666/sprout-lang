@@ -6,7 +6,7 @@ import stdlib.scram as scram
 # recursion) must run in O(1) GC roots inside a green task. Un-optimized mutual
 # recursion accumulates the recursive call's heap args one set per frame; at the
 # SCRAM-default 4096 iterations that is ~9 roots x 4096 ~= 36864 simultaneous
-# roots, which exhausts a green task's 16384-slot root pool. `client_proof`
+# roots, which exhausts a green task's 16384-slot root pool. `client_final`
 # drives PBKDF2 via `salted_password`.
 #
 # On the pre-mutual-TCO compiler this ABORTS the process with
@@ -24,13 +24,13 @@ let server_first_raw: String =
 fn client_bare() -> String =
   scram.client_first_bare("user", "fyko+d2lbbFgONRv9qkxdawL")
 
-# Pure: runs the full PBKDF2 (4096 HMAC iterations) via client_proof. Returns
+# Pure: runs the full PBKDF2 (4096 HMAC iterations) via client_final. Returns
 # true iff a proof was produced (i.e. the loop completed without exhausting).
 fn compute_proof() -> Bool =
   match scram.parse_server_first(server_first_raw) with
   | Err _ -> false
   | Ok server ->
-      match scram.client_proof("pencil", client_bare(), server, scram.no_channel_binding) with
+      match scram.client_final("pencil", client_bare(), server, scram.no_channel_binding) with
       | Err _ -> false
       | Ok _ -> true
 
@@ -45,5 +45,5 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
     ok <- with_scope(\s -> run_on_green(s))
-    assert_eq(state, "SCRAM PBKDF2 (client_proof) completes in a green task without root-pool exhaustion", ok, true)
+    assert_eq(state, "SCRAM PBKDF2 (client_final) completes in a green task without root-pool exhaustion", ok, true)
     summary(state)
