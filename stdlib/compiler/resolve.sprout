@@ -538,22 +538,20 @@ fn te_display_atom(te: ast.TypeExpr) -> String =
 #
 # Resolve one constraint into the Evidence tree lowering will consume.  A single
 # TDict lowers to one witness block per *effective class* — the constraint's class
-# followed by its transitive superclasses — so produce_evidence expands supers the
-# same way lowering's resolve_tdict does, via the shared
-# types.class_with_transitive_supers (one source of order + dedup), and wraps the
-# per-class blocks in EvClasses.  Each block mirrors
-# lowering's resolve_tdict_with_key decision order exactly:
+# followed by its transitive superclasses — so produce_evidence expands supers via
+# types.class_with_transitive_supers (one source of order + dedup, shared with
+# lowering's unresolved path), and wraps the per-class blocks in EvClasses.  Each
+# block is decided in this order:
 #   * key in fwd_keys           → EvForward key   (the enclosing function forwards
 #                                  this exact constraint as a hidden param — checked
-#                                  FIRST, mirroring lowering's ctx_fwd-before-ctx_inst
-#                                  priority; applies even to a CONCRETE head that also
-#                                  has an instance, e.g. `where Summable (Vec Int)`)
+#                                  FIRST, so it applies even to a CONCRETE head that
+#                                  also has an instance, e.g. `where Summable (Vec Int)`)
 #   * type-variable head        → EvForward key   (forwarded, or a phantom fresh tyvar
 #                                  that lowering null-fills on the ctx_fwd miss)
 #   * concrete head, bundled    → EvInstance key children  (children = one Evidence
 #                                  per substituted instance context constraint)
 #   * concrete head, env-marker → EvUnresolved    (imported instance not bundled;
-#                                  lowering resolves it, same as today)
+#                                  lowering emits __unresolved_ sentinels)
 #   * concrete head, no instance→ EvMissing       (unreachable once check passes)
 #
 # fwd_keys is the set of constraint_keys the enclosing function forwards (its
@@ -607,8 +605,8 @@ fn produce_concrete_evidence(
 # a constrained instance recurses on each context constraint substituted at the
 # concrete head's type args, in declaration order (matching lowering's inner_dicts).
 # Each child is itself an EvClasses (the context constraint is super-expanded too).
-# The inner dicts share the enclosing function's fwd_keys, exactly as lowering's
-# resolve_inner_constraint_dicts resolves them against the same ctx_fwd.
+# The inner dicts share the enclosing function's fwd_keys, so a forwarded inner
+# constraint reads the same ctx_fwd slot in lowering.
 fn produce_instance_evidence(
   eff_class: String,
   key: String,

@@ -65,8 +65,9 @@ export type TypedRecordField (..) = TypedRecordField String TypedExpr
 
 # Resolved typeclass-dictionary evidence attached to a TDict node.
 # EvClasses: one block per effective class — the constraint's class followed by its
-#   transitive superclasses (the witness order lowering's resolve_tdict produces).
-# EvUnresolved: not yet rewritten by the resolve pass (lowering resolves it itself).
+#   transitive superclasses (the order lowering emits witnesses in).
+# EvUnresolved: resolve found no bundled instance; lowering emits __unresolved_
+#   sentinels for it.
 # EvInstance/EvForward each carry TWO differently-shaped strings:
 #   class_name — the ClassDecl name form, UNSTRIPPED (lowering's class_methods_for /
 #     class_order key on this form to get the ordered method list); and

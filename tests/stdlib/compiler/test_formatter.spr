@@ -4,6 +4,9 @@ import stdlib.compiler.formatter as formatter
 fn issue_count(src: String) -> Int =
   list_length(formatter.lint_source(src))
 
+fn shared_issue_count(src: String) -> Int =
+  list_length(formatter.lint_tokens(src, formatter.tokenize_source(src)))
+
 fn main() -> Unit !{IO} =
   run_suite("formatter", [
     # Regression: needs_space's fallback path (formatter.sprout
@@ -138,5 +141,9 @@ fn main() -> Unit !{IO} =
     check_eq("lint_source: unformatted and missing newline",
       issue_count("let x=1"), 2),
     check_eq("lint_source: bad tokenization still lints lines",
-      issue_count("let s = \"abc  \n"), 2)
+      issue_count("let s = \"abc  \n"), 2),
+    check_eq("lint_tokens: unformatted and missing newline",
+      shared_issue_count("let x=1"), 2),
+    check_eq("lint_tokens: bad tokenization still lints lines",
+      shared_issue_count("let s = \"abc  \n"), 2)
   ])

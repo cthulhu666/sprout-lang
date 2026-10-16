@@ -197,41 +197,11 @@ fn qualified_name(module_name: source.ModuleName, name: source.RawName) -> sourc
   where mn = source.module_name_str(module_name)
         rn = source.raw_name_str(name)
 
-fn str_list_member(name: String, lst: List String) -> Bool =
-  match lst with
-  | Nil -> false
-  | Cons h t -> if h == name then true else str_list_member(name, t)
-
+# `maybe_with_default` would box the `dict_get` result; matching it in place does not.
 fn dict_get_or(key: String, d: Dict String, default: String) -> String =
   match dict_get(key, d) with
   | Nothing -> default
   | Just v -> v
-
-fn split_at_dot(name: String) -> (String, String) =
-  match string.split_once(name, ".") with
-  | Just parts -> parts
-  | Nothing -> ("", name)
-
-fn vec_to_str_list(v: Vec String, i: Int) -> List String =
-  if i >= vec_length(v) then Nil
-  else
-    match vec_get(i, v) with
-    | Nothing -> vec_to_str_list(v, i + 1)
-    | Just k -> Cons(k, vec_to_str_list(v, i + 1))
-
-fn dict_keys_list(d: Dict String) -> List String =
-  vec_to_str_list(dict_keys(d), 0)
-
-fn dict_merge(d1: Dict String, d2: Dict String) -> Dict String =
-  dict_merge_keys(d1, dict_keys_list(d2), d2)
-
-fn dict_merge_keys(acc: Dict String, keys: List String, src: Dict String) -> Dict String =
-  match keys with
-  | Nil -> acc
-  | Cons k rest ->
-      match dict_get(k, src) with
-      | Nothing -> dict_merge_keys(acc, rest, src)
-      | Just v -> dict_merge_keys(dict_set(k, v, acc), rest, src)
 
 # ---------------------------------------------------------------------------
 # Source scanning: module name and export names from raw source text
@@ -500,11 +470,11 @@ fn process_wi_visit(
 ) -> List LoadIssue !{IO} =
   do
     seen_list <- ref_read(seen)
-    if str_list_member(path, seen_list) then Nil
+    if list_member(path, seen_list) then Nil
     else
       do
         visiting_list <- ref_read(visiting)
-        if str_list_member(path, visiting_list) then
+        if list_member(path, visiting_list) then
           Cons(LoadIssue(path, no_pos(), "Import cycle detected involving: " ++ path), Nil)
         else
           do
@@ -837,15 +807,15 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   | ast.TypeDecl name _ ctors _ _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
   | ast.RecordDecl name _ _ _ _ _ _ ->
-      add_record_to_symbols(mod_name, name, str_list_member(name, exported),
-        str_list_member(name, ctor_types), acc)
+      add_record_to_symbols(mod_name, name, list_member(name, exported),
+        list_member(name, ctor_types), acc)
   | ast.ClassDecl name _ methods _ _ ->
-      add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
+      add_class_to_symbols(mod_name, name, methods, list_member(name, exported), acc)
   | ast.InstanceDecl _ _ _ _ -> acc
   # An alias declares a name for a type and nothing else — no constructor, so
   # nothing for `(..)` to govern.
   | ast.AliasDecl name _ _ _ ->
-      add_type_name_to_symbols(mod_name, name, str_list_member(name, exported), acc)
+      add_type_name_to_symbols(mod_name, name, list_member(name, exported), acc)
   # WrapDecl: register the type AND the synthetic constructor (same name) so
   # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
   | ast.WrapDecl name _ inner _ _ ->
@@ -878,7 +848,7 @@ fn add_value_names(mod_name: String, exported: List String, names: List String, 
   | Nil -> acc
   | Cons name rest ->
       add_value_names(mod_name, exported, rest,
-        add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc))
+        add_value_to_symbols(mod_name, name, list_member(name, exported), acc))
 
 fn canonical_of(mod_name: String, name: String) -> String =
   source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
@@ -951,8 +921,8 @@ fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.Type
                         if export_ctors then dict_set(type_name, ctor_map, ce) else ce,
                         xs)
   where canonical = canonical_of(mod_name, type_name)
-        is_type_exported = str_list_member(type_name, exported)
-        export_ctors = str_list_member(type_name, ctor_types)
+        is_type_exported = list_member(type_name, exported)
+        export_ctors = list_member(type_name, ctor_types)
 
 fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bool, vl: Dict String, ev: Dict String, ctor_map: Dict String) -> (Dict String, Dict String, Dict String) =
   match ctors with
@@ -1113,7 +1083,7 @@ fn foreign_externs(own: List String, externs: List (String, String)) -> Dict Str
 
 fn add_foreign_extern(own: List String, acc: Dict String, entry: (String, String)) -> Dict String =
   match entry with
-  | (m, n) -> if str_list_member(n, own) then acc else dict_set(n, m, acc)
+  | (m, n) -> if list_member(n, own) then acc else dict_set(n, m, acc)
 
 # Found by path, as `prelude_type_names` does. Empty when the bundle has no
 # prelude; under `no_prelude` it is the floor.
@@ -1143,7 +1113,7 @@ fn prelude_type(names: PreludeNames, name: String) -> Maybe String =
 # Deliberately drawn from the `*_locals` tables, not the `exported_*` ones. A
 # PRIVATE name is exactly the one this rule has to catch.
 fn all_canonical_names(all_symbols: Dict ModuleSymbols) -> Dict String =
-  canonical_names_of(all_symbols, vec_to_str_list(dict_keys(all_symbols), 0), dict_empty())
+  canonical_names_of(all_symbols, vec_to_list(dict_keys(all_symbols)), dict_empty())
 
 fn canonical_names_of(all_symbols: Dict ModuleSymbols, paths: List String,
                       acc: Dict String) -> Dict String =
@@ -1162,7 +1132,7 @@ fn canonical_names_of(all_symbols: Dict ModuleSymbols, paths: List String,
 # ones. Undotted values are skipped — a headerless module's names are canonical
 # AND bare, and marking those would take every ordinary reference with them.
 fn add_canonical(src: Dict String, acc: Dict String) -> Dict String =
-  add_canonical_keys(src, dict_keys_list(src), acc)
+  add_canonical_keys(src, vec_to_list(dict_keys(src)), acc)
 
 fn add_canonical_keys(src: Dict String, keys: List String, acc: Dict String) -> Dict String =
   match keys with
@@ -1193,7 +1163,7 @@ fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymb
      | module_loader.ImportSelective _ names _ -> apply_selective_names(names, symbols, ctx)
 
 fn merge_type_exports(symbols: ModuleSymbols) -> Dict String =
-  dict_merge(sym_exported_types(symbols), sym_exported_cls(symbols))
+  sym_exported_types(symbols) ++ sym_exported_cls(symbols)
 
 fn apply_selective_names(names: List String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
   match names with
@@ -1226,7 +1196,7 @@ fn type_bindings(name: String, symbols: ModuleSymbols) -> List ImportBinding =
       Cons(ImportBinding (NsType, name, canonical),
         match dict_get(name, sym_ctor_exports(symbols)) with
         | Nothing -> Nil
-        | Just ctor_map -> ctor_bindings(ctor_map, dict_keys_list(ctor_map)))
+        | Just ctor_map -> ctor_bindings(ctor_map, vec_to_list(dict_keys(ctor_map))))
 
 fn ctor_bindings(ctor_map: Dict String, ctor_names: List String) -> List ImportBinding =
   match ctor_names with
@@ -1257,7 +1227,7 @@ fn apply_import_binding(b: ImportBinding, ctx: ResolveCtx) -> ResolveCtx =
   | ImportBinding NsPrefix _ _ -> ctx
 
 fn try_add_method(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
-  if str_list_member(name, sym_method_names(symbols)) then
+  if list_member(name, sym_method_names(symbols)) then
     ctx_with_methods(ctx, Cons(name, Nil))
   else ctx
 
@@ -1357,8 +1327,8 @@ fn ns_tag(ns: ImportNs) -> String =
 fn import_name_binds(name: String, symbols: ModuleSymbols) -> Bool =
   match selective_name_bindings(name, symbols) with
   | Nil ->
-      str_list_member(name, sym_method_names(symbols))
-        || str_list_member(name, sym_extern_names(symbols))
+      list_member(name, sym_method_names(symbols))
+        || list_member(name, sym_extern_names(symbols))
   | [_ | _] -> true
 
 fn module_declares_name(name: String, symbols: ModuleSymbols) -> Bool =
@@ -1477,91 +1447,106 @@ fn qualify_type_expr(ctx: ResolveCtx, t: ast.TypeExpr) -> ast.TypeExpr =
   | ast.TupleType items -> ast.TupleType(qualify_type_list(ctx, items))
 
 fn qualify_type_name(ctx: ResolveCtx, name: String) -> String =
-  if str_find(name, ".") != -1 then
-    match qualified_type_lookup(ctx, name) with
-    | Just canonical -> canonical
-    | Nothing ->
-        match prelude_qualified(ctx, name, \symbol -> prelude_type(ctx.prelude, symbol)) with
-        | Just canonical -> canonical
-        | Nothing -> guard_canonical(ctx, Nil, name)
-  else
-    match dict_get(name, ctx.type_locals) with
-    | Just canonical -> canonical
-    | Nothing ->
-        match dict_get(name, ctx.class_locals) with
-        | Just canonical -> canonical
-        | Nothing ->
-            match dict_get(name, ctx.unqual_types) with
-            | Just canonical -> canonical
-            | Nothing ->
-                match dict_get(name, ctx.unqual_classes) with
-                | Just canonical -> canonical
-                | Nothing -> name
+  match string.split_once(name, ".") with
+  | Nothing -> bare_type_name(ctx, name)
+  | Just (head, symbol) ->
+      match alias_export(head, symbol, ctx.alias_type_exports) with
+      | Just canonical -> canonical
+      | Nothing ->
+          match prelude_qualified(ctx, head, symbol, \s -> prelude_type(ctx.prelude, s)) with
+          | Just canonical -> canonical
+          | Nothing -> guard_canonical(ctx, name)
 
-# `Nothing` means module-alias resolution DECLINED, which a String return could
-# not express: a single-segment module makes `demo.sealed` resolve to itself, and
-# "unchanged" then reads as "declined". guard_canonical turns that confusion into
-# a rejected program, so the two must stay distinguishable.
-fn qualified_type_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
-  match split_at_dot(name) with
-  | ("", _) -> Nothing
-  | (alias, symbol) ->
-      match dict_get(alias, ctx.alias_type_exports) with
-      | Nothing -> Nothing
-      | Just exports -> dict_get(symbol, exports)
+fn bare_type_name(ctx: ResolveCtx, name: String) -> String =
+  match dict_get(name, ctx.type_locals) with
+  | Just canonical -> canonical
+  | Nothing ->
+      match dict_get(name, ctx.class_locals) with
+      | Just canonical -> canonical
+      | Nothing ->
+          match dict_get(name, ctx.unqual_types) with
+          | Just canonical -> canonical
+          | Nothing ->
+              match dict_get(name, ctx.unqual_classes) with
+              | Just canonical -> canonical
+              | Nothing -> name
+
+# `alias.symbol` through an import alias's export table. `Nothing` means module-alias
+# resolution DECLINED, which a String return could not express: a single-segment
+# module makes `demo.sealed` resolve to itself, and "unchanged" then reads as
+# "declined". guard_canonical turns that confusion into a rejected program, so the
+# two must stay distinguishable.
+fn alias_export(alias: String, symbol: String, aliases: Dict (Dict String)) -> Maybe String =
+  match dict_get(alias, aliases) with
+  | Nothing -> Nothing
+  | Just exports -> dict_get(symbol, exports)
 
 # DOTTED-NAME CASCADE — do not reorder, and do not drop a step, without checking
 # all six readings a dotted name has. Only the last is an error. A and C rename
-# through `local_name`/`local_head` like any local:
+# through `local_name` like any local. The name is split at its first dot once,
+# and B to F read the `head` and `rest` halves:
 #   A. A binder named by the WHOLE dotted name — the `scope` test below. Rare;
 #      a name with a dot in it is not writable as a binder, but lambdas and
 #      `do` binds thread names in verbatim.
 #   B. A field chain whose HEAD is a module-level value (`origin.x`) — claimed
-#      earlier, in `qualify_expr`, by `dotted_value_field_access`.
-#   C. A field chain whose HEAD is a LOCAL binder — the `head_segment` test
-#      below. Spec §field-access is normative: "a local binding wins over a
-#      same-named module in head position." It must precede D, or an import
-#      alias sharing a parameter's name answers `origin.x` with the module's
-#      export and the program reads a different value, compiling clean.
-#   D. An alias-qualified import (`sealed.unseal`) — `qualified_value_lookup`.
+#      earlier, in `qualify_var`, by `dotted_value_field_access`.
+#   C. A field chain whose HEAD is a LOCAL binder — the `head` test in
+#      `dotted_value_name`. Spec §field-access is normative: "a local binding
+#      wins over a same-named module in head position." It must precede D, or an
+#      import alias sharing a parameter's name answers `origin.x` with the
+#      module's export and the program reads a different value, compiling clean.
+#   D. An alias-qualified import (`sealed.unseal`) — `alias_export`.
 #   E. `prelude.X` — `prelude_qualified`. After D, so an alias named `prelude`
 #      wins; before F, which would mark it as a typed canonical name.
 #   F. Anything left: a method name, a typo, or a hand-written canonical name.
 #      `guard_canonical` separates the last from the rest and must run here,
 #      after D has declined — running it earlier would reject `sealed.unseal`,
 #      whose canonical form is in the same table.
-#
-# `guard_canonical` repeats C's head test because it is also called with an
-# empty scope (from `qualify_type_name`), where no binder can have been seen.
 fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> String =
-  if str_list_member(name, scope) then local_name(ctx, name)
-  else if str_find(name, ".") != -1 then
-    if str_list_member(head_segment(name), scope) then local_head(ctx, name)
-    else
-      match qualified_value_lookup(ctx, name) with
-      | Just canonical -> canonical
-      | Nothing ->
-          match prelude_qualified(ctx, name, \symbol -> prelude_value(ctx.prelude, symbol)) with
-          | Just canonical -> guard_private_extern(ctx, canonical)
-          | Nothing -> guard_canonical(ctx, scope, name)
+  if list_member(name, scope) then local_name(ctx, name)
   else
-    match dict_get(name, ctx.value_locals) with
+    match string.split_once(name, ".") with
+    | Nothing -> bare_value_name(ctx, name)
+    | Just (head, rest) -> dotted_value_name(ctx, scope, name, head, rest)
+
+# `qualify_value_name` for an expression, which also has reading B.
+fn qualify_var(ctx: ResolveCtx, scope: List String, name: String, pos: source.SourcePos) -> ast.Expr =
+  if list_member(name, scope) then ast.VarExpr(local_name(ctx, name), pos)
+  else
+    match string.split_once(name, ".") with
+    | Nothing -> ast.VarExpr(bare_value_name(ctx, name), pos)
+    | Just (head, rest) ->
+        match dotted_value_field_access(ctx, scope, head, rest, pos) with
+        | Just chain -> chain
+        | Nothing -> ast.VarExpr(dotted_value_name(ctx, scope, name, head, rest), pos)
+
+# C to F of the cascade above.
+fn dotted_value_name(ctx: ResolveCtx, scope: List String, name: String, head: String, rest: String) -> String =
+  if list_member(head, scope) then local_name(ctx, head) ++ "." ++ rest
+  else
+    match alias_export(head, rest, ctx.alias_val_exports) with
     | Just canonical -> canonical
     | Nothing ->
-        if str_list_member(name, ctx.method_names) then name
-        else
-          match dict_get(name, ctx.unqual_values) with
-          | Just canonical -> canonical
-          | Nothing -> guard_private_extern(ctx, name)
+        match prelude_qualified(ctx, head, rest, \s -> prelude_value(ctx.prelude, s)) with
+        | Just canonical -> guard_private_extern(ctx, canonical)
+        | Nothing -> guard_canonical(ctx, name)
+
+fn bare_value_name(ctx: ResolveCtx, name: String) -> String =
+  match dict_get(name, ctx.value_locals) with
+  | Just canonical -> canonical
+  | Nothing ->
+      if list_member(name, ctx.method_names) then name
+      else
+        match dict_get(name, ctx.unqual_values) with
+        | Just canonical -> canonical
+        | Nothing -> guard_private_extern(ctx, name)
 
 # `prelude.X` is the prelude's `X`, after a local, an import alias or a top-level
 # value named `prelude` has declined it (docs/prelude-name-identity-v0.md §5). `Nothing` for an `X` the
 # prelude lacks, so the name stays unresolved and inference reports it.
-fn prelude_qualified(ctx: ResolveCtx, name: String, declared: String -> Maybe String) -> Maybe String =
-  match split_at_dot(name) with
-  | (head, symbol) ->
-      if head != ast.prelude_qualifier || claims_prelude_head(ctx, head) then Nothing
-      else declared(symbol)
+fn prelude_qualified(ctx: ResolveCtx, head: String, symbol: String, declared: String -> Maybe String) -> Maybe String =
+  if head != ast.prelude_qualifier || claims_prelude_head(ctx, head) then Nothing
+  else declared(symbol)
 
 # An import alias or a top-level value named `prelude` takes the head in every
 # position, so `prelude.X` means one thing in an expression, a pattern and a type.
@@ -1580,20 +1565,6 @@ fn local_name(ctx: ResolveCtx, name: String) -> String =
   | Nothing -> name
   | Just _ -> source.local_rename_prefix ++ name
 
-# A field chain on a local: rename the head, keep the fields.
-fn local_head(ctx: ResolveCtx, name: String) -> String =
-  match split_at_dot(name) with
-  | ("", whole) -> local_name(ctx, whole)
-  | (head, fields) -> local_name(ctx, head) ++ "." ++ fields
-
-fn qualified_value_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
-  match split_at_dot(name) with
-  | ("", _) -> Nothing
-  | (alias, symbol) ->
-      match dict_get(alias, ctx.alias_val_exports) with
-      | Nothing -> Nothing
-      | Just exports -> dict_get(symbol, exports)
-
 # A dotted name no import claims is normally a field chain (`o.inner.n`) or a
 # genuine typo, and is left alone for inference to read. One shape is neither: a
 # `<module>.<name>` someone typed. The bundler flattens modules into one namespace
@@ -1604,17 +1575,14 @@ fn qualified_value_lookup(ctx: ResolveCtx, name: String) -> Maybe String =
 # no error channel, and the marked name cannot resolve (nothing declares one), so
 # the existing unknown-name paths raise it with the position they already have.
 # `infer.unresolved_name_message` and `unresolved_type_message` render it.
-# `scope` is the enclosing binders. `qualify_value_name` tests the WHOLE dotted
-# name against it, which a field chain never matches — for `demo.dup_one.x` the
-# binder is `demo`, the HEAD. Without that second test a parameter named after a
-# module turns a correct chain into a rejected program, because the chain happens
-# to spell a canonical name. Types pass `Nil`: a type name's head is never a local.
-fn guard_canonical(ctx: ResolveCtx, scope: List String, name: String) -> String =
-  if str_list_member(head_segment(name), scope) then name
-  else
-    match dict_get(name, ctx.canonical_names) with
-    | Nothing -> name
-    | Just _ -> source.canonical_marker ++ name
+# The caller has already tested the head against the enclosing binders: for
+# `demo.dup_one.x` the binder is `demo`, and without that test a parameter named
+# after a module turns a correct chain into a rejected program. A type name's head
+# is never a local.
+fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
+  match dict_get(name, ctx.canonical_names) with
+  | Nothing -> name
+  | Just _ -> source.canonical_marker ++ name
 
 # An extern with a `local` parameter is reachable only from its declaring module
 # (spec-v0 §Externs). `foreign_externs` holds the ones declared ELSEWHERE, so an
@@ -1623,11 +1591,6 @@ fn guard_private_extern(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.foreign) with
   | Nothing -> name
   | Just module -> source.mark_private_extern(module, name)
-
-fn head_segment(name: String) -> String =
-  match split_at_dot(name) with
-  | ("", whole) -> whole
-  | (head, _) -> head
 
 # Dot access whose head is a MODULE-LEVEL value (docs/records-v0.md §4.3).
 #
@@ -1646,33 +1609,26 @@ fn head_segment(name: String) -> String =
 # disagree about precedence for names qualification DOES claim (there, module
 # wins; at inference, the value would); that divergence predates this rule and is
 # left alone deliberately, since changing it would change shadowing semantics.
-fn is_claimed_by_import(ctx: ResolveCtx, name: String) -> Bool =
-  match qualified_value_lookup(ctx, name) with
-  | Nothing -> false
-  | Just _ -> true
-
 fn dotted_value_field_access(
   ctx: ResolveCtx,
   scope: List String,
-  name: String,
+  head: String,
+  rest: String,
   pos: source.SourcePos
 ) -> Maybe ast.Expr =
-  if str_find(name, ".") == -1 then Nothing
-  else if str_list_member(name, scope) then Nothing
-  else if is_claimed_by_import(ctx, name) then Nothing
+  if list_member(head, scope) then Nothing
   else
-    match string.split_once(name, ".") with
-    | Nothing -> Nothing
-    | Just (head, rest) ->
-        if str_list_member(head, scope) then Nothing
-        else
-          match module_level_value(ctx, head) with
-          | Nothing -> Nothing
-          | Just canonical ->
-              Just(ast.build_field_chain(ast.VarExpr(canonical, pos), rest, pos))
+    match alias_export(head, rest, ctx.alias_val_exports) with
+    | Just _ -> Nothing
+    | Nothing -> module_field_chain(ctx, head, rest, pos)
+
+fn module_field_chain(ctx: ResolveCtx, head: String, rest: String, pos: source.SourcePos) -> Maybe ast.Expr =
+  match module_level_value(ctx, head) with
+  | Nothing -> Nothing
+  | Just canonical -> Just(ast.build_field_chain(ast.VarExpr(canonical, pos), rest, pos))
 
 # The head's canonical name: this module's own top-level values first, then names
-# imported unqualified.  Same two dictionaries `qualify_value_name` consults, in
+# imported unqualified.  Same two dictionaries `bare_value_name` consults, in
 # the same order, so a head resolves here exactly when the bare name would.
 fn module_level_value(ctx: ResolveCtx, head: String) -> Maybe String =
   match dict_get(head, ctx.value_locals) with
@@ -1757,10 +1713,7 @@ fn qualify_expr_list(ctx: ResolveCtx, scope: List String, exprs: List ast.Expr) 
 
 fn qualify_expr(ctx: ResolveCtx, scope: List String, expr: ast.Expr) -> ast.Expr =
   match expr with
-  | ast.VarExpr name pos ->
-      match dotted_value_field_access(ctx, scope, name, pos) with
-      | Just chain -> chain
-      | Nothing -> ast.VarExpr(qualify_value_name(ctx, scope, name), pos)
+  | ast.VarExpr name pos -> qualify_var(ctx, scope, name, pos)
   | ast.IntExpr _ _ -> expr
   | ast.FloatExpr _ _ -> expr
   | ast.BoolExpr _ _ -> expr
@@ -1997,7 +1950,7 @@ fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
   match decl with
   | ast.RecordDecl name type_params fields deriving_classes mult _ pos ->
       ast.RecordDecl(name, type_params, fields, deriving_classes, mult,
-        if str_list_member(name, ctor_types) then ast.Published else ast.Abstract,
+        if list_member(name, ctor_types) then ast.Published else ast.Abstract,
         pos)
   | _ -> decl
 
@@ -2074,7 +2027,7 @@ let undeclared_type_names: List String =
 fn type_over_floor(t: ast.TypeExpr) -> Bool =
   match t with
   | ast.TypeName name ->
-      type_name_starts_lower(name) || str_list_member(name, floor_type_names)
+      type_name_starts_lower(name) || list_member(name, floor_type_names)
   | ast.TypeApply base arg -> type_over_floor(base) && type_over_floor(arg)
   | ast.TypeArrow left right _ _ -> type_over_floor(left) && type_over_floor(right)
   | ast.TypeThunk right _ -> type_over_floor(right)
@@ -2159,7 +2112,7 @@ fn declared_type_names(decls: List ast.Decl, acc: Dict String) -> Dict String =
 
 fn type_name_in_scope(name: String, declared: Dict String) -> Bool =
   if type_name_starts_lower(name) then true
-  else if str_list_member(name, undeclared_type_names) then true
+  else if list_member(name, undeclared_type_names) then true
   else
     dict_member(name, declared)
 
@@ -2385,7 +2338,7 @@ fn unresolved_type_message(name: String, decl_name: String, declared: Dict Strin
   if str_starts_with(name, source.canonical_marker)
   then source.canonical_name_message(name)
   else
-    match exporting_module(name, dict_keys_list(declared)) with
+    match exporting_module(name, vec_to_list(dict_keys(declared))) with
     | Nothing -> base
     | Just mod_name ->
         base ++ ". `" ++ mod_name ++ "` exports it — add it to that module's import list"
@@ -2445,20 +2398,24 @@ fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, List String, String, s
       if ctor == name then Nothing else Just((name, params, ctor, pos))
   | _ -> Nothing
 
-fn alias_names_type(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
-  match qualified_type_lookup(ctx, name) with
+fn alias_names_type(ctx: ResolveCtx, vocab: TypeVocab, alias: String, symbol: String) -> Bool =
+  match alias_export(alias, symbol, ctx.alias_type_exports) with
   | Nothing -> false
   | Just canonical -> dict_member(canonical, vocab.type_canonicals)
 
 # A bare name is tried in qualify_type_name's order, so a class the module declares
 # or imports hides a prelude or builtin type of its name.
 fn names_type_in_scope(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
-  if str_find(name, ".") != -1 then alias_names_type(ctx, vocab, name)
-  else if dict_member(name, ctx.type_locals) then true
+  match string.split_once(name, ".") with
+  | Just (alias, symbol) -> alias_names_type(ctx, vocab, alias, symbol)
+  | Nothing -> bare_names_type(ctx, vocab, name)
+
+fn bare_names_type(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
+  if dict_member(name, ctx.type_locals) then true
   else if dict_member(name, ctx.class_locals) then false
   else if dict_member(name, ctx.unqual_types) then true
   else if dict_member(name, ctx.unqual_classes) then false
-  else str_list_member(name, undeclared_type_names) || dict_member(name, vocab.prelude_types)
+  else list_member(name, undeclared_type_names) || dict_member(name, vocab.prelude_types)
 
 # `shown` is the qualified name, so the message names the module; `head` is the
 # type as written, with its parameters, which the suggested fix needs.

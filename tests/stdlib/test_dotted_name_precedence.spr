@@ -1,0 +1,28 @@
+module main
+
+import stdlib.test (check_eq, run_suite)
+import testsupport.alias_shadow as origin
+
+# The bundler's dotted-name cascade (`bundler.qualify_value_name`) between a
+# module-level value and the two qualifiers it shares a head with. A top-level
+# value named like an import alias loses to the alias; one named `prelude` wins
+# over the `prelude.` qualifier, as a local does.
+
+type Point (..) = (x: Int, y: Int)
+
+let origin = Point(x = 7, y = 8)
+
+let prelude = Point(x = 4, y = 5)
+
+fn alias_over_value() -> Int = origin.x
+
+fn alias_call_over_value() -> Int = origin.scale(2)
+
+fn value_over_prelude() -> Int = prelude.y
+
+fn main() -> Unit !{IO} =
+  run_suite("dotted name precedence", [
+    check_eq("an import alias wins over a same-named top-level value", alias_over_value(), 99),
+    check_eq("the alias still reaches a function", alias_call_over_value(), 20),
+    check_eq("a top-level value named prelude wins over the qualifier", value_over_prelude(), 5)
+  ])
