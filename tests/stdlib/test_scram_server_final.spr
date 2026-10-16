@@ -2,19 +2,20 @@ import stdlib.test (check_eq, run_suite)
 import stdlib.scram as scram
 
 # `verify_server_final` is the client's check of the SERVER's proof — the mutual-auth
-# half of SCRAM — and had no test. A verifier that always answered true would let a
-# client accept a forged server, and nothing here would have noticed.
+# half of SCRAM. A verifier that always answered true would let a client accept a
+# forged server, and nothing here would have noticed.
 #
 # The anchor is the SCRAM-SHA-256 exchange in RFC 7677 §3 (user "user", password
-# "pencil"), so the expected proof and signature are quoted, not computed by the code
-# under test. `client_proof` was already exercised by test_scram_pbkdf2_green.spr, but
-# only for "did not return Err" — its VALUE is asserted here for the first time, which
-# is what pins the mechanism to SHA-256 rather than to whatever it currently computes.
+# "pencil"), so the expected messages are quoted, not computed by the code under test.
+# The client-final message pins the proof; verifying the RFC's server-final, and
+# rejecting a one-character forgery of it, pins the expected server signature.
 
 let server_first_raw: String =
   "r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096"
 
-# RFC 7677 §3, the base64 fields of the last two lines of the exchange.
+# RFC 7677 §3, the last two lines of the exchange.
+let rfc_client_final: String =
+  "c=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,p=dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ="
 let rfc_client_proof: String = "dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ="
 let rfc_server_signature: String = "6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4="
 
@@ -31,34 +32,26 @@ fn rendered_bool(r: Result scram.ScramError Bool) -> String =
   | Ok value -> to_string(value)
   | Err err -> `err:${scram.error_message(err)}`
 
-fn with_server(f: (scram.ScramServerFirst) -> String) -> String =
+fn with_final(bare: String, f: (scram.ScramClientFinal) -> String) -> String =
   match scram.parse_server_first(server_first_raw) with
   | Err err -> `err:${scram.error_message(err)}`
-  | Ok server -> f(server)
+  | Ok server ->
+      match scram.client_final("pencil", bare, server, scram.no_channel_binding) with
+      | Err err -> `err:${scram.error_message(err)}`
+      | Ok final -> f(final)
 
-fn proof() -> String =
-  with_server(\server -> rendered_text(scram.client_proof("pencil", client_bare, server, scram.no_channel_binding)))
-
-fn signature() -> String =
-  with_server(\server -> rendered_text(scram.server_signature("pencil", client_bare, server, scram.no_channel_binding)))
+fn final_text(bare: String) -> String =
+  with_final(bare, scram.client_final_text)
 
 # The `raw` argument is a whole server-final message, as it arrives on the wire.
 fn verify(raw: String) -> String =
-  with_server(\server -> rendered_bool(scram.verify_server_final("pencil", client_bare, server, scram.no_channel_binding, raw)))
-
-# A client-first-bare with no `r=` attribute: the signature cannot be computed at all,
-# so the failure must surface instead of being read as a mismatched verifier.
-fn verify_without_client_nonce(raw: String) -> String =
-  with_server(\server -> rendered_bool(scram.verify_server_final("pencil", "n=user", server, scram.no_channel_binding, raw)))
+  with_final(client_bare, \final -> rendered_bool(scram.verify_server_final(final, raw)))
 
 fn main() -> Unit !{IO} =
-  run_suite("scram server-final verification", [
+  run_suite("scram client-final and server-final verification", [
     # --- the RFC vector, so the expectations below are not self-referential ---
-    check_eq("client proof matches RFC 7677 §3", proof(), rfc_client_proof),
-    check_eq("server signature matches RFC 7677 §3", signature(), rfc_server_signature),
-    # The two must differ: they are keyed by "Client Key" and "Server Key" respectively,
-    # and a mix-up would make a client accept its own proof echoed back at it.
-    check_eq("server signature is not the client proof", signature() == proof(), false),
+    check_eq("client-first-bare matches RFC 7677 §3", client_bare, "n=user,r=rOprNGfwEbeRWgbNEkqO"),
+    check_eq("client-final matches RFC 7677 §3", final_text(client_bare), rfc_client_final),
 
     # --- verify_server_final: the mutual-auth decision ---
     check_eq("genuine server signature verifies", verify(`v=${rfc_server_signature}`), "true"),
@@ -66,10 +59,11 @@ fn main() -> Unit !{IO} =
     check_eq("forged server signature is rejected", verify("v=6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G5="), "false"),
     check_eq("truncated server signature is rejected", verify("v=6rriTRBi23WpRR"), "false"),
     check_eq("empty verifier is rejected", verify("v="), "false"),
-    # The client's own proof is not a valid server signature, however well-formed.
+    # Keyed by "Client Key" vs "Server Key": a mix-up would accept the client's own proof
+    # echoed back at it.
     check_eq("client proof is not accepted as a server signature", verify(`v=${rfc_client_proof}`), "false"),
 
-    # --- the message is malformed or is itself an error, before any crypto runs ---
+    # --- the message is malformed or is itself an error ---
     check_eq("server error attribute surfaces", verify("e=other-error"),
       "err:SCRAM server-final error: other-error"),
     # An `e=` wins over a `v=` in the same message: never verify against an error reply.
@@ -78,8 +72,14 @@ fn main() -> Unit !{IO} =
     check_eq("message with neither v nor e is an error", verify("r=abc,s=def"),
       "err:SCRAM server-final message missing verifier"),
 
-    # --- a failure computing the expected signature must not read as "forged" ---
-    check_eq("unusable client-first-bare is an error, not a mismatch",
-      verify_without_client_nonce(`v=${rfc_server_signature}`),
-      "err:SCRAM client-first-bare message missing nonce")
+    # --- client_final refuses inputs it cannot sign ---
+    check_eq("client-first-bare without a nonce is an error", final_text("n=user"),
+      "err:SCRAM client-first-bare message missing nonce"),
+    check_eq("server nonce must extend the client nonce", final_text(scram.client_first_bare("user", "other")),
+      "err:SCRAM server nonce does not extend client nonce"),
+
+    # --- username escaping (RFC 5802 §5.1): "=" first, or the "=" of "=2C" is escaped again ---
+    check_eq("comma and equals are escaped", scram.client_first_bare("a,b=c", "N"), "n=a=2Cb=3Dc,r=N"),
+    check_eq("equals before comma is not double-escaped", scram.client_first_bare("x=,y", "N"), "n=x=3D=2Cy,r=N"),
+    check_eq("other characters pass through", scram.client_first_bare("żółw", "N"), "n=żółw,r=N")
   ])

@@ -331,7 +331,7 @@ v0 is silent (an optimization, not a checked contract). Two follow-ups are noted
 ## 9. Tests added / updated
 
 - **RED regression (motivating bug):** `tests/stdlib/test_scram_pbkdf2_green.spr` — build a
-  `ScramServerFirst` with `i=4096` (`parse_server_first`), call `scram.client_proof` inside a
+  `ScramServerFirst` with `i=4096` (`parse_server_first`), call `scram.client_final` inside a
   `task_spawn`'d green task; assert `Ok`. Fails ("GC root pool exhausted") on master; passes
   after. Doubles as the **first** native SCRAM coverage (currently zero).
 - **Unit (pure IR transform):** extend `test_tco_rewrite.spr` — a 2-function i64 cycle

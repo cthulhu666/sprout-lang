@@ -658,10 +658,10 @@ SCRAM helpers (in `stdlib/scram.sprout`):
 - `client_first_message(username, nonce) -> String`
 - `parse_server_first(raw) -> Result ScramError ScramServerFirst`
 - `client_final_without_proof(channel_binding, server) -> String`
-- `client_proof(password, client_first_bare_raw, server, channel_binding) -> Result ScramError String`
-- `client_final_message(password, client_first_bare_raw, server, channel_binding) -> Result ScramError String`
-- `server_signature(password, client_first_bare_raw, server, channel_binding) -> Result ScramError String`
-- `verify_server_final(password, client_first_bare_raw, server, channel_binding, raw) -> Result ScramError Bool`
+- `client_final(password, client_first_bare_raw, server, channel_binding) -> Result ScramError ScramClientFinal`
+  — runs PBKDF2 once and keeps the server signature the exchange expects back
+- `client_final_text(final: ScramClientFinal) -> String` — the message to send
+- `verify_server_final(final: ScramClientFinal, raw) -> Result ScramError Bool` — no second PBKDF2
 - `error_message(err) -> String`
 
 The first slice is intentionally generic and SCRAM-SHA-256-focused; protocol-specific auth and wire-message flow should live in external libraries layered on top.
