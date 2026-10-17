@@ -203,7 +203,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P2` **B2 — recursive instance-method dispatch fails instance resolution.** A class method
   calling itself from its own instance body reports `No instance of <Class> for <T>`. Not
   effect-related (the pure control fails identically) — it is the tyvar-identity / dict-resolution
-  gap. Blocks unifying the iteration combinators under a generic `Foldable`; also the message a
+  gap. Blocks unifying the iteration combinators under a generic `Foldable`, and a shared
+  `where Monoid t` fold a user's `Monoid.concat_all` could call; also the message a
   legitimate self-recursive instance method hits.
 - [ ] `P3` **Reject a user declaration that shadows an intercepted compiler intrinsic.** A
   headerless file defining `fn to_double`/`fn print`/`fn double_to_bits` has its call sites silently
@@ -849,7 +850,7 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict` forces callers to pre-stringify, which contradicts typeclass-based design. Unblocks
   `deriving (Hash)`.
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
-  and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `mconcat`, `list_dedup`,
+  and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
   Document true complexity inline or fix to linear.
   Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
@@ -2869,9 +2870,9 @@ acting.
   lower to `a`'s dict, so the `b` value renders through `a`'s instance, and
   `SPROUT_TRACE_DISPATCH=1` shows the caller resolving all four correctly, so the mis-selection is
   inside the callee. Gating that site too breaks the prelude's `map4`, leaving the scan load-bearing
-  for at least the Applicative shape. Closing it needs the post-pass repair to cover the
-  no-class-var-arg case — `dispatch_type_for_vars` finds a class variable nested in a container,
-  `class_var_arg_or_fallback` cannot — then Applicative re-checked against it.
+  for at least the Applicative shape. A binding nested in a container is now gated
+  (`class_var_type`); what still reaches the scan is a call where no argument binds the class
+  variable. Rebuild the repro first — `show2(x: a, y: b)` with two `to_string`s passes.
 - [ ] `P2` **The uncovered-dictionary diagnostic prints a compiler-internal placeholder and gives
   advice that cannot be followed.** For an unannotated parameter it says "add
   `where ToString _unann_n`" — and `_unann_<param>` is a synthesized placeholder the compiler's

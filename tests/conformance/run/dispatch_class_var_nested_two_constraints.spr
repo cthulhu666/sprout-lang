@@ -1,0 +1,26 @@
+# Two constraints of one class, each class variable nested in a parameter type
+# (`List t`) and bound to a where-variable. Each call must forward its own
+# variable's dictionary; an ungated scan gave both calls the first one.
+
+class Summ t
+  fn total(xs: List t) -> t
+
+instance Summ Int
+  fn total(xs: List Int) -> Int = list_fold(\ (a, b) -> a + b, 0, xs)
+
+instance Summ String
+  fn total(xs: List String) -> String = string_concat_many(xs)
+
+fn two(xs: List a, ys: List b) -> (a, b) where Summ a, Summ b = (total(xs), total(ys))
+
+fn both(xs: List a, ys: List b) -> (a, b) where Monoid a, Monoid b =
+  (concat_all(xs), concat_all(ys))
+
+fn main() -> Unit !{IO} =
+  do
+    match two([1, 2, 3], ["x", "y"]) with
+    | (n, s) -> print(int_to_string(n) ++ " " ++ s)
+    match two(["p", "q"], [4, 5]) with
+    | (s, n) -> print(s ++ " " ++ int_to_string(n))
+    match both(["a", "b"], [[1], [2, 3]]) with
+    | (s, ns) -> print(s ++ " " ++ int_to_string(list_length(ns)))

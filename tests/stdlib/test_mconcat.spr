@@ -1,0 +1,39 @@
+import stdlib.test (check_eq, run_suite)
+
+type Total = (n: Int)
+
+instance Semigroup Total
+  fn append(left: Total, right: Total) -> Total = Total(n = left.n + right.n)
+
+# A user instance with no bulk primitive folds over `++`.
+instance Monoid Total
+  fn empty() -> Total = Total(n = 0)
+  fn concat_all(xs: List Total) -> Total = list_fold(\ (acc, x) -> acc ++ x, Total(n = 0), xs)
+
+# Polymorphic in the instance: `concat_all` arrives through the dict parameter.
+fn join_all(xs: List t) -> t where Monoid t = mconcat(xs)
+
+fn digit(i: Int) -> String = int_to_string(i)
+
+let no_strings: List String = Nil
+
+let no_lists: List (List Int) = Nil
+
+fn main() -> Unit !{IO} =
+  let many = list_map(digit, range_to_list(1..3000))
+  in
+    run_suite("mconcat", [
+      check_eq("mconcat over List String, order kept", mconcat(["a", "b", "c"]), "abc"),
+      check_eq("mconcat over an empty List String", mconcat(no_strings), ""),
+      check_eq("mconcat over List (List Int)", mconcat([[1], [], [2, 3]]), [1, 2, 3]),
+      check_eq("mconcat over a Vec container", mconcat(foldable_to_vec(["x", "y"])), "xy"),
+      check_eq("mconcat matches string_concat_many on 3000 parts",
+        mconcat(many), string_concat_many(many)),
+      check_eq("concat_all on String", concat_all(["ab", "", "c"]), "abc"),
+      check_eq("concat_all on List", concat_all([[1, 2], [3]]), [1, 2, 3]),
+      check_eq("concat_all on an empty List (List Int)", list_length(concat_all(no_lists)), 0),
+      check_eq("generic where Monoid t, String", join_all(["p", "q"]), "pq"),
+      check_eq("generic where Monoid t, List", join_all([[1], [2]]), [1, 2]),
+      check_eq("user instance with a folding concat_all", mconcat([Total(n = 2), Total(n = 5)]).n, 7),
+      check_eq("concat_map over String results", concat_map(digit, [1, 2, 3]), "123")
+    ])
