@@ -20,7 +20,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
 
-# --- Private leaf helpers ---
+# --- Private helpers ---
 
 fn char_is_uppercase(ch: Char) -> Bool =
   str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char_to_string(ch)) >= 0
