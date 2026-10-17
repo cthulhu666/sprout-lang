@@ -116,7 +116,7 @@ fn te_conflicts(use: ast.TypeExpr, written: ast.TypeExpr) -> Bool =
   # Compared without module prefixes: a `where` clause and an inferred type may
   # spell one type `Box` and `main.Box`, and a false conflict here is a rejection.
   | (ast.TypeName u, ast.TypeName w) ->
-      string.substring_after_last(u, ".") != string.substring_after_last(w, ".") && is_unnamed(u) == false
+      string.after_last_dot(u) != string.after_last_dot(w) && is_unnamed(u) == false
   | (ast.TypeName u, _) -> is_unnamed(u) == false
   | (ast.TypeApply ub ua, ast.TypeApply wb wa) -> te_conflicts(ub, wb) || te_conflicts(ua, wa)
   | (ast.TupleType us, ast.TupleType ws) -> args_conflict(us, ws)
@@ -266,14 +266,10 @@ fn add_instance(
   inst_constraints: List ast.TypeConstraint,
   acc: Tables
 ) -> Tables =
-  match constraint with
-  | ast.TypeConstraint _ type_args ->
-      Tables(
-        dict_set(typed_ast.constraint_key_from_tc(constraint), true, tables_exists(acc)),
-        add_ctx(typed_ast.constraint_key_from_tc(constraint), type_args, inst_constraints, tables_ctx(acc)),
-        tables_env(acc),
-        tables_super(acc),
-        tables_class_params(acc))
+  let ast.TypeConstraint _ type_args = constraint
+      key = typed_ast.constraint_key_from_tc(constraint)
+  in Tables(dict_set(key, true, tables_exists(acc)), add_ctx(key, type_args, inst_constraints, tables_ctx(acc)),
+            tables_env(acc), tables_super(acc), tables_class_params(acc))
 
 fn add_ctx(
   key: String,
@@ -296,22 +292,20 @@ fn check_constraint(
   cover: VarCover,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
-  match c with
-  | ast.TypeConstraint class_name type_args ->
-      match type_args with
-      | Nil -> Nothing
-      | [head_arg | _] ->
-          # Only diagnose constraints whose head is a concrete type constructor
-          # (uppercase head). A lowercase/`_`/non-letter head is a type variable —
-          # forwarded/polymorphic, resolved as a hidden parameter by lowering.
-          if declares(string.substring_after_last(class_name, "."), type_args, cover) then Nothing
-          else if head_is_concrete(head_arg) == false then Nothing
-          else
-            if instance_exists(string.substring_after_last(class_name, "."), type_args, head_arg, tables)
-            then check_context(typed_ast.constraint_key_str(string.substring_after_last(class_name, "."), type_args),
-                               class_name, head_arg, type_args, pos, cover, tables)
-            else Just((pos,
-              "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ typed_ast.type_expr_head_name(head_arg)))
+  let ast.TypeConstraint class_name type_args = c
+      [head_arg | _] = type_args else Nothing
+      class_bare = string.after_last_dot(class_name)
+  in
+    # Only diagnose constraints whose head is a concrete type constructor
+    # (uppercase head). A lowercase/`_`/non-letter head is a type variable —
+    # forwarded/polymorphic, resolved as a hidden parameter by lowering.
+    if declares(class_bare, type_args, cover) then Nothing
+    else if head_is_concrete(head_arg) == false then Nothing
+    else
+      let key = typed_ast.constraint_key_str(class_bare, type_args)
+      in if instance_exists(class_bare, key, head_arg, tables)
+         then check_context(key, class_name, head_arg, type_args, pos, cover, tables)
+         else Just((pos, "No instance of " ++ class_bare ++ " for " ++ typed_ast.type_expr_head_name(head_arg)))
 
 # A dictionary the declaration forwards arrives whole, context included, so no instance
 # has to exist for it and its context is not this body's to supply. Decided as
@@ -326,11 +320,11 @@ fn declares(class_bare: String, type_args: List ast.TypeExpr, cover: VarCover) -
 # bundled into this program register markers in the env but no TInstanceDecl).
 fn instance_exists(
   class_bare: String,
-  type_args: List ast.TypeExpr,
+  key: String,
   head_arg: ast.TypeExpr,
   tables: Tables
 ) -> Bool =
-  dict_member(typed_ast.constraint_key_str(class_bare, type_args), tables_exists(tables))
+  dict_member(key, tables_exists(tables))
   || dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables))
 
 # Recurse into a matched instance's context constraints (substituted at the
@@ -441,12 +435,13 @@ fn unsupplied_context_var(
 ) -> Maybe(source.SourcePos, String) =
   let CoverFrom kind fwd_keys = cover else Nothing
       [head_arg | _] = type_args else Nothing
+      class_bare = string.after_last_dot(class_name)
   in
     if is_checked_var(typed_ast.type_expr_head_name(head_arg)) == false then Nothing
-    else if forwards(string.substring_after_last(class_name, "."), type_args, fwd_keys) then Nothing
-    else Just((pos, "the `" ++ string.substring_after_last(outer_class, ".") ++ "` instance for `"
+    else if forwards(class_bare, type_args, fwd_keys) then Nothing
+    else Just((pos, "the `" ++ string.after_last_dot(outer_class) ++ "` instance for `"
                       ++ te_display(outer_head) ++ "` "
-                      ++ unsupplied_remedy(kind, string.substring_after_last(class_name, "."), head_arg)))
+                      ++ unsupplied_remedy(kind, class_bare, head_arg)))
 
 fn is_checked_var(name: String) -> Bool =
   source.is_lowercase_name(name) || types.is_unann_placeholder(name)
@@ -519,7 +514,7 @@ fn unann_slot(owner_and_param: String) -> String =
 # named prints as `_`.
 fn te_display(te: ast.TypeExpr) -> String =
   match te with
-  | ast.TypeName n -> if displays_as_hole(n) then "_" else string.substring_after_last(n, ".")
+  | ast.TypeName n -> if displays_as_hole(n) then "_" else string.after_last_dot(n)
   | ast.TypeApply base arg -> te_display(base) ++ " " ++ te_display_atom(arg)
   | ast.TupleType items -> "(" ++ string.join(", ", list_map(te_display, items)) ++ ")"
   | ast.TypeArrow param ret _ _ -> te_display_atom(param) ++ " -> " ++ te_display(ret)
@@ -578,13 +573,14 @@ fn produce_one_class(
   fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  match forwarded_slot(string.substring_after_last(eff_class, "."), type_args, fwd_keys) with
-  | Just slot -> typed_ast.EvForward(eff_class, slot)
-  | Nothing ->
-      if head_is_concrete(head_arg) == false then
-        typed_ast.EvForward(eff_class, ast.dict_slot_key(string.substring_after_last(eff_class, "."), type_args))
-      else
-        produce_concrete_evidence(eff_class, string.substring_after_last(eff_class, "."), type_args, head_arg, fwd_keys, tables)
+  let class_bare = string.after_last_dot(eff_class)
+  in match forwarded_slot(class_bare, type_args, fwd_keys) with
+     | Just slot -> typed_ast.EvForward(eff_class, slot)
+     | Nothing ->
+         if head_is_concrete(head_arg) == false then
+           typed_ast.EvForward(eff_class, ast.dict_slot_key(class_bare, type_args))
+         else
+           produce_concrete_evidence(eff_class, class_bare, type_args, head_arg, fwd_keys, tables)
 
 fn produce_concrete_evidence(
   eff_class: String,
@@ -594,12 +590,13 @@ fn produce_concrete_evidence(
   fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  if dict_member(typed_ast.constraint_key_str(class_bare, type_args), tables_exists(tables)) then
-    produce_instance_evidence(eff_class, typed_ast.constraint_key_str(class_bare, type_args), type_args, fwd_keys, tables)
-  else if dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables)) then
-    typed_ast.EvUnresolved
-  else
-    typed_ast.EvMissing(ast.TypeConstraint(eff_class, type_args))
+  let key = typed_ast.constraint_key_str(class_bare, type_args)
+  in
+    if dict_member(key, tables_exists(tables)) then produce_instance_evidence(eff_class, key, type_args, fwd_keys, tables)
+    else if dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables)) then
+      typed_ast.EvUnresolved
+    else
+      typed_ast.EvMissing(ast.TypeConstraint(eff_class, type_args))
 
 # Bundled instance: an unconstrained instance has no context entry → no children;
 # a constrained instance recurses on each context constraint substituted at the
@@ -645,7 +642,7 @@ fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, expanded: List 
   | Nil -> acc
   | Cons eff rest ->
       add_eff_keys(rest, type_args, expanded,
-        add_slot(string.substring_after_last(eff, "."), type_args, expanded, acc))
+        add_slot(string.after_last_dot(eff), type_args, expanded, acc))
 
 # A slot already recorded (one constraint reached twice, as a superclass and directly)
 # is not recorded again.

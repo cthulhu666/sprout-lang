@@ -34,4 +34,16 @@ fn main() -> Unit !{IO} =
       typed_ast.type_expr_head_name(ast.TypeApply(ast.TypeApply(name("Dict"), name("k")), name("v"))),
       "Dict")
 
+    # type_expr_head: the same head, and none for a function or effect type.
+    assert_eq(state, "head of a nested application",
+      head_or_none(ast.TypeApply(ast.TypeApply(name("Dict"), name("k")), name("v"))), "Dict")
+    assert_eq(state, "head of a tuple is its arity",
+      head_or_none(ast.TupleType([name("Int"), name("Bool"), name("Char")])), "Tuple3")
+    assert_eq(state, "an arrow has no head",
+      head_or_none(ast.TypeArrow(name("Int"), name("Int"), Nothing, ast.ModeDefault)), "<none>")
+    assert_eq(state, "a thunk has no head", head_or_none(ast.TypeThunk(name("Int"), Nothing)), "<none>")
+    assert_eq(state, "an effect type has no head", head_or_none(ast.TypeEffect(name("Int"), ["IO"])), "<none>")
+
     summary(state)
+
+fn head_or_none(te: ast.TypeExpr) -> String = maybe_with_default("<none>", typed_ast.type_expr_head(te))

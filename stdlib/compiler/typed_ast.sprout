@@ -401,21 +401,29 @@ export fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
       constraint_key_str(string.after_last_dot(class_name), type_args)
 
 export fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
-  match type_args with
-  | Nil -> class_name
-  | Cons h rest -> class_name ++ "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
+  string.join("_", Cons(class_name, list_map(type_expr_head_name, type_args)))
 
-fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
-  match args with
-  | Nil -> ""
-  | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
-
-# The outermost constructor; a tuple includes its arity so pairs and triples differ.
+# The outermost constructor, with function and effect types named `Fn` and `Eff`.
 export fn type_expr_head_name(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName name -> name
-  | ast.TypeApply base _ -> type_expr_head_name(base)
+  match applied_base(te) with
   | ast.TypeArrow _ _ _ _ -> "Fn"
   | ast.TypeThunk _ _ -> "Fn"
   | ast.TypeEffect _ _ -> "Eff"
-  | ast.TupleType items -> types.tuple_head(list_length(items))
+  | base -> maybe_with_default("", type_expr_head(base))
+
+# The outermost constructor, or Nothing for a function or effect type. A tuple
+# includes its arity so pairs and triples differ.
+export fn type_expr_head(te: ast.TypeExpr) -> Maybe String =
+  match applied_base(te) with
+  | ast.TypeName name -> Just(name)
+  | ast.TupleType items -> Just(types.tuple_head(list_length(items)))
+  | ast.TypeApply _ _ -> Nothing
+  | ast.TypeArrow _ _ _ _ -> Nothing
+  | ast.TypeThunk _ _ -> Nothing
+  | ast.TypeEffect _ _ -> Nothing
+
+# The type an application is built on: `Dict k v` is built on `Dict`.
+fn applied_base(te: ast.TypeExpr) -> ast.TypeExpr =
+  match te with
+  | ast.TypeApply base _ -> applied_base(base)
+  | _ -> te
