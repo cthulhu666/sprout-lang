@@ -3167,7 +3167,7 @@ fn head_token_for(te: ast.TypeExpr, binders: List String) -> String =
 # variable. Nil means there is no index to record, which yields source names —
 # the same fallback constraint_var_token takes for an ungeneralized scheme.
 fn compound_head_token(te: ast.TypeExpr, binders: List String) -> String =
-  let Just h = type_expr_head_name(te) else "#none"
+  let Just h = typed_ast.type_expr_head(te) else "#none"
       Just toks = compound_arg_tokens(compound_head_args(te, Nil), binders) else "#app:" ++ h
   in "#app:" ++ h ++ ":" ++ toks
 
@@ -3205,7 +3205,7 @@ fn arg_token_or_wild(a: ast.TypeExpr, binders: List String) -> String =
 
 # A variable head (`List (f a)`) is itself a token, decoded at the call like an argument.
 fn nested_or_wild(a: ast.TypeExpr, token: ast.TypeExpr -> String) -> String =
-  let Just h = type_expr_head_name(a) else "#any"
+  let Just h = typed_ast.type_expr_head(a) else "#any"
       head = if source.is_lowercase_name(h) then token(ast.TypeName(h)) else h
   in types.nested_arg_token(head, list_map(token, compound_head_args(a, Nil)))
 
@@ -3215,7 +3215,7 @@ fn nested_or_wild(a: ast.TypeExpr, token: ast.TypeExpr -> String) -> String =
 # positions exist; recording one here would decode to nothing at the call site.
 fn canonical_compound_head_token(te: ast.TypeExpr, prog_to_fresh: Dict types.Type,
                                  s2: Dict types.Type, binders: List String) -> String =
-  let Just h = type_expr_head_name(te) else "#none"
+  let Just h = typed_ast.type_expr_head(te) else "#none"
       Just toks = canonical_arg_tokens(compound_head_args(te, Nil), prog_to_fresh, s2, binders)
         else "#app:" ++ h
   in "#app:" ++ h ++ ":" ++ toks
@@ -3250,16 +3250,6 @@ fn canonical_nested_token(a: ast.TypeExpr, prog_to_fresh: Dict types.Type,
   | ast.TypeArrow _ _ _ _ -> "#any"
   | ast.TypeThunk _ _ -> "#any"
   | ast.TypeEffect _ _ -> "#any"
-
-# A tuple is named by types.tuple_head, as every dispatch key names it.
-fn type_expr_head_name(te: ast.TypeExpr) -> Maybe String =
-  match te with
-  | ast.TypeName n -> Just(n)
-  | ast.TypeApply base _ -> type_expr_head_name(base)
-  | ast.TupleType items -> Just(types.tuple_head(list_length(items)))
-  | ast.TypeArrow _ _ _ _ -> Nothing
-  | ast.TypeThunk _ _ -> Nothing
-  | ast.TypeEffect _ _ -> Nothing
 
 # Both token forms are discharged by scanning the ARGUMENTS, as opposed to a
 # variable head (decoded via scheme_vars) or a concrete-ctor head (looked up
@@ -3524,7 +3514,7 @@ fn scan_fwd_markers_for_prog_var(
 # (evidence is still EvUnresolved at this stage, so the TypeConstraint is the source).
 fn tdict_head_str(td: typed_ast.TypedExpr) -> String =
   match td with
-  | typed_ast.TDict (ast.TypeConstraint _ [head_te | _]) _ _ _ -> maybe_with_default("?", type_expr_head_name(head_te))
+  | typed_ast.TDict (ast.TypeConstraint _ [head_te | _]) _ _ _ -> maybe_with_default("?", typed_ast.type_expr_head(head_te))
   | _ -> "?"
 
 fn resolved_head_str(class_name: String, resolved: Maybe typed_ast.TypedExpr) -> String =
@@ -8478,21 +8468,14 @@ fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
 # Same-class constraints the forwarded-dictionary key cannot tell apart
 # ---------------------------------------------------------------------------
 #
-# A function's hidden dictionary parameters are keyed by class name and the
-# OUTERMOST constructor of each constraint argument (typed_ast.constraint_key_str,
-# which lowering and resolve share). So `where Boxed (Tagged k), Boxed (Tagged j)`
-# gives both constraints the key `Boxed_Tagged`: the caller passes two different
-# dictionaries and the body reads one of them twice.
-#
-# Rejected rather than miscompiled. Nothing is lost that worked — the shape has
-# always produced the wrong dictionary, and since a compound head began dispatching
-# on the parameter it names the two dictionaries genuinely differ, so reading the
-# wrong one crashes instead of printing a wrong answer. Two constraints with the SAME
-# subject are fine: one dictionary is the right answer for both.
-#
-# Making the shape WORK means giving that key the arguments' identity, in all four
-# places that build it — a change to the dictionary-passing key format, not to this
-# rule (BACKLOG §7.5).
+# A function's hidden dictionary parameters are grouped by class name and the
+# OUTERMOST constructor of each constraint argument. So `where Boxed (Tagged k),
+# Boxed (Tagged j)` puts both constraints in the group `Boxed_Tagged`. Each has its
+# own slot (ast.dict_slot_key names the arguments), but an eta'd method under both
+# reaches lowering's fallback (find_forwarded_method_any), which cannot tell the two
+# slots apart and leaves a name ast_to_ir rejects. So the shape is rejected here,
+# where it is written. Two constraints with the SAME subject are fine: one
+# dictionary is the right answer for both.
 # One pass, keyed by the slot the constraint would occupy: the first constraint to
 # claim a key records its subject, and a later one claiming the same key with a
 # different subject is the collision. Subjects are compared as written, which is exact
@@ -8518,13 +8501,15 @@ fn constraint_class_of(c: ast.TypeConstraint) -> String =
   let ast.TypeConstraint class_name _ = c
   in string.after_last_dot(class_name)
 
-# Mirrors typed_ast.constraint_key_str: the outermost constructor of each argument.
+# The group: the outermost constructor of each argument, as typed_ast.constraint_key_str
+# names it, but shortened to its last segment and blank for a function or effect type,
+# so heads that differ only by module, or by function vs effect, share one group.
 fn constraint_fwd_key(c: ast.TypeConstraint) -> String =
   let ast.TypeConstraint _ type_args = c
   in string.join("_", list_map(\te -> head_name_or_blank(te), type_args))
 
 fn head_name_or_blank(te: ast.TypeExpr) -> String =
-  match type_expr_head_name(te) with
+  match typed_ast.type_expr_head(te) with
   | Just n -> string.after_last_dot(n)
   | Nothing -> ""
 

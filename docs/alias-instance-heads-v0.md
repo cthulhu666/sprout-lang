@@ -22,17 +22,15 @@ nothing was mis-selected; the alias-headed one was unreachable.
 
 ## 2. Cause
 
-An instance key is `@inst:{Class}:{head}`, built by four independent paths:
+An instance key is `@inst:{Class}:{head}`. When this was written it was built by four independent
+paths; the `resolve` and `lowering` rows are now one function, `typed_ast.constraint_key_from_tc`.
 
-| Path | Builds the head from | Expanded aliases |
+| Path | Built the head from | Expanded aliases |
 |---|---|---|
 | `infer.instance_key_and_class`, `infer.register_instance_marker` | `type_from_ast(te, dict_empty())` | no |
 | `infer` lookups (~22 sites) | the **inferred** type | **yes** |
 | `resolve.type_expr_head_name` | the AST `TypeExpr` | no |
 | `lowering.constraint_key_from_tc` | the AST type args | no |
-
-The `resolve` and `lowering` rows have since become one function,
-`typed_ast.constraint_key_from_tc`.
 
 Three of the four read the head off the AST; the only path that expanded was the lookup side, because
 inference expands aliases to typecheck at all. Registration and lookup therefore computed different

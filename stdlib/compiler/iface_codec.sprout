@@ -686,7 +686,7 @@ fn method_constraint_tokens(constraints: List ast.TypeConstraint) -> List (Strin
 # decodes as a type VARIABLE instead and resolves the dictionary by a different
 # path entirely. Names, not positions, for the reason the caller above gives.
 fn compound_head_token(te: ast.TypeExpr) -> String =
-  match te_head_name(te) with
+  match typed_ast.type_expr_head(te) with
   | Just h -> app_token_with_args(h, compound_head_arg_names(te, Nil))
   | Nothing -> "#none"
 
@@ -718,7 +718,7 @@ fn element_name(te: ast.TypeExpr) -> String =
   | ast.TupleType _ -> nested_element(te)
 
 fn nested_element(te: ast.TypeExpr) -> String =
-  let Just h = te_head_name(te) else "#any"
+  let Just h = typed_ast.type_expr_head(te) else "#any"
       Just names = compound_head_arg_names(te, Nil) else "#any"
   in types.nested_arg_token(h, names)
 
@@ -726,16 +726,6 @@ fn arg_names_done(acc: List String) -> Maybe (List String) =
   match acc with
   | [] -> Nothing
   | [_ | _] -> Just(acc)
-
-# A tuple is named with its arity, as infer.type_expr_head_name names it.
-fn te_head_name(te: ast.TypeExpr) -> Maybe String =
-  match te with
-  | ast.TypeName n -> Just(n)
-  | ast.TypeApply base _ -> te_head_name(base)
-  | ast.TupleType items -> Just(types.tuple_head(list_length(items)))
-  | ast.TypeArrow _ _ _ _ -> Nothing
-  | ast.TypeThunk _ _ -> Nothing
-  | ast.TypeEffect _ _ -> Nothing
 
 # Build a right-associating TFunc chain from a list of Params.
 #
