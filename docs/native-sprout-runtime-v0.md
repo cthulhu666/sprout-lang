@@ -80,8 +80,8 @@ Limits on 2, both measured already:
 
 **Field kinds are not on this list.** The compiler computes them (`field_kinds.sprout`) and
 already passes them to the runtime: `sprout_register_ctor` stores them in `g_ctor_meta`, indexed
-by tag. Only `sprout_debug_adt` reads them. Using them in the marker was Phase 1a, dropped once
-measured.
+by tag. Only `sprout_debug_adt` and the `gc-profile` drain-edge counter read them. Using them in
+the marker was Phase 1a, dropped once measured.
 
 What Sprout code lacks today: unboxed byte access (`bytes_get` returns `Maybe Int`), raw memory,
 and a checked guarantee that a function does not allocate.
