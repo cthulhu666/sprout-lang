@@ -1,6 +1,5 @@
 # The instance and the class its failure arm calls are both declared after the
-# `try`: rejected at the `try` as the call to `branch` would be, not with the
-# instance's error placed in `bump`.
+# `try`, and both are in scope there.
 
 type Fetch a =
   | Got a

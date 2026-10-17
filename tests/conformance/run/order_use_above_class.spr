@@ -1,0 +1,20 @@
+# A `fn` may call a class method, and require the class in a `where` clause, above
+# the class declaration; a top-level `let` may call one too.
+
+fn show_it(x: Bool) -> String = describe(x)
+
+fn describe_twice(x: a) -> String where Describe a = describe(x) ++ describe(x)
+
+let said: String = describe(true)
+
+class Describe a
+  fn describe(x: a) -> String
+
+instance Describe Bool
+  fn describe(x: Bool) -> String = if x then "yes" else "no"
+
+fn main() -> Unit !{IO} =
+  do
+    print(show_it(true))
+    print(describe_twice(false))
+    print(said)

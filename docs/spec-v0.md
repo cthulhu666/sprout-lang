@@ -2154,11 +2154,10 @@ no `where` context, the compiler puts that `match` in place of the `branch` call
 Accepted programs and their results are the same either way. The result is the `match` written by hand: no call and no
 `ControlFlow` value. Otherwise, and in generic code (`where Propagate t`), `try`
 calls `branch` and allocates a `ControlFlow`. The type must be known at the `try`
-for the first case, the `try` must be in a function or instance method, and the
-instance and what its `Break` arms call must be checked before that function:
-declared after it without a dependency, or in a binding group with it, they are
-not, and `try` calls `branch`. An instance declared after the `try` is not in
-scope there either way, so that `try` is rejected.
+for the first case, the `try` must be in a function or instance method, and what
+the instance's `Break` arms call must be checked before that function: declared
+after it without a dependency, or in a binding group with it, it is not, and
+`try` calls `branch`. The instance itself may be declared anywhere in the module.
 
 ### 5.10 List comprehensions (Experimental)
 
@@ -2499,9 +2498,13 @@ Effect note for v0:
     cannot change whether the program is accepted, nor which declaration a
     conflict is reported against. A `record`'s fields are in scope throughout
     its module, as its type name is: a `fn` above the declaration may read,
-    construct and update it. A `fn` may not be moved above a `class`,
-    `instance`, `let` or `alias` declaration it depends on; those introduce
-    names that must already be in scope, exactly as they must today.
+    construct and update it. A `class` and an `instance` are in scope throughout
+    their module too: a declaration above a class may call its methods and
+    require it in a `where` clause, one above an instance may use it, and an
+    instance's methods may use the instance itself, so a recursive type's `Eq`
+    compares its children with the instance being declared. An alias is in scope
+    throughout its module (§5.6.2). A `fn` may not be moved above a top-level
+    `let` it depends on: a `let` must already be in scope where it is used.
 
     **Polymorphic recursion requires a complete, constraint-free signature.** A
     function may call itself at a *different* type than the one it was called with

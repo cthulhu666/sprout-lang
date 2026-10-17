@@ -1,5 +1,5 @@
-# The instance is declared after the `try`, so `branch` has no instance there;
-# a `try` fused from it must not accept what the call to `branch` rejects.
+# The instance is declared after the `try`. Instances are in scope throughout
+# their module, so the `try` finds it as the call to `branch` would.
 
 type Fetch a =
   | Got a

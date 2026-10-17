@@ -9414,8 +9414,9 @@ fn pre_scan_extern(
       dict_set(types.arity_marker_key(name), arity_marker(list_length(params)),
         dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env))
 
-# Register every FnDecl signature, TypeDecl constructor and record without
-# checking a body, so a declaration may reference one written below it.
+# Register every FnDecl signature, TypeDecl constructor, record, class and
+# instance without checking a body, so a declaration may reference one written
+# below it.
 fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
   match decls with
   | Nil -> env
@@ -9440,6 +9441,12 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # A record's fields are in scope throughout its module (spec §7).
       | ast.RecordDecl _ _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_record_decl(decl, alias_env, env), alias_env)
+      # A class and an instance are in scope throughout their module, an instance
+      # in its own methods too (spec §7).
+      | ast.ClassDecl name type_params methods superclasses _ ->
+          pre_scan_fn_decls(rest, register_class(name, type_params, methods, superclasses, alias_env, env), alias_env)
+      | ast.InstanceDecl constraint _ _ _ ->
+          pre_scan_fn_decls(rest, register_instance_marker(constraint, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
@@ -9610,28 +9617,28 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # move emitted code — which is what makes swapping its body a contained change.
 #
 # FnDecls are partitioned into strongly connected components and ordered so a
-# group's dependencies are checked before it; every other declaration is its own
-# group, in place, and acts as a BARRIER that no FnDecl may cross.
+# group's dependencies are checked before it. Instances are checked last. Every
+# other declaration is its own group, in place, and acts as a BARRIER that no
+# FnDecl may cross.
 #
-# The barrier rule is not conservatism, it is what the environments allow.
-# ClassDecl and InstanceDecl are registered by typecheck_decl as it walks, not by
-# pre_scan_fn_decls, so a FnDecl hoisted above one loses the methods or instance it
-# needs. RecordDecl is registered before the walk and need not be a barrier, but
-# still is (BACKLOG). A top-level `let` is not pre-scanned either — a
-# forward reference to one is `Unknown variable` today, which this must not change.
+# Instances are registered by pre_scan_fn_decls, so they need not be barriers.
+# Classes are too, but re-register in place (typecheck_decl), so they stay
+# barriers. RecordDecl is registered before the walk and need not be a barrier,
+# but still is (BACKLOG). A top-level `let` is not pre-scanned — a forward
+# reference to one is `Unknown variable` today, which this must not change.
 # AliasDecl is a barrier too, by rule rather than need: `alias_env` is complete
 # before the walk (register_all_aliases) and mirrored into the env once, up front.
 #
 # The invariant every plan owes typecheck_groups: the groups partition 0..n-1
 # EXACTLY once. A missing index silently drops a declaration from the emitted
 # program; a duplicated one emits it twice. It holds by construction here — each
-# declaration is either a barrier singleton or in exactly one segment, and an SCC
+# declaration is a singleton (a barrier or an instance) or in exactly one segment, and an SCC
 # partition covers its node set — with one dependency: names must be unique, which
 # check_duplicate_fn_decls has already guaranteed by the time this runs. The
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.
 fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil), list_length(decls))
+  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil, Nil), list_length(decls))
 
 # A plan that does not partition 0..n-1 falls back to source order. Reordering is
 # an optimisation of COMPLETENESS — it makes more correct programs typable — so
@@ -9661,18 +9668,22 @@ fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
   | Nil -> Nil
   | Cons d rest -> Cons((i, d), index_decls(rest, i + 1))
 
-# `seg` is the current run of FnDecls and `acc` the finished groups, both held in
-# REVERSE so the walk stays a cons. Hitting a barrier flushes the run, then emits
-# the barrier itself as a singleton in its original position.
-fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
+# `seg` is the current run of FnDecls, `acc` the finished groups and `late` the
+# instances, all held in REVERSE so the walk stays a cons. Hitting a barrier
+# flushes the run, then emits the barrier itself as a singleton in its original
+# position. Instances come last: nothing reads a checked instance, and its methods
+# may then call any declaration.
+fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int),
+             late: List (List Int)) -> List (List Int) =
   match items with
-  | Nil -> list_reverse(flush_segment(seg, acc))
+  | Nil -> list_reverse(list_append(late, flush_segment(seg, acc)))
   | Cons item rest ->
       match item with
       | (i, decl) ->
           match decl with
-          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc)
-          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)))
+          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc, late)
+          | ast.InstanceDecl _ _ _ _ -> plan_walk(rest, seg, acc, Cons (Cons(i, Nil), late))
+          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)), late)
 
 # The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
@@ -10185,11 +10196,12 @@ fn typecheck_decl(
                           s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
+  # pre_scan_fn_decls registered it already. Again here, because a method keeps
+  # its bare name: a prelude `fn` of that name, committed since, would otherwise
+  # shadow the method below the class.
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(register_class_methods(type_params, methods, alias_env,
-          register_class_method_markers(class_name, type_params, methods,
-            register_superclass_markers(class_name, superclasses, global_env_dict(env))))),
+        GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
         env_ftv, subst)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
@@ -10203,10 +10215,7 @@ fn typecheck_decl(
             # method name, so their placeholders would otherwise be forced equal.
             # scheme_from_fn_parts gives them a "#inst/" namespace for the same
             # reason — the two guards are a pair.
-            TypedDeclOk(
-              typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
-              GlobalEnv(register_instance_marker(constraint, global_env_dict(env))),
-              env_ftv, subst)
+            TypedDeclOk(typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods), env, env_ftv, subst)
 
 # ---------------------------------------------------------------------------
 # apply_subst_typed_expr — walk a typed AST applying a type substitution
@@ -11966,6 +11975,16 @@ fn attribute_to_function(msg: String, name: String) -> String =
 # ---------------------------------------------------------------------------
 # ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
+
+# A class's methods and markers. Both callers (pre_scan_fn_decls, then
+# typecheck_decl) pass the same `alias_env`, so the second call changes nothing
+# but what a same-named prelude `fn` overwrote in between.
+fn register_class(class_name: String, type_params: List String, methods: List ast.ClassMethodSig,
+                  superclasses: List ast.TypeConstraint, alias_env: Dict types.Type,
+                  env: Dict types.Scheme) -> Dict types.Scheme =
+  register_class_methods(type_params, methods, alias_env,
+    register_class_method_markers(class_name, type_params, methods,
+      register_superclass_markers(class_name, superclasses, env)))
 
 fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig,
                           alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =

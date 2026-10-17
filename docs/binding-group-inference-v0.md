@@ -277,13 +277,21 @@ covered the machinery instead of stepping around it: every `FnDecl` runs the gro
 path, at size one. The second step replaced `group_plan`'s body, leaving a small
 diff whose entire blast radius is the ordering.
 
-**Barriers.** Only `FnDecl`s are reordered, and only among themselves; every other
+**Barriers.** Only `FnDecl`s are reordered, and only among themselves. Each
+`InstanceDecl` is a singleton checked after everything else. Every other
 declaration is its own group, in place, and no `FnDecl` crosses it. This is what
 the environments allow rather than caution:
 
-- `ClassDecl`, `InstanceDecl` are registered by `typecheck_decl` as it walks, not
-  by `pre_scan_fn_decls`. `RecordDecl` was too; `pre_scan_fn_decls` now registers
-  it, so it no longer needs to be a barrier, but still is (`BACKLOG.md`).
+- `ClassDecl` and `InstanceDecl` are registered by `pre_scan_fn_decls`, so they are
+  in scope above their declaration and an instance is in scope in its own methods.
+  Checking instances last costs nothing: no other declaration reads a checked
+  instance, and an instance method may then call any declaration.
+- A `ClassDecl` registers its methods again where it stands, and stays a barrier.
+  Method names stay bare after bundling, so a prelude `fn` of the same name,
+  committed in the walk, would otherwise shadow the method in the class's own
+  module (`run/class_method_named_like_prelude_fn.spr`).
+- `RecordDecl` is pre-scanned too, so it no longer needs to be a barrier, but still
+  is (`BACKLOG.md`).
 - A top-level `let` is not pre-scanned either — forward-referencing one is
   `Unknown variable` today (measured), and this must not change that.
 - `AliasDecl` is a barrier *despite* being pre-scanned. `pre_scan`'s `alias_env`
@@ -319,7 +327,7 @@ by us.
 
 **The invariant.** Groups must partition `0..n-1` exactly once — a missing index
 silently drops a declaration from the emitted program, a duplicate emits it twice.
-It holds by construction (each declaration is a barrier singleton or in exactly one
+It holds by construction (each declaration is a singleton or in exactly one
 segment; an SCC partition covers its nodes) given unique names, which
 `check_duplicate_fn_decls` has already guaranteed. `checked_plan` verifies it
 anyway and falls back to source order if it fails: reordering improves
