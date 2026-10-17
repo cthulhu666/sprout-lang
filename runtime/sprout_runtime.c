@@ -3434,10 +3434,10 @@ static const char* fs_error_ctor(int err) {
   return "stdlib.fs.FsIoError";
 }
 
-/* Err(<ctor> "<detail>"), the one builder for a one-String error. `detail` is copied
- * to a managed String: callers pass C literals, strerror() and stack buffers, none of
- * which carries the CSTR header a String must have. Each intermediate is a GC local
- * before the next allocation can run a collection. */
+/* Err(<ctor> "<detail>") from a C string, which is copied to a managed String:
+ * callers pass C literals, strerror() and stack buffers, none of which carries the
+ * CSTR header a String must have (http_err_cstr adopts a malloc'd one instead).
+ * Each intermediate is a GC local before the next allocation can run a collection. */
 static long long sprout_err1_text(const char* ctor_name, const char* detail, const char* oom_ctx) {
   long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, oom_ctx);
   SPROUT_GC_PUSH_I64_LOCAL(msg);
