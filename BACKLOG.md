@@ -215,7 +215,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P2` **A user class method named like a prelude function captures built-in syntax.** Method
   names stay bare after bundling, so a method `list_reverse` breaks comprehensions
   (`class_method_captures_comprehension.spr`), and a method `branch` captures an unfused `try`
-  (`class_method_captures_try.spr`; §9 Q9). Same root as spec §3.1's wrapper-symbol limit.
+  (`class_method_captures_try.spr`; §9 Q9). Same root as spec §3.1's wrapper-symbol limit. It
+  also makes the method visible only below its class (spec §7 rule 16's exception), and the
+  prelude fn's arity wins over a method's of another arity (`list_append(4)` for a 1-ary method).
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in

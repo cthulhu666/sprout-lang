@@ -2502,7 +2502,9 @@ Effect note for v0:
     their module too: a declaration above a class may call its methods and
     require it in a `where` clause, one above an instance may use it, and an
     instance's methods may use the instance itself, so a recursive type's `Eq`
-    compares its children with the instance being declared. An alias is in scope
+    compares its children with the instance being declared. One exception: a
+    method named like a prelude function names that function above its class,
+    and the method only from the class down. An alias is in scope
     throughout its module (§5.6.2). A `fn` may not be moved above a top-level
     `let` it depends on: a `let` must already be in scope where it is used.
 

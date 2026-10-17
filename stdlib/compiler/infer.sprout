@@ -5169,7 +5169,7 @@ fn is_try_operand(e: typed_ast.TypedExpr) -> Bool =
   | _ -> false
 
 # An operand whose type has no `Propagate` instance in scope: it is not a `t a`,
-# or its `t` has none yet. A variable head is the `branch` call's to resolve.
+# or its `t` has none. A variable head is the `branch` call's to resolve.
 fn no_propagate_error(operand_ty: types.Type, env: Dict types.Scheme) -> Maybe String =
   match operand_ty with
   | types.TVar _ -> Nothing
@@ -5198,9 +5198,9 @@ fn propagate_instance_key(head: String) -> String = types.inst_marker_key("Propa
 # no failure arm and a refutable success pattern stays non-exhaustive. An
 # instance with a context is left alone: its dictionaries are its own.
 #
-# A `try` is not a dependency of what the failure arms call, nor of the instance,
-# so either may not be typed yet where the `try` is. Until both are, the `try`
-# calls `branch` (ready_try_fusion).
+# A `try` is not a dependency of what the failure arms call, so that may not be
+# typed yet where the `try` is. Until it is, the `try` calls `branch`
+# (ready_try_fusion).
 fn try_fusions(decls: List ast.Decl) -> unifier.TryFusions =
   let pending = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
       callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), pending, decls)
@@ -5248,15 +5248,14 @@ fn failure_calls(arm: unifier.FusionArm, callable: Set, acc: Set) -> Set =
   | unifier.SuccessArm _ _ -> acc
   | unifier.FailureArm pat failure -> referenced_names(failure, bind_pattern(pat, set_empty()), callable, acc)
 
-# The fusion for a `try` on `operand_ty`, once its instance and what its failure
-# arms call are typed and in scope, and the scope to infer those arms in.
+# The fusion for a `try` on `operand_ty`, once what its failure arms call is typed
+# and in scope, and the scope to infer those arms in.
 fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
     Maybe(unifier.Fusion, Dict types.Scheme) =
   let Just head = concrete_type_str(operand_ty) else Nothing
       Just fusion = dict_get(head, fusions.by_head) else Nothing
       Just decl = fusions.decl else Nothing
-  in if dict_member(propagate_instance_key(head), decl.scope)
-        && all(\n -> dict_member(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
+  in if all(\n -> dict_member(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
      then Just((fusion, decl.scope)) else Nothing
 
 # A declaration's `try`s start here. A failure arm names what the instance sees,
@@ -9616,29 +9615,31 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # (typed_decls_in_source_order), so no plan this function can return is able to
 # move emitted code — which is what makes swapping its body a contained change.
 #
-# FnDecls are partitioned into strongly connected components and ordered so a
-# group's dependencies are checked before it. Instances are checked last. Every
-# other declaration is its own group, in place, and acts as a BARRIER that no
-# FnDecl may cross.
+# FnDecls and instances are partitioned into strongly connected components and
+# ordered so a group's dependencies are checked before it. Every other declaration
+# is its own group, in place, and acts as a BARRIER that neither may cross.
 #
-# Instances are registered by pre_scan_fn_decls, so they need not be barriers.
-# Classes are too, but re-register in place (typecheck_decl), so they stay
-# barriers. RecordDecl is registered before the walk and need not be a barrier,
-# but still is (BACKLOG). A top-level `let` is not pre-scanned — a forward
-# reference to one is `Unknown variable` today, which this must not change.
+# Instances are registered by pre_scan_fn_decls, so they need not be barriers, and
+# staying inside their segment keeps the prelude's checked before a user class can
+# shadow a name they call. Classes are registered there too, but re-register in
+# place (typecheck_decl), so they stay barriers. RecordDecl is registered before
+# the walk and need not be a barrier, but still is (BACKLOG). A top-level `let` is
+# not pre-scanned — a forward reference to one is `Unknown variable` today, which
+# this must not change.
 # AliasDecl is a barrier too, by rule rather than need: `alias_env` is complete
 # before the walk (register_all_aliases) and mirrored into the env once, up front.
 #
 # The invariant every plan owes typecheck_groups: the groups partition 0..n-1
 # EXACTLY once. A missing index silently drops a declaration from the emitted
 # program; a duplicated one emits it twice. It holds by construction here — each
-# declaration is a singleton (a barrier or an instance) or in exactly one segment, and an SCC
+# declaration is a barrier singleton or in exactly one segment, and an SCC
 # partition covers its node set — with one dependency: names must be unique, which
-# check_duplicate_fn_decls has already guaranteed by the time this runs. The
+# check_duplicate_fn_decls has already guaranteed by the time this runs (an
+# instance's node is named by its index). The
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.
 fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil, Nil), list_length(decls))
+  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil), list_length(decls))
 
 # A plan that does not partition 0..n-1 falls back to source order. Reordering is
 # an optimisation of COMPLETENESS — it makes more correct programs typable — so
@@ -9668,22 +9669,28 @@ fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
   | Nil -> Nil
   | Cons d rest -> Cons((i, d), index_decls(rest, i + 1))
 
-# `seg` is the current run of FnDecls, `acc` the finished groups and `late` the
-# instances, all held in REVERSE so the walk stays a cons. Hitting a barrier
-# flushes the run, then emits the barrier itself as a singleton in its original
-# position. Instances come last: nothing reads a checked instance, and its methods
-# may then call any declaration.
-fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int),
-             late: List (List Int)) -> List (List Int) =
+# `seg` is the current run of FnDecls and instances, `acc` the finished groups,
+# both held in REVERSE so the walk stays a cons. Hitting a barrier flushes the run,
+# then emits the barrier itself as a singleton in its original position.
+fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
   match items with
-  | Nil -> list_reverse(list_append(late, flush_segment(seg, acc)))
+  | Nil -> list_reverse(flush_segment(seg, acc))
   | Cons item rest ->
-      match item with
-      | (i, decl) ->
-          match decl with
-          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc, late)
-          | ast.InstanceDecl _ _ _ _ -> plan_walk(rest, seg, acc, Cons (Cons(i, Nil), late))
-          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)), late)
+      if in_segment(item) then plan_walk(rest, Cons(item, seg), acc)
+      else plan_walk(rest, Nil, Cons (Cons(i_of(item), Nil), flush_segment(seg, acc)))
+
+# Every kind is named: a new one is a barrier only once the header above says why.
+fn in_segment(item: (Int, ast.Decl)) -> Bool =
+  match item with
+  | (_, ast.FnDecl _ _ _ _ _ _ _) -> true
+  | (_, ast.InstanceDecl _ _ _ _) -> true
+  | (_, ast.ExternFnDecl _ _ _ _ _) -> false
+  | (_, ast.TypeDecl _ _ _ _ _ _) -> false
+  | (_, ast.RecordDecl _ _ _ _ _ _ _) -> false
+  | (_, ast.LetDecl _ _ _ _) -> false
+  | (_, ast.ClassDecl _ _ _ _ _) -> false
+  | (_, ast.AliasDecl _ _ _ _) -> false
+  | (_, ast.WrapDecl _ _ _ _ _) -> false
 
 # The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
@@ -9709,7 +9716,12 @@ fn segment_names(seg: List (Int, ast.Decl)) -> List String =
   | Cons m rest ->
       match m with
       | (_, ast.FnDecl name _ _ _ _ _ _) -> Cons(name, segment_names(rest))
+      | (i, ast.InstanceDecl _ _ _ _) -> Cons(instance_node(i), segment_names(rest))
       | _ -> segment_names(rest)
+
+# An instance is a node that names no value, so nothing in the segment calls it:
+# it lands after what its methods call, and is otherwise where it was written.
+fn instance_node(i: Int) -> String = "@instance:" ++ int_to_string(i)
 
 fn segment_graph(seg: List (Int, ast.Decl), index: Set, acc: Dict Set) -> Dict Set =
   match seg with
@@ -9719,7 +9731,16 @@ fn segment_graph(seg: List (Int, ast.Decl), index: Set, acc: Dict Set) -> Dict S
       | (_, ast.FnDecl name params _ _ _ body _) ->
           segment_graph(rest, index,
             dict_set(name, referenced_names(body, bind_params(params, set_empty()), index, set_empty()), acc))
+      | (i, ast.InstanceDecl _ _ methods _) ->
+          segment_graph(rest, index, dict_set(instance_node(i), method_references(methods, index, set_empty()), acc))
       | _ -> segment_graph(rest, index, acc)
+
+fn method_references(methods: List ast.InstanceMethodImpl, index: Set, acc: Set) -> Set =
+  match methods with
+  | Nil -> acc
+  | Cons m rest ->
+      let ast.InstanceMethodImpl _ params _ _ _ body = m
+      in method_references(rest, index, referenced_names(body, bind_params(params, set_empty()), index, acc))
 
 fn segment_index_map(seg: List (Int, ast.Decl), acc: Dict Int) -> Dict Int =
   match seg with
@@ -9727,6 +9748,7 @@ fn segment_index_map(seg: List (Int, ast.Decl), acc: Dict Int) -> Dict Int =
   | Cons m rest ->
       match m with
       | (_, ast.FnDecl name _ _ _ _ _ _) -> segment_index_map(rest, dict_set(name, i_of(m), acc))
+      | (i, ast.InstanceDecl _ _ _ _) -> segment_index_map(rest, dict_set(instance_node(i), i, acc))
       | _ -> segment_index_map(rest, acc)
 
 fn i_of(m: (Int, ast.Decl)) -> Int =

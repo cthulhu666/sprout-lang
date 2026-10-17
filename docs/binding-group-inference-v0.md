@@ -277,15 +277,18 @@ covered the machinery instead of stepping around it: every `FnDecl` runs the gro
 path, at size one. The second step replaced `group_plan`'s body, leaving a small
 diff whose entire blast radius is the ordering.
 
-**Barriers.** Only `FnDecl`s are reordered, and only among themselves. Each
-`InstanceDecl` is a singleton checked after everything else. Every other
-declaration is its own group, in place, and no `FnDecl` crosses it. This is what
-the environments allow rather than caution:
+**Barriers.** Only `FnDecl`s and `InstanceDecl`s are reordered, and only within
+the run between two barriers. Every other declaration is its own group, in place,
+and neither crosses it. This is what the environments allow rather than caution:
 
 - `ClassDecl` and `InstanceDecl` are registered by `pre_scan_fn_decls`, so they are
   in scope above their declaration and an instance is in scope in its own methods.
-  Checking instances last costs nothing: no other declaration reads a checked
-  instance, and an instance method may then call any declaration.
+  An instance is a graph node with edges to what its methods call and none into
+  it, so it is checked after those and otherwise where it is written, and its
+  errors come in source order (`type_error/instance_error_reported_in_source_order.spr`).
+  It must not move past a barrier: checked after a user class, a prelude instance
+  calling `list_append` would get the class's method of that name
+  (`run/prelude_instance_beside_shadowing_class.spr`).
 - A `ClassDecl` registers its methods again where it stands, and stays a barrier.
   Method names stay bare after bundling, so a prelude `fn` of the same name,
   committed in the walk, would otherwise shadow the method in the class's own
