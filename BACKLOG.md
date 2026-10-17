@@ -381,6 +381,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **GC and runtime**
 
+- [ ] `P2` **The marker looks up every field, scalars included.** `sprout_gc_drain_marks` sends each
+  child through `sprout_heap_lookup` (a region binary search) because values are untyped `i64`;
+  `field_kinds.sprout` already knows which ctor fields are `Int`/`Bool`. Skip those via a
+  per-ctor mask — safe, since every other field is still looked up. Size it first with a
+  drain-edge counter by kind. `Double` is classed `p` today. `docs/native-sprout-runtime-v0.md`
+  §5 Phase 2a.
 - [ ] `P2` **GC generational step** — bump-region nursery over the phase-2 regions, minor
   collections, write barrier, age/remembered bits already reserved. **Measured 2026-08-09, and it
   re-scoped the item:** the nursery ceiling is 97% for the compiler but 13-48% elsewhere, and
@@ -1687,6 +1693,10 @@ deferral happened, not for current behaviour. Still open:
 
 ### Runtime and performance roadmap
 
+- [ ] `P2` **Native-Sprout runtime, Phase 0: port bench and workload baseline.** Moving a builtin
+  to Sprout is a slowdown today (~5× on the same sort). Before any move: a per-candidate C-vs-Sprout
+  bench under `bench/`, and a baseline over self-compile, nqueens, `http_log_middleware`,
+  `gc_roots` and the galaxy frame. Plan and phase order: `docs/native-sprout-runtime-v0.md`.
 - [ ] `P2` **Make tight Sprout string-processing loops competitive with host builtins**, so moderate
   stdin/text workloads do not need dedicated host helpers to be practical. Investigate the native
   overhead in recursive stdlib string loops such as `string_lines` over stdin-loaded text — tail-
