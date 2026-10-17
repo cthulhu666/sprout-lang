@@ -2373,9 +2373,9 @@ fn check_instance_for_marker(
             # PARAMETER POSITION (the arg whose declared type mentions a class
             # variable), not by "first concrete arg" — otherwise a leading
             # concrete arg of an unrelated type (e.g. a String `tag`) hijacks the
-            # dict (fundamentals review W4 / probe sr_dispatch). head_str comes
-            # from that arg; the TDict records the class VARIABLE's binding, which
-            # class_var_dispatch_type checks names the same head.
+            # dict (fundamentals review W4 / probe sr_dispatch). The dispatch type
+            # is the class VARIABLE's binding at that position, not the whole arg:
+            # `List t` given `List Int` dispatches on `Int`, never on `List`.
             # Resolve the dispatch arg's type with s3 — the substitution AFTER
             # argument inference and callee-param unification — not the stale
             # pre-argument `subst`. An inline parametric-record arg (`Box(val=5)`)
@@ -2386,13 +2386,12 @@ fn check_instance_for_marker(
             # the post-pass only rewrites return-position calls, so s3 is the last
             # chance to see the concrete type. (ADTs dodge this: a constructor
             # application node is already concretely typed.)
-            # No class-var arg found at all: the constraint var is not at the head
-            # of any argument (it may be hidden inside a container), so there is no
-            # dispatch type to gate on — Nothing keeps the ungated scan.
+            # No dispatch type at all: no binding is concrete and no parameter is the
+            # bare class variable (`List t` given `List a`), so there is nothing to
+            # gate on — Nothing keeps the ungated scan.
             let cname = types.type_id_name(class_name)
-                Just cv_arg = class_var_arg_or_fallback(method_name, class_vars, typed_args, s3, env)
+                Just cv_ty = class_var_type_or_fallback(method_name, class_vars, typed_args, s3, env)
                   else check_instance_fwd(cname, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, NoDispatchType)
-                cv_ty = unifier.apply_subst(s3, typed_ast.typed_expr_type(cv_arg))
                 # The arg was found but its type is not concrete — that type IS the
                 # dispatch type, so the scan can be gated on it.
                 Just head_str = concrete_type_str(cv_ty)
@@ -2410,10 +2409,7 @@ fn check_instance_for_marker(
                       else InferErr(pos, "No instance of " ++ cname ++ " for " ++ head_str)
                 in
                   InferOk(
-                    concrete_dispatch_call(env, s3, typed_callee, typed_args, ret_t, pos,
-                      cname,
-                      class_var_dispatch_type(method_name, class_vars, typed_args, ret_t, s3, env,
-                        cv_ty, head_str)),
+                    concrete_dispatch_call(env, s3, typed_callee, typed_args, ret_t, pos, cname, cv_ty),
                     s3, es3, call_eff)
           else
             # Return-position dispatch — first_concrete_typed_arg_str_excluding would pick
@@ -2587,13 +2583,12 @@ fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, en
           | Just fwd_scheme -> fwd_scheme_to_tdict(fwd_scheme, class_name, pos)
           | Nothing -> find_fwd_tdict_in_args(class_name, rest, env, pos)
 
-# W4 (F-DISPATCH): pick the argument that determines the instance dict by
-# CONSTRAINT POSITION. Walk the method's declared parameter chain alongside the
-# actual args and return the first arg whose declared parameter type mentions a
-# class variable AND has a concrete head. This makes `describe(tag: String,
-# x: a)` dispatch on `x` (the class-var parameter), not on the leading `tag`.
-# Returning Nothing (no class-var arg is concrete) routes to the @fwd
-# polymorphic path, matching the old first-concrete behaviour on that boundary.
+# W4 (F-DISPATCH): find the dispatch type by CONSTRAINT POSITION. Walk the
+# method's declared parameter chain alongside the actual args and return the
+# class variable's binding in the first arg where that binding has a concrete
+# head. So `describe(tag: String, x: a)` dispatches on `x`, not on the leading
+# `tag`, and `total(xs: List t)` given `List Int` on `Int`, not on `List`.
+# Returning Nothing (no concrete binding) routes to the @fwd polymorphic path.
 #
 # With no concrete one, the argument at a parameter that IS the class variable is
 # still the dispatch value, its type still a variable: returned, it gates the marker
@@ -2602,34 +2597,38 @@ fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, en
 # share a class, as `(\z -> to_string(z))(y)` under `where ToString a, ToString b`
 # did. Gated, an unlinked lambda parameter is left for the post-pass, which forwards
 # it by the final substitution.
-fn class_var_arg(
+fn class_var_type(
   method_type: types.Type,
   class_vars: List String,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type
-) -> Maybe typed_ast.TypedExpr =
-  match concrete_class_var_arg(method_type, class_vars, typed_args, subst) with
-  | Just arg -> Just(arg)
-  | Nothing -> bare_class_var_arg(method_type, class_vars, typed_args)
+) -> Maybe types.Type =
+  match concrete_class_var_type(method_type, class_vars, typed_args, subst) with
+  | Just t -> Just(t)
+  | Nothing ->
+      match bare_class_var_arg(method_type, class_vars, typed_args) with
+      | Just arg -> Just(arg_type_under(subst, arg))
+      | Nothing -> Nothing
 
-fn concrete_class_var_arg(
+fn concrete_class_var_type(
   method_type: types.Type,
   class_vars: List String,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type
-) -> Maybe typed_ast.TypedExpr =
-  match method_type with
-  | types.TFunc param ret _ _ ->
-      match typed_args with
-      | Nil -> Nothing
-      | Cons arg rest ->
-          if type_contains_var(param, class_vars) then
-            match concrete_type_str(unifier.apply_subst(subst, typed_ast.typed_expr_type(arg))) with
-            | Just _ -> Just(arg)
-            | Nothing -> concrete_class_var_arg(ret, class_vars, rest, subst)
-          else
-            concrete_class_var_arg(ret, class_vars, rest, subst)
-  | _ -> Nothing
+) -> Maybe types.Type =
+  match (method_type, typed_args) with
+  | (types.TFunc param ret _ _, [arg | rest]) ->
+      match concrete_class_var_binding(param, arg_type_under(subst, arg), class_vars) with
+      | Just t -> Just(t)
+      | Nothing -> concrete_class_var_type(ret, class_vars, rest, subst)
+  | (_, _) -> Nothing
+
+# What a class variable binds to at its position in `param`, if that has a concrete head.
+fn concrete_class_var_binding(param: types.Type, arg_t: types.Type,
+                              class_vars: List String) -> Maybe types.Type =
+  let Just t = find_map(find_class_var_in_type(param, arg_t, _), class_vars) else Nothing
+      Just _ = concrete_type_str(t) else Nothing
+  in Just(t)
 
 fn bare_class_var_arg(
   method_type: types.Type,
@@ -2643,49 +2642,24 @@ fn bare_class_var_arg(
   | (types.TFunc _ ret _ _, [_ | rest]) -> bare_class_var_arg(ret, class_vars, rest)
   | (_, _) -> Nothing
 
-# Position-aware instance-arg selection with a safe fallback: when the method's
+# Position-aware dispatch-type selection with a safe fallback: when the method's
 # declared type is not in env (cannot locate the class-var position), fall back
 # to the historical first-concrete-arg heuristic rather than mis-dispatching.
-fn class_var_arg_or_fallback(
+fn class_var_type_or_fallback(
   method_name: String,
   class_vars: List String,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type,
   env: Dict types.Scheme
-) -> Maybe typed_ast.TypedExpr =
+) -> Maybe types.Type =
   match dict_get(method_name, env) with
   | Just method_scheme ->
       match method_scheme with
-      | types.Scheme _ _ method_type _ _ -> class_var_arg(method_type, class_vars, typed_args, subst)
-  | Nothing -> first_concrete_typed_arg(typed_args, subst)
-
-# The dictionary's type argument is the CLASS VARIABLE's binding, not the whole
-# argument type: `fn label(xs: t Int)` binds `t` to `Tagged k` while the argument
-# is `Tagged k Int`, and an instance context substituted against that extra
-# trailing argument binds the head's variable to it. Falling back unless the
-# projection names the same head leaves the instance head_str gated on unchanged.
-#
-# Each fallback to `arg_t` records the whole argument, one application deeper than
-# the class variable, so it would break the recorder invariant that lets
-# unify_type_expr pair spines as they stand. Measured DEFENSIVE: instrumenting all
-# four with a panic fired on none of 462 corpus files nor on the compiler's own
-# source. Instrumenting again is the way to check that, not reading this line — and
-# resolve.spine_depth_mismatch reports it loudly on the instance-context path.
-fn class_var_dispatch_type(
-  method_name: String,
-  class_vars: List String,
-  typed_args: List typed_ast.TypedExpr,
-  ret_t: types.Type,
-  subst: Dict types.Type,
-  env: Dict types.Scheme,
-  arg_t: types.Type,
-  head_str: String
-) -> types.Type =
-  let Just sch = dict_get(method_name, env) else arg_t
-      Just projected = dispatch_type_for_vars(types.scheme_type(sch), typed_args, ret_t, subst,
-                                              class_vars) else arg_t
-      Just h = concrete_type_str(projected) else arg_t
-  in if h == head_str then projected else arg_t
+      | types.Scheme _ _ method_type _ _ -> class_var_type(method_type, class_vars, typed_args, subst)
+  | Nothing ->
+      match first_concrete_typed_arg(typed_args, subst) with
+      | Just arg -> Just(arg_type_under(subst, arg))
+      | Nothing -> Nothing
 
 # Like first_concrete_typed_arg_str_excluding, but returns the arg itself (used
 # as the W4 fallback so head_str and TypeExpr derive from the same TypedExpr).
