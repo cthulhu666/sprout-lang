@@ -56,7 +56,7 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
     match r with
     | typed_ast.TypedErr pos msg -> CheckErr(pos, msg)
     | typed_ast.TypedOk _ env ->
-        match stored_effect_var_error(list_flat_map(\m -> m, modules)) with
+        match stored_effect_var_error(ast.flatten_modules(modules)) with
         | Nothing -> CheckOk(env)
         | Just (pos, msg) -> CheckErr(pos, msg)
 
@@ -70,7 +70,7 @@ export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme))
 export fn typecheck_bundle(modules: List (List ast.Decl), extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
     (result, reports) <- typecheck_typed_with_effects(modules, extra)
-    enforce_stored_effect_vars(list_flat_map(\m -> m, modules), enforce_effects(result, reports))
+    enforce_stored_effect_vars(ast.flatten_modules(modules), enforce_effects(result, reports))
 
 # Rule 9's stored-position half, applied on the SAME path as rule 8's post-pass
 # and for the same reason: `--phase effects` calls

@@ -33,7 +33,7 @@ import stdlib.string as string
 # program's aliases and signatures.
 export fn desugar_modules(modules: List (List ast.Decl)) -> List (List ast.Decl) =
   let expanded = ast.expand_alias_constraints(modules)
-      fn_idx = build_fn_sig_index(list_flat_map(\decls -> decls, expanded))
+      fn_idx = build_fn_sig_index(ast.flatten_modules(expanded))
   in list_map(\decls -> desugar_decls_i(decls, fn_idx), expanded)
 
 # ---------------------------------------------------------------------------

@@ -7349,7 +7349,7 @@ export fn typecheck_decls(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
-  let decls = list_flat_map(\m -> m, modules)
+  let decls = ast.flatten_modules(modules)
   in match register_all_aliases(decls, dict_empty()) with
      | AliasesErr pos msg -> pure_typed_err(pos, msg)
      | AliasesOk alias_env ->
@@ -7384,7 +7384,7 @@ fn typecheck_decls_resolved(
   class_sigs: Dict (String, List ast.ClassMethodSig)
 ) -> typed_ast.TypedResult !{IO} =
   do
-    let decls = list_flat_map(\m -> m, modules)
+    let decls = ast.flatten_modules(modules)
     # Pre-scan: register all FnDecl signatures (constraint field included) in env
     # before processing bodies.  This enables forward references and
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
@@ -9803,7 +9803,7 @@ fn typecheck_decls_inner(
   alias_env: Dict types.Type,
   env_ftv: List String
 ) -> typed_ast.TypedResult !{IO} =
-  let decls = list_flat_map(\m -> m, modules)
+  let decls = ast.flatten_modules(modules)
   in typecheck_modules(state, vec_from_list(decls), index_modules(modules, 0), env, subst, eff_subst,
                        alias_env, dict_empty(), env_ftv, list_length(decls))
 

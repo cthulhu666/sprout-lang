@@ -128,7 +128,7 @@ fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String, 
     | bundler.BundleOk modules ->
         do
           print("OK")
-          dump_ast_decl_names(list_flat_map(\decls -> decls, modules))
+          dump_ast_decl_names(ast.flatten_modules(modules))
 
 # ---------------------------------------------------------------------------
 # Phases: check, lower, recheck. They differ only in how far `compile` goes: the

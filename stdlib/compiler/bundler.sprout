@@ -24,7 +24,7 @@ export type BundleResult (..) =
   | BundleErr source.SourcePos String
 
 export fn bundle_program(modules: List (List ast.Decl)) -> ast.Program =
-  ast.Program(list_flat_map(\decls -> decls, modules), no_pos())
+  ast.Program(ast.flatten_modules(modules), no_pos())
 
 # Where module sources come from, and what has already been parsed.
 #
