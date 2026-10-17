@@ -1,0 +1,82 @@
+module app.jwt
+
+import stdlib.bytes as bytes
+import stdlib.crypto (hmac_sha256, base64_decode, const_time_eq)
+import stdlib.json (Json, JsonString, JsonInt, json_parse, json_get_field)
+import stdlib.string as string
+
+# The three ways auth fails, each with its own 401 message.
+export type AuthError (..) =
+  | MissingBearer
+  | InvalidToken
+  | InvalidPayload
+
+export type Claims (..) = (user_id: Int, username: String)
+
+export fn auth_error_message(err: AuthError) -> String =
+  match err with
+  | MissingBearer -> "missing bearer token"
+  | InvalidToken -> "invalid or expired token"
+  | InvalidPayload -> "invalid token payload"
+
+# base64url without padding -> bytes. stdlib.crypto only knows the padded
+# standard alphabet, so translate first.
+fn b64url_decode(raw: String) -> Maybe Bytes =
+  if extra == 1 then Nothing
+  else
+    match base64_decode(std ++ string.repeat("=", if extra == 0 then 0 else 4 - extra)) with
+    | Ok data -> Just(data)
+    | Err _ -> Nothing
+where
+  std = string.replace_all("_", "/", string.replace_all("-", "+", raw))
+  len = string.byte_length(raw)
+  extra = len - len / 4 * 4
+
+fn decode_json(part: String) -> Maybe Json =
+  let Just raw = b64url_decode(part) else Nothing
+      Ok text = bytes.to_string(raw) else Nothing
+      Ok value = json_parse(text) else Nothing
+  in Just(value)
+
+fn field_is(value: Json, key: String, want: String) -> Bool =
+  match json_get_field(value, key) with
+  | Just (JsonString s) -> s == want
+  | _ -> false
+
+fn all_digits(s: String) -> Bool =
+  ! string.is_empty (s) && vec_all(string.is_ascii_digit, string.string_chars(s))
+
+# `sub` must be a positive integer in a string.
+export fn positive_id(s: String) -> Maybe Int =
+  if string.byte_length(s) > 18 || ! all_digits (s) then Nothing
+  else
+    match parse_int(s) with
+    | Just n -> if n > 0 then Just(n) else Nothing
+    | Nothing -> Nothing
+
+fn not_expired(payload: Json, now_s: Int) -> Bool =
+  match json_get_field(payload, "exp") with
+  | Just (JsonInt exp) -> now_s < exp
+  | _ -> false
+
+fn claims(payload: Json) -> Result AuthError Claims =
+  let Just(JsonString sub) = json_get_field(payload, "sub") else Err(InvalidPayload)
+      Just user_id = positive_id(sub) else Err(InvalidPayload)
+      Just(JsonString name) = json_get_field(payload, "username") else Err(InvalidPayload)
+  in Ok(Claims(user_id = user_id, username = name))
+
+# HS256 only; signature, then `exp`, then the claims this API reads.
+fn verify(secret: Bytes, now_s: Int, token: String) -> Result AuthError Claims =
+  let [h, p, s] = string.split(token, ".") else Err(InvalidToken)
+      Just header = decode_json(h) else Err(InvalidToken)
+      Just sig = b64url_decode(s) else Err(InvalidToken)
+      Just payload = decode_json(p) else Err(InvalidToken)
+  in if ! field_is (header, "alg", "HS256") then Err(InvalidToken)
+     else if !const_time_eq(hmac_sha256(secret, bytes.from_string(`${h}.${p}`)), sig) then Err(InvalidToken)
+     else if ! not_expired (payload, now_s) then Err(InvalidToken)
+     else claims(payload)
+
+export fn authenticate(secret: Bytes, now_s: Int, header: Maybe String) -> Result AuthError Claims =
+  let Just value = header else Err(MissingBearer)
+      Just token = string.strip_prefix(value, "Bearer ") else Err(MissingBearer)
+  in verify(secret, now_s, token)

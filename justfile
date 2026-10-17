@@ -2790,6 +2790,14 @@ http-client-binary-gate: bootstrap-from-seed
 http-tls-gate: bootstrap-from-seed
   SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/http_tls_gate.sh
 
+# The twelve-dollar-server-challenge app in examples/twelve_dollar_server, with its vendored sqlite
+# driver: builds it and checks every route once over HTTP. Its own recipe because compile-examples
+# links the runtime alone, and this app also needs the driver's C shim and the system libsqlite3.
+# Its .sprout files sit two folders deep, out of compile-examples' glob.
+[group('examples')]
+twelve-dollar-example: bootstrap-from-seed
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/twelve_dollar_example.sh
+
 # The curated Linux gate: the park/timer/socket surface, on the backend CI uses.
 [group('smoke')]
 linux-smoke: (linux-run "task-io-smoke")
@@ -3777,6 +3785,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "stack-overflow-smoke|stack-overflow-smoke"
     "flush-on-crash-smoke|flush-on-crash-smoke"
     "http-client-binary|http-client-binary-gate"
+    "twelve-dollar-example|twelve-dollar-example"
     "tco-runtime-smoke|tco-runtime-smoke"
     "trace-dispatch-smoke|trace-dispatch-smoke"
     "verify-dispatch-smoke|verify-dispatch-smoke"
@@ -4027,7 +4036,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

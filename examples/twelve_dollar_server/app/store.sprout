@@ -1,0 +1,91 @@
+module app.store
+
+import stdlib.string as string
+import sqlite.connection (SqliteDb, sqlite_query, sqlite_exec, sqlite_changes)
+import sqlite.types (SqliteError, SqliteRow, SqliteDecodeError, SqliteText, SqliteInt, sqlite_rows, sqlite_row_entries)
+
+# What a like did.
+export type LikeOutcome (..) =
+  | Liked
+  | AlreadyLiked
+  | NoSuchPost
+
+# Per-connection settings. WAL + synchronous=NORMAL is the durability floor the
+# rules allow. mmap lets reads skip sqlite's own page copy, and its pages are
+# shared by every connection; the page cache is per connection, so it stays at
+# sqlite's 2 MB default.
+export fn configure(db: borrowing SqliteDb) -> Result SqliteError Unit !{IO} =
+  sqlite_exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA mmap_size=1073741824; PRAGMA temp_store=MEMORY; PRAGMA busy_timeout=5000;")
+
+# The driver has no parameter binding yet, so values go in as literals. Ints
+# are formatted by `to_string`; text is quoted here and nowhere else.
+fn quote(s: String) -> String =
+  `'${string.replace_all("'", "''", s)}'`
+
+# The post object, built by sqlite so its JSON escaping is sqlite's.
+let post_json: String =
+  "json_object('id',p.id,'body',p.body,'created_at',p.created_at,'author',u.username,'like_count',(SELECT count(*) FROM likes l WHERE l.post_id=p.id))"
+
+# First column of every row, as text.
+fn texts(rows: Vec SqliteRow) -> List String =
+  vec_to_list(rows) |> list_filter_map(first_text)
+
+fn first_text(row: SqliteRow) -> Maybe String =
+  match vec_get(0, sqlite_row_entries(row)) with
+  | Just (_, SqliteText s) -> Just(s)
+  | _ -> Nothing
+
+fn first_int(rows: Vec SqliteRow) -> Maybe Int =
+  let Just row = vec_get(0, rows) else Nothing
+      Just(_, SqliteInt n) = vec_get(0, sqlite_row_entries(row)) else Nothing
+  in Just(n)
+
+fn query_texts(db: borrowing SqliteDb, sql: String) -> Result SqliteError (List String) !{IO} =
+  do
+    result <- try sqlite_query(db, sql)
+    Ok(texts(sqlite_rows(result)))
+
+export fn ping(db: borrowing SqliteDb) -> Result SqliteError Unit !{IO} =
+  do
+    _ <- try sqlite_query(db, "SELECT 1")
+    Ok(())
+
+# `{"posts":[...]}` for the 20 newest posts.
+export fn feed(db: borrowing SqliteDb) -> Result SqliteError String !{IO} =
+  do
+    posts <- try query_texts(db, `SELECT ${post_json} FROM posts p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC, p.id DESC LIMIT 20`)
+    Ok(`{"posts":[${string.join(",", posts)}]}`)
+
+# `{"post":...}`, or Nothing when the post does not exist.
+export fn post(db: borrowing SqliteDb, id: Int) -> Result SqliteError (Maybe String) !{IO} =
+  do
+    rows <- try query_texts(db, `SELECT json_object('post',${post_json}) FROM posts p JOIN users u ON u.id=p.user_id WHERE p.id=${to_string(id)}`)
+    match rows with
+    | [] -> Ok(Nothing)
+    | [row | _] -> Ok(Just(row))
+
+# Inserts and answers `{"post":...}` in one statement; the commit has happened
+# when sqlite_query returns.
+export fn create_post(db: borrowing SqliteDb, user_id: Int, username: String, body: String) -> Result SqliteError String !{IO} =
+  do
+    rows <- try query_texts(db, `INSERT INTO posts (user_id, body) VALUES (${to_string(user_id)}, ${quote(body)}) RETURNING json_object('post',json_object('id',id,'body',body,'created_at',created_at,'author',${quote(username)},'like_count',0))`)
+    match rows with
+    | [row | _] -> Ok(row)
+    | [] -> Err(SqliteDecodeError("INSERT returned no row"))
+
+# One statement for the common case (a new like). Only when it inserts nothing
+# does a second one tell a repeat from a missing post.
+export fn like(db: borrowing SqliteDb, user_id: Int, post_id: Int) -> Result SqliteError LikeOutcome !{IO} =
+  do
+    _ <- try sqlite_query(db, `INSERT INTO likes (user_id, post_id) SELECT ${uid}, ${pid} WHERE EXISTS (SELECT 1 FROM posts WHERE id=${pid}) ON CONFLICT DO NOTHING`)
+    inserted <- sqlite_changes(db)
+    if inserted > 0 then Ok(Liked)
+    else
+      do
+        found <- try sqlite_query(db, `SELECT EXISTS (SELECT 1 FROM posts WHERE id=${pid})`)
+        match first_int(sqlite_rows(found)) with
+        | Just 1 -> Ok(AlreadyLiked)
+        | _ -> Ok(NoSuchPost)
+where
+  uid = to_string(user_id)
+  pid = to_string(post_id)

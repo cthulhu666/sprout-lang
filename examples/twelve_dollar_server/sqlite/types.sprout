@@ -1,0 +1,61 @@
+module sqlite.types
+
+export type SqliteError (..) =
+  | SqliteOpenError Int String
+  | SqliteQueryError Int String
+  | SqliteDecodeError String
+
+export type SqliteValue (..) =
+  | SqliteInt Int
+  | SqliteText String
+  | SqliteNull
+
+export type SqliteRow (..) =
+  | SqliteRow (Vec (String, SqliteValue))
+
+export type SqliteResult (..) =
+  | SqliteResult (Vec String) (Vec SqliteRow)
+
+export fn sqlite_error_message(err: SqliteError) -> String =
+  match err with
+  | SqliteOpenError code msg -> "open failed (" ++ to_string(code) ++ "): " ++ msg
+  | SqliteQueryError code msg -> "query failed (" ++ to_string(code) ++ "): " ++ msg
+  | SqliteDecodeError msg -> "decode failed: " ++ msg
+
+export fn sqlite_columns(result: SqliteResult) -> Vec String =
+  match result with
+  | SqliteResult columns _ -> columns
+
+export fn sqlite_rows(result: SqliteResult) -> Vec SqliteRow =
+  match result with
+  | SqliteResult _ rows -> rows
+
+fn lookup(entries: Vec (String, SqliteValue), name: String, index: Int, found: Maybe SqliteValue) -> Result SqliteError SqliteValue =
+  match vec_get(index, entries) with
+  | Nothing ->
+      match found with
+      | Nothing -> Err(SqliteDecodeError("no column named " ++ name))
+      | Just value -> Ok(value)
+  | Just (key, value) ->
+      if key != name then lookup(entries, name, index + 1, found)
+      else
+        match found with
+        | Nothing -> lookup(entries, name, index + 1, Just(value))
+        | Just _ -> Err(SqliteDecodeError("more than one column named " ++ name ++ "; alias it or use sqlite_row_entries"))
+
+# A name shared by several columns (e.g. `id` after a JOIN) is an error, not
+# the first match.
+export fn sqlite_get(row: SqliteRow, name: String) -> Result SqliteError SqliteValue =
+  match row with
+  | SqliteRow entries -> lookup(entries, name, 0, Nothing)
+
+# Columns in result order, for positional access.
+export fn sqlite_row_entries(row: SqliteRow) -> Vec (String, SqliteValue) =
+  match row with
+  | SqliteRow entries -> entries
+
+export fn sqlite_value_to_string(value: SqliteValue) -> String =
+  match value with
+  | SqliteInt n -> to_string(n)
+  | SqliteText s -> s
+  | SqliteNull -> "NULL"
