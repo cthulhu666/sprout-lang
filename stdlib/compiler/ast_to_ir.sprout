@@ -251,17 +251,15 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
         dict_set(v, sprout_ir.temp_ssa(base_idx + i), acc))
 
 # Determine the IRLoadEnvSlot kind for a single captured variable:
-#   IRTScalar  — Int (no GC root needed)
+#   IRTScalar  — a non-heap scalar per type_kind (no GC root needed)
 #   IRTHeap    — everything else with a known type
 #   IRTUnknown — type lookup failed (conservative; ir_rooting treats as heap)
-# Char is a non-heap scalar (an immediate i64 codepoint), so a captured Char is
-# treated like Int and needs no rooting.
 # O(n) where n = body size (scans body for the TVar occurrence).
 fn capture_kind(v: String, body: typed_ast.TypedExpr) -> sprout_ir.IRType =
   match find_capture_type(body, v) with
   | Nothing -> sprout_ir.IRTUnknown
   | Just t ->
-      if is_int_type(t) || is_char_type(t) || is_double_type(t)
+      if type_kind.type_is_non_heap_scalar(t)
       then sprout_ir.IRTScalar
       else sprout_ir.IRTHeap
 
@@ -1426,7 +1424,7 @@ fn finish_do_short_circuit(pat: ast.Pattern, rest: List typed_ast.TypedDoStep,
         done_lbl = "do_done_" ++ int_to_string(eidx)
 
 # Find the type of the first TVar with the given name inside expr.
-# Used by translate_lambda to check whether a captured variable is Bool-typed.
+# Used by capture_kind to classify a captured variable as scalar or heap.
 # Returns Nothing if no matching TVar is found (should not happen for a name
 # that passed filter_capturable, but we handle it defensively).
 # O(n) where n = expression node count.
