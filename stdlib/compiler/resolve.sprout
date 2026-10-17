@@ -85,7 +85,7 @@ type DeclKind =
 # variable) is not evidence of a difference, so it takes the one slot it fits, and none
 # when it fits two.
 fn forwarded_slot(class_bare: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Maybe String =
-  let Just slots = dict_get(constraint_key_str(class_bare, type_args), fwd) else Nothing
+  let Just slots = dict_get(typed_ast.constraint_key_str(class_bare, type_args), fwd) else Nothing
       exact = ast.dict_slot_key(class_bare, type_args)
   in
     if any(\s -> slot_key(s) == exact, slots) then Just(exact)
@@ -122,7 +122,7 @@ fn te_conflicts(use: ast.TypeExpr, written: ast.TypeExpr) -> Bool =
   | (ast.TupleType us, ast.TupleType ws) -> args_conflict(us, ws)
   # Any other pair, arrows included: the key-level answer, by head constructor. It is
   # what forwarding meant before arguments were compared, so it stays right for any shape.
-  | (_, _) -> type_expr_head_name(use) != type_expr_head_name(written)
+  | (_, _) -> typed_ast.type_expr_head_name(use) != typed_ast.type_expr_head_name(written)
 
 # A position nothing names: `_`, or an inference variable (`$t<n>`, as
 # typed_ast.type_to_type_expr writes one). An existential (`$ex_<binder>`, a `$sk<n>`
@@ -269,8 +269,8 @@ fn add_instance(
   match constraint with
   | ast.TypeConstraint _ type_args ->
       Tables(
-        dict_set(constraint_key_from_tc(constraint), true, tables_exists(acc)),
-        add_ctx(constraint_key_from_tc(constraint), type_args, inst_constraints, tables_ctx(acc)),
+        dict_set(typed_ast.constraint_key_from_tc(constraint), true, tables_exists(acc)),
+        add_ctx(typed_ast.constraint_key_from_tc(constraint), type_args, inst_constraints, tables_ctx(acc)),
         tables_env(acc),
         tables_super(acc),
         tables_class_params(acc))
@@ -308,10 +308,10 @@ fn check_constraint(
           else if head_is_concrete(head_arg) == false then Nothing
           else
             if instance_exists(string.substring_after_last(class_name, "."), type_args, head_arg, tables)
-            then check_context(constraint_key_str(string.substring_after_last(class_name, "."), type_args),
+            then check_context(typed_ast.constraint_key_str(string.substring_after_last(class_name, "."), type_args),
                                class_name, head_arg, type_args, pos, cover, tables)
             else Just((pos,
-              "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ type_expr_head_name(head_arg)))
+              "No instance of " ++ string.substring_after_last(class_name, ".") ++ " for " ++ typed_ast.type_expr_head_name(head_arg)))
 
 # A dictionary the declaration forwards arrives whole, context included, so no instance
 # has to exist for it and its context is not this body's to supply. Decided as
@@ -330,8 +330,8 @@ fn instance_exists(
   head_arg: ast.TypeExpr,
   tables: Tables
 ) -> Bool =
-  dict_member(constraint_key_str(class_bare, type_args), tables_exists(tables))
-  || dict_member(types.inst_marker_key(class_bare, type_expr_head_name(head_arg)), tables_env(tables))
+  dict_member(typed_ast.constraint_key_str(class_bare, type_args), tables_exists(tables))
+  || dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables))
 
 # Recurse into a matched instance's context constraints (substituted at the
 # concrete type args).  A context-free instance has no entry → Nothing.
@@ -442,7 +442,7 @@ fn unsupplied_context_var(
   let CoverFrom kind fwd_keys = cover else Nothing
       [head_arg | _] = type_args else Nothing
   in
-    if is_checked_var(type_expr_head_name(head_arg)) == false then Nothing
+    if is_checked_var(typed_ast.type_expr_head_name(head_arg)) == false then Nothing
     else if forwards(string.substring_after_last(class_name, "."), type_args, fwd_keys) then Nothing
     else Just((pos, "the `" ++ string.substring_after_last(outer_class, ".") ++ "` instance for `"
                       ++ te_display(outer_head) ++ "` "
@@ -456,7 +456,7 @@ fn is_checked_var(name: String) -> Bool =
 # an applied variable (`Eq (f a)`) is not supported; an instance method takes its
 # context from the instance head, under the head's own variable names.
 fn unsupplied_remedy(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
-  if types.is_unann_placeholder(type_expr_head_name(arg)) then unann_remedy(cls, type_expr_head_name(arg))
+  if types.is_unann_placeholder(typed_ast.type_expr_head_name(arg)) then unann_remedy(cls, typed_ast.type_expr_head_name(arg))
   else
     "needs `" ++ cls ++ " " ++ te_display_atom(arg) ++ "`, which nothing in scope supplies — "
       ++ supply_hint(kind, cls, arg)
@@ -469,7 +469,7 @@ fn supply_hint(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
   | (ast.TypeApply _ _, _) ->
       "a `where` constraint on an applied type variable is not supported; use a concrete type"
   | (_, InInstanceMethod bound) ->
-      if list_member(type_expr_head_name(arg), bound) then "add it to the instance head's `where`"
+      if list_member(typed_ast.type_expr_head_name(arg), bound) then "add it to the instance head's `where`"
       else
         "constrain `" ++ te_display(arg) ++ "` with a method-level `where` (the class declaration "
           ++ "must declare it too) — or, if it is the instance head's variable, spell it as the head does"
@@ -524,7 +524,7 @@ fn te_display(te: ast.TypeExpr) -> String =
   | ast.TupleType items -> "(" ++ string.join(", ", list_map(te_display, items)) ++ ")"
   | ast.TypeArrow param ret _ _ -> te_display_atom(param) ++ " -> " ++ te_display(ret)
   # A thunk or effect type in a context position: its head (`Fn`, `Eff`) still names it.
-  | _ -> type_expr_head_name(te)
+  | _ -> typed_ast.type_expr_head_name(te)
 
 fn te_display_atom(te: ast.TypeExpr) -> String =
   match te with
@@ -594,9 +594,9 @@ fn produce_concrete_evidence(
   fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  if dict_member(constraint_key_str(class_bare, type_args), tables_exists(tables)) then
-    produce_instance_evidence(eff_class, constraint_key_str(class_bare, type_args), type_args, fwd_keys, tables)
-  else if dict_member(types.inst_marker_key(class_bare, type_expr_head_name(head_arg)), tables_env(tables)) then
+  if dict_member(typed_ast.constraint_key_str(class_bare, type_args), tables_exists(tables)) then
+    produce_instance_evidence(eff_class, typed_ast.constraint_key_str(class_bare, type_args), type_args, fwd_keys, tables)
+  else if dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables)) then
     typed_ast.EvUnresolved
   else
     typed_ast.EvMissing(ast.TypeConstraint(eff_class, type_args))
@@ -651,7 +651,7 @@ fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, expanded: List 
 # is not recorded again.
 fn add_slot(class_bare: String, type_args: List ast.TypeExpr, expanded: List ast.TypeExpr,
             acc: Forwarded) -> Forwarded =
-  let group = constraint_key_str(class_bare, type_args)
+  let group = typed_ast.constraint_key_str(class_bare, type_args)
       slot = ast.dict_slot_key(class_bare, type_args)
       Just slots = dict_get(group, acc) else dict_set(group, [(slot, expanded)], acc)
   in
@@ -883,36 +883,7 @@ fn check_expr(e: typed_ast.TypedExpr, cover: VarCover, tables: Tables) -> Maybe(
 # Concreteness is a property of the type NAME, not its module path: a canonical
 # dotted head (e.g. "main.Maybe") is concrete iff its last segment starts uppercase.
 fn head_is_concrete(te: ast.TypeExpr) -> Bool =
-  types.type_id_is_concrete(types.type_id(type_expr_head_name(te)))
-
-fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
-  match c with
-  | ast.TypeConstraint class_name type_args ->
-      constraint_key_str(string.substring_after_last(class_name, "."), type_args)
-
-fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
-  match type_args with
-  | Nil -> class_name
-  | Cons h rest ->
-      class_name ++ "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
-
-fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
-  match args with
-  | Nil -> ""
-  | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
-
-fn type_expr_head_name(te: ast.TypeExpr) -> String =
-  match te with
-  # Module-qualified type identity (T7): instance dispatch keys preserve the
-  # canonical (dotted) name so main.Maybe and a prelude Maybe get distinct keys.
-  # Must agree with infer's @inst registration and lowering's ctx_inst keys, which
-  # are all raw dotted names; only the emitted __tc_ LLVM symbol is dot-sanitized.
-  | ast.TypeName name -> name
-  | ast.TypeApply base _ -> type_expr_head_name(base)
-  | ast.TypeArrow _ _ _ _ -> "Fn"
-  | ast.TypeThunk _ _ -> "Fn"
-  | ast.TypeEffect _ _ -> "Eff"
-  | ast.TupleType items -> types.tuple_head(list_length(items))
+  types.type_id_is_concrete(types.type_id(typed_ast.type_expr_head_name(te)))
 
 # The instance head and the dispatch type arrive at the SAME application depth:
 # every recorder records the class variable's binding, and the head-arity check

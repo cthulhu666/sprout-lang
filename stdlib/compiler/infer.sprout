@@ -8479,8 +8479,8 @@ fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
 # ---------------------------------------------------------------------------
 #
 # A function's hidden dictionary parameters are keyed by class name and the
-# OUTERMOST constructor of each constraint argument (lowering.constraint_key_str,
-# mirrored by resolve's EvForward key). So `where Boxed (Tagged k), Boxed (Tagged j)`
+# OUTERMOST constructor of each constraint argument (typed_ast.constraint_key_str,
+# which lowering and resolve share). So `where Boxed (Tagged k), Boxed (Tagged j)`
 # gives both constraints the key `Boxed_Tagged`: the caller passes two different
 # dictionaries and the body reads one of them twice.
 #
@@ -8518,7 +8518,7 @@ fn constraint_class_of(c: ast.TypeConstraint) -> String =
   let ast.TypeConstraint class_name _ = c
   in string.after_last_dot(class_name)
 
-# Mirrors lowering.constraint_key_str: the outermost constructor of each argument.
+# Mirrors typed_ast.constraint_key_str: the outermost constructor of each argument.
 fn constraint_fwd_key(c: ast.TypeConstraint) -> String =
   let ast.TypeConstraint _ type_args = c
   in string.join("_", list_map(\te -> head_name_or_blank(te), type_args))

@@ -488,7 +488,8 @@ A constrained function's hidden dictionary parameters are found under
 `ToString_a`, `ToString_List(a)`, `ToString_(a,b)`. `lowering.build_hidden_for_constraints`
 keys `ctx_fwd` with it, `resolve`'s `EvForward` uses it, and so do the existential witness
 seeding and the value-position (eta) lookups. Instance keys are a different function,
-`constraint_key_str`, and name the head constructor only: one instance per head is correct.
+`typed_ast.constraint_key_str`, and name the head constructor only: one instance per head
+is correct.
 
 It was head-only once (`ToString_List`), and then a body declaring `ToString (List a)`
 answered every `ToString (List …)` request from that slot — a concrete `List String`

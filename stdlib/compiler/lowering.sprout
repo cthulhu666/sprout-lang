@@ -136,7 +136,7 @@ fn collect_instance_table(decls: List typed_ast.TypedDecl, acc: Dict (Dict Strin
       match d with
       | typed_ast.TInstanceDecl constraint _ methods ->
           collect_instance_table(rest,
-            dict_set(constraint_key_from_tc(constraint),
+            dict_set(typed_ast.constraint_key_from_tc(constraint),
                      build_inst_method_map(constraint, methods, dict_empty()),
                      acc))
       | _ -> collect_instance_table(rest, acc)
@@ -180,7 +180,7 @@ fn collect_inst_meta(
               match constraint with
               | ast.TypeConstraint _ type_args ->
                   collect_inst_meta(rest, class_order, super_map,
-                    dict_set(constraint_key_from_tc(constraint),
+                    dict_set(typed_ast.constraint_key_from_tc(constraint),
                              (type_args, inst_constraints,
                               collect_method_arities(methods, class_order, super_map, dict_empty())),
                              acc))
@@ -598,30 +598,6 @@ fn tc_slot_name(class_name: String, idx: Int, method_name: String) -> String =
 fn classmethod_dispatch_name(class_name: String, method_name: String) -> String =
   string_concat_many(["__cm_", string.after_last_dot(class_name), "_", string.after_last_dot(method_name)])
 
-# ---------------------------------------------------------------------------
-# Constraint key helpers
-# ---------------------------------------------------------------------------
-#
-# The constraint key is: class_name + "_" + head_of_each_type_arg
-# using the OUTERMOST constructor name only (no type parameters).
-# This matches the @inst: marker keys used in the typechecker.
-
-fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
-  match c with
-  | ast.TypeConstraint class_name type_args ->
-      constraint_key_str(string.after_last_dot(class_name), type_args)
-
-fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
-  match type_args with
-  | Nil -> class_name
-  | Cons h rest ->
-      class_name ++ "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
-
-fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
-  match args with
-  | Nil -> ""
-  | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
-
 # Module-qualified type identity (T7): dot-sanitize a canonical type name into an
 # LLVM-valid instance-method SYMBOL fragment (__tc_...). Used ONLY for the emitted
 # symbol (mangle_type_expr). Dispatch KEYS — ctx_inst, resolve.sprout Evidence, and
@@ -629,17 +605,6 @@ fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
 # key would desync it from the others. Two same-short-named types thus get distinct
 # symbols and distinct keys. The prelude's canonical head is unqualified (no-op).
 fn qualified_head(name: String) -> String = types.type_id_symbol(types.type_id(name))
-
-# Returns the outermost constructor/variable name from a type expression.
-# For TupleType, include the arity so 2-tuple and 3-tuple instances don't collide.
-fn type_expr_head_name(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName name -> name
-  | ast.TypeApply base _ -> type_expr_head_name(base)
-  | ast.TypeArrow _ _ _ _ -> "Fn"
-  | ast.TypeThunk _ _ -> "Fn"
-  | ast.TypeEffect _ _ -> "Eff"
-  | ast.TupleType items -> types.tuple_head(list_length(items))
 
 # ---------------------------------------------------------------------------
 # Instance function name
@@ -1337,7 +1302,7 @@ fn unresolved_witnesses_for_classes(
       list_append(
         list_map(
           \_ -> typed_ast.TVar(
-            "__unresolved_" ++ constraint_key_str(string.after_last_dot(eff_class), type_args),
+            "__unresolved_" ++ typed_ast.constraint_key_str(string.after_last_dot(eff_class), type_args),
             types.TVar(types.tyvar_id("?gen")), pos),
           types.class_methods_for(eff_class, ctx.env.class_order)),
         unresolved_witnesses_for_classes(rest, type_args, pos, ctx))
@@ -1628,7 +1593,7 @@ fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, 
 # transitive superclasses) so a superclass method call on the unpacked value —
 # which resolve emits as EvForward under the SUPER's key — finds its packed
 # witness. Each block maps that class's methods to their per-slot binders, keyed
-# by constraint_key_str(<eff>, [$ex_<binder>]) so it matches resolve's EvForward key
+# by typed_ast.constraint_key_str(<eff>, [$ex_<binder>]) so it matches resolve's EvForward key
 # and consume_block's lookup.
 fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> Dict (Dict String) =
   match field_var_for_constraint(existv, param_types, fields) with
