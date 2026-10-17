@@ -156,9 +156,14 @@ Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
   self-compile with every missed lookup done twice (14.7M more), 3.10 s against 3.10 s. So no
   variant that removes misses pays: not 1a, not registering records, not typed vectors.
   What the profile's `sprout_heap_lookup` time buys is hits, which this did not measure.
-- **1b. `str_eq` reads the header.** String literals already carry a CSTR header
-  (`ir_lowering.emit_str_global`), and `sprout_cstr_byte_len` already reads it. `str_eq`'s
-  length fast-reject still calls `sprout_heap_lookup` twice; it can make the same header read.
+- ~~**1b. `str_eq` reads the header.**~~ **Landed (2026-10-17).** The length fast-reject reads
+  both CSTR headers at payload-8, as `sprout_cstr_byte_len` does, instead of two
+  `sprout_heap_lookup` calls. Literals and interned strings are now rejected too. Self-compile
+  makes 13.34M `str_eq` calls, 12.44M of them unequal: the old check rejected 1.73M, the new one
+  9.16M, with no wrong reject. Interleaved 11-run A/B, user time, two sessions: medians
+  3.01 → 2.95 s, 2.90 → 2.82 s (−2–3%). Other workloads were not timed; every path does less
+  work than before. Verifying each reject under `SPROUT_GC_HDRCHECK=1` cost half the gain (2.84 s),
+  so it is not done: the sweep and `str_byte_len` already assert header length = `strlen`.
 
 Exit: each change kept only if self-compile improves by more than its noise floor and no workload
 regresses past its own.

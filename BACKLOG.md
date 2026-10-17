@@ -415,9 +415,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **Sweep pass fusion** — pass 3 re-walks every region calling `slot_bytes` per live
   slot; fusible into pass 1 if freelist entries from released regions are handled. Only worth it if
   gc-profile shows sweep dominated by the extra pass.
-- [ ] `P3` **`str_eq`'s length fast-reject pays two `sprout_heap_lookup` calls** to find headers
-  that literals now carry too (`emit_str_global`). Read the CSTR header as `sprout_cstr_byte_len`
-  does, then measure. `docs/native-sprout-runtime-v0.md` §5 Phase 1b.
 
 **Strings and data representation**
 
