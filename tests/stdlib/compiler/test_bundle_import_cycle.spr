@@ -11,7 +11,7 @@ import stdlib.env as env
 
 fn cycle_error(r: bundler.BundleResult) -> String =
   match r with
-  | bundler.BundleOk _ _ -> ""
+  | bundler.BundleOk _ -> ""
   | bundler.BundleErr _ msg -> msg
 
 fn main() -> Unit !{IO} =

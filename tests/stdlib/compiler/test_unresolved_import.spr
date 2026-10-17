@@ -25,7 +25,7 @@ fn bundle_err(src: String, root: String, roots: List String) -> (Int, String) !{
     result <- bundler.bundle_source_with_roots(src, entry_path, source.StdlibRoot(root), roots, load_env)
     match result with
     | bundler.BundleErr pos msg -> (pos.line, msg)
-    | bundler.BundleOk _ _ -> (0, "")
+    | bundler.BundleOk _ -> (0, "")
 
 fn reply(state: svc.StartupState, line: String) -> String !{IO} =
   do
@@ -70,7 +70,7 @@ fn bundle_cases(t: TestState, root: String) -> Unit !{IO} =
     assert_true(t, "a missing entry file is a bundle error, not a crash",
       match missing with
       | bundler.BundleErr _ msg -> has(msg, "sprout_no_such_entry.spr")
-      | bundler.BundleOk _ _ -> false)
+      | bundler.BundleOk _ -> false)
 
 fn repl_cases(t: TestState, root: String) -> Unit !{IO} =
   do

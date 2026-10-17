@@ -50,8 +50,8 @@ fn main() -> Unit !{IO} =
                              source.StdlibRoot(root))
     match r with
     | bundler.BundleErr _ msg -> assert_true(state, "the entry bundles: " ++ msg, false)
-    | bundler.BundleOk prog _ ->
-        match prog with
+    | bundler.BundleOk modules ->
+        match bundler.bundle_program(modules) with
         | ast.Program decls _ ->
             do
               assert_true(state, "bare reference to a private prelude extern is marked",

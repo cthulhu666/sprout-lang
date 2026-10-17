@@ -2157,7 +2157,8 @@ calls `branch` and allocates a `ControlFlow`. The type must be known at the `try
 for the first case, the `try` must be in a function or instance method, and what
 the instance's `Break` arms call must be checked before that function: declared
 after it without a dependency, or in a binding group with it, it is not, and
-`try` calls `branch`. The instance itself may be declared anywhere in the module.
+`try` calls `branch`. The instance itself may be declared anywhere in the module,
+or in a module it imports.
 
 ### 5.10 List comprehensions (Experimental)
 
@@ -2502,7 +2503,9 @@ Effect note for v0:
     their module too: a declaration above a class may call its methods and
     require it in a `where` clause, one above an instance may use it, and an
     instance's methods may use the instance itself, so a recursive type's `Eq`
-    compares its children with the instance being declared. A method named like
+    compares its children with the instance being declared. An instance in a
+    module that imports this one is not in scope here: an imported module is
+    checked first. A method named like
     a prelude function names the method throughout its module, and the function
     in the prelude. An alias is in scope throughout its module (§5.6.2). A `fn` may not be moved above a top-level
     `let` it depends on: a `let` must already be in scope where it is used.

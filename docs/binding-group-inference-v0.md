@@ -281,8 +281,12 @@ diff whose entire blast radius is the ordering.
 the run between two barriers. Every other declaration is its own group, in place,
 and neither crosses it. This is what the environments allow rather than caution:
 
-- `InstanceDecl` is registered by `pre_scan_fn_decls`, so it is in scope above
-  its declaration and in its own methods. An instance is a graph node with edges
+- `InstanceDecl` is registered at the **start of its module**
+  (`typecheck_modules`), so it is in scope above its declaration and in its own
+  methods, but not in a module checked before it: an importer's instance does not
+  reach what it imports, for a method call or a fused `try`
+  (`package_resolution/app_importer_instance_not_in_import.spr`,
+  `app_importer_propagate_not_in_import.spr`). An instance is a graph node with edges
   to what its methods call and none into it, so it is checked after those and
   otherwise where it is written, and its errors come in source order
   (`type_error/instance_error_reported_in_source_order.spr`).
@@ -294,8 +298,8 @@ and neither crosses it. This is what the environments allow rather than caution:
   stands, they would miss the module's uses above it
   (`run/class_method_named_like_prelude_fn.spr`). Where a module starts is not
   read off names, which an instance does not have: `bundler.BundleOk` gives each
-  module's declaration count, and `group_plan` plans each module on its own
-  (`run/order_foreign_instance_first_in_module.spr`,
+  module's declarations, and `typecheck_modules` checks each whole, planned on its
+  own by `group_plan` (`run/order_foreign_instance_first_in_module.spr`,
   `run/order_imported_class_instance_first_in_module.spr`). Bundled modules are
   contiguous and in import order, so every module the class could shadow a name
   for is checked by then.

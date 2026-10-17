@@ -32,7 +32,7 @@ fn bundle_msg(src: String, root: String) -> String !{IO} =
       source.StdlibRoot(root), [package_root()], load_env)
     match result with
     | bundler.BundleErr _ msg -> msg
-    | bundler.BundleOk _ _ -> ""
+    | bundler.BundleOk _ -> ""
 
 # The line the bundle error points at, or 0 when it bundled cleanly.
 fn bundle_line(src: String, root: String) -> Int !{IO} =
@@ -42,7 +42,7 @@ fn bundle_line(src: String, root: String) -> Int !{IO} =
       source.StdlibRoot(root), [package_root()], load_env)
     match result with
     | bundler.BundleErr pos _ -> pos.line
-    | bundler.BundleOk _ _ -> 0
+    | bundler.BundleOk _ -> 0
 
 fn valid_import() -> String =
   `module entry

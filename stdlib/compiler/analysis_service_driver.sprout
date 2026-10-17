@@ -494,12 +494,12 @@ export type InstancesResult (..) =
 fn resolve_instances_from_bundle(result: bundler.BundleResult, query_display: String) -> InstancesResult =
   match result with
   | bundler.BundleErr _ msg -> InstancesErr(source.strip_entry_names(msg))
-  | bundler.BundleOk prog _ ->
-      match prog with
-      | ast.Program decls _ ->
-          match find_probe_query_type(decls) with
-          | Nothing -> InstancesErr("instances_in_source: could not resolve query type")
-          | Just query_te -> InstancesOk(query_display, instance_match_names_for_type(prog, query_te))
+  | bundler.BundleOk modules ->
+      let prog = bundler.bundle_program(modules)
+          ast.Program decls _ = prog
+      in match find_probe_query_type(decls) with
+         | Nothing -> InstancesErr("instances_in_source: could not resolve query type")
+         | Just query_te -> InstancesOk(query_display, instance_match_names_for_type(prog, query_te))
 
 # Reusable end-to-end entry (StartupState-free, so tests and future clients — e.g.
 # an LSP hover — can call it directly): resolve the query in the session's naming

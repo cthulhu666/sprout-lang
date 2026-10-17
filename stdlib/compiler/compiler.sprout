@@ -197,7 +197,7 @@ fn check_source_at(src: String, entry_path: String, stdlib_root: source.StdlibRo
     bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
     match bundled with
     | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
-    | bundler.BundleOk prog modules -> check_bundled(prog, modules)
+    | bundler.BundleOk modules -> check_bundled(modules)
 
 # Bundling qualifies a named module's own top-level names (`examples.foo.bar`), but every
 # consumer of this env looks them up as written in the file — the REPL's sentinel, the
@@ -407,9 +407,9 @@ export fn compile_full(path: source.FilePath, stdlib_root: source.StdlibRoot) ->
     bundle_result <- bundler.bundle_file(path, stdlib_root)
     match bundle_result with
     | bundler.BundleErr pos msg -> FullFail(Cons(diag_error(pos, "bundle: " ++ msg), Nil))
-    | bundler.BundleOk prog modules ->
+    | bundler.BundleOk modules ->
         do
-          tc_result <- checker.typecheck_bundle(prog, modules, Nil)
+          tc_result <- checker.typecheck_bundle(modules, Nil)
           match tc_result with
           | typed_ast.TypedErr pos msg -> FullFail(Cons(diag_error(pos, "check: " ++ msg), Nil))
           | typed_ast.TypedOk typed_prog env ->
@@ -506,9 +506,9 @@ export fn compile_phase_effects_with_roots(path: source.FilePath, stdlib_root: s
     bundle_result <- bundler.bundle_file_with_roots(path, stdlib_root, extra_roots)
     match bundle_result with
     | bundler.BundleErr pos msg -> (typed_ast.TypedErr(pos, "bundle: " ++ msg), Nil)
-    | bundler.BundleOk prog modules ->
+    | bundler.BundleOk modules ->
         do
-          checker.typecheck_typed_with_effects(prog, modules, Nil)
+          checker.typecheck_typed_with_effects(modules, Nil)
 
 # The bind census of the entry file's declarations (`--phase bind-census`).
 export fn compile_phase_census_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String)
@@ -517,16 +517,16 @@ export fn compile_phase_census_with_roots(path: source.FilePath, stdlib_root: so
     (bundle_result, entry) <- bundler.bundle_with_entry_decls(path, stdlib_root, extra_roots)
     match bundle_result with
     | bundler.BundleErr pos msg -> (typed_ast.TypedErr(pos, "bundle: " ++ msg), Nil)
-    | bundler.BundleOk prog modules ->
-        checker.typecheck_typed_with_census(prog, modules, Nil, entry)
+    | bundler.BundleOk modules ->
+        checker.typecheck_typed_with_census(modules, Nil, entry)
 
 export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: source.StdlibRoot, extra_roots: List String) -> typed_ast.TypedResult !{IO} =
   do
     bundle_result <- bundler.bundle_file_with_roots(path, stdlib_root, extra_roots)
     match bundle_result with
     | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
-    | bundler.BundleOk prog modules ->
-        check_bundled(prog, modules)
+    | bundler.BundleOk modules ->
+        check_bundled(modules)
 
 # Everything after the bundle: typecheck, resolve, verify dispatch. Shared so that
 # checking a FILE and checking a BUFFER cannot diverge — the whole point of retiring the
@@ -550,9 +550,9 @@ export fn compile_phase_check_with_roots(path: source.FilePath, stdlib_root: sou
 # files, which at the time received no prelude at all. Since
 # docs/prelude-scope-v0.md the prelude is unconditional, so bare files get it from
 # the bundle and the compensation had outlived its cause.
-fn check_bundled(prog: ast.Program, modules: List Int) -> typed_ast.TypedResult !{IO} =
+fn check_bundled(modules: List (List ast.Decl)) -> typed_ast.TypedResult !{IO} =
   do
-    result <- checker.typecheck_bundle(prog, modules, Nil)
+    result <- checker.typecheck_bundle(modules, Nil)
     match result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
     | typed_ast.TypedOk typed_prog env ->

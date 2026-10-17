@@ -1,0 +1,16 @@
+module main
+import demo.orphan_try as lib
+
+# The `try` in `lib.bump` has no `Propagate lib.Fetch` in scope: only this module
+# declares it. The instance is fusable, which must not put it in scope there.
+
+instance Propagate lib.Fetch
+  fn branch(value: lib.Fetch a) -> ControlFlow(lib.Fetch b) a =
+    match value with
+    | lib.Got v -> Continue(v)
+    | lib.Failed why -> Break(lib.Failed(why))
+
+fn main() -> Unit !{IO} =
+  match lib.bump(lib.Got(1)) with
+  | lib.Got v -> print(to_string(v))
+  | lib.Failed why -> print(why)
