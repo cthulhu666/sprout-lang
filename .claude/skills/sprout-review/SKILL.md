@@ -133,15 +133,21 @@ cleanup also carries `worth` (1–5), `worthReason` and `decision` (`do`, `skip`
 skeptic gave no usable score), sorted by worth. `doAt` is the threshold used and `cleanupsDo` the
 DO count. Refuted and unverified cleanups have no decision.
 
+Every entry in all six lists carries `n`: one number, 1 to k, across the whole run, in the order
+step 6 reports them — bugs confirmed, unverified, refuted, then cleanups confirmed, unverified,
+refuted. It is how the reader picks what to act on ("fix 2 and 5"), so use it as given and never
+renumber: the findings file and the report must agree.
+
 **4. Write the findings to disk** before reporting them, at the path the ledger names:
 
 ```
 bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" findings <run-id>
 ```
 
-Write every finding there — confirmed, unverified and refuted, each with its file:line, severity
-and scenario. **Group them as you write**: two reports of one bug become one entry carrying both
-wordings, and state how many reports became how many issues, because `found` counts the former while
+Write every finding there — confirmed, unverified and refuted, each under its `n`, with its
+file:line, severity and scenario. **Group them as you write**: two reports of one bug become one
+entry carrying both wordings and both numbers (`3, 5.`), so either number the reader quotes finds
+it, and state how many reports became how many issues, because `found` counts the former while
 a reader wants the latter. This is the step that makes the next one checkable. Findings that
 exist only inside a chat message cannot be pointed at afterwards, which is the same failure the
 ledger exists to fix, one level down: a count without a list says a review happened but not what it
@@ -181,8 +187,9 @@ missing row reads as "never reviewed".
 **6. Report the findings and STOP.** Most severe first, with the unverified ones marked as such and
 the refuted ones listed briefly. Then hand the decision over and wait.
 
-**Lead every finding with its severity chip**, at the very start of the line, before the file:line
-and before the summary:
+**Number every entry, then lead with its severity chip** — the `n` in bold, then the chip, before
+the file:line and before the summary: `**4.** 🟠 **MEDIUM** CONFIRMED — bundler.sprout:1513 …`.
+Refuted entries, listed briefly, keep their numbers too. A grouped entry shows all of its numbers.
 
 | severity | chip |
 |---|---|
@@ -190,8 +197,8 @@ and before the summary:
 | `medium` | 🟠 **MEDIUM** |
 | `low` | 🟡 **LOW** |
 
-First position is the whole point: a severity that arrives after a 90-character summary is read at
-prose speed, which is to say skipped. Keep both halves — the glyph is what the eye catches running
+The chip goes straight after the number for a reason: a severity that arrives after a 90-character
+summary is read at prose speed, which is to say skipped. Keep both halves — the glyph is what the eye catches running
 down the left edge, the word is what survives a copy-paste somewhere that renders no colour.
 
 Severity and verification status are two axes, so never fold them into one chip. A confirmed
@@ -201,7 +208,7 @@ the chip: `CONFIRMED`, `UNVERIFIED — <reason>`, `REFUTED`.
 
 **Cleanups go after every bug**, in their own section, split into **Do**, **Skip** and the rest
 (unscored, unverified, refuted). Same chips, then the category, the status, and for a confirmed one
-the score and decision: `🟡 LOW reuse CONFIRMED · worth 4/5 → DO — net.sprout:40 …`. Say the
+the score and decision: `**7.** 🟡 LOW reuse CONFIRMED · worth 4/5 → DO — net.sprout:40 …`. Say the
 threshold in the section heading. A confirmed cleanup is one whose claims hold — the code says what
 it says, a named helper exists and matches, the proposed form keeps behaviour. DO is the skeptic's
 recommendation, not an instruction: the skill still applies nothing, and the reader decides.
@@ -348,7 +355,9 @@ Flag new code that re-implements something the codebase already has. Grep
 change, and name the existing helper to call instead.`,
   simplification: `### Simplification
 Flag unnecessary complexity the diff adds: redundant or derivable state,
-copy-paste with slight variation, deep nesting, dead code left behind. In Sprout
+copy-paste with slight variation, deep nesting, dead code left behind. Flag too
+any comment or doc the diff made false: one naming a function it removed or
+renamed, or describing behaviour it moved. In Sprout
 that includes a nested \`match\` that \`let..else\`, a combinator or \`|>\` would
 flatten (\`docs/idiomatic-sprout.md\`). Name the simpler form.`,
   efficiency: `### Efficiency
@@ -500,6 +509,8 @@ and a one-line \`worthReason\`:
 3 worthwhile — clear gain, cheap; do it while in the code
 4 should do — removes real duplication or waste, or a maintenance trap
 5 must do — e.g. quadratic work on a hot path, or a symptom patch that will regrow
+A comment or doc the diff made false is worth at least 3, however small the edit:
+the next reader trusts it, and fixing it costs a line.
 Give a refuted cleanup 1; its score is ignored.`,
 }
 
@@ -589,6 +600,15 @@ const byWorth = (a, b) => (b.worth || 0) - (a.worth || 0) || bySeverity(a, b)
 const rated = tidy.confirmed.map(rate).sort(byWorth)
 const unscored = rated.filter(f => !f.decision).length
 if (unscored) log(`${unscored} confirmed cleanup(s) unscored — worth missing or not 1-5`)
+
+// One number per entry, 1..k across the whole report in its reading order, so a
+// reader can answer "fix 2 and 5" and the findings file and the report agree.
+// Assigned here, not by the caller, so two renderings cannot number differently.
+let next = 1
+const numbered = list => list.map(f => ({ n: next++, ...f }))
+const [bugsOk, bugsUnverified, bugsRefuted, tidyOk, tidyUnverified, tidyRefuted] =
+  [bugs.confirmed, bugs.unverified, bugs.refuted, rated, tidy.unverified, tidy.refuted]
+    .map(numbered)
 return {
   // Returned so step 5 records the level the run ACTUALLY used, not the one the
   // caller meant to send — they differ exactly when the args were malformed,
@@ -601,9 +621,9 @@ return {
   // Every pass's findings in the reviewer's own words. Step 4 writes these to
   // the ledger beside the report, so the unjudged claims survive too.
   raw: all,
-  findings: bugs.confirmed,
-  unverified: bugs.unverified,
-  refuted: bugs.refuted,
+  findings: bugsOk,
+  unverified: bugsUnverified,
+  refuted: bugsRefuted,
   // Never part of `found`, `confirmed` or `raw`: those mean bugs in every
   // ledger row written before cleanups existed.
   cleanupPasses: C,
@@ -611,16 +631,17 @@ return {
   cleanupsConfirmed: tidy.confirmed.length,
   doAt: DO_AT,
   cleanupsDo: rated.filter(f => f.decision === 'do').length,
-  cleanups: rated,
-  cleanupsUnverified: tidy.unverified,
-  cleanupsRefuted: tidy.refuted,
+  cleanups: tidyOk,
+  cleanupsUnverified: tidyUnverified,
+  cleanupsRefuted: tidyRefuted,
 }
 ```
 
 ## Notes
 
-- **Severity leads, as a chip** — 🔴 HIGH / 🟠 MEDIUM / 🟡 LOW at the start of each finding's line,
-  per step 6. The whole report is scanned before any of it is read, and the first column is the
+- **Numbered, then severity, as a chip** — `**n.**` then 🔴 HIGH / 🟠 MEDIUM / 🟡 LOW at the start
+  of each line, per step 6. The script assigns `n`, one sequence over bugs and cleanups, so a
+  reader can pick findings by number and the file and the report cannot disagree. The whole report is scanned before any of it is read, and the first column is the
   only one that survives that. Status stays a separate word: folding the two axes into one marker
   hides an unverified `high` behind a confirmed `low`.
 - **Report the refuted findings too**, briefly. A finding the verifier killed is information about

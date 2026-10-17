@@ -239,6 +239,12 @@ over eight cleanups, none checked by anyone but the pass that wrote them. It is 
 rather than a second list for the bug skeptic so that each track has its own `VERIFY_CAP`; sharing
 one, that run's 6 bugs would have pushed 4 of its 8 cleanups past the cap.
 
+**A comment the diff made false scores at least 3** (since 2026-10-17). Run `1792220382-44063`
+confirmed two such comments on PR #652 and scored them 2, "small gain, near-zero cost", so both
+landed under SKIP. The scale weighed the size of the edit; the cost is the next reader trusting
+the comment. The same run is why every entry is now numbered by the script: the reader picked
+fixes by position in an unnumbered list, which is one misread away from fixing the wrong one.
+
 The built-in `/code-review` already runs cleanup angles at `high` — three cleanup, one altitude and
 one conventions, inline in one context. The conventions angle (quote a CLAUDE.md rule, quote the line
 that breaks it) is not in this track.

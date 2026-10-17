@@ -31,6 +31,9 @@ and decides what it means. These behaviours are worth pinning beyond "it parses"
   8. The cleanup skeptic scores worth apart from truth, and the script, not the
      skeptic, applies the threshold. A bad score leaves a cleanup unscored,
      never classified; a refuted or unjudged one is never classified at all.
+  9. Every entry is numbered by the script, 1..k across bugs and cleanups in
+     reading order, so the reader can pick fixes by number.
+ 10. A comment the diff made false is asked for, and scored at least 3.
 """
 import json
 import os
@@ -647,6 +650,46 @@ out, err = run([[]] * 3, cleanups=[[HI2, LO5, MED_NONE, LO2]],
                          {"at": AT + "4", "worth": 2}])
 check("cleanups are ordered by worth, then severity", ["lo5", "hi2", "lo2", "none"],
       [f["summary"] for f in field(out, "cleanups")])
+
+# --- numbering: one sequence across the whole report -------------------------
+# A reader picks findings by number ("fix 2 and 5"), so every entry carries `n`:
+# 1..k with no gaps or restarts, in the report's reading order — bugs confirmed,
+# unverified, refuted, then cleanups confirmed, unverified, refuted.
+BUG_OK = dict(LONE_HIGH, line=1, summary="bug ok")
+BUG_DEAD = dict(LONE_LOW, line=2, summary="bug dead")
+BUG_SKIPPED = dict(LONE_MEDIUM, line=3, summary="bug skipped")
+CL_DO = dict(DUP_HELPER, line=11, summary="cl do")
+CL_DEAD = dict(DUP_HELPER, line=12, summary="cl dead")
+CL_SKIPPED = dict(DUP_HELPER, line=13, summary="cl skipped")
+out, err = run([[BUG_OK, BUG_DEAD, BUG_SKIPPED], [], []],
+               cleanups=[[CL_DO, CL_DEAD, CL_SKIPPED]],
+               verdicts=[{"at": "l.ts:2", "refuted": True}, {"at": "m.ts:3", "omit": True},
+                         {"at": AT + "11", "worth": 4}, {"at": AT + "12", "refuted": True},
+                         {"at": AT + "13", "omit": True}])
+ORDER = ["findings", "unverified", "refuted", "cleanups", "cleanupsUnverified", "cleanupsRefuted"]
+numbered = [(f.get("n"), f["summary"]) for k in ORDER for f in field(out, k)]
+check("every entry is numbered 1..k in reading order",
+      [(1, "bug ok"), (2, "bug skipped"), (3, "bug dead"),
+       (4, "cl do"), (5, "cl skipped"), (6, "cl dead")], numbered)
+out, err = run([[]] * 3, cleanups=[[CL_DO]], verdicts=[{"at": AT + "11", "worth": 4}])
+check("with no bugs, cleanups number from 1", [1],
+      [f.get("n") for f in field(out, "cleanups")])
+
+# --- stale comments rate as worth doing --------------------------------------
+# A comment the diff made false misleads the next reader and costs a line to fix,
+# so the cleanup pass asks for them and the skeptic's scale floors them at 3.
+out, err = run([[]] * 3, cleanups=[[DUP_HELPER]])
+cl = [e for e in field(out, "EFFORTS") if e["label"].startswith("cleanup:")]
+check("the cleanup pass asks for comments the diff made false", True,
+      bool(cl) and "comment or doc the diff made false" in cl[0]["prompt"])
+vet = [e for e in field(out, "EFFORTS") if e["label"].startswith("verify-cleanups:")]
+check("the skeptic scores a falsified comment at least 3", True,
+      bool(vet) and "made false is worth at least 3" in vet[0]["prompt"])
+out, err = run([[]] * 5, cleanups=[[], [DUP_HELPER], [], []],
+               args={"effort": "xhigh", "target": ""})
+cl = [e for e in field(out, "EFFORTS") if e["label"] == "cleanup:simplification"]
+check("with one angle per pass, simplification still asks for stale comments", True,
+      bool(cl) and "comment or doc the diff made false" in cl[0]["prompt"])
 
 if failures:
     print("==> sprout-review script tests FAILED (%d)" % len(failures), file=sys.stderr)
