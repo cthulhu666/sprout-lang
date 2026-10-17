@@ -18,12 +18,13 @@ module stdlib.compiler.type_kind
 
 import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
-import stdlib.string as string
 
-# --- Private leaf helper ---
+# --- Private helper ---
 
-fn type_name_leaf_is(name: String, leaf: String) -> Bool =
-  name == leaf || string.ends_with(name, "." ++ leaf)
+# Exact match on the canonical name. A module's own `type Int` canonicalises to
+# `<module>.Int`, a heap ADT; only the bare prelude primitive is a scalar.
+fn is_scalar_name(name: String) -> Bool =
+  name == "Int" || name == "Bool" || name == "Char" || name == "Double"
 
 # --- Public predicate ---
 
@@ -33,11 +34,7 @@ fn type_name_leaf_is(name: String, leaf: String) -> Bool =
 # runtime — returns false and is rooted conservatively.
 export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
   match te with
-  | ast.TypeName name ->
-      type_name_leaf_is(name, "Int") ||
-      type_name_leaf_is(name, "Bool") ||
-      type_name_leaf_is(name, "Char") ||
-      type_name_leaf_is(name, "Double")
+  | ast.TypeName name -> is_scalar_name(name)
   | _ -> false
 
 # Same predicate over an inferred `types.Type` (used by ast_to_ir to classify a
@@ -47,9 +44,5 @@ export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
 # conservatively, matching the TypeExpr predicate.
 export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
   match t with
-  | types.TConst name ->
-      type_name_leaf_is(types.type_id_name(name), "Int") ||
-      type_name_leaf_is(types.type_id_name(name), "Bool") ||
-      type_name_leaf_is(types.type_id_name(name), "Char") ||
-      type_name_leaf_is(types.type_id_name(name), "Double")
+  | types.TConst name -> is_scalar_name(types.type_id_name(name))
   | _ -> false

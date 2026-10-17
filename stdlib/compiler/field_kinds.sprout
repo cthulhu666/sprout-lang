@@ -25,20 +25,17 @@ import stdlib.string as string
 fn char_is_uppercase(ch: Char) -> Bool =
   str_find("ABCDEFGHIJKLMNOPQRSTUVWXYZ", char_to_string(ch)) >= 0
 
-fn type_name_leaf_is(name: String, leaf: String) -> Bool =
-  name == leaf || string.ends_with(name, "." ++ leaf)
-
 # --- Encoder ---
 
 # Map a constructor field's source-level TypeExpr to a one-byte kind code.
-# O(1) modulo string traversal in helpers.
+# O(1) modulo string traversal in helpers. Primitives match their canonical name
+# exactly: a module's own `type Bool` is `<module>.Bool`, a heap ADT.
 export fn ctor_field_kind(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName name ->
-      if type_name_leaf_is(name, "Int") then "i"
-      else if type_name_leaf_is(name, "Bool") then "b"
-      else if type_name_leaf_is(name, "String") then "s"
-      else if type_name_leaf_is(name, "Char") then "i"
+      if name == "Int" || name == "Char" then "i"
+      else if name == "Bool" then "b"
+      else if name == "String" then "s"
       else
         match str_char_at(string.after_last_dot(name), 0) with
         | Nothing -> "_"

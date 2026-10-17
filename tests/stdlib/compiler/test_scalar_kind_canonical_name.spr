@@ -1,0 +1,34 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.field_kinds as field_kinds
+import stdlib.compiler.type_kind as type_kind
+
+# Only the prelude primitive is a scalar, and after bundling its canonical name is
+# the bare `Int`. A module's own `type Int` canonicalises to `<module>.Int`, a heap
+# ADT that must be rooted. Its last segment alone cannot tell the two apart.
+
+fn field_kind(name: String) -> String = field_kinds.ctor_field_kind(ast.TypeName(name))
+
+fn expr_scalar(name: String) -> Bool = type_kind.type_expr_is_non_heap_scalar(ast.TypeName(name))
+
+fn type_scalar(name: String) -> Bool = type_kind.type_is_non_heap_scalar(types.TConst(types.type_id(name)))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "prelude Int field", field_kind("Int"), "i")
+    assert_eq(state, "prelude Bool field", field_kind("Bool"), "b")
+    assert_eq(state, "prelude Char field", field_kind("Char"), "i")
+    assert_eq(state, "prelude String field", field_kind("String"), "s")
+    assert_eq(state, "shadowed Int field", field_kind("main.Int"), "p")
+    assert_eq(state, "shadowed Bool field", field_kind("$entry.Bool"), "p")
+    assert_eq(state, "shadowed Char field", field_kind("app.util.Char"), "p")
+    assert_eq(state, "shadowed String field", field_kind("main.String"), "p")
+    assert_true(state, "prelude Double expr", expr_scalar("Double"))
+    assert_false(state, "shadowed Int expr", expr_scalar("main.Int"))
+    assert_false(state, "shadowed Double expr", expr_scalar("main.Double"))
+    assert_true(state, "prelude Char type", type_scalar("Char"))
+    assert_false(state, "shadowed Bool type", type_scalar("$entry.Bool"))
+    assert_false(state, "shadowed Int type", type_scalar("main.Int"))
+    summary(state)
