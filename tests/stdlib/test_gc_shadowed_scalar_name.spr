@@ -1,0 +1,93 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# A module may declare a type that shadows a prelude scalar. These three are heap
+# ADTs, so a value of each must be rooted although its name's last segment is a
+# primitive's. An unrooted one is swept by the churn below while still live.
+
+type Bool =
+  | Yes String
+  | No
+
+type Char =
+  | Glyph String
+
+type Double =
+  | Boxed String
+
+type Pair =
+  | Pair Bool Int
+
+type Single =
+  | Single Char
+
+# 40000 short-lived strings: far past the collector's 4096-object floor, so a
+# collection runs while each value below is held only by its own frame. Nothing
+# stays live, so the adaptive threshold stays at the floor for every case. Each
+# string is read, so it cannot be dropped as a dead value.
+fn churn(n: Int, acc: Int) -> Int =
+  if n == 0 then acc
+  else churn(n - 1, acc + (if str_len(int_to_string(n) ++ "-x") > 0 then 1 else 0))
+
+fn burned() -> Int = churn(20000, 0)
+
+fn show_bool(b: Bool) -> String =
+  match b with
+  | Yes s -> s
+  | No -> "no"
+
+fn show_char(c: Char) -> String =
+  match c with
+  | Glyph s -> s
+
+fn show_double(d: Double) -> String =
+  match d with
+  | Boxed s -> s
+
+fn mk_bool(tag: String) -> Bool = Yes("bool-" ++ tag)
+
+fn mk_char(tag: String) -> Char = Glyph("char-" ++ tag)
+
+fn mk_double(tag: String) -> Double = Boxed("double-" ++ tag)
+
+# Field extraction: the ctor's field-kinds string. The scrutinee is a temporary,
+# so the extracted field is the value's only reference across the churn.
+fn bool_field(i: Int) -> String =
+  match Pair(mk_bool(int_to_string(i)), i) with
+  | Pair b _ ->
+      let n = burned() in
+      show_bool(b) ++ " " ++ int_to_string(n)
+
+fn char_field(i: Int) -> String =
+  match Single(mk_char(int_to_string(i))) with
+  | Single c ->
+      let n = burned() in
+      show_char(c) ++ " " ++ int_to_string(n)
+
+# Call result: the IRCall return type.
+fn via_call(tag: String) -> String =
+  let b = mk_bool(tag) in
+  let d = mk_double(tag) in
+  let n = burned() in
+  show_bool(b) ++ " " ++ show_double(d) ++ " " ++ int_to_string(n)
+
+# Parameter: the declared parameter type.
+fn param_user(b: Bool, c: Char) -> String =
+  let n = burned() in
+  show_bool(b) ++ " " ++ show_char(c) ++ " " ++ int_to_string(n)
+
+fn via_param(tag: String) -> String = param_user(mk_bool(tag), mk_char(tag))
+
+# Top-level let: the permanent-root registration.
+let global_bool: Bool = mk_bool("g")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "churn allocates past the GC floor", burned(), 20000)
+    assert_eq(state, "field of shadowed Bool", bool_field(1), "bool-1 20000")
+    assert_eq(state, "field of shadowed Char", char_field(2), "char-2 20000")
+    assert_eq(state, "call result of shadowed Bool/Double", via_call("c"),
+              "bool-c double-c 20000")
+    assert_eq(state, "param of shadowed Bool/Char", via_param("p"), "bool-p char-p 20000")
+    assert_eq(state, "global of shadowed Bool", show_bool(global_bool), "bool-g")
+    summary(state)
