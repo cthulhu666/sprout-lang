@@ -5,18 +5,20 @@
 §Builtin vs Stdlib.
 
 The question this answers: can moving C runtime code into Sprout make programs **faster**, and in
-what order should it happen? Short answer: yes, but only where Sprout knows something C cannot,
-and only after Sprout code stops being ~5× slower than C on the same algorithm. Before that, a
-port is a slowdown.
+what order should it happen? Short answer: rarely by moving code, mostly by moving **knowledge**.
+The fastest wins hand the C runtime what the compiler already knows. Moving code pays only where
+Sprout knows something C cannot, and only after Sprout code stops being ~5× slower than C on the
+same algorithm. Before that, a port is a slowdown.
 
 ## 1. Problem
 
-The runtime is ~12.7k lines of C (`sprout_runtime.c`, `sprout_scheduler.c`, `sprout_poll.c`,
-`sprout_context.h`) exporting 194 builtins (`runtime/APPROVED_BUILTINS`).
+The runtime is ~12.7k lines of C including headers (`sprout_runtime.c`, `sprout_scheduler.c`,
+`sprout_poll.c`, `sprout_context.h`, `sprout_scheduler.h`) exporting 194 builtins
+(`runtime/APPROVED_BUILTINS`).
 
 **Where the compiler's time goes.** `--emit-ir stdlib/compiler/compile_driver.sprout`, IR at
 `-O2`, per-TU link (not `link_whole_program.sh`), `sample` for 3 s, 2,460 samples, macOS arm64,
-one run. Self time, grouped:
+**one run**. Self time, grouped:
 
 | bucket | samples | share |
 |---|---:|---:|
@@ -26,13 +28,16 @@ one run. Self time, grouped:
 | output I/O | 132 | ~5% |
 | code emitted from Sprout source | ≤ ~250 | ≤ ~10% |
 
-Static functions inlined at `-O2` fold into their callers, so the buckets are approximate (the
-trap BACKLOG §GC & Runtime Performance records). The compiler is the GC-heaviest workload known:
-outside it GC is not the bottleneck ([gc-generational-v0.md](gc-generational-v0.md) §5.1).
+BACKLOG §GC & Runtime Performance warns that `static` runtime functions are inlined at `-O2` and
+cannot be attributed. In this build they were not: `sprout_heap_lookup`, `slot_bytes` and
+`bst_insert_node` each appear as their own symbol. Time inlined elsewhere still folds into its
+caller, so the buckets are approximate. The compiler is the GC-heaviest workload known: outside it
+GC is not the bottleneck ([gc-generational-v0.md](gc-generational-v0.md) §5.1).
 
-**`-O2` buys little.** The same compiler built from `-O0` IR runs the self-compile in 4.19 s
-against 3.40 s at `-O2` (−19%, runtime C at `-O2` in both, one run each). LLVM optimises the
-slice that is not runtime.
+**`-O2` buys little.** Same session, one run each: the compiler built from `-O0` IR self-compiles
+in 4.19 s, from `-O2` IR in 3.40 s (−19%, runtime C at `-O2` in both). `clang -c -O2` on the
+16.5 MB of emitted IR took 5.3 s against 3.6 s for the front end. Indicative only; Phase 0 repeats
+it properly.
 
 **Porting as-is would be slower.** On the same merge sort, Sprout is ~5× slower than C, cause
 unknown ([sorting-v0.md](sorting-v0.md) §Where the time goes, item 3). Generic `Ord` dispatch
@@ -42,30 +47,26 @@ costs another ~2× (item 1). A builtin rewritten in today's Sprout inherits both
 
 **Goals**
 
-1. Make Sprout code fast enough that a pure-compute builtin can move without a regression.
-2. Move the pieces where Sprout has an edge C cannot get: types, specialisation, per-program DCE.
-3. Where code stays in C, hand it what the compiler knows (field kinds, string lengths).
+1. Hand the C runtime what the compiler knows, where it is cheap and measurable.
+2. Make Sprout code fast enough that a pure-compute builtin can move without a regression.
+3. Move the pieces where Sprout has an edge C cannot get: types, specialisation, per-program DCE.
 4. Every step measured on more than one workload before and after.
 
 **Non-goals**
 
 - Zero C. The stack switch, OS calls, sockets, TLS (SecureTransport) and terminal stay in C.
 - The GC, root stack or scheduler in Sprout. That needs an unsafe sublanguage (§5, Phase 4).
-- Dropping LLVM. Set aside 2026-10-17: `clang -O2` is ~60% of self-compile time, but it buys
-  ~19% of run time and costs nothing to keep; a new backend would cost far more.
+- Dropping LLVM. Set aside 2026-10-17: `-O2` buys ~19% (§1), and a new backend would cost far
+  more than the compile time it saves.
 
-## 3. What Sprout code can have that C cannot
+## 3. What a Sprout implementation can have that C cannot
 
 1. **Types.** C sees every value as `i64`. Sprout can specialise per type: an `Int`-keyed map
-   compares words, a sort on `Int` skips the `Ord` dictionary. `Dict` is `String`-keyed today
-   because the C tree compares with `strcmp`.
-2. **Field kinds.** `stdlib/compiler/field_kinds.sprout` knows which constructor fields are
-   scalars. The C collector does not, so `sprout_gc_drain_marks` sends every field through
-   `sprout_heap_lookup`, a binary search over regions.
-3. **Per-program DCE and inlining.** Sprout stdlib code is bundled and compiled with the program,
-   so it inlines into callers and unused code is dropped.
+   compares words, a sort on `Int` skips the `Ord` dictionary.
+2. **Per-program DCE and inlining.** Sprout stdlib code is bundled and compiled with the program
+   (`dce.elim_unreachable`), so it inlines into callers and unused code is dropped.
 
-Limits on 3, both measured already:
+Limits on 2, both measured already:
 
 - Inlining runtime code into the program costs compile time per binary whatever the source
   language: [cross-tu-inlining-v0.md](cross-tu-inlining-v0.md) §5.1 (771 ms of `clang -O2` per
@@ -74,8 +75,12 @@ Limits on 3, both measured already:
   context being an internal symbol, which lets LLVM prove root stores do not alias the heap
   ([gc-root-inline-lowering-v0.md](gc-root-inline-lowering-v0.md) §10: −6.1% exported, −38.7%
   internal). Internal is possible only if every reader of the root stack — the marker and the
-  scheduler — is in the same module. So the root stack moves only with the GC, or not at all;
-  `link_whole_program.sh` already gets the win for long-running binaries.
+  scheduler — is in the same module. So the root stack moves only with the GC, or is replaced
+  (Phase 4); `link_whole_program.sh` already gets the win for long-running binaries.
+
+**Field kinds are not on this list.** The compiler computes them (`field_kinds.sprout`) and
+already passes them to the runtime: `sprout_register_ctor` stores them in `g_ctor_meta`, indexed
+by tag. Only `sprout_debug_adt` reads them. That is a C change, not a port (Phase 1).
 
 What Sprout code lacks today: unboxed byte access (`bytes_get` returns `Maybe Int`), raw memory,
 and a checked guarantee that a function does not allocate.
@@ -101,27 +106,58 @@ the runtime in C/C++ and grow the stdlib in the language. Sprout is in that seco
 moves its line, it does not remove it.
 
 Every tracing GC in the table tells a pointer from a scalar without a heap lookup: Go and GHC from
-type layout, OCaml from a tag bit. How runtime bodies cross into callers (GHC unfoldings, Swift `@inlinable`, Rust MIR):
-[cross-tu-inlining-v0.md](cross-tu-inlining-v0.md) §8.
+type layout, OCaml from a tag bit. How runtime bodies cross into callers (GHC unfoldings, Swift
+`@inlinable`, Rust MIR): [cross-tu-inlining-v0.md](cross-tu-inlining-v0.md) §8.
+
+**Stack roots.** LLVM's statepoints are "a set of extensions to LLVM to support garbage
+collection": pointer locations "are provided in a separate section of the generated object file",
+so the collector finds roots without a shadow stack. They are "still listed as 'experimental' to
+indicate that no forward or backward compatibility guarantees are offered across versions". The
+`gcroot` shadow stack, Sprout's model, is "mostly of historical interest" there but "still
+supported" ([LLVM, Statepoints](https://llvm.org/docs/Statepoints.html)).
 
 ## 5. Plan
 
-Each phase has an exit criterion. A phase that misses it stops the plan rather than starting the
-next.
+Ordered by the profile: the cheap C-side wins on the 47% GC bucket come first, open-ended compiler
+work second. Each phase has an exit criterion; a phase that misses it stops the plan rather than
+starting the next.
 
 ### Phase 0 — instruments (no behaviour change)
 
-- **Port bench.** One directory per candidate under `bench/`, the C builtin and a Sprout version
-  on the same inputs, interleaved min-of-N (single runs drift ~1.6× between sessions on this
-  machine, BACKLOG §GC & Runtime Performance).
 - **Workload set.** Self-compile, `nqueens`, `http_log_middleware`, `gc_roots`, and the
-  `uncharted-suns` galaxy frame. A move must not regress any of them.
+  `uncharted-suns` galaxy frame. Interleaved min-of-N, since single runs drift ~1.6× between
+  sessions on this machine (BACKLOG §GC & Runtime Performance). The spread of N runs is each
+  workload's **noise floor**; later gates are stated against it.
 - **Drain-edge counter by field kind.** How many marked edges land on `i`/`b` fields, and how many
-  `sprout_heap_lookup` calls return NULL. It sizes Phase 2a before it is built.
+  `sprout_heap_lookup` calls return NULL. One counter bump per edge, so it goes behind
+  `SPROUT_PROF_HOT`, which compiles in only under `-DSPROUT_GC_PROFILE` (`just gc-profile`).
+- **Port bench.** One directory per Phase 3 candidate under `bench/`: the C builtin and a Sprout
+  version on the same inputs.
 
 Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
 
-### Phase 1 — close the Sprout-vs-C gap
+### Phase 1 — give the C runtime what the compiler knows
+
+- **1a. Skip scalar fields when marking.** `sprout_gc_drain_marks` reads the tag from the OBJ
+  header (`aux` is `(tag << 8) | arity`) and the kinds from `g_ctor_meta`, then skips `i`/`b`
+  fields. Every other field is still looked up. Three preconditions:
+  - **Kinds must never call a heap field scalar.** They did: a module's own `type Bool` got `b`.
+    Fixed by matching the canonical name exactly (PR #658,
+    `tests/stdlib/test_gc_shadowed_scalar_name.spr`). With that, skipping is safe; trusting `p`
+    without a lookup is not (string literals live outside the heap) and is out of scope.
+  - **Records and wrap types are not registered** (`build_ctor_table` adds no `CtorReg` for
+    them), so their objects keep the lookup path, or get registered first.
+  - `Double` is kind `p` today (any capitalised name), so its fields are not skipped until it gets
+    a kind of its own.
+  Gate: Phase 0's counter shows a share of scalar edges worth having.
+- **1b. `str_eq` reads the header.** String literals already carry a CSTR header
+  (`ir_lowering.emit_str_global`), and `sprout_cstr_byte_len` already reads it. `str_eq`'s
+  length fast-reject still calls `sprout_heap_lookup` twice; it can make the same header read.
+
+Exit: each change kept only if self-compile improves by more than its noise floor and no workload
+regresses past its own.
+
+### Phase 2 — close the Sprout-vs-C gap
 
 All of it is filed already; this plan only orders it:
 
@@ -132,48 +168,54 @@ All of it is filed already; this plan only orders it:
 - Profile the ~5× `MutVec` gap, then inline element access if access is the cost (same section).
 - Tight string-processing loops (same section).
 
-Exit: the merge sort pair from [sorting-v0.md](sorting-v0.md) within an agreed bound of C (§9,
-question 1).
+Exit: the merge-sort pair from [sorting-v0.md](sorting-v0.md) within a bound of C that is **not
+yet set** (§9, question 1). Until it is, Phase 3 cannot start.
 
-### Phase 2 — give the C runtime what the compiler knows
+### Phase 3 — move builtins, one per PR
 
-- **2a. Skip scalar fields when marking.** Store a per-constructor mask of `i`/`b` fields. The OBJ
-  header's `aux` is `(tag << 8) | arity` with 42 tag bits, so small arities fit there; larger
-  ones use a table by tag. Only scalars are skipped; every other field is still looked up, so a
-  wrong kind costs a lookup, never the heap. `Double` is classified `p` today (any capitalised type
-  name) and needs its own kind to be skipped. Trusting `p` fields without a lookup is a separate,
-  riskier step: string literals live outside the heap, and a wrong kind becomes a use-after-free.
-  Gate: Phase 0's counter shows enough scalar edges to matter.
-- **2b. Static string literals get a length header** (BACKLOG §Strings, filed). Every string then
-  has a header, so `str_eq`'s length fast-reject no longer asks `sprout_heap_lookup` whether one
-  exists.
+**3.1–3.3 are builtin-surface reduction, not speed.** None of them is in the profile, and each
+will cost time until Phase 2 lands. Do them for the smaller C surface, or not yet.
 
-Exit: measured on the workload set; kept only where it wins.
+1. Encoders off the compiler's path: `crypto_base64_*`, `json_*` (used by `lsp_driver`, outside
+   the seed). No reseed.
+2. String helpers: `split_words`, `str_split_lines` (both declared in the seed — `module_loader`
+   calls `str_split_lines` — so each move reseeds), `string_join_newlines`, `regex_escape` (not in
+   the seed).
+3. Byte-level crypto (`crypto_sha256`, `crypto_hmac_sha256`), once byte access is unboxed.
 
-### Phase 3 — move pure-compute builtins, one per PR
+**3.4 `Dict`: fix the representation, then decide where it lives.** The 17% bucket is per-insert
+node allocation and `strcmp` descent, and a Sprout port of the same AVL tree keeps both and adds the
+~5× Sprout cost. `Dict` is `String`-keyed and so is the compiler, so "generic in the key" buys the
+compiler nothing. The fix at each layer:
 
-Order, least risky first:
+- caller — intern identifiers to `Int` symbols at lex time, so maps compare words. Largest gain,
+  largest change: every compiler map changes key type.
+- function — keys are already interned, so an equal key is pointer-equal; a pointer check before
+  `strcmp` saves only the last comparison, since ordering still needs `strcmp` on the way down.
+- representation — a hash map (HAMT) with the hash cached in the interned string: a lookup
+  compares hashes and calls `strcmp` only on a hash match. `dict_keys` returns sorted order today
+  (in-order walk), which a hash map must then sort.
 
-1. Encoders off the compiler's path: `crypto_base64_*`, hex, `json_*`. A move here does not change
-   the seed.
-2. String helpers: `split_words`, `str_split_lines`, `string_join_newlines`, `regex_escape`. These
-   are on the compiler's path (`module_loader` calls `str_split_lines`), so each move reseeds.
-3. Byte-level crypto (`crypto_sha256`, `crypto_hmac_sha256`) — only once byte access is unboxed.
-4. **`Dict` as a Sprout persistent map, generic in its key.** The largest prize (17% of the
-   compiler) and the largest risk: the compiler uses it everywhere, it changes the seed, and
-   `dict_keys` order (sorted, from the in-order walk) must not change. Non-`String` keys are a
-   semantic change and get their own design doc.
+The representation fix is the one that targets the measured cost, and it can be done in C first.
+Whether it then moves to Sprout is Phase 3's usual question. Non-`String` keys are a semantic
+change with their own design doc.
 
 Each move: a differential test (C and Sprout agree on a corpus) lands first, then the Sprout
 version, then the C function and its `APPROVED_BUILTINS` line are deleted. Gate: port bench at
-parity or better, and no workload regresses.
+parity or better, and no workload regresses past its noise floor.
 
 ### Phase 4 — decide, do not assume
 
-Stop and look at what is still hot. If it is the GC, root stack or scheduler, moving them needs an
-unsafe sublanguage (raw loads/stores, unboxed words) and a compiler-checked no-allocation subset —
-Go's model above. That is a language change and gets its own design doc. If what is hot is
-elsewhere, the plan ends here.
+Stop and look at what is still hot. Two directions remain, both language- or ABI-level, each with
+its own design doc:
+
+- **Precise stack maps instead of the root stack.** The collector reads root locations from LLVM
+  statepoint stack maps, so no push or pop is emitted at all, and the GC stays in C. Costs: an
+  experimental LLVM interface, a seed whose IR depends on it, and a rewrite of `ir_rooting`.
+- **The GC or scheduler in Sprout.** Needs an unsafe sublanguage (raw loads/stores, unboxed words)
+  and a compiler-checked no-allocation subset — Go's model above.
+
+If what is hot is elsewhere, the plan ends here.
 
 **Stays in C regardless:** `sprout_context.h` (stack switch), the poller, sockets and DNS, TLS,
 terminal, process, fs, and the REPL/analysis plumbing. POSIX `regex.h` stays until there is a
@@ -181,27 +223,33 @@ reason to own a regex engine.
 
 ## 6. Impact on the language
 
-Phases 0–3: none. Specialisation (Phase 1) is an optimisation with no surface change. Removing a
-builtin keeps its stdlib name and type. Phase 4 would be a language change, out of scope here.
+Phases 0–3: none. Specialisation (Phase 2) is an optimisation with no surface change. Removing a
+builtin keeps its stdlib name and type. Phase 4 would be a language or ABI change, out of scope
+here.
 
 ## 7. Compatibility and migration
 
 All Sprout code lives in four repos: this one, `uncharted-suns`, `repbit`, `sprout-pg`. Each Phase 3
-move greps all four for the `extern fn` name before deleting it. A move of a builtin the compiler
-uses changes the seed and follows `AGENTS.md` Definition of Done #9 and #12.
+move greps all four for the `extern fn` name before deleting it.
+
+**Bootstrap.** A move of a builtin the compiler uses changes the seed and follows `AGENTS.md`
+Definition of Done #9 and #12. For `Dict` and the string helpers the risk is sharper: a bug in the
+Sprout version breaks the compiler that has to build its fix, which is the 2-step bootstrap case
+([debugging.md](debugging.md) §2-Step Bootstrap Protocol). And the prelude is unconditional, so
+every binary carries the port and every golden IR snapshot changes with it.
 
 ## 8. Tests
 
-- Phase 0: the port bench and counter are themselves the deliverable.
-- Phase 2a: a GC test that names the collection count it must exceed (the lesson in
+- Phase 0: the bench and counter are themselves the deliverable.
+- Phase 1a: a GC test that names the collection count it must exceed (the lesson in
   [gc-root-inline-lowering-v0.md](gc-root-inline-lowering-v0.md) §10), with scalar and pointer
-  fields in one constructor.
+  fields in one constructor, and a shadowed scalar type name (as in PR #658's test).
 - Phase 3: one differential test per moved builtin; existing conformance tests unchanged.
 
 ## 9. Open questions
 
-1. Phase 1's exit bound: how close to C must the merge-sort pair get before Phase 3 starts?
-2. Whether `Dict` should gain non-`String` keys (Phase 3.4) or keep its current surface.
+1. Phase 2's exit bound: how close to C must the merge-sort pair get before Phase 3 starts?
+2. Whether `Dict` should gain non-`String` keys, or keep its current surface.
 3. Whether the Phase 0 workload set is the right one.
 
 ## 10. Sources
@@ -214,3 +262,4 @@ uses changes the seed and follows `AGENTS.md` Definition of Done #9 and #12.
 - GHC: [rts/include/rts/storage/InfoTables.h](https://github.com/ghc/ghc/blob/master/rts/include/rts/storage/InfoTables.h)
 - OCaml: [runtime/caml/mlvalues.h](https://github.com/ocaml/ocaml/blob/trunk/runtime/caml/mlvalues.h),
   [manual, Interfacing C with OCaml](https://ocaml.org/manual/5.2/intfc.html)
+- LLVM: [Garbage Collection Safepoints in LLVM](https://llvm.org/docs/Statepoints.html)
