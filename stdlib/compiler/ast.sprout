@@ -726,9 +726,14 @@ type AliasHead =
 # has to stop, leaving the head unexpanded so that diagnostic is the one to fire.
 let alias_expand_fuel: Int = 100
 
-export fn expand_alias_constraints(decls: List Decl) -> List Decl =
-  let table = alias_head_table(decls, dict_empty())
-  in list_map(\d -> expand_decl(table, d), decls)
+# A bundle's modules as one declaration list, in order.
+export fn flatten_modules(modules: List (List Decl)) -> List Decl =
+  list_flat_map(\decls -> decls, modules)
+
+# Each module's declarations, with every module's aliases expanded.
+export fn expand_alias_constraints(modules: List (List Decl)) -> List (List Decl) =
+  let table = list_fold(\ (acc, decls) -> alias_head_table(decls, acc), dict_empty(), modules)
+  in list_map(\decls -> list_map(\d -> expand_decl(table, d), decls), modules)
 
 # A declaration that is not an alias contributes no alias, which stays the right
 # answer for a variant that does not exist yet — so the catch-all belongs here.

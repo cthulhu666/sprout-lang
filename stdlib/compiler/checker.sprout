@@ -50,39 +50,40 @@ export fn check_program(prog: ast.Program) -> CheckResult !{IO} =
 export fn check_program_with_env(prog: ast.Program, extra: List (String, types.Scheme)) -> CheckResult !{IO} =
   do
     state <- unifier.new_state()
-    let desugared = desugar_program(prog)
-    match desugared with
-    | ast.Program decls _ ->
-        do
-          r <- infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
-          match r with
-          | typed_ast.TypedErr pos msg -> CheckErr(pos, msg)
-          | typed_ast.TypedOk _ env ->
-              match stored_effect_var_error(decls) with
-              | Nothing -> CheckOk(env)
-              | Just (pos, msg) -> CheckErr(pos, msg)
+    let ast.Program decls _ = prog
+    r <- typecheck_unenforced(state, [decls], extra)
+    match r with
+    | typed_ast.TypedErr pos msg -> CheckErr(pos, msg)
+    | typed_ast.TypedOk _ env ->
+        match stored_effect_var_error(decls) with
+        | Nothing -> CheckOk(env)
+        | Just (pos, msg) -> CheckErr(pos, msg)
 
 # Like check_program_with_env but returns the full TypedResult (TypedProgram + env).
+# `prog` is one module; a bundle goes through typecheck_bundle.
 export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
+  let ast.Program decls _ = prog
+  in typecheck_bundle([decls], extra)
+
+# `modules` is each module's declarations, as bundler.BundleOk gives them.
+export fn typecheck_bundle(modules: List (List ast.Decl), extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
-    (result, reports) <- typecheck_typed_with_effects(prog, extra)
-    enforce_stored_effect_vars(prog, enforce_effects(result, reports))
+    (result, reports) <- typecheck_typed_with_effects(modules, extra)
+    enforce_stored_effect_vars(ast.flatten_modules(modules), enforce_effects(result, reports))
 
 # Rule 9's stored-position half, applied on the SAME path as rule 8's post-pass
 # and for the same reason: `--phase effects` calls
 # `typecheck_typed_with_effects` directly, so the census still enumerates a
 # program this rejects. Type declarations carry no expressions, so the
-# un-desugared `prog` is the right thing to read.
-fn enforce_stored_effect_vars(prog: ast.Program,
+# un-desugared declarations are the right thing to read.
+fn enforce_stored_effect_vars(decls: List ast.Decl,
                               result: typed_ast.TypedResult) -> typed_ast.TypedResult =
   match result with
   | typed_ast.TypedErr _ _ -> result
   | typed_ast.TypedOk _ _ ->
-      match prog with
-      | ast.Program decls _ ->
-          match stored_effect_var_error(decls) with
-          | Nothing -> result
-          | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
+      match stored_effect_var_error(decls) with
+      | Nothing -> result
+      | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
 
 # spec-v0.md §7 rule 8, enforced. A declaration whose body performs IO under a
 # pure signature is rejected here.
@@ -331,33 +332,32 @@ fn stored_effect_var_message(tname: String, where_desc: String, v: String) -> St
 # every declaration even in a program enforcement would reject — which is what
 # makes the phase usable for migrating a codebase onto enforced effects rather
 # than something that dies at the first gap.
-export fn typecheck_typed_with_effects(prog: ast.Program, extra: List (String, types.Scheme))
+export fn typecheck_typed_with_effects(modules: List (List ast.Decl), extra: List (String, types.Scheme))
     -> (typed_ast.TypedResult, List unifier.EffectReport) !{IO} =
   do
     state <- unifier.new_state()
-    result <- typecheck_unenforced(state, prog, extra)
+    result <- typecheck_unenforced(state, modules, extra)
     reports <- unifier.effect_reports(state)
     (result, reports)
 
 # Like typecheck_typed_with_effects, but hands back the bind census of the
-# declarations in `entry`, the entry file's part of `prog` (`--phase bind-census`).
+# declarations in `entry`, the entry file's module (`--phase bind-census`).
 # Rejects nothing either.
-export fn typecheck_typed_with_census(prog: ast.Program, extra: List (String, types.Scheme), entry: List ast.Decl)
+export fn typecheck_typed_with_census(modules: List (List ast.Decl), extra: List (String, types.Scheme),
+                                      entry: List ast.Decl)
     -> (typed_ast.TypedResult, List bind_census.Piece) !{IO} =
   do
     state <- unifier.new_state()
     unifier.census_start(state, set_from_list(list_filter_map(infer.census_key, entry)))
-    result <- typecheck_unenforced(state, prog, extra)
+    result <- typecheck_unenforced(state, modules, extra)
     pieces <- unifier.census_pieces(state)
     (result, pieces)
 
 # Both report phases check one program the same way; each reads its report off
 # `state` afterwards.
-fn typecheck_unenforced(state: unifier.InferState, prog: ast.Program, extra: List (String, types.Scheme))
-    -> typed_ast.TypedResult !{IO} =
-  do
-    let ast.Program decls _ = desugar_program(prog)
-    infer.typecheck_decls(state, decls, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+fn typecheck_unenforced(state: unifier.InferState, modules: List (List ast.Decl),
+                        extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
+  infer.typecheck_decls(state, desugar_modules(modules), dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
 
 # ---------------------------------------------------------------------------
 # String template / Vec-literal desugar pass
@@ -368,8 +368,8 @@ fn typecheck_unenforced(state: unifier.InferState, prog: ast.Program, extra: Lis
 # string only, no typechecker dependency) so lint_rules.sprout can reuse the
 # same Vec-context computation without depending on this module's stack.
 
-fn desugar_program(prog: ast.Program) -> ast.Program =
-  desugar_ctx.desugar_program(prog)
+fn desugar_modules(modules: List (List ast.Decl)) -> List (List ast.Decl) =
+  desugar_ctx.desugar_modules(modules)
 
 # ---------------------------------------------------------------------------
 # dump_typed_names — parity-test output renderer

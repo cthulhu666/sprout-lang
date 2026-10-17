@@ -320,10 +320,15 @@ unfused meaning. The disjoint constructors keep a refutable success pattern non-
 catch-all failure arm would otherwise catch the success values the pattern misses
 (`try_fused_refutable_pattern.spr`). The `match` is typed as `branch` declares its failure, `t b`
 for an operand `t a`, before any arm, so a failure arm more general than that (`Break(Gone)` for a
-`Res e a`) cannot widen it (`try_fused_failure_type.spr`). A head fuses only once its instance, and
-every declaration and class method its failure arms call, is checked and in scope
-(`infer.ready_try_fusion`); before that the `try` calls `branch`, which rejects an instance not yet
-in scope as it would by hand (`try_instance_declared_after.spr`, `try_failure_arm_class_after.spr`).
+`Res e a`) cannot widen it (`try_fused_failure_type.spr`). A head fuses only once its instance
+and every declaration and class method its failure arms call are checked and in scope
+(`infer.ready_try_fusion`); before that the `try` calls `branch`. Fusing earlier would infer the
+instance's arms in the `try`'s declaration and report their errors there
+(`type_error/try_instance_below_error_stays_in_instance.spr`). The instance is in scope throughout
+its module, so declaring it, or a class its failure arms call, below the `try` still type-checks,
+through `branch` (`run/try_instance_declared_after.spr`, `run/try_failure_arm_class_after.spr`).
+An importer's instance is not in scope in a module it imports, so it fuses no `try` there
+(`package_resolution/app_importer_propagate_not_in_import.spr`).
 Adding those calls to the binding-group graph instead made a `try` on any type depend on them, which
 merged unrelated groups and made their members monomorphic (`test_try_decl_order.spr`). The failure
 arms are inferred in the declaration's scope without its locals, so a parameter at the `try` cannot

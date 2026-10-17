@@ -1,0 +1,23 @@
+# A `fn` and a top-level `let` may use an instance declared below them, and an
+# instance method may call a `fn` declared below it.
+
+type Coin (..) =
+  | Heads
+  | Tails
+
+fn same(a: Coin, b: Coin) -> Bool = a == b
+
+let heads_twice: Bool = Heads == Heads
+
+instance Eq Coin
+  fn eq(left: Coin, right: Coin) -> Bool = coin_index(left) == coin_index(right)
+
+fn coin_index(c: Coin) -> Int =
+  match c with
+  | Heads -> 0
+  | Tails -> 1
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(same(Heads, Tails)))
+    print(to_string(heads_twice))

@@ -316,8 +316,9 @@ Shadowing has three known limits, all because the construct resolves by
   bare name.
 - Class methods keep bare names. A redefined class collides in the class-method
   wrapper symbol, and a method named like a prelude function is what built-in
-  syntax calls: a method `list_reverse` breaks comprehensions, and one named
-  `branch` is what an unfused `try` calls (§5.9.1).
+  syntax calls, throughout the method's module, above its class too: a method
+  `list_reverse` breaks comprehensions, and one named `branch` is what an unfused
+  `try` calls (§5.9.1).
 - List and dict literals, list patterns and `>>`/`<<` are built from the bare names
   `Cons`, `Nil`, `dict_empty`, `dict_set`, `rcompose` and `lcompose`. A file's own
   declaration of one of them, or a local named like one, is what they use.
@@ -2157,8 +2158,8 @@ calls `branch` and allocates a `ControlFlow`. The type must be known at the `try
 for the first case, the `try` must be in a function or instance method, and the
 instance and what its `Break` arms call must be checked before that function:
 declared after it without a dependency, or in a binding group with it, they are
-not, and `try` calls `branch`. An instance declared after the `try` is not in
-scope there either way, so that `try` is rejected.
+not, and `try` calls `branch`. The instance itself is in scope anywhere in its
+module, and in a module that imports it.
 
 ### 5.10 List comprehensions (Experimental)
 
@@ -2499,9 +2500,16 @@ Effect note for v0:
     cannot change whether the program is accepted, nor which declaration a
     conflict is reported against. A `record`'s fields are in scope throughout
     its module, as its type name is: a `fn` above the declaration may read,
-    construct and update it. A `fn` may not be moved above a `class`,
-    `instance`, `let` or `alias` declaration it depends on; those introduce
-    names that must already be in scope, exactly as they must today.
+    construct and update it. A `class` and an `instance` are in scope throughout
+    their module too: a declaration above a class may call its methods and
+    require it in a `where` clause, one above an instance may use it, and an
+    instance's methods may use the instance itself, so a recursive type's `Eq`
+    compares its children with the instance being declared. An instance in a
+    module that imports this one is not in scope here: an imported module is
+    checked first. A method named like
+    a prelude function names the method throughout its module, and the function
+    in the prelude. An alias is in scope throughout its module (§5.6.2). A `fn` may not be moved above a top-level
+    `let` it depends on: a `let` must already be in scope where it is used.
 
     **Polymorphic recursion requires a complete, constraint-free signature.** A
     function may call itself at a *different* type than the one it was called with

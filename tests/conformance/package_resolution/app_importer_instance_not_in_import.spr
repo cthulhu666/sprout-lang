@@ -1,0 +1,10 @@
+module main
+import demo.orphan_show as lib
+
+# `lib.describe` calls `to_string` on a `lib.Foo`, and only this module declares
+# that instance. lib is checked before its importer, so the call has no instance.
+
+instance ToString lib.Foo
+  fn to_string(f: lib.Foo) -> String = "foo"
+
+fn main() -> Unit !{IO} = print(lib.describe(lib.Foo))

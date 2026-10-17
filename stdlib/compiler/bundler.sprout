@@ -17,9 +17,14 @@ import stdlib.fs as fs
 # Public API
 # ---------------------------------------------------------------------------
 
+# Each module's declarations, in the program's order: the prelude first and each
+# module after its imports. bundle_program is them as one program.
 export type BundleResult (..) =
-  | BundleOk ast.Program
+  | BundleOk (List (List ast.Decl))
   | BundleErr source.SourcePos String
+
+export fn bundle_program(modules: List (List ast.Decl)) -> ast.Program =
+  ast.Program(ast.flatten_modules(modules), no_pos())
 
 # Where module sources come from, and what has already been parsed.
 #
@@ -2472,7 +2477,7 @@ fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_roo
             | Nothing ->
             match deriving.validate_deriving_decls(qualified) with
             | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
-            | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
+            | Nothing -> BundleOk(list_map(\m -> deriving.expand_deriving_decls(m.decls), names.qualified))
   where qualified = list_flat_map(\m -> m.decls, names.qualified)
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =

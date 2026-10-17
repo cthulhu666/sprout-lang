@@ -277,13 +277,35 @@ covered the machinery instead of stepping around it: every `FnDecl` runs the gro
 path, at size one. The second step replaced `group_plan`'s body, leaving a small
 diff whose entire blast radius is the ordering.
 
-**Barriers.** Only `FnDecl`s are reordered, and only among themselves; every other
-declaration is its own group, in place, and no `FnDecl` crosses it. This is what
-the environments allow rather than caution:
+**Barriers.** Only `FnDecl`s and `InstanceDecl`s are reordered, and only within
+the run between two barriers. Every other declaration but a class is its own
+group, in place, and neither crosses it. This is what the environments allow
+rather than caution:
 
-- `ClassDecl`, `InstanceDecl` are registered by `typecheck_decl` as it walks, not
-  by `pre_scan_fn_decls`. `RecordDecl` was too; `pre_scan_fn_decls` now registers
-  it, so it no longer needs to be a barrier, but still is (`BACKLOG.md`).
+- `InstanceDecl` is registered at the **start of its module**
+  (`typecheck_modules`), so it is in scope above its declaration and in its own
+  methods, but not in a module checked before it: an importer's instance does not
+  reach what it imports, for a method call or a fused `try`
+  (`package_resolution/app_importer_instance_not_in_import.spr`,
+  `app_importer_propagate_not_in_import.spr`). An instance is a graph node with edges
+  to what its methods call and none into it, so it is checked after those and
+  otherwise where it is written, and its errors come in source order
+  (`type_error/instance_error_reported_in_source_order.spr`).
+- A `ClassDecl` is checked, and its methods registered, at the **start of its
+  module**, as its own group, and splits no segment. Method names stay bare after
+  bundling, so registered before the walk they would replace same-named prelude
+  functions for the prelude itself (`run/class_method_named_like_called_prelude_fn.spr`,
+  `run/class_method_named_like_prelude_extern.spr`); registered where the class
+  stands, they would miss the module's uses above it
+  (`run/class_method_named_like_prelude_fn.spr`). Where a module starts is not
+  read off names, which an instance does not have: `bundler.BundleOk` gives each
+  module's declarations, and `typecheck_modules` checks each whole, planned on its
+  own by `group_plan` (`run/order_foreign_instance_first_in_module.spr`,
+  `run/order_imported_class_instance_first_in_module.spr`). Bundled modules are
+  contiguous and in import order, so every module the class could shadow a name
+  for is checked by then.
+- `RecordDecl` is pre-scanned too, so it no longer needs to be a barrier, but still
+  is (`BACKLOG.md`).
 - A top-level `let` is not pre-scanned either — forward-referencing one is
   `Unknown variable` today (measured), and this must not change that.
 - `AliasDecl` is a barrier *despite* being pre-scanned. `pre_scan`'s `alias_env`
@@ -317,9 +339,10 @@ And it must be iterative: 551 recursive DFS frames is the stack the
 `stack-overflow-smoke` gate exists to police, at a depth set by user code rather than
 by us.
 
-**The invariant.** Groups must partition `0..n-1` exactly once — a missing index
-silently drops a declaration from the emitted program, a duplicate emits it twice.
-It holds by construction (each declaration is a barrier singleton or in exactly one
+**The invariant.** Each module's groups must partition that module's indices
+exactly once — a missing index silently drops a declaration from the emitted
+program, a duplicate emits it twice.
+It holds by construction (each declaration is a singleton or in exactly one
 segment; an SCC partition covers its nodes) given unique names, which
 `check_duplicate_fn_decls` has already guaranteed. `checked_plan` verifies it
 anyway and falls back to source order if it fails: reordering improves

@@ -5169,7 +5169,7 @@ fn is_try_operand(e: typed_ast.TypedExpr) -> Bool =
   | _ -> false
 
 # An operand whose type has no `Propagate` instance in scope: it is not a `t a`,
-# or its `t` has none yet. A variable head is the `branch` call's to resolve.
+# or its `t` has none. A variable head is the `branch` call's to resolve.
 fn no_propagate_error(operand_ty: types.Type, env: Dict types.Scheme) -> Maybe String =
   match operand_ty with
   | types.TVar _ -> Nothing
@@ -5198,14 +5198,16 @@ fn propagate_instance_key(head: String) -> String = types.inst_marker_key("Propa
 # no failure arm and a refutable success pattern stays non-exhaustive. An
 # instance with a context is left alone: its dictionaries are its own.
 #
-# A `try` is not a dependency of what the failure arms call, nor of the instance,
-# so either may not be typed yet where the `try` is. Until both are, the `try`
-# calls `branch` (ready_try_fusion).
+# A `try` is not a dependency of its instance, nor of what the failure arms call,
+# so either may not be checked yet where the `try` is. Until both are, the `try`
+# calls `branch` (ready_try_fusion): fusing earlier would infer the instance's
+# arms, and report their errors, in the `try`'s declaration.
 fn try_fusions(decls: List ast.Decl) -> unifier.TryFusions =
-  let pending = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
-      callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), pending, decls)
-  in unifier.TryFusions(by_head = list_fold(\ (acc, d) -> add_try_fusion(d, callable, acc), dict_empty(), decls),
-                        pending = pending, decl = Nothing)
+  let values = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
+      callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), values, decls)
+      by_head = list_fold(add_try_fusion(callable, _, _), dict_empty(), index_decls(decls, 0))
+      pending = vec_fold(\ (acc, f) -> set_insert(f.pending_key, acc), values, dict_values(by_head))
+  in unifier.TryFusions(by_head = by_head, pending = pending, decl = Nothing)
 
 fn add_value_name(d: ast.Decl, acc: Set) -> Set =
   match checked_value_name(d) with
@@ -5231,14 +5233,15 @@ fn checked_value_name(d: ast.Decl) -> Maybe String =
   | ast.AliasDecl _ _ _ _ -> Nothing
   | ast.WrapDecl _ _ _ _ _ -> Nothing
 
-fn add_try_fusion(d: ast.Decl, callable: Set, acc: Dict unifier.Fusion) -> Dict unifier.Fusion =
-  match d with
-  | ast.InstanceDecl (ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _ ->
+fn add_try_fusion(callable: Set, acc: Dict unifier.Fusion, item: (Int, ast.Decl)) -> Dict unifier.Fusion =
+  match item with
+  | (i, ast.InstanceDecl(ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _) ->
       match fusable_branch_arms(param, body) with
       | Just arms ->
           dict_set(type_head_str(type_from_ast(head, dict_empty())),
                    unifier.Fusion(arms = arms, success = success_index(arms, 0),
-                                  calls = list_fold(\ (a, arm) -> failure_calls(arm, callable, a), set_empty(), arms)),
+                                  calls = list_fold(\ (a, arm) -> failure_calls(arm, callable, a), set_empty(), arms),
+                                  pending_key = instance_node(i)),
                    acc)
       | Nothing -> acc
   | _ -> acc
@@ -5249,13 +5252,14 @@ fn failure_calls(arm: unifier.FusionArm, callable: Set, acc: Set) -> Set =
   | unifier.FailureArm pat failure -> referenced_names(failure, bind_pattern(pat, set_empty()), callable, acc)
 
 # The fusion for a `try` on `operand_ty`, once its instance and what its failure
-# arms call are typed and in scope, and the scope to infer those arms in.
+# arms call are checked and in scope, and the scope to infer those arms in. An
+# importer's instance is checked after the module it imports, so it never is.
 fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
     Maybe(unifier.Fusion, Dict types.Scheme) =
   let Just head = concrete_type_str(operand_ty) else Nothing
       Just fusion = dict_get(head, fusions.by_head) else Nothing
       Just decl = fusions.decl else Nothing
-  in if dict_member(propagate_instance_key(head), decl.scope)
+  in if ! set_member (fusion.pending_key, fusions.pending)
         && all(\n -> dict_member(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
      then Just((fusion, decl.scope)) else Nothing
 
@@ -5273,13 +5277,14 @@ fn settle_try_fusions(state: unifier.InferState, decl_vec: Vec ast.Decl, g: List
   do
     fusions <- unifier.get_try_fusions(state)
     unifier.set_try_fusions(state,
-      fusions with (pending = list_fold(\ (acc, i) -> settle_decl(decl_at(decl_vec, i), acc), fusions.pending, g),
+      fusions with (pending = list_fold(\ (acc, i) -> settle_decl(i, decl_at(decl_vec, i), acc), fusions.pending, g),
                     decl = Nothing))
 
-fn settle_decl(d: Maybe ast.Decl, pending: Set) -> Set =
+# An instance is settled by its index, a value by its name.
+fn settle_decl(i: Int, d: Maybe ast.Decl, pending: Set) -> Set =
   match and_then(checked_value_name, d) with
   | Just name -> set_remove(name, pending)
-  | Nothing -> pending
+  | Nothing -> set_remove(instance_node(i), pending)
 
 fn fusable_branch_arms(param: String, body: ast.Expr) -> Maybe (List unifier.FusionArm) =
   let ast.MatchExpr(ast.VarExpr scrut _) arms _ = body else Nothing
@@ -7338,21 +7343,25 @@ fn undetermined_source_message(src_expr: ast.Expr) -> String =
 # Aliases are resolved before anything else: every later pass reads types
 # through `alias_env`, so it has to be complete first. A cycle among them is
 # reported here rather than diverging in the expander.
+#
+# `modules` is each module's declarations, in order (BundleOk's); a program that
+# was not bundled is one module.
 export fn typecheck_decls(
   state: unifier.InferState,
-  decls: List ast.Decl,
+  modules: List (List ast.Decl),
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
-  match register_all_aliases(decls, dict_empty()) with
-  | AliasesErr pos msg -> pure_typed_err(pos, msg)
-  | AliasesOk alias_env ->
-      # Seeding rewrites only InstanceDecls, so the class signatures read off the
-      # unseeded decls are the ones the signature check needs.
-      let class_sigs = own_class_sigs(decls, dict_empty())
-      in typecheck_decls_resolved(state, seed_instance_method_types(decls, class_sigs, alias_env), env, subst,
-                                  eff_subst, alias_env, class_sigs)
+  let decls = ast.flatten_modules(modules)
+  in match register_all_aliases(decls, dict_empty()) with
+     | AliasesErr pos msg -> pure_typed_err(pos, msg)
+     | AliasesOk alias_env ->
+         # Seeding rewrites only InstanceDecls, so the class signatures read off the
+         # unseeded decls are the ones the signature check needs.
+         let class_sigs = own_class_sigs(decls, dict_empty())
+         in typecheck_decls_resolved(state, list_map(seed_instance_method_types(_, class_sigs, alias_env), modules),
+                                     env, subst, eff_subst, alias_env, class_sigs)
 
 fn pure_typed_err(pos: source.SourcePos, msg: String) -> typed_ast.TypedResult !{IO} =
   do
@@ -7371,7 +7380,7 @@ let builtin_type_names: List String =
 
 fn typecheck_decls_resolved(
   state: unifier.InferState,
-  decls: List ast.Decl,
+  modules: List (List ast.Decl),
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
@@ -7379,6 +7388,7 @@ fn typecheck_decls_resolved(
   class_sigs: Dict (String, List ast.ClassMethodSig)
 ) -> typed_ast.TypedResult !{IO} =
   do
+    let decls = ast.flatten_modules(modules)
     # Pre-scan: register all FnDecl signatures (constraint field included) in env
     # before processing bodies.  This enables forward references and
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
@@ -7425,7 +7435,7 @@ fn typecheck_decls_resolved(
     # Mirrored once, up front: an annotation inside a body reads
     # aliases from the env, and a body may be checked above the
     # declaration whose alias it names.
-    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
+    match typecheck_decls_inner(state, modules, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
     | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
     | typed_ast.TypedOk prog schemes ->
         # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -9440,6 +9450,11 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # A record's fields are in scope throughout its module (spec §7).
       | ast.RecordDecl _ _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_record_decl(decl, alias_env, env), alias_env)
+      # Not here: both are registered at their module's start (group_plan,
+      # typecheck_modules), or they would reach the modules checked before it. A
+      # class's bare method names would shadow the prelude's for the prelude itself.
+      | ast.ClassDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
+      | ast.InstanceDecl _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
@@ -9609,36 +9624,49 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # (typed_decls_in_source_order), so no plan this function can return is able to
 # move emitted code — which is what makes swapping its body a contained change.
 #
-# FnDecls are partitioned into strongly connected components and ordered so a
-# group's dependencies are checked before it; every other declaration is its own
-# group, in place, and acts as a BARRIER that no FnDecl may cross.
+# FnDecls and instances are partitioned into strongly connected components and
+# ordered so a group's dependencies are checked before it. Every other declaration
+# but a class is its own group, in place, and acts as a BARRIER that neither may
+# cross; a class is its own group at the module's start and splits no segment.
 #
-# The barrier rule is not conservatism, it is what the environments allow.
-# ClassDecl and InstanceDecl are registered by typecheck_decl as it walks, not by
-# pre_scan_fn_decls, so a FnDecl hoisted above one loses the methods or instance it
-# needs. RecordDecl is registered before the walk and need not be a barrier, but
-# still is (BACKLOG). A top-level `let` is not pre-scanned either — a
-# forward reference to one is `Unknown variable` today, which this must not change.
+# It plans one module: typecheck_modules checks each whole before the next, and
+# registers its instances first, so they need not be barriers. A class is checked
+# at the START of its module: its methods keep bare names after bundling, so
+# registered any earlier they would shadow a same-named prelude fn for the
+# prelude, and any later they would miss its own module's uses above it.
+# RecordDecl is registered before the walk and need not be a barrier, but still is
+# (BACKLOG). A top-level `let` is not pre-scanned — a forward reference to one is
+# `Unknown variable` today, which this must not change.
 # AliasDecl is a barrier too, by rule rather than need: `alias_env` is complete
 # before the walk (register_all_aliases) and mirrored into the env once, up front.
 #
-# The invariant every plan owes typecheck_groups: the groups partition 0..n-1
-# EXACTLY once. A missing index silently drops a declaration from the emitted
+# The invariant every plan owes typecheck_groups: the groups partition the module's
+# indices EXACTLY once. A missing index silently drops a declaration from the emitted
 # program; a duplicated one emits it twice. It holds by construction here — each
-# declaration is either a barrier singleton or in exactly one segment, and an SCC
+# declaration is a barrier singleton or in exactly one segment (a class is emitted
+# once, at its module's start), and an SCC
 # partition covers its node set — with one dependency: names must be unique, which
-# check_duplicate_fn_decls has already guaranteed by the time this runs. The
+# check_duplicate_fn_decls has already guaranteed by the time this runs (an
+# instance's node is named by its index). The
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.
-fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil), list_length(decls))
+#
+# The module's classes come first, each its own group, then the rest in order.
+fn group_plan(items: List (Int, ast.Decl)) -> List (List Int) =
+  checked_plan(list_append(list_filter_map(class_group, items), plan_walk(items, Nil, Nil)), items)
 
-# A plan that does not partition 0..n-1 falls back to source order. Reordering is
+fn class_group(item: (Int, ast.Decl)) -> Maybe (List Int) =
+  match placement(item) with
+  | AtModuleStart -> Just([i_of(item)])
+  | InSegment -> Nothing
+  | Barrier -> Nothing
+
+# A plan that does not partition the module falls back to source order. Reordering is
 # an optimisation of COMPLETENESS — it makes more correct programs typable — so
 # losing it degrades diagnostics; dropping a declaration corrupts the output. Trade
 # the first for certainty about the second.
-fn checked_plan(plan: List (List Int), n: Int) -> List (List Int) =
-  if plan_covers_exactly(plan, n) then plan else group_plan_singletons(0, n)
+fn checked_plan(plan: List (List Int), items: List (Int, ast.Decl)) -> List (List Int) =
+  if plan_covers_exactly(plan, list_length(items)) then plan else list_map(\item -> [i_of(item)], items)
 
 fn plan_covers_exactly(plan: List (List Int), n: Int) -> Bool =
   set_size(plan_indices(plan, set_empty())) == n
@@ -9653,26 +9681,41 @@ fn plan_group_indices(g: List Int, acc: Set) -> Set =
   | Nil -> acc
   | Cons i rest -> plan_group_indices(rest, set_insert(int_to_string(i), acc))
 
-fn group_plan_singletons(i: Int, n: Int) -> List (List Int) =
-  if i >= n then Nil else Cons(Cons(i, Nil), group_plan_singletons(i + 1, n))
-
 fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
   match decls with
   | Nil -> Nil
   | Cons d rest -> Cons((i, d), index_decls(rest, i + 1))
 
-# `seg` is the current run of FnDecls and `acc` the finished groups, both held in
-# REVERSE so the walk stays a cons. Hitting a barrier flushes the run, then emits
-# the barrier itself as a singleton in its original position.
+# `seg` is the current run of FnDecls and instances, `acc` the finished groups,
+# both held in REVERSE so the walk stays a cons. Hitting a barrier flushes the run,
+# then emits the barrier itself as a singleton in its original position. A class
+# is skipped: group_plan has emitted it already.
 fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
   match items with
-  | Nil -> list_reverse(flush_segment(seg, acc))
-  | Cons item rest ->
-      match item with
-      | (i, decl) ->
-          match decl with
-          | ast.FnDecl _ _ _ _ _ _ _ -> plan_walk(rest, Cons(item, seg), acc)
-          | _ -> plan_walk(rest, Nil, Cons (Cons(i, Nil), flush_segment(seg, acc)))
+  | [] -> list_reverse(flush_segment(seg, acc))
+  | [item | rest] ->
+      match placement(item) with
+      | InSegment -> plan_walk(rest, Cons(item, seg), acc)
+      | Barrier -> plan_walk(rest, Nil, Cons([i_of(item)], flush_segment(seg, acc)))
+      | AtModuleStart -> plan_walk(rest, seg, acc)
+
+type Placement =
+  | InSegment
+  | Barrier
+  | AtModuleStart
+
+# Every kind is named: a new one is a barrier only once the header above says why.
+fn placement(item: (Int, ast.Decl)) -> Placement =
+  match item with
+  | (_, ast.FnDecl _ _ _ _ _ _ _) -> InSegment
+  | (_, ast.InstanceDecl _ _ _ _) -> InSegment
+  | (_, ast.ClassDecl _ _ _ _ _) -> AtModuleStart
+  | (_, ast.ExternFnDecl _ _ _ _ _) -> Barrier
+  | (_, ast.TypeDecl _ _ _ _ _ _) -> Barrier
+  | (_, ast.RecordDecl _ _ _ _ _ _ _) -> Barrier
+  | (_, ast.LetDecl _ _ _ _) -> Barrier
+  | (_, ast.AliasDecl _ _ _ _) -> Barrier
+  | (_, ast.WrapDecl _ _ _ _ _) -> Barrier
 
 # The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
@@ -9683,40 +9726,40 @@ fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List 
 # declaration already checked, and a reference to a later one names something the
 # barrier makes unreachable anyway. Neither can inform this segment's order.
 fn partition_segment(seg: List (Int, ast.Decl)) -> List (List Int) =
-  match seg with
-  | Nil -> Nil
-  | [_ | _] ->
-      let names = segment_names(seg)
+  match list_filter_map(segment_node, seg) with
+  | [] -> []
+  | nodes ->
+      let names = list_map(\n -> n.name, nodes)
           index = set_from_list(names)
       in groups_to_indices(
-           scc.sccs_in_dependency_order(names, segment_graph(seg, index, dict_empty())),
-           segment_index_map(seg, dict_empty()))
+           scc.sccs_in_dependency_order(names, list_fold(add_node_edges(index, _, _), dict_empty(), nodes)),
+           dict_from_list(list_map(\n -> (n.name, n.at), nodes)))
 
-fn segment_names(seg: List (Int, ast.Decl)) -> List String =
-  match seg with
-  | Nil -> Nil
-  | Cons m rest ->
-      match m with
-      | (_, ast.FnDecl name _ _ _ _ _ _) -> Cons(name, segment_names(rest))
-      | _ -> segment_names(rest)
+# A FnDecl or instance as a graph node: its index, its name, and the bodies, with
+# their parameters, whose references are its edges.
+type SegmentNode = (at: Int, name: String, bodies: List (List ast.Param, ast.Expr))
 
-fn segment_graph(seg: List (Int, ast.Decl), index: Set, acc: Dict Set) -> Dict Set =
-  match seg with
-  | Nil -> acc
-  | Cons m rest ->
-      match m with
-      | (_, ast.FnDecl name params _ _ _ body _) ->
-          segment_graph(rest, index,
-            dict_set(name, referenced_names(body, bind_params(params, set_empty()), index, set_empty()), acc))
-      | _ -> segment_graph(rest, index, acc)
+fn segment_node(m: (Int, ast.Decl)) -> Maybe SegmentNode =
+  match m with
+  | (i, ast.FnDecl name params _ _ _ body _) -> Just (SegmentNode(at = i, name = name, bodies = [(params, body)]))
+  | (i, ast.InstanceDecl _ _ methods _) ->
+      Just(SegmentNode(at = i, name = instance_node(i), bodies = list_map(method_body, methods)))
+  | _ -> Nothing
 
-fn segment_index_map(seg: List (Int, ast.Decl), acc: Dict Int) -> Dict Int =
-  match seg with
-  | Nil -> acc
-  | Cons m rest ->
-      match m with
-      | (_, ast.FnDecl name _ _ _ _ _ _) -> segment_index_map(rest, dict_set(name, i_of(m), acc))
-      | _ -> segment_index_map(rest, acc)
+# An instance is a node that names no value, so nothing in the segment calls it:
+# it lands after what its methods call, and is otherwise where it was written.
+fn instance_node(i: Int) -> String = "@instance:" ++ int_to_string(i)
+
+fn method_body(m: ast.InstanceMethodImpl) -> (List ast.Param, ast.Expr) =
+  let ast.InstanceMethodImpl _ params _ _ _ body = m
+  in (params, body)
+
+fn add_node_edges(index: Set, acc: Dict Set, n: SegmentNode) -> Dict Set =
+  dict_set(n.name, list_fold(add_body_references(index, _, _), set_empty(), n.bodies), acc)
+
+fn add_body_references(index: Set, acc: Set, pb: (List ast.Param, ast.Expr)) -> Set =
+  let (params, body) = pb
+  in referenced_names(body, bind_params(params, set_empty()), index, acc)
 
 fn i_of(m: (Int, ast.Decl)) -> Int =
   match m with
@@ -9758,15 +9801,63 @@ fn decl_at(decl_vec: Vec ast.Decl, i: Int) -> Maybe ast.Decl = vec_get(i, decl_v
 
 fn typecheck_decls_inner(
   state: unifier.InferState,
-  decls: List ast.Decl,
+  modules: List (List ast.Decl),
   env: GlobalEnv,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
 ) -> typed_ast.TypedResult !{IO} =
-  typecheck_groups(state, vec_from_list(decls), group_plan(decls), env, subst, eff_subst,
-                   alias_env, dict_empty(), env_ftv, list_length(decls))
+  let decls = ast.flatten_modules(modules)
+  in typecheck_modules(state, vec_from_list(decls), index_modules(modules, 0), env, subst, eff_subst,
+                       alias_env, dict_empty(), env_ftv, list_length(decls))
+
+fn index_modules(modules: List (List ast.Decl), i: Int) -> List (List (Int, ast.Decl)) =
+  match modules with
+  | [] -> []
+  | [decls | rest] -> Cons(index_decls(decls, i), index_modules(rest, i + list_length(decls)))
+
+# Each module is checked whole before the next, its instances registered first: an
+# instance is in scope throughout its module and in every later one, never in an
+# earlier one (spec §7). An importer's instance stays out of what it imports.
+fn typecheck_modules(
+  state: unifier.InferState,
+  decl_vec: Vec ast.Decl,
+  modules: List (List (Int, ast.Decl)),
+  env: GlobalEnv,
+  subst: Dict types.Type,
+  eff_subst: Dict types.Effect,
+  alias_env: Dict types.Type,
+  out: Dict typed_ast.TypedDecl,
+  env_ftv: List String,
+  total: Int
+) -> typed_ast.TypedResult !{IO} =
+  match modules with
+  | [] ->
+      do
+        unifier.census_finish(state, subst)
+        # Unwrap GlobalEnv for the public TypedResult API, which still uses
+        # raw Dict types.Scheme.  The wrap discipline is internal to infer.
+        typed_ast.TypedOk(
+          typed_ast.TypedProgram(typed_decls_in_source_order(out, 0, total)),
+          global_env_dict(env))
+  | [items | rest] ->
+      do
+        r <- typecheck_groups(state, decl_vec, group_plan(items), register_instances(items, env), subst, eff_subst,
+                              alias_env, out, env_ftv)
+        match r with
+        | GroupErr pos e -> typed_ast.TypedErr(pos, e)
+        | GroupOk new_out new_env new_subst new_alias_env new_env_ftv ->
+            typecheck_modules(state, decl_vec, rest, new_env, new_subst, eff_subst,
+                              new_alias_env, new_out, new_env_ftv, total)
+
+fn register_instances(items: List (Int, ast.Decl), env: GlobalEnv) -> GlobalEnv =
+  GlobalEnv(list_fold(register_instance_item, global_env_dict(env), items))
+
+fn register_instance_item(env: Dict types.Scheme, item: (Int, ast.Decl)) -> Dict types.Scheme =
+  match item with
+  | (_, ast.InstanceDecl constraint _ _ _) -> register_instance_marker(constraint, env)
+  | _ -> env
 
 fn typecheck_groups(
   state: unifier.InferState,
@@ -9777,31 +9868,23 @@ fn typecheck_groups(
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   out: Dict typed_ast.TypedDecl,
-  env_ftv: List String,
-  total: Int
-) -> typed_ast.TypedResult !{IO} =
+  env_ftv: List String
+) -> GroupResult !{IO} =
   match groups with
-  | Nil ->
-      do
-        unifier.census_finish(state, subst)
-        # Unwrap GlobalEnv for the public TypedResult API, which still uses
-        # raw Dict types.Scheme.  The wrap discipline is internal to infer.
-        typed_ast.TypedOk(
-          typed_ast.TypedProgram(typed_decls_in_source_order(out, 0, total)),
-          global_env_dict(env))
-  | Cons g rest ->
+  | [] -> GroupOk(out, env, subst, alias_env, env_ftv)
+  | [g | rest] ->
       do
         r <- typecheck_group(state, decl_vec, g, env, subst, eff_subst, alias_env, out, env_ftv)
         settle_try_fusions(state, decl_vec, g)
         match r with
-        | GroupErr pos e -> typed_ast.TypedErr(pos, e)
+        | GroupErr _ _ -> r
         | GroupOk new_out new_env new_subst new_alias_env new_env_ftv ->
             # new_subst, not subst: this is the whole of what makes an
             # unannotated declaration's placeholder mean anything. The pin a
             # caller puts on it has to survive to the declaration that owns
             # it, or the two are inferred as if they were unrelated.
             typecheck_groups(state, decl_vec, rest, new_env, new_subst, eff_subst,
-                             new_alias_env, new_out, new_env_ftv, total)
+                             new_alias_env, new_out, new_env_ftv)
 
 # Dispatch is by DECL KIND, not by group size, and that is deliberate: a group of
 # one FnDecl takes the same path as a group of five. It means the group machinery
@@ -10185,11 +10268,11 @@ fn typecheck_decl(
                           s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
+  # Checked at its module's start (group_plan), so its methods are in scope
+  # throughout the module and in no module before it.
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(register_class_methods(type_params, methods, alias_env,
-          register_class_method_markers(class_name, type_params, methods,
-            register_superclass_markers(class_name, superclasses, global_env_dict(env))))),
+        GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
         env_ftv, subst)
   | ast.InstanceDecl constraint inst_constraints methods _ ->
       do
@@ -10203,10 +10286,7 @@ fn typecheck_decl(
             # method name, so their placeholders would otherwise be forced equal.
             # scheme_from_fn_parts gives them a "#inst/" namespace for the same
             # reason — the two guards are a pair.
-            TypedDeclOk(
-              typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
-              GlobalEnv(register_instance_marker(constraint, global_env_dict(env))),
-              env_ftv, subst)
+            TypedDeclOk(typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods), env, env_ftv, subst)
 
 # ---------------------------------------------------------------------------
 # apply_subst_typed_expr — walk a typed AST applying a type substitution
@@ -11967,6 +12047,14 @@ fn attribute_to_function(msg: String, name: String) -> String =
 # ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
 
+# A class's methods and markers.
+fn register_class(class_name: String, type_params: List String, methods: List ast.ClassMethodSig,
+                  superclasses: List ast.TypeConstraint, alias_env: Dict types.Type,
+                  env: Dict types.Scheme) -> Dict types.Scheme =
+  register_class_methods(type_params, methods, alias_env,
+    register_class_method_markers(class_name, type_params, methods,
+      register_superclass_markers(class_name, superclasses, env)))
+
 fn register_class_methods(type_params: List String, methods: List ast.ClassMethodSig,
                           alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match methods with
@@ -11992,12 +12080,13 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
         name, params, ret_type, effects_maybe, constraints, alias_env, env)
 
 # Split out so the binder list is computed once: it both quantifies the scheme
-# and positions the method's own constraint heads.
+# and positions the method's own constraint heads. Bound as a local is, so a
+# shadowed prelude `fn`'s `@arity` goes, or its count would judge the method's calls.
 fn register_class_method_over(binders: List String, name: String, params: List ast.Param,
                               ret_type: ast.TypeExpr, effects_maybe: Maybe (List String),
                               constraints: List ast.TypeConstraint,
                               alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set(name,
+  bind_local_scheme(name,
     types.scheme_with_constraints(
       scheme_from_fn_parts_inner(binders, name, params, Just(ret_type), effects_maybe, alias_env),
       constraint_pos_tokens(constraints, binders)),

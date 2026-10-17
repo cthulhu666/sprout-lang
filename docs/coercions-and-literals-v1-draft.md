@@ -126,7 +126,7 @@ consensus, not the C++/Scala-2 one.
 
 Mirror the `StringTemplate → String` path — which is **not** a unifier-level
 coercion but a **syntactic, pre-typecheck desugar pass** (`checker.sprout`
-`desugar_program`). The pass threads an *expected type name* (a bare `String`,
+`desugar_modules`). The pass threads an *expected type name* (a bare `String`,
 never a full inferred type) down the AST: `desugar_decl_i` uses the fn's return
 type name, `desugar_args_with_types` uses each param's type name from a fn-name
 index. Lowering keys off the **AST node shape** plus that expected name. It never
