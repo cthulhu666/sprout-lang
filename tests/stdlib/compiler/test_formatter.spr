@@ -1,11 +1,12 @@
 import stdlib.test (check_eq, run_suite)
 import stdlib.compiler.formatter as formatter
+import stdlib.compiler.lexer as lexer
 
 fn issue_count(src: String) -> Int =
   list_length(formatter.lint_source(src))
 
 fn shared_issue_count(src: String) -> Int =
-  list_length(formatter.lint_tokens(src, formatter.tokenize_source(src)))
+  list_length(formatter.lint_tokens(src, lexer.tokenize_source(src)))
 
 fn main() -> Unit !{IO} =
   run_suite("formatter", [

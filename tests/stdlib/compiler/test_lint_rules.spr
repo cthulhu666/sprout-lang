@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.compiler.lint_rules as lint_rules
-import stdlib.compiler.formatter as formatter
+import stdlib.compiler.lexer as lexer
 
 fn count_list(lst: List a) -> Int =
   match lst with
@@ -36,7 +36,7 @@ fn first_message(findings: List lint_rules.LintFinding) -> String =
 
 # `just lint` tokenizes a file once and gives the tokens to both lint passes.
 fn shared_tokens(src: String) -> List lint_rules.LintFinding =
-  lint_rules.lint_ast_tokens(src, formatter.tokenize_source(src))
+  lint_rules.lint_ast_tokens(src, lexer.tokenize_source(src))
 
 fn mentions_let_else(msg: String) -> Bool =
   str_find(msg, "let..else") != -1

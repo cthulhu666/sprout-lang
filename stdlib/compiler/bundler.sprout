@@ -197,6 +197,13 @@ fn qualified_name(module_name: source.ModuleName, name: source.RawName) -> sourc
   where mn = source.module_name_str(module_name)
         rn = source.raw_name_str(name)
 
+# Prelude `list_member` allocates its `Eq String` closure on every call, once per
+# name resolved; with it, self-compile peaks ~15 MB higher.
+fn str_list_member(name: String, lst: List String) -> Bool =
+  match lst with
+  | Nil -> false
+  | Cons h t -> if h == name then true else str_list_member(name, t)
+
 # `maybe_with_default` would box the `dict_get` result; matching it in place does not.
 fn dict_get_or(key: String, d: Dict String, default: String) -> String =
   match dict_get(key, d) with
@@ -260,7 +267,7 @@ fn read_dotted_ident_at(s: String, bytes: Bytes, b: Int) -> (String, Int) =
 # Only the module name is still read from the text, because headers are stripped
 # before tokenizing and so `module x.y` never reaches the token stream.
 export fn scan_source_info(src: String) -> (String, List String, List String) =
-  match lexer.tokenize(source.strip_headers(src)) with
+  match lexer.tokenize_source(src) with
   # A source that does not lex has no surface to report. Callers that need the
   # error raise it from their own tokenize (process_wi_finalize); the rest are
   # diagnostic paths where an empty surface is the honest answer.
@@ -470,11 +477,11 @@ fn process_wi_visit(
 ) -> List LoadIssue !{IO} =
   do
     seen_list <- ref_read(seen)
-    if list_member(path, seen_list) then Nil
+    if str_list_member(path, seen_list) then Nil
     else
       do
         visiting_list <- ref_read(visiting)
-        if list_member(path, visiting_list) then
+        if str_list_member(path, visiting_list) then
           Cons(LoadIssue(path, no_pos(), "Import cycle detected involving: " ++ path), Nil)
         else
           do
@@ -559,7 +566,7 @@ fn process_wi_finalize(
     # One tokenize serves both the module surface and the parse. Calling
     # scan_source_info here would lex the source a second time, and lexing it twice
     # is how the surface could differ from the AST in the first place.
-    match lexer.tokenize(source.strip_headers(src)) with
+    match lexer.tokenize_source(src) with
     | Err e ->
         match e with
         | token.TokenizeError msg pos -> Cons(LoadIssue(path, pos, "Lex error in " ++ path ++ ": " ++ msg), Nil)
@@ -761,7 +768,7 @@ fn prelude_module(stdlib_root: String, load_env: LoadEnv) -> (Maybe LoadIssue, M
 
 fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIssue, Maybe ParsedModule) !{IO} =
   do
-    let Ok tokens = lexer.tokenize(source.strip_headers(src))
+    let Ok tokens = lexer.tokenize_source(src)
       else Err (token.TokenizeError msg pos) -> (Just(LoadIssue(path, pos, `Lex error in prelude: ${msg}`)), Nothing)
     let Ok(ast.Program decls _) = parser.parse_program(tokens)
       else Err (parser.ParseError msg pos) -> (Just(LoadIssue(path, pos, `Parse error in prelude: ${msg}`)), Nothing)
@@ -807,15 +814,15 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   | ast.TypeDecl name _ ctors _ _ _ ->
       add_type_to_symbols(mod_name, name, ctors, exported, ctor_types, acc)
   | ast.RecordDecl name _ _ _ _ _ _ ->
-      add_record_to_symbols(mod_name, name, list_member(name, exported),
-        list_member(name, ctor_types), acc)
+      add_record_to_symbols(mod_name, name, str_list_member(name, exported),
+        str_list_member(name, ctor_types), acc)
   | ast.ClassDecl name _ methods _ _ ->
-      add_class_to_symbols(mod_name, name, methods, list_member(name, exported), acc)
+      add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
   | ast.InstanceDecl _ _ _ _ -> acc
   # An alias declares a name for a type and nothing else — no constructor, so
   # nothing for `(..)` to govern.
   | ast.AliasDecl name _ _ _ ->
-      add_type_name_to_symbols(mod_name, name, list_member(name, exported), acc)
+      add_type_name_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   # WrapDecl: register the type AND the synthetic constructor (same name) so
   # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
   | ast.WrapDecl name _ inner _ _ ->
@@ -848,7 +855,7 @@ fn add_value_names(mod_name: String, exported: List String, names: List String, 
   | Nil -> acc
   | Cons name rest ->
       add_value_names(mod_name, exported, rest,
-        add_value_to_symbols(mod_name, name, list_member(name, exported), acc))
+        add_value_to_symbols(mod_name, name, str_list_member(name, exported), acc))
 
 fn canonical_of(mod_name: String, name: String) -> String =
   source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
@@ -921,8 +928,8 @@ fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.Type
                         if export_ctors then dict_set(type_name, ctor_map, ce) else ce,
                         xs)
   where canonical = canonical_of(mod_name, type_name)
-        is_type_exported = list_member(type_name, exported)
-        export_ctors = list_member(type_name, ctor_types)
+        is_type_exported = str_list_member(type_name, exported)
+        export_ctors = str_list_member(type_name, ctor_types)
 
 fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bool, vl: Dict String, ev: Dict String, ctor_map: Dict String) -> (Dict String, Dict String, Dict String) =
   match ctors with
@@ -1083,7 +1090,7 @@ fn foreign_externs(own: List String, externs: List (String, String)) -> Dict Str
 
 fn add_foreign_extern(own: List String, acc: Dict String, entry: (String, String)) -> Dict String =
   match entry with
-  | (m, n) -> if list_member(n, own) then acc else dict_set(n, m, acc)
+  | (m, n) -> if str_list_member(n, own) then acc else dict_set(n, m, acc)
 
 # Found by path, as `prelude_type_names` does. Empty when the bundle has no
 # prelude; under `no_prelude` it is the floor.
@@ -1113,36 +1120,21 @@ fn prelude_type(names: PreludeNames, name: String) -> Maybe String =
 # Deliberately drawn from the `*_locals` tables, not the `exported_*` ones. A
 # PRIVATE name is exactly the one this rule has to catch.
 fn all_canonical_names(all_symbols: Dict ModuleSymbols) -> Dict String =
-  canonical_names_of(all_symbols, vec_to_list(dict_keys(all_symbols)), dict_empty())
+  vec_fold(add_module_canonical, dict_empty(), dict_values(all_symbols))
 
-fn canonical_names_of(all_symbols: Dict ModuleSymbols, paths: List String,
-                      acc: Dict String) -> Dict String =
-  match paths with
-  | Nil -> acc
-  | Cons p rest ->
-      match dict_get(p, all_symbols) with
-      | Nothing -> canonical_names_of(all_symbols, rest, acc)
-      | Just syms ->
-          canonical_names_of(all_symbols, rest,
-            add_canonical(sym_class_locals(syms),
-              add_canonical(sym_type_locals(syms),
-                add_canonical(sym_value_locals(syms), acc))))
+fn add_module_canonical(acc: Dict String, syms: ModuleSymbols) -> Dict String =
+  add_canonical(sym_class_locals(syms),
+    add_canonical(sym_type_locals(syms),
+      add_canonical(sym_value_locals(syms), acc)))
 
 # The VALUES of a locals table are the canonical names; the keys are the bare
 # ones. Undotted values are skipped — a headerless module's names are canonical
 # AND bare, and marking those would take every ordinary reference with them.
 fn add_canonical(src: Dict String, acc: Dict String) -> Dict String =
-  add_canonical_keys(src, vec_to_list(dict_keys(src)), acc)
+  vec_fold(add_canonical_name, acc, dict_values(src))
 
-fn add_canonical_keys(src: Dict String, keys: List String, acc: Dict String) -> Dict String =
-  match keys with
-  | Nil -> acc
-  | Cons k rest ->
-      match dict_get(k, src) with
-      | Nothing -> add_canonical_keys(src, rest, acc)
-      | Just canonical ->
-          add_canonical_keys(src, rest,
-            if str_find(canonical, ".") == -1 then acc else dict_set(canonical, "", acc))
+fn add_canonical_name(acc: Dict String, canonical: String) -> Dict String =
+  if str_find(canonical, ".") == -1 then acc else dict_set(canonical, "", acc)
 
 fn apply_imports_to_ctx(specs: List module_loader.ImportSpec, all_symbols: Dict ModuleSymbols, stdlib_root: String, extra_roots: List String, ctx: ResolveCtx) -> ResolveCtx =
   match specs with
@@ -1196,16 +1188,11 @@ fn type_bindings(name: String, symbols: ModuleSymbols) -> List ImportBinding =
       Cons(ImportBinding (NsType, name, canonical),
         match dict_get(name, sym_ctor_exports(symbols)) with
         | Nothing -> Nil
-        | Just ctor_map -> ctor_bindings(ctor_map, vec_to_list(dict_keys(ctor_map))))
+        | Just ctor_map -> vec_to_list(vec_map(ctor_binding, dict_entries(ctor_map))))
 
-fn ctor_bindings(ctor_map: Dict String, ctor_names: List String) -> List ImportBinding =
-  match ctor_names with
-  | Nil -> Nil
-  | Cons ctor_name rest ->
-      match dict_get(ctor_name, ctor_map) with
-      | Nothing -> ctor_bindings(ctor_map, rest)
-      | Just canonical ->
-          Cons(ImportBinding (NsValue, ctor_name, canonical), ctor_bindings(ctor_map, rest))
+fn ctor_binding(entry: (String, String)) -> ImportBinding =
+  match entry with
+  | (ctor_name, canonical) -> ImportBinding(NsValue, ctor_name, canonical)
 
 fn class_binding(name: String, symbols: ModuleSymbols) -> List ImportBinding =
   match dict_get(name, sym_exported_cls(symbols)) with
@@ -1227,7 +1214,7 @@ fn apply_import_binding(b: ImportBinding, ctx: ResolveCtx) -> ResolveCtx =
   | ImportBinding NsPrefix _ _ -> ctx
 
 fn try_add_method(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
-  if list_member(name, sym_method_names(symbols)) then
+  if str_list_member(name, sym_method_names(symbols)) then
     ctx_with_methods(ctx, Cons(name, Nil))
   else ctx
 
@@ -1327,8 +1314,8 @@ fn ns_tag(ns: ImportNs) -> String =
 fn import_name_binds(name: String, symbols: ModuleSymbols) -> Bool =
   match selective_name_bindings(name, symbols) with
   | Nil ->
-      list_member(name, sym_method_names(symbols))
-        || list_member(name, sym_extern_names(symbols))
+      str_list_member(name, sym_method_names(symbols))
+        || str_list_member(name, sym_extern_names(symbols))
   | [_ | _] -> true
 
 fn module_declares_name(name: String, symbols: ModuleSymbols) -> Bool =
@@ -1488,10 +1475,11 @@ fn alias_export(alias: String, symbol: String, aliases: Dict (Dict String)) -> M
 #   A. A binder named by the WHOLE dotted name — the `scope` test below. Rare;
 #      a name with a dot in it is not writable as a binder, but lambdas and
 #      `do` binds thread names in verbatim.
-#   B. A field chain whose HEAD is a module-level value (`origin.x`) — claimed
-#      earlier, in `qualify_var`, by `dotted_value_field_access`.
+#   B. A field chain whose HEAD is a module-level value (`origin.x`) — in an
+#      expression only, by `qualify_var` once C to E decline. After E is safe:
+#      such a value named `prelude` makes E decline.
 #   C. A field chain whose HEAD is a LOCAL binder — the `head` test in
-#      `dotted_value_name`. Spec §field-access is normative: "a local binding
+#      `claim_dotted_value`. Spec §field-access is normative: "a local binding
 #      wins over a same-named module in head position." It must precede D, or an
 #      import alias sharing a parameter's name answers `origin.x` with the
 #      module's export and the program reads a different value, compiling clean.
@@ -1503,39 +1491,55 @@ fn alias_export(alias: String, symbol: String, aliases: Dict (Dict String)) -> M
 #      after D has declined — running it earlier would reject `sealed.unseal`,
 #      whose canonical form is in the same table.
 fn qualify_value_name(ctx: ResolveCtx, scope: List String, name: String) -> String =
-  if list_member(name, scope) then local_name(ctx, name)
-  else
-    match string.split_once(name, ".") with
-    | Nothing -> bare_value_name(ctx, name)
-    | Just (head, rest) -> dotted_value_name(ctx, scope, name, head, rest)
+  match claim_value_name(ctx, scope, name) with
+  | Claimed resolved -> resolved
+  | Unclaimed _ -> guard_canonical(ctx, name)
 
 # `qualify_value_name` for an expression, which also has reading B.
+#
+# B's rule (docs/records-v0.md §4.3) lives in `infer.infer_var_or_field`, but by then
+# the head is in scope only under its canonical name, so infer's lookup misses and
+# `origin.x` fails as an unknown variable. Locals stay with infer: C took them.
 fn qualify_var(ctx: ResolveCtx, scope: List String, name: String, pos: source.SourcePos) -> ast.Expr =
-  if list_member(name, scope) then ast.VarExpr(local_name(ctx, name), pos)
+  match claim_value_name(ctx, scope, name) with
+  | Claimed resolved -> ast.VarExpr(resolved, pos)
+  | Unclaimed (head, rest) ->
+      match module_level_value(ctx, head) with
+      | Just canonical -> ast.build_field_chain(ast.VarExpr(canonical, pos), rest, pos)
+      | Nothing -> ast.VarExpr(guard_canonical(ctx, name), pos)
+
+# What readings A and C to E make of a value name. `Unclaimed` is a dotted name
+# none of them took, as its split at the first dot. One field per constructor, so
+# a call matched in place takes the unboxed worker.
+type ValueName =
+  | Claimed String
+  | Unclaimed (String, String)
+
+fn claim_value_name(ctx: ResolveCtx, scope: List String, name: String) -> ValueName =
+  if str_list_member(name, scope) then Claimed(local_name(ctx, name))
   else
     match string.split_once(name, ".") with
-    | Nothing -> ast.VarExpr(bare_value_name(ctx, name), pos)
-    | Just (head, rest) ->
-        match dotted_value_field_access(ctx, scope, head, rest, pos) with
-        | Just chain -> chain
-        | Nothing -> ast.VarExpr(dotted_value_name(ctx, scope, name, head, rest), pos)
+    | Nothing -> Claimed(bare_value_name(ctx, name))
+    | Just split -> claim_dotted_value(ctx, scope, split)
 
-# C to F of the cascade above.
-fn dotted_value_name(ctx: ResolveCtx, scope: List String, name: String, head: String, rest: String) -> String =
-  if list_member(head, scope) then local_name(ctx, head) ++ "." ++ rest
-  else
-    match alias_export(head, rest, ctx.alias_val_exports) with
-    | Just canonical -> canonical
-    | Nothing ->
-        match prelude_qualified(ctx, head, rest, \s -> prelude_value(ctx.prelude, s)) with
-        | Just canonical -> guard_private_extern(ctx, canonical)
-        | Nothing -> guard_canonical(ctx, name)
+# C to E of the cascade above.
+fn claim_dotted_value(ctx: ResolveCtx, scope: List String, split: (String, String)) -> ValueName =
+  match split with
+  | (head, rest) ->
+      if str_list_member(head, scope) then Claimed(local_name(ctx, head) ++ "." ++ rest)
+      else
+        match alias_export(head, rest, ctx.alias_val_exports) with
+        | Just canonical -> Claimed(canonical)
+        | Nothing ->
+            match prelude_qualified(ctx, head, rest, \s -> prelude_value(ctx.prelude, s)) with
+            | Just canonical -> Claimed(guard_private_extern(ctx, canonical))
+            | Nothing -> Unclaimed(split)
 
 fn bare_value_name(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.value_locals) with
   | Just canonical -> canonical
   | Nothing ->
-      if list_member(name, ctx.method_names) then name
+      if str_list_member(name, ctx.method_names) then name
       else
         match dict_get(name, ctx.unqual_values) with
         | Just canonical -> canonical
@@ -1591,41 +1595,6 @@ fn guard_private_extern(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.foreign) with
   | Nothing -> name
   | Just module -> source.mark_private_extern(module, name)
-
-# Dot access whose head is a MODULE-LEVEL value (docs/records-v0.md §4.3).
-#
-# §4.3's rule — "if the head component is an in-scope value, the name is a
-# field-access chain on that value" — is implemented in `infer.infer_var_or_field`,
-# but by the time inference runs the bundler has already rewritten every
-# module-level name to its canonical form, so the head is in the environment only
-# under THAT name and the rule's head lookup misses.  `origin.x` then reached
-# `infer_var` as one undivided string and failed with `Unknown variable: origin.x`.
-# The rule has to be applied here, the phase that still knows the head's canonical
-# name.  Locals and parameters are deliberately left to infer's copy of the rule:
-# for those the bundler has nothing to rewrite, and access already works.
-#
-# Consulted ONLY after module qualification declined, which makes this additive —
-# every name it rewrites is one that fails to resolve today.  The two phases
-# disagree about precedence for names qualification DOES claim (there, module
-# wins; at inference, the value would); that divergence predates this rule and is
-# left alone deliberately, since changing it would change shadowing semantics.
-fn dotted_value_field_access(
-  ctx: ResolveCtx,
-  scope: List String,
-  head: String,
-  rest: String,
-  pos: source.SourcePos
-) -> Maybe ast.Expr =
-  if list_member(head, scope) then Nothing
-  else
-    match alias_export(head, rest, ctx.alias_val_exports) with
-    | Just _ -> Nothing
-    | Nothing -> module_field_chain(ctx, head, rest, pos)
-
-fn module_field_chain(ctx: ResolveCtx, head: String, rest: String, pos: source.SourcePos) -> Maybe ast.Expr =
-  match module_level_value(ctx, head) with
-  | Nothing -> Nothing
-  | Just canonical -> Just(ast.build_field_chain(ast.VarExpr(canonical, pos), rest, pos))
 
 # The head's canonical name: this module's own top-level values first, then names
 # imported unqualified.  Same two dictionaries `bare_value_name` consults, in
@@ -1950,7 +1919,7 @@ fn publish_if_marked(ctor_types: List String, decl: ast.Decl) -> ast.Decl =
   match decl with
   | ast.RecordDecl name type_params fields deriving_classes mult _ pos ->
       ast.RecordDecl(name, type_params, fields, deriving_classes, mult,
-        if list_member(name, ctor_types) then ast.Published else ast.Abstract,
+        if str_list_member(name, ctor_types) then ast.Published else ast.Abstract,
         pos)
   | _ -> decl
 
@@ -2027,7 +1996,7 @@ let undeclared_type_names: List String =
 fn type_over_floor(t: ast.TypeExpr) -> Bool =
   match t with
   | ast.TypeName name ->
-      type_name_starts_lower(name) || list_member(name, floor_type_names)
+      type_name_starts_lower(name) || str_list_member(name, floor_type_names)
   | ast.TypeApply base arg -> type_over_floor(base) && type_over_floor(arg)
   | ast.TypeArrow left right _ _ -> type_over_floor(left) && type_over_floor(right)
   | ast.TypeThunk right _ -> type_over_floor(right)
@@ -2112,7 +2081,7 @@ fn declared_type_names(decls: List ast.Decl, acc: Dict String) -> Dict String =
 
 fn type_name_in_scope(name: String, declared: Dict String) -> Bool =
   if type_name_starts_lower(name) then true
-  else if list_member(name, undeclared_type_names) then true
+  else if str_list_member(name, undeclared_type_names) then true
   else
     dict_member(name, declared)
 
@@ -2415,7 +2384,7 @@ fn bare_names_type(ctx: ResolveCtx, vocab: TypeVocab, name: String) -> Bool =
   else if dict_member(name, ctx.class_locals) then false
   else if dict_member(name, ctx.unqual_types) then true
   else if dict_member(name, ctx.unqual_classes) then false
-  else list_member(name, undeclared_type_names) || dict_member(name, vocab.prelude_types)
+  else str_list_member(name, undeclared_type_names) || dict_member(name, vocab.prelude_types)
 
 # `shown` is the qualified name, so the message names the module; `head` is the
 # type as written, with its parameters, which the suggested fix needs.

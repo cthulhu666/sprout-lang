@@ -314,6 +314,19 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   iteration, so a long input overflows the stack: `json`'s string decoder died at 2^15 escapes
   until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a. Hit again
   by `http_server`'s keep-alive loop: ~2,700 requests on one connection exhausted the root pool.
+- [ ] `P2` **A captureless method closure is heap-allocated at every call, so `where Eq a` costs.**
+  Passing a known instance's method, e.g. `list_member(name, scope)` at `Eq String`, emits
+  `sprout_alloc_closure` for `@__sprout_ir_eta___tc_Eq_String_eq_*` each call, though it captures
+  nothing; the compiler's own IR has 71 such sites. Measured: the bundler on prelude `list_member`
+  peaks 13–21 MB higher compiling `compile_driver.sprout` (239–245 vs 224 MB), so it keeps a local
+  `str_list_member`. Fix: emit captureless closures as static constants, as string literals are.
+- [ ] `P3` **The CPR worker set is not closed over tail calls, so a wrapper's worker can box.**
+  `collect_worker_callees` admits only callees some `match` scrutinises. A wrapper whose tail
+  calls a function nothing else matches gets a worker, but `translate_tail_chain` finds no callee
+  worker and falls to `translate_tail_catchall`: box, then repack. Seen in
+  `lexer.tokenize_source_worker` (golden `11_compiler_bundle`), where it costs nothing, since
+  `tokenize`'s own arms box too. Fix: add tail-call targets of workerized fns to the set, to a
+  fixed point. Docs claim the workers compose; that holds only when the callee is matched.
 - [ ] `P3` **Phase B / Tier-2 CPR: `emit_repack_one` emits width-2 only.** A match-routed cycle
   member returning a ≥2-field-ctor ADT would drop fields. Unreachable today (worker routing is
   gated on max-ctor-arity ≤ 1), so latent. Widening needs `{tag, f0, f1}` and a `{i64,i64,i64}`

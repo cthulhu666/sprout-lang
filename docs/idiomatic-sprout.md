@@ -198,12 +198,14 @@ matches instead of calling `maybe_with_default` — 15x faster on a whole-buffer
 scan — and why `mutvec_at` exists beside `mutvec_get`.
 
 What decides it is **argument position**, not how hot the code is and not how far
-the call is from the accessor. Returning a wrapper keeps it unboxed however many
-layers you wrap it in — the workers compose — and only handing it to a call puts
-the box back. Nor is this builtins-only: the worker exists for **any top-level
-function** whose result is a concrete ADT, user-defined ones included
+the call is from the accessor. Returning a wrapper keeps it unboxed through a layer
+that ends in a constructor, an `if`, or a call to a function some `match` also
+scrutinises — and handing it to a call puts the box back. Nor is this
+builtins-only: the worker exists for **any top-level function** whose result is a
+concrete ADT with at most one field per constructor, user-defined ones included
 (`ast_to_ir.cpr_result_known`). It declines a polymorphic `Maybe a` result, and a
-call through a closure or a parameter has no worker to take.
+call through a closure or a parameter has no worker to take. A worker whose body
+ends in a multi-arm `match` still boxes each arm, then unpacks it.
 
 Nor is it limited to the eliminators. `map`, `and_then` and `result_from_maybe`
 must box their input to receive it as well, so matching the producing call beats
