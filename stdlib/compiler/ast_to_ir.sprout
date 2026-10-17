@@ -5865,16 +5865,11 @@ fn build_adt_ctor_index_go(decls: List typed_ast.TypedDecl,
       | typed_ast.TPassThrough pd ->
           match pd with
           | ast.TypeDecl adt_name _ ctor_list _ _ _ ->
-              # Key by BOTH the (possibly module-qualified) declared name AND its
-              # bare last segment.  The type system identifies types by bare
-              # TConst names, so a catch-all repack's `type_head_name(body)` is
-              # bare (e.g. "TokenKind") while the bundled TypeDecl name is
-              # qualified ("stdlib.compiler.token.TokenKind"); keying both lets
-              # the bare lookup resolve.
-              let entries = adt_ctor_entries(ctor_list, ctors)
-              in build_adt_ctor_index_go(rest, ctors,
-                   dict_set(string.after_last_dot(adt_name), entries,
-                     dict_set(adt_name, entries, acc)))
+              # Keyed by the canonical name only, which is what TConst heads and
+              # bundled TypeNames carry. A last-segment key would let a module's
+              # own `type Maybe` replace the prelude's bare `Maybe` entry.
+              build_adt_ctor_index_go(rest, ctors,
+                dict_set(adt_name, adt_ctor_entries(ctor_list, ctors), acc))
           | _ -> build_adt_ctor_index_go(rest, ctors, acc)
       | _ -> build_adt_ctor_index_go(rest, ctors, acc)
 

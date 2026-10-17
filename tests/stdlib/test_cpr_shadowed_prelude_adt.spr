@@ -1,0 +1,67 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# A module may declare types that shadow prelude ADTs. Matching on a call that
+# returns the PRELUDE type routes through a CPR worker, whose repack reads that
+# type's ctor tags from the ADT index. The local type must not replace them, or
+# the repack matches no tag and aborts.
+
+type Maybe =
+  | Some String
+  | Empty
+
+type Result =
+  | Fine
+  | Broken String
+
+# A `match` body is not a recognised tail shape, so the worker takes the
+# catch-all repack.
+fn find_pos(xs: List Int, i: Int) -> prelude.Maybe Int =
+  match xs with
+  | Nil -> Nothing
+  | Cons x rest -> if x > 10 then Just(i) else find_pos(rest, i + 1)
+
+fn check(n: Int) -> prelude.Result String Int =
+  match n with
+  | 0 -> Err("zero")
+  | _ -> Ok(n * 2)
+
+fn local_maybe(n: Int) -> Maybe =
+  match n with
+  | 0 -> Empty
+  | _ -> Some(int_to_string(n))
+
+fn local_result(n: Int) -> Result =
+  match n with
+  | 0 -> Fine
+  | _ -> Broken(int_to_string(n))
+
+fn found(xs: List Int) -> String =
+  match find_pos(xs, 0) with
+  | Just i -> "at " ++ int_to_string(i)
+  | Nothing -> "none"
+
+fn checked(n: Int) -> String =
+  match check(n) with
+  | Ok v -> "ok " ++ int_to_string(v)
+  | Err e -> "err " ++ e
+
+fn local_m(n: Int) -> String =
+  match local_maybe(n) with
+  | Some s -> s
+  | Empty -> "empty"
+
+fn local_r(n: Int) -> String =
+  match local_result(n) with
+  | Fine -> "fine"
+  | Broken s -> "broken " ++ s
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "prelude Maybe, Just", found([1, 2, 30, 4]), "at 2")
+    assert_eq(state, "prelude Maybe, Nothing", found([1, 2, 3]), "none")
+    assert_eq(state, "prelude Result, Ok", checked(4), "ok 8")
+    assert_eq(state, "prelude Result, Err", checked(0), "err zero")
+    assert_eq(state, "local Maybe", local_m(7) ++ " " ++ local_m(0), "7 empty")
+    assert_eq(state, "local Result", local_r(0) ++ " " ++ local_r(3), "fine broken 3")
+    summary(state)
