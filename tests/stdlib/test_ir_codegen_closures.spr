@@ -25,7 +25,7 @@ fn contains(haystack: String, needle: String) -> Bool =
 # Drive a Sprout source string through lex -> parse -> typecheck -> lower ->
 # ast_to_ir.translate_program.  Returns the translator's Result.
 # Mirrors translate_source in test_ir_codegen_ctors.spr.
-fn translate_source(src: String) -> Result String String !{IO} =
+fn translate_ir(src: String) -> Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
   match lexer.tokenize(src) with
   | Err _ -> Err("lex error")
   | Ok toks ->
@@ -37,12 +37,20 @@ fn translate_source(src: String) -> Result String String !{IO} =
             match tc with
             | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
             | typed_ast.TypedOk typed_prog env ->
-                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
-                | Err msg -> Err(msg)
-                | Ok pair ->
-                    match pair with
-                    | (ir_prog, idx_map) ->
-                        Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+                ast_to_ir.translate_program(lowering.lower_program(typed_prog, env))
+
+# translate_ir, then rooting and lowering to LLVM text.
+fn translate_source(src: String) -> Result String String !{IO} =
+  match translate_ir(src) with
+  | Err msg -> Err(msg)
+  | Ok (ir_prog, idx_map) -> Ok(ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+# Like translated_ok_ir_contains, but over the pretty-printed Sprout IR before
+# rooting, where each env-slot load shows its kind.
+fn translated_sprout_ir_contains(src: String, needle: String) -> Bool !{IO} =
+  match translate_ir(src) with
+  | Err _ -> false
+  | Ok (ir_prog, _) -> contains(sprout_ir.print_ir_program(ir_prog), needle)
 
 fn translated_err_contains(src: String, needle: String) -> Bool !{IO} =
   match translate_source(src) with
@@ -214,6 +222,17 @@ fn main() -> Unit !{IO} =
       "fn outer(b: Bool) -> Int = (\\g -> g(5))(\\x -> if b then x else 0)",
       "@__sprout_ir_lambda_")
     assert_true(state, "T14: Bool-capturing lambda VALUE compiles + lifts (/code-review-v2 fix #7)", t14)
+
+    # T14b: a Bool is an immediate, so its env slot loads as scalar, which
+    # ir_rooting skips, as for Int; a String capture still loads as heap.
+    t14b <- translated_sprout_ir_contains(
+      "fn outer(b: Bool) -> Int = (\\g -> g(5))(\\x -> if b then x else 0)",
+      "load_env_slot %p$env$[1](scalar)")
+    assert_true(state, "T14b: a captured Bool loads as scalar", t14b)
+    t14c <- translated_sprout_ir_contains(
+      "fn outer(s: String) -> String = (\\g -> g(5))(\\x -> s)",
+      "load_env_slot %p$env$[1](heap)")
+    assert_true(state, "T14c: a captured String loads as heap", t14c)
 
     # T15: Lambda VALUE param named t0 no longer collides with body fresh names.
     # Previously the lifted body used %t0, %t1, ... as fresh SSA names, which
