@@ -6137,19 +6137,15 @@ long long str_len(long long s_val) {
 
 _Bool str_eq(const char* left, const char* right) {
   if (left == NULL || right == NULL) sprout_fail("str_eq: null input");
-  /* Fast-reject: if both are managed CSTRs with differing byte lengths they
-   * cannot be equal (strcmp is byte-wise, so length equality is necessary). */
-  void* lhdr = sprout_heap_lookup((void*)left);
-  if (lhdr != NULL) {
-    void* rhdr = sprout_heap_lookup((void*)right);
-    if (rhdr != NULL) {
-      uint64_t lh, rh;
-      memcpy(&lh, lhdr, 8);
-      memcpy(&rh, rhdr, 8);
-      if ((lh & 0xFF) == SPROUT_HEAP_CSTR && (rh & 0xFF) == SPROUT_HEAP_CSTR &&
-          (lh >> 14) != (rh >> 14)) return 0;
-    }
-  }
+  /* Fast-reject on differing byte lengths. Every String carries its length in a
+   * CSTR header at payload-8, literals and interned strings included (see
+   * sprout_cstr_byte_len), so this is two loads and no heap lookup. No per-call
+   * HDRCHECK: it cost half the gain, and the sweep and str_byte_len assert it. */
+  uint64_t lh, rh;
+  memcpy(&lh, left - 8, 8);
+  memcpy(&rh, right - 8, 8);
+  if ((lh & 0xFF) == SPROUT_HEAP_CSTR && (rh & 0xFF) == SPROUT_HEAP_CSTR &&
+      (lh >> 14) != (rh >> 14)) return 0;
   return strcmp(left, right) == 0;
 }
 

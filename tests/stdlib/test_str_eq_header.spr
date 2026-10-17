@@ -1,0 +1,24 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string (concat, slice)
+
+# `==` on strings rejects on the byte lengths in the CSTR headers before comparing
+# bytes. Literals, GC strings and interned strings each write that header, so
+# every pairing is checked both ways: equal, and unequal by length or by content.
+
+# A dict key comes back interned, a third header source.
+fn interned(s: String) -> String =
+  dict_set(s, 1, dict_empty()) |> dict_keys |> vec_get(0) |> maybe_with_default("(missing)")
+
+fn main() -> Unit !{IO} =
+  run_suite("str_eq_header", [
+    check_eq("literal = gc", "café" == concat("ca", "fé"), true),
+    check_eq("gc = literal", concat("ca", "fé") == "café", true),
+    check_eq("literal = interned", "café" == interned("café"), true),
+    check_eq("gc = interned", concat("ca", "fé") == interned("café"), true),
+    check_eq("empty literal = empty gc", "" == slice("abc", 1, 0), true),
+    check_eq("literal != longer gc", "caf" == concat("ca", "fé"), false),
+    check_eq("interned != shorter literal", interned("abcd") == "abc", false),
+    check_eq("same length, other bytes", "cafe" == concat("ca", "fx"), false),
+    check_eq("same length, other multibyte char", "café" == concat("caf", "è"), false),
+    check_eq("empty != one byte", "" == concat("", "a"), false)
+  ])
