@@ -292,11 +292,13 @@ and neither crosses it. This is what the environments allow rather than caution:
   itself (`run/class_method_named_like_called_prelude_fn.spr`,
   `run/class_method_named_like_prelude_extern.spr`); registered where the class
   stands, they would miss the module's uses above it
-  (`run/class_method_named_like_prelude_fn.spr`). A module starts at its first
-  declaration whose name, or for an instance whose class or type, belongs to it
-  (`run/order_instance_first_in_module.spr`). Bundled modules are contiguous and
-  in import order, so every module the class could shadow a name for is checked
-  by then.
+  (`run/class_method_named_like_prelude_fn.spr`). Where a module starts is not
+  read off names, which an instance does not have: `bundler.BundleOk` gives each
+  module's declaration count, and `group_plan` plans each module on its own
+  (`run/order_foreign_instance_first_in_module.spr`,
+  `run/order_imported_class_instance_first_in_module.spr`). Bundled modules are
+  contiguous and in import order, so every module the class could shadow a name
+  for is checked by then.
 - `RecordDecl` is pre-scanned too, so it no longer needs to be a barrier, but still
   is (`BACKLOG.md`).
 - A top-level `let` is not pre-scanned either — forward-referencing one is

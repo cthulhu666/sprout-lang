@@ -494,7 +494,7 @@ export type InstancesResult (..) =
 fn resolve_instances_from_bundle(result: bundler.BundleResult, query_display: String) -> InstancesResult =
   match result with
   | bundler.BundleErr _ msg -> InstancesErr(source.strip_entry_names(msg))
-  | bundler.BundleOk prog ->
+  | bundler.BundleOk prog _ ->
       match prog with
       | ast.Program decls _ ->
           match find_probe_query_type(decls) with

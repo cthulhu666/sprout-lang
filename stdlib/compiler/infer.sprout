@@ -7,6 +7,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.linear_check as linear_check
 import stdlib.compiler.scc as scc
+import stdlib.list as list
 import stdlib.string as string
 import stdlib.env as env
 
@@ -7337,21 +7338,35 @@ fn undetermined_source_message(src_expr: ast.Expr) -> String =
 # Aliases are resolved before anything else: every later pass reads types
 # through `alias_env`, so it has to be complete first. A cycle among them is
 # reported here rather than diverging in the expander.
+#
+# `modules` is each module's declaration count, in order (BundleOk's); a program
+# that was not bundled is one module. Counts that do not cover `decls` exactly are a
+# compiler bug, reported rather than guessed around.
 export fn typecheck_decls(
   state: unifier.InferState,
   decls: List ast.Decl,
+  modules: List Int,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect
 ) -> typed_ast.TypedResult !{IO} =
-  match register_all_aliases(decls, dict_empty()) with
-  | AliasesErr pos msg -> pure_typed_err(pos, msg)
-  | AliasesOk alias_env ->
-      # Seeding rewrites only InstanceDecls, so the class signatures read off the
-      # unseeded decls are the ones the signature check needs.
-      let class_sigs = own_class_sigs(decls, dict_empty())
-      in typecheck_decls_resolved(state, seed_instance_method_types(decls, class_sigs, alias_env), env, subst,
-                                  eff_subst, alias_env, class_sigs)
+  match module_sizes_error(decls, modules) with
+  | Just msg -> pure_typed_err(no_pos(), msg)
+  | Nothing ->
+      match register_all_aliases(decls, dict_empty()) with
+      | AliasesErr pos msg -> pure_typed_err(pos, msg)
+      | AliasesOk alias_env ->
+          # Seeding rewrites only InstanceDecls, so the class signatures read off the
+          # unseeded decls are the ones the signature check needs.
+          let class_sigs = own_class_sigs(decls, dict_empty())
+          in typecheck_decls_resolved(state, seed_instance_method_types(decls, class_sigs, alias_env), modules, env,
+                                      subst, eff_subst, alias_env, class_sigs)
+
+fn module_sizes_error(decls: List ast.Decl, modules: List Int) -> Maybe String =
+  let covered = list_fold(\ (total, size) -> total + size, 0, modules)
+      n = list_length(decls)
+  in if covered == n then Nothing
+     else Just(`internal: module sizes cover ${int_to_string(covered)} declarations, not ${int_to_string(n)}`)
 
 fn pure_typed_err(pos: source.SourcePos, msg: String) -> typed_ast.TypedResult !{IO} =
   do
@@ -7371,6 +7386,7 @@ let builtin_type_names: List String =
 fn typecheck_decls_resolved(
   state: unifier.InferState,
   decls: List ast.Decl,
+  modules: List Int,
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
@@ -7424,7 +7440,7 @@ fn typecheck_decls_resolved(
     # Mirrored once, up front: an annotation inside a body reads
     # aliases from the env, and a body may be checked above the
     # declaration whose alias it names.
-    match typecheck_decls_inner(state, decls, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
+    match typecheck_decls_inner(state, decls, modules, mirror_alias_env(qual_env, GlobalEnv(scanned_env_with_types)), subst, eff_subst, qual_env, unifier.ftv_env(scanned_env_with_types)) with
     | typed_ast.TypedErr p m -> typed_ast.TypedErr(p, m)
     | typed_ast.TypedOk prog schemes ->
         # Final gate: a DEFINED `main` must be a well-formed entrypoint.
@@ -9619,11 +9635,11 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # is its own group, in place, and acts as a BARRIER that neither may cross.
 #
 # Instances are registered by pre_scan_fn_decls, so they need not be barriers. A
-# class is planned at the START of its module, as a barrier: its methods keep bare
+# class is checked at the START of its module, as a barrier: its methods keep bare
 # names after bundling, so registered any earlier they would shadow a same-named
 # prelude fn for the prelude, and any later they would miss its own module's uses
-# above it. A module starts at the first declaration that names it (plan_module);
-# modules are contiguous and in import order. RecordDecl is registered before
+# above it. `modules` is each module's declaration count, in order, from the
+# bundler; no segment crosses a module's start. RecordDecl is registered before
 # the walk and need not be a barrier, but still is (BACKLOG). A top-level `let` is
 # not pre-scanned — a forward reference to one is `Unknown variable` today, which
 # this must not change.
@@ -9633,17 +9649,31 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # The invariant every plan owes typecheck_groups: the groups partition 0..n-1
 # EXACTLY once. A missing index silently drops a declaration from the emitted
 # program; a duplicated one emits it twice. It holds by construction here — each
-# declaration is a barrier singleton or in exactly one segment (a class's own name
-# enters its module, so it is emitted there once), and an SCC
+# declaration is a barrier singleton or in exactly one segment (a class is emitted
+# once, at its module's start), and an SCC
 # partition covers its node set — with one dependency: names must be unique, which
 # check_duplicate_fn_decls has already guaranteed by the time this runs (an
 # instance's node is named by its index). The
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.
-fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  let items = index_decls(decls, 0)
-  in checked_plan(plan_walk(items, module_classes(list_reverse(items), dict_empty()), set_empty(), Nil, Nil),
-                  list_length(decls))
+fn group_plan(decls: List ast.Decl, modules: List Int) -> List (List Int) =
+  checked_plan(list_flat_map(module_plan, split_modules(index_decls(decls, 0), modules)), list_length(decls))
+
+fn split_modules(items: List (Int, ast.Decl), sizes: List Int) -> List (List (Int, ast.Decl)) =
+  match sizes with
+  | [] -> []
+  | [size | rest] ->
+      let (here, later) = list.split_at(size, items)
+      in Cons(here, split_modules(later, rest))
+
+# A module's classes first, each its own group, then the rest in order.
+fn module_plan(items: List (Int, ast.Decl)) -> List (List Int) =
+  list_append(list_filter_map(class_group, items), plan_walk(items, Nil, Nil))
+
+fn class_group(item: (Int, ast.Decl)) -> Maybe (List Int) =
+  match item with
+  | (i, ast.ClassDecl _ _ _ _ _) -> Just([i])
+  | _ -> Nothing
 
 # A plan that does not partition 0..n-1 falls back to source order. Reordering is
 # an optimisation of COMPLETENESS — it makes more correct programs typable — so
@@ -9675,31 +9705,16 @@ fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
 
 # `seg` is the current run of FnDecls and instances, `acc` the finished groups,
 # both held in REVERSE so the walk stays a cons. Hitting a barrier flushes the run,
-# then emits the barrier itself as a singleton in its original position. Entering a
-# module flushes too, then emits its classes; `seen` holds the modules entered.
-fn plan_walk(items: List (Int, ast.Decl), classes: Dict (List Int), seen: Set,
-             seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
+# then emits the barrier itself as a singleton in its original position. A class
+# is skipped: module_plan has emitted it already.
+fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
   match items with
   | [] -> list_reverse(flush_segment(seg, acc))
   | [item | rest] ->
-      let m = plan_module(item)
-      in if m != unattributed_module && ! set_member (m, seen) then
-           plan_walk(items, classes, set_insert(m, seen), Nil,
-             push_singletons(classes_of(m, classes), flush_segment(seg, acc)))
-         else
-           match placement(item) with
-           | InSegment -> plan_walk(rest, classes, seen, Cons(item, seg), acc)
-           | Barrier -> plan_walk(rest, classes, seen, Nil, push_singletons([i_of(item)], flush_segment(seg, acc)))
-           | AtModuleStart -> plan_walk(rest, classes, seen, seg, acc)
-
-# Each index as its own group, onto the reversed `acc`.
-fn push_singletons(indices: List Int, acc: List (List Int)) -> List (List Int) =
-  list_fold(\ (groups, i) -> Cons([i], groups), acc, indices)
-
-fn classes_of(m: String, classes: Dict (List Int)) -> List Int =
-  match dict_get(m, classes) with
-  | Just indices -> indices
-  | Nothing -> []
+      match placement(item) with
+      | InSegment -> plan_walk(rest, Cons(item, seg), acc)
+      | Barrier -> plan_walk(rest, Nil, Cons([i_of(item)], flush_segment(seg, acc)))
+      | AtModuleStart -> plan_walk(rest, seg, acc)
 
 type Placement =
   | InSegment
@@ -9718,25 +9733,6 @@ fn placement(item: (Int, ast.Decl)) -> Placement =
   | (_, ast.LetDecl _ _ _ _) -> Barrier
   | (_, ast.AliasDecl _ _ _ _) -> Barrier
   | (_, ast.WrapDecl _ _ _ _ _) -> Barrier
-
-# The module a declaration's names place it in; an extern's name is global, so it
-# says none. An instance reads its class's, else its type's: either is its own
-# module or an import, entered already, so a wrong answer enters nothing.
-fn plan_module(item: (Int, ast.Decl)) -> String =
-  match item with
-  | (_, ast.InstanceDecl(ast.TypeConstraint class_name type_args) _ _ _) ->
-      let by_class = owning_module(class_name)
-      in if by_class != "" then by_class else owning_module(te_head_str(type_args))
-  | (_, d) -> group_module(d)
-
-# Each module's class indices in source order; consing the items reversed keeps it.
-fn module_classes(items_rev: List (Int, ast.Decl), acc: Dict (List Int)) -> Dict (List Int) =
-  match items_rev with
-  | [] -> acc
-  | [(i, ast.ClassDecl name _ _ _ _) | rest] ->
-      let m = owning_module(name)
-      in module_classes(rest, dict_set(m, Cons(i, classes_of(m, acc)), acc))
-  | [_ | rest] -> module_classes(rest, acc)
 
 # The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
@@ -9838,13 +9834,14 @@ fn decl_at(decl_vec: Vec ast.Decl, i: Int) -> Maybe ast.Decl = vec_get(i, decl_v
 fn typecheck_decls_inner(
   state: unifier.InferState,
   decls: List ast.Decl,
+  modules: List Int,
   env: GlobalEnv,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
 ) -> typed_ast.TypedResult !{IO} =
-  typecheck_groups(state, vec_from_list(decls), group_plan(decls), env, subst, eff_subst,
+  typecheck_groups(state, vec_from_list(decls), group_plan(decls, modules), env, subst, eff_subst,
                    alias_env, dict_empty(), env_ftv, list_length(decls))
 
 fn typecheck_groups(

@@ -17,8 +17,10 @@ import stdlib.fs as fs
 # Public API
 # ---------------------------------------------------------------------------
 
+# BundleOk's list is each module's declaration count, in the program's order:
+# modules stay contiguous, the prelude first and each after its imports.
 export type BundleResult (..) =
-  | BundleOk ast.Program
+  | BundleOk ast.Program (List Int)
   | BundleErr source.SourcePos String
 
 # Where module sources come from, and what has already been parsed.
@@ -2472,8 +2474,11 @@ fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_roo
             | Nothing ->
             match deriving.validate_deriving_decls(qualified) with
             | Just (pos, err_msg) -> BundleErr(pos, "deriving: " ++ err_msg)
-            | Nothing -> BundleOk(ast.Program(deriving.expand_deriving_decls(qualified), no_pos()))
+            | Nothing -> bundle_ok(list_map(\m -> deriving.expand_deriving_decls(m.decls), names.qualified))
   where qualified = list_flat_map(\m -> m.decls, names.qualified)
+
+fn bundle_ok(modules: List (List ast.Decl)) -> BundleResult =
+  BundleOk(ast.Program(list_flat_map(\decls -> decls, modules), no_pos()), list_map(list_length, modules))
 
 export fn bundle_file(path: source.FilePath, stdlib_root: source.StdlibRoot) -> BundleResult !{IO} =
   bundle_file_with_roots(path, stdlib_root, Nil)

@@ -16,7 +16,7 @@ fn bundle_msg(root: String) -> String !{IO} =
       source.StdlibRoot(root), Nil, load_env)
     match result with
     | bundler.BundleErr _ msg -> msg
-    | bundler.BundleOk _ -> ""
+    | bundler.BundleOk _ _ -> ""
 
 fn with_prelude(root: String, text: String) -> String !{IO} =
   do

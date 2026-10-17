@@ -125,7 +125,7 @@ fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String, 
     result <- compiler.compile_phase_bundle_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | bundler.BundleErr _ msg -> report_error(failed, "ERROR: bundle: " ++ msg)
-    | bundler.BundleOk prog ->
+    | bundler.BundleOk prog _ ->
         do
           print("OK")
           match prog with
