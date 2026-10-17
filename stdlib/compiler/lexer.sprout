@@ -449,3 +449,7 @@ export fn tokenize(raw: String) -> Result token.TokenizeError (Vec token.Token) 
   match tokenize_from(raw, source.cursor_from_string(raw), Nil) with
   | Err e -> Err(e)
   | Ok lst -> Ok(vec_from_list(list_reverse(lst)))
+
+# A whole source file: its header block blanked, so positions keep their lines.
+export fn tokenize_source(src: String) -> Result token.TokenizeError (Vec token.Token) =
+  tokenize(source.strip_headers(src))

@@ -67,6 +67,13 @@ fn tok_pos(src: String, n: Int) -> String =
       pos = token.token_position(t)
   in `${pos.index}:${pos.line}:${pos.column}`
 
+# A whole file's first token as `text@line`, through `tokenize_source`.
+fn source_first_token(src: String) -> String =
+  let Ok toks = lexer.tokenize_source(src) else "lex_error"
+      Just t = vec_get(0, toks) else "missing"
+      pos = token.token_position(t)
+  in `${token.token_text(t)}@${pos.line}`
+
 fn token_count(src: String) -> Int =
   match lexer.tokenize(src) with
   | Err _ -> -1
@@ -240,5 +247,11 @@ fn main() -> Unit !{IO} =
 
     # Mutual-recursion stress: tokenize_from ↔ scan_template_from cycle.
     # N simple templates produce 3N + 1 tokens (start, lit, end per template, plus eof).
-    check_eq("200 templates token count", token_count(make_templates(200, Nil)), 601)
+    check_eq("200 templates token count", token_count(make_templates(200, Nil)), 601),
+
+    # tokenize_source drops the header block and keeps line numbers.
+    check_eq("tokenize_source skips a module and import header",
+      source_first_token("module demo\nimport stdlib.list\n\nfn f() -> Int = 1\n"), "fn@4"),
+    check_eq("tokenize_source on a headerless file",
+      source_first_token("fn f() -> Int = 1\n"), "fn@1")
   ])

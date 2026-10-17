@@ -2,7 +2,6 @@ module stdlib.repl
 import stdlib.compiler as compiler
 import stdlib.compiler.parser as parser
 import stdlib.compiler.lexer as lexer
-import stdlib.compiler.source as source
 import stdlib.compiler.ast as ast
 import stdlib.compiler.token as token
 import stdlib.terminal as terminal
@@ -289,7 +288,7 @@ export fn module_public_names(content: String) -> Vec String =
 
 # Tokenizes and scans once; (qualifiable names, bare globals). Empty pair on a lex error.
 export fn module_surface_names(content: String) -> (Vec String, Vec String) =
-  match lexer.tokenize(source.strip_headers(content)) with
+  match lexer.tokenize_source(content) with
   | Err _ -> (vec_empty(), vec_empty())
   | Ok toks ->
       let surface = parser.scan_module_surface(toks)
@@ -339,7 +338,7 @@ fn append_names_from_list(acc: Vec String, names: List String) -> Vec String =
 # Externs are ast.ScopeGlobal: spelled bare, never `alias.`-qualified. They belong
 # in the top-level candidate set, never in the dotted one.
 export fn module_global_names(content: String) -> Vec String =
-  match lexer.tokenize(source.strip_headers(content)) with
+  match lexer.tokenize_source(content) with
   | Err _ -> vec_empty()
   | Ok toks -> vec_from_list(parser.surface_globals(parser.scan_module_surface(toks)))
 

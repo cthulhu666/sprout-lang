@@ -1,6 +1,7 @@
 module stdlib.compiler.fmt_driver
 
 import stdlib.compiler.formatter as formatter
+import stdlib.compiler.lexer as lexer
 import stdlib.compiler.lint_rules as lint_rules
 import stdlib.compiler.fmt_cli as fmt_cli
 import stdlib.string as string
@@ -83,7 +84,7 @@ fn run_lint_file(path: String) -> Int !{IO} =
   | Err msg -> read_failed(path, msg)
   | Ok src ->
       do
-        let tokenized = formatter.tokenize_source(src)
+        let tokenized = lexer.tokenize_source(src)
         let issues = formatter.lint_tokens(src, tokenized)
         let findings = lint_rules.lint_ast_tokens(src, tokenized)
         print_issues(path, issues)

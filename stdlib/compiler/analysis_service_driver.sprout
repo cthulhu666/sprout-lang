@@ -128,7 +128,7 @@ fn decl_type_names(d: ast.Decl, acc: List String) -> List String =
   prepend_names(ast.decl_type_names(d), acc)
 
 fn parse_decl_names(src: String) -> List String =
-  match lexer.tokenize(source.strip_headers(src)) with
+  match lexer.tokenize_source(src) with
   | Err _ -> Nil
   | Ok tokens ->
       match parser.parse_program(tokens) with
@@ -181,7 +181,7 @@ fn empty_locations_json() -> json.Json =
                                       ("columns", json.array_from_list(Nil))]))
 
 fn parse_symbol_locations(src: String) -> json.Json =
-  match lexer.tokenize(source.strip_headers(src)) with
+  match lexer.tokenize_source(src) with
   | Err _ -> empty_locations_json()
   | Ok tokens ->
       match parser.parse_program(tokens) with

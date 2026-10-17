@@ -164,7 +164,7 @@ one, and the reason is phase ordering: the bundler rewrites every module-level
 name to its canonical qualified form *before* inference runs, so by then the head
 exists in the environment only under that canonical name and inference's own
 head-first lookup cannot find it. The rule is therefore applied twice —
-`bundler.dotted_value_field_access` for module-level heads (where the canonical
+`bundler.qualify_var` for module-level heads (where the canonical
 name is still known) and `infer.infer_var_or_field` for locals and parameters
 (which the bundler does not rewrite). Both split with `string.split_once` and
 build the same `GetFieldExpr` chain. Before this was fixed, `origin.x` on an

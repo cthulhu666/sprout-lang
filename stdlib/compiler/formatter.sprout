@@ -1,7 +1,6 @@
 module stdlib.compiler.formatter
 import stdlib.compiler.lexer as lexer
 import stdlib.compiler.token as token
-import stdlib.compiler.source as source
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -529,10 +528,7 @@ fn format_per_line(src: String) -> String =
   string.join("\n", list_map(format_line, drop_trailing_empty(str_split_lines(src)))) ++ "\n"
 
 export fn format_source(src: String) -> String =
-  format_tokenized(src, tokenize_source(src))
-
-export fn tokenize_source(src: String) -> Result token.TokenizeError (Vec token.Token) =
-  lexer.tokenize(source.strip_headers(src))
+  format_tokenized(src, lexer.tokenize_source(src))
 
 fn format_tokenized(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> String =
   match tokenized with
@@ -556,8 +552,8 @@ fn trailing_ws_col(line: String) -> Int =
 fn line_has_trailing_ws(line: String) -> Bool =
   string.trim_right(line) != line
 
-# Issues are accumulated in reverse order then reversed by lint_source.
-# Python order: tab before trailing-ws. So we must prepend trailing-ws first
+# Issues are accumulated in reverse order then reversed by lint_tokens.
+# Order: tab before trailing-ws. So we must prepend trailing-ws first
 # (so it ends up after tab after reversal), then tab (so it ends up first).
 fn lint_line_issues(raw_line: String, ln: Int, base: List LintIssue) -> List LintIssue =
   trailing_then_tab(raw_line, ln, base)
@@ -614,9 +610,9 @@ fn lint_spans(tokenized: Result token.TokenizeError (Vec token.Token)) -> List T
   | Ok toks -> collect_spans(toks)
 
 export fn lint_source(src: String) -> List LintIssue =
-  lint_tokens(src, tokenize_source(src))
+  lint_tokens(src, lexer.tokenize_source(src))
 
-# `tokenized` is `tokenize_source(src)`. One tokenization feeds both the template
+# `tokenized` is `lexer.tokenize_source(src)`. One tokenization feeds both the template
 # spans and the format check.
 export fn lint_tokens(src: String, tokenized: Result token.TokenizeError (Vec token.Token)) -> List LintIssue =
   run_lint_fold(lint_spans(tokenized), lines)
