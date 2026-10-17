@@ -281,18 +281,22 @@ diff whose entire blast radius is the ordering.
 the run between two barriers. Every other declaration is its own group, in place,
 and neither crosses it. This is what the environments allow rather than caution:
 
-- `ClassDecl` and `InstanceDecl` are registered by `pre_scan_fn_decls`, so they are
-  in scope above their declaration and an instance is in scope in its own methods.
-  An instance is a graph node with edges to what its methods call and none into
-  it, so it is checked after those and otherwise where it is written, and its
-  errors come in source order (`type_error/instance_error_reported_in_source_order.spr`).
-  It must not move past a barrier: checked after a user class, a prelude instance
-  calling `list_append` would get the class's method of that name
-  (`run/prelude_instance_beside_shadowing_class.spr`).
-- A `ClassDecl` registers its methods again where it stands, and stays a barrier.
-  Method names stay bare after bundling, so a prelude `fn` of the same name,
-  committed in the walk, would otherwise shadow the method in the class's own
-  module (`run/class_method_named_like_prelude_fn.spr`).
+- `InstanceDecl` is registered by `pre_scan_fn_decls`, so it is in scope above
+  its declaration and in its own methods. An instance is a graph node with edges
+  to what its methods call and none into it, so it is checked after those and
+  otherwise where it is written, and its errors come in source order
+  (`type_error/instance_error_reported_in_source_order.spr`).
+- A `ClassDecl` is checked, and its methods registered, at the **start of its
+  module**, as a barrier. Method names stay bare after bundling, so registered
+  before the walk they would replace same-named prelude functions for the prelude
+  itself (`run/class_method_named_like_called_prelude_fn.spr`,
+  `run/class_method_named_like_prelude_extern.spr`); registered where the class
+  stands, they would miss the module's uses above it
+  (`run/class_method_named_like_prelude_fn.spr`). A module starts at its first
+  declaration whose name, or for an instance whose class or type, belongs to it
+  (`run/order_instance_first_in_module.spr`). Bundled modules are contiguous and
+  in import order, so every module the class could shadow a name for is checked
+  by then.
 - `RecordDecl` is pre-scanned too, so it no longer needs to be a barrier, but still
   is (`BACKLOG.md`).
 - A top-level `let` is not pre-scanned either — forward-referencing one is

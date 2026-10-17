@@ -1,6 +1,9 @@
 module main
 
-# A class method named like a prelude function is what its own module calls.
+# A class method named like a prelude function is what its own module calls,
+# above the class as well as below it.
+
+fn above(n: Int) -> Int = list_reverse(n)
 
 class Rev a
   fn list_reverse(x: a) -> Int
@@ -8,4 +11,7 @@ class Rev a
 instance Rev Int
   fn list_reverse(x: Int) -> Int = x
 
-fn main() -> Unit !{IO} = print(list_reverse(5))
+fn main() -> Unit !{IO} =
+  do
+    print(above(4))
+    print(list_reverse(5))

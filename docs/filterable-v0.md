@@ -104,18 +104,15 @@ requires `Functor`. Both instances here are `Functor`s regardless, and neither
 derives a method from the superclass, so requiring it would only widen every
 dictionary. `Foldable` in this prelude has no superclass for the same reason.
 
-**Instances delegate rather than recurse.** A class method that calls itself
-from inside its own instance body fails dictionary resolution today (`BACKLOG`
-B2), so `filter_values` calls the standalone `list_filter`/`vec_filter` — the
-same shape `Foldable List.fold_values` already uses.
+**Instances delegate.** `filter_values` calls the standalone
+`list_filter`/`vec_filter`, the shape `Foldable List.fold_values` uses, so each
+container has one body.
 
 ## 6. Purity
 
-`pred : a -> Bool`, not `a -> Bool !{e}`. **Corrected 2026-09-08: this section
-previously blamed B2, which is wrong on both counts.** An effect-polymorphic
-class method compiles, runs, and enforces the effect at the caller today — B2 is
-about an instance body calling its *own* method, and these instances delegate to
-`list_filter`/`vec_filter` instead. There is no implementation obstacle.
+`pred : a -> Bool`, not `a -> Bool !{e}`. An effect-polymorphic class method
+compiles, runs, and enforces the effect at the caller, so there is no
+implementation obstacle.
 
 The real reason is a contract gap: `Filterable` does not say what order `pred`
 runs in, and an effect needs an order to be meaningful. Stating that order is

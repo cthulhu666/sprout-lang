@@ -9413,9 +9413,8 @@ fn pre_scan_extern(
       dict_set(types.arity_marker_key(name), arity_marker(list_length(params)),
         dict_set(name, scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env), env))
 
-# Register every FnDecl signature, TypeDecl constructor, record, class and
-# instance without checking a body, so a declaration may reference one written
-# below it.
+# Register every FnDecl signature, TypeDecl constructor, record and instance
+# without checking a body, so a declaration may reference one written below it.
 fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Dict types.Type) -> Dict types.Scheme =
   match decls with
   | Nil -> env
@@ -9440,10 +9439,10 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # A record's fields are in scope throughout its module (spec §7).
       | ast.RecordDecl _ _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_record_decl(decl, alias_env, env), alias_env)
-      # A class and an instance are in scope throughout their module, an instance
-      # in its own methods too (spec §7).
-      | ast.ClassDecl name type_params methods superclasses _ ->
-          pre_scan_fn_decls(rest, register_class(name, type_params, methods, superclasses, alias_env, env), alias_env)
+      # Not here: its methods keep bare names, which would shadow the prelude's
+      # for the prelude too. The walk registers it at its module's start (group_plan).
+      | ast.ClassDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
+      # An instance is in scope throughout its module, in its own methods too (spec §7).
       | ast.InstanceDecl constraint _ _ _ ->
           pre_scan_fn_decls(rest, register_instance_marker(constraint, env), alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
@@ -9619,10 +9618,12 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # ordered so a group's dependencies are checked before it. Every other declaration
 # is its own group, in place, and acts as a BARRIER that neither may cross.
 #
-# Instances are registered by pre_scan_fn_decls, so they need not be barriers, and
-# staying inside their segment keeps the prelude's checked before a user class can
-# shadow a name they call. Classes are registered there too, but re-register in
-# place (typecheck_decl), so they stay barriers. RecordDecl is registered before
+# Instances are registered by pre_scan_fn_decls, so they need not be barriers. A
+# class is planned at the START of its module, as a barrier: its methods keep bare
+# names after bundling, so registered any earlier they would shadow a same-named
+# prelude fn for the prelude, and any later they would miss its own module's uses
+# above it. A module starts at the first declaration that names it (plan_module);
+# modules are contiguous and in import order. RecordDecl is registered before
 # the walk and need not be a barrier, but still is (BACKLOG). A top-level `let` is
 # not pre-scanned — a forward reference to one is `Unknown variable` today, which
 # this must not change.
@@ -9632,14 +9633,17 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # The invariant every plan owes typecheck_groups: the groups partition 0..n-1
 # EXACTLY once. A missing index silently drops a declaration from the emitted
 # program; a duplicated one emits it twice. It holds by construction here — each
-# declaration is a barrier singleton or in exactly one segment, and an SCC
+# declaration is a barrier singleton or in exactly one segment (a class's own name
+# enters its module, so it is emitted there once), and an SCC
 # partition covers its node set — with one dependency: names must be unique, which
 # check_duplicate_fn_decls has already guaranteed by the time this runs (an
 # instance's node is named by its index). The
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.
 fn group_plan(decls: List ast.Decl) -> List (List Int) =
-  checked_plan(plan_walk(index_decls(decls, 0), Nil, Nil), list_length(decls))
+  let items = index_decls(decls, 0)
+  in checked_plan(plan_walk(items, module_classes(list_reverse(items), dict_empty()), set_empty(), Nil, Nil),
+                  list_length(decls))
 
 # A plan that does not partition 0..n-1 falls back to source order. Reordering is
 # an optimisation of COMPLETENESS — it makes more correct programs typable — so
@@ -9671,26 +9675,68 @@ fn index_decls(decls: List ast.Decl, i: Int) -> List (Int, ast.Decl) =
 
 # `seg` is the current run of FnDecls and instances, `acc` the finished groups,
 # both held in REVERSE so the walk stays a cons. Hitting a barrier flushes the run,
-# then emits the barrier itself as a singleton in its original position.
-fn plan_walk(items: List (Int, ast.Decl), seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
+# then emits the barrier itself as a singleton in its original position. Entering a
+# module flushes too, then emits its classes; `seen` holds the modules entered.
+fn plan_walk(items: List (Int, ast.Decl), classes: Dict (List Int), seen: Set,
+             seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
   match items with
-  | Nil -> list_reverse(flush_segment(seg, acc))
-  | Cons item rest ->
-      if in_segment(item) then plan_walk(rest, Cons(item, seg), acc)
-      else plan_walk(rest, Nil, Cons (Cons(i_of(item), Nil), flush_segment(seg, acc)))
+  | [] -> list_reverse(flush_segment(seg, acc))
+  | [item | rest] ->
+      let m = plan_module(item)
+      in if m != unattributed_module && ! set_member (m, seen) then
+           plan_walk(items, classes, set_insert(m, seen), Nil,
+             push_singletons(classes_of(m, classes), flush_segment(seg, acc)))
+         else
+           match placement(item) with
+           | InSegment -> plan_walk(rest, classes, seen, Cons(item, seg), acc)
+           | Barrier -> plan_walk(rest, classes, seen, Nil, push_singletons([i_of(item)], flush_segment(seg, acc)))
+           | AtModuleStart -> plan_walk(rest, classes, seen, seg, acc)
+
+# Each index as its own group, onto the reversed `acc`.
+fn push_singletons(indices: List Int, acc: List (List Int)) -> List (List Int) =
+  list_fold(\ (groups, i) -> Cons([i], groups), acc, indices)
+
+fn classes_of(m: String, classes: Dict (List Int)) -> List Int =
+  match dict_get(m, classes) with
+  | Just indices -> indices
+  | Nothing -> []
+
+type Placement =
+  | InSegment
+  | Barrier
+  | AtModuleStart
 
 # Every kind is named: a new one is a barrier only once the header above says why.
-fn in_segment(item: (Int, ast.Decl)) -> Bool =
+fn placement(item: (Int, ast.Decl)) -> Placement =
   match item with
-  | (_, ast.FnDecl _ _ _ _ _ _ _) -> true
-  | (_, ast.InstanceDecl _ _ _ _) -> true
-  | (_, ast.ExternFnDecl _ _ _ _ _) -> false
-  | (_, ast.TypeDecl _ _ _ _ _ _) -> false
-  | (_, ast.RecordDecl _ _ _ _ _ _ _) -> false
-  | (_, ast.LetDecl _ _ _ _) -> false
-  | (_, ast.ClassDecl _ _ _ _ _) -> false
-  | (_, ast.AliasDecl _ _ _ _) -> false
-  | (_, ast.WrapDecl _ _ _ _ _) -> false
+  | (_, ast.FnDecl _ _ _ _ _ _ _) -> InSegment
+  | (_, ast.InstanceDecl _ _ _ _) -> InSegment
+  | (_, ast.ClassDecl _ _ _ _ _) -> AtModuleStart
+  | (_, ast.ExternFnDecl _ _ _ _ _) -> Barrier
+  | (_, ast.TypeDecl _ _ _ _ _ _) -> Barrier
+  | (_, ast.RecordDecl _ _ _ _ _ _ _) -> Barrier
+  | (_, ast.LetDecl _ _ _ _) -> Barrier
+  | (_, ast.AliasDecl _ _ _ _) -> Barrier
+  | (_, ast.WrapDecl _ _ _ _ _) -> Barrier
+
+# The module a declaration's names place it in; an extern's name is global, so it
+# says none. An instance reads its class's, else its type's: either is its own
+# module or an import, entered already, so a wrong answer enters nothing.
+fn plan_module(item: (Int, ast.Decl)) -> String =
+  match item with
+  | (_, ast.InstanceDecl(ast.TypeConstraint class_name type_args) _ _ _) ->
+      let by_class = owning_module(class_name)
+      in if by_class != "" then by_class else owning_module(te_head_str(type_args))
+  | (_, d) -> group_module(d)
+
+# Each module's class indices in source order; consing the items reversed keeps it.
+fn module_classes(items_rev: List (Int, ast.Decl), acc: Dict (List Int)) -> Dict (List Int) =
+  match items_rev with
+  | [] -> acc
+  | [(i, ast.ClassDecl name _ _ _ _) | rest] ->
+      let m = owning_module(name)
+      in module_classes(rest, dict_set(m, Cons(i, classes_of(m, acc)), acc))
+  | [_ | rest] -> module_classes(rest, acc)
 
 # The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
@@ -10218,9 +10264,8 @@ fn typecheck_decl(
                           s1, let_pos, env, env_ftv, es1a)
   | ast.AliasDecl _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
-  # pre_scan_fn_decls registered it already. Again here, because a method keeps
-  # its bare name: a prelude `fn` of that name, committed since, would otherwise
-  # shadow the method below the class.
+  # Checked at its module's start (group_plan), so its methods are in scope
+  # throughout the module and in no module before it.
   | ast.ClassDecl class_name type_params methods superclasses _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
@@ -11998,9 +12043,7 @@ fn attribute_to_function(msg: String, name: String) -> String =
 # ClassDecl: method registration + constraint markers
 # ---------------------------------------------------------------------------
 
-# A class's methods and markers. Both callers (pre_scan_fn_decls, then
-# typecheck_decl) pass the same `alias_env`, so the second call changes nothing
-# but what a same-named prelude `fn` overwrote in between.
+# A class's methods and markers.
 fn register_class(class_name: String, type_params: List String, methods: List ast.ClassMethodSig,
                   superclasses: List ast.TypeConstraint, alias_env: Dict types.Type,
                   env: Dict types.Scheme) -> Dict types.Scheme =
@@ -12033,7 +12076,8 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
         name, params, ret_type, effects_maybe, constraints, alias_env, env)
 
 # Split out so the binder list is computed once: it both quantifies the scheme
-# and positions the method's own constraint heads.
+# and positions the method's own constraint heads. A shadowed prelude `fn`'s
+# `@arity` goes, as in bind_local_scheme, or its count would judge the method's calls.
 fn register_class_method_over(binders: List String, name: String, params: List ast.Param,
                               ret_type: ast.TypeExpr, effects_maybe: Maybe (List String),
                               constraints: List ast.TypeConstraint,
@@ -12042,7 +12086,7 @@ fn register_class_method_over(binders: List String, name: String, params: List a
     types.scheme_with_constraints(
       scheme_from_fn_parts_inner(binders, name, params, Just(ret_type), effects_maybe, alias_env),
       constraint_pos_tokens(constraints, binders)),
-    env)
+    dict_remove(types.arity_marker_key(name), env))
 
 # A method-level constraint's head keyed by POSITION in the method's generalized
 # binder list, so it survives the instantiate renaming that defeats name-keying
