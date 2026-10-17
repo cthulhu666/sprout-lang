@@ -80,7 +80,8 @@ Limits on 2, both measured already:
 
 **Field kinds are not on this list.** The compiler computes them (`field_kinds.sprout`) and
 already passes them to the runtime: `sprout_register_ctor` stores them in `g_ctor_meta`, indexed
-by tag. Only `sprout_debug_adt` reads them. That is a C change, not a port (Phase 1).
+by tag. Only `sprout_debug_adt` reads them. Using them in the marker was Phase 1a, dropped once
+measured.
 
 What Sprout code lacks today: unboxed byte access (`bytes_get` returns `Maybe Int`), raw memory,
 and a checked guarantee that a function does not allocate.
@@ -128,9 +129,9 @@ starting the next.
   `uncharted-suns` galaxy frame. Interleaved min-of-N, since single runs drift ~1.6× between
   sessions on this machine (BACKLOG §GC & Runtime Performance). The spread of N runs is each
   workload's **noise floor**; later gates are stated against it.
-- **Drain-edge counter by field kind.** How many marked edges land on `i`/`b` fields, and how many
-  `sprout_heap_lookup` calls return NULL. One counter bump per edge, so it goes behind
-  `SPROUT_PROF_HOT`, which compiles in only under `-DSPROUT_GC_PROFILE` (`just gc-profile`).
+- ~~**Drain-edge counter by field kind.**~~ Landed: `just gc-profile` prints a second line,
+  `drain_edges by kind`, with edges and lookup hits per field kind, plus buckets for unregistered
+  OBJs and non-OBJ objects. The 1a result below is its first reading.
 - **Port bench.** One directory per Phase 3 candidate under `bench/`: the C builtin and a Sprout
   version on the same inputs.
 
@@ -138,18 +139,23 @@ Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
 
 ### Phase 1 — give the C runtime what the compiler knows
 
-- **1a. Skip scalar fields when marking.** `sprout_gc_drain_marks` reads the tag from the OBJ
-  header (`aux` is `(tag << 8) | arity`) and the kinds from `g_ctor_meta`, then skips `i`/`b`
-  fields. Every other field is still looked up. Three preconditions:
-  - **Kinds must never call a heap field scalar.** They did: a module's own `type Bool` got `b`.
-    Fixed by matching the canonical name exactly (PR #658,
-    `tests/stdlib/test_gc_shadowed_scalar_name.spr`). With that, skipping is safe; trusting `p`
-    without a lookup is not (string literals live outside the heap) and is out of scope.
-  - **Records and wrap types are not registered** (`build_ctor_table` adds no `CtorReg` for
-    them), so their objects keep the lookup path, or get registered first.
-  - `Double` is kind `p` today (any capitalised name), so its fields are not skipped until it gets
-    a kind of its own.
-  Gate: Phase 0's counter shows a share of scalar edges worth having.
+- ~~**1a. Skip scalar fields when marking.**~~ **Dropped: it failed its gate (2026-10-17).** The
+  plan was to read the tag from the OBJ header and skip `i`/`b` fields. Counter readings, `-O2`,
+  macOS arm64:
+
+  | workload | edges | `i`+`b` edges | lookup misses | misses come from |
+  |---|---:|---:|---:|---|
+  | self-compile | 52.98M | 113k (0.2%) | 14.71M | unregistered OBJ 13.25M, non-OBJ 0.95M |
+  | `nqueens` | 5.35M | 0 | 5.11M | non-OBJ (vector slots) |
+  | `gc_roots` | 1.35M | 0 | 0.85M | unregistered OBJ |
+  | `astar` | 2.17M | 0 | 1.77M | non-OBJ (vector slots) |
+
+  Misses are not only rare on `i`/`b`, they are free: `region_find` rejects a value outside the
+  heap span with one inline compare, before any search. Two A/B runs, interleaved min-of-5:
+  `nqueens` with vector slots not scanned at all (5.1M fewer lookups), 1.76 s against 1.76 s;
+  self-compile with every missed lookup done twice (14.7M more), 3.10 s against 3.10 s. So no
+  variant that removes misses pays: not 1a, not registering records, not typed vectors.
+  What the profile's `sprout_heap_lookup` time buys is hits, which this did not measure.
 - **1b. `str_eq` reads the header.** String literals already carry a CSTR header
   (`ir_lowering.emit_str_global`), and `sprout_cstr_byte_len` already reads it. `str_eq`'s
   length fast-reject still calls `sprout_heap_lookup` twice; it can make the same header read.
@@ -241,9 +247,6 @@ every binary carries the port and every golden IR snapshot changes with it.
 ## 8. Tests
 
 - Phase 0: the bench and counter are themselves the deliverable.
-- Phase 1a: a GC test that names the collection count it must exceed (the lesson in
-  [gc-root-inline-lowering-v0.md](gc-root-inline-lowering-v0.md) §10), with scalar and pointer
-  fields in one constructor, and a shadowed scalar type name (as in PR #658's test).
 - Phase 3: one differential test per moved builtin; existing conformance tests unchanged.
 
 ## 9. Open questions
