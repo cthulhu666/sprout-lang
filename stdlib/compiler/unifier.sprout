@@ -239,9 +239,9 @@ export type TryFusions (..) = (by_head: Dict Fusion, pending: Set, decl: Maybe T
 # A declaration's scope without its locals, and its return type.
 export type TryDecl (..) = (scope: Dict types.Scheme, returns: types.Type)
 
-# A fusable `branch`: its arms, where the success arm is, and the names the
-# failure arms call.
-export type Fusion (..) = (arms: List FusionArm, success: Int, calls: Set)
+# A fusable `branch`: its arms, where the success arm is, the names the failure
+# arms call, and its instance's key in `pending`.
+export type Fusion (..) = (arms: List FusionArm, success: Int, calls: Set, pending_key: String)
 
 # The success arm's pattern and the binder it passes on, or a failure arm's
 # pattern and failure value.

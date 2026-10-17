@@ -278,8 +278,9 @@ path, at size one. The second step replaced `group_plan`'s body, leaving a small
 diff whose entire blast radius is the ordering.
 
 **Barriers.** Only `FnDecl`s and `InstanceDecl`s are reordered, and only within
-the run between two barriers. Every other declaration is its own group, in place,
-and neither crosses it. This is what the environments allow rather than caution:
+the run between two barriers. Every other declaration but a class is its own
+group, in place, and neither crosses it. This is what the environments allow
+rather than caution:
 
 - `InstanceDecl` is registered at the **start of its module**
   (`typecheck_modules`), so it is in scope above its declaration and in its own
@@ -291,9 +292,9 @@ and neither crosses it. This is what the environments allow rather than caution:
   otherwise where it is written, and its errors come in source order
   (`type_error/instance_error_reported_in_source_order.spr`).
 - A `ClassDecl` is checked, and its methods registered, at the **start of its
-  module**, as a barrier. Method names stay bare after bundling, so registered
-  before the walk they would replace same-named prelude functions for the prelude
-  itself (`run/class_method_named_like_called_prelude_fn.spr`,
+  module**, as its own group, and splits no segment. Method names stay bare after
+  bundling, so registered before the walk they would replace same-named prelude
+  functions for the prelude itself (`run/class_method_named_like_called_prelude_fn.spr`,
   `run/class_method_named_like_prelude_extern.spr`); registered where the class
   stands, they would miss the module's uses above it
   (`run/class_method_named_like_prelude_fn.spr`). Where a module starts is not
@@ -338,8 +339,9 @@ And it must be iterative: 551 recursive DFS frames is the stack the
 `stack-overflow-smoke` gate exists to police, at a depth set by user code rather than
 by us.
 
-**The invariant.** Groups must partition `0..n-1` exactly once — a missing index
-silently drops a declaration from the emitted program, a duplicate emits it twice.
+**The invariant.** Each module's groups must partition that module's indices
+exactly once — a missing index silently drops a declaration from the emitted
+program, a duplicate emits it twice.
 It holds by construction (each declaration is a singleton or in exactly one
 segment; an SCC partition covers its nodes) given unique names, which
 `check_duplicate_fn_decls` has already guaranteed. `checked_plan` verifies it

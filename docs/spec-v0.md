@@ -316,8 +316,9 @@ Shadowing has three known limits, all because the construct resolves by
   bare name.
 - Class methods keep bare names. A redefined class collides in the class-method
   wrapper symbol, and a method named like a prelude function is what built-in
-  syntax calls: a method `list_reverse` breaks comprehensions, and one named
-  `branch` is what an unfused `try` calls (§5.9.1).
+  syntax calls, throughout the method's module, above its class too: a method
+  `list_reverse` breaks comprehensions, and one named `branch` is what an unfused
+  `try` calls (§5.9.1).
 - List and dict literals, list patterns and `>>`/`<<` are built from the bare names
   `Cons`, `Nil`, `dict_empty`, `dict_set`, `rcompose` and `lcompose`. A file's own
   declaration of one of them, or a local named like one, is what they use.
@@ -2154,11 +2155,11 @@ no `where` context, the compiler puts that `match` in place of the `branch` call
 Accepted programs and their results are the same either way. The result is the `match` written by hand: no call and no
 `ControlFlow` value. Otherwise, and in generic code (`where Propagate t`), `try`
 calls `branch` and allocates a `ControlFlow`. The type must be known at the `try`
-for the first case, the `try` must be in a function or instance method, and what
-the instance's `Break` arms call must be checked before that function: declared
-after it without a dependency, or in a binding group with it, it is not, and
-`try` calls `branch`. The instance itself may be declared anywhere in the module,
-or in a module it imports.
+for the first case, the `try` must be in a function or instance method, and the
+instance and what its `Break` arms call must be checked before that function:
+declared after it without a dependency, or in a binding group with it, they are
+not, and `try` calls `branch`. The instance itself is in scope anywhere in its
+module, and in a module that imports it.
 
 ### 5.10 List comprehensions (Experimental)
 

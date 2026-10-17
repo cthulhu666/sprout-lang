@@ -5198,14 +5198,16 @@ fn propagate_instance_key(head: String) -> String = types.inst_marker_key("Propa
 # no failure arm and a refutable success pattern stays non-exhaustive. An
 # instance with a context is left alone: its dictionaries are its own.
 #
-# A `try` is not a dependency of what the failure arms call, so that may not be
-# typed yet where the `try` is. Until it is, the `try` calls `branch`
-# (ready_try_fusion).
+# A `try` is not a dependency of its instance, nor of what the failure arms call,
+# so either may not be checked yet where the `try` is. Until both are, the `try`
+# calls `branch` (ready_try_fusion): fusing earlier would infer the instance's
+# arms, and report their errors, in the `try`'s declaration.
 fn try_fusions(decls: List ast.Decl) -> unifier.TryFusions =
-  let pending = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
-      callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), pending, decls)
-  in unifier.TryFusions(by_head = list_fold(\ (acc, d) -> add_try_fusion(d, callable, acc), dict_empty(), decls),
-                        pending = pending, decl = Nothing)
+  let values = list_fold(\ (acc, d) -> add_value_name(d, acc), set_empty(), decls)
+      callable = list_fold(\ (acc, d) -> add_class_methods(d, acc), values, decls)
+      by_head = list_fold(add_try_fusion(callable, _, _), dict_empty(), index_decls(decls, 0))
+      pending = vec_fold(\ (acc, f) -> set_insert(f.pending_key, acc), values, dict_values(by_head))
+  in unifier.TryFusions(by_head = by_head, pending = pending, decl = Nothing)
 
 fn add_value_name(d: ast.Decl, acc: Set) -> Set =
   match checked_value_name(d) with
@@ -5231,14 +5233,15 @@ fn checked_value_name(d: ast.Decl) -> Maybe String =
   | ast.AliasDecl _ _ _ _ -> Nothing
   | ast.WrapDecl _ _ _ _ _ -> Nothing
 
-fn add_try_fusion(d: ast.Decl, callable: Set, acc: Dict unifier.Fusion) -> Dict unifier.Fusion =
-  match d with
-  | ast.InstanceDecl (ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _ ->
+fn add_try_fusion(callable: Set, acc: Dict unifier.Fusion, item: (Int, ast.Decl)) -> Dict unifier.Fusion =
+  match item with
+  | (i, ast.InstanceDecl(ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _) ->
       match fusable_branch_arms(param, body) with
       | Just arms ->
           dict_set(type_head_str(type_from_ast(head, dict_empty())),
                    unifier.Fusion(arms = arms, success = success_index(arms, 0),
-                                  calls = list_fold(\ (a, arm) -> failure_calls(arm, callable, a), set_empty(), arms)),
+                                  calls = list_fold(\ (a, arm) -> failure_calls(arm, callable, a), set_empty(), arms),
+                                  pending_key = instance_node(i)),
                    acc)
       | Nothing -> acc
   | _ -> acc
@@ -5248,15 +5251,15 @@ fn failure_calls(arm: unifier.FusionArm, callable: Set, acc: Set) -> Set =
   | unifier.SuccessArm _ _ -> acc
   | unifier.FailureArm pat failure -> referenced_names(failure, bind_pattern(pat, set_empty()), callable, acc)
 
-# The fusion for a `try` on `operand_ty`, once its instance is in scope and what
-# its failure arms call is typed and in scope, and the scope to infer those arms
-# in. `by_head` spans every module, so an importer's instance is in it.
+# The fusion for a `try` on `operand_ty`, once its instance and what its failure
+# arms call are checked and in scope, and the scope to infer those arms in. An
+# importer's instance is checked after the module it imports, so it never is.
 fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
     Maybe(unifier.Fusion, Dict types.Scheme) =
   let Just head = concrete_type_str(operand_ty) else Nothing
       Just fusion = dict_get(head, fusions.by_head) else Nothing
       Just decl = fusions.decl else Nothing
-  in if dict_member(propagate_instance_key(head), decl.scope)
+  in if ! set_member (fusion.pending_key, fusions.pending)
         && all(\n -> dict_member(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
      then Just((fusion, decl.scope)) else Nothing
 
@@ -5274,13 +5277,14 @@ fn settle_try_fusions(state: unifier.InferState, decl_vec: Vec ast.Decl, g: List
   do
     fusions <- unifier.get_try_fusions(state)
     unifier.set_try_fusions(state,
-      fusions with (pending = list_fold(\ (acc, i) -> settle_decl(decl_at(decl_vec, i), acc), fusions.pending, g),
+      fusions with (pending = list_fold(\ (acc, i) -> settle_decl(i, decl_at(decl_vec, i), acc), fusions.pending, g),
                     decl = Nothing))
 
-fn settle_decl(d: Maybe ast.Decl, pending: Set) -> Set =
+# An instance is settled by its index, a value by its name.
+fn settle_decl(i: Int, d: Maybe ast.Decl, pending: Set) -> Set =
   match and_then(checked_value_name, d) with
   | Just name -> set_remove(name, pending)
-  | Nothing -> pending
+  | Nothing -> set_remove(instance_node(i), pending)
 
 fn fusable_branch_arms(param: String, body: ast.Expr) -> Maybe (List unifier.FusionArm) =
   let ast.MatchExpr(ast.VarExpr scrut _) arms _ = body else Nothing
@@ -9622,13 +9626,14 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 #
 # FnDecls and instances are partitioned into strongly connected components and
 # ordered so a group's dependencies are checked before it. Every other declaration
-# is its own group, in place, and acts as a BARRIER that neither may cross.
+# but a class is its own group, in place, and acts as a BARRIER that neither may
+# cross; a class is its own group at the module's start and splits no segment.
 #
 # It plans one module: typecheck_modules checks each whole before the next, and
 # registers its instances first, so they need not be barriers. A class is checked
-# at the START of its module, as a barrier: its methods keep bare names after
-# bundling, so registered any earlier they would shadow a same-named prelude fn for
-# the prelude, and any later they would miss its own module's uses above it.
+# at the START of its module: its methods keep bare names after bundling, so
+# registered any earlier they would shadow a same-named prelude fn for the
+# prelude, and any later they would miss its own module's uses above it.
 # RecordDecl is registered before the walk and need not be a barrier, but still is
 # (BACKLOG). A top-level `let` is not pre-scanned — a forward reference to one is
 # `Unknown variable` today, which this must not change.
@@ -12075,17 +12080,17 @@ fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
         name, params, ret_type, effects_maybe, constraints, alias_env, env)
 
 # Split out so the binder list is computed once: it both quantifies the scheme
-# and positions the method's own constraint heads. A shadowed prelude `fn`'s
-# `@arity` goes, as in bind_local_scheme, or its count would judge the method's calls.
+# and positions the method's own constraint heads. Bound as a local is, so a
+# shadowed prelude `fn`'s `@arity` goes, or its count would judge the method's calls.
 fn register_class_method_over(binders: List String, name: String, params: List ast.Param,
                               ret_type: ast.TypeExpr, effects_maybe: Maybe (List String),
                               constraints: List ast.TypeConstraint,
                               alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  dict_set(name,
+  bind_local_scheme(name,
     types.scheme_with_constraints(
       scheme_from_fn_parts_inner(binders, name, params, Just(ret_type), effects_maybe, alias_env),
       constraint_pos_tokens(constraints, binders)),
-    dict_remove(types.arity_marker_key(name), env))
+    env)
 
 # A method-level constraint's head keyed by POSITION in the method's generalized
 # binder list, so it survives the instantiate renaming that defeats name-keying

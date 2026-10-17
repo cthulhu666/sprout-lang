@@ -51,12 +51,11 @@ export fn check_program_with_env(prog: ast.Program, extra: List (String, types.S
   do
     state <- unifier.new_state()
     let ast.Program decls _ = prog
-    let modules = desugar_modules([decls])
-    r <- infer.typecheck_decls(state, modules, dict_from_list(builtin_entries() ++ extra), dict_empty(), dict_empty())
+    r <- typecheck_unenforced(state, [decls], extra)
     match r with
     | typed_ast.TypedErr pos msg -> CheckErr(pos, msg)
     | typed_ast.TypedOk _ env ->
-        match stored_effect_var_error(ast.flatten_modules(modules)) with
+        match stored_effect_var_error(decls) with
         | Nothing -> CheckOk(env)
         | Just (pos, msg) -> CheckErr(pos, msg)
 
