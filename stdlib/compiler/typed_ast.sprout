@@ -386,3 +386,36 @@ fn count_field(f: TypedRecordField) -> Int =
   match f with
   | TypedRecordField _ value -> 1 + count_expr(value)
 
+
+# ---------------------------------------------------------------------------
+# Instance dispatch keys
+# ---------------------------------------------------------------------------
+#
+# The bare class, then the outermost constructor of each argument: `Show_List`,
+# `Eq_Tuple2`. lowering's ctx_inst, resolve's Evidence and infer's @inst markers must
+# all compare equal, so heads keep their raw dotted names.
+
+export fn constraint_key_from_tc(c: ast.TypeConstraint) -> String =
+  match c with
+  | ast.TypeConstraint class_name type_args ->
+      constraint_key_str(string.after_last_dot(class_name), type_args)
+
+export fn constraint_key_str(class_name: String, type_args: List ast.TypeExpr) -> String =
+  match type_args with
+  | Nil -> class_name
+  | Cons h rest -> class_name ++ "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
+
+fn constraint_key_args_rest(args: List ast.TypeExpr) -> String =
+  match args with
+  | Nil -> ""
+  | Cons h rest -> "_" ++ type_expr_head_name(h) ++ constraint_key_args_rest(rest)
+
+# The outermost constructor; a tuple includes its arity so pairs and triples differ.
+export fn type_expr_head_name(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName name -> name
+  | ast.TypeApply base _ -> type_expr_head_name(base)
+  | ast.TypeArrow _ _ _ _ -> "Fn"
+  | ast.TypeThunk _ _ -> "Fn"
+  | ast.TypeEffect _ _ -> "Eff"
+  | ast.TupleType items -> types.tuple_head(list_length(items))

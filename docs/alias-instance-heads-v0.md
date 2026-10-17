@@ -31,6 +31,9 @@ An instance key is `@inst:{Class}:{head}`, built by four independent paths:
 | `resolve.type_expr_head_name` | the AST `TypeExpr` | no |
 | `lowering.constraint_key_from_tc` | the AST type args | no |
 
+The `resolve` and `lowering` rows have since become one function,
+`typed_ast.constraint_key_from_tc`.
+
 Three of the four read the head off the AST; the only path that expanded was the lookup side, because
 inference expands aliases to typecheck at all. Registration and lookup therefore computed different
 strings for one type, and because the key is a string a mismatch can only be a silent miss.

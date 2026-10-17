@@ -705,11 +705,11 @@ export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr
 #
 # A `type alias` is transparent (spec §5.6.2), so `instance C Name` where
 # `type alias Name = String` is an instance at `String`. Instance keys are built
-# from the head by four separate paths — `infer`'s two writers, `resolve`'s
-# `type_expr_head_name` and `lowering`'s `constraint_key_from_tc` — and only the
-# LOOKUP side starts from an inferred type, where the alias is already gone.
-# Expanding the head once, here, is what keeps those four agreeing; fixing each
-# path separately leaves four normalizations to keep in step.
+# from the head by three separate paths — `infer`'s two writers and
+# `typed_ast.constraint_key_from_tc`, which `resolve` and `lowering` share — and only
+# the LOOKUP side starts from an inferred type, where the alias is already gone.
+# Expanding the head once, here, is what keeps them agreeing; fixing each path
+# separately leaves three normalizations to keep in step.
 #
 # Every `where` clause is expanded too, at every depth: a hidden dictionary's slot
 # key spells its whole constraint (dict_slot_key), and a call rebuilds it from the
