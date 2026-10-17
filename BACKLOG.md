@@ -203,7 +203,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P2` **B2 — recursive instance-method dispatch fails instance resolution.** A class method
   calling itself from its own instance body reports `No instance of <Class> for <T>`. Not
   effect-related (the pure control fails identically) — it is the tyvar-identity / dict-resolution
-  gap. Blocks unifying the iteration combinators under a generic `Foldable`; also the message a
+  gap. Blocks unifying the iteration combinators under a generic `Foldable`, and a shared
+  `where Monoid t` fold a user's `Monoid.concat_all` could call; also the message a
   legitimate self-recursive instance method hits.
 - [ ] `P3` **Reject a user declaration that shadows an intercepted compiler intrinsic.** A
   headerless file defining `fn to_double`/`fn print`/`fn double_to_bits` has its call sites silently
@@ -849,7 +850,7 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict` forces callers to pre-stringify, which contradicts typeclass-based design. Unblocks
   `deriving (Hash)`.
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
-  and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `mconcat`, `list_dedup`,
+  and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).
   Document true complexity inline or fix to linear.
   Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.

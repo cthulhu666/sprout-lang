@@ -426,7 +426,7 @@ holds them reversed, so build it with these functions and never with the bare
 (spec §3.1), so nothing stops you, and the list comes out backwards.
 
 `bytes.builder_*` is the same pattern for `Bytes`, and `string.join` /
-`string_concat_many` are what to use for strings — see "Build strings with `++` and
+`string_concat_many` / `mconcat` are what to use for strings — see "Build strings with `++` and
 backtick templates" below, where accumulating in a loop is quadratic for the same
 reason.
 
