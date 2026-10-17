@@ -381,12 +381,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **GC and runtime**
 
-- [ ] `P2` **The marker looks up every field, scalars included.** `sprout_gc_drain_marks` sends each
-  child through `sprout_heap_lookup` (a region binary search) because values are untyped `i64`.
-  The runtime already holds each ctor's field kinds (`g_ctor_meta`, via `sprout_register_ctor`),
-  read only by `sprout_debug_adt`. Skip `i`/`b` fields by tag — safe once kinds match exact names
-  (PR #658). Records and wrap types are not registered; `Double` is kind `p`. Size it first with a
-  drain-edge counter by kind. `docs/native-sprout-runtime-v0.md` §5 Phase 1a.
 - [ ] `P2` **GC generational step** — bump-region nursery over the phase-2 regions, minor
   collections, write barrier, age/remembered bits already reserved. **Measured 2026-08-09, and it
   re-scoped the item:** the nursery ceiling is 97% for the compiler but 13-48% elsewhere, and
@@ -418,8 +412,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `is_large` uniformization (~9 branch sites — do it before the generational step multiplies them);
   single ownership of the "keep ≥ 1 normal region" invariant; close the OBJ tag-write window by
   passing the tag into the alloc path.
-- [ ] `P3` **Region allocator polish** — consider address-mask region lookup (1 MiB-aligned
-  regions) to replace the binary search, if the profile shows it.
 - [ ] `P3` **Sweep pass fusion** — pass 3 re-walks every region calling `slot_bytes` per live
   slot; fusible into pass 1 if freelist entries from released regions are handled. Only worth it if
   gc-profile shows sweep dominated by the extra pass.

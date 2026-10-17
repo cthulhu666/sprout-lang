@@ -339,7 +339,8 @@ run file: bootstrap-from-seed
 # Build {{file}} with GC profiling compiled in (-DSPROUT_GC_PROFILE) and run it
 # with SPROUT_GC_PROFILE=1, printing a "[gc profile] ..." summary to stderr at
 # exit: cycles, heap_lookup_calls, drain edges, sweep visits, mark-root slots,
-# gc_us, trace hits/misses, region_count, and freelist_hits. The hot-path
+# gc_us, trace hits/misses, region_count, and freelist_hits; then drain edges and
+# hits by source field kind (i/b/s/p/_, unregistered OBJ, non-OBJ). The hot-path
 # counters are compile-time gated, so a normal `just run` build is byte-identical.
 [group('dev')]
 gc-profile file: bootstrap-from-seed

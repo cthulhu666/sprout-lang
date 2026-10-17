@@ -1310,6 +1310,12 @@ static unsigned long long g_prof_drain_edges, g_prof_sweep_visits; /* hot */
 static unsigned long long g_prof_trace_hits, g_prof_trace_misses;  /* hot: drain-phase lookup outcomes */
 static unsigned long long g_prof_freelist_hits;                    /* hot: alloc reuse from freelist */
 static unsigned long long g_prof_cycles, g_prof_mark_slots, g_prof_gc_us; /* cold */
+/* hot: drain edges by source field kind, [bucket][lookup hit]. Buckets 0..4 are
+ * the field-kind codes, in SPROUT_PROF_EDGE_KINDS order. */
+#define SPROUT_PROF_EDGE_KINDS   "ibsp_"
+#define SPROUT_PROF_EDGE_UNREG   5   /* OBJ with no registered kinds */
+#define SPROUT_PROF_EDGE_NON_OBJ 6   /* closure, vector, tuple, map, ... */
+static unsigned long long g_prof_edge_kind[7][2];
 static int g_prof_enabled = -1;
 static int g_gc_tracing = 0;   /* set to 1 during drain to classify hit/miss */
 static int sprout_prof_on(void) {
@@ -1339,6 +1345,12 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
     g_prof_sweep_visits, g_prof_mark_slots, g_prof_gc_us,
     g_prof_trace_hits, g_prof_trace_misses,
     g_region_count, g_prof_freelist_hits);
+  static const char* const names[7] = { "i", "b", "s", "p", "_", "unreg", "non_obj" };
+  fprintf(stderr, "[gc profile] drain_edges by kind (edges/hits):");
+  for (int k = 0; k < 7; k++)
+    fprintf(stderr, " %s=%llu/%llu", names[k],
+            g_prof_edge_kind[k][0] + g_prof_edge_kind[k][1], g_prof_edge_kind[k][1]);
+  fprintf(stderr, "\n");
 }
 #else
 #  define SPROUT_PROF_HOT(stmt)  ((void)0)
@@ -2223,6 +2235,21 @@ static void sprout_gc_mark_ptr(void* ptr) {
   if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8);
 }
 
+#if defined(SPROUT_GC_PROFILE)
+/* Bucket an edge by the field kind of the slot it came from. OBJ fields use the
+ * ctor's registered kinds; an unregistered OBJ (record, wrap type) and every
+ * other heap kind get their own bucket. */
+static int sprout_prof_edge_bucket(void* payload, size_t i) {
+  uint64_t h = sprout_hdr_of(payload);
+  if (sprout_hdr_kind(h) != SPROUT_HEAP_OBJ) return SPROUT_PROF_EDGE_NON_OBJ;
+  CtorMeta* meta = find_ctor((long long)(sprout_hdr_aux(h) >> SPROUT_OBJ_ARITY_BITS));
+  if (meta == NULL || meta->field_kinds == NULL || i >= strlen(meta->field_kinds))
+    return SPROUT_PROF_EDGE_UNREG;
+  const char* at = strchr(SPROUT_PROF_EDGE_KINDS, meta->field_kinds[i]);
+  return at != NULL ? (int)(at - SPROUT_PROF_EDGE_KINDS) : SPROUT_PROF_EDGE_UNREG;
+}
+#endif
+
 /* Drain the grey-set worklist: expand each grey node (marked but children
  * not yet processed) into its children until all reachable nodes are black.
  * Must be called after sprout_gc_mark_roots() and before sprout_gc_sweep(). */
@@ -2235,6 +2262,7 @@ static void sprout_gc_drain_marks(void) {
       long long child_val = sprout_heap_child_value_payload(payload, i);
       SPROUT_PROF_HOT(g_prof_drain_edges++);
       void* child_hdr = sprout_heap_lookup((void*)(uintptr_t)child_val);
+      SPROUT_PROF_HOT(g_prof_edge_kind[sprout_prof_edge_bucket(payload, i)][child_hdr != NULL]++);
       if (child_hdr != NULL) gc_mark_enqueue((char*)child_hdr + 8);
     }
   }
