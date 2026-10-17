@@ -1,0 +1,62 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.string (concat, slice)
+import stdlib.net (TcpError, TcpConnection, TcpListener, close, close_listener, connect, listen_local, listen_on, local_port, tcp_error_message)
+
+# `==` on strings rejects on the byte lengths in the CSTR headers before comparing
+# bytes. Literals, GC strings and interned strings each write that header, so
+# every pairing is checked both ways: equal, and unequal by length or by content.
+# Runtime-made strings must carry one too; under SPROUT_GC_HDRCHECK=1 (as in CI)
+# `==` aborts on a String that does not.
+
+# A dict key comes back interned, a third header source.
+fn interned(s: String) -> String =
+  dict_set(s, 1, dict_empty()) |> dict_keys |> vec_get(0) |> maybe_with_default("(missing)")
+
+fn listen_error(r: Result TcpError TcpListener) -> String !{IO} =
+  match r with
+  | Ok l ->
+      do
+        close_listener(l)
+        "(ok)"
+  | Err e -> tcp_error_message(e)
+
+fn connect_error(r: Result TcpError TcpConnection) -> String !{IO} =
+  match r with
+  | Ok c ->
+      do
+        close(c)
+        "(ok)"
+  | Err e -> tcp_error_message(e)
+
+# A port that was just bound and released, so nothing listens on it.
+fn closed_port() -> Int !{IO} =
+  match listen_local(0) with
+  | Ok l ->
+      do
+        let port = local_port(l)
+        close_listener(l)
+        port
+  | Err _ -> 1
+
+fn main() -> Unit !{IO} =
+  do
+    let bad_port = listen_error(listen_local(65536))
+    let v6 = listen_error(listen_on("::1", 0))
+    let zero_port = connect_error(connect("127.0.0.1", 0))
+    let refused = connect_error(connect("127.0.0.1", closed_port()))
+    run_suite("str_eq_header", [
+      check_eq("literal = gc", "café" == concat("ca", "fé"), true),
+      check_eq("gc = literal", concat("ca", "fé") == "café", true),
+      check_eq("literal = interned", "café" == interned("café"), true),
+      check_eq("gc = interned", concat("ca", "fé") == interned("café"), true),
+      check_eq("empty literal = empty gc", "" == slice("abc", 1, 0), true),
+      check_eq("literal != longer gc", "caf" == concat("ca", "fé"), false),
+      check_eq("interned != shorter literal", interned("abcd") == "abc", false),
+      check_eq("same length, other bytes", "cafe" == concat("ca", "fx"), false),
+      check_eq("same length, other multibyte char", "café" == concat("caf", "è"), false),
+      check_eq("empty != one byte", "" == concat("", "a"), false),
+      check_eq("tcp error from a C literal", bad_port == "port must be in 0..65535", true),
+      check_eq("tcp error from a chosen literal", v6 == "IPv6 is not supported yet; host must be an IPv4 address", true),
+      check_eq("tcp connect error from a C literal", zero_port == "port must be in 1..65535", true),
+      check_eq("tcp error from strerror", refused == "Connection refused", true)
+    ])

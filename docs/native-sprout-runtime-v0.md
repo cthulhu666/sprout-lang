@@ -80,8 +80,8 @@ Limits on 2, both measured already:
 
 **Field kinds are not on this list.** The compiler computes them (`field_kinds.sprout`) and
 already passes them to the runtime: `sprout_register_ctor` stores them in `g_ctor_meta`, indexed
-by tag. Only `sprout_debug_adt` reads them. Using them in the marker was Phase 1a, dropped once
-measured.
+by tag. Only `sprout_debug_adt` and the `gc-profile` drain-edge counter read them. Using them in
+the marker was Phase 1a, dropped once measured.
 
 What Sprout code lacks today: unboxed byte access (`bytes_get` returns `Maybe Int`), raw memory,
 and a checked guarantee that a function does not allocate.
@@ -156,9 +156,17 @@ Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
   self-compile with every missed lookup done twice (14.7M more), 3.10 s against 3.10 s. So no
   variant that removes misses pays: not 1a, not registering records, not typed vectors.
   What the profile's `sprout_heap_lookup` time buys is hits, which this did not measure.
-- **1b. `str_eq` reads the header.** String literals already carry a CSTR header
-  (`ir_lowering.emit_str_global`), and `sprout_cstr_byte_len` already reads it. `str_eq`'s
-  length fast-reject still calls `sprout_heap_lookup` twice; it can make the same header read.
+- ~~**1b. `str_eq` reads the header.**~~ **Landed (2026-10-17).** The length fast-reject reads
+  both CSTR headers at payload-8, as `sprout_cstr_byte_len` does, instead of two
+  `sprout_heap_lookup` calls. Literals and interned strings are now rejected too. Self-compile
+  makes 13.34M `str_eq` calls, 12.44M of them unequal: the old check rejected 1.73M, the new one
+  9.16M, with no wrong reject. Interleaved 11-run A/B, user time, two sessions: medians
+  3.01 → 2.95 s, 2.90 → 2.82 s (−2–3%). Other workloads were not timed; every path does less
+  work than before. Verifying each reject under `SPROUT_GC_HDRCHECK=1` cost half the gain (2.84 s),
+  so it is not done: the sweep and `str_byte_len` already assert header length = `strlen`. What
+  HDRCHECK does check, off the hot path, is a String with no header at all: `tcp_net_err1` handed
+  out raw C literals and `strerror()` text, which a stray `0x0A` at s-8 would have made compare
+  unequal. It now copies them to managed strings.
 
 Exit: each change kept only if self-compile improves by more than its noise floor and no workload
 regresses past its own.

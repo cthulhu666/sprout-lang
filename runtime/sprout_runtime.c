@@ -3434,16 +3434,22 @@ static const char* fs_error_ctor(int err) {
   return "stdlib.fs.FsIoError";
 }
 
-/* Err(<ctor> "<detail>"). Rooting mirrors tcp_net_err1: each intermediate is a
- * GC local before the next allocation can run a collection. */
-static long long fs_err_ctor_msg(const char* ctor_name, const char* detail) {
-  long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, "stdlib.fs: out of memory");
+/* Err(<ctor> "<detail>") from a C string, which is copied to a managed String:
+ * callers pass C literals, strerror() and stack buffers, none of which carries the
+ * CSTR header a String must have (http_err_cstr adopts a malloc'd one instead).
+ * Each intermediate is a GC local before the next allocation can run a collection. */
+static long long sprout_err1_text(const char* ctor_name, const char* detail, const char* oom_ctx) {
+  long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, oom_ctx);
   SPROUT_GC_PUSH_I64_LOCAL(msg);
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), msg);
   SPROUT_GC_PUSH_I64_LOCAL(err);
   long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
   SPROUT_GC_POP_LOCALS(2);
   return out;
+}
+
+static long long fs_err_ctor_msg(const char* ctor_name, const char* detail) {
+  return sprout_err1_text(ctor_name, detail, "stdlib.fs: out of memory");
 }
 
 /* The payload carries the path as well as strerror: by the time an error
@@ -6137,18 +6143,18 @@ long long str_len(long long s_val) {
 
 _Bool str_eq(const char* left, const char* right) {
   if (left == NULL || right == NULL) sprout_fail("str_eq: null input");
-  /* Fast-reject: if both are managed CSTRs with differing byte lengths they
-   * cannot be equal (strcmp is byte-wise, so length equality is necessary). */
-  void* lhdr = sprout_heap_lookup((void*)left);
-  if (lhdr != NULL) {
-    void* rhdr = sprout_heap_lookup((void*)right);
-    if (rhdr != NULL) {
-      uint64_t lh, rh;
-      memcpy(&lh, lhdr, 8);
-      memcpy(&rh, rhdr, 8);
-      if ((lh & 0xFF) == SPROUT_HEAP_CSTR && (rh & 0xFF) == SPROUT_HEAP_CSTR &&
-          (lh >> 14) != (rh >> 14)) return 0;
-    }
+  /* Fast-reject on differing byte lengths, read from the CSTR header every String
+   * carries at payload-8 (see sprout_cstr_byte_len): two loads, no heap lookup.
+   * A String without one would be misread whenever its byte at s-8 is 10, so
+   * HDRCHECK aborts on it; that branch runs only off the both-CSTR path. */
+  uint64_t lh = sprout_hdr_of((void*)left), rh = sprout_hdr_of((void*)right);
+  int l_cstr = sprout_hdr_kind(lh) == SPROUT_HEAP_CSTR;
+  if (l_cstr && sprout_hdr_kind(rh) == SPROUT_HEAP_CSTR) {
+    if (sprout_hdr_aux(lh) != sprout_hdr_aux(rh)) return 0;
+  } else if (sprout_gc_hdrcheck_on()) {
+    fprintf(stderr, "[sprout] HDRCHECK: str_eq on a String with no CSTR header: \"%.60s\"\n",
+            l_cstr ? right : left);
+    abort();
   }
   return strcmp(left, right) == 0;
 }
@@ -7030,7 +7036,7 @@ static long long http_err_cstr(const char* ctor_name, char* payload) {
 }
 
 static long long http_err_text(const char* ctor_name, const char* payload) {
-  return http_err_cstr(ctor_name, dup_managed_cstr(payload, "http_request: out of memory"));
+  return sprout_err1_text(ctor_name, payload, "http_request: out of memory");
 }
 
 /* `body` is raw bytes with an explicit length, NOT a C string. It is copied into a BytesVal rather
@@ -9892,13 +9898,7 @@ static int base64_decode_bytes(const char* text, unsigned char** out_data, size_
 }
 
 static long long crypto_err1(const char* ctor_name, const char* payload) {
-  char* owned = dup_managed_cstr(payload, "crypto: out of memory");
-  SPROUT_HANDLE(h_payload, (long long)(uintptr_t)owned);
-  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload));
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+  return sprout_err1_text(ctor_name, payload, "crypto: out of memory");
 }
 
 static long long crypto_err2(const char* ctor_name, long long a0, long long a1) {
@@ -10037,18 +10037,16 @@ static void tcp_set_nonblocking(int fd) {
 }
 
 static long long tcp_net_ok(long long payload);
-static long long tcp_net_err1(const char* ctor_name, long long payload);
+static long long tcp_net_err1(const char* ctor_name, const char* detail);
 
-/* Err(TcpListenFailed "<step> <host>:<port>: <reason>"), closing `fd` if one is open. The message
- * is built on the stack, so it is copied to a managed string: tcp_net_err1 keeps the pointer as is.
+/* Err(TcpListenFailed "<step> <host>:<port>: <reason>"), closing `fd` if one is open.
  * `reason` is read before the close, which could overwrite errno. */
 static long long tcp_listen_fail(int fd, const char* step, const char* host, long long port,
                                  const char* reason) {
   char detail[160];
   snprintf(detail, sizeof(detail), "%s %s:%lld: %s", step, host, port, reason);
   if (fd >= 0) close(fd);
-  return tcp_net_err1("stdlib.net.TcpListenFailed",
-                      (long long)(uintptr_t)dup_managed_cstr(detail, "tcp_listen: out of memory"));
+  return tcp_net_err1("stdlib.net.TcpListenFailed", detail);
 }
 
 /* Bind and listen on an IPv4 literal; port 0 lets the OS pick, and tcp_listener_port reads it back.
@@ -10058,7 +10056,7 @@ static long long tcp_listen_fail(int fd, const char* step, const char* host, lon
 long long tcp_listen(const char* host, long long port) {
   if (host == NULL) sprout_fail("tcp_listen: null host");
   if (port < 0 || port > 65535) {
-    return tcp_net_err1("stdlib.net.TcpInvalidArgument", (long long)(uintptr_t)"port must be in 0..65535");
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument", "port must be in 0..65535");
   }
   struct sockaddr_in addr;
   memset(&addr, 0, sizeof(addr));
@@ -10069,7 +10067,7 @@ long long tcp_listen(const char* host, long long port) {
     const char* why = inet_pton(AF_INET6, host, &a6) == 1
       ? "IPv6 is not supported yet; host must be an IPv4 address"
       : "host must be an IPv4 address such as 127.0.0.1";
-    return tcp_net_err1("stdlib.net.TcpInvalidArgument", (long long)(uintptr_t)why);
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument", why);
   }
   int fd = socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) return tcp_listen_fail(-1, "socket", host, port, strerror(errno));
@@ -10126,14 +10124,8 @@ static long long tcp_net_err0(const char* ctor_name) {
   return out;
 }
 
-static long long tcp_net_err1(const char* ctor_name, long long payload) {
-  long long rooted_payload = payload;
-  SPROUT_GC_PUSH_I64_LOCAL(rooted_payload);
-  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(2);
-  return out;
+static long long tcp_net_err1(const char* ctor_name, const char* detail) {
+  return sprout_err1_text(ctor_name, detail, "tcp: out of memory");
 }
 
 long long tcp_connect(const char* host, long long port) {
@@ -10141,7 +10133,7 @@ long long tcp_connect(const char* host, long long port) {
   if (port < 1 || port > 65535) {
     return tcp_net_err1(
       "stdlib.net.TcpInvalidArgument",
-      (long long)(uintptr_t)"port must be in 1..65535"
+      "port must be in 1..65535"
     );
   }
   char port_buf[16];
@@ -10156,7 +10148,7 @@ long long tcp_connect(const char* host, long long port) {
   int gai = 0;
   int ncand = async_resolve(host, port_buf, cand, HTTP_MAX_CANDIDATES, &gai);
   if (ncand < 0) {
-    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)gai_strerror(gai));
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", gai_strerror(gai));
   }
 
   int fd = -1;
@@ -10205,13 +10197,13 @@ long long tcp_connect(const char* host, long long port) {
    * state read/write parks on EAGAIN require — no post-connect fcntl needed. */
 
   if (fd < 0) {
-    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)error_msg);
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", error_msg);
   }
 
   long long h = alloc_conn_handle();
   if (h < 0) {
     close(fd);
-    return tcp_net_err1("stdlib.net.TcpConnectFailed", (long long)(uintptr_t)"connection table full");
+    return tcp_net_err1("stdlib.net.TcpConnectFailed", "connection table full");
   }
   g_conn_fd[h] = fd;
   g_conn_used[h] = 1;
@@ -10398,7 +10390,7 @@ retry:
       scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
       continue;
     }
-    return tcp_net_err1("stdlib.net.TcpAcceptFailed", (long long)(uintptr_t)strerror(errno));
+    return tcp_net_err1("stdlib.net.TcpAcceptFailed", strerror(errno));
   }
   tcp_set_nonblocking(fd);   /* accepted conn parks on EAGAIN */
   long long h = alloc_conn_handle();
@@ -10434,7 +10426,7 @@ long long tcp_read_exact(long long conn, long long count) {
   if (count < 0) {
     return tcp_net_err1(
       "stdlib.net.TcpInvalidArgument",
-      (long long)(uintptr_t)"count must be >= 0"
+      "count must be >= 0"
     );
   }
   BytesVal* out = sprout_alloc_bytes_val("tcp_read_exact: out of memory");
@@ -10454,7 +10446,7 @@ long long tcp_read_exact(long long conn, long long count) {
         continue;
       }
       SPROUT_GC_POP_LOCALS(1);
-      return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
+      return tcp_net_err1("stdlib.net.TcpReadFailed", strerror(errno));
     }
     received += (size_t)n;
   }
@@ -10528,7 +10520,7 @@ long long tcp_write_all(long long conn, long long payload_h) {
   if (payload == NULL) sprout_fail("tcp_write_all: null payload");
   int err = 0;
   if (tcp_send_all(conn, payload->data, payload->len, TCP_WAIT_FOREVER, 0, &err) != TCP_SEND_OK)
-    return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(err));
+    return tcp_net_err1("stdlib.net.TcpWriteFailed", strerror(err));
   return tcp_net_ok((long long)payload->len);
 }
 
@@ -10553,7 +10545,7 @@ long long tcp_write_all_timeout(long long conn, long long payload_h, long long i
     case TCP_SEND_TIMEOUT:
       return tcp_net_err0("stdlib.net.TcpTimeout");
     case TCP_SEND_ERRNO:
-      return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(err));
+      return tcp_net_err1("stdlib.net.TcpWriteFailed", strerror(err));
     case TCP_SEND_OK:
       break;
   }
@@ -10579,7 +10571,7 @@ long long tcp_write_all_timeout(long long conn, long long payload_h, long long i
 long long tcp_wait(long long conn, long long interest, long long ms) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   if (interest != SPROUT_POLL_READ && interest != SPROUT_POLL_WRITE)
-    return tcp_net_err1("stdlib.net.TcpInvalidArgument", (long long)(uintptr_t)"tcp_wait: interest must be read or write");
+    return tcp_net_err1("stdlib.net.TcpInvalidArgument", "tcp_wait: interest must be read or write");
   if (ms <= 0) return tcp_net_ok(0);   /* budget already spent: "not ready", never a park on 0 */
   if (!scheduler_park_on_fd_timeout(g_conn_fd[conn], (int)interest, ms)) return tcp_net_ok(0);
   return tcp_net_ok(1);
@@ -10604,7 +10596,7 @@ long long tcp_write_some(long long conn, long long payload_h, long long offset) 
   ssize_t n = send(g_conn_fd[conn], payload->data + (size_t)offset, len, 0);
   if (n > 0) return tcp_net_ok((long long)n);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return tcp_net_err0("stdlib.net.TcpWouldBlock");
-  return tcp_net_err1("stdlib.net.TcpWriteFailed", (long long)(uintptr_t)strerror(errno));
+  return tcp_net_err1("stdlib.net.TcpWriteFailed", strerror(errno));
 }
 
 /* TRANSFER, the read half — and the piece that closes W2 R2 for `net`.
@@ -10639,14 +10631,14 @@ long long tcp_read_some(long long conn, long long max_bytes) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0("stdlib.net.TcpInvalidHandle");
   if (max_bytes <= 0)
     return tcp_net_err1("stdlib.net.TcpInvalidArgument",
-                        (long long)(uintptr_t)"tcp_read_some: max_bytes must be > 0");
+                        "tcp_read_some: max_bytes must be > 0");
   size_t want = (size_t)max_bytes;
   if (want > sizeof(g_tcp_read_scratch)) want = sizeof(g_tcp_read_scratch);
 
   ssize_t n = recv(g_conn_fd[conn], g_tcp_read_scratch, want, 0);
   if (n < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) return tcp_net_err0("stdlib.net.TcpWouldBlock");
-    return tcp_net_err1("stdlib.net.TcpReadFailed", (long long)(uintptr_t)strerror(errno));
+    return tcp_net_err1("stdlib.net.TcpReadFailed", strerror(errno));
   }
   if (n == 0) return tcp_net_err0("stdlib.net.TcpEndOfStream");
   /* Exact-sized: the result is retained by the caller's accumulator, so handing back a 64 KiB
