@@ -2984,8 +2984,11 @@ variable binds to at the call, wherever the variable sits in the method's
 parameters — not by the head of the argument that holds it.  Given `fn total(xs:
 List t) -> t`, the call `total([1, 2])` dispatches on `Int`, and `fn mk(f: Int ->
 b) -> String` called with `\x -> x + 1` dispatches on `Int` too.  The first
-parameter whose binding has a concrete head decides; a class variable that occurs
-only in the return type is dispatched by the expected result type.
+parameter whose binding has a concrete head decides.  When none does, the first
+binding is a type variable and the caller's constraint on that variable is
+forwarded, so `where Summ a, Summ b` keeps `total(xs: List a)` and `total(ys:
+List b)` apart.  A class variable that occurs only in the return type is dispatched
+by the expected result type.
 
 **Method-level constraints.**  A class method may end with its own `where`
 clause, constraining a type variable the *method* quantifies rather than the

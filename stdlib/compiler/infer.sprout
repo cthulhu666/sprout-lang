@@ -2386,14 +2386,13 @@ fn check_instance_for_marker(
             # the post-pass only rewrites return-position calls, so s3 is the last
             # chance to see the concrete type. (ADTs dodge this: a constructor
             # application node is already concretely typed.)
-            # No dispatch type at all: no binding is concrete and no parameter is the
-            # bare class variable (`List t` given `List a`), so there is nothing to
-            # gate on — Nothing keeps the ungated scan.
+            # No dispatch type at all: no argument binds the class variable, so there
+            # is nothing to gate on — Nothing keeps the ungated scan.
             let cname = types.type_id_name(class_name)
                 Just cv_ty = class_var_type_or_fallback(method_name, class_vars, typed_args, s3, env)
                   else check_instance_fwd(cname, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, NoDispatchType)
-                # The arg was found but its type is not concrete — that type IS the
-                # dispatch type, so the scan can be gated on it.
+                # A binding was found but is not concrete — it IS the dispatch type,
+                # so the scan can be gated on it.
                 Just head_str = concrete_type_str(cv_ty)
                   else check_instance_fwd(cname, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos, ByArg(cv_ty))
             in
@@ -2588,29 +2587,30 @@ fn find_fwd_tdict_in_args(class_name: String, args: List typed_ast.TypedExpr, en
 # class variable's binding in the first arg where that binding has a concrete
 # head. So `describe(tag: String, x: a)` dispatches on `x`, not on the leading
 # `tag`, and `total(xs: List t)` given `List Int` on `Int`, not on `List`.
-# Returning Nothing (no concrete binding) routes to the @fwd polymorphic path.
 #
-# With no concrete one, the argument at a parameter that IS the class variable is
-# still the dispatch value, its type still a variable: returned, it gates the marker
-# scan on that variable (check_instance_fwd). Not returned, the scan was class-only
-# and took the class's FIRST marker — another variable's whenever two constraints
-# share a class, as `(\z -> to_string(z))(y)` under `where ToString a, ToString b`
-# did. Gated, an unlinked lambda parameter is left for the post-pass, which forwards
-# it by the final substitution.
+# With no concrete one, the first binding is still the dispatch type, a variable:
+# returned, it gates the marker scan on that variable (check_instance_fwd). Not
+# returned, the scan was class-only and took the class's FIRST marker — another
+# variable's whenever two constraints share a class, as `(\z -> to_string(z))(y)`
+# under `where ToString a, ToString b`, or `total(xs)` and `total(ys)` with `xs:
+# List a`, `ys: List b`, did. Gated, an unlinked lambda parameter is left for the
+# post-pass, which forwards it by the final substitution. Nothing (no binding at
+# all) routes to the @fwd polymorphic path.
 fn class_var_type(
   method_type: types.Type,
   class_vars: List String,
   typed_args: List typed_ast.TypedExpr,
   subst: Dict types.Type
 ) -> Maybe types.Type =
-  match concrete_class_var_type(method_type, class_vars, typed_args, subst) with
+  match class_var_binding_where(has_concrete_head, method_type, class_vars, typed_args, subst) with
   | Just t -> Just(t)
-  | Nothing ->
-      match bare_class_var_arg(method_type, class_vars, typed_args) with
-      | Just arg -> Just(arg_type_under(subst, arg))
-      | Nothing -> Nothing
+  | Nothing -> class_var_binding_where(\_ -> true, method_type, class_vars, typed_args, subst)
 
-fn concrete_class_var_type(
+fn has_concrete_head(t: types.Type) -> Bool = concrete_type_str(t) != Nothing
+
+# The class variable's binding in the first arg where `keep` accepts it.
+fn class_var_binding_where(
+  keep: types.Type -> Bool,
   method_type: types.Type,
   class_vars: List String,
   typed_args: List typed_ast.TypedExpr,
@@ -2618,28 +2618,11 @@ fn concrete_class_var_type(
 ) -> Maybe types.Type =
   match (method_type, typed_args) with
   | (types.TFunc param ret _ _, [arg | rest]) ->
-      match concrete_class_var_binding(param, arg_type_under(subst, arg), class_vars) with
-      | Just t -> Just(t)
-      | Nothing -> concrete_class_var_type(ret, class_vars, rest, subst)
-  | (_, _) -> Nothing
-
-# What a class variable binds to at its position in `param`, if that has a concrete head.
-fn concrete_class_var_binding(param: types.Type, arg_t: types.Type,
-                              class_vars: List String) -> Maybe types.Type =
-  let Just t = find_map(find_class_var_in_type(param, arg_t, _), class_vars) else Nothing
-      Just _ = concrete_type_str(t) else Nothing
-  in Just(t)
-
-fn bare_class_var_arg(
-  method_type: types.Type,
-  class_vars: List String,
-  typed_args: List typed_ast.TypedExpr
-) -> Maybe typed_ast.TypedExpr =
-  match (method_type, typed_args) with
-  | (types.TFunc(types.TVar v) ret _ _, [arg | rest]) ->
-      if list_member(types.tyvar_identity(v), class_vars) then Just(arg)
-      else bare_class_var_arg(ret, class_vars, rest)
-  | (types.TFunc _ ret _ _, [_ | rest]) -> bare_class_var_arg(ret, class_vars, rest)
+      let arg_t = arg_type_under(subst, arg)
+      in
+        match find_map(find_class_var_in_type(param, arg_t, _), class_vars) with
+        | Just t -> if keep(t) then Just(t) else class_var_binding_where(keep, ret, class_vars, rest, subst)
+        | Nothing -> class_var_binding_where(keep, ret, class_vars, rest, subst)
   | (_, _) -> Nothing
 
 # Position-aware dispatch-type selection with a safe fallback: when the method's
