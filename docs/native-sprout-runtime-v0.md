@@ -163,7 +163,10 @@ Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
   9.16M, with no wrong reject. Interleaved 11-run A/B, user time, two sessions: medians
   3.01 → 2.95 s, 2.90 → 2.82 s (−2–3%). Other workloads were not timed; every path does less
   work than before. Verifying each reject under `SPROUT_GC_HDRCHECK=1` cost half the gain (2.84 s),
-  so it is not done: the sweep and `str_byte_len` already assert header length = `strlen`.
+  so it is not done: the sweep and `str_byte_len` already assert header length = `strlen`. What
+  HDRCHECK does check, off the hot path, is a String with no header at all: `tcp_net_err1` handed
+  out raw C literals and `strerror()` text, which a stray `0x0A` at s-8 would have made compare
+  unequal. It now copies them to managed strings.
 
 Exit: each change kept only if self-compile improves by more than its noise floor and no workload
 regresses past its own.
