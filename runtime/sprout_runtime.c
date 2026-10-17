@@ -3434,16 +3434,22 @@ static const char* fs_error_ctor(int err) {
   return "stdlib.fs.FsIoError";
 }
 
-/* Err(<ctor> "<detail>"). Rooting mirrors tcp_net_err1: each intermediate is a
- * GC local before the next allocation can run a collection. */
-static long long fs_err_ctor_msg(const char* ctor_name, const char* detail) {
-  long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, "stdlib.fs: out of memory");
+/* Err(<ctor> "<detail>"), the one builder for a one-String error. `detail` is copied
+ * to a managed String: callers pass C literals, strerror() and stack buffers, none of
+ * which carries the CSTR header a String must have. Each intermediate is a GC local
+ * before the next allocation can run a collection. */
+static long long sprout_err1_text(const char* ctor_name, const char* detail, const char* oom_ctx) {
+  long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, oom_ctx);
   SPROUT_GC_PUSH_I64_LOCAL(msg);
   long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), msg);
   SPROUT_GC_PUSH_I64_LOCAL(err);
   long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
   SPROUT_GC_POP_LOCALS(2);
   return out;
+}
+
+static long long fs_err_ctor_msg(const char* ctor_name, const char* detail) {
+  return sprout_err1_text(ctor_name, detail, "stdlib.fs: out of memory");
 }
 
 /* The payload carries the path as well as strerror: by the time an error
@@ -6141,14 +6147,13 @@ _Bool str_eq(const char* left, const char* right) {
    * carries at payload-8 (see sprout_cstr_byte_len): two loads, no heap lookup.
    * A String without one would be misread whenever its byte at s-8 is 10, so
    * HDRCHECK aborts on it; that branch runs only off the both-CSTR path. */
-  uint64_t lh, rh;
-  memcpy(&lh, left - 8, 8);
-  memcpy(&rh, right - 8, 8);
-  if ((lh & 0xFF) == SPROUT_HEAP_CSTR && (rh & 0xFF) == SPROUT_HEAP_CSTR) {
-    if ((lh >> 14) != (rh >> 14)) return 0;
+  uint64_t lh = sprout_hdr_of((void*)left), rh = sprout_hdr_of((void*)right);
+  int l_cstr = sprout_hdr_kind(lh) == SPROUT_HEAP_CSTR;
+  if (l_cstr && sprout_hdr_kind(rh) == SPROUT_HEAP_CSTR) {
+    if (sprout_hdr_aux(lh) != sprout_hdr_aux(rh)) return 0;
   } else if (sprout_gc_hdrcheck_on()) {
     fprintf(stderr, "[sprout] HDRCHECK: str_eq on a String with no CSTR header: \"%.60s\"\n",
-            (lh & 0xFF) == SPROUT_HEAP_CSTR ? right : left);
+            l_cstr ? right : left);
     abort();
   }
   return strcmp(left, right) == 0;
@@ -7031,7 +7036,7 @@ static long long http_err_cstr(const char* ctor_name, char* payload) {
 }
 
 static long long http_err_text(const char* ctor_name, const char* payload) {
-  return http_err_cstr(ctor_name, dup_managed_cstr(payload, "http_request: out of memory"));
+  return sprout_err1_text(ctor_name, payload, "http_request: out of memory");
 }
 
 /* `body` is raw bytes with an explicit length, NOT a C string. It is copied into a BytesVal rather
@@ -9893,13 +9898,7 @@ static int base64_decode_bytes(const char* text, unsigned char** out_data, size_
 }
 
 static long long crypto_err1(const char* ctor_name, const char* payload) {
-  char* owned = dup_managed_cstr(payload, "crypto: out of memory");
-  SPROUT_HANDLE(h_payload, (long long)(uintptr_t)owned);
-  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), sprout_handle_get(h_payload));
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+  return sprout_err1_text(ctor_name, payload, "crypto: out of memory");
 }
 
 static long long crypto_err2(const char* ctor_name, long long a0, long long a1) {
@@ -10125,16 +10124,8 @@ static long long tcp_net_err0(const char* ctor_name) {
   return out;
 }
 
-/* Copies `detail` to a managed String: callers pass C literals, strerror() and stack
- * buffers, none of which carries the CSTR header a String must have. */
 static long long tcp_net_err1(const char* ctor_name, const char* detail) {
-  long long payload = (long long)(uintptr_t)dup_managed_cstr(detail, "tcp: out of memory");
-  SPROUT_GC_PUSH_I64_LOCAL(payload);
-  long long err = sprout_make1(find_ctor_tag_by_name(ctor_name), payload);
-  SPROUT_GC_PUSH_I64_LOCAL(err);
-  long long out = sprout_make1(find_ctor_tag_by_name("Err"), err);
-  SPROUT_GC_POP_LOCALS(2);
-  return out;
+  return sprout_err1_text(ctor_name, detail, "tcp: out of memory");
 }
 
 long long tcp_connect(const char* host, long long port) {
