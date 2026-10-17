@@ -14,7 +14,7 @@ Throughout the IR pipeline (`ast_to_ir.sprout` → `ir_lowering.sprout`), String
 
 Implications for IR-pipeline edits:
 - `type_kind.type_is_non_heap_scalar` classifies `Int`/`Bool`/`Char`/`Double` as scalars; String is heap, so a String SSA value is an `i64` heap handle that must be rooted across GC-triggering ops.
-- Scalars match the **canonical name exactly**, in `type_kind` and in `field_kinds.ctor_field_kind`. A module's own `type Bool` canonicalises to `<module>.Bool`, a heap ADT; matching only the last segment would leave its values unrooted (`tests/stdlib/test_gc_shadowed_scalar_name.spr`).
+- Scalars match the **canonical name exactly**, in `type_kind` and in `field_kinds.ctor_field_kind`. A module's own `type Bool` canonicalises to `<module>.Bool`, a heap ADT; matching only the last segment would leave its values unrooted (`tests/stdlib/test_gc_shadowed_scalar_name.spr`). The CPR ctor index (`build_adt_ctor_index`) keys by canonical name for the same reason: prelude ADTs canonicalise to bare names, so a last-segment key for `<module>.Maybe` would replace the prelude `Maybe`'s tags (`tests/stdlib/test_cpr_shadowed_prelude_adt.spr`).
 - String literals lower to a `str_ptr` global coerced to `i64`. Char literals do **not** — see above.
 - String comparisons must coerce both operands back to `ptr` before calling `str_eq`/`str_compare` (see the `emit_ptr_comparison` lowering in `ir_lowering.sprout`).
 - `str_concat`, `str_slice`, etc.: called with `i64` args, return `i64`.

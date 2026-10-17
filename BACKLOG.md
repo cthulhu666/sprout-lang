@@ -1894,13 +1894,6 @@ deferral happened, not for current behaviour. Still open:
   scaffolding to remove. Still on the table: inline small generics before the CPR router runs;
   specialize per instantiated head; or attack allocation cost via the allocator-attributes item
   above. Re-file under whichever is chosen.
-- [ ] `P3` **Tier-2 CPR: bare-name `adt_index` collision.** `build_adt_ctor_index` keys by the bare
-  type name and every reader uses bare `type_head_name`, so two modules declaring width-2 types with
-  the same bare name collide last-write-wins; a catch-all repack then uses the wrong `(tag, arity)`
-  and can emit `IRGetField(box, 0)` on a genuinely nullary ctor — reading adjacent heap into a
-  rooted `val`, i.e. silent corruption, not a loud abort. A real fix is qualified type identity, not
-  `adt_index` alone. Also: the qualified key it inserts is currently DEAD — delete it or make the
-  reader disambiguate via it.
 - [ ] `P3` **Tier-2 CPR: unify the two worker-emission shells.** The active streaming path and the
   test-only batch path duplicate the same collect+index+emit+merge loop with different accumulator
   plumbing; only the shell diverges, so **IR-shape tests exercise a different shell than production
