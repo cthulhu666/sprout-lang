@@ -314,12 +314,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   iteration, so a long input overflows the stack: `json`'s string decoder died at 2^15 escapes
   until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a. Hit again
   by `http_server`'s keep-alive loop: ~2,700 requests on one connection exhausted the root pool.
-- [ ] `P2` **A captureless method closure is heap-allocated at every call, so `where Eq a` costs.**
+- [ ] `P3` **A captureless method closure is heap-allocated at every call, so `where Eq a` costs.**
   Passing a known instance's method, e.g. `list_member(name, scope)` at `Eq String`, emits
   `sprout_alloc_closure` for `@__sprout_ir_eta___tc_Eq_String_eq_*` each call, though it captures
-  nothing; the compiler's own IR has 71 such sites. Measured: the bundler on prelude `list_member`
-  peaks 13–21 MB higher compiling `compile_driver.sprout` (239–245 vs 224 MB), so it keeps a local
-  `str_list_member`. Fix: emit captureless closures as static constants, as string literals are.
+  nothing; 650 of the compiler's 894 closure sites capture nothing. On 2026-10-17's master the
+  bundler on prelude `list_member` peaks 247–252 vs 219–230 MB self-compiling, so it keeps a local
+  `str_list_member`; static constants (hand-patched seed) bring it to 227–236 MB. On #652's first
+  commit the same patch recovered nothing, and on master as is it gains nothing, so the win is
+  unstable. Fix: emit captureless closures as static constants, as string literals are.
 - [ ] `P3` **The CPR worker set is not closed over tail calls, so a wrapper's worker can box.**
   `collect_worker_callees` admits only callees some `match` scrutinises. A wrapper whose tail
   calls a function nothing else matches gets a worker, but `translate_tail_chain` finds no callee

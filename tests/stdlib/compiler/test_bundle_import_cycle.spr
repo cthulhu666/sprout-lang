@@ -1,0 +1,36 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.fs as fs
+import stdlib.env as env
+
+# Two modules that import each other: the bundler must stop with a cycle error
+# naming the module it re-entered, not recurse or bundle.
+
+fn cycle_error(r: bundler.BundleResult) -> String =
+  match r with
+  | bundler.BundleOk _ -> ""
+  | bundler.BundleErr _ msg -> msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> assert_true(state, "SPROUT_STDLIB_ROOT is set", false)
+    | Just stdlib_root ->
+        do
+          let root = "/tmp/sprout_bundle_import_cycle"
+          fs.make_dir_all(root ++ "/cyc")
+          fs.write_text(root ++ "/cyc/a.sprout", "module cyc.a\nimport cyc.b\nexport fn a() -> Int = 1\n")
+          fs.write_text(root ++ "/cyc/b.sprout", "module cyc.b\nimport cyc.a\nexport fn b() -> Int = 2\n")
+          let entry = root ++ "/main.spr"
+          fs.write_text(entry, "import cyc.a\nfn main() -> Unit !{IO} = print(a.a())\n")
+          r <- bundler.bundle_file_with_roots(source.FilePath(entry), source.StdlibRoot(stdlib_root), [root])
+          let msg = cycle_error(r)
+          assert_true(state, "a mutual import is a bundle error",
+            string.contains(msg, "Import cycle detected"))
+          assert_true(state, "the error names the re-entered module",
+            string.contains(msg, "cyc/a.sprout"))
+    summary(state)
