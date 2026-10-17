@@ -147,11 +147,15 @@ jobs:
         # c-runtime-test was wired into ci-fast-gates. Unversioned name so it tracks the
         # distro's default clang alongside the bindir rule below.
         #
+        # libsqlite3-dev and sqlite3: twelve-dollar-example links the system libsqlite3 and
+        # builds its test database with the CLI. The runner image has both today; named here
+        # so the gate does not depend on that.
+        #
         # Bounded: Ubuntu's apt mirrors stall. Worst green run here is 144 s.
         timeout-minutes: 5
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm clang libclang-rt-dev ripgrep
+          sudo apt-get install -y llvm clang libclang-rt-dev ripgrep libsqlite3-dev sqlite3
           LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
           echo "LLVM_BINDIR=$LLVM_BINDIR"
           echo "$LLVM_BINDIR" >> "$GITHUB_PATH"

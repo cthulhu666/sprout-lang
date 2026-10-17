@@ -1,0 +1,185 @@
+module sqlite.connection
+
+import stdlib.bytes (Utf8DecodeError)
+import stdlib.bytes as bytes
+import sqlite.types (SqliteError, SqliteInt, SqliteNull, SqliteOpenError, SqliteQueryError, SqliteDecodeError, SqliteResult, SqliteRow, SqliteText, SqliteValue, sqlite_error_message)
+
+# The `sqlite3*` as an Int. LINEAR: open with `sqlite_open`, use through
+# `borrowing` operations, release exactly once with `sqlite_close`. There are
+# no finalizers, so linearity is the only thing that stops a leaked handle.
+# Declared here without `(..)` so importers can neither forge one from an Int
+# nor match it apart without closing it.
+export type linear SqliteDb =
+  | SqliteDb Int
+
+# C side: src/sqlite_ffi.c. Handles are Ints. Column text that is plain UTF-8
+# crosses in one copy; all other text crosses one byte per call.
+extern fn sqlite_ffi_libversion_number() -> Int
+extern fn sqlite_ffi_open(path: String, flags: Int) -> Int !{IO}
+extern fn sqlite_ffi_close(db: Int) -> Int !{IO}
+extern fn sqlite_ffi_errcode(db: Int) -> Int !{IO}
+extern fn sqlite_ffi_errmsg_len(db: Int) -> Int !{IO}
+extern fn sqlite_ffi_errmsg_byte(db: Int, i: Int) -> Int !{IO}
+extern fn sqlite_ffi_changes(db: Int) -> Int !{IO}
+extern fn sqlite_ffi_last_insert_rowid(db: Int) -> Int !{IO}
+extern fn sqlite_ffi_exec(db: Int, sql: String) -> Int !{IO}
+extern fn sqlite_ffi_prepare(db: Int, sql: String) -> Int !{IO}
+extern fn sqlite_ffi_step(stmt: Int) -> Int !{IO}
+extern fn sqlite_ffi_finalize(stmt: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_count(stmt: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_type(stmt: Int, i: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_int(stmt: Int, i: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_text_len(stmt: Int, i: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_text_byte(stmt: Int, i: Int, k: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_text_plain(stmt: Int, i: Int) -> Bool !{IO}
+extern fn sqlite_ffi_column_text_str(stmt: Int, i: Int) -> String !{IO}
+extern fn sqlite_ffi_column_name_len(stmt: Int, i: Int) -> Int !{IO}
+extern fn sqlite_ffi_column_name_byte(stmt: Int, i: Int, k: Int) -> Int !{IO}
+
+# sqlite3.h result and type codes used here.
+let sqlite_ok: Int = 0
+let sqlite_row: Int = 100
+let sqlite_done: Int = 101
+let type_integer: Int = 1
+let type_text: Int = 3
+let type_null: Int = 5
+let sqlite_nomem: Int = 7
+
+# sqlite_ffi_prepare's return when SQL follows the first statement.
+let prepare_extra_sql: Int = 0 - 4294967296
+
+# SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI.
+let open_flags: Int = 70
+
+export fn sqlite_version_number() -> Int =
+  sqlite_ffi_libversion_number()
+
+# O(n log n) in n: one FFI call per byte, assembled with `builder_concat`.
+fn collect_bytes(byte_at: Int -> Int !{IO}, k: Int, acc: List Builder) -> List Builder !{IO} =
+  if k < 0 then acc
+  else collect_bytes(byte_at, k - 1, Cons(bytes.builder_byte(byte_at(k)), acc))
+
+# A negative `len` is the shim's out-of-memory signal.
+fn read_string(len: Int, byte_at: Int -> Int !{IO}) -> Result SqliteError String !{IO} =
+  if len < 0 then Err(SqliteQueryError(sqlite_nomem, "out of memory"))
+  else
+    match bytes.to_string(bytes.builder_build(bytes.builder_concat(collect_bytes(byte_at, len - 1, Nil)))) with
+    | Err (Utf8DecodeError reason) -> Err(SqliteDecodeError(reason))
+    | Ok s -> Ok(s)
+
+fn errmsg(handle: Int) -> String !{IO} =
+  match read_string(sqlite_ffi_errmsg_len(handle), \k -> sqlite_ffi_errmsg_byte(handle, k)) with
+  | Err err -> "<unreadable error message: " ++ sqlite_error_message(err) ++ ">"
+  | Ok msg -> msg
+
+# Call only right after a call that is known to have failed: errcode and
+# errmsg are undefined after a success.
+fn query_error(handle: Int) -> SqliteError !{IO} =
+  SqliteQueryError(sqlite_ffi_errcode(handle), errmsg(handle))
+
+fn db_handle(db: borrowing SqliteDb) -> Int =
+  match db with
+  | SqliteDb handle -> handle
+
+# `path` is a file path, ":memory:", or a `file:` URI. The file is created if
+# missing.
+export fn sqlite_open(path: String) -> Result SqliteError SqliteDb !{IO} =
+  let handle = sqlite_ffi_open(path, open_flags)
+  in if handle == 0 then Err(SqliteOpenError(7, "out of memory"))
+     else opened(handle, sqlite_ffi_errcode(handle))
+
+# A failed open still yields a handle carrying the error; read it, then close.
+fn opened(handle: Int, code: Int) -> Result SqliteError SqliteDb !{IO} =
+  if code == sqlite_ok then Ok(SqliteDb(handle))
+  else
+    let msg = errmsg(handle)
+        _ = sqlite_ffi_close(handle)
+    in Err(SqliteOpenError(code, msg))
+
+# Uses sqlite3_close_v2, so unfinalized statements do not make it fail; the
+# shim never leaves a statement open across calls anyway.
+export fn sqlite_close(db: consuming SqliteDb) -> Result SqliteError Unit !{IO} =
+  match db with
+  | SqliteDb handle ->
+      let code = sqlite_ffi_close(handle)
+      in if code == sqlite_ok then Ok(())
+         else Err(SqliteQueryError(code, "close failed"))
+
+export fn sqlite_changes(db: borrowing SqliteDb) -> Int !{IO} =
+  sqlite_ffi_changes(db_handle(db))
+
+export fn sqlite_last_insert_rowid(db: borrowing SqliteDb) -> Int !{IO} =
+  sqlite_ffi_last_insert_rowid(db_handle(db))
+
+fn column_name(stmt: Int, i: Int) -> Result SqliteError String !{IO} =
+  read_string(sqlite_ffi_column_name_len(stmt, i), \k -> sqlite_ffi_column_name_byte(stmt, i, k))
+
+fn column_names(stmt: Int, i: Int, n: Int, acc: Vec String) -> Result SqliteError (Vec String) !{IO} =
+  if i >= n then Ok(acc)
+  else
+    do
+      name <- column_name(stmt, i)
+      column_names(stmt, i + 1, n, vec_append(name, acc))
+
+# The byte path is the fallback: it reports what the one-call copy cannot take
+# (out of memory, NUL, invalid UTF-8) with the same errors as before.
+fn column_text(stmt: Int, i: Int) -> Result SqliteError SqliteValue !{IO} =
+  if sqlite_ffi_column_text_plain(stmt, i) then Ok(SqliteText(sqlite_ffi_column_text_str(stmt, i)))
+  else
+    do
+      s <- read_string(sqlite_ffi_column_text_len(stmt, i), \k -> sqlite_ffi_column_text_byte(stmt, i, k))
+      Ok(SqliteText(s))
+
+fn column_value(stmt: Int, i: Int) -> Result SqliteError SqliteValue !{IO} =
+  let kind = sqlite_ffi_column_type(stmt, i)
+  in if kind == type_integer then Ok(SqliteInt(sqlite_ffi_column_int(stmt, i)))
+  else if kind == type_null then Ok(SqliteNull)
+  else if kind == type_text then column_text(stmt, i)
+  else Err(SqliteDecodeError("unsupported column type code " ++ to_string(kind)))
+
+fn row_values(stmt: Int, names: Vec String, i: Int, acc: Vec (String, SqliteValue)) -> Result SqliteError SqliteRow !{IO} =
+  match vec_get(i, names) with
+  | Nothing -> Ok(SqliteRow(acc))
+  | Just name ->
+      do
+        value <- column_value(stmt, i)
+        row_values(stmt, names, i + 1, vec_append((name, value), acc))
+
+fn step_rows(handle: Int, stmt: Int, names: Vec String, acc: Vec SqliteRow) -> Result SqliteError (Vec SqliteRow) !{IO} =
+  let code = sqlite_ffi_step(stmt)
+  in if code == sqlite_done then Ok(acc)
+  else if code == sqlite_row then
+    do
+      row <- row_values(stmt, names, 0, vec_empty())
+      step_rows(handle, stmt, names, vec_append(row, acc))
+  else Err(query_error(handle))
+
+fn run_prepared(handle: Int, stmt: Int) -> Result SqliteError SqliteResult !{IO} =
+  do
+    names <- column_names(stmt, 0, sqlite_ffi_column_count(stmt), vec_empty())
+    rows <- step_rows(handle, stmt, names, vec_empty())
+    Ok(SqliteResult(names, rows))
+
+# Prepares, steps to completion, and finalizes ONE statement. SQL after it
+# (other than whitespace, `;`, and comments) is an error and nothing runs.
+# Empty SQL gives an empty result. All rows are held in memory.
+export fn sqlite_query(db: borrowing SqliteDb, sql: String) -> Result SqliteError SqliteResult !{IO} =
+  let handle = db_handle(db)
+      stmt = sqlite_ffi_prepare(handle, sql)
+  in if stmt > 0 then finalized(stmt, run_prepared(handle, stmt))
+     else if stmt == 0 then Ok(SqliteResult(vec_empty(), vec_empty()))
+     else if stmt == prepare_extra_sql then Err(SqliteQueryError(1, "sqlite_query takes one statement; use sqlite_exec for several"))
+     else Err(query_error(handle))
+
+fn finalized(stmt: Int, result: Result SqliteError SqliteResult) -> Result SqliteError SqliteResult !{IO} =
+  let _ = sqlite_ffi_finalize(stmt)
+  in result
+
+# Runs every statement in `sql` in order (sqlite3_exec) and discards rows, so
+# no column is decoded. Stops at the first error; statements before it stay
+# applied unless the script wraps them in a transaction.
+export fn sqlite_exec(db: borrowing SqliteDb, sql: String) -> Result SqliteError Unit !{IO} =
+  let handle = db_handle(db)
+      code = sqlite_ffi_exec(handle, sql)
+  in if code == sqlite_ok then Ok(())
+     else Err(query_error(handle))

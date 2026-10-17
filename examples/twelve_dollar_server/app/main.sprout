@@ -1,0 +1,283 @@
+module app.main
+
+import stdlib.bytes as bytes
+import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.env as env
+import stdlib.json (JsonString, json_parse, json_get_field, json_stringify)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_on, read_avail_timeout, write_all_utf8_by, tcp_error_message)
+import stdlib.string as string
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.time as time
+import sqlite.connection (SqliteDb, sqlite_open, sqlite_close)
+import sqlite.types (SqliteError, sqlite_error_message)
+import app.jwt (Claims, authenticate, auth_error_message, positive_id)
+import app.store (LikeOutcome, Liked, AlreadyLiked, NoSuchPost, configure, ping, feed, post, create_post, like)
+
+type Config = (secret: Bytes, started_us: Int)
+
+type Request = (method: String, path: String, auth: Maybe String, body: Bytes, keep_alive: Bool)
+
+type Response = (status: Int, body: String)
+
+# --- responses ----------------------------------------------------------------
+
+fn reason(status: Int) -> String =
+  match status with
+  | 200 -> "OK"
+  | 201 -> "Created"
+  | 400 -> "Bad Request"
+  | 401 -> "Unauthorized"
+  | 404 -> "Not Found"
+  | 503 -> "Service Unavailable"
+  | _ -> "Internal Server Error"
+
+fn render(resp: Response, keep_alive: Bool) -> String =
+  string_concat_many([
+    "HTTP/1.1 ", to_string(resp.status), " ", reason(resp.status),
+    "\r\nContent-Type: application/json\r\nContent-Length: ", to_string(string.byte_length(resp.body)),
+    "\r\n", connection, "\r\n", resp.body
+  ])
+where
+  connection = if keep_alive then "" else "Connection: close\r\n"
+
+fn error(status: Int, message: String) -> Response =
+  Response(status = status, body = `{"error":"${message}"}`)
+
+fn internal(err: SqliteError) -> Response !{IO} =
+  do
+    eprint(`db error: ${sqlite_error_message(err)}`)
+    error(500, "internal server error")
+
+# --- handlers -----------------------------------------------------------------
+
+fn health(cfg: Config, db: borrowing SqliteDb) -> Response !{IO} =
+  match ping(db) with
+  | Ok _ ->
+      do
+        now <- time.now_micros()
+        Response(status = 200, body = `{"status":"ok","db":"ok","uptime_s":${to_string((now - cfg.started_us) / 1000000)}}`)
+  | Err err ->
+      Response(status = 503, body = `{"status":"degraded","db":"unreachable","error":${quoted(sqlite_error_message(err))}}`)
+
+fn quoted(s: String) -> String =
+  json_stringify(JsonString(s))
+
+fn get_feed(db: borrowing SqliteDb) -> Response !{IO} =
+  match feed(db) with
+  | Ok body -> Response(status = 200, body = body)
+  | Err err -> internal(err)
+
+fn get_post(db: borrowing SqliteDb, raw_id: String) -> Response !{IO} =
+  let Just id = positive_id(raw_id) else error(400, "invalid post id")
+  in match post(db, id) with
+     | Ok (Just body) -> Response(status = 200, body = body)
+     | Ok Nothing -> error(404, "post not found")
+     | Err err -> internal(err)
+
+# The trimmed body, or the 400 that names what is wrong with it.
+fn post_body(raw: Bytes) -> Result Response String =
+  let Ok text = bytes.to_string(raw) else Err(error(400, "malformed JSON body"))
+      Ok value = json_parse(text) else Err(error(400, "malformed JSON body"))
+      Just(JsonString body) = json_get_field(value, "body") else Err(error(400, "body is required"))
+      trimmed = string.trim(body)
+  in if string.is_empty(trimmed) then Err(error(400, "body is required"))
+     else if string.length(trimmed) > 500 then Err(error(400, "body must be at most 500 characters"))
+     else Ok(trimmed)
+
+fn create(db: borrowing SqliteDb, who: Claims, req: Request) -> Response !{IO} =
+  match post_body(req.body) with
+  | Err resp -> resp
+  | Ok body ->
+      match create_post(db, who.user_id, who.username, body) with
+      | Ok json -> Response(status = 201, body = json)
+      | Err err -> internal(err)
+
+fn like_post(db: borrowing SqliteDb, who: Claims, raw_id: String) -> Response !{IO} =
+  let Just id = positive_id(raw_id) else error(400, "invalid post id")
+  in match like(db, who.user_id, id) with
+     | Ok Liked -> Response(status = 201, body = liked(false, id))
+     | Ok AlreadyLiked -> Response(status = 200, body = liked(true, id))
+     | Ok NoSuchPost -> error(404, "post not found")
+     | Err err -> internal(err)
+
+fn liked(already: Bool, id: Int) -> String =
+  `{"liked":true,"already_liked":${if already then "true" else "false"},"post_id":${to_string(id)}}`
+
+# Auth before anything else on authenticated routes, so a bad id behind a
+# missing token is still a 401.
+fn authed(cfg: Config, req: Request, k: local Claims -> Response !{IO}) -> Response !{IO} =
+  do
+    now <- time.wall_micros()
+    match authenticate(cfg.secret, now / 1000000, req.auth) with
+    | Ok who -> k(who)
+    | Err err -> error(401, auth_error_message(err))
+
+fn route(cfg: Config, db: borrowing SqliteDb, req: Request) -> Response !{IO} =
+  match (req.method, string.split(req.path, "/")) with
+  | ("GET", ["", "health"]) -> health(cfg, db)
+  | ("GET", ["", "feed"]) -> get_feed(db)
+  | ("GET", ["", "posts", id]) -> get_post(db, id)
+  | ("POST", ["", "posts"]) -> authed(cfg, req, \who -> create(db, who, req))
+  | ("POST", ["", "posts", id, "like"]) -> authed(cfg, req, \who -> like_post(db, who, id))
+  | _ -> error(404, "not found")
+
+# --- HTTP/1.1 framing ---------------------------------------------------------
+
+type Head = (method: String, path: String, auth: Maybe String, content_length: Int, keep_alive: Bool)
+
+fn crlf2() -> Bytes =
+  bytes.from_string("\r\n\r\n")
+
+fn without_query(target: String) -> String =
+  match string.split_once(target, "?") with
+  | Just (path, _) -> path
+  | Nothing -> target
+
+fn fold_header(head: Head, line: String) -> Head =
+  match string.split_once(line, ":") with
+  | Nothing -> head
+  | Just (name, value) ->
+      match string.to_lower_ascii(name) with
+      | "authorization" -> head with (auth = Just(string.trim(value)))
+      | "content-length" -> head with (content_length = int_or(-1, string.trim(value)))
+      | "connection" -> head with (keep_alive = string.to_lower_ascii(string.trim(value)) != "close")
+      | _ -> head
+
+# Matches the call in place rather than calling maybe_with_default, which would box the Maybe.
+fn int_or(fallback: Int, text: String) -> Int =
+  match parse_int(text) with
+  | Just n -> n
+  | Nothing -> fallback
+
+fn parse_head(block: Bytes) -> Maybe Head =
+  let Ok text = bytes.to_string(block) else Nothing
+      [first | lines] = string.split(text, "\r\n") else Nothing
+      [method, target, version] = string.split(first, " ") else Nothing
+      start = Head(method = method, path = without_query(target), auth = Nothing, content_length = 0, keep_alive = version == "HTTP/1.1")
+  in Just(list_fold(fold_header, start, lines))
+
+# Idle keep-alive connections stay open past nginx's 60 s upstream timeout;
+# a request that has started must finish within 10 s.
+let idle_ms: Int = 75000
+let request_ms: Int = 10000
+let max_head: Int = 16384
+let max_body: Int = 65536
+
+# What the buffered bytes hold so far.
+type Framed =
+  | NeedMore
+  | Malformed
+  | Framed Request Int  # the request, and the bytes it used
+
+fn frame(buf: Bytes) -> Framed =
+  match bytes.find(buf, crlf2()) with
+  | Nothing -> if bytes.length(buf) > max_head then Malformed else NeedMore
+  | Just at ->
+      match parse_head(bytes.take(buf, at)) with
+      | Nothing -> Malformed
+      | Just head ->
+          if head.content_length < 0 || head.content_length > max_body then Malformed
+          else if bytes.length(buf) < at + 4 + head.content_length then NeedMore
+          else
+            Framed(Request(method = head.method, path = head.path, auth = head.auth,
+                           body = bytes.slice(buf, at + 4, head.content_length), keep_alive = head.keep_alive),
+                   at + 4 + head.content_length)
+
+# The one sqlite connection, lent to a request and given back. Tasks cannot
+# share a borrowed linear handle, but a channel can move it. Handlers never
+# yield while they hold it, so with one slot it is never contended.
+type alias Pool = Chan SqliteDb
+
+fn with_db(cfg: Config, pool: Pool, req: Request) -> Response !{IO} =
+  match chan_recv(pool) with
+  | Closed -> error(500, "internal server error")
+  | Got db ->
+      do
+        resp <- route(cfg, db, req)
+        chan_send(pool, db)
+        resp
+
+# One function, self-recursive only: that compiles to a loop. A keep-alive
+# loop split across two functions got a plain call on one edge and overflowed
+# its green stack after a few thousand requests.
+fn serve_conn(cfg: Config, pool: Pool, conn: borrowing TcpConnection, buf: Bytes) -> Unit !{IO} =
+  match frame(buf) with
+  | Malformed -> respond_and_close(conn, error(400, "bad request"))
+  | NeedMore ->
+      match read_avail_timeout(conn, if bytes.length(buf) == 0 then idle_ms else request_ms) with
+      | Ok chunk -> serve_conn(cfg, pool, conn, bytes.append(buf, chunk))
+      | Err _ -> ()
+  | Framed req used ->
+      do
+        resp <- with_db(cfg, pool, req)
+        sent <- send(conn, render(resp, req.keep_alive))
+        if sent && req.keep_alive then serve_conn(cfg, pool, conn, bytes.drop(buf, used))
+        else ()
+
+fn send(conn: borrowing TcpConnection, payload: String) -> Bool !{IO} =
+  do
+    now <- time.now_micros()
+    match write_all_utf8_by(conn, payload, now + request_ms * 1000) with
+    | Ok _ -> true
+    | Err _ -> false
+
+fn respond_and_close(conn: borrowing TcpConnection, resp: Response) -> Unit !{IO} =
+  do
+    _ <- send(conn, render(resp, false))
+    ()
+
+fn handle(cfg: Config, pool: Pool, conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    serve_conn(cfg, pool, conn, bytes.empty())
+    close(conn)
+
+fn accept_loop(cfg: Config, scope: Scope, pool: Pool, listener: consuming TcpListener) -> Unit !{IO} =
+  match accept(listener) with
+  | Ok conn ->
+      do
+        task_spawn(scope, \_ -> handle(cfg, pool, conn))
+        accept_loop(cfg, scope, pool, listener)
+  | Err err ->
+      do
+        close_listener(listener)
+        panic(`accept failed: ${tcp_error_message(err)}`)
+
+fn env_or(name: String, fallback: String) -> String !{IO} =
+  match env.get(name) with
+  | Just value -> value
+  | Nothing -> fallback
+
+fn main() -> Unit !{IO} =
+  do
+    db_path <- env_or("SQLITE_PATH", "feed.db")
+    secret <- env_or("JWT_SECRET", "")
+    host <- env_or("HOST", "127.0.0.1")
+    port <- env_or("PORT", "3000")
+    started <- time.now_micros()
+    let cfg = Config(secret = bytes.from_string(secret), started_us = started)
+    match sqlite_open(db_path) with
+    | Err err -> panic(`cannot open ${db_path}: ${sqlite_error_message(err)}`)
+    | Ok db ->
+        match configure(db) with
+        | Err err ->
+            do
+              sqlite_close(db)
+              panic(`cannot configure ${db_path}: ${sqlite_error_message(err)}`)
+        | Ok _ ->
+            match listen_on(host, int_or(3000, port)) with
+            | Err err ->
+                do
+                  sqlite_close(db)
+                  panic(`listen failed: ${tcp_error_message(err)}`)
+            | Ok listener ->
+                do
+                  eprint(`listening on ${host}:${port}`)
+                  with_scope(\s -> serve(cfg, s, db, listener))
+
+# The server runs until the process is killed, so the pooled handle is never
+# closed.
+fn serve(cfg: Config, scope: Scope, db: consuming SqliteDb, listener: consuming TcpListener) -> Unit !{IO} =
+  do
+    pool <- chan_new(scope, 1)
+    chan_send(pool, db)
+    accept_loop(cfg, scope, pool, listener)
