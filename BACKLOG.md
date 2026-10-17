@@ -382,11 +382,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 **GC and runtime**
 
 - [ ] `P2` **The marker looks up every field, scalars included.** `sprout_gc_drain_marks` sends each
-  child through `sprout_heap_lookup` (a region binary search) because values are untyped `i64`;
-  `field_kinds.sprout` already knows which ctor fields are `Int`/`Bool`. Skip those via a
-  per-ctor mask — safe, since every other field is still looked up. Size it first with a
-  drain-edge counter by kind. `Double` is classed `p` today. `docs/native-sprout-runtime-v0.md`
-  §5 Phase 2a.
+  child through `sprout_heap_lookup` (a region binary search) because values are untyped `i64`.
+  The runtime already holds each ctor's field kinds (`g_ctor_meta`, via `sprout_register_ctor`),
+  read only by `sprout_debug_adt`. Skip `i`/`b` fields by tag — safe once kinds match exact names
+  (PR #658). Records and wrap types are not registered; `Double` is kind `p`. Size it first with a
+  drain-edge counter by kind. `docs/native-sprout-runtime-v0.md` §5 Phase 1a.
 - [ ] `P2` **GC generational step** — bump-region nursery over the phase-2 regions, minor
   collections, write barrier, age/remembered bits already reserved. **Measured 2026-08-09, and it
   re-scoped the item:** the nursery ceiling is 97% for the compiler but 13-48% elsewhere, and
@@ -423,14 +423,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **Sweep pass fusion** — pass 3 re-walks every region calling `slot_bytes` per live
   slot; fusible into pass 1 if freelist entries from released regions are handled. Only worth it if
   gc-profile shows sweep dominated by the extra pass.
-- [ ] `P3` **Measure `str_eq`'s length fast-reject** now that membership is a region binary-search:
-  two lookups guard every strcmp. Profile whether a short-string threshold or identifier interning
-  is the better shape.
+- [ ] `P3` **`str_eq`'s length fast-reject pays two `sprout_heap_lookup` calls** to find headers
+  that literals now carry too (`emit_str_global`). Read the CSTR header as `sprout_cstr_byte_len`
+  does, then measure. `docs/native-sprout-runtime-v0.md` §5 Phase 1b.
 
 **Strings and data representation**
 
-- [ ] `P3` **Static string literals: emit a length-prefix header word in the data segment** so all
-  strings get O(1) length via a uniform header read. Codegen change → seed refresh.
 - [ ] `P2` **`print` writes a string literal inside an ADT as a number.** `print(Err("boom"))`
   prints `Err(4373942584)`, while `print(Just(int_to_string(42) ++ "x"))` prints `Just(42x)`.
   `print_inline_value` in `runtime/sprout_runtime.c` renders a word as text only when
@@ -1668,10 +1666,6 @@ deferral happened, not for current behaviour. Still open:
 
 ### Compiler and codegen roadmap
 
-- [ ] `P3` **Split the field-kinds `'s'` byte into `'s'` (String, heap) and `'c'` (Char, scalar)**
-  in `stdlib/compiler/field_kinds.sprout` so Char fields stop being conservatively over-rooted. A
-  single-file edit now the encoder is consolidated. Trigger when Char field rooting becomes
-  measurable, or on the next cleanup pass.
 - [ ] `P3` **Expression-side list-literal sweep.** Rewrite multi-element `Cons(a, Cons(b, …))`
   *constructions* in `ast_to_ir.sprout`, `compiler.sprout` and similar to `[a, b]` literals, in
   batches with a seed refresh per batch. `docs/style-guide-v0.md` §8 has the policy on what to
