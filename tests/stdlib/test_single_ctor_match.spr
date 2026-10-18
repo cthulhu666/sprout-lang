@@ -63,6 +63,10 @@ let nested_src = box_decls ++ "fn pair_sum(p: Pair) -> Int =\n  match p with\n  
 let inside_multi_src =
   box_decls ++ "fn boxed_or(m: Maybe Box) -> Int =\n  match m with\n  | Just(Box(n)) -> n\n  | Nothing -> 0\n"
 
+# A multi-ctor match reads the tag once, and every arm's test shares it.
+let multi_src =
+  box_decls ++ "type Shape =\n  | Circle(Int)\n  | Square(Int)\n  | Dot\n\nfn side(s: Shape) -> Int =\n  match s with\n  | Circle r -> r\n  | Square n -> n\n  | Dot -> 0\n"
+
 let wrap_src = "wrap Cents = Int\n\nfn cents(c: Cents) -> Int =\n  match c with\n  | Cents n -> n\n"
 
 # Returns the emitted IR, or a string starting "ERR: ", so a broken fixture cannot
@@ -105,6 +109,8 @@ fn main() -> Unit !{IO} =
     inside <- translate_or_msg(inside_multi_src)
     assert_eq(state, "sole ctor inside Maybe: only Maybe's tag call", tag_calls(inside), 1)
     assert_eq(state, "a sole-ctor arm has no jump-only block", body_jumps(top), 0)
+    multi <- translate_or_msg(multi_src)
+    assert_eq(state, "a three-ctor match reads the tag once", tag_calls(multi), 1)
     wrapped <- translate_or_msg(wrap_src)
     assert_eq(state, "a wrap arm has no jump-only block", body_jumps(wrapped), 0)
 
