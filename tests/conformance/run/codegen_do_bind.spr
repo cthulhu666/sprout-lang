@@ -1,15 +1,6 @@
-no_prelude
-
-# This fixture defines its OWN `Maybe` and relies on `<-` binding it, so it opts
-# out of the prelude (docs/prelude-scope-v0.md §4.2 step 5).
-#
-# Not a workaround for this change: a `module demo` header reproduces the same
-# failure (`Int vs demo.Maybe Int`), because do-notation resolves the monad family
-# by UNQUALIFIED name and so does not recognise a user-defined `Maybe`. That gap
-# is pre-existing and tracked in BACKLOG; the file previously escaped it only by
-# getting no prelude at all, which is now explicit rather than incidental.
-
-type Maybe a = Just a | Nothing
+# `<-` on the prelude's `Maybe` unwraps it and ends the block on `Nothing`.
+# A file's own `Maybe` does not: it ends a block through `try` and a
+# `Propagate` instance (try_own_maybe.spr).
 
 fn safe_div(a: Int, b: Int) -> Maybe Int =
   if b == 0 then Nothing else Just(a / b)

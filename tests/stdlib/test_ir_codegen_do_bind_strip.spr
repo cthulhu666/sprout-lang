@@ -1,56 +1,17 @@
-no_prelude
+import stdlib.test (check_eq, run_suite)
 
-# Opted out of the prelude (docs/prelude-scope-v0.md §4.2 step 5): this fixture
-# redefines `Maybe` on purpose (see below) AND binds it with `<-`, and do notation
-# resolves the monad family by UNQUALIFIED name. It used to get no prelude by
-# accident, for having no header and no imports; now it says so.
+# `x <- f()` with `f : Maybe a !{IO}` binds `x : a`, and a `Nothing` ends the
+# block as its value. ast_to_ir's translate_do_bind_short lowers it: tag test,
+# a short branch that builds `Nothing`, a continue branch that reads the payload,
+# and a phi joining the two.
 
-# Verifies do-block Maybe wrapper-strip binding lowers via
-# --use-ir-codegen (M3 PR 13).  Closes the Maybe slice of the 8-entry IR_XFAIL
-# gap left by PR 11's do-block implementation.
-#
-# Semantics per memory project_do_block_result_io_quirk:
-#
-#   x <- f() where f returns Maybe a !{IO} gives `x : a` (both layers
-#   stripped: IO and Maybe wrapper).  Nothing propagates as the do-block's
-#   overall result, mirroring Haskell-style monadic short-circuit.
-#
-# Implementation in ast_to_ir.sprout's translate_do_bind_short helper:
-#   - emit IRCall to sprout_tag(scrut) → tag
-#   - icmp eq tag, <nothing-tag> → is_nothing
-#   - br i1 → short branch (build Nothing of result-ty via IRMakeCtor)
-#   - cont: IRGetField(scrut, 0) → payload, bind, recurse
-#   - phi the two branches into final do result
-#
-# Mirrors codegen.sprout's emit_do_maybe_bind (lines 2913-2956).
-#
-# Test convention (matches test_ir_codegen_short_circuit.spr and
-# test_ir_codegen_unary_arith.spr): redeclare `type Maybe a` locally so
-# `Just`/`Nothing` resolve as user-defined ctors and the ctor-routing path
-# stays inside the supported IR-codegen surface.  Bare prelude-imported
-# ctor names (`Just`/`Nothing` without local shadowing) currently hit a
-# separate TCall ctor-name routing gap — planned for the next PR.
-#
-# Result wrapper-strip is NOT covered in this PR — that path will land
-# once the same ctor-routing gap closes (the IR codegen helpers were
-# scaffolded then removed to avoid shipping untested dead code).
-
-# Local Maybe redefinition — see file-level comment for why.
-type Maybe a =
-  | Just a
-  | Nothing
-
-# A Maybe-returning IO helper.  Exercises the wrapper-strip without needing
-# us to write a bind on a prelude-imported Maybe value (separate gap).  The
-# helper returns Just(n) so the cont-branch is non-trivially exercised;
-# Nothing forms a short-circuit when the param signals it.
+# A Maybe-returning IO helper. It returns Just(n) so the continue branch is
+# exercised; a negative argument gives the short-circuit.
 fn maybe_id(n: Int) -> Maybe Int !{IO} =
   do
     if n < 0 then Nothing else Just(n)
 
-# Test 1 — single bind, named pattern, payload threaded into cont branch.
-# After PR 13: `n <- maybe_id(5)` binds `n : Int` and the next step observes
-# it as a plain Int, not a Maybe-wrapped value.
+# Test 1 — single bind, named pattern, payload threaded into the continue branch.
 fn bind_one_named() -> Maybe Int !{IO} =
   do
     n <- maybe_id(5)
@@ -78,5 +39,25 @@ fn bind_mixed() -> Maybe Int !{IO} =
     n <- maybe_id(1)
     maybe_id(n + n)
 
-# Trivial main — IR path requires `()` until further milestones.
-fn main() -> Unit !{IO} = ()
+# Test 5 — the first bind short-circuits.
+fn bind_first_short() -> Maybe Int !{IO} =
+  do
+    n <- maybe_id(-1)
+    maybe_id(n)
+
+# Test 6 — the second bind short-circuits, after the first bound a value.
+fn bind_second_short() -> Maybe Int !{IO} =
+  do
+    a <- maybe_id(2)
+    b <- maybe_id(-a)
+    maybe_id(a + b)
+
+fn main() -> Unit !{IO} =
+  run_suite("do bind strip", [
+    check_eq("one named", bind_one_named(), Just(6)),
+    check_eq("two named", bind_two_named(), Just(4)),
+    check_eq("wildcard", bind_wildcard(), Just(7)),
+    check_eq("mixed", bind_mixed(), Just(2)),
+    check_eq("first short", bind_first_short(), Nothing),
+    check_eq("second short", bind_second_short(), Nothing)
+  ])
