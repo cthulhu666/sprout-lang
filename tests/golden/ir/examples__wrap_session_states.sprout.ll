@@ -163,14 +163,12 @@ define i64 @examples.wrap_session_states.session_id(i64 %p$s) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%p$s, %body_0_0]
+  %t$1 = phi i64 [%p$s, %arm_0_0]
   ret i64 %t$1
 }
 

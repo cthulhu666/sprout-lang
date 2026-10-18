@@ -3172,6 +3172,8 @@ fn translate_match_arm_string(s: String, body: typed_ast.TypedExpr,
 
 # Translate a ConstructorPattern arm.
 # Emits tag test in dispatch_lbl, field binds at body_lbl start, body, recurses via miss_lbl.
+# A ctor that cannot miss (a wrap or a sole ctor) has no test: like a tuple arm,
+# it binds and runs its body from dispatch_lbl itself.
 fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                              body: typed_ast.TypedExpr,
                              rest_arms: List typed_ast.TypedMatchBranch,
@@ -3189,19 +3191,26 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
   | Just entry ->
       if entry.tag == -1
       then
-        # Wrap match: the scrutinee IS the inner value — no tag test, no IRGetField.
-        # Mirror codegen.sprout ctor_is_wrap path (emit_pattern_bind:1253, emit_ctor_pattern_test:1122).
-        # dispatch_lbl gets an unconditional branch to body_lbl; inner arg binds to s_name directly.
+        # Wrap match: the scrutinee IS the inner value, so the inner arg binds to s_name.
         do
           arm_captures <- bind_wrap_inner_arg(ctor_args, s_name, captures)
-          translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
-                                     Just(sprout_ir.IRBlock(dispatch_lbl, [sprout_ir.IRBr(body_lbl)])),
-                                     body_lbl, list_builder_empty, Nil, join_lbl, match_ty,
+          translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx, Nothing,
+                                     dispatch_lbl, list_builder_empty, Nil, join_lbl, match_ty,
                                      s_name, tag_name, params, env, idx,
+                                     acc_blocks, acc_phi, arm_captures, captures)
+      else if entry.sole
+      then
+        do
+          (extra_blocks, real_body_lbl, field_ops, arm_captures, idx2) <-
+            bind_pattern_fields(ctor_args, s_name, CtorFields(entry.field_kinds), idx,
+                                0, list_builder_empty, captures, dispatch_lbl,
+                                miss_lbl, env.prog.ctors, Nil)
+          translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx, Nothing,
+                                     real_body_lbl, field_ops, extra_blocks, join_lbl,
+                                     match_ty, s_name, tag_name, params, env, idx2,
                                      acc_blocks, acc_phi, arm_captures, captures)
       else
         # Regular ADT ctor: emit tag test in dispatch_lbl, bind fields at body_lbl.
-        # A sole ctor cannot miss, so its dispatch_lbl just branches to body_lbl.
         # Field ops start at idx+2 to leave room for the tag_const and cmp SSA names
         # allocated by the dispatch_lbl block.  body_lbl is the entry of the open block;
         # nested ConstructorPatterns may seal body_lbl and introduce extra intermediate
@@ -3210,18 +3219,17 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
           (extra_blocks, real_body_lbl, field_ops, arm_captures, idx3) <-
             bind_pattern_fields(ctor_args, s_name, CtorFields(entry.field_kinds), idx + 2,
                                 0, list_builder_empty, captures, body_lbl,
-                                fresh_arm_label(branch_idx + 1, base_idx), env.prog.ctors, Nil)
+                                miss_lbl, env.prog.ctors, Nil)
           translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
-                                     Just(if entry.sole
-                                          then sprout_ir.IRBlock(dispatch_lbl, [sprout_ir.IRBr(body_lbl)])
-                                          else arm_test_block(dispatch_lbl,
-                                                              eq_const_ops(tag_name, entry.tag, idx),
-                                                              fresh_name(idx + 1),
-                                                              branch_idx, base_idx)),
+                                     Just(arm_test_block(dispatch_lbl,
+                                                         eq_const_ops(tag_name, entry.tag, idx),
+                                                         fresh_name(idx + 1),
+                                                         branch_idx, base_idx)),
                                      real_body_lbl, field_ops, extra_blocks, join_lbl,
                                      match_ty, s_name, tag_name, params, env, idx3,
                                      acc_blocks, acc_phi, arm_captures, captures)
   where body_lbl = fresh_body_label(branch_idx, base_idx)
+        miss_lbl = fresh_arm_label(branch_idx + 1, base_idx)
 
 # Translate one arm's body at body_lbl, seal it with `br join`, then recurse
 # into rest_arms. `test_block` is the arm's test (Nothing for an always-match

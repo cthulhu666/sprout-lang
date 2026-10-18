@@ -189,24 +189,22 @@ define i64 @examples.existential_render.render(i64 %p$cell) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$cell, i64 0)
-  %t$5 = call i64 @sprout_field(i64 %p$cell, i64 1)
+  %t$2 = call i64 @sprout_field(i64 %p$cell, i64 0)
+  %t$3 = call i64 @sprout_field(i64 %p$cell, i64 1)
+  %t$5 = alloca i64
+  store i64 %t$2, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
-  store i64 %t$4, ptr %t$7
+  store i64 %t$3, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$9 = alloca i64
-  store i64 %t$5, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$6 = call i64 @__cm_ToString_to_string(i64 %t$4, i64 %t$5)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$4 = call i64 @__cm_ToString_to_string(i64 %t$2, i64 %t$3)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$6, %body_0_0]
+  %t$1 = phi i64 [%t$4, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -277,51 +275,49 @@ define i64 @__tc_ToString_examples_existential_render_Temp_to_string(i64 %p$t) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$t, i64 0)
-  %t$5 = call i64 @int_to_string(i64 %t$4)
-  %t$6 = call i64 @__tc_ToString_String_to_string(i64 %t$5)
-  %t$7 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
-  %t$8 = ptrtoint ptr %t$7 to i64
+  %t$2 = call i64 @sprout_field(i64 %p$t, i64 0)
+  %t$3 = call i64 @int_to_string(i64 %t$2)
+  %t$4 = call i64 @__tc_ToString_String_to_string(i64 %t$3)
+  %t$5 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  %t$11 = alloca i64
+  store i64 %t$4, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$13 = alloca i64
   store i64 %t$6, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$7 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$15 = alloca i64
-  store i64 %t$8, ptr %t$15
+  store i64 %t$7, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$9 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$17 = alloca i64
-  store i64 %t$9, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$10 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$10$ptr = inttoptr i64 %t$10 to ptr
-  %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
-  store i64 %t$8, ptr %t$10$f0
-  %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
-  store i64 %t$9, ptr %t$10$f1
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$20 = alloca i64
-  store i64 %t$10, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$11 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$11$ptr = inttoptr i64 %t$11 to ptr
-  %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
-  store i64 %t$6, ptr %t$11$f0
-  %t$11$f1 = getelementptr i64, ptr %t$11$ptr, i64 1
-  store i64 %t$10, ptr %t$11$f1
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$23 = alloca i64
-  store i64 %t$11, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$12 = call i64 @string_concat_many(i64 %t$11)
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$8 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %t$6, ptr %t$8$f0
+  %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
+  store i64 %t$7, ptr %t$8$f1
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$18 = alloca i64
+  store i64 %t$8, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$9 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$9$ptr = inttoptr i64 %t$9 to ptr
+  %t$9$f0 = getelementptr i64, ptr %t$9$ptr, i64 0
+  store i64 %t$4, ptr %t$9$f0
+  %t$9$f1 = getelementptr i64, ptr %t$9$ptr, i64 1
+  store i64 %t$8, ptr %t$9$f1
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$21 = alloca i64
+  store i64 %t$9, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$10 = call i64 @string_concat_many(i64 %t$9)
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$12, %body_0_0]
+  %t$1 = phi i64 [%t$10, %arm_0_0]
   ret i64 %t$1
 }
 

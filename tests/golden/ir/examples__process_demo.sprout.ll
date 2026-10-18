@@ -181,15 +181,13 @@ define i64 @stdlib.process.proc_exit(i64 %p$r) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$r, i64 0)
+  %t$2 = call i64 @sprout_field(i64 %p$r, i64 0)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$4, %body_0_0]
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -206,15 +204,13 @@ define i64 @stdlib.process.proc_stdout_bytes(i64 %p$r) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$r, i64 1)
+  %t$2 = call i64 @sprout_field(i64 %p$r, i64 1)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$4, %body_0_0]
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 

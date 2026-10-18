@@ -942,30 +942,28 @@ define i64 @stdlib.http.http_status_line(i64 %p$info) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$info, i64 0)
-  %t$5 = call i64 @sprout_field(i64 %p$info, i64 1)
-  %t$6 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.44, i64 0, i32 1, i64 0
+  %t$2 = call i64 @sprout_field(i64 %p$info, i64 0)
+  %t$3 = call i64 @sprout_field(i64 %p$info, i64 1)
+  %t$4 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.44, i64 0, i32 1, i64 0
+  %t$5 = ptrtoint ptr %t$4 to i64
+  %t$6 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.45, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
-  %t$8 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.45, i64 0, i32 1, i64 0
-  %t$9 = ptrtoint ptr %t$8 to i64
+  %t$11 = alloca i64
+  store i64 %t$2, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$13 = alloca i64
-  store i64 %t$4, ptr %t$13
+  store i64 %t$5, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$15 = alloca i64
-  store i64 %t$7, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$10 = call i64 @str_concat(i64 %t$9, i64 %t$5)
-  %t$11 = call i64 @str_concat(i64 %t$4, i64 %t$10)
-  %t$12 = call i64 @str_concat(i64 %t$7, i64 %t$11)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$8 = call i64 @str_concat(i64 %t$7, i64 %t$3)
+  %t$9 = call i64 @str_concat(i64 %t$2, i64 %t$8)
+  %t$10 = call i64 @str_concat(i64 %t$5, i64 %t$9)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$12, %body_0_0]
+  %t$1 = phi i64 [%t$10, %arm_0_0]
   ret i64 %t$1
 }
 

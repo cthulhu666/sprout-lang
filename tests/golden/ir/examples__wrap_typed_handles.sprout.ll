@@ -177,14 +177,12 @@ define i64 @examples.wrap_typed_handles.slot_of(i64 %p$h) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%p$h, %body_0_0]
+  %t$1 = phi i64 [%p$h, %arm_0_0]
   ret i64 %t$1
 }
 
