@@ -56,7 +56,9 @@ Inserts do: `ir_rooting.compute_live_out` 15%, `infer.partition_segment` 12%,
 wall median: an inline byte loop in place of `strcmp` (no call, no stub) 3.70 s against 3.70 s; the
 same plus a descent that skips the prefix already matched by both bounds on the path 3.65 s. Within
 noise. Bytes compared are not the cost. What is left is latency: each step loads a node and then
-the key it points to, 5.5 times per lookup. That is the working hypothesis, and it is untested.
+the key it points to, 5.5 times per lookup. §6 measures it.
+
+**A lookup memo.** It skips 45% of lookups and gains nothing measurable (§6).
 
 **Moving `Dict` to Sprout as it is.** It keeps every cost above and adds Sprout's own
 ([native-sprout-runtime-v0.md](native-sprout-runtime-v0.md) §1).
@@ -113,20 +115,48 @@ At each layer:
   a function of (root, key). 48% of lookups repeat a pair, which bounds what a cache could skip. It
   costs a key hash and a probe on every lookup, and must be cleared when a collection can reuse a
   root's address. Ceiling: half of lookup time (`map_get_unboxed` is 6.9%), ~3.5% of the
-  compile.
+  compile. Measured in §6: no gain.
 - **Representation — fewer dependent loads per step.** Keep the order, cut the latency: a wider
   persistent node (B-tree) with each key's leading bytes or hash stored in the node, so most steps
   decide without loading the key. Inserts copy wider nodes. Or a hash map beside the tree for
   lookups only, which doubles insert work (8% of samples today).
 
-## 6. Recommendation
+## 6. The memo, measured, and what it leaves
 
-Do not pick a representation yet: the claim that would choose between them, that descent latency
-is the cost, is untested, and the one cheap experiment that tests it is the memo. Hand-apply it in
-a scratch runtime, clear it on each collection, and measure wall time over interleaved runs. If
-it gains near its ~3.5% ceiling, latency is the cost and the wider node is worth prototyping next.
-If it gains nothing, `Dict`'s 20% is spread too thin to recover in `Dict`, and GC's 37% is the
-better target.
+**Memo.** Hand-applied in a scratch copy of the runtime, master `8d2a9d8d`: a direct-mapped table
+of 8,192 (root, key, value) entries in front of `bst_get`, tagged with `g_gc_cycle_count` so a
+collection invalidates it. Output identical byte for byte. Two variants:
+
+| variant | hits | instructions | cycles |
+|---|---:|---:|---:|
+| slot by key pointer, hit on pointer equality | 25.1% | −0.6% | −0.5% |
+| slot by key hash (FNV-1a), hit on `strcmp` | 44.7% | −0.1% | −0.6% |
+
+Medians of 8 runs, order alternated, from `time -l` (cycles and instructions retired, which
+other load on the machine moves less than wall time). The cycle ranges overlap: base
+11.72–12.43G, hashed 11.43–12.06G. The hashed variant reaches 44.7% of the 48% ceiling and gains
+nothing that survives the noise.
+
+**Why.** A build that always walks the tree and times each walk (`mach_absolute_time`, 5 ns of
+its own per walk subtracted), split by whether the memo would have hit, over 3 runs:
+
+| walk | count | ns per walk |
+|---|---:|---:|
+| first of its (root, key) | 2.34M | 62–81 |
+| repeat | 1.90M | 53–71 |
+
+Repeats are not cache-warm freebies: they cost 85–90% of a first walk. So the memo skips
+100–135 ms of walking per compile, and costs about as much itself: a probe of a 256 KB table on
+each of 4.24M lookups, plus a key hash in the hashed variant.
+
+**What is left to win.** All walks together are 245–325 ms, 8–10% of user time, about 11 ns per
+step. That bounds any fix to lookup, at any layer. A hash map still pays a hash, a load and a
+compare per lookup, so it might save half: ~4–5% of a compile, for a new runtime structure and
+the type split in [sorted-dict-v0.md](sorted-dict-v0.md). Inserts (~6%) and order-statistic walks
+are separate and smaller.
+
+**Recommendation.** Stop on `Dict` for speed. GC at 37% is the larger lever. Revisit `Dict`'s
+representation only together with `Dict k v`, which needs a runtime change anyway.
 
 ## 7. Tests
 
