@@ -145,7 +145,7 @@ matches PureScript and Sprout's own type-and-constructors rule.
 ## 8. Impact
 
 - **Syntax.** None.
-- **Semantics.** Rules 2-3 reject programs that compile today; §5 lists the in-tree ones. A
+- **Semantics.** Rule 2 rejects programs that compile today; §5 lists the in-tree ones. A
   `no_prelude` file's own `class Eq` is no longer reached by `==` on a non-primitive type. That
   was a capture; no in-tree `no_prelude` file relies on it (`run/type_classes.spr` and
   `run/instance_check.spr` call `eq` directly).
@@ -155,9 +155,10 @@ matches PureScript and Sprout's own type-and-constructors rule.
 - **Compatibility.** Measured 2026-10-18: repbit, repbit-cards, sprout-postgres and
   uncharted-suns declare no classes. In sprout_lang, `stdlib/json.sprout`'s `JsonEncode` is the
   only class outside the prelude and tests, and `encode_json` is called bare only inside its
-  module. How many tests call a method of an unimported module is **not measured**. Step 1 of
-  the implementation counts them: the bundler reports each bare method that resolved only through
-  the leak.
+  module. No file uses a bare method that rule 3 would leave unbound (a static scan of `stdlib/`,
+  `tests/`, `examples/`, `testsupport/`, `ide/` and `bench/`, 2026-10-18). Five imported modules
+  declare classes; the one cross-module use, `draw` in `test_existential_cross_module.spr`, is a
+  selective import. The `demo.enc_*` fixtures only define instances, which rule 4 covers.
 
 ## 9. Tests
 
@@ -169,6 +170,9 @@ matches PureScript and Sprout's own type-and-constructors rule.
 - Type errors: two classes sharing a method; a method and a `fn` sharing a name; a method from an
   unimported module; a class import beside a function import of one of its method names.
 - Hover on a user method still shows its class constraint.
+- Unchanged: `package_resolution/app_class_name_collision.spr` and
+  `app_cross_module_class_reject.spr` (instances of two modules' `Enc`, rule 4), whose message
+  must still name the method short.
 
 ## 10. Spec and docs on landing
 
