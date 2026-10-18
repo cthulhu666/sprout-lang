@@ -31,6 +31,12 @@ fn pair_sum(p: Pair) -> Int =
   match p with
   | Pair (Box a) (Box b) -> a + b
 
+# A nested test inside a sole-ctor arm can still miss, to the next arm.
+fn zero_first(p: Pair) -> Int =
+  match p with
+  | Pair (Box 0) _ -> 1
+  | Pair _ _ -> 2
+
 fn token_code(t: Token) -> Int =
   match t with
   | Token -> 7
@@ -57,6 +63,8 @@ let nested_src = box_decls ++ "fn pair_sum(p: Pair) -> Int =\n  match p with\n  
 let inside_multi_src =
   box_decls ++ "fn boxed_or(m: Maybe Box) -> Int =\n  match m with\n  | Just(Box(n)) -> n\n  | Nothing -> 0\n"
 
+let wrap_src = "wrap Cents = Int\n\nfn cents(c: Cents) -> Int =\n  match c with\n  | Cents n -> n\n"
+
 # Returns the emitted IR, or a string starting "ERR: ", so a broken fixture cannot
 # pass a count of zero.
 fn translate_or_msg(src: String) -> String !{IO} =
@@ -80,6 +88,12 @@ fn tag_calls(ir: String) -> Int =
   if str_starts_with(ir, "ERR: ") then -1
   else list_length(string.split(ir, "call i64 @sprout_tag(")) - 1
 
+# A sole or wrap arm starts its body at the arm's own label; a block that only
+# jumps to `body_` is wasted.
+fn body_jumps(ir: String) -> Int =
+  if str_starts_with(ir, "ERR: ") then -1
+  else list_length(string.split(ir, "br label %body_")) - 1
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -90,10 +104,15 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "nested sole ctors: no tag call", tag_calls(nested), 0)
     inside <- translate_or_msg(inside_multi_src)
     assert_eq(state, "sole ctor inside Maybe: only Maybe's tag call", tag_calls(inside), 1)
+    assert_eq(state, "a sole-ctor arm has no jump-only block", body_jumps(top), 0)
+    wrapped <- translate_or_msg(wrap_src)
+    assert_eq(state, "a wrap arm has no jump-only block", body_jumps(wrapped), 0)
 
     assert_eq(state, "unbox", unbox(Box(41)), 41)
     assert_eq(state, "nested sole ctors bind both fields", pair_sum(Pair (Box(3), Box(4))), 7)
     assert_eq(state, "nullary sole ctor", token_code(Token), 7)
+    assert_eq(state, "a nested test in a sole arm hits", zero_first(Pair (Box(0), Box(5))), 1)
+    assert_eq(state, "a nested test in a sole arm misses to the next arm", zero_first(Pair (Box(3), Box(5))), 2)
     assert_eq(state, "sole ctor inside Just", boxed_or(Just (Box(5)), 0), 5)
     assert_eq(state, "Nothing still takes its arm", boxed_or(Nothing, 9), 9)
     assert_eq(state, "multi-ctor arm before a sole-ctor field", side(Circle(2)), 2)

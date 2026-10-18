@@ -141,15 +141,13 @@ define i64 @range_start(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$value, i64 0)
+  %t$2 = call i64 @sprout_field(i64 %p$value, i64 0)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$4, %body_0_0]
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -157,15 +155,13 @@ define i64 @range_end(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$value, i64 1)
+  %t$2 = call i64 @sprout_field(i64 %p$value, i64 1)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$4, %body_0_0]
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -173,38 +169,36 @@ define i64 @range_step(i64 %p$value) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$value, i64 2)
-  %t$5 = add i64 0, 0
-  %t$6 = icmp slt i64 %t$4, %t$5
-  %t$7 = zext i1 %t$6 to i64
-  %t$15 = trunc i64 %t$7 to i1
-  br i1 %t$15, label %then_8, label %else_8
-then_8:
-  %t$10 = add i64 0, 1
-  %t$11$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$10)
-  %t$11 = extractvalue { i64, i1 } %t$11$agg, 0
-  %t$11$ovf = extractvalue { i64, i1 } %t$11$agg, 1
-  br i1 %t$11$ovf, label %ovfpanic_11, label %ovfok_11
-ovfpanic_11:
-  %t$12 = getelementptr inbounds { i64, [46 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
-  %t$13 = ptrtoint ptr %t$12 to i64
-  call i64 @panic(i64 %t$13)
+  %t$2 = call i64 @sprout_field(i64 %p$value, i64 2)
+  %t$3 = add i64 0, 0
+  %t$4 = icmp slt i64 %t$2, %t$3
+  %t$5 = zext i1 %t$4 to i64
+  %t$13 = trunc i64 %t$5 to i1
+  br i1 %t$13, label %then_6, label %else_6
+then_6:
+  %t$8 = add i64 0, 1
+  %t$9$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$8)
+  %t$9 = extractvalue { i64, i1 } %t$9$agg, 0
+  %t$9$ovf = extractvalue { i64, i1 } %t$9$agg, 1
+  br i1 %t$9$ovf, label %ovfpanic_9, label %ovfok_9
+ovfpanic_9:
+  %t$10 = getelementptr inbounds { i64, [46 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
   unreachable
-ovfok_11:
-  br label %join_8
-else_8:
-  %t$14 = add i64 0, 1
-  br label %join_8
-join_8:
-  %t$9 = phi i64 [%t$11, %ovfok_11], [%t$14, %else_8]
+ovfok_9:
+  br label %join_6
+else_6:
+  %t$12 = add i64 0, 1
+  br label %join_6
+join_6:
+  %t$7 = phi i64 [%t$9, %ovfok_9], [%t$12, %else_6]
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$9, %join_8]
+  %t$1 = phi i64 [%t$7, %join_6]
   ret i64 %t$1
 }
 

@@ -194,78 +194,76 @@ define i64 @examples.existential_shapes.describe(i64 %p$d) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$d, i64 0)
-  %t$5 = call i64 @sprout_field(i64 %p$d, i64 1)
-  %t$6 = call i64 @sprout_field(i64 %p$d, i64 2)
+  %t$2 = call i64 @sprout_field(i64 %p$d, i64 0)
+  %t$3 = call i64 @sprout_field(i64 %p$d, i64 1)
+  %t$4 = call i64 @sprout_field(i64 %p$d, i64 2)
+  %t$17 = alloca i64
+  store i64 %t$2, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$19 = alloca i64
-  store i64 %t$4, ptr %t$19
+  store i64 %t$3, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$21 = alloca i64
-  store i64 %t$5, ptr %t$21
+  store i64 %t$4, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$5 = call i64 @__cm_Shape_name(i64 %t$2, i64 %t$3, i64 %t$4)
+  %t$6 = call i64 @__tc_ToString_String_to_string(i64 %t$5)
+  %t$7 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$8 = ptrtoint ptr %t$7 to i64
   %t$23 = alloca i64
   store i64 %t$6, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$7 = call i64 @__cm_Shape_name(i64 %t$4, i64 %t$5, i64 %t$6)
-  %t$8 = call i64 @__tc_ToString_String_to_string(i64 %t$7)
-  %t$9 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
-  %t$10 = ptrtoint ptr %t$9 to i64
   %t$25 = alloca i64
   store i64 %t$8, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$9 = call i64 @__cm_Shape_area(i64 %t$2, i64 %t$3, i64 %t$4)
+  %t$10 = call i64 @__tc_ToString_Double_to_string(i64 %t$9)
+  %t$11 = call i64 @__tc_ToString_String_to_string(i64 %t$10)
   %t$27 = alloca i64
-  store i64 %t$10, ptr %t$27
+  store i64 %t$11, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$11 = call i64 @__cm_Shape_area(i64 %t$4, i64 %t$5, i64 %t$6)
-  %t$12 = call i64 @__tc_ToString_Double_to_string(i64 %t$11)
-  %t$13 = call i64 @__tc_ToString_String_to_string(i64 %t$12)
+  %t$12 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$29 = alloca i64
-  store i64 %t$13, ptr %t$29
+  store i64 %t$12, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$14 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$31 = alloca i64
-  store i64 %t$14, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$13 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$13$ptr = inttoptr i64 %t$13 to ptr
+  %t$13$f0 = getelementptr i64, ptr %t$13$ptr, i64 0
+  store i64 %t$11, ptr %t$13$f0
+  %t$13$f1 = getelementptr i64, ptr %t$13$ptr, i64 1
+  store i64 %t$12, ptr %t$13$f1
+  %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$32 = alloca i64
+  store i64 %t$13, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$14 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$14$ptr = inttoptr i64 %t$14 to ptr
+  %t$14$f0 = getelementptr i64, ptr %t$14$ptr, i64 0
+  store i64 %t$8, ptr %t$14$f0
+  %t$14$f1 = getelementptr i64, ptr %t$14$ptr, i64 1
+  store i64 %t$13, ptr %t$14$f1
+  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$35 = alloca i64
+  store i64 %t$14, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$15 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$15$ptr = inttoptr i64 %t$15 to ptr
   %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
-  store i64 %t$13, ptr %t$15$f0
+  store i64 %t$6, ptr %t$15$f0
   %t$15$f1 = getelementptr i64, ptr %t$15$ptr, i64 1
   store i64 %t$14, ptr %t$15$f1
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$34 = alloca i64
-  store i64 %t$15, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$16 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$16$ptr = inttoptr i64 %t$16 to ptr
-  %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
-  store i64 %t$10, ptr %t$16$f0
-  %t$16$f1 = getelementptr i64, ptr %t$16$ptr, i64 1
-  store i64 %t$15, ptr %t$16$f1
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$37 = alloca i64
-  store i64 %t$16, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$17$ptr = inttoptr i64 %t$17 to ptr
-  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
-  store i64 %t$8, ptr %t$17$f0
-  %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
-  store i64 %t$16, ptr %t$17$f1
-  %t$39 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$40 = alloca i64
-  store i64 %t$17, ptr %t$40
-  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$18 = call i64 @string_concat_many(i64 %t$17)
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$38 = alloca i64
+  store i64 %t$15, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$16 = call i64 @string_concat_many(i64 %t$15)
+  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$18, %body_0_0]
+  %t$1 = phi i64 [%t$16, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -328,28 +326,26 @@ define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_C
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$5 = load i64, ptr @examples.existential_shapes.pi
-  %t$6$fr = sitofp i64 %t$4 to double
+  %t$2 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$3 = load i64, ptr @examples.existential_shapes.pi
+  %t$4$fr = sitofp i64 %t$2 to double
+  %t$4 = bitcast double %t$4$fr to i64
+  %t$5$la = bitcast i64 %t$3 to double
+  %t$5$lb = bitcast i64 %t$4 to double
+  %t$5$fr = fmul double %t$5$la, %t$5$lb
+  %t$5 = bitcast double %t$5$fr to i64
+  %t$6$fr = sitofp i64 %t$2 to double
   %t$6 = bitcast double %t$6$fr to i64
   %t$7$la = bitcast i64 %t$5 to double
   %t$7$lb = bitcast i64 %t$6 to double
   %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
-  %t$8$fr = sitofp i64 %t$4 to double
-  %t$8 = bitcast double %t$8$fr to i64
-  %t$9$la = bitcast i64 %t$7 to double
-  %t$9$lb = bitcast i64 %t$8 to double
-  %t$9$fr = fmul double %t$9$la, %t$9$lb
-  %t$9 = bitcast double %t$9$fr to i64
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$9, %body_0_0]
+  %t$1 = phi i64 [%t$7, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -364,24 +360,22 @@ define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_R
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$5 = call i64 @sprout_field(i64 %p$s, i64 1)
-  %t$6$fr = sitofp i64 %t$4 to double
+  %t$2 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$3 = call i64 @sprout_field(i64 %p$s, i64 1)
+  %t$4$fr = sitofp i64 %t$2 to double
+  %t$4 = bitcast double %t$4$fr to i64
+  %t$5$fr = sitofp i64 %t$3 to double
+  %t$5 = bitcast double %t$5$fr to i64
+  %t$6$la = bitcast i64 %t$4 to double
+  %t$6$lb = bitcast i64 %t$5 to double
+  %t$6$fr = fmul double %t$6$la, %t$6$lb
   %t$6 = bitcast double %t$6$fr to i64
-  %t$7$fr = sitofp i64 %t$5 to double
-  %t$7 = bitcast double %t$7$fr to i64
-  %t$8$la = bitcast i64 %t$6 to double
-  %t$8$lb = bitcast i64 %t$7 to double
-  %t$8$fr = fmul double %t$8$la, %t$8$lb
-  %t$8 = bitcast double %t$8$fr to i64
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$8, %body_0_0]
+  %t$1 = phi i64 [%t$6, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -396,23 +390,21 @@ define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_S
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$5$fr = sitofp i64 %t$4 to double
+  %t$2 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$3$fr = sitofp i64 %t$2 to double
+  %t$3 = bitcast double %t$3$fr to i64
+  %t$4$fr = sitofp i64 %t$2 to double
+  %t$4 = bitcast double %t$4$fr to i64
+  %t$5$la = bitcast i64 %t$3 to double
+  %t$5$lb = bitcast i64 %t$4 to double
+  %t$5$fr = fmul double %t$5$la, %t$5$lb
   %t$5 = bitcast double %t$5$fr to i64
-  %t$6$fr = sitofp i64 %t$4 to double
-  %t$6 = bitcast double %t$6$fr to i64
-  %t$7$la = bitcast i64 %t$5 to double
-  %t$7$lb = bitcast i64 %t$6 to double
-  %t$7$fr = fmul double %t$7$la, %t$7$lb
-  %t$7 = bitcast double %t$7$fr to i64
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$7, %body_0_0]
+  %t$1 = phi i64 [%t$5, %arm_0_0]
   ret i64 %t$1
 }
 

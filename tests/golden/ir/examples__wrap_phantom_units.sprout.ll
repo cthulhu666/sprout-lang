@@ -490,15 +490,13 @@ define i64 @examples.wrap_phantom_units.to_radians(i64 %p$a) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   %t$2 = call i64 @stdlib.math.radians(i64 %p$a)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$2, %body_0_0]
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -506,15 +504,13 @@ define i64 @examples.wrap_phantom_units.sine(i64 %p$a) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   %t$2 = call i64 @stdlib.math.sin(i64 %p$a)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$2, %body_0_0]
+  %t$1 = phi i64 [%t$2, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -522,12 +518,8 @@ define i64 @examples.wrap_phantom_units.add(i64 %p$left, i64 %p$right) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %arm_0_2
 arm_0_2:
-  br label %body_0_2
-body_0_2:
   %t$4$la = bitcast i64 %p$left to double
   %t$4$lb = bitcast i64 %p$right to double
   %t$4$fr = fadd double %t$4$la, %t$4$lb
@@ -537,7 +529,7 @@ arm_1_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$4, %body_0_2]
+  %t$3 = phi i64 [%t$4, %arm_0_2]
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -551,14 +543,12 @@ define i64 @examples.wrap_phantom_units.angle_value(i64 %p$a) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%p$a, %body_0_0]
+  %t$1 = phi i64 [%p$a, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -571,8 +561,6 @@ define i64 @examples.wrap_phantom_units.to_km(i64 %p$l) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   %t$2 = load i64, ptr @examples.wrap_phantom_units.km_per_au
   %t$3$la = bitcast i64 %p$l to double
   %t$3$lb = bitcast i64 %t$2 to double
@@ -583,7 +571,7 @@ arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$3, %body_0_0]
+  %t$1 = phi i64 [%t$3, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -591,14 +579,12 @@ define i64 @examples.wrap_phantom_units.length_value(i64 %p$l) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%p$l, %body_0_0]
+  %t$1 = phi i64 [%p$l, %arm_0_0]
   ret i64 %t$1
 }
 

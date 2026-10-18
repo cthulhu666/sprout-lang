@@ -210,12 +210,8 @@ define i64 @examples.wrap_typed_money.cents_add(i64 %p$a, i64 %p$b) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %arm_0_2
 arm_0_2:
-  br label %body_0_2
-body_0_2:
   %t$4$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$a, i64 %p$b)
   %t$4 = extractvalue { i64, i1 } %t$4$agg, 0
   %t$4$ovf = extractvalue { i64, i1 } %t$4$agg, 1
@@ -245,12 +241,8 @@ define i64 @examples.wrap_typed_money.cents_sub(i64 %p$a, i64 %p$b) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   br label %arm_0_2
 arm_0_2:
-  br label %body_0_2
-body_0_2:
   %t$4$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$a, i64 %p$b)
   %t$4 = extractvalue { i64, i1 } %t$4$agg, 0
   %t$4$ovf = extractvalue { i64, i1 } %t$4$agg, 1
@@ -417,8 +409,6 @@ define i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %p$i
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$6 = alloca i64
@@ -438,7 +428,7 @@ arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$5, %body_0_0]
+  %t$1 = phi i64 [%t$5, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -446,8 +436,6 @@ define i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %p$amoun
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
   %t$2 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$4 = add i64 0, 100

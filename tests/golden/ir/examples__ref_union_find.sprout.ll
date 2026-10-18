@@ -132,31 +132,29 @@ define i64 @vec_append(i64 %p$value, i64 %p$vec) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$vec, i64 0)
+  %t$2 = call i64 @sprout_field(i64 %p$vec, i64 0)
+  %t$5 = alloca i64
+  store i64 %p$value, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
-  store i64 %p$value, ptr %t$7
+  store i64 %t$2, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$9 = alloca i64
-  store i64 %t$4, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$5 = call i64 @vector_append(i64 %t$4, i64 %p$value)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$12 = alloca i64
-  store i64 %t$5, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$6 = call i64 @sprout_alloc_obj(i64 10, i64 1)
-  %t$6$ptr = inttoptr i64 %t$6 to ptr
-  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
-  store i64 %t$5, ptr %t$6$f0
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$3 = call i64 @vector_append(i64 %t$2, i64 %p$value)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$10 = alloca i64
+  store i64 %t$3, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$4 = call i64 @sprout_alloc_obj(i64 10, i64 1)
+  %t$4$ptr = inttoptr i64 %t$4 to ptr
+  %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
+  store i64 %t$3, ptr %t$4$f0
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$6, %body_0_0]
+  %t$1 = phi i64 [%t$4, %arm_0_0]
   ret i64 %t$1
 }
 
@@ -164,20 +162,18 @@ define i64 @vec_get(i64 %p$index, i64 %p$vec) {
 entry:
   br label %arm_0_0
 arm_0_0:
-  br label %body_0_0
-body_0_0:
-  %t$4 = call i64 @sprout_field(i64 %p$vec, i64 0)
-  %t$6 = alloca i64
-  store i64 %t$4, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$5 = call i64 @vector_get(i64 %t$4, i64 %p$index)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$2 = call i64 @sprout_field(i64 %p$vec, i64 0)
+  %t$4 = alloca i64
+  store i64 %t$2, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$3 = call i64 @vector_get(i64 %t$2, i64 %p$index)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
-  %t$1 = phi i64 [%t$5, %body_0_0]
+  %t$1 = phi i64 [%t$3, %arm_0_0]
   ret i64 %t$1
 }
 
