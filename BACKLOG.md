@@ -842,6 +842,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict` site plus the `Eq`/`ToString`/`dict_keys`/`dict_values`/`dict_entries` surface. Today's
   `Dict` forces callers to pre-stringify, which contradicts typeclass-based design. Unblocks
   `deriving (Hash)`.
+- [ ] `P2` **`Dict` order is relied on but never promised; split out `SortedDict`.** Every
+  `dict_keys`/`dict_entries`/`set_to_list` returns ascending keys only because the runtime is a
+  tree; 62 compiler calls read it, unmarked. Proposal: `SortedDict`/`SortedSet` promise the order,
+  `Dict`/`Set` do not, and a scrambled-order test mode finds callers that rely on it. Stage 1 (add
+  the types) is safe now; stage 2 (migrate) waits on the measurement for a hash `Dict`.
+  `docs/sorted-dict-v0.md`.
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
   and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).

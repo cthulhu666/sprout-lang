@@ -1,10 +1,10 @@
 # `Dict`'s representation (v0, 2026-10-18)
 
 **Status:** investigation. No code change. Phase 3.4 of
-[native-sprout-runtime-v0.md](native-sprout-runtime-v0.md). The order `Dict` keys follow is
-normative ([spec-v0.md](spec-v0.md) §`Eq` and `Ord` on `Double`: `Dict` keys use `compare`'s
-total order); nothing
-here changes it.
+[native-sprout-runtime-v0.md](native-sprout-runtime-v0.md). The spec promises no order for `Dict`.
+Keys come out ascending because the runtime is a tree, and only `docs/stdlib-reference.md` says so,
+for `dict_entries_with_prefix`. [sorted-dict-v0.md](sorted-dict-v0.md) proposes making the order a
+type of its own.
 
 ## 1. Problem
 
@@ -63,7 +63,7 @@ the key it points to, 5.5 times per lookup. That is the working hypothesis, and 
 
 ## 3. Who needs the order
 
-The order is normative, and three things read it:
+Nothing in the spec promises the order, but three things read it:
 
 - `dict_keys` / `set_to_list`: an in-order walk. Small maps: 2.2 keys per call.
 - `dict_values`, `dict_entries`: `n` order-statistic descents, O(n log n). 19k of the 32k `nth`
@@ -90,8 +90,9 @@ re-sorted for each of ~770 queries over a map that has changed since the last on
 | Rust `HashMap` / `BTreeMap` (not persistent) | hash table / B-tree | arbitrary / key order | — |
 
 Every library here that offers a persistent hash map offers it **beside** an ordered tree, not
-instead of one, and none promises an order from the hash map. Sprout has one `Dict` whose order is
-normative, so a hash map cannot replace it without either a second type or a sorted view.
+instead of one, and none promises an order from the hash map. Sprout has one `Dict`, and its
+callers rely on the order, so a hash map cannot replace it without either a second type
+([sorted-dict-v0.md](sorted-dict-v0.md)) or a sorted view.
 
 Compilers avoid string keys in hot maps instead: rustc's `Symbol` is an index into an interner,
 and equality, hashing and **ordering** all work on the index (`rustc_span/src/symbol.rs`), so a map
@@ -107,7 +108,7 @@ At each layer:
   changing map, which is what makes a hash map possible. It is a type-checker change across every
   place a marker is written or read. Interning keys to `Int` symbols, the
   rustc and GHC shape, is the larger form of this: every compiler map changes key type, and the
-  order becomes interning order, which the spec does not allow for `Dict`.
+  order becomes interning order, which breaks every caller that reads keys in order.
 - **Function — a lookup memo.** A persistent map at a given address never changes, so a lookup is
   a function of (root, key). 48% of lookups repeat a pair, which bounds what a cache could skip. It
   costs a key hash and a probe on every lookup, and must be cleared when a collection can reuse a
