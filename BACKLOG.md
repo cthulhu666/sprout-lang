@@ -1258,6 +1258,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7.5) Type Classes
 
+- [ ] `P2` **Default method bodies.** A class method is a signature only (spec §8.5), so adding a
+  method breaks every user instance and a derivable one (`Foldable.fold_values`,
+  `Filterable.filter_values`) is still mandatory. A sort on `Ord` and `length` over `Foldable`
+  were both declined over this. Proposed: lift each default to
+  one `where C t` function in the class's module, an omitted method forwards to it, a cycle of
+  taken defaults is rejected at the instance. Awaiting approval: `docs/default-methods-v0.md`.
 - [ ] `P3` **A constraint materialises its whole superclass chain, so idiomatic combinators cost
   more than the code they replace.** `and_then` carries `where Monad m`, and `Monad m where
   Applicative m where Functor f`, so one call in `stdlib/json.sprout` emitted four eta wrappers
