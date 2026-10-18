@@ -188,8 +188,12 @@ All of it is filed already; this plan only orders it:
 - Profile the ~5× `MutVec` gap, then inline element access if access is the cost (same section).
 - Tight string-processing loops (same section).
 
-Exit: the merge-sort pair from [sorting-v0.md](sorting-v0.md) within a bound of C that is **not
-yet set** (§9, question 1). Until it is, Phase 3 cannot start.
+Exit: the Int-specialised half of the merge-sort pair (`bench/native_runtime/`) within **1.3× of
+C by median, at both n=440 and n=100k**; 1.2× is the aim. Baseline: 4.4× and 3.2× (2026-10-18).
+Until then, Phase 3 cannot start. The bound keeps Sprout's checks: element access stays
+bounds-checked and arithmetic overflow-checked. Where the pair's merge stands, whole-program
+linked: reads are already inlined loads, but each write is a call to `vector_mutset`, and the
+function body holds three calls to `sprout_tag`. Those calls are the first thing to profile.
 
 ### Phase 3 — move builtins, one per PR
 
@@ -265,7 +269,8 @@ every binary carries the port and every golden IR snapshot changes with it.
 
 ## 9. Open questions
 
-1. Phase 2's exit bound: how close to C must the merge-sort pair get before Phase 3 starts?
+1. ~~Phase 2's exit bound.~~ Decided 2026-10-18: 20–30% slower than C is acceptable, written as
+   the Phase 2 exit above (≤ 1.3× by median, aim 1.2×).
 2. Whether `Dict` should gain non-`String` keys, or keep its current surface.
 3. Whether the Phase 0 workload set is the right one.
 
