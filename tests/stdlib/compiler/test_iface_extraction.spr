@@ -104,7 +104,7 @@ fn sample_tuple_constraint_class() -> ast.Decl =
 # The method constraints of every class, after an encode/decode round trip.
 fn round_tripped_method_constraints(classes: List iface_codec.ClassInfo) -> List (String, String) =
   let Just iface = iface_codec.decode_iface_file(iface_codec.encode_iface_file(
-        iface_codec.IfaceFile(12, "tup.mod", Nil, Nil, classes, Nil))) else Nil
+        iface_codec.IfaceFile(iface_codec.iface_version, "tup.mod", Nil, Nil, classes, Nil))) else Nil
       iface_codec.IfaceFile _ _ _ _ [iface_codec.ClassInfo _ _ _ [iface_codec.NamedScheme _ sch]] _ = iface
         else Nil
   in types.scheme_constraints(sch)
@@ -155,7 +155,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "extract_ctor_infos: round-trips via iface encode/decode",
       match iface_codec.decode_iface_file(
         iface_codec.encode_iface_file(
-          iface_codec.IfaceFile(12, "mymod", Nil, ctors_mymod, Nil, Nil))) with
+          iface_codec.IfaceFile(iface_codec.iface_version, "mymod", Nil, ctors_mymod, Nil, Nil))) with
       | Nothing -> false
       | Just _ -> true)
 
@@ -196,7 +196,7 @@ fn main() -> Unit !{IO} =
 
     # --- round-trip: full IfaceFile with populated tables ---
 
-    let full_iface = iface_codec.IfaceFile(12, "mymod", Nil,
+    let full_iface = iface_codec.IfaceFile(iface_codec.iface_version, "mymod", Nil,
       iface_codec.extract_ctor_infos(prog, "mymod"),
       iface_codec.extract_class_infos(prog, "mymod"),
       iface_codec.extract_instance_infos(prog, "mymod"))

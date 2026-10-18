@@ -136,7 +136,9 @@ matches PureScript and Sprout's own type-and-constructors rule.
 - `compiler.with_class_constraint` (hover) looks up `@class:` by the name the scheme was found
   under, and `unqualify_entry_names` re-exposes a method's marker beside the method.
 - `iface_codec.extract_named_schemes` will now list user methods among the module's schemes, as
-  the exported values they are. Bump the iface version (12 to 13).
+  the exported values they are. The iface version goes from 12 to 13, and is now one constant,
+  `iface_codec.iface_version`, which the driver writes and the decoder checks: the first bump
+  changed the driver alone and every new iface failed to decode.
 - `verify_dispatch` keys its signature table on the method name. Its skip for a function of the
   same name (`collect_fn_names`) is dead under rule 2 and goes.
 

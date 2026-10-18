@@ -358,9 +358,11 @@ fn decode_type_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Li
 #      (NamedScheme stdlib.compiler.types.scheme_vars <scheme>)
 #      ...))
 #
-# `version` is encoded as a bare atom and checked by string equality. When
-# v2 lands, decoder gets an if-chain or a parsed-int conversion.
-# (Current version is 12 — see decode_iface_version for the change log.)
+# `version` is encoded as a bare atom and checked by string equality against
+# `iface_version`, which the driver also writes; see decode_iface_version for the
+# change log.
+
+export let iface_version: Int = 13
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -521,8 +523,10 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # through its first element's dictionary, and a nested argument not at all.
 # `WrapDecl` gaining a type-parameter list did NOT bump this: an IfaceFile carries
 # schemes, ctors, classes and instances, never decls, so no on-disk iface holds one.
+# v13: user class method names are module-qualified (`m.method`) in NamedScheme and
+# ClassInfo (docs/qualified-class-methods-v0.md); a v12 file names them bare.
 fn decode_iface_version(s: String) -> Maybe Int =
-  if s == "12" then Just(12) else Nothing
+  if s == int_to_string(iface_version) then Just(iface_version) else Nothing
 
 fn decode_named_scheme_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (List NamedScheme, Int) =
   decode_list_at(decode_named_scheme_at, s, bytes, i, total)

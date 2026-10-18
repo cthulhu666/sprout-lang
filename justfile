@@ -1555,6 +1555,13 @@ effect-report-smoke: bootstrap-from-seed
          tests.effects.iface_effects "$IFX" > "$TMPD/iface" 2>"$TMPD/iface.err"; then
     echo "effect-report-smoke: --emit-iface failed on $IFX" >&2; cat "$TMPD/iface.err" >&2; exit 1
   fi
+  # What the driver writes, its decoder must read: a version bump once reached the
+  # emitter alone, and every new iface was INVALID.
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --check-iface "$TMPD/iface" > "$TMPD/check" 2>&1; then
+    echo "effect-report-smoke: --check-iface rejects what --emit-iface wrote:" >&2
+    cat "$TMPD/check" >&2
+    failed=$((failed + 1))
+  fi
   # A declared !{IO} must reach the method's INNERMOST arrow, not just the
   # scheme's trailing effect field. `params_to_func_type` built every arrow pure.
   if ! grep -q '(TFunc (TConst String) (TConst Unit) (EffectIO) consume)' "$TMPD/iface"; then
