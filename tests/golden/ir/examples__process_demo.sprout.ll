@@ -179,21 +179,18 @@ entry:
 
 define i64 @stdlib.process.proc_exit(i64 %p$r) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$r)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 17
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$r, i64 0)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$r, i64 0)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.process.proc_ok(i64 %p$r) {
@@ -207,21 +204,18 @@ entry:
 
 define i64 @stdlib.process.proc_stdout_bytes(i64 %p$r) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$r)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 17
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$r, i64 1)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$r, i64 1)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.process.proc_stdout_text(i64 %p$r) {

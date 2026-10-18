@@ -314,40 +314,37 @@ entry:
 
 define i64 @examples.existential_widget.run(i64 %p$w, i64 %p$n) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$w)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 17
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$w, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %t$5, i64 2)
-  %t$7 = call i64 @sprout_field(i64 %t$5, i64 1)
-  %t$8 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$11 = alloca i64
-  store i64 %t$6, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$13 = alloca i64
-  store i64 %t$7, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$15 = alloca i64
-  store i64 %t$8, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$9 = call i64 @examples.existential_widget.step_n(i64 %t$7, i64 %t$8, i64 %p$n)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
-  call void @sprout_closure_arity_check(i64 %t$6, i64 1)
-  %t$10$env_ptr = inttoptr i64 %t$6 to ptr
-  %t$10$code = load ptr, ptr %t$10$env_ptr
-  %t$10 = call i64 (i64, i64) %t$10$code(i64 %t$6, i64 %t$9)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$w, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %t$4, i64 2)
+  %t$6 = call i64 @sprout_field(i64 %t$4, i64 1)
+  %t$7 = call i64 @sprout_field(i64 %t$4, i64 0)
+  %t$10 = alloca i64
+  store i64 %t$5, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$12 = alloca i64
+  store i64 %t$6, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$14 = alloca i64
+  store i64 %t$7, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$8 = call i64 @examples.existential_widget.step_n(i64 %t$6, i64 %t$7, i64 %p$n)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
+  call void @sprout_closure_arity_check(i64 %t$5, i64 1)
+  %t$9$env_ptr = inttoptr i64 %t$5 to ptr
+  %t$9$code = load ptr, ptr %t$9$env_ptr
+  %t$9 = call i64 (i64, i64) %t$9$code(i64 %t$5, i64 %t$8)
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$10, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$9, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @examples.existential_widget.step_n(i64 %p$step$in, i64 %p$st$in, i64 %p$n$in) {

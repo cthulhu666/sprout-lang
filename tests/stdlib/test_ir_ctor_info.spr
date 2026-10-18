@@ -9,9 +9,9 @@ import stdlib.compiler.sprout_ir as sprout_ir
 
 fn main() -> Unit !{IO} =
   let ci = sprout_ir.CtorInfo(tag = 5, arity = 2, max_arity = 3, field_kinds = "ips",
-                              field_names = ["a", "b"])
+                              field_names = ["a", "b"], sole = false)
       wrap_ci = sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1, field_kinds = "p",
-                                   field_names = Nil)
+                                   field_names = Nil, sole = true)
   in run_suite("ir_ctor_info", [
     check_eq("CtorInfo: tag", ci.tag, 5),
     check_eq("CtorInfo: arity", ci.arity, 2),
@@ -20,5 +20,7 @@ fn main() -> Unit !{IO} =
     check_eq("CtorInfo: a record's field_names keep declaration order", ci.field_names, ["a", "b"]),
     check_eq("CtorInfo: wrap sentinel tag is -1", wrap_ci.tag, -1),
     check_eq("CtorInfo: wrap sentinel arity is 1", wrap_ci.arity, 1),
-    check_true("CtorInfo: positional ctor has no field_names", wrap_ci.field_names == Nil)
+    check_true("CtorInfo: positional ctor has no field_names", wrap_ci.field_names == Nil),
+    check_true("CtorInfo: a wrap is its type's sole ctor", wrap_ci.sole),
+    check_true("CtorInfo: sole is read from its own field",! ci.sole)
   ])

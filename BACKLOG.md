@@ -1713,9 +1713,11 @@ deferral happened, not for current behaviour. Still open:
   look redundant, and they survive LLVM inlining, so small wrappers cost real time. Narrowing the
   rule needs a written GC-safety argument first, since a missing root corrupts the heap.
   Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
-- [ ] `P3` **Profile the ~5× gap between a `MutVec` loop in Sprout and the same loop in C.** The
-  cause is unknown and two cheap guesses failed; profile before choosing a fix such as inline
-  `MutVec` loads and stores. Evidence: `docs/sorting-v0.md` §Where the time goes, item 3.
+- [ ] `P3` **Merge-sort pair: 1.76× C at n=100k, against Phase 2's 1.3×.** The merge's two
+  tail calls keep `if y < x` a branch, which random input mispredicts; C's ternary is a `csel`.
+  A select-shaped merge fixes n=100k but slows n=440 to 1.40×, since each step reloads wrapper →
+  vector → `len`/`data`. Needs both: if-conversion of the two-tail-call shape, and a shorter
+  reload chain. `docs/native-sprout-runtime-v0.md` §Phase 2.
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.

@@ -181,11 +181,11 @@ regresses past its own.
 
 ### Phase 2 — close the Sprout-vs-C gap
 
-All of it is filed already; this plan only orders it. The first is the profile the exit below
-names:
+All of it is filed already; this plan only orders it. The first is what the exit below still
+needs:
 
-- Profile the ~5× `MutVec` gap, then inline element access if access is the cost (BACKLOG
-  §Runtime and performance roadmap).
+- The merge loop's branch, which C turns into a select (BACKLOG §Runtime and performance
+  roadmap).
 - Root call operands only for runtime builtins, not Sprout callees (same section; needs a written
   GC-safety argument first).
 - Non-escaping combinator closures allocate; every apply re-checks arity (same section).
@@ -198,9 +198,16 @@ names:
 Exit: the Int-specialised half of the merge-sort pair (`bench/native_runtime/`) within **1.3× of
 C by median, at both n=440 and n=100k**; 1.2× is the aim. Baseline: 4.4× and 3.2× (2026-10-18).
 Until then, Phase 3 cannot start. The bound keeps Sprout's checks: element access stays
-bounds-checked and arithmetic overflow-checked. Where the pair's merge stands, whole-program
-linked: reads are already inlined loads, but each write is a call to `vector_mutset`, and the
-function body holds three calls to `sprout_tag`. Those calls are the first thing to profile.
+bounds-checked and arithmetic overflow-checked.
+
+Where it stands: **1.18× at n=440, 1.76× at n=100k** (2026-10-18). Most of the baseline gap was
+two calls per element access, both removed. A match on `MutVec`, a type with one constructor, read
+the tag through `sprout_tag`, which LLVM can neither inline nor hoist. `vector_mutset` inlined its
+age-profile path and grew too big to inline itself. What is left at n=100k is the merge's
+`if y < x` branch: C compiles its ternary to `csel`, and random input mispredicts the branch about
+half the time. Written as one tail call over selects, the Sprout merge reaches 1.21× at n=100k but
+1.40× at n=440. Each step then reloads wrapper → vector → `len`/`data` in a chain on the critical
+path, because the store into `dst` may alias them.
 
 ### Phase 3 — move builtins, one per PR
 

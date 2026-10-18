@@ -40,18 +40,17 @@ Apple M3 Pro, `clang -O2`, random Ints in [0, 65536), ns per element.
    read their arguments (`op_exposes_operands` in `ir_rooting.sprout`). So `ord_lt` pushes its
    four arguments (two values, two dictionaries) around its call to `compare`, and LLVM cannot
    delete a call to `sprout_gc_push_i64_root`. `mutvec_sort` calls `compare` directly.
-3. **Sprout vs C on the same algorithm: about 5×, cause unknown.** Each element of each pass
-   makes three runtime calls (`vector_get_direct` twice, `vector_mutset` once), each with null,
-   bounds and ageprof checks, plus overflow-checked arithmetic. Two cheap guesses changed
-   nothing: LTO across the runtime, and folding the four mutually recursive merge functions into
-   two. It needs a profile before a fix.
+3. **Sprout vs C on the same algorithm: about 5×, now 1.2–1.8×.** Under the whole-program
+   link the cost was two calls per access: `sprout_tag`, for a match on the one-constructor
+   `MutVec`, and a `vector_mutset` too big to inline. Both are gone (2026-10-18); what is left is
+   in [native-sprout-runtime-v0.md](native-sprout-runtime-v0.md) §Phase 2.
 
 ## Options for going faster
 
 | option | gain | needs |
 |---|---|---|
 | A. Specialise `where C a` functions at concrete types | ~2× on every generic sort, and on generic code at large | compiler design |
-| B. Inline `MutVec` element access as loads/stores | up to the 5× in item 3, if access is the cost | profile first; compiler change, no builtin |
+| ~~B. Inline `MutVec` element access as loads/stores~~ | done 2026-10-18: item 3 | — |
 | C. C sort builtins for primitive vectors (`Int` radix, `Double`) | 50–500× over `vec_sort` | approval for new builtins; a way to reach them (below) |
 | D. Generic C sort calling a Sprout comparator | removes item 3, keeps item 1 | a builtin, and C→Sprout callbacks; not checked whether the runtime supports them safely |
 | E. Local mutation in pure code (ST-style) | lets pure `vec_sort` use the in-place sort, ~5× | language design |
