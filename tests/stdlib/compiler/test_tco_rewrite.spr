@@ -1,6 +1,7 @@
 module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
@@ -32,6 +33,13 @@ fn make_loop_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRPhi("%t$4", "i64", Cons(("%t$5", "then_3"), Cons(("%t$9", "else_3"), Nil))),
       Cons(sprout_ir.IRRet("%t$4"), Nil))),
     Nil)))))
+
+# Lower `f` after rooting it, as the pipeline does. Rooting temps start at
+# `next_idx`, past the rewrite's own.
+fn lower_rooted(f: sprout_ir.IRFunction, next_idx: Int) -> String =
+  ir_lowering.lower_fn_with_table(
+    ir_rooting.rewrite_one_fn_with_summary(f, dict_from_list([(sprout_ir.ir_fn_name(f), next_idx)]), dict_empty()),
+    dict_empty())
 
 # Pre-rooting IR for a NESTED tail call (two phi levels):
 #   g(n) = if c1 then base1 else (if c2 then base2 else g(x))
@@ -228,28 +236,33 @@ fn main() -> Unit !{IO} =
           assert_true(state, "single-arm: self-call gone", string.contains(sair, "call i64 @main.h") == false)
           assert_true(state, "single-arm: dead join_inner block removed", string.contains(sair, "join_inner") == false)
     match ast_to_ir.tco_rewrite(make_nested_fn(), 200) with
-    | (nested, _ni) ->
+    | (nested, nested_ni) ->
         do
           let nir = ir_lowering.lower_fn_with_table(nested, dict_empty())
           assert_true(state, "nested: renames param", string.contains(nir, "@main.g(i64 %p$n$in)"))
           assert_true(state, "nested: has tco_loop", string.contains(nir, "tco_loop:"))
           assert_true(state, "nested: back-edge to loop", string.contains(nir, "br label %tco_loop"))
           assert_true(state, "nested: self-call gone", string.contains(nir, "call i64 @main.g") == false)
+          # The pair only frees an iteration's root slots. An all-scalar loop has
+          # none, so rooting drops it: LLVM treats stackrestore as a write.
+          let rnir = lower_rooted(nested, nested_ni)
+          assert_true(state, "nested, rooted: no stacksave", string.contains(rnir, "@llvm.stacksave") == false)
+          assert_true(state, "nested, rooted: no stackrestore", string.contains(rnir, "@llvm.stackrestore") == false)
     match ast_to_ir.tco_rewrite(make_loop_fn(), 100) with
-    | (rewritten, _next_idx) ->
+    | (rewritten, next_idx) ->
         do
           let ir = ir_lowering.lower_fn_with_table(rewritten, dict_empty())
           assert_true(state, "renames params to $in",
             string.contains(ir, "define i64 @main.loop(i64 %p$n$in, i64 %p$s$in)"))
           assert_true(state, "has a tco_loop block", string.contains(ir, "tco_loop:"))
-          # Unrooted here: rooting runs after the rewrite, and lowering keeps the
-          # pair only for a function with a root slot.
-          assert_true(state, "no root slots, no stacksave", string.contains(ir, "@llvm.stacksave()") == false)
+          assert_true(state, "entry stacksaves", string.contains(ir, "@llvm.stacksave()"))
+          assert_true(state, "entry slots are one per line",
+            string.contains(ir, "store i64 %p$n$in, ptr %t$100\n  %t$101 = alloca i64\n"))
           assert_true(state, "loop header reloads n", string.contains(ir, "%p$n = load i64, ptr"))
           assert_true(state, "loop header reloads s", string.contains(ir, "%p$s = load i64, ptr"))
           assert_true(state, "back-edge stores new n", string.contains(ir, "store i64 %t$7, ptr"))
           assert_true(state, "back-edge stores new s", string.contains(ir, "store i64 %t$8, ptr"))
-          assert_true(state, "no root slots, no stackrestore", string.contains(ir, "@llvm.stackrestore") == false)
+          assert_true(state, "back-edge stackrestores", string.contains(ir, "@llvm.stackrestore"))
           assert_true(state, "back-edge branches to the loop", string.contains(ir, "br label %tco_loop"))
           assert_true(state, "the self-call is gone",
             string.contains(ir, "call i64 @main.loop") == false)
@@ -260,4 +273,9 @@ fn main() -> Unit !{IO} =
             string.contains(ir, "[%t$9, %else_3]") == false)
           assert_true(state, "phi keeps the base arm as its only incoming",
             string.contains(ir, "%t$4 = phi i64 [%t$5, %then_3]"))
+          # Under an empty summary str_len is a GC trigger, so rooting pushes s around it.
+          let kir = lower_rooted(rewritten, next_idx)
+          assert_true(state, "rooted loop pushes a root", string.contains(kir, "@sprout_gc_push_i64_root"))
+          assert_true(state, "rooted loop keeps its stacksave", string.contains(kir, "@llvm.stacksave()"))
+          assert_true(state, "rooted loop keeps its stackrestore", string.contains(kir, "@llvm.stackrestore"))
           summary(state)

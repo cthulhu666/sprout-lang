@@ -1097,9 +1097,34 @@ fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, summary: Dict Bool) -> sp
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
       sprout_ir.IRFunction(name, params, ret_ty,
-        rewrite_fn_blocks(blocks, compute_liveness(blocks),
-                          set_union(params_heap_origin(params), compute_heap_origin(blocks)),
-                          blocks, start_idx, summary, Nil))
+        drop_unused_stack_resets(
+          rewrite_fn_blocks(blocks, compute_liveness(blocks),
+                            set_union(params_heap_origin(params), compute_heap_origin(blocks)),
+                            blocks, start_idx, summary, Nil)))
+
+# A TCO loop saves and restores the stack only to free the root slots (`IRRoot`
+# allocas) an iteration adds. Without any, the pair goes: LLVM treats
+# stackrestore as a memory write, which keeps the loop's loads from being hoisted.
+fn drop_unused_stack_resets(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
+  if sprout_ir.blocks_have_op(sprout_ir.is_tco_entry, blocks) && ! sprout_ir.blocks_have_op (is_root_op, blocks) then
+    list_map(block_without_stack_reset, blocks)
+  else blocks
+
+fn is_root_op(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRRoot _ _ _ -> true
+  | _ -> false
+
+fn block_without_stack_reset(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
+  match b with
+  | sprout_ir.IRBlock label ops -> sprout_ir.IRBlock(label, list_map(op_without_stack_reset, ops))
+
+fn op_without_stack_reset(op: sprout_ir.IROp) -> sprout_ir.IROp =
+  match op with
+  | sprout_ir.IRTcoEntry slots _ -> sprout_ir.IRTcoEntry(slots, "")
+  | sprout_ir.IRTcoBack stores _ loop_lbl -> sprout_ir.IRTcoBack(stores, "", loop_lbl)
+  | sprout_ir.IRTailCall r callee args _ -> sprout_ir.IRTailCall(r, callee, args, "")
+  | _ -> op
 
 # ---------------------------------------------------------------------------
 # Seed heap_origin from function parameters.

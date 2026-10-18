@@ -472,8 +472,8 @@ export type IROp (..) =
   # Lowers to, for each: `<slot> = alloca <ty>` + `store <ty> <in>, ptr <slot>`;
   # then `<sp_save> = call ptr @llvm.stacksave()`.  Slot allocas MUST precede the
   # stacksave so stackrestore (on the back-edge) frees only per-iteration root
-  # allocas, never the slots.  Lowering empties sp_save, and drops both, in a
-  # function with no IRRoot.  The caller appends `IRBr "tco_loop"`.  No GC root
+  # allocas, never the slots.  Rooting empties sp_save, and lowering drops both, in
+  # a function it gives no IRRoot.  The caller appends `IRBr "tco_loop"`.  No GC root
   # push — rooting is handled by the liveness pass on the loaded values.
   | IRTcoEntry (List (String, String, String)) String
   # IRTcoLoad <loaded> <lltype> <slot> <kind>  — one per param, at the top of the
@@ -601,6 +601,20 @@ export fn op_direct_callee(op: IROp) -> Maybe String =
   | IRTcoLoad _ _ _ _ -> Nothing
   | IRTcoBack _ _ _ -> Nothing
   | IRTailCall _ _ _ _ -> Nothing
+
+# True iff some op in some block satisfies `pred`.
+export fn blocks_have_op(pred: IROp -> Bool, blocks: List IRBlock) -> Bool =
+  any(\b -> block_has_op(pred, b), blocks)
+
+fn block_has_op(pred: IROp -> Bool, b: IRBlock) -> Bool =
+  match b with
+  | IRBlock _ ops -> any(pred, ops)
+
+# True for the op that opens a self-TCO loop: the function is already rewritten.
+export fn is_tco_entry(op: IROp) -> Bool =
+  match op with
+  | IRTcoEntry _ _ -> true
+  | _ -> false
 
 # CtorReg carries the metadata emitted as @sprout_register_ctor calls in @main.
 # Fields: name (source-level, possibly qualified), tag, arity, field_kinds.

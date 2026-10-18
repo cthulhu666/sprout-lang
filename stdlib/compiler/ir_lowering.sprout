@@ -374,7 +374,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
   | sprout_ir.IRTruncI64ToI1 r s ->
       "  " ++ r ++ " = trunc i64 " ++ s ++ " to i1"
   # TCO entry: alloca + store each param slot, then save the stack pointer
-  # unless sp is "" (drop_unused_stack_resets). Slot allocas precede the stacksave
+  # unless sp is "" (ir_rooting.drop_unused_stack_resets). Slot allocas precede the stacksave
   # so the back-edge's stackrestore frees per-iteration root allocas, not the slots.
   | sprout_ir.IRTcoEntry slots sp ->
       lower_tco_entry_slots(slots) ++
@@ -429,10 +429,7 @@ fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (Str
 
 # Emit `alloca` + `store` for each TCO param slot, with no trailing newline.
 fn lower_tco_entry_slots(slots: List (String, String, String)) -> String =
-  match slots with
-  | Nil -> ""
-  | [s] -> lower_tco_entry_slot(s)
-  | Cons s rest -> lower_tco_entry_slot(s) ++ "\n" ++ lower_tco_entry_slots(rest)
+  string.join("\n", list_map(lower_tco_entry_slot, slots))
 
 fn lower_tco_entry_slot(s: (String, String, String)) -> String =
   match s with
@@ -471,49 +468,9 @@ fn lower_params(params: List (String, sprout_ir.IRType)) -> String =
 
 export fn lower_fn_with_table(f: sprout_ir.IRFunction, fn_table: Dict (String, Int)) -> String =
   match f with
-  | sprout_ir.IRFunction name params ret_ty raw_blocks ->
-      let blocks = drop_unused_stack_resets(raw_blocks) in
+  | sprout_ir.IRFunction name params ret_ty blocks ->
       "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n"
         ++ lower_blocks(blocks, ret_ty, fn_table, direct_call_attr(blocks)) ++ "}\n"
-
-# A TCO loop saves and restores the stack only to free the root slots (`IRRoot`
-# allocas) an iteration adds. Without any, the pair goes: LLVM treats
-# stackrestore as a memory write, which keeps the loop's loads from being hoisted.
-fn drop_unused_stack_resets(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
-  if entry_has_tco(blocks) && ! any (block_has_root, blocks) then
-    list_map(block_without_stack_reset, blocks)
-  else blocks
-
-# IRTcoEntry is always in the entry block, so a non-TCO function costs one block scan.
-fn entry_has_tco(blocks: List sprout_ir.IRBlock) -> Bool =
-  match blocks with
-  | [sprout_ir.IRBlock _ ops | _] -> any(is_tco_entry_op, ops)
-  | Nil -> false
-
-fn is_tco_entry_op(op: sprout_ir.IROp) -> Bool =
-  match op with
-  | sprout_ir.IRTcoEntry _ _ -> true
-  | _ -> false
-
-fn block_has_root(b: sprout_ir.IRBlock) -> Bool =
-  match b with
-  | sprout_ir.IRBlock _ ops -> any(is_root_op, ops)
-
-fn is_root_op(op: sprout_ir.IROp) -> Bool =
-  match op with
-  | sprout_ir.IRRoot _ _ _ -> true
-  | _ -> false
-
-fn block_without_stack_reset(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
-  match b with
-  | sprout_ir.IRBlock label ops -> sprout_ir.IRBlock(label, list_map(op_without_stack_reset, ops))
-
-fn op_without_stack_reset(op: sprout_ir.IROp) -> sprout_ir.IROp =
-  match op with
-  | sprout_ir.IRTcoEntry slots _ -> sprout_ir.IRTcoEntry(slots, "")
-  | sprout_ir.IRTcoBack stores _ loop_lbl -> sprout_ir.IRTcoBack(stores, "", loop_lbl)
-  | sprout_ir.IRTailCall r callee args _ -> sprout_ir.IRTailCall(r, callee, args, "")
-  | _ -> op
 
 # `noinline` on EVERY call of a function that carries a `musttail` one, the
 # musttail call included — inlining through it imports the partner's own calls,
@@ -521,14 +478,7 @@ fn op_without_stack_reset(op: sprout_ir.IROp) -> sprout_ir.IROp =
 # that into an accumulator loop, breaking the musttail and aborting the backend
 # at -O2 (docs/mutual-tco-v0.md §2.1, tests/codegen_o2/).
 fn direct_call_attr(blocks: List sprout_ir.IRBlock) -> String =
-  if blocks_have_tail_call(blocks) then " noinline" else ""
-
-fn blocks_have_tail_call(bs: List sprout_ir.IRBlock) -> Bool =
-  any(block_has_tail_call, bs)
-
-fn block_has_tail_call(b: sprout_ir.IRBlock) -> Bool =
-  match b with
-  | sprout_ir.IRBlock _ ops -> any(is_tail_call_op, ops)
+  if sprout_ir.blocks_have_op(is_tail_call_op, blocks) then " noinline" else ""
 
 fn is_tail_call_op(op: sprout_ir.IROp) -> Bool =
   match op with

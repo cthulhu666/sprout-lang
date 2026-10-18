@@ -4689,22 +4689,6 @@ fn maybe_tco(name: String, f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir
 # scram's hi_loop/hi_step are not self-recursive so they are covered.
 # ===========================================================================
 
-# True iff any block already carries an IRTcoEntry (i.e. self-TCO'd).
-fn mutual_has_tco_entry(blocks: List sprout_ir.IRBlock) -> Bool =
-  match blocks with
-  | Nil -> false
-  | Cons b rest ->
-      if mutual_ops_have_tco_entry(tco_block_ops(b)) then true
-      else mutual_has_tco_entry(rest)
-
-fn mutual_ops_have_tco_entry(ops: List sprout_ir.IROp) -> Bool =
-  match ops with
-  | Nil -> false
-  | Cons op rest ->
-      match op with
-      | sprout_ir.IRTcoEntry _ _ -> true
-      | _ -> mutual_ops_have_tco_entry(rest)
-
 # True iff the function still calls ITSELF, which means non-tail: self-TCO turns
 # tail ones into IRTcoBack.  LLVM's tailcallelim would rewrite such a call into an
 # accumulator loop, breaking the musttail this function would otherwise get
@@ -4797,7 +4781,7 @@ export fn mutual_tco_rewrite_fn(f: sprout_ir.IRFunction, targets: List (String, 
     sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      if ret_ty == "i64" && ! mutual_has_tco_entry (blocks) && ! mutual_has_self_call (name, blocks)
+      if ret_ty == "i64" && ! sprout_ir.blocks_have_op (sprout_ir.is_tco_entry, blocks) && ! mutual_has_self_call (name, blocks)
       then mutual_finish_rewrite(name, params, ret_ty, blocks, mutual_collect_hits(targets, blocks), f)
       else f
 
