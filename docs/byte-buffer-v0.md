@@ -88,9 +88,9 @@ Each maps to a change:
   Only `push4` gains, because only it packs. Index arithmetic (`g * 3`) needs range analysis.
 - **Bounds checks in loops.** With `g < len / 3`, reads at `3g .. 3g + 2` are in range, and a
   pre-sized output holds every push. LLVM keeps the checks at `-O2`, and its loop passes do not
-  remove them in the sort either. In the sort, checking once per loop call and running an
-  unchecked clone does (1.09× C); not yet tried here.
-  [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md).
+  remove them in the sort either. Checking once per loop call and running an unchecked clone
+  does: with constant tables and no overflow checks, 0.98× (push4) and 1.07× (push_byte), the
+  same as deleting every check. [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md).
 
 So the 1.3× gate needs constant tables and shift-based packing; parity also needs bounds-check
 elimination. The table here must be a byte table: B1
