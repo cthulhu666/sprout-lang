@@ -108,6 +108,15 @@ typedef struct {
   long long* data;
 } VectorVal;
 
+/* Distinct types for type-based alias analysis (TBAA), so LLVM knows a store into a
+ * vector slot does not change an object field or a VectorVal header, and can keep
+ * those loads out of a store loop (docs/native-sprout-runtime-v0.md §Phase 2).
+ * Sound because the memory never overlaps: slots sit in their own buffer or after
+ * the header, and sprout_field reads only ctor objects.  Every other access is a
+ * plain long long, which aliases all three. */
+struct SproutField { long long w; };
+struct SproutSlot { long long w; };
+
 typedef struct InternBucket { char* str; struct InternBucket* next; } InternBucket;
 
 typedef struct {
@@ -6000,7 +6009,7 @@ long long sprout_tag(long long h) {
   return (long long)(sprout_hdr_aux(hdr) >> SPROUT_OBJ_ARITY_BITS);
 }
 long long sprout_field(long long h, long long idx) {
-  return ((long long*)(uintptr_t)h)[idx];
+  return ((struct SproutField*)(uintptr_t)h)[idx].w;
 }
 
 __attribute__((noreturn)) void sprout_abort_match(void) {
@@ -8854,7 +8863,7 @@ long long vector_mutset(long long vec, long long index, long long value) {
    * a GC object in its own right, so a real barrier here must record the OWNING
    * object, which is what is priced. */
   sprout_ap_on_store(vec, value);
-  v->data[index] = value;
+  ((struct SproutSlot*)v->data)[index].w = value;
   return 0;
 }
 
@@ -8947,7 +8956,7 @@ long long vector_get_direct(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) sprout_fail("vector_get_direct: null vector");
   if (index < 0 || index >= v->len) sprout_fail("vector_get_direct: index out of bounds");
-  return v->data[index];
+  return ((struct SproutSlot*)v->data)[index].w;
 }
 
 long long vector_from_list(long long list_handle) {
