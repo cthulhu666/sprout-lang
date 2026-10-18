@@ -1337,7 +1337,23 @@ fn malformed_import_message(path: String, mod_name: String, name: String) -> Str
 # and "exports no such name" would send the reader looking for a typo instead.
 fn unknown_import_message(path: String, mod_name: String, name: String, symbols: ModuleSymbols) -> String =
   if str_find(name, "(") != -1 then malformed_import_message(path, mod_name, name)
-  else if module_declares_name(name, symbols) then
+  else
+    match method_class(name, symbols) with
+    | Just class_name ->
+        `${path}: import ${mod_name} (${name}): \`${name}\` is a method of class \`${class_name}\`, which is not exported — a method is exported with its class, so add \`export\` to \`class ${class_name}\` in \`${mod_name}\`.`
+    | Nothing -> unexported_name_message(path, mod_name, name, symbols)
+
+# The class in `symbols` that declares method `name`, if any.
+fn method_class(name: String, symbols: ModuleSymbols) -> Maybe String =
+  match find(declares_method(name, _), vec_to_list(dict_entries(sym_class_methods(symbols)))) with
+  | Just (class_name, _) -> Just(class_name)
+  | Nothing -> Nothing
+
+fn declares_method(name: String, entry: (String, Dict String)) -> Bool =
+  match entry with | (_, methods) -> dict_member(name, methods)
+
+fn unexported_name_message(path: String, mod_name: String, name: String, symbols: ModuleSymbols) -> String =
+  if module_declares_name(name, symbols) then
     `${path}: import ${mod_name} (${name}): \`${name}\` is declared in module \`${mod_name}\` but not exported — add \`export\` to its declaration, or \`(..)\` to its type's export if it is a constructor.`
   else
     `${path}: import ${mod_name} (${name}): module \`${mod_name}\` exports no \`${name}\`.`

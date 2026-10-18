@@ -301,5 +301,14 @@ else
   fail=1
 fi
 
+hid="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_import_hidden_method.spr" 2>&1)"
+if echo "$hid" | grep -qF '`peek` is a method of class `Hidden`, which is not exported'; then
+  echo "PASS method scope: importing a hidden class's method names the class"
+else
+  echo "FAIL method scope: expected the diagnostic to name class \`Hidden\`"
+  echo "$hid" | tail -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

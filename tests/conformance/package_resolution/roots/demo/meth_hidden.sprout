@@ -1,0 +1,8 @@
+module demo.meth_hidden
+
+# A class that is not exported, so neither are its methods (app_import_hidden_method.spr).
+class Hidden a
+  fn peek(x: a) -> Int
+
+instance Hidden Int
+  fn peek(x: Int) -> Int = x

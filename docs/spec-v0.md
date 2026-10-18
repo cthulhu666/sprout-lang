@@ -198,6 +198,8 @@ name at some later use.
 that module does not export — including one it declares without `export` — is
 rejected, naming both. The two cases are worded differently because the fix
 differs: a declared-but-unexported name says so, and points at the declaration.
+A method of an unexported class points at the class instead, since a method is
+exported with its class (§8.5).
 
 **A listed name is a bare name.** A parenthesised group after one — `T(..)`,
 `T(C1)`, and the same spellings with a space before the group — is rejected. `(..)` is declaration-side (§5.6.1), and naming a type

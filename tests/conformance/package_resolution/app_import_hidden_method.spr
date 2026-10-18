@@ -1,0 +1,6 @@
+module main
+import demo.meth_hidden (peek)
+
+# A method is exported with its class, so the diagnostic points at the class.
+
+fn main() -> Unit !{IO} = print(int_to_string(peek(1)))

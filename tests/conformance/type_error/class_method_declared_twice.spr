@@ -1,0 +1,10 @@
+module main
+
+# One class declaring a method twice is named once, not as a clash between two
+# classes.
+
+class Dup a
+  fn go(x: a) -> Int
+  fn go(x: a) -> Int
+
+fn main() -> Unit !{IO} = print("never")
