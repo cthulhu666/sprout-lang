@@ -149,6 +149,22 @@ What qualifies, all on Sprout IR after type inference:
    length-preserving by the same rule. A pure comparator qualifies: an effect type is the proof.
    `Bytes` never changes length, so byte reads need only 2 and 3.
 
+A byte buffer ([byte-buffer-v0.md](byte-buffer-v0.md) §5) changes rule 4 by how it is kept pure:
+
+| buffer | what can change it | rule 4 needs |
+|---|---|---|
+| `MutVec` today | `vector_push`, `vector_truncate`: `!{IO}` | the effect type |
+| 5.2 `Local` | every `ByteBuf` op: `!{Local}` | the effect type, `Local` in place of `IO` |
+| 5.4 Erlang-style | `push_byte`, which is pure | the body calls only known functions, none of which reaches a `ByteBuf` |
+| 5.1 linear | only the owner, which is the loop | nothing |
+
+Under 5.4 a pure callee can push onto the same `Storage` and move `fill`, so the effect type
+proves nothing. Nor do the callee's parameter types: an `Int -> Int` closure can capture the
+buffer, push and drop the result. 5.4 also has a second per-push check, `len == fill`, which only
+that alias rule lets the entry test cover; the base64 rows above have the room check only, and
+the version check costs 3–12% (byte-buffer-v0.md §3). Running out of room is not an error, so
+for pushes the entry could grow the buffer once instead of testing it; unmeasured.
+
 The entry test uses wrapping arithmetic and falls back on overflow; a test that panics where the
 original did not would change behaviour. Each qualifying function is emitted twice.
 

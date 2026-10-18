@@ -207,6 +207,10 @@ b3 = push_byte(b1, 'C')       b1.len=1 < fill=2: copy   b3 = "AC", b2 still "AB"
   version check a branch that never fails.
 - 5.2 and 5.1 compete: both check purity statically, and 5.1 is more general.
 - 5.3 is the fallback if nothing else ships.
+- **Bounds-check elimination.** Under 5.1, 5.2 and 5.3, types prove that a loop body cannot
+  change the buffer, so a loop's checks can move to one entry test. Under 5.4 they cannot, since
+  `push_byte` is pure: lifting the version check out of a loop needs an alias rule
+  ([bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) §6).
 
 ## 7. Recommendation
 
