@@ -452,7 +452,8 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
   | Cons decl rest ->
       match decl with
       | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _ _) ->
-          match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), acc, regs, cenv) with
+          match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), list_length(ctors) == 1,
+                                     acc, regs, cenv) with
           | (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1, cenv)
       # Wrap types: synthetic ctor with tag sentinel -1 (mirrors codegen.sprout wrap_tag() = -1).
       # Not added to regs — wrap types have no runtime allocation or tag.
@@ -462,7 +463,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
             dict_set(type_name,
                      sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1,
                                         field_kinds = fk.ctor_field_kinds_string([inner]),
-                                        field_names = Nil),
+                                        field_names = Nil, sole = true),
                      acc),
             regs, cenv)
       # Records: a single-constructor product keyed by the type name.  It carries
@@ -476,7 +477,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
               sprout_ir.CtorInfo(tag = next_tag, arity = list_length(fields),
                                  max_arity = list_length(fields),
                                  field_kinds = fk.ctor_field_kinds_string(ast.record_field_type_exprs(fields)),
-                                 field_names = list_map(record_field_name, fields)),
+                                 field_names = list_map(record_field_name, fields), sole = true),
               acc),
             regs, cenv)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs, cenv)
@@ -533,7 +534,7 @@ fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
           | n -> max_arity_of(rest, if n > m then n else m)
 
 fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
-                         max_ar: Int, acc: Dict sprout_ir.CtorInfo,
+                         max_ar: Int, sole: Bool, acc: Dict sprout_ir.CtorInfo,
                          regs: List sprout_ir.CtorReg,
                          cenv: (Dict (List String), Dict (List String))) -> (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   match ctors with
@@ -549,7 +550,7 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
           # The count must equal what construction's dict expansion emits; both
           # derive from types.witness_slots_for_class so they cannot drift.
           register_ctor_one(ctor_name, ctor_args, witness_slot_count(exist_constraints, cenv),
-                            rest, next_tag, max_ar, acc, regs, cenv)
+                            rest, next_tag, max_ar, sole, acc, regs, cenv)
 
 # /code-review fix #9: helper that computes arity and fks ONCE per ctor.
 # Without this, register_ctor_entries called list_length(ctor_args) and
@@ -560,14 +561,15 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
 # binding is visible to the call body.
 fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr, witness_slots: Int,
                      rest: List ast.TypeConstructor, next_tag: Int, max_ar: Int,
-                     acc: Dict sprout_ir.CtorInfo,
+                     sole: Bool, acc: Dict sprout_ir.CtorInfo,
                      regs: List sprout_ir.CtorReg,
                      cenv: (Dict (List String), Dict (List String))) ->
     (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
-  register_ctor_entries(rest, next_tag + 1, max_ar,
+  register_ctor_entries(rest, next_tag + 1, max_ar, sole,
                         dict_set(ctor_name,
                                  sprout_ir.CtorInfo(tag = next_tag, arity = arity, max_arity = max_ar,
-                                                    field_kinds = fks, field_names = Nil),
+                                                    field_kinds = fks, field_names = Nil,
+                                                    sole = sole),
                                  acc),
                         Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs), cenv)
   where arity = list_length(ctor_args) + witness_slots
@@ -2025,16 +2027,12 @@ fn finish_if(if_ty: types.Type,
 # body's next_idx is threaded forward.  Branch number i is baked into label
 # names so arms allocated at the same base_idx cannot collide.
 
-# True if a ConstructorPattern arm matches a `wrap` ctor (tag sentinel -1,
-# mirrors codegen.sprout wrap_tag()).  Wrap values are UNBOXED (the raw
-# payload), so the match must NOT hoist IRGetTag — sprout_tag on a raw Int
-# derefs it as a pointer and segfaults.  The downstream arm dispatch already
-# binds the wrap field by identity, so skipping the tag hoist suffices.  A wrap
-# type has exactly one ctor, so the first ctor-pattern arm is decisive; the
-# discriminator is strictly tag == -1 (a normal single-field ADT is boxed and
-# genuinely needs the tag).
-fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
-                 ctors: Dict sprout_ir.CtorInfo) -> Bool =
+# True if the first ConstructorPattern arm names its type's only constructor,
+# so the match never reads the tag.  A `wrap` is one, and reading its tag would
+# be a crash, not a waste: the value is the unboxed payload, and sprout_tag on a
+# raw Int derefs it.  Every ctor arm names a ctor of one type, so the first decides.
+fn is_sole_ctor_match(arms: List typed_ast.TypedMatchBranch,
+                      ctors: Dict sprout_ir.CtorInfo) -> Bool =
   match arms with
   | Nil -> false
   | Cons arm rest ->
@@ -2043,10 +2041,9 @@ fn is_wrap_match(arms: List typed_ast.TypedMatchBranch,
           match pat with
           | ast.ConstructorPattern name _ _ ->
               match dict_get(name, ctors) with
-              | Just entry ->
-                  entry.tag == -1
-              | Nothing -> is_wrap_match(rest, ctors)
-          | _ -> is_wrap_match(rest, ctors)
+              | Just entry -> entry.sole
+              | Nothing -> is_sole_ctor_match(rest, ctors)
+          | _ -> is_sole_ctor_match(rest, ctors)
 
 # field_kind_char_to_irtype and fk_at moved to stdlib.compiler.field_kinds
 # (/code-review fix #10). Call sites below use fk.field_kind_char_to_irtype /
@@ -2165,6 +2162,16 @@ fn bind_pattern_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: Stri
               bind_pattern_fields(rest, scrut_name, src, idx + 1, field_idx + 1,
                                   list_builder_add(fetched, cur_ops), wrap_captures,
                                   cur_lbl, miss_lbl, ctors, acc_extra)
+          else if nested_entry.sole
+          then
+            # The type's only ctor: no tag test, and cur_lbl stays open, as for a tuple.
+            do
+              (extra2, cont_lbl, cont_ops, captures2, idx2) <-
+                bind_pattern_fields(nested_args, field_ssa, CtorFields(nested_entry.field_kinds), idx + 1, 0,
+                                    list_builder_add(fetched, cur_ops),
+                                    acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
+              bind_pattern_fields(rest, scrut_name, src, idx2, field_idx + 1, cont_ops, captures2,
+                                  cont_lbl, miss_lbl, ctors, list_reverse(extra2))
           else
             do
               (extra2, cont_lbl, cont_ops, captures2, idx2) <-
@@ -2963,7 +2970,7 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
   # (not once per arm), so it is bounded and is NOT the O(N²) pattern that
   # fix #7/#8 eliminated. Widening the Cons-prepend convention upstream into
   # translate_expr is a broader refactor and is out of scope here.
-  if arms_have_ctor_anchor(arms) && ! is_wrap_match (arms, env.prog.ctors)
+  if arms_have_ctor_anchor(arms) && ! is_sole_ctor_match (arms, env.prog.ctors)
   then
     translate_match_dispatch(arms, match_ty, params, env, s_blocks, s_cur_lbl,
                              list_builder_add(sprout_ir.IRGetTag(fresh_name(idx), s_name), s_ops),
@@ -3194,6 +3201,7 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                                      acc_blocks, acc_phi, arm_captures, captures)
       else
         # Regular ADT ctor: emit tag test in dispatch_lbl, bind fields at body_lbl.
+        # A sole ctor cannot miss, so its dispatch_lbl just branches to body_lbl.
         # Field ops start at idx+2 to leave room for the tag_const and cmp SSA names
         # allocated by the dispatch_lbl block.  body_lbl is the entry of the open block;
         # nested ConstructorPatterns may seal body_lbl and introduce extra intermediate
@@ -3204,10 +3212,12 @@ fn translate_match_arm_ctor(ctor_name: String, ctor_args: List ast.Pattern,
                                 0, list_builder_empty, captures, body_lbl,
                                 fresh_arm_label(branch_idx + 1, base_idx), env.prog.ctors, Nil)
           translate_match_arm_sealed(body, rest_arms, branch_idx, base_idx,
-                                     Just(arm_test_block(dispatch_lbl,
-                                                         eq_const_ops(tag_name, entry.tag, idx),
-                                                         fresh_name(idx + 1),
-                                                         branch_idx, base_idx)),
+                                     Just(if entry.sole
+                                          then sprout_ir.IRBlock(dispatch_lbl, [sprout_ir.IRBr(body_lbl)])
+                                          else arm_test_block(dispatch_lbl,
+                                                              eq_const_ops(tag_name, entry.tag, idx),
+                                                              fresh_name(idx + 1),
+                                                              branch_idx, base_idx)),
                                      real_body_lbl, field_ops, extra_blocks, join_lbl,
                                      match_ty, s_name, tag_name, params, env, idx3,
                                      acc_blocks, acc_phi, arm_captures, captures)

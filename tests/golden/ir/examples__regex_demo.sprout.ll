@@ -168,21 +168,18 @@ declare i64 @split_words(i64)
 
 define i64 @stdlib.regex.raw_pattern(i64 %p$re) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$re)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 18
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$re, i64 0)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$re, i64 0)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.regex.unsupported_detail(i64 %p$msg) {
@@ -510,15 +507,15 @@ ovfok_17:
 
 define i64 @examples.regex_demo.summarize_found(i64 %p$re, i64 %p$raw) {
 entry:
-  %t$29 = alloca i64
-  store i64 %p$re, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$31 = alloca i64
-  store i64 %p$raw, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$26 = alloca i64
+  store i64 %p$re, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %p$raw, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$0 = call i64 @stdlib.regex.find_first(i64 %p$re, i64 %p$raw)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -526,73 +523,68 @@ arm_0_2:
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
   %t$6 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$7 = call i64 @sprout_tag(i64 %t$6)
-  %t$8 = add i64 0, 19
-  %t$9 = icmp eq i64 %t$7, %t$8
-  br i1 %t$9, label %ntest_6, label %arm_1_2
-ntest_6:
-  %t$10 = call i64 @sprout_field(i64 %t$6, i64 0)
-  %t$11 = call i64 @sprout_field(i64 %t$6, i64 1)
-  %t$12 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
+  %t$7 = call i64 @sprout_field(i64 %t$6, i64 0)
+  %t$8 = call i64 @sprout_field(i64 %t$6, i64 1)
+  %t$9 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  %t$31 = alloca i64
+  store i64 %p$re, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$33 = alloca i64
+  store i64 %p$raw, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$35 = alloca i64
+  store i64 %t$10, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$11 = call i64 @stdlib.regex.replace_all_literal(i64 %p$re, i64 %t$10, i64 %p$raw)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$12 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
-  %t$34 = alloca i64
-  store i64 %p$re, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$36 = alloca i64
-  store i64 %p$raw, ptr %t$36
-  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$38 = alloca i64
-  store i64 %t$13, ptr %t$38
+  store i64 %t$11, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$14 = call i64 @stdlib.regex.replace_all_literal(i64 %p$re, i64 %t$13, i64 %p$raw)
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
-  %t$16 = ptrtoint ptr %t$15 to i64
-  %t$41 = alloca i64
-  store i64 %t$14, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$40 = alloca i64
+  store i64 %t$13, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$14 = call i64 @stdlib.regex.escape(i64 %t$13)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$43 = alloca i64
-  store i64 %t$16, ptr %t$43
+  store i64 %t$14, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$17 = call i64 @stdlib.regex.escape(i64 %t$16)
-  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$46 = alloca i64
-  store i64 %t$17, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$18 = call i64 @examples.regex_demo.render_match(i64 %p$raw, i64 %t$10, i64 %t$11, i64 %t$14, i64 %t$17)
-  %t$48 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$15 = call i64 @examples.regex_demo.render_match(i64 %p$raw, i64 %t$7, i64 %t$8, i64 %t$11, i64 %t$14)
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_2
 arm_1_2:
-  %t$19 = add i64 0, 0
-  %t$20 = icmp eq i64 %t$1, %t$19
-  br i1 %t$20, label %body_1_2, label %arm_2_2
+  %t$16 = add i64 0, 0
+  %t$17 = icmp eq i64 %t$1, %t$16
+  br i1 %t$17, label %body_1_2, label %arm_2_2
 body_1_2:
-  %t$49 = alloca i64
-  store i64 %p$re, ptr %t$49
-  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$51 = alloca i64
-  store i64 %p$raw, ptr %t$51
-  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$21 = call i64 @stdlib.regex.is_match(i64 %p$re, i64 %p$raw)
-  %t$53 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$28 = trunc i64 %t$21 to i1
-  br i1 %t$28, label %then_22, label %else_22
-then_22:
-  %t$24 = getelementptr inbounds { i64, [27 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
-  %t$25 = ptrtoint ptr %t$24 to i64
-  br label %join_22
-else_22:
-  %t$26 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
-  %t$27 = ptrtoint ptr %t$26 to i64
-  br label %join_22
-join_22:
-  %t$23 = phi i64 [%t$25, %then_22], [%t$27, %else_22]
+  %t$46 = alloca i64
+  store i64 %p$re, ptr %t$46
+  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
+  %t$48 = alloca i64
+  store i64 %p$raw, ptr %t$48
+  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
+  %t$18 = call i64 @stdlib.regex.is_match(i64 %p$re, i64 %p$raw)
+  %t$50 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$25 = trunc i64 %t$18 to i1
+  br i1 %t$25, label %then_19, label %else_19
+then_19:
+  %t$21 = getelementptr inbounds { i64, [27 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
+  %t$22 = ptrtoint ptr %t$21 to i64
+  br label %join_19
+else_19:
+  %t$23 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
+  %t$24 = ptrtoint ptr %t$23 to i64
+  br label %join_19
+join_19:
+  %t$20 = phi i64 [%t$22, %then_19], [%t$24, %else_19]
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$18, %ntest_6], [%t$23, %join_22]
+  %t$3 = phi i64 [%t$15, %body_0_2], [%t$20, %join_19]
   ret i64 %t$3
 }
 

@@ -940,36 +940,33 @@ join_0:
 
 define i64 @stdlib.http.http_status_line(i64 %p$info) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$info)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 25
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$info, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %p$info, i64 1)
-  %t$7 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.44, i64 0, i32 1, i64 0
-  %t$8 = ptrtoint ptr %t$7 to i64
-  %t$9 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.45, i64 0, i32 1, i64 0
-  %t$10 = ptrtoint ptr %t$9 to i64
-  %t$14 = alloca i64
-  store i64 %t$5, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$16 = alloca i64
-  store i64 %t$8, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$11 = call i64 @str_concat(i64 %t$10, i64 %t$6)
-  %t$12 = call i64 @str_concat(i64 %t$5, i64 %t$11)
-  %t$13 = call i64 @str_concat(i64 %t$8, i64 %t$12)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$info, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$info, i64 1)
+  %t$6 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.44, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  %t$8 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.45, i64 0, i32 1, i64 0
+  %t$9 = ptrtoint ptr %t$8 to i64
+  %t$13 = alloca i64
+  store i64 %t$4, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$15 = alloca i64
+  store i64 %t$7, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$10 = call i64 @str_concat(i64 %t$9, i64 %t$5)
+  %t$11 = call i64 @str_concat(i64 %t$4, i64 %t$10)
+  %t$12 = call i64 @str_concat(i64 %t$7, i64 %t$11)
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$13, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$12, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.http.http_response(i64 %p$status, i64 %p$body) {

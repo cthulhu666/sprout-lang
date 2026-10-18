@@ -122,46 +122,40 @@ declare i64 @ref_write(i64, i64)
 
 define i64 @vec_length(i64 %p$vec) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$vec)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 10
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$vec, i64 0)
-  %t$6 = call i64 @vector_length(i64 %t$5)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$vec, i64 0)
+  %t$5 = call i64 @vector_length(i64 %t$4)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$5, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @vec_get(i64 %p$index, i64 %p$vec) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$vec)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 10
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$vec, i64 0)
-  %t$7 = alloca i64
-  store i64 %t$5, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$6 = call i64 @vector_get(i64 %t$5, i64 %p$index)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$vec, i64 0)
+  %t$6 = alloca i64
+  store i64 %t$4, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$5 = call i64 @vector_get(i64 %t$4, i64 %p$index)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$5, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @vec_fold_indexed(i64 %p$f$in, i64 %p$acc$in, i64 %p$vec$in, i64 %p$index$in, i64 %p$total$in) {
@@ -494,33 +488,30 @@ entry:
 
 define i64 @__tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values(i64 %p$xs) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$xs)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 16
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$9 = alloca i64
-  store i64 %t$5, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$6$raw = inttoptr i64 %t$6 to ptr
-  store ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_2, ptr %t$6$raw
-  %t$7 = add i64 0, 0
-  %t$11 = alloca i64
-  store i64 %t$6, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$8 = call i64 @vec_fold(i64 %t$6, i64 %t$7, i64 %t$5)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$8 = alloca i64
+  store i64 %t$4, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$5 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$5$raw = inttoptr i64 %t$5 to ptr
+  store ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_2, ptr %t$5$raw
+  %t$6 = add i64 0, 0
+  %t$10 = alloca i64
+  store i64 %t$5, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$7 = call i64 @vec_fold(i64 %t$5, i64 %t$6, i64 %t$4)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$8, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$7, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_3(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
@@ -531,33 +522,30 @@ entry:
 
 define i64 @__tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values(i64 %p$xs) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$xs)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 17
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$9 = alloca i64
-  store i64 %t$5, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$6$raw = inttoptr i64 %t$6 to ptr
-  store ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_3, ptr %t$6$raw
-  %t$7 = add i64 0, 0
-  %t$11 = alloca i64
-  store i64 %t$6, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$8 = call i64 @vec_fold(i64 %t$6, i64 %t$7, i64 %t$5)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$xs, i64 0)
+  %t$8 = alloca i64
+  store i64 %t$4, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$5 = call i64 @sprout_alloc_closure(i64 8, i64 2)
+  %t$5$raw = inttoptr i64 %t$5 to ptr
+  store ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_3, ptr %t$5$raw
+  %t$6 = add i64 0, 0
+  %t$10 = alloca i64
+  store i64 %t$5, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$7 = call i64 @vec_fold(i64 %t$5, i64 %t$6, i64 %t$4)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$8, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$7, %body_0_0]
+  ret i64 %t$1
 }
 
 define { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec) {

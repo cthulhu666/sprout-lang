@@ -618,10 +618,12 @@ export type CtorReg (..) = CtorReg String Int Int String
 #                 (positional). A record's names map a literal's source-order
 #                 fields and a `.field` access to the fixed declaration
 #                 offset (docs/records-v0.md §10.6).
+#   sole        — the enclosing type has no other constructor, so a match on
+#                 this one cannot miss and needs no tag test.
 # Distinct from CtorReg: CtorReg is the runtime-registration output list and has
 # no max_arity; this is the compile-time lookup table.  Kept separate on purpose.
 export type CtorInfo (..) = (tag: Int, arity: Int, max_arity: Int, field_kinds: String,
-                             field_names: List String)
+                             field_names: List String, sole: Bool)
 
 # IR-level top-level let global declaration (M3 PR 5).
 #

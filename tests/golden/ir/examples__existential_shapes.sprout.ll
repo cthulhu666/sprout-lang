@@ -192,84 +192,81 @@ entry:
 
 define i64 @examples.existential_shapes.describe(i64 %p$d) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$d)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 19
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$d, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %p$d, i64 1)
-  %t$7 = call i64 @sprout_field(i64 %p$d, i64 2)
-  %t$20 = alloca i64
-  store i64 %t$5, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %t$6, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$24 = alloca i64
-  store i64 %t$7, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$8 = call i64 @__cm_Shape_name(i64 %t$5, i64 %t$6, i64 %t$7)
-  %t$9 = call i64 @__tc_ToString_String_to_string(i64 %t$8)
-  %t$10 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
-  %t$11 = ptrtoint ptr %t$10 to i64
-  %t$26 = alloca i64
-  store i64 %t$9, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$28 = alloca i64
-  store i64 %t$11, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$12 = call i64 @__cm_Shape_area(i64 %t$5, i64 %t$6, i64 %t$7)
-  %t$13 = call i64 @__tc_ToString_Double_to_string(i64 %t$12)
-  %t$14 = call i64 @__tc_ToString_String_to_string(i64 %t$13)
-  %t$30 = alloca i64
-  store i64 %t$14, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$15 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$32 = alloca i64
-  store i64 %t$15, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$d, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$d, i64 1)
+  %t$6 = call i64 @sprout_field(i64 %p$d, i64 2)
+  %t$19 = alloca i64
+  store i64 %t$4, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$21 = alloca i64
+  store i64 %t$5, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$23 = alloca i64
+  store i64 %t$6, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$7 = call i64 @__cm_Shape_name(i64 %t$4, i64 %t$5, i64 %t$6)
+  %t$8 = call i64 @__tc_ToString_String_to_string(i64 %t$7)
+  %t$9 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  %t$25 = alloca i64
+  store i64 %t$8, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$27 = alloca i64
+  store i64 %t$10, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$11 = call i64 @__cm_Shape_area(i64 %t$4, i64 %t$5, i64 %t$6)
+  %t$12 = call i64 @__tc_ToString_Double_to_string(i64 %t$11)
+  %t$13 = call i64 @__tc_ToString_String_to_string(i64 %t$12)
+  %t$29 = alloca i64
+  store i64 %t$13, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$14 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$31 = alloca i64
+  store i64 %t$14, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$15 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$15$ptr = inttoptr i64 %t$15 to ptr
+  %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
+  store i64 %t$13, ptr %t$15$f0
+  %t$15$f1 = getelementptr i64, ptr %t$15$ptr, i64 1
+  store i64 %t$14, ptr %t$15$f1
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$34 = alloca i64
+  store i64 %t$15, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$16 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$16$ptr = inttoptr i64 %t$16 to ptr
   %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
-  store i64 %t$14, ptr %t$16$f0
+  store i64 %t$10, ptr %t$16$f0
   %t$16$f1 = getelementptr i64, ptr %t$16$ptr, i64 1
   store i64 %t$15, ptr %t$16$f1
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$35 = alloca i64
-  store i64 %t$16, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$37 = alloca i64
+  store i64 %t$16, ptr %t$37
+  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
   %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$17$ptr = inttoptr i64 %t$17 to ptr
   %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
-  store i64 %t$11, ptr %t$17$f0
+  store i64 %t$8, ptr %t$17$f0
   %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
   store i64 %t$16, ptr %t$17$f1
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$38 = alloca i64
-  store i64 %t$17, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$18 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$18$ptr = inttoptr i64 %t$18 to ptr
-  %t$18$f0 = getelementptr i64, ptr %t$18$ptr, i64 0
-  store i64 %t$9, ptr %t$18$f0
-  %t$18$f1 = getelementptr i64, ptr %t$18$ptr, i64 1
-  store i64 %t$17, ptr %t$18$f1
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 5)
-  %t$41 = alloca i64
-  store i64 %t$18, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$19 = call i64 @string_concat_many(i64 %t$18)
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_1
-arm_1_1:
+  %t$39 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$40 = alloca i64
+  store i64 %t$17, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$18 = call i64 @string_concat_many(i64 %t$17)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$19, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$18, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @__sprout_ir_lambda_0(i64 %p$env$, i64 %p$d) {
@@ -329,34 +326,31 @@ entry:
 
 define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$s)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 16
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$6 = load i64, ptr @examples.existential_shapes.pi
-  %t$7$fr = sitofp i64 %t$5 to double
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$5 = load i64, ptr @examples.existential_shapes.pi
+  %t$6$fr = sitofp i64 %t$4 to double
+  %t$6 = bitcast double %t$6$fr to i64
+  %t$7$la = bitcast i64 %t$5 to double
+  %t$7$lb = bitcast i64 %t$6 to double
+  %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
-  %t$8$la = bitcast i64 %t$6 to double
-  %t$8$lb = bitcast i64 %t$7 to double
-  %t$8$fr = fmul double %t$8$la, %t$8$lb
+  %t$8$fr = sitofp i64 %t$4 to double
   %t$8 = bitcast double %t$8$fr to i64
-  %t$9$fr = sitofp i64 %t$5 to double
+  %t$9$la = bitcast i64 %t$7 to double
+  %t$9$lb = bitcast i64 %t$8 to double
+  %t$9$fr = fmul double %t$9$la, %t$9$lb
   %t$9 = bitcast double %t$9$fr to i64
-  %t$10$la = bitcast i64 %t$8 to double
-  %t$10$lb = bitcast i64 %t$9 to double
-  %t$10$fr = fmul double %t$10$la, %t$10$lb
-  %t$10 = bitcast double %t$10$fr to i64
-  br label %join_1
-arm_1_1:
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$10, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$9, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name(i64 %p$s) {
@@ -368,30 +362,27 @@ entry:
 
 define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$s)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 17
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$6 = call i64 @sprout_field(i64 %p$s, i64 1)
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$5 = call i64 @sprout_field(i64 %p$s, i64 1)
+  %t$6$fr = sitofp i64 %t$4 to double
+  %t$6 = bitcast double %t$6$fr to i64
   %t$7$fr = sitofp i64 %t$5 to double
   %t$7 = bitcast double %t$7$fr to i64
-  %t$8$fr = sitofp i64 %t$6 to double
+  %t$8$la = bitcast i64 %t$6 to double
+  %t$8$lb = bitcast i64 %t$7 to double
+  %t$8$fr = fmul double %t$8$la, %t$8$lb
   %t$8 = bitcast double %t$8$fr to i64
-  %t$9$la = bitcast i64 %t$7 to double
-  %t$9$lb = bitcast i64 %t$8 to double
-  %t$9$fr = fmul double %t$9$la, %t$9$lb
-  %t$9 = bitcast double %t$9$fr to i64
-  br label %join_1
-arm_1_1:
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$9, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$8, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name(i64 %p$s) {
@@ -403,29 +394,26 @@ entry:
 
 define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area(i64 %p$s) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$s)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 18
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$s, i64 0)
-  %t$6$fr = sitofp i64 %t$5 to double
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$5$fr = sitofp i64 %t$4 to double
+  %t$5 = bitcast double %t$5$fr to i64
+  %t$6$fr = sitofp i64 %t$4 to double
   %t$6 = bitcast double %t$6$fr to i64
-  %t$7$fr = sitofp i64 %t$5 to double
+  %t$7$la = bitcast i64 %t$5 to double
+  %t$7$lb = bitcast i64 %t$6 to double
+  %t$7$fr = fmul double %t$7$la, %t$7$lb
   %t$7 = bitcast double %t$7$fr to i64
-  %t$8$la = bitcast i64 %t$6 to double
-  %t$8$lb = bitcast i64 %t$7 to double
-  %t$8$fr = fmul double %t$8$la, %t$8$lb
-  %t$8 = bitcast double %t$8$fr to i64
-  br label %join_1
-arm_1_1:
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$8, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$7, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @__tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name(i64 %p$s) {

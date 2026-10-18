@@ -313,40 +313,34 @@ join_1:
 
 define i64 @stdlib.net.tcp_connection_handle(i64 %p$conn) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$conn)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 27
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$conn, i64 0)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$conn, i64 0)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.net.tcp_listener_handle(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$listener)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 28
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$listener, i64 0)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$listener, i64 0)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.net.write_all(i64 %p$conn, i64 %p$payload) {
@@ -531,22 +525,19 @@ ovfok_6:
 
 define i64 @stdlib.net.close(i64 %p$conn) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$conn)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 27
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$conn, i64 0)
-  %t$6 = call i64 @tcp_close(i64 %t$5)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$conn, i64 0)
+  %t$5 = call i64 @tcp_close(i64 %t$4)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$5, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.net.listen_on(i64 %p$host, i64 %p$port) {
@@ -659,22 +650,19 @@ do_done_3:
 
 define i64 @stdlib.net.close_listener(i64 %p$listener) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$listener)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 28
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$listener, i64 0)
-  %t$6 = call i64 @tcp_close_listener(i64 %t$5)
-  br label %join_1
-arm_1_1:
+  br label %arm_0_0
+arm_0_0:
+  br label %body_0_0
+body_0_0:
+  %t$4 = call i64 @sprout_field(i64 %p$listener, i64 0)
+  %t$5 = call i64 @tcp_close_listener(i64 %t$4)
+  br label %join_0
+arm_1_0:
   call void @sprout_abort_match()
   unreachable
-join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1]
-  ret i64 %t$2
+join_0:
+  %t$1 = phi i64 [%t$5, %body_0_0]
+  ret i64 %t$1
 }
 
 define i64 @stdlib.terminal.write(i64 %p$text) {

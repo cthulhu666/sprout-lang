@@ -1,0 +1,101 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.string as string
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# A match on a type with one constructor cannot miss, so it reads the fields with
+# no tag test. `mutvec_at` pays for one per access otherwise: a `sprout_tag` call
+# LLVM cannot inline or hoist (docs/native-sprout-runtime-v0.md, Phase 2).
+
+type Box = Box(Int)
+
+type Pair = Pair Box Box
+
+type Token = Token
+
+type Shape =
+  | Circle (Int)
+  | Square (Box)
+
+fn unbox(b: Box) -> Int =
+  match b with
+  | Box n -> n
+
+fn pair_sum(p: Pair) -> Int =
+  match p with
+  | Pair (Box a) (Box b) -> a + b
+
+fn token_code(t: Token) -> Int =
+  match t with
+  | Token -> 7
+
+fn boxed_or(m: Maybe Box, fallback: Int) -> Int =
+  match m with
+  | Just (Box(n)) -> n
+  | Nothing -> fallback
+
+fn side(s: Shape) -> Int =
+  match s with
+  | Circle r -> r
+  | Square (Box(n)) -> n
+
+# --- emitted IR ---
+
+let box_decls = "type Maybe a =\n  | Nothing\n  | Just a\n\ntype Box = Box(Int)\n\ntype Pair = Pair Box Box\n\n"
+
+let top_level_src = box_decls ++ "fn unbox(b: Box) -> Int =\n  match b with\n  | Box n -> n\n"
+
+let nested_src = box_decls ++ "fn pair_sum(p: Pair) -> Int =\n  match p with\n  | Pair (Box a) (Box b) -> a + b\n"
+
+# Maybe has two constructors and keeps its tag test; the Box inside it needs none.
+let inside_multi_src =
+  box_decls ++ "fn boxed_or(m: Maybe Box) -> Int =\n  match m with\n  | Just(Box(n)) -> n\n  | Nothing -> 0\n"
+
+# Returns the emitted IR, or a string starting "ERR: ", so a broken fixture cannot
+# pass a count of zero.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok (ir_prog, idx_map) ->
+                    ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn tag_calls(ir: String) -> Int =
+  if str_starts_with(ir, "ERR: ") then -1
+  else list_length(string.split(ir, "call i64 @sprout_tag(")) - 1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    top <- translate_or_msg(top_level_src)
+    assert_eq(state, "top-level match on a sole ctor: no tag call", tag_calls(top), 0)
+    nested <- translate_or_msg(nested_src)
+    assert_eq(state, "nested sole ctors: no tag call", tag_calls(nested), 0)
+    inside <- translate_or_msg(inside_multi_src)
+    assert_eq(state, "sole ctor inside Maybe: only Maybe's tag call", tag_calls(inside), 1)
+
+    assert_eq(state, "unbox", unbox(Box(41)), 41)
+    assert_eq(state, "nested sole ctors bind both fields", pair_sum(Pair (Box(3), Box(4))), 7)
+    assert_eq(state, "nullary sole ctor", token_code(Token), 7)
+    assert_eq(state, "sole ctor inside Just", boxed_or(Just (Box(5)), 0), 5)
+    assert_eq(state, "Nothing still takes its arm", boxed_or(Nothing, 9), 9)
+    assert_eq(state, "multi-ctor arm before a sole-ctor field", side(Circle(2)), 2)
+    assert_eq(state, "sole ctor under a multi-ctor arm", side(Square (Box(6))), 6)
+    summary(state)
