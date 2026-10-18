@@ -466,8 +466,9 @@ Not planned, required by the change:
    ("no call to `@sprout_alloc_obj`", "allocates no tuple"), which a bundled prelude
    makes unstatable — their fixtures now say `no_prelude`. `test_compiler`'s
    cache-sharing test relied on a preludeless bundle to make an empty
-   `stdlib_root` work, same fix. `test_ir_codegen_do_bind_strip` redefines `Maybe`
-   and binds it with `<-` (§0 item 1). `test_borrow_erasure`'s presence guards now
+   `stdlib_root` work, same fix. `test_ir_codegen_do_bind_strip` redefined `Maybe`
+   and bound it with `<-` (§0 item 1); it has since dropped both the redefinition
+   and `no_prelude` (§8's 2026-10-18 note). `test_borrow_erasure`'s presence guards now
    match the `$entry.`-qualified spellings.
 8. **`compiler.env_scheme`** — hover and `:type` looked the sentinel up by bare
    name, so on any headerless buffer both lookups missed and the answer was
