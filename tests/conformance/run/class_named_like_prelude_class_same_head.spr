@@ -1,0 +1,23 @@
+module main
+
+# A file's own `class Eq` with an instance at a head the prelude's `Eq` also has.
+# Each class keeps its own instance: the user's answers `false`, the prelude's
+# compares.
+
+class Eq a
+  fn eq(x: a, y: a) -> Bool
+
+instance Eq Int
+  fn eq(x: Int, y: Int) -> Bool = false
+
+fn same_mine(x: a) -> Bool where Eq a = eq(x, x)
+
+fn same_prelude(x: a) -> Bool where prelude.Eq a = prelude.eq(x, x)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(same_mine(1)))
+    print(to_string(same_prelude(1)))
+    print(to_string(eq(2, 2)))
+    print(to_string(prelude.eq(2, 2)))
+    print(to_string(2 == 2))

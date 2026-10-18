@@ -86,7 +86,7 @@ Existential evidence is forwarded per match arm (`resolve.sprout`), so this filt
 2. Substitute the concrete types in every node's `types.Type`, the `TDict` constraint field
    included.
 3. Replace each `EvForward` with the caller's concrete evidence, **by key**, not by position.
-   Forward keys are `ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
+   Forward keys are `typed_ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
    superclass-expanded in `build_hidden_for_constraints` order. Recurse into `EvInstance` children
    and into `TMethodRef` evidence.
 4. Name the copy deterministically from the function name and the mangled evidence (reuse

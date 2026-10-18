@@ -28,14 +28,14 @@ fn evidence_key(ev: typed_ast.Evidence) -> String =
   match ev with
   | typed_ast.EvUnresolved -> "unresolved"
   | typed_ast.EvClasses _ -> "classes"
-  | typed_ast.EvInstance _ key _ -> typed_ast.key_text(key)
-  | typed_ast.EvForward _ slot -> typed_ast.key_text(slot)
+  | typed_ast.EvInstance _ key _ -> typed_ast.instance_key_text(key)
+  | typed_ast.EvForward _ slot -> typed_ast.slot_key_text(slot)
   | typed_ast.EvMissing _ -> "missing"
 
 # Keys are built only by typed_ast.
-fn show_int() -> typed_ast.DispatchKey = typed_ast.constraint_key_str("Show", [ast.TypeName("Int")])
+fn show_int() -> typed_ast.InstanceKey = typed_ast.constraint_key_str("Show", [ast.TypeName("Int")])
 
-fn slot(class_name: String) -> typed_ast.DispatchKey = typed_ast.dict_slot_key(class_name, [ast.TypeName("a")])
+fn slot(class_name: String) -> typed_ast.SlotKey = typed_ast.dict_slot_key(class_name, [ast.TypeName("a")])
 
 fn ev_classes_len(ev: typed_ast.Evidence) -> Int =
   match ev with

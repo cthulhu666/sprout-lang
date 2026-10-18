@@ -12,7 +12,7 @@ fn bound(pattern: types.Type, actual: types.Type, v: String) -> String =
   | Nothing -> "-"
   | Just t -> types.type_to_string(t)
 
-# Class `Show a` whose method `show` has the scheme `a String`.
+# Class `Show a`, keyed by its full name, whose method `show` has the scheme `a String`.
 fn eta(class_name: String, method: String, used: types.Type) -> String =
   types.type_to_string(types.eta_class_type(dict_set("Show", "a", dict_empty()),
                                             dict_set("show", types.mono(app(var("a"), con("String"))), dict_empty()),
@@ -41,8 +41,10 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "head of a tuple", head(types.TTuple([con("Int"), con("Int")])), "Tuple2")
     assert_eq(state, "a variable has no head", head(var("a")), "-")
 
-    assert_eq(state, "eta type read at the class parameter, by short names",
-      eta("prelude.Show", "prelude.show", app(con("Int"), con("String"))), "Int")
+    assert_eq(state, "eta type read at the class parameter, the method by its short name",
+      eta("Show", "prelude.show", app(con("Int"), con("String"))), "Int")
+    assert_eq(state, "a class is found by its full name only",
+      eta("main.Show", "show", app(con("Int"), con("String"))), "Fallback")
     assert_eq(state, "an unknown class falls back", eta("Eq", "show", app(con("Int"), con("String"))), "Fallback")
     assert_eq(state, "an unknown method falls back", eta("Show", "eq", app(con("Int"), con("String"))), "Fallback")
     assert_eq(state, "an unbound class parameter falls back", eta("Show", "show", con("Int")), "Fallback")

@@ -2,15 +2,16 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 
-# The instance dispatch key lowering and resolve both build: the bare class, then the
-# head constructor of each argument, kept module-qualified so it matches infer's @inst.
+# The dispatch keys lowering and resolve both build. An instance key is the class, then
+# the head constructor of each argument, each as written, so two same-named classes
+# differ; a slot key names each argument in full.
 
 fn name(n: String) -> ast.TypeExpr = ast.TypeName(n)
 
 fn key_str(class_name: String, args: List ast.TypeExpr) -> String =
-  typed_ast.key_text(typed_ast.constraint_key_str(class_name, args))
+  typed_ast.instance_key_text(typed_ast.constraint_key_str(class_name, args))
 
-fn key_from_tc(c: ast.TypeConstraint) -> String = typed_ast.key_text(typed_ast.constraint_key_from_tc(c))
+fn key_from_tc(c: ast.TypeConstraint) -> String = typed_ast.instance_key_text(typed_ast.constraint_key_from_tc(c))
 
 fn main() -> Unit !{IO} =
   do
@@ -32,9 +33,26 @@ fn main() -> Unit !{IO} =
       key_str("Convert", [name("Int"), name("String")]), "Convert_Int_String")
     assert_eq(state, "no arguments is the class alone", key_str("C", []), "C")
 
-    assert_eq(state, "the class is stripped, the head stays qualified",
-      key_from_tc(ast.TypeConstraint("prelude.Eq", [name("stdlib.x.Bar")])),
-      "Eq_stdlib.x.Bar")
+    assert_eq(state, "class and head both keep their modules",
+      key_from_tc(ast.TypeConstraint("main.Eq", [name("stdlib.x.Bar")])),
+      "main.Eq_stdlib.x.Bar")
+    assert_eq(state, "a bare prelude class keys bare",
+      key_from_tc(ast.TypeConstraint("Eq", [name("Int")])), "Eq_Int")
+    assert_eq(state, "instance_key is the one-head constraint key",
+      typed_ast.instance_key_text(typed_ast.instance_key("main.Eq", "Int")),
+      key_str("main.Eq", [name("Int")]))
+
+    # Slot keys keep their argument apart from the class, so it is never sliced out.
+    assert_eq(state, "a slot key spells its argument",
+      typed_ast.slot_key_text(typed_ast.dict_slot_key("main.Eq", [ast.TypeApply(name("List"), name("a"))])),
+      "main.Eq_List(a)")
+    assert_eq(state, "a slot's sole argument",
+      sole_arg(typed_ast.dict_slot_key("main.Eq", [name("a")])), "a")
+    assert_eq(state, "an underscore in a variable stays in the argument",
+      sole_arg(typed_ast.dict_slot_key("Eq", [name("x_a")])), "x_a")
+    assert_eq(state, "two arguments have no sole one",
+      sole_arg(typed_ast.dict_slot_key("C", [name("a"), name("b")])), "<none>")
+
     assert_eq(state, "head name of a nested application",
       typed_ast.type_expr_head_name(ast.TypeApply(ast.TypeApply(name("Dict"), name("k")), name("v"))),
       "Dict")
@@ -50,5 +68,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "an effect type has no head", head_or_none(ast.TypeEffect(name("Int"), ["IO"])), "<none>")
 
     summary(state)
+
+fn sole_arg(key: typed_ast.SlotKey) -> String = maybe_with_default("<none>", typed_ast.slot_key_sole_arg(key))
 
 fn head_or_none(te: ast.TypeExpr) -> String = maybe_with_default("<none>", typed_ast.type_expr_head(te))

@@ -362,7 +362,7 @@ fn decode_type_list_at(s: String, bytes: Bytes, i: Int, total: Int) -> Maybe (Li
 # `iface_version`, which the driver also writes; see decode_iface_version for the
 # change log.
 
-export let iface_version: Int = 13
+export let iface_version: Int = 14
 
 export type NamedScheme (..) =
   | NamedScheme String types.Scheme
@@ -525,6 +525,8 @@ fn decode_iface_v2_tail(s: String, bytes: Bytes, i: Int, total: Int, version: In
 # schemes, ctors, classes and instances, never decls, so no on-disk iface holds one.
 # v13: user class method names are module-qualified (`m.method`) in NamedScheme and
 # ClassInfo (docs/qualified-class-methods-v0.md); a v12 file names them bare.
+# v14: an InstanceInfo's dispatch key names the class in full (`main.Eq_Int`); a v13
+# file names it short.
 fn decode_iface_version(s: String) -> Maybe Int =
   if s == int_to_string(iface_version) then Just(iface_version) else Nothing
 
@@ -638,19 +640,6 @@ fn make_local_vars(type_params: List String) -> Dict types.Type =
   match type_params with
   | Nil -> dict_empty()
   | Cons p rest -> dict_set(p, types.TVar(types.tyvar_id(p)), make_local_vars(rest))
-
-# Extract the outermost type-name from the first type-argument of a constraint.
-# Used to compute the canonical instance dispatch key.
-fn constraint_head(type_args: List ast.TypeExpr) -> String =
-  match type_args with
-  | Nil -> "Unknown"
-  | [te | _] -> te_outermost_name(te)
-
-fn te_outermost_name(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName n -> string.after_last_dot(n)
-  | ast.TypeApply base _ -> te_outermost_name(base)
-  | _ -> "Unknown"
 
 # Build a Scheme for a class method: forall type_params. params -> ret @ effect.
 # Effects come from the method's `effects` field (Nothing → EffectPure).
@@ -877,8 +866,7 @@ fn build_method_named_schemes(methods: List ast.ClassMethodSig, type_params: Lis
 # TypeConstraint class_name type_args, and `class_name` starts with
 # `module_name ++ "."`.
 #
-# dict_name encoding: uses the same dispatch-key format as the typechecker
-# (infer.sprout:835 — `strip(class_name) ++ "_" ++ head`), which is the only
+# dict_name is the instance's dispatch key (typed_ast.constraint_key_str), the only
 # string with real provenance in this phase. A synthesised name
 # ("class_head") is stored rather than a real function name because there is
 # no single per-instance dict function in the current lowering scheme — each
@@ -912,7 +900,7 @@ fn collect_instance_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: St
 fn build_instance_info(class_name: String, type_args: List ast.TypeExpr) -> InstanceInfo =
   InstanceInfo(class_name,
     head_type_from_args(type_args),
-    string.after_last_dot(class_name) ++ "_" ++ constraint_head(type_args))
+    typed_ast.instance_key_text(typed_ast.constraint_key_str(class_name, type_args)))
 
 fn head_type_from_args(type_args: List ast.TypeExpr) -> types.Type =
   match type_args with

@@ -1,0 +1,15 @@
+module main
+
+# The file's own `Ord` is over its own `Eq`, and `Int` has an `Eq` instance only
+# from the prelude. That one is not the superclass instance `instance Ord Int` needs.
+
+class Eq a
+  fn eq(x: a, y: a) -> Bool
+
+class Ord a where Eq a
+  fn compare(left: a, right: a) -> Int
+
+instance Ord Int
+  fn compare(left: Int, right: Int) -> Int = 0
+
+fn main() -> Unit !{IO} = print(to_string(compare(1, 2)))

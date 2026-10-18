@@ -57,8 +57,8 @@ fn ev_tag(ev: typed_ast.Evidence) -> String =
 
 fn ev_key(ev: typed_ast.Evidence) -> String =
   match ev with
-  | typed_ast.EvInstance _ k _ -> typed_ast.key_text(k)
-  | typed_ast.EvForward _ k -> typed_ast.key_text(k)
+  | typed_ast.EvInstance _ k _ -> typed_ast.instance_key_text(k)
+  | typed_ast.EvForward _ k -> typed_ast.slot_key_text(k)
   | _ -> ""
 
 # The i-th effective-class block of an EvClasses (EvUnresolved if out of range).
