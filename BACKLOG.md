@@ -218,8 +218,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `branch` captures an unfused `try` (`class_method_captures_try.spr`; §9 Q9). Same root as spec
   §3.1's wrapper-symbol limit. A bare method also stays visible to every LATER module.
   Qualifying methods in the bundler, as functions are, fixes all three and lets classes be
-  pre-scanned again, retiring `group_plan`'s per-module class planning. Touches dispatch keys
-  and lowering: needs a design doc.
+  pre-scanned, retiring `group_plan`'s per-module class planning. Proposed design:
+  `docs/qualified-class-methods-v0.md`.
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in
