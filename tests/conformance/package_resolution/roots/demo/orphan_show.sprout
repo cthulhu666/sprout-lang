@@ -1,0 +1,9 @@
+module demo.orphan_show
+
+# Calls `to_string` on a type with no `ToString` here; only an importer declares
+# one, and an importer's instance is not in scope in what it imports (spec §7).
+
+export type Foo (..) =
+  | Foo
+
+export fn describe(f: Foo) -> String = to_string(f)

@@ -1,0 +1,15 @@
+module main
+
+# An instance of a prelude class for a prelude type, written first in its module,
+# still sees the module's classes.
+
+instance Semigroup Int
+  fn append(a: Int, b: Int) -> Int = twice(a) + b
+
+class Twice a
+  fn twice(x: a) -> a
+
+instance Twice Int
+  fn twice(x: Int) -> Int = x * 2
+
+fn main() -> Unit !{IO} = print(append(3, 4))

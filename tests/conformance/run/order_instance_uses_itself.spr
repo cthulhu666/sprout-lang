@@ -1,0 +1,35 @@
+# An instance is in scope in its own methods: a recursive type's `Eq`, derived or
+# written by hand, compares its children with the instance being declared, and an
+# instance for a type constructor recurses at another element type.
+
+type Tree (..) deriving (Eq) =
+  | Leaf Int
+  | Node Tree Tree
+
+type Expr (..) =
+  | Lit Int
+  | Add Expr Expr
+
+instance Eq Expr
+  fn eq(left: Expr, right: Expr) -> Bool =
+    match (left, right) with
+    | (Lit a, Lit b) -> a == b
+    | (Add a1 a2, Add b1 b2) -> a1 == b1 && eq(a2, b2)
+    | _ -> false
+
+class Size f
+  fn size(x: f a) -> Int
+
+instance Size List
+  fn size(x: List a) -> Int =
+    match x with
+    | Nil -> 0
+    | Cons _ t -> 1 + size(t)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(Node (Leaf(1), Leaf(2)) == Node (Leaf(1), Leaf(2))))
+    print(to_string(Node (Leaf(1), Leaf(2)) == Node (Leaf(1), Leaf(3))))
+    print(to_string(Add (Lit(1), Lit(2)) == Add (Lit(1), Lit(2))))
+    print(to_string(Add (Lit(1), Lit(2)) == Add (Lit(2), Lit(2))))
+    print(to_string(size([1, 2, 3])))

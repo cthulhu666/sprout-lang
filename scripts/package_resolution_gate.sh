@@ -260,5 +260,25 @@ else
   fail=1
 fi
 
+# An importer's instance is not in scope in the module it imports, which is
+# checked first. Two halves: a method call, and a `try` whose instance is fusable.
+inst="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_importer_instance_not_in_import.spr" 2>&1)"
+if echo "$inst" | grep -qF 'No instance of ToString for demo.orphan_show.Foo in function demo.orphan_show.describe'; then
+  echo "PASS instance scope: an importer's instance does not reach the module it imports"
+else
+  echo "FAIL instance scope: expected no ToString instance in demo.orphan_show.describe"
+  echo "$inst" | tail -3
+  fail=1
+fi
+
+prop="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_importer_propagate_not_in_import.spr" 2>&1)"
+if echo "$prop" | grep -qF '`demo.orphan_try.Fetch Int` has no `Propagate` instance in function demo.orphan_try.bump'; then
+  echo "PASS instance scope: an importer's Propagate instance does not fuse a \`try\` it imports"
+else
+  echo "FAIL instance scope: expected no Propagate instance in demo.orphan_try.bump"
+  echo "$prop" | tail -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

@@ -42,9 +42,7 @@ fn bundled_names(src: String, path: String, stdlib_root: String) -> List String 
     r <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
     match r with
     | bundler.BundleErr _ msg -> Cons("ERR: " ++ msg, Nil)
-    | bundler.BundleOk prog ->
-        match prog with
-        | ast.Program decls _ -> decl_names(decls)
+    | bundler.BundleOk modules -> decl_names(ast.flatten_modules(modules))
 
 fn has(names: List String, n: String) -> Bool = list_member(n, names)
 
@@ -151,6 +149,4 @@ fn bundled_names_of_path(path: String, stdlib_root: String) -> List String !{IO}
     r <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
     match r with
     | bundler.BundleErr _ msg -> Cons("ERR: " ++ msg, Nil)
-    | bundler.BundleOk prog ->
-        match prog with
-        | ast.Program decls _ -> decl_names(decls)
+    | bundler.BundleOk modules -> decl_names(ast.flatten_modules(modules))

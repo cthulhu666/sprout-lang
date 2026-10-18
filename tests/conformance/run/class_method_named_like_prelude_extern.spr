@@ -1,0 +1,12 @@
+module main
+
+# A user class method named like a prelude extern leaves the extern's own
+# declaration alone.
+
+class Render a
+  fn char_to_str(x: a) -> String
+
+instance Render Int
+  fn char_to_str(x: Int) -> String = "int " ++ int_to_string(x)
+
+fn main() -> Unit !{IO} = print(char_to_str(7))

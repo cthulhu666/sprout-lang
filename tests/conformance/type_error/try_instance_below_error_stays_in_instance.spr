@@ -1,5 +1,5 @@
-# The instance is declared after the `try`, so `branch` has no instance there;
-# a `try` fused from it must not accept what the call to `branch` rejects.
+# The instance's `Break` arm is wrong, and it is declared below the `try`. A `try`
+# fuses only with a checked instance, so the error is the instance's, not `bump`'s.
 
 type Fetch a =
   | Got a
@@ -13,7 +13,7 @@ instance Propagate Fetch
   fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
     match value with
     | Got v -> Continue(v)
-    | Failed why -> Break(Failed(why))
+    | Failed why -> Break(Failed(why + 1))
 
 fn main() -> Unit !{IO} =
   match bump(Got(1)) with

@@ -1,0 +1,15 @@
+module main
+
+# A user class method named like a prelude function does not reach into the
+# prelude: `instance Semigroup (List a)` still calls the prelude `list_append`.
+
+class Glue a
+  fn list_append(x: a, y: a) -> Int
+
+instance Glue Int
+  fn list_append(x: Int, y: Int) -> Int = x + y
+
+fn main() -> Unit !{IO} =
+  do
+    print(list_length([1] ++ [2]))
+    print(list_append(2, 3))
