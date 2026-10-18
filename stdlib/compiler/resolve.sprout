@@ -38,12 +38,12 @@ export type ResolveResult (..) =
 # modules whose decls are NOT bundled into this program), and super_map
 # (class_name → direct superclass names, for transitive-super expansion — the same
 # source lowering's collect_super_map reads).
-type Tables = Tables(Dict Bool) (Dict (List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String)) (Dict String)
+type Tables = Tables(typed_ast.KeyedTable Bool)(typed_ast.KeyedTable(List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String)) (Dict String)
 
-fn tables_exists(t: Tables) -> Dict Bool =
+fn tables_exists(t: Tables) -> typed_ast.KeyedTable Bool =
   match t with | Tables e _ _ _ _ -> e
 
-fn tables_ctx(t: Tables) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
+fn tables_ctx(t: Tables) -> typed_ast.KeyedTable(List ast.TypeExpr, List ast.TypeConstraint) =
   match t with | Tables _ c _ _ _ -> c
 
 fn tables_env(t: Tables) -> Dict types.Scheme =
@@ -56,11 +56,11 @@ fn tables_class_params(t: Tables) -> Dict String =
   match t with | Tables _ _ _ _ p -> p
 
 # The constraints a declaration forwards as hidden dictionaries, grouped by class and
-# head constructor (constraint_key_str): each slot's key (ast.dict_slot_key, one slot
+# head constructor (constraint_key_str): each slot's key (typed_ast.dict_slot_key, one slot
 # per whole constraint) with the arguments it was written with, aliases expanded.
 # Two slots can share a group (`Ord (Maybe a)` brings `Eq (Maybe a)` beside a written
 # `Eq (Maybe b)`); see forwarded_slot.
-type alias Forwarded = Dict(List (String, List ast.TypeExpr))
+type alias Forwarded = typed_ast.KeyedTable(List(typed_ast.DispatchKey, List ast.TypeExpr))
 
 # What an instance context's type-variable constraint is checked against. In a
 # declaration body it must be one the declaration forwards (CoverFrom its table),
@@ -84,9 +84,9 @@ type DeclKind =
 # `Maybe Int` with `a`'s dictionary. An unnamed use-site position (`_`, an inference
 # variable) is not evidence of a difference, so it takes the one slot it fits, and none
 # when it fits two.
-fn forwarded_slot(class_bare: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Maybe String =
-  let Just slots = dict_get(typed_ast.constraint_key_str(class_bare, type_args), fwd) else Nothing
-      exact = ast.dict_slot_key(class_bare, type_args)
+fn forwarded_slot(class_bare: String, type_args: List ast.TypeExpr, fwd: Forwarded) -> Maybe typed_ast.DispatchKey =
+  let Just slots = typed_ast.keyed_get(typed_ast.constraint_key_str(class_bare, type_args), fwd) else Nothing
+      exact = typed_ast.dict_slot_key(class_bare, type_args)
   in
     if any(\s -> slot_key(s) == exact, slots) then Just(exact)
     else
@@ -94,11 +94,11 @@ fn forwarded_slot(class_bare: String, type_args: List ast.TypeExpr, fwd: Forward
       | [(key, _)] -> Just(key)
       | _ -> Nothing
 
-fn slot_key(s: (String, List ast.TypeExpr)) -> String =
+fn slot_key(s: (typed_ast.DispatchKey, List ast.TypeExpr)) -> typed_ast.DispatchKey =
   let (key, _) = s
   in key
 
-fn slot_args(s: (String, List ast.TypeExpr)) -> List ast.TypeExpr =
+fn slot_args(s: (typed_ast.DispatchKey, List ast.TypeExpr)) -> List ast.TypeExpr =
   let (_, written) = s
   in written
 
@@ -249,7 +249,7 @@ fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> Resol
 # ---------------------------------------------------------------------------
 
 fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
-  collect_tables(decls, Tables(dict_empty(), dict_empty(), env, classes.supers, classes.params))
+  collect_tables(decls, Tables(typed_ast.keyed_empty(), typed_ast.keyed_empty(), env, classes.supers, classes.params))
   where classes = typed_ast.class_tables(decls)
 
 fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
@@ -268,18 +268,18 @@ fn add_instance(
 ) -> Tables =
   let ast.TypeConstraint _ type_args = constraint
       key = typed_ast.constraint_key_from_tc(constraint)
-  in Tables(dict_set(key, true, tables_exists(acc)), add_ctx(key, type_args, inst_constraints, tables_ctx(acc)),
+  in Tables(typed_ast.keyed_set(key, true, tables_exists(acc)), add_ctx(key, type_args, inst_constraints, tables_ctx(acc)),
             tables_env(acc), tables_super(acc), tables_class_params(acc))
 
 fn add_ctx(
-  key: String,
+  key: typed_ast.DispatchKey,
   type_args: List ast.TypeExpr,
   inst_constraints: List ast.TypeConstraint,
-  acc: Dict (List ast.TypeExpr, List ast.TypeConstraint)
-) -> Dict (List ast.TypeExpr, List ast.TypeConstraint) =
+  acc: typed_ast.KeyedTable (List ast.TypeExpr, List ast.TypeConstraint)
+) -> typed_ast.KeyedTable(List ast.TypeExpr, List ast.TypeConstraint) =
   match inst_constraints with
   | Nil -> acc
-  | _ -> dict_set(key, (type_args, inst_constraints), acc)
+  | _ -> typed_ast.keyed_set(key, (type_args, inst_constraints), acc)
 
 # ---------------------------------------------------------------------------
 # Constraint discharge
@@ -320,17 +320,17 @@ fn declares(class_bare: String, type_args: List ast.TypeExpr, cover: VarCover) -
 # bundled into this program register markers in the env but no TInstanceDecl).
 fn instance_exists(
   class_bare: String,
-  key: String,
+  key: typed_ast.DispatchKey,
   head_arg: ast.TypeExpr,
   tables: Tables
 ) -> Bool =
-  dict_member(key, tables_exists(tables))
+  typed_ast.keyed_member(key, tables_exists(tables))
   || dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables))
 
 # Recurse into a matched instance's context constraints (substituted at the
 # concrete type args).  A context-free instance has no entry → Nothing.
 fn check_context(
-  key: String,
+  key: typed_ast.DispatchKey,
   class_name: String,
   head_arg: ast.TypeExpr,
   type_args: List ast.TypeExpr,
@@ -338,7 +338,7 @@ fn check_context(
   cover: VarCover,
   tables: Tables
 ) -> Maybe(source.SourcePos, String) =
-  match dict_get(key, tables_ctx(tables)) with
+  match typed_ast.keyed_get(key, tables_ctx(tables)) with
   | Nothing -> Nothing
   | Just (inst_type_args, inst_constraints) ->
       match spine_depth_mismatch(key, inst_type_args, type_args) with
@@ -355,13 +355,13 @@ fn check_context(
 #
 # Only this one of the three unify_type_args_list callers can report: the other two
 # return an Evidence and a Maybe list, with no position between them.
-fn spine_depth_mismatch(key: String, patterns: List ast.TypeExpr,
+fn spine_depth_mismatch(key: typed_ast.DispatchKey, patterns: List ast.TypeExpr,
                         concretes: List ast.TypeExpr) -> Maybe String =
   match (patterns, concretes) with
   | ([p | rest_p], [c | rest_c]) ->
       if te_app_depth(p) == te_app_depth(c)
       then spine_depth_mismatch(key, rest_p, rest_c)
-      else Just("internal: instance " ++ key ++ " is written at depth "
+      else Just("internal: instance " ++ typed_ast.key_text(key) ++ " is written at depth "
                   ++ int_to_string(te_app_depth(p)) ++ " but dispatches on a type at depth "
                   ++ int_to_string(te_app_depth(c)))
   | (_, _) -> Nothing
@@ -563,7 +563,7 @@ fn produce_evidence(c: ast.TypeConstraint, fwd_keys: Forwarded, tables: Tables) 
               \eff_class -> produce_one_class(eff_class, head_arg, type_args, fwd_keys, tables),
               types.class_with_transitive_supers(class_name, tables_super(tables))))
 
-# One effective-class block. A forward is keyed by ast.dict_slot_key, as lowering keys
+# One effective-class block. A forward is keyed by typed_ast.dict_slot_key, as lowering keys
 # its slots; an instance by constraint_key_str, the head alone. class_name is kept
 # UNSTRIPPED (eff_class); only the keys are stripped.
 fn produce_one_class(
@@ -578,7 +578,7 @@ fn produce_one_class(
      | Just slot -> typed_ast.EvForward(eff_class, slot)
      | Nothing ->
          if head_is_concrete(head_arg) == false then
-           typed_ast.EvForward(eff_class, ast.dict_slot_key(class_bare, type_args))
+           typed_ast.EvForward(eff_class, typed_ast.dict_slot_key(class_bare, type_args))
          else
            produce_concrete_evidence(eff_class, class_bare, type_args, head_arg, fwd_keys, tables)
 
@@ -592,7 +592,7 @@ fn produce_concrete_evidence(
 ) -> typed_ast.Evidence =
   let key = typed_ast.constraint_key_str(class_bare, type_args)
   in
-    if dict_member(key, tables_exists(tables)) then produce_instance_evidence(eff_class, key, type_args, fwd_keys, tables)
+    if typed_ast.keyed_member(key, tables_exists(tables)) then produce_instance_evidence(eff_class, key, type_args, fwd_keys, tables)
     else if dict_member(types.inst_marker_key(class_bare, typed_ast.type_expr_head_name(head_arg)), tables_env(tables)) then
       typed_ast.EvUnresolved
     else
@@ -606,12 +606,12 @@ fn produce_concrete_evidence(
 # constraint reads the same ctx_fwd slot in lowering.
 fn produce_instance_evidence(
   eff_class: String,
-  key: String,
+  key: typed_ast.DispatchKey,
   type_args: List ast.TypeExpr,
   fwd_keys: Forwarded,
   tables: Tables
 ) -> typed_ast.Evidence =
-  match dict_get(key, tables_ctx(tables)) with
+  match typed_ast.keyed_get(key, tables_ctx(tables)) with
   | Nothing -> typed_ast.EvInstance(eff_class, key, Nil)
   | Just (inst_type_args, inst_constraints) ->
       typed_ast.EvInstance(eff_class, key,
@@ -621,10 +621,10 @@ fn produce_instance_evidence(
 
 # The forwarded slots of a function/method body: one per (constraint, super) in its
 # where-clause, keyed by the WRITTEN arguments exactly as lowering's
-# build_hidden_for_constraints keys ctx_fwd (ast.dict_slot_key), and holding them with
+# build_hidden_for_constraints keys ctx_fwd (typed_ast.dict_slot_key), and holding them with
 # aliases expanded, as use sites are compared (expand_aliases).
 fn build_fwd_keys(constraints: List ast.TypeConstraint, tables: Tables) -> Forwarded =
-  add_fwd_keys(constraints, tables, dict_empty())
+  add_fwd_keys(constraints, tables, typed_ast.keyed_empty())
 
 fn add_fwd_keys(constraints: List ast.TypeConstraint, tables: Tables, acc: Forwarded) -> Forwarded =
   match constraints with
@@ -649,11 +649,11 @@ fn add_eff_keys(effs: List String, type_args: List ast.TypeExpr, expanded: List 
 fn add_slot(class_bare: String, type_args: List ast.TypeExpr, expanded: List ast.TypeExpr,
             acc: Forwarded) -> Forwarded =
   let group = typed_ast.constraint_key_str(class_bare, type_args)
-      slot = ast.dict_slot_key(class_bare, type_args)
-      Just slots = dict_get(group, acc) else dict_set(group, [(slot, expanded)], acc)
+      slot = typed_ast.dict_slot_key(class_bare, type_args)
+      Just slots = typed_ast.keyed_get(group, acc) else typed_ast.keyed_set(group, [(slot, expanded)], acc)
   in
     if any(\s -> slot_key(s) == slot, slots) then acc
-    else dict_set(group, list_append(slots, [(slot, expanded)]), acc)
+    else typed_ast.keyed_set(group, list_append(slots, [(slot, expanded)]), acc)
 
 # The type variables an instance head binds (`a` in `instance Eq (Maybe a)`).
 fn head_vars(constraint: ast.TypeConstraint) -> List String =
@@ -711,7 +711,7 @@ fn method_ref_constraint(method: String, class_name: String, t: types.Type,
   in Just(ast.TypeConstraint(class_name, [named_type_expr(class_type, tables_env(tables))]))
 
 # The type with each signature variable named as it was declared, through the
-# `@eta_fwdvar` markers, so a slot key built from it (ast.dict_slot_key) is the one the
+# `@eta_fwdvar` markers, so a slot key built from it (typed_ast.dict_slot_key) is the one the
 # enclosing function's slot is under. Any other variable keeps its identity.
 fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
@@ -742,7 +742,7 @@ fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
       typed_ast.TFnDecl(name, params, ret_ty, effects, constraints,
         rewrite_expr(body, build_fwd_keys(constraints, tables), tables))
   | typed_ast.TLetDecl name body ->
-      typed_ast.TLetDecl(name, rewrite_expr(body, dict_empty(), tables))
+      typed_ast.TLetDecl(name, rewrite_expr(body, typed_ast.keyed_empty(), tables))
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       typed_ast.TInstanceDecl(constraint, inst_constraints,
         list_map(\m -> rewrite_method(m, head_bound(inst_constraints, head_vars(constraint)), tables), methods))
@@ -832,7 +832,7 @@ fn check_decls(
 fn check_decl(d: typed_ast.TypedDecl, tables: Tables) -> Maybe(source.SourcePos, String) =
   match d with
   | typed_ast.TFnDecl _ _ _ _ constraints body -> check_body(body, InFn, constraints, tables)
-  | typed_ast.TLetDecl _ body -> check_expr(body, CoverFrom (InFn, dict_empty()), tables)
+  | typed_ast.TLetDecl _ body -> check_expr(body, CoverFrom (InFn, typed_ast.keyed_empty()), tables)
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       check_methods(head_vars(constraint), head_bound(inst_constraints, head_vars(constraint)), methods, tables)
   | typed_ast.TExternFnDecl _ _ _ _ -> Nothing

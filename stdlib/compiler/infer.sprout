@@ -3327,9 +3327,9 @@ fn is_self_binding(callee: String, env: Dict types.Scheme) -> Bool =
 
 # The marker a function body carries for each compound constraint it declares, and
 # for each transitive superclass of one, under the key its hidden slot has
-# (ast.dict_slot_key), so two constraints sharing a class and head do not collide.
+# (typed_ast.dict_slot_key), so two constraints sharing a class and head do not collide.
 fn compound_fwd_key(class_name: String, te: ast.TypeExpr) -> String =
-  "@fwdhead:" ++ ast.dict_slot_key(string.after_last_dot(class_name), [te])
+  "@fwdhead:" ++ typed_ast.key_text(typed_ast.dict_slot_key(string.after_last_dot(class_name), [te]))
 
 fn resolve_one_constraint_tdict(
   class_name: String,
@@ -3942,7 +3942,7 @@ fn set_super_marker(key: String -> String, prog_var: String, acc: Dict types.Sch
 # Class-independent `@eta_fwdvar:<var>` markers naming every signature variable, keyed
 # by the seeded variable and by what `s2` made of it: the body can rebind the seeded
 # one, and lowering reads the final types. A value-position slot key
-# (ast.dict_slot_key) is rendered through them, and resolve checks a method used as a
+# (typed_ast.dict_slot_key) is rendered through them, and resolve checks a method used as a
 # value at the named type.
 fn eta_fwdvar_markers(prog_to_fresh: Dict types.Type, s2: Dict types.Type,
                       markers: Dict types.Scheme) -> Dict types.Scheme =
@@ -8483,7 +8483,7 @@ fn check_arity_decls(decls: List ast.Decl, depths: Dict (String, List Int),
 # A function's hidden dictionary parameters are grouped by class name and the
 # OUTERMOST constructor of each constraint argument. So `where Boxed (Tagged k),
 # Boxed (Tagged j)` puts both constraints in the group `Boxed_Tagged`. Each has its
-# own slot (ast.dict_slot_key names the arguments), but an eta'd method under both
+# own slot (typed_ast.dict_slot_key names the arguments), but an eta'd method under both
 # reaches lowering's fallback (find_forwarded_method_any), which cannot tell the two
 # slots apart and leaves a name ast_to_ir rejects. So the shape is rejected here,
 # where it is written. Two constraints with the SAME subject are fine: one

@@ -7,28 +7,33 @@ import stdlib.compiler.typed_ast as typed_ast
 
 fn name(n: String) -> ast.TypeExpr = ast.TypeName(n)
 
+fn key_str(class_name: String, args: List ast.TypeExpr) -> String =
+  typed_ast.key_text(typed_ast.constraint_key_str(class_name, args))
+
+fn key_from_tc(c: ast.TypeConstraint) -> String = typed_ast.key_text(typed_ast.constraint_key_from_tc(c))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    assert_eq(state, "a bare head", typed_ast.constraint_key_str("Show", [name("Int")]), "Show_Int")
+    assert_eq(state, "a bare head", key_str("Show", [name("Int")]), "Show_Int")
     assert_eq(state, "an applied type keys by its head",
-      typed_ast.constraint_key_str("Show", [ast.TypeApply(name("List"), name("a"))]), "Show_List")
+      key_str("Show", [ast.TypeApply(name("List"), name("a"))]), "Show_List")
     assert_eq(state, "a tuple keys by its arity",
-      typed_ast.constraint_key_str("Eq", [ast.TupleType([name("Int"), name("Bool")])]), "Eq_Tuple2")
+      key_str("Eq", [ast.TupleType([name("Int"), name("Bool")])]), "Eq_Tuple2")
     assert_eq(state, "an arrow keys as Fn",
-      typed_ast.constraint_key_str("C", [ast.TypeArrow(name("Int"), name("Int"), Nothing, ast.ModeDefault)]),
+      key_str("C", [ast.TypeArrow(name("Int"), name("Int"), Nothing, ast.ModeDefault)]),
       "C_Fn")
     assert_eq(state, "a thunk keys as Fn",
-      typed_ast.constraint_key_str("C", [ast.TypeThunk(name("Int"), Nothing)]), "C_Fn")
+      key_str("C", [ast.TypeThunk(name("Int"), Nothing)]), "C_Fn")
     assert_eq(state, "an effect type keys as Eff",
-      typed_ast.constraint_key_str("C", [ast.TypeEffect(name("Int"), ["IO"])]), "C_Eff")
+      key_str("C", [ast.TypeEffect(name("Int"), ["IO"])]), "C_Eff")
     assert_eq(state, "each argument adds its head",
-      typed_ast.constraint_key_str("Convert", [name("Int"), name("String")]), "Convert_Int_String")
-    assert_eq(state, "no arguments is the class alone", typed_ast.constraint_key_str("C", []), "C")
+      key_str("Convert", [name("Int"), name("String")]), "Convert_Int_String")
+    assert_eq(state, "no arguments is the class alone", key_str("C", []), "C")
 
     assert_eq(state, "the class is stripped, the head stays qualified",
-      typed_ast.constraint_key_from_tc(ast.TypeConstraint("prelude.Eq", [name("stdlib.x.Bar")])),
+      key_from_tc(ast.TypeConstraint("prelude.Eq", [name("stdlib.x.Bar")])),
       "Eq_stdlib.x.Bar")
     assert_eq(state, "head name of a nested application",
       typed_ast.type_expr_head_name(ast.TypeApply(ast.TypeApply(name("Dict"), name("k")), name("v"))),

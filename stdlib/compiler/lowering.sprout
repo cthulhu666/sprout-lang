@@ -33,9 +33,9 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
   in
   match lower_decls(decls,
                     LowerEnv(class_order = class_order,
-                             inst_table = collect_instance_table(decls, dict_empty()),
+                             inst_table = collect_instance_table(decls, typed_ast.keyed_empty()),
                              super_map = super_map,
-                             inst_meta = collect_inst_meta(decls, class_order, super_map, dict_empty()),
+                             inst_meta = collect_inst_meta(decls, class_order, super_map, typed_ast.keyed_empty()),
                              scheme_env = scheme_env,
                              class_params = tables.params_with_short,
                              method_class = method_class_table(class_order)),
@@ -64,9 +64,9 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
 #   method_class – canonical method name → the one class that declares it
 type LowerEnv = (
   class_order: Dict (List String),
-  inst_table: Dict (Dict String),
+  inst_table: typed_ast.KeyedTable (Dict String),
   super_map: Dict (List String),
-  inst_meta: Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)),
+  inst_meta: typed_ast.KeyedTable (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)),
   scheme_env: Dict types.Scheme,
   class_params: Dict String,
   method_class: Dict String)
@@ -76,14 +76,14 @@ type LowerEnv = (
 #   fwd   – constraint_key → { method_name → hidden_param_name }  (forwarded)
 #   bound – locally bound names (fn params, lambda params, pattern and do binders)
 #           that must NOT be eta-expanded; a Set so each binder is O(log n)
-type LowerCtx = (env: LowerEnv, fwd: Dict (Dict String), bound: Set)
+type LowerCtx = (env: LowerEnv, fwd: typed_ast.KeyedTable (Dict String), bound: Set)
 
 fn ctx_is_bound(name: String, ctx: LowerCtx) -> Bool = set_member(name, ctx.bound)
 
 fn ctx_with_bound(vars: List String, ctx: LowerCtx) -> LowerCtx =
   LowerCtx(env = ctx.env, fwd = ctx.fwd, bound = list_fold(\ (s, v) -> set_insert(v, s), ctx.bound, vars))
 
-fn new_ctx(env: LowerEnv, fwd: Dict (Dict String), bound: List String) -> LowerCtx =
+fn new_ctx(env: LowerEnv, fwd: typed_ast.KeyedTable (Dict String), bound: List String) -> LowerCtx =
   LowerCtx(env = env, fwd = fwd, bound = set_from_list(bound))
 
 fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
@@ -129,14 +129,14 @@ fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, po
 # The constraint_key uses the HEAD type of the first constraint arg (same as the
 # @inst: markers in the typechecker) so it matches keys produced from TDict nodes.
 
-fn collect_instance_table(decls: List typed_ast.TypedDecl, acc: Dict (Dict String)) -> Dict (Dict String) =
+fn collect_instance_table(decls: List typed_ast.TypedDecl, acc: typed_ast.KeyedTable (Dict String)) -> typed_ast.KeyedTable(Dict String) =
   match decls with
   | Nil -> acc
   | Cons d rest ->
       match d with
       | typed_ast.TInstanceDecl constraint _ methods ->
           collect_instance_table(rest,
-            dict_set(typed_ast.constraint_key_from_tc(constraint),
+            typed_ast.keyed_set(typed_ast.constraint_key_from_tc(constraint),
                      build_inst_method_map(constraint, methods, dict_empty()),
                      acc))
       | _ -> collect_instance_table(rest, acc)
@@ -167,8 +167,8 @@ fn collect_inst_meta(
   decls: List typed_ast.TypedDecl,
   class_order: Dict (List String),
   super_map: Dict (List String),
-  acc: Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int))
-) -> Dict (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) =
+  acc: typed_ast.KeyedTable (List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int))
+) -> typed_ast.KeyedTable(List ast.TypeExpr, List ast.TypeConstraint, Dict (Int, Int)) =
   match decls with
   | Nil -> acc
   | Cons d rest ->
@@ -180,7 +180,7 @@ fn collect_inst_meta(
               match constraint with
               | ast.TypeConstraint _ type_args ->
                   collect_inst_meta(rest, class_order, super_map,
-                    dict_set(typed_ast.constraint_key_from_tc(constraint),
+                    typed_ast.keyed_set(typed_ast.constraint_key_from_tc(constraint),
                              (type_args, inst_constraints,
                               collect_method_arities(methods, class_order, super_map, dict_empty())),
                              acc))
@@ -255,7 +255,7 @@ fn lower_one_decl(
        wrapper_rev, inst_rev)
   | typed_ast.TLetDecl name body ->
       (Cons(typed_ast.TLetDecl(name,
-                               lower_expr(body, new_ctx(env, dict_empty(), Nil))),
+                               lower_expr(body, new_ctx(env, typed_ast.keyed_empty(), Nil))),
             user_rev),
        wrapper_rev, inst_rev)
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
@@ -504,14 +504,14 @@ fn lower_fn_decl(
 #
 # Returns:
 #   (List Param) - the hidden params to append to the function params
-#   (Dict (Dict String)) - fwd_map: constraint_key → { method → hidden_param_name }
+#   (typed_ast.KeyedTable (Dict String)) - fwd_map: constraint_key → { method → hidden_param_name }
 
 fn build_hidden_for_constraints(
   constraints: List ast.TypeConstraint,
   class_order: Dict (List String),
   super_map: Dict (List String)
-) -> (List ast.Param, Dict (Dict String)) =
-  build_hidden_acc(constraints, class_order, super_map, 0, Nil, dict_empty())
+) -> (List ast.Param, typed_ast.KeyedTable(Dict String)) =
+  build_hidden_acc(constraints, class_order, super_map, 0, Nil, typed_ast.keyed_empty())
 
 fn build_hidden_acc(
   constraints: List ast.TypeConstraint,
@@ -519,8 +519,8 @@ fn build_hidden_acc(
   super_map: Dict (List String),
   idx: Int,
   param_rev: List ast.Param,
-  map_acc: Dict (Dict String)
-) -> (List ast.Param, Dict (Dict String)) =
+  map_acc: typed_ast.KeyedTable (Dict String)
+) -> (List ast.Param, typed_ast.KeyedTable(Dict String)) =
   match constraints with
   | Nil -> (list_reverse(param_rev), map_acc)
   | Cons c rest ->
@@ -545,8 +545,8 @@ fn build_hidden_for_constraint_with_supers(
   classes: List String,
   class_order: Dict (List String),
   param_rev: List ast.Param,
-  map_acc: Dict (Dict String)
-) -> (List ast.Param, Dict (Dict String)) =
+  map_acc: typed_ast.KeyedTable (Dict String)
+) -> (List ast.Param, typed_ast.KeyedTable(Dict String)) =
   match classes with
   | Nil -> (param_rev, map_acc)
   | Cons eff_class rest ->
@@ -554,7 +554,7 @@ fn build_hidden_for_constraint_with_supers(
       | (new_params, method_map) ->
           build_hidden_for_constraint_with_supers(direct_class, type_args, idx, rest, class_order,
             prepend_params(new_params, param_rev),
-            dict_set(ast.dict_slot_key(string.after_last_dot(eff_class), type_args), method_map, map_acc))
+            typed_ast.keyed_set(typed_ast.dict_slot_key(string.after_last_dot(eff_class), type_args), method_map, map_acc))
 
 fn build_hidden_for_one(
   class_name: String,
@@ -694,24 +694,25 @@ fn find_concrete_method_impl(class_name: String, method_name: String, head: Stri
   # after_last_dot: class_order stores bundler-qualified names (e.g. "prelude.ToString")
   # but inst_table keys are always stripped (built via constraint_key_from_tc which calls
   # after_last_dot).  Strip here so both sides of the lookup use the same key form.
-  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx.env.inst_table) with
+  match typed_ast.keyed_get(typed_ast.constraint_key_str(string.after_last_dot(class_name), [ast.TypeName(head)]),
+                            ctx.env.inst_table) with
   | Nothing -> Nothing
   | Just method_map -> dict_get(method_name, method_map)
 
-# The forwarded slot's method under an exact slot key (ast.dict_slot_key), if the
+# The forwarded slot's method under an exact slot key (typed_ast.dict_slot_key), if the
 # current function received that constraint as a hidden dict parameter. Used to
 # prefer the forwarded slot over the concrete instance, avoiding an unresolvable
 # inner-dict reference at eta-expansion time.
-fn find_fwd_method_for_key(method_name: String, key: String, ctx: LowerCtx) -> Maybe String =
-  match dict_get(key, ctx.fwd) with
+fn find_fwd_method_for_key(method_name: String, key: typed_ast.DispatchKey, ctx: LowerCtx) -> Maybe String =
+  match typed_ast.keyed_get(key, ctx.fwd) with
   | Nothing -> Nothing
   | Just method_map -> dict_get(method_name, method_map)
 
 # The slot key for a value-position method at `class_type`, its variables named by
 # the `@eta_fwdvar` markers infer threads into scheme_env. A variable without one
 # renders `_`, which no slot declares.
-fn eta_slot_key(class_name: String, class_type: types.Type, ctx: LowerCtx) -> String =
-  ast.dict_slot_key(string.after_last_dot(class_name), [eta_named_typeexpr(class_type, ctx)])
+fn eta_slot_key(class_name: String, class_type: types.Type, ctx: LowerCtx) -> typed_ast.DispatchKey =
+  typed_ast.dict_slot_key(string.after_last_dot(class_name), [eta_named_typeexpr(class_type, ctx)])
 
 fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
   match t with
@@ -860,21 +861,21 @@ fn tvar_position(t: types.Type) -> Maybe types.Type =
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let Just param = eta_class_position(t) else Nothing
-      Just impl_name = eta_forwarded_impl(name, param, vec_to_list(dict_entries(ctx.fwd))) else Nothing
+      Just impl_name = eta_forwarded_impl(name, param, typed_ast.keyed_entries(ctx.fwd)) else Nothing
   in Just(make_eta_lambda(impl_name, t, no_pos()))
 
 # The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
 # A missing tvar head or a for-tvar miss both fall through to the any-slot scan.
-fn eta_forwarded_impl(name: String, param: types.Type, entries: List (String, Dict String)) -> Maybe String =
+fn eta_forwarded_impl(name: String, param: types.Type, entries: List (typed_ast.DispatchKey, Dict String)) -> Maybe String =
   let Just tvar_name = tvar_head_name(param) else find_forwarded_method_any(name, entries)
       Just impl_name = find_forwarded_method_for_tvar(name, tvar_name, entries) else find_forwarded_method_any(name, entries)
   in Just(impl_name)
 
-fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entries: List (String, Dict String)) -> Maybe String =
+fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entries: List (typed_ast.DispatchKey, Dict String)) -> Maybe String =
   match entries with
   | Nil -> Nothing
   | Cons (key, method_map) rest ->
-      if string.ends_with(key, "_" ++ tvar_name) then
+      if string.ends_with(typed_ast.key_text(key), "_" ++ tvar_name) then
         match dict_get(method_name, method_map) with
         | Just impl_name -> Just(impl_name)
         | Nothing -> find_forwarded_method_for_tvar(method_name, tvar_name, rest)
@@ -886,12 +887,12 @@ fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entrie
 # recoverable here, since its type is a fresh tvar that no @eta_fwd marker names.
 # With several, any pick runs one instance's code at another's type, so decline and
 # leave the loud __eta_unresolved_ failure.
-fn find_forwarded_method_any(method_name: String, entries: List (String, Dict String)) -> Maybe String =
+fn find_forwarded_method_any(method_name: String, entries: List (typed_ast.DispatchKey, Dict String)) -> Maybe String =
   match forwarded_method_impls(method_name, entries) with
   | Nil -> Nothing
   | Cons impl_name rest -> if all_same_impl(impl_name, rest) then Just(impl_name) else Nothing
 
-fn forwarded_method_impls(method_name: String, entries: List (String, Dict String)) -> List String =
+fn forwarded_method_impls(method_name: String, entries: List (typed_ast.DispatchKey, Dict String)) -> List String =
   match entries with
   | Nil -> Nil
   | Cons (_, method_map) rest ->
@@ -942,7 +943,8 @@ fn eta_in_class_concrete(class_name: String, name: String, t: types.Type, head: 
   | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
 
 fn eta_in_class_with_impl(class_name: String, t: types.Type, head: String, impl_name: String, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx.env.inst_meta) with
+  match typed_ast.keyed_get(typed_ast.constraint_key_str(string.after_last_dot(class_name), [ast.TypeName(head)]),
+                            ctx.env.inst_meta) with
   | Just (_, [ast.TypeConstraint inner _ | _], _) -> eta_inner_dict_unreachable(inner, no_pos())
   | _ -> Just(make_eta_lambda(impl_name, t, no_pos()))
 
@@ -975,7 +977,7 @@ fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: Stri
 
 fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_fwd_method_for_key(method_name,
-          ast.dict_slot_key(string.after_last_dot(class_name), [ast.TypeName(prog_var)]), ctx) with
+          typed_ast.dict_slot_key(string.after_last_dot(class_name), [ast.TypeName(prog_var)]), ctx) with
   | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, no_pos()))
   | Nothing -> Nothing
 
@@ -1080,9 +1082,9 @@ fn concrete_block_providing(mname: String, blocks: List typed_ast.Evidence, ctx:
       | Nothing -> concrete_block_providing(mname, rest, ctx)
   | Cons _ rest -> concrete_block_providing(mname, rest, ctx)
 
-fn block_impl_if_resolved(mname: String, key: String, children: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe String =
+fn block_impl_if_resolved(mname: String, key: typed_ast.DispatchKey, children: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe String =
   if evidence_list_fully_resolved(children) then
-    match dict_get(key, ctx.env.inst_table) with
+    match typed_ast.keyed_get(key, ctx.env.inst_table) with
     | Just method_map -> dict_get(mname, method_map)
     | Nothing -> Nothing
   else Nothing
@@ -1204,7 +1206,7 @@ fn expand_dict_witness_args(args: List typed_ast.TypedExpr, ctx: LowerCtx) -> Li
 
 # Apply resolved inner dicts to instance methods: bare refs if Nil, lambda-wrapped otherwise.
 fn resolve_tdict_apply_inner_dicts(
-  key: String,
+  key: typed_ast.DispatchKey,
   pos: source.SourcePos,
   method_map: Dict String,
   methods: List String,
@@ -1218,14 +1220,14 @@ fn resolve_tdict_apply_inner_dicts(
 
 fn resolve_method_with_lambda(
   method_name: String,
-  key: String,
+  key: typed_ast.DispatchKey,
   method_map: Dict String,
   method_arities: Dict (Int, Int),
   inner_dicts: List typed_ast.TypedExpr,
   pos: source.SourcePos
 ) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
-  | Nothing -> typed_ast.TVar("__unresolved_" ++ key ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
+  | Nothing -> typed_ast.TVar(unresolved_name(key) ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
   | Just fn_name ->
       match get_method_arity(method_name, method_arities) with
       | (n_params, n_method_dicts) ->
@@ -1239,13 +1241,16 @@ fn get_method_arity(method_name: String, method_arities: Dict (Int, Int)) -> (In
 fn resolve_method_var(
   method_name: String,
   method_map: Dict String,
-  fallback_key: String,
+  fallback_key: typed_ast.DispatchKey,
   pos: source.SourcePos,
   scheme_env: Dict types.Scheme
 ) -> typed_ast.TypedExpr =
   match dict_get(method_name, method_map) with
   | Just fn_name -> typed_ast.TVar(fn_name, lookup_scheme_type(fn_name, scheme_env), pos)
-  | Nothing -> typed_ast.TVar("__unresolved_" ++ fallback_key ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
+  | Nothing -> typed_ast.TVar(unresolved_name(fallback_key) ++ "_" ++ method_name, types.TVar(types.tyvar_id("?gen")), pos)
+
+# The poison name for a dictionary no instance or slot answered.
+fn unresolved_name(key: typed_ast.DispatchKey) -> String = "__unresolved_" ++ typed_ast.key_text(key)
 
 # ---------------------------------------------------------------------------
 # Evidence consumption (M3b-3): mechanical Evidence → witness translation
@@ -1296,7 +1301,7 @@ fn unresolved_witnesses_for_classes(
       list_append(
         list_map(
           \_ -> typed_ast.TVar(
-            "__unresolved_" ++ typed_ast.constraint_key_str(string.after_last_dot(eff_class), type_args),
+            unresolved_name(typed_ast.constraint_key_str(string.after_last_dot(eff_class), type_args)),
             types.TVar(types.tyvar_id("?gen")), pos),
           types.class_methods_for(eff_class, ctx.env.class_order)),
         unresolved_witnesses_for_classes(rest, type_args, pos, ctx))
@@ -1336,15 +1341,15 @@ fn consume_blocks(blocks: List typed_ast.Evidence, pos: source.SourcePos, ctx: L
 fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match ev with
   | typed_ast.EvForward class_name key ->
-      match dict_get(key, ctx.fwd) with
+      match typed_ast.keyed_get(key, ctx.fwd) with
       | Just method_map ->
           list_map(\m -> resolve_method_var(m, method_map, key, pos, ctx.env.scheme_env),
                    types.class_methods_for(class_name, ctx.env.class_order))
       | Nothing ->
-          list_map(\_ -> typed_ast.TVar("__unresolved_" ++ key, types.TVar(types.tyvar_id("?gen")), pos),
+          list_map(\_ -> typed_ast.TVar(unresolved_name(key), types.TVar(types.tyvar_id("?gen")), pos),
                    types.class_methods_for(class_name, ctx.env.class_order))
   | typed_ast.EvInstance class_name key children ->
-      match dict_get(key, ctx.env.inst_table) with
+      match typed_ast.keyed_get(key, ctx.env.inst_table) with
       | Just method_map ->
           resolve_tdict_apply_inner_dicts(
             key, pos, method_map,
@@ -1353,12 +1358,12 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
             consume_inner_dicts(children, pos, ctx),
             ctx.env.scheme_env)
       | Nothing ->
-          panic("lowering: instance dict '" ++ key ++ "' at " ++ pos_loc(pos) ++
+          panic("lowering: instance dict '" ++ typed_ast.key_text(key) ++ "' at " ++ pos_loc(pos) ++
                 " absent from ctx_inst — resolve/lowering table disagreement")
   | _ -> panic("lowering: consume_block expected EvForward/EvInstance (internal error)")
 
-fn evidence_inst_arities(key: String, ctx: LowerCtx) -> Dict (Int, Int) =
-  match dict_get(key, ctx.env.inst_meta) with
+fn evidence_inst_arities(key: typed_ast.DispatchKey, ctx: LowerCtx) -> Dict (Int, Int) =
+  match typed_ast.keyed_get(key, ctx.env.inst_meta) with
   | Just (_, _, method_arities) -> method_arities
   | Nothing -> dict_empty()
 
@@ -1396,7 +1401,7 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
   # A ctx_fwd miss (a phantom fresh tyvar resolve emitted EvForward for
   # optimistically) returns Nothing, so lower_value_var null-fills exactly as today.
   | typed_ast.EvForward _ key ->
-      match dict_get(key, ctx.fwd) with
+      match typed_ast.keyed_get(key, ctx.fwd) with
       | Nothing -> Nothing
       | Just method_map ->
           match dict_get(method, method_map) with
@@ -1404,8 +1409,8 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
           | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | _ -> Nothing
 
-fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match dict_get(key, ctx.env.inst_table) with
+fn eta_from_instance(method: String, key: typed_ast.DispatchKey, t: types.Type, pos: source.SourcePos, inner_dicts: List typed_ast.TypedExpr, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
+  match typed_ast.keyed_get(key, ctx.env.inst_table) with
   | Nothing -> Nothing
   | Just method_map ->
       match dict_get(method, method_map) with
@@ -1422,7 +1427,7 @@ fn misses_named_forward(evs: List typed_ast.Evidence, ctx: LowerCtx) -> Bool =
 fn named_forward_miss(ev: typed_ast.Evidence, ctx: LowerCtx) -> Bool =
   match ev with
   | typed_ast.EvForward class_name key ->
-      match dict_get(key, ctx.fwd) with
+      match typed_ast.keyed_get(key, ctx.fwd) with
       | Just _ -> false
       | Nothing -> unnamed_forward(class_name, key) == false
   | typed_ast.EvInstance _ _ children -> misses_named_forward(children, ctx)
@@ -1430,10 +1435,10 @@ fn named_forward_miss(ev: typed_ast.Evidence, ctx: LowerCtx) -> Bool =
   | typed_ast.EvUnresolved -> false
   | typed_ast.EvMissing _ -> false
 
-# The variable a forward key (ast.dict_slot_key) names is `_` or an inference variable,
+# The variable a forward key (typed_ast.dict_slot_key) names is `_` or an inference variable,
 # as resolve.is_unnamed reads it; an existential (`$ex_`, a skolem) is a type of its own.
-fn unnamed_forward(class_name: String, key: String) -> Bool =
-  let arg = string.drop(key, string.length(string.after_last_dot(class_name)) + 1)
+fn unnamed_forward(class_name: String, key: typed_ast.DispatchKey) -> Bool =
+  let arg = typed_ast.slot_key_args_text(string.after_last_dot(class_name), key)
   in arg == "_"
      || (str_starts_with(arg, "$") && types.is_existential_head(arg) == false
            && types.is_skolem_name(arg) == false)
@@ -1574,7 +1579,7 @@ fn slot_pattern_for(field_var: Maybe String, eff: String, method: String, ppos: 
 fn witness_slot_var(vname: String, eff: String, method: String) -> String =
   string_concat_many(["$wtns_", vname, "_", string.after_last_dot(eff), "_", string.after_last_dot(method)])
 
-fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> Dict (Dict String) =
+fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, fields: List ast.Pattern, fwd: typed_ast.KeyedTable (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> typed_ast.KeyedTable(Dict String) =
   match cons with
   | Nil -> fwd
   | Cons entry rest ->
@@ -1589,7 +1594,7 @@ fn seed_fwd_for_cons(cons: List (String, String), param_types: List types.Type, 
 # witness. Each block maps that class's methods to their per-slot binders, keyed
 # by typed_ast.constraint_key_str(<eff>, [$ex_<binder>]) so it matches resolve's EvForward key
 # and consume_block's lookup.
-fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: Dict (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> Dict (Dict String) =
+fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, fwd: typed_ast.KeyedTable (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> typed_ast.KeyedTable(Dict String) =
   match field_var_for_constraint(existv, param_types, fields) with
   | Just vname ->
       # class_name AS-IS (qualified after the bundler fix) to match super_map's keys
@@ -1599,12 +1604,12 @@ fn seed_one_fwd(existv: String, class_name: String, param_types: List types.Type
                           vname, class_order, fwd)
   | Nothing -> fwd
 
-fn seed_eff_fwd_blocks(effs: List String, vname: String, class_order: Dict (List String), fwd: Dict (Dict String)) -> Dict (Dict String) =
+fn seed_eff_fwd_blocks(effs: List String, vname: String, class_order: Dict (List String), fwd: typed_ast.KeyedTable (Dict String)) -> typed_ast.KeyedTable(Dict String) =
   match effs with
   | Nil -> fwd
   | Cons eff rest ->
       seed_eff_fwd_blocks(rest, vname, class_order,
-        dict_set(ast.dict_slot_key(string.after_last_dot(eff),
+        typed_ast.keyed_set(typed_ast.dict_slot_key(string.after_last_dot(eff),
                                    Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
                  eff_method_witness_map(eff, types.class_methods_for(eff, class_order), vname, dict_empty()),
                  fwd))
@@ -1638,7 +1643,7 @@ fn scheme_param_types(t: types.Type) -> List types.Type =
   | types.TFunc p rest _ _ -> Cons(p, scheme_param_types(rest))
   | _ -> Nil
 
-fn ctx_with_fwd(fwd: Dict (Dict String), ctx: LowerCtx) -> LowerCtx =
+fn ctx_with_fwd(fwd: typed_ast.KeyedTable (Dict String), ctx: LowerCtx) -> LowerCtx =
   LowerCtx(env = ctx.env, fwd = fwd, bound = ctx.bound)
 
 fn lower_do_steps(steps: List typed_ast.TypedDoStep, ctx: LowerCtx) -> List typed_ast.TypedDoStep =
