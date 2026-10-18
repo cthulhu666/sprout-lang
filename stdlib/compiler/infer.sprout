@@ -7369,7 +7369,7 @@ fn typecheck_decls_resolved(
     let Nothing = validate_all_decls(decls, declared_types) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = validate_alias_uses(decls, alias_arities(decls, dict_empty())) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = validate_constraints_all(decls, marker_names(types.class_marker_tag, env, set_from_list(collect_declared_class_names(decls, Nil)))) else Just(p, m) -> typed_ast.TypedErr(p, m)
-    let Nothing = check_duplicate_fn_decls(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_duplicate_module_values(decls, dict_empty()) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_tyvar_instance_heads(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_instance_head_kinds(decls, arities, env, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_indistinct_constraints(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
@@ -7896,7 +7896,7 @@ type NameOwner =
   | OwnedByLet
   | OwnedByClass String
 
-fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
+fn check_duplicate_module_values(decls: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
@@ -7905,23 +7905,26 @@ fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict NameOwner) -> Maybe
       | ast.LetDecl name _ _ pos -> check_value_name(name, OwnedByLet, pos, rest, seen)
       | ast.ClassDecl class_name _ methods _ pos ->
           check_class_method_names(class_name, methods, pos, rest, seen)
-      | _ -> check_duplicate_fn_decls(rest, seen)
+      | _ -> check_duplicate_module_values(rest, seen)
 
 fn check_value_name(name: String, owner: NameOwner, pos: source.SourcePos, rest: List ast.Decl,
                     seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
   match dict_get(name, seen) with
-  | Nothing -> check_duplicate_fn_decls(rest, dict_set(name, owner, seen))
+  | Nothing -> check_duplicate_module_values(rest, dict_set(name, owner, seen))
   | Just (OwnedByClass class_name) -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
   | Just _ -> Just((pos, "`" ++ name ++ "` is defined more than once in this module"))
 
 fn check_class_method_names(class_name: String, methods: List ast.ClassMethodSig, pos: source.SourcePos,
                             rest: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
   match methods with
-  | Nil -> check_duplicate_fn_decls(rest, seen)
+  | Nil -> check_duplicate_module_values(rest, seen)
   | Cons (ast.ClassMethodSig name _ _ _ _) more ->
       match dict_get(name, seen) with
       | Nothing -> check_class_method_names(class_name, more, pos, rest, dict_set(name, OwnedByClass(class_name), seen))
-      | Just (OwnedByClass other) -> Just((pos, shared_method_message(name, other, "class " ++ class_name)))
+      | Just (OwnedByClass other) ->
+          if other == class_name
+          then Just((pos, "`" ++ string.after_last_dot(name) ++ "` is declared twice in class " ++ class_name))
+          else Just((pos, shared_method_message(name, other, "class " ++ class_name)))
       | Just owner -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
 
 fn value_label(owner: NameOwner) -> String =
@@ -9629,7 +9632,7 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 # declaration is a barrier singleton or in exactly one segment (a class is emitted
 # once, at its module's start), and an SCC
 # partition covers its node set — with one dependency: names must be unique, which
-# check_duplicate_fn_decls has already guaranteed by the time this runs (an
+# check_duplicate_module_values has already guaranteed by the time this runs (an
 # instance's node is named by its index). The
 # verification below is not a substitute for that argument; it is there because a
 # silently vanishing declaration is the one failure mode worth paying to rule out.

@@ -109,7 +109,7 @@ matches PureScript and Sprout's own type-and-constructors rule.
 
 **Inference.**
 - `register_class_method_over` and the `@class:` markers need no change: their keys are now
-  canonical. `check_duplicate_fn_decls` extends to class methods for rule 2.
+  canonical. `check_duplicate_module_values` extends to class methods for rule 2.
 - Messages that print a method's raw name print the short one, since the class is named beside
   it: `instance_method_err`, `constraint_list_mismatch`, `class_row_message` (which would read
   `main.Tree.main.branch`) and `instance_report_name`.

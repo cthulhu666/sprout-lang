@@ -490,13 +490,12 @@ fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
 
 # Names bound LOCALLY at the current point of the walk.
 #
-# A class method is registered under its bare name, and the callee of a call is
-# just a `TVar name` — nothing in the typed AST marks it as a method rather than
-# an ordinary variable. `collect_fn_names` handles the top-level case by removing
-# the method entry when a top-level `fn` shares its name; a local binding needs
-# the mirror of that, but scoped, because it shadows the method only inside its
-# own body. So the walk carries the set of names in scope and `check_call` skips
-# a callee that is one of them.
+# A class method is registered under its canonical name, and the callee of a call
+# is just a `TVar name` — nothing in the typed AST marks it as a method rather than
+# an ordinary variable. A top-level `fn` never shares a method's name (rule 2 of
+# docs/qualified-class-methods-v0.md), but a local binding can shadow a prelude
+# method, which stays bare, and only inside its own body. So the walk carries the
+# set of names in scope and `check_call` skips a callee that is one of them.
 #
 # Without this, a parameter named after a method produced a hard error naming a
 # class the code never mentions:

@@ -353,7 +353,7 @@ exactly once — a missing index silently drops a declaration from the emitted
 program, a duplicate emits it twice.
 It holds by construction (each declaration is a singleton or in exactly one
 segment; an SCC partition covers its nodes) given unique names, which
-`check_duplicate_fn_decls` has already guaranteed. `checked_plan` verifies it
+`check_duplicate_module_values` has already guaranteed. `checked_plan` verifies it
 anyway and falls back to source order if it fails: reordering improves
 *completeness*, so losing it degrades diagnostics, whereas dropping a declaration
 corrupts output — worth trading the first for certainty about the second.
