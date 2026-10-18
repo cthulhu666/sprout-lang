@@ -141,7 +141,8 @@ starting the next.
 - **Port bench.** One directory per Phase 3 candidate under `bench/`: the C builtin and a Sprout
   version on the same inputs. The merge-sort pair, Phase 2's exit metric, is in
   `bench/native_runtime/`: Int-specialised Sprout is 3.2× C at n=100k and 4.4× at n=440, by
-  median; generic `mutvec_sort` 6.6× and 9.6×. The Phase 3 candidates' benches wait for Phase 2.
+  median; generic `mutvec_sort` 6.6× and 9.6×. Those runs sorted one input per n, every round;
+  Phase 2 found what that hides. The Phase 3 candidates' benches wait for Phase 2.
 
 Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
 
@@ -184,8 +185,8 @@ regresses past its own.
 All of it is filed already; this plan only orders it. The first is what the exit below still
 needs:
 
-- The merge loop's branch, which C turns into a select (BACKLOG §Runtime and performance
-  roadmap).
+- What is left of the merge step's cost (BACKLOG §Runtime and performance roadmap).
+- ~~The merge loop's branch, which C turns into a select.~~ Done 2026-10-18; see below.
 - Root call operands only for runtime builtins, not Sprout callees (same section; needs a written
   GC-safety argument first).
 - Non-escaping combinator closures allocate; every apply re-checks arity (same section).
@@ -196,18 +197,31 @@ needs:
   against `Ord`/`Eq`.
 
 Exit: the Int-specialised half of the merge-sort pair (`bench/native_runtime/`) within **1.3× of
-C by median, at both n=440 and n=100k**; 1.2× is the aim. Baseline: 4.4× and 3.2× (2026-10-18).
-Until then, Phase 3 cannot start. The bound keeps Sprout's checks: element access stays
-bounds-checked and arithmetic overflow-checked.
+C by median, at both n=440 and n=100k**; 1.2× is the aim. Baseline: 4.4× and 3.2× (2026-10-18,
+one input repeated). Until then, Phase 3 cannot start. The bound keeps Sprout's checks: element
+access stays bounds-checked and arithmetic overflow-checked.
 
-Where it stands: **1.18× at n=440, 1.76× at n=100k** (2026-10-18). Most of the baseline gap was
-two calls per element access, both removed. A match on `MutVec`, a type with one constructor, read
-the tag through `sprout_tag`, which LLVM can neither inline nor hoist. `vector_mutset` inlined its
-age-profile path and grew too big to inline itself. What is left at n=100k is the merge's
-`if y < x` branch: C compiles its ternary to `csel`, and random input mispredicts the branch about
-half the time. Written as one tail call over selects, the Sprout merge reaches 1.21× at n=100k but
-1.40× at n=440. Each step then reloads wrapper → vector → `len`/`data` in a chain on the critical
-path, because the store into `dst` may alias them.
+Where it stands: **1.37× at n=440, 1.23× at n=100k** (2026-10-18, median of 11). Three steps:
+
+1. Two calls per element access, both removed. A match on `MutVec`, a type with one constructor,
+   read the tag through `sprout_tag`, which LLVM can neither inline nor hoist. `vector_mutset`
+   inlined its age-profile path and grew too big to inline itself. That read 1.18× and 1.76×.
+2. The 1.18× was the bench's. Each round sorted the same input, and at n=440 (2000 rounds) the
+   branch predictor learns it, so branchy code looked cheap: C's insertion sort, and Sprout's
+   merge far more. With a fresh seed per round, the same code is 1.92× and 1.82×.
+3. The merge's `if y < x` was a branch, which random input mispredicts about half the time; C
+   compiles its ternary to `csel`. LLVM makes selects of one store and one tail call whose
+   arguments carry the choice, not of two arms that each store and recurse: an arm's inlined
+   bounds and overflow checks make it several blocks. `mutvec_sort`'s merge has that shape now.
+   Generic `mutvec_sort` gains too: 6.87× and 6.55× to 6.35× and 5.82×.
+
+What is left is instruction count: a merge step is ~33 instructions to C's 11. Each step reloads
+wrapper → vector → `len`/`data` and repeats the null and bounds checks. Measured, each alone:
+dropping the age-profile hook from `vector_mutset` gains ~6% at n=440; distinct TBAA types for
+object fields, vector slots and `len` gain nothing, and neither does dropping the TCO loop's
+`stacksave`/`stackrestore`. With all three, nothing aliases those loads, yet they stay in the
+loop: each comes after an exit test, and a Sprout handle is an `i64`, so nothing says it points
+at valid memory.
 
 ### Phase 3 — move builtins, one per PR
 

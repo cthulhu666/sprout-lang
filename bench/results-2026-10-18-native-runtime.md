@@ -42,6 +42,10 @@ generic one).
 | Sprout generic / C, by median | 9.6× | 6.6× |
 | generic / Int-specialised, by median | 2.2× | 2.1× |
 
+These rounds all sorted one input per n, and at n=440 the branch predictor learns it, which
+flatters branchy code. The bench now seeds each round apart; [native-sprout-runtime-v0.md
+](../docs/native-sprout-runtime-v0.md) §Phase 2 has the numbers.
+
 Medians, because a ratio of minimums pairs each side's luckiest run: C's 11.7 ns at n=440 came
 from one round of nine, and makes that ratio 4.6×. Round 1's C runs were slow (51.0 and 19.0 ns,
 against ~34 and ~12.5 after), so Int-specialised / C was 2.1× and 2.9× there, and 2.9–3.4× and

@@ -50,6 +50,16 @@ fn sorted_by_key(xs: List (Int, Int)) -> List (Int, Int) !{IO} =
     _ <- mutvec_sort_by(first, v)
     to_list(v)
 
+# Allocates on every comparison, so collections run mid-merge: the two elements
+# a merge step reads must survive the comparator call between read and store.
+fn key_text(p: (Int, Int)) -> String = to_string(first(p))
+
+fn sorted_by_text(xs: List (Int, Int)) -> List (Int, Int) !{IO} =
+  do
+    v <- from_list(xs)
+    _ <- mutvec_sort_by(key_text, v)
+    to_list(v)
+
 fn check_ints(state: TestState, n: Int, m: Int) -> Unit !{IO} =
   assert_eq(state, `mutvec_sort n=${to_string(n)} m=${to_string(m)}`, sorted(ints(n, m)),
     vec_to_list(vec_sort(vec_from_list(ints(n, m)))))
@@ -75,6 +85,8 @@ fn main() -> Unit !{IO} =
     # A key that reverses the order: descending by key, equal keys still in input order.
     _ <- assert_eq(state, "mutvec_sort_by descending key", sorted_by_descending(keyed(200, 4)),
       vec_to_list(vec_sort_by(descending, vec_from_list(keyed(200, 4)))))
+    _ <- assert_eq(state, "mutvec_sort_by allocating key", sorted_by_text(keyed(2001, 40)),
+      vec_to_list(vec_sort_by(key_text, vec_from_list(keyed(2001, 40)))))
     _ <- assert_eq(state, "already sorted", sorted(range_to_list(0..99)), range_to_list(0..99))
     _ <- assert_eq(state, "reversed", sorted(list_reverse(range_to_list(0..99))), range_to_list(0..99))
     _ <- assert_eq(state, "strings", sorted(["pear", "fig", "apple", "fig"]), ["apple", "fig", "fig", "pear"])
