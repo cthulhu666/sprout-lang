@@ -967,6 +967,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   and add a duplicate-key test at odd run counts first), store no key for `vec_sort`, seed runs from
   ascending stretches, and call `compare`, not `ord_lt`. Measure; random input gains little from
   natural runs. Numbers: `docs/sorting-v0.md`.
+- [ ] `P3` **Top-k selection without a full sort.** uncharted's `loam/lights.sprout` `reaching`
+  sorts every light in range, then takes `keep`, per chunk and per mesh every frame. A
+  `take_smallest_by(k, key, xs)`-style helper keeps k items in O(n log k). Grep the spec for the
+  name first. `docs/laziness-v0.md` §5.3.
 
 ### 6) Modules and Packaging
 
@@ -1031,6 +1035,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   args (name, kind, default, required, help) for `Result`-typed validation of
   unknown/missing/bad-int args and an auto-generated `--help`. The bag-of-args core covers the
   boot-config need without it.
+- [ ] `P3` **Fold a file's lines with an early stop.** `stdlib.fs` reads only whole files, so
+  uncharted's starmap reads a ~600 KB tile and splits all of it to find one row, and starcat keeps
+  folding after `node_cap`. Wanted: a `fold_while`-shaped line fold whose effect row sits on the
+  fold. Open: chunked reads, or the whole file read first — that decides most of the value.
+  `docs/laziness-v0.md` §5.2, §6.4.
 
 ### 7) Tooling and Developer UX
 
