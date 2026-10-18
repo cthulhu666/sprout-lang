@@ -1728,9 +1728,11 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P3` **LLVM does not inline the sort pair's `insert` into `insertion`.** The Int merge
   sort is 1.26× C at n=440, against Phase 2's 1.2× aim, and the insertion phase over 16-element
   blocks carries most of it. `insert` costs 325 against a threshold of 225, so each element pays
-  a call; forced inline, the bench reaches 1.14×. Fix in the compiler (an inline hint for small
-  TCO-loop functions) or in the accessors (fewer fail-call sites). Generic `sort_insert` is never
-  inlined: its comparator call roots a slot, a dynamic alloca in the loop.
+  a call; forced inline, the bench reaches 1.14×. The bounds checks block it: without them it
+  inlines and the bench reaches 1.06× (the overflow checks alone change nothing). Fix in the
+  compiler (an inline hint for small TCO-loop functions), in the accessors (fewer fail-call
+  sites), or by removing the checks (`docs/bounds-check-elimination-v0.md`). Generic
+  `sort_insert` is never inlined: its comparator call roots a slot, a dynamic alloca in the loop.
   `docs/native-sprout-runtime-v0.md` §Phase 2.
 - [ ] `P3` **Sink a shared store and tail self-call out of both `if` arms.**
   `if c then do { set(d, k, a); f(x1) } else do { set(d, k, b); f(x2) }` stays a branch: each
@@ -2266,9 +2268,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   packing. Array data, unlike the Double-literal entry under Compiler Internals Follow-Ups.
   `docs/byte-buffer-v0.md` §3.1.
 - [ ] `P3` **Bounds checks in counted loops are never removed.** Reading `3g .. 3g + 2` under
-  `g < len / 3` is always in range, yet each read keeps its check at `-O2`. Removed by hand with
-  the two entries above: base64 reaches 0.99× C. Options: range facts from `ast_to_ir`, an LLVM
-  loop pass (unmeasured), or stdlib loops that check once per call. `docs/byte-buffer-v0.md` §3.1.
+  `g < len / 3` is always in range, yet each read keeps its check at `-O2`. Removed by hand:
+  base64 reaches 0.99× C with the two entries above, and the Int merge sort 1.06× and 1.05×,
+  from 1.27× and 1.17×. LLVM does not do it: the bound's link to `len` is in the caller, IRCE and
+  loop predication are not in `-O2`, and run by hand IRCE rewrites none of the sort's loops.
+  Options and measurements: `docs/bounds-check-elimination-v0.md`.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, +1 per object whatever its size, so many-small
   over-collects and few-but-large under-collects (`adapt_factor` 3.0 amplifies it). 2026-09-06, a

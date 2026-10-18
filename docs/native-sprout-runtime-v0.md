@@ -233,7 +233,12 @@ step 4, the merge phase was ~1.25× C and the insertion phase ~1.65×. LLVM does
 `insert` into `insertion` (cost 325 against a threshold of 225, after step 4), so each element
 pays a call and the loop around it cannot keep its loads in registers. Forced by hand, the
 inline reaches 1.14× and 1.11×; without step 4 it gains almost nothing, since each of the four
-blocks a different optimisation. Instruction count was the wrong target: with every invariant
+blocks a different optimisation. The bounds checks are what keep `insert` out: with the two
+checks in `vector_get_direct` and `vector_mutset` removed by hand, it inlines and the bench reads
+1.06× and 1.05×; with the overflow checks removed too, 1.01× and 1.00×. The overflow checks alone
+change nothing. Generic `mutvec_sort` stays at ~6.4× and ~5.7× in every variant. Removing checks
+without proof breaks the bound above;
+[bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) has the ways that keep it. Instruction count was the wrong target: with every invariant
 load hoisted out of the merge loop, two loads and a store per step as in C, it measured the same.
 
 ### Phase 3 — move builtins, one per PR
