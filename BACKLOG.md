@@ -1703,7 +1703,8 @@ deferral happened, not for current behaviour. Still open:
   `Int` runs ~2× slower than a hand-specialised copy. Specialisation would also let `vec_sort` at
   `Int` reach a primitive sort under its own name. Numbers:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
-  "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry.
+  "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry. Proposal:
+  `docs/specialisation-v0.md`.
 - [ ] `P2` **Calls to Sprout functions root their operands, though the callee roots what it
   needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots every call's heap operands, for
   runtime builtins that allocate before reading them; for a call to a Sprout function the pushes
