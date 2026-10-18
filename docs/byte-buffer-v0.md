@@ -61,8 +61,40 @@ What this says:
   path only.
 - **Batching matters little once inlined and unrooted:** `push4` beats `push_byte` by 6–15%.
 
-Not broken down: the gap from ~1.8× to C. Candidates are the bounds checks, overflow checks on
-index arithmetic, and the alphabet held in a `Vec` rather than a static table.
+### 3.1 What closes the rest
+
+The baseline is `crypto_base64_encode`, timed in the same binary and run. Above, the Sprout side
+built no `String`; here its `finish` copies into a GC `String`, as the C side does, which costs
+~0.3×. Each row removes one kind of check from the best unrooted build, by hand and
+unconditionally, so it bounds what a compiler that proves the check redundant could gain. Median
+of 11 interleaved runs.
+
+| variant | `push4` | `push_byte` |
+|---|---:|---:|
+| inlined, alias tags, no rooting | 2.08× | 2.17× |
+| no overflow checks | 1.67× | 2.12× |
+| no bounds checks | 1.51× | 1.26× |
+| alphabet as a constant array, bounds check kept | 1.65× | 1.60× |
+| constant array, no overflow checks | **1.25×** | 1.60× |
+| all three | **0.99×** | **1.07×** |
+
+Each maps to a change:
+
+- **Constant tables.** A top-level `let` is a mutable global set at startup, so LLVM sees neither
+  the table's size nor its contents. As a constant array of 64, a masked index (`& 63`, or a
+  24-bit value shifted right 18) is provably in range and LLVM drops the check itself.
+- **Overflow checks that cannot fire.** `bit_shl` and `bit_or` wrap and lower to plain `shl` and
+  `or`, so packing four output bytes with shifts instead of `*` and `+` needs no compiler work.
+  Only `push4` gains, because only it packs. Index arithmetic (`g * 3`) needs range analysis.
+- **Bounds checks in loops.** With `g < len / 3`, reads at `3g .. 3g + 2` are in range, and a
+  pre-sized output holds every push. LLVM keeps the checks at `-O2`. Whether one of its loop
+  passes would remove them is not measured. A stdlib loop over groups could check once per call.
+
+So the 1.3× gate needs constant tables and shift-based packing; parity also needs bounds-check
+elimination. The table here must be a byte table: B1
+([phase-d-numeric-fastpath-design-2026-07-11.md](phase-d-numeric-fastpath-design-2026-07-11.md))
+inlines only `Vector Double`, since generic wrappers such as `vec_get_or` erase other element
+types. `Bytes` and a `ByteBuf` hold only bytes and avoid that.
 
 ## 4. Prior art
 

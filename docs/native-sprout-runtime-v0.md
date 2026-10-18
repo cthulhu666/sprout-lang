@@ -251,7 +251,9 @@ will cost time until Phase 2 lands. Do them for the smaller C surface, or not ye
 **3.1 fails its gate today.** A pure Sprout base64 encoder is 22–55× slower than C. A buffer
 alone gets to 6.5×: the rest is a C call per byte read or write. Applied by hand to the emitted
 IR, inline access reaches 2.6×, alias tags (TBAA) 1.6×, and a byte buffer 1.8× once pushes are
-not rooted. Which buffer, and how it stays pure: [byte-buffer-v0.md](byte-buffer-v0.md).
+not rooted. Constant tables and shift-based packing then meet the 1.3× gate, and bounds-check
+elimination in counted loops reaches parity. Which buffer, how it stays pure, and the
+measurements: [byte-buffer-v0.md](byte-buffer-v0.md).
 
 **3.4 `Dict`: fix the representation, then decide where it lives.** Re-profiled over 5 runs:
 `Dict` is 19.8% of a self-compile, and 63% of its 4.23M lookups miss. Neither a cheaper
