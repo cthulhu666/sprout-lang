@@ -205,6 +205,11 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a constrained name reports the constraint that makes it one",
       string.contains(constrained, "where ") && string.contains(constrained, "MyShow a"))
 
+    # A user method is constrained by its class too, under its qualified name.
+    user_method <- rendered_type(constrained_source(), "myshow", sr, Nil, cache)
+    assert_true(state, "a user class method reports its class",
+      string.contains(user_method, "where ") && string.contains(user_method, "MyShow a"))
+
     # --- a class method is constrained by its own class ---
     #
     # Its Scheme carries no constraint list, so `fmap` rendered with nothing explaining its

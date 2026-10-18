@@ -7886,19 +7886,52 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
 #
 # No false positive from bundling: `decls` here is post-bundler, where every
 # imported module's definitions carry their module prefix, so a local `map` and
-# the prelude's `map` are distinct keys. Only FnDecl participates — instance and
-# class methods are InstanceMethodImpl/ClassMethodSig, not top-level decls, so
-# the many `fn eq` implementations across instances never collide here.
-fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict Bool) -> Maybe(source.SourcePos, String) =
+# the prelude's `map` are distinct keys.
+#
+# A class method is a module value too, so it may not share its name with a
+# top-level value or another class's method (docs/qualified-class-methods-v0.md,
+# rule 2). Instance methods are not declarations and never collide.
+type NameOwner =
+  | OwnedByFn
+  | OwnedByLet
+  | OwnedByClass String
+
+fn check_duplicate_fn_decls(decls: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
   match decls with
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
-      | ast.FnDecl name _ _ _ _ _ pos ->
-          match dict_get(name, seen) with
-          | Just _ -> Just((pos, "`" ++ name ++ "` is defined more than once in this module"))
-          | Nothing -> check_duplicate_fn_decls(rest, dict_set(name, true, seen))
+      | ast.FnDecl name _ _ _ _ _ pos -> check_value_name(name, OwnedByFn, pos, rest, seen)
+      | ast.LetDecl name _ _ pos -> check_value_name(name, OwnedByLet, pos, rest, seen)
+      | ast.ClassDecl class_name _ methods _ pos ->
+          check_class_method_names(class_name, methods, pos, rest, seen)
       | _ -> check_duplicate_fn_decls(rest, seen)
+
+fn check_value_name(name: String, owner: NameOwner, pos: source.SourcePos, rest: List ast.Decl,
+                    seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
+  match dict_get(name, seen) with
+  | Nothing -> check_duplicate_fn_decls(rest, dict_set(name, owner, seen))
+  | Just (OwnedByClass class_name) -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
+  | Just _ -> Just((pos, "`" ++ name ++ "` is defined more than once in this module"))
+
+fn check_class_method_names(class_name: String, methods: List ast.ClassMethodSig, pos: source.SourcePos,
+                            rest: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
+  match methods with
+  | Nil -> check_duplicate_fn_decls(rest, seen)
+  | Cons (ast.ClassMethodSig name _ _ _ _) more ->
+      match dict_get(name, seen) with
+      | Nothing -> check_class_method_names(class_name, more, pos, rest, dict_set(name, OwnedByClass(class_name), seen))
+      | Just (OwnedByClass other) -> Just((pos, shared_method_message(name, other, "class " ++ class_name)))
+      | Just owner -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
+
+fn value_label(owner: NameOwner) -> String =
+  match owner with
+  | OwnedByFn -> "a function"
+  | OwnedByLet -> "a top-level `let`"
+  | OwnedByClass class_name -> "class " ++ class_name
+
+fn shared_method_message(method: String, class_name: String, other: String) -> String =
+  `\`${string.after_last_dot(method)}\` is declared by class ${class_name} and by ${other} in this module`
 
 # ---------------------------------------------------------------------------
 # Type-variable instance-head validation
@@ -9404,8 +9437,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       | ast.RecordDecl _ _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_record_decl(decl, alias_env, env), alias_env)
       # Not here: both are registered at their module's start (group_plan,
-      # typecheck_modules), or they would reach the modules checked before it. A
-      # class's bare method names would shadow the prelude's for the prelude itself.
+      # typecheck_modules), or an instance would reach the modules checked before it.
       | ast.ClassDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | ast.InstanceDecl _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
@@ -9584,9 +9616,7 @@ fn bind_params(params: List ast.Param, bound: Set) -> Set =
 #
 # It plans one module: typecheck_modules checks each whole before the next, and
 # registers its instances first, so they need not be barriers. A class is checked
-# at the START of its module: its methods keep bare names after bundling, so
-# registered any earlier they would shadow a same-named prelude fn for the
-# prelude, and any later they would miss its own module's uses above it.
+# at the START of its module, so its module's uses above it see its methods.
 # RecordDecl is registered before the walk and need not be a barrier, but still is
 # (BACKLOG). A top-level `let` is not pre-scanned — a forward reference to one is
 # `Unknown variable` today, which this must not change.
@@ -11490,7 +11520,7 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
     | Just (v, cls, subject) ->
         match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2, env) with
         | (subj, where_text) ->
-            Just("`" ++ name ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
+            Just("`" ++ string.after_last_dot(name) ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
                    ++ subj ++ ", which this method generalizes and nothing supplies; add `where "
                    ++ where_text ++ "` to the method (the class declaration must declare it too),"
                    ++ " constrain the variable in the instance head, or give the method a concrete"
@@ -11498,7 +11528,7 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
     | Nothing ->
         match uncovered_dict_subject(typed_body, s2, uncovered, env) with
         | Just (cls, _) ->
-            Just("`" ++ name ++ "` needs " ++ a_or_an(string.after_last_dot(cls)) ++ " "
+            Just("`" ++ string.after_last_dot(name) ++ "` needs " ++ a_or_an(string.after_last_dot(cls)) ++ " "
                    ++ string.after_last_dot(cls) ++ " instance for a"
                    ++ " type variable it generalizes, which appears in no parameter and which"
                    ++ " nothing supplies; add a method-level `where` (the class declaration must"
@@ -12169,13 +12199,10 @@ fn first_class_method_row(class_name: String, methods: List ast.ClassMethodSig) 
             then Just(class_row_message(name, class_name, eff))
             else first_class_method_row(class_name, rest)
 
-# Keyed by CLASS, verbatim as the decl spells it. A method NAME identifies no
-# class: two classes may declare one and a top-level `fn` may shadow one, and both
-# compile (tests/conformance/run/effect_class_method_name_not_unique_ok.spr).
-# The bundler qualifies the ClassDecl name and the instance head alike, so the two
-# sides agree wherever this table is built, and `demo.enc_loud.Enc` stays distinct
-# from `demo.enc_quiet.Enc`
-# (tests/conformance/package_resolution/app_class_name_collision.spr).
+# Keyed by CLASS and method, verbatim as the decl spells them. The bundler qualifies
+# the ClassDecl name and the instance head alike, so the two sides agree wherever
+# this table is built, and `demo.enc_loud.Enc` stays distinct from
+# `demo.enc_quiet.Enc` (tests/conformance/package_resolution/app_class_name_collision.spr).
 fn class_method_key(class_name: String, method_name: String) -> String =
   "@classmethod:" ++ class_name ++ ":" ++ method_name
 
@@ -12262,12 +12289,12 @@ fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodIm
 
 fn class_row_message(name: String, class_name: String, class_eff: types.Effect) -> String =
   types.effect_row_undefined_message(
-    "class method `" ++ class_name ++ "." ++ name ++ "`",
+    "class method `" ++ class_name ++ "." ++ string.after_last_dot(name) ++ "`",
     types.effect_to_string(class_eff))
 
 fn instance_effect_message(name: String, class_name: String, inst_eff: types.Effect,
                            class_eff: types.Effect) -> String =
-  "effect mismatch in instance method `" ++ name ++ "` of class `" ++ class_name
+  "effect mismatch in instance method `" ++ string.after_last_dot(name) ++ "` of class `" ++ class_name
     ++ "`: declared " ++ types.effect_to_string(inst_eff) ++ ", but the class declares "
     ++ types.effect_to_string(class_eff)
     ++ ". A call dispatches through the class signature, so an instance may promise less"
@@ -12381,8 +12408,8 @@ fn check_instance_method(
 # name, which is a report label, not an identity the compiler relies on.
 fn instance_report_name(name: String, inst_type: types.Type) -> String =
   match inst_type with
-  | types.TFunc param _ _ _ -> "instance " ++ name ++ "(" ++ types.type_to_string(param) ++ ")"
-  | _ -> "instance " ++ name
+  | types.TFunc param _ _ _ -> "instance " ++ string.after_last_dot(name) ++ "(" ++ types.type_to_string(param) ++ ")"
+  | _ -> "instance " ++ string.after_last_dot(name)
 
 fn instance_method_checked(
   state: unifier.InferState,
@@ -12404,7 +12431,7 @@ fn instance_method_checked(
   env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
   match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
-  | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ name ++ ": " ++ e)
+  | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ string.after_last_dot(name) ++ ": " ++ e)
   | unifier.UnifyOk s2a es2a ->
       # AFTER the return-type unify — see finish_field_obligations.
       do
@@ -12417,7 +12444,7 @@ fn instance_method_checked(
         tries <- unifier.take_try_positions(state)
         f <- finish_field_obligations(state, body_env, s2a, typed_body0)
         match f with
-        | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ name)
+        | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ string.after_last_dot(name))
         | FinishOk typed_body s2 ->
             do
               unifier.census_flush(state, s2, es2a)
@@ -12429,7 +12456,7 @@ fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> Inst
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
   # method on Unknown-variable / Unknown-constructor errors. Now hard error,
   # matching the change to `fn_body_err`.
-  InstanceMethodErr(pos, msg ++ " in instance method " ++ name)
+  InstanceMethodErr(pos, msg ++ " in instance method " ++ string.after_last_dot(name))
 
 # M4.2 gate + result construction for an instance method, extracted so the arm
 # body is a plain call (keeps the enclosing match chain shallow).
@@ -12466,7 +12493,7 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
 # served values of the other (`Just(u) == Just(v)` ran String's `eq` on an Int).
 fn instance_method_rigidity_error(name: String, prog_to_fresh: Dict types.Type, s2: Dict types.Type,
                                   sig_vars: List String) -> Maybe String =
-  map(\bad -> "Signature too general for its body in instance method " ++ name ++ ": type variable " ++ bad,
+  map(\bad -> "Signature too general for its body in instance method " ++ string.after_last_dot(name) ++ ": type variable " ++ bad,
       rigidity_violation(prog_to_fresh, s2, sig_vars))
 
 # M4.6: an instance method's ownership modifiers must agree with the class
@@ -12514,16 +12541,16 @@ fn constraint_list_mismatch(name: String, idx: Int, declared: List String,
   match (declared, restated) with
   | (Nil, Nil) -> Nothing
   | (Nil, [extra | _]) ->
-      Just("instance method `" ++ name ++ "` adds `where " ++ extra
+      Just("instance method `" ++ string.after_last_dot(name) ++ "` adds `where " ++ extra
            ++ "`, which the class declaration does not declare")
   | ([missing | _], Nil) ->
-      Just("instance method `" ++ name ++ "` omits `where " ++ missing
+      Just("instance method `" ++ string.after_last_dot(name) ++ "` omits `where " ++ missing
            ++ "`, which the class declaration declares; restate it on the instance")
   | (Cons d drest, Cons r rrest) ->
       if d == r
       then constraint_list_mismatch(name, idx + 1, drest, rrest)
       else
-        Just("instance method `" ++ name ++ "` names `" ++ r ++ "` where the class declares `"
+        Just("instance method `" ++ string.after_last_dot(name) ++ "` names `" ++ r ++ "` where the class declares `"
              ++ d ++ "` (constraint " ++ int_to_string(idx)
              ++ "); the dictionaries are positional, so restate the class's `where` in order")
 

@@ -584,8 +584,10 @@ fn prepend_params(new_params: List ast.Param, acc: List ast.Param) -> List ast.P
   | Nil -> acc
   | Cons p rest -> prepend_params(rest, Cons(p, acc))
 
+# Dispatch symbols name the class in full and the method short: a method is
+# unique within its class, and its canonical name repeats the class's module.
 fn tc_slot_name(class_name: String, idx: Int, method_name: String) -> String =
-  string_concat_many(["__tc_", class_name, "_", int_to_string(idx), "_", method_name])
+  string_concat_many(["__tc_", class_name, "_", int_to_string(idx), "_", string.after_last_dot(method_name)])
 
 # Dispatch identity for a class method's wrapper.  Mangled so a user top-level
 # fn of the same name (`fn append`, `fn eq`, `fn to_string`) never collides with
@@ -594,9 +596,10 @@ fn tc_slot_name(class_name: String, idx: Int, method_name: String) -> String =
 # DEFINE site (generate_one_class_wrapper) and every dispatch CALL site
 # (lower_dispatch_callee) — they must agree, so both route through this helper.
 # ast_to_ir mirrors the scheme for the Semigroup `append` peephole (its
-# translate_direct_call keys on "__cm_Semigroup_append").
+# translate_direct_call keys on "__cm_Semigroup_append"). The class keeps its
+# module, so a file's own `class Eq` and the prelude's get two wrappers.
 fn classmethod_dispatch_name(class_name: String, method_name: String) -> String =
-  string_concat_many(["__cm_", string.after_last_dot(class_name), "_", string.after_last_dot(method_name)])
+  string_concat_many(["__cm_", class_name, "_", string.after_last_dot(method_name)])
 
 # Module-qualified type identity (T7): dot-sanitize a canonical type name into an
 # LLVM-valid instance-method SYMBOL fragment (__tc_...). Used ONLY for the emitted
@@ -616,7 +619,7 @@ fn qualified_head(name: String) -> String = types.type_id_symbol(types.type_id(n
 fn instance_fn_name(c: ast.TypeConstraint, method_name: String) -> String =
   match c with
   | ast.TypeConstraint class_name type_args ->
-      "__tc_" ++ class_name ++ "_" ++ mangle_type_args(type_args) ++ "_" ++ method_name
+      "__tc_" ++ class_name ++ "_" ++ mangle_type_args(type_args) ++ "_" ++ string.after_last_dot(method_name)
 
 fn mangle_type_args(args: List ast.TypeExpr) -> String =
   string_concat_many(list_reverse(mangle_type_args_rev(args, Nil)))
@@ -674,20 +677,18 @@ fn mangle_mode_suffix(mode: ast.ParamMode) -> String =
 # lower_expr_callee (used for TCall callees) skips eta-expansion so that
 # infer-injected TDict nodes in direct calls expand correctly.
 
+# Keyed by the method's canonical name, which names one class (a module may not
+# declare one method name twice).
 fn find_class_of_method(method_name: String, ctx: LowerCtx) -> Maybe String =
-  dict_get(string.after_last_dot(method_name), ctx.env.method_class)
+  dict_get(method_name, ctx.env.method_class)
 
-# Built once per program: the first class in entry order wins, as a linear scan would.
+# Built once per program.
 fn method_class_table(class_order: Dict (List String)) -> Dict String =
   list_fold(add_class_methods, dict_empty(), vec_to_list(dict_entries(class_order)))
 
 fn add_class_methods(table: Dict String, entry: (String, List String)) -> Dict String =
   match entry with
-  | (class_name, methods) ->
-      list_fold(\ (t, m) -> add_method_class(string.after_last_dot(m), class_name, t), table, methods)
-
-fn add_method_class(short: String, class_name: String, table: Dict String) -> Dict String =
-  if dict_member(short, table) then table else dict_set(short, class_name, table)
+  | (class_name, methods) -> list_fold(\ (t, m) -> dict_set(m, class_name, t), table, methods)
 
 fn find_concrete_method_impl(class_name: String, method_name: String, head: String, ctx: LowerCtx) -> Maybe String =
   # after_last_dot: class_order stores bundler-qualified names (e.g. "prelude.ToString")

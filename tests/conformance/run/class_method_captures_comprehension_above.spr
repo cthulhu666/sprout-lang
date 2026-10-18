@@ -1,0 +1,14 @@
+module main
+
+# class_method_captures_comprehension.spr with the comprehension above the class,
+# which is in scope throughout its module: the comprehension still calls the prelude.
+
+fn squares(xs: List Int) -> List Int = [x * x for x in xs]
+
+fn main() -> Unit !{IO} = print(to_string(squares(range_to_list(1..3))))
+
+class Rev a
+  fn list_reverse(x: a) -> Int
+
+instance Rev Int
+  fn list_reverse(x: Int) -> Int = x

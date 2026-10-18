@@ -1,0 +1,8 @@
+module demo.meth_base
+
+# A class for app_method_not_imported.spr and app_class_import_method_conflict.spr.
+export class Tally a
+  fn tally(x: a) -> Int
+
+instance Tally Int
+  fn tally(x: Int) -> Int = x + 1

@@ -206,7 +206,7 @@ arm_0_0:
   %t$21 = alloca i64
   store i64 %t$4, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$5 = call i64 @__cm_Shape_name(i64 %t$2, i64 %t$3, i64 %t$4)
+  %t$5 = call i64 @__cm_examples.existential_shapes.Shape_name(i64 %t$2, i64 %t$3, i64 %t$4)
   %t$6 = call i64 @__tc_ToString_String_to_string(i64 %t$5)
   %t$7 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.0, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
@@ -216,7 +216,7 @@ arm_0_0:
   %t$25 = alloca i64
   store i64 %t$8, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$9 = call i64 @__cm_Shape_area(i64 %t$2, i64 %t$3, i64 %t$4)
+  %t$9 = call i64 @__cm_examples.existential_shapes.Shape_area(i64 %t$2, i64 %t$3, i64 %t$4)
   %t$10 = call i64 @__tc_ToString_Double_to_string(i64 %t$9)
   %t$11 = call i64 @__tc_ToString_String_to_string(i64 %t$10)
   %t$27 = alloca i64
@@ -293,7 +293,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__cm_Shape_area(i64 %p$s, i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$__tc_examples.existential_shapes.Shape_0_name) {
+define i64 @__cm_examples.existential_shapes.Shape_area(i64 %p$s, i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$__tc_examples.existential_shapes.Shape_0_name) {
 entry:
   call void @sprout_closure_arity_check(i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 1)
   %t$0$env_ptr = inttoptr i64 %p$__tc_examples.existential_shapes.Shape_0_area to ptr
@@ -302,7 +302,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__cm_Shape_name(i64 %p$s, i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$__tc_examples.existential_shapes.Shape_0_name) {
+define i64 @__cm_examples.existential_shapes.Shape_name(i64 %p$s, i64 %p$__tc_examples.existential_shapes.Shape_0_area, i64 %p$__tc_examples.existential_shapes.Shape_0_name) {
 entry:
   call void @sprout_closure_arity_check(i64 %p$__tc_examples.existential_shapes.Shape_0_name, i64 1)
   %t$0$env_ptr = inttoptr i64 %p$__tc_examples.existential_shapes.Shape_0_name to ptr

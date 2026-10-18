@@ -1,0 +1,10 @@
+module testsupport.ident_class
+
+# A class whose method shares its name with tests/stdlib/test_forwarded_slot_selection.spr's
+# `Make.from_int`. One module may not declare both, so this one lives here.
+
+export class Ident t
+  fn from_int(n: Int) -> t
+
+instance Ident Int
+  fn from_int(n: Int) -> Int = 99

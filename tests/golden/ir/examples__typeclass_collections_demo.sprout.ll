@@ -319,7 +319,7 @@ entry:
   %t$3 = alloca i64
   store i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @__cm_Summable_sum_values(i64 %p$values, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values)
+  %t$0 = call i64 @__cm_examples.typeclass_collections_demo.Summable_sum_values(i64 %p$values, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
@@ -467,7 +467,7 @@ entry:
   ret i64 %t$23
 }
 
-define i64 @__cm_Summable_sum_values(i64 %p$xs, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values) {
+define i64 @__cm_examples.typeclass_collections_demo.Summable_sum_values(i64 %p$xs, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values) {
 entry:
   call void @sprout_closure_arity_check(i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values, i64 1)
   %t$0$env_ptr = inttoptr i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values to ptr

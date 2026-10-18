@@ -1559,7 +1559,7 @@ effect-report-smoke: bootstrap-from-seed
   # scheme's trailing effect field. `params_to_func_type` built every arrow pure.
   if ! grep -q '(TFunc (TConst String) (TConst Unit) (EffectIO) consume)' "$TMPD/iface"; then
     echo "effect-report-smoke: class method 'emit' lost its !{IO} on the arrow:" >&2
-    tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme emit' >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep -A2 -E "NamedScheme ${Q}emit" >&2
     failed=$((failed + 1))
   fi
   # A method's !{IO} must normalise to (EffectIO), the same value infer builds.
@@ -1572,9 +1572,10 @@ effect-report-smoke: bootstrap-from-seed
   fi
   # An effect-polymorphic method must QUANTIFY its variable. An empty list in the
   # scheme's second field is the every-`!{e}`-is-one-global-variable bug.
-  if ! grep -q 'NamedScheme run_with (Scheme (a) (e)' "$TMPD/iface"; then
+  # A method's name is module-qualified like a function's, so allow the prefix (`Q`).
+  if ! grep -qE "NamedScheme ${Q}run_with \(Scheme \(a\) \(e\)" "$TMPD/iface"; then
     echo "effect-report-smoke: 'run_with' does not quantify its effect variable:" >&2
-    tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme run_with' >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep -A2 -E "NamedScheme ${Q}run_with" >&2
     failed=$((failed + 1))
   fi
   # A PARENTHESISED arrow parameter reaches the walk as a TypeEffect wrapper, not
@@ -1582,7 +1583,7 @@ effect-report-smoke: bootstrap-from-seed
   # against its own source text.
   if ! grep -q '(TFunc (TConst Int) (TConst Unit) (EffectIO) consume)' "$TMPD/iface"; then
     echo "effect-report-smoke: 'accept' lost the !{IO} on its parenthesised arrow:" >&2
-    tr ')' ')\n' < "$TMPD/iface" | grep -A2 'NamedScheme accept' >&2
+    tr ')' ')\n' < "$TMPD/iface" | grep -A2 -E "NamedScheme ${Q}accept" >&2
     failed=$((failed + 1))
   fi
   if (( failed > 0 )); then

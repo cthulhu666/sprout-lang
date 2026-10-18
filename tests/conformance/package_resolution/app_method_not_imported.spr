@@ -1,0 +1,7 @@
+module main
+import demo.meth_mid (mid)
+
+# demo.meth_base is bundled through demo.meth_mid but not imported here, so its
+# method is unknown (docs/qualified-class-methods-v0.md, rule 3).
+
+fn main() -> Unit !{IO} = print(int_to_string(mid(1) + tally(3)))

@@ -212,14 +212,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `prelude.Cons` instead breaks `no_prelude` files and `compiler.compile_source`, which type-checks
   without bundling. That path also neither resolves a user's `prelude.X` nor renames locals, so a
   local still captures templates there. `docs/prelude-name-identity-v0.md` §5.
-- [ ] `P2` **A user class method named like a prelude function captures built-in syntax.** Method
-  names stay bare after bundling, so a method `list_reverse` breaks comprehensions anywhere in its
-  module, above the class too (`class_method_captures_comprehension{,_above}.spr`), and a method
-  `branch` captures an unfused `try` (`class_method_captures_try.spr`; §9 Q9). Same root as spec
-  §3.1's wrapper-symbol limit. A bare method also stays visible to every LATER module.
-  Qualifying methods in the bundler, as functions are, fixes all three and lets classes be
-  pre-scanned, retiring `group_plan`'s per-module class planning. Proposed design:
-  `docs/qualified-class-methods-v0.md`.
+- [ ] `P3` **Register classes in `pre_scan_fn_decls`, retiring `group_plan`'s `AtModuleStart`.**
+  A class is checked at its module's start because its methods once kept bare names and would
+  have shadowed the prelude if registered earlier. Methods are now canonical
+  (`docs/qualified-class-methods-v0.md` §7, stage 2), so that reason is gone. Moving it changes
+  check order, so it is its own change with its own golden diff.
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in
@@ -1304,14 +1301,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `docs/dict-resolution-north-star-plan-2026-06-30.md` for the sentinel-flow map and why M4/M5/M3b
   were parked.
 - [ ] `P1` **An ambiguous class-method reference is diagnosed at codegen, with no source location.**
-  The three `tests/conformance/emit_error/ambiguous_forwarded_*.spr` shapes pass `--phase check`
+  The two `tests/conformance/emit_error/ambiguous_forwarded_*.spr` shapes pass `--phase check`
   and then fail at emit with `ast_to_ir: unbound variable '__eta_unresolved_<Class>_<method>'` —
   a compiler-internal sentinel, no line, no column. So the LSP and every check-phase gate accept
-  the program and the user learns at build time. Two of the shapes are unresolvable identity
-  (see below); the cross-class one is genuinely ambiguous source and wants a real
-  "ambiguous method reference: `blank` is declared by both `Blank` and `Sizer`" at check time,
-  with a way to say which — Sprout has no qualified `Blank::blank` form. Ambiguity detection
-  belongs where constraints are known, not at slot-selection time.
+  the program and the user learns at build time. Both are unresolvable identity (see below).
+  Ambiguity detection belongs where constraints are known, not at slot-selection time. (The
+  cross-class shape is now rejected at its declaration, `docs/qualified-class-methods-v0.md`.)
 - [ ] `P2` **An eta'd class method under two same-class constraints is rejected, not resolved.**
   The occurrence's type is a fresh tvar that no `@eta_fwd` marker names, so lowering cannot tell
   which constraint it belongs to; it now declines instead of taking the first slot, which was
@@ -2459,13 +2454,13 @@ acting.
   which reverses C-b's landed decision that under-application is an error, or Package C-a's
   arity-aware types, which makes both mismatches *compile* errors.
   `docs/currying-and-pipe-decision-v1.md`.
-- [ ] `P2` **A redefined typeclass collides in the class-method wrapper symbol.** A file declaring
-  `class Eq a` when the prelude also declares one emits two `@__cm_Eq_eq` definitions and the IR is
-  rejected. Module qualification is threaded *most* of the way — the dictionary parameter is
-  correctly `__tc_demo.Eq_0_eq` — and stops at the method wrapper, mangled from class and method
-  names only. Presumably include the class's module in the `__cm_` mangling, but the
-  dictionary-passing lowering reads these names in several places, so trace before costing. Affected
-  fixtures: `conformance/run/instance_check.spr`, `type_classes.spr`.
+- [ ] `P2` **Two same-short-named classes' instances at one head share a dispatch key.**
+  `typed_ast.constraint_key_from_tc` strips the class to its last segment (`Eq_Int`), and
+  lowering's `inst_table`, resolve's evidence keys and the super/fwd maps all key on it. A file's
+  own `class Eq` with `instance Eq Int` beside the prelude's then overwrites one instance table
+  with the other; a first-class use was seen to reach `__eta_unresolved_Eq_eq`. The `__cm_` wrapper
+  already keeps the module (`run/class_named_like_prelude_class_dispatch.spr` uses a head the
+  prelude lacks). Fix: keep the class in full in the key, at every reader at once.
 - [ ] `P2` **Do notation resolves the monad family by unqualified name, so a user-defined `Maybe` is
   not bindable with `<-`.** `x <- safe_div(a, b)` returning the file's own `Maybe Int` reports
   `Type mismatch: Int vs demo.Maybe Int` — the bind machinery matches the family on the bare name,
@@ -2519,13 +2514,6 @@ acting.
   steps' functor with `pure`'s — **that reading is inferred from the error, not confirmed in
   `infer`**. The message names the *operator*, not the binding, so it points at the wrong line.
   Workaround: pass the value as a parameter, or annotate.
-- [ ] `P3` **A class method is not reachable through a module alias.** `import m as m` then
-  `m.method(x)` fails with `Unknown variable: m.method`; only `import m (method)` works.
-  `bundler.add_class_to_symbols` files method names in `method_names` and never in `exported_vals`,
-  and the alias value table is populated from `sym_exported_vals` alone. Latent until now because no
-  module outside `stdlib/json.sprout` ever called an imported class's method. Fix is to register
-  method names in the alias table — **settle first whether a method SHOULD be alias-qualifiable**,
-  given that dispatch is by instance rather than by module.
 
 **Language surface gaps**
 

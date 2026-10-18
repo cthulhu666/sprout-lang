@@ -1,0 +1,27 @@
+module main
+
+# Two classes in one module may not declare one method name (spec §8.5): a bare
+# `blank` would mean either. It once picked a forwarded slot in dict KEY order, so
+# renaming `Blank` to `Zed` ran `Sizer`'s instance, 106 where 7 was intended.
+
+class Blank t
+  fn blank() -> t
+  fn combine(x: t, y: t) -> t
+
+class Sizer t
+  fn blank() -> t
+  fn size(x: t) -> Int
+
+instance Blank Int
+  fn blank() -> Int = 0
+  fn combine(x: Int, y: Int) -> Int = x + y
+
+instance Sizer Int
+  fn blank() -> Int = 99
+  fn size(x: Int) -> Int = x
+
+fn run_thunk(th: () -> a) -> a = th()
+
+fn seeded(x: a) -> a where Blank a, Sizer a = combine(x, run_thunk(blank))
+
+fn main() -> Unit !{IO} = print(int_to_string(seeded(7)))

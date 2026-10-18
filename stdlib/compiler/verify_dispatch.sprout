@@ -412,23 +412,10 @@ fn tally(os: List VerifyOutcome, ok: Int, sk: Int, mm: Int) -> (Int, Int, Int) =
       | VerifySkip _ -> tally(rest, ok, sk + 1, mm)
       | VerifyMismatch _ _ -> tally(rest, ok, sk, mm + 1)
 
-# A top-level `fn` may legitimately SHADOW a class-method name — `tests/stdlib/
-# test_classmethod_dispatch_identity.spr` declares `fn append(x: Int) -> Int`
-# alongside Semigroup's `append` on purpose. Calls to that name then reach the fn,
-# not the method, so the method entry must not be registered at all. Overwriting
-# it with the fn's entry is not enough: an UNCONSTRAINED shadowing fn has no
-# verifiable signature (fn_sig returns Nothing), which would leave the method
-# entry in place and report `No instance of Semigroup for Int` on a plain call.
+# A function and a class method never share a name: both are canonical, and one
+# module may not declare both (docs/qualified-class-methods-v0.md, rule 2).
 fn build_sig_table(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict CalleeSig =
-  build_fn_sigs(decls, build_class_sigs(decls, collect_fn_names(decls, dict_empty()), acc))
-
-fn collect_fn_names(decls: List typed_ast.TypedDecl, acc: Dict Bool) -> Dict Bool =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      match d with
-      | typed_ast.TFnDecl name _ _ _ _ _ -> collect_fn_names(rest, dict_set(name, true, acc))
-      | _ -> collect_fn_names(rest, acc)
+  build_fn_sigs(decls, build_class_sigs(decls, acc))
 
 fn build_fn_sigs(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict CalleeSig =
   match decls with
@@ -444,40 +431,37 @@ fn build_fn_sigs(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict C
 # A class declaration survives inference as TPassThrough, still carrying every
 # method's written signature. Each method is registered as a callee whose sole
 # constraint is the class applied to its own type parameter — the obligation the
-# resolver must discharge with a dict at each call site. Registered under the bare
-# method name, which is exactly how infer keys `@class:{method}` and how the
-# callee appears as `TVar {method}`.
+# resolver must discharge with a dict at each call site. Registered under the
+# method's canonical name, which is exactly how infer keys `@class:{method}` and how
+# the callee appears as `TVar {method}`.
 #
 # Multi-parameter classes are skipped: `constraint_var` only reads a single
 # var-headed constraint, so a two-parameter class would yield an unusable head.
-fn build_class_sigs(decls: List typed_ast.TypedDecl, fn_names: Dict Bool, acc: Dict CalleeSig) -> Dict CalleeSig =
+fn build_class_sigs(decls: List typed_ast.TypedDecl, acc: Dict CalleeSig) -> Dict CalleeSig =
   match decls with
   | Nil -> acc
   | Cons d rest ->
-      let typed_ast.TPassThrough inner = d else build_class_sigs(rest, fn_names, acc)
-          ast.ClassDecl class_name type_params methods _ _ = inner else build_class_sigs(rest, fn_names, acc)
-          [tv] = type_params else build_class_sigs(rest, fn_names, acc)
-      in build_class_sigs(rest, fn_names, add_class_methods(class_name, tv, methods, fn_names, acc))
+      let typed_ast.TPassThrough inner = d else build_class_sigs(rest, acc)
+          ast.ClassDecl class_name type_params methods _ _ = inner else build_class_sigs(rest, acc)
+          [tv] = type_params else build_class_sigs(rest, acc)
+      in build_class_sigs(rest, add_class_methods(class_name, tv, methods, acc))
 
-fn add_class_methods(class_name: String, tv: String, methods: List ast.ClassMethodSig, fn_names: Dict Bool, acc: Dict CalleeSig) -> Dict CalleeSig =
+fn add_class_methods(class_name: String, tv: String, methods: List ast.ClassMethodSig, acc: Dict CalleeSig) -> Dict CalleeSig =
   match methods with
   | Nil -> acc
   | Cons m rest ->
       match m with
       | ast.ClassMethodSig name params ret_te _ method_constraints ->
-          match dict_get(name, fn_names) with
-          | Just _ -> add_class_methods(class_name, tv, rest, fn_names, acc)
-          | Nothing ->
-              match all_annotated(params) with
-              | Nothing -> add_class_methods(class_name, tv, rest, fn_names, acc)
-              | Just tes ->
-                  add_class_methods(class_name, tv, rest, fn_names,
-                    dict_set(name,
-                      # The class constraint first, then the method's own, in the
-                      # dictionary order the call site injects.
-                      SigMethod(name, tes, Just(ret_te),
-                        Cons(ast.TypeConstraint(class_name, [ast.TypeName(tv)]), method_constraints)),
-                      acc))
+          match all_annotated(params) with
+          | Nothing -> add_class_methods(class_name, tv, rest, acc)
+          | Just tes ->
+              add_class_methods(class_name, tv, rest,
+                dict_set(name,
+                  # The class constraint first, then the method's own, in the
+                  # dictionary order the call site injects.
+                  SigMethod(name, tes, Just(ret_te),
+                    Cons(ast.TypeConstraint(class_name, [ast.TypeName(tv)]), method_constraints)),
+                  acc))
 
 # A verifiable signature: has a where-clause AND every param is annotated (which a
 # where-clause guarantees in source, but stay defensive against synthesized decls).

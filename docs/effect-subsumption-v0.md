@@ -342,7 +342,7 @@ effects — no inference and no unification involved:
 
 - The class method's declared effect is already in scope. `register_class_method`
   (`infer.sprout`) builds the class method's scheme from its `effects_maybe` and
-  registers it under the bare method name when the `ClassDecl` is processed — before any
+  registers it under the method's name when the `ClassDecl` is processed — before any
   of that class's instances are checked. So inside `check_instance_method` the class
   effect is `types.scheme_effects(dict_get(name, env))`.
 - The instance method's declared effect is `eff_maybe`, already threaded through
@@ -474,10 +474,12 @@ neither cost a design round.
 
 **Both bare-name hazards above were confirmed to compile on master before the fix**, so
 the class-qualified key is load-bearing rather than defensive:
-`tests/conformance/run/effect_class_method_name_not_unique_ok.spr` is both shapes in one
+`tests/conformance/run/effect_class_method_name_not_unique_ok.spr` was both shapes in one
 program, and it was A/B'd — with the key degraded to the bare method name, that fixture is
 rejected with `class main.Loud declares pure`, which is `Quiet`'s signature leaking through
-the shared name.
+the shared name. Both shapes are now rejected at the declaration
+(`docs/qualified-class-methods-v0.md`, rule 2), so that fixture is gone; the cross-module
+shape is `package_resolution/app_class_name_collision.spr`.
 
 The key is `@classmethod:{class}:{method}`, and it names an entry in a table this check
 builds from the decl list — **not** an env marker. An earlier version did register it in
@@ -1296,7 +1298,8 @@ Reject (`tests/conformance/type_error/`):
   `effect_instance_var_under_pure_class` (the cell §6.1a left open) and
   `effect_instance_strengthens_class_before_decl` (the ordering bypass, found in
   self-review). Accept side: `effect_instance_weakens_class_ok` (the five accepting cells
-  in one program) and `effect_class_method_name_not_unique_ok` (both bare-name hazards).
+  in one program) and `effect_class_method_name_not_unique_ok` (both bare-name hazards;
+  removed when they became declaration errors).
   Unit: `test_declared_effect_subsumption.spr`, all nine cells plus both row arms.
 - `effect_io_arrow_join_then` and `effect_io_arrow_join_else` — §6.5, **the same program
   with the branches swapped**. Two fixtures, not one: a single one passes under a wrong

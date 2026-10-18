@@ -1,0 +1,20 @@
+module main
+
+# A method named `eq` is `main.eq`, so `==` and a derived `Eq` still name the
+# prelude's `eq`, and the bare `eq` here names the method.
+
+class Same a
+  fn eq(x: a, y: a) -> Bool
+
+instance Same Int
+  fn eq(x: Int, y: Int) -> Bool = false
+
+type Color deriving (Eq) =
+  | Red
+  | Green
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(Red == Red))
+    print(to_string(Red == Green))
+    print(to_string(eq(1, 1)))

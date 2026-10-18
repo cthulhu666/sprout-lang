@@ -1,0 +1,14 @@
+module main
+
+# A method named like a prelude function is `main.list_reverse` after bundling,
+# so a comprehension still calls the prelude's (docs/qualified-class-methods-v0.md).
+
+class Rev a
+  fn list_reverse(x: a) -> Int
+
+instance Rev Int
+  fn list_reverse(x: Int) -> Int = x
+
+fn squares(xs: List Int) -> List Int = [x * x for x in xs]
+
+fn main() -> Unit !{IO} = print(to_string(squares(range_to_list(1..3))))

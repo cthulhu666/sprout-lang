@@ -281,7 +281,7 @@ entry:
   %t$3 = alloca i64
   store i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @__cm_JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json)
+  %t$0 = call i64 @__cm_stdlib.json.JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
@@ -1069,7 +1069,7 @@ entry:
   ret i64 %t$5
 }
 
-define i64 @__cm_JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json) {
+define i64 @__cm_stdlib.json.JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json) {
 entry:
   call void @sprout_closure_arity_check(i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, i64 1)
   %t$0$env_ptr = inttoptr i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json to ptr

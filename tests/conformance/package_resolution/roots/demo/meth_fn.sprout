@@ -1,0 +1,4 @@
+module demo.meth_fn
+
+# A function named like demo.meth_base's method.
+export fn tally(x: Int) -> Int = x

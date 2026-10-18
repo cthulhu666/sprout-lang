@@ -202,6 +202,8 @@ differs: a declared-but-unexported name says so, and points at the declaration.
 **A listed name is a bare name.** A parenthesised group after one — `T(..)`,
 `T(C1)`, and the same spellings with a space before the group — is rejected. `(..)` is declaration-side (§5.6.1), and naming a type
 already imports its constructors, so the group is both invalid and redundant.
+Naming a class likewise imports its methods; a method may also be named alone, and
+a whole-module import reaches one as `alias.method`.
 The rejection is stated because the alternative was silence: the list scan ended
 at the group's closing parenthesis, so every name after it was dropped, and a
 bare use of a dropped name resolved to whatever else was in scope.
@@ -309,22 +311,18 @@ an unknown name. A compile resolves `prelude.X` and keeps locals off prelude nam
 checking one module on its own, without the rest of the program, does neither yet.
 Rationale: `docs/prelude-name-identity-v0.md`.
 
-Shadowing has three known limits, all because the construct resolves by
+Shadowing has two known limits, both because the construct resolves by
 *unqualified* name:
 
 - A redefined type cannot be bound with `<-`: do notation picks the monad family by
   bare name.
-- Class methods keep bare names. A redefined class collides in the class-method
-  wrapper symbol, and a method named like a prelude function is what built-in
-  syntax calls, throughout the method's module, above its class too: a method
-  `list_reverse` breaks comprehensions, and one named `branch` is what an unfused
-  `try` calls (§5.9.1).
 - List and dict literals, list patterns and `>>`/`<<` are built from the bare names
   `Cons`, `Nil`, `dict_empty`, `dict_set`, `rcompose` and `lcompose`. A file's own
   declaration of one of them, or a local named like one, is what they use.
 
-All three predate this rule and apply equally to a named module; use `no_prelude`
-for a file that needs any of them.
+Both predate this rule and apply equally to a named module; use `no_prelude`
+for a file that needs either. A class method is qualified like a function (§8.5),
+so a method named like a prelude function is not what built-in syntax calls.
 
 #### The `no_prelude` opt-out
 
@@ -2595,9 +2593,8 @@ Effect note for v0:
 >   Rule 8's instance/class sentence is a **second, separate** check: two declared effects,
 >   no body and no inference. It runs as a whole-program pass over the declaration list, so
 >   that an instance declared above its class is checked like any other — §16's "declaration
->   order is not significant" applies to it. It is keyed by class rather than by method name,
->   because a method name identifies no class: two classes may declare one, and a top-level
->   `fn` may shadow one, and both compile. A multi-label **row** is never reported as a
+>   order is not significant" applies to it. It is keyed by class and method, so two
+>   modules' same-named classes are judged separately. A multi-label **row** is never reported as a
 >   mismatch by it, because a row is outside the order it compares. On the *instance* side
 >   the row is left to rule 9, which names the instance's own signature. A row in a *class
 >   method* signature is rejected by a separate scan over the class declarations and
@@ -3438,6 +3435,19 @@ method bodies, so an instance that leaves one out is rejected at the instance:
 ```
 instance Two Box does not define method `two`, declared by class Two. Classes have no default method bodies, so an instance defines every method (spec-v0.md §8.5).
 ```
+
+**A class method is a value of its class's module.**  It is qualified as a function
+is, exported exactly when its class is, and reached through imports like any value
+(§3): a method of a module the file does not import is unknown.  One module may not
+declare a method name twice, nor a method and a top-level value of one name; the
+second declaration is rejected:
+
+```
+`blank` is declared by class main.Blank and by class main.Sizer in this module
+```
+
+An instance names its methods through its class, so it need not import them.
+Rationale: `docs/qualified-class-methods-v0.md`.
 
 **Two instances may not share a head constructor.**  Instance selection keys on
 the head constructor, so `instance C (List a)` and `instance C (List b)` both name
