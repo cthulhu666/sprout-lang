@@ -1,7 +1,7 @@
 module stdlib.compiler.type_kind
 
 # Single source of truth for "is this source-level type a known non-heap
-# scalar?".  Int, Bool, and Char qualify.  A Char is an immediate i64 Unicode
+# scalar?".  Int, Bool, Char and Double qualify.  A Char is an immediate i64 Unicode
 # codepoint (not a heap string), so it is never a managed pointer and never needs
 # GC rooting — exactly like Int.  (char_to_string encodes a codepoint to a heap
 # String on demand; that String is rooted, but the Char itself is not.)
@@ -29,7 +29,7 @@ fn is_scalar_name(name: String) -> Bool =
 # --- Public predicate ---
 
 # Returns true when an ast.TypeExpr annotation declares a known non-heap
-# scalar (Int, Bool, Char).  Everything else — String, ADTs, tuples, closures,
+# scalar (Int, Bool, Char, Double).  Everything else — String, ADTs, tuples, closures,
 # Unit, and TVars/polymorphic positions, which may resolve to heap objects at
 # runtime — returns false and is rooted conservatively.
 export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =

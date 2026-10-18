@@ -195,7 +195,7 @@ fn main() -> Unit !{IO} =
                 types.TVar(types.tyvar_id("j")),
                 types.EffectPure,
                 Cons(("#app:Tagged:#pos:1", "Boxed"), Cons(("#app:Trip:#pos:0,#any", "Sh2"), Nil)))))
-    # A wrong constraint must NOT compare equal (guards scheme_eq actually checks constraints).
+    # A wrong constraint must NOT compare equal (guards that Scheme's Eq checks constraints).
     assert_eq(state, "constraint mismatch is not equal",
               (roundtrip(types.Scheme(Cons("a", Nil), Nil, types.TVar(types.tyvar_id("a")), types.EffectPure, Cons(("#pos:0", "Semigroup"), Nil)))
                 == Just(types.Scheme(Cons("a", Nil), Nil, types.TVar(types.tyvar_id("a")), types.EffectPure, Cons(("#pos:0", "Eq"), Nil)))),

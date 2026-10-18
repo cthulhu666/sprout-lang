@@ -136,7 +136,7 @@ every heap SSA value stays reachable across GC-triggering ops. Type-awareness co
 from classifying which SSA values are heap:
 
 - `op_triggers_gc` — which non-call ops are GC-safe points (allocations, closure calls, etc.). Direct calls are classified by callee: `op_raw_callee` drops the allow-listed non-allocating externs, and `op_triggers_gc_summary` looks the rest up in the may-trigger-GC summary.
-- `op_produces_simple_heap` — which op *results* are heap values that must be tracked. Scalars (`Int`/`Bool`/`Char`, via `type_kind.type_is_non_heap_scalar`) are excluded; an `IRCall` result is rooted unless its carried return `IRType` is `IRTScalar`.
+- `op_produces_simple_heap` — which op *results* are heap values that must be tracked. Scalars (`Int`/`Bool`/`Char`/`Double`, via `type_kind.type_is_non_heap_scalar`) are excluded; an `IRCall` result is rooted unless its carried return `IRType` is `IRTScalar`.
 - `compute_heap_origin` / `roots_across` — track the heap-origin set and compute, for each op, the values that must be rooted across it (live-after ∪ heap operands the op exposes). It scans only `pending`, the heap values defined since the last trigger (or seeded at block entry): one passed over at a trigger is dead for the rest of the block, and one pushed is still rooted or was popped dead.
 
 **Per-op liveness is a query, not a set.** `BlockLive` indexes a block once — its

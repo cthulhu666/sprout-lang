@@ -907,7 +907,7 @@ fn unify_tfunc_owned(subst: Dict types.Type, eff_subst: Dict types.Effect, polar
                      l: types.Type, r: types.Type,
                      p1: types.Type, r1: types.Type, e1: types.Effect, o1: types.Ownership,
                      p2: types.Type, r2: types.Type, e2: types.Effect, o2: types.Ownership) -> Unified =
-  if types.ownership_eq(o1, o2)
+  if o1 == o2
   then unify_tfunc(subst, eff_subst, polarity, p1, r1, e1, p2, r2, e2)
   else UnifyErr(ownership_mismatch_error(l, r, o1, o2))
 

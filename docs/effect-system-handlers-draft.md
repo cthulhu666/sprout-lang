@@ -289,7 +289,7 @@ Sprout ADTs, fully expressible in stage-0 syntax.
 | `lexer.sprout` | Add `"effect"` and `"handle"` to `is_keyword` |
 | `ast.sprout` | Add `EffectDecl`, `EffectOpSig`, `HandleExpr`, `HandleBranch` to `Decl` / `Expr` |
 | `parser.sprout` | Add `parse_effect_decl`, `parse_handle_expr`, dispatcher branches |
-| `types.sprout` | Add `EffectOpen` stub; update `ftv_effect`, `effect_to_string`, `effect_eq` |
+| `types.sprout` | Add `EffectOpen` stub; update `ftv_effect`, `effect_to_string` (`Eq` is derived) |
 | `unifier.sprout` | Extend `unify_effects_applied` for `EffectRow` cases |
 | `infer.sprout` | Extend `merge_effects`; add effect env; handle `EffectDecl` + `HandleExpr` |
 | `typed_ast.sprout` | Add `THandle`, `TypedHandleBranch`; update `typed_expr_type`/`_pos` |
