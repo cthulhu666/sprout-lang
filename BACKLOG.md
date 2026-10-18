@@ -469,9 +469,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `u64::widening_mul`, C `__int128`, Go `bits.Mul64`.
 - [ ] `P2` **A second `type T` in one module is accepted silently.** `type T = | A` then
   `type T = | B` passes `--phase check` with no error, while a second `fn f` is rejected with
-  "is defined more than once in this module" (`infer.check_duplicate_fn_decls`). Which `T` the
-  rest of the module sees is not something a user can know. That check looks at `FnDecl` only;
-  extend it to type, alias and class declarations, each in its own namespace.
+  "is defined more than once in this module" (`infer.check_duplicate_module_values`). Which `T`
+  the rest of the module sees is not something a user can know. That check covers `fn`, `let`
+  and class-method names only; extend it to type, alias and class declarations, each in its own
+  namespace.
 
 ### 2) Networking and HTTP Client
 

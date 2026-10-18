@@ -696,12 +696,7 @@ fn find_concrete_method_impl(class_name: String, method_name: String, head: Stri
   # after_last_dot).  Strip here so both sides of the lookup use the same key form.
   match dict_get(string.after_last_dot(class_name) ++ "_" ++ head, ctx.env.inst_table) with
   | Nothing -> Nothing
-  | Just method_map -> dict_get_method(method_name, method_map)
-
-fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String =
-  match dict_get(method_name, method_map) with
-  | Just value -> Just(value)
-  | Nothing -> dict_get(string.after_last_dot(method_name), method_map)
+  | Just method_map -> dict_get(method_name, method_map)
 
 # The forwarded slot's method under an exact slot key (ast.dict_slot_key), if the
 # current function received that constraint as a hidden dict parameter. Used to
@@ -710,7 +705,7 @@ fn dict_get_method(method_name: String, method_map: Dict String) -> Maybe String
 fn find_fwd_method_for_key(method_name: String, key: String, ctx: LowerCtx) -> Maybe String =
   match dict_get(key, ctx.fwd) with
   | Nothing -> Nothing
-  | Just method_map -> dict_get_method(method_name, method_map)
+  | Just method_map -> dict_get(method_name, method_map)
 
 # The slot key for a value-position method at `class_type`, its variables named by
 # the `@eta_fwdvar` markers infer threads into scheme_env. A variable without one
@@ -880,7 +875,7 @@ fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entrie
   | Nil -> Nothing
   | Cons (key, method_map) rest ->
       if string.ends_with(key, "_" ++ tvar_name) then
-        match dict_get_method(method_name, method_map) with
+        match dict_get(method_name, method_map) with
         | Just impl_name -> Just(impl_name)
         | Nothing -> find_forwarded_method_for_tvar(method_name, tvar_name, rest)
       else
@@ -900,7 +895,7 @@ fn forwarded_method_impls(method_name: String, entries: List (String, Dict Strin
   match entries with
   | Nil -> Nil
   | Cons (_, method_map) rest ->
-      match dict_get_method(method_name, method_map) with
+      match dict_get(method_name, method_map) with
       | Just impl_name -> Cons(impl_name, forwarded_method_impls(method_name, rest))
       | Nothing -> forwarded_method_impls(method_name, rest)
 
@@ -1075,9 +1070,7 @@ fn sole_leading_ev_classes(args: List typed_ast.TypedExpr) -> Maybe (List typed_
 # Only the dispatch class's block carries the method (e.g. `compare` is in the Ord block, not
 # the Eq super block), so matching by method presence in ctx_inst[key] both identifies the
 # right block AND skips sibling superclass blocks — whose dicts the concrete fn never takes.
-# ASSUMPTION: method SHORT-names are unique across the blocks in play (Eq/Ord/Enum/ToString do
-# not collide). `dict_get_method`'s after_last_dot fallback would otherwise let a same-named
-# method in a sibling block be selected; no such collision exists in the current class set.
+# A method name is canonical and declared by one class, so at most one block carries it.
 fn concrete_block_providing(mname: String, blocks: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe (String, List typed_ast.Evidence) =
   match blocks with
   | Nil -> Nothing
@@ -1090,7 +1083,7 @@ fn concrete_block_providing(mname: String, blocks: List typed_ast.Evidence, ctx:
 fn block_impl_if_resolved(mname: String, key: String, children: List typed_ast.Evidence, ctx: LowerCtx) -> Maybe String =
   if evidence_list_fully_resolved(children) then
     match dict_get(key, ctx.env.inst_table) with
-    | Just method_map -> dict_get_method(mname, method_map)
+    | Just method_map -> dict_get(mname, method_map)
     | Nothing -> Nothing
   else Nothing
 
@@ -1406,7 +1399,7 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
       match dict_get(key, ctx.fwd) with
       | Nothing -> Nothing
       | Just method_map ->
-          match dict_get_method(method, method_map) with
+          match dict_get(method, method_map) with
           | Nothing -> Nothing
           | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | _ -> Nothing
@@ -1415,7 +1408,7 @@ fn eta_from_instance(method: String, key: String, t: types.Type, pos: source.Sou
   match dict_get(key, ctx.env.inst_table) with
   | Nothing -> Nothing
   | Just method_map ->
-      match dict_get_method(method, method_map) with
+      match dict_get(method, method_map) with
       | Nothing -> Nothing
       | Just impl_name -> Just(make_eta_lambda_with_dicts(impl_name, t, inner_dicts, pos))
 

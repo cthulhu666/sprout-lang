@@ -1,18 +1,15 @@
 import stdlib.test (check_eq, run_suite)
 
-# A LOCAL binding may share a class method's name.
+# A LOCAL binding may share a prelude class method's name.
 #
-# `build_sig_table` registers every class method under its bare name, and
-# `check_call` looked the callee up by name alone. `collect_fn_names` guarded the
-# top-level case — a top-level `fn append` suppresses Semigroup's entry — but
-# nothing guarded a parameter, a lambda parameter, a `let`, a do-bind or a match
-# binding. A call to any of those reported a hard error naming a class the code
-# never mentioned:
+# Prelude methods stay bare, and `check_call` looks the callee up by name alone, so
+# a parameter, a lambda parameter, a `let`, a do-bind or a match binding named
+# `append` was checked as Semigroup's method:
 #
 #   fn use_it(append: Int -> Int -> Int, x: Int) -> Int = append(x, x)
 #   ERROR: check: dispatch-verify: No instance of Semigroup for Int
 #
-# The verifier now carries the set of names bound locally at each point and skips
+# The verifier carries the set of names bound locally at each point and skips
 # a callee that is one of them: a local shadow is not the method, so there is no
 # dispatch obligation to verify. Scoping is precise — the suppression lasts only
 # as long as the binding, so `real_dispatch` below still exercises the real
