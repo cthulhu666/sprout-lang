@@ -1793,7 +1793,7 @@ fn qualify_instance_methods(ctx: ResolveCtx, class_name: String, methods: List a
 # class's method is bare.
 fn class_method_canonical(class_name: String, method: String) -> String =
   match string.rsplit_once(class_name, ".") with
-  | Just (module_name, _) -> module_name ++ "." ++ method
+  | Just (module_name, _) -> canonical_of(module_name, method)
   | Nothing -> method
 
 fn qualify_maybe_type(ctx: ResolveCtx, mt: Maybe ast.TypeExpr) -> Maybe ast.TypeExpr =
