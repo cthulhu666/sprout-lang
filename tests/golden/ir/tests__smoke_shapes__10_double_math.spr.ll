@@ -529,7 +529,6 @@ entry:
   store i64 %p$guess$in, ptr %t$16
   %t$17 = alloca i64
   store i64 %p$i$in, ptr %t$17
-  %t$18 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$x = load i64, ptr %t$15
@@ -570,7 +569,6 @@ ovfok_10:
   store i64 %p$x, ptr %t$15
   store i64 %t$8, ptr %t$16
   store i64 %t$10, ptr %t$17
-  call void @llvm.stackrestore(ptr %t$18)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%p$guess, %then_3]
@@ -1605,7 +1603,6 @@ entry:
   store i64 %p$guess$in, ptr %t$21
   %t$22 = alloca i64
   store i64 %p$i$in, ptr %t$22
-  %t$23 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$x = load i64, ptr %t$20
@@ -1660,7 +1657,6 @@ ovfok_15:
   store i64 %p$x, ptr %t$20
   store i64 %t$13, ptr %t$21
   store i64 %t$15, ptr %t$22
-  call void @llvm.stackrestore(ptr %t$23)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%p$guess, %then_3]
@@ -1927,7 +1923,6 @@ entry:
   store i64 %p$e$in, ptr %t$26
   %t$27 = alloca i64
   store i64 %p$acc$in, ptr %t$27
-  %t$28 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$base = load i64, ptr %t$25
@@ -1979,7 +1974,6 @@ then_16:
   store i64 %t$18, ptr %t$25
   store i64 %t$2, ptr %t$26
   store i64 %t$19, ptr %t$27
-  call void @llvm.stackrestore(ptr %t$28)
   br label %tco_loop
 else_16:
   %t$21$la = bitcast i64 %p$base to double
@@ -1989,7 +1983,6 @@ else_16:
   store i64 %t$21, ptr %t$25
   store i64 %t$2, ptr %t$26
   store i64 %p$acc, ptr %t$27
-  call void @llvm.stackrestore(ptr %t$28)
   br label %tco_loop
 join_8:
   %t$9 = phi i64 [%p$acc, %then_8]
@@ -2052,7 +2045,6 @@ entry:
   store i64 %p$x$in, ptr %t$166
   %t$167 = alloca i64
   store i64 %p$y$in, ptr %t$167
-  %t$168 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$x = load i64, ptr %t$166
@@ -2328,7 +2320,6 @@ else_131:
   %t$136 = bitcast double %t$136$fr to i64
   store i64 %t$136, ptr %t$166
   store i64 %p$y, ptr %t$167
-  call void @llvm.stackrestore(ptr %t$168)
   br label %tco_loop
 join_131:
   %t$132 = phi i64 [%t$135, %then_131]

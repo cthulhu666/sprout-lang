@@ -119,7 +119,6 @@ entry:
   store i64 %p$x$in, ptr %t$17
   %t$18 = alloca i64
   store i64 %p$xs$in, ptr %t$18
-  %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$x = load i64, ptr %t$17
@@ -150,7 +149,6 @@ then_12:
 else_12:
   store i64 %p$x, ptr %t$17
   store i64 %t$9, ptr %t$18
-  call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
 join_12:
   %t$13 = phi i64 [%t$14, %then_12]

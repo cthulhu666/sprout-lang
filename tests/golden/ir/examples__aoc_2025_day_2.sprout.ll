@@ -1040,7 +1040,6 @@ entry:
   store i64 %p$base$in, ptr %t$24
   %t$25 = alloca i64
   store i64 %p$pat$in, ptr %t$25
-  %t$26 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$n = load i64, ptr %t$23
@@ -1084,7 +1083,6 @@ divok_11:
   store i64 %t$18, ptr %t$23
   store i64 %p$base, ptr %t$24
   store i64 %p$pat, ptr %t$25
-  call void @llvm.stackrestore(ptr %t$26)
   br label %tco_loop
 else_9:
   %t$20 = add i64 0, 0

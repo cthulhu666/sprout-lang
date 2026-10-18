@@ -560,7 +560,6 @@ entry:
   store i64 %p$g$in, ptr %t$14
   %t$15 = alloca i64
   store i64 %p$i$in, ptr %t$15
-  %t$16 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$g = load i64, ptr %t$14
@@ -589,7 +588,6 @@ ovfpanic_9:
 ovfok_9:
   store i64 %p$g, ptr %t$14
   store i64 %t$9, ptr %t$15
-  call void @llvm.stackrestore(ptr %t$16)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%t$5, %then_3]
@@ -606,7 +604,6 @@ entry:
   store i64 %p$lr$in, ptr %t$19
   %t$20 = alloca i64
   store i64 %p$i$in, ptr %t$20
-  %t$21 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$w = load i64, ptr %t$17
@@ -648,7 +645,6 @@ ovfok_12:
   store i64 %p$g, ptr %t$18
   store i64 %p$lr, ptr %t$19
   store i64 %t$12, ptr %t$20
-  call void @llvm.stackrestore(ptr %t$21)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%t$5, %then_3]
@@ -860,7 +856,6 @@ entry:
   store i64 %p$i$in, ptr %t$16
   %t$17 = alloca i64
   store i64 %p$state$in, ptr %t$17
-  %t$18 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$w = load i64, ptr %t$15
@@ -892,7 +887,6 @@ ovfok_9:
   store i64 %p$w, ptr %t$15
   store i64 %t$9, ptr %t$16
   store i64 %t$12, ptr %t$17
-  call void @llvm.stackrestore(ptr %t$18)
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%t$5, %then_3]

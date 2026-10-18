@@ -202,7 +202,6 @@ entry:
   store i64 %p$available$in, ptr %t$26
   %t$27 = alloca i64
   store i64 %p$acc$in, ptr %t$27
-  %t$28 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$mask = load i64, ptr %t$22
@@ -247,7 +246,6 @@ ovfok_17:
   store i64 %p$rd, ptr %t$25
   store i64 %t$16, ptr %t$26
   store i64 %t$17, ptr %t$27
-  call void @llvm.stackrestore(ptr %t$28)
   br label %tco_loop
 arm_1_14:
   call void @sprout_abort_match()
