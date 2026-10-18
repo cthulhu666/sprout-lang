@@ -1674,10 +1674,11 @@ deferral happened, not for current behaviour. Still open:
 
 ### Runtime and performance roadmap
 
-- [ ] `P2` **Native-Sprout runtime, Phase 0: port bench and workload baseline.** Moving a builtin
-  to Sprout is a slowdown today (~5× on the same sort). Before any move: a per-candidate C-vs-Sprout
-  bench under `bench/`, and a baseline over self-compile, nqueens, `http_log_middleware`,
-  `gc_roots` and the galaxy frame. Plan and phase order: `docs/native-sprout-runtime-v0.md`.
+- [ ] `P2` **Native-Sprout runtime, Phase 0: quiet baseline and galaxy frame.** The first
+  baseline (`bench/results-2026-10-18-native-runtime.md`, `bench/native_runtime/bench.sh`) ran on
+  a loaded machine, so its 14–19% spreads are not usable noise floors: rerun it quiet. It also
+  lacks the `uncharted-suns` galaxy frame. Per-candidate Phase 3 port benches wait for Phase 2.
+  Plan: `docs/native-sprout-runtime-v0.md`.
 - [ ] `P2` **Make tight Sprout string-processing loops competitive with host builtins**, so moderate
   stdin/text workloads do not need dedicated host helpers to be practical. Investigate the native
   overhead in recursive stdlib string loops such as `string_lines` over stdin-loaded text — tail-

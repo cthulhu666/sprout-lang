@@ -1,0 +1,168 @@
+module main
+
+# Sprout half of the merge-sort pair (sort_c.c is the C half). Two variants on the
+# same input: the shipped generic `mutvec_sort`, and the same algorithm copied and
+# specialised to Int, so a comparison is `<` and not an `Ord` call. Each prints ns
+# per element for fill+sort minus fill alone, and a checksum sort_c.c must match.
+
+import stdlib.time as time
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_sort)
+
+let block = 16
+
+# Remainder for a non-negative `a`; truncating division gives it directly.
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+fn smaller(a: Int, b: Int) -> Int =
+  if a < b then a else b
+
+# The LCG sort_c.c uses; every product stays inside the checked Int range.
+fn fill_from(v: MutVec Int, i: Int, n: Int, x: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      let next = rem(x * 1103515245 + 12345, 2147483648)
+      _ <- mutvec_set(v, i, rem(next / 65536, 65536))
+      fill_from(v, i + 1, n, next)
+
+fn fill(v: MutVec Int, n: Int) -> Unit !{IO} =
+  fill_from(v, 0, n, 42)
+
+# --- the Int-specialised copy of mutvec_sort ---
+
+fn insert(v: MutVec Int, x: Int, j: Int, lo: Int) -> Unit !{IO} =
+  if j <= lo then mutvec_set(v, j, x)
+  else
+    do
+      prev <- mutvec_at(v, j - 1)
+      if x < prev then
+        do
+          _ <- mutvec_set(v, j, prev)
+          insert(v, x, j - 1, lo)
+      else mutvec_set(v, j, x)
+
+fn insertion(v: MutVec Int, i: Int, lo: Int, hi: Int) -> Unit !{IO} =
+  if i >= hi then ()
+  else
+    do
+      x <- mutvec_at(v, i)
+      _ <- insert(v, x, i, lo)
+      insertion(v, i + 1, lo, hi)
+
+fn blocks(v: MutVec Int, lo: Int, n: Int) -> Unit !{IO} =
+  if lo >= n then ()
+  else
+    do
+      _ <- insertion(v, lo + 1, lo, smaller(lo + block, n))
+      blocks(v, lo + block, n)
+
+fn copy(src: MutVec Int, dst: MutVec Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =
+  if i >= stop then ()
+  else
+    do
+      x <- mutvec_at(src, i)
+      _ <- mutvec_set(dst, k, x)
+      copy(src, dst, i + 1, stop, k + 1)
+
+# A tie takes the left run, as mutvec_sort does.
+fn merge(src: MutVec Int, dst: MutVec Int, i: Int, mid: Int, j: Int, hi: Int, k: Int) -> Unit !{IO} =
+  if i >= mid then copy(src, dst, j, hi, k)
+  else if j >= hi then copy(src, dst, i, mid, k)
+  else
+    do
+      x <- mutvec_at(src, i)
+      y <- mutvec_at(src, j)
+      if y < x then
+        do
+          _ <- mutvec_set(dst, k, y)
+          merge(src, dst, i, mid, j + 1, hi, k + 1)
+      else
+        do
+          _ <- mutvec_set(dst, k, x)
+          merge(src, dst, i + 1, mid, j, hi, k + 1)
+
+fn pass(src: MutVec Int, dst: MutVec Int, lo: Int, n: Int, w: Int) -> Unit !{IO} =
+  if lo >= n then ()
+  else
+    do
+      let mid = smaller(lo + w, n)
+      let hi = smaller(lo + 2 * w, n)
+      _ <- merge(src, dst, lo, mid, mid, hi, lo)
+      pass(src, dst, hi, n, w)
+
+# Returns whether the last pass wrote the scratch buffer.
+fn passes(src: MutVec Int, dst: MutVec Int, n: Int, w: Int, in_scratch: Bool) -> Bool !{IO} =
+  if w >= n then in_scratch
+  else
+    do
+      _ <- pass(src, dst, 0, n, w)
+      passes(dst, src, n, w * 2,! in_scratch)
+
+fn sort_int(v: MutVec Int, scratch: MutVec Int, n: Int) -> Unit !{IO} =
+  do
+    _ <- blocks(v, 0, n)
+    if n <= block then ()
+    else
+      do
+        in_scratch <- passes(v, scratch, n, block, false)
+        if in_scratch then copy(scratch, v, 0, n, 0) else ()
+
+# --- harness ---
+
+fn checksum(v: MutVec Int, i: Int, n: Int, prev: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      x <- mutvec_at(v, i)
+      if x < prev then panic(`not sorted at ${i}`)
+      else checksum(v, i + 1, n, x, rem(acc * 31 + x, 1000000007))
+
+fn fill_reps(v: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
+  if r <= 0 then ()
+  else
+    do
+      _ <- fill(v, n)
+      fill_reps(v, n, r - 1)
+
+fn generic_reps(v: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
+  if r <= 0 then ()
+  else
+    do
+      _ <- fill(v, n)
+      _ <- mutvec_sort(v)
+      generic_reps(v, n, r - 1)
+
+fn int_reps(v: MutVec Int, scratch: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
+  if r <= 0 then ()
+  else
+    do
+      _ <- fill(v, n)
+      _ <- sort_int(v, scratch, n)
+      int_reps(v, scratch, n, r - 1)
+
+fn report(name: String, n: Int, reps: Int, fill_us: Int, total_us: Int, v: MutVec Int) -> Unit !{IO} =
+  do
+    sum <- checksum(v, 0, n, 0, 0)
+    let ns_x10 = (total_us - fill_us) * 10000 / (n * reps)
+    print(`sort ${name} n=${n} ns_per_elem=${ns_x10 / 10}.${rem(ns_x10, 10)} checksum=${sum}`)
+
+fn run(n: Int, reps: Int) -> Unit !{IO} =
+  do
+    v <- mutvec_new(n, 0)
+    scratch <- mutvec_new(n, 0)
+    t0 <- time.now_micros()
+    _ <- fill_reps(v, n, reps)
+    t1 <- time.now_micros()
+    _ <- generic_reps(v, n, reps)
+    t2 <- time.now_micros()
+    _ <- report("sprout_generic", n, reps, t1 - t0, t2 - t1, v)
+    t3 <- time.now_micros()
+    _ <- int_reps(v, scratch, n, reps)
+    t4 <- time.now_micros()
+    report("sprout_int", n, reps, t1 - t0, t4 - t3, v)
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- run(440, 2000)
+    run(100000, 5)

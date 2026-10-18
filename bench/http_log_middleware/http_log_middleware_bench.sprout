@@ -40,19 +40,21 @@ fn bench_handler(label: String, h: HttpRequest -> HttpServerResponse !{IO}, req:
     report(label, t1 - t0, n)
 
 # --- cost breakdown: the three clock reads and the ISO-8601 formatter ---------
+# The clock loops carry the last reading, not a sum: a million wall-clock readings
+# overflow Int.
 fn clock_loop(n: Int, acc: Int) -> Int !{IO} =
   if n <= 0 then acc
   else
     do
       t <- time.now_micros()
-      clock_loop(n - 1, acc + t)
+      clock_loop(n - 1, t)
 
 fn wall_loop(n: Int, acc: Int) -> Int !{IO} =
   if n <= 0 then acc
   else
     do
       t <- time.wall_micros()
-      wall_loop(n - 1, acc + t)
+      wall_loop(n - 1, t)
 
 fn fmt_loop(n: Int, acc: Int) -> Int !{IO} =
   if n <= 0 then acc
