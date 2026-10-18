@@ -553,7 +553,9 @@ which always relinks, and two parallel entries would write the same binary at on
 ## Object-age instrument — `just gc-ageprof-check`
 
 Calibrates `SPROUT_GC_AGEPROF=1` against two workloads with known answers. Details and the
-current bounds: [gc-generational-v0.md](gc-generational-v0.md) §4.
+current bounds: [gc-generational-v0.md](gc-generational-v0.md) §4. It also checks the store
+counters' build flag: a default runtime reports them as `off`, and one built with
+`-DSPROUT_GC_AGEPROF_STORES` counts `test_mutvec_sort`'s stores.
 
 ### An absolute ratio tracked the number of rooted globals, not what the gate measured
 
