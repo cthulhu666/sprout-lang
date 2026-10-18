@@ -28,6 +28,10 @@ The runtime is ~12.7k lines of C including headers (`sprout_runtime.c`, `sprout_
 | output I/O | 132 | ~5% |
 | code emitted from Sprout source | ≤ ~250 | ≤ ~10% |
 
+Re-measured 2026-10-18 over 5 whole runs: GC 36.7%, `Dict` 19.8%, output I/O 15.4% (not a
+lever: full buffering leaves wall time unchanged), root stack 9.5%
+([dict-representation-v0.md](dict-representation-v0.md) §1).
+
 BACKLOG §GC & Runtime Performance warns that `static` runtime functions are inlined at `-O2` and
 cannot be attributed. In this build they were not: `sprout_heap_lookup`, `slot_bytes` and
 `bst_insert_node` each appear as their own symbol. Time inlined elsewhere still folds into its
@@ -244,22 +248,13 @@ will cost time until Phase 2 lands. Do them for the smaller C surface, or not ye
    the seed).
 3. Byte-level crypto (`crypto_sha256`, `crypto_hmac_sha256`), once byte access is unboxed.
 
-**3.4 `Dict`: fix the representation, then decide where it lives.** The 17% bucket is per-insert
-node allocation and `strcmp` descent, and a Sprout port of the same AVL tree keeps both and adds the
-~5× Sprout cost. `Dict` is `String`-keyed and so is the compiler, so "generic in the key" buys the
-compiler nothing. The fix at each layer:
-
-- caller — intern identifiers to `Int` symbols at lex time, so maps compare words. Largest gain,
-  largest change: every compiler map changes key type.
-- function — keys are already interned, so an equal key is pointer-equal; a pointer check before
-  `strcmp` saves only the last comparison, since ordering still needs `strcmp` on the way down.
-- representation — a hash map (HAMT) with the hash cached in the interned string: a lookup
-  compares hashes and calls `strcmp` only on a hash match. `dict_keys` returns sorted order today
-  (in-order walk), which a hash map must then sort.
-
-The representation fix is the one that targets the measured cost, and it can be done in C first.
-Whether it then moves to Sprout is Phase 3's usual question. Non-`String` keys are a semantic
-change with their own design doc.
+**3.4 `Dict`: fix the representation, then decide where it lives.** Re-profiled over 5 runs:
+`Dict` is 19.8% of a self-compile, and 63% of its 4.23M lookups miss. Neither a cheaper
+comparison nor skipping matched prefixes moves wall time, and a hash map cannot keep the
+normative key order cheaply: the type environment answers ~770 prefix queries per compile over
+7–11k changing keys. Measurements, options per layer and the next experiment:
+[dict-representation-v0.md](dict-representation-v0.md). A Sprout port of the same tree keeps its
+cost and adds Sprout's.
 
 Each move: a differential test (C and Sprout agree on a corpus) lands first, then the Sprout
 version, then the C function and its `APPROVED_BUILTINS` line are deleted. Gate: port bench at
