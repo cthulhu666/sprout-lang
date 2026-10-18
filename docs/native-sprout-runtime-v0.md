@@ -185,7 +185,8 @@ regresses past its own.
 All of it is filed already; this plan only orders it. The first is what the exit below still
 needs:
 
-- What is left of the merge step's cost (BACKLOG §Runtime and performance roadmap).
+- ~~What is left of the merge step's cost.~~ Done 2026-10-18: the exit below is met. The 1.2×
+  aim needs `insert` inlined (BACKLOG §Runtime and performance roadmap); see below.
 - ~~The merge loop's branch, which C turns into a select.~~ Done 2026-10-18; see below.
 - Root call operands only for runtime builtins, not Sprout callees (same section; needs a written
   GC-safety argument first).
@@ -201,7 +202,8 @@ C by median, at both n=440 and n=100k**; 1.2× is the aim. Baseline: 4.4× and 3
 one input repeated). Until then, Phase 3 cannot start. The bound keeps Sprout's checks: element
 access stays bounds-checked and arithmetic overflow-checked.
 
-Where it stands: **1.37× at n=440, 1.23× at n=100k** (2026-10-18, median of 11). Three steps:
+Where it stands: **1.26× at n=440, 1.19× at n=100k** (2026-10-18, median of 31), inside the
+bound. At n=440 the margin is about one run-to-run spread. Four steps:
 
 1. Two calls per element access, both removed. A match on `MutVec`, a type with one constructor,
    read the tag through `sprout_tag`, which LLVM can neither inline nor hoist. `vector_mutset`
@@ -214,14 +216,21 @@ Where it stands: **1.37× at n=440, 1.23× at n=100k** (2026-10-18, median of 11
    arguments carry the choice, not of two arms that each store and recurse: an arm's inlined
    bounds and overflow checks make it several blocks. `mutvec_sort`'s merge has that shape now.
    Generic `mutvec_sort` gains too: 6.87× and 6.55× to 6.35× and 5.82×.
+4. Three things that kept LLVM from holding a store loop's loads in registers. The age-profile
+   store hook's slow call could write any memory; it is now a build flag
+   (`-DSPROUT_GC_AGEPROF_STORES`). A TCO loop saved and restored the stack even with no root
+   slots to free, and LLVM treats `stackrestore` as a write; that pair now goes when there are
+   none. A store into a vector slot shared a TBAA type with object fields and the vector
+   header; `SproutSlot` and `SproutField` now separate them. Alone, only the hook moves the
+   bench (1.40× to 1.30×); all three reach 1.26× and 1.19×.
 
-What is left is instruction count: a merge step is ~33 instructions to C's 11. Each step reloads
-wrapper → vector → `len`/`data` and repeats the null and bounds checks. Measured, each alone:
-dropping the age-profile hook from `vector_mutset` gains ~6% at n=440; distinct TBAA types for
-object fields, vector slots and `len` gain nothing, and neither does dropping the TCO loop's
-`stacksave`/`stackrestore`. With all three, nothing aliases those loads, yet they stay in the
-loop: each comes after an exit test, and a Sprout handle is an `i64`, so nothing says it points
-at valid memory.
+What is left is the insertion sort over 16-element blocks, not the merge. Timed apart before
+step 4, the merge phase was ~1.25× C and the insertion phase ~1.65×. LLVM does not inline
+`insert` into `insertion` (cost 325 against a threshold of 225, after step 4), so each element
+pays a call and the loop around it cannot keep its loads in registers. Forced by hand, the
+inline reaches 1.14× and 1.11×; without step 4 it gains almost nothing, since each of the four
+blocks a different optimisation. Instruction count was the wrong target: with every invariant
+load hoisted out of the merge loop, two loads and a store per step as in C, it measured the same.
 
 ### Phase 3 — move builtins, one per PR
 

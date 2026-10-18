@@ -1713,11 +1713,12 @@ deferral happened, not for current behaviour. Still open:
   look redundant, and they survive LLVM inlining, so small wrappers cost real time. Narrowing the
   rule needs a written GC-safety argument first, since a missing root corrupts the heap.
   Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
-- [ ] `P3` **Merge-sort pair: 1.37× C at n=440, against Phase 2's 1.3×.** A merge step is ~33
-  instructions to C's 11: it reloads wrapper → vector → `len`/`data` and repeats the null and
-  bounds checks. The loads stay in the loop with no aliasing in the way: each follows an exit
-  test, and an `i64` handle says nothing about valid memory. Levers: the age-profile hook out
-  of default builds (~6%, measured); handles LLVM knows are dereferenceable (untested).
+- [ ] `P3` **LLVM does not inline the sort pair's `insert` into `insertion`.** The Int merge
+  sort is 1.26× C at n=440, against Phase 2's 1.2× aim, and the insertion phase over 16-element
+  blocks carries most of it. `insert` costs 325 against a threshold of 225, so each element pays
+  a call; forced inline, the bench reaches 1.14×. Fix in the compiler (an inline hint for small
+  TCO-loop functions) or in the accessors (fewer fail-call sites). Generic `sort_insert` is never
+  inlined: its comparator call roots a slot, a dynamic alloca in the loop.
   `docs/native-sprout-runtime-v0.md` §Phase 2.
 - [ ] `P3` **Sink a shared store and tail self-call out of both `if` arms.**
   `if c then do { set(d, k, a); f(x1) } else do { set(d, k, b); f(x2) }` stays a branch: each
