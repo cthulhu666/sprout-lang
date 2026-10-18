@@ -62,8 +62,10 @@ builtin rewritten in today's Sprout inherits both.
 
 ## 3. What a Sprout implementation can have that C cannot
 
-1. **Types.** C sees every value as `i64`. Sprout can specialise per type: an `Int`-keyed map
-   compares words, a sort on `Int` skips the `Ord` dictionary.
+1. **Types.** C sees every value as `i64`. Sprout can specialise per dictionary: an `Int`-keyed
+   map written `where Ord k` compares words, a sort on `Int` skips the `Ord` dictionary
+   ([specialisation-v0.md](specialisation-v0.md)). Code that is generic without a class
+   constraint gets no copy.
 2. **Per-program DCE and inlining.** Sprout stdlib code is bundled and compiled with the program
    (`dce.elim_unreachable`), so it inlines into callers and unused code is dropped.
 
@@ -179,14 +181,19 @@ regresses past its own.
 
 ### Phase 2 — close the Sprout-vs-C gap
 
-All of it is filed already; this plan only orders it:
+All of it is filed already; this plan only orders it. The first is the profile the exit below
+names:
 
-- Specialise generic functions at concrete types (BACKLOG §Runtime and performance roadmap).
+- Profile the ~5× `MutVec` gap, then inline element access if access is the cost (BACKLOG
+  §Runtime and performance roadmap).
 - Root call operands only for runtime builtins, not Sprout callees (same section; needs a written
   GC-safety argument first).
 - Non-escaping combinator closures allocate; every apply re-checks arity (same section).
-- Profile the ~5× `MutVec` gap, then inline element access if access is the cost (same section).
 - Tight string-processing loops (same section).
+- Specialise generic functions at concrete types (same section;
+  [specialisation-v0.md](specialisation-v0.md)). It brings generic code down to the
+  Int-specialised level, so it does not move the exit metric; it matters for Phase 3 code written
+  against `Ord`/`Eq`.
 
 Exit: the Int-specialised half of the merge-sort pair (`bench/native_runtime/`) within **1.3× of
 C by median, at both n=440 and n=100k**; 1.2× is the aim. Baseline: 4.4× and 3.2× (2026-10-18).
