@@ -40,8 +40,9 @@ in 4.19 s, from `-O2` IR in 3.40 s (−19%, runtime C at `-O2` in both). `clang 
 it properly.
 
 **Porting as-is would be slower.** On the same merge sort, Sprout is ~5× slower than C, cause
-unknown ([sorting-v0.md](sorting-v0.md) §Where the time goes, item 3). Generic `Ord` dispatch
-costs another ~2× (item 1). A builtin rewritten in today's Sprout inherits both.
+unknown ([sorting-v0.md](sorting-v0.md) §Where the time goes, item 3); the Phase 0 pair measures
+3.1–4.3× by minimum, whole-program linked. Generic `Ord` dispatch costs another ~2× (item 1). A
+builtin rewritten in today's Sprout inherits both.
 
 ## 2. Goals and non-goals
 
@@ -128,12 +129,17 @@ starting the next.
 - **Workload set.** Self-compile, `nqueens`, `http_log_middleware`, `gc_roots`, and the
   `uncharted-suns` galaxy frame. Interleaved min-of-N, since single runs drift ~1.6× between
   sessions on this machine (BACKLOG §GC & Runtime Performance). The spread of N runs is each
-  workload's **noise floor**; later gates are stated against it.
+  workload's **noise floor**; later gates are stated against it. First run:
+  [bench/results-2026-10-18-native-runtime.md](../bench/results-2026-10-18-native-runtime.md),
+  from `bench/native_runtime/bench.sh`, without the galaxy frame and on a loaded machine (spreads
+  14–19%), so a quiet rerun comes before any gate uses its floors.
 - ~~**Drain-edge counter by field kind.**~~ Landed: `just gc-profile` prints a second line,
   `drain_edges by kind`, with edges and lookup hits per field kind, plus buckets for unregistered
   OBJs and non-OBJ objects. The 1a result below is its first reading.
 - **Port bench.** One directory per Phase 3 candidate under `bench/`: the C builtin and a Sprout
-  version on the same inputs.
+  version on the same inputs. The merge-sort pair, Phase 2's exit metric, is in
+  `bench/native_runtime/`: Int-specialised Sprout is 3.1× C at n=100k and 4.3× at n=440, by
+  minimum; generic `mutvec_sort` 6.4× and 9.3×. The Phase 3 candidates' benches wait for Phase 2.
 
 Exit: a baseline table in `bench/results-<date>-native-runtime.md`.
 
