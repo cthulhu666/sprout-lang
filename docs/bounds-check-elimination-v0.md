@@ -53,9 +53,24 @@ The versioned row is the sort rewritten so each loop function checks once at ent
 access it can make is in range, then runs a clone whose accesses call unchecked twins of the two
 accessors. In the clones, `insert` inlines into `insertion`. The gap to the no-checks row was
 not measured apart; the candidate is the entry test in `insert`, run once per element, which
-§6 stage 2 removes. The last
-row is from an earlier run of the same protocol, which read 1.27×/1.17× shipped and 1.06×/1.05×
-with no bounds checks.
+§6 stage 2 removes. The last row is from an earlier run of the same protocol, which read
+1.27×/1.17× shipped and 1.06×/1.05× with no bounds checks.
+
+**base64**, the [byte-buffer-v0.md](byte-buffer-v0.md) bench: 64 KiB input, hand-edited IR,
+medians of 15 interleaved rounds, ratios against `crypto_base64_encode`; every run's output
+equals C's. `push4` packs a group into one 4-byte push, `push_byte` pushes each byte.
+
+| variant | push4 | push_byte |
+|---|---:|---:|
+| shipped accessors, checked | 2.10× | 2.19× |
+| constant table, no overflow checks, checked | 1.24× | 1.58× |
+| the same, **versioned** | **0.98×** | **1.07×** |
+| the same, every check removed | 0.98× | 1.07× |
+
+The loop has three checks. Input reads at `3g + c` and output pushes (`n` grows by 4 per group)
+are affine, so the entry test covers them: `3 * groups_n ≤ len(b)` and
+`n + 4 * (groups_n - g) ≤ cap`. The table lookup's index is bounded by `& 63` and shifts, not by
+the loop; with a constant table, LLVM folds that check itself, in both clones.
 
 **LLVM does not do this itself.** Run on the whole-program module of the shipped sort:
 
@@ -92,11 +107,13 @@ fact that is only true at run time (`stop ≤ len`).
 
 **A. Fact-based removal in `ast_to_ir` (Go's way).** Track branch facts inside a function and
 drop a check they imply. Cheap to build, but removes nothing in the sort or base64: each loop is
-its own function, and the fact linking its bound to a length is in the caller.
+its own function, and the fact linking its bound to a length is in the caller. The one local
+fact base64 has, a table index under `& 63`, LLVM already uses.
 
 **B. Loop versioning on Sprout IR (RyuJIT's way).** For a self-recursive function that qualifies
 (§6), emit an entry test that every access the loop can make is in range; on success tail-call a
-clone whose accesses are unchecked, else run the original. Measured above: 1.09× and 1.07×.
+clone whose accesses are unchecked, else run the original. Measured above: 1.09× and 1.07× on
+the sort, and on base64 the same as removing every check.
 Behaviour is unchanged by construction: the clone runs only when no access can fail, and
 otherwise the original code runs, panicking where it always did.
 
