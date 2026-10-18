@@ -87,8 +87,10 @@ Each maps to a change:
   `or`, so packing four output bytes with shifts instead of `*` and `+` needs no compiler work.
   Only `push4` gains, because only it packs. Index arithmetic (`g * 3`) needs range analysis.
 - **Bounds checks in loops.** With `g < len / 3`, reads at `3g .. 3g + 2` are in range, and a
-  pre-sized output holds every push. LLVM keeps the checks at `-O2`. Whether one of its loop
-  passes would remove them is not measured. A stdlib loop over groups could check once per call.
+  pre-sized output holds every push. LLVM keeps the checks at `-O2`, and its loop passes do not
+  remove them in the sort either. In the sort, checking once per loop call and running an
+  unchecked clone does (1.09× C); not yet tried here.
+  [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md).
 
 So the 1.3× gate needs constant tables and shift-based packing; parity also needs bounds-check
 elimination. The table here must be a byte table: B1
