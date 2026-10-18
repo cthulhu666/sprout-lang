@@ -243,6 +243,20 @@ The same effect recalibrated the instrument's own gate (`retain_all` fell 73% �
 `gc-adapt-check` validates the policy. Any future factor change should re-read this section:
 **re-mark ratios are only comparable at equal collection frequency.**
 
+**So the "GC is 59%" finding is a property of the self-hosted compiler**, whose live
+set is 85% immortal AST/IR, and it does not generalise. BACKLOG:283's "primary target:
+nqueens-class workloads" is contradicted by the data.
+
+### 5.2 Non-moving is what caps the churn workloads
+
+For nqueens / http, the collector's work is proportional to **garbage**, not survivors:
+each cycle walks ~4096 slots to reclaim ~4073 dead objects. A non-moving nursery cannot
+change that — it must still visit each dead young slot to free it and rebuild freelists.
+A **copying** nursery can: survivors are evacuated and the region's bump pointer is
+reset, so cost becomes proportional to survivors. That is the concrete thing Sprout
+gives up for the stable-address invariant of §3 — and, per §5.1, on these workloads it
+currently costs nothing worth reclaiming.
+
 ### 5.4 Re-measured 2026-10-18: the pool grew back
 
 The re-measure §5.3 asks for, on master `8d2a9d8d` after trigger option B
@@ -265,7 +279,7 @@ be told apart):
 | phase | share of all samples | of which |
 |---|---:|---|
 | mark (`sprout_gc_drain_marks`) | 20.9% | `sprout_heap_lookup` 7.6%, `gc_mark_enqueue` 5.3% |
-| sweep (`sprout_gc_sweep`) | 18.4% | `slot_bytes` 5.9% |
+| sweep (`sprout_gc_sweep`) | 18.4% | `slot_bytes` 5.9% (not a lever, below) |
 | allocation | 7.7% | `sprout_gc_alloc_block` 3.4% |
 
 Mark is proportional to objects marked, so skipping the 89% that are re-marks bounds the mark
@@ -275,19 +289,20 @@ earlier cycle (112.2M steps, 77.1M of them occupied). A minor sweep only gains i
 are not scattered among old ones, which freelist reuse does today. The exit-time cycle is 26 ms,
 2% of GC time.
 
-**So the "GC is 59%" finding is a property of the self-hosted compiler**, whose live
-set is 85% immortal AST/IR, and it does not generalise. BACKLOG:283's "primary target:
-nqueens-class workloads" is contradicted by the data.
+`slot_bytes`'s 5.9% is not the cost of sizing a slot. Hand-applied in scratch builds, output
+identical byte for byte, sweep timed directly (`mach_absolute_time`, median of 8 runs):
 
-### 5.2 Non-moving is what caps the churn workloads
+| step | sweep ms |
+|---|---:|
+| today: `slot_bytes`, an out-of-line call | 629 |
+| `slot_bytes` inlined | 636 |
+| a branch-free per-kind table | 730 |
+| next slot read from the slotmap, not the header | 598 |
 
-For nqueens / http, the collector's work is proportional to **garbage**, not survivors:
-each cycle walks ~4096 slots to reclaim ~4073 dead objects. A non-moving nursery cannot
-change that — it must still visit each dead young slot to free it and rebuild freelists.
-A **copying** nursery can: survivors are evacuated and the region's bump pointer is
-reset, so cost becomes proportional to survivors. That is the concrete thing Sprout
-gives up for the stable-address invariant of §3 — and, per §5.1, on these workloads it
-currently costs nothing worth reclaiming.
+Cutting the call or the branches gains nothing; the table adds a load to each step and loses 16%.
+What costs is visiting the slot. The slotmap walk's 5% of sweep (under 1% of a compile) is not
+worth taking: HDRCHECK checks the size walk against the slotmap, and a walk built on the slotmap
+would check it against itself. Only touching fewer slots shrinks the sweep.
 
 ## 6. The write barrier is nearly free — but only if it is typed
 
