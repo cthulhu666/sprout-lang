@@ -1732,6 +1732,11 @@ deferral happened, not for current behaviour. Still open:
   becomes selects (`sort_merge`, 1.92× → 1.37× C on random input). A lowering in
   `ast_to_ir` could do that rewrite when both arms end in the same effect and tail call and
   their differing arguments are pure. `docs/native-sprout-runtime-v0.md` §Phase 2.
+- [ ] `P2` **`Dict` is 20% of a self-compile, and nothing yet says which fix recovers it.**
+  4.23M lookups, 63% misses, 5.5 tree steps each; cheaper comparisons gain nothing, and a hash
+  map would re-sort the type environment for ~770 prefix queries. Next: hand-apply a (root, key)
+  lookup memo, cleared on each collection (48% of lookups repeat a pair, ~3.5% ceiling), to test
+  whether descent latency is the cost. `docs/dict-representation-v0.md` §6.
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.
