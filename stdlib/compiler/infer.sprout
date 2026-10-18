@@ -7939,6 +7939,16 @@ fn shared_method_message(method: String, class_name: String, other: String) -> S
 # A method's name is canonical (`m.method`); every message shows it short.
 fn method_display(name: String) -> String = string.after_last_dot(name)
 
+# The short name as its own type, so it cannot stand in for the canonical name that
+# keys the schemes, or the reverse.
+wrap MethodLabel = String
+
+fn method_label(name: String) -> MethodLabel = MethodLabel(method_display(name))
+
+fn label_text(label: MethodLabel) -> String =
+  match label with
+  | MethodLabel s -> s
+
 # ---------------------------------------------------------------------------
 # Type-variable instance-head validation
 # ---------------------------------------------------------------------------
@@ -11512,7 +11522,7 @@ fn fn_dict_coverage_msg(name: String, params: List ast.Param,
 # the only place a constraint can go is the instance head. The instance's own constraints are
 # what `constraints` supplies here, which is why a parameterized head like
 # `instance Renderer (Pair a) where ToString a` stays accepted.
-fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
+fn instance_method_dict_coverage_msg(label: MethodLabel, params: List ast.Param,
                                      constraints: List ast.TypeConstraint,
                                      prog_to_fresh: Dict types.Type, s2: Dict types.Type,
                                      inst_type: types.Type, env_ftv: List String,
@@ -11526,7 +11536,7 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
     | Just (v, cls, subject) ->
         match constraint_advice(v, cls, subject, param_vars, prog_to_fresh, s2, env) with
         | (subj, where_text) ->
-            Just("`" ++ method_display(name) ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
+            Just("`" ++ label_text(label) ++ "` needs " ++ a_or_an(cls) ++ " " ++ cls ++ " instance for "
                    ++ subj ++ ", which this method generalizes and nothing supplies; add `where "
                    ++ where_text ++ "` to the method (the class declaration must declare it too),"
                    ++ " constrain the variable in the instance head, or give the method a concrete"
@@ -11534,7 +11544,7 @@ fn instance_method_dict_coverage_msg(name: String, params: List ast.Param,
     | Nothing ->
         match uncovered_dict_subject(typed_body, s2, uncovered, env) with
         | Just (cls, _) ->
-            Just("`" ++ method_display(name) ++ "` needs " ++ a_or_an(string.after_last_dot(cls)) ++ " "
+            Just("`" ++ label_text(label) ++ "` needs " ++ a_or_an(string.after_last_dot(cls)) ++ " "
                    ++ string.after_last_dot(cls) ++ " instance for a"
                    ++ " type variable it generalizes, which appears in no parameter and which"
                    ++ " nothing supplies; add a method-level `where` (the class declaration must"
@@ -12365,6 +12375,8 @@ fn check_instance_method(
   match method with
   | ast.InstanceMethodImpl name params ret_maybe eff_maybe method_constraints body ->
       do
+        # `name` is canonical and keys the schemes; messages take `label`.
+        let label = method_label(name)
         # Let-bound rather than inlined into instantiate_with_vars: rule 9 asks
         # about the DECLARATION, so the report needs the pre-instantiation scheme
         # (source names `e`, `d`) and not `inst_type`'s freshened `$e0`.
@@ -12388,7 +12400,7 @@ fn check_instance_method(
         enter_try_decl(state, env, fn_return_type(inst_type, list_length(params)))
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
         match br with
-        | InferErr pos msg -> instance_method_err(name, pos, msg)
+        | InferErr pos msg -> instance_method_err(label, pos, msg)
         | InferOk typed_body0 s1 es1 body_eff ->
             # The instance-method twin of the record in check_fn_body. Both sites
             # discard a body effect, and instrumenting only the `fn` one would
@@ -12402,7 +12414,7 @@ fn check_instance_method(
             #
             # The record happens inside instance_method_checked, after the
             # return-type unify — same ordering and same reasons as check_fn_body.
-            instance_method_checked(state, name, params, ret_maybe, eff_maybe,
+            instance_method_checked(state, name, label, params, ret_maybe, eff_maybe,
               body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme,
               inst_constraints, method_constraints, prog_to_fresh, env_ftv)
 
@@ -12412,14 +12424,15 @@ fn check_instance_method(
 # parameter is the head for every instance method that takes one, and inst_type is
 # already built. A nullary method (e.g. Applicative.pure) falls back to the bare
 # name, which is a report label, not an identity the compiler relies on.
-fn instance_report_name(name: String, inst_type: types.Type) -> String =
+fn instance_report_name(label: MethodLabel, inst_type: types.Type) -> String =
   match inst_type with
-  | types.TFunc param _ _ _ -> "instance " ++ method_display(name) ++ "(" ++ types.type_to_string(param) ++ ")"
-  | _ -> "instance " ++ method_display(name)
+  | types.TFunc param _ _ _ -> "instance " ++ label_text(label) ++ "(" ++ types.type_to_string(param) ++ ")"
+  | _ -> "instance " ++ label_text(label)
 
 fn instance_method_checked(
   state: unifier.InferState,
   name: String,
+  label: MethodLabel,
   params: List ast.Param,
   ret_maybe: Maybe ast.TypeExpr,
   eff_maybe: Maybe (List String),
@@ -12437,12 +12450,12 @@ fn instance_method_checked(
   env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
   match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
-  | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ method_display(name) ++ ": " ++ e)
+  | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ label_text(label) ++ ": " ++ e)
   | unifier.UnifyOk s2a es2a ->
       # AFTER the return-type unify — see finish_field_obligations.
       do
         _ <- unifier.record_effect_report(state,
-               unifier.EffectReport(instance_report_name(name, inst_type),
+               unifier.EffectReport(instance_report_name(label, inst_type),
                  types.effect_from_labels(eff_maybe),
                  unifier.apply_effect_subst(es2a, body_eff),
                  typed_ast.typed_expr_pos(typed_body0),
@@ -12450,23 +12463,23 @@ fn instance_method_checked(
         tries <- unifier.take_try_positions(state)
         f <- finish_field_obligations(state, body_env, s2a, typed_body0)
         match f with
-        | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ method_display(name))
+        | FinishErr fpos fmsg -> InstanceMethodErr(fpos, fmsg ++ " in instance method " ++ label_text(label))
         | FinishOk typed_body s2 ->
             do
               unifier.census_flush(state, s2, es2a)
-              finish_instance_method(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
+              finish_instance_method(name, label, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
                 typed_body, with_try_markers(tries, env), inst_constraints, method_constraints, prog_to_fresh,
                 types.scheme_vars(decl_scheme), env_ftv)
 
-fn instance_method_err(name: String, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
+fn instance_method_err(label: MethodLabel, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
   # method on Unknown-variable / Unknown-constructor errors. Now hard error,
   # matching the change to `fn_body_err`.
-  InstanceMethodErr(pos, msg ++ " in instance method " ++ method_display(name))
+  InstanceMethodErr(pos, msg ++ " in instance method " ++ label_text(label))
 
 # M4.2 gate + result construction for an instance method, extracted so the arm
 # body is a plain call (keeps the enclosing match chain shallow).
-fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
+fn finish_instance_method(name: String, label: MethodLabel, params: List ast.Param, ret_maybe: Maybe ast.TypeExpr,
                           eff_maybe: Maybe (List String), body_env: Dict types.Scheme,
                           s2: Dict types.Type, inst_type: types.Type,
                           typed_body: typed_ast.TypedExpr, env: Dict types.Scheme,
@@ -12476,8 +12489,8 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
                           sig_vars: List String,
                           env_ftv: List String) -> InstanceMethodResult =
   match maybe_or_else(maybe_or_else(class_method_mode_error(name, params, env),
-                                    class_method_constraints_error(name, method_constraints, env)),
-                      instance_method_rigidity_error(name, prog_to_fresh, s2, sig_vars)) with
+                                    class_method_constraints_error(name, label, method_constraints, env)),
+                      instance_method_rigidity_error(label, prog_to_fresh, s2, sig_vars)) with
   | Just bad ->
       InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), bad)
   | Nothing ->
@@ -12485,7 +12498,7 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
       # own constraint-free scheme, so the walk attributes nothing to it.
       # Both lists count as coverage: the instance head's dictionaries and the
       # method's own each reach the body.
-      match instance_method_dict_coverage_msg(name, params,
+      match instance_method_dict_coverage_msg(label, params,
                                               list_append(inst_constraints, method_constraints),
                                               prog_to_fresh, s2,
                                               inst_type, env_ftv, typed_body, body_env) with
@@ -12497,9 +12510,9 @@ fn finish_instance_method(name: String, params: List ast.Param, ret_maybe: Maybe
 # check_fn_body's rigidity check, for an instance method. Without it a body could
 # merge two written variables, and a context dictionary forwarded for one of them
 # served values of the other (`Just(u) == Just(v)` ran String's `eq` on an Int).
-fn instance_method_rigidity_error(name: String, prog_to_fresh: Dict types.Type, s2: Dict types.Type,
+fn instance_method_rigidity_error(label: MethodLabel, prog_to_fresh: Dict types.Type, s2: Dict types.Type,
                                   sig_vars: List String) -> Maybe String =
-  map(\bad -> "Signature too general for its body in instance method " ++ method_display(name) ++ ": type variable " ++ bad,
+  map(\bad -> "Signature too general for its body in instance method " ++ label_text(label) ++ ": type variable " ++ bad,
       rigidity_violation(prog_to_fresh, s2, sig_vars))
 
 # M4.6: an instance method's ownership modifiers must agree with the class
@@ -12527,12 +12540,12 @@ fn class_method_mode_error_at(name: String, params: List ast.Param,
 # class, a longer or shorter list, or the same classes reordered all dispatch
 # through the wrong slot rather than failing — the same reason the ownership
 # modifiers above must agree.
-fn class_method_constraints_error(name: String, method_constraints: List ast.TypeConstraint,
+fn class_method_constraints_error(name: String, label: MethodLabel, method_constraints: List ast.TypeConstraint,
                                   env: Dict types.Scheme) -> Maybe String =
   match dict_get(types.class_marker_key(name), env) with
   | Nothing -> Nothing
   | Just _ ->
-      constraint_list_mismatch(name, 1,
+      constraint_list_mismatch(label, 1,
         list_map(constraint_field_class, constrained_fn_field(name, env)),
         list_map(constraint_class_short, method_constraints))
 
@@ -12542,21 +12555,21 @@ fn constraint_field_class(entry: (String, String)) -> String =
 fn constraint_class_short(c: ast.TypeConstraint) -> String =
   match c with | ast.TypeConstraint cls _ -> string.after_last_dot(cls)
 
-fn constraint_list_mismatch(name: String, idx: Int, declared: List String,
+fn constraint_list_mismatch(label: MethodLabel, idx: Int, declared: List String,
                             restated: List String) -> Maybe String =
   match (declared, restated) with
   | (Nil, Nil) -> Nothing
   | (Nil, [extra | _]) ->
-      Just("instance method `" ++ method_display(name) ++ "` adds `where " ++ extra
+      Just("instance method `" ++ label_text(label) ++ "` adds `where " ++ extra
            ++ "`, which the class declaration does not declare")
   | ([missing | _], Nil) ->
-      Just("instance method `" ++ method_display(name) ++ "` omits `where " ++ missing
+      Just("instance method `" ++ label_text(label) ++ "` omits `where " ++ missing
            ++ "`, which the class declaration declares; restate it on the instance")
   | (Cons d drest, Cons r rrest) ->
       if d == r
-      then constraint_list_mismatch(name, idx + 1, drest, rrest)
+      then constraint_list_mismatch(label, idx + 1, drest, rrest)
       else
-        Just("instance method `" ++ method_display(name) ++ "` names `" ++ r ++ "` where the class declares `"
+        Just("instance method `" ++ label_text(label) ++ "` names `" ++ r ++ "` where the class declares `"
              ++ d ++ "` (constraint " ++ int_to_string(idx)
              ++ "); the dictionaries are positional, so restate the class's `where` in order")
 

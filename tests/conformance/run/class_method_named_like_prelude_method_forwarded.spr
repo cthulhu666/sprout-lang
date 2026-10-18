@@ -1,0 +1,16 @@
+module main
+
+# `empty` here is `main.empty`, not Monoid's `empty`, so a function constrained
+# by both classes forwards each dictionary's own method.
+
+class Blank t
+  fn empty() -> t
+
+instance Blank String
+  fn empty() -> String = "blank"
+
+fn call0(f: () -> a) -> a = f()
+
+fn seeded(x: a) -> a where Monoid a, Blank a = x ++ call0(empty)
+
+fn main() -> Unit !{IO} = print(seeded("seed:"))
