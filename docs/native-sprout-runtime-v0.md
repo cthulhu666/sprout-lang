@@ -250,8 +250,8 @@ will cost time until Phase 2 lands. Do them for the smaller C surface, or not ye
 
 **3.4 `Dict`: fix the representation, then decide where it lives.** Re-profiled over 5 runs:
 `Dict` is 19.8% of a self-compile, and 63% of its 4.23M lookups miss. Neither a cheaper
-comparison nor skipping matched prefixes moves wall time, and a hash map cannot keep the
-normative key order cheaply: the type environment answers ~770 prefix queries per compile over
+comparison nor skipping matched prefixes moves wall time, and a hash map cannot keep the key
+order callers rely on cheaply: the type environment answers ~770 prefix queries per compile over
 7–11k changing keys. Measurements, options per layer and the next experiment:
 [dict-representation-v0.md](dict-representation-v0.md). A Sprout port of the same tree keeps its
 cost and adds Sprout's.
