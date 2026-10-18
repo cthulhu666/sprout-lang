@@ -200,11 +200,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   general". **Not a contained fix** — the non-destructive version rejects code that compiles
   today. **Hard constraint:** any `Ord` fallback must keep the `Double` short-circuit, or
   `nan < 1.0` becomes true (`docs/eq-ord-double-v0.md`).
-- [ ] `P2` **B2 — recursive instance-method dispatch fails instance resolution.** A class method
-  calling itself from its own instance body reports `No instance of <Class> for <T>`. Not
-  effect-related (the pure control fails identically) — it is the tyvar-identity / dict-resolution
-  gap. Blocks unifying the iteration combinators under a generic `Foldable`; also the message a
-  legitimate self-recursive instance method hits.
 - [ ] `P3` **Reject a user declaration that shadows an intercepted compiler intrinsic.** A
   headerless file defining `fn to_double`/`fn print`/`fn double_to_bits` has its call sites silently
   lowered to the intrinsic, body ignored, no error at any stage. **Sharper second form:**
@@ -218,9 +213,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   without bundling. That path also neither resolves a user's `prelude.X` nor renames locals, so a
   local still captures templates there. `docs/prelude-name-identity-v0.md` §5.
 - [ ] `P2` **A user class method named like a prelude function captures built-in syntax.** Method
-  names stay bare after bundling, so a method `list_reverse` breaks comprehensions
-  (`class_method_captures_comprehension.spr`), and a method `branch` captures an unfused `try`
-  (`class_method_captures_try.spr`; §9 Q9). Same root as spec §3.1's wrapper-symbol limit.
+  names stay bare after bundling, so a method `list_reverse` breaks comprehensions anywhere in its
+  module, above the class too (`class_method_captures_comprehension{,_above}.spr`), and a method
+  `branch` captures an unfused `try` (`class_method_captures_try.spr`; §9 Q9). Same root as spec
+  §3.1's wrapper-symbol limit. A bare method also stays visible to every LATER module.
+  Qualifying methods in the bundler, as functions are, fixes all three and lets classes be
+  pre-scanned again, retiring `group_plan`'s per-module class planning. Touches dispatch keys
+  and lowering: needs a design doc.
 - [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
   everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
   importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in
@@ -1393,11 +1392,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   constructor resolved. Confirm whether qualified constructor access is intended syntax at all
   before treating it as a bug.
 - [ ] `P2` **Deriving/specialization follow-ups** once the core class system is stable.
-- [ ] `P3` **`deriving (ToString)` in the prelude depends on declaration order.** On a prelude
-  type declared above `instance Semigroup String`, it fails with "No Semigroup instance for String
-  in instance method to_string"; below it, it works. `deriving (Eq)` works anywhere. Instance
-  resolution should not depend on order. Until fixed, prelude types hand-write `ToString`
-  (`ControlFlow` does).
+- [ ] `P3` **Prelude types hand-write `ToString` that `deriving` now covers.** Instances are
+  in scope throughout their module (spec §7 rule 16), so a prelude type above
+  `instance Semigroup String` can derive `ToString`. `ControlFlow` still hand-writes it. Needs a
+  seed built from the order-free checker first, or stage 1 rejects the prelude.
 - [ ] `P3` **`Alternative` class + generic `or_else`** — deferred until a *second* lawful instance
   exists (e.g. a parser combinator type); with only `Maybe` it is single-instance ceremony, and
   List's lawful instance (`++`) is already `Semigroup`.

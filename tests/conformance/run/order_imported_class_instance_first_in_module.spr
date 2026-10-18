@@ -1,0 +1,17 @@
+# An instance of an imported class for a prelude type, written first in its module,
+# still sees the module's classes.
+import stdlib.json as json
+
+instance json.JsonEncode Unit
+  fn encode_json(u: Unit) -> json.Json = json.string(shout(u))
+
+class Shout a
+  fn shout(x: a) -> String
+
+instance Shout Unit
+  fn shout(x: Unit) -> String = "unit!"
+
+fn main() -> Unit !{IO} =
+  match json.stringify(json.encode(())) with
+  | Ok text -> print(text)
+  | Err _ -> print("error")

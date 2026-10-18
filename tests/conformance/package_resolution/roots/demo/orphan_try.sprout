@@ -1,0 +1,12 @@
+module demo.orphan_try
+
+# A `try` on a type with no `Propagate` here; only an importer declares one, and
+# an importer's instance is not in scope in what it imports (spec §7).
+
+export type Fetch a (..) =
+  | Got a
+  | Failed String
+
+export fn bump(f: Fetch Int) -> Fetch Int =
+  let v = try f
+  in Got(v + 1)

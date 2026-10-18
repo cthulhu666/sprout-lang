@@ -125,11 +125,10 @@ fn run_file_bundle(path: String, stdlib_root: String, extra_roots: List String, 
     result <- compiler.compile_phase_bundle_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
     match result with
     | bundler.BundleErr _ msg -> report_error(failed, "ERROR: bundle: " ++ msg)
-    | bundler.BundleOk prog ->
+    | bundler.BundleOk modules ->
         do
           print("OK")
-          match prog with
-          | ast.Program decls _ -> dump_ast_decl_names(decls)
+          dump_ast_decl_names(ast.flatten_modules(modules))
 
 # ---------------------------------------------------------------------------
 # Phases: check, lower, recheck. They differ only in how far `compile` goes: the

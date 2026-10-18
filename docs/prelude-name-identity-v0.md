@@ -113,9 +113,10 @@ also removes `$l_`, so no diagnostic shows it.
   `tests/conformance/type_error/own_cons_captures_list_literal.spr`. Lifting it needs a spelling
   the unbundled checking paths can resolve.
 - **User class methods** keep bare names after bundling, so a method named like a prelude
-  function captures names written later: a method `list_reverse` breaks comprehensions, and one
-  named `branch` would capture `try`. Pinned by
-  `tests/conformance/type_error/class_method_captures_comprehension.spr`.
+  function captures names written later, anywhere in its module since a class is checked at the
+  module's start: a method `list_reverse` breaks comprehensions, and one named `branch` would
+  capture `try`. Pinned by `tests/conformance/type_error/class_method_captures_comprehension.spr`
+  and `class_method_captures_comprehension_above.spr`.
 
 ## 6. Impact
 

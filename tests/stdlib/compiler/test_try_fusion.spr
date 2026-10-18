@@ -49,11 +49,13 @@ let maybe_hand =
   "  | Nothing -> Nothing\n" ++
   "fn main() -> Unit !{IO} = print(to_string(f(1)))\n"
 
-let fetch_decls =
+let fetch_type =
   "type Fetch a =\n" ++
   "  | Got a\n" ++
   "  | NotFound\n" ++
-  "  | Failed String\n" ++
+  "  | Failed String\n"
+
+let fetch_rest =
   "instance Propagate Fetch\n" ++
   "  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =\n" ++
   "    match value with\n" ++
@@ -68,6 +70,8 @@ let fetch_decls =
   "  | Failed why -> why\n" ++
   "fn main() -> Unit !{IO} = print(show(f(1)))\n"
 
+let fetch_decls = fetch_type ++ fetch_rest
+
 let fetch_try =
   fetch_decls ++
   "fn f(i: Int) -> Fetch Int =\n" ++
@@ -76,6 +80,24 @@ let fetch_try =
 
 let fetch_hand =
   fetch_decls ++
+  "fn f(i: Int) -> Fetch Int =\n" ++
+  "  match fetch(i) with\n" ++
+  "  | Got a -> Got(a * 2)\n" ++
+  "  | NotFound -> NotFound\n" ++
+  "  | Failed why -> Failed(why)\n"
+
+# The instance is written above `f`, and a caller of `f` above the instance. The
+# instance has no edge to either, so only source order says it comes first.
+let caller_above = fetch_type ++ "fn g(i: Int) -> Fetch Int = f(i)\n" ++ fetch_rest
+
+let caller_above_try =
+  caller_above ++
+  "fn f(i: Int) -> Fetch Int =\n" ++
+  "  let a = try fetch(i)\n" ++
+  "  in Got(a * 2)\n"
+
+let caller_above_hand =
+  caller_above ++
   "fn f(i: Int) -> Fetch Int =\n" ++
   "  match fetch(i) with\n" ++
   "  | Got a -> Got(a * 2)\n" ++
@@ -168,5 +190,7 @@ fn main() -> Unit !{IO} =
           check_pair(state, stdlib_root, "result", result_try, result_hand)
           check_pair(state, stdlib_root, "maybe", maybe_try, maybe_hand)
           check_pair(state, stdlib_root, "user instance", fetch_try, fetch_hand)
+          check_pair(state, stdlib_root, "instance above f, a caller of f above it", caller_above_try,
+                     caller_above_hand)
           check_pair(state, stdlib_root, "failure arm calls a helper", tagged_try, tagged_hand)
     summary(state)

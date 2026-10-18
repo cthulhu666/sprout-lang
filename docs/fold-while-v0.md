@@ -75,9 +75,8 @@ non-linear instance re-checks it between substructures.
 Checking `cond(init)` makes the degenerate case well defined (`fold_while(step, never, 7, xs) == 7`)
 and makes "re-check after each subtree" the natural reading for a future tree instance.
 
-Concrete builders `list_fold_while` / `vec_fold_while` back the two instances, per the existing rule
-that an instance body delegates rather than recursing (a class method calling itself from its own
-instance body fails dictionary resolution today). `vec_any` / `vec_all` are now `vec_fold_while`
+Concrete builders `list_fold_while` / `vec_fold_while` back the two instances, so each container's
+loop has one body, which the instance calls. `vec_any` / `vec_all` are now `vec_fold_while`
 specialisations, which deleted the hand-written `vec_any_indexed` / `vec_all_indexed` index loops —
 the generic and the `Vec` spelling can no longer drift apart in behaviour or complexity.
 

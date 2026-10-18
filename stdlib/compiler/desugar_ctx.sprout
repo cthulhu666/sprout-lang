@@ -29,14 +29,12 @@ import stdlib.string as string
 # Aliases in instance heads and `where` clauses are expanded FIRST, before anything reads
 # a constraint: both checker entry points reach every later phase through here, so this is
 # the one place that keeps infer's, resolve's and lowering's keys agreeing
-# (ast.expand_alias_constraints).
-export fn desugar_program(prog: ast.Program) -> ast.Program =
-  match prog with
-  | ast.Program decls pos ->
-      desugared_program(ast.expand_alias_constraints(decls), pos)
-
-fn desugared_program(decls: List ast.Decl, pos: source.SourcePos) -> ast.Program =
-  ast.Program(desugar_decls_i(decls, build_fn_sig_index(decls)), pos)
+# (ast.expand_alias_constraints). Each module is desugared against the whole
+# program's aliases and signatures.
+export fn desugar_modules(modules: List (List ast.Decl)) -> List (List ast.Decl) =
+  let expanded = ast.expand_alias_constraints(modules)
+      fn_idx = build_fn_sig_index(ast.flatten_modules(expanded))
+  in list_map(\decls -> desugar_decls_i(decls, fn_idx), expanded)
 
 # ---------------------------------------------------------------------------
 # Phase 4B.5 — FnSig index: maps fn name → List (Maybe String) of param types

@@ -1440,9 +1440,6 @@ instance Foldable List
   fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: List a) -> b =
     list_fold_while(step, cond, init, xs)
 
-# Delegates to the standalone `list_filter` rather than recursing here: a class
-# method that calls itself from its own instance body fails dictionary
-# resolution today, the same reason `fold_values` above delegates.
 instance Filterable List
   fn filter_values(pred: a -> Bool, xs: List a) -> List a =
     list_filter(pred, xs)

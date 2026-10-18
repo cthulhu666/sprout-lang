@@ -1,0 +1,18 @@
+module main
+
+# User class methods named like prelude functions that the prelude calls above
+# their definitions do not reach into the prelude.
+
+class Tally a
+  fn list_fold(x: a) -> Int
+  fn list_map(x: a, y: Int) -> Int
+
+instance Tally Int
+  fn list_fold(x: Int) -> Int = x * 2
+  fn list_map(x: Int, y: Int) -> Int = x + y
+
+fn main() -> Unit !{IO} =
+  do
+    print(list_fold(4))
+    print(list_map(1, 2))
+    print(set_size(set_union(set_from_list(["a"]), set_from_list(["b"]))))

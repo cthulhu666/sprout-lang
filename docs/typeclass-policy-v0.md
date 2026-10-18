@@ -440,5 +440,5 @@ reader inherits it:
    just leaves `wrap` as the only escape hatch.
 4. ~~**Alias-headed instances** (§3).~~ **Answered and landed**: they dispatch. The alias is
    expanded in the head before any key is built, by `ast.expand_alias_constraints` from
-   `desugar_ctx.desugar_program`. Design and the four key paths it reconciles:
+   `desugar_ctx.desugar_modules`. Design and the four key paths it reconciles:
    `docs/alias-instance-heads-v0.md`; normative rule in `spec-v0.md` §8.5.

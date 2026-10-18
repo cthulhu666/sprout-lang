@@ -1,0 +1,18 @@
+module main
+
+# An instance written first in its module still sees the module's classes,
+# including one only its method body calls.
+
+instance Describe Bool
+  fn describe(x: Bool) -> String = if x then loud("yes") else "no"
+
+class Describe a
+  fn describe(x: a) -> String
+
+class Loud a
+  fn loud(x: a) -> String
+
+instance Loud String
+  fn loud(x: String) -> String = x ++ "!"
+
+fn main() -> Unit !{IO} = print(describe(true))

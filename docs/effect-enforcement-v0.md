@@ -554,7 +554,7 @@ imprecision in effect inference must fail towards accepting a program.
 
 ### 11.1 A post-pass, not a boundary error
 
-`check_fn_body` and `check_instance_method` still only *record*. `checker.typecheck_typed` scans the
+`check_fn_body` and `check_instance_method` still only *record*. `checker.typecheck_bundle` scans the
 collected reports afterwards and rejects. Two things follow, and both were the point:
 
 **Every gap is reported in one compile.** Raising the error at the declaration boundary stops

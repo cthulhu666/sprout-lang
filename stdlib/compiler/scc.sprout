@@ -6,9 +6,10 @@ module stdlib.compiler.scc
 # out-edges. Edges to names outside `nodes` must not occur. O((V+E) log V):
 # each node and edge is visited once per pass, and Dict/Set are AVL trees.
 #
-# Two callers. infer's group_plan needs the dependency order. ast_to_ir's
-# mutual-TCO Phase B needs only the partition, and puts it in declaration order
-# itself. Phase B once asked "does f reach g, and g reach f?" for every pair
+# Two callers. infer's group_plan needs the dependency order, stable in source
+# order (sccs_in_source_order), so an instance is checked where it is written.
+# ast_to_ir's mutual-TCO Phase B needs only the partition, and puts it in
+# declaration order itself. Phase B once asked "does f reach g, and g reach f?" for every pair
 # instead, which was 55% of the compiler's self-compile allocation
 # (scripts/scc_cost_gate.sh).
 #
@@ -104,3 +105,116 @@ fn scc_dfs2(work: List String, rgraph: Dict Set, visited: Set, members: List Str
 export fn sccs_in_dependency_order(nodes: List String, graph: Dict Set) -> List (List String) =
   scc_components(scc_finish_order(nodes, graph), reverse_graph(nodes, graph, dict_empty()),
                  set_empty(), Nil)
+
+# The same components, dependencies first and otherwise in the order `nodes` lists
+# them: next is always the earliest-listed component whose dependencies are all
+# placed (Kahn's algorithm, smallest position first). The order above breaks ties
+# by finish time, which can put a node after unrelated ones listed later.
+#
+# A component is named by one of its members, its representative.
+export fn sccs_in_source_order(nodes: List String, graph: Dict Set) -> List (List String) =
+  let comps = sccs_in_dependency_order(nodes, graph)
+      rep_of = list_fold(add_representative, dict_empty(), comps)
+      first = first_positions(nodes, rep_of, 0, dict_empty())
+      start = list_fold(add_component(graph, rep_of, _, _),
+                        Placing(members = dict_empty(), waiting = dict_empty(), dependents = dict_empty(), placed = []),
+                        comps)
+      ready = list_fold(add_if_ready(start, first, _, _), Leaf, vec_to_list(dict_keys(start.members)))
+  in list_reverse(drain(ready, first, start).placed)
+
+# Keyed by representative: `waiting` counts the components each still waits for.
+# `placed` is built reversed.
+type Placing = (members: Dict (List String), waiting: Dict Int, dependents: Dict Set, placed: List (List String))
+
+fn add_representative(acc: Dict String, members: List String) -> Dict String =
+  match members with
+  | [] -> acc
+  | [rep | _] -> list_fold(\ (a, m) -> dict_set(m, rep, a), acc, members)
+
+fn add_component(graph: Dict Set, rep_of: Dict String, st: Placing, members: List String) -> Placing =
+  match members with
+  | [] -> st
+  | [rep | _] ->
+      let callees = list_flat_map(\m -> neighbors_of(m, graph), members)
+          deps = set_to_list(set_remove(rep, set_from_list(list_filter_map(\c -> dict_get(c, rep_of), callees))))
+      in st with (members = dict_set(rep, members, st.members),
+                  waiting = dict_set(rep, list_length(deps), st.waiting),
+                  dependents = list_fold(\ (acc, d) -> dict_set(d, set_insert(rep, set_or_empty(d, acc)), acc),
+                                         st.dependents, deps))
+
+# Each representative's earliest position in `nodes`.
+fn first_positions(nodes: List String, rep_of: Dict String, i: Int, first: Dict Int) -> Dict Int =
+  match nodes with
+  | [] -> first
+  | [n | rest] ->
+      match dict_get(n, rep_of) with
+      | Just rep ->
+          if dict_member(rep, first) then first_positions(rest, rep_of, i + 1, first)
+          else first_positions(rest, rep_of, i + 1, dict_set(rep, i, first))
+      | Nothing -> first_positions(rest, rep_of, i + 1, first)
+
+# Every representative has a position, a count and members: add_component and
+# first_positions record one for each component.
+fn position_of(rep: String, first: Dict Int) -> Int =
+  match dict_get(rep, first) with
+  | Just i -> i
+  | Nothing -> panic("scc.position_of: no position for " ++ rep ++ " (internal error)")
+
+fn waiting_on(rep: String, st: Placing) -> Int =
+  match dict_get(rep, st.waiting) with
+  | Just n -> n
+  | Nothing -> panic("scc.waiting_on: no count for " ++ rep ++ " (internal error)")
+
+fn add_if_ready(st: Placing, first: Dict Int, ready: Heap, rep: String) -> Heap =
+  if waiting_on(rep, st) == 0 then heap_insert(position_of(rep, first), rep, ready) else ready
+
+fn drain(ready: Heap, first: Dict Int, st: Placing) -> Placing =
+  match heap_pop(ready) with
+  | Nothing -> st
+  | Just (rep, rest) ->
+      let placed = st with (placed = Cons(members_of(rep, st), st.placed))
+          (freed, ready2) = list_fold(release(first, _, _), (placed, rest),
+                                      set_to_list(set_or_empty(rep, st.dependents)))
+      in drain(ready2, first, freed)
+
+# One dependency of `d` is placed; once none are left, `d` is ready.
+fn release(first: Dict Int, acc: (Placing, Heap), d: String) -> (Placing, Heap) =
+  let (st, ready) = acc
+      left = waiting_on(d, st) - 1
+      st2 = st with (waiting = dict_set(d, left, st.waiting))
+  in if left == 0 then (st2, heap_insert(position_of(d, first), d, ready)) else (st2, ready)
+
+fn members_of(rep: String, st: Placing) -> List String =
+  match dict_get(rep, st.members) with
+  | Just ms -> ms
+  | Nothing -> panic("scc.members_of: no members for " ++ rep ++ " (internal error)")
+
+# A leftist heap of representatives keyed by position: O(log n) insert and pop.
+type Heap =
+  | Leaf
+  | Branch Int Int String Heap Heap  # rank, position, representative, left, right
+
+fn heap_rank(h: Heap) -> Int =
+  match h with
+  | Leaf -> 0
+  | Branch rank _ _ _ _ -> rank
+
+# The higher-ranked child goes left, so the right spine stays O(log n).
+fn heap_branch(position: Int, rep: String, a: Heap, b: Heap) -> Heap =
+  if heap_rank(a) >= heap_rank(b) then Branch(heap_rank(b) + 1, position, rep, a, b)
+  else Branch(heap_rank(a) + 1, position, rep, b, a)
+
+fn heap_merge(a: Heap, b: Heap) -> Heap =
+  match (a, b) with
+  | (Leaf, _) -> b
+  | (_, Leaf) -> a
+  | (Branch _ pa ra la xa, Branch _ pb _ _ _) ->
+      if pa <= pb then heap_branch(pa, ra, la, heap_merge(xa, b)) else heap_merge(b, a)
+
+fn heap_insert(position: Int, rep: String, h: Heap) -> Heap =
+  heap_merge(Branch(1, position, rep, Leaf, Leaf), h)
+
+fn heap_pop(h: Heap) -> Maybe (String, Heap) =
+  match h with
+  | Leaf -> Nothing
+  | Branch _ _ rep left right -> Just((rep, heap_merge(left, right)))

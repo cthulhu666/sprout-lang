@@ -23,6 +23,9 @@ fn render_comp(members: List String) -> String =
 fn sccs(nodes: List String, edges: List (String, List String)) -> String =
   render(scc.sccs_in_dependency_order(nodes, graph_of(edges)))
 
+fn stable(nodes: List String, edges: List (String, List String)) -> String =
+  render(scc.sccs_in_source_order(nodes, graph_of(edges)))
+
 fn main() -> Unit !{IO} =
   do
     let state = new_state()
@@ -51,5 +54,24 @@ fn main() -> Unit !{IO} =
                 sccs(["a", "b"], [("a", ["b"])]) == "[b] [a]")
 
     assert_true(state, "no nodes: no components", sccs([], []) == "")
+
+    # The source-stable order: dependencies first, otherwise as `nodes` lists them.
+    # Finish order put `i` last here, though nothing it depends on comes after it.
+    assert_true(state, "stable: an unrelated node keeps its place",
+                stable(["p", "i", "q"], [("p", ["q"])]) == "[i] [q] [p]")
+    assert_true(state, "stable: unrelated nodes in listed order",
+                stable(["a", "b", "c"], []) == "[a] [b] [c]")
+    assert_true(state, "stable: chain a->b->c: callees first",
+                stable(["a", "b", "c"], [("a", ["b"]), ("b", ["c"])]) == "[c] [b] [a]")
+    # `a` waits for `c`, and is checked the moment `c` is, before anything after `c`.
+    assert_true(state, "stable: a waiting node follows its last dependency",
+                stable(["a", "b", "c", "d"], [("a", ["c"])]) == "[b] [c] [a] [d]")
+    # Freed together, they keep their listed order, not their names' order.
+    assert_true(state, "stable: two waiting nodes freed at once stay in listed order",
+                stable(["z", "a", "c"], [("z", ["c"]), ("a", ["c"])]) == "[c] [z] [a]")
+    assert_true(state, "stable: two cycles, callee cycle first",
+                stable(["a", "b", "c", "d"], [("a", ["b", "c"]), ("b", ["a"]), ("c", ["d"]), ("d", ["c"])])
+                  == "[c,d] [a,b]")
+    assert_true(state, "stable: no nodes", stable([], []) == "")
 
     summary(state)

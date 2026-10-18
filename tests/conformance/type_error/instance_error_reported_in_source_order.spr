@@ -1,0 +1,13 @@
+module main
+
+# An instance is checked near its place in the file, so its error is reported
+# before one in a later, unrelated function.
+
+type Coin = Heads | Tails
+
+instance Eq Coin
+  fn eq(a: Coin, b: Coin) -> Bool = 1
+
+fn bad(n: Int) -> Int = "x"
+
+fn main() -> Unit !{IO} = print(1)
