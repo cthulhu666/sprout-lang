@@ -6143,8 +6143,9 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
 # tail single-arm `match scrut with | Ctor f0 f1 … -> body`: destructure the
 # scrutinee (bind each field var) and translate the arm body tail-unboxed.  A
 # single ConstructorPattern arm is exhaustive only for a one-ctor (record-like)
-# type, so no tag test is needed.  Multi-arm / nested-field matches fall back to
-# the boxed catch-all (still correct, just not fully unboxed).
+# type, so no tag test is needed.  A wrap has no box: its field is the scrutinee.
+# Multi-arm / nested-field matches fall back to the boxed catch-all (still correct,
+# just not fully unboxed).
 fn translate_tail_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                         whole: typed_ast.TypedExpr, params: List String,
                         env: TxEnv, idx: Int,
@@ -6153,20 +6154,17 @@ fn translate_tail_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMa
                         worker_set: Set, self_name: String) ->
     Result String (List sprout_ir.IRBlock, Int) !{IO} =
   match arms with
-  | [typed_ast.TypedMatchBranch(ast.ConstructorPattern _cname cargs _) arm_body] ->
+  | [typed_ast.TypedMatchBranch(ast.ConstructorPattern cname cargs _) arm_body] ->
       if all_var_or_wild(cargs)
       then
         do
           (sblocks, slbl, sops, scrut_ssa, idx1) <-
             translate_expr(scrut, params, env, idx, cur_label, cur_ops, captures)
-          match bind_ctor_fields(cargs, scrut_ssa, 0, idx1, sops, captures) with
-          | (fops, idx2, caps2) ->
-              do
-                br <-
-                  translate_tail_unboxed(arm_body, params, env, idx2, slbl, fops, caps2, result_adt_ctors,
-                                         worker_set, self_name)
-                match br with
-                | (bblocks, idx3) -> Ok((list_append(sblocks, bblocks), idx3))
+          (fops, idx2, caps2) <- bind_sole_arm_fields(cname, cargs, scrut_ssa, idx1, sops, captures, env.prog.ctors)
+          (bblocks, idx3) <-
+            translate_tail_unboxed(arm_body, params, env, idx2, slbl, fops, caps2, result_adt_ctors,
+                                   worker_set, self_name)
+          Ok((list_append(sblocks, bblocks), idx3))
       else translate_tail_catchall(whole, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors)
   | _ -> translate_tail_catchall(whole, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors)
 
@@ -6176,6 +6174,19 @@ fn all_var_or_wild(pats: List ast.Pattern) -> Bool =
   | Cons p rest ->
       (match p with | ast.VarPattern _ _ -> true | ast.WildcardPattern _ -> true | _ -> false)
       && all_var_or_wild(rest)
+
+fn bind_sole_arm_fields(cname: String, pats: List ast.Pattern, scrut_ssa: String, idx: Int,
+                        ops: ListBuilder sprout_ir.IROp, captures: Dict String,
+                        ctors: Dict sprout_ir.CtorInfo) ->
+    Result String (ListBuilder sprout_ir.IROp, Int, Dict String) =
+  if is_wrap_ctor(cname, ctors)
+  then result_map(\caps -> (ops, idx, caps), bind_wrap_inner_arg(pats, scrut_ssa, captures))
+  else Ok(bind_ctor_fields(pats, scrut_ssa, 0, idx, ops, captures))
+
+fn is_wrap_ctor(name: String, ctors: Dict sprout_ir.CtorInfo) -> Bool =
+  match dict_get(name, ctors) with
+  | Just entry -> entry.tag == -1
+  | Nothing -> false
 
 # Emit IRGetField for each ConstructorPattern field, binding VarPattern names into
 # `captures` (WildcardPattern binds nothing).  Field i lives at box offset i.

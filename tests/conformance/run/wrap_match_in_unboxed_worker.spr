@@ -1,0 +1,33 @@
+module main
+
+# A `Maybe`-returning function whose body matches a `wrap` parameter. Destructuring
+# its result gives it an unboxed worker, which must bind the wrap's inner value
+# as-is: a wrap has no box to read a field from.
+
+wrap Name = String
+
+wrap Table v = Dict v
+
+fn initial_length(name: Name) -> Maybe Int =
+  match name with
+  | Name s -> if s == "" then Nothing else Just(str_len(s))
+
+fn lookup(key: String, table: Table v) -> Maybe v =
+  match table with
+  | Table d -> dict_get(key, d)
+
+fn length_or_zero(name: Name) -> Int =
+  let Just n = initial_length(name) else 0
+  in n
+
+fn lookup_or(key: String, fallback: v, table: Table v) -> v =
+  let Just value = lookup(key, table) else fallback
+  in value
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(length_or_zero(Name("kuba"))))
+    print(to_string(length_or_zero(Name(""))))
+    let table = Table(dict_set("a", [1, 2], dict_empty()))
+    print(to_string(lookup_or("a", [], table)))
+    print(to_string(lookup_or("b", [0], table)))
