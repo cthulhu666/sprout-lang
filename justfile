@@ -3441,6 +3441,28 @@ gc-ageprof-check: bootstrap-from-seed
   (( none_churn_pct <= 5 ))                  || { echo "gc-ageprof-check: retain_none churn survivors ${none_churn_pct}% > 5% (marked_age_ge1=${none_ge1}, ${none_roots} root(s) x ${none_cycles} cycles) — objects are surviving cycles that should not" >&2; failed=1; }
   (( all_marked - none_churn_pct >= 40 ))    || { echo "gc-ageprof-check: separation $(( all_marked - none_churn_pct ))pp < 40pp — the counter does not discriminate" >&2; failed=1; }
   (( none_young >= 90 ))                     || { echo "gc-ageprof-check: retain_none died_young ${none_young}% < 90% — weak generational hypothesis not reproduced on pure churn" >&2; failed=1; }
+  # The store counters are a build flag. Without it the report must say "off", not 0;
+  # with it, a workload that stores pairs into a MutVec must count them.
+  mkdir -p "$TMPD/rtobj_st"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 -DSPROUT_GC_AGEPROF_STORES -o "$TMPD/rtobj_st/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-ageprof-check: runtime compile failed with -DSPROUT_GC_AGEPROF_STORES ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  st=tests/stdlib/test_mutvec_sort.spr
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$st" > "$TMPD/st.ll" 2>"$TMPD/st.err" \
+    || { echo "gc-ageprof-check: compile failed: $st" >&2; cat "$TMPD/st.err" >&2; exit 1; }
+  for rt in rtobj rtobj_st; do
+    clang "$TMPD/st.ll" "$TMPD/$rt"/*.o {{clang_extra}} -o "$TMPD/st_$rt.bin" 2>"$TMPD/st.err" \
+      || { echo "gc-ageprof-check: link failed: $st ($rt)" >&2; cat "$TMPD/st.err" >&2; exit 1; }
+    SPROUT_GC_AGEPROF=1 "$TMPD/st_$rt.bin" > /dev/null 2>"$TMPD/st_$rt.prof" \
+      || { echo "gc-ageprof-check: $st failed ($rt)" >&2; tail -5 "$TMPD/st_$rt.prof" >&2; exit 1; }
+  done
+  grep -q "mut_calls=off ptr_stores=off old_to_young=off " "$TMPD/st_rtobj.prof" \
+    || { echo "gc-ageprof-check: default build does not report its store counters as off" >&2; failed=1; }
+  stores=$(grep -m1 -o "mut_calls=[0-9]* ptr_stores=[0-9]*" "$TMPD/st_rtobj_st.prof")
+  echo "  stores (-DSPROUT_GC_AGEPROF_STORES): ${stores:-none}"
+  [[ "$stores" =~ ^mut_calls=[1-9][0-9]*\ ptr_stores=[1-9][0-9]*$ ]] \
+    || { echo "gc-ageprof-check: -DSPROUT_GC_AGEPROF_STORES counted no stores on $st" >&2; failed=1; }
   (( failed == 0 )) || exit 1
   echo "==> gc-ageprof-check ✓"
 

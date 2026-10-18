@@ -228,8 +228,8 @@ document is the starting point and §4's split is the number to design against.
 Whether the barrier is affordable for *this* game. §6's measurements are the compiler,
 `digit_recognizer` and friends; none of them run at 58 fps with 2% headroom. Before any
 barrier work, the number to get is the game's pointer-store rate per frame — which the
-`SPROUT_GC_AGEPROF=1` counters (`mut_calls` / `ptr_stores`) already report, and which
-nobody has run against it.
+`SPROUT_GC_AGEPROF=1` counters (`mut_calls` / `ptr_stores`, in a runtime built with
+`-DSPROUT_GC_AGEPROF_STORES`) already report, and which nobody has run against it.
 
 ## 11. Sources
 

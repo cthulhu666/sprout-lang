@@ -825,11 +825,17 @@ static long long g_ap_cycles = 0;
 static long long g_ap_marked_total = 0;
 static long long g_ap_freed_total = 0;
 static long long g_ap_freed_age0 = 0;
+static long long g_ap_marked_by_age[SPROUT_GC_AGE_MAX + 1];
+static long long g_ap_live_by_age[SPROUT_GC_AGE_MAX + 1];
+
+/* The store counters are a build flag, -DSPROUT_GC_AGEPROF_STORES; the mark-side
+ * counters above are not.  Built in, the hook costs every vector_mutset a load and
+ * a branch, and its slow call can write any memory, so LLVM cannot keep a store
+ * loop's loads in registers (docs/native-sprout-runtime-v0.md §Phase 2). */
+#ifdef SPROUT_GC_AGEPROF_STORES
 static long long g_ap_mut_calls = 0;       /* mutation-primitive calls seen */
 static long long g_ap_ptr_stores = 0;      /* ...of which stored a heap pointer */
 static long long g_ap_old_to_young = 0;    /* ...of which a barrier would record */
-static long long g_ap_marked_by_age[SPROUT_GC_AGE_MAX + 1];
-static long long g_ap_live_by_age[SPROUT_GC_AGE_MAX + 1];
 
 /* Price a pointer store into an already-allocated object.  Called from the
  * mutation primitives (ref_write, vector_mutset) — the candidate barrier sites.
@@ -862,6 +868,12 @@ __attribute__((noinline, cold)) static void sprout_ap_store_slow(long long targe
 static inline void sprout_ap_on_store(long long target, long long value) {
   if (g_ageprof != 0) sprout_ap_store_slow(target, value);
 }
+#else
+static inline void sprout_ap_on_store(long long target, long long value) {
+  (void)target;
+  (void)value;
+}
+#endif
 
 /* Runs after the atexit full collect (destructors follow atexit handlers), so
  * the totals include every cycle.  Aborts rather than reports on an internal
@@ -883,11 +895,17 @@ __attribute__((destructor)) static void sprout_ap_report(void) {
   }
   fprintf(stderr,
           "[sprout ageprof] cycles=%lld marked_total=%lld marked_age_ge1=%lld "
-          "marked_age_ge2=%lld freed_total=%lld freed_age0=%lld "
-          "mut_calls=%lld ptr_stores=%lld old_to_young=%lld live_final=%lld\n",
+          "marked_age_ge2=%lld freed_total=%lld freed_age0=%lld ",
           g_ap_cycles, g_ap_marked_total, marked_ge1, marked_ge2,
-          g_ap_freed_total, g_ap_freed_age0,
-          g_ap_mut_calls, g_ap_ptr_stores, g_ap_old_to_young, live_sum);
+          g_ap_freed_total, g_ap_freed_age0);
+#ifdef SPROUT_GC_AGEPROF_STORES
+  fprintf(stderr, "mut_calls=%lld ptr_stores=%lld old_to_young=%lld ",
+          g_ap_mut_calls, g_ap_ptr_stores, g_ap_old_to_young);
+#else
+  /* "off", not 0: a zero would read as "a barrier would be free here". */
+  fprintf(stderr, "mut_calls=off ptr_stores=off old_to_young=off ");
+#endif
+  fprintf(stderr, "live_final=%lld\n", live_sum);
   fprintf(stderr, "[sprout ageprof] marked_by_age:");
   for (int a = 0; a <= SPROUT_GC_AGE_MAX; a++)
     if (g_ap_marked_by_age[a]) fprintf(stderr, " %d=%lld", a, g_ap_marked_by_age[a]);

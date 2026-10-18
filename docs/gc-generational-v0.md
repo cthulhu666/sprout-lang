@@ -83,7 +83,10 @@ Sprout's base — size-class freelists over 1 MiB regions — is `MS`, not `IX`.
 ## 4. Instrument
 
 `SPROUT_GC_AGEPROF=1`, runtime-only, no build flag (unlike `-DSPROUT_GC_PROFILE`,
-which needs a special build and over-reports GC by ~2.3×).
+which needs a special build and over-reports GC by ~2.3×). The store counters are the
+exception: they need `-DSPROUT_GC_AGEPROF_STORES`, and without it the report prints
+them as `off`. Built in, their hook kept LLVM from optimising store loops
+([native-sprout-runtime-v0.md](native-sprout-runtime-v0.md) §Phase 2).
 
 - **Age** lives in header bits 9–13 (the gap between the colour bit and aux, which
   `sprout_hdr_make` shifts to bit 14): a saturating 5-bit count of collections
@@ -93,7 +96,7 @@ which needs a special build and over-reports GC by ~2.3×).
   is a dry run of that mechanism.
 - **Counters:** `marked_by_age[]` at the single mark choke point (`gc_mark_enqueue`),
   `freed_age0`/`freed_total` in the sweep's dead branch, `live_by_age[]` per cycle, and
-  `mut_calls`/`ptr_stores`/`old_to_young` at the mutation primitives.
+  `mut_calls`/`ptr_stores`/`old_to_young` at the mutation primitives (build flag, above).
 
 **Why `mut_calls` is separate from `ptr_stores`:** without it, a zero cannot be
 distinguished from a hook that never ran — "a barrier would be free here" and "we did
