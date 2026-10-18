@@ -1599,7 +1599,7 @@ export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -
                                     spine_own(class_type)))
 
 fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
-  types.ownership_eq(ownership_of_param_mode(m), spine_own(class_type))
+  ownership_of_param_mode(m) == spine_own(class_type)
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
   match types.mode_diff(inst, cls) with

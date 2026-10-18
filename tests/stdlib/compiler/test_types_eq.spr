@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.types as types
+
+# Structural equality of the type representation: each constructor compares every
+# field, and different constructors never compare equal.
+
+fn var(n: String) -> types.Type = types.TVar(types.tyvar_id(n))
+
+fn con(n: String) -> types.Type = types.TConst(types.type_id(n))
+
+fn func(e: types.Effect, o: types.Ownership) -> types.Type = types.TFunc(con("Int"), con("Bool"), e, o)
+
+fn scheme(evs: List String, cs: List (String, String)) -> types.Scheme =
+  types.Scheme(["a"], evs, var("a"), types.EffectPure, cs)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "same variable", var("a") == var("a"))
+    assert_false(state, "different variables", var("a") == var("b"))
+    assert_false(state, "a variable is not a constant of its name", var("a") == con("a"))
+    assert_false(state, "different constants", con("Int") == con("String"))
+    assert_true(state, "same application", types.TApp(con("List"), var("a")) == types.TApp(con("List"), var("a")))
+    assert_false(state, "applications differ in the argument",
+      types.TApp(con("List"), var("a")) == types.TApp(con("List"), var("b")))
+    assert_true(state, "same function", func(types.EffectIO, types.OwnConsume) == func(types.EffectIO, types.OwnConsume))
+    assert_false(state, "functions differ in effect only",
+      func(types.EffectIO, types.OwnConsume) == func(types.EffectPure, types.OwnConsume))
+    assert_false(state, "functions differ in ownership only",
+      func(types.EffectIO, types.OwnConsume) == func(types.EffectIO, types.OwnBorrow))
+    assert_false(state, "thunks differ in effect",
+      types.TThunk(con("Int"), types.EffectIO) == types.TThunk(con("Int"), types.EffectPure))
+    assert_true(state, "same tuple", types.TTuple([con("Int"), var("a")]) == types.TTuple([con("Int"), var("a")]))
+    assert_false(state, "tuples differ in length", types.TTuple([con("Int")]) == types.TTuple([con("Int"), con("Int")]))
+
+    assert_true(state, "same row", types.EffectRow(["IO", "Net"]) == types.EffectRow(["IO", "Net"]))
+    assert_false(state, "rows differ", types.EffectRow(["IO"]) == types.EffectRow(["IO", "Net"]))
+    assert_false(state, "effect variables differ", types.EffectVar("e") == types.EffectVar("f"))
+    assert_false(state, "pure is not IO", types.EffectPure == types.EffectIO)
+
+    assert_true(state, "same ownership", types.OwnOnceLocal == types.OwnOnceLocal)
+    assert_false(state, "once is not once local", types.OwnOnce == types.OwnOnceLocal)
+
+    assert_true(state, "same scheme", scheme(["e"], [("#pos:0", "Eq")]) == scheme(["e"], [("#pos:0", "Eq")]))
+    assert_false(state, "schemes differ in effect variables only", scheme(["e"], []) == scheme([], []))
+    assert_false(state, "schemes differ in constraints only",
+      scheme([], [("#pos:0", "Eq")]) == scheme([], [("#pos:0", "Ord")]))
+
+    summary(state)

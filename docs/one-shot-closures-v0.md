@@ -140,8 +140,8 @@ export type Ownership (..) = | OwnConsume | OwnBorrow | OwnOnce
 
 `Ownership` sits on `TFunc` and describes how *that node's parameter* is taken, so this needs **no
 new `TFunc` field** and therefore none of M4.6's ~85-site fan-out — only the handful of `match`es on
-`Ownership` itself (`ownership_eq`, `ownership_is_borrow`, `ownership_prefix`, `encode_ownership`,
-`ownership_from_str`). This is the payoff from M4.6: the slot already exists and already survives
+`Ownership` itself (`ownership_is_borrow`, `ownership_prefix`, `encode_ownership`,
+`ownership_from_str`; its `Eq` is derived). This is the payoff from M4.6: the slot already exists and already survives
 instantiation, substitution, generalisation and the interface codec.
 
 Unification stays **invariant** (M4.6, per SE-0377): `OwnOnce` unifies only with `OwnOnce`. Call
