@@ -2959,7 +2959,8 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
                                 s_name: String, idx: Int,
                                 captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  # Hoist IRGetTag once up-front if any arm is a ConstructorPattern.
+  # Hoist IRGetTag once up-front if an arm tests a ctor of a multi-ctor type;
+  # a sole-ctor or wrap match never reads the tag.
   # This SSA name is reused in every ctor branch test.
   #
   # /code-review-v2 #9: s_ops arrives in SOURCE ORDER from translate_expr
