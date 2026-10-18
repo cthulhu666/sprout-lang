@@ -61,7 +61,7 @@ fn lower_program_decls(decls: List typed_ast.TypedDecl, scheme_env: Dict types.S
 #   scheme_env   – the full type scheme environment from the typechecker; used to
 #                  assign types to generated nodes so types survive lowering.
 #   class_params – class_name → primary class type parameter name
-#   method_class – method short name → first class in class_order that declares it
+#   method_class – canonical method name → the one class that declares it
 type LowerEnv = (
   class_order: Dict (List String),
   inst_table: Dict (Dict String),

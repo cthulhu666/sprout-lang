@@ -865,12 +865,14 @@ fn canonical_of(mod_name: String, name: String) -> String =
   source.qualified_name_str(qualified_name(source.ModuleName(mod_name), source.RawName(name)))
 
 fn add_value_to_symbols(mod_name: String, name: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
+  bind_value(name, canonical_of(mod_name, name), is_exported, acc)
+
+fn bind_value(name: String, canonical: String, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
   | ModuleSymbols vl tl cl ev et ec mn ce xs ->
       ModuleSymbols(dict_set(name, canonical, vl), tl, cl,
                     if is_exported then dict_set(name, canonical, ev) else ev,
                     et, ec, mn, ce, xs)
-  where canonical = canonical_of(mod_name, name)
 
 # A record declares BOTH a type and a constructor under one name, the same shape
 # `wrap` has. Registering the constructor in the value maps is what subjects
@@ -905,14 +907,20 @@ fn add_type_name_to_symbols(mod_name: String, name: String, is_exported: Bool, a
 
 # A method is exported exactly when its class is.
 fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
-  match fold(\ (a, n) -> add_value_to_symbols(mod_name, n, is_exported, a), acc, method_names) with
+  match fold(bind_method(is_exported, _, _), acc, vec_to_list(dict_entries(method_map))) with
   | ModuleSymbols vl tl cl ev et ec cm ce xs ->
       ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
                     if is_exported then dict_set(name, canonical, ec) else ec,
                     dict_set(name, method_map, cm), ce, xs)
   where canonical = canonical_of(mod_name, name)
-        method_names = list_map(method_sig_name, methods)
-        method_map = fold(\ (m, n) -> dict_set(n, canonical_of(mod_name, n), m), dict_empty(), method_names)
+        method_map = fold(add_method_canonical(mod_name, _, _), dict_empty(), methods)
+
+fn add_method_canonical(mod_name: String, acc: Dict String, method: ast.ClassMethodSig) -> Dict String =
+  dict_set(name, canonical_of(mod_name, name), acc)
+  where name = method_sig_name(method)
+
+fn bind_method(is_exported: Bool, acc: ModuleSymbols, entry: (String, String)) -> ModuleSymbols =
+  match entry with | (name, canonical) -> bind_value(name, canonical, is_exported, acc)
 
 fn method_sig_name(m: ast.ClassMethodSig) -> String =
   match m with | ast.ClassMethodSig name _ _ _ _ -> name
@@ -1345,9 +1353,8 @@ fn unknown_import_message(path: String, mod_name: String, name: String, symbols:
 
 # The class in `symbols` that declares method `name`, if any.
 fn method_class(name: String, symbols: ModuleSymbols) -> Maybe String =
-  match find(declares_method(name, _), vec_to_list(dict_entries(sym_class_methods(symbols)))) with
-  | Just (class_name, _) -> Just(class_name)
-  | Nothing -> Nothing
+  let Just(class_name, _) = find(declares_method(name, _), vec_to_list(dict_entries(sym_class_methods(symbols)))) else Nothing
+  in Just(class_name)
 
 fn declares_method(name: String, entry: (String, Dict String)) -> Bool =
   match entry with | (_, methods) -> dict_member(name, methods)

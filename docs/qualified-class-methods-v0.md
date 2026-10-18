@@ -118,8 +118,8 @@ matches PureScript and Sprout's own type-and-constructors rule.
   spellings equal.
 
 **Lowering and codegen.**
-- `add_method_class` and `find_class_of_method` key on the full method name, not
-  `after_last_dot`. The first-wins/last-wins disagreement goes with rule 2.
+- `add_class_methods` (which absorbs `add_method_class`) and `find_class_of_method` key on the
+  full method name, not `after_last_dot`. The first-wins/last-wins disagreement goes with rule 2.
 - Dispatch symbols name the class in full and the method short, since a method is unique
   within its class: `__cm_<class>_<method>`, `__tc_<class>_<head>_<method>` and the slot
   parameters. `__cm_` used to drop the class's module; the `__tc_` names already kept it, so

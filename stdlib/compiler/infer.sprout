@@ -7924,7 +7924,7 @@ fn check_class_method_names(class_name: String, methods: List ast.ClassMethodSig
       | Just (OwnedByClass other) ->
           if other == class_name
           then Just((pos, "`" ++ method_display(name) ++ "` is declared twice in class " ++ class_name))
-          else Just((pos, shared_method_message(name, other, "class " ++ class_name)))
+          else Just((pos, shared_method_message(name, other, value_label(OwnedByClass(class_name)))))
       | Just owner -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
 
 fn value_label(owner: NameOwner) -> String =

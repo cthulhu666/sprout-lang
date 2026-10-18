@@ -1,0 +1,13 @@
+module main
+
+# The clash is reported whichever comes first: here the function precedes the class.
+
+fn speak(s: String) -> String = s ++ "!"
+
+class Speaker a
+  fn speak(x: a) -> Int
+
+instance Speaker Int
+  fn speak(x: Int) -> Int = x
+
+fn main() -> Unit !{IO} = print(speak("hi"))
