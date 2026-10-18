@@ -1,0 +1,46 @@
+# A class variable inside a parameter type (`List t`, `Int -> b`) dispatches on
+# what the variable binds to, not on the parameter's head. Picking the head gave
+# `No instance of Summ for List` (or, with a `Summ (List a)` instance in scope,
+# that instance) and `No instance of Mk for a function type`.
+
+class Summ t
+  fn total(xs: List t) -> t
+
+instance Summ Int
+  fn total(xs: List Int) -> Int = list_fold(\ (a, b) -> a + b, 0, xs)
+
+instance Summ (List a)
+  fn total(xs: List (List a)) -> List a = list_flat_map(\x -> x, xs)
+
+# Forwarded: `t` is a where-bound variable, so the caller's dictionary is used.
+fn gen(xs: List t) -> t where Summ t = total(xs)
+
+# A leading concrete argument of another type must not decide the instance.
+class Tagged t
+  fn tagged(tag: String, xs: List t) -> String
+
+instance Tagged Int
+  fn tagged(tag: String, xs: List Int) -> String = tag ++ " ints " ++ int_to_string(list_length(xs))
+
+instance Tagged String
+  fn tagged(tag: String, xs: List String) -> String = tag ++ " strs " ++ string_concat_many(xs)
+
+class Mk b
+  fn mk(f: Int -> b) -> String
+
+instance Mk Int
+  fn mk(f: Int -> Int) -> String = "int " ++ int_to_string(f(1))
+
+instance Mk String
+  fn mk(f: Int -> String) -> String = "str " ++ f(2)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(total([1, 2, 3])))
+    print(int_to_string(list_length(total([[1], [2, 3]]))))
+    print(int_to_string(gen([4, 5])))
+    print(int_to_string(list_length(gen([[1, 2], [3]]))))
+    print(mk(\x -> x + 10))
+    print(mk(\x -> int_to_string(x) ++ "!"))
+    print(tagged("a", [1, 2]))
+    print(tagged("b", ["x", "y"]))

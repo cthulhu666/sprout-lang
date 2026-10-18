@@ -875,8 +875,12 @@ export fn set_from_list(xs: List String) -> Set =
 export class Semigroup t
   fn append(left: t, right: t) -> t
 
+# `concat_all` joins a whole list at once, so an instance with a bulk primitive
+# stays linear where a fold over `++` copies the accumulator each step. An
+# instance without one folds: `list_fold(\ (acc, x) -> acc ++ x, <its empty>, xs)`.
 export class Monoid t where Semigroup t
   fn empty() -> t
+  fn concat_all(xs: List t) -> t
 
 export class Functor f
   fn fmap(f: a -> b, xs: f a) -> f b
@@ -1100,16 +1104,13 @@ export fn minimum(xs: c a) -> Maybe a where Foldable c, Ord a =
 export fn maximum(xs: c a) -> Maybe a where Foldable c, Ord a =
   max_by(\value -> value, xs)
 
-# O(n²) when 'a = String': each '++' copies the growing accumulator (O(total chars so far)).
-# Use string_concat_many directly for String; a String-specific fast path would need Monoid dispatch.
+# O(total size) for String and List: collects the elements, then joins them
+# with the instance's `concat_all`.
 export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
-  fold(\ (acc, x) -> acc ++ x, empty(), xs)
+  concat_all(foldable_to_list(xs))
 
 # Map each element to a Monoid value, then concatenate the results — the
-# "flatten a per-element list of findings" shape. Same O(n²) tradeoff as
-# mconcat (a fold over '++' repeatedly copies the growing accumulator); fine
-# for typical-sized inputs (e.g. walking one source file's AST), not a
-# replacement for a container-specific bulk-concat builtin on hot paths.
+# "flatten a per-element list of findings" shape. Same cost as `mconcat`.
 export fn concat_map(f: a -> t, xs: c a) -> t where Functor c, Foldable c, Monoid t =
   mconcat(map(f, xs))
 
@@ -1411,9 +1412,11 @@ instance Semigroup (List a)
 
 instance Monoid String
   fn empty() -> String = ""
+  fn concat_all(xs: List String) -> String = string_concat_many(xs)
 
 instance Monoid (List a)
   fn empty() -> List a = Nil
+  fn concat_all(xs: List (List a)) -> List a = list_flat_map(\x -> x, xs)
 
 instance Functor List
   fn fmap(f: a -> b, xs: List a) -> List b =
@@ -1601,8 +1604,12 @@ instance Semigroup (Dict v)
     match right with
     | Dict raw -> dict_append_entries(left, raw, 0, map_size(raw))
 
+# O(n): the elements in fold order.
+fn foldable_to_list(xs: f a) -> List a where Foldable f =
+  list_reverse_go(fold(\ (acc, x) -> Cons(x, acc), Nil, xs), Nil)
+
 export fn foldable_to_vec(xs: f a) -> Vec a where Foldable f =
-  vec_from_list(list_reverse_go(fold(\ (acc, x) -> Cons(x, acc), Nil, xs), Nil))
+  vec_from_list(foldable_to_list(xs))
 
 export fn dict_from_list(pairs: List (String, v)) -> Dict v =
   dict_from_list_loop(pairs, dict_empty())
