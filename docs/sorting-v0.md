@@ -52,7 +52,7 @@ Apple M3 Pro, `clang -O2`, random Ints in [0, 65536), ns per element.
 | A. Specialise `where C a` functions at concrete types | ~2× on every generic sort, and on generic code at large | compiler design |
 | ~~B. Inline `MutVec` element access as loads/stores~~ | done 2026-10-18: item 3 | — |
 | C. C sort builtins for primitive vectors (`Int` radix, `Double`) | 50–500× over `vec_sort` | approval for new builtins; a way to reach them (below) |
-| D. Generic C sort calling a Sprout comparator | removes item 3, keeps item 1 | a builtin, and C→Sprout callbacks; not checked whether the runtime supports them safely |
+| D. Generic C sort calling a Sprout comparator | removes what is left of item 3 (1.2–1.8×), keeps item 1 | a builtin, and C→Sprout callbacks; not checked whether the runtime supports them safely |
 | E. Local mutation in pure code (ST-style) | lets pure `vec_sort` use the in-place sort, ~5× | language design |
 | F. Root call operands only for runtime builtins, not for calls to Sprout functions | item 2, program-wide | a GC-safety argument; compiler change |
 
