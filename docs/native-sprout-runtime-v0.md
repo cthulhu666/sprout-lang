@@ -252,9 +252,10 @@ will cost time until Phase 2 lands. Do them for the smaller C surface, or not ye
 `Dict` is 19.8% of a self-compile, and 63% of its 4.23M lookups miss. Neither a cheaper
 comparison nor skipping matched prefixes moves wall time, and a hash map cannot keep the key
 order callers rely on cheaply: the type environment answers ~770 prefix queries per compile over
-7–11k changing keys. Measurements, options per layer and the next experiment:
-[dict-representation-v0.md](dict-representation-v0.md). A Sprout port of the same tree keeps its
-cost and adds Sprout's.
+7–11k changing keys. A (root, key) lookup memo skips 45% of lookups and gains nothing measurable.
+All tree walks together are 8–10% of user time, which bounds any lookup fix. Measurements and
+options per layer: [dict-representation-v0.md](dict-representation-v0.md). A Sprout port of the
+same tree keeps its cost and adds Sprout's.
 
 Each move: a differential test (C and Sprout agree on a corpus) lands first, then the Sprout
 version, then the C function and its `APPROVED_BUILTINS` line are deleted. Gate: port bench at

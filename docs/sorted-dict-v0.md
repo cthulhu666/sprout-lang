@@ -29,8 +29,8 @@ Goals:
 
 Non-goals:
 
-- Changing `Dict`'s representation. That is a separate step and needs its own measurement
-  ([dict-representation-v0.md](dict-representation-v0.md) §6).
+- Changing `Dict`'s representation. That is a separate step; what it could gain is bounded in
+  [dict-representation-v0.md](dict-representation-v0.md) §6.
 - Generic keys. `Dict k v` and `SortedDict k v` come with the P1 entry; this design keeps `String`
   keys and must not make that step harder.
 - Insertion order (Python's `dict`, Java's `LinkedHashMap`). Nothing in the corpus asks for it.
@@ -127,13 +127,14 @@ under it; each difference is a caller that relied on order. The mode stays in CI
 holds. It changes how existing builtins iterate rather than adding one, but it is a runtime change
 and needs approval (`AGENTS.md` §Builtin vs Stdlib).
 
-**Stage 3: change `Dict`'s representation.** Only if
-[dict-representation-v0.md](dict-representation-v0.md) §6 finds lookup latency is the cost, and
-together with `Dict k v` and `Hash`, so `Dict` callers migrate once.
+**Stage 3: change `Dict`'s representation**, together with `Dict k v` and `Hash`, so `Dict`
+callers migrate once.
 
 Stages 1 and 2 alone make nothing faster. Their value is the freedom stage 3 needs and a contract
-that says what a caller can rely on. If stage 3 never has a measured case, stage 2's migration is
-paid for nothing. So stage 2 waits for that measurement; stage 1 can go first.
+that says what a caller can rely on. Speed alone does not pay for stage 2:
+[dict-representation-v0.md](dict-representation-v0.md) §6 bounds what a hash `Dict` could save at
+~4–5% of a self-compile. So stage 2 goes with `Dict k v`, which migrates every `Dict` site anyway;
+stage 1 can go first.
 
 ## 7. Impact
 
