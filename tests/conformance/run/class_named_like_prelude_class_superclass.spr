@@ -1,0 +1,27 @@
+module main
+
+# A file's own `Ord` over its own `Eq`, both named like prelude classes, with
+# instances at `Int`. The superclass reached through `where Ord a` is the file's
+# `Eq`, not the prelude's.
+
+class Eq a
+  fn eq(x: a, y: a) -> Bool
+
+class Ord a where Eq a
+  fn compare(left: a, right: a) -> Int
+
+instance Eq Int
+  fn eq(x: Int, y: Int) -> Bool = false
+
+instance Ord Int
+  fn compare(left: Int, right: Int) -> Int = 99
+
+fn mine(x: a) -> String where Ord a = `${to_string(eq(x, x))} ${to_string(compare(x, x))}`
+
+fn theirs(x: a) -> String where prelude.Ord a =
+  `${to_string(prelude.eq(x, x))} ${to_string(prelude.compare(x, x))}`
+
+fn main() -> Unit !{IO} =
+  do
+    print(mine(1))
+    print(theirs(1))

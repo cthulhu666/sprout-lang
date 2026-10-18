@@ -485,12 +485,15 @@ the declaration boundary if that head becomes `Maybe`/`Result`.
 ### A hidden-dictionary slot is keyed by its whole constraint
 
 A constrained function's hidden dictionary parameters are found under
-`ast.dict_slot_key`: the class, then each argument in full, variables by source name —
+`typed_ast.dict_slot_key`: the class, then each argument in full, variables by source name —
 `ToString_a`, `ToString_List(a)`, `ToString_(a,b)`. `lowering.build_hidden_for_constraints`
 keys `ctx_fwd` with it, `resolve`'s `EvForward` uses it, and so do the existential witness
 seeding and the value-position (eta) lookups. Instance keys are a different function,
 `typed_ast.constraint_key_str`, and name the head constructor only: one instance per head
-is correct.
+is correct. They return a `typed_ast.SlotKey` and a `typed_ast.InstanceKey`, which only
+`typed_ast` builds, from the class's full name (`main.Eq_Int`), and each has its own table
+type: a key spelled by hand, or one kind looked up in the other's table, does not
+type-check.
 
 It was head-only once (`ToString_List`), and then a body declaring `ToString (List a)`
 answered every `ToString (List …)` request from that slot — a concrete `List String`
@@ -599,7 +602,7 @@ unification (a lambda parameter, say) can still make it a declared variable, and
 bound stays `_`, whose dictionary nothing reads.
 The result is taken when it has a hole, when the caller declares exactly it — `seed_compound_marker` records
 each compound constraint a body declares, and each transitive superclass of it, as `@fwdhead:` plus its
-slot key (`ast.dict_slot_key`) — or when the class has an instance for the head, looked up
+slot key (`typed_ast.dict_slot_key`) — or when the class has an instance for the head, looked up
 under the constraint's own spelling of it (qualified when bundled, `main.Pair`; short on
 the env path, below). `resolve` then forwards the exact slot, or builds the instance from
 its context: a context constraint on a variable the call named must be one the body

@@ -1,0 +1,17 @@
+module main
+
+# Methods of two same-named classes passed as values at one head: each resolves
+# to its own class's instance.
+
+class Eq a
+  fn eq(x: a, y: a) -> Bool
+
+instance Eq Int
+  fn eq(x: Int, y: Int) -> Bool = false
+
+fn apply2(f: Int -> Int -> Bool, a: Int, b: Int) -> Bool = f(a, b)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(apply2(eq, 1, 1)))
+    print(to_string(apply2(prelude.eq, 1, 1)))

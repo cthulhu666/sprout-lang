@@ -130,9 +130,9 @@ matches PureScript and Sprout's own type-and-constructors rule.
 - The short method also settles the entry-name hazard. `ast_to_ir.is_entry_fn_name` and
   `dce.is_entry_name` accept any name ending in `.main`, which a qualified method `main` would
   have put at the end of `__tc_<class>_<head>_m.main`. It ends in `_main` instead.
-- Not fixed here: dispatch KEYS (`typed_ast.constraint_key_from_tc`) still strip the class, so
-  two same-short-named classes' instances at one head collide. That is a class-identity bug,
-  independent of method names, and has its own `BACKLOG.md` P2 entry.
+- Dispatch keys (`typed_ast.constraint_key_from_tc`) keep the class in full too, so two
+  same-named classes' instances at one head no longer collide. Keys are `typed_ast.InstanceKey`
+  and `typed_ast.SlotKey`, which only `typed_ast` builds; each kind has its own table type.
 
 **Other readers.**
 - `compiler.with_class_constraint` (hover) looks up `@class:` by the name the scheme was found

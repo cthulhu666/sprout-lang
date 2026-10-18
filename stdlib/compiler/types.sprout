@@ -230,8 +230,7 @@ export fn type_mentions_skolem(t: Type) -> Bool =
 # (docs/gadts-v0.md §5b; BACKLOG "Multi-method / superclass existentials").
 
 # The class itself followed by all transitive superclasses in DFS order, deduped.
-# Keyed by the bare (post-`after_last_dot`) class name, matching class_order and
-# super_map, which collect_class_order/collect_super_map build from ClassDecls.
+# Keyed by the class name as declared, matching class_order and super_map.
 export fn class_with_transitive_supers(class_name: String, super_map: Dict (List String)) -> List String =
   list_reverse(collect_supers_dfs(Cons(class_name, Nil), super_map, Nil))
 
@@ -286,12 +285,10 @@ fn match_type_var_lists(patterns: List Type, actuals: List Type, acc: Dict Type)
 # The class-parameter type a value-position method is used at: its scheme aligned
 # with `actual`, read at the class parameter. `fallback` when the class, the
 # method or the binding is missing. Lowering's eta expansion and resolve's
-# Evidence both read it; they pass different `class_params` tables (see
-# typed_ast.ClassTables), which differ for a short class name and for a declared
-# name that is also another class's short name.
+# Evidence both read it, with the class's full name.
 export fn eta_class_type(class_params: Dict String, scheme_env: Dict Scheme, class_name: String,
                          method_name: String, actual: Type, fallback: Type) -> Type =
-  let Just class_param = dict_get_or_short(class_name, class_params) else fallback
+  let Just class_param = dict_get(class_name, class_params) else fallback
       Just scheme = dict_get_or_short(method_name, scheme_env) else fallback
       Just class_type = dict_get(class_param, match_type_vars(scheme_type(scheme), actual, dict_empty())) else fallback
   in class_type

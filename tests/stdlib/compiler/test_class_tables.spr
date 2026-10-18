@@ -17,6 +17,7 @@ fn class_decl(name: String, params: List String, methods: List String, supers: L
 fn decls() -> List typed_ast.TypedDecl =
   [class_decl("prelude.Eq", ["a"], ["eq", "neq"], []),
    class_decl("main.Ord", ["t"], ["compare", "lt"], ["prelude.Eq"]),
+   class_decl("main.Eq", ["b"], ["same"], []),
    typed_ast.TPassThrough(ast.AliasDecl("Unrelated", [], ast.TypeName("Int"), p())),
    class_decl("Marker", [], [], [])]
 
@@ -35,7 +36,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "no superclasses", get_list("prelude.Eq", t.supers), Nil)
     assert_eq(state, "first type parameter", get("main.Ord", t.params), "t")
     assert_eq(state, "params has no short keys", get("Ord", t.params), "-")
-    assert_eq(state, "params_with_short has both keys",
-      (get("main.Ord", t.params_with_short), get("Ord", t.params_with_short)), ("t", "t"))
-    assert_eq(state, "a parameterless class has no param", get("Marker", t.params_with_short), "-")
+    assert_eq(state, "same-named classes keep their own param",
+      (get("prelude.Eq", t.params), get("main.Eq", t.params)), ("a", "b"))
+    assert_eq(state, "a parameterless class has no param", get("Marker", t.params), "-")
     summary(state)

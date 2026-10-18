@@ -3329,7 +3329,7 @@ fn is_self_binding(callee: String, env: Dict types.Scheme) -> Bool =
 # for each transitive superclass of one, under the key its hidden slot has
 # (typed_ast.dict_slot_key), so two constraints sharing a class and head do not collide.
 fn compound_fwd_key(class_name: String, te: ast.TypeExpr) -> String =
-  "@fwdhead:" ++ typed_ast.key_text(typed_ast.dict_slot_key(string.after_last_dot(class_name), [te]))
+  "@fwdhead:" ++ typed_ast.slot_key_text(typed_ast.dict_slot_key(class_name, [te]))
 
 fn resolve_one_constraint_tdict(
   class_name: String,
@@ -8394,7 +8394,7 @@ fn class_super_arity_error(cls: String, superclasses: List ast.TypeConstraint,
                            depths: Dict (String, List Int),
                            supers: Dict (List String)) -> Maybe String =
   let Just own = single_depth(class_own_part(cls, depths)) else Nothing
-  in super_arity_error(cls, own, class_super_names(superclasses, as_written), depths, supers)
+  in super_arity_error(cls, own, class_super_names(superclasses), depths, supers)
 
 fn super_arity_error(cls: String, own: Int, names: List String,
                      depths: Dict (String, List Int),
@@ -8465,7 +8465,7 @@ fn check_instance_head_kinds(decls: List ast.Decl, arities: Dict Int, env: Dict 
     env_class_depths(vec_to_list(dict_entries_with_prefix(types.class_marker_tag, env)), env,
       own_class_depths(decls, alias_env, dict_empty())),
     env_class_supers(vec_to_list(dict_entries_with_prefix(types.super_marker_tag, env)),
-      build_class_super_map(decls, as_written)),
+      build_class_super_map(decls)),
     arities, env)
 
 # The position is the declaration's, not the method's: ClassMethodSig carries no
@@ -8500,18 +8500,18 @@ fn indistinct_scan(cs: List ast.TypeConstraint,
   match cs with
   | [] -> Nothing
   | [c | rest] ->
-      let key = constraint_class_of(c) ++ "_" ++ constraint_fwd_key(c)
+      let key = constraint_class(c) ++ "_" ++ constraint_fwd_key(c)
           subject = constraint_subject_text(c)
       in
         match dict_get(key, seen) with
         | Just prior ->
             if prior == subject then indistinct_scan(rest, seen)
-            else Just((constraint_class_of(c), prior, subject))
+            else Just((string.after_last_dot(constraint_class(c)), prior, subject))
         | Nothing -> indistinct_scan(rest, dict_set(key, subject, seen))
 
-fn constraint_class_of(c: ast.TypeConstraint) -> String =
+fn constraint_class(c: ast.TypeConstraint) -> String =
   let ast.TypeConstraint class_name _ = c
-  in string.after_last_dot(class_name)
+  in class_name
 
 # The group: the outermost constructor of each argument, as typed_ast.constraint_key_str
 # names it, but shortened to its last segment and blank for a function or effect type,
@@ -8618,7 +8618,7 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
 fn check_missing_superclass_instances(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   ast.first_decl_error(missing_superclass_error(super_map, inst_set, _), decls)
 where
-  super_map = build_class_super_map(decls, string.after_last_dot)
+  super_map = build_class_super_map(decls)
   inst_set = build_inst_key_set(decls, dict_empty())
 
 fn missing_superclass_error(super_map: Dict (List String), inst_set: Dict Bool,
@@ -8634,8 +8634,8 @@ fn superclass_check_one(constraint: ast.TypeConstraint, super_map: Dict (List St
       | Nil -> Nothing
       | [head_te | _] ->
           check_super_list(
-            super_list_of(string.after_last_dot(class_name), super_map),
-            string.after_last_dot(class_name),
+            super_list_of(class_name, super_map),
+            class_name,
             type_head_str(type_from_ast(head_te, dict_empty())),
             inst_set)
 
@@ -8645,12 +8645,13 @@ fn check_super_list(supers: List String, cls: String, head: String, inst_set: Di
   | Cons super_name rest ->
       match dict_get(super_name ++ ":" ++ head, inst_set) with
       | Just _ -> check_super_list(rest, cls, head, inst_set)
-      | Nothing -> Just("No instance of " ++ super_name ++ " for " ++ string.after_last_dot(head)
-                        ++ ", required as a superclass of " ++ cls)
+      | Nothing -> Just("No instance of " ++ string.after_last_dot(super_name) ++ " for " ++ string.after_last_dot(head)
+                        ++ ", required as a superclass of " ++ string.after_last_dot(cls))
 
-# Verbatim first, then short, for class_depths_entry's reason: the arity path's map is
-# keyed as declared while the completeness path's and the env path's are short, and a
-# short-keyed lookup of a short-keyed map is unchanged by the first attempt.
+# Verbatim first, then short, for class_depths_entry's reason: the arity and
+# completeness paths' maps are keyed as declared while the env path's
+# (add_env_super) is short, and a short-keyed lookup of a short-keyed map is
+# unchanged by the first attempt.
 fn super_list_of(cls: String, super_map: Dict (List String)) -> List String =
   match dict_get(cls, super_map) with
   | Just supers -> supers
@@ -8659,28 +8660,20 @@ fn super_list_of(cls: String, super_map: Dict (List String)) -> List String =
       | Just supers -> supers
       | Nothing -> Nil
 
-# class -> its direct superclasses, every name passed through `name`. The
-# completeness check above keys both halves short (`string.after_last_dot`). The
-# arity check keeps both as written, since its tables tell two same-named classes
-# apart and a shortened reference would resolve to whichever won the short key.
-fn build_class_super_map(decls: List ast.Decl, name: String -> String) -> Dict (List String) =
-  list_fold(add_class_supers(name, _, _), dict_empty(), decls)
+# class -> its direct superclasses, both as written: the tables tell two same-named
+# classes apart, and a shortened name would resolve to whichever won the short key.
+fn build_class_super_map(decls: List ast.Decl) -> Dict (List String) =
+  list_fold(add_class_supers, dict_empty(), decls)
 
-fn add_class_supers(name: String -> String, acc: Dict (List String), decl: ast.Decl) -> Dict (List String) =
+fn add_class_supers(acc: Dict (List String), decl: ast.Decl) -> Dict (List String) =
   match decl with
-  | ast.ClassDecl cls _ _ superclasses _ -> dict_set(name(cls), class_super_names(superclasses, name), acc)
+  | ast.ClassDecl cls _ _ superclasses _ -> dict_set(cls, class_super_names(superclasses), acc)
   | _ -> acc
 
-fn class_super_names(supers: List ast.TypeConstraint, name: String -> String) -> List String =
-  list_map(super_name_through(name, _), supers)
+fn class_super_names(supers: List ast.TypeConstraint) -> List String =
+  list_map(constraint_class, supers)
 
-fn super_name_through(name: String -> String, c: ast.TypeConstraint) -> String =
-  let ast.TypeConstraint cls _ = c
-  in name(cls)
-
-fn as_written(name: String) -> String = name
-
-# set of "{bare_class}:{head}" for every instance declared.
+# set of "{class}:{head}" for every instance declared.
 fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
   match decls with
   | Nil -> acc
@@ -8693,7 +8686,7 @@ fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
               | Nil -> build_inst_key_set(rest, acc)
               | [head_te | _] ->
                   build_inst_key_set(rest,
-                    dict_set(string.after_last_dot(class_name) ++ ":"
+                    dict_set(class_name ++ ":"
                              ++ type_head_str(type_from_ast(head_te, dict_empty())), true, acc))
       | _ -> build_inst_key_set(rest, acc)
 

@@ -163,10 +163,13 @@ fn main() -> Unit !{IO} =
     # v12 is retired by v13: user class method names are now module-qualified.
     assert_true(state, "decode v12 rejected (retired by v13)",
       match iface_codec.decode_iface_file("(IfaceFile 12 foo () () () ())") with | Nothing -> true | _ -> false)
+    # v13 is retired by v14: an instance's dispatch key names its class in full.
+    assert_true(state, "decode v13 rejected (retired by v14)",
+      match iface_codec.decode_iface_file("(IfaceFile 13 foo () () () ())") with | Nothing -> true | _ -> false)
     assert_true(state, "decode trailing chars rejected",
-      match iface_codec.decode_iface_file("(IfaceFile 13 foo () () () ()) garbage") with | Nothing -> true | _ -> false)
+      match iface_codec.decode_iface_file("(IfaceFile 14 foo () () () ()) garbage") with | Nothing -> true | _ -> false)
     assert_true(state, "decode well-formed accepted",
-      match iface_codec.decode_iface_file("(IfaceFile 13 foo () () () ())") with | Just _ -> true | _ -> false)
+      match iface_codec.decode_iface_file("(IfaceFile 14 foo () () () ())") with | Just _ -> true | _ -> false)
 
     # --- extract_named_schemes: env-filtering helper ---
     # Build a Dict simulating a post-typecheck env with entries from two
@@ -188,11 +191,11 @@ fn main() -> Unit !{IO} =
     # around decode_iface_file. These assertions pin the contract the CLI
     # relies on: well-formed input decodes, truncated input fails.
     assert_true(state, "check-iface contract: well-formed minimal accepted",
-      match iface_codec.decode_iface_file("(IfaceFile 13 foo () () () ())") with
+      match iface_codec.decode_iface_file("(IfaceFile 14 foo () () () ())") with
       | Just _ -> true
       | Nothing -> false)
     assert_true(state, "check-iface contract: missing trailing paren rejected",
-      match iface_codec.decode_iface_file("(IfaceFile 13 foo () () () ()") with
+      match iface_codec.decode_iface_file("(IfaceFile 14 foo () () () ()") with
       | Nothing -> true
       | _ -> false)
 

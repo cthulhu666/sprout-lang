@@ -1296,10 +1296,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   records the downstream check and its result, and the diagnostic should name the competing module.
 
 - [ ] `P2` **Two same-class constraints differing only in their arguments are still rejected.**
-  `where Boxed (Tagged k), Boxed (Tagged j)` gets two hidden slots now — `ast.dict_slot_key` names
-  the arguments — but `infer.check_indistinct_constraints` still rejects it (spec "Two constraints
-  of one class must not differ only in their arguments"). What is left: the eta fallback that
-  takes the only slot carrying a method (`lowering.find_forwarded_method_any`) must pick by key.
+  `where Boxed (Tagged k), Boxed (Tagged j)` gets two hidden slots now —
+  `typed_ast.dict_slot_key` names the arguments — but `infer.check_indistinct_constraints` still
+  rejects it (spec "Two constraints of one class must not differ only in their arguments"). What
+  is left: the eta fallback that takes the only slot carrying a method
+  (`lowering.find_forwarded_method_any`) must pick by key.
   Then drop the rule and its spec paragraph, and turn `type_error/same_class_heads_share_dict_slot`
   and `tuple_heads_share_dict_slot` into run fixtures.
 - [ ] `P2` **A class method's `.iface` scheme quantifies fewer binders than the live
@@ -2440,12 +2441,6 @@ acting.
 - [ ] `P3` **`ast_to_ir`: bind-then-one-arm-match leftovers.** `translate_tail_*` and
   `translate_call` bind a result, then destructure it with a one-arm `match` (`er`, `br`, `r` — the
   last shadowed by `| Just r`); a tuple `<-` says it. Other one-arm matches only name `fresh_name`s.
-- [ ] `P3` **Class-parameter lookup: lowering and resolve read different tables.**
-  `typed_ast.class_tables` builds `params` (declared names) and `params_with_short` (also each
-  class's last segment). Lowering hands `types.eta_class_type` the second, resolve the first, so a
-  short class name finds a parameter in lowering only. Where a bare class shares a short name with
-  `x.B`, decl order picks lowering's answer. Pin resolve's answer for a short name with a test,
-  then keep one table.
 
 ### Compiler / Stdlib Misc
 
@@ -2470,13 +2465,12 @@ acting.
   which reverses C-b's landed decision that under-application is an error, or Package C-a's
   arity-aware types, which makes both mismatches *compile* errors.
   `docs/currying-and-pipe-decision-v1.md`.
-- [ ] `P2` **Two same-short-named classes' instances at one head share a dispatch key.**
-  `typed_ast.constraint_key_from_tc` strips the class to its last segment (`Eq_Int`), and
-  lowering's `inst_table`, resolve's evidence keys and the super/fwd maps all key on it. A file's
-  own `class Eq` with `instance Eq Int` beside the prelude's then overwrites one instance table
-  with the other; a first-class use was seen to reach `__eta_unresolved_Eq_eq`. The `__cm_` wrapper
-  already keeps the module (`run/class_named_like_prelude_class_dispatch.spr` uses a head the
-  prelude lacks). Fix: keep the class in full in the key, at every reader at once.
+- [ ] `P3` **Dictionary pairings still compare classes by their last segment.** Dispatch keys
+  keep the full class now, but `infer.take_dict_for_class`, `infer.dict_refines`,
+  `infer.where_slot_error` and `verify_dispatch.take_by_class` match a dict to its constraint on
+  the short name, so one call or `where` needing both `main.Eq` and `prelude.Eq` can pair them
+  crosswise. `take_dict_for_class` cites an unqualified field entry (`Tag`) no bundled path was
+  found to produce; prove that with a test, then compare in full.
 - [ ] `P2` **Do notation resolves the monad family by unqualified name, so a user-defined `Maybe` is
   not bindable with `<-`.** `x <- safe_div(a, b)` returning the file's own `Maybe Int` reports
   `Type mismatch: Int vs demo.Maybe Int` — the bind machinery matches the family on the bare name,

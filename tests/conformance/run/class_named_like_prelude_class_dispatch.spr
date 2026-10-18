@@ -2,8 +2,7 @@ module main
 
 # A file's own `class Eq` beside the prelude's, each method called through a
 # dictionary. Their `__cm_` wrappers keep the class's module, so the two do not
-# collide. The head is one the prelude's `Eq` has no instance for: two classes'
-# instances at one head still share a dispatch key (BACKLOG.md).
+# collide. class_named_like_prelude_class_same_head.spr has both at one head.
 
 class Eq a
   fn eq(x: a, y: a) -> Bool
