@@ -472,7 +472,8 @@ export type IROp (..) =
   # Lowers to, for each: `<slot> = alloca <ty>` + `store <ty> <in>, ptr <slot>`;
   # then `<sp_save> = call ptr @llvm.stacksave()`.  Slot allocas MUST precede the
   # stacksave so stackrestore (on the back-edge) frees only per-iteration root
-  # allocas, never the slots.  The caller appends `IRBr "tco_loop"`.  No GC root
+  # allocas, never the slots.  Lowering empties sp_save, and drops both, in a
+  # function with no IRRoot.  The caller appends `IRBr "tco_loop"`.  No GC root
   # push — rooting is handled by the liveness pass on the loaded values.
   | IRTcoEntry (List (String, String, String)) String
   # IRTcoLoad <loaded> <lltype> <slot> <kind>  — one per param, at the top of the
@@ -482,7 +483,8 @@ export type IROp (..) =
   | IRTcoLoad String String String IRType
   # IRTcoBack <stores> <sp_save> <loop_label>  — the tail self-call back-edge
   # (a terminator).  stores = (slot, lltype, new_value).  Lowers to, for each:
-  # `store <ty> <new>, ptr <slot>`; then `call void @llvm.stackrestore(ptr <sp_save>)`;
+  # `store <ty> <new>, ptr <slot>`; then, unless sp_save is "",
+  # `call void @llvm.stackrestore(ptr <sp_save>)`;
   # then `br label %<loop_label>`.  No explicit GC root pop — the per-trigger
   # bracketing in ir_rooting self-balances each iteration.
   | IRTcoBack (List (String, String, String)) String String

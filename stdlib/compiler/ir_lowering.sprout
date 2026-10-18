@@ -373,19 +373,20 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ " = zext i1 " ++ s ++ " to i64"
   | sprout_ir.IRTruncI64ToI1 r s ->
       "  " ++ r ++ " = trunc i64 " ++ s ++ " to i1"
-  # TCO entry: alloca + store each param slot, then save the stack pointer.
-  # Slot allocas precede the stacksave so the back-edge's stackrestore frees
-  # per-iteration root allocas without freeing the slots.
+  # TCO entry: alloca + store each param slot, then save the stack pointer
+  # unless sp is "" (drop_unused_stack_resets). Slot allocas precede the stacksave
+  # so the back-edge's stackrestore frees per-iteration root allocas, not the slots.
   | sprout_ir.IRTcoEntry slots sp ->
-      lower_tco_entry_slots(slots) ++ "  " ++ sp ++ " = call ptr @llvm.stacksave()"
+      lower_tco_entry_slots(slots) ++
+        (if sp == "" then "" else "\n  " ++ sp ++ " = call ptr @llvm.stacksave()")
   # TCO loop header: re-load a param from its slot (kind ignored at lowering).
   | sprout_ir.IRTcoLoad loaded ll slot _kind ->
       "  " ++ loaded ++ " = load " ++ ll ++ ", ptr " ++ slot
   # TCO back-edge: store new args into the slots, restore the stack (free the
-  # iteration's root allocas), and branch back to the loop header.
+  # iteration's root allocas) unless sp is "", and branch back to the loop header.
   | sprout_ir.IRTcoBack stores sp loop_lbl ->
       lower_tco_back_stores(stores) ++
-      "  call void @llvm.stackrestore(ptr " ++ sp ++ ")\n" ++
+      (if sp == "" then "" else "  call void @llvm.stackrestore(ptr " ++ sp ++ ")\n") ++
       "  br label %" ++ loop_lbl
   # Mutual tail call: [restore the enclosing self-TCO loop's stack if any], then a
   # guaranteed `musttail` jump immediately followed by `ret` of its value (musttail
@@ -426,15 +427,18 @@ fn lower_blocks_parts(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dic
 fn lower_blocks(bs: List sprout_ir.IRBlock, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   string_concat_many(list_reverse(lower_blocks_parts(bs, ret_ty, str_table, call_attr, Nil)))
 
-# Emit `alloca` + `store` for each TCO param slot.  Each line ends in '\n' so the
-# trailing `stacksave` (appended by the caller) starts on its own line.
+# Emit `alloca` + `store` for each TCO param slot, with no trailing newline.
 fn lower_tco_entry_slots(slots: List (String, String, String)) -> String =
   match slots with
   | Nil -> ""
-  | Cons (slot, ty, in_name) rest ->
+  | [s] -> lower_tco_entry_slot(s)
+  | Cons s rest -> lower_tco_entry_slot(s) ++ "\n" ++ lower_tco_entry_slots(rest)
+
+fn lower_tco_entry_slot(s: (String, String, String)) -> String =
+  match s with
+  | (slot, ty, in_name) ->
       "  " ++ slot ++ " = alloca " ++ ty ++ "\n" ++
-      "  store " ++ ty ++ " " ++ in_name ++ ", ptr " ++ slot ++ "\n" ++
-      lower_tco_entry_slots(rest)
+      "  store " ++ ty ++ " " ++ in_name ++ ", ptr " ++ slot
 
 # Emit a `store` of each new value into its TCO slot (back-edge).
 fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
@@ -467,9 +471,49 @@ fn lower_params(params: List (String, sprout_ir.IRType)) -> String =
 
 export fn lower_fn_with_table(f: sprout_ir.IRFunction, fn_table: Dict (String, Int)) -> String =
   match f with
-  | sprout_ir.IRFunction name params ret_ty blocks ->
+  | sprout_ir.IRFunction name params ret_ty raw_blocks ->
+      let blocks = drop_unused_stack_resets(raw_blocks) in
       "define " ++ ret_ty ++ " @" ++ name ++ "(" ++ lower_params(params) ++ ") {\n"
         ++ lower_blocks(blocks, ret_ty, fn_table, direct_call_attr(blocks)) ++ "}\n"
+
+# A TCO loop saves and restores the stack only to free the root slots (`IRRoot`
+# allocas) an iteration adds. Without any, the pair goes: LLVM treats
+# stackrestore as a memory write, which keeps the loop's loads from being hoisted.
+fn drop_unused_stack_resets(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
+  if entry_has_tco(blocks) && ! any (block_has_root, blocks) then
+    list_map(block_without_stack_reset, blocks)
+  else blocks
+
+# IRTcoEntry is always in the entry block, so a non-TCO function costs one block scan.
+fn entry_has_tco(blocks: List sprout_ir.IRBlock) -> Bool =
+  match blocks with
+  | [sprout_ir.IRBlock _ ops | _] -> any(is_tco_entry_op, ops)
+  | Nil -> false
+
+fn is_tco_entry_op(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRTcoEntry _ _ -> true
+  | _ -> false
+
+fn block_has_root(b: sprout_ir.IRBlock) -> Bool =
+  match b with
+  | sprout_ir.IRBlock _ ops -> any(is_root_op, ops)
+
+fn is_root_op(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRRoot _ _ _ -> true
+  | _ -> false
+
+fn block_without_stack_reset(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
+  match b with
+  | sprout_ir.IRBlock label ops -> sprout_ir.IRBlock(label, list_map(op_without_stack_reset, ops))
+
+fn op_without_stack_reset(op: sprout_ir.IROp) -> sprout_ir.IROp =
+  match op with
+  | sprout_ir.IRTcoEntry slots _ -> sprout_ir.IRTcoEntry(slots, "")
+  | sprout_ir.IRTcoBack stores _ loop_lbl -> sprout_ir.IRTcoBack(stores, "", loop_lbl)
+  | sprout_ir.IRTailCall r callee args _ -> sprout_ir.IRTailCall(r, callee, args, "")
+  | _ -> op
 
 # `noinline` on EVERY call of a function that carries a `musttail` one, the
 # musttail call included — inlining through it imports the partner's own calls,

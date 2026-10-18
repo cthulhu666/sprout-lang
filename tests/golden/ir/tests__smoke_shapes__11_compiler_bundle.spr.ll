@@ -2893,7 +2893,6 @@ entry:
   store i64 %p$xs$in, ptr %t$13
   %t$14 = alloca i64
   store i64 %p$acc$in, ptr %t$14
-  %t$15 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$xs = load i64, ptr %t$13
@@ -2925,7 +2924,6 @@ ovfpanic_9:
 ovfok_9:
   store i64 %t$7, ptr %t$13
   store i64 %t$9, ptr %t$14
-  call void @llvm.stackrestore(ptr %t$15)
   br label %tco_loop
 arm_2_1:
   call void @sprout_abort_match()
@@ -3156,7 +3154,6 @@ entry:
   store i64 %p$acc$in, ptr %t$59
   %t$60 = alloca i64
   store i64 %p$seen$in, ptr %t$60
-  %t$61 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$s = load i64, ptr %t$57
@@ -3270,7 +3267,6 @@ ovfok_49:
   store i64 %t$42, ptr %t$58
   store i64 %t$49, ptr %t$59
   store i64 %t$52, ptr %t$60
-  call void @llvm.stackrestore(ptr %t$61)
   br label %tco_loop
 join_38:
   %t$39 = phi i64 [%t$40, %then_38]
@@ -4515,7 +4511,6 @@ entry:
   store i64 %p$i$in, ptr %t$17
   %t$18 = alloca i64
   store i64 %p$n$in, ptr %t$18
-  %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$b = load i64, ptr %t$16
@@ -4548,7 +4543,6 @@ ovfok_10:
   store i64 %p$b, ptr %t$16
   store i64 %t$10, ptr %t$17
   store i64 %p$n, ptr %t$18
-  call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
 else_7:
   br label %join_7
@@ -4566,7 +4560,6 @@ entry:
   store i64 %p$b$in, ptr %t$21
   %t$22 = alloca i64
   store i64 %p$i$in, ptr %t$22
-  %t$23 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$b = load i64, ptr %t$21
@@ -4609,7 +4602,6 @@ ovfpanic_15:
 ovfok_15:
   store i64 %p$b, ptr %t$21
   store i64 %t$15, ptr %t$22
-  call void @llvm.stackrestore(ptr %t$23)
   br label %tco_loop
 else_12:
   br label %join_12
@@ -4849,7 +4841,6 @@ entry:
   store i64 %p$i$in, ptr %t$18
   %t$19 = alloca i64
   store i64 %p$n$in, ptr %t$19
-  %t$20 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$b = load i64, ptr %t$17
@@ -4888,7 +4879,6 @@ ovfok_12:
   store i64 %p$b, ptr %t$17
   store i64 %t$12, ptr %t$18
   store i64 %p$n, ptr %t$19
-  call void @llvm.stackrestore(ptr %t$20)
   br label %tco_loop
 join_9:
   %t$10 = phi i64 [%p$i, %then_9]
@@ -12905,7 +12895,6 @@ entry:
   store i64 %p$prev_line$in, ptr %t$146
   %t$147 = alloca i64
   store i64 %p$depth$in, ptr %t$147
-  %t$148 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$tokens = load i64, ptr %t$143
@@ -13040,7 +13029,6 @@ ovfok_68:
   store i64 %t$64, ptr %t$145
   store i64 %t$10, ptr %t$146
   store i64 %t$68, ptr %t$147
-  call void @llvm.stackrestore(ptr %t$148)
   br label %tco_loop
 else_61:
   %t$72 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.203, i64 0, i32 1, i64 0
@@ -13094,7 +13082,6 @@ ovfok_94:
   store i64 %t$90, ptr %t$145
   store i64 %t$10, ptr %t$146
   store i64 %t$94, ptr %t$147
-  call void @llvm.stackrestore(ptr %t$148)
   br label %tco_loop
 else_87:
   %t$98 = add i64 0, 0
@@ -13171,7 +13158,6 @@ ovfok_132:
   store i64 %t$132, ptr %t$145
   store i64 %t$10, ptr %t$146
   store i64 %p$depth, ptr %t$147
-  call void @llvm.stackrestore(ptr %t$148)
   br label %tco_loop
 else_129:
   %t$136 = add i64 0, 0
@@ -15248,7 +15234,6 @@ define i64 @stdlib.compiler.layout.body_where(i64 %p$stack$in) {
 entry:
   %t$47 = alloca i64
   store i64 %p$stack$in, ptr %t$47
-  %t$48 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$stack = load i64, ptr %t$47
@@ -15339,7 +15324,6 @@ body_6_11:
   br label %join_11
 arm_7_11:
   store i64 %t$9, ptr %t$47
-  call void @llvm.stackrestore(ptr %t$48)
   br label %tco_loop
 arm_8_11:
   call void @sprout_abort_match()
@@ -15550,7 +15534,6 @@ define i64 @stdlib.compiler.layout.in_bracket(i64 %p$stack$in) {
 entry:
   %t$31 = alloca i64
   store i64 %p$stack$in, ptr %t$31
-  %t$32 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$stack = load i64, ptr %t$31
@@ -15609,7 +15592,6 @@ arm_4_1:
 body_4_1:
   %t$29 = call i64 @sprout_field(i64 %p$stack, i64 1)
   store i64 %t$29, ptr %t$31
-  call void @llvm.stackrestore(ptr %t$32)
   br label %tco_loop
 arm_5_1:
   call void @sprout_abort_match()
@@ -15762,7 +15744,6 @@ define i64 @stdlib.compiler.layout.let_open(i64 %p$stack$in) {
 entry:
   %t$32 = alloca i64
   store i64 %p$stack$in, ptr %t$32
-  %t$33 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$stack = load i64, ptr %t$32
@@ -15797,7 +15778,6 @@ arm_1_11:
   br i1 %t$17, label %body_1_11, label %arm_2_11
 body_1_11:
   store i64 %t$9, ptr %t$32
-  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 arm_2_11:
   %t$19 = add i64 0, 57
@@ -15805,7 +15785,6 @@ arm_2_11:
   br i1 %t$20, label %body_2_11, label %arm_3_11
 body_2_11:
   store i64 %t$9, ptr %t$32
-  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 arm_3_11:
   %t$22 = add i64 0, 62
@@ -15813,7 +15792,6 @@ arm_3_11:
   br i1 %t$23, label %body_3_11, label %arm_4_11
 body_3_11:
   store i64 %t$9, ptr %t$32
-  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 arm_4_11:
   %t$25 = add i64 0, 63
@@ -15821,7 +15799,6 @@ arm_4_11:
   br i1 %t$26, label %body_4_11, label %arm_5_11
 body_4_11:
   store i64 %t$9, ptr %t$32
-  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 arm_5_11:
   %t$28 = add i64 0, 64
@@ -15829,7 +15806,6 @@ arm_5_11:
   br i1 %t$29, label %body_5_11, label %arm_6_11
 body_5_11:
   store i64 %t$9, ptr %t$32
-  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 arm_6_11:
   %t$31 = add i64 0, 0
@@ -16082,7 +16058,6 @@ define i64 @stdlib.compiler.layout.guard_position(i64 %p$stack$in) {
 entry:
   %t$46 = alloca i64
   store i64 %p$stack$in, ptr %t$46
-  %t$47 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$stack = load i64, ptr %t$46
@@ -16145,7 +16120,6 @@ arm_5_11:
   br i1 %t$29, label %body_5_11, label %arm_6_11
 body_5_11:
   store i64 %t$9, ptr %t$46
-  call void @llvm.stackrestore(ptr %t$47)
   br label %tco_loop
 arm_6_11:
   %t$31 = add i64 0, 58
@@ -16153,7 +16127,6 @@ arm_6_11:
   br i1 %t$32, label %body_6_11, label %arm_7_11
 body_6_11:
   store i64 %t$9, ptr %t$46
-  call void @llvm.stackrestore(ptr %t$47)
   br label %tco_loop
 arm_7_11:
   %t$34 = add i64 0, 59
@@ -16161,7 +16134,6 @@ arm_7_11:
   br i1 %t$35, label %body_7_11, label %arm_8_11
 body_7_11:
   store i64 %t$9, ptr %t$46
-  call void @llvm.stackrestore(ptr %t$47)
   br label %tco_loop
 arm_8_11:
   %t$37 = add i64 0, 62
@@ -16169,7 +16141,6 @@ arm_8_11:
   br i1 %t$38, label %body_8_11, label %arm_9_11
 body_8_11:
   store i64 %t$9, ptr %t$46
-  call void @llvm.stackrestore(ptr %t$47)
   br label %tco_loop
 arm_9_11:
   %t$40 = add i64 0, 63
@@ -16177,7 +16148,6 @@ arm_9_11:
   br i1 %t$41, label %body_9_11, label %arm_10_11
 body_9_11:
   store i64 %t$9, ptr %t$46
-  call void @llvm.stackrestore(ptr %t$47)
   br label %tco_loop
 arm_10_11:
   %t$43 = add i64 0, 64
@@ -16185,7 +16155,6 @@ arm_10_11:
   br i1 %t$44, label %body_10_11, label %arm_11_11
 body_10_11:
   store i64 %t$9, ptr %t$46
-  call void @llvm.stackrestore(ptr %t$47)
   br label %tco_loop
 arm_11_11:
   call void @sprout_abort_match()
@@ -16635,7 +16604,6 @@ define i64 @stdlib.compiler.layout.scrutinee_open(i64 %p$stack$in) {
 entry:
   %t$19 = alloca i64
   store i64 %p$stack$in, ptr %t$19
-  %t$20 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$stack = load i64, ptr %t$19
@@ -16667,7 +16635,6 @@ body_1_1:
 ntest_12:
   %t$16 = call i64 @sprout_field(i64 %p$stack, i64 1)
   store i64 %t$16, ptr %t$19
-  call void @llvm.stackrestore(ptr %t$20)
   br label %tco_loop
 arm_2_1:
   %t$18 = add i64 0, 0
@@ -16830,7 +16797,6 @@ define i64 @stdlib.compiler.layout.drop_markers(i64 %p$stack$in) {
 entry:
   %t$15 = alloca i64
   store i64 %p$stack$in, ptr %t$15
-  %t$16 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$stack = load i64, ptr %t$15
@@ -16848,7 +16814,6 @@ body_0_1:
   br i1 %t$11, label %then_8, label %else_8
 then_8:
   store i64 %t$6, ptr %t$15
-  call void @llvm.stackrestore(ptr %t$16)
   br label %tco_loop
 else_8:
   br label %join_8
@@ -26469,7 +26434,6 @@ define i64 @stdlib.compiler.parser.all_irrefutable_do_bind(i64 %p$pats$in) {
 entry:
   %t$16 = alloca i64
   store i64 %p$pats$in, ptr %t$16
-  %t$17 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$pats = load i64, ptr %t$16
@@ -26494,7 +26458,6 @@ body_1_1:
   br i1 %t$15, label %then_11, label %else_11
 then_11:
   store i64 %t$9, ptr %t$16
-  call void @llvm.stackrestore(ptr %t$17)
   br label %tco_loop
 else_11:
   %t$14 = add i64 0, 0
@@ -34234,7 +34197,6 @@ define i64 @stdlib.compiler.parser.any_arg_hole(i64 %p$args$in) {
 entry:
   %t$16 = alloca i64
   store i64 %p$args$in, ptr %t$16
-  %t$17 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$args = load i64, ptr %t$16
@@ -34262,7 +34224,6 @@ then_11:
   br label %join_11
 else_11:
   store i64 %t$9, ptr %t$16
-  call void @llvm.stackrestore(ptr %t$17)
   br label %tco_loop
 join_11:
   %t$12 = phi i64 [%t$13, %then_11]
@@ -58159,7 +58120,6 @@ entry:
   store i64 %p$value$in, ptr %t$20
   %t$21 = alloca i64
   store i64 %p$index$in, ptr %t$21
-  %t$22 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$names = load i64, ptr %t$19
@@ -58198,7 +58158,6 @@ ovfok_11:
   store i64 %p$names, ptr %t$19
   store i64 %p$value, ptr %t$20
   store i64 %t$11, ptr %t$21
-  call void @llvm.stackrestore(ptr %t$22)
   br label %tco_loop
 join_7:
   %t$8 = phi i64 [%t$9, %then_7]
