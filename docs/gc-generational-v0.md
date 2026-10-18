@@ -243,6 +243,38 @@ The same effect recalibrated the instrument's own gate (`retain_all` fell 73% �
 `gc-adapt-check` validates the policy. Any future factor change should re-read this section:
 **re-mark ratios are only comparable at equal collection frequency.**
 
+### 5.4 Re-measured 2026-10-18: the pool grew back
+
+The re-measure §5.3 asks for, on master `8d2a9d8d` after trigger option B
+([gc-trigger-v0.md](gc-trigger-v0.md)) landed. The input is the whole compiler
+(`--emit-ir stdlib/compiler/compile_driver.sprout`), not `ast_to_ir.sprout` as above, so compare
+the shares, not the counts.
+
+| cycles | marked_total | age ≥ 1 | freed | freed at age 0 | GC time (`SPROUT_DEBUG_GC`) |
+|---|---|---|---|---|---|
+| 89 | 25,694,514 | **22,892,313 (89%)** | 51,454,707 | 94.6% | 1.33 s of ~3.6 s |
+
+Fewer cycles than §5.3's 252, but each marks a larger live set: late cycles mark ~800k objects
+(peak 1.1M) out of ~2.4M on the heap. The pool a minor collection could skip is **22.9M
+re-marks**, back above §5.3's 15.2M.
+
+Where GC time goes, from `sample` at 1 ms over 3 runs of a scratch build with the three phase
+functions marked `noinline` (otherwise they inline into `sprout_gc_collect_with_reason` and cannot
+be told apart):
+
+| phase | share of all samples | of which |
+|---|---:|---|
+| mark (`sprout_gc_drain_marks`) | 20.9% | `sprout_heap_lookup` 7.6%, `gc_mark_enqueue` 5.3% |
+| sweep (`sprout_gc_sweep`) | 18.4% | `slot_bytes` 5.9% |
+| allocation | 7.7% | `sprout_gc_alloc_block` 3.4% |
+
+Mark is proportional to objects marked, so skipping the 89% that are re-marks bounds the mark
+prize at ~18% of a self-compile, less whatever major collections still re-mark. The sweep prize
+is less certain. It walks every slot, and 31.2% of its steps cross slots already free from an
+earlier cycle (112.2M steps, 77.1M of them occupied). A minor sweep only gains if young objects
+are not scattered among old ones, which freelist reuse does today. The exit-time cycle is 26 ms,
+2% of GC time.
+
 **So the "GC is 59%" finding is a property of the self-hosted compiler**, whose live
 set is 85% immortal AST/IR, and it does not generalise. BACKLOG:283's "primary target:
 nqueens-class workloads" is contradicted by the data.
