@@ -19,18 +19,18 @@ let make_trivial_fn =
 # A self-tail-recursive `tco_fn(p)` lowered as an alloca-slot loop: entry
 # allocas the param slot and branches to tco_loop; the loop header re-loads the
 # slot; the back-edge stores a new value and branches back. Exercises the
-# IRTcoEntry / IRTcoLoad / IRTcoBack lowering. `loop_ops` go before the back-edge.
-fn make_tco_fn(loop_ops: List sprout_ir.IROp) -> sprout_ir.IRFunction =
+# IRTcoEntry / IRTcoLoad / IRTcoBack lowering. `sp` names the stacksave, "" none.
+fn make_tco_fn(sp: String) -> sprout_ir.IRFunction =
   sprout_ir.IRFunction(
     "tco_fn",
     Cons(("p$in", sprout_ir.IRTScalar), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
-           Cons(sprout_ir.IRTcoEntry(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p$in")), Nil), "%sp"),
+           Cons(sprout_ir.IRTcoEntry(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p$in")), Nil), sp),
            Cons(sprout_ir.IRBr("tco_loop"), Nil))),
     Cons(sprout_ir.IRBlock("tco_loop",
            Cons(sprout_ir.IRTcoLoad(sprout_ir.param_ssa("p"), "i64", "%p.slot", sprout_ir.IRTScalar),
-           loop_ops ++ [sprout_ir.IRTcoBack(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p")), Nil), "%sp", "tco_loop")])),
+           Cons(sprout_ir.IRTcoBack(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p")), Nil), sp, "tco_loop"), Nil))),
     Nil)))
 
 # Three string constants over two blocks, collected from index 5.  The walk
@@ -86,31 +86,29 @@ fn main() -> Unit !{IO} =
     assert_true(state, "lower_fn_with_table output starts with expected header",
       str_starts_with(ir, "define i64 @my_test_fn()"))
 
-    let tco_ir = ir_lowering.lower_fn_with_table(make_tco_fn(Nil), dict_empty())
+    let tco_ir = ir_lowering.lower_fn_with_table(make_tco_fn(""), dict_empty())
     assert_true(state, "tco define renames param to <p>$in",
       string.contains(tco_ir, "define i64 @tco_fn(i64 %p$p$in)"))
     assert_true(state, "tco entry allocas the param slot",
       string.contains(tco_ir, "%p.slot = alloca i64"))
     assert_true(state, "tco entry stores the incoming param into the slot",
       string.contains(tco_ir, "store i64 %p$p$in, ptr %p.slot"))
-    # The save/restore pair frees an iteration's root slots; with none it is
-    # dropped, since LLVM treats stackrestore as a write and stops hoisting loads.
-    assert_true(state, "tco entry without root slots does not stacksave",
+    # Rooting empties `sp` when the loop pushes no root; the printer then emits no pair.
+    assert_true(state, "tco entry with no sp does not stacksave",
       string.contains(tco_ir, "@llvm.stacksave") == false)
     assert_true(state, "tco loop header reloads the slot",
       string.contains(tco_ir, "%p$p = load i64, ptr %p.slot"))
     assert_true(state, "tco back-edge stores the new value",
       string.contains(tco_ir, "store i64 %p$p, ptr %p.slot"))
-    assert_true(state, "tco back-edge without root slots does not stackrestore",
+    assert_true(state, "tco back-edge with no sp does not stackrestore",
       string.contains(tco_ir, "@llvm.stackrestore") == false)
     assert_true(state, "tco back-edge branches to the loop header",
       string.contains(tco_ir, "br label %tco_loop"))
-    let rooted_ir = ir_lowering.lower_fn_with_table(
-      make_tco_fn([sprout_ir.IRRoot("%r.slot", sprout_ir.param_ssa("p"), "%r.d")]), dict_empty())
-    assert_true(state, "tco entry with a root slot stacksaves",
-      string.contains(rooted_ir, "%sp = call ptr @llvm.stacksave()"))
-    assert_true(state, "tco back-edge with a root slot stackrestores",
-      string.contains(rooted_ir, "call void @llvm.stackrestore(ptr %sp)\n  br label %tco_loop"))
+    let sp_ir = ir_lowering.lower_fn_with_table(make_tco_fn("%sp"), dict_empty())
+    assert_true(state, "tco entry with an sp stacksaves",
+      string.contains(sp_ir, "%sp = call ptr @llvm.stacksave()"))
+    assert_true(state, "tco back-edge with an sp stackrestores",
+      string.contains(sp_ir, "call void @llvm.stackrestore(ptr %sp)\n  br label %tco_loop"))
 
     match ir_lowering.walk_blocks_for_strs(str_blocks, 5, dict_empty()) with
     | (text, next_idx, table) ->
