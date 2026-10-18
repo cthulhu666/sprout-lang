@@ -212,9 +212,18 @@ fn add_bare_aliases(entries: List (String, types.Scheme), prefix: String, acc: D
   match entries with
   | Nil -> acc
   | Cons (key, scheme) rest ->
-      match string.strip_prefix(key, prefix) with
+      match bare_alias(key, prefix) with
       | Nothing -> add_bare_aliases(rest, prefix, acc)
       | Just bare -> add_bare_aliases(rest, prefix, dict_set(bare, scheme, acc))
+
+# A class method's `@class:` marker is re-exposed with the method, since hover reads both.
+fn bare_alias(key: String, prefix: String) -> Maybe String =
+  match string.strip_prefix(key, prefix) with
+  | Just bare -> Just(bare)
+  | Nothing ->
+      match string.strip_prefix(key, types.class_marker_key(prefix)) with
+      | Just method -> Just(types.class_marker_key(method))
+      | Nothing -> Nothing
 
 export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot, cache: bundler.LoadEnv) -> CompileResult !{IO} =
   compile_source_with_cache_roots(src, stdlib_root, Nil, cache)
@@ -331,14 +340,15 @@ fn env_scheme(name: String, env: Dict types.Scheme) -> Maybe types.Scheme =
   | Nothing ->
       match dict_get(source.entry_module_prefix ++ name, env) with
       | Nothing -> Nothing
-      | Just scheme -> Just(with_class_constraint(name, scheme, env))
+      | Just scheme -> Just(with_class_constraint(source.entry_module_prefix ++ name, scheme, env))
 
 # A class method's Scheme has no constraint list — nothing fills one, and its calls
 # dispatch off the `@class:` marker instead — so `fmap` renders with nothing explaining its
 # `a b` head. Recovered for DISPLAY only: `infer.inject_constrained_fn_dicts_via_field`
 # reads this list at call sites, so a method must not carry one in the env.
 #
-# Keyed by the bare method name: `unqualify_entry_names` leaves `@class:` keys alone.
+# Keyed by the name the scheme was found under: a user method's marker is canonical
+# (`@class:$entry.myshow`), and `unqualify_entry_names` aliases it with the method.
 # Replacing the list is safe — a method cannot declare a `where` clause, and
 # `infer.register_fn_decl_scheme` drops the marker for a function that takes the name.
 fn with_class_constraint(name: String, s: types.Scheme, env: Dict types.Scheme) -> types.Scheme =

@@ -1,0 +1,23 @@
+module main
+
+# A file's own `class Eq` beside the prelude's, each method called through a
+# dictionary. Their `__cm_` wrappers keep the class's module, so the two do not
+# collide. The head is one the prelude's `Eq` has no instance for: two classes'
+# instances at one head still share a dispatch key (BACKLOG.md).
+
+class Eq a
+  fn eq(x: a, y: a) -> Bool
+
+type Token = Token Int
+
+instance Eq Token
+  fn eq(x: Token, y: Token) -> Bool = false
+
+fn same_mine(x: a) -> Bool where Eq a = eq(x, x)
+
+fn same_prelude(x: a) -> Bool where prelude.Eq a = prelude.eq(x, x)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(same_mine(Token(1))))
+    print(to_string(same_prelude(1)))

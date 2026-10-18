@@ -1,4 +1,5 @@
 import stdlib.test (check_eq, run_suite)
+import testsupport.ident_class as ident
 
 # An eta-expanded class method reads its implementation out of a forwarded
 # dictionary slot, keyed by the tvar the constraint names. When the method's class
@@ -7,8 +8,8 @@ import stdlib.test (check_eq, run_suite)
 # and selection falls back to scanning the slots by method name.
 #
 # One constraint means one candidate, so that scan cannot pick wrongly. Every
-# ambiguous shape is rejected at compile time rather than tested here; the three
-# `tests/conformance/emit_error/ambiguous_forwarded_*.spr` fixtures carry them.
+# ambiguous shape is rejected at compile time rather than tested here;
+# `tests/conformance/emit_error/ambiguous_forwarded_*.spr` carry them.
 
 class Make t
   fn from_int(n: Int) -> t
@@ -23,16 +24,8 @@ fn apply_int(f: Int -> a, n: Int) -> a = f(n)
 
 fn made_int(x: a) -> a where Make a = apply_int(from_int, 1)
 
-# A second class declaring the same method name puts two slots in scope with nothing
-# to choose between them, and that shape is rejected rather than tested here — see
-# tests/conformance/emit_error/ambiguous_forwarded_across_classes.spr. One class with
-# a same-named method is not enough on its own: it must also be a constraint in scope.
-
-class Ident t
-  fn from_int(n: Int) -> t
-
-instance Ident Int
-  fn from_int(n: Int) -> Int = 99
+# A second class with a method `from_int`, in another module (one module may not
+# declare both). Being in the bundle is not enough: it must be a constraint in scope.
 
 fn identish(x: a) -> a where Make a = apply_int(from_int, 1)
 
@@ -40,5 +33,6 @@ fn main() -> Unit !{IO} =
   run_suite("forwarded_slot_selection", [
     check_eq("single constraint, Int instance", made_int(0), 101),
     check_eq("single constraint, String instance", made_int("q"), "made"),
-    check_eq("same method name in a class NOT constrained here", identish(0), 101)
+    check_eq("same method name in a class NOT constrained here", identish(0), 101),
+    check_eq("the other class's method, through its alias", ident.from_int(0), 99)
   ])

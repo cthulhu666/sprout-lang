@@ -1,0 +1,14 @@
+module main
+
+# A method and a top-level `let` of one module may not share a name (spec §8.5):
+# both would be `main.limit`.
+
+class Bounded a
+  fn limit(x: a) -> Int
+
+instance Bounded Int
+  fn limit(x: Int) -> Int = x
+
+let limit: Int = 10
+
+fn main() -> Unit !{IO} = print(int_to_string(limit))

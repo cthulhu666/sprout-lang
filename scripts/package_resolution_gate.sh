@@ -280,5 +280,26 @@ else
   fail=1
 fi
 
+# A method is reached as a value is (docs/qualified-class-methods-v0.md, rule 3):
+# a module bundled but not imported gives no method, and a class import binds its
+# methods, so one beside a function import of the same name is bound twice.
+mni="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_method_not_imported.spr" 2>&1)"
+if echo "$mni" | grep -qF 'Unknown variable: tally'; then
+  echo "PASS method scope: a method of a module not imported here is unknown"
+else
+  echo "FAIL method scope: expected 'Unknown variable: tally'"
+  echo "$mni" | tail -3
+  fail=1
+fi
+
+mcf="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_class_import_method_conflict.spr" 2>&1)"
+if echo "$mcf" | grep -qF '`tally` is imported twice in this file'; then
+  echo "PASS method scope: a class import binds its methods"
+else
+  echo "FAIL method scope: expected \`tally\` imported twice"
+  echo "$mcf" | tail -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail

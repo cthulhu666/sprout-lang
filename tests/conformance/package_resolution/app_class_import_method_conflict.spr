@@ -1,0 +1,7 @@
+module main
+import demo.meth_base (Tally)
+import demo.meth_fn (tally)
+
+# Importing a class binds its methods, so `tally` is bound twice.
+
+fn main() -> Unit !{IO} = print(int_to_string(tally(3)))

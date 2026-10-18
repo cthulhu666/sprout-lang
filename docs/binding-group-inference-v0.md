@@ -292,12 +292,14 @@ rather than caution:
   otherwise where it is written, and its errors come in source order
   (`type_error/instance_error_reported_in_source_order.spr`).
 - A `ClassDecl` is checked, and its methods registered, at the **start of its
-  module**, as its own group, and splits no segment. Method names stay bare after
-  bundling, so registered before the walk they would replace same-named prelude
+  module**, as its own group, and splits no segment. Method names were bare after
+  bundling, so registered before the walk they would have replaced same-named prelude
   functions for the prelude itself (`run/class_method_named_like_called_prelude_fn.spr`,
   `run/class_method_named_like_prelude_extern.spr`); registered where the class
   stands, they would miss the module's uses above it
-  (`run/class_method_named_like_prelude_fn.spr`). Where a module starts is not
+  (`run/class_method_named_like_prelude_fn.spr`). Methods are now canonical
+  (`docs/qualified-class-methods-v0.md`), so the first reason is gone; moving
+  registration into the pre-scan is `BACKLOG.md` P3. Where a module starts is not
   read off names, which an instance does not have: `bundler.BundleOk` gives each
   module's declarations, and `typecheck_modules` checks each whole, planned on its
   own by `group_plan` (`run/order_foreign_instance_first_in_module.spr`,

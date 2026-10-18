@@ -74,7 +74,12 @@ type ParsedModule =
 # Per-module name tables.
 #   ModuleSymbols value_locals type_locals class_locals
 #                 exported_vals exported_types exported_cls
-#                 method_names ctor_exports extern_names
+#                 class_methods ctor_exports extern_names
+#
+# A class method is a module value like a function (docs/qualified-class-methods-v0.md):
+# it is in `value_locals`, and in `exported_vals` when its class is exported.
+# `class_methods` maps a class's bare name to its methods (bare -> canonical), so
+# importing the class binds them.
 #
 # `extern_names` is for DIAGNOSTICS and `foreign_externs`, and is the one entry that is not a
 # resolution binding: an extern is ScopeGlobal, so it resolves by bare name
@@ -85,7 +90,7 @@ type ModuleSymbols =
   | ModuleSymbols
       (Dict String) (Dict String) (Dict String)
       (Dict String) (Dict String) (Dict String)
-      (List String) (Dict (Dict String)) (List String)
+      (Dict (Dict String)) (Dict (Dict String)) (List String)
 
 # What one import binds, in one namespace.
 #
@@ -115,7 +120,7 @@ type ImportBinding =
 # `foreign` is the private externs declared by OTHER modules (name -> module); see
 # `foreign_externs`.
 type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
-                   class_locals: Dict String, method_names: List String,
+                   class_locals: Dict String,
                    unqual_values: Dict String, unqual_types: Dict String,
                    unqual_classes: Dict String,
                    alias_val_exports: Dict (Dict String),
@@ -124,8 +129,7 @@ type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
                    foreign: Dict String)
 
 # The prelude's own symbol tables, held as they are, built once per bundle beside
-# `canonical`. `bare` is built, from two short lists: class methods and externs,
-# which keep their bare names and are in no value table.
+# `canonical`. `bare` is built from the externs, which are in no value table.
 type PreludeNames = (values: Dict String, bare: Dict String, types: Dict String,
                      classes: Dict String)
 
@@ -151,8 +155,8 @@ fn sym_exported_types(s: ModuleSymbols) -> Dict String =
 fn sym_exported_cls(s: ModuleSymbols) -> Dict String =
   match s with | ModuleSymbols _ _ _ _ _ ec _ _ _ -> ec
 
-fn sym_method_names(s: ModuleSymbols) -> List String =
-  match s with | ModuleSymbols _ _ _ _ _ _ mn _ _ -> mn
+fn sym_class_methods(s: ModuleSymbols) -> Dict (Dict String) =
+  match s with | ModuleSymbols _ _ _ _ _ _ cm _ _ -> cm
 
 fn sym_ctor_exports(s: ModuleSymbols) -> Dict (Dict String) =
   match s with | ModuleSymbols _ _ _ _ _ _ _ ce _ -> ce
@@ -163,9 +167,6 @@ fn sym_extern_names(s: ModuleSymbols) -> List String =
 # ---------------------------------------------------------------------------
 # ResolveCtx updates
 # ---------------------------------------------------------------------------
-
-fn ctx_with_methods(c: ResolveCtx, extra: List String) -> ResolveCtx =
-  c with (method_names = list_append(c.method_names, extra))
 
 fn ctx_with_alias_val(c: ResolveCtx, alias: String, exports: Dict String) -> ResolveCtx =
   c with (alias_val_exports = dict_set(alias, exports, c.alias_val_exports))
@@ -184,7 +185,7 @@ fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> Reso
 
 fn empty_resolve_ctx() -> ResolveCtx =
   ResolveCtx(value_locals = dict_empty(), type_locals = dict_empty(),
-             class_locals = dict_empty(), method_names = Nil,
+             class_locals = dict_empty(),
              unqual_values = dict_empty(), unqual_types = dict_empty(),
              unqual_classes = dict_empty(), alias_val_exports = dict_empty(),
              alias_type_exports = dict_empty(), canonical_names = dict_empty(),
@@ -664,11 +665,9 @@ fn collect_modules(entry_path: String, stdlib_root: String, extra_roots: List St
                 # Naming the entry is COUPLED to prepending the FULL prelude, not
                 # done unconditionally: the synthetic name exists only to keep the
                 # entry out of the prelude's namespace. Qualifying anyway would be a
-                # pure loss, because two resolutions still key on the UNQUALIFIED
-                # name — do notation picks the monad family by it, and the
-                # class-method wrapper `__cm_<Class>_<method>` is mangled from it. A
-                # `no_prelude` file that defines its own `Maybe` or `Eq` depends on
-                # staying bare, and the floor is safe to prepend without renaming
+                # pure loss, because do notation still picks the monad family by the
+                # UNQUALIFIED name. A `no_prelude` file that defines its own `Maybe`
+                # depends on staying bare, and the floor is safe to prepend without renaming
                 # precisely because it declares no types and no classes — there is
                 # nothing on either axis for the entry to collide with.
                 if entry_path == prelude_path(stdlib_root) then (Nothing, plain_mods)
@@ -801,7 +800,7 @@ fn build_module_symbols(mod_name: String, exported: List String, ctor_types: Lis
   build_symbols_from_decls(mod_name, exported, ctor_types, decls,
     ModuleSymbols(dict_empty(), dict_empty(), dict_empty(),
                   dict_empty(), dict_empty(), dict_empty(),
-                  Nil, dict_empty(), Nil))
+                  dict_empty(), dict_empty(), Nil))
 
 fn build_symbols_from_decls(mod_name: String, exported: List String, ctor_types: List String, decls: List ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
   match decls with
@@ -904,20 +903,24 @@ fn add_type_name_to_symbols(mod_name: String, name: String, is_exported: Bool, a
                     ec, mn, ce, xs)
   where canonical = canonical_of(mod_name, name)
 
+# A method is exported exactly when its class is.
 fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
-  match acc with
-  | ModuleSymbols vl tl cl ev et ec mn ce xs ->
+  match fold(add_method_value(mod_name, is_exported, _, _), acc, method_names) with
+  | ModuleSymbols vl tl cl ev et ec cm ce xs ->
       ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
                     if is_exported then dict_set(name, canonical, ec) else ec,
-                    list_append(mn, extract_method_names(methods)), ce, xs)
+                    dict_set(name, own_methods(vl, method_names), cm), ce, xs)
   where canonical = canonical_of(mod_name, name)
+        method_names = list_map(method_sig_name, methods)
 
-fn extract_method_names(methods: List ast.ClassMethodSig) -> List String =
-  match methods with
-  | Nil -> Nil
-  | Cons sig rest ->
-      match sig with
-      | ast.ClassMethodSig name _ _ _ _ -> Cons(name, extract_method_names(rest))
+fn method_sig_name(m: ast.ClassMethodSig) -> String =
+  match m with | ast.ClassMethodSig name _ _ _ _ -> name
+
+fn add_method_value(mod_name: String, is_exported: Bool, acc: ModuleSymbols, name: String) -> ModuleSymbols =
+  add_value_to_symbols(mod_name, name, is_exported, acc)
+
+fn own_methods(vl: Dict String, names: List String) -> Dict String =
+  fold(\ (acc, n) -> dict_set(n, dict_get_or(n, vl, n), acc), dict_empty(), names)
 
 fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.TypeConstructor, exported: List String, ctor_types: List String, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -965,7 +968,6 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
               value_locals = sym_value_locals(own_syms),
               type_locals = sym_type_locals(own_syms),
               class_locals = sym_class_locals(own_syms),
-              method_names = sym_method_names(own_syms),
               canonical_names = canonical,
               prelude = prelude,
               foreign = foreign_externs(sym_extern_names(own_syms), externs)))
@@ -1104,8 +1106,7 @@ fn prelude_names(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> Prelud
   | Nothing -> no_prelude_names()
   | Just syms ->
       PreludeNames(values = sym_value_locals(syms),
-                   bare = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(),
-                               sym_method_names(syms) ++ sym_extern_names(syms)),
+                   bare = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(), sym_extern_names(syms)),
                    types = sym_type_locals(syms), classes = sym_class_locals(syms))
 
 fn no_prelude_names() -> PreludeNames =
@@ -1152,11 +1153,9 @@ fn apply_one_import(spec: module_loader.ImportSpec, all_symbols: Dict ModuleSymb
   let Just symbols = spec_symbols(spec, all_symbols, stdlib_root, extra_roots) else ctx
   in match spec with
      | module_loader.ImportAlias _ alias _ ->
-         ctx_with_methods(
-           ctx_with_alias_type(
-             ctx_with_alias_val(ctx, alias, sym_exported_vals(symbols)),
-             alias, merge_type_exports(symbols)),
-           sym_method_names(symbols))
+         ctx_with_alias_type(
+           ctx_with_alias_val(ctx, alias, sym_exported_vals(symbols)),
+           alias, merge_type_exports(symbols))
      | module_loader.ImportSelective _ names _ -> apply_selective_names(names, symbols, ctx)
 
 fn merge_type_exports(symbols: ModuleSymbols) -> Dict String =
@@ -1169,8 +1168,7 @@ fn apply_selective_names(names: List String, symbols: ModuleSymbols, ctx: Resolv
       apply_selective_names(rest, symbols, apply_selective_name(name, symbols, ctx))
 
 fn apply_selective_name(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
-  try_add_method(name, symbols,
-    apply_import_bindings(selective_name_bindings(name, symbols), ctx))
+  apply_import_bindings(selective_name_bindings(name, symbols), ctx)
 
 # Every binding one selective import name contributes. Single source of truth:
 # resolution applies exactly this list and the import diagnostics below check it,
@@ -1193,16 +1191,21 @@ fn type_bindings(name: String, symbols: ModuleSymbols) -> List ImportBinding =
       Cons(ImportBinding (NsType, name, canonical),
         match dict_get(name, sym_ctor_exports(symbols)) with
         | Nothing -> Nil
-        | Just ctor_map -> vec_to_list(vec_map(ctor_binding, dict_entries(ctor_map))))
+        | Just ctor_map -> vec_to_list(vec_map(value_entry_binding, dict_entries(ctor_map))))
 
-fn ctor_binding(entry: (String, String)) -> ImportBinding =
+fn value_entry_binding(entry: (String, String)) -> ImportBinding =
   match entry with
-  | (ctor_name, canonical) -> ImportBinding(NsValue, ctor_name, canonical)
+  | (name, canonical) -> ImportBinding(NsValue, name, canonical)
 
+# A class import binds its methods, as a type import binds its constructors.
 fn class_binding(name: String, symbols: ModuleSymbols) -> List ImportBinding =
   match dict_get(name, sym_exported_cls(symbols)) with
   | Nothing -> Nil
-  | Just canonical -> [ImportBinding (NsClass, name, canonical)]
+  | Just canonical ->
+      Cons(ImportBinding (NsClass, name, canonical),
+        match dict_get(name, sym_class_methods(symbols)) with
+        | Nothing -> Nil
+        | Just methods -> vec_to_list(vec_map(value_entry_binding, dict_entries(methods))))
 
 fn apply_import_bindings(bindings: List ImportBinding, ctx: ResolveCtx) -> ResolveCtx =
   match bindings with
@@ -1217,11 +1220,6 @@ fn apply_import_binding(b: ImportBinding, ctx: ResolveCtx) -> ResolveCtx =
   | ImportBinding NsType name target -> ctx_with_unqual_type(ctx, name, target)
   | ImportBinding NsClass name target -> ctx_with_unqual_class(ctx, name, target)
   | ImportBinding NsPrefix _ _ -> ctx
-
-fn try_add_method(name: String, symbols: ModuleSymbols, ctx: ResolveCtx) -> ResolveCtx =
-  if str_list_member(name, sym_method_names(symbols)) then
-    ctx_with_methods(ctx, Cons(name, Nil))
-  else ctx
 
 # ---------------------------------------------------------------------------
 # Import diagnostics
@@ -1300,12 +1298,11 @@ fn ns_tag(ns: ImportNs) -> String =
   | NsClass -> "class"
   | NsPrefix -> "prefix"
 
-# Two kinds of name bind nothing yet are legitimate to import, and both would
-# otherwise read as unknown: a class METHOD, which joins the method list, and an
-# EXTERN, which is global once its module is bundled — listing it is what bundles
-# the module.
+# One kind of name binds nothing yet is legitimate to import, and would otherwise
+# read as unknown: an EXTERN, which is global once its module is bundled — listing
+# it is what bundles the module.
 #
-# For an extern the exemption is FORCED, not a leniency. An extern "never enters a
+# The exemption is FORCED, not a leniency. An extern "never enters a
 # module's exported set" (spec-v0 §"Externs are outside the module system"), and
 # `export` on one is a parsed-and-discarded no-op (parser.sprout:2227), so
 # "declared but not exported" is not a state an extern can be in. Rejecting one
@@ -1318,9 +1315,7 @@ fn ns_tag(ns: ImportNs) -> String =
 # module's imports is still unknown here.
 fn import_name_binds(name: String, symbols: ModuleSymbols) -> Bool =
   match selective_name_bindings(name, symbols) with
-  | Nil ->
-      str_list_member(name, sym_method_names(symbols))
-        || str_list_member(name, sym_extern_names(symbols))
+  | Nil -> str_list_member(name, sym_extern_names(symbols))
   | [_ | _] -> true
 
 fn module_declares_name(name: String, symbols: ModuleSymbols) -> Bool =
@@ -1491,7 +1486,7 @@ fn alias_export(alias: String, symbol: String, aliases: Dict (Dict String)) -> M
 #   D. An alias-qualified import (`sealed.unseal`) — `alias_export`.
 #   E. `prelude.X` — `prelude_qualified`. After D, so an alias named `prelude`
 #      wins; before F, which would mark it as a typed canonical name.
-#   F. Anything left: a method name, a typo, or a hand-written canonical name.
+#   F. Anything left: a typo, or a hand-written canonical name.
 #      `guard_canonical` separates the last from the rest and must run here,
 #      after D has declined — running it earlier would reject `sealed.unseal`,
 #      whose canonical form is in the same table.
@@ -1544,11 +1539,9 @@ fn bare_value_name(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.value_locals) with
   | Just canonical -> canonical
   | Nothing ->
-      if str_list_member(name, ctx.method_names) then name
-      else
-        match dict_get(name, ctx.unqual_values) with
-        | Just canonical -> canonical
-        | Nothing -> guard_private_extern(ctx, name)
+      match dict_get(name, ctx.unqual_values) with
+      | Just canonical -> canonical
+      | Nothing -> guard_private_extern(ctx, name)
 
 # `prelude.X` is the prelude's `X`, after a local, an import alias or a top-level
 # value named `prelude` has declined it (docs/prelude-name-identity-v0.md §5). `Nothing` for an `X` the
@@ -1764,23 +1757,32 @@ fn qualify_class_methods(ctx: ResolveCtx, methods: List ast.ClassMethodSig) -> L
   | Cons m rest ->
       match m with
       | ast.ClassMethodSig name params ret_type effects constraints ->
-          Cons(ast.ClassMethodSig(name, qualify_param_types(ctx, params), qualify_type_expr(ctx, ret_type), effects,
+          Cons(ast.ClassMethodSig(dict_get_or(name, ctx.value_locals, name), qualify_param_types(ctx, params),
+                                  qualify_type_expr(ctx, ret_type), effects,
                                   qualify_constraints(ctx, constraints)),
                qualify_class_methods(ctx, rest))
 
-fn qualify_instance_methods(ctx: ResolveCtx, methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
+# An instance names its methods through its class, not through scope, so it need
+# not import them: `class_name` is canonical, and so is the method it yields.
+fn qualify_instance_methods(ctx: ResolveCtx, class_name: String, methods: List ast.InstanceMethodImpl) -> List ast.InstanceMethodImpl =
   match methods with
   | Nil -> Nil
   | Cons m rest ->
       match m with
       | ast.InstanceMethodImpl name params ret_type effects constraints body ->
-          Cons(ast.InstanceMethodImpl(name,
+          Cons(ast.InstanceMethodImpl(class_method_canonical(class_name, name),
                                       qualify_params(ctx, params),
                                       qualify_maybe_type(ctx, ret_type),
                                       effects,
                                       qualify_constraints(ctx, constraints),
                                       qualify_expr(ctx, ast.param_names(params), body)),
-               qualify_instance_methods(ctx, rest))
+               qualify_instance_methods(ctx, class_name, rest))
+
+# A method's canonical name is its class's module and its own name; a prelude
+# class's method is bare.
+fn class_method_canonical(class_name: String, method: String) -> String =
+  if str_find(class_name, ".") == -1 then method
+  else str_slice(class_name, 0, str_len(class_name) - str_len(string.after_last_dot(class_name))) ++ method
 
 fn qualify_maybe_type(ctx: ResolveCtx, mt: Maybe ast.TypeExpr) -> Maybe ast.TypeExpr =
   match mt with
@@ -1856,11 +1858,12 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
   | ast.InstanceDecl constraint instance_constraints methods pos ->
       match constraint with
       | ast.TypeConstraint class_name args ->
-          ast.InstanceDecl(
-            ast.TypeConstraint(qualify_type_name(ctx, class_name), qualify_type_list(ctx, args)),
-            qualify_constraints(ctx, instance_constraints),
-            qualify_instance_methods(ctx, methods),
-            pos)
+          let qclass = qualify_type_name(ctx, class_name)
+          in ast.InstanceDecl(
+               ast.TypeConstraint(qclass, qualify_type_list(ctx, args)),
+               qualify_constraints(ctx, instance_constraints),
+               qualify_instance_methods(ctx, qclass, methods),
+               pos)
   | ast.AliasDecl name type_params rhs pos ->
       ast.AliasDecl(dict_get_or(name, ctx.type_locals, name), type_params, qualify_type_expr(ctx, rhs), pos)
   | ast.WrapDecl name type_params inner deriving_classes pos ->

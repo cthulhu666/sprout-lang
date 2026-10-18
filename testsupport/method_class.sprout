@@ -1,0 +1,16 @@
+module testsupport.method_class
+
+# Classes for tests/stdlib/test_class_method_visibility.spr.
+
+export class Runner a
+  fn twice(x: a) -> Int
+
+instance Runner Int
+  fn twice(x: Int) -> Int = x * 2
+
+# A method named `main`: its instance is not an entry point.
+export class Starter a
+  fn main(x: a) -> Int
+
+instance Starter Int
+  fn main(x: Int) -> Int = x + 1

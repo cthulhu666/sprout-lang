@@ -1,0 +1,6 @@
+module demo.meth_mid
+
+# Imports demo.meth_base, so an importer of this module bundles it without importing it.
+import demo.meth_base (Tally)
+
+export fn mid(x: Int) -> Int = tally(x)

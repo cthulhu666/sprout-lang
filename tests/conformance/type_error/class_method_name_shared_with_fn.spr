@@ -1,0 +1,14 @@
+module main
+
+# A method and a top-level function of one module may not share a name (spec §8.5):
+# both would be `main.speak`.
+
+class Speaker a
+  fn speak(x: a) -> Int
+
+instance Speaker Int
+  fn speak(x: Int) -> Int = x
+
+fn speak(s: String) -> String = s ++ "!"
+
+fn main() -> Unit !{IO} = print(speak("hi"))

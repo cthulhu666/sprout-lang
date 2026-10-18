@@ -1,0 +1,16 @@
+import stdlib.test (check_eq, run_suite)
+import testsupport.method_class as mc
+import testsupport.method_class (Runner)
+
+# A method is reached as a value is: through an alias, or bound bare by importing
+# its class (docs/qualified-class-methods-v0.md, rule 3).
+
+fn twice_each(xs: List Int) -> List Int = list_map(twice, xs)
+
+fn main() -> Unit !{IO} =
+  run_suite("class method visibility", [
+    check_eq("through an alias", mc.twice(3), 6),
+    check_eq("bound by importing its class", twice(4), 8),
+    check_eq("first-class, bound by its class", twice_each([1, 2]), [2, 4]),
+    check_eq("a method named main is not the entry", mc.main(1), 2)
+  ])
