@@ -851,6 +851,18 @@ static void sprout_ap_note_ptr_store(long long target, long long value) {
   if (sprout_hdr_age(th) >= 1 && sprout_hdr_age(vh) == 0) g_ap_old_to_young++;
 }
 
+__attribute__((noinline, cold)) static void sprout_ap_store_slow(long long target, long long value) {
+  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(target, value);
+}
+
+/* The mutation primitives' hook.  The slow half is out of line so that a
+ * primitive stays small enough to inline into Sprout code: inlined here, the
+ * getenv and lookups made vector_mutset a call per store.  g_ageprof is -1
+ * until the first store resolves it, so the test is != 0, not > 0. */
+static inline void sprout_ap_on_store(long long target, long long value) {
+  if (g_ageprof != 0) sprout_ap_store_slow(target, value);
+}
+
 /* Runs after the atexit full collect (destructors follow atexit handlers), so
  * the totals include every cycle.  Aborts rather than reports on an internal
  * inconsistency: a histogram that disagrees with its own total means the
@@ -2119,7 +2131,7 @@ long long ref_write(long long ref, long long value) {
   /* Candidate write-barrier site: a pointer store into an already-allocated
    * object.  Measured under SPROUT_GC_AGEPROF to price a barrier before one
    * exists (see sprout_ap_note_ptr_store). */
-  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(ref, value);
+  sprout_ap_on_store(ref, value);
   ((RefVal*)(uintptr_t)ref)->value = value;
   return 0;
 }
@@ -8823,7 +8835,7 @@ long long vector_mutset(long long vec, long long index, long long value) {
    * either in the VectorVal's own slot or in a malloc buffer it owns; neither is
    * a GC object in its own right, so a real barrier here must record the OWNING
    * object, which is what is priced. */
-  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(vec, value);
+  sprout_ap_on_store(vec, value);
   v->data[index] = value;
   return 0;
 }
@@ -8881,7 +8893,7 @@ long long vector_push(long long vec, long long value) {
   }
   /* The same candidate write-barrier site as vector_mutset: a push stores into an
    * already-allocated object, so a generational barrier would have to cover it. */
-  if (sprout_gc_ageprof_on()) sprout_ap_note_ptr_store(vec, value);
+  sprout_ap_on_store(vec, value);
   v->data[v->len] = value;
   v->len = v->len + 1;
   return 0;
