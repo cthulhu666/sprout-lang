@@ -1,0 +1,32 @@
+module demo
+
+# A file's own `Maybe`, named and shaped like the prelude's, ends a block through
+# `try` and its own `Propagate` instance. `<-` does not unwrap it: that is the
+# prelude's `Maybe` only, and only until `<-` stops unwrapping (try-propagate-v0 §8).
+
+type Maybe a = Just a | Nothing
+
+instance Propagate Maybe
+  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a =
+    match value with
+    | Just v -> Continue(v)
+    | Nothing -> Break(Nothing)
+
+fn safe_div(a: Int, b: Int) -> Maybe Int =
+  if b == 0 then Nothing else Just(a / b)
+
+fn chain(a: Int, b: Int, c: Int) -> Maybe Int =
+  let x = try safe_div(a, b)
+      y = try safe_div(x, c)
+  in Just(y + 1)
+
+fn show_maybe(m: Maybe Int) -> String =
+  match m with
+  | Just n -> int_to_string(n)
+  | Nothing -> "none"
+
+fn main() -> Unit !{IO} =
+  do
+    print(show_maybe(chain(10, 2, 1)))
+    print(show_maybe(chain(10, 0, 1)))
+    print(show_maybe(chain(10, 2, 0)))

@@ -25,11 +25,10 @@ into `justfile` and `ci-fast-gates` in the same change.
   own declarations are qualified under a synthetic module name that is stripped
   from all output — so `print(Just(3))` prints `Just(3)`.
 
-  Add `no_prelude` as the first line if the fixture needs to be preludeless. Two
-  cases genuinely do, both because the construct resolves by *unqualified* name:
-  a fixture that redefines a type and binds it with `<-`, and one that declares
-  its own `class`. `codegen_do_bind.spr`, `instance_check.spr` and
-  `type_classes.spr` are the in-tree examples.
+  Add `no_prelude` as the first line only to test the directive itself
+  (`no_prelude_directive.spr`, `no_prelude_floor.spr`). A fixture's own class or
+  type sits beside the prelude's: `instance_check.spr` declares its own `Eq`, and
+  `try_own_maybe.spr` its own `Maybe`, which ends a block through `try`.
 
   > Until 2026-08-20 this said bare `.spr` files were self-contained and got no
   > prelude, so a fixture had to define everything it used. That is what put all

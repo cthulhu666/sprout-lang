@@ -396,6 +396,9 @@ migration's main defensible benefit beyond the examples.
 That single break is itself the argument for marking rather than migrating the
 fixtures: the file's subject is do-bind stripping *without* a prelude Maybe in
 scope, and giving it one deletes the case under test.
+*Later (2026-10-18): that was wrong. The file redefined `Maybe` to get around an IR
+constructor-routing gap that has since closed, and its `main` was `()`, so none of its
+binds was lowered. It now binds the prelude's `Maybe` and checks six results.*
 
 **Golden IR.** The 7 examples grow from ~70–150 lines to ~12.7k each, roughly
 **+88k lines on an 811k-line corpus (~11%)**, and every future prelude change

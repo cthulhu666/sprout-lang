@@ -2499,15 +2499,6 @@ acting.
   the short name, so one call or `where` needing both `main.Eq` and `prelude.Eq` can pair them
   crosswise. `take_dict_for_class` cites an unqualified field entry (`Tag`) no bundled path was
   found to produce; prove that with a test, then compare in full.
-- [ ] `P2` **Do notation resolves the monad family by unqualified name, so a user-defined `Maybe` is
-  not bindable with `<-`.** `x <- safe_div(a, b)` returning the file's own `Maybe Int` reports
-  `Type mismatch: Int vs demo.Maybe Int` — the bind machinery matches the family on the bare name,
-  so a qualified `demo.Maybe`/`$entry.Maybe` is not recognised as the same family. Same class of gap
-  as the item above (qualification is not uniform across resolutions that key on names) and worth
-  fixing together. Affected fixtures: `conformance/run/codegen_do_bind.spr`,
-  `test_ir_codegen_do_bind_strip.spr`. *(Both were surfaced by making the prelude unconditional and
-  are **pre-existing** — each reproduces with an ordinary `module demo` header. The files that hit
-  them were previously exempt only because they received no prelude at all.)*
 - [ ] `P3` **Ten intrinsics get a `declare` for a symbol the runtime does not define** —
   `@to_double`, `@double_to_bits`, `@double_from_bits` and the seven `@bit_*`. Nothing calls them
   any more and LLVM does not require an unreferenced declare to resolve, so this is inert today.
