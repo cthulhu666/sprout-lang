@@ -2251,11 +2251,24 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   inline: a base64 loop kept every `bytes_get_unboxed`/`vector_get_unboxed` call and timed the
   same linked whole or per file. Fix in the emitted declare or in `link_whole_program.sh`.
   `docs/byte-buffer-v0.md` §3.
-- [ ] `P2` **Inline byte and vector access, with alias tags.** `ir_lowering` emits a C call for
-  each `bytes_get`/`vector_get`/`vector_mutset`. Hand-inlined in a base64 loop: 6.5× C → 2.6×.
-  Adding TBAA tags that keep headers, elements and bytes apart: → 1.6×, because LLVM otherwise
-  assumes any `i64` store may hit a header and reloads it. Phase 3.3 of
-  `docs/native-sprout-runtime-v0.md` needs it. `docs/byte-buffer-v0.md` §3.
+- [ ] `P2` **Inline `Bytes` reads the way B1 inlines `Vector Double`.** `bytes_get_unboxed` is a
+  C call per byte. B1 (`IRVecGetD`) covers only `Vector Double`, because generic wrappers erase
+  other element types; `Bytes` holds only bytes, so no specialisation is needed. Hand-inlined
+  in a base64 loop: 6.5× C → 2.6×. Phase 3.3 of `docs/native-sprout-runtime-v0.md` needs it.
+  `docs/byte-buffer-v0.md` §3.
+- [ ] `P2` **Alias tags (TBAA) on inlined runtime-object access.** Every Sprout value is an `i64`,
+  so LLVM assumes an element store may hit a vector or `Bytes` header and reloads `len` and
+  `data` after it. Tags that keep headers, elements and bytes apart: 2.6× → 1.6× C on base64.
+  B1's `IRVecGetD`/`IRVecSetD` loops have the same reloads. `docs/byte-buffer-v0.md` §3.
+- [ ] `P3` **A top-level literal table is opaque to LLVM.** A top-level `let` is a mutable global
+  set at startup, so LLVM sees neither its size nor its contents and keeps a bounds check on a
+  masked index (`& 63`). As a constant array: base64 2.08× → 1.65× C, and 1.25× with shift-based
+  packing. Array data, unlike the Double-literal entry under Compiler Internals Follow-Ups.
+  `docs/byte-buffer-v0.md` §3.1.
+- [ ] `P3` **Bounds checks in counted loops are never removed.** Reading `3g .. 3g + 2` under
+  `g < len / 3` is always in range, yet each read keeps its check at `-O2`. Removed by hand with
+  the two entries above: base64 reaches 0.99× C. Options: range facts from `ast_to_ir`, an LLVM
+  loop pass (unmeasured), or stdlib loops that check once per call. `docs/byte-buffer-v0.md` §3.1.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, +1 per object whatever its size, so many-small
   over-collects and few-but-large under-collects (`adapt_factor` 3.0 amplifies it). 2026-09-06, a
