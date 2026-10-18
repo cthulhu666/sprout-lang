@@ -1719,6 +1719,13 @@ deferral happened, not for current behaviour. Still open:
   test, and an `i64` handle says nothing about valid memory. Levers: the age-profile hook out
   of default builds (~6%, measured); handles LLVM knows are dereferenceable (untested).
   `docs/native-sprout-runtime-v0.md` §Phase 2.
+- [ ] `P3` **Sink a shared store and tail self-call out of both `if` arms.**
+  `if c then do { set(d, k, a); f(x1) } else do { set(d, k, b); f(x2) }` stays a branch: each
+  arm's inlined bounds checks and `+ 1` overflow check make it several blocks, so LLVM will not
+  if-convert it. Written as one `set` and one `f` with `if c then … else …` arguments, it
+  becomes selects (`sort_merge`, 1.92× → 1.37× C on random input). A lowering in
+  `ast_to_ir` could do that rewrite when both arms end in the same effect and tail call and
+  their differing arguments are pure. `docs/native-sprout-runtime-v0.md` §Phase 2.
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.
