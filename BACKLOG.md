@@ -2245,6 +2245,17 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   perft, so it is workload-dependent and unmeasured elsewhere. Not a candidate for the
   416-binary test path — a binary that runs once cannot repay any extra link.
   `docs/cross-tu-inlining-v0.md` §5.2.
+- [ ] `P2` **Whole-program linking cannot inline the CPR `_unboxed` externs on aarch64.** Emitted
+  IR declares `{ i64, i64 } @bytes_get_unboxed`; clang compiles the C to `[2 x i64]` on arm64
+  and aarch64 Linux (x86_64 agrees). The registers match, the IR types do not, so LLVM will not
+  inline: a base64 loop kept every `bytes_get_unboxed`/`vector_get_unboxed` call and timed the
+  same linked whole or per file. Fix in the emitted declare or in `link_whole_program.sh`.
+  `docs/byte-buffer-v0.md` §3.
+- [ ] `P2` **Inline byte and vector access, with alias tags.** `ir_lowering` emits a C call for
+  each `bytes_get`/`vector_get`/`vector_mutset`. Hand-inlined in a base64 loop: 6.5× C → 2.6×.
+  Adding TBAA tags that keep headers, elements and bytes apart: → 1.6×, because LLVM otherwise
+  assumes any `i64` store may hit a header and reloads it. Phase 3.3 of
+  `docs/native-sprout-runtime-v0.md` needs it. `docs/byte-buffer-v0.md` §3.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, +1 per object whatever its size, so many-small
   over-collects and few-but-large under-collects (`adapt_factor` 3.0 amplifies it). 2026-09-06, a

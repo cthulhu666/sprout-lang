@@ -248,6 +248,11 @@ will cost time until Phase 2 lands. Do them for the smaller C surface, or not ye
    the seed).
 3. Byte-level crypto (`crypto_sha256`, `crypto_hmac_sha256`), once byte access is unboxed.
 
+**3.1 fails its gate today.** A pure Sprout base64 encoder is 22–55× slower than C. A buffer
+alone gets to 6.5×: the rest is a C call per byte read or write. Applied by hand to the emitted
+IR, inline access reaches 2.6×, alias tags (TBAA) 1.6×, and a byte buffer 1.8× once pushes are
+not rooted. Which buffer, and how it stays pure: [byte-buffer-v0.md](byte-buffer-v0.md).
+
 **3.4 `Dict`: fix the representation, then decide where it lives.** Re-profiled over 5 runs:
 `Dict` is 19.8% of a self-compile, and 63% of its 4.23M lookups miss. Neither a cheaper
 comparison nor skipping matched prefixes moves wall time, and a hash map cannot keep the key
