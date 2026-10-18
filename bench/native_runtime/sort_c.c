@@ -17,9 +17,11 @@ static long long now_micros(void) {
   return (long long)ts.tv_sec * 1000000LL + ts.tv_nsec / 1000;
 }
 
-/* The LCG sort_bench.sprout uses; it stays inside Sprout's checked Int range. */
-static void fill(long long* a, long long n) {
-  long long x = 42;
+/* The LCG sort_bench.sprout uses; it stays inside Sprout's checked Int range.
+ * Each round gets its own seed: sorting one input over and over lets the branch
+ * predictor learn it, which flatters branchy code at small n. */
+static void fill(long long* a, long long n, long long seed) {
+  long long x = seed;
   for (long long i = 0; i < n; i++) {
     x = (x * 1103515245 + 12345) % 2147483648LL;
     a[i] = (x / 65536) % 65536;
@@ -59,9 +61,9 @@ static void run(long long n, long long reps) {
   long long* a = malloc((size_t)n * sizeof(long long));
   long long* scratch = malloc((size_t)n * sizeof(long long));
   long long t0 = now_micros();
-  for (long long r = 0; r < reps; r++) fill(a, n);
+  for (long long r = reps; r > 0; r--) fill(a, n, 42 + r);
   long long t1 = now_micros();
-  for (long long r = 0; r < reps; r++) { fill(a, n); sort(a, scratch, n); }
+  for (long long r = reps; r > 0; r--) { fill(a, n, 42 + r); sort(a, scratch, n); }
   long long t2 = now_micros();
   long long check = 0;
   for (long long i = 0; i < n; i++) {

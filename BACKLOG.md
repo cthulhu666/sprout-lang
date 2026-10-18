@@ -1713,11 +1713,12 @@ deferral happened, not for current behaviour. Still open:
   look redundant, and they survive LLVM inlining, so small wrappers cost real time. Narrowing the
   rule needs a written GC-safety argument first, since a missing root corrupts the heap.
   Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
-- [ ] `P3` **Merge-sort pair: 1.76× C at n=100k, against Phase 2's 1.3×.** The merge's two
-  tail calls keep `if y < x` a branch, which random input mispredicts; C's ternary is a `csel`.
-  A select-shaped merge fixes n=100k but slows n=440 to 1.40×, since each step reloads wrapper →
-  vector → `len`/`data`. Needs both: if-conversion of the two-tail-call shape, and a shorter
-  reload chain. `docs/native-sprout-runtime-v0.md` §Phase 2.
+- [ ] `P3` **Merge-sort pair: 1.37× C at n=440, against Phase 2's 1.3×.** A merge step is ~33
+  instructions to C's 11: it reloads wrapper → vector → `len`/`data` and repeats the null and
+  bounds checks. The loads stay in the loop with no aliasing in the way: each follows an exit
+  test, and an `i64` handle says nothing about valid memory. Levers: the age-profile hook out
+  of default builds (~6%, measured); handles LLVM knows are dereferenceable (untested).
+  `docs/native-sprout-runtime-v0.md` §Phase 2.
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.

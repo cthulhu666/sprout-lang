@@ -17,7 +17,8 @@ fn rem(a: Int, m: Int) -> Int =
 fn smaller(a: Int, b: Int) -> Int =
   if a < b then a else b
 
-# The LCG sort_c.c uses; every product stays inside the checked Int range.
+# The LCG sort_c.c uses; every product stays inside the checked Int range. Round r
+# is seeded 42 + r in both halves, so neither sorts one input the predictor learns.
 fn fill_from(v: MutVec Int, i: Int, n: Int, x: Int) -> Unit !{IO} =
   if i >= n then ()
   else
@@ -26,8 +27,8 @@ fn fill_from(v: MutVec Int, i: Int, n: Int, x: Int) -> Unit !{IO} =
       _ <- mutvec_set(v, i, rem(next / 65536, 65536))
       fill_from(v, i + 1, n, next)
 
-fn fill(v: MutVec Int, n: Int) -> Unit !{IO} =
-  fill_from(v, 0, n, 42)
+fn fill(v: MutVec Int, n: Int, seed: Int) -> Unit !{IO} =
+  fill_from(v, 0, n, seed)
 
 # --- the Int-specialised copy of mutvec_sort ---
 
@@ -65,7 +66,7 @@ fn copy(src: MutVec Int, dst: MutVec Int, i: Int, stop: Int, k: Int) -> Unit !{I
       _ <- mutvec_set(dst, k, x)
       copy(src, dst, i + 1, stop, k + 1)
 
-# A tie takes the left run, as mutvec_sort does.
+# A tie takes the left run, and the choice is in the arguments, as in mutvec_sort.
 fn merge(src: MutVec Int, dst: MutVec Int, i: Int, mid: Int, j: Int, hi: Int, k: Int) -> Unit !{IO} =
   if i >= mid then copy(src, dst, j, hi, k)
   else if j >= hi then copy(src, dst, i, mid, k)
@@ -73,14 +74,9 @@ fn merge(src: MutVec Int, dst: MutVec Int, i: Int, mid: Int, j: Int, hi: Int, k:
     do
       x <- mutvec_at(src, i)
       y <- mutvec_at(src, j)
-      if y < x then
-        do
-          _ <- mutvec_set(dst, k, y)
-          merge(src, dst, i, mid, j + 1, hi, k + 1)
-      else
-        do
-          _ <- mutvec_set(dst, k, x)
-          merge(src, dst, i + 1, mid, j, hi, k + 1)
+      let right = y < x
+      _ <- mutvec_set(dst, k, if right then y else x)
+      merge(src, dst, if right then i else i + 1, mid, if right then j + 1 else j, hi, k + 1)
 
 fn pass(src: MutVec Int, dst: MutVec Int, lo: Int, n: Int, w: Int) -> Unit !{IO} =
   if lo >= n then ()
@@ -122,14 +118,14 @@ fn fill_reps(v: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
   if r <= 0 then ()
   else
     do
-      _ <- fill(v, n)
+      _ <- fill(v, n, 42 + r)
       fill_reps(v, n, r - 1)
 
 fn generic_reps(v: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
   if r <= 0 then ()
   else
     do
-      _ <- fill(v, n)
+      _ <- fill(v, n, 42 + r)
       _ <- mutvec_sort(v)
       generic_reps(v, n, r - 1)
 
@@ -137,7 +133,7 @@ fn int_reps(v: MutVec Int, scratch: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
   if r <= 0 then ()
   else
     do
-      _ <- fill(v, n)
+      _ <- fill(v, n, 42 + r)
       _ <- sort_int(v, scratch, n)
       int_reps(v, scratch, n, r - 1)
 

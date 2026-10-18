@@ -295,13 +295,10 @@ fn sort_copy(src: Vector a, dst: Vector a, i: Int, stop: Int, k: Int) -> Unit !{
       _ <- vector_mutset(dst, k, x)
       sort_copy(src, dst, i + 1, stop, k + 1)
 
-fn sort_take(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: Int, j: Int, hi: Int,
-             k: Int, x: a) -> Unit !{IO} =
-  do
-    _ <- vector_mutset(dst, k, x)
-    sort_merge(less, src, dst, i, mid, j, hi, k + 1)
-
 # Merge `src[i, mid)` and `src[j, hi)` into `dst` from `k`. A tie takes the left run.
+# One store and one tail call, the choice in their arguments: LLVM makes selects of
+# that. Two arms that each store and recurse stay a branch, which random input
+# mispredicts about half the time (docs/native-sprout-runtime-v0.md §Phase 2).
 fn sort_merge(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: Int, j: Int, hi: Int,
               k: Int) -> Unit !{IO} =
   if i >= mid then sort_copy(src, dst, j, hi, k)
@@ -310,8 +307,10 @@ fn sort_merge(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: I
     do
       x <- vector_get_direct(src, i)
       y <- vector_get_direct(src, j)
-      if less(y, x) then sort_take(less, src, dst, i, mid, j + 1, hi, k, y)
-      else sort_take(less, src, dst, i + 1, mid, j, hi, k, x)
+      let right = less(y, x)
+      _ <- vector_mutset(dst, k, if right then y else x)
+      sort_merge(less, src, dst, if right then i else i + 1, mid, if right then j + 1 else j, hi,
+                 k + 1)
 
 fn sort_pass(less: a -> a -> Bool, src: Vector a, dst: Vector a, lo: Int, n: Int, w: Int) -> Unit !{IO} =
   if lo >= n then ()
