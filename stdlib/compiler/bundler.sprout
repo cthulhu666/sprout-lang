@@ -905,22 +905,17 @@ fn add_type_name_to_symbols(mod_name: String, name: String, is_exported: Bool, a
 
 # A method is exported exactly when its class is.
 fn add_class_to_symbols(mod_name: String, name: String, methods: List ast.ClassMethodSig, is_exported: Bool, acc: ModuleSymbols) -> ModuleSymbols =
-  match fold(add_method_value(mod_name, is_exported, _, _), acc, method_names) with
+  match fold(\ (a, n) -> add_value_to_symbols(mod_name, n, is_exported, a), acc, method_names) with
   | ModuleSymbols vl tl cl ev et ec cm ce xs ->
       ModuleSymbols(vl, tl, dict_set(name, canonical, cl), ev, et,
                     if is_exported then dict_set(name, canonical, ec) else ec,
-                    dict_set(name, own_methods(vl, method_names), cm), ce, xs)
+                    dict_set(name, method_map, cm), ce, xs)
   where canonical = canonical_of(mod_name, name)
         method_names = list_map(method_sig_name, methods)
+        method_map = fold(\ (m, n) -> dict_set(n, canonical_of(mod_name, n), m), dict_empty(), method_names)
 
 fn method_sig_name(m: ast.ClassMethodSig) -> String =
   match m with | ast.ClassMethodSig name _ _ _ _ -> name
-
-fn add_method_value(mod_name: String, is_exported: Bool, acc: ModuleSymbols, name: String) -> ModuleSymbols =
-  add_value_to_symbols(mod_name, name, is_exported, acc)
-
-fn own_methods(vl: Dict String, names: List String) -> Dict String =
-  fold(\ (acc, n) -> dict_set(n, dict_get_or(n, vl, n), acc), dict_empty(), names)
 
 fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.TypeConstructor, exported: List String, ctor_types: List String, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -1781,8 +1776,9 @@ fn qualify_instance_methods(ctx: ResolveCtx, class_name: String, methods: List a
 # A method's canonical name is its class's module and its own name; a prelude
 # class's method is bare.
 fn class_method_canonical(class_name: String, method: String) -> String =
-  if str_find(class_name, ".") == -1 then method
-  else str_slice(class_name, 0, str_len(class_name) - str_len(string.after_last_dot(class_name))) ++ method
+  match string.rsplit_once(class_name, ".") with
+  | Just (module_name, _) -> module_name ++ "." ++ method
+  | Nothing -> method
 
 fn qualify_maybe_type(ctx: ResolveCtx, mt: Maybe ast.TypeExpr) -> Maybe ast.TypeExpr =
   match mt with
