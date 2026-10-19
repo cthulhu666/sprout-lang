@@ -1,0 +1,3 @@
+strings: first item-0 last item-999 out-of-order 0
+ints: out-of-order 0 total 1512265
+exit=0

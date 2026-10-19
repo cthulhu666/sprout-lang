@@ -1,0 +1,80 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# BCE differential fixture (scripts/bce_gate.sh): the case name arrives as argv[0]. Every
+# case runs with the pass on and off and must print the same text and exit with the same
+# status. `ok` stays in range; each other case breaks one term of the entry test.
+fn copy(src: MutVec Int, dst: MutVec Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =
+  if i >= stop then ()
+  else
+    do
+      x <- mutvec_at(src, i)
+      _ <- mutvec_set(dst, k, x)
+      copy(src, dst, i + 1, stop, k + 1)
+
+# `n` counts down while `i` and `k` count up, so the exit test is on another parameter.
+fn down(src: MutVec Int, dst: MutVec Int, i: Int, n: Int, k: Int) -> Unit !{IO} =
+  if n <= 0 then ()
+  else
+    do
+      x <- mutvec_at(src, i)
+      _ <- mutvec_set(dst, k, x)
+      down(src, dst, i + 1, n - 1, k + 1)
+
+# `i` counts up and `k` counts down.
+fn rev(src: MutVec Int, dst: MutVec Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =
+  if i >= stop then ()
+  else
+    do
+      x <- mutvec_at(src, i)
+      _ <- mutvec_set(dst, k, x)
+      rev(src, dst, i + 1, stop, k - 1)
+
+fn sum(v: MutVec Int, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      x <- mutvec_at(v, i)
+      sum(v, i + 1, n, acc + x)
+
+fn fill(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, i * 3 + 1)
+      fill(v, i + 1, n)
+
+fn min_int() -> Int = 0 - 9223372036854775807 - 1
+
+fn run_case(name: String, src: MutVec Int, dst: MutVec Int) -> Unit !{IO} =
+  match name with
+  | "ok" -> copy(src, dst, 0, 5, 2)
+  | "stop_past_end" -> copy(src, dst, 0, 6, 0)
+  | "start_negative" -> copy(src, dst, -1, 5, 0)
+  | "start_min" -> copy(src, dst, min_int(), 5, 0)
+  | "dst_short" -> copy(src, dst, 0, 5, 6)
+  | "dst_start_negative" -> copy(src, dst, 0, 5, -1)
+  | "stop_max" -> copy(src, dst, 0, 9223372036854775807, 0)
+  | "dst_max" -> copy(src, dst, 0, 5, 9223372036854775807)
+  | "empty_range" -> copy(src, dst, 3, 3, 100)
+  | "down_ok" -> down(src, dst, 0, 5, 0)
+  | "down_n_big" -> down(src, dst, 0, 9, 0)
+  | "down_start_negative" -> down(src, dst, -1, 3, 0)
+  | "rev_ok" -> rev(src, dst, 0, 5, 7)
+  | "rev_k_low" -> rev(src, dst, 0, 5, 3)
+  | "rev_k_high" -> rev(src, dst, 0, 5, 8)
+  | _ -> print("unknown case")
+
+fn main() -> Unit !{IO} =
+  do
+    src <- mutvec_new(5, 0)
+    dst <- mutvec_new(8, 7)
+    _ <- fill(src, 0, 5)
+    _ <- print("before")
+    match argv_get(0) with
+    | Just name ->
+        do
+          _ <- run_case(name, src, dst)
+          total <- sum(dst, 0, 8, 0)
+          print(`${name}: dst sum ${total}`)
+    | Nothing -> print("no case")

@@ -1,8 +1,8 @@
 # Bounds-check elimination in counted loops, v0
 
-Status: design, not started. Supporting doc; changes no syntax or semantics, so nothing here is
-normative. Measured 2026-10-18 on macOS arm64, Homebrew LLVM 23.1.1, whole-program link
-(`just compile-native`).
+Status: stage 1 of option B landed 2026-10-19 (§10); stages 2 and 3 are open (`BACKLOG.md`).
+Supporting doc; changes no syntax or semantics, so nothing here is normative. Measured on macOS
+arm64, Homebrew LLVM 23.1.1, whole-program link (`just compile-native`), 2026-10-18 except §10.
 
 ## 1. Problem
 
@@ -165,12 +165,13 @@ that alias rule lets the entry test cover; the base64 rows above have the room c
 the version check costs 3–12% (byte-buffer-v0.md §3). Running out of room is not an error, so
 for pushes the entry could grow the buffer once instead of testing it; unmeasured.
 
-The entry test uses wrapping arithmetic and falls back on overflow; a test that panics where the
-original did not would change behaviour. Each qualifying function is emitted twice.
+The entry test must not panic where the original did not, or it would change behaviour: on
+overflow it falls back to the original (§10 says how). Each qualifying function is emitted twice.
 
 Staging:
 
-1. Constant-step loops: `copy`, `insertion`, `insert`, the `stdlib.mutable` `_go` loops, base64.
+1. ~~Constant-step loops: `copy`, `insertion`, `insert`, the `stdlib.mutable` `_go` loops,
+   base64.~~ Landed (§10). The `_go` loops take an `!{IO}` callback, so they stay as they are.
 2. A fast clone calling a callee whose test its own entry test implies goes straight to the
    callee's clone (`insertion_fast` to `insert_fast`, saving the per-element test).
 3. Step-0-or-1 induction variables (the merge).
@@ -180,11 +181,12 @@ Staging:
 - **Syntax, typing, diagnostics:** none.
 - **Semantics:** none. `sprout_fail` prints its message and calls `exit(1)`, and the original
   loop is what runs whenever an access would fail.
-- **Runtime:** unchecked twins of `vector_get_direct` and `vector_mutset`, the second still
-  calling `sprout_ap_on_store`, and of the `Bytes` reads. New runtime functions need approval and
-  `runtime/APPROVED_BUILTINS` entries; `ir_rooting.sprout` must list them as non-allocating, as
-  it does the checked ones. Emitting the access inline instead, as B1 does for `Vector Double`,
-  avoids the runtime change but has to reproduce the store hook in IR.
+- **Runtime:** none. The unchecked accessors are inline IR ops, as B1 does for `Vector Double`:
+  `IRVecGetU` (new; it carries the element's `IRType`, so `ir_rooting` roots a heap read) and the
+  existing `IRVecSetD`. A store is unchecked only when the element is a non-heap scalar (Int,
+  Bool, Char, Double), which needs no store hook. Any other store stays `vector_mutset`, keeping
+  its check and `sprout_ap_on_store`, so `gc-ageprof-check` still counts it. `Bytes` reads are not
+  covered.
 - **Compile cost:** a qualifying function is emitted twice; `just rooting-cost-gate` and
   `just scc-cost-gate` price it.
 - **Seed:** a compiler change, so a reseed.
@@ -192,15 +194,95 @@ Staging:
 ## 8. Tests
 
 - Differential: a loop whose entry test fails (an index one past the end, an overflowing bound)
-  prints the same output and the same panic as today.
-- Golden IR: a qualifying loop has the entry test and two bodies; a loop with an `!{IO}` callback
-  (`mutvec_each_go`) has one.
-- The sort bench: the Int row at or under 1.1× at both sizes.
+  prints the same output and the same panic as today. `just bce-gate`, each case run with the
+  pass on and off.
+- IR shape: a qualifying loop has the entry test and two bodies; a loop with an `!{IO}` callback
+  has one. `tests/stdlib/compiler/test_bce.spr`, and the golden IR corpus.
+- The sort bench: the Int row at or under 1.1× at both sizes. Not met by stage 1 (§10).
 
 ## 9. Open questions
 
 1. Priority. The Phase 2 exit (1.3×) is met without this; B buys the 1.2× aim and most of the
-   way to parity, here and in base64.
-2. Runtime twins or inline IR (§7)?
-3. Code size: how much does emitting every qualifying function twice cost the compiler binary?
-   Unmeasured.
+   way to parity, here and in base64. Stage 1 landed (§10); stages 2 and 3 are in `BACKLOG.md`.
+2. ~~Runtime twins or inline IR?~~ Inline IR ops (§7): no runtime change, no new builtin.
+3. ~~Code size.~~ Measured in §10: the compiler grew 3.6%, almost all of it the pass itself; no
+   function of the compiler is duplicated, and seven in the stdlib are.
+
+## 10. Stage 1 as landed
+
+`stdlib/compiler/bce.sprout`, a typed-AST pass that `ir_pipeline.compile_program_streaming` runs
+after `dce.elim_unreachable` and before Phase B. A qualifying `f` becomes `f` (the entry test and
+a tail call), `f$chk` (the original, self-calls renamed) and `f$fast` (accesses unchecked). `$` is
+lexer-reserved, so no program can name either clone, and both are ordinary self-tail-recursive
+functions to `tco_rewrite`: each is a loop in the IR. A function that cannot be proven is left
+as it was. `SPROUT_OPT_OFF=bce` turns the pass off; `SPROUT_TRACE_BCE=1` prints one
+`[bce] versioned f` or `[bce] kept f: <reason>` line per loop it looked at
+([debugging.md](debugging.md)).
+
+**What qualifies, as implemented.**
+
+- Every self-call is a tail call, and each parameter is passed unchanged in all of them
+  (invariant), steps by one constant in all of them, or is neither (varying). A local that
+  rebinds a parameter, or the function used as a value, rejects it.
+- An access is `vector_get_direct`, `vector_mutset`, or a one-expression wrapper over one
+  (`mutvec_at`, `mutvec_set`) whose parameters appear once and in order. The vector is an
+  invariant parameter or a field projection of one (`mutvec_raw`); the index is a linear form in
+  the parameters, with literal coefficients. A loop whose index is not affine, or has no exit test
+  bounding it, is kept. An access inside a lambda keeps the function out, since it may run after
+  the vector changed.
+- Exit tests give facts (`i < stop`, `n <= 0`) on a stepping parameter. A fact bounds the distance
+  the loop has travelled, and every other stepping parameter moves in lockstep, in either
+  direction, so `copy`'s `k` is bounded by `i`'s test and `down(n)` bounds an ascending `i`. An
+  access in the exit branch (`insert`'s `j <= lo`) is covered by the facts that hold at every
+  self-call, plus a `W >= 0` term in the test for the first iteration.
+- Nothing reachable may change a length: a summary over the call graph, where an IO extern off a
+  short safe list (`vector_get_direct`, `vector_mutset`, refs, `print`, `vec_make_filled`), and a
+  call through a function value that is not pure, make a function unsafe. `vector_push` and
+  `vector_truncate` are IO externs, so a loop that pushes is kept.
+
+**The entry test** is a conjunction: each vector is non-null, each atom (a parameter) is in
+`[-2^31, 2^31]`, then `lo >= 0` and `hi < len(v)` for every access's range. It differs from the
+sketch in §6, which used overflow-checked arithmetic and fell back on overflow: boxing the atoms
+first means the linear forms after it cannot overflow, so the test never panics, and an `Int`
+near the limit fails the box and runs `f$chk`, which panics where it always did. `just bce-gate`
+runs each such case with the pass on and off and compares the output and exit status.
+
+**The unchecked ops.** `f$fast` reads through the new `IRVecGetU` for any element type, rooted by
+the element's kind. A store is the existing `IRVecSetD` only for an element that is Int, Bool,
+Char or Double; any other store stays `vector_mutset`, check and `sprout_ap_on_store` included,
+so `gc-ageprof-check` is unchanged.
+
+**What qualified.**
+
+| scope | versioned | kept, and why |
+|---|---|---|
+| `stdlib` (all modules) | `mutvec_shift_down`, `mutvec_shift_up`, `sort_insertion`, `sort_copy`, `mutmatrix_row_dot_go`, `mutmatrix_row_sub_scaled_go`, `mutmatrix_row_add_scaled_into_go` | `mutvec_each_go`, `mutvec_fold_go`, `mutvec_zip_fold_go`, `mutvec_map_inplace_go`, `mutmatrix_fold_go`, `mutmatrix_row_zip_fold_go`, `mutmatrix_row_zip_update_go`: an `!{IO}` callback. `sort_merge`: varying index (stage 3). `mutmatrix_fill_go`: only heap-element stores. |
+| the compiler | none | none of its functions loops over a vector access |
+| the sort bench | `fill_from`, `insert`, `insertion`, `copy`, `checksum` | `merge`: varying index |
+
+`sort_insert` is not on the list: it recurses through `sort_shift`, so it has no self-call
+(`BACKLOG.md`).
+
+**Measured**, 2026-10-19, macOS arm64, whole-program link, medians of 15 interleaved rounds,
+ratios against `sort_c.c`:
+
+| row | master | stage 1 | by hand (§3) |
+|---|---:|---:|---:|
+| sort Int, n=440 | 1.26× | 1.22× | 1.09× |
+| sort Int, n=100k | 1.17× | 1.13× | 1.07× |
+
+The rows barely move because the loops stage 1 reaches are not where the sort spends its time:
+`insertion$fast` calls `insert`'s entry once per element, so the test runs per element and LLVM
+leaves that call in the loop; and `merge` stays checked. Where a loop is the whole of a function
+the gain is real: `copy` then `sum` over 100,000 elements, 3,000 times, 230 ms against 297 ms
+(median of 3).
+
+| compile cost | master | stage 1 |
+|---|---:|---:|
+| self-compile, median of 7 | 3304 ms | 3457 ms (3418 with `SPROUT_OPT_OFF=bce`) |
+| compiler binary | 3,239,704 B | 3,357,800 B |
+| `rooting-cost-gate`, per element | 304 map, 1773 swept, 73,549 B, 1079 objects | 304, 1774, 73,553 B, 1079 |
+| `scc-cost-gate`, per link | 4017 objects, 235,732 B | 4054 objects, 238,604 B |
+
+Most of the self-compile and size difference is the pass's own source. Nothing in the compiler is
+duplicated, so the cost of cloning shows only in the stdlib: seven small functions.

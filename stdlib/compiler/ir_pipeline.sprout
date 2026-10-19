@@ -6,6 +6,9 @@ import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.dce as dce
+import stdlib.compiler.bce as bce
+import stdlib.compiler.opt_config as opt_config
+import stdlib.env as env
 
 # ---------------------------------------------------------------------------
 # Streaming IR-codegen pipeline (T2).
@@ -285,11 +288,37 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
   # Before the pre-passes, not after: phase_b_program, the ctor table and the
   # alloc summary would otherwise each walk the ~98% of declarations that are
   # about to be discarded.
+  do
+    bce_on <- opt_config.pass_enabled(opt_config.Bce)
+    versioned <- version_if(bce_on, dce.elim_unreachable(prog))
+    compile_reachable(versioned)
+
+# Bounds-check elimination runs on the reachable program, before Phase B: the
+# clones it adds are ordinary self-tail-recursive functions to everything below.
+fn version_if(on: Bool, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram !{IO} =
+  if on then
+    match bce.version_loops(prog) with
+    | (versioned, lines) -> trace_bce(lines, versioned)
+  else prog
+
+# SPROUT_TRACE_BCE=1: one line per loop the pass looked at, to stderr.
+fn trace_bce(lines: List String, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram !{IO} =
+  match env.get("SPROUT_TRACE_BCE") with
+  | Nothing -> prog
+  | Just _ ->
+      do
+        _ <- list_each(trace_line, lines)
+        prog
+
+fn trace_line(line: String) -> Unit !{IO} = eprint(line)
+
+fn compile_reachable(prog: typed_ast.TypedProgram) ->
+    Result String String !{IO} =
   # Phase B pre-pass (docs/mutual-tco-phase-b-v0.md §5a): phase_b_program unifies
   # heterogeneous-arity tail-call SCCs to a uniform max arity (+ trampolines) BEFORE
   # the detection below, so the `$u` variants read as a same-prototype cycle that
   # Phase A's musttail (mutual_build_eligible) picks up. No-op when there are none.
-  match ast_to_ir.phase_b_program(dce.elim_unreachable(prog)) with
+  match ast_to_ir.phase_b_program(prog) with
   | typed_ast.TypedProgram decls ->
       match ast_to_ir.validate_reserved_namespace(decls) with
       | Err msg -> Err(msg)

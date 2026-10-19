@@ -365,6 +365,9 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       vec_elem_addr_ir(r, v, i) ++ "\n" ++
       "  store i64 " ++ x ++ ", ptr " ++ r ++ "$ep\n" ++
       "  " ++ r ++ " = add i64 0, 0"
+  | sprout_ir.IRVecGetU r v i _ ->
+      vec_elem_addr_ir(r, v, i) ++ "\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$ep"
   | sprout_ir.IRAbortMatch ->
       "  call void @sprout_abort_match()\n  unreachable"
   # W7/F-DIV: reuses the existing `panic` builtin. The call result is unused

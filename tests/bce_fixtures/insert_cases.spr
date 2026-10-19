@@ -1,0 +1,67 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# BCE differential fixture (scripts/bce_gate.sh), descending loop: the case name arrives
+# as argv[0]. `insert` slides `x` down from slot `j` to `lo`; its write at the exit slot
+# sits in the exit branch of `j <= lo`.
+fn insert(v: MutVec Int, x: Int, j: Int, lo: Int) -> Unit !{IO} =
+  if j <= lo then mutvec_set(v, j, x)
+  else
+    do
+      prev <- mutvec_at(v, j - 1)
+      if x < prev then
+        do
+          _ <- mutvec_set(v, j, prev)
+          insert(v, x, j - 1, lo)
+      else mutvec_set(v, j, x)
+
+fn insertion(v: MutVec Int, i: Int, lo: Int, hi: Int) -> Unit !{IO} =
+  if i >= hi then ()
+  else
+    do
+      x <- mutvec_at(v, i)
+      _ <- insert(v, x, i, lo)
+      insertion(v, i + 1, lo, hi)
+
+fn show(v: MutVec Int, i: Int, n: Int, acc: String) -> String !{IO} =
+  if i >= n then acc
+  else
+    do
+      x <- mutvec_at(v, i)
+      show(v, i + 1, n, `${acc} ${x}`)
+
+fn fill(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, rem((n - i) * 7, 11))
+      fill(v, i + 1, n)
+
+fn run_case(name: String, v: MutVec Int) -> Unit !{IO} =
+  match name with
+  | "ok" -> insertion(v, 1, 0, 6)
+  | "lo_negative" -> insert(v, 0, 3, -1)
+  | "lo_min" -> insert(v, 0, 3, 0 - 9223372036854775807 - 1)
+  | "j_at_len" -> insert(v, 0, 6, 0)
+  | "j_past_len" -> insert(v, 0, 9, 0)
+  | "j_negative" -> insert(v, 0, -2, -5)
+  | "j_max" -> insert(v, 0, 9223372036854775807, 0)
+  | "hi_past_len" -> insertion(v, 1, 0, 9)
+  | "lo_past_j" -> insert(v, 0, 2, 4)
+  | _ -> print("unknown case")
+
+fn main() -> Unit !{IO} =
+  do
+    v <- mutvec_new(6, 0)
+    _ <- fill(v, 0, 6)
+    _ <- print("before")
+    match argv_get(0) with
+    | Just name ->
+        do
+          _ <- run_case(name, v)
+          shown <- show(v, 0, 6, "")
+          print(`${name}:${shown}`)
+    | Nothing -> print("no case")
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m

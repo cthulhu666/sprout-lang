@@ -426,6 +426,10 @@ export type IROp (..) =
   # vector_mutset's `return 0` so SSA consumers (bound to `_`) are unaffected.
   # Non-allocating.
   | IRVecSetD String String String String
+  # IRVecGetU <result> <vec-handle> <idx-value> <kind> — load v->data[idx], unchecked;
+  # emitted only into a bce.sprout `$fast` clone. Unlike IRVecGetD the element may be a
+  # heap pointer: <kind> is its IRType, so ir_rooting roots it as it does a call result.
+  | IRVecGetU String String String IRType
   # IRAbortMatch
   # Lowers to:
   #   call void @sprout_abort_match()
@@ -591,6 +595,7 @@ export fn op_direct_callee(op: IROp) -> Maybe String =
   | IRVecLenD _ _ -> Nothing
   | IRVecGetD _ _ _ -> Nothing
   | IRVecSetD _ _ _ _ -> Nothing
+  | IRVecGetU _ _ _ _ -> Nothing
   | IRAbortMatch -> Nothing
   | IRPanic _ -> Nothing
   | IRZextI1ToI64 _ _ -> Nothing
@@ -780,6 +785,8 @@ fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = vec_get_d " ++ v ++ ", " ++ i
   | IRVecSetD r v i x ->
       "    " ++ r ++ " = vec_set_d " ++ v ++ ", " ++ i ++ ", " ++ x
+  | IRVecGetU r v i k ->
+      "    " ++ r ++ " = vec_get_u " ++ v ++ ", " ++ i ++ " [" ++ print_ir_type(k) ++ "]"
   | IRAbortMatch ->
       "    abort_match; unreachable"
   | IRPanic msg ->

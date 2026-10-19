@@ -9,6 +9,7 @@ happened; `spec-v0.md` is untouched, as planned.
 | **M1** — CSE | **measured and declined.** Opportunity real, payoff nil: `bench/results-2026-09-11-cse-census.md` |
 | **M2** — LICM | **open, not refuted by M1.** `BACKLOG.md` P3, gated on a hand-applied-hoist A/B |
 | **M3** — LLVM `declare` attributes / LTO | **open**, untouched by this arc. `BACKLOG.md` |
+| **BCE** — bounds-check elimination | **landed, stage 1**, a typed-AST pass under `SPROUT_OPT_OFF=bce`: [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) |
 
 **What this arc established, in one line:** the two passes it set out to add turned out not to be
 worth adding, and the instrument that proved it is the durable result. DLE removes zero nodes from

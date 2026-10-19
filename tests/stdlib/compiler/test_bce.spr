@@ -1,0 +1,191 @@
+import stdlib.test (check_true, check_false, run_suite)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.bce as bce
+import stdlib.string as string
+
+# Bounds-check elimination by loop versioning (docs/bounds-check-elimination-v0.md).
+# A qualifying self-tail-recursive loop `f` becomes an entry `f` plus `f$chk` (the
+# original body) and `f$fast` (unchecked accesses). The behavioural half, a failing
+# entry test panicking exactly as before, lives in `just bce-gate`.
+
+fn compile_ir(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ir_pipeline.compile_program_streaming(lowering.lower_program(typed_prog, env)) with
+                | Ok ir -> ir
+                | Err msg -> "ERR: " ++ msg
+
+# The pass's report on a source, one line per loop it looked at, joined by newlines.
+fn trace_of(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match bce.version_loops(lowering.lower_program(typed_prog, env)) with
+                | (_, lines) -> string.join("\n", lines)
+
+# The text of one function: from its `define` line to the closing brace.
+fn body_of(ir: String, name: String) -> String =
+  let start = str_find(ir, "define i64 @" ++ name ++ "(")
+  in if start < 0 then ""
+     else
+       let rest = str_slice(ir, start, str_len(ir) - start)
+       in str_slice(rest, 0, str_find(rest, "\n}"))
+
+fn has(s: String, needle: String) -> Bool = str_find(s, needle) >= 0
+
+fn defines(ir: String, name: String) -> Bool = has(ir, "define i64 @" ++ name ++ "(")
+
+# The function compiled and stayed a single body: a source that failed to compile
+# must not pass a "left alone" check.
+fn one_body(ir: String, name: String) -> Bool =
+  defines(ir, name) && ! defines (ir, name ++ "$fast") && ! defines (ir, name ++ "$chk")
+
+let prelude_externs = "extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}\nextern fn vector_mutset(v: Vector a, i: Int, x: a) -> Unit !{IO}\nextern fn vector_push(v: Vector a, x: a) -> Unit !{IO}\nextern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}\n"
+
+let main_calls = "fn main() -> Unit !{IO} =\n  do\n    v <- vec_make_filled(3, 0)\n    copy(v, v, 0, 3, 0)\n"
+
+let copy_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# Same loop over `Vector a`: the element may be a heap pointer, so stores keep their check.
+let generic_loop = "fn copy(src: Vector a, dst: Vector a, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# A callback declared `!{IO}` may change the vector's length, so the loop stays as is.
+let io_callback_loop = "fn copy(src: Vector Int, f: Int -> Int !{IO}, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- f(x)\n      copy(src, f, i + 1, stop, k + 1)\n"
+
+# `i` steps by 0 or 1 (a merge's shape): not a constant step.
+let step_zero_or_one_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if k >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, if x > 0 then i + 1 else i, stop, k + 1)\n"
+
+# The body pushes onto the vector it reads.
+let push_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_push(src, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# The index is not affine in a stepping parameter.
+let non_affine_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i * i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# `j <= lo` exits exactly, so the access in the exit branch is covered by the entry test.
+let descending_loop = "fn insert(v: Vector Int, x: Int, j: Int, lo: Int) -> Unit !{IO} =\n  if j <= lo then vector_mutset(v, j, x)\n  else\n    do\n      prev <- vector_get_direct(v, j - 1)\n      if x < prev then\n        do\n          _ <- vector_mutset(v, j, prev)\n          insert(v, x, j - 1, lo)\n      else vector_mutset(v, j, x)\n"
+
+# The exit test is on `n`, which counts down while `i` and `k` count up.
+let countdown_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, n: Int, k: Int) -> Unit !{IO} =\n  if n <= 0 then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, n - 1, k + 1)\n"
+
+# The access comes before the exit test, so only the self-call's own condition bounds it.
+let before_exit_loop = "fn sum(v: Vector Int, i: Int, n: Int, acc: Int) -> Int !{IO} =\n  do\n    x <- vector_get_direct(v, i)\n    if i >= n then acc + x else sum(v, i + 1, n, acc + x)\n"
+
+let main_sum = "fn main() -> Unit !{IO} =\n  do\n    v <- vec_make_filled(3, 0)\n    _ <- sum(v, 0, 3, 0)\n    ()\n"
+
+# The index is a local, not a parameter form.
+let local_index_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      let j = i + 1\n      x <- vector_get_direct(src, j)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# A local rebinds a parameter, so a use of `i` below it is not the loop's `i`.
+let shadowed_param_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      let i = k * 2\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# A self-call that is not the last step is not a loop.
+let non_tail_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      _ <- copy(src, dst, i + 1, stop, k + 1)\n      vector_mutset(dst, k, x)\n"
+
+# The access sits in a lambda, which may run after the vector changed.
+let lambda_access_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      let read = \\ (j) -> vector_get_direct(src, j)\n      x <- read(i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+# The two self-calls step `i` differently.
+let two_steps_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      if x > 0 then copy(src, dst, i + 1, stop, k + 1) else copy(src, dst, i + 2, stop, k + 1)\n"
+
+# Int's minimum as a literal operand, a step and a bound: the pass must reject these without
+# negating it, which would overflow inside the compiler.
+let min_offset_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i + (-9223372036854775808))\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+let min_step_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= stop then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + (-9223372036854775808), stop, k + 1)\n"
+
+let min_bound_loop = "fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int) -> Unit !{IO} =\n  if i >= (-9223372036854775808) then ()\n  else\n    do\n      x <- vector_get_direct(src, i)\n      _ <- vector_mutset(dst, k, x)\n      copy(src, dst, i + 1, stop, k + 1)\n"
+
+let main_insert = "fn main() -> Unit !{IO} =\n  do\n    v <- vec_make_filled(3, 0)\n    insert(v, 1, 2, 0)\n"
+
+fn main() -> Unit !{IO} =
+  do
+    copy_ir <- compile_ir(prelude_externs ++ copy_loop ++ main_calls)
+    generic_ir <- compile_ir(prelude_externs ++ generic_loop ++ main_calls)
+    io_ir <- compile_ir(prelude_externs ++ io_callback_loop ++ "fn main() -> Unit !{IO} =\n  do\n    v <- vec_make_filled(3, 0)\n    copy(v, \\ (x) -> x, 0, 3, 0)\n")
+    step_ir <- compile_ir(prelude_externs ++ step_zero_or_one_loop ++ main_calls)
+    push_ir <- compile_ir(prelude_externs ++ push_loop ++ main_calls)
+    affine_ir <- compile_ir(prelude_externs ++ non_affine_loop ++ main_calls)
+    desc_ir <- compile_ir(prelude_externs ++ descending_loop ++ main_insert)
+    down_ir <- compile_ir(prelude_externs ++ countdown_loop ++ main_calls)
+    before_ir <- compile_ir(prelude_externs ++ before_exit_loop ++ main_sum)
+    local_ir <- compile_ir(prelude_externs ++ local_index_loop ++ main_calls)
+    shadow_ir <- compile_ir(prelude_externs ++ shadowed_param_loop ++ main_calls)
+    nontail_ir <- compile_ir(prelude_externs ++ non_tail_loop ++ main_calls)
+    lambda_ir <- compile_ir(prelude_externs ++ lambda_access_loop ++ main_calls)
+    steps_ir <- compile_ir(prelude_externs ++ two_steps_loop ++ main_calls)
+    min_offset_ir <- compile_ir(prelude_externs ++ min_offset_loop ++ main_calls)
+    min_step_ir <- compile_ir(prelude_externs ++ min_step_loop ++ main_calls)
+    min_bound_ir <- compile_ir(prelude_externs ++ min_bound_loop ++ main_calls)
+    copy_trace <- trace_of(prelude_externs ++ copy_loop ++ main_calls)
+    push_trace <- trace_of(prelude_externs ++ push_loop ++ main_calls)
+    steps_trace <- trace_of(prelude_externs ++ two_steps_loop ++ main_calls)
+    affine_trace <- trace_of(prelude_externs ++ non_affine_loop ++ main_calls)
+    local_trace <- trace_of(prelude_externs ++ shadowed_param_loop ++ main_calls)
+    run_suite("bce", [
+      check_false("copy: compiles", has(copy_ir, "ERR:")),
+      check_true("copy: entry kept", defines(copy_ir, "copy")),
+      check_true("copy: $chk emitted", defines(copy_ir, "copy$chk")),
+      check_true("copy: $fast emitted", defines(copy_ir, "copy$fast")),
+      check_true("copy: entry calls $fast", has(body_of(copy_ir, "copy"), "@copy$fast(")),
+      check_true("copy: entry calls $chk", has(body_of(copy_ir, "copy"), "@copy$chk(")),
+      check_false("copy: $fast has no checked read", has(body_of(copy_ir, "copy$fast"), "@vector_get_direct")),
+      check_false("copy: $fast has no checked store (Int elements)", has(body_of(copy_ir, "copy$fast"), "@vector_mutset")),
+      check_true("copy: $chk keeps the checked read", has(body_of(copy_ir, "copy$chk"), "@vector_get_direct")),
+      check_true("copy: $chk keeps the checked store", has(body_of(copy_ir, "copy$chk"), "@vector_mutset")),
+      check_true("copy: $fast is still a loop", has(body_of(copy_ir, "copy$fast"), "tco_loop")),
+      check_true("copy: $chk is still a loop", has(body_of(copy_ir, "copy$chk"), "tco_loop")),
+      check_true("copy: $fast recurses into itself", has(body_of(copy_ir, "copy$fast"), "tco_loop") && ! has (body_of(copy_ir, "copy$fast"), "call i64 @copy")),
+      check_true("generic: $fast emitted", defines(generic_ir, "copy$fast")),
+      check_false("generic: $fast read is unchecked", has(body_of(generic_ir, "copy$fast"), "@vector_get_direct")),
+      check_true("generic: $fast store keeps the checked call", has(body_of(generic_ir, "copy$fast"), "@vector_mutset")),
+      check_true("io callback: one body", one_body(io_ir, "copy")),
+      check_false("io callback: no $chk either", defines(io_ir, "copy$chk")),
+      check_true("step 0 or 1: one body", one_body(step_ir, "copy")),
+      check_true("push in the body: one body", one_body(push_ir, "copy")),
+      check_true("non-affine index: one body", one_body(affine_ir, "copy")),
+      check_true("descending: $fast emitted", defines(desc_ir, "insert$fast")),
+      check_true("descending: $chk emitted", defines(desc_ir, "insert$chk")),
+      check_false("descending: $fast has no checked read", has(body_of(desc_ir, "insert$fast"), "@vector_get_direct")),
+      check_false("descending: $fast has no checked store", has(body_of(desc_ir, "insert$fast"), "@vector_mutset")),
+      check_true("countdown: $fast emitted", defines(down_ir, "copy$fast")),
+      check_false("countdown: $fast has no checked read", has(body_of(down_ir, "copy$fast"), "@vector_get_direct")),
+      check_true("access before the exit test: $fast emitted", defines(before_ir, "sum$fast")),
+      check_false("access before the exit test: $fast has no checked read", has(body_of(before_ir, "sum$fast"), "@vector_get_direct")),
+      check_true("local index: one body", one_body(local_ir, "copy")),
+      check_true("shadowed parameter: one body", one_body(shadow_ir, "copy")),
+      check_true("non-tail self-call: one body", one_body(nontail_ir, "copy")),
+      check_true("access in a lambda: one body", one_body(lambda_ir, "copy")),
+      check_true("two different steps: one body", one_body(steps_ir, "copy")),
+      check_true("Int minimum as an index offset: compiles, one body", one_body(min_offset_ir, "copy")),
+      check_true("Int minimum as a step: compiles, one body", one_body(min_step_ir, "copy")),
+      check_true("Int minimum as a bound: compiles, one body", one_body(min_bound_ir, "copy")),
+      check_true("trace: a versioned loop is named", has(copy_trace, "[bce] versioned copy")),
+      check_true("trace: a loop that can change a length says so", has(push_trace, "[bce] kept copy: its body can change a vector's length")),
+      check_true("trace: an index that moves with no exit test on it says so", has(steps_trace, "[bce] kept copy: no exit test bounds an index that moves")),
+      check_true("trace: a non-affine index says so", has(affine_trace, "[bce] kept copy: an index is not affine in the parameters")),
+      check_true("trace: a rebound parameter says so", has(local_trace, "[bce] kept copy: a local rebinds a parameter")),
+      check_true("entry boxes the atoms before any arithmetic", str_find(body_of(copy_ir, "copy"), "add i64 0, 2147483648") < str_find(body_of(copy_ir, "copy"), "llvm.smul.with.overflow")),
+      check_true("entry tests a vector non-null before loading its length", str_find(body_of(copy_ir, "copy"), "icmp ne i64") < str_find(body_of(copy_ir, "copy"), "inttoptr"))
+    ])
