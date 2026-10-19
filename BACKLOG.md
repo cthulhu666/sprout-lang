@@ -304,7 +304,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   carrying an `IRTcoEntry`. No miscompile, but the mutual edge builds a native frame per
   iteration, so a long input overflows the stack: `json`'s string decoder died at 2^15 escapes
   until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a. Hit again
-  by `http_server`'s keep-alive loop: ~2,700 requests on one connection exhausted the root pool.
+  by `http_server`'s keep-alive loop: ~2,700 requests on one connection exhausted the root pool,
+  and by a two-function grid BFS at 1M cells (`docs/persistent-array-v0.md` §3.2).
 - [ ] `P3` **A captureless method closure is heap-allocated at every call, so `where Eq a` costs.**
   Passing a known instance's method, e.g. `list_member(name, scope)` at `Eq String`, emits
   `sprout_alloc_closure` for `@__sprout_ir_eta___tc_Eq_String_eq_*` each call, though it captures
@@ -1728,6 +1729,7 @@ deferral happened, not for current behaviour. Still open:
   look redundant, and they survive LLVM inlining, so small wrappers cost real time. Narrowing the
   rule needs a written GC-safety argument first, since a missing root corrupts the heap.
   Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
+  The root also keeps a persistent array's whole history alive: `docs/persistent-array-v0.md` §3.
 - [ ] `P3` **LLVM does not inline the sort pair's `insert` into `insertion`.** The Int merge
   sort is 1.26× C at n=440, against Phase 2's 1.2× aim, and the insertion phase over 16-element
   blocks carries most of it. `insert` costs 325 against a threshold of 225, so each element pays
@@ -1975,6 +1977,41 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   unannotated lambda at a `once` slot is still a mismatch; the WRITTEN spelling above is the way in.
   Fix: run `once_honesty` over lambda bodies, keyed on the parameter's ownership rather than its
   written mode. Regression to flip: `type_error/lambda_slot_once_not_pushed_down` has the shape.
+- [ ] `P1` **Generic code can duplicate a linear value.** `fn dup(x: a) -> (a, a) = (x, x)` is
+  accepted, since the body sees a rigid `a`, not a linear type; with `type linear L = L Int`,
+  `dup(L(1))` returns two owners and both are consumed (verified running, 2026-10-19). Any generic
+  function that uses a parameter twice does this, so a `File` can be closed twice. Spec §5.8
+  rejects a bare type variable only when it is discarded. Fix needs a design: a linearity bound on
+  type parameters (P3 **Linearity bound on a type parameter**), or inferring per type parameter
+  whether the body may copy it. Blocks `docs/persistent-array-v0.md` §5.3.
+- [ ] `P1` **One call can borrow and consume the same linear value.** `f(x, x)` with
+  `f(b: borrowing L, c: L)` is accepted and runs (verified 2026-10-19). The borrow is checked as a
+  read before the consume, left to right, but the callee holds both for the whole call, so `f` can
+  read `b` after consuming `c`. Spec §5.8 already states the whole-call rule for a lambda at a
+  `local` position; plain `borrowing` arguments need it too. Rust rejects `f(&x, x)` (E0505). Fix:
+  in `linear_check`, a value one argument borrows may not be consumed by another argument of the
+  same call. Blocks `docs/persistent-array-v0.md` §5.3.
+- [ ] `P1` **A top-level `let` can hold a linear value that every function consumes.** With
+  `let g = L(1)` at module level, `fn a() -> Int = consume(g)` and `fn b` the same are accepted,
+  and `a() + b()` consumes `g` twice (verified running, 2026-10-19). The linear pass tracks binders
+  inside a body; a module binding is not one, so each reference is unchecked. Fix: reject a
+  top-level `let` whose type is or contains a linear type. Blocks `docs/persistent-array-v0.md`
+  §5.3, where a top-level array would be written by one function and read by another.
+- [ ] `P1` **Reading a borrowed generic container hands out its linear element.**
+  `fn box_peek(b: borrowing Box a) -> Maybe a` returns the field of a borrowed `Box`. At `Box L`
+  the caller gets an owned `L` while `b` still holds it, and both are consumed (verified running,
+  2026-10-19). Spec §5.8 binds a borrowed value's linear fields as borrowed, but in the generic
+  body `a` is not linear, so the field is free to return. Same root as **Generic code can
+  duplicate a linear value**; every `get` on a generic container has this shape, including
+  `docs/persistent-array-v0.md` §5.3's `larr_get` at a linear element type.
+- [ ] `P1` **An existential hides a linear value from the checker.** With
+  `type Boxed = | exists a. Boxed a where Taker a`, `let b = Boxed(L(1))` is accepted and
+  `unbox(b) + unbox(b)` consumes the `L` twice (verified running, 2026-10-19). Containment reads
+  the declaration's stored fields, and `exists a.` stores a hidden `a`, never a linear type, so `b`
+  carries no obligation. A linearity bound on type parameters does not reach it unless packing is
+  bounded too. Fix: reject packing a linear value into an existential, or give the `exists`
+  variable a linearity bound that makes the packed type linear. Blocks
+  `docs/persistent-array-v0.md` §5.3.
 - [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
   M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
   lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
@@ -2285,7 +2322,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   push-grown buffer is an invisible `malloc`. Cheap repro: `test_http_param_all_cost.spr` against
   pre-#622 `http_server` peaks at ~3 GB RSS (2^15 pairs; 2^16 hit 16 GB) on ~n²/2 words of copies.
   `docs/gc-generational-v0.md` §11 has the measurements and three approaches already measured and
-  rejected — do not re-derive them.
+  rejected — do not re-derive them. Also over-collects one big live array: 868 re-scans, 1.2 s of a
+  1.4 s `MutVec` BFS (`docs/persistent-array-v0.md` §3.2).
 - [ ] `P2` **`ir_lowering` assembles IR text with `++` in a recursion at all three nesting levels**
   (`lower_ops`, `lower_blocks`, `lower_fns`, and the same shape in `sprout_ir.print_*`). Each of n
   frames concatenates onto the entire remaining tail, so emitting a block of n ops copies O(n ×
@@ -2381,8 +2419,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   whole object-allocation count. Measured while landing nullary interning, which moved nqueens by 7
   objects and so disproved this entry's predecessor: it blamed `true`/`false` literals, but `Bool`
   lowers to a native `i1` (`br i1` in the emitted IR, no ctor), and tag 10 arity 1 is `Vec`. The
-  cost is the persistent vector's copy-on-write wrapper, so the lever is the HAMT entry below or
-  unboxing, not interning.
+  cost is the persistent vector's copy-on-write wrapper, so the lever is the pure-array entry
+  below or unboxing, not interning.
 - [ ] `P2` **Bump-allocated nursery with no per-object metadata** — the canonical generational GC,
   and distinct from the older split-the-node-list draft, which keeps per-object `ManagedNode` and so
   cannot reduce per-allocation cost. Objects are identified by address-range membership and
@@ -2393,9 +2431,18 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   the largest single contributor out of that share — nqueens now allocates 33.4M objects, not 50.1M
   — so re-measure before pricing this. See also the generational-step entry in §1, whose
   measurements re-scope it as compiler-only.
-- [ ] `P3` **HAMT persistent vector for `vec_set`** — O(n) → O(log n). **Deferred:** at N≤14
-  vectors are 12–27 elements (a single HAMT leaf), so path-copying is the same work as the current
-  copy, and `vector_set` is 1.1% of CPU.
+- [ ] `P3` **A pure array with cheap index writes.** `vec_set` copies, O(n): a sieve, a grid BFS,
+  a histogram or a DP table takes 1.5–19 s and up to 12 GB with it, 0–12 ms with `MutVec`. Our
+  own code is not bottlenecked, but three uncharted-suns functions are `!{IO}` only for a scratch
+  `MutVec`. Proposal: `docs/persistent-array-v0.md` — a trie as the persistent array, and a
+  linear array with bulk operations (builtins, needs approval) as the one in-place mechanism; no
+  Baker array, no `ST`-style `run_local`. The trie waits on nothing. The linear array waits on
+  the six P1 linearity holes (doc §5.3) and P3 **Linearity bound on a type parameter**, which
+  closes three of them. Revisit per the doc's §12 triggers.
+- [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
+  (`LMatrix Int Int (LArr a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a
+  function consumes a linear constructor and builds one of the same shape, reuse its memory, as
+  Koka's Perceus does at count 1. Not designed; `docs/persistent-array-v0.md` §5.3.
 
 **Server and scheduler**
 

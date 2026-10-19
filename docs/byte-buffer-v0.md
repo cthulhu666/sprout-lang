@@ -100,8 +100,8 @@ types. `Bytes` and a `ByteBuf` hold only bytes and avoid that.
 
 ## 4. Prior art
 
-Checked against each language's reference or library source, 2026-10-18; the Koka and Baker rows
-and the last three, 2026-10-19.
+Checked against each language's reference or library source, 2026-10-18; the Koka, Baker, Rocq
+and `DiffArray` rows and the last three, 2026-10-19.
 
 | language | mechanism | purity comes from |
 |---|---|---|
@@ -114,7 +114,8 @@ and the last three, 2026-10-19.
 | Lean 4 | `Array`/`ByteArray` updated in place when the reference count is 1 | a run-time count |
 | Erlang | appending to a binary reserves room (twice the size, at least 256); "only the binary returned from the latest append operation will support further cheap append operations" (Efficiency Guide, *Constructing and Matching Binaries*) | a run-time check; older versions copy |
 | Koka | Perceus reference counting; reuse analysis gives "functional but in-place" (FBIP) updates (PLDI 2021) | a run-time count, made exact by the compiler |
-| Baker / Haskell `DiffArray` | newest version holds the array; older versions are diff chains, rerooted on access | a run-time check; old versions slow down |
+| Baker; Rocq `PArray` | newest version holds the array; older versions are diff chains, rerooted on access | a run-time check; old versions slow down |
+| Haskell `DiffArray` | the same chains, never rerooted; updating an old version copies the array | a run-time check; old versions slow down |
 | Go | `strings.Builder`: mutable; `String()` makes no copy; a copied Builder panics | not pure |
 | OCaml | `Buffer.contents` copies; `Bytes.unsafe_to_string` relies on convention | not pure |
 | Scala (research) | `@local` second-class values (Osvald et al., OOPSLA 2016, "Gentrification Gone too Far?"): "Second-class values cannot be stored in mutable variables, they cannot be returned from functions, and they cannot be accessed by first-class (named or anonymous) functions through free variables" | a binding mode, not a type: "parametric polymorphism does not pose major difficulties" |
@@ -223,26 +224,40 @@ The rule underneath is "write only where no version reads". It covers more than 
   (index, old value, newer version). Old versions read correctly but slower, "proportional to
   ... the number of updates", until rerooting reverses the chain toward the version read
   (Conchon & Filliâtre, *A Persistent Union-Find Data Structure*, §2.3). Haskell's `DiffArray`
-  is the same: the old array "stores a link to the new current array along with the
-  difference".
+  keeps the same link, the old array "stores a link to the new current array along with the
+  difference", but never reroots, and updating an old version copies.
 
 A Baker array over `Ref` and `MutVec Int`, written in Sprout (three allocations per set, every
-step a C call), against today's copying `vector_set` and an in-place `mutvec_set`. ns per
-operation, random indices, one process per row, median of 5, macOS arm64:
+step a C call), and the same in C (one allocation per set; rerooting allocates nothing), against
+today's copying `vector_set` and an in-place `mutvec_set`. ns per operation, random indices, one
+process per row, median of 5, macOS arm64, 2026-10-19:
 
-| elements | set: Baker | set: `vector_set` | set: `mutvec_set` | get: Baker | get: `vector_get` |
-|---:|---:|---:|---:|---:|---:|
-| 100 | 60 | 121 | 1 | 12 | 1 |
-| 1,000 | 74 | 1,071 | 1 | 12 | 1 |
-| 10,000 | 67 | 6,040 | 1 | 12 | 2 |
-| 100,000 | 98 | 70,372 | 2 | 57 | 10 |
+| elements | set: Baker | set: C Baker | set: `vector_set` | set: `mutvec_set` | get: Baker | get: C Baker | get: `vector_get` |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 63 | 36 | 84 | 1 | 12 | 4 | 1 |
+| 1,000 | 73 | 21 | 1,029 | 1 | 15 | 3 | 1 |
+| 10,000 | 67 | 22 | 10,354 | 1 | 14 | 5 | 2 |
+| 100,000 | 99 | 17 | 80,371 | 2 | 10 | 4 | 2 |
 
-Alternating reads between two versions `d` sets apart reroots `d` steps each way: 106 ns per
-pair at `d` = 1, 0.9 µs at 10, 11.6 µs at 100, 156 µs at 1,000.
+The 100,000-element reads are 3 million reads, median of 3. Timed over 3,000 reads, as the sets
+are, they measured 52–79 and 6–22 ns, a cold cache in a window under 0.2 ms; this table's first
+version printed that as 57 and 10. The 100-element row makes 1 million sets, the others at most
+300,000. Its first version stays reachable, so the collector marks a growing chain: at 300,000
+sets the C set costs 22–25 ns.
 
-- Set stays flat while the copy grows with size; Baker is ahead at 100 elements and up. It is
-  50–75× slower than mutation here, and a read about 10×. A runtime version could make a set
-  one allocation (the old handle turns into the diff node in place); that is not measured.
+Alternating reads between two versions `d` sets apart reroots `d` steps each way. Per pair:
+
+| `d` | 1 | 10 | 100 | 1,000 |
+|---|---:|---:|---:|---:|
+| Baker | 106 ns | 0.97 µs | 11.2 µs | 160 µs |
+| C Baker | 8 ns | 71 ns | 0.79 µs | 7.6 µs |
+
+- Set stays flat while the copy grows with size; both Bakers are ahead at 100 elements and up. C
+  is 1.8–5.8× faster than Sprout on a set, 2.5–5× on a read and 13–21× on a reroot. It is still
+  9–36× slower than mutation, and a read 2–4×.
+- A 32-way trie in plain Sprout, with no runtime change and no slow old versions, is as fast as
+  the Sprout Baker up to 1,000 elements. [persistent-array-v0.md](persistent-array-v0.md) compares
+  it with a C builtin and a linear array on typical programs.
 - Every read checks whether its version holds the array, and a fast loop needs that check
   hoisted before bounds-check elimination applies.
 - Rerooting writes into old objects, so a generational GC needs a barrier there, and a shared
