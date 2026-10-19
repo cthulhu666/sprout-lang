@@ -1,5 +1,5 @@
 import stdlib.test (check_true, check_eq, run_suite)
-import stdlib.http (NoContent204, NotModified304, Ok200, http_response, status_code, status_line)
+import stdlib.http (HttpStatus, http_response, status_code, status_has_content, status_line)
 import stdlib.http_server (HttpServerResponse, ok, response, with_header, add_header, render, cookie, cookie_name, cookie_value, with_cookie)
 import stdlib.string as string
 
@@ -25,6 +25,15 @@ fn count_from(hay: String, needle: String, acc: Int) -> Int =
   match string.find(hay, needle) with
   | Nothing -> acc
   | Just pos -> count_from(string.drop(hay, pos + string.length(needle)), needle, acc + 1)
+
+let all_statuses: List HttpStatus =
+  [
+    Ok200, Created201, Accepted202, NoContent204, MovedPermanently301, Found302, SeeOther303,
+    NotModified304, TemporaryRedirect307, PermanentRedirect308, BadRequest400, Unauthorized401,
+    Forbidden403, NotFound404, MethodNotAllowed405, RequestTimeout408, Conflict409, Gone410,
+    ContentTooLarge413, UnprocessableContent422, TooManyRequests429, RequestHeaderFieldsTooLarge431,
+    InternalServerError500, NotImplemented501, BadGateway502, ServiceUnavailable503, GatewayTimeout504
+  ]
 
 fn main() -> Unit !{IO} =
   run_suite("http_render", [
@@ -121,6 +130,8 @@ fn main() -> Unit !{IO} =
       http_response(Ok200, "hi"), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nhi"),
     check_eq("status_line", status_line(NotModified304), "HTTP/1.1 304 Not Modified"),
     check_eq("status_code", status_code(NoContent204), 204),
+    check_eq("only 204 and 304 have no content",
+      list_map(status_code, list_filter(\s -> ! status_has_content (s), all_statuses)), [204, 304]),
     # The whole message, byte for byte: status line, caller headers in order, the defaulted
     # content-type, content-length, one blank line, the body.
     check_eq("the full message, in order",

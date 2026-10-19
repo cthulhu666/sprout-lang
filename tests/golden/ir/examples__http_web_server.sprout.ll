@@ -4404,27 +4404,199 @@ entry:
   %t$0 = call i64 @sprout_tag(i64 %p$status)
   br label %arm_0_1
 arm_0_1:
-  %t$3 = add i64 0, 25
+  %t$3 = add i64 0, 22
   %t$4 = icmp eq i64 %t$0, %t$3
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
-  %t$5 = add i64 0, 0
+  %t$5 = add i64 0, 1
   br label %join_1
 arm_1_1:
-  %t$6 = add i64 0, 29
+  %t$6 = add i64 0, 23
   %t$7 = icmp eq i64 %t$0, %t$6
   br i1 %t$7, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$8 = add i64 0, 0
+  %t$8 = add i64 0, 1
   br label %join_1
 arm_2_1:
-  %t$9 = add i64 0, 1
+  %t$9 = add i64 0, 24
+  %t$10 = icmp eq i64 %t$0, %t$9
+  br i1 %t$10, label %body_2_1, label %arm_3_1
+body_2_1:
+  %t$11 = add i64 0, 1
   br label %join_1
 arm_3_1:
+  %t$12 = add i64 0, 25
+  %t$13 = icmp eq i64 %t$0, %t$12
+  br i1 %t$13, label %body_3_1, label %arm_4_1
+body_3_1:
+  %t$14 = add i64 0, 0
+  br label %join_1
+arm_4_1:
+  %t$15 = add i64 0, 26
+  %t$16 = icmp eq i64 %t$0, %t$15
+  br i1 %t$16, label %body_4_1, label %arm_5_1
+body_4_1:
+  %t$17 = add i64 0, 1
+  br label %join_1
+arm_5_1:
+  %t$18 = add i64 0, 27
+  %t$19 = icmp eq i64 %t$0, %t$18
+  br i1 %t$19, label %body_5_1, label %arm_6_1
+body_5_1:
+  %t$20 = add i64 0, 1
+  br label %join_1
+arm_6_1:
+  %t$21 = add i64 0, 28
+  %t$22 = icmp eq i64 %t$0, %t$21
+  br i1 %t$22, label %body_6_1, label %arm_7_1
+body_6_1:
+  %t$23 = add i64 0, 1
+  br label %join_1
+arm_7_1:
+  %t$24 = add i64 0, 29
+  %t$25 = icmp eq i64 %t$0, %t$24
+  br i1 %t$25, label %body_7_1, label %arm_8_1
+body_7_1:
+  %t$26 = add i64 0, 0
+  br label %join_1
+arm_8_1:
+  %t$27 = add i64 0, 30
+  %t$28 = icmp eq i64 %t$0, %t$27
+  br i1 %t$28, label %body_8_1, label %arm_9_1
+body_8_1:
+  %t$29 = add i64 0, 1
+  br label %join_1
+arm_9_1:
+  %t$30 = add i64 0, 31
+  %t$31 = icmp eq i64 %t$0, %t$30
+  br i1 %t$31, label %body_9_1, label %arm_10_1
+body_9_1:
+  %t$32 = add i64 0, 1
+  br label %join_1
+arm_10_1:
+  %t$33 = add i64 0, 32
+  %t$34 = icmp eq i64 %t$0, %t$33
+  br i1 %t$34, label %body_10_1, label %arm_11_1
+body_10_1:
+  %t$35 = add i64 0, 1
+  br label %join_1
+arm_11_1:
+  %t$36 = add i64 0, 33
+  %t$37 = icmp eq i64 %t$0, %t$36
+  br i1 %t$37, label %body_11_1, label %arm_12_1
+body_11_1:
+  %t$38 = add i64 0, 1
+  br label %join_1
+arm_12_1:
+  %t$39 = add i64 0, 34
+  %t$40 = icmp eq i64 %t$0, %t$39
+  br i1 %t$40, label %body_12_1, label %arm_13_1
+body_12_1:
+  %t$41 = add i64 0, 1
+  br label %join_1
+arm_13_1:
+  %t$42 = add i64 0, 35
+  %t$43 = icmp eq i64 %t$0, %t$42
+  br i1 %t$43, label %body_13_1, label %arm_14_1
+body_13_1:
+  %t$44 = add i64 0, 1
+  br label %join_1
+arm_14_1:
+  %t$45 = add i64 0, 36
+  %t$46 = icmp eq i64 %t$0, %t$45
+  br i1 %t$46, label %body_14_1, label %arm_15_1
+body_14_1:
+  %t$47 = add i64 0, 1
+  br label %join_1
+arm_15_1:
+  %t$48 = add i64 0, 37
+  %t$49 = icmp eq i64 %t$0, %t$48
+  br i1 %t$49, label %body_15_1, label %arm_16_1
+body_15_1:
+  %t$50 = add i64 0, 1
+  br label %join_1
+arm_16_1:
+  %t$51 = add i64 0, 38
+  %t$52 = icmp eq i64 %t$0, %t$51
+  br i1 %t$52, label %body_16_1, label %arm_17_1
+body_16_1:
+  %t$53 = add i64 0, 1
+  br label %join_1
+arm_17_1:
+  %t$54 = add i64 0, 39
+  %t$55 = icmp eq i64 %t$0, %t$54
+  br i1 %t$55, label %body_17_1, label %arm_18_1
+body_17_1:
+  %t$56 = add i64 0, 1
+  br label %join_1
+arm_18_1:
+  %t$57 = add i64 0, 40
+  %t$58 = icmp eq i64 %t$0, %t$57
+  br i1 %t$58, label %body_18_1, label %arm_19_1
+body_18_1:
+  %t$59 = add i64 0, 1
+  br label %join_1
+arm_19_1:
+  %t$60 = add i64 0, 41
+  %t$61 = icmp eq i64 %t$0, %t$60
+  br i1 %t$61, label %body_19_1, label %arm_20_1
+body_19_1:
+  %t$62 = add i64 0, 1
+  br label %join_1
+arm_20_1:
+  %t$63 = add i64 0, 42
+  %t$64 = icmp eq i64 %t$0, %t$63
+  br i1 %t$64, label %body_20_1, label %arm_21_1
+body_20_1:
+  %t$65 = add i64 0, 1
+  br label %join_1
+arm_21_1:
+  %t$66 = add i64 0, 43
+  %t$67 = icmp eq i64 %t$0, %t$66
+  br i1 %t$67, label %body_21_1, label %arm_22_1
+body_21_1:
+  %t$68 = add i64 0, 1
+  br label %join_1
+arm_22_1:
+  %t$69 = add i64 0, 44
+  %t$70 = icmp eq i64 %t$0, %t$69
+  br i1 %t$70, label %body_22_1, label %arm_23_1
+body_22_1:
+  %t$71 = add i64 0, 1
+  br label %join_1
+arm_23_1:
+  %t$72 = add i64 0, 45
+  %t$73 = icmp eq i64 %t$0, %t$72
+  br i1 %t$73, label %body_23_1, label %arm_24_1
+body_23_1:
+  %t$74 = add i64 0, 1
+  br label %join_1
+arm_24_1:
+  %t$75 = add i64 0, 46
+  %t$76 = icmp eq i64 %t$0, %t$75
+  br i1 %t$76, label %body_24_1, label %arm_25_1
+body_24_1:
+  %t$77 = add i64 0, 1
+  br label %join_1
+arm_25_1:
+  %t$78 = add i64 0, 47
+  %t$79 = icmp eq i64 %t$0, %t$78
+  br i1 %t$79, label %body_25_1, label %arm_26_1
+body_25_1:
+  %t$80 = add i64 0, 1
+  br label %join_1
+arm_26_1:
+  %t$81 = add i64 0, 48
+  %t$82 = icmp eq i64 %t$0, %t$81
+  br i1 %t$82, label %body_26_1, label %arm_27_1
+body_26_1:
+  %t$83 = add i64 0, 1
+  br label %join_1
+arm_27_1:
   call void @sprout_abort_match()
   unreachable
 join_1:
-  %t$2 = phi i64 [%t$5, %body_0_1], [%t$8, %body_1_1], [%t$9, %arm_2_1]
+  %t$2 = phi i64 [%t$5, %body_0_1], [%t$8, %body_1_1], [%t$11, %body_2_1], [%t$14, %body_3_1], [%t$17, %body_4_1], [%t$20, %body_5_1], [%t$23, %body_6_1], [%t$26, %body_7_1], [%t$29, %body_8_1], [%t$32, %body_9_1], [%t$35, %body_10_1], [%t$38, %body_11_1], [%t$41, %body_12_1], [%t$44, %body_13_1], [%t$47, %body_14_1], [%t$50, %body_15_1], [%t$53, %body_16_1], [%t$56, %body_17_1], [%t$59, %body_18_1], [%t$62, %body_19_1], [%t$65, %body_20_1], [%t$68, %body_21_1], [%t$71, %body_22_1], [%t$74, %body_23_1], [%t$77, %body_24_1], [%t$80, %body_25_1], [%t$83, %body_26_1]
   ret i64 %t$2
 }
 
