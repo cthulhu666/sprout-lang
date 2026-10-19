@@ -23,11 +23,6 @@ fn h_second(req: HttpRequest) -> HttpServerResponse = ok("second")
 fn dup_routes() -> Vec Route =
   [Route("GET", "/", h_first), Route("GET", "/", h_second)]
 
-fn rendered(resp: HttpServerResponse) -> String =
-  match render(resp) with
-  | Ok raw -> raw
-  | Err _ -> "RENDER_ERR"
-
 # `dispatch` now carries the handler's `!{IO}` effect (handlers may do I/O), so drive
 # it in a do-block even though these handlers are pure — a pure handler subsumes into
 # the effectful route slot unchanged.
@@ -37,7 +32,7 @@ fn served_in(table: Vec Route, raw: String) -> String !{IO} =
   | Ok req ->
       do
         resp <- dispatch(table, req)
-        rendered(resp)
+        render(resp)
 
 fn served(raw: String) -> String !{IO} =
   served_in(routes(), raw)

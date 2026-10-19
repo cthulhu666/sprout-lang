@@ -1,5 +1,5 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpServerUnsupportedStatus, parse, request_header, request_method, request_path, request_body)
+import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, parse, request_header, request_method, request_path, request_body)
 
 # Regression: a header-less request (request line immediately followed by the blank line) once
 # sliced a NEGATIVE header-block length, since headers_end == line_end. HTTP/1.0 permits no
@@ -21,7 +21,6 @@ fn body_text(req: HttpRequest) -> String =
 fn describe_err(e: HttpServerError) -> String =
   match e with
   | HttpInvalidRequest msg -> `Err ${msg}`
-  | HttpServerUnsupportedStatus code -> `Err status ${int_to_string(code)}`
   # `parse` works on an already-read String, so it can never produce this — a timeout can only come
   # from the read path (see tests/task_io_smoke/http_idle_timeout.spr). Named anyway: the
   # exhaustiveness checker is what made this file the first thing to notice the new variant.

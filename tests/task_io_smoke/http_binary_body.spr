@@ -2,6 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
 import stdlib.bytes as bytes
+import stdlib.http (InternalServerError500, Ok200)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, request_body_bytes, response, serve_n_with)
 import stdlib.terminal as terminal
 
@@ -29,8 +30,8 @@ fn byte_at(b: Bytes, i: Int) -> Int =
 # The status carries the assertion: 200 only if all three bytes arrived in order, so a truncated or
 # re-encoded body cannot pass as success.
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
-  if intact(request_body_bytes(req)) then response(200, "ok")
-  else response(500, "body corrupted")
+  if intact(request_body_bytes(req)) then response(Ok200, "ok")
+  else response(InternalServerError500, "body corrupted")
 
 fn intact(b: Bytes) -> Bool =
   (bytes.length(b) == 3) && (byte_at(b, 0) == 0) && (byte_at(b, 1) == 255) && (byte_at(b, 2) == 65)

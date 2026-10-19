@@ -32,9 +32,8 @@ After a response, the connection stays open only if all of these hold:
 2. The handler did not set `connection: close`.
 3. The read succeeded. After a failed read (400, 408, 413, 431, 501) the framing of what follows is
    unknown, so the reply closes.
-4. The response has an exact length. The 500 fallback is framed only by the close.
-5. The server has capacity for one more idle connection (§4).
-6. The write succeeded.
+4. The server has capacity for one more idle connection (§4).
+5. The write succeeded.
 
 A closing response says `connection: close` (RFC 9112 §9.6), overriding any other value a handler
 set. A kept response sends no `connection` header, persistence being HTTP/1.1's default.

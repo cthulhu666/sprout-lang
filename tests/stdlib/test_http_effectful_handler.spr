@@ -29,9 +29,7 @@ fn served(counter: Ref Int, raw: String) -> String !{IO} =
   | Ok req ->
       do
         resp <- dispatch(routes(counter), req)
-        match render(resp) with
-        | Ok wire -> wire
-        | Err _ -> "RENDER_ERR"
+        render(resp)
 
 fn contains(hay: String, needle: String) -> Bool =
   match string.find(hay, needle) with

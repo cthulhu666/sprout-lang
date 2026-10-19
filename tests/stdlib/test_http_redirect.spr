@@ -1,36 +1,21 @@
-import stdlib.test (check_true, run_suite)
-import stdlib.http_server (HttpServerResponse, see_other, render, response, with_header)
-import stdlib.string as string
+import stdlib.test (check_eq, run_suite)
+import stdlib.http (MovedPermanently301, Found302, TemporaryRedirect307, PermanentRedirect308)
+import stdlib.http_server (redirect, render, see_other)
 
-# New feature: `see_other(location)` builds a 303 See Other response carrying a
-# `Location` header and an empty body — the Post/Redirect/Get pattern a form-driven
-# CRUD server uses so a browser refresh after a POST re-GETs the result page rather
-# than re-submitting the form. This exercises two additions: the `see_other` helper
-# and a `303 See Other` arm in the shared status table (without it, `render` fails
-# with an unsupported-status error).
-
-fn rendered(resp: HttpServerResponse) -> String =
-  match render(resp) with
-  | Ok raw -> raw
-  | Err _ -> "RENDER_ERR"
-
-fn contains(hay: String, needle: String) -> Bool =
-  match string.find(hay, needle) with
-  | Nothing -> false
-  | Just _ -> true
+# `redirect(status, location)`: an empty body and a `location` header. `see_other` is the 303 case,
+# the Post/Redirect/Get answer to a form POST, so a browser refresh re-GETs the result page.
 
 fn main() -> Unit !{IO} =
   run_suite("http_redirect", [
-    check_true("see_other renders a 303 status line",
-      contains(rendered(see_other("/users")), "303 See Other")),
-    check_true("see_other sets the Location header",
-      contains(rendered(see_other("/users")), "location: /users")),
-    # The other redirects (RFC 9110 §15.4). Outside the status table, `render` fails and the
-    # server sends a 500 in their place.
-    check_true("301 renders", contains(rendered(response(301, "")), "HTTP/1.1 301 Moved Permanently\r\n")),
-    check_true("302 renders", contains(rendered(response(302, "")), "HTTP/1.1 302 Found\r\n")),
-    check_true("307 renders", contains(rendered(response(307, "")), "HTTP/1.1 307 Temporary Redirect\r\n")),
-    check_true("308 renders", contains(rendered(response(308, "")), "HTTP/1.1 308 Permanent Redirect\r\n")),
-    check_true("a redirect carries its location",
-      contains(rendered(with_header("location", "/reactor/", response(301, ""))), "location: /reactor/\r\n"))
+    check_eq("see_other is a 303 with a location",
+      render(see_other("/users")),
+      "HTTP/1.1 303 See Other\r\nlocation: /users\r\ncontent-type: text/plain\r\ncontent-length: 0\r\n\r\n"),
+    check_eq("301", render(redirect(MovedPermanently301, "/reactor/")),
+      "HTTP/1.1 301 Moved Permanently\r\nlocation: /reactor/\r\ncontent-type: text/plain\r\ncontent-length: 0\r\n\r\n"),
+    check_eq("302", render(redirect(Found302, "/a")),
+      "HTTP/1.1 302 Found\r\nlocation: /a\r\ncontent-type: text/plain\r\ncontent-length: 0\r\n\r\n"),
+    check_eq("307", render(redirect(TemporaryRedirect307, "/a")),
+      "HTTP/1.1 307 Temporary Redirect\r\nlocation: /a\r\ncontent-type: text/plain\r\ncontent-length: 0\r\n\r\n"),
+    check_eq("308", render(redirect(PermanentRedirect308, "/a")),
+      "HTTP/1.1 308 Permanent Redirect\r\nlocation: /a\r\ncontent-type: text/plain\r\ncontent-length: 0\r\n\r\n")
   ])

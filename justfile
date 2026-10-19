@@ -2396,11 +2396,11 @@ task-io-smoke: bootstrap-from-seed
   # (24) serve_pooled: a FIXED worker pool instead of a task per connection. Two workers serve five
   # connections, so markers 3-5 can only appear if a worker looped back for more work — a pool whose
   # workers do not loop answers the first two and then hangs silently, which is the failure this
-  # exists to make loud. Marker 3 drives a handler into the 500 fallback and markers 4-5 prove the
-  # pool did not lose capacity to it. RED as a hang (no `done`) or as missing later markers.
+  # exists to make loud. Marker 3's handler fails with a 500 and markers 4-5 prove the pool did not
+  # lose capacity to it. RED as a hang (no `done`) or as missing later markers.
   build tests/task_io_smoke/http_pooled_serve.spr
   run_once "http-pooled-serve" "pooled-5-200"
-  run_once "http-pooled-serve/fallback" "pooled-3-500"
+  run_once "http-pooled-serve/failing-handler" "pooled-3-500"
   SPROUT_GC_STRESS=1 run_once "http-pooled-serve/stress" "pooled-5-200"
   # (24) read_avail_timeout's two contract ends, both previously untested: `timeout_ms <= 0` polls
   # ONCE and reports a timeout without parking (what makes http_server's total header budget

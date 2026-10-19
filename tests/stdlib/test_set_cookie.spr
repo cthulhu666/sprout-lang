@@ -7,14 +7,9 @@ import stdlib.string as string
 # they are made, so `with_cookie` and `render` cannot fail on a cookie: every check here is either
 # on those constructors or on the rendered wire.
 
-fn rendered(resp: HttpServerResponse) -> String =
-  match render(resp) with
-  | Ok raw -> raw
-  | Err _ -> "RENDER_ERR"
-
 # Every `set-cookie:` line of `resp`, joined with `|` in wire order.
 fn set_cookie_lines(resp: HttpServerResponse) -> String =
-  string.split(rendered(resp), "\r\n")
+  string.split(render(resp), "\r\n")
     |> list_filter(\line -> string.starts_with(line, "set-cookie: "))
     |> string.join("|")
 
@@ -133,5 +128,5 @@ fn main() -> Unit !{IO} =
     check_true("a semicolon in a domain cannot add an attribute",
       lacks(line_for("sid", "abc", \c -> c with (domain = Just("x.com; Secure"))), "; Secure")),
     check_true("a CR LF in a path cannot start a header line",
-      lacks(rendered(with_cookie(cookie(name("sid"), empty_value()) with (path = Just("/\r\nx-evil: 1")), ok(""))), "\r\nx-evil"))
+      lacks(render(with_cookie(cookie(name("sid"), empty_value()) with (path = Just("/\r\nx-evil: 1")), ok(""))), "\r\nx-evil"))
   ])

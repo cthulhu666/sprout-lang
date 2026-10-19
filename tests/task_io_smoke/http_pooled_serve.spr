@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
+import stdlib.http (InternalServerError500)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, response, serve_pooled_n_with)
 import stdlib.terminal as terminal
 
@@ -16,14 +17,12 @@ import stdlib.terminal as terminal
 #    why this asserts on connection five and not on connection one: a broken pool passes any test
 #    that only serves as many connections as it has workers.
 #  * CAPACITY SURVIVES A BAD HANDLER. A worker that exits its loop permanently removes capacity, so
-#    a server degrades to zero workers and hangs rather than failing visibly. Connection three asks
-#    for a status outside the supported table, driving the 500 fallback, and connections four and
-#    five must still be served afterwards by the same two workers.
+#    a server degrades to zero workers and hangs rather than failing visibly. Connection three's
+#    handler fails with a 500, and connections four and five must still be served afterwards by the
+#    same two workers.
 
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
-  # 599 is outside the status table, so `render` fails and the handler drives the 500 fallback —
-  # the closest thing to a misbehaving handler that can be provoked without a panic.
-  if request_path(req) == "/bad" then response(599, "unsupported")
+  if request_path(req) == "/bad" then response(InternalServerError500, "handler failed")
   else ok("served")
 
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =

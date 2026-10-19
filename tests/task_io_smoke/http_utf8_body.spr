@@ -1,6 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
+import stdlib.http (BadRequest400, InternalServerError500, Ok200)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, request_body, response, serve_n_with)
 import stdlib.terminal as terminal
 
@@ -20,10 +21,10 @@ import stdlib.terminal as terminal
 # reaches the handler with the wrong string and gets 500, so a mis-framing cannot pass as a 200.
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
   match request_body(req) with
-  | Ok text -> if text == "café" then response(200, "ok") else response(500, `wrong body: ${text}`)
+  | Ok text -> if text == "café" then response(Ok200, "ok") else response(InternalServerError500, `wrong body: ${text}`)
   # Reached by the split-codepoint client: 4 announced bytes of a 5-byte character frame correctly but
   # do not decode. 400 is what a text endpoint should answer; the bytes themselves were delivered.
-  | Err _ -> response(400, "body is not valid UTF-8")
+  | Err _ -> response(BadRequest400, "body is not valid UTF-8")
 
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
   match read_exact_utf8(conn, 12) with

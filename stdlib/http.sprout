@@ -28,17 +28,42 @@ export type HttpError (..) =
   | HttpBadStatus Int
   | HttpDecode String
 
-export type HttpStatusError (..) =
-  | HttpUnsupportedStatus Int
+# A status a server here can send. Closed, so every one has a status line and nothing can ask for
+# one that does not. Each name carries its code, which also keeps `Ok200` apart from `Result`'s `Ok`.
+export type HttpStatus (..) =
+  | Ok200
+  | Created201
+  | Accepted202
+  | NoContent204
+  | MovedPermanently301
+  | Found302
+  | SeeOther303
+  | NotModified304
+  | TemporaryRedirect307
+  | PermanentRedirect308
+  | BadRequest400
+  | Unauthorized401
+  | Forbidden403
+  | NotFound404
+  | MethodNotAllowed405
+  | RequestTimeout408
+  | Conflict409
+  | Gone410
+  | ContentTooLarge413
+  | UnprocessableContent422
+  | TooManyRequests429
+  | RequestHeaderFieldsTooLarge431
+  | InternalServerError500
+  | NotImplemented501
+  | BadGateway502
+  | ServiceUnavailable503
+  | GatewayTimeout504
 
 export type RequestPathVersion (..) =
   | RequestPathVersion String String
 
 export type RequestLine (..) =
   | RequestLine String RequestPathVersion
-
-type HttpStatusInfo =
-  | HttpStatusInfo String String
 
 fn str_drop(s: String, n: Int) -> String =
   if n >= str_len(s) then ""
@@ -65,74 +90,93 @@ fn parse_request_line_from_line(line: String) -> Maybe RequestLine =
 export fn parse_request_line(raw: String) -> Maybe RequestLine =
   parse_request_line_from_line(first_line(raw))
 
-fn http_status_info(status: Int) -> Maybe HttpStatusInfo =
+export fn status_code(status: HttpStatus) -> Int =
   match status with
-  | 200 -> Just(HttpStatusInfo("200", "OK"))
-  | 201 -> Just(HttpStatusInfo("201", "Created"))
-  | 202 -> Just(HttpStatusInfo("202", "Accepted"))
-  | 204 -> Just(HttpStatusInfo("204", "No Content"))
-  | 301 -> Just(HttpStatusInfo("301", "Moved Permanently"))
-  | 302 -> Just(HttpStatusInfo("302", "Found"))
-  | 303 -> Just(HttpStatusInfo("303", "See Other"))
-  | 304 -> Just(HttpStatusInfo("304", "Not Modified"))
-  | 307 -> Just(HttpStatusInfo("307", "Temporary Redirect"))
-  | 308 -> Just(HttpStatusInfo("308", "Permanent Redirect"))
-  | 400 -> Just(HttpStatusInfo("400", "Bad Request"))
-  | 401 -> Just(HttpStatusInfo("401", "Unauthorized"))
-  | 403 -> Just(HttpStatusInfo("403", "Forbidden"))
-  | 404 -> Just(HttpStatusInfo("404", "Not Found"))
-  | 405 -> Just(HttpStatusInfo("405", "Method Not Allowed"))
-  | 408 -> Just(HttpStatusInfo("408", "Request Timeout"))
-  | 409 -> Just(HttpStatusInfo("409", "Conflict"))
-  | 410 -> Just(HttpStatusInfo("410", "Gone"))
+  | Ok200 -> 200
+  | Created201 -> 201
+  | Accepted202 -> 202
+  | NoContent204 -> 204
+  | MovedPermanently301 -> 301
+  | Found302 -> 302
+  | SeeOther303 -> 303
+  | NotModified304 -> 304
+  | TemporaryRedirect307 -> 307
+  | PermanentRedirect308 -> 308
+  | BadRequest400 -> 400
+  | Unauthorized401 -> 401
+  | Forbidden403 -> 403
+  | NotFound404 -> 404
+  | MethodNotAllowed405 -> 405
+  | RequestTimeout408 -> 408
+  | Conflict409 -> 409
+  | Gone410 -> 410
+  | ContentTooLarge413 -> 413
+  | UnprocessableContent422 -> 422
+  | TooManyRequests429 -> 429
+  | RequestHeaderFieldsTooLarge431 -> 431
+  | InternalServerError500 -> 500
+  | NotImplemented501 -> 501
+  | BadGateway502 -> 502
+  | ServiceUnavailable503 -> 503
+  | GatewayTimeout504 -> 504
+
+export fn status_reason(status: HttpStatus) -> String =
+  match status with
+  | Ok200 -> "OK"
+  | Created201 -> "Created"
+  | Accepted202 -> "Accepted"
+  | NoContent204 -> "No Content"
+  | MovedPermanently301 -> "Moved Permanently"
+  | Found302 -> "Found"
+  | SeeOther303 -> "See Other"
+  | NotModified304 -> "Not Modified"
+  | TemporaryRedirect307 -> "Temporary Redirect"
+  | PermanentRedirect308 -> "Permanent Redirect"
+  | BadRequest400 -> "Bad Request"
+  | Unauthorized401 -> "Unauthorized"
+  | Forbidden403 -> "Forbidden"
+  | NotFound404 -> "Not Found"
+  | MethodNotAllowed405 -> "Method Not Allowed"
+  | RequestTimeout408 -> "Request Timeout"
+  | Conflict409 -> "Conflict"
+  | Gone410 -> "Gone"
   # RFC 9110 §15.5.14 renamed 413 from "Payload Too Large" (RFC 7231) to "Content Too Large"; the
   # newer phrase is used here. The reason phrase is advisory — clients switch on the code — so the
   # rename is safe, and nginx still reports the older name for the same status.
-  | 413 -> Just(HttpStatusInfo("413", "Content Too Large"))
-  | 422 -> Just(HttpStatusInfo("422", "Unprocessable Content"))
-  | 429 -> Just(HttpStatusInfo("429", "Too Many Requests"))
-  | 431 -> Just(HttpStatusInfo("431", "Request Header Fields Too Large"))
-  | 500 -> Just(HttpStatusInfo("500", "Internal Server Error"))
-  | 501 -> Just(HttpStatusInfo("501", "Not Implemented"))
-  | 502 -> Just(HttpStatusInfo("502", "Bad Gateway"))
-  | 503 -> Just(HttpStatusInfo("503", "Service Unavailable"))
-  | 504 -> Just(HttpStatusInfo("504", "Gateway Timeout"))
-  | _ -> Nothing
+  | ContentTooLarge413 -> "Content Too Large"
+  | UnprocessableContent422 -> "Unprocessable Content"
+  | TooManyRequests429 -> "Too Many Requests"
+  | RequestHeaderFieldsTooLarge431 -> "Request Header Fields Too Large"
+  | InternalServerError500 -> "Internal Server Error"
+  | NotImplemented501 -> "Not Implemented"
+  | BadGateway502 -> "Bad Gateway"
+  | ServiceUnavailable503 -> "Service Unavailable"
+  | GatewayTimeout504 -> "Gateway Timeout"
 
-fn http_status_line(info: HttpStatusInfo) -> String =
-  match info with
-  | HttpStatusInfo code reason ->
-      str_concat("HTTP/1.1 ", str_concat(code, str_concat(" ", reason)))
+# A 204 or 304 has no content (RFC 9110 §15.3.5, §15.4.5): no body, no Content-Length (§8.6) and no
+# default content-type. A cache copies a 304's headers onto the stored response (RFC 9111 §4.3.4),
+# so a defaulted type would replace the real one.
+export fn status_has_content(status: HttpStatus) -> Bool =
+  match status with
+  | NoContent204 -> false
+  | NotModified304 -> false
+  | _ -> true
 
-# The status line alone ("HTTP/1.1 200 OK"), for callers that assemble their own
-# header block (e.g. stdlib.http_server.render, which builds headers from a dict so
-# it can control Content-Type/Content-Length). Reuses the shared status table so the
-# supported-status set stays defined in one place.
-export fn status_line(status: Int) -> Result HttpStatusError String =
-  match http_status_info(status) with
-  | Just info -> Ok(http_status_line(info))
-  | Nothing -> Err(HttpUnsupportedStatus(status))
+# "HTTP/1.1 200 OK", for callers that assemble their own header block, as
+# stdlib.http_server.render does.
+export fn status_line(status: HttpStatus) -> String =
+  "HTTP/1.1 " ++ int_to_string(status_code(status)) ++ " " ++ status_reason(status)
 
-export fn http_response(status: Int, body: String) -> Result HttpStatusError String =
-  match http_status_info(status) with
-  | Just info ->
-      Ok(
-        str_concat(
-          http_status_line(info),
-          str_concat("\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n", body)
-        )
-      )
-  | Nothing -> Err(HttpUnsupportedStatus(status))
+export fn http_response(status: HttpStatus, body: String) -> String =
+  if status_has_content(status) then
+    status_line(status) ++ "\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n" ++ body
+  else status_line(status) ++ "\r\nConnection: close\r\n\r\n"
 
 export fn http_ok(body: String) -> String =
-  match http_response(200, body) with
-  | Ok response -> response
-  | Err _ -> ""
+  http_response(Ok200, body)
 
 export fn http_bad_request() -> String =
-  match http_response(400, "bad request") with
-  | Ok response -> response
-  | Err _ -> ""
+  http_response(BadRequest400, "bad request")
 
 export fn request_line_to_string(req: RequestLine) -> String =
   match req with
