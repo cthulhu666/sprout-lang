@@ -260,6 +260,20 @@ the lowering, not the version number (Apple clang 17 passes): LLVM discovery ski
 fails it, `just bootstrap-from-seed` refuses one, and `just test-check-clang-cpr` tests the probe.
 CI installs clang 22 from apt.llvm.org (`scripts/ci_install_llvm.sh`).
 
+## Bounds-check elimination — `just bce-gate`
+
+Compiles each `tests/bce_fixtures/*.spr` twice, with the pass on and with `SPROUT_OPT_OFF=bce`,
+and runs every case (the case name is `argv[0]`) against both. Three things must hold: the pass
+fires (a `$fast` clone with it on, none with it off); on and off print the same text and exit with
+the same status; both equal `tests/bce_fixtures/expected/<fixture>.<case>.out`. The cases break
+one term of an entry test each (past the end, below zero, `Int` bounds that would overflow), so a
+failing test that reached the unchecked clone would read out of range instead of printing the
+original panic. `scripts/bce_gate.sh --snapshot` rewrites the goldens from the pass-off build;
+read the diff before staging it, since the off build is the behaviour being preserved.
+
+The IR-shape half (what qualifies, what is left alone and why) is `tests/stdlib/compiler/test_bce.spr`.
+Wired into `just ci-fast-gates` as `bce-gate`.
+
 ## fmt/lint batching — `just fmt-batch-smoke`
 
 Asserts what the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch is processed, an

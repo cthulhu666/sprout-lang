@@ -167,6 +167,16 @@ the roots, and it is the largest single frame in allocation-heavy code
 
 Regression tests: `tests/stdlib/compiler/test_scalar_global_no_root.spr` (globals — the four scalar types unrooted, a boxed ctor still rooted, and per-let discrimination in a mixed module); `tests/stdlib/compiler/test_ir_call_result_rooting.spr` and `test_ir_tuple_result_rooting.spr` (SSA values).
 
+### Bounds-check elimination — `stdlib/compiler/bce.sprout`
+
+A typed-AST pass in `ir_pipeline`, after DCE and before Phase B, that clones a qualifying
+self-tail-recursive loop `f` into `f` (entry test), `f$chk` (original) and `f$fast`. The clone's
+accesses are the pseudo-callees `__sprout_vec_get`/`__sprout_vec_set`, lowered by `ast_to_ir` to
+`IRVecGetU` and the existing `IRVecSetD`; the entry test uses `__sprout_vec_len`/`__sprout_vec_live`.
+All are non-allocating, so `ir_rooting` treats them like the B1 ops: `IRVecGetU`'s result is rooted by
+its `IRType` kind, and only stores of a non-heap scalar are unchecked. Switches and trace:
+[debugging.md](debugging.md); design and numbers: [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md).
+
 ### GC safety linter
 
 `just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.

@@ -91,12 +91,15 @@ declare i64 @vector_truncate(i64, i64)
 @.str.9 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 42, column 58)\00" }
 @.str.10 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 46, column 34)\00" }
 @.str.11 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 101, column 23)\00" }
-@.str.12 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 110, column 32)\00" }
-@.str.13 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 144, column 37)\00" }
-@.str.14 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"epoch \00" }
-@.str.15 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"  mse \00" }
-@.str.16 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 159, column 25)\00" }
-@.str.17 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"XOR predictions (expect 0 1 1 0):\00" }
+@.str.12 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 101, column 23)\00" }
+@.str.13 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 110, column 32)\00" }
+@.str.14 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 110, column 32)\00" }
+@.str.15 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 144, column 37)\00" }
+@.str.16 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"epoch \00" }
+@.str.17 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"  mse \00" }
+@.str.18 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 159, column 25)\00" }
+@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 159, column 25)\00" }
+@.str.20 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"XOR predictions (expect 0 1 1 0):\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -554,7 +557,76 @@ entry:
   ret i64 %t$28
 }
 
-define i64 @examples.neural_network_train_xor.zero_grads(i64 %p$g$in, i64 %p$i$in) {
+define i64 @examples.neural_network_train_xor.zero_grads(i64 %p$g, i64 %p$i) {
+entry:
+  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$g)
+  %t$2 = icmp ne i64 %t$0, 0
+  %t$1 = zext i1 %t$2 to i64
+  %t$33 = trunc i64 %t$1 to i1
+  br i1 %t$33, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, -2147483648
+  %t$6 = icmp sle i64 %t$5, %p$i
+  %t$7 = zext i1 %t$6 to i64
+  %t$14 = trunc i64 %t$7 to i1
+  br i1 %t$14, label %then_8, label %else_8
+then_8:
+  %t$10 = add i64 0, 2147483648
+  %t$11 = icmp sle i64 %p$i, %t$10
+  %t$12 = zext i1 %t$11 to i64
+  br label %join_8
+else_8:
+  %t$13 = add i64 0, 0
+  br label %join_8
+join_8:
+  %t$9 = phi i64 [%t$12, %then_8], [%t$13, %else_8]
+  %t$31 = trunc i64 %t$9 to i1
+  br i1 %t$31, label %then_15, label %else_15
+then_15:
+  %t$17 = add i64 0, 8
+  %t$18 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$g)
+  %t$19$vp = inttoptr i64 %t$18 to ptr
+  %t$19 = load i64, ptr %t$19$vp
+  %t$21 = icmp slt i64 %t$17, %t$19
+  %t$22 = zext i1 %t$21 to i64
+  %t$29 = trunc i64 %t$22 to i1
+  br i1 %t$29, label %then_23, label %else_23
+then_23:
+  %t$25 = add i64 0, 0
+  %t$26 = icmp sle i64 %t$25, %p$i
+  %t$27 = zext i1 %t$26 to i64
+  br label %join_23
+else_23:
+  %t$28 = add i64 0, 0
+  br label %join_23
+join_23:
+  %t$24 = phi i64 [%t$27, %then_23], [%t$28, %else_23]
+  br label %join_15
+else_15:
+  %t$30 = add i64 0, 0
+  br label %join_15
+join_15:
+  %t$16 = phi i64 [%t$24, %join_23], [%t$30, %else_15]
+  br label %join_3
+else_3:
+  %t$32 = add i64 0, 0
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$16, %join_15], [%t$32, %else_3]
+  %t$38 = trunc i64 %t$4 to i1
+  br i1 %t$38, label %then_34, label %else_34
+then_34:
+  %t$36 = call i64 @examples.neural_network_train_xor.zero_grads$fast(i64 %p$g, i64 %p$i)
+  br label %join_34
+else_34:
+  %t$37 = call i64 @examples.neural_network_train_xor.zero_grads$chk(i64 %p$g, i64 %p$i)
+  br label %join_34
+join_34:
+  %t$35 = phi i64 [%t$36, %then_34], [%t$37, %else_34]
+  ret i64 %t$35
+}
+
+define i64 @examples.neural_network_train_xor.zero_grads$chk(i64 %p$g$in, i64 %p$i$in) {
 entry:
   %t$14 = alloca i64
   store i64 %p$g$in, ptr %t$14
@@ -594,7 +666,149 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @examples.neural_network_train_xor.apply_update(i64 %p$w$in, i64 %p$g$in, i64 %p$lr$in, i64 %p$i$in) {
+define i64 @examples.neural_network_train_xor.zero_grads$fast(i64 %p$g$in, i64 %p$i$in) {
+entry:
+  %t$16 = alloca i64
+  store i64 %p$g$in, ptr %t$16
+  %t$17 = alloca i64
+  store i64 %p$i$in, ptr %t$17
+  br label %tco_loop
+tco_loop:
+  %p$g = load i64, ptr %t$16
+  %p$i = load i64, ptr %t$17
+  %t$0 = add i64 0, 9
+  %t$1 = icmp sge i64 %p$i, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$15 = trunc i64 %t$2 to i1
+  br i1 %t$15, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, 0
+  br label %join_3
+else_3:
+  %t$6 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$g)
+  %t$7 = bitcast double 0.0 to i64
+  %t$8$vp = inttoptr i64 %t$6 to ptr
+  %t$8$dp = getelementptr i64, ptr %t$8$vp, i64 2
+  %t$8$data = load ptr, ptr %t$8$dp
+  %t$8$ep = getelementptr i64, ptr %t$8$data, i64 %p$i
+  store i64 %t$7, ptr %t$8$ep
+  %t$8 = add i64 0, 0
+  %t$10 = add i64 0, 1
+  %t$11$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$10)
+  %t$11 = extractvalue { i64, i1 } %t$11$agg, 0
+  %t$11$ovf = extractvalue { i64, i1 } %t$11$agg, 1
+  br i1 %t$11$ovf, label %ovfpanic_11, label %ovfok_11
+ovfpanic_11:
+  %t$12 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  call i64 @panic(i64 %t$13)
+  unreachable
+ovfok_11:
+  store i64 %p$g, ptr %t$16
+  store i64 %t$11, ptr %t$17
+  br label %tco_loop
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3]
+  ret i64 %t$4
+}
+
+define i64 @examples.neural_network_train_xor.apply_update(i64 %p$w, i64 %p$g, i64 %p$lr, i64 %p$i) {
+entry:
+  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$g)
+  %t$2 = icmp ne i64 %t$0, 0
+  %t$1 = zext i1 %t$2 to i64
+  %t$50 = trunc i64 %t$1 to i1
+  br i1 %t$50, label %then_3, label %else_3
+then_3:
+  %t$5 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$7 = icmp ne i64 %t$5, 0
+  %t$6 = zext i1 %t$7 to i64
+  %t$48 = trunc i64 %t$6 to i1
+  br i1 %t$48, label %then_8, label %else_8
+then_8:
+  %t$10 = add i64 0, -2147483648
+  %t$11 = icmp sle i64 %t$10, %p$i
+  %t$12 = zext i1 %t$11 to i64
+  %t$19 = trunc i64 %t$12 to i1
+  br i1 %t$19, label %then_13, label %else_13
+then_13:
+  %t$15 = add i64 0, 2147483648
+  %t$16 = icmp sle i64 %p$i, %t$15
+  %t$17 = zext i1 %t$16 to i64
+  br label %join_13
+else_13:
+  %t$18 = add i64 0, 0
+  br label %join_13
+join_13:
+  %t$14 = phi i64 [%t$17, %then_13], [%t$18, %else_13]
+  %t$46 = trunc i64 %t$14 to i1
+  br i1 %t$46, label %then_20, label %else_20
+then_20:
+  %t$22 = add i64 0, 8
+  %t$23 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$g)
+  %t$24$vp = inttoptr i64 %t$23 to ptr
+  %t$24 = load i64, ptr %t$24$vp
+  %t$26 = icmp slt i64 %t$22, %t$24
+  %t$27 = zext i1 %t$26 to i64
+  %t$44 = trunc i64 %t$27 to i1
+  br i1 %t$44, label %then_28, label %else_28
+then_28:
+  %t$30 = add i64 0, 8
+  %t$31 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$32$vp = inttoptr i64 %t$31 to ptr
+  %t$32 = load i64, ptr %t$32$vp
+  %t$34 = icmp slt i64 %t$30, %t$32
+  %t$35 = zext i1 %t$34 to i64
+  %t$42 = trunc i64 %t$35 to i1
+  br i1 %t$42, label %then_36, label %else_36
+then_36:
+  %t$38 = add i64 0, 0
+  %t$39 = icmp sle i64 %t$38, %p$i
+  %t$40 = zext i1 %t$39 to i64
+  br label %join_36
+else_36:
+  %t$41 = add i64 0, 0
+  br label %join_36
+join_36:
+  %t$37 = phi i64 [%t$40, %then_36], [%t$41, %else_36]
+  br label %join_28
+else_28:
+  %t$43 = add i64 0, 0
+  br label %join_28
+join_28:
+  %t$29 = phi i64 [%t$37, %join_36], [%t$43, %else_28]
+  br label %join_20
+else_20:
+  %t$45 = add i64 0, 0
+  br label %join_20
+join_20:
+  %t$21 = phi i64 [%t$29, %join_28], [%t$45, %else_20]
+  br label %join_8
+else_8:
+  %t$47 = add i64 0, 0
+  br label %join_8
+join_8:
+  %t$9 = phi i64 [%t$21, %join_20], [%t$47, %else_8]
+  br label %join_3
+else_3:
+  %t$49 = add i64 0, 0
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$9, %join_8], [%t$49, %else_3]
+  %t$55 = trunc i64 %t$4 to i1
+  br i1 %t$55, label %then_51, label %else_51
+then_51:
+  %t$53 = call i64 @examples.neural_network_train_xor.apply_update$fast(i64 %p$w, i64 %p$g, i64 %p$lr, i64 %p$i)
+  br label %join_51
+else_51:
+  %t$54 = call i64 @examples.neural_network_train_xor.apply_update$chk(i64 %p$w, i64 %p$g, i64 %p$lr, i64 %p$i)
+  br label %join_51
+join_51:
+  %t$52 = phi i64 [%t$53, %then_51], [%t$54, %else_51]
+  ret i64 %t$52
+}
+
+define i64 @examples.neural_network_train_xor.apply_update$chk(i64 %p$w$in, i64 %p$g$in, i64 %p$lr$in, i64 %p$i$in) {
 entry:
   %t$17 = alloca i64
   store i64 %p$w$in, ptr %t$17
@@ -636,7 +850,7 @@ else_3:
   %t$12$ovf = extractvalue { i64, i1 } %t$12$agg, 1
   br i1 %t$12$ovf, label %ovfpanic_12, label %ovfok_12
 ovfpanic_12:
-  %t$13 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
+  %t$13 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
   call i64 @panic(i64 %t$14)
   unreachable
@@ -645,6 +859,79 @@ ovfok_12:
   store i64 %p$g, ptr %t$18
   store i64 %p$lr, ptr %t$19
   store i64 %t$12, ptr %t$20
+  br label %tco_loop
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3]
+  ret i64 %t$4
+}
+
+define i64 @examples.neural_network_train_xor.apply_update$fast(i64 %p$w$in, i64 %p$g$in, i64 %p$lr$in, i64 %p$i$in) {
+entry:
+  %t$23 = alloca i64
+  store i64 %p$w$in, ptr %t$23
+  %t$24 = alloca i64
+  store i64 %p$g$in, ptr %t$24
+  %t$25 = alloca i64
+  store i64 %p$lr$in, ptr %t$25
+  %t$26 = alloca i64
+  store i64 %p$i$in, ptr %t$26
+  br label %tco_loop
+tco_loop:
+  %p$w = load i64, ptr %t$23
+  %p$g = load i64, ptr %t$24
+  %p$lr = load i64, ptr %t$25
+  %p$i = load i64, ptr %t$26
+  %t$0 = add i64 0, 9
+  %t$1 = icmp sge i64 %p$i, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$22 = trunc i64 %t$2 to i1
+  br i1 %t$22, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, 0
+  br label %join_3
+else_3:
+  %t$6 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$7$vp = inttoptr i64 %t$6 to ptr
+  %t$7$dp = getelementptr i64, ptr %t$7$vp, i64 2
+  %t$7$data = load ptr, ptr %t$7$dp
+  %t$7$ep = getelementptr i64, ptr %t$7$data, i64 %p$i
+  %t$7 = load i64, ptr %t$7$ep
+  %t$9 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$g)
+  %t$10$vp = inttoptr i64 %t$9 to ptr
+  %t$10$dp = getelementptr i64, ptr %t$10$vp, i64 2
+  %t$10$data = load ptr, ptr %t$10$dp
+  %t$10$ep = getelementptr i64, ptr %t$10$data, i64 %p$i
+  %t$10 = load i64, ptr %t$10$ep
+  %t$12 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$13$la = bitcast i64 %p$lr to double
+  %t$13$lb = bitcast i64 %t$10 to double
+  %t$13$fr = fmul double %t$13$la, %t$13$lb
+  %t$13 = bitcast double %t$13$fr to i64
+  %t$14$la = bitcast i64 %t$7 to double
+  %t$14$lb = bitcast i64 %t$13 to double
+  %t$14$fr = fsub double %t$14$la, %t$14$lb
+  %t$14 = bitcast double %t$14$fr to i64
+  %t$15$vp = inttoptr i64 %t$12 to ptr
+  %t$15$dp = getelementptr i64, ptr %t$15$vp, i64 2
+  %t$15$data = load ptr, ptr %t$15$dp
+  %t$15$ep = getelementptr i64, ptr %t$15$data, i64 %p$i
+  store i64 %t$14, ptr %t$15$ep
+  %t$15 = add i64 0, 0
+  %t$17 = add i64 0, 1
+  %t$18$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$17)
+  %t$18 = extractvalue { i64, i1 } %t$18$agg, 0
+  %t$18$ovf = extractvalue { i64, i1 } %t$18$agg, 1
+  br i1 %t$18$ovf, label %ovfpanic_18, label %ovfok_18
+ovfpanic_18:
+  %t$19 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
+  %t$20 = ptrtoint ptr %t$19 to i64
+  call i64 @panic(i64 %t$20)
+  unreachable
+ovfok_18:
+  store i64 %p$w, ptr %t$23
+  store i64 %p$g, ptr %t$24
+  store i64 %p$lr, ptr %t$25
+  store i64 %t$18, ptr %t$26
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%t$5, %then_3]
@@ -778,7 +1065,7 @@ else_2:
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$8$ovf, label %ovfpanic_8, label %ovfok_8
 ovfpanic_8:
-  %t$9 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
+  %t$9 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
   call i64 @panic(i64 %t$10)
   unreachable
@@ -806,7 +1093,7 @@ entry:
   br i1 %t$19, label %then_4, label %else_4
 then_4:
   %t$6 = call i64 @examples.neural_network_train_xor.mse(i64 %p$w)
-  %t$7 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
+  %t$7 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
   %t$20 = alloca i64
   store i64 %t$8, ptr %t$20
@@ -817,7 +1104,7 @@ then_4:
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$8, i64 %t$9)
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$11 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
+  %t$11 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$25 = alloca i64
   store i64 %t$10, ptr %t$25
@@ -848,7 +1135,76 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @examples.neural_network_train_xor.init_weights(i64 %p$w$in, i64 %p$i$in, i64 %p$state$in) {
+define i64 @examples.neural_network_train_xor.init_weights(i64 %p$w, i64 %p$i, i64 %p$state) {
+entry:
+  %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$2 = icmp ne i64 %t$0, 0
+  %t$1 = zext i1 %t$2 to i64
+  %t$33 = trunc i64 %t$1 to i1
+  br i1 %t$33, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, -2147483648
+  %t$6 = icmp sle i64 %t$5, %p$i
+  %t$7 = zext i1 %t$6 to i64
+  %t$14 = trunc i64 %t$7 to i1
+  br i1 %t$14, label %then_8, label %else_8
+then_8:
+  %t$10 = add i64 0, 2147483648
+  %t$11 = icmp sle i64 %p$i, %t$10
+  %t$12 = zext i1 %t$11 to i64
+  br label %join_8
+else_8:
+  %t$13 = add i64 0, 0
+  br label %join_8
+join_8:
+  %t$9 = phi i64 [%t$12, %then_8], [%t$13, %else_8]
+  %t$31 = trunc i64 %t$9 to i1
+  br i1 %t$31, label %then_15, label %else_15
+then_15:
+  %t$17 = add i64 0, 8
+  %t$18 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$19$vp = inttoptr i64 %t$18 to ptr
+  %t$19 = load i64, ptr %t$19$vp
+  %t$21 = icmp slt i64 %t$17, %t$19
+  %t$22 = zext i1 %t$21 to i64
+  %t$29 = trunc i64 %t$22 to i1
+  br i1 %t$29, label %then_23, label %else_23
+then_23:
+  %t$25 = add i64 0, 0
+  %t$26 = icmp sle i64 %t$25, %p$i
+  %t$27 = zext i1 %t$26 to i64
+  br label %join_23
+else_23:
+  %t$28 = add i64 0, 0
+  br label %join_23
+join_23:
+  %t$24 = phi i64 [%t$27, %then_23], [%t$28, %else_23]
+  br label %join_15
+else_15:
+  %t$30 = add i64 0, 0
+  br label %join_15
+join_15:
+  %t$16 = phi i64 [%t$24, %join_23], [%t$30, %else_15]
+  br label %join_3
+else_3:
+  %t$32 = add i64 0, 0
+  br label %join_3
+join_3:
+  %t$4 = phi i64 [%t$16, %join_15], [%t$32, %else_3]
+  %t$38 = trunc i64 %t$4 to i1
+  br i1 %t$38, label %then_34, label %else_34
+then_34:
+  %t$36 = call i64 @examples.neural_network_train_xor.init_weights$fast(i64 %p$w, i64 %p$i, i64 %p$state)
+  br label %join_34
+else_34:
+  %t$37 = call i64 @examples.neural_network_train_xor.init_weights$chk(i64 %p$w, i64 %p$i, i64 %p$state)
+  br label %join_34
+join_34:
+  %t$35 = phi i64 [%t$36, %then_34], [%t$37, %else_34]
+  ret i64 %t$35
+}
+
+define i64 @examples.neural_network_train_xor.init_weights$chk(i64 %p$w$in, i64 %p$i$in, i64 %p$state$in) {
 entry:
   %t$15 = alloca i64
   store i64 %p$w$in, ptr %t$15
@@ -878,7 +1234,7 @@ else_3:
   %t$9$ovf = extractvalue { i64, i1 } %t$9$agg, 1
   br i1 %t$9$ovf, label %ovfpanic_9, label %ovfok_9
 ovfpanic_9:
-  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.18, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   call i64 @panic(i64 %t$11)
   unreachable
@@ -887,6 +1243,57 @@ ovfok_9:
   store i64 %p$w, ptr %t$15
   store i64 %t$9, ptr %t$16
   store i64 %t$12, ptr %t$17
+  br label %tco_loop
+join_3:
+  %t$4 = phi i64 [%t$5, %then_3]
+  ret i64 %t$4
+}
+
+define i64 @examples.neural_network_train_xor.init_weights$fast(i64 %p$w$in, i64 %p$i$in, i64 %p$state$in) {
+entry:
+  %t$17 = alloca i64
+  store i64 %p$w$in, ptr %t$17
+  %t$18 = alloca i64
+  store i64 %p$i$in, ptr %t$18
+  %t$19 = alloca i64
+  store i64 %p$state$in, ptr %t$19
+  br label %tco_loop
+tco_loop:
+  %p$w = load i64, ptr %t$17
+  %p$i = load i64, ptr %t$18
+  %p$state = load i64, ptr %t$19
+  %t$0 = add i64 0, 9
+  %t$1 = icmp sge i64 %p$i, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$16 = trunc i64 %t$2 to i1
+  br i1 %t$16, label %then_3, label %else_3
+then_3:
+  %t$5 = add i64 0, 0
+  br label %join_3
+else_3:
+  %t$6 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$w)
+  %t$7 = call i64 @examples.neural_network_train_xor.lcg_to_weight(i64 %p$state)
+  %t$8$vp = inttoptr i64 %t$6 to ptr
+  %t$8$dp = getelementptr i64, ptr %t$8$vp, i64 2
+  %t$8$data = load ptr, ptr %t$8$dp
+  %t$8$ep = getelementptr i64, ptr %t$8$data, i64 %p$i
+  store i64 %t$7, ptr %t$8$ep
+  %t$8 = add i64 0, 0
+  %t$10 = add i64 0, 1
+  %t$11$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$10)
+  %t$11 = extractvalue { i64, i1 } %t$11$agg, 0
+  %t$11$ovf = extractvalue { i64, i1 } %t$11$agg, 1
+  br i1 %t$11$ovf, label %ovfpanic_11, label %ovfok_11
+ovfpanic_11:
+  %t$12 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.19, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  call i64 @panic(i64 %t$13)
+  unreachable
+ovfok_11:
+  %t$14 = call i64 @examples.neural_network_train_xor.lcg_next(i64 %p$state)
+  store i64 %p$w, ptr %t$17
+  store i64 %t$11, ptr %t$18
+  store i64 %t$14, ptr %t$19
   br label %tco_loop
 join_3:
   %t$4 = phi i64 [%t$5, %then_3]
@@ -937,7 +1344,7 @@ entry:
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$13 = call i64 @examples.neural_network_train_xor.train_verbose(i64 %t$2, i64 %t$5, i64 %t$9, i64 %t$10, i64 %t$11, i64 %t$12)
   %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$14 = getelementptr inbounds { i64, [34 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
+  %t$14 = getelementptr inbounds { i64, [34 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
   %t$16$ptr = inttoptr i64 %t$15 to ptr
   %t$16 = call i64 @print_str(ptr %t$16$ptr)

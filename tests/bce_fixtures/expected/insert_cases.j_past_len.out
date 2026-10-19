@@ -1,0 +1,3 @@
+before
+runtime error: vector_get_direct: index out of bounds
+exit=1

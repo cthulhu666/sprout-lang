@@ -1,0 +1,1178 @@
+module stdlib.compiler.bce
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.type_kind as type_kind
+import stdlib.compiler.dce as dce
+
+# Bounds-check elimination by loop versioning (docs/bounds-check-elimination-v0.md).
+#
+# A self-tail-recursive `f` whose accesses stay in range under its own exit tests becomes
+# `f` (one entry test, then a tail call), `f$chk` (the original) and `f$fast` (unchecked
+# accesses). The test covers every access the loop can make and never panics: each atom
+# is boxed to a small range first. A function it cannot prove is left alone.
+
+# ---------------------------------------------------------------------------
+# Pseudo-callees. `ast_to_ir` lowers each to one inline op; only this pass writes
+# them, and the `__sprout_` prefix is reserved so no program can.
+# ---------------------------------------------------------------------------
+
+export type BceOp (..) =
+  | OpGet
+  | OpSet
+  | OpLen
+  | OpLive
+
+let get_callee: String = "__sprout_vec_get"
+let set_callee: String = "__sprout_vec_set"
+let len_callee: String = "__sprout_vec_len"
+let live_callee: String = "__sprout_vec_live"
+
+export fn recognize_op(name: String) -> Maybe BceOp =
+  if name == get_callee then Just(OpGet)
+  else if name == set_callee then Just(OpSet)
+  else if name == len_callee then Just(OpLen)
+  else if name == live_callee then Just(OpLive)
+  else Nothing
+
+fn chk_name(f: String) -> String = f ++ "$chk"
+fn fast_name(f: String) -> String = f ++ "$fast"
+
+# ---------------------------------------------------------------------------
+# Linear forms: konst + sum(coef * atom), atoms being parameter names.
+#
+# Every form is kept small (`lin_ok`) so arithmetic on it cannot overflow, here or
+# in the entry test once its atoms are boxed.
+# ---------------------------------------------------------------------------
+
+type Lin (..) = (konst: Int, terms: List (String, Int))
+
+let max_konst: Int = 1099511627776
+
+let max_coef: Int = 1048576
+
+let box_limit: Int = 2147483648
+
+# Larger than any bound this pass accepts, and safe to negate.
+let magnitude_cap: Int = 4611686018427387904
+
+# Clamped: `0 - n` would overflow at Int's minimum, which a literal can spell.
+fn abs_int(n: Int) -> Int =
+  if n >= 0 then n
+  else if n < 0 - magnitude_cap then magnitude_cap
+  else 0 - n
+
+fn rem_int(a: Int, m: Int) -> Int = a - (a / m) * m
+
+fn lin_const(n: Int) -> Lin = Lin(konst = n, terms = Nil)
+
+fn lin_atom(name: String) -> Lin = Lin(konst = 0, terms = [(name, 1)])
+
+fn lin_ok(l: Lin) -> Bool =
+  abs_int(l.konst) <= max_konst && list_length(l.terms) <= 8 && list_all_small(l.terms)
+
+fn list_all_small(ts: List (String, Int)) -> Bool =
+  match ts with
+  | Nil -> true
+  | [(_, c) | rest] -> abs_int(c) <= max_coef && list_all_small(rest)
+
+# Terms are sorted by name with no zero coefficient, so equal forms compare equal.
+fn merge_terms(xs: List (String, Int), ys: List (String, Int)) -> List (String, Int) =
+  match xs with
+  | Nil -> ys
+  | [(xn, xc) | xrest] -> merge_term_into(xn, xc, xrest, xs, ys)
+
+fn merge_term_into(xn: String, xc: Int, xrest: List (String, Int),
+                   xs: List (String, Int), ys: List (String, Int)) -> List (String, Int) =
+  match ys with
+  | Nil -> xs
+  | [(yn, yc) | yrest] ->
+      let order = str_compare(xn, yn)
+      in if order == 0 then keep_sum(xn, xc + yc, merge_terms(xrest, yrest))
+         else if order < 0 then Cons((xn, xc), merge_terms(xrest, ys))
+         else Cons((yn, yc), merge_terms(xs, yrest))
+
+fn keep_sum(name: String, c: Int, rest: List (String, Int)) -> List (String, Int) =
+  if c == 0 then rest else Cons((name, c), rest)
+
+fn lin_add(a: Lin, b: Lin) -> Lin =
+  Lin(konst = a.konst + b.konst, terms = merge_terms(a.terms, b.terms))
+
+fn lin_neg_term(t: (String, Int)) -> (String, Int) =
+  match t with
+  | (n, c) -> (n, 0 - c)
+
+fn lin_neg(a: Lin) -> Lin =
+  Lin(konst = 0 - a.konst, terms = list_map(lin_neg_term, a.terms))
+
+fn scale_ok(k: Int, a: Lin) -> Bool =
+  abs_int(k) <= max_coef && abs_int(a.konst) <= max_konst && list_all_small(a.terms)
+
+fn scale_term(k: Int, t: (String, Int)) -> (String, Int) =
+  match t with
+  | (n, c) -> (n, k * c)
+
+# Nothing when the product would not stay small.
+fn lin_scale(k: Int, a: Lin) -> Maybe Lin =
+  if ! scale_ok (k, a) then Nothing
+  else if k == 0 then Just(lin_const(0))
+  else if lin_ok(scaled(k, a)) then Just(scaled(k, a))
+  else Nothing
+
+fn scaled(k: Int, a: Lin) -> Lin =
+  Lin(konst = k * a.konst, terms = list_map(scale_term(k, _), a.terms))
+
+fn lin_key(l: Lin) -> String =
+  int_to_string(l.konst) ++ list_fold(term_key, "", l.terms)
+
+fn term_key(acc: String, t: (String, Int)) -> String =
+  match t with
+  | (n, c) -> acc ++ ";" ++ n ++ ":" ++ int_to_string(c)
+
+fn lin_atoms(l: Lin) -> List String = list_map(term_name, l.terms)
+
+fn term_name(t: (String, Int)) -> String =
+  match t with
+  | (n, _) -> n
+
+# ---------------------------------------------------------------------------
+# Parameter classes. Each parameter is passed unchanged by every self-call
+# (invariant), steps by one constant in all of them, or is neither (varying).
+# ---------------------------------------------------------------------------
+
+type Cls (..) =
+  | Inv
+  | Step Int
+  | Vary
+
+# What the self-calls did to one parameter so far: tag 0 unseen, 1 unchanged,
+# 2 stepped by `step`, 3 mixed.
+type Obs (..) = (tag: Int, step: Int)
+
+fn obs_unseen() -> Obs = Obs(tag = 0, step = 0)
+
+fn obs_merge(a: Obs, b: Obs) -> Obs =
+  if a.tag == 0 then b
+  else if b.tag == 0 then a
+  else if a.tag == b.tag && a.step == b.step then a
+  else Obs(tag = 3, step = 0)
+
+fn is_int(t: types.Type) -> Bool =
+  match t with
+  | types.TConst id -> types.type_id_name(id) == "Int"
+  | _ -> false
+
+# A literal small enough to negate and add safely; a larger one is not a step this pass uses.
+fn int_lit(e: typed_ast.TypedExpr) -> Maybe Int =
+  match e with
+  | typed_ast.TInt n _ _ -> if abs_int(n) <= max_konst then Just(n) else Nothing
+  | typed_ast.TUnary op x _ _ -> if op == "-" then negated_lit(x) else Nothing
+  | _ -> Nothing
+
+fn negated_lit(e: typed_ast.TypedExpr) -> Maybe Int =
+  match e with
+  | typed_ast.TInt n _ _ -> if abs_int(n) <= max_konst then Just(0 - n) else Nothing
+  | _ -> Nothing
+
+fn is_var(p: String, e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TVar n _ _ -> n == p
+  | _ -> false
+
+# `p + c`, `c + p` or `p - c` for a literal `c`.
+fn step_of(p: String, e: typed_ast.TypedExpr) -> Maybe Int =
+  match e with
+  | typed_ast.TBinary op l r _ _ ->
+      if op == "+" && is_var(p, l) then int_lit(r)
+      else if op == "+" && is_var(p, r) then int_lit(l)
+      else if op == "-" && is_var(p, l) then negate_maybe(int_lit(r))
+      else Nothing
+  | _ -> Nothing
+
+fn negate_maybe(m: Maybe Int) -> Maybe Int =
+  match m with
+  | Just n -> Just(0 - n)
+  | Nothing -> Nothing
+
+fn observe(p: String, e: typed_ast.TypedExpr) -> Obs =
+  if is_var(p, e) then Obs(tag = 1, step = 0)
+  else observe_step(step_of(p, e))
+
+fn observe_step(m: Maybe Int) -> Obs =
+  match m with
+  | Just c -> if c != 0 && abs_int(c) <= max_coef then Obs(tag = 2, step = c) else Obs(tag = 3, step = 0)
+  | Nothing -> Obs(tag = 3, step = 0)
+
+fn cls_of_obs(o: Obs) -> Cls =
+  if o.tag == 1 then Inv
+  else if o.tag == 2 then Step(o.step)
+  else Vary
+
+# One observation per parameter from one call's arguments, in parameter order.
+fn observe_call(pnames: List String, args: List typed_ast.TypedExpr) -> List Obs =
+  match pnames with
+  | Nil -> Nil
+  | [p | prest] ->
+      match args with
+      | Nil -> Nil
+      | [a | arest] -> Cons(observe(p, a), observe_call(prest, arest))
+
+fn merge_obs_lists(xs: List Obs, ys: List Obs) -> List Obs =
+  match xs with
+  | Nil -> Nil
+  | [x | xrest] ->
+      match ys with
+      | Nil -> Nil
+      | [y | yrest] -> Cons(obs_merge(x, y), merge_obs_lists(xrest, yrest))
+
+fn unseen_list(n: Int) -> List Obs =
+  if n <= 0 then Nil else Cons(obs_unseen(), unseen_list(n - 1))
+
+fn classify(pnames: List String, calls: List Call) -> Dict Cls =
+  let observed = list_fold(\ (acc, c) -> merge_obs_lists(acc, observe_call(pnames, c.args)),
+                           unseen_list(list_length(pnames)), calls)
+  in dict_from_list(zip_cls(pnames, observed))
+
+fn zip_cls(pnames: List String, obs: List Obs) -> List (String, Cls) =
+  match pnames with
+  | Nil -> Nil
+  | [p | prest] ->
+      match obs with
+      | Nil -> Nil
+      | [o | orest] -> Cons((p, cls_of_obs(o)), zip_cls(prest, orest))
+
+fn calls_match_arity(n: Int, calls: List Call) -> Bool =
+  match calls with
+  | Nil -> true
+  | [c | rest] -> list_length(c.args) == n && calls_match_arity(n, rest)
+
+# ---------------------------------------------------------------------------
+# Linear forms of expressions.
+# ---------------------------------------------------------------------------
+
+# `allow_step` admits stepping parameters (an index); bounds may use only
+# invariant ones.
+fn to_lin(e: typed_ast.TypedExpr, cls: Dict Cls, allow_step: Bool) -> Maybe Lin =
+  match e with
+  | typed_ast.TInt n _ _ -> if abs_int(n) <= max_konst then Just(lin_const(n)) else Nothing
+  | typed_ast.TVar p t _ -> if is_int(t) then atom_lin(p, dict_get(p, cls), allow_step) else Nothing
+  | typed_ast.TUnary op x _ _ -> if op == "-" then lin_negated(to_lin(x, cls, allow_step)) else Nothing
+  | typed_ast.TBinary op l r _ _ -> to_lin_binary(op, to_lin(l, cls, allow_step), to_lin(r, cls, allow_step))
+  | _ -> Nothing
+
+fn atom_lin(p: String, c: Maybe Cls, allow_step: Bool) -> Maybe Lin =
+  match c with
+  | Just Inv -> Just(lin_atom(p))
+  | Just (Step _) -> if allow_step then Just(lin_atom(p)) else Nothing
+  | _ -> Nothing
+
+fn lin_negated(m: Maybe Lin) -> Maybe Lin =
+  match m with
+  | Just l -> Just(lin_neg(l))
+  | Nothing -> Nothing
+
+fn to_lin_binary(op: String, ml: Maybe Lin, mr: Maybe Lin) -> Maybe Lin =
+  let Just a = ml else Nothing
+      Just b = mr else Nothing
+  in if op == "+" then checked(lin_add(a, b))
+     else if op == "-" then checked(lin_add(a, lin_neg(b)))
+     else if op == "*" then lin_product(a, b)
+     else Nothing
+
+fn checked(l: Lin) -> Maybe Lin = if lin_ok(l) then Just(l) else Nothing
+
+fn lin_product(a: Lin, b: Lin) -> Maybe Lin =
+  match a.terms with
+  | Nil -> lin_scale(a.konst, b)
+  | _ ->
+      match b.terms with
+      | Nil -> lin_scale(b.konst, a)
+      | _ -> Nothing
+
+# ---------------------------------------------------------------------------
+# Facts: bounds on a stepping parameter that hold at a program point, read off the
+# branch conditions above it. `d <= bound` when `upper`, else `d >= bound`.
+# ---------------------------------------------------------------------------
+
+type Fact (..) = (param: String, upper: Bool, bound: Lin)
+
+fn fact_key(f: Fact) -> String =
+  f.param ++ (if f.upper then "<=" else ">=") ++ lin_key(f.bound)
+
+fn flip_op(op: String) -> String =
+  if op == "<" then ">" else if op == "<=" then ">=" else if op == ">" then "<" else if op == ">=" then "<=" else op
+
+fn negate_op(op: String) -> String =
+  if op == "<" then ">=" else if op == "<=" then ">" else if op == ">" then "<=" else if op == ">=" then "<" else op
+
+fn is_order_op(op: String) -> Bool = op == "<" || op == "<=" || op == ">" || op == ">="
+
+fn is_step_param(p: String, cls: Dict Cls) -> Bool =
+  match dict_get(p, cls) with
+  | Just (Step _) -> true
+  | _ -> false
+
+# The fact `d op bound` gives, with `d` on the left.
+fn fact_of(d: String, op: String, bound: Maybe Lin) -> List Fact =
+  match bound with
+  | Nothing -> Nil
+  | Just b ->
+      if op == "<" then [Fact(param = d, upper = true, bound = lin_add(b, lin_const(-1)))]
+      else if op == "<=" then [Fact(param = d, upper = true, bound = b)]
+      else if op == ">" then [Fact(param = d, upper = false, bound = lin_add(b, lin_const(1)))]
+      else if op == ">=" then [Fact(param = d, upper = false, bound = b)]
+      else Nil
+
+fn cmp_facts(op: String, l: typed_ast.TypedExpr, r: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
+  if ! is_order_op (op) then Nil
+  else
+    match l with
+    | typed_ast.TVar d t _ ->
+        if is_int(t) && is_step_param(d, cls) then fact_of(d, op, to_lin(r, cls, false))
+        else mirrored_facts(op, l, r, cls)
+    | _ -> mirrored_facts(op, l, r, cls)
+
+fn mirrored_facts(op: String, l: typed_ast.TypedExpr, r: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
+  match r with
+  | typed_ast.TVar d t _ ->
+      if is_int(t) && is_step_param(d, cls) then fact_of(d, flip_op(op), to_lin(l, cls, false)) else Nil
+  | _ -> Nil
+
+fn facts_true(c: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
+  match c with
+  | typed_ast.TBinary op l r _ _ ->
+      if op == "&&" then list_append(facts_true(l, cls), facts_true(r, cls))
+      else cmp_facts(op, l, r, cls)
+  | typed_ast.TUnary op x _ _ -> if op == "!" then facts_false(x, cls) else Nil
+  | _ -> Nil
+
+fn facts_false(c: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
+  match c with
+  | typed_ast.TBinary op l r _ _ ->
+      if op == "||" then list_append(facts_false(l, cls), facts_false(r, cls))
+      else cmp_facts(negate_op(op), l, r, cls)
+  | typed_ast.TUnary op x _ _ -> if op == "!" then facts_true(x, cls) else Nil
+  | _ -> Nil
+
+# ---------------------------------------------------------------------------
+# Accesses and the wrappers that reduce to one.
+# ---------------------------------------------------------------------------
+
+# An access with its operands in terms of the enclosing function.
+type Shape (..) = (is_set: Bool, vec: typed_ast.TypedExpr, idx: typed_ast.TypedExpr,
+                   val: Maybe typed_ast.TypedExpr)
+
+# A function whose whole body is one access over its own parameters, each used
+# once and in order, so inlining it neither repeats nor drops an argument.
+type Wrapper (..) = (params: List String, shape: Shape)
+
+type Tables (..) = (wrappers: Dict Wrapper, projs: Set, fn_names: Set, ext_pure: Dict Bool)
+
+fn is_pure_decl(eff: Maybe (List String)) -> Bool =
+  match eff with
+  | Nothing -> true
+  | Just es -> list_length(es) == 0
+
+# `match v with | C x -> x` or `v.field`: a read of one field of an immutable value.
+fn is_projection(d: typed_ast.TypedDecl) -> Bool =
+  match d with
+  | typed_ast.TFnDecl _ [ast.Param p _ _] _ eff _ body -> is_pure_decl(eff) && projects(p, body)
+  | _ -> false
+
+fn projects(p: String, body: typed_ast.TypedExpr) -> Bool =
+  match body with
+  | typed_ast.TMatch scrut [typed_ast.TypedMatchBranch pat arm] _ _ ->
+      is_var(p, scrut) && is_field_pattern(pat, arm)
+  | typed_ast.TGetField obj _ _ _ -> is_var(p, obj)
+  | _ -> false
+
+fn is_field_pattern(pat: ast.Pattern, arm: typed_ast.TypedExpr) -> Bool =
+  match pat with
+  | ast.ConstructorPattern _ [ast.VarPattern x _] _ -> is_var(x, arm)
+  | _ -> false
+
+fn decl_projection_name(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> if is_projection(d) then Just(name) else Nothing
+  | _ -> Nothing
+
+# Operands a wrapper may pass on: its parameters, small literals, sums and
+# products of those, and projections of them.
+fn operand_ok(e: typed_ast.TypedExpr, projs: Set) -> Bool =
+  match e with
+  | typed_ast.TVar _ _ _ -> true
+  | typed_ast.TInt _ _ _ -> true
+  | typed_ast.TBinary op l r _ _ ->
+      (op == "+" || op == "-" || op == "*") && operand_ok(l, projs) && operand_ok(r, projs)
+  | typed_ast.TCall (typed_ast.TVar g _ _) [x] _ _ -> set_member(g, projs) && operand_ok(x, projs)
+  | _ -> false
+
+# Parameter names in the order the operands mention them.
+fn mentions(e: typed_ast.TypedExpr, acc: List String) -> List String =
+  match e with
+  | typed_ast.TVar n _ _ -> Cons(n, acc)
+  | typed_ast.TBinary _ l r _ _ -> mentions(r, mentions(l, acc))
+  | typed_ast.TCall _ args _ _ -> list_fold(\ (a, x) -> mentions(x, a), acc, args)
+  | _ -> acc
+
+fn names_in_order(es: List typed_ast.TypedExpr) -> List String =
+  list_reverse(list_fold(\ (a, x) -> mentions(x, a), Nil, es))
+
+fn same_names(xs: List String, ys: List String) -> Bool =
+  match xs with
+  | Nil -> list_length(ys) == 0
+  | [x | xrest] ->
+      match ys with
+      | Nil -> false
+      | [y | yrest] -> x == y && same_names(xrest, yrest)
+
+fn wrapper_of(d: typed_ast.TypedDecl, projs: Set) -> Maybe (String, Wrapper) =
+  match d with
+  | typed_ast.TFnDecl name params _ _ Nil (typed_ast.TCall(typed_ast.TVar callee _ _) cargs _ _) ->
+      wrapper_from(name, ast.param_names(params), callee, cargs, projs)
+  | _ -> Nothing
+
+fn wrapper_from(name: String, pnames: List String, callee: String,
+                cargs: List typed_ast.TypedExpr, projs: Set) -> Maybe (String, Wrapper) =
+  if ! list_all_operands (cargs, projs) || ! same_names (names_in_order(cargs), pnames) then Nothing
+  else
+    match direct_shape(callee, cargs) with
+    | Just shape -> Just((name, Wrapper(params = pnames, shape = shape)))
+    | Nothing -> Nothing
+
+fn list_all_operands(es: List typed_ast.TypedExpr, projs: Set) -> Bool =
+  match es with
+  | Nil -> true
+  | [e | rest] -> operand_ok(e, projs) && list_all_operands(rest, projs)
+
+# `vector_get_direct` and `vector_mutset` are externs, so their names are bare and
+# cannot belong to a user function.
+fn direct_shape(callee: String, args: List typed_ast.TypedExpr) -> Maybe Shape =
+  if callee == "vector_get_direct" then get_shape(args)
+  else if callee == "vector_mutset" then set_shape(args)
+  else Nothing
+
+fn get_shape(args: List typed_ast.TypedExpr) -> Maybe Shape =
+  match args with
+  | [v, i] -> Just (Shape(is_set = false, vec = v, idx = i, val = Nothing))
+  | _ -> Nothing
+
+fn set_shape(args: List typed_ast.TypedExpr) -> Maybe Shape =
+  match args with
+  | [v, i, x] -> Just (Shape(is_set = true, vec = v, idx = i, val = Just(x)))
+  | _ -> Nothing
+
+fn subst(e: typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar n _ _ -> subst_var(n, e, env)
+  | typed_ast.TBinary op l r t p -> typed_ast.TBinary(op, subst(l, env), subst(r, env), t, p)
+  | typed_ast.TCall callee args t p -> typed_ast.TCall(callee, list_map(subst(_, env), args), t, p)
+  | _ -> e
+
+fn subst_var(n: String, e: typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match dict_get(n, env) with
+  | Just arg -> arg
+  | Nothing -> e
+
+fn zip_env(names: List String, es: List typed_ast.TypedExpr) -> List (String, typed_ast.TypedExpr) =
+  match names with
+  | Nil -> Nil
+  | [n | nrest] ->
+      match es with
+      | Nil -> Nil
+      | [e | erest] -> Cons((n, e), zip_env(nrest, erest))
+
+fn apply_wrapper(w: Wrapper, args: List typed_ast.TypedExpr) -> Maybe Shape =
+  if list_length(args) != list_length(w.params) then Nothing
+  else
+    let env = dict_from_list(zip_env(w.params, args))
+    in Just(Shape(is_set = w.shape.is_set, vec = subst(w.shape.vec, env), idx = subst(w.shape.idx, env),
+                  val = subst_val(w.shape.val, env)))
+
+fn subst_val(v: Maybe typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
+  match v with
+  | Just e -> Just(subst(e, env))
+  | Nothing -> Nothing
+
+fn shape_of(n: String, args: List typed_ast.TypedExpr, tables: Tables) -> Maybe Shape =
+  match direct_shape(n, args) with
+  | Just s -> Just(s)
+  | Nothing ->
+      match dict_get(n, tables.wrappers) with
+      | Just w -> apply_wrapper(w, args)
+      | Nothing -> Nothing
+
+# A store of a non-heap scalar needs no write hook; any other store stays checked.
+fn shape_converts(s: Shape) -> Bool =
+  match s.val with
+  | Nothing -> true
+  | Just x -> type_kind.type_is_non_heap_scalar(typed_ast.typed_expr_type(x))
+
+# ---------------------------------------------------------------------------
+# The scan: one walk of a body that finds the self-calls and the accesses, each
+# with the facts in force there. `ok` drops on anything it cannot reason about: a
+# self-call off the tail path, the function used as a value, an access inside a
+# lambda (which may run after the vector changed).
+# ---------------------------------------------------------------------------
+
+type Acc (..) = (shape: Shape, facts: List Fact)
+
+type Call (..) = (args: List typed_ast.TypedExpr, facts: List Fact)
+
+type Scan (..) = (ok: Bool, accs: List Acc, calls: List Call)
+
+type Ctx (..) = (self: String, cls: Dict Cls, tables: Tables, locals: Set)
+
+fn scan_fail(sc: Scan) -> Scan = Scan(ok = false, accs = sc.accs, calls = sc.calls)
+
+fn scan_acc(a: Acc, sc: Scan) -> Scan = Scan(ok = sc.ok, accs = Cons(a, sc.accs), calls = sc.calls)
+
+fn scan_call_rec(c: Call, sc: Scan) -> Scan = Scan(ok = sc.ok, accs = sc.accs, calls = Cons(c, sc.calls))
+
+fn scan_all(es: List typed_ast.TypedExpr, ctx: Ctx, facts: List Fact, sc: Scan) -> Scan =
+  list_fold(\ (acc, e) -> scan(e, ctx, false, facts, acc), sc, es)
+
+fn scan(e: typed_ast.TypedExpr, ctx: Ctx, tail: Bool, facts: List Fact, sc: Scan) -> Scan =
+  if ! sc.ok then sc
+  else
+    match e with
+    | typed_ast.TVar n _ _ -> if n == ctx.self && ! set_member (n, ctx.locals) then scan_fail(sc) else sc
+    | typed_ast.TIf c t el _ _ ->
+        scan(el, ctx, tail, list_append(facts, facts_false(c, ctx.cls)),
+             scan(t, ctx, tail, list_append(facts, facts_true(c, ctx.cls)),
+                  scan(c, ctx, false, facts, sc)))
+    | typed_ast.TBinary op l r _ _ -> scan_binary(op, l, r, ctx, facts, sc)
+    | typed_ast.TMatch scrut arms _ _ ->
+        list_fold(\ (acc, arm) -> scan(typed_ast.branch_body(arm), ctx, tail, facts, acc),
+                  scan(scrut, ctx, false, facts, sc), arms)
+    | typed_ast.TDo steps _ _ -> scan_steps(steps, ctx, tail, facts, sc)
+    | typed_ast.TLambda _ body _ _ -> scan_lambda(body, ctx, facts, sc)
+    | typed_ast.TCall callee args _ _ -> scan_call(callee, args, ctx, tail, facts, sc)
+    | _ -> scan_all(typed_ast.children(e), ctx, facts, sc)
+
+# The right operand of `&&` runs only when the left held, of `||` only when it did not.
+fn scan_binary(op: String, l: typed_ast.TypedExpr, r: typed_ast.TypedExpr, ctx: Ctx,
+               facts: List Fact, sc: Scan) -> Scan =
+  if op == "&&" then
+    scan(r, ctx, false, list_append(facts, facts_true(l, ctx.cls)), scan(l, ctx, false, facts, sc))
+  else if op == "||" then
+    scan(r, ctx, false, list_append(facts, facts_false(l, ctx.cls)), scan(l, ctx, false, facts, sc))
+  else scan(r, ctx, false, facts, scan(l, ctx, false, facts, sc))
+
+fn scan_steps(steps: List typed_ast.TypedDoStep, ctx: Ctx, tail: Bool, facts: List Fact, sc: Scan) -> Scan =
+  match steps with
+  | Nil -> sc
+  | [step | rest] ->
+      match rest with
+      | Nil -> scan(typed_ast.step_value(step), ctx, tail && is_expr_step(step), facts, sc)
+      | _ -> scan_steps(rest, ctx, tail, facts, scan(typed_ast.step_value(step), ctx, false, facts, sc))
+
+fn is_expr_step(s: typed_ast.TypedDoStep) -> Bool =
+  match s with
+  | typed_ast.TDoExprStep _ -> true
+  | _ -> false
+
+fn scan_lambda(body: typed_ast.TypedExpr, ctx: Ctx, facts: List Fact, sc: Scan) -> Scan =
+  let inner = scan(body, ctx, false, facts, Scan(ok = true, accs = Nil, calls = Nil))
+  in if inner.ok && list_length(inner.accs) == 0 && list_length(inner.calls) == 0 then sc
+     else scan_fail(sc)
+
+fn scan_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, ctx: Ctx, tail: Bool,
+             facts: List Fact, sc: Scan) -> Scan =
+  match callee with
+  | typed_ast.TVar n _ _ ->
+      if set_member(n, ctx.locals) then scan_all(args, ctx, facts, sc)
+      else if n == ctx.self then
+        if tail then scan_all(args, ctx, facts, scan_call_rec(Call(args = args, facts = facts), sc))
+        else scan_fail(sc)
+      else scan_access(n, args, ctx, facts, sc)
+  | _ -> scan_all(Cons(callee, args), ctx, facts, sc)
+
+fn scan_access(n: String, args: List typed_ast.TypedExpr, ctx: Ctx, facts: List Fact, sc: Scan) -> Scan =
+  match shape_of(n, args, ctx.tables) with
+  | Just shape -> scan_all(args, ctx, facts, scan_acc(Acc(shape = shape, facts = facts), sc))
+  | Nothing -> scan_all(args, ctx, facts, sc)
+
+# ---------------------------------------------------------------------------
+# Deriving the entry test. Iteration t has parameter values p0 + s*t. A fact on a
+# stepping parameter d bounds the distance travelled, |s_d| * t, by a linear form W;
+# the other stepping parameters move in lockstep, so each index has a range linear
+# in W, and every range must sit inside [0, len).
+# ---------------------------------------------------------------------------
+
+# One condition of the entry test: lin >= 0 (kind 0) or lin < len(vec) (kind 1).
+type Req (..) = (kind: Int, lin: Lin, vec: Maybe typed_ast.TypedExpr)
+
+type Reqs (..) = (reqs: Dict Req, vecs: Dict typed_ast.TypedExpr)
+
+type Loop (..) = (cls: Dict Cls, cont: List Fact)
+
+fn req_nonneg(l: Lin) -> Req = Req(kind = 0, lin = l, vec = Nothing)
+
+fn req_below(vec: typed_ast.TypedExpr, l: Lin) -> Req = Req(kind = 1, lin = l, vec = Just(vec))
+
+fn req_key(r: Req) -> String =
+  (if r.kind == 0 then "nn:" else "bl:" ++ vec_key_of(r.vec) ++ ":") ++ lin_key(r.lin)
+
+fn vec_key_of(v: Maybe typed_ast.TypedExpr) -> String =
+  match v with
+  | Just e -> vec_key(e)
+  | Nothing -> ""
+
+fn vec_key(e: typed_ast.TypedExpr) -> String =
+  match e with
+  | typed_ast.TVar n _ _ -> n
+  | typed_ast.TCall (typed_ast.TVar g _ _) [x] _ _ -> g ++ "(" ++ vec_key(x) ++ ")"
+  | _ -> "?"
+
+# An invariant vector: an invariant parameter, or a projection of one.
+fn vec_invariant(e: typed_ast.TypedExpr, cls: Dict Cls, projs: Set) -> Bool =
+  match e with
+  | typed_ast.TVar n _ _ ->
+      match dict_get(n, cls) with
+      | Just Inv -> true
+      | _ -> false
+  | typed_ast.TCall (typed_ast.TVar g _ _) [x] _ _ -> set_member(g, projs) && vec_invariant(x, cls, projs)
+  | _ -> false
+
+fn step_of_param(p: String, cls: Dict Cls) -> Int =
+  match dict_get(p, cls) with
+  | Just (Step c) -> c
+  | _ -> 0
+
+# Movement of a linear form per iteration.
+fn movement(l: Lin, cls: Dict Cls) -> Int =
+  list_fold(\ (acc, t) -> acc + term_movement(t, cls), 0, l.terms)
+
+fn term_movement(t: (String, Int), cls: Dict Cls) -> Int =
+  match t with
+  | (n, c) -> c * step_of_param(n, cls)
+
+# A bound W on the distance travelled, and the step it is measured in.
+type Driver (..) = (w: Lin, step: Int, needs_nonneg: Bool)
+
+# `cont` facts hold at every self-call, so they bound the previous iteration; the
+# current one is one step further, and iteration 0 needs W >= 0 from the entry test.
+fn drivers_from(facts: List Fact, cls: Dict Cls, cont: Bool) -> List Driver =
+  list_filter_map(driver_of(_, cls, cont), facts)
+
+fn driver_of(f: Fact, cls: Dict Cls, cont: Bool) -> Maybe Driver =
+  let s = step_of_param(f.param, cls)
+  in if s == 0 || (s > 0) != f.upper then Nothing
+     else
+       let dist = if f.upper then lin_add(f.bound, lin_neg(lin_atom(f.param)))
+                  else lin_add(lin_atom(f.param), lin_neg(f.bound))
+           w = if cont then lin_add(dist, lin_const(abs_int(s))) else dist
+       in if lin_ok(w) then Just(Driver(w = w, step = abs_int(s), needs_nonneg = cont)) else Nothing
+
+# The range of an index form over the loop, from the first driver that divides its
+# movement: Just (lo, hi, extra requirement for W).
+fn index_range(l: Lin, mv: Int, drivers: List Driver) -> Maybe (Lin, Lin, List Req) =
+  match drivers with
+  | Nil -> Nothing
+  | [dr | rest] ->
+      if rem_int(mv, dr.step) != 0 then index_range(l, mv, rest)
+      else
+        match range_with(l, mv / dr.step, dr) with
+        | Just r -> Just(r)
+        | Nothing -> index_range(l, mv, rest)
+
+fn range_with(l: Lin, m: Int, dr: Driver) -> Maybe (Lin, Lin, List Req) =
+  match lin_scale(m, dr.w) with
+  | Nothing -> Nothing
+  | Just mw ->
+      let moved = lin_add(l, mw)
+          extra = if dr.needs_nonneg then [req_nonneg(dr.w)] else Nil
+      in if ! lin_ok (moved) then Nothing
+         else if m >= 0 then Just((l, moved, extra))
+         else Just((moved, l, extra))
+
+# The conditions that put one access in range, or the reason none can be derived.
+fn derive_access(a: Acc, lp: Loop, projs: Set) -> Result String (List Req) =
+  if ! shape_converts (a.shape) then Ok(Nil)
+  else if ! vec_invariant (a.shape.vec, lp.cls, projs) then
+    Err("a vector operand is not an invariant parameter or a projection of one")
+  else
+    match to_lin(a.shape.idx, lp.cls, true) with
+    | Nothing -> Err("an index is not affine in the parameters")
+    | Just l -> derive_range(a.shape.vec, l, movement(l, lp.cls), a.facts, lp)
+
+fn derive_range(vec: typed_ast.TypedExpr, l: Lin, mv: Int, facts: List Fact, lp: Loop) -> Result String (List Req) =
+  if mv == 0 then Ok([req_nonneg(l), req_below(vec, l)])
+  else
+    match index_range(l, mv, list_append(drivers_from(facts, lp.cls, false), drivers_from(lp.cont, lp.cls, true))) with
+    | Nothing -> Err("no exit test bounds an index that moves")
+    | Just (lo, hi, extra) -> Ok(Cons(req_nonneg(lo), Cons(req_below(vec, hi), extra)))
+
+fn derive_all(accs: List Acc, lp: Loop, projs: Set, acc: Reqs) -> Result String Reqs =
+  match accs with
+  | Nil -> Ok(acc)
+  | [a | rest] ->
+      match derive_access(a, lp, projs) with
+      | Err why -> Err(why)
+      | Ok rs -> derive_all(rest, lp, projs, list_fold(add_req(a.shape.vec, _, _), acc, rs))
+
+fn add_req(vec: typed_ast.TypedExpr, acc: Reqs, r: Req) -> Reqs =
+  Reqs(reqs = dict_set(req_key(r), r, acc.reqs),
+       vecs = if r.kind == 1 then dict_set(vec_key_of(r.vec), maybe_with_default(vec, r.vec), acc.vecs) else acc.vecs)
+
+# Facts in force at every self-call.
+fn continuation_facts(calls: List Call) -> List Fact =
+  match calls with
+  | Nil -> Nil
+  | [first | rest] -> list_filter(held_by_all(_, rest), first.facts)
+
+fn held_by_all(f: Fact, calls: List Call) -> Bool =
+  match calls with
+  | Nil -> true
+  | [c | rest] -> list_member(fact_key(f), list_map(fact_key, c.facts)) && held_by_all(f, rest)
+
+# ---------------------------------------------------------------------------
+# Building typed expressions.
+# ---------------------------------------------------------------------------
+
+fn cmp_expr(op: String, l: typed_ast.TypedExpr, r: typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TBinary(op, l, r, types.type_bool(), pos)
+
+fn int_expr(n: Int, pos: source.SourcePos) -> typed_ast.TypedExpr = typed_ast.TInt(n, types.type_int(), pos)
+
+fn atom_expr(p: String, ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TVar(p, type_of_param(p, ptypes), pos)
+
+fn type_of_param(p: String, ptypes: Dict types.Type) -> types.Type =
+  match dict_get(p, ptypes) with
+  | Just t -> t
+  | Nothing -> types.type_int()
+
+fn term_expr(t: (String, Int), ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  match t with
+  | (n, c) ->
+      if c == 1 then atom_expr(n, ptypes, pos)
+      else typed_ast.TBinary("*", int_expr(c, pos), atom_expr(n, ptypes, pos), types.type_int(), pos)
+
+fn sum_expr(acc: typed_ast.TypedExpr, t: (String, Int), ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TBinary("+", acc, term_expr(t, ptypes, pos), types.type_int(), pos)
+
+fn lin_expr(l: Lin, ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  match l.terms with
+  | Nil -> int_expr(l.konst, pos)
+  | [t | rest] ->
+      let sum = list_fold(\ (acc, x) -> sum_expr(acc, x, ptypes, pos), term_expr(t, ptypes, pos), rest)
+      in if l.konst == 0 then sum
+         else typed_ast.TBinary("+", sum, int_expr(l.konst, pos), types.type_int(), pos)
+
+fn len_expr(vec: typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar(len_callee, types.type_int(), pos), [vec], types.type_int(), pos)
+
+fn live_expr(vec: typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar(live_callee, types.type_bool(), pos), [vec], types.type_bool(), pos)
+
+fn req_expr(r: Req, ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  match r.vec with
+  | Nothing -> cmp_expr("<=", int_expr(0, pos), lin_expr(r.lin, ptypes, pos), pos)
+  | Just vec -> cmp_expr("<", lin_expr(r.lin, ptypes, pos), len_expr(vec, pos), pos)
+
+# `-B <= p && p <= B` for one atom.
+fn box_expr(p: String, ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  typed_ast.TBinary("&&",
+    cmp_expr("<=", int_expr(0 - box_limit, pos), atom_expr(p, ptypes, pos), pos),
+    cmp_expr("<=", atom_expr(p, ptypes, pos), int_expr(box_limit, pos), pos),
+    types.type_bool(), pos)
+
+fn and_all(es: List typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  match es with
+  | Nil -> typed_ast.TBool(true, types.type_bool(), pos)
+  | [e] -> e
+  | [e | rest] -> typed_ast.TBinary("&&", e, and_all(rest, pos), types.type_bool(), pos)
+
+fn req_atoms(r: Req) -> List String = lin_atoms(r.lin)
+
+fn all_atoms(rs: List Req) -> List String =
+  list_dedup(list_flat_map(req_atoms, rs))
+
+fn atoms_are_int(atoms: List String, ptypes: Dict types.Type) -> Bool =
+  match atoms with
+  | Nil -> true
+  | [a | rest] -> is_int(type_of_param(a, ptypes)) && atoms_are_int(rest, ptypes)
+
+fn entry_test(rs: Reqs, ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  let reqs = list_map(snd_req, vec_to_list(dict_entries(rs.reqs)))
+      vecs = list_map(snd_expr, vec_to_list(dict_entries(rs.vecs)))
+      atoms = all_atoms(reqs)
+  in and_all(list_append(list_map(live_expr(_, pos), vecs),
+               list_append(list_map(box_expr(_, ptypes, pos), atoms),
+                           list_map(req_expr(_, ptypes, pos), reqs))), pos)
+
+fn snd_req(p: (String, Req)) -> Req =
+  match p with
+  | (_, r) -> r
+
+fn snd_expr(p: (String, typed_ast.TypedExpr)) -> typed_ast.TypedExpr =
+  match p with
+  | (_, e) -> e
+
+# ---------------------------------------------------------------------------
+# Binders and parameter types.
+# ---------------------------------------------------------------------------
+
+fn own_binders(e: typed_ast.TypedExpr) -> List String =
+  match e with
+  | typed_ast.TLambda ps _ _ _ -> ast.param_names(ps)
+  | typed_ast.TMatch _ arms _ _ -> list_flat_map(arm_names, arms)
+  | typed_ast.TDo steps _ _ -> list_flat_map(step_names, steps)
+  | _ -> Nil
+
+fn arm_names(arm: typed_ast.TypedMatchBranch) -> List String =
+  match arm with
+  | typed_ast.TypedMatchBranch pat _ -> ast.pattern_names(pat)
+
+fn step_names(s: typed_ast.TypedDoStep) -> List String =
+  match s with
+  | typed_ast.TDoBindStep pat _ _ -> ast.pattern_names(pat)
+  | typed_ast.TDoLetStep n _ -> [n]
+  | typed_ast.TDoExprStep _ -> Nil
+
+fn collect_binders(e: typed_ast.TypedExpr, acc: Set) -> Set =
+  list_fold(\ (a, c) -> collect_binders(c, a),
+            list_fold(\ (s, n) -> set_insert(n, s), acc, own_binders(e)),
+            typed_ast.children(e))
+
+fn collect_ptypes(e: typed_ast.TypedExpr, pset: Set, acc: Dict types.Type) -> Dict types.Type =
+  list_fold(\ (a, c) -> collect_ptypes(c, pset, a), note_ptype(e, pset, acc), typed_ast.children(e))
+
+fn note_ptype(e: typed_ast.TypedExpr, pset: Set, acc: Dict types.Type) -> Dict types.Type =
+  match e with
+  | typed_ast.TVar n t _ -> if set_member(n, pset) && ! dict_member (n, acc) then dict_set(n, t, acc) else acc
+  | _ -> acc
+
+fn any_member(names: List String, s: Set) -> Bool =
+  match names with
+  | Nil -> false
+  | [n | rest] -> set_member(n, s) || any_member(rest, s)
+
+# ---------------------------------------------------------------------------
+# Calls that could change a vector's length, as a summary over the call graph. Only
+# `vector_push` and `vector_truncate` do, both `!{IO}`; a function is unsafe if it can
+# reach an IO extern off a short safe list, or call a function value that is not pure.
+# ---------------------------------------------------------------------------
+
+fn safe_io_externs() -> Set =
+  set_from_list(["vector_get_direct", "vector_mutset", "vec_make_filled", "ref_new", "ref_read",
+                 "ref_write", "print", "eprint", "print_str", "eprint_str", "print_value"])
+
+# What a body calls: the global functions, and whether anything else could be unsafe.
+type Calls (..) = (unsafe: Bool, callees: List String)
+
+fn note_unsafe(c: Calls) -> Calls = Calls(unsafe = true, callees = c.callees)
+
+fn note_callee(n: String, c: Calls) -> Calls = Calls(unsafe = c.unsafe, callees = Cons(n, c.callees))
+
+fn calls_in(e: typed_ast.TypedExpr, locals: Set, tables: Tables, acc: Calls) -> Calls =
+  list_fold(\ (a, c) -> calls_in(c, locals, tables, a), note_call(e, locals, tables, acc), typed_ast.children(e))
+
+fn note_call(e: typed_ast.TypedExpr, locals: Set, tables: Tables, acc: Calls) -> Calls =
+  match e with
+  | typed_ast.TCall callee args _ _ -> note_callee_kind(callee, list_length(args), locals, tables, acc)
+  | _ -> acc
+
+fn note_callee_kind(callee: typed_ast.TypedExpr, argc: Int, locals: Set, tables: Tables, acc: Calls) -> Calls =
+  match callee with
+  | typed_ast.TVar n _ _ ->
+      if set_member(n, locals) then by_effect(callee, argc, acc)
+      else if set_member(n, tables.fn_names) then note_callee(n, acc)
+      else
+        match dict_get(n, tables.ext_pure) with
+        | Just pure -> if pure || set_member(n, safe_io_externs()) then acc else note_unsafe(acc)
+        | Nothing -> by_effect(callee, argc, acc)
+  | _ -> by_effect(callee, argc, acc)
+
+fn by_effect(callee: typed_ast.TypedExpr, argc: Int, acc: Calls) -> Calls =
+  if dce.callee_is_pure(callee, argc) then acc else note_unsafe(acc)
+
+type Node (..) = (name: String, calls: Calls)
+
+fn decl_node(d: typed_ast.TypedDecl, tables: Tables) -> Maybe Node =
+  match d with
+  | typed_ast.TFnDecl name params _ eff _ body ->
+      if is_pure_decl(eff) then Nothing
+      else
+        Just(Node(name = name,
+                  calls = calls_in(body, set_union(collect_binders(body, set_empty()),
+                                                   set_from_list(ast.param_names(params))),
+                                   tables, Calls(unsafe = false, callees = Nil))))
+  | _ -> Nothing
+
+# name -> the functions that call it.
+fn reverse_edges(nodes: List Node) -> Dict (List String) =
+  list_fold(\ (acc, n) -> list_fold(\ (a, callee) -> add_caller(callee, n.name, a), acc, n.calls.callees),
+            dict_empty(), nodes)
+
+fn add_caller(callee: String, caller: String, acc: Dict (List String)) -> Dict (List String) =
+  match dict_get(callee, acc) with
+  | Just cs -> dict_set(callee, Cons(caller, cs), acc)
+  | Nothing -> dict_set(callee, [caller], acc)
+
+fn callers_of(n: String, rev: Dict (List String)) -> List String =
+  match dict_get(n, rev) with
+  | Just cs -> cs
+  | Nothing -> Nil
+
+fn mark_unsafe(queue: List String, rev: Dict (List String), marked: Set) -> Set =
+  match queue with
+  | Nil -> marked
+  | [n | rest] ->
+      if set_member(n, marked) then mark_unsafe(rest, rev, marked)
+      else mark_unsafe(list_append(callers_of(n, rev), rest), rev, set_insert(n, marked))
+
+# The functions that can reach an unsafe call. A pure function cannot, so it has no node.
+fn may_change_length(decls: List typed_ast.TypedDecl, tables: Tables) -> Set =
+  let nodes = list_filter_map(decl_node(_, tables), decls)
+  in mark_unsafe(list_map(node_name, list_filter(node_is_unsafe, nodes)), reverse_edges(nodes), set_empty())
+
+fn node_name(n: Node) -> String = n.name
+
+fn node_is_unsafe(n: Node) -> Bool = n.calls.unsafe
+
+# ---------------------------------------------------------------------------
+# Candidates.
+# ---------------------------------------------------------------------------
+
+type Cand (..) = (name: String, params: List ast.Param, ret: Maybe ast.TypeExpr,
+                  eff: Maybe (List String), body: typed_ast.TypedExpr, test: typed_ast.TypedExpr,
+                  callee_ty: types.Type, ptypes: Dict types.Type, locals: Set, calls: Calls)
+
+# What the analysis made of a loop worth reporting: a candidate, or why it was left alone.
+type Verdict (..) =
+  | Accept Cand
+  | Skip String String
+
+fn skip(name: String, reason: String) -> Maybe Verdict = Just(Skip(name, reason))
+
+# Nothing for a function that is not a loop over vector accesses: those are most of them.
+fn analyze(d: typed_ast.TypedDecl, tables: Tables) -> Maybe Verdict =
+  match d with
+  | typed_ast.TFnDecl name params ret eff Nil body ->
+      if list_length(params) == 0 then Nothing else analyze_fn(name, params, ret, eff, body, tables)
+  | _ -> Nothing
+
+fn analyze_fn(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff: Maybe (List String),
+              body: typed_ast.TypedExpr, tables: Tables) -> Maybe Verdict =
+  let pnames = ast.param_names(params)
+      binders = collect_binders(body, set_empty())
+      locals = set_union(binders, set_from_list(pnames))
+      first = scan(body, Ctx(self = name, cls = dict_empty(), tables = tables, locals = locals), true, Nil,
+                   Scan(ok = true, accs = Nil, calls = Nil))
+  in if ! first.ok || list_length(first.calls) == 0 || list_length(first.accs) == 0 then Nothing
+     else if any_member(pnames, binders) then skip(name, "a local rebinds a parameter")
+     else if ! calls_match_arity (list_length(pnames), first.calls) then
+       skip(name, "a self-call passes the wrong number of arguments")
+     else analyze_loop(name, params, ret, eff, body, tables, locals, classify(pnames, first.calls))
+
+fn analyze_loop(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff: Maybe (List String),
+                body: typed_ast.TypedExpr, tables: Tables, locals: Set, cls: Dict Cls) -> Maybe Verdict =
+  let sc = scan(body, Ctx(self = name, cls = cls, tables = tables, locals = locals), true, Nil,
+                Scan(ok = true, accs = Nil, calls = Nil))
+      lp = Loop(cls = cls, cont = continuation_facts(sc.calls))
+  in if ! list_any_converts (sc.accs) then skip(name, "every access is a store of a value that may be a heap pointer")
+     else
+       match derive_all(sc.accs, lp, tables.projs, Reqs(reqs = dict_empty(), vecs = dict_empty())) with
+       | Err why -> skip(name, why)
+       | Ok rs -> finish_cand(name, params, ret, eff, body, locals, rs, tables)
+
+fn list_any_converts(accs: List Acc) -> Bool =
+  match accs with
+  | Nil -> false
+  | [a | rest] -> shape_converts(a.shape) || list_any_converts(rest)
+
+fn finish_cand(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff: Maybe (List String),
+               body: typed_ast.TypedExpr, locals: Set, rs: Reqs, tables: Tables) -> Maybe Verdict =
+  let ptypes = collect_ptypes(body, set_from_list(ast.param_names(params)), dict_empty())
+      pos = typed_ast.typed_expr_pos(body)
+      reqs = list_map(snd_req, vec_to_list(dict_entries(rs.reqs)))
+  in if ! atoms_are_int (all_atoms(reqs), ptypes) then skip(name, "a bound is not an Int parameter")
+     else
+       Just(Accept (Cand(name = name, params = params, ret = ret, eff = eff, body = body,
+                        test = entry_test(rs, ptypes, pos), callee_ty = self_callee_type(body, name),
+                        ptypes = ptypes, locals = locals,
+                        calls = calls_in(body, locals, tables, Calls(unsafe = false, callees = Nil)))))
+
+# The type the body gave its own callee node, reused for the clones' call nodes.
+fn self_callee_type(e: typed_ast.TypedExpr, name: String) -> types.Type =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar n t _) _ _ _ -> if n == name then t else types.type_int()
+  | _ -> list_fold(\ (found, c) -> prefer_found(found, self_callee_type(c, name)), types.type_int(), typed_ast.children(e))
+
+fn prefer_found(a: types.Type, b: types.Type) -> types.Type = if is_int(a) then b else a
+
+# ---------------------------------------------------------------------------
+# Rewriting: the clones, bottom-up.
+# ---------------------------------------------------------------------------
+
+type Rw (..) = (self: String, to: String, fast: Bool, tables: Tables, locals: Set)
+
+fn map_children(e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TVar _ _ _ -> e
+  | typed_ast.TInt _ _ _ -> e
+  | typed_ast.TFloat _ _ _ -> e
+  | typed_ast.TBool _ _ _ -> e
+  | typed_ast.TString _ _ _ -> e
+  | typed_ast.TChar _ _ _ -> e
+  | typed_ast.TUnit _ _ -> e
+  | typed_ast.TTuple items t p -> typed_ast.TTuple(map_list(items, rw), t, p)
+  | typed_ast.TIf c th el t p -> typed_ast.TIf(rewrite(c, rw), rewrite(th, rw), rewrite(el, rw), t, p)
+  | typed_ast.TMatch scrut arms t p -> typed_ast.TMatch(rewrite(scrut, rw), map_arms(arms, rw), t, p)
+  | typed_ast.TCall callee args t p -> typed_ast.TCall(rewrite(callee, rw), map_list(args, rw), t, p)
+  | typed_ast.TDict _ _ _ _ -> e
+  | typed_ast.TMethodRef _ _ _ _ _ -> e
+  | typed_ast.TLambda ps body t p -> typed_ast.TLambda(ps, rewrite(body, rw), t, p)
+  | typed_ast.TBinary op l r t p -> typed_ast.TBinary(op, rewrite(l, rw), rewrite(r, rw), t, p)
+  | typed_ast.TUnary op x t p -> typed_ast.TUnary(op, rewrite(x, rw), t, p)
+  | typed_ast.TRange l r t p -> typed_ast.TRange(rewrite(l, rw), rewrite(r, rw), t, p)
+  | typed_ast.TDo steps t p -> typed_ast.TDo(list_map(map_step(_, rw), steps), t, p)
+  | typed_ast.TRecord name fields t p -> typed_ast.TRecord(name, list_map(map_field(_, rw), fields), t, p)
+  | typed_ast.TGetField obj f t p -> typed_ast.TGetField(rewrite(obj, rw), f, t, p)
+  | typed_ast.TRecordUpdate base fields t p ->
+      typed_ast.TRecordUpdate(rewrite(base, rw), list_map(map_field(_, rw), fields), t, p)
+
+fn map_list(es: List typed_ast.TypedExpr, rw: Rw) -> List typed_ast.TypedExpr = list_map(rewrite(_, rw), es)
+
+fn map_arms(arms: List typed_ast.TypedMatchBranch, rw: Rw) -> List typed_ast.TypedMatchBranch =
+  list_map(map_arm(_, rw), arms)
+
+fn map_arm(arm: typed_ast.TypedMatchBranch, rw: Rw) -> typed_ast.TypedMatchBranch =
+  match arm with
+  | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite(body, rw))
+
+fn map_field(f: typed_ast.TypedRecordField, rw: Rw) -> typed_ast.TypedRecordField =
+  match f with
+  | typed_ast.TypedRecordField name v -> typed_ast.TypedRecordField(name, rewrite(v, rw))
+
+fn map_step(s: typed_ast.TypedDoStep, rw: Rw) -> typed_ast.TypedDoStep =
+  match s with
+  | typed_ast.TDoBindStep pat e mode -> typed_ast.TDoBindStep(pat, rewrite(e, rw), mode)
+  | typed_ast.TDoLetStep n e -> typed_ast.TDoLetStep(n, rewrite(e, rw))
+  | typed_ast.TDoExprStep e -> typed_ast.TDoExprStep(rewrite(e, rw))
+
+fn rewrite(e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
+  rewrite_node(map_children(e, rw), rw)
+
+fn rewrite_node(e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar n vt vp) args t p ->
+      if set_member(n, rw.locals) then e
+      else if n == rw.self then typed_ast.TCall(typed_ast.TVar(rw.to, vt, vp), args, t, p)
+      else if rw.fast then to_unchecked(n, vt, vp, args, t, p, e, rw)
+      else e
+  | _ -> e
+
+fn to_unchecked(n: String, vt: types.Type, vp: source.SourcePos, args: List typed_ast.TypedExpr,
+                t: types.Type, p: source.SourcePos, e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
+  match shape_of(n, args, rw.tables) with
+  | Nothing -> e
+  | Just s -> unchecked_call(s, vt, vp, t, p, e)
+
+fn unchecked_call(s: Shape, vt: types.Type, vp: source.SourcePos, t: types.Type, p: source.SourcePos,
+                  e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  match s.val with
+  | Nothing -> typed_ast.TCall(typed_ast.TVar(get_callee, vt, vp), [s.vec, s.idx], t, p)
+  | Just x ->
+      if shape_converts(s) then typed_ast.TCall(typed_ast.TVar(set_callee, vt, vp), [s.vec, s.idx, x], t, p)
+      else e
+
+# ---------------------------------------------------------------------------
+# The program.
+# ---------------------------------------------------------------------------
+
+fn param_var(p: ast.Param, ptypes: Dict types.Type, pos: source.SourcePos) -> typed_ast.TypedExpr =
+  match p with
+  | ast.Param n _ _ -> typed_ast.TVar(n, type_of_param(n, ptypes), pos)
+
+fn entry_decl(c: Cand) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(c.name, c.params, c.ret, c.eff, Nil,
+    typed_ast.TIf(c.test, call_to(fast_name(c.name), c), call_to(chk_name(c.name), c),
+                  typed_ast.typed_expr_type(c.body), pos))
+where pos = typed_ast.typed_expr_pos(c.body)
+
+fn call_to(target: String, c: Cand) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar(target, c.callee_ty, pos),
+                  list_map(param_var(_, c.ptypes, pos), c.params), typed_ast.typed_expr_type(c.body), pos)
+where pos = typed_ast.typed_expr_pos(c.body)
+
+fn clone_decl(c: Cand, target: String, fast: Bool, tables: Tables) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(target, c.params, c.ret, c.eff, Nil,
+    rewrite(c.body, Rw(self = c.name, to = target, fast = fast, tables = tables, locals = c.locals)))
+
+fn expand(c: Cand, tables: Tables) -> List typed_ast.TypedDecl =
+  [entry_decl(c), clone_decl(c, chk_name(c.name), false, tables), clone_decl(c, fast_name(c.name), true, tables)]
+
+fn build_tables(decls: List typed_ast.TypedDecl) -> Tables =
+  let projs = set_from_list(list_filter_map(decl_projection_name, decls))
+  in Tables(wrappers = dict_from_list(list_filter_map(wrapper_of(_, projs), decls)), projs = projs,
+            fn_names = set_from_list(list_filter_map(fn_decl_name, decls)),
+            ext_pure = dict_from_list(list_filter_map(extern_purity, decls)))
+
+fn fn_decl_name(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
+  | _ -> Nothing
+
+fn extern_purity(d: typed_ast.TypedDecl) -> Maybe (String, Bool) =
+  match d with
+  | typed_ast.TExternFnDecl name _ _ eff -> Just((name, is_pure_decl(eff)))
+  | _ -> Nothing
+
+fn cand_safe(c: Cand, unsafe_fns: Set) -> Bool =
+  ! c.calls.unsafe && ! any_member (list_filter(is_other(c.name, _), c.calls.callees), unsafe_fns)
+
+fn is_other(self: String, n: String) -> Bool = n != self
+
+fn expand_decl(d: typed_ast.TypedDecl, accepted: Dict Cand, tables: Tables) -> List typed_ast.TypedDecl =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ ->
+      match dict_get(name, accepted) with
+      | Just c -> expand(c, tables)
+      | Nothing -> [d]
+  | _ -> [d]
+
+fn cand_pair(c: Cand) -> (String, Cand) = (c.name, c)
+
+fn candidate_of(v: Verdict) -> Maybe Cand =
+  match v with
+  | Accept c -> Just(c)
+  | Skip _ _ -> Nothing
+
+# One line per reported loop, for SPROUT_TRACE_BCE.
+fn verdict_line(v: Verdict, unsafe_fns: Set) -> String =
+  match v with
+  | Skip name reason -> "[bce] kept " ++ name ++ ": " ++ reason
+  | Accept c ->
+      if cand_safe(c, unsafe_fns) then "[bce] versioned " ++ c.name
+      else "[bce] kept " ++ c.name ++ ": " ++ unsafe_reason(c, unsafe_fns)
+
+fn unsafe_reason(c: Cand, unsafe_fns: Set) -> String =
+  if c.calls.unsafe then "its body can change a vector's length"
+  else
+    match list_filter(in_set(unsafe_fns, _), list_filter(is_other(c.name, _), c.calls.callees)) with
+    | [callee | _] -> "it calls " ++ callee ++ ", which can change a vector's length"
+    | Nil -> "its body can change a vector's length"
+
+fn in_set(s: Set, n: String) -> Bool = set_member(n, s)
+
+# Version every qualifying loop of the program, and report on each loop it looked at. A
+# program with none comes back as it was.
+export fn version_loops(prog: typed_ast.TypedProgram) -> (typed_ast.TypedProgram, List String) =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      let tables = build_tables(decls)
+          verdicts = list_filter_map(analyze(_, tables), decls)
+      in if list_length(verdicts) == 0 then (prog, Nil) else versioned(decls, tables, verdicts)
+
+fn versioned(decls: List typed_ast.TypedDecl, tables: Tables, verdicts: List Verdict) ->
+    (typed_ast.TypedProgram, List String) =
+  let cands = list_filter_map(candidate_of, verdicts)
+      unsafe_fns = if list_length(cands) == 0 then set_empty() else may_change_length(decls, tables)
+      accepted = dict_from_list(list_map(cand_pair, list_filter(cand_safe(_, unsafe_fns), cands)))
+  in (typed_ast.TypedProgram(list_flat_map(expand_decl(_, accepted, tables), decls)),
+      list_map(verdict_line(_, unsafe_fns), verdicts))

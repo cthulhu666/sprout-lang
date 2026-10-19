@@ -1,0 +1,52 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_sort)
+
+# BCE differential fixture (scripts/bce_gate.sh): the generic `mutvec_sort` loops
+# (`stdlib.mutable.sort_*`) over a heap element type and over Int, with enough
+# elements to force garbage collection. Stores in generic loops keep their check.
+fn fill_strings(v: MutVec String, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, `item-${rem((n - i) * 7919, 1009)}`)
+      fill_strings(v, i + 1, n)
+
+fn fill_ints(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, rem((n - i) * 7919, 1009))
+      fill_ints(v, i + 1, n)
+
+fn ordered_strings(v: MutVec String, i: Int, n: Int, prev: String, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      s <- mutvec_at(v, i)
+      ordered_strings(v, i + 1, n, s, if str_compare(s, prev) < 0 then acc + 1 else acc)
+
+fn ordered_ints(v: MutVec Int, i: Int, n: Int, prev: Int, acc: Int, total: Int) -> (Int, Int) !{IO} =
+  if i >= n then (acc, total)
+  else
+    do
+      x <- mutvec_at(v, i)
+      ordered_ints(v, i + 1, n, x, if x < prev then acc + 1 else acc, total + x)
+
+fn main() -> Unit !{IO} =
+  do
+    let n = 3000
+    strs <- mutvec_new(n, "")
+    _ <- fill_strings(strs, 0, n)
+    _ <- mutvec_sort(strs)
+    first <- mutvec_at(strs, 0)
+    last <- mutvec_at(strs, n - 1)
+    bad_s <- ordered_strings(strs, 0, n, "", 0)
+    print(`strings: first ${first} last ${last} out-of-order ${bad_s}`)
+    ints <- mutvec_new(n, 0)
+    _ <- fill_ints(ints, 0, n)
+    _ <- mutvec_sort(ints)
+    (bad_i, total) <- ordered_ints(ints, 0, n, 0, 0, 0)
+    print(`ints: out-of-order ${bad_i} total ${total}`)
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m

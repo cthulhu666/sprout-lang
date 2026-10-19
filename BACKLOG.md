@@ -1734,7 +1734,7 @@ deferral happened, not for current behaviour. Still open:
   a call; forced inline, the bench reaches 1.14×. The bounds checks block it: without them it
   inlines and the bench reaches 1.06× (the overflow checks alone change nothing). Fix in the
   compiler (an inline hint for small TCO-loop functions), in the accessors (fewer fail-call
-  sites), or by removing the checks (`docs/bounds-check-elimination-v0.md`). Generic
+  sites), or by BCE stage 2 (below; stage 1 leaves `insert` entered once per element). Generic
   `sort_insert` is never inlined: its comparator call roots a slot, a dynamic alloca in the loop.
   `docs/native-sprout-runtime-v0.md` §Phase 2.
 - [ ] `P3` **Sink a shared store and tail self-call out of both `if` arms.**
@@ -2264,12 +2264,19 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   masked index (`& 63`). As a constant array: base64 2.08× → 1.65× C, and 1.25× with shift-based
   packing. Array data, unlike the Double-literal entry under Compiler Internals Follow-Ups.
   `docs/byte-buffer-v0.md` §3.1.
-- [ ] `P3` **Bounds checks in counted loops are never removed.** Reading `3g .. 3g + 2` under
-  `g < len / 3` is always in range, yet each read keeps its check at `-O2`. Removed by hand:
-  base64 reaches 0.99× C with the two entries above, and the Int merge sort 1.06× and 1.05×,
-  from 1.27× and 1.17×. LLVM does not do it: the bound's link to `len` is in the caller, IRCE and
-  loop predication are not in `-O2`, and run by hand IRCE rewrites none of the sort's loops.
-  Options and measurements: `docs/bounds-check-elimination-v0.md`.
+- [ ] `P3` **BCE stage 2: a `$fast` clone calls its callee's `$fast` directly.** `insertion$fast`
+  still calls `insert`'s entry once per element, so the test runs per element and LLVM does
+  not inline `insert$fast`; stage 1 moved the sort's Int rows by 3-4%, against the 1.07-1.09×
+  of the by-hand version. When the caller's own entry test implies the callee's, call the
+  callee's `$fast`. `docs/bounds-check-elimination-v0.md` §6 and §10.
+- [ ] `P3` **BCE stage 3: step-0-or-1 induction variables (the merge).** `merge`/`sort_merge`
+  advance `i` or `j` by 0 or 1 with `i + j` stepping by exactly 1, so the pass sees a varying
+  parameter and leaves them checked. Also `Bytes` reads (no length change possible).
+  `docs/bounds-check-elimination-v0.md` §6 and §10.
+- [ ] `P3` **`sort_insert` and `sort_shift` are one loop written as two functions.** Mutual
+  recursion hides it from BCE, which needs a self-tail-call. Merging `sort_shift` into
+  `sort_insert`, as the bench's `insert` is written, makes the generic insertion loop versioned.
+  `stdlib/mutable.sprout`, `docs/bounds-check-elimination-v0.md` §10.
 - [ ] `P2` **GC trigger is object-count-blind, not byte-aware.** `sprout_gc_maybe_collect_threshold`
   fires on `g_managed_heap_count >= g_gc_threshold`, +1 per object whatever its size, so many-small
   over-collects and few-but-large under-collects (`adapt_factor` 3.0 amplifies it). 2026-09-06, a

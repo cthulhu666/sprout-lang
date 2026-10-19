@@ -238,7 +238,9 @@ checks in `vector_get_direct` and `vector_mutset` removed by hand, it inlines an
 1.06× and 1.05×; with the overflow checks removed too, 1.01× and 1.00×. The overflow checks alone
 change nothing. Generic `mutvec_sort` stays at ~6.4× and ~5.7× in every variant. Removing checks
 without proof breaks the bound above;
-[bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) has the ways that keep it. Instruction count was the wrong target: with every invariant
+[bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) has the ways that keep it; its
+stage 1 (2026-10-19) moves the Int rows to 1.22× and 1.13×, and stages 2 and 3 are open.
+Instruction count was the wrong target: with every invariant
 load hoisted out of the merge loop, two loads and a store per step as in C, it measured the same.
 
 ### Phase 3 — move builtins, one per PR

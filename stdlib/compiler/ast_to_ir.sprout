@@ -7,6 +7,7 @@ import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.field_kinds as fk
 import stdlib.compiler.type_kind as type_kind
 import stdlib.compiler.scc as scc
+import stdlib.compiler.bce as bce
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -3896,12 +3897,16 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
             # op (by name), gates on full application (an under-applied call falls
             # through to translate_general_call, which rejects it — inference should
             # already have) and on the element representation; Nothing = general path.
-            match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
-                                       arg_cur_ops, arg_names, idx1, env.prog.fn_arities) with
+            match try_bce_intrinsic(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                    arg_cur_ops, arg_names, idx1) with
             | Just r -> r
             | Nothing ->
-                translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                       arg_cur_ops, arg_names, idx1, env.prog.fn_arities)
+                match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
+                                           arg_cur_ops, arg_names, idx1, env.prog.fn_arities) with
+                | Just r -> r
+                | Nothing ->
+                    translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                           arg_cur_ops, arg_names, idx1, env.prog.fn_arities)
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
@@ -4145,6 +4150,52 @@ fn finish_vec_set_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
                       sprout_ir.IRVecSetD(fresh_name(idx + 5), vec, i, val),
                       "vector_mutset: null vector or index out of bounds", idx)
   | _ -> Err("ast_to_ir: vector_mutset expects 3 arguments")
+
+# BCE pseudo-callees (bce.sprout writes them into a `$fast` clone only). Each lowers to
+# one inline op with no guard blocks: the clone's entry test has already shown the
+# vector non-null and every index in range. Nothing but bce.sprout can name them.
+fn try_bce_intrinsic(fname: String, call_ty: types.Type,
+                     arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                     cur_ops: ListBuilder sprout_ir.IROp, arg_names: List String,
+                     idx: Int) ->
+    Maybe(Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int)) =
+  match bce.recognize_op(fname) with
+  | Nothing -> Nothing
+  | Just op ->
+      match bce_op_ir(op, ret_irtype(call_ty), arg_names, idx) with
+      | Err msg -> Just(Err(msg))
+      | Ok (ops, result) ->
+          Just(Ok((arg_blocks, cur_lbl, list_builder_extend(ops, cur_ops), result, idx + 2)))
+
+# The ops for one BCE pseudo-call and the SSA holding its result. Two name slots are
+# reserved (idx, idx + 1); only the Bool test needs the second.
+fn bce_op_ir(op: bce.BceOp, kind: sprout_ir.IRType, args: List String,
+             idx: Int) -> Result String (List sprout_ir.IROp, String) =
+  match args with
+  | [v] -> bce_unary_ir(op, v, idx)
+  | [v, i] -> bce_get_ir(op, kind, v, i, idx)
+  | [v, i, x] -> bce_set_ir(op, v, i, x, idx)
+  | _ -> Err("ast_to_ir: BCE op applied to " ++ int_to_string(list_length(args)) ++ " arguments")
+
+fn bce_unary_ir(op: bce.BceOp, v: String, idx: Int) -> Result String (List sprout_ir.IROp, String) =
+  match op with
+  | bce.OpLen -> Ok(([sprout_ir.IRVecLenD(fresh_name(idx), v)], fresh_name(idx)))
+  | bce.OpLive ->
+      Ok(([sprout_ir.IRICmp(fresh_name(idx + 1), "ne", v, "0"),
+           sprout_ir.IRZextI1ToI64(fresh_name(idx), fresh_name(idx + 1))], fresh_name(idx)))
+  | _ -> Err("ast_to_ir: BCE op applied to the wrong number of arguments")
+
+fn bce_get_ir(op: bce.BceOp, kind: sprout_ir.IRType, v: String, i: String,
+              idx: Int) -> Result String (List sprout_ir.IROp, String) =
+  match op with
+  | bce.OpGet -> Ok(([sprout_ir.IRVecGetU(fresh_name(idx), v, i, kind)], fresh_name(idx)))
+  | _ -> Err("ast_to_ir: BCE op applied to the wrong number of arguments")
+
+fn bce_set_ir(op: bce.BceOp, v: String, i: String, x: String,
+              idx: Int) -> Result String (List sprout_ir.IROp, String) =
+  match op with
+  | bce.OpSet -> Ok(([sprout_ir.IRVecSetD(fresh_name(idx), v, i, x)], fresh_name(idx)))
+  | _ -> Err("ast_to_ir: BCE op applied to the wrong number of arguments")
 
 # M3 PR 7: translate tuple elements left-to-right, accumulate SSAs, emit
 # IRMakeTuple at the end.  Each element gets its own translate_expr call;

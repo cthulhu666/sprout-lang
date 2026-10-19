@@ -1,0 +1,3 @@
+before
+ok: 2 3 6 7 9 10
+exit=0

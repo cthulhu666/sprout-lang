@@ -119,6 +119,9 @@ Bisect a miscompile against the Sprout-level passes without rebuilding the compi
   ("no such pass") and a name that is declared but not yet implemented — `cse`
   and `licm` today ("not implemented yet … nothing was disabled"). Neither can
   silently "fix" the bug you are chasing.
+- `SPROUT_OPT_OFF=bce` — bounds-check elimination (`stdlib/compiler/bce.sprout`). It runs in
+  `ir_pipeline`, below the seam, and the switch reaches it. `SPROUT_TRACE_BCE=1` prints one
+  `[bce] versioned <fn>` or `[bce] kept <fn>: <reason>` line per loop it looked at, on stderr.
 - `SPROUT_OPT_STATS=1` — one `[opt] <pass> on|off nodes=N removed=M` line per
   compile on stderr, `removed` being the typed-AST node delta the pass produced.
 

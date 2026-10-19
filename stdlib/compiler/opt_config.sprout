@@ -20,6 +20,7 @@ export type Pass (..) deriving (Eq, ToString) =
   | Dle
   | Cse
   | Licm
+  | Bce
 
 export type OptConfig (..) = (disabled: List Pass, unrecognised: List String, stats: Bool)
 
@@ -28,16 +29,18 @@ export fn pass_name(p: Pass) -> String =
   | Dle -> "dle"
   | Cse -> "cse"
   | Licm -> "licm"
+  | Bce -> "bce"
 
 export fn pass_from_name(name: String) -> Maybe Pass =
   match name with
   | "dle" -> Just(Dle)
   | "cse" -> Just(Cse)
   | "licm" -> Just(Licm)
+  | "bce" -> Just(Bce)
   | _ -> Nothing
 
 export let all_passes =
-  [Dle, Cse, Licm]
+  [Dle, Cse, Licm, Bce]
 
 # Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
 # exist because the switch's vocabulary is the roadmap — but disabling one must
@@ -49,6 +52,7 @@ export fn implemented(p: Pass) -> Bool =
   | Dle -> true
   | Cse -> false
   | Licm -> false
+  | Bce -> true
 
 export fn parse(off: Maybe String, stats: Maybe String) -> OptConfig =
   let names = requested_names(off)
@@ -67,6 +71,11 @@ export fn from_env() -> OptConfig !{IO} =
 
 export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
   ! list_member (p, cfg.disabled)
+
+# For a pass that runs below `compiler.run_opt_passes`, which has already reported
+# any unknown name: reads the switch without repeating the warnings.
+export fn pass_enabled(p: Pass) -> Bool !{IO} =
+  enabled(parse(env.get("SPROUT_OPT_OFF"), Nothing), p)
 
 fn requested_names(off: Maybe String) -> List String =
   match off with

@@ -529,6 +529,12 @@ test-conformance-run: bootstrap-from-seed
 b1-gate: bootstrap-from-seed
   SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/b1_gate.sh
 
+# Bounds-check elimination gate: the pass fires on its fixtures, and a failing entry test
+# reaches the original body, which panics where it always did. See scripts/bce_gate.sh.
+[group('test')]
+bce-gate: bootstrap-from-seed
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/bce_gate.sh
+
 # Byte-diff --use-ir-codegen output for the whole example + smoke-shape corpus
 # against the committed goldens in tests/golden/ir/ (57 files, ~55s serial).
 #
@@ -3801,6 +3807,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     # predated the explicit-`_` partial-application syntax.
     "c-runtime-test|c-runtime-test"
     "b1-gate|b1-gate"
+    "bce-gate|bce-gate"
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
@@ -4087,7 +4094,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures cpr-declare-check backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
