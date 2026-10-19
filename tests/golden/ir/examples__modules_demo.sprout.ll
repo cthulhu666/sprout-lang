@@ -118,9 +118,10 @@ declare i64 @bytes_builder_build(i64)
 @.str.26 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"Gateway Timeout\00" }
 @.str.27 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"HTTP/1.1 \00" }
 @.str.28 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
-@.str.29 = private unnamed_addr constant { i64, [50 x i8] } { i64 802826, [50 x i8] c"\0D\0AConnection: close\0D\0AContent-Type: text/plain\0D\0A\0D\0A\00" }
-@.str.30 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"\0D\0AConnection: close\0D\0A\0D\0A\00" }
-@.str.31 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"modules work\00" }
+@.str.29 = private unnamed_addr constant { i64, [29 x i8] } { i64 458762, [29 x i8] c"Content-Type: text/plain\0D\0A\0D\0A\00" }
+@.str.30 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
+@.str.31 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"\0D\0AConnection: close\0D\0A\00" }
+@.str.32 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"modules work\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -902,52 +903,62 @@ entry:
 define i64 @stdlib.http.http_response(i64 %p$status, i64 %p$body) {
 entry:
   %t$0 = call i64 @stdlib.http.status_has_content(i64 %p$status)
-  %t$12 = trunc i64 %t$0 to i1
-  br i1 %t$12, label %then_1, label %else_1
+  %t$8 = trunc i64 %t$0 to i1
+  br i1 %t$8, label %then_1, label %else_1
 then_1:
-  %t$13 = alloca i64
-  store i64 %p$status, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$15 = alloca i64
-  store i64 %p$body, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$3 = call i64 @stdlib.http.status_line(i64 %p$status)
-  %t$4 = getelementptr inbounds { i64, [50 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
-  %t$5 = ptrtoint ptr %t$4 to i64
-  %t$17 = alloca i64
-  store i64 %t$3, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$19 = alloca i64
-  store i64 %t$5, ptr %t$19
-  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$6 = call i64 @__tc_Semigroup_String_append(i64 %t$3, i64 %t$5)
-  %t$21 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$22 = alloca i64
-  store i64 %t$6, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$7 = call i64 @__tc_Semigroup_String_append(i64 %t$6, i64 %p$body)
-  %t$24 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$3 = getelementptr inbounds { i64, [29 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
+  %t$4 = ptrtoint ptr %t$3 to i64
+  %t$16 = alloca i64
+  store i64 %p$status, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$18 = alloca i64
+  store i64 %p$body, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$20 = alloca i64
+  store i64 %t$4, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$5 = call i64 @__tc_Semigroup_String_append(i64 %t$4, i64 %p$body)
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 else_1:
-  %t$25 = alloca i64
-  store i64 %p$status, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$8 = call i64 @stdlib.http.status_line(i64 %p$status)
-  %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9 = getelementptr inbounds { i64, [24 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
-  %t$10 = ptrtoint ptr %t$9 to i64
-  %t$28 = alloca i64
-  store i64 %t$8, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$30 = alloca i64
-  store i64 %t$10, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$11 = call i64 @__tc_Semigroup_String_append(i64 %t$8, i64 %t$10)
-  %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$6 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
   br label %join_1
 join_1:
-  %t$2 = phi i64 [%t$7, %then_1], [%t$11, %else_1]
-  ret i64 %t$2
+  %t$2 = phi i64 [%t$5, %then_1], [%t$7, %else_1]
+  br label %arm_0_9
+arm_0_9:
+  %t$24 = alloca i64
+  store i64 %t$2, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$26 = alloca i64
+  store i64 %p$status, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$11 = call i64 @stdlib.http.status_line(i64 %p$status)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$12 = getelementptr inbounds { i64, [22 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
+  %t$13 = ptrtoint ptr %t$12 to i64
+  %t$29 = alloca i64
+  store i64 %t$11, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$31 = alloca i64
+  store i64 %t$13, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$14 = call i64 @__tc_Semigroup_String_append(i64 %t$11, i64 %t$13)
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$34 = alloca i64
+  store i64 %t$14, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$15 = call i64 @__tc_Semigroup_String_append(i64 %t$14, i64 %t$2)
+  %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
+  br label %join_9
+arm_1_9:
+  call void @sprout_abort_match()
+  unreachable
+join_9:
+  %t$10 = phi i64 [%t$15, %arm_0_9]
+  ret i64 %t$10
 }
 
 define i64 @stdlib.http.http_ok(i64 %p$body) {
@@ -966,7 +977,7 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
+  %t$0 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$4 = alloca i64
   store i64 %t$1, ptr %t$4

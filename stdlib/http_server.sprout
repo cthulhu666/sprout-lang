@@ -1183,7 +1183,7 @@ fn handle_connection(config: ServerConfig, adm: Admission, conn: consuming TcpCo
                      handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int)) -> Unit !{IO} =
   match read_request(conn, config, pending) with
   # The framing of whatever follows a failed read is unknown, so the reply closes (RFC 9112 §9.3).
-  | Err err -> write_and_close(conn, joined(render_parts(closing(read_error_response(err)))), config)
+  | Err err -> write_and_close(conn, render(closing(read_error_response(err))), config)
   | Ok (req, rest) ->
       do
         resp <- handler(req)

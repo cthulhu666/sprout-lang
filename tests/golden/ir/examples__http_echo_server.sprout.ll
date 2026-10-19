@@ -10455,6 +10455,21 @@ join_0:
   ret i64 %t$1
 }
 
+define i64 @stdlib.http_server.render(i64 %p$resp) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$resp, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @stdlib.http_server.render_parts(i64 %p$resp)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$5 = alloca i64
+  store i64 %t$0, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$1 = call i64 @stdlib.http_server.joined(i64 %t$0)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.http_server.render_parts(i64 %p$resp) {
 entry:
   br label %arm_0_0
@@ -11136,24 +11151,24 @@ entry:
 
 define i64 @stdlib.http_server.handle_connection$u(i64 %p$config, i64 %p$adm, i64 %p$conn, i64 %p$handler, i64 %p$pending, i64 %p$pbpad$5, i64 %p$pbpad$6) {
 entry:
-  %t$26 = alloca i64
-  store i64 %p$pending, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$28 = alloca i64
-  store i64 %p$handler, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$30 = alloca i64
-  store i64 %p$conn, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$32 = alloca i64
-  store i64 %p$config, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$34 = alloca i64
-  store i64 %p$adm, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$25 = alloca i64
+  store i64 %p$pending, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$27 = alloca i64
+  store i64 %p$handler, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$29 = alloca i64
+  store i64 %p$conn, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$31 = alloca i64
+  store i64 %p$config, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$33 = alloca i64
+  store i64 %p$adm, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$0 = call i64 @stdlib.http_server.read_request(i64 %p$conn, i64 %p$config, i64 %p$pending) noinline
   %t$1 = call i64 @sprout_tag(i64 %t$0)
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 5)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 5)
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 8
@@ -11161,108 +11176,103 @@ arm_0_2:
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
   %t$6 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$37 = alloca i64
-  store i64 %p$conn, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$39 = alloca i64
-  store i64 %p$config, ptr %t$39
-  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$41 = alloca i64
-  store i64 %t$6, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$36 = alloca i64
+  store i64 %p$conn, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$38 = alloca i64
+  store i64 %p$config, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$40 = alloca i64
+  store i64 %t$6, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
   %t$7 = call i64 @stdlib.http_server.read_error_response(i64 %t$6) noinline
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$44 = alloca i64
-  store i64 %t$7, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$43 = alloca i64
+  store i64 %t$7, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$8 = call i64 @stdlib.http_server.closing(i64 %t$7) noinline
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$47 = alloca i64
-  store i64 %t$8, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$9 = call i64 @stdlib.http_server.render_parts(i64 %t$8) noinline
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$50 = alloca i64
-  store i64 %t$9, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$10 = call i64 @stdlib.http_server.joined(i64 %t$9) noinline
-  %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$53 = alloca i64
-  store i64 %t$10, ptr %t$53
-  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$11 = call i64 @stdlib.http_server.write_and_close(i64 %p$conn, i64 %t$10, i64 %p$config) noinline
-  %t$55 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$46 = alloca i64
+  store i64 %t$8, ptr %t$46
+  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
+  %t$9 = call i64 @stdlib.http_server.render(i64 %t$8) noinline
+  %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$49 = alloca i64
+  store i64 %t$9, ptr %t$49
+  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
+  %t$10 = call i64 @stdlib.http_server.write_and_close(i64 %p$conn, i64 %t$9, i64 %p$config) noinline
+  %t$51 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_2
 arm_1_2:
-  %t$12 = add i64 0, 7
-  %t$13 = icmp eq i64 %t$1, %t$12
-  br i1 %t$13, label %body_1_2, label %arm_2_2
+  %t$11 = add i64 0, 7
+  %t$12 = icmp eq i64 %t$1, %t$11
+  br i1 %t$12, label %body_1_2, label %arm_2_2
 body_1_2:
-  %t$14 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$15$ptr = inttoptr i64 %t$14 to ptr
-  %t$15$gep = getelementptr i64, ptr %t$15$ptr, i64 0
+  %t$13 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$14$ptr = inttoptr i64 %t$13 to ptr
+  %t$14$gep = getelementptr i64, ptr %t$14$ptr, i64 0
+  %t$14 = load i64, ptr %t$14$gep
+  %t$15$ptr = inttoptr i64 %t$13 to ptr
+  %t$15$gep = getelementptr i64, ptr %t$15$ptr, i64 1
   %t$15 = load i64, ptr %t$15$gep
-  %t$16$ptr = inttoptr i64 %t$14 to ptr
-  %t$16$gep = getelementptr i64, ptr %t$16$ptr, i64 1
-  %t$16 = load i64, ptr %t$16$gep
+  %t$52 = alloca i64
+  store i64 %p$handler, ptr %t$52
+  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
+  %t$54 = alloca i64
+  store i64 %p$conn, ptr %t$54
+  %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
   %t$56 = alloca i64
-  store i64 %p$handler, ptr %t$56
+  store i64 %p$config, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
   %t$58 = alloca i64
-  store i64 %p$conn, ptr %t$58
+  store i64 %p$adm, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
   %t$60 = alloca i64
-  store i64 %p$config, ptr %t$60
+  store i64 %t$14, ptr %t$60
   %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
   %t$62 = alloca i64
-  store i64 %p$adm, ptr %t$62
+  store i64 %t$15, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$64 = alloca i64
-  store i64 %t$15, ptr %t$64
-  %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
-  %t$66 = alloca i64
-  store i64 %t$16, ptr %t$66
-  %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
   call void @sprout_closure_arity_check(i64 %p$handler, i64 1)
-  %t$17$env_ptr = inttoptr i64 %p$handler to ptr
-  %t$17$code = load ptr, ptr %t$17$env_ptr
-  %t$17 = call i64 (i64, i64) %t$17$code(i64 %p$handler, i64 %t$15)
-  %t$68 = alloca i64
-  store i64 %t$17, ptr %t$68
-  %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
-  %t$18 = call i64 @stdlib.http_server.request_keeps(i64 %t$15) noinline
-  %t$25 = trunc i64 %t$18 to i1
-  %t$70 = call i64 @sprout_gc_pop_roots(i64 7)
-  br i1 %t$25, label %then_19, label %else_19
-then_19:
-  %t$21 = call i64 @stdlib.http_server.request_method(i64 %t$15) noinline
-  %t$22 = musttail call i64 @stdlib.http_server.respond$u(i64 %p$config, i64 %p$adm, i64 %p$conn, i64 %p$handler, i64 %t$21, i64 %t$17, i64 %t$16) noinline
-  ret i64 %t$22
-else_19:
-  %t$23 = call i64 @stdlib.http_server.request_method(i64 %t$15) noinline
+  %t$16$env_ptr = inttoptr i64 %p$handler to ptr
+  %t$16$code = load ptr, ptr %t$16$env_ptr
+  %t$16 = call i64 (i64, i64) %t$16$code(i64 %p$handler, i64 %t$14)
+  %t$64 = alloca i64
+  store i64 %t$16, ptr %t$64
+  %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
+  %t$17 = call i64 @stdlib.http_server.request_keeps(i64 %t$14) noinline
+  %t$24 = trunc i64 %t$17 to i1
+  %t$66 = call i64 @sprout_gc_pop_roots(i64 7)
+  br i1 %t$24, label %then_18, label %else_18
+then_18:
+  %t$20 = call i64 @stdlib.http_server.request_method(i64 %t$14) noinline
+  %t$21 = musttail call i64 @stdlib.http_server.respond$u(i64 %p$config, i64 %p$adm, i64 %p$conn, i64 %p$handler, i64 %t$20, i64 %t$16, i64 %t$15) noinline
+  ret i64 %t$21
+else_18:
+  %t$22 = call i64 @stdlib.http_server.request_method(i64 %t$14) noinline
+  %t$67 = alloca i64
+  store i64 %t$16, ptr %t$67
+  %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
+  %t$69 = alloca i64
+  store i64 %p$conn, ptr %t$69
+  %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
   %t$71 = alloca i64
-  store i64 %t$17, ptr %t$71
+  store i64 %p$config, ptr %t$71
   %t$72 = call i64 @sprout_gc_push_i64_root(ptr %t$71)
   %t$73 = alloca i64
-  store i64 %p$conn, ptr %t$73
+  store i64 %t$22, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
-  %t$75 = alloca i64
-  store i64 %p$config, ptr %t$75
-  %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$77 = alloca i64
-  store i64 %t$23, ptr %t$77
-  %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
-  %t$24 = call i64 @stdlib.http_server.close_with(i64 %p$conn, i64 %t$23, i64 %t$17, i64 %p$config) noinline
-  %t$79 = call i64 @sprout_gc_pop_roots(i64 4)
-  br label %join_19
-join_19:
-  %t$20 = phi i64 [%t$24, %else_19]
+  %t$23 = call i64 @stdlib.http_server.close_with(i64 %p$conn, i64 %t$22, i64 %t$16, i64 %p$config) noinline
+  %t$75 = call i64 @sprout_gc_pop_roots(i64 4)
+  br label %join_18
+join_18:
+  %t$19 = phi i64 [%t$23, %else_18]
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$11, %body_0_2], [%t$20, %join_19]
+  %t$3 = phi i64 [%t$10, %body_0_2], [%t$19, %join_18]
   ret i64 %t$3
 }
 

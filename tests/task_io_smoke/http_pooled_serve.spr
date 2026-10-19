@@ -16,13 +16,13 @@ import stdlib.terminal as terminal
 #    would be answered and the remaining three would hang forever with no error anywhere. That is
 #    why this asserts on connection five and not on connection one: a broken pool passes any test
 #    that only serves as many connections as it has workers.
-#  * CAPACITY SURVIVES A BAD HANDLER. A worker that exits its loop permanently removes capacity, so
-#    a server degrades to zero workers and hangs rather than failing visibly. Connection three's
-#    handler fails with a 500, and connections four and five must still be served afterwards by the
-#    same two workers.
+#  * CAPACITY SURVIVES A NON-2XX RESPONSE. A worker that exits its loop permanently removes
+#    capacity, so a server degrades to zero workers and hangs rather than failing visibly.
+#    Connection three is answered with a 500, and connections four and five must still be served
+#    afterwards by the same two workers.
 
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
-  if request_path(req) == "/bad" then response(InternalServerError500, "handler failed")
+  if request_path(req) == "/bad" then response(InternalServerError500, "error")
   else ok("served")
 
 fn expect_status(conn: borrowing TcpConnection, want: String, marker: String) -> Unit !{IO} =
