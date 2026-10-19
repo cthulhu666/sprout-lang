@@ -1968,15 +1968,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `docs/local-closures-v0.md`). Left: marking the prelude combinators `local` (own entry); a linear
   value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING linear
   lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
-- [ ] `P1` **A lambda's `once` promise is never checked, so a moved-in linear value can be released
-  twice.** `once_honesty` is what makes `once` a promise rather than a decoration, and it runs from
-  `check_fn_linear` over a DECLARED parameter's written mode. A lambda reaches neither, so
-  `runner(\(w: once Unit -> Int) -> w(()) + w(()), n)` at a `once` slot compiles, and a value M4.4a
-  moved into the closure `runner` passes is released twice — verified running, on master and since.
-  M4.4b keeps the hole closed for the common shape by pushing only `borrowing` down, so an
-  unannotated lambda at a `once` slot is still a mismatch; the WRITTEN spelling above is the way in.
-  Fix: run `once_honesty` over lambda bodies, keyed on the parameter's ownership rather than its
-  written mode. Regression to flip: `type_error/lambda_slot_once_not_pushed_down` has the shape.
 - [ ] `P1` **Generic code can duplicate a linear value.** `fn dup(x: a) -> (a, a) = (x, x)` is
   accepted, since the body sees a rigid `a`, not a linear type; with `type linear L = L Int`,
   `dup(L(1))` returns two owners and both are consumed (verified running, 2026-10-19). Any generic

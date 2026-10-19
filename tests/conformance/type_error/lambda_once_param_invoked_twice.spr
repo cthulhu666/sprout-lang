@@ -1,0 +1,19 @@
+module main
+
+# `once` written on a lambda's own parameter is the same promise a declared
+# function makes, so it is checked the same way. `runner` moves `f` into the
+# closure it passes, trusting the promise; `w(()) + w(())` released it twice
+# and printed 10.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn runner(g: (once(Unit -> Int)) -> Int, n: Int) -> Int =
+  do
+    let f = File(n)
+    g(\_ -> release(f))
+
+fn bad(n: Int) -> Int = runner(\ (w: once Unit -> Int) -> w(()) + w(()), n)
+
+fn main() -> Unit !{IO} = print(to_string(bad(5)))

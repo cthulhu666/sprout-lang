@@ -137,6 +137,15 @@ fn forward_in_lambda(w: once Unit -> Int) -> Int = run_once(\_ -> w(()) + 1)
 fn move_forwarded(f: File, g: File) -> Int =
   forward_once(\_ -> release(f)) + forward_in_lambda(\_ -> release(g))
 
+# --- 9. a lambda's own `once` parameter keeps the same promise ---------------
+# Written on the lambda, it is checked as a declared one is: one run per path,
+# or none. (Rejections: lambda_once_param_*.)
+fn hand_once(g: (once(Unit -> Int)) -> Int, f: File) -> Int = g(\_ -> release(f))
+
+fn lambda_once_param(go: Bool, f: File, g: File) -> Int =
+  hand_once(\ (w: once Unit -> Int) -> if go then w(()) else w(()), f)
+  + hand_once(\ (w: once Unit -> Int) -> run_once(w) + 1, g)
+
 fn main() -> Unit !{IO} =
   run_suite("once_closures", [
     check_eq("linear value moved into a once closure", move_in(File(9)), 9),
@@ -148,5 +157,6 @@ fn main() -> Unit !{IO} =
     check_eq("callee may decline to invoke a once parameter", declines_to_run(), 5),
     check_eq("borrow before the move", borrow_then_move(File(3)), 3),
     check_eq("callee invokes on one path only", one_path(File(1), File(2), File(3)), 116),
-    check_eq("once parameter forwarded to a once slot", move_forwarded(File(10), File(20)), 31)
+    check_eq("once parameter forwarded to a once slot", move_forwarded(File(10), File(20)), 31),
+    check_eq("lambda's own once parameter run once per path", lambda_once_param(false, File(2), File(3)), 6)
   ])

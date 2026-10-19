@@ -844,7 +844,9 @@ fn lin_slot_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: 
   match first_owned_linear_param(params, lam_type, env) with
   | Just b -> LinErr(p, lambda_param_binder_msg(b, env))
   | Nothing ->
-      lin_slot_lambda_body(borrowed_linear_params(params, lam_type, env), params, body, sc, env)
+      lambda_once_after(
+        lin_slot_lambda_body(borrowed_linear_params(params, lam_type, env), params, body, sc, env),
+        params, lam_type, body, env)
 
 # The borrowing parameters are discharged first and on their own terms — not
 # consumed, then dropped from both sets — so what the slot's rule sees is the
@@ -1449,10 +1451,32 @@ fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types
                                     drop_comp_acc_type(params, lam_type), env) with
      | Just b -> LinErr(p, linear_param_msg(from_comp, b, env))
      | Nothing ->
-         lin_lambda_body(body, p, params,
-           borrowed_linear_params(drop_comp_acc_params(params),
-                                  drop_comp_acc_type(params, lam_type), env),
-           sc, env, from_comp)
+         lambda_once_after(
+           lin_lambda_body(body, p, params,
+             borrowed_linear_params(drop_comp_acc_params(params),
+                                    drop_comp_acc_type(params, lam_type), env),
+             sc, env, from_comp),
+           params, lam_type, body, env)
+
+# A lambda's own `once` parameter makes the promise a declared one does, and a
+# caller moves linear values in on the strength of it, so the body is held to it
+# by the same two walks, after its own walk passed (linear_result). Keyed on the
+# TYPE's ownership: the mode is written, never pushed down from the slot.
+# Regressions: tests/conformance/type_error/lambda_once_param_{invoked_twice,escapes}.
+fn lambda_once_after(res: LinRes, params: List ast.Param, lam_type: types.Type,
+                     body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
+  let LinOk c b = res else LinErr ep m -> LinErr(ep, m)
+      names = once_lambda_params(params, lam_type)
+  in match once_honesty_after(escape_honesty(EscOnce, names, body), names, body, env) with
+     | LinFail q m -> LinErr(q, m)
+     | LinPass -> LinOk(c, b)
+
+fn once_lambda_params(params: List ast.Param, t: types.Type) -> List String =
+  match params with
+  | Nil -> Nil
+  | Cons prm rest ->
+      linear_param_cons(types.own_is_once(spine_own(t)), ast.param_name(prm),
+                        once_lambda_params(rest, spine_rest(t)))
 
 # The rejection is identical either way; only the wording differs, so provenance
 # is carried as a flag rather than duplicating the analysis.

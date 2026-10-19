@@ -1,0 +1,19 @@
+module main
+
+# The other half of the promise: a `once` parameter may not reach a slot that
+# could run it again. `twice` makes no promise.
+
+type linear File = File Int
+
+fn release(f: consuming File) -> Int = match f with | File n -> n
+
+fn twice(k: Unit -> Int) -> Int = k(()) + k(())
+
+fn runner(g: (once(Unit -> Int)) -> Int, n: Int) -> Int =
+  do
+    let f = File(n)
+    g(\_ -> release(f))
+
+fn bad(n: Int) -> Int = runner(\ (w: once Unit -> Int) -> twice(w), n)
+
+fn main() -> Unit !{IO} = print(to_string(bad(5)))
