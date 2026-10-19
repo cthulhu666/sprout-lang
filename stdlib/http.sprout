@@ -158,9 +158,33 @@ export fn status_reason(status: HttpStatus) -> String =
 # so a defaulted type would replace the real one.
 export fn status_has_content(status: HttpStatus) -> Bool =
   match status with
+  | Ok200 -> true
+  | Created201 -> true
+  | Accepted202 -> true
   | NoContent204 -> false
+  | MovedPermanently301 -> true
+  | Found302 -> true
+  | SeeOther303 -> true
   | NotModified304 -> false
-  | _ -> true
+  | TemporaryRedirect307 -> true
+  | PermanentRedirect308 -> true
+  | BadRequest400 -> true
+  | Unauthorized401 -> true
+  | Forbidden403 -> true
+  | NotFound404 -> true
+  | MethodNotAllowed405 -> true
+  | RequestTimeout408 -> true
+  | Conflict409 -> true
+  | Gone410 -> true
+  | ContentTooLarge413 -> true
+  | UnprocessableContent422 -> true
+  | TooManyRequests429 -> true
+  | RequestHeaderFieldsTooLarge431 -> true
+  | InternalServerError500 -> true
+  | NotImplemented501 -> true
+  | BadGateway502 -> true
+  | ServiceUnavailable503 -> true
+  | GatewayTimeout504 -> true
 
 # "HTTP/1.1 200 OK", for callers that assemble their own header block, as
 # stdlib.http_server.render does.
