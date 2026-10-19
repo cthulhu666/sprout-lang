@@ -13214,7 +13214,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -15099,7 +15099,7 @@ ovfok_0:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0 = add i64 0, 0
   ret i64 %t$0
@@ -15683,7 +15683,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_30(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_30(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0 = add i64 0, 1
   %t$1$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$0)

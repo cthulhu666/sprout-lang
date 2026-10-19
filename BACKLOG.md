@@ -78,11 +78,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (measured): a self-call at `Nest (a, a)` needs `Eq (a, a)`, deduced against the instance
   environment, which Sprout has no step for. Pinned by
   `tests/conformance/type_error/polymorphic_recursion_constrained.spr`.
-- [ ] `P1` **A lambda with two `_` parameters emits invalid IR.** `\ (a, _, _) -> a` lowers to
-  `define … (i64 %p$a, i64 %p$_, i64 %p$_)`, which `opt` rejects as "redefinition of argument".
-  `--emit-ir` exits 0, so the error surfaces only at `opt`/`clang`, with no Sprout position. Each
-  `_` needs its own SSA name. Workaround: name them (`_roots`, `_failed`), as
-  `compile_driver.phases` does. Repro: an `apply(f: Int -> Int -> Int -> Int)` passed that lambda.
 - [ ] `P2` **Numeric defaulting fires before a deferred field obligation is discharged**
   (`infer.check_arith`, `infer.sprout:2782`), so `Double` fields under arithmetic get a spurious
   `Int vs Double` error and valid code is rejected. Incomplete fix, not a regression — it replaced

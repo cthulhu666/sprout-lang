@@ -15091,7 +15091,7 @@ entry:
   ret i64 %t$8
 }
 
-define i64 @__sprout_ir_lambda_49(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_49(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1

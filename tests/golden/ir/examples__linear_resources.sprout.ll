@@ -1477,7 +1477,7 @@ entry:
   ret i64 %t$13
 }
 
-define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -1756,7 +1756,7 @@ join_12:
   ret i64 %t$13
 }
 
-define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -1873,7 +1873,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_13(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_13(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -2092,7 +2092,7 @@ join_10:
   ret i64 %t$40
 }
 
-define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1

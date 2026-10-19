@@ -378,7 +378,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_lambda_1(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_1(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -523,7 +523,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_lambda_3(i64 %p$env$, i64 %p$_) {
+define i64 @__sprout_ir_lambda_3(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
