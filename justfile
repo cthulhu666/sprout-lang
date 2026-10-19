@@ -4225,8 +4225,9 @@ gate-audit:
   for s in scripts/*.sh; do
     b="$(basename "$s")"
     grep -qw "$b" <<<"$SCRIPTS_EXCLUDE" && continue
-    # Reachable if the justfile invokes it, or a .claude hook wires it.
+    # Reachable if the justfile invokes it, a CI workflow runs it, or a .claude hook wires it.
     grep -q "$b" justfile && continue
+    grep -rq "$b" .github/workflows/ && continue
     grep -rq "$b" .claude/ 2>/dev/null && continue
     unreachable="$unreachable $b"
   done

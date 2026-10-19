@@ -20,19 +20,9 @@ jobs:
         uses: jdx/mise-action@v2
 
       - name: Install LLVM/Clang, expose bare clang/opt on PATH
-        # See .github/workflows/ci.yml for the rationale (x86_64 needs clang >= 22;
-        # recipes call bare clang/opt from the versioned bindir).
+        # x86_64 needs clang >= 22; see .github/workflows/ci.yml.
         timeout-minutes: 5
-        run: |
-          . /etc/os-release
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
-          echo "deb https://apt.llvm.org/$VERSION_CODENAME/ llvm-toolchain-$VERSION_CODENAME-22 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm-22.list
-          sudo apt-get update
-          sudo apt-get install -y llvm-22 clang-22
-          LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
-          echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
+        run: bash scripts/ci_install_llvm.sh
 
       - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed

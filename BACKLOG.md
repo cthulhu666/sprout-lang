@@ -1264,6 +1264,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   delete `runtime_error/main_arity_mismatch` (a mislabeled duplicate) and `parity_*` (byte-parity
   against the retired reference, no golden).
 
+**Developer setup**
+
+- [ ] `P3` **`setup-dev.sh` stops on x86_64 distros without clang 22.** It installs the distro
+  clang, and on x86_64 clang <= 21 lowers `__int128` as `{ i64, i64 }`, so LLVM discovery and
+  `bootstrap-from-seed` refuse it (`scripts/check_clang_cpr.sh`). Ubuntu 24.04 ships 18. Setup
+  stops with a pointer to apt.llvm.org instead of adding that repository itself. Revisit when
+  Ubuntu's default clang reaches 22: then the distro install works and this entry dies.
+
 ### 7.5) Type Classes
 
 - [ ] `P2` **Default method bodies.** A class method is a signature only (spec §8.5), so adding a
@@ -2757,7 +2765,7 @@ acting.
 ### CI / Build Performance
 
 - [ ] `P2` **The apt LLVM install has no retry and no cache, and it hung CI for 24 min.** The
-  `test-*` shards and `lsp` run a bare `sudo apt-get update && sudo apt-get install -y llvm clang …`
+  `test-*` shards and `lsp` run `scripts/ci_install_llvm.sh` (apt.llvm.org plus Ubuntu's mirrors)
   with no retry and no package cache; on one run that step sat 24 minutes against 24 seconds on the
   run 43 minutes earlier. A 5-min `timeout-minutes` now makes a stall fail rather than burn the
   6-hour job default, but a failed fetch is still a red run, now on three shards instead of one.

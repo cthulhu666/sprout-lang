@@ -2609,7 +2609,7 @@ fn worker_ret_ty(body: typed_ast.TypedExpr) -> String =
   | Just w -> if w == 3 then "{ i64, i64, i64 }" else "i128"
   | Nothing -> "i128"
 
-# The unboxed struct width a worker-chain tail returns: a scalar 3-tuple → 3; everything else
+# The unboxed word count a worker-chain tail returns: a scalar 3-tuple → 3; everything else
 # (width-2 ADT chain, scalar 2-tuple, Maybe-extern) → 2. Must equal the chaining worker's
 # worker_ret_ty (both read scalar_tuple_width on the same tail-result type).
 fn chain_width(body: typed_ast.TypedExpr) -> Int =
@@ -6239,7 +6239,7 @@ fn seal_ret(blocks: List sprout_ir.IRBlock, lbl: String, ops: ListBuilder sprout
 fn fresh_name_run(idx: Int, n: Int) -> List String =
   if n <= 0 then Nil else Cons(fresh_name(idx), fresh_name_run(idx + 1, n - 1))
 
-# Return `slots` (width 2 or 3) unboxed, naming the struct `dst`.
+# Return `slots` (width 2 or 3) unboxed, naming the result `dst`.
 fn ret_unboxed(dst: String, slots: List String) -> Result String sprout_ir.IROp =
   match slots with
   | [a, b] -> Ok(sprout_ir.IRRetUnboxed2(dst, a, b))
@@ -6275,7 +6275,7 @@ fn translate_tail_tuple_repack(body: typed_ast.TypedExpr, params: List String,
     (blocks, lbl, ops, box_ssa, idx1) <-
       translate_expr(body, params, env, idx, cur_label, cur_ops, captures)
     # Width from the body's tuple type — the SAME oracle the worker's ret-type used, so the
-    # repacked { i64,… } arity matches the worker signature. Width 2 is also the never-reached
+    # repacked width matches the worker signature. Width 2 is also the never-reached
     # non-tuple default.
     let width = if tuple_repack_is_w3(body) then 3 else 2
     let slots = fresh_name_run(idx1, width)
@@ -6284,7 +6284,7 @@ fn translate_tail_tuple_repack(body: typed_ast.TypedExpr, params: List String,
         idx1 + width + 1))
 
 # tail chained call to an unboxed-returning target (a Maybe-extern _unboxed, or another fn's worker).
-# `width` is the returned struct's field count: 2 → i128 (Maybe-extern, width-2 ADT, or a
+# `width` is the returned word count: 2 → i128 (Maybe-extern, width-2 ADT, or a
 # scalar 2-tuple worker); 3 → { i64, i64, i64 } (a scalar 3-tuple worker). It MUST equal the chaining
 # fn's own declared worker_ret_ty, else the emitted `ret` mismatches the `define` (caught by opt-verify).
 fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, params: List String,
