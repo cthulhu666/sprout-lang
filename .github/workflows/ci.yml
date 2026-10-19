@@ -133,19 +133,18 @@ jobs:
 
       - &install-llvm
         name: Install LLVM/Clang + sanitizer runtime + ripgrep, expose bare clang/opt on PATH
-        # Sprout IR uses opaque pointer type → requires LLVM >= 16. The build recipes
-        # call BARE `clang` and `opt` (the IR verifier, via `opt --passes=verify`)
+        # clang 22 from apt.llvm.org: emitted IR declares the CPR `_unboxed` runtime functions
+        # as returning i128, and x86_64 clang <= 21 lowers `__int128` as `{ i64, i64 }`
+        # (scripts/check_clang_cpr.sh; bootstrap-from-seed refuses such a clang). The build
+        # recipes call BARE `clang` and `opt` (the IR verifier, via `opt --passes=verify`)
         # from PATH; only the versioned LLVM bindir (/usr/lib/llvm-N/bin) carries the
-        # unversioned `clang`+`opt`. ubuntu-latest ships a newer LLVM (>= 16); pick
-        # the highest installed bindir rather than pinning a version that may not be
-        # apt-installable on a future runner image.
+        # unversioned `clang`+`opt`, so put the highest one on PATH.
         #
         # libclang-rt-dev carries the ASan/UBSan runtime. `clang` does NOT pull it in on
         # Ubuntu, and without it `-fsanitize=address,undefined` fails to LINK — which
         # tests/c_runtime/run.sh absorbs by falling back to an unsanitized build and still
         # passing, so two of its ten assertions were silently unsanitized. Added when
-        # c-runtime-test was wired into ci-fast-gates. Unversioned name so it tracks the
-        # distro's default clang alongside the bindir rule below.
+        # c-runtime-test was wired into ci-fast-gates. Its version must match clang's.
         #
         # libsqlite3-dev and sqlite3: twelve-dollar-example links the system libsqlite3 and
         # builds its test database with the CLI. The runner image has both today; named here
@@ -154,8 +153,13 @@ jobs:
         # Bounded: Ubuntu's apt mirrors stall. Worst green run here is 144 s.
         timeout-minutes: 5
         run: |
+          . /etc/os-release
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb https://apt.llvm.org/$VERSION_CODENAME/ llvm-toolchain-$VERSION_CODENAME-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-22.list
           sudo apt-get update
-          sudo apt-get install -y llvm clang libclang-rt-dev ripgrep libsqlite3-dev sqlite3
+          sudo apt-get install -y llvm-22 clang-22 libclang-rt-22-dev ripgrep libsqlite3-dev sqlite3
           LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
           echo "LLVM_BINDIR=$LLVM_BINDIR"
           echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
@@ -400,12 +404,17 @@ jobs:
         uses: jdx/mise-action@v2
 
       - name: Install LLVM/Clang, expose bare clang/opt on PATH
-        # Same reason as the `test` job: the build recipes call bare `clang` and `opt`, which
-        # only the versioned LLVM bindir carries.
+        # Same reasons as the `test` job: clang 22, and bare `clang` and `opt`, which only the
+        # versioned LLVM bindir carries.
         timeout-minutes: 5
         run: |
+          . /etc/os-release
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb https://apt.llvm.org/$VERSION_CODENAME/ llvm-toolchain-$VERSION_CODENAME-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-22.list
           sudo apt-get update
-          sudo apt-get install -y llvm clang
+          sudo apt-get install -y llvm-22 clang-22
           LLVM_BINDIR="$(ls -d /usr/lib/llvm-*/bin | sort -V | tail -n1)"
           echo "$LLVM_BINDIR" >> "$GITHUB_PATH"
 

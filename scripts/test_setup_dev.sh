@@ -60,8 +60,20 @@ echo 'Debian LLVM version 18.1.3'
 TOOL
 cat >"$TMPD/llvm/bin/clang" <<'TOOL'
 #!/usr/bin/env bash
-echo 'Debian clang version 18.1.3'
+if [[ "$1" == --version ]]; then echo 'Debian clang version 22.1.8'; exit 0; fi
+while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && out="$2"; shift; done
+echo 'define dso_local i128 @f(i64 noundef %0) {' >"$out"
 TOOL
+# x86_64 clang <= 21: right version range, wrong `__int128` lowering.
+mkdir -p "$TMPD/old-llvm/bin"
+cp "$TMPD/llvm/bin/opt" "$TMPD/old-llvm/bin/"
+cat >"$TMPD/old-llvm/bin/clang" <<'TOOL'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then echo 'Ubuntu clang version 18.1.3'; exit 0; fi
+while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && out="$2"; shift; done
+echo 'define dso_local { i64, i64 } @f(i64 noundef %0) {' >"$out"
+TOOL
+chmod +x "$TMPD"/old-llvm/bin/{opt,clang}
 cat >"$TMPD/not-llvm/bin/opt" <<'TOOL'
 #!/usr/bin/env bash
 echo 'opt 3.19 -- a command line option parsing library'
@@ -77,6 +89,9 @@ found="$(SPROUT_LLVM_BINDIR="$TMPD/llvm/bin" PATH=/usr/bin:/bin bash "$LLVM_PATH
 
 found="$(SPROUT_LLVM_BINDIR="$TMPD/not-llvm/bin" PATH=/usr/bin:/bin bash "$LLVM_PATH")"
 [[ -z "$found" ]] || fail "GNU opt was mistaken for LLVM opt"
+
+found="$(SPROUT_LLVM_BINDIR="$TMPD/old-llvm/bin" PATH=/usr/bin:/bin bash "$LLVM_PATH")"
+[[ -z "$found" ]] || fail "a clang lowering __int128 as { i64, i64 } was accepted"
 
 mkdir -p "$TMPD/installed/bin"
 cp "$TMPD/llvm/bin/opt" "$TMPD/llvm/bin/clang" "$TMPD/installed/bin/"

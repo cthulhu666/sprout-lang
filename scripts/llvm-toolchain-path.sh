@@ -10,7 +10,10 @@ is_llvm_bindir() {
   [[ "$opt_version" == *LLVM* && "$clang_version" == *clang* ]] || return 1
   opt_major="$(sed -nE 's/.*version ([0-9]+).*/\1/p' <<<"$opt_version" | head -n1)"
   clang_major="$(sed -nE 's/.*version ([0-9]+).*/\1/p' <<<"$clang_version" | head -n1)"
-  [[ -n "$opt_major" && -n "$clang_major" && "$opt_major" -ge 16 && "$clang_major" -ge 16 ]]
+  [[ -n "$opt_major" && -n "$clang_major" && "$opt_major" -ge 16 && "$clang_major" -ge 16 ]] \
+    || return 1
+  # Skips x86_64 clang <= 21, so an installed newer LLVM wins over the distro one.
+  bash "$(dirname "${BASH_SOURCE[0]}")/check_clang_cpr.sh" "$bindir/clang" >/dev/null 2>&1
 }
 
 emit_if_valid() {

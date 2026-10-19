@@ -4,8 +4,7 @@
 # agree even when the types do not, so a mismatch passes every test — but LLVM will
 # not inline a call whose type differs from the callee's, so whole-program linking
 # (scripts/link_whole_program.sh) silently keeps the call. CI runs this on x86_64
-# and contributors on arm64, which between them cover both ways clang lowers a
-# two-word return. See docs/gates.md §CPR declares.
+# and arm64. See docs/gates.md §CPR declares.
 #
 # usage: cpr_declare_check.sh <emitted.ll> <runtime.c>
 set -euo pipefail

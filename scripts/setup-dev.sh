@@ -117,7 +117,7 @@ install_linux_packages() {
   distro="$(linux_distro)"
   if ! manager="$(linux_manager "$distro")"; then
     echo "Unsupported Linux distribution: $distro" >&2
-    echo "Install LLVM >= 16, Clang, C build tools, ripgrep, curl, and mise, then rerun." >&2
+    echo "Install LLVM >= 16 (x86_64: >= 22), Clang, C build tools, ripgrep, curl, and mise, then rerun." >&2
     exit 1
   fi
 
@@ -210,7 +210,8 @@ fi
 
 llvm_bindir="$(bash "$ROOT/scripts/llvm-toolchain-path.sh")"
 if [[ -z "$llvm_bindir" ]]; then
-  echo "Could not find matching LLVM opt and clang binaries (LLVM >= 16)." >&2
+  echo "Could not find matching LLVM opt and clang binaries (LLVM >= 16, and on x86_64" >&2
+  echo "clang >= 22: https://apt.llvm.org). scripts/check_clang_cpr.sh <clang> says why." >&2
   exit 1
 fi
 export PATH="$llvm_bindir:$PATH"
