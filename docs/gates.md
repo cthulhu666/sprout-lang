@@ -258,7 +258,7 @@ The declares now return `i128`, which aarch64 clang and x86_64 clang >= 22 both 
 clang <= 21 lowers `unsigned __int128` as `{ i64, i64 }`, so `scripts/check_clang_cpr.sh` probes
 the lowering, not the version number (Apple clang 17 passes): LLVM discovery skips a clang that
 fails it, `just bootstrap-from-seed` refuses one, and `just test-check-clang-cpr` tests the probe.
-CI installs clang 22 from apt.llvm.org.
+CI installs clang 22 from apt.llvm.org (`scripts/ci_install_llvm.sh`).
 
 ## fmt/lint batching — `just fmt-batch-smoke`
 
