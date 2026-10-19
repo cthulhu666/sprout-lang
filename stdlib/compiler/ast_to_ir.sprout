@@ -284,8 +284,8 @@ fn ann_to_irtype(ann: Maybe ast.TypeExpr) -> sprout_ir.IRType =
   | Nothing -> sprout_ir.IRTUnknown
 
 # Zip ast.Param list with a parallel name list to produce IRFunction's params
-# field shape.  Used at both IRFunction construction sites (lifted lambda and
-# top-level fn).  Both list arguments are expected to be the same length; the
+# field shape, for a lifted lambda, a top-level fn and a CPR worker.  `names`
+# comes from ir_param_names.  Both list arguments are expected to be the same length; the
 # function tolerates mismatch by truncating to the shorter (defensive).
 fn ast_params_to_irtype_pairs(params: List ast.Param, names: List String) -> List (String, sprout_ir.IRType) =
   match (params, names) with
@@ -293,6 +293,18 @@ fn ast_params_to_irtype_pairs(params: List ast.Param, names: List String) -> Lis
   | (_, Nil) -> Nil
   | (Cons(ast.Param _ ann _) rest_p, Cons n rest_n) ->
       Cons((n, ann_to_irtype(ann)), ast_params_to_irtype_pairs(rest_p, rest_n))
+
+# Parameter names as the IR spells them. Each `_` becomes `_$<position>`, since
+# LLVM rejects two arguments with one name; `$` lexes as its own token, so no
+# source name can collide.
+fn ir_param_names(params: List ast.Param) -> List String =
+  ir_param_names_from(ast.param_names(params), 0)
+
+fn ir_param_names_from(names: List String, i: Int) -> List String =
+  match names with
+  | [] -> []
+  | [n | rest] ->
+      Cons(if n == "_" then "_$" ++ int_to_string(i) else n, ir_param_names_from(rest, i + 1))
 
 # Build the IRLoadEnvSlot ops for the lifted lambda entry block.
 # Each free var at index i gets: IRLoadEnvSlot(temp base+i, "%p$env$", i+1, kind).
@@ -1546,7 +1558,7 @@ fn translate_lambda(lparams: List ast.Param, body: typed_ast.TypedExpr,
                     captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
-    let lam_param_names = ast.param_names(lparams)
+    let lam_param_names = ir_param_names(lparams)
     let capturable = filter_capturable(set_to_list(compute_free_vars(body, set_from_list(lam_param_names))),
                                        params, captures)
     lam_idx <- ref_read(env.prog.lambda_ctr_ref)
@@ -5291,7 +5303,7 @@ fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.Typed
     | (tco_fn, next_idx2) ->
         Ok(Just((tco_fn, next_idx2, list_reverse(lifted))))
   where ret_ty = llvm_ret_type(typed_ast.typed_expr_type(body))
-        pnames = ast.param_names(params)
+        pnames = ir_param_names(params)
         params_with_kinds = ast_params_to_irtype_pairs(params, pnames)
 
 # Validate that no TInstanceDecl method name starts with "__sprout_".
@@ -6433,12 +6445,13 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
     Result String (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
+    let pnames = ir_param_names(params)
     (blocks, next_idx) <-
-      translate_tail_unboxed(body, ast.param_names(params), TxEnv(prog = penv, lifted_ref = lifted_ref), 0, "entry",
+      translate_tail_unboxed(body, pnames, TxEnv(prog = penv, lifted_ref = lifted_ref), 0, "entry",
                              list_builder_empty, dict_empty(), result_adt_ctors, worker_set, self_name)
     lifted <- ref_read(lifted_ref)
     Ok((sprout_ir.IRFunction(worker_name,
-          ast_params_to_irtype_pairs(params, ast.param_names(params)),
+          ast_params_to_irtype_pairs(params, pnames),
           worker_ret_ty(body), blocks),
         next_idx, list_reverse(lifted)))
 
@@ -6489,18 +6502,13 @@ fn synth_extern_body(name: String, params: List ast.Param) -> typed_ast.TypedExp
   typed_ast.TCall(
     typed_ast.TVar(name, types.TConst(types.type_id("Unit")),
                    source.SourcePos(index = 0, line = 0, column = 0)),
-    synth_param_vars(params),
+    synth_param_vars(ir_param_names(params)),
     types.TConst(types.type_id("Unit")), source.SourcePos(index = 0, line = 0, column = 0))
 
-fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
-  match params with
-  | Nil -> Nil
-  | Cons p rest ->
-      match p with
-      | ast.Param pname _ _ ->
-          Cons(typed_ast.TVar(pname, types.TConst(types.type_id("Unit")),
-                              source.SourcePos(index = 0, line = 0, column = 0)),
-               synth_param_vars(rest))
+fn synth_param_vars(names: List String) -> List typed_ast.TypedExpr = list_map(synth_param_var, names)
+
+fn synth_param_var(pname: String) -> typed_ast.TypedExpr =
+  typed_ast.TVar(pname, types.TConst(types.type_id("Unit")), source.SourcePos(index = 0, line = 0, column = 0))
 
 # Emit the worker (+ its lifted lambdas) for one matched callee `name`, or
 # Nothing when `name` is not a top-level fn/extern (a let/ctor over-collected by

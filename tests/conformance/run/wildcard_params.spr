@@ -1,0 +1,31 @@
+# Two `_` parameters in one function: a lambda, a lambda with a capture, a
+# top-level fn, a tail-recursive fn, an instance method and a fn returning a
+# scalar tuple, which also gets an unboxed `_worker` copy.
+class Pick a
+  fn pick(x: a, y: a, z: a) -> a
+
+instance Pick Int
+  fn pick(x: Int, _: Int, _: Int) -> Int = x
+
+fn apply(f: Int -> Int -> Int -> Int) -> Int = f(1, 2, 3)
+
+fn first(a: Int, _: Int, _: Int) -> Int = a
+
+fn count(n: Int, _: Int, _: Int) -> Int =
+  if n == 0 then 7 else count(n - 1, n, n)
+
+fn split(a: Int, _: Int, _: Int) -> (Int, Int) = (a, a + 1)
+
+fn sum_split(n: Int) -> Int =
+  match split(n, 0, 0) with
+  | (x, y) -> x + y
+
+fn main() -> Unit !{IO} =
+  let k = 10
+  in do
+    print(apply(\ (a, _, _) -> a))
+    print(apply(\ (_, _, c) -> c + k))
+    print(first(4, 5, 6))
+    print(count(5, 2, 3))
+    print(pick(8, 9, 0))
+    print(sum_split(2))
