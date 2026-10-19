@@ -241,8 +241,8 @@ Alternating reads between two versions `d` sets apart reroots `d` steps each way
 pair at `d` = 1, 0.9 µs at 10, 11.6 µs at 100, 156 µs at 1,000.
 
 - Set stays flat while the copy grows with size; Baker is ahead at 100 elements and up. It is
-  50–75× slower than mutation here, and a read about 10×. A runtime version could make a set one allocation (the old
-  handle turns into the diff node in place); that is not measured.
+  50–75× slower than mutation here, and a read about 10×. A runtime version could make a set
+  one allocation (the old handle turns into the diff node in place); that is not measured.
 - Every read checks whether its version holds the array, and a fast loop needs that check
   hoisted before bounds-check elimination applies.
 - Rerooting writes into old objects, so a generational GC needs a barrier there, and a shared
