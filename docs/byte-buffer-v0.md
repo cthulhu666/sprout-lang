@@ -100,8 +100,8 @@ types. `Bytes` and a `ByteBuf` hold only bytes and avoid that.
 
 ## 4. Prior art
 
-Checked against each language's reference or library source, 2026-10-18; the last three rows
-2026-10-19.
+Checked against each language's reference or library source, 2026-10-18; the Koka and Baker rows
+and the last three, 2026-10-19.
 
 | language | mechanism | purity comes from |
 |---|---|---|
@@ -113,6 +113,8 @@ Checked against each language's reference or library source, 2026-10-18; the las
 | Rust | `String::from_utf8(Vec<u8>)` takes the `Vec` by value, no copy | ownership |
 | Lean 4 | `Array`/`ByteArray` updated in place when the reference count is 1 | a run-time count |
 | Erlang | appending to a binary reserves room (twice the size, at least 256); "only the binary returned from the latest append operation will support further cheap append operations" (Efficiency Guide, *Constructing and Matching Binaries*) | a run-time check; older versions copy |
+| Koka | Perceus reference counting; reuse analysis gives "functional but in-place" (FBIP) updates (PLDI 2021) | a run-time count, made exact by the compiler |
+| Baker / Haskell `DiffArray` | newest version holds the array; older versions are diff chains, rerooted on access | a run-time check; old versions slow down |
 | Go | `strings.Builder`: mutable; `String()` makes no copy; a copied Builder panics | not pure |
 | OCaml | `Buffer.contents` copies; `Bytes.unsafe_to_string` relies on convention | not pure |
 | Scala (research) | `@local` second-class values (Osvald et al., OOPSLA 2016, "Gentrification Gone too Far?"): "Second-class values cannot be stored in mutable variables, they cannot be returned from functions, and they cannot be accessed by first-class (named or anonymous) functions through free variables" | a binding mode, not a type: "parametric polymorphism does not pose major difficulties" |
@@ -205,6 +207,48 @@ b3 = push_byte(b1, 'C')       b1.len=1 < fill=2: copy   b3 = "AC", b2 still "AB"
   the storage to a `Bytes` without a copy would free memory older versions still read. Erlang
   can share because its binaries are reference-counted. Zero-copy needs `Bytes` able to point
   into a `Storage`.
+
+#### Beyond append
+
+The rule underneath is "write only where no version reads". It covers more than bytes:
+
+- **Append and prepend.** A buffer can grow at both ends; prepend fills from the back. Go's
+  `append` reuses spare room without the version check ("Otherwise, `append` re-uses the
+  underlying array", spec, *Appending to and copying slices*), so two appends to one slice
+  overwrite each other. The `len == fill` check is what makes the same reuse pure.
+- **Pop, then push** always copies: the longer version still reads the slot. A stack used this
+  way pays a copy per push.
+- **Writes at an index** have no spare room to use. Baker's persistent arrays handle them: the
+  newest version holds the array and is written in place; the old version becomes a diff node
+  (index, old value, newer version). Old versions read correctly but slower, "proportional to
+  ... the number of updates", until rerooting reverses the chain toward the version read
+  (Conchon & Filliâtre, *A Persistent Union-Find Data Structure*, §2.3). Haskell's `DiffArray`
+  is the same: the old array "stores a link to the new current array along with the
+  difference".
+
+A Baker array over `Ref` and `MutVec Int`, written in Sprout (three allocations per set, every
+step a C call), against today's copying `vector_set` and an in-place `mutvec_set`. ns per
+operation, random indices, one process per row, median of 5, macOS arm64:
+
+| elements | set: Baker | set: `vector_set` | set: `mutvec_set` | get: Baker | get: `vector_get` |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 60 | 121 | 1 | 12 | 1 |
+| 1,000 | 74 | 1,071 | 1 | 12 | 1 |
+| 10,000 | 67 | 6,040 | 1 | 12 | 2 |
+| 100,000 | 98 | 70,372 | 2 | 57 | 10 |
+
+Alternating reads between two versions `d` sets apart reroots `d` steps each way: 106 ns per
+pair at `d` = 1, 0.9 µs at 10, 11.6 µs at 100, 156 µs at 1,000.
+
+- Set stays flat while the copy grows with size; Baker is ahead at 100 elements and up. It is
+  50–75× slower than mutation here, and a read about 10×. A runtime version could make a set one allocation (the old
+  handle turns into the diff node in place); that is not measured.
+- Every read checks whether its version holds the array, and a fast loop needs that check
+  hoisted before bounds-check elimination applies.
+- Rerooting writes into old objects, so a generational GC needs a barrier there, and a shared
+  heap would need locking.
+- Lean and Koka reach in-place updates by reference counts instead (an update writes in place
+  when the count is 1). That needs counts, which a tracing GC does not keep.
 
 ### 5.5 A `Local` effect over second-class buffers
 
