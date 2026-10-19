@@ -1,0 +1,154 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.resolve as resolve
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.ast as ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.list (take_last)
+
+# resolve checks and rewrites every TDict in one walk. A slot the walk rewrites but
+# does not check would let an unsatisfiable constraint through, so each child slot of
+# each TypedExpr variant gets both: a missing instance there is rejected, and a
+# satisfiable one there gets Evidence.
+
+fn pos_at(line: Int) -> source.SourcePos = source.SourcePos(index = 0, line = line, column = 1)
+
+fn ty() -> types.Type = types.TVar(types.tyvar_id("t"))
+
+fn leaf() -> typed_ast.TypedExpr = typed_ast.TInt(0, ty(), pos_at(1))
+
+fn eq_on(name: String) -> ast.TypeConstraint = ast.TypeConstraint("Eq", [ast.TypeName(name)])
+
+fn dict_at(name: String, line: Int) -> typed_ast.TypedExpr =
+  typed_ast.TDict(eq_on(name), ty(), pos_at(line), typed_ast.EvUnresolved)
+
+# No instance of Eq for Foo exists below; one for Int does.
+fn bad() -> typed_ast.TypedExpr = dict_at("Foo", 7)
+
+fn good() -> typed_ast.TypedExpr = dict_at("Int", 7)
+
+fn branch(body: typed_ast.TypedExpr) -> typed_ast.TypedMatchBranch =
+  typed_ast.TypedMatchBranch(ast.WildcardPattern(pos_at(1)), body)
+
+fn field(value: typed_ast.TypedExpr) -> typed_ast.TypedRecordField = typed_ast.TypedRecordField("f", value)
+
+# `e` in every child slot of every variant that has children, the others filled with
+# a leaf.
+fn holes(e: typed_ast.TypedExpr) -> List (String, typed_ast.TypedExpr) =
+  [
+    ("tuple first", typed_ast.TTuple([e, leaf()], ty(), pos_at(1))),
+    ("tuple second", typed_ast.TTuple([leaf(), e], ty(), pos_at(1))),
+    ("if cond", typed_ast.TIf(e, leaf(), leaf(), ty(), pos_at(1))),
+    ("if then", typed_ast.TIf(leaf(), e, leaf(), ty(), pos_at(1))),
+    ("if else", typed_ast.TIf(leaf(), leaf(), e, ty(), pos_at(1))),
+    ("match scrutinee", typed_ast.TMatch(e, [branch(leaf())], ty(), pos_at(1))),
+    ("match arm", typed_ast.TMatch(leaf(), [branch(leaf()), branch(e)], ty(), pos_at(1))),
+    ("call callee", typed_ast.TCall(e, [leaf()], ty(), pos_at(1))),
+    ("call argument", typed_ast.TCall(leaf(), [leaf(), e], ty(), pos_at(1))),
+    ("lambda body", typed_ast.TLambda(Nil, e, ty(), pos_at(1))),
+    ("binary left", typed_ast.TBinary("+", e, leaf(), ty(), pos_at(1))),
+    ("binary right", typed_ast.TBinary("+", leaf(), e, ty(), pos_at(1))),
+    ("unary", typed_ast.TUnary("-", e, ty(), pos_at(1))),
+    ("range low", typed_ast.TRange(e, leaf(), ty(), pos_at(1))),
+    ("range high", typed_ast.TRange(leaf(), e, ty(), pos_at(1))),
+    ("do bind", typed_ast.TDo([typed_ast.TDoBindStep(ast.WildcardPattern(pos_at(1)), e, typed_ast.PlainBind)], ty(), pos_at(1))),
+    ("do let", typed_ast.TDo([typed_ast.TDoLetStep("x", e)], ty(), pos_at(1))),
+    ("do expr", typed_ast.TDo([typed_ast.TDoExprStep(leaf()), typed_ast.TDoExprStep(e)], ty(), pos_at(1))),
+    ("record field", typed_ast.TRecord("R", [field(leaf()), field(e)], ty(), pos_at(1))),
+    ("get field", typed_ast.TGetField(e, "f", ty(), pos_at(1))),
+    ("update base", typed_ast.TRecordUpdate(e, [field(leaf())], ty(), pos_at(1))),
+    ("update field", typed_ast.TRecordUpdate(leaf(), [field(e)], ty(), pos_at(1)))
+  ]
+
+fn fn_decl(name: String, body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil, body)
+
+fn method(body: typed_ast.TypedExpr) -> typed_ast.TypedInstanceMethod =
+  typed_ast.TypedInstanceMethod("m", Nil, Nothing, Nothing, Nil, body)
+
+fn resolve_decls(decls: List typed_ast.TypedDecl) -> resolve.ResolveResult =
+  resolve.resolve_program(typed_ast.TypedProgram(
+    [
+      typed_ast.TPassThrough(ast.ClassDecl("Eq", ["a"], Nil, Nil, pos_at(1))),
+      typed_ast.TPassThrough(ast.ClassDecl("Show", ["a"], Nil, Nil, pos_at(1))),
+      typed_ast.TInstanceDecl(eq_on("Int"), Nil, Nil)
+    ] ++ decls), dict_empty())
+
+# "line: message" of the error, or "ok".
+fn outcome(r: resolve.ResolveResult) -> String =
+  match r with
+  | resolve.ResolveOk _ -> "ok"
+  | resolve.ResolveErr p msg -> `${int_to_string(p.line)}: ${msg}`
+
+fn first_evidence(e: typed_ast.TypedExpr) -> Maybe typed_ast.Evidence =
+  match e with
+  | typed_ast.TDict _ _ _ ev -> Just(ev)
+  | _ -> find_map(first_evidence, typed_ast.children(e))
+
+fn decl_evidence(d: typed_ast.TypedDecl) -> Maybe typed_ast.Evidence =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ body -> first_evidence(body)
+  | typed_ast.TLetDecl _ body -> first_evidence(body)
+  | typed_ast.TInstanceDecl _ _ methods ->
+      find_map(\m -> match m with | typed_ast.TypedInstanceMethod _ _ _ _ _ body -> first_evidence(body), methods)
+  | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
+  | typed_ast.TPassThrough _ -> Nothing
+
+# The tag of the Evidence on the program's last decl's first TDict; "U" when it was
+# left unresolved.
+fn rewritten_tag(r: resolve.ResolveResult) -> String =
+  match r with
+  | resolve.ResolveErr _ _ -> "error"
+  | resolve.ResolveOk prog ->
+      let typed_ast.TypedProgram decls = prog
+          [d] = take_last(1, decls) else "no decl"
+          Just ev = decl_evidence(d) else "no dict"
+      in
+        match ev with
+        | typed_ast.EvUnresolved -> "U"
+        | typed_ast.EvClasses _ -> "C"
+        | typed_ast.EvInstance _ _ _ -> "I"
+        | typed_ast.EvForward _ _ -> "F"
+        | typed_ast.EvMissing _ -> "M"
+
+fn check_rejected(state: TestState, slot: (String, typed_ast.TypedExpr)) -> Unit !{IO} =
+  let (name, e) = slot
+  in assert_eq(state, `${name}: missing instance rejected`, outcome(resolve_decls([fn_decl("f", e)])),
+       "7: No instance of Eq for Foo")
+
+fn check_filled(state: TestState, slot: (String, typed_ast.TypedExpr)) -> Unit !{IO} =
+  let (name, e) = slot
+  in assert_eq(state, `${name}: evidence filled`, rewritten_tag(resolve_decls([fn_decl("f", e)])), "C")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    list_each(\slot -> check_rejected(state, slot), holes(bad()))
+    list_each(\slot -> check_filled(state, slot), holes(good()))
+
+    assert_eq(state, "let body: missing instance rejected",
+      outcome(resolve_decls([typed_ast.TLetDecl("x", bad())])), "7: No instance of Eq for Foo")
+    assert_eq(state, "let body: evidence filled",
+      rewritten_tag(resolve_decls([typed_ast.TLetDecl("x", good())])), "C")
+    assert_eq(state, "instance method: missing instance rejected",
+      outcome(resolve_decls([typed_ast.TInstanceDecl(ast.TypeConstraint("Show", [ast.TypeName("Int")]), Nil, [method(bad())])])),
+      "7: No instance of Eq for Foo")
+    assert_eq(state, "instance method: evidence filled",
+      rewritten_tag(resolve_decls([typed_ast.TInstanceDecl(ast.TypeConstraint("Show", [ast.TypeName("Int")]), Nil, [method(good())])])),
+      "C")
+
+    # The first error is the first in declaration order, then left to right.
+    assert_eq(state, "first error: earlier declaration",
+      outcome(resolve_decls([fn_decl("f", dict_at("Foo", 3)), fn_decl("g", dict_at("Bar", 2))])),
+      "3: No instance of Eq for Foo")
+    assert_eq(state, "first error: callee before argument",
+      outcome(resolve_decls([fn_decl("f", typed_ast.TCall(dict_at("Foo", 5), [dict_at("Bar", 4)], ty(), pos_at(1)))])),
+      "5: No instance of Eq for Foo")
+    assert_eq(state, "first error: scrutinee before arm",
+      outcome(resolve_decls([fn_decl("f", typed_ast.TMatch(dict_at("Foo", 6), [branch(dict_at("Bar", 5))], ty(), pos_at(1)))])),
+      "6: No instance of Eq for Foo")
+    assert_eq(state, "first error: earlier do step",
+      outcome(resolve_decls([fn_decl("f", typed_ast.TDo([typed_ast.TDoExprStep(dict_at("Foo", 9)), typed_ast.TDoExprStep(dict_at("Bar", 8))], ty(), pos_at(1)))])),
+      "9: No instance of Eq for Foo")
+
+    summary(state)
