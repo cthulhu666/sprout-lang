@@ -1,0 +1,16 @@
+module main
+
+# Containment, as for any binder: `Maybe File` holds a File.
+
+type linear File = File Int
+
+fn release(f: File) -> Int = match f with | File n -> n
+
+let m = Just(File(1))
+
+fn a() -> Int =
+  match m with
+  | Just f -> release(f)
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(to_string(a() + a()))

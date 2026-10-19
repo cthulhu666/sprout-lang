@@ -266,11 +266,12 @@ twice in six ways, each verified running on master. With `LArr`, the second use 
 first one's writes, so a pure function could return two answers. These BACKLOG P1 entries land
 first:
 
-- **A lambda's `once` promise is never checked.**
+- ~~**A lambda's `once` promise is never checked.**~~ Landed: checked as a declared one is.
 - **Generic code can duplicate a linear value**: `fn dup(x: a) -> (a, a) = (x, x)`.
-- **One call can borrow and consume the same linear value**: `f(x, x)` with
-  `f(b: borrowing L, c: L)`.
-- **A top-level `let` can hold a linear value that every function consumes.**
+- ~~**One call can borrow and consume the same linear value**: `f(x, x)` with
+  `f(b: borrowing L, c: L)`.~~ Landed: a borrow lasts the whole call (spec §5.8).
+- ~~**A top-level `let` can hold a linear value that every function consumes.**~~ Landed:
+  rejected at the declaration.
 - **Reading a borrowed generic container hands out its linear element**: a generic `get` at a
   linear element type. Until it is fixed, `LArr` rejects a linear element type.
 - **An existential hides a linear value from the checker**: `Boxed(L(1))` with
@@ -281,8 +282,8 @@ of them: a wildcard that drops an array loses it but cannot expose a write. `LAr
 stakes: a double close fails loudly, while a double use of an `LArr` makes a pure function return
 two answers in silence. So their rejection tests gate `LArr`.
 
-They split by cost. Three are missing checks in existing code: `once`, the borrow-and-consume
-call and the top-level `let`. The other three share one cause, a type variable that hides
+They split by cost. Three were missing checks in existing code, and have landed: `once`, the
+borrow-and-consume call and the top-level `let`. The other three share one cause, a type variable that hides
 linearity: generic duplication, the generic container and the existential. One design closes all
 three, a linearity bound on type variables at instantiation and at packing (BACKLOG P3
 **Linearity bound on a type parameter**). M4.2 made polymorphism over linear types a non-goal;
@@ -538,8 +539,7 @@ value is unshared moves the ranking.
 1. Document 5.1's build-by-rows form in `idiomatic-sprout.md` now; it needs no approval.
 2. Ship 5.2, the trie, as the general persistent array. It needs no builtins and no
    linearity, so nothing below blocks it.
-3. Fix the three linearity holes that are missing checks (5.3, *Prerequisites*). They break
-   `File` today, with or without `LArr`.
+3. ~~Fix the three linearity holes that are missing checks (5.3, *Prerequisites*).~~ Landed.
 4. Design the linearity bound on type variables, which closes the other three.
 5. Ship 5.3, the linear array, with its bulk operations, as the one mechanism for in-place
    writes in pure code (`MutVec`, `Ref` and `MutMatrix` stay for `IO` code), after steps 3 and

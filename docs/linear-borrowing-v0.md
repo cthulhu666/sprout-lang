@@ -497,7 +497,8 @@ mask reader — **the tests were shaped by the implementation rather than by the
 
 Also fixed: `extern fn` modifiers were never validated (the guard only runs over function
 *bodies*, and an extern has none); a module-level linear `let` at a borrowing position was
-rejected with "must be a variable reference", which contradicted the source; and the
+rejected with "must be a variable reference", which contradicted the source (such a `let` is
+now rejected at its declaration, spec §5.8); and the
 type-variable rejection reused the non-linear-parameter message, telling authors to make `a`
 linear when that is not expressible.
 

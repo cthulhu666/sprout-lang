@@ -110,14 +110,6 @@ fn borrow_twice_in_one_call(f: File) -> Int =
     let x = pair_sum(f, f)
     x + release(f)
 
-# REVIEW FINDING (diagnostic). A module-level linear `let` is not carried in the
-# checker's scope, and the borrow path used to route any untracked name into the
-# "a borrowing argument must be a variable reference" rejection -- a message that
-# contradicted the source, since `top_level_file` plainly IS a variable.
-let top_level_file = File(99)
-
-fn borrow_module_level() -> Int = ignore(top_level_file)
-
 fn main() -> Unit !{IO} =
   run_suite("linear_borrowing", [
     check_eq("borrowed field read", owned_get_x(), 3),
@@ -129,6 +121,5 @@ fn main() -> Unit !{IO} =
     check_eq("borrow in neither arm", borrow_one_arm(false, File(5)), 5),
     check_eq("borrow at a middle parameter position", borrow_in_middle_position(File(7)), 37),
     check_eq("borrow at the last parameter position", borrow_in_last_position(File(7)), 12),
-    check_eq("borrow a module-level linear let", borrow_module_level(), 0),
     check_eq("borrow one value twice in one call", borrow_twice_in_one_call(File(4)), 12)
   ])

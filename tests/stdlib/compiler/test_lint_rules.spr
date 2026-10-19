@@ -647,9 +647,8 @@ let unary_literal_fn =
   "fn always(n: Int) -> Int = 65600\n"
 
 # A LINEAR value must be consumed exactly once. A `fn` mints a fresh one per
-# call, so that obligation is real; a single shared binding makes it vanish, and
-# nothing downstream catches the second consume — `letdecl_linear_gate` checks
-# the initializer, not the uses.
+# call, so that obligation is real; a single shared binding would make it
+# vanish, and the compiler rejects a top-level `let` that holds one.
 let nullary_linear_ctor =
   "type linear Token (..) =\n" ++
   "  | Token Int\n" ++

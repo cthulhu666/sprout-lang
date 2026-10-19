@@ -1663,6 +1663,10 @@ scrutinee; a constructor/tuple sub-pattern binds a linear field), and **`<-`
 do-bind** variables — in `fn`, top-level `let`, and instance-method bodies, and is
 checked on every control-flow path.
 
+A **top-level `let` may not hold a linear value**, nor one that contains one: every
+function can name a module binding, so no scope holds it to one use. A function
+that makes one (`let mk = \(n: Int) -> File(n)`) holds nothing and is accepted.
+
 A binder carries the obligation when its type **is** a linear type or **contains**
 one — as a type argument, as a tuple component, or as a type the declaration
 **stores in a field**. `let m = Just(File(1))` is bound by the rules below even
