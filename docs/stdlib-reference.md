@@ -305,7 +305,9 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
   `RequestTimeout408`, `Conflict409`, `Gone410`, `ContentTooLarge413`,
   `UnprocessableContent422`, `TooManyRequests429`, `RequestHeaderFieldsTooLarge431`,
   `InternalServerError500`, `NotImplemented501`, `BadGateway502`, `ServiceUnavailable503`,
-  `GatewayTimeout504`. Closed, so no response can carry a status without a status line.
+  `GatewayTimeout504`. Closed, so no response can carry a status without a status line. Derives
+  `Enum`, so `from_ordinal(0..)` walks every status in code order; an ordinal is a position, not a
+  code, and shifts when a status is added — store `status_code`, not `ordinal`.
 - `status_code(s) -> Int`, `status_reason(s) -> String`, `status_line(s) -> String` (`"HTTP/1.1 200 OK"`)
 - `status_has_content(s) -> Bool` — false for 204 and 304, which send no body, no `content-length` and no default content-type (RFC 9110 §8.6, §15.3.5, §15.4.5)
 - `parse_request_line(raw) -> Maybe RequestLine`
