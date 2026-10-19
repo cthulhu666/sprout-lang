@@ -100,6 +100,16 @@ fn borrow_in_last_position(f: File) -> Int =
     let x = last(5, f)
     x + release(f)
 
+# One call may borrow a value at two positions; only a consume beside a borrow
+# is rejected (type_error/borrow_arg_consumed_in_other_arg).
+fn pair_sum(a: borrowing File, b: borrowing File) -> Int =
+  (match a with | File m -> m) + (match b with | File n -> n)
+
+fn borrow_twice_in_one_call(f: File) -> Int =
+  do
+    let x = pair_sum(f, f)
+    x + release(f)
+
 # REVIEW FINDING (diagnostic). A module-level linear `let` is not carried in the
 # checker's scope, and the borrow path used to route any untracked name into the
 # "a borrowing argument must be a variable reference" rejection -- a message that
@@ -119,5 +129,6 @@ fn main() -> Unit !{IO} =
     check_eq("borrow in neither arm", borrow_one_arm(false, File(5)), 5),
     check_eq("borrow at a middle parameter position", borrow_in_middle_position(File(7)), 37),
     check_eq("borrow at the last parameter position", borrow_in_last_position(File(7)), 12),
-    check_eq("borrow a module-level linear let", borrow_module_level(), 0)
+    check_eq("borrow a module-level linear let", borrow_module_level(), 0),
+    check_eq("borrow one value twice in one call", borrow_twice_in_one_call(File(4)), 12)
   ])

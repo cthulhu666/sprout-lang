@@ -1804,6 +1804,10 @@ a field access or as a `match` scrutinee. Every other reference consumes. So
 - **Use after consume** — a borrow may not follow the consume along a path
   (`close(conn); write(conn, …)` is rejected). Borrow-then-consume is the normal
   order and is fine. Evaluation order is the one fixed in §6.
+- **A borrow lasts the whole call.** A value passed at a `borrowing` position may
+  not be consumed by another argument of the same call: with
+  `f(b: borrowing File, c: File)`, `f(x, x)` is rejected, since `f` could read `b`
+  after consuming `c`. Borrowing one value at two positions is fine.
 - **Branch convergence** applies to consumes only; arms need not agree on borrows.
 - **Borrowed contents** — destructuring a borrowed value binds its linear fields
   as borrowed too, so they cannot be consumed out from under the owner. For the
