@@ -200,6 +200,97 @@ export fn children(e: TypedExpr) -> List TypedExpr =
   | TGetField base _ _ _ -> [base]
   | TRecordUpdate base fields _ _ -> [base] ++ list_map(field_value, fields)
 
+# `e` rebuilt with `g` applied to each of children(e), in that order; the first
+# Err stops the walk. Exhaustive like children, and beside it so the two change
+# together.
+export fn traverse_children(g: TypedExpr -> Result err TypedExpr, e: TypedExpr) -> Result err TypedExpr =
+  match e with
+  | TVar _ _ _ -> Ok(e)
+  | TInt _ _ _ -> Ok(e)
+  | TFloat _ _ _ -> Ok(e)
+  | TBool _ _ _ -> Ok(e)
+  | TString _ _ _ -> Ok(e)
+  | TChar _ _ _ -> Ok(e)
+  | TUnit _ _ -> Ok(e)
+  | TTuple items t p ->
+      let xs = try traverse_list(g, items)
+      in Ok(TTuple(xs, t, p))
+  | TIf cond then_e else_e t p ->
+      let c = try g(cond)
+          a = try g(then_e)
+          b = try g(else_e)
+      in Ok(TIf(c, a, b, t, p))
+  | TMatch scrut branches t p ->
+      let s = try g(scrut)
+          bs = try traverse_list(traverse_branch(g, _), branches)
+      in Ok(TMatch(s, bs, t, p))
+  | TCall callee args t p ->
+      let f = try g(callee)
+          xs = try traverse_list(g, args)
+      in Ok(TCall(f, xs, t, p))
+  | TDict _ _ _ _ -> Ok(e)
+  | TMethodRef _ _ _ _ _ -> Ok(e)
+  | TLambda params body t p ->
+      let b = try g(body)
+      in Ok(TLambda(params, b, t, p))
+  | TBinary op left right t p ->
+      let l = try g(left)
+          r = try g(right)
+      in Ok(TBinary(op, l, r, t, p))
+  | TUnary op operand t p ->
+      let x = try g(operand)
+      in Ok(TUnary(op, x, t, p))
+  | TRange lo hi t p ->
+      let a = try g(lo)
+          b = try g(hi)
+      in Ok(TRange(a, b, t, p))
+  | TDo steps t p ->
+      let ss = try traverse_list(traverse_step(g, _), steps)
+      in Ok(TDo(ss, t, p))
+  | TRecord name fields t p ->
+      let fs = try traverse_list(traverse_field(g, _), fields)
+      in Ok(TRecord(name, fs, t, p))
+  | TGetField base fld t p ->
+      let b = try g(base)
+      in Ok(TGetField(b, fld, t, p))
+  | TRecordUpdate base fields t p ->
+      let b = try g(base)
+          fs = try traverse_list(traverse_field(g, _), fields)
+      in Ok(TRecordUpdate(b, fs, t, p))
+
+# Left to right, stopping at the first Err; tail recursive.
+fn traverse_list(g: a -> Result err b, xs: List a) -> Result err (List b) =
+  traverse_list_go(g, xs, [])
+
+fn traverse_list_go(g: a -> Result err b, xs: List a, acc: List b) -> Result err (List b) =
+  match xs with
+  | [] -> Ok(list_reverse(acc))
+  | [x | rest] ->
+      let y = try g(x)
+      in traverse_list_go(g, rest, Cons(y, acc))
+
+fn traverse_branch(g: TypedExpr -> Result err TypedExpr, b: TypedMatchBranch) -> Result err TypedMatchBranch =
+  let TypedMatchBranch pat body = b
+      x = try g(body)
+  in Ok(TypedMatchBranch(pat, x))
+
+fn traverse_step(g: TypedExpr -> Result err TypedExpr, s: TypedDoStep) -> Result err TypedDoStep =
+  match s with
+  | TDoBindStep pat value mode ->
+      let x = try g(value)
+      in Ok(TDoBindStep(pat, x, mode))
+  | TDoLetStep name value ->
+      let x = try g(value)
+      in Ok(TDoLetStep(name, x))
+  | TDoExprStep value ->
+      let x = try g(value)
+      in Ok(TDoExprStep(x))
+
+fn traverse_field(g: TypedExpr -> Result err TypedExpr, f: TypedRecordField) -> Result err TypedRecordField =
+  let TypedRecordField name value = f
+      x = try g(value)
+  in Ok(TypedRecordField(name, x))
+
 export fn branch_body(b: TypedMatchBranch) -> TypedExpr =
   match b with
   | TypedMatchBranch _ body -> body

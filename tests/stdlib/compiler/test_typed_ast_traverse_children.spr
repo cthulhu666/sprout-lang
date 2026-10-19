@@ -1,0 +1,154 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+import stdlib.list (take, drop)
+import stdlib.string as string
+
+# typed_ast.traverse_children rebuilds a node from its children, left to right in
+# the order typed_ast.children lists them, stopping at the first Err. Each sample
+# has distinctly named children; for every k, a step that fails from the k-th child
+# on must report exactly that child, and one that never fails must rebuild the same
+# node with every child replaced.
+
+fn pos_at(line: Int) -> source.SourcePos = source.SourcePos(index = 0, line = line, column = 1)
+
+fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
+
+fn var_(name: String) -> typed_ast.TypedExpr = typed_ast.TVar(name, int_t(), pos_at(1))
+
+fn name_of(e: typed_ast.TypedExpr) -> String =
+  match e with
+  | typed_ast.TVar name _ _ -> name
+  | _ -> "?"
+
+fn branch(pat: ast.Pattern, body: String) -> typed_ast.TypedMatchBranch = typed_ast.TypedMatchBranch(pat, var_(body))
+
+fn field(name: String, value: String) -> typed_ast.TypedRecordField = typed_ast.TypedRecordField(name, var_(value))
+
+fn dict() -> typed_ast.TypedExpr =
+  typed_ast.TDict(ast.TypeConstraint("Eq", []), int_t(), pos_at(2), typed_ast.EvUnresolved)
+
+fn method_ref() -> typed_ast.TypedExpr =
+  typed_ast.TMethodRef("eq", "Eq", int_t(), pos_at(3), typed_ast.EvUnresolved)
+
+fn leaves() -> List typed_ast.TypedExpr =
+  [
+    var_("v"),
+    typed_ast.TInt(1, int_t(), pos_at(1)),
+    typed_ast.TFloat("1.0", int_t(), pos_at(1)),
+    typed_ast.TBool(true, int_t(), pos_at(1)),
+    typed_ast.TString("s", int_t(), pos_at(1)),
+    typed_ast.TChar(65, int_t(), pos_at(1)),
+    typed_ast.TUnit(int_t(), pos_at(1)),
+    dict(),
+    method_ref()
+  ]
+
+# Every variant with children, each at its own line so a dropped position shows.
+fn composites() -> List typed_ast.TypedExpr =
+  [
+    typed_ast.TTuple([var_("a"), var_("b")], int_t(), pos_at(10)),
+    typed_ast.TIf(var_("c"), var_("t"), var_("e"), int_t(), pos_at(11)),
+    typed_ast.TMatch(var_("s"), [branch(ast.VarPattern("p", pos_at(1)), "b1"), branch(ast.WildcardPattern(pos_at(1)), "b2")], int_t(), pos_at(12)),
+    typed_ast.TCall(var_("f"), [var_("x"), var_("y")], int_t(), pos_at(13)),
+    typed_ast.TLambda([], var_("body"), int_t(), pos_at(14)),
+    typed_ast.TBinary("+", var_("l"), var_("r"), int_t(), pos_at(15)),
+    typed_ast.TUnary("-", var_("o"), int_t(), pos_at(16)),
+    typed_ast.TRange(var_("lo"), var_("hi"), int_t(), pos_at(17)),
+    typed_ast.TDo([typed_ast.TDoBindStep(ast.WildcardPattern(pos_at(1)), var_("v1"), typed_ast.ResultBind), typed_ast.TDoLetStep("n", var_("v2")), typed_ast.TDoExprStep(var_("v3"))], int_t(), pos_at(18)),
+    typed_ast.TRecord("R", [field("fa", "x1"), field("fb", "x2")], int_t(), pos_at(19)),
+    typed_ast.TGetField(var_("g"), "fa", int_t(), pos_at(20)),
+    typed_ast.TRecordUpdate(var_("base"), [field("fa", "u1"), field("fb", "u2")], int_t(), pos_at(21))
+  ]
+
+fn kids(e: typed_ast.TypedExpr) -> List String = list_map(name_of, typed_ast.children(e))
+
+fn pat_tag(p: ast.Pattern) -> String =
+  match p with
+  | ast.VarPattern name _ -> name
+  | ast.WildcardPattern _ -> "_"
+  | _ -> "?"
+
+fn step_tag(s: typed_ast.TypedDoStep) -> String =
+  match s with
+  | typed_ast.TDoBindStep p _ typed_ast.PlainBind -> `bind ${pat_tag(p)} plain`
+  | typed_ast.TDoBindStep p _ typed_ast.MaybeBind -> `bind ${pat_tag(p)} maybe`
+  | typed_ast.TDoBindStep p _ typed_ast.ResultBind -> `bind ${pat_tag(p)} result`
+  | typed_ast.TDoLetStep name _ -> `let ${name}`
+  | typed_ast.TDoExprStep _ -> "expr"
+
+fn field_name(f: typed_ast.TypedRecordField) -> String =
+  match f with
+  | typed_ast.TypedRecordField name _ -> name
+
+fn branch_pat(b: typed_ast.TypedMatchBranch) -> String =
+  match b with
+  | typed_ast.TypedMatchBranch p _ -> pat_tag(p)
+
+# The node's own data — constructor, the fields that are not children, its line —
+# then its children's names.
+fn shape(e: typed_ast.TypedExpr) -> String =
+  `${head(e)} @${int_to_string(typed_ast.typed_expr_pos(e).line)} [${string.join(",", kids(e))}]`
+
+fn head(e: typed_ast.TypedExpr) -> String =
+  match e with
+  | typed_ast.TVar name _ _ -> `TVar ${name}`
+  | typed_ast.TInt _ _ _ -> "TInt"
+  | typed_ast.TFloat _ _ _ -> "TFloat"
+  | typed_ast.TBool _ _ _ -> "TBool"
+  | typed_ast.TString _ _ _ -> "TString"
+  | typed_ast.TChar _ _ _ -> "TChar"
+  | typed_ast.TUnit _ _ -> "TUnit"
+  | typed_ast.TDict _ _ _ _ -> "TDict"
+  | typed_ast.TMethodRef _ _ _ _ _ -> "TMethodRef"
+  | typed_ast.TTuple _ _ _ -> "TTuple"
+  | typed_ast.TIf _ _ _ _ _ -> "TIf"
+  | typed_ast.TMatch _ bs _ _ -> `TMatch ${string.join(",", list_map(branch_pat, bs))}`
+  | typed_ast.TCall _ _ _ _ -> "TCall"
+  | typed_ast.TLambda _ _ _ _ -> "TLambda"
+  | typed_ast.TBinary op _ _ _ _ -> `TBinary ${op}`
+  | typed_ast.TUnary op _ _ _ -> `TUnary ${op}`
+  | typed_ast.TRange _ _ _ _ -> "TRange"
+  | typed_ast.TDo steps _ _ -> `TDo ${string.join(",", list_map(step_tag, steps))}`
+  | typed_ast.TRecord name fs _ _ -> `TRecord ${name} ${string.join(",", list_map(field_name, fs))}`
+  | typed_ast.TGetField _ fld _ _ -> `TGetField ${fld}`
+  | typed_ast.TRecordUpdate _ fs _ _ -> `TRecordUpdate ${string.join(",", list_map(field_name, fs))}`
+
+fn outcome(r: Result String typed_ast.TypedExpr) -> String =
+  match r with
+  | Err name -> `err ${name}`
+  | Ok e -> `ok ${shape(e)}`
+
+fn primed(name: String) -> String = name ++ "'"
+
+# Succeeds, priming the name, on the children in `allowed`; fails on any other.
+fn step_within(allowed: List String, c: typed_ast.TypedExpr) -> Result String typed_ast.TypedExpr =
+  if list_member(name_of(c), allowed) then Ok(var_(primed(name_of(c)))) else Err(name_of(c))
+
+fn expected(e: typed_ast.TypedExpr, k: Int) -> String =
+  let ks = kids(e)
+  in
+    match drop(k, ks) with
+    | [next | _] -> `err ${next}`
+    | [] -> `ok ${head(e)} @${int_to_string(typed_ast.typed_expr_pos(e).line)} [${string.join(",", list_map(primed, ks))}]`
+
+fn check_stop_at(state: TestState, e: typed_ast.TypedExpr, k: Int) -> Unit !{IO} =
+  let allowed = take(k, kids(e))
+  in assert_eq(state, `${head(e)}: fails from child ${int_to_string(k)}`,
+       outcome(typed_ast.traverse_children(step_within(allowed, _), e)), expected(e, k))
+
+fn check_composite(state: TestState, e: typed_ast.TypedExpr) -> Unit !{IO} =
+  range_each(check_stop_at(state, e, _), 0..list_length(kids(e)))
+
+fn check_leaf(state: TestState, e: typed_ast.TypedExpr) -> Unit !{IO} =
+  assert_eq(state, `${head(e)}: a leaf is returned as is, the step never called`,
+    outcome(typed_ast.traverse_children(\_ -> Err("called"), e)), `ok ${shape(e)}`)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    list_each(check_leaf(state, _), leaves())
+    list_each(check_composite(state, _), composites())
+    summary(state)
