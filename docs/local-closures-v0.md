@@ -138,8 +138,8 @@ Sources, verbatim:
    closure, in all four repos, for a benefit confined to borrowed linear captures. `once` is opt-in
    for the same reason.
 
-Not surveyed: second-class values (Osvald et al., OOPSLA 2016) and Effekt's second-class blocks,
-likely the closest prior art. No primary source could be fetched to verify them.
+Second-class values (Osvald et al., OOPSLA 2016) and Effekt's second-class blocks, likely the
+closest prior art, are surveyed in [byte-buffer-v0.md](byte-buffer-v0.md) §4 and §5.5.
 
 ## 4. Syntax and semantics
 
