@@ -240,7 +240,7 @@ export fn resolve_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) 
 # field is filled with the resolved instance/forward tree, which lowering consumes
 # (evidence_to_witness). The first error in declaration order is the one reported.
 fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> ResolveResult =
-  match resolve_decls(decls, tables, []) with
+  match resolve_all(resolve_decl(_, tables), decls) with
   | Err (pos, msg) -> ResolveErr(pos, msg)
   | Ok resolved -> ResolveOk(typed_ast.TypedProgram(resolved))
 
@@ -725,17 +725,6 @@ fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
 # The walk: check every TDict, then fill its Evidence; structure otherwise unchanged
 # ---------------------------------------------------------------------------
 
-fn resolve_decls(
-  decls: List typed_ast.TypedDecl,
-  tables: Tables,
-  acc: List typed_ast.TypedDecl
-) -> Result(source.SourcePos, String) (List typed_ast.TypedDecl) =
-  match decls with
-  | [] -> Ok(list_reverse(acc))
-  | [d | rest] ->
-      let r = try resolve_decl(d, tables)
-      in resolve_decls(rest, tables, Cons(r, acc))
-
 # Each body is resolved under the keys it forwards: a function its where-clause
 # constraints; an instance method the instance's context constraints and then its
 # own (matching lowering's build_hidden_for_constraints call sites). A top-level
@@ -750,26 +739,24 @@ fn resolve_decl(d: typed_ast.TypedDecl, tables: Tables) -> Result(source.SourceP
       in Ok(typed_ast.TLetDecl(name, b))
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       let bound = head_vars(constraint)
-          ms = try resolve_methods(methods, InInstanceMethod(bound), head_bound(inst_constraints, bound), tables)
+          kind = InInstanceMethod(bound)
+          ctx = head_bound(inst_constraints, bound)
+          ms = try resolve_all(resolve_method(_, kind, ctx, tables), methods)
       in Ok(typed_ast.TInstanceDecl(constraint, inst_constraints, ms))
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(d)
   | typed_ast.TPassThrough _ -> Ok(d)
 
 # The instance context's keys, then the method's own: the order lowering's
 # generate_one_instance_fn passes the dictionaries in.
-fn resolve_methods(
-  methods: List typed_ast.TypedInstanceMethod,
+fn resolve_method(
+  m: typed_ast.TypedInstanceMethod,
   kind: DeclKind,
   inst_constraints: List ast.TypeConstraint,
   tables: Tables
-) -> Result(source.SourcePos, String) (List typed_ast.TypedInstanceMethod) =
-  match methods with
-  | [] -> Ok([])
-  | [m | rest] ->
-      let typed_ast.TypedInstanceMethod name params ret_ty effects cs body = m
-          b = try resolve_expr(body, kind, build_fwd_keys(list_append(inst_constraints, cs), tables), tables)
-          ms = try resolve_methods(rest, kind, inst_constraints, tables)
-      in Ok(Cons(typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs, b), ms))
+) -> Result(source.SourcePos, String) typed_ast.TypedInstanceMethod =
+  let typed_ast.TypedInstanceMethod name params ret_ty effects cs body = m
+      b = try resolve_expr(body, kind, build_fwd_keys(list_append(inst_constraints, cs), tables), tables)
+  in Ok(typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs, b))
 
 # Every variant is listed, with no wildcard: a new one stops the build here, so no
 # node is rewritten without its check. A TDict or method reference is checked
@@ -787,18 +774,15 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
   | typed_ast.TChar _ _ _ -> Ok(e)
   | typed_ast.TUnit _ _ -> Ok(e)
   | typed_ast.TDict c t pos _ ->
-      match check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) with
-      | Just err -> Err(err)
-      | Nothing -> Ok(typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables)))
+      let Nothing = check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) else Just err -> Err(err)
+      in Ok(typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables)))
   | typed_ast.TMethodRef method class_name t pos _ ->
-      match method_ref_constraint(method, class_name, t, tables) with
-      | Nothing -> Ok(typed_ast.TMethodRef(method, class_name, t, pos, typed_ast.EvUnresolved))
-      | Just c ->
-          match check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) with
-          | Just err -> Err(err)
-          | Nothing -> Ok(typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(c, fwd_keys, tables)))
+      let Just c = method_ref_constraint(method, class_name, t, tables)
+            else Ok(typed_ast.TMethodRef(method, class_name, t, pos, typed_ast.EvUnresolved))
+          Nothing = check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) else Just err -> Err(err)
+      in Ok(typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(c, fwd_keys, tables)))
   | typed_ast.TTuple items t pos ->
-      let xs = try resolve_exprs(items, kind, fwd_keys, tables)
+      let xs = try resolve_all(resolve_expr(_, kind, fwd_keys, tables), items)
       in Ok(typed_ast.TTuple(xs, t, pos))
   | typed_ast.TIf cnd thn els t pos ->
       let c = try resolve_expr(cnd, kind, fwd_keys, tables)
@@ -807,11 +791,11 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
       in Ok(typed_ast.TIf(c, a, b, t, pos))
   | typed_ast.TMatch scrut branches t pos ->
       let s = try resolve_expr(scrut, kind, fwd_keys, tables)
-          bs = try resolve_branches(branches, kind, fwd_keys, tables)
+          bs = try resolve_all(resolve_branch(_, kind, fwd_keys, tables), branches)
       in Ok(typed_ast.TMatch(s, bs, t, pos))
   | typed_ast.TCall callee args t pos ->
       let f = try resolve_expr(callee, kind, fwd_keys, tables)
-          xs = try resolve_exprs(args, kind, fwd_keys, tables)
+          xs = try resolve_all(resolve_expr(_, kind, fwd_keys, tables), args)
       in Ok(typed_ast.TCall(f, xs, t, pos))
   | typed_ast.TLambda params body t pos ->
       let b = try resolve_expr(body, kind, fwd_keys, tables)
@@ -828,45 +812,38 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
           b = try resolve_expr(hi, kind, fwd_keys, tables)
       in Ok(typed_ast.TRange(a, b, t, pos))
   | typed_ast.TDo steps t pos ->
-      let ss = try resolve_steps(steps, kind, fwd_keys, tables)
+      let ss = try resolve_all(resolve_step(_, kind, fwd_keys, tables), steps)
       in Ok(typed_ast.TDo(ss, t, pos))
   | typed_ast.TRecord name fields t pos ->
-      let fs = try resolve_fields(fields, kind, fwd_keys, tables)
+      let fs = try resolve_all(resolve_field(_, kind, fwd_keys, tables), fields)
       in Ok(typed_ast.TRecord(name, fs, t, pos))
   | typed_ast.TGetField obj fld t pos ->
       let o = try resolve_expr(obj, kind, fwd_keys, tables)
       in Ok(typed_ast.TGetField(o, fld, t, pos))
   | typed_ast.TRecordUpdate base fields t pos ->
       let b = try resolve_expr(base, kind, fwd_keys, tables)
-          fs = try resolve_fields(fields, kind, fwd_keys, tables)
+          fs = try resolve_all(resolve_field(_, kind, fwd_keys, tables), fields)
       in Ok(typed_ast.TRecordUpdate(b, fs, t, pos))
 
-fn resolve_exprs(es: List typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
-    -> Result(source.SourcePos, String) (List typed_ast.TypedExpr) =
-  match es with
-  | [] -> Ok([])
-  | [e | rest] ->
-      let x = try resolve_expr(e, kind, fwd_keys, tables)
-          xs = try resolve_exprs(rest, kind, fwd_keys, tables)
-      in Ok(Cons(x, xs))
+# traverse over Result without its dictionaries or per-element closures. Left to right,
+# stopping at the first Err: the first error reported depends on it. Tail recursive,
+# since the program's decl list is one of the lists.
+fn resolve_all(g: a -> Result(source.SourcePos, String) b, xs: List a) -> Result(source.SourcePos, String) (List b) =
+  resolve_all_go(g, xs, [])
 
-fn resolve_branches(bs: List typed_ast.TypedMatchBranch, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
-    -> Result(source.SourcePos, String) (List typed_ast.TypedMatchBranch) =
-  match bs with
-  | [] -> Ok([])
-  | [typed_ast.TypedMatchBranch pat body | rest] ->
-      let b = try resolve_expr(body, kind, fwd_keys, tables)
-          xs = try resolve_branches(rest, kind, fwd_keys, tables)
-      in Ok(Cons(typed_ast.TypedMatchBranch(pat, b), xs))
+fn resolve_all_go(g: a -> Result(source.SourcePos, String) b, xs: List a, acc: List b)
+    -> Result(source.SourcePos, String) (List b) =
+  match xs with
+  | [] -> Ok(list_reverse(acc))
+  | [x | rest] ->
+      let y = try g(x)
+      in resolve_all_go(g, rest, Cons(y, acc))
 
-fn resolve_steps(ss: List typed_ast.TypedDoStep, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
-    -> Result(source.SourcePos, String) (List typed_ast.TypedDoStep) =
-  match ss with
-  | [] -> Ok([])
-  | [s | rest] ->
-      let x = try resolve_step(s, kind, fwd_keys, tables)
-          xs = try resolve_steps(rest, kind, fwd_keys, tables)
-      in Ok(Cons(x, xs))
+fn resolve_branch(b: typed_ast.TypedMatchBranch, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) typed_ast.TypedMatchBranch =
+  let typed_ast.TypedMatchBranch pat body = b
+      x = try resolve_expr(body, kind, fwd_keys, tables)
+  in Ok(typed_ast.TypedMatchBranch(pat, x))
 
 fn resolve_step(s: typed_ast.TypedDoStep, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
     -> Result(source.SourcePos, String) typed_ast.TypedDoStep =
@@ -881,14 +858,11 @@ fn resolve_step(s: typed_ast.TypedDoStep, kind: DeclKind, fwd_keys: Forwarded, t
       let x = try resolve_expr(ex, kind, fwd_keys, tables)
       in Ok(typed_ast.TDoExprStep(x))
 
-fn resolve_fields(fs: List typed_ast.TypedRecordField, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
-    -> Result(source.SourcePos, String) (List typed_ast.TypedRecordField) =
-  match fs with
-  | [] -> Ok([])
-  | [typed_ast.TypedRecordField name ex | rest] ->
-      let x = try resolve_expr(ex, kind, fwd_keys, tables)
-          xs = try resolve_fields(rest, kind, fwd_keys, tables)
-      in Ok(Cons(typed_ast.TypedRecordField(name, x), xs))
+fn resolve_field(f: typed_ast.TypedRecordField, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) typed_ast.TypedRecordField =
+  let typed_ast.TypedRecordField name ex = f
+      x = try resolve_expr(ex, kind, fwd_keys, tables)
+  in Ok(typed_ast.TypedRecordField(name, x))
 
 # ---------------------------------------------------------------------------
 # Type-expression helpers (ported from lowering; resolve owns its own copies)

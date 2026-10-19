@@ -150,5 +150,18 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "first error: earlier do step",
       outcome(resolve_decls([fn_decl("f", typed_ast.TDo([typed_ast.TDoExprStep(dict_at("Foo", 9)), typed_ast.TDoExprStep(dict_at("Bar", 8))], ty(), pos_at(1)))])),
       "9: No instance of Eq for Foo")
+    # Within a list, the earlier element's error, in every list the walk crosses.
+    assert_eq(state, "first error: earlier tuple item",
+      outcome(resolve_decls([fn_decl("f", typed_ast.TTuple([dict_at("Foo", 4), dict_at("Bar", 3)], ty(), pos_at(1)))])),
+      "4: No instance of Eq for Foo")
+    assert_eq(state, "first error: earlier match arm",
+      outcome(resolve_decls([fn_decl("f", typed_ast.TMatch(leaf(), [branch(dict_at("Foo", 5)), branch(dict_at("Bar", 4))], ty(), pos_at(1)))])),
+      "5: No instance of Eq for Foo")
+    assert_eq(state, "first error: earlier record field",
+      outcome(resolve_decls([fn_decl("f", typed_ast.TRecord("R", [field(dict_at("Foo", 6)), field(dict_at("Bar", 5))], ty(), pos_at(1)))])),
+      "6: No instance of Eq for Foo")
+    assert_eq(state, "first error: earlier instance method",
+      outcome(resolve_decls([typed_ast.TInstanceDecl(ast.TypeConstraint("Show", [ast.TypeName("Int")]), Nil, [method(dict_at("Foo", 8)), method(dict_at("Bar", 7))])])),
+      "8: No instance of Eq for Foo")
 
     summary(state)
