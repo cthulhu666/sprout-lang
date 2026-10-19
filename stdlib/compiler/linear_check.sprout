@@ -41,7 +41,8 @@ import stdlib.compiler.source as source
 # do-block `let`, match-arm pattern variables (a var pattern aliases the whole
 # linear scrutinee; a constructor/tuple sub-pattern binds a linear field, resolved
 # by `pattern_linear_binders`), and `<-` do-bind vars — in `fn`, top-level `let`,
-# and instance-method bodies. Deferred (loud-rejected, never silently accepted):
+# and instance-method bodies. A top-level `let` may not itself hold one: no scope
+# bounds who uses it. Deferred (loud-rejected, never silently accepted):
 # a linear lambda parameter and a linear binding captured by a lambda body
 # (higher-order linearity, M4.4 — a closure may run 0..n times).
 
@@ -963,12 +964,10 @@ fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) 
   | typed_ast.TVar name _ p -> lin_borrow_var(name, p, sc, a, env)
   | _ -> lin_nonvar_borrow(a, sc, env)
 
-# An untracked name (a module-level linear `let`, say) is still a VARIABLE, so it
-# must not fall into the "must be a variable reference" rejection — that message
-# contradicted the source and named a cause ("a freshly-built linear value") that
-# was false for the program. Walk it as an ordinary reference instead; that also
-# routes it through the borrowing-function-as-value check.
-# Regression: tests/stdlib/test_linear_borrowing.spr `borrow_module_level`.
+# An untracked name is still a VARIABLE, so it must not fall into the "must be a
+# variable reference" rejection, whose stated cause would be false. Walk it as an
+# ordinary reference. (The case that reached here, a module-level linear `let`,
+# is now rejected at its declaration: check_let_linear.)
 fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
                   a: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
   if scope_is_linear(name, sc) then LinOk(Nil, Cons (LinUse(name, p), Nil))
@@ -1924,13 +1923,27 @@ fn local_param_names(params: List ast.Param) -> List String =
       linear_param_cons(ast.mode_is_local(ast.param_mode_of(prm)), ast.param_name(prm),
                         local_param_names(rest))
 
-# Check a body with no parameters (a top-level `let` declaration): there are no
-# linear params to leak, but do-`let`/pattern/lambda binders inside are still
-# enforced by the walk.
-export fn check_body_linear(body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
-  match lin_consumed(body, LinScope (Nil, Nil, Nil), env) with
-  | LinErr p m -> LinFail(p, m)
-  | LinOk _ _ -> LinPass
+# Check a top-level `let`. Its own value may not be linear: every function can
+# name a module binding, and none of them is a scope the walk could hold to one
+# use. Binders inside the body are enforced by the walk as in any function.
+# Regressions: tests/conformance/type_error/linear_toplevel_let_{holds,contains}_linear.
+export fn check_let_linear(name: String, body: typed_ast.TypedExpr, let_pos: source.SourcePos,
+                           env: Dict types.Scheme) -> LinCheck =
+  let t = typed_ast.typed_expr_type(body)
+  in match first_linear_in(t, env) with
+     | Just lin -> LinFail(let_pos, toplevel_linear_msg(name, toplevel_linear_type(t, lin, env)))
+     | Nothing ->
+         match lin_consumed(body, LinScope (Nil, Nil, Nil), env) with
+         | LinErr p m -> LinFail(p, m)
+         | LinOk _ _ -> LinPass
+
+fn toplevel_linear_msg(name: String, what: String) -> String =
+  "top-level `let` '" ++ name ++ "' holds a linear value (" ++ what
+    ++ "): every function can use a module binding, so it cannot be used exactly once; create the value inside a function and pass it on"
+
+fn toplevel_linear_type(t: types.Type, lin: types.Type, env: Dict types.Scheme) -> String =
+  if type_is_linear(t, env) then "`" ++ types.type_to_string(t) ++ "`"
+  else "`" ++ types.type_to_string(t) ++ "` contains `" ++ types.type_to_string(lin) ++ "`"
 
 fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List String,
                  local_names: List String, body: typed_ast.TypedExpr, fn_pos: source.SourcePos,

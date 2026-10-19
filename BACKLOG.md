@@ -1975,12 +1975,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   rejects a bare type variable only when it is discarded. Fix needs a design: a linearity bound on
   type parameters (P3 **Linearity bound on a type parameter**), or inferring per type parameter
   whether the body may copy it. Blocks `docs/persistent-array-v0.md` §5.3.
-- [ ] `P1` **A top-level `let` can hold a linear value that every function consumes.** With
-  `let g = L(1)` at module level, `fn a() -> Int = consume(g)` and `fn b` the same are accepted,
-  and `a() + b()` consumes `g` twice (verified running, 2026-10-19). The linear pass tracks binders
-  inside a body; a module binding is not one, so each reference is unchecked. Fix: reject a
-  top-level `let` whose type is or contains a linear type. Blocks `docs/persistent-array-v0.md`
-  §5.3, where a top-level array would be written by one function and read by another.
 - [ ] `P1` **Reading a borrowed generic container hands out its linear element.**
   `fn box_peek(b: borrowing Box a) -> Maybe a` returns the field of a borrowed `Box`. At `Box L`
   the caller gets an owned `L` while `b` still holds it, and both are consumed (verified running,
@@ -2421,8 +2415,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `MutVec`. Proposal: `docs/persistent-array-v0.md` — a trie as the persistent array, and a
   linear array with bulk operations (builtins, needs approval) as the one in-place mechanism; no
   Baker array, no `ST`-style `run_local`. The trie waits on nothing. The linear array waits on
-  the six P1 linearity holes (doc §5.3) and P3 **Linearity bound on a type parameter**, which
-  closes three of them. When it lands, uncomment the `LArr` sieves in `examples/sieve.sprout`.
+  the three P1 linearity holes left (doc §5.3), which P3 **Linearity bound on a type
+  parameter** closes. When it lands, uncomment the `LArr` sieves in `examples/sieve.sprout`.
   Revisit per the doc's §12 triggers.
 - [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
   (`LMatrix Int Int (LArr a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a

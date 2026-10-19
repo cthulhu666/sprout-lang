@@ -702,10 +702,10 @@ fn multi_line_lambda_finding(arg: ast.Expr) -> List LintFinding =
 #   NO `where` CONSTRAINT — a `fn` takes its dictionary per call, a binding
 #   makes the choice once, and an open one is rejected outright (§5.2).
 #   NOT LINEAR — a `fn` mints a fresh value per call, so its consume-once
-#   obligation is real; one shared binding makes it vanish, and nothing
-#   downstream reports the second consume (`letdecl_linear_gate` checks the
-#   INITIALIZER, not the uses). Read from this file's own declarations, so a
-#   linear type imported from elsewhere is still missed.
+#   obligation is real; one shared binding would make it vanish, and the
+#   compiler rejects a top-level `let` that holds a linear value
+#   (`linear_check.check_let_linear`). Read from this file's own declarations,
+#   so a linear type imported from elsewhere is still missed.
 #   A SYNTACTIC VALUE, and not one typed by CONTEXT (see the two predicates
 #   below). Outside that set a `let` is monomorphic and can narrow a
 #   polymorphic helper, and a computed body would move its cost — and its

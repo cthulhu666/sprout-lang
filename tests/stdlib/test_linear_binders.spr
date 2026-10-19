@@ -276,6 +276,12 @@ fn record_phantom_before_decl(s: Slot File) -> Int = 1
 
 type Slot a = (id: Int)
 
+# A top-level `let` may not hold a linear value, but may hold a function that
+# makes one: a recipe holds nothing (type_error/linear_toplevel_let_*).
+let make_file = \ (n: Int) -> File(n)
+
+fn toplevel_maker(n: Int) -> Int = use_file(make_file(n)) + use_file(make_file(1))
+
 fn main() -> Unit !{IO} =
   run_suite("linear_binders", [
     check_eq("let..in alias once", via_let(File(1)), 1),
@@ -297,6 +303,7 @@ fn main() -> Unit !{IO} =
     check_eq("a self-recursive declaration terminates", chain_depth(Link (End(26))), 27),
     check_eq("a declaration cycling through a sibling terminates",
       ping_depth(Ping (Pong (PingEnd(27)))), 28),
+    check_eq("top-level let of a function making a linear", toplevel_maker(40), 41),
     check_eq("do-let List of a linear, used once", do_let_container_once(10), Just(10)),
     check_eq("a function returning a linear is not a resource", recipe_is_not_a_resource(11), 11),
     check_eq("a bare linear ctor as a value is not a resource", ctor_value_is_not_a_resource(12), 12),

@@ -11350,11 +11350,12 @@ fn fn_linear_gate(params: List ast.Param, ret_te: Maybe ast.TypeExpr, s2: Dict t
       apply_subst_typed_expr(s2, typed_body), fn_pos, env)
   else linear_check.LinPass
 
-# Same gate for a top-level `let` body (no params to leak-check).
-fn letdecl_linear_gate(s1: Dict types.Type, typed_expr: typed_ast.TypedExpr,
-                       env: GlobalEnv) -> linear_check.LinCheck =
+# Same gate for a top-level `let`: its body, and its own value's type.
+fn letdecl_linear_gate(name: String, s1: Dict types.Type, typed_expr: typed_ast.TypedExpr,
+                       let_pos: source.SourcePos, env: GlobalEnv) -> linear_check.LinCheck =
   if linear_check.program_has_linear(global_env_dict(env)) then
-    linear_check.check_body_linear(apply_subst_typed_expr(s1, typed_expr), global_env_dict(env))
+    linear_check.check_let_linear(name, apply_subst_typed_expr(s1, typed_expr), let_pos,
+                                  global_env_dict(env))
   else linear_check.LinPass
 
 # The class of the first typeclass dictionary in an expression whose choice depends on one of
@@ -11732,7 +11733,7 @@ fn bind_if_matched(matched: Dict types.Type, acc: Dict types.Type, v: String) ->
 fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr,
                    s1: Dict types.Type, let_pos: source.SourcePos, env: GlobalEnv,
                    env_ftv: List String, eff_subst: Dict types.Effect) -> TypedDeclResult =
-  match letdecl_linear_gate(s1, typed_expr, env) with
+  match letdecl_linear_gate(name, s1, typed_expr, let_pos, env) with
   | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
   | linear_check.LinPass ->
       # Sibling of the FnDecl escape check: a skolem is a TConst, so it has no
