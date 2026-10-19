@@ -192,9 +192,9 @@ export fn status_line(status: HttpStatus) -> String =
   "HTTP/1.1 " ++ int_to_string(status_code(status)) ++ " " ++ status_reason(status)
 
 export fn http_response(status: HttpStatus, body: String) -> String =
-  if status_has_content(status) then
-    status_line(status) ++ "\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\n" ++ body
-  else status_line(status) ++ "\r\nConnection: close\r\n\r\n"
+  status_line(status) ++ "\r\nConnection: close\r\n" ++ content_part
+where
+  content_part = if status_has_content(status) then "Content-Type: text/plain\r\n\r\n" ++ body else "\r\n"
 
 export fn http_ok(body: String) -> String =
   http_response(Ok200, body)
