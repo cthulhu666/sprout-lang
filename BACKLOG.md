@@ -2486,6 +2486,12 @@ acting.
 - [ ] `P3` **`ast_to_ir.sra_escape_ok_go` builds a free-variable Set per do-step to test one
   name.** Up to two full `compute_free_vars` Sets per step, only to ask whether `name` occurs. An
   early-exit "does `e` mention `name`" walk does the same job. Same family as #599.
+- [ ] `P3` **Four passes hand-write the same `TypedExpr` rebuild.** `dce.elim_expr` and
+  `bce.map_children` are plain child maps; `lowering.lower_expr` and
+  `infer.resolve_dispatch_typed_expr` are too, apart from a few arms (`TCall`, `TLambda` scope,
+  `TMethodRef`). A pure `typed_ast.map_children(g, e)` beside `traverse_children` would hold the
+  rebuild once, as `resolve` now does through the `Result` form. Keep each pass's variant list
+  exhaustive (guidelines §2a) and measure closures: `g` is one per node.
 
 - [~] `P1` **Arity mismatch through a function-typed VALUE is a clean runtime error, not a working
   call.** Both halves of the miscompile are closed — direct calls check arity in both directions,
