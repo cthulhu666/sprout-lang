@@ -9,11 +9,10 @@ import stdlib.env as env
 
 # THE TYPE OF AN EXPRESSION IN A SOURCE CONTEXT — ONE AUTHORITY.
 #
-# The trick is small: append `let __repl_source_value = <expr>` to the module, typecheck
-# it, and read the sentinel's Scheme back out of the resulting env. It had two copies in
-# analysis_service_driver (op_type_of_in_source and op_eval_expr_in_source), and hover
-# needed a third. Three copies of a mechanism is how the module-surface bugs happened, so
-# it lives here instead and both of those call it.
+# The expression is typed after the module's declarations, as a question rather than a
+# binding. It had two copies in analysis_service_driver (op_type_of_in_source and
+# op_eval_expr_in_source), and hover needed a third. Three copies of a mechanism is how the
+# module-surface bugs happened, so it lives in one place and all three call it.
 #
 # Two properties the copies could not have:
 #
@@ -69,7 +68,20 @@ fn existential_source() -> String =
     ++ "  fn myshow(x: a) -> String\n"
     ++ "}\n"
     ++ "\n"
+    ++ "instance MyShow Int {\n"
+    ++ "  fn myshow(x: Int) -> String = \"i\"\n"
+    ++ "}\n"
+    ++ "\n"
     ++ "type Shown = | Shown (any MyShow)\n"
+
+# A type with no instances, so a dictionary for it can only be missing.
+let bare_type_source: String = "type Opaque = Opaque Int\n"
+
+# A linear type, so the expression has a value that must be used exactly once.
+fn linear_source() -> String =
+  "type linear File = File Int\n"
+    ++ "\n"
+    ++ "fn release(f: File) -> Int = match f with | File n -> n\n"
 
 fn source_using_package() -> String =
   "import demo.greet (greeting)\n"
@@ -84,15 +96,11 @@ fn reports_diagnostics(r: compiler.ExprSchemeResult) -> Bool =
       | Nil -> false
       | [_ | _] -> true
   | compiler.ExprSchemeOk _ -> false
-  | compiler.ExprSentinelCollision -> false
-  | compiler.ExprNotInferable -> false
 
 fn is_scheme_ok(r: compiler.ExprSchemeResult) -> Bool =
   match r with
   | compiler.ExprSchemeOk _ -> true
-  | compiler.ExprSentinelCollision -> false
   | compiler.ExprCheckFailed _ -> false
-  | compiler.ExprNotInferable -> false
 
 # `== false` rather than a prefix `!` on the call: the formatter renders `!f(x)` as
 # `! f (x)`, which reads worse than the comparison it replaces.
@@ -135,10 +143,9 @@ fn main() -> Unit !{IO} =
     # --- a declared name reports what it was DECLARED as, effects included ---
     #
     # Hover, the REPL's :type and the analysis service all read this. Before the fix they
-    # answered `Unit` for every `main` in the tree: the sentinel binding re-infers the type
-    # of a *reference*, and referencing a value is pure, so the Scheme-level effect of a
-    # nullary function was replaced by the sentinel's own. The checked env had `Unit !{IO}`
-    # under the name's own key the whole time.
+    # answered `Unit` for every `main` in the tree: typing the name types a *reference*,
+    # and referencing a value is pure, so the Scheme-level effect of a nullary function was
+    # lost. The checked env had `Unit !{IO}` under the name's own key the whole time.
     nullary_effect <- rendered_type(effectful_source(), "boot", sr, Nil, cache)
     assert_true(state, "a nullary effectful function reports its effect",
       string.contains(nullary_effect, "!{IO}"))
@@ -156,21 +163,21 @@ fn main() -> Unit !{IO} =
       string.contains(pure_nullary, "Int") && mentions_no_effect(pure_nullary))
 
     # Preferring the declared scheme must not disturb polymorphism: a type variable stays a
-    # type variable rather than being instantiated by the sentinel's binding.
+    # type variable rather than being instantiated by typing a reference to it.
     poly <- rendered_type(effectful_source(), "ident", sr, Nil, cache)
     assert_true(state, "a polymorphic name still renders as a function over a variable",
       string.contains(poly, "->") && mentions_no_effect(poly))
 
-    # An expression that is not a bare name has no env entry, so it must still go through
-    # the sentinel — and must not acquire an effect on the way.
+    # An expression that is not a bare name has no env entry, so it is typed as a question
+    # — and must not acquire an effect on the way.
     call <- rendered_type(effectful_source(), "pure_boot()", sr, Nil, cache)
-    assert_true(state, "a call expression is still typed through the sentinel",
+    assert_true(state, "a call expression is typed as a question",
       string.contains(call, "Int") && mentions_no_effect(call))
 
     # --- a constrained name is a question, not a binding ---
     #
-    # `:type minimum` made the sentinel into `let __repl_source_value = minimum`: a
-    # top-level binding that generalizes a variable it needs an `Ord` dictionary for.
+    # `:type minimum` used to be asked as `let __repl_source_value = minimum`: a top-level
+    # binding that generalizes a variable it needs an `Ord` dictionary for.
     # `infer.let_dict_ambiguity_msg` rejects exactly that, and is right to for a module —
     # the binding is one slot holding one closure, so the instance picked at definition is
     # the one every use gets. Here it described a binding nobody wrote, and made every
@@ -275,18 +282,70 @@ fn main() -> Unit !{IO} =
     assert_true(state, "the rendered form answers Nothing on a failure",
       unknown_rendered == "")
 
-    # Double-underscore names are valid Sprout identifiers, so a source CAN already bind
-    # the sentinel. Appending a second binding of the same name would make the typecheck
-    # fail for a reason that has nothing to do with the user's expression, so the
-    # collision is reported as itself.
-    collision <- compiler.scheme_of_expr_in_source(
-      "let " ++ compiler.expr_sentinel_name ++ " = 1\n", "42", sr, Nil, cache)
-    assert_true(state, "a source already binding the sentinel is reported as a collision",
-      match collision with
-      | compiler.ExprSentinelCollision -> true
-      | compiler.ExprSchemeOk _ -> false
-      | compiler.ExprCheckFailed _ -> false
-      | compiler.ExprNotInferable -> false)
+    # --- a question is not a binding ---
+    #
+    # Nothing is bound by asking, so no rule about what a top-level `let` may hold applies.
+    # A linear value cannot sit in a module binding, since every function could use it; asked
+    # about, it is just a value of its type.
+    linear <- rendered_type(linear_source(), "File(1)", sr, Nil, cache)
+    assert_true(state, "a linear expression is typed, not rejected as a module binding",
+      string.contains(linear, "File"))
+
+    # The value restriction refuses to generalize a non-value binding, because one slot read
+    # at two types is unsound. A question has no slot.
+    non_value <- rendered_type(plain_source(), "list_reverse(Nil)", sr, Nil, cache)
+    assert_true(state, "a polymorphic non-value expression is typed, not value-restricted",
+      string.contains(non_value, "List "))
+
+    # Sprout does not infer `where` clauses, so an expression whose dictionary depends on a
+    # type it leaves open has no type to report. Answering without the constraint would state
+    # a type the expression does not have.
+    open_dict <- rendered_type(plain_source(), "\\xs -> minimum(xs)", sr, Nil, cache)
+    assert_true(state, "an expression needing an undetermined dictionary is not typed",
+      open_dict == "")
+
+    # The same for a class method at a type the expression leaves open: no dictionary
+    # argument marks these, so only the dispatch verifier sees them.
+    open_method <- rendered_type(plain_source(), "\\x -> to_string(x)", sr, Nil, cache)
+    assert_true(state, "a class method at an open type is not typed", open_method == "")
+    open_eq <- rendered_type(plain_source(), "\\x -> x == x", sr, Nil, cache)
+    assert_true(state, "an operator method at an open type is not typed", open_eq == "")
+    open_pure <- rendered_type(plain_source(), "pure(1)", sr, Nil, cache)
+    assert_true(state, "a method dispatched on its return type alone is not typed", open_pure == "")
+    open_user <- rendered_type(existential_source(), "\\x -> myshow(x)", sr, Nil, cache)
+    assert_true(state, "a user class method at an open type is not typed", open_user == "")
+    # The expression's effect is part of its type; eval reads it to run an action rather
+    # than print it.
+    action <- rendered_type(plain_source(), "print(\"hi\")", sr, Nil, cache)
+    assert_true(state, "an effectful expression's type carries its effect", action == "Unit !{IO}")
+    closed_method <- rendered_type(plain_source(), "\\(x: Int) -> to_string(x)", sr, Nil, cache)
+    assert_true(state, "a class method at a concrete type is typed",
+      string.contains(closed_method, "Int -> String"))
+
+    # The expression is parsed as an expression. Appended to the source as text, a line break
+    # in it ended the binding and the rest was read as declarations.
+    trailing <- rendered_type(plain_source(), "1\nfn sneaky() -> Int = 2", sr, Nil, cache)
+    assert_true(state, "declarations after the expression are rejected", trailing == "")
+
+    # The refusals that stay. A skolem has no name outside its match branch.
+    skolem <- rendered_type(existential_source(), "match Shown(1) with | Shown x -> x", sr, Nil, cache)
+    assert_true(state, "an unpacked existential is not the type of the expression", skolem == "")
+
+    # The instance for a list exists; its context, ToString of the element, does not. Only the
+    # dictionary pass sees that, so without it this answered String.
+    context <- rendered_type(bare_type_source, "to_string([Opaque(1)])", sr, Nil, cache)
+    assert_true(state, "a missing instance in an instance's context is reported", context == "")
+
+    # Type names in the expression are resolved in the buffer's scope, and an unknown one is
+    # refused rather than becoming a fresh opaque type.
+    unknown_type <- rendered_type(plain_source(), "\\(x: Nope) -> x", sr, Nil, cache)
+    assert_true(state, "an unknown type in the expression is refused", unknown_type == "")
+
+    # No name is reserved: the source may declare any name, including the one the question
+    # used to be bound to.
+    reserved <- rendered_type("let __repl_source_value = 1\n", "42", sr, Nil, cache)
+    assert_true(state, "a source may bind any name without colliding with the question",
+      string.contains(reserved, "Int"))
 
     # --- package roots reach it: the property the builtin route cannot have ---
     let roots = Cons(package_root, Nil)

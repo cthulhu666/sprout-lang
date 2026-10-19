@@ -68,8 +68,33 @@ export fn typecheck_typed(prog: ast.Program, extra: List (String, types.Scheme))
 # `modules` is each module's declarations, as bundler.BundleOk gives them.
 export fn typecheck_bundle(modules: List (List ast.Decl), extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
   do
-    (result, reports) <- typecheck_typed_with_effects(modules, extra)
+    state <- unifier.new_state()
+    typecheck_enforced(state, modules, extra)
+
+fn typecheck_enforced(state: unifier.InferState, modules: List (List ast.Decl),
+                      extra: List (String, types.Scheme)) -> typed_ast.TypedResult !{IO} =
+  do
+    result <- typecheck_unenforced(state, modules, extra)
+    reports <- unifier.effect_reports(state)
     enforce_stored_effect_vars(ast.flatten_modules(modules), enforce_effects(result, reports))
+
+# A bundle and an expression asked about in it. The question shares the bundle's
+# inference state, so its fresh variables cannot collide with the env's, and is typed
+# only when the bundle checks.
+export type BundleQuestion (..) =
+  | BundleQuestionOk typed_ast.TypedProgram (Dict types.Scheme) infer.QuestionResult
+  | BundleQuestionErr source.SourcePos String
+
+export fn typecheck_bundle_question(modules: List (List ast.Decl), question: ast.Expr) -> BundleQuestion !{IO} =
+  do
+    state <- unifier.new_state()
+    result <- typecheck_enforced(state, modules, Nil)
+    match result with
+    | typed_ast.TypedErr pos msg -> BundleQuestionErr(pos, msg)
+    | typed_ast.TypedOk prog env ->
+        do
+          answer <- infer.typecheck_question(state, env, desugar_ctx.desugar_question(modules, question))
+          BundleQuestionOk(prog, env, answer)
 
 # Rule 9's stored-position half, applied on the SAME path as rule 8's post-pass
 # and for the same reason: `--phase effects` calls

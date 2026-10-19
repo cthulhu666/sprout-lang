@@ -540,6 +540,10 @@ fn parsed_specs(mod: ParsedModule) -> List module_loader.ImportSpec =
   match mod with
   | ParsedModule _ _ specs _ _ _ -> specs
 
+fn parsed_path(mod: ParsedModule) -> String =
+  match mod with
+  | ParsedModule _ path _ _ _ _ -> path
+
 fn issue_message(issue: LoadIssue) -> String =
   match issue with | LoadIssue _ _ msg -> msg
 
@@ -2330,7 +2334,8 @@ fn exporting_module(name: String, declared_names: List String) -> Maybe String =
       then Just(str_slice(d, 0, str_len(d) - str_len(string.after_last_dot(d)) - 1))
       else exporting_module(name, rest)
 
-fn unresolved_type_message(name: String, decl_name: String, declared: Dict String) -> String =
+# `place` is where the name was written: a declaration, in backticks, or the expression.
+fn unresolved_type_message(name: String, place: String, declared: Dict String) -> String =
   if str_starts_with(name, source.canonical_marker)
   then source.canonical_name_message(name)
   else
@@ -2338,14 +2343,13 @@ fn unresolved_type_message(name: String, decl_name: String, declared: Dict Strin
     | Nothing -> base
     | Just mod_name ->
         base ++ ". `" ++ mod_name ++ "` exports it — add it to that module's import list"
-  where base = "unknown type `" ++ name ++ "` in `" ++ decl_name
-               ++ "`: nothing in scope declares that name"
+  where base = "unknown type `" ++ name ++ "` in " ++ place ++ ": nothing in scope declares that name"
 
 fn find_unresolved_type(decls: List ast.Decl, declared: Dict String) -> Maybe(source.SourcePos, String) =
   ast.first_decl_error(unresolved_type_error(declared, _), decls)
 
 fn unresolved_type_error(declared: Dict String, d: ast.Decl) -> Maybe String =
-  map(unresolved_type_message(_, decl_display_name(d), declared), unresolved_in_decl(d, declared))
+  map(unresolved_type_message(_, "`" ++ decl_display_name(d) ++ "`", declared), unresolved_in_decl(d, declared))
 
 # The declared set is now the whole story. It used to be widened with an
 # "ambient" list — the prelude's exported names, re-read from source, because a
@@ -2518,7 +2522,7 @@ export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.Stdl
 #
 # This is the entry point an editor needs, and the reason the two front ends can now be
 # one. The buffer being checked may differ from what is on disk, or have no file at all
-# (a REPL line, a hover's sentinel-augmented snippet), so it enters through the overlay
+# (a REPL line, an unsaved editor buffer), so it enters through the overlay
 # under `entry_path` and is found there instead of being read.
 #
 # `entry_path` is not required to exist. It still matters: imports resolve against
@@ -2531,9 +2535,23 @@ export fn bundle_file_with_roots(path: source.FilePath, stdlib_root: source.Stdl
 export fn bundle_source_with_roots(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
                                    extra_roots: List String, load_env: LoadEnv) -> BundleResult !{IO} =
   do
-    (bundle, _) <- bundle_entry(entry_path, stdlib_root, extra_roots,
-                                load_env_with_overlay(dict_set(entry_path, src, load_env_overlay(load_env)), load_env))
+    (bundle, _) <- bundle_entry(entry_path, stdlib_root, extra_roots, with_entry_source(entry_path, src, load_env))
     bundle
+
+# A buffer with a declaration it does not contain: eval's `main`. The declaration is
+# named, resolved and checked as if it were written at the end of the buffer.
+export fn bundle_source_with_decl(src: String, entry_path: String, decl: ast.Decl,
+                                  stdlib_root: source.StdlibRoot, extra_roots: List String,
+                                  load_env: LoadEnv) -> BundleResult !{IO} =
+  do
+    let root = source.stdlib_root_str(stdlib_root)
+    loaded <- load_bundle(entry_path, root, extra_roots, [decl], with_entry_source(entry_path, src, load_env))
+    match loaded with
+    | LoadFailed pos msg -> BundleErr(pos, msg)
+    | LoadedBundle modules names -> make_bundle_or_err(modules, entry_path, root, extra_roots, names)
+
+fn with_entry_source(entry_path: String, src: String, load_env: LoadEnv) -> LoadEnv =
+  load_env_with_overlay(dict_set(entry_path, src, load_env_overlay(load_env)), load_env)
 
 # Like bundle_file_with_roots, but also hands back the entry module's
 # declarations as the bundle names them, so a report can tell the entry's
@@ -2544,18 +2562,75 @@ export fn bundle_with_entry_decls(path: source.FilePath, stdlib_root: source.Std
     load_env <- new_load_env()
     bundle_entry(source.filepath_str(path), stdlib_root, extra_roots, load_env)
 
-# Every bundle is loaded here: the bundle, and the entry module's declarations.
+# Every bundle is loaded here: its modules, and the names they are qualified against.
+# `entry_extra` is appended to the entry module's declarations before either is computed.
+type LoadedBundle =
+  | LoadFailed source.SourcePos String
+  | LoadedBundle (List ParsedModule) BundleNames
+
+fn load_bundle(entry_path: String, root: String, extra_roots: List String, entry_extra: List ast.Decl,
+               load_env: LoadEnv) -> LoadedBundle !{IO} =
+  do
+    (err, loaded) <- collect_modules(entry_path, root, extra_roots, load_env)
+    match err with
+    | Just issue -> LoadFailed(issue_pos_for_entry(issue, entry_path), issue_message(issue))
+    | Nothing ->
+        let modules = list_map(append_to_entry(entry_path, entry_extra, _), loaded)
+        in LoadedBundle(modules, bundle_names(modules, root, extra_roots))
+
+fn append_to_entry(entry_path: String, extra: List ast.Decl, mod: ParsedModule) -> ParsedModule =
+  match mod with
+  | ParsedModule name path specs exported ctor_types decls ->
+      if path == entry_path then ParsedModule(name, path, specs, exported, ctor_types, decls ++ extra)
+      else mod
+
+# The bundle, and the entry module's declarations.
 fn bundle_entry(entry_path: String, stdlib_root: source.StdlibRoot, extra_roots: List String,
                 load_env: LoadEnv) -> (BundleResult, List ast.Decl) !{IO} =
   do
     let root = source.stdlib_root_str(stdlib_root)
-    (err, modules) <- collect_modules(entry_path, root, extra_roots, load_env)
-    match err with
-    | Just issue -> (BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue)), Nil)
-    | Nothing ->
-        let names = bundle_names(modules, root, extra_roots)
-        in (make_bundle_or_err(modules, entry_path, root, extra_roots, names),
-            list_flat_map(\m -> if m.path == entry_path then m.decls else Nil, names.qualified))
+    loaded <- load_bundle(entry_path, root, extra_roots, Nil, load_env)
+    match loaded with
+    | LoadFailed pos msg -> (BundleErr(pos, msg), Nil)
+    | LoadedBundle modules names ->
+        (make_bundle_or_err(modules, entry_path, root, extra_roots, names),
+         list_flat_map(\m -> if m.path == entry_path then m.decls else Nil, names.qualified))
+
+# A question asked in a buffer's scope: the buffer's bundle, and the expression with its
+# names resolved as a declaration in the buffer would resolve them. The expression is not
+# added to the buffer, so it binds nothing and no name is reserved for it.
+export type QuestionBundle (..) =
+  | QuestionBundleOk (List (List ast.Decl)) ast.Expr
+  | QuestionBundleErr source.SourcePos String
+
+export fn bundle_source_with_question(src: String, entry_path: String, question: ast.Expr,
+                                      stdlib_root: source.StdlibRoot, extra_roots: List String,
+                                      load_env: LoadEnv) -> QuestionBundle !{IO} =
+  do
+    let root = source.stdlib_root_str(stdlib_root)
+    loaded <- load_bundle(entry_path, root, extra_roots, Nil, with_entry_source(entry_path, src, load_env))
+    match loaded with
+    | LoadFailed pos msg -> QuestionBundleErr(pos, msg)
+    | LoadedBundle modules names ->
+        match make_bundle_or_err(modules, entry_path, root, extra_roots, names) with
+        | BundleErr pos msg -> QuestionBundleErr(pos, msg)
+        | BundleOk bundled -> qualify_question(question, entry_path, root, extra_roots, modules, names, bundled)
+
+# Type names are checked here, as validate_type_names checks a declaration's: an unknown
+# one would otherwise reach the checker as a fresh opaque type.
+fn qualify_question(question: ast.Expr, entry_path: String, root: String, extra_roots: List String,
+                    modules: List ParsedModule, names: BundleNames,
+                    bundled: List (List ast.Decl)) -> QuestionBundle =
+  let pos = ast.expr_pos(question)
+      Just entry = find(\m -> parsed_path(m) == entry_path, modules)
+        else QuestionBundleErr(pos, "internal: the entry module was not loaded")
+      ctx = build_resolve_ctx(entry, names.all_symbols, root, extra_roots, names.canonical,
+                              names.prelude, names.externs)
+      qualified = qualify_expr(ctx, Nil, question)
+      declared = declared_type_names(list_flat_map(\m -> m.decls, names.qualified), dict_empty())
+      Nothing = unresolved_in_expr(qualified, declared)
+        else Just name -> QuestionBundleErr(pos, unresolved_type_message(name, "the expression", declared))
+  in QuestionBundleOk(bundled, qualified)
 
 # ---------------------------------------------------------------------------
 # Phase: dump-qualify — show original→qualified name mapping per module

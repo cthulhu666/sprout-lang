@@ -1,0 +1,78 @@
+module main
+
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.analysis_service_driver as service
+import stdlib.json as json
+import stdlib.process as process
+import stdlib.string as string
+import stdlib.terminal as terminal
+import stdlib.env as env
+
+# eval_expr_in_source end to end: the service compiles the buffer with a `main` built
+# around the expression, links it and runs it. No binding is added for the expression, so
+# no name in the buffer is reserved and no rule about top-level `let`s applies to it.
+
+fn eval_request(src: String, expr: String) -> String =
+  match json.stringify(json.object_from_pairs([("op", json.JsonString("eval_expr_in_source")),
+                                               ("module_source", json.JsonString(src)),
+                                               ("expr", json.JsonString(expr))])) with
+  | Ok line -> line
+  | Err _ -> ""
+
+fn eval_text(src: String, expr: String, state: service.StartupState) -> String !{IO} =
+  do
+    response <- service.dispatch_line(eval_request(src, expr), state)
+    match json.stringify(response) with
+    | Ok text -> text
+    | Err _ -> ""
+
+# A type with one owner, and a way to show it that consumes it.
+fn linear_source() -> String =
+  "type linear File = File Int\n"
+    ++ "\n"
+    ++ "instance ToString File {\n"
+    ++ "  fn to_string(f: File) -> String = match f with | File n -> `File ${int_to_string(n)}`\n"
+    ++ "}\n"
+
+fn clang_available() -> Bool !{IO} =
+  do
+    probe <- process.proc_run(["clang", "--version"])
+    process.proc_ok(probe)
+
+fn run_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
+  do
+    reserved <- eval_text("let __repl_source_value = 1\n", "__repl_source_value + 1", state)
+    assert_true(test, "the buffer may bind the name eval used to reserve",
+      reserved == "{\"ok\":true,\"value\":[\"2\"]}")
+
+    linear <- eval_text(linear_source(), "File(7)", state)
+    assert_true(test, "a linear value is evaluated, not refused as a module binding",
+      linear == "{\"ok\":true,\"value\":[\"File 7\"]}")
+
+    action <- eval_text("", "print(\"hi\")", state)
+    assert_true(test, "a Unit !{IO} expression is run", action == "{\"ok\":true,\"value\":[\"hi\"]}")
+
+    has_main <- eval_text("fn main() -> Unit !{IO} = print(\"x\")\n", "1", state)
+    assert_true(test, "a buffer that declares main is refused by name",
+      string.contains(has_main, "\"ok\":false") && string.contains(has_main, "`main`"))
+
+    trailing <- eval_text("", "1\nfn sneaky() -> Int = 2", state)
+    assert_true(test, "declarations after the expression are rejected",
+      string.contains(trailing, "\"ok\":false"))
+
+fn main() -> Unit !{IO} =
+  do
+    test <- new_state()
+    have_clang <- clang_available()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> assert_true(test, "eval end to end (auto-skipped: no SPROUT_STDLIB_ROOT)", true)
+    | Just root ->
+        if have_clang then
+          do
+            state <- service.build_startup_state(root)
+            run_cases(test, state)
+        else
+          do
+            terminal.write("[test_eval_question] clang not in PATH — assertions auto-pass\n")
+            assert_true(test, "eval end to end (auto-skipped: no clang)", true)
+    summary(test)

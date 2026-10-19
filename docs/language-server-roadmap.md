@@ -46,38 +46,49 @@ editor and IDE support.
 >   runtime which talks to a co-process launched as
 >   `sproutd --analysis-service <stdlib_root>`, a command line carrying **no package
 >   roots**, so hover routed through it would fail on precisely the projects whose
->   diagnostics succeed. The mechanism (append a sentinel binding, typecheck, read the
->   sentinel's `Scheme` out of the env) now lives once in `compiler.sprout`; the analysis
+>   diagnostics succeed. The mechanism lives once in `compiler.sprout`; the analysis
 >   service calls it instead of keeping its own two copies
 > - ~~hover reported every nullary effectful function as pure~~ **done**: a bare name now
 >   answers with the `Scheme` the env holds under *its own key*, and only a non-name
->   expression goes through the sentinel. The sentinel types a **reference** to the name,
->   and referencing a value is pure, so a declared effect living only on the `Scheme` was
->   replaced by the sentinel's own — which is every zero-parameter function, since it had
+>   expression is typed. Typing a name types a **reference** to it, and referencing a
+>   value is pure, so a declared effect living only on the `Scheme` was lost — which is
+>   every zero-parameter function, since it had
 >   no arrow to carry the effect (`types.scheme_effect_suffix`; a nullary function has had
 >   one since the 2026-09-08 `TThunk` change). Every `main` in the tree
 >   hovered as plain `Unit`. Not hover-only: the REPL's `:type` and the analysis service
 >   read the same function. Measured on the real server, `fn main() -> Unit !{IO}` before
 >   and after: `Unit` → `Unit !{IO}`
-> - ~~a constrained name could not be asked about at all~~ **done**: the sentinel is a
->   synthesized top-level `let`, so it answers to the rules a top-level `let` answers to —
+> - ~~a constrained name could not be asked about at all~~ **done**: the question was a
+>   synthesized top-level `let`, so it answered to the rules a top-level `let` answers to —
 >   including `infer.let_dict_ambiguity_msg`, which rejects one that generalizes a type
 >   variable it needs a class dictionary for. Right for a module, wrong for a question:
 >   `:type minimum` answered "a top-level binding holds a single value, so the instance
 >   cannot be picked per use", describing a binding nobody wrote, and every constrained
 >   prelude name (`minimum`, `maximum`, `min_by`) was unaskable — evaluating one was an
->   error rather than the `<fn: …>` display that already existed for it. When the
->   augmented check fails, the source is now checked **alone** and a bare name answered
->   from its own scheme; an expression has no env entry, so a real type error in one keeps
->   its diagnostics. A same-file constrained name never hit this — every reproduction
->   references a name from another module
+>   error rather than the `<fn: …>` display that already existed for it. A bare name is
+>   now answered from its own scheme. A same-file constrained name never hit this — every
+>   reproduction references a name from another module
+> - ~~the type question answered to a module binding's rules~~ **done**: the expression is
+>   parsed alone, its names resolved in the buffer's scope
+>   (`bundler.bundle_source_with_question`), and typed after the buffer's declarations
+>   (`infer.typecheck_question`), never appended to it. The value restriction, the
+>   one-dictionary rule and linearity no longer apply, and no name is reserved. A skolem
+>   and an open dictionary are still refused, since neither has a type to report: Sprout
+>   infers no `where` clause, so `:type \xs -> minimum(xs)` is refused. A class method at
+>   an open type (`\x -> to_string(x)`, `pure(1)`) has no dictionary argument to mark it,
+>   so the question also passes the dispatch verifier
+>   (`verify_dispatch.verify_question`). The type carries the expression's effect:
+>   `print("hi")` is `Unit !{IO}`, where it read `Unit`. Eval asks the same way: it adds
+>   a `main` around the parsed expression to the buffer (`compiler.compile_question_ir`)
+>   instead of appending source text, so a linear value can be evaluated and a buffer
+>   with its own `main` is refused as a duplicate
 > - ~~a rendered scheme dropped its constraints~~ **done**: `types.scheme_to_string` now
 >   emits the `where` clause, so `minimum` reads `forall a b. a b -> Maybe b where
 >   Foldable a, Ord b` instead of `forall a b. a b -> Maybe b` — a higher-kinded
 >   application with nothing to explain it. Head tokens decode against the *renamed*
 >   binders, so the clause names the variables the type does. Only the quantified branch
 >   renders it: a monomorphic scheme's rendering is sniffed by
->   `analysis_service_driver.make_eval_source` for a trailing effect, and a constraint on
+>   `analysis_service_driver.eval_main_for` for a trailing effect, and a constraint on
 >   a concrete head is already discharged
 > - ~~a class method dropped its constraints too~~ **done**: the clause above renders
 >   `Scheme`'s constraint list and a class method's is empty — nothing fills one, and its

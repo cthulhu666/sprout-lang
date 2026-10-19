@@ -398,6 +398,13 @@ export fn verify_program(prog: typed_ast.TypedProgram) -> Maybe(source.SourcePos
 export fn verify_stats(prog: typed_ast.TypedProgram) -> (Int, Int, Int) =
   tally(collect_program(prog), 0, 0, 0)
 
+# A question asked in `prog`: the expression's calls, against the program's signatures.
+export fn verify_question(prog: typed_ast.TypedProgram, question: typed_ast.TypedExpr) -> Maybe(source.SourcePos, String) =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      first_mismatch(list_builder_build(
+        collect_expr(question, build_sig_table(decls, dict_empty()), dict_empty(), list_builder_empty)))
+
 fn collect_program(prog: typed_ast.TypedProgram) -> List VerifyOutcome =
   match prog with
   | typed_ast.TypedProgram decls ->

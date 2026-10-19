@@ -11775,6 +11775,57 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
                 global_env_dict(env))),
               env_ftv, s1)
 
+# ---------------------------------------------------------------------------
+# A question: the type of an expression in a checked program
+# ---------------------------------------------------------------------------
+#
+# Typed against the program's final env and inference state. It binds nothing, so no
+# top-level `let` rule applies — linearity, the value restriction, one dictionary per
+# binding. A skolem and an open dictionary are refused: neither has a type to state, since
+# Sprout infers no `where` clause.
+
+export type QuestionResult (..) =
+  | QuestionOk typed_ast.TypedExpr types.Scheme
+  | QuestionErr source.SourcePos String
+
+export fn typecheck_question(state: unifier.InferState, env: Dict types.Scheme,
+                             question: ast.Expr) -> QuestionResult !{IO} =
+  do
+    r <- typecheck_expr(state, env, dict_empty(), dict_empty(), question)
+    match r with
+    | InferErr pos e -> QuestionErr(pos, e)
+    | InferOk typed0 s0 es eff ->
+        do
+          f <- finish_field_obligations(state, env, s0, typed0)
+          match f with
+          | FinishErr fpos fmsg -> QuestionErr(fpos, fmsg)
+          | FinishOk typed1 s1 ->
+              question_scheme(resolve_dispatch_typed_expr(env, s1, set_empty(), typed1), s1, es, eff,
+                              unifier.ftv_env(env), ast.expr_pos(question))
+
+# The scheme carries the expression's effect, so `print("hi")` is `Unit !{IO}`.
+fn question_scheme(typed: typed_ast.TypedExpr, s1: Dict types.Type, es: Dict types.Effect,
+                   eff: types.Effect, env_ftv: List String, pos: source.SourcePos) -> QuestionResult =
+  let t = unifier.apply_subst(s1, typed_ast.typed_expr_type(typed))
+      quantified = list_diff(types.ftv(t), env_ftv)
+  in if types.type_mentions_skolem(t) then QuestionErr(pos, skolem_question_msg())
+     else
+       # The class is not named: the finder reports a call's first dictionary, which need
+       # not be the open one (`minimum(Nil)` fixes Foldable and leaves Ord open).
+       match first_ambiguous_dict_class(typed, s1, quantified) with
+       | Just _ -> QuestionErr(pos, open_dict_question_msg(quantified, t))
+       | Nothing ->
+           QuestionOk(typed, unifier.generalize(env_ftv, s1, es, typed_ast.typed_expr_type(typed), eff))
+
+fn skolem_question_msg() -> String =
+  skolem_escape_prefix("the expression") ++ "be the type of the whole expression"
+    ++ " — ask about the unpacked value inside its match branch"
+
+fn open_dict_question_msg(quantified: List String, t: types.Type) -> String =
+  "the expression needs a class instance that its type " ++ types.type_to_string_renamed(quantified, t)
+    ++ " leaves open, and Sprout does not infer `where` clauses"
+    ++ " — make the type concrete, for example by annotating a lambda parameter"
+
 fn check_fn_body(
   state: unifier.InferState,
   decl: ast.Decl,
