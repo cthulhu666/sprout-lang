@@ -30,7 +30,7 @@ export type HttpError (..) =
 
 # A status a server here can send. Closed, so every one has a status line and nothing can ask for
 # one that does not. Each name carries its code, which also keeps `Ok200` apart from `Result`'s `Ok`.
-export type HttpStatus (..) =
+export type HttpStatus (..) deriving (Enum) =
   | Ok200
   | Created201
   | Accepted202
