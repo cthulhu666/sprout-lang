@@ -587,6 +587,9 @@ An index out of range gives `Nothing`, as `vec_get` does, in all three.
 `spec-v0.md` gains the type and its operations, normative when they land; for 5.3, Experimental
 while §5.8 is. `stdlib-reference.md` gets a row in *Collection costs*. `idiomatic-sprout.md`
 shows build-by-rows for DP and the chosen array for the rest, in place of a fold of `vec_set`.
+`examples/sieve.sprout` runs the `vec_set` and `MutVec` sieves and keeps 5.3's two versions,
+element by element and with `larr_scatter`, commented out; uncomment them when 5.3 lands. Both
+compile and count correctly against a prototype `LArr` written in Sprout over `Vector`.
 
 ## 11. Open questions
 

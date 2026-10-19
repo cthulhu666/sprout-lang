@@ -2438,7 +2438,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   linear array with bulk operations (builtins, needs approval) as the one in-place mechanism; no
   Baker array, no `ST`-style `run_local`. The trie waits on nothing. The linear array waits on
   the six P1 linearity holes (doc §5.3) and P3 **Linearity bound on a type parameter**, which
-  closes three of them. Revisit per the doc's §12 triggers.
+  closes three of them. When it lands, uncomment the `LArr` sieves in `examples/sieve.sprout`.
+  Revisit per the doc's §12 triggers.
 - [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
   (`LMatrix Int Int (LArr a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a
   function consumes a linear constructor and builds one of the same shape, reuse its memory, as
