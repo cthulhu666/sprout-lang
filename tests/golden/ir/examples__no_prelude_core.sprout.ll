@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -529,9 +529,10 @@ entry:
   %t$25 = alloca i64
   store i64 %t$1, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$2$st = call { i64, i64 } @lookup_worker(i64 %t$1, i64 %p$settings)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @lookup_worker(i64 %t$1, i64 %p$settings)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 0
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -552,9 +553,10 @@ do_cont_4:
   %t$33 = alloca i64
   store i64 %t$9, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
-  %t$10$st = call { i64, i64 } @lookup_worker(i64 %t$9, i64 %p$settings)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @lookup_worker(i64 %t$9, i64 %p$settings)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$35 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 0
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -777,7 +779,7 @@ join_0:
   ret i64 %t$1
 }
 
-define { i64, i64 } @lookup_worker(i64 %p$key, i64 %p$settings) {
+define i128 @lookup_worker(i64 %p$key, i64 %p$settings) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$settings)
   br label %arm_0_1
@@ -836,18 +838,22 @@ join_1:
   %t$20 = icmp eq i64 %t$18, %t$19
   br i1 %t$20, label %wrepack_hit_19, label %wrepack_next_19
 wrepack_hit_19:
-  %t$22$r0 = insertvalue { i64, i64 } undef, i64 %t$18, 0
-  %t$22$r1 = insertvalue { i64, i64 } %t$22$r0, i64 0, 1
-  ret { i64, i64 } %t$22$r1
+  %t$22$lo = zext i64 %t$18 to i128
+  %t$22$hw = zext i64 0 to i128
+  %t$22$hi = shl i128 %t$22$hw, 64
+  %t$22$r = or i128 %t$22$hi, %t$22$lo
+  ret i128 %t$22$r
 wrepack_next_19:
   %t$23 = add i64 0, 1
   %t$24 = icmp eq i64 %t$18, %t$23
   br i1 %t$24, label %wrepack_hit_23, label %wrepack_next_23
 wrepack_hit_23:
   %t$25 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$26$r0 = insertvalue { i64, i64 } undef, i64 %t$18, 0
-  %t$26$r1 = insertvalue { i64, i64 } %t$26$r0, i64 %t$25, 1
-  ret { i64, i64 } %t$26$r1
+  %t$26$lo = zext i64 %t$18 to i128
+  %t$26$hw = zext i64 %t$25 to i128
+  %t$26$hi = shl i128 %t$26$hw, 64
+  %t$26$r = or i128 %t$26$hi, %t$26$lo
+  ret i128 %t$26$r
 wrepack_next_23:
   call void @sprout_abort_match()
   unreachable

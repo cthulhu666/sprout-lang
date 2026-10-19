@@ -4,7 +4,8 @@
 > (worker/wrapper for non-recursive user-defined functions) merged from
 > `perf/cpr-unboxing` in May 2026. No width=3 unboxed extern exists, and
 > neither does the sret path one would need: it lived in `codegen.sprout`,
-> deleted with the direct backend (`5f29b9da`). See
+> deleted with the direct backend (`5f29b9da`). The width-2 return below is
+> `i128` since 2026-10-19, not `{ i64, i64 }`. See
 > `docs/compiler-internals.md` §CPR extern ABI. The "draft" suffix is
 > retained because the file name is referenced from BACKLOG.md; it is not
 > a current design proposal.

@@ -1613,6 +1613,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `["sh", "-c", …]` and there is no `sh` on Windows, so the driver needs its own fix beyond the
   builtin. **DECISION PENDING (owner):** implement, or ship a loud stub? A stub is a legitimate
   answer, but that is a product call.
+- [ ] `P2` **The CPR `_unboxed` externs have no Windows x64 ABI.** Emitted IR declares
+  `i128 @X_unboxed` and gets it back in rax/rdx. MSVC returns a 16-byte struct through `sret`,
+  clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so no C form of
+  `SproutUnboxed2` matches: a call returns garbage. Windows ARM64 under clang agrees (`i128`).
+  Fix before W3 links the runtime: an out-pointer declare on Windows x64, or no CPR externs
+  there. `docs/compiler-internals.md` §CPR extern ABI.
 - [ ] `P3` **Milestone B — run the *compiler* on Windows.** Everything outside the runtime: the
   `justfile` and `scripts/*.sh` are bash, the bootstrap-seed flow assumes a POSIX shell, `mise`
   provisions the toolchain. Realistically MSYS2 or WSL rather than a native port. Strictly
@@ -2242,12 +2248,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   perft, so it is workload-dependent and unmeasured elsewhere. Not a candidate for the
   416-binary test path — a binary that runs once cannot repay any extra link.
   `docs/cross-tu-inlining-v0.md` §5.2.
-- [ ] `P2` **Whole-program linking cannot inline the CPR `_unboxed` externs on aarch64.** Emitted
-  IR declares `{ i64, i64 } @bytes_get_unboxed`; clang compiles the C to `[2 x i64]` on arm64
-  and aarch64 Linux (x86_64 agrees). The registers match, the IR types do not, so LLVM will not
-  inline: a base64 loop kept every `bytes_get_unboxed`/`vector_get_unboxed` call and timed the
-  same linked whole or per file. Fix in the emitted declare or in `link_whole_program.sh`.
-  `docs/byte-buffer-v0.md` §3.
 - [ ] `P2` **Inline `Bytes` reads the way B1 inlines `Vector Double`.** `bytes_get_unboxed` is a
   C call per byte. B1 (`IRVecGetD`) covers only `Vector Double`, because generic wrappers erase
   other element types; `Bytes` holds only bytes, so no specialisation is needed. Hand-inlined

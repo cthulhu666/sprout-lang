@@ -10,7 +10,7 @@ import stdlib.compiler.typed_ast as typed_ast
 
 # Pins the MEMBERSHIP of ast_to_ir.unboxed_maybe_extern_name — the Tier-1 CPR
 # allow-list that decides whether `match <extern>(..)` emits IRCallUnboxed2 (a
-# { i64, i64 } call into a `<name>_unboxed` C variant) or an ordinary boxed
+# i128 call into a `<name>_unboxed` C variant) or an ordinary boxed
 # `call i64 @<name>`.
 #
 # Until 2026-08-19 that list had NO test: nothing in tests/ referenced
@@ -150,35 +150,38 @@ fn main() -> Unit !{IO} =
     vget <- translate_or_msg(probe_two_arg("vector_get"))
     assert_true(state, "vector_get fixture translates", translated(vget))
     assert_true(state, "vector_get keeps CPR (non-allocating read)",
-                has(vget, "call { i64, i64 } @vector_get_unboxed"))
+                has(vget, "call i128 @vector_get_unboxed"))
+    # The tag is the low word, the payload the high one (SproutUnboxed2's packing).
+    assert_true(state, "vector_get payload is the high word",
+                has(vget, "= lshr i128 "))
 
     schar <- translate_or_msg(probe_two_arg("str_char_at"))
     assert_true(state, "str_char_at keeps CPR (non-allocating read)",
-                has(schar, "call { i64, i64 } @str_char_at_unboxed"))
+                has(schar, "call i128 @str_char_at_unboxed"))
 
     mget <- translate_or_msg(probe_two_arg("map_get"))
     assert_true(state, "map_get keeps CPR (non-allocating read)",
-                has(mget, "call { i64, i64 } @map_get_unboxed"))
+                has(mget, "call i128 @map_get_unboxed"))
 
     mnk <- translate_or_msg(probe_two_arg("map_nth_key"))
     assert_true(state, "map_nth_key keeps CPR (non-allocating read)",
-                has(mnk, "call { i64, i64 } @map_nth_key_unboxed"))
+                has(mnk, "call i128 @map_nth_key_unboxed"))
 
     mnv <- translate_or_msg(probe_two_arg("map_nth_value"))
     assert_true(state, "map_nth_value keeps CPR (non-allocating read)",
-                has(mnv, "call { i64, i64 } @map_nth_value_unboxed"))
+                has(mnv, "call i128 @map_nth_value_unboxed"))
 
     bget <- translate_or_msg(probe_two_arg("bytes_get"))
     assert_true(state, "bytes_get keeps CPR (non-allocating read)",
-                has(bget, "call { i64, i64 } @bytes_get_unboxed"))
+                has(bget, "call i128 @bytes_get_unboxed"))
 
     aget <- translate_or_msg(probe_one_arg("argv_get"))
     assert_true(state, "argv_get keeps CPR (returns an interned argv entry)",
-                has(aget, "call { i64, i64 } @argv_get_unboxed"))
+                has(aget, "call i128 @argv_get_unboxed"))
 
     eget <- translate_or_msg(probe_one_arg("env_get"))
     assert_true(state, "env_get keeps CPR (interned, GC-invisible)",
-                has(eget, "call { i64, i64 } @env_get_unboxed"))
+                has(eget, "call i128 @env_get_unboxed"))
 
     # --- The ir_lowering declare block, pinned POSITIVELY. -------------------
     # Checking only that the two removed names are ABSENT would stay green if a
@@ -188,21 +191,21 @@ fn main() -> Unit !{IO} =
     # ir_lowering emits the whole block unconditionally, so ONE fixture's IR
     # carries all eight declares.
     assert_true(state, "declare: vector_get_unboxed",
-                has(eget, "declare { i64, i64 } @vector_get_unboxed(i64, i64)"))
+                has(eget, "declare i128 @vector_get_unboxed(i64, i64)"))
     assert_true(state, "declare: map_get_unboxed",
-                has(eget, "declare { i64, i64 } @map_get_unboxed(i64, i64)"))
+                has(eget, "declare i128 @map_get_unboxed(i64, i64)"))
     assert_true(state, "declare: map_nth_key_unboxed",
-                has(eget, "declare { i64, i64 } @map_nth_key_unboxed(i64, i64)"))
+                has(eget, "declare i128 @map_nth_key_unboxed(i64, i64)"))
     assert_true(state, "declare: map_nth_value_unboxed",
-                has(eget, "declare { i64, i64 } @map_nth_value_unboxed(i64, i64)"))
+                has(eget, "declare i128 @map_nth_value_unboxed(i64, i64)"))
     assert_true(state, "declare: bytes_get_unboxed",
-                has(eget, "declare { i64, i64 } @bytes_get_unboxed(i64, i64)"))
+                has(eget, "declare i128 @bytes_get_unboxed(i64, i64)"))
     assert_true(state, "declare: str_char_at_unboxed",
-                has(eget, "declare { i64, i64 } @str_char_at_unboxed(i64, i64)"))
+                has(eget, "declare i128 @str_char_at_unboxed(i64, i64)"))
     assert_true(state, "declare: argv_get_unboxed",
-                has(eget, "declare { i64, i64 } @argv_get_unboxed(i64)"))
+                has(eget, "declare i128 @argv_get_unboxed(i64)"))
     assert_true(state, "declare: env_get_unboxed",
-                has(eget, "declare { i64, i64 } @env_get_unboxed(i64)"))
+                has(eget, "declare i128 @env_get_unboxed(i64)"))
 
     # --- Membership is an explicit allow-list, not a suffix convention. -------
     # Locks that nothing opts in merely by existing: an extern absent from

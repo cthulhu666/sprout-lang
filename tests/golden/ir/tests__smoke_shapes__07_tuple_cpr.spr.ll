@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -127,9 +127,10 @@ entry:
 
 define i64 @main.use_pair(i64 %p$a, i64 %p$b) {
 entry:
-  %t$0$st = call { i64, i64 } @main.swap_pair_worker(i64 %p$a, i64 %p$b)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @main.swap_pair_worker(i64 %p$a, i64 %p$b)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$0, i64 %t$1)
   %t$2 = extractvalue { i64, i1 } %t$2$agg, 0
   %t$2$ovf = extractvalue { i64, i1 } %t$2$agg, 1
@@ -152,11 +153,13 @@ entry:
   ret i64 %t$3
 }
 
-define { i64, i64 } @main.swap_pair_worker(i64 %p$a, i64 %p$b) {
+define i128 @main.swap_pair_worker(i64 %p$a, i64 %p$b) {
 entry:
-  %t$0$r0 = insertvalue { i64, i64 } undef, i64 %p$b, 0
-  %t$0$r1 = insertvalue { i64, i64 } %t$0$r0, i64 %p$a, 1
-  ret { i64, i64 } %t$0$r1
+  %t$0$lo = zext i64 %p$b to i128
+  %t$0$hw = zext i64 %p$a to i128
+  %t$0$hi = shl i128 %t$0$hw, 64
+  %t$0$r = or i128 %t$0$hi, %t$0$lo
+  ret i128 %t$0$r
 }
 
 define void @__sprout_init_globals() {

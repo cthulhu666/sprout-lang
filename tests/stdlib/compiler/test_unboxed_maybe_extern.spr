@@ -10,7 +10,7 @@ import stdlib.compiler.source as source
 
 # Tier-1 CPR peephole: a `match` whose scrutinee is a direct call to a
 # Maybe-returning C extern with an `_unboxed` variant must lower to an
-# UNBOXED { i64, i64 } call + extractvalue — NOT a boxed @vector_get call
+# UNBOXED i128 call, split by trunc/lshr — NOT a boxed @vector_get call
 # read back with @sprout_tag / @sprout_field.  This eliminates the per-call
 # `Just` heap allocation (measured ~20 ns/get, ~71% of the get cost).
 
@@ -70,8 +70,8 @@ fn main() -> Unit !{IO} =
             [
               check_true("unboxed call emitted",
                 str_find(ir, "@vector_get_unboxed") >= 0),
-              check_true("extractvalue emitted",
-                str_find(ir, "extractvalue") >= 0),
+              check_true("payload split from the i128",
+                str_find(ir, "lshr i128 ") >= 0),
               check_true("no boxed vector_get call at match site",
                 str_find(ir, "call i64 @vector_get(") < 0)
             ])

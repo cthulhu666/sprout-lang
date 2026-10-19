@@ -1,7 +1,7 @@
 import stdlib.test (check_eq, run_suite)
 
 # Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1): a fn returning a 2-tuple that is immediately
-# matched by a tuple pattern unboxes to a `{ i64, i64 }` worker — the tuple never touches the heap.
+# matched by a tuple pattern unboxes to an `i128` worker — the tuple never touches the heap.
 # The optimization is value-NEUTRAL, so these assert the SEMANTICS are identical whether the result
 # is boxed or unboxed. The IR-shape win (no sprout_alloc_tuple_blob at the matched call site) is
 # checked separately via tests/smoke_shapes/07_tuple_cpr.spr. Three tail shapes are exercised so the

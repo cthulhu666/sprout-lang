@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -972,9 +972,10 @@ entry:
   %t$16 = alloca i64
   store i64 %p$body, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0$st = call { i64, i64 } @stdlib.http.http_status_info_worker(i64 %p$status)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.http.http_status_info_worker(i64 %p$status)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -1038,9 +1039,10 @@ entry:
   %t$11 = alloca i64
   store i64 %p$body, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$1$st = call { i64, i64 } @stdlib.http.http_response_worker(i64 %t$0, i64 %p$body)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.http.http_response_worker(i64 %t$0, i64 %p$body)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -1079,14 +1081,15 @@ entry:
   ret i64 %t$3
 }
 
-define { i64, i64 } @stdlib.http.http_response_worker(i64 %p$status, i64 %p$body) {
+define i128 @stdlib.http.http_response_worker(i64 %p$status, i64 %p$body) {
 entry:
   %t$25 = alloca i64
   store i64 %p$body, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$0$st = call { i64, i64 } @stdlib.http.http_status_info_worker(i64 %p$status)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.http.http_status_info_worker(i64 %p$status)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -1147,24 +1150,28 @@ join_2:
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$16 to i128
+  %t$20$hw = zext i64 %t$19 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$16, %t$21
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$16 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.http.http_status_info_worker(i64 %p$status) {
+define i128 @stdlib.http.http_status_info_worker(i64 %p$status) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -1862,18 +1869,22 @@ join_0:
   %t$181 = icmp eq i64 %t$179, %t$180
   br i1 %t$181, label %wrepack_hit_180, label %wrepack_next_180
 wrepack_hit_180:
-  %t$183$r0 = insertvalue { i64, i64 } undef, i64 %t$179, 0
-  %t$183$r1 = insertvalue { i64, i64 } %t$183$r0, i64 0, 1
-  ret { i64, i64 } %t$183$r1
+  %t$183$lo = zext i64 %t$179 to i128
+  %t$183$hw = zext i64 0 to i128
+  %t$183$hi = shl i128 %t$183$hw, 64
+  %t$183$r = or i128 %t$183$hi, %t$183$lo
+  ret i128 %t$183$r
 wrepack_next_180:
   %t$184 = add i64 0, 1
   %t$185 = icmp eq i64 %t$179, %t$184
   br i1 %t$185, label %wrepack_hit_184, label %wrepack_next_184
 wrepack_hit_184:
   %t$186 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$187$r0 = insertvalue { i64, i64 } undef, i64 %t$179, 0
-  %t$187$r1 = insertvalue { i64, i64 } %t$187$r0, i64 %t$186, 1
-  ret { i64, i64 } %t$187$r1
+  %t$187$lo = zext i64 %t$179 to i128
+  %t$187$hw = zext i64 %t$186 to i128
+  %t$187$hi = shl i128 %t$187$hw, 64
+  %t$187$r = or i128 %t$187$hi, %t$187$lo
+  ret i128 %t$187$r
 wrepack_next_184:
   call void @sprout_abort_match()
   unreachable

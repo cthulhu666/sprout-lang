@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -442,9 +442,10 @@ divovfpanic_6:
   unreachable
 divok_6:
   %t$13 = sdiv i64 %t$2, %t$5
-  %t$14$st = call { i64, i64 } @tcp_wait_worker(i64 %p$handle, i64 %t$1, i64 %t$13) noinline
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @tcp_wait_worker(i64 %p$handle, i64 %t$1, i64 %t$13) noinline
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
   br i1 %t$17, label %do_short_16, label %do_cont_16
@@ -539,9 +540,10 @@ entry:
   %t$11 = alloca i64
   store i64 %p$host, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0$st = call { i64, i64 } @tcp_listen_worker(i64 %p$host, i64 %p$port)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @tcp_listen_worker(i64 %p$host, i64 %p$port)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -603,9 +605,10 @@ entry:
 define i64 @stdlib.net.accept(i64 %p$listener) {
 entry:
   %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %p$listener)
-  %t$1$st = call { i64, i64 } @tcp_accept_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @tcp_accept_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$3 = add i64 0, 8
   %t$4 = icmp eq i64 %t$1, %t$3
   br i1 %t$4, label %do_short_3, label %do_cont_3
@@ -673,9 +676,10 @@ entry:
   %t$54 = alloca i64
   store i64 %p$conn, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$1$st = call { i64, i64 } @stdlib.net.read_avail_timeout_worker(i64 %p$conn, i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.net.read_avail_timeout_worker(i64 %p$conn, i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -689,9 +693,10 @@ body_0_3:
   %t$59 = alloca i64
   store i64 %p$conn, ptr %t$59
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$7$st = call { i64, i64 } @stdlib.net.write_all_worker(i64 %p$conn, i64 %t$2)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.net.write_all_worker(i64 %p$conn, i64 %t$2)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$61 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_9
 arm_0_9:
@@ -914,9 +919,10 @@ join_3:
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 8081
-  %t$1$st = call { i64, i64 } @stdlib.net.listen_local_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.net.listen_local_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   br label %arm_0_3
 arm_0_3:
   %t$5 = add i64 0, 8
@@ -973,9 +979,10 @@ body_1_3:
   %t$56 = alloca i64
   store i64 %t$2, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$18$st = call { i64, i64 } @stdlib.net.accept_worker(i64 %t$2)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.net.accept_worker(i64 %t$2)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_20
 arm_0_20:
@@ -1083,12 +1090,13 @@ entry:
   ret i64 %p$value
 }
 
-define { i64, i64 } @stdlib.net.accept_worker(i64 %p$listener) {
+define i128 @stdlib.net.accept_worker(i64 %p$listener) {
 entry:
   %t$0 = call i64 @stdlib.net.tcp_listener_handle(i64 %p$listener)
-  %t$1$st = call { i64, i64 } @tcp_accept_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @tcp_accept_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$3 = add i64 0, 8
   %t$4 = icmp eq i64 %t$1, %t$3
   br i1 %t$4, label %do_short_3, label %do_cont_3
@@ -1128,24 +1136,28 @@ do_done_3:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.net.listen_local_worker(i64 %p$port) {
+define i128 @stdlib.net.listen_local_worker(i64 %p$port) {
 entry:
   %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.19, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -1160,24 +1172,28 @@ entry:
   br i1 %t$5, label %wrepack_hit_4, label %wrepack_next_4
 wrepack_hit_4:
   %t$6 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$7$r0 = insertvalue { i64, i64 } undef, i64 %t$3, 0
-  %t$7$r1 = insertvalue { i64, i64 } %t$7$r0, i64 %t$6, 1
-  ret { i64, i64 } %t$7$r1
+  %t$7$lo = zext i64 %t$3 to i128
+  %t$7$hw = zext i64 %t$6 to i128
+  %t$7$hi = shl i128 %t$7$hw, 64
+  %t$7$r = or i128 %t$7$hi, %t$7$lo
+  ret i128 %t$7$r
 wrepack_next_4:
   %t$8 = add i64 0, 8
   %t$9 = icmp eq i64 %t$3, %t$8
   br i1 %t$9, label %wrepack_hit_8, label %wrepack_next_8
 wrepack_hit_8:
   %t$10 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$11$r0 = insertvalue { i64, i64 } undef, i64 %t$3, 0
-  %t$11$r1 = insertvalue { i64, i64 } %t$11$r0, i64 %t$10, 1
-  ret { i64, i64 } %t$11$r1
+  %t$11$lo = zext i64 %t$3 to i128
+  %t$11$hw = zext i64 %t$10 to i128
+  %t$11$hi = shl i128 %t$11$hw, 64
+  %t$11$r = or i128 %t$11$hi, %t$11$lo
+  ret i128 %t$11$r
 wrepack_next_8:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.net.read_avail_timeout_worker(i64 %p$conn, i64 %p$timeout_ms) {
+define i128 @stdlib.net.read_avail_timeout_worker(i64 %p$conn, i64 %p$timeout_ms) {
 entry:
   %t$19 = alloca i64
   store i64 %p$conn, ptr %t$19
@@ -1213,24 +1229,28 @@ ovfok_6:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.net.write_all_worker(i64 %p$conn, i64 %p$payload) {
+define i128 @stdlib.net.write_all_worker(i64 %p$conn, i64 %p$payload) {
 entry:
   %t$0 = call i64 @stdlib.net.tcp_connection_handle(i64 %p$conn)
   %t$11 = alloca i64
@@ -1244,24 +1264,28 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$2 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 wrepack_next_3:
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$2, %t$7
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$2 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @tcp_accept_worker(i64 %p$listener) {
+define i128 @tcp_accept_worker(i64 %p$listener) {
 entry:
   %t$0 = call i64 @tcp_accept(i64 %p$listener)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
@@ -1270,24 +1294,28 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @tcp_listen_worker(i64 %p$host, i64 %p$port) {
+define i128 @tcp_listen_worker(i64 %p$host, i64 %p$port) {
 entry:
   %t$10 = alloca i64
   store i64 %p$host, ptr %t$10
@@ -1300,24 +1328,28 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @tcp_wait_worker(i64 %p$conn, i64 %p$interest, i64 %p$ms) {
+define i128 @tcp_wait_worker(i64 %p$conn, i64 %p$interest, i64 %p$ms) {
 entry:
   %t$0 = call i64 @tcp_wait(i64 %p$conn, i64 %p$interest, i64 %p$ms)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
@@ -1326,18 +1358,22 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable

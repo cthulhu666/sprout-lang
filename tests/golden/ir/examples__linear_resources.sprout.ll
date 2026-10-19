@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -1946,9 +1946,10 @@ entry:
   %t$46 = alloca i64
   store i64 %t$7, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$8$st = call { i64, i64 } @examples.linear_resources.retry_worker(i64 %t$6, i64 %t$7)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @examples.linear_resources.retry_worker(i64 %t$6, i64 %t$7)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_10
@@ -2339,7 +2340,7 @@ entry:
   ret i64 %t$0
 }
 
-define { i64, i64 } @examples.linear_resources.retry_worker(i64 %p$times, i64 %p$body) {
+define i128 @examples.linear_resources.retry_worker(i64 %p$times, i64 %p$body) {
 entry:
   %t$0 = add i64 0, 0
   %t$33 = alloca i64
@@ -2420,18 +2421,22 @@ join_3:
   br i1 %t$26, label %wrepack_hit_25, label %wrepack_next_25
 wrepack_hit_25:
   %t$27 = call i64 @sprout_field(i64 %t$4, i64 0)
-  %t$28$r0 = insertvalue { i64, i64 } undef, i64 %t$24, 0
-  %t$28$r1 = insertvalue { i64, i64 } %t$28$r0, i64 %t$27, 1
-  ret { i64, i64 } %t$28$r1
+  %t$28$lo = zext i64 %t$24 to i128
+  %t$28$hw = zext i64 %t$27 to i128
+  %t$28$hi = shl i128 %t$28$hw, 64
+  %t$28$r = or i128 %t$28$hi, %t$28$lo
+  ret i128 %t$28$r
 wrepack_next_25:
   %t$29 = add i64 0, 8
   %t$30 = icmp eq i64 %t$24, %t$29
   br i1 %t$30, label %wrepack_hit_29, label %wrepack_next_29
 wrepack_hit_29:
   %t$31 = call i64 @sprout_field(i64 %t$4, i64 0)
-  %t$32$r0 = insertvalue { i64, i64 } undef, i64 %t$24, 0
-  %t$32$r1 = insertvalue { i64, i64 } %t$32$r0, i64 %t$31, 1
-  ret { i64, i64 } %t$32$r1
+  %t$32$lo = zext i64 %t$24 to i128
+  %t$32$hw = zext i64 %t$31 to i128
+  %t$32$hi = shl i128 %t$32$hw, 64
+  %t$32$r = or i128 %t$32$hi, %t$32$lo
+  ret i128 %t$32$r
 wrepack_next_29:
   call void @sprout_abort_match()
   unreachable

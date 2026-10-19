@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -121,9 +121,10 @@ declare i64 @ref_write(i64, i64)
 
 define i64 @main.color_of(i64 %p$tag) {
 entry:
-  %t$0$st = call { i64, i64 } @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$tag)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$tag)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -254,7 +255,7 @@ join_3:
   ret i64 %t$4
 }
 
-define { i64, i64 } @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$n) {
+define i128 @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$n) {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = icmp eq i64 %p$n, %t$0
@@ -263,9 +264,11 @@ entry:
   br i1 %t$3, label %then_3, label %else_3
 then_3:
   %t$4 = call i64 @sprout_alloc_obj(i64 16, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 else_3:
   %t$6 = add i64 0, 1
   %t$7 = icmp eq i64 %p$n, %t$6
@@ -274,9 +277,11 @@ else_3:
   br i1 %t$9, label %then_9, label %else_9
 then_9:
   %t$10 = call i64 @sprout_alloc_obj(i64 17, i64 0)
-  %t$11$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$11$r1 = insertvalue { i64, i64 } %t$11$r0, i64 %t$10, 1
-  ret { i64, i64 } %t$11$r1
+  %t$11$lo = zext i64 1 to i128
+  %t$11$hw = zext i64 %t$10 to i128
+  %t$11$hi = shl i128 %t$11$hw, 64
+  %t$11$r = or i128 %t$11$hi, %t$11$lo
+  ret i128 %t$11$r
 else_9:
   %t$12 = add i64 0, 2
   %t$13 = icmp eq i64 %p$n, %t$12
@@ -285,13 +290,17 @@ else_9:
   br i1 %t$15, label %then_15, label %else_15
 then_15:
   %t$16 = call i64 @sprout_alloc_obj(i64 18, i64 0)
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 1 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 else_15:
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 0, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 0 to i128
+  %t$18$hw = zext i64 0 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 }
 
 define void @__sprout_init_globals() {

@@ -208,9 +208,22 @@ and runs a function per label family), `tests/conformance/run/wildcard_params.sp
 
 The CPR (Constructed Product Return) path unboxes a call to a C-runtime extern
 that returns a small ADT, instead of allocating it. Every such extern
-(`ast_to_ir.unboxed_maybe_extern_name`) returns a `Maybe`: a 16-byte
-`SproutUnboxed2`, declared `{ i64, i64 } @X_unboxed(...)`. LLVM and Clang agree
-on that return — arm64 Darwin in x0/x1, SysV in rax/rdx.
+(`ast_to_ir.unboxed_maybe_extern_name`) returns a `Maybe` as `SproutUnboxed2`, an
+`unsigned __int128` with the tag in the low word and the payload in the high one,
+declared `i128 @X_unboxed(...)`. It comes back in x0/x1 on AArch64 and rax/rdx on SysV.
+
+It is an integer rather than a two-word struct because the declare must match clang's
+IR type for the C function, not just its registers: LLVM will not inline a call whose
+type differs from the callee's, so whole-program linking keeps the call. Clang spells
+the struct `{ i64, i64 }` on x86_64 and `[2 x i64]` on AArch64, and `i128` on both.
+On arm64, whole-program linked, the struct kept a base64 loop's reads as calls (87 ms);
+`i128` inlines them (64 ms). `just cpr-declare-check` pins every declare to clang's
+definition on the host ([gates.md](gates.md)). Sprout's own width-2 workers (Tier-2 and
+tuple CPR) return `i128` too, since `IRCallUnboxed2` calls both kinds.
+
+**Windows x64 does not fit.** MSVC returns a 16-byte struct through `sret` and
+clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so neither
+form matches the declare. Nothing builds the runtime for Windows yet; see `BACKLOG.md`.
 
 **There is no width-3 extern, and no lowering for one.** Clang returns a 24-byte
 struct through a hidden `sret` pointer, so a `{ i64, i64, i64 }` extern declared

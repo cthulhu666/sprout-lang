@@ -13,7 +13,7 @@ import stdlib.env as env
 # BACKLOG item are stale — which is the point of pinning them.
 #
 # Fact 1 (the win): CPR fires on the OUTER call. A caller that destructures a top-level
-# tuple-returning fn gets `{i64, i64}` back by value — no heap tuple.
+# tuple-returning fn gets an `i128` back by value — no heap tuple.
 #
 # Fact 2 (the gap): CPR does NOT fire on the SELF-RECURSIVE edge. Each recursive step
 # round-trips through the boxed wrapper and calls @sprout_alloc_tuple_blob, so a reduction
@@ -63,7 +63,7 @@ fn ir_text(r: compiler.IrFullResult) -> String =
 
 # A by-value struct return from the CPR worker — the shape that costs nothing.
 fn calls_worker_by_value(ir: String) -> Bool =
-  contains(ir, "call { i64, i64 } @split_worker")
+  contains(ir, "call i128 @split_worker")
 
 # A CALL to the tuple allocator, not the always-present declare.
 fn allocates_tuple(ir: String) -> Bool =
@@ -93,13 +93,13 @@ fn main() -> Unit !{IO} =
           # Structural sanity before any absence proof: an empty string would make every
           # assert_false below pass trivially (the trap test_wrap_codegen.spr calls out).
           assert_true(state, "tuple IR contains the CPR worker definition",
-            contains(tup_ir, "define { i64, i64 } @split_worker"))
+            contains(tup_ir, "define i128 @split_worker"))
           assert_true(state, "accumulator IR contains @reduce_acc definition",
             contains(acc_ir, "define i64 @reduce_acc"))
 
           # Fact 1 — CPR fires on the outer call: the `where`-destructuring caller takes
           # the worker's by-value struct return rather than a boxed tuple.
-          assert_true(state, "where-destructured call takes the by-value {i64,i64} return",
+          assert_true(state, "where-destructured call takes the by-value i128 return",
             calls_worker_by_value(tup_ir))
 
           # Control — the accumulator form never builds a tuple at all. This is the

@@ -3,7 +3,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 
 # GC-stress regression for the Tier-1 CPR peephole (IRCallUnboxed2).
 #
-# The peephole binds a Just payload straight from `extractvalue { i64, i64 } …, 1`
+# The peephole binds a Just payload straight from the high word of the returned `i128`
 # (no heap Just, no IRGetField).  When that payload is a HEAP value (String here)
 # held live ACROSS a later allocation, ir_rooting must root it — op_triggers_gc=
 # true + op_produces_simple_heap→val seeds update_scope so the value is rooted

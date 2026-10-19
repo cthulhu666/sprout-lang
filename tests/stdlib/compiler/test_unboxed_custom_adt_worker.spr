@@ -11,7 +11,7 @@ import stdlib.compiler.source as source
 # Tier-2 CPR generalizes beyond Maybe: ANY width-2 ADT (every constructor holds
 # 0 or 1 field, i.e. max_ar <= 1) is unboxable.  Here a custom `Box a = Empty |
 # Full a` wrapper whose body is `if i < 0 then Empty else Full(i)` must emit a
-# { i64, i64 } worker (tail constructors -> struct, `if` recursed into), and the
+# i128 worker (tail constructors -> struct, `if` recursed into), and the
 # matched call site must route to it — no boxed `@bget` allocation.
 
 fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
@@ -84,9 +84,9 @@ fn main() -> Unit !{IO} =
             let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
             in [
               check_true("custom-ADT worker define emitted",
-                str_find(ir, "define { i64, i64 } @bget_worker(") >= 0),
+                str_find(ir, "define i128 @bget_worker(") >= 0),
               check_true("match site calls the worker",
-                str_find(ir, "call { i64, i64 } @bget_worker(") >= 0),
+                str_find(ir, "call i128 @bget_worker(") >= 0),
               check_true("no boxed bget call at match site",
                 str_find(ir, "call i64 @bget(") < 0)
             ])

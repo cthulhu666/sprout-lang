@@ -129,7 +129,7 @@ fn stream_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                         | Err msg -> Err(msg)
                         | Ok s2 -> stream_decls(rest, penv, s2)
 
-# Tier-2 CPR: stream an unboxed { i64, i64 } worker for each matched callee,
+# Tier-2 CPR: stream an unboxed i128 worker for each matched callee,
 # AFTER all boxed decls (so an escaping use resolves to the boxed original).
 # Each worker is rooted + lowered through emit_one_fn like any other fn.
 fn stream_workers(names: List String, plan: ast_to_ir.WorkerPlan,

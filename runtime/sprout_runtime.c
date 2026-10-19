@@ -1832,10 +1832,18 @@ void sprout_roots_free(SproutRoots* r) {
  * The shadow root stack (sprout_gc_push_i64_root / sprout_gc_pop_roots)
  * remains in use for generated Sprout IR code; handles are for C builtins.
  */
-/* CPR unboxed return types: returned in registers by _unboxed extern variants.
- * The caller (codegen) extracts tag + fields via LLVM extractvalue and never
- * heap-allocates the ADT wrapper when the result is immediately pattern-matched. */
-typedef struct { int64_t tag; int64_t f0; } SproutUnboxed2;
+/* CPR unboxed return type of the _unboxed extern variants: tag in the low word,
+ * payload in the high word, returned in two registers. An integer, not a struct:
+ * clang spells unsigned __int128 `i128` on x86_64 SysV and AArch64, matching the
+ * emitted declare, while a two-word struct is `{ i64, i64 }` on x86_64 and
+ * `[2 x i64]` on AArch64, and LLVM will not inline a call whose type differs from
+ * the callee's. Windows x64 matches neither (docs/compiler-internals.md).
+ * `just cpr-declare-check` pins the declares to these definitions. */
+typedef unsigned __int128 SproutUnboxed2;
+
+static inline SproutUnboxed2 sprout_unboxed2(int64_t tag, int64_t f0) {
+  return ((SproutUnboxed2)(uint64_t)f0 << 64) | (uint64_t)tag;
+}
 
 #define SPROUT_HANDLE_TABLE_SIZE 1024
 typedef int32_t SproutHandle;
@@ -6477,72 +6485,73 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * re-rooted via handles before any allocation; the non-moving invariant makes
  * this safe today. */
 
-SproutUnboxed2 env_get_unboxed(const char* name) {
+SproutUnboxed2 env_get_unboxed(long long name_val) {
+  const char* name = (const char*)name_val;
   if (name == NULL) sprout_fail("env_get_unboxed: null name");
   const char* value = getenv(name);
-  if (value == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  if (value == NULL) return sprout_unboxed2(cached_tag_nothing(), 0);
   /* getenv returns bare libc memory; intern to a headered Sprout String. */
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)intern_string(value) };
+  return sprout_unboxed2(cached_tag_just(), (int64_t)(uintptr_t)intern_string(value));
 }
 
 SproutUnboxed2 argv_get_unboxed(long long index) {
   if (index < 0 || g_sprout_argv == NULL || index >= (long long)(g_sprout_argc - 1))
-    return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+    return sprout_unboxed2(cached_tag_nothing(), 0);
   /* argv is bare libc memory; intern to a headered Sprout String. */
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)intern_string(g_sprout_argv[index + 1]) };
+  return sprout_unboxed2(cached_tag_just(), (int64_t)(uintptr_t)intern_string(g_sprout_argv[index + 1]));
 }
 
 SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   const char* s = (const char*)s_val;
   if (s == NULL) sprout_fail("str_char_at_unboxed: null input");
-  if (index < 0) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  if (index < 0) return sprout_unboxed2(cached_tag_nothing(), 0);
   size_t byte_pos = 0;
   long long cp_idx = 0;
   while (s[byte_pos] != '\0') {
     size_t width = sprout_utf8_step(s, byte_pos);
     if (cp_idx == index) {
       /* A Sprout Char is its Unicode codepoint (immediate i64) — return it. */
-      return (SproutUnboxed2){ cached_tag_just(),
-                               (int64_t)sprout_utf8_decode_at(s, byte_pos, width) };
+      return sprout_unboxed2(cached_tag_just(),
+                             (int64_t)sprout_utf8_decode_at(s, byte_pos, width));
     }
     byte_pos += width;
     cp_idx++;
   }
-  return (SproutUnboxed2){ cached_tag_nothing(), 0 };
+  return sprout_unboxed2(cached_tag_nothing(), 0);
 }
 
 SproutUnboxed2 vector_get_unboxed(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) sprout_fail("vector_get_unboxed: null vector");
-  if (index < 0 || index >= v->len) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), v->data[index] };
+  if (index < 0 || index >= v->len) return sprout_unboxed2(cached_tag_nothing(), 0);
+  return sprout_unboxed2(cached_tag_just(), v->data[index]);
 }
 
 SproutUnboxed2 map_get_unboxed(long long map_h, long long key_val) {
   const char* key = (const char*)key_val;
   if (key == NULL) sprout_fail("map_get_unboxed: null key");
   long long found = bst_get(map_h, key);
-  if (found == LLONG_MIN) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), found };
+  if (found == LLONG_MIN) return sprout_unboxed2(cached_tag_nothing(), 0);
+  return sprout_unboxed2(cached_tag_just(), found);
 }
 
 SproutUnboxed2 map_nth_key_unboxed(long long map_h, long long index) {
   BSTNode* node = bst_nth_node(map_h, index);
-  if (node == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)(uintptr_t)node->key };
+  if (node == NULL) return sprout_unboxed2(cached_tag_nothing(), 0);
+  return sprout_unboxed2(cached_tag_just(), (int64_t)(uintptr_t)node->key);
 }
 
 SproutUnboxed2 map_nth_value_unboxed(long long map_h, long long index) {
   BSTNode* node = bst_nth_node(map_h, index);
-  if (node == NULL) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), node->value };
+  if (node == NULL) return sprout_unboxed2(cached_tag_nothing(), 0);
+  return sprout_unboxed2(cached_tag_just(), node->value);
 }
 
 SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) sprout_fail("bytes_get_unboxed: null bytes");
-  if (index < 0 || (size_t)index >= value->len) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), (int64_t)value->data[index] };
+  if (index < 0 || (size_t)index >= value->len) return sprout_unboxed2(cached_tag_nothing(), 0);
+  return sprout_unboxed2(cached_tag_just(), (int64_t)value->data[index]);
 }
 
 /* ── end CPR unboxed extern variants ────────────────────────────────────────*/

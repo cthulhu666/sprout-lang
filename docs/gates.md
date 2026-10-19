@@ -242,6 +242,18 @@ Added 2026-09-11 for a specific class: LLVM passes that break the `musttail` inv
 A fixture belongs here when its *shape* is what provokes the optimizer, not its output; assert
 nothing about what it prints, and keep it small enough that the IR is readable when it fires.
 
+## CPR declares — `just cpr-declare-check`
+
+Compares each `declare … @<name>_unboxed(…)` in emitted IR with clang's `define` of that C
+function, return and parameter types both. The registers agree even when the types do not, so a
+mismatch passes every test, but LLVM will not inline a call whose type differs from the callee's,
+and whole-program linking (`scripts/link_whole_program.sh`) silently keeps the call.
+
+Added 2026-10-19, when the declares said `{ i64, i64 }` and clang compiled `SproutUnboxed2`, then
+a two-word struct, to `[2 x i64]` on aarch64: a base64 loop kept every read as a call. x86_64
+lowers that struct to `{ i64, i64 }`, so the gate runs on both: in `just ci-fast-gates` (Linux
+x86_64) and as its own step in the macOS (arm64) CI job.
+
 ## fmt/lint batching — `just fmt-batch-smoke`
 
 Asserts what the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch is processed, an
