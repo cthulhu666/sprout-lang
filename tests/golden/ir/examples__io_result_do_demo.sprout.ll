@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -195,9 +195,10 @@ entry:
   %t$5$ptr = inttoptr i64 %t$4 to ptr
   %t$5 = call i64 @print_str(ptr %t$5$ptr)
   %t$6 = add i64 0, 8
-  %t$7$st = call { i64, i64 } @stdlib.crypto.random_bytes_worker(i64 %t$6)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.crypto.random_bytes_worker(i64 %t$6)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   br i1 %t$10, label %do_short_9, label %do_cont_9
@@ -229,9 +230,10 @@ do_done_9:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0$st = call { i64, i64 } @examples.io_result_do_demo.random_payload_size_worker()
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @examples.io_result_do_demo.random_payload_size_worker()
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 7
@@ -279,7 +281,7 @@ entry:
   ret i64 %t$0
 }
 
-define { i64, i64 } @examples.io_result_do_demo.random_payload_size_worker() {
+define i128 @examples.io_result_do_demo.random_payload_size_worker() {
 entry:
   %t$0 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -290,9 +292,10 @@ entry:
   %t$5$ptr = inttoptr i64 %t$4 to ptr
   %t$5 = call i64 @print_str(ptr %t$5$ptr)
   %t$6 = add i64 0, 8
-  %t$7$st = call { i64, i64 } @stdlib.crypto.random_bytes_worker(i64 %t$6)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.crypto.random_bytes_worker(i64 %t$6)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   br i1 %t$10, label %do_short_9, label %do_cont_9
@@ -325,24 +328,28 @@ do_done_9:
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$16 to i128
+  %t$20$hw = zext i64 %t$19 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$16, %t$21
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$16 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.crypto.random_bytes_worker(i64 %p$$l_count) {
+define i128 @stdlib.crypto.random_bytes_worker(i64 %p$$l_count) {
 entry:
   %t$0 = call i64 @crypto_random_bytes(i64 %p$$l_count)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
@@ -351,18 +358,22 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable

@@ -87,13 +87,13 @@ fn main() -> Unit !{IO} =
     # Asserted on the CALL, not on the bare name: ir_lowering emits the `declare` for all eight
     # allow-listed names unconditionally, so `bytes_get_unboxed` is present either way.
     assert_false(state, "a helper-consumed Maybe never reaches CPR",
-                 has(helper, "call { i64, i64 } @bytes_get_unboxed"))
+                 has(helper, "call i128 @bytes_get_unboxed"))
 
     # The fix: a direct match with simple arms reaches the unboxed read.
     direct <- translate_or_msg(probe_via_match())
     assert_true(state, "match fixture translates", translated(direct))
     assert_true(state, "a directly-matched Maybe keeps CPR (no allocation per read)",
-                has(direct, "call { i64, i64 } @bytes_get_unboxed"))
+                has(direct, "call i128 @bytes_get_unboxed"))
     assert_false(state, "a directly-matched Maybe emits no boxed call",
                  has(direct, "call i64 @bytes_get("))
 

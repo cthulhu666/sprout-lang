@@ -53,7 +53,7 @@ fn is_nonallocating_read(fname: String) -> Bool =
   || fname == "vector_truncate"
 
 # B2 reach extension.  The Tier-1 CPR peephole rewrites a matched/do-bound
-# Maybe-returning read into an `_unboxed` { i64, i64 } extern (IRCallUnboxed2),
+# Maybe-returning read into an `_unboxed` i128 extern (IRCallUnboxed2),
 # which returns { tag, value } BY VALUE.  The reads below build no Sprout heap
 # object (all verified in runtime/sprout_runtime.c — only add a name after
 # reading its body):

@@ -114,13 +114,13 @@ fn main() -> Unit !{IO} =
             let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
             in [
               check_true("concrete-result callee still emits a worker",
-                str_find(ir, "define { i64, i64 } @bget_worker(") >= 0),
+                str_find(ir, "define i128 @bget_worker(") >= 0),
               check_true("concrete-result call site still routes to it",
-                str_find(ir, "call { i64, i64 } @bget_worker(") >= 0),
+                str_find(ir, "call i128 @bget_worker(") >= 0),
               check_true("known-head generic result still emits a worker",
-                str_find(ir, "define { i64, i64 } @gbox_worker(") >= 0),
+                str_find(ir, "define i128 @gbox_worker(") >= 0),
               check_true("known-head generic call site still routes to it",
-                str_find(ir, "call { i64, i64 } @gbox_worker(") >= 0),
+                str_find(ir, "call i128 @gbox_worker(") >= 0),
               check_true("tyvar-result callee emits NO worker",
                 str_find(ir, "@gident_worker") < 0),
               check_true("tyvar-result call site stays boxed",

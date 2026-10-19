@@ -205,22 +205,24 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
   | sprout_ir.IRPhi r ty pairs -> "  " ++ r ++ " = phi " ++ ty ++ " " ++ lower_phi_pairs(pairs)
   | sprout_ir.IRCall r _kind fname args ->
       "  " ++ r ++ " = call i64 @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")" ++ call_attr
-  # Tier-1 CPR peephole: unboxed { i64, i64 } extern call + two extractvalues.
-  # The struct SSA (<tag>$st) is synthesized here — it never exists at IR level.
-  # The callee is declared explicitly in ir_header() (the 10 `declare { i64, i64 }
-  # @<fn>_unboxed` lines) — an implicit declaration from the call site is NOT
-  # emitted; the C runtime provides `SproutUnboxed2 <fn>(long long, …)`
-  # (ABI-identical to { i64, i64 }).
+  # CPR call, split into tag (low word) and payload (high word); the <tag>$st/$hi
+  # SSAs exist only here. The callee is a C `_unboxed` extern declared in
+  # ir_header(), or a Sprout CPR worker (IRRetUnboxed2). Both return i128 because
+  # clang spells the C `unsigned __int128` that way on x86_64 and AArch64, where a
+  # two-word struct differs per target and blocks whole-program inlining.
   | sprout_ir.IRCallUnboxed2 tag val _vk fname args ->
-      "  " ++ tag ++ "$st = call { i64, i64 } @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")" ++ call_attr ++ "\n" ++
-      "  " ++ tag ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 0\n" ++
-      "  " ++ val ++ " = extractvalue { i64, i64 } " ++ tag ++ "$st, 1"
-  # Tier-2 CPR worker return: pack (tag, val) into the { i64, i64 } ABI and
-  # return by value.  `undef` seeds the aggregate; two insertvalues fill it.
+      "  " ++ tag ++ "$st = call i128 @" ++ fname ++ "(" ++ lower_call_args(args) ++ ")" ++ call_attr ++ "\n" ++
+      "  " ++ tag ++ " = trunc i128 " ++ tag ++ "$st to i64\n" ++
+      "  " ++ tag ++ "$hi = lshr i128 " ++ tag ++ "$st, 64\n" ++
+      "  " ++ val ++ " = trunc i128 " ++ tag ++ "$hi to i64"
+  # Tier-2 CPR worker return: pack (tag, val) into the i128 that IRCallUnboxed2
+  # splits, tag in the low word, and return it by value.
   | sprout_ir.IRRetUnboxed2 base tag val ->
-      "  " ++ base ++ "$r0 = insertvalue { i64, i64 } undef, i64 " ++ tag ++ ", 0\n" ++
-      "  " ++ base ++ "$r1 = insertvalue { i64, i64 } " ++ base ++ "$r0, i64 " ++ val ++ ", 1\n" ++
-      "  ret { i64, i64 } " ++ base ++ "$r1"
+      "  " ++ base ++ "$lo = zext i64 " ++ tag ++ " to i128\n" ++
+      "  " ++ base ++ "$hw = zext i64 " ++ val ++ " to i128\n" ++
+      "  " ++ base ++ "$hi = shl i128 " ++ base ++ "$hw, 64\n" ++
+      "  " ++ base ++ "$r = or i128 " ++ base ++ "$hi, " ++ base ++ "$lo\n" ++
+      "  ret i128 " ++ base ++ "$r"
   # Width-3 tuple-CPR call: unboxed { i64, i64, i64 } worker call + three extractvalues.
   # Direct register/memory return (LLVM-to-LLVM self-consistent; no sret).  The struct SSA
   # (<s0>$st) is synthesized here — it never exists at IR level.  The worker is a Sprout
@@ -553,17 +555,18 @@ let runtime_declares: List RuntimeDeclare =
    # The arity-generic boxed-ADT constructor: IRMakeCtor is a call plus one store
    # per field, so the only arity limit is ast_to_ir's max_boxed_arity.
    decl("i64", "sprout_alloc_obj", "i64, i64"),
-   # Tier-1 CPR peephole: the { i64, i64 } variants of the Maybe-returning
-   # externs, called by IRCallUnboxed2. In step with ast_to_ir's
-   # unboxed_maybe_extern_name; test_ir_codegen_cpr_maybe_externs.spr pins both.
-   decl("{ i64, i64 }", "vector_get_unboxed", "i64, i64"),
-   decl("{ i64, i64 }", "map_get_unboxed", "i64, i64"),
-   decl("{ i64, i64 }", "map_nth_key_unboxed", "i64, i64"),
-   decl("{ i64, i64 }", "map_nth_value_unboxed", "i64, i64"),
-   decl("{ i64, i64 }", "bytes_get_unboxed", "i64, i64"),
-   decl("{ i64, i64 }", "str_char_at_unboxed", "i64, i64"),
-   decl("{ i64, i64 }", "argv_get_unboxed", "i64"),
-   decl("{ i64, i64 }", "env_get_unboxed", "i64"),
+   # Tier-1 CPR peephole: the i128 variants of the Maybe-returning externs,
+   # called by IRCallUnboxed2. In step with ast_to_ir's unboxed_maybe_extern_name;
+   # test_ir_codegen_cpr_maybe_externs.spr pins both, and `just cpr-declare-check`
+   # pins each line to the C definition as clang compiles it.
+   decl("i128", "vector_get_unboxed", "i64, i64"),
+   decl("i128", "map_get_unboxed", "i64, i64"),
+   decl("i128", "map_nth_key_unboxed", "i64, i64"),
+   decl("i128", "map_nth_value_unboxed", "i64, i64"),
+   decl("i128", "bytes_get_unboxed", "i64, i64"),
+   decl("i128", "str_char_at_unboxed", "i64, i64"),
+   decl("i128", "argv_get_unboxed", "i64"),
+   decl("i128", "env_get_unboxed", "i64"),
    # print() of a String/Char is IRPrintStr -> @print_str; of an Int/Bool a
    # plain IRCall of @print_value; eprint() -> @eprint_str. No runtime `@print`
    # exists, so the prelude's `extern fn print` is filtered out (extern_skip_names).

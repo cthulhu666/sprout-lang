@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -2015,9 +2015,10 @@ tco_loop:
   %p$i = load i64, ptr %t$58
   %p$acc = load i64, ptr %t$59
   %p$seen = load i64, ptr %t$60
-  %t$0$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$s, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @str_char_at_unboxed(i64 %p$s, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -2202,9 +2203,10 @@ join_1:
 define i64 @parse_int(i64 %p$s) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$s, i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @str_char_at_unboxed(i64 %p$s, i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   br label %arm_0_3
 arm_0_3:
   %t$5 = add i64 0, 0
@@ -2299,9 +2301,10 @@ entry:
 
 define i64 @stdlib.bytes.get_or(i64 %p$value, i64 %p$index, i64 %p$fallback) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -5405,9 +5408,10 @@ entry:
   %t$14 = alloca i64
   store i64 %t$0, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$1$st = call { i64, i64 } @stdlib.bytes.to_string_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.bytes.to_string_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -5761,9 +5765,10 @@ entry:
   %t$11 = alloca i64
   store i64 %p$m, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0$st = call { i64, i64 } @stdlib.tui.keys.final_key_worker(i64 %p$f)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.tui.keys.final_key_worker(i64 %p$f)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -6010,9 +6015,10 @@ entry:
   %t$11 = alloca i64
   store i64 %p$m, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0$st = call { i64, i64 } @stdlib.tui.keys.tilde_code_worker(i64 %p$p)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.tui.keys.tilde_code_worker(i64 %p$p)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -6707,9 +6713,10 @@ entry:
   %t$14 = alloca i64
   store i64 %t$0, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$1$st = call { i64, i64 } @stdlib.bytes.to_string_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.bytes.to_string_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -8161,9 +8168,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$chunk, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.unicode.lookup.find_tag_worker(i64 %p$$l_count, i64 %p$chunk, i64 %p$cp)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.unicode.lookup.find_tag_worker(i64 %p$$l_count, i64 %p$chunk, i64 %p$cp)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -8448,9 +8456,10 @@ then_1:
   %t$4 = ptrtoint ptr %t$3 to i64
   br label %join_1
 else_1:
-  %t$5$st = call { i64, i64 } @stdlib.unicode.grapheme.hangul_class_worker(i64 %p$cp)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.unicode.grapheme.hangul_class_worker(i64 %p$cp)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   br label %arm_0_7
 arm_0_7:
   %t$9 = add i64 0, 1
@@ -8491,9 +8500,10 @@ entry:
   %t$12 = alloca i64
   store i64 %t$1, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$2$st = call { i64, i64 } @stdlib.unicode.lookup.find_tag_worker(i64 %t$0, i64 %t$1, i64 %p$cp)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.unicode.lookup.find_tag_worker(i64 %t$0, i64 %t$1, i64 %p$cp)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_4
 arm_0_4:
@@ -8571,9 +8581,10 @@ else_1:
   %t$18 = alloca i64
   store i64 %t$6, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$7$st = call { i64, i64 } @stdlib.unicode.lookup.find_tag_worker(i64 %t$5, i64 %t$6, i64 %p$cp)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.unicode.lookup.find_tag_worker(i64 %t$5, i64 %t$6, i64 %p$cp)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_9
 arm_0_9:
@@ -14388,9 +14399,10 @@ then_4:
   br label %join_4
 else_4:
   %t$7 = add i64 0, 0
-  %t$8$st = call { i64, i64 } @stdlib.bytes.get_worker(i64 %p$held, i64 %t$7)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.bytes.get_worker(i64 %p$held, i64 %t$7)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   br label %arm_0_10
 arm_0_10:
   %t$12 = add i64 0, 1
@@ -16226,9 +16238,10 @@ body_1_1:
   %t$35 = alloca i64
   store i64 %t$9, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
-  %t$10$st = call { i64, i64 } @stdlib.tui.widget.deliver_worker(i64 %t$8, i64 %p$target, i64 %p$d)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.tui.widget.deliver_worker(i64 %t$8, i64 %p$target, i64 %p$d)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$37 = call i64 @sprout_gc_pop_roots(i64 5)
   br label %arm_0_12
 arm_0_12:
@@ -16960,9 +16973,10 @@ join_1:
 
 define i64 @stdlib.tui.widgets.container.fit_dim(i64 %p$a, i64 %p$m) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.tui.widgets.container.grow_along_worker(i64 %p$a, i64 %p$m)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.tui.widgets.container.grow_along_worker(i64 %p$a, i64 %p$m)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 84
@@ -18296,9 +18310,10 @@ body_0_1:
   %t$23 = alloca i64
   store i64 %t$6, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$7$st = call { i64, i64 } @stdlib.tui.widget.deliver_worker(i64 %p$child, i64 %t$5, i64 %t$6)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.tui.widget.deliver_worker(i64 %p$child, i64 %t$5, i64 %t$6)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_9
@@ -18865,9 +18880,10 @@ body_0_2:
   %t$26 = alloca i64
   store i64 %t$8, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$9$st = call { i64, i64 } @stdlib.tui.widget.deliver_worker(i64 %t$7, i64 %t$6, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.tui.widget.deliver_worker(i64 %t$7, i64 %t$6, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$28 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_11
@@ -25744,17 +25760,20 @@ join_1:
   ret i64 %t$2
 }
 
-define { i64, i64 } @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index) {
+define i128 @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index) {
 entry:
-  %t$0$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$value, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  %t$2$r0 = insertvalue { i64, i64 } undef, i64 %t$0, 0
-  %t$2$r1 = insertvalue { i64, i64 } %t$2$r0, i64 %t$1, 1
-  ret { i64, i64 } %t$2$r1
+  %t$0$st = call i128 @bytes_get_unboxed(i64 %p$value, i64 %p$index)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$2$lo = zext i64 %t$0 to i128
+  %t$2$hw = zext i64 %t$1 to i128
+  %t$2$hi = shl i128 %t$2$hw, 64
+  %t$2$r = or i128 %t$2$hi, %t$2$lo
+  ret i128 %t$2$r
 }
 
-define { i64, i64 } @stdlib.bytes.to_string_worker(i64 %p$value) {
+define i128 @stdlib.bytes.to_string_worker(i64 %p$value) {
 entry:
   %t$10 = alloca i64
   store i64 %p$value, ptr %t$10
@@ -25767,24 +25786,28 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.tui.keys.final_key_worker(i64 %p$f) {
+define i128 @stdlib.tui.keys.final_key_worker(i64 %p$f) {
 entry:
   %t$0 = add i64 0, 65
   %t$1 = icmp eq i64 %p$f, %t$0
@@ -25793,9 +25816,11 @@ entry:
   br i1 %t$3, label %then_3, label %else_3
 then_3:
   %t$4 = call i64 @sprout_alloc_obj(i64 45, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 else_3:
   %t$6 = add i64 0, 66
   %t$7 = icmp eq i64 %p$f, %t$6
@@ -25804,9 +25829,11 @@ else_3:
   br i1 %t$9, label %then_9, label %else_9
 then_9:
   %t$10 = call i64 @sprout_alloc_obj(i64 46, i64 0)
-  %t$11$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$11$r1 = insertvalue { i64, i64 } %t$11$r0, i64 %t$10, 1
-  ret { i64, i64 } %t$11$r1
+  %t$11$lo = zext i64 1 to i128
+  %t$11$hw = zext i64 %t$10 to i128
+  %t$11$hi = shl i128 %t$11$hw, 64
+  %t$11$r = or i128 %t$11$hi, %t$11$lo
+  ret i128 %t$11$r
 else_9:
   %t$12 = add i64 0, 67
   %t$13 = icmp eq i64 %p$f, %t$12
@@ -25815,9 +25842,11 @@ else_9:
   br i1 %t$15, label %then_15, label %else_15
 then_15:
   %t$16 = call i64 @sprout_alloc_obj(i64 48, i64 0)
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 1 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 else_15:
   %t$18 = add i64 0, 68
   %t$19 = icmp eq i64 %p$f, %t$18
@@ -25826,9 +25855,11 @@ else_15:
   br i1 %t$21, label %then_21, label %else_21
 then_21:
   %t$22 = call i64 @sprout_alloc_obj(i64 47, i64 0)
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 1 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 else_21:
   %t$24 = add i64 0, 70
   %t$25 = icmp eq i64 %p$f, %t$24
@@ -25837,9 +25868,11 @@ else_21:
   br i1 %t$27, label %then_27, label %else_27
 then_27:
   %t$28 = call i64 @sprout_alloc_obj(i64 50, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 1 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 else_27:
   %t$30 = add i64 0, 72
   %t$31 = icmp eq i64 %p$f, %t$30
@@ -25848,9 +25881,11 @@ else_27:
   br i1 %t$33, label %then_33, label %else_33
 then_33:
   %t$34 = call i64 @sprout_alloc_obj(i64 49, i64 0)
-  %t$35$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$35$r1 = insertvalue { i64, i64 } %t$35$r0, i64 %t$34, 1
-  ret { i64, i64 } %t$35$r1
+  %t$35$lo = zext i64 1 to i128
+  %t$35$hw = zext i64 %t$34 to i128
+  %t$35$hi = shl i128 %t$35$hw, 64
+  %t$35$r = or i128 %t$35$hi, %t$35$lo
+  ret i128 %t$35$r
 else_33:
   %t$36 = add i64 0, 90
   %t$37 = icmp eq i64 %p$f, %t$36
@@ -25859,9 +25894,11 @@ else_33:
   br i1 %t$39, label %then_39, label %else_39
 then_39:
   %t$40 = call i64 @sprout_alloc_obj(i64 40, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 1 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 else_39:
   %t$42 = add i64 0, 80
   %t$43 = icmp sge i64 %p$f, %t$42
@@ -25896,16 +25933,20 @@ ovfok_54:
   %t$57$ptr = inttoptr i64 %t$57 to ptr
   %t$57$f0 = getelementptr i64, ptr %t$57$ptr, i64 0
   store i64 %t$54, ptr %t$57$f0
-  %t$58$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$58$r1 = insertvalue { i64, i64 } %t$58$r0, i64 %t$57, 1
-  ret { i64, i64 } %t$58$r1
+  %t$58$lo = zext i64 1 to i128
+  %t$58$hw = zext i64 %t$57 to i128
+  %t$58$hi = shl i128 %t$58$hw, 64
+  %t$58$r = or i128 %t$58$hi, %t$58$lo
+  ret i128 %t$58$r
 else_52:
-  %t$59$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$59$r1 = insertvalue { i64, i64 } %t$59$r0, i64 0, 1
-  ret { i64, i64 } %t$59$r1
+  %t$59$lo = zext i64 0 to i128
+  %t$59$hw = zext i64 0 to i128
+  %t$59$hi = shl i128 %t$59$hw, 64
+  %t$59$r = or i128 %t$59$hi, %t$59$lo
+  ret i128 %t$59$r
 }
 
-define { i64, i64 } @stdlib.tui.keys.tilde_code_worker(i64 %p$p) {
+define i128 @stdlib.tui.keys.tilde_code_worker(i64 %p$p) {
 entry:
   %t$0 = add i64 0, 1
   %t$1 = icmp eq i64 %p$p, %t$0
@@ -25926,9 +25967,11 @@ join_3:
   br i1 %t$10, label %then_10, label %else_10
 then_10:
   %t$11 = call i64 @sprout_alloc_obj(i64 49, i64 0)
-  %t$12$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$12$r1 = insertvalue { i64, i64 } %t$12$r0, i64 %t$11, 1
-  ret { i64, i64 } %t$12$r1
+  %t$12$lo = zext i64 1 to i128
+  %t$12$hw = zext i64 %t$11 to i128
+  %t$12$hi = shl i128 %t$12$hw, 64
+  %t$12$r = or i128 %t$12$hi, %t$12$lo
+  ret i128 %t$12$r
 else_10:
   %t$13 = add i64 0, 2
   %t$14 = icmp eq i64 %p$p, %t$13
@@ -25937,9 +25980,11 @@ else_10:
   br i1 %t$16, label %then_16, label %else_16
 then_16:
   %t$17 = call i64 @sprout_alloc_obj(i64 43, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 1 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 else_16:
   %t$19 = add i64 0, 3
   %t$20 = icmp eq i64 %p$p, %t$19
@@ -25948,9 +25993,11 @@ else_16:
   br i1 %t$22, label %then_22, label %else_22
 then_22:
   %t$23 = call i64 @sprout_alloc_obj(i64 42, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 1 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 else_22:
   %t$25 = add i64 0, 4
   %t$26 = icmp eq i64 %p$p, %t$25
@@ -25971,9 +26018,11 @@ join_28:
   br i1 %t$35, label %then_35, label %else_35
 then_35:
   %t$36 = call i64 @sprout_alloc_obj(i64 50, i64 0)
-  %t$37$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$37$r1 = insertvalue { i64, i64 } %t$37$r0, i64 %t$36, 1
-  ret { i64, i64 } %t$37$r1
+  %t$37$lo = zext i64 1 to i128
+  %t$37$hw = zext i64 %t$36 to i128
+  %t$37$hi = shl i128 %t$37$hw, 64
+  %t$37$r = or i128 %t$37$hi, %t$37$lo
+  ret i128 %t$37$r
 else_35:
   %t$38 = add i64 0, 5
   %t$39 = icmp eq i64 %p$p, %t$38
@@ -25982,9 +26031,11 @@ else_35:
   br i1 %t$41, label %then_41, label %else_41
 then_41:
   %t$42 = call i64 @sprout_alloc_obj(i64 51, i64 0)
-  %t$43$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$43$r1 = insertvalue { i64, i64 } %t$43$r0, i64 %t$42, 1
-  ret { i64, i64 } %t$43$r1
+  %t$43$lo = zext i64 1 to i128
+  %t$43$hw = zext i64 %t$42 to i128
+  %t$43$hi = shl i128 %t$43$hw, 64
+  %t$43$r = or i128 %t$43$hi, %t$43$lo
+  ret i128 %t$43$r
 else_41:
   %t$44 = add i64 0, 6
   %t$45 = icmp eq i64 %p$p, %t$44
@@ -25993,9 +26044,11 @@ else_41:
   br i1 %t$47, label %then_47, label %else_47
 then_47:
   %t$48 = call i64 @sprout_alloc_obj(i64 52, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 1 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 else_47:
   %t$50 = add i64 0, 11
   %t$51 = icmp sge i64 %p$p, %t$50
@@ -26030,9 +26083,11 @@ ovfok_62:
   %t$65$ptr = inttoptr i64 %t$65 to ptr
   %t$65$f0 = getelementptr i64, ptr %t$65$ptr, i64 0
   store i64 %t$62, ptr %t$65$f0
-  %t$66$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$66$r1 = insertvalue { i64, i64 } %t$66$r0, i64 %t$65, 1
-  ret { i64, i64 } %t$66$r1
+  %t$66$lo = zext i64 1 to i128
+  %t$66$hw = zext i64 %t$65 to i128
+  %t$66$hi = shl i128 %t$66$hw, 64
+  %t$66$r = or i128 %t$66$hi, %t$66$lo
+  ret i128 %t$66$r
 else_60:
   %t$67 = add i64 0, 17
   %t$68 = icmp sge i64 %p$p, %t$67
@@ -26067,9 +26122,11 @@ ovfok_79:
   %t$82$ptr = inttoptr i64 %t$82 to ptr
   %t$82$f0 = getelementptr i64, ptr %t$82$ptr, i64 0
   store i64 %t$79, ptr %t$82$f0
-  %t$83$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$83$r1 = insertvalue { i64, i64 } %t$83$r0, i64 %t$82, 1
-  ret { i64, i64 } %t$83$r1
+  %t$83$lo = zext i64 1 to i128
+  %t$83$hw = zext i64 %t$82 to i128
+  %t$83$hi = shl i128 %t$83$hw, 64
+  %t$83$r = or i128 %t$83$hi, %t$83$lo
+  ret i128 %t$83$r
 else_77:
   %t$84 = add i64 0, 23
   %t$85 = icmp sge i64 %p$p, %t$84
@@ -26104,16 +26161,20 @@ ovfok_96:
   %t$99$ptr = inttoptr i64 %t$99 to ptr
   %t$99$f0 = getelementptr i64, ptr %t$99$ptr, i64 0
   store i64 %t$96, ptr %t$99$f0
-  %t$100$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$100$r1 = insertvalue { i64, i64 } %t$100$r0, i64 %t$99, 1
-  ret { i64, i64 } %t$100$r1
+  %t$100$lo = zext i64 1 to i128
+  %t$100$hw = zext i64 %t$99 to i128
+  %t$100$hi = shl i128 %t$100$hw, 64
+  %t$100$r = or i128 %t$100$hi, %t$100$lo
+  ret i128 %t$100$r
 else_94:
-  %t$101$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$101$r1 = insertvalue { i64, i64 } %t$101$r0, i64 0, 1
-  ret { i64, i64 } %t$101$r1
+  %t$101$lo = zext i64 0 to i128
+  %t$101$hw = zext i64 0 to i128
+  %t$101$hi = shl i128 %t$101$hw, 64
+  %t$101$r = or i128 %t$101$hi, %t$101$lo
+  ret i128 %t$101$r
 }
 
-define { i64, i64 } @stdlib.tui.widget.deliver_worker(i64 %p$w, i64 %p$target, i64 %p$d) {
+define i128 @stdlib.tui.widget.deliver_worker(i64 %p$w, i64 %p$target, i64 %p$d) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$w, i64 0)
   %t$1 = call i64 @sprout_field(i64 %t$0, i64 2)
@@ -26135,24 +26196,28 @@ entry:
   %t$7 = icmp eq i64 %t$5, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$5, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 0, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$5 to i128
+  %t$9$hw = zext i64 0 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   %t$10 = add i64 0, 1
   %t$11 = icmp eq i64 %t$5, %t$10
   br i1 %t$11, label %wrepack_hit_10, label %wrepack_next_10
 wrepack_hit_10:
   %t$12 = call i64 @sprout_field(i64 %t$4, i64 0)
-  %t$13$r0 = insertvalue { i64, i64 } undef, i64 %t$5, 0
-  %t$13$r1 = insertvalue { i64, i64 } %t$13$r0, i64 %t$12, 1
-  ret { i64, i64 } %t$13$r1
+  %t$13$lo = zext i64 %t$5 to i128
+  %t$13$hw = zext i64 %t$12 to i128
+  %t$13$hi = shl i128 %t$13$hw, 64
+  %t$13$r = or i128 %t$13$hi, %t$13$lo
+  ret i128 %t$13$r
 wrepack_next_10:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.tui.widgets.container.grow_along_worker(i64 %p$a, i64 %p$m) {
+define i128 @stdlib.tui.widgets.container.grow_along_worker(i64 %p$a, i64 %p$m) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$a)
   br label %arm_0_1
@@ -26180,23 +26245,27 @@ join_1:
   %t$11 = icmp eq i64 %t$9, %t$10
   br i1 %t$11, label %wrepack_hit_10, label %wrepack_next_10
 wrepack_hit_10:
-  %t$13$r0 = insertvalue { i64, i64 } undef, i64 %t$9, 0
-  %t$13$r1 = insertvalue { i64, i64 } %t$13$r0, i64 0, 1
-  ret { i64, i64 } %t$13$r1
+  %t$13$lo = zext i64 %t$9 to i128
+  %t$13$hw = zext i64 0 to i128
+  %t$13$hi = shl i128 %t$13$hw, 64
+  %t$13$r = or i128 %t$13$hi, %t$13$lo
+  ret i128 %t$13$r
 wrepack_next_10:
   %t$14 = add i64 0, 84
   %t$15 = icmp eq i64 %t$9, %t$14
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$9, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 0, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$9 to i128
+  %t$17$hw = zext i64 0 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.unicode.grapheme.hangul_class_worker(i64 %p$cp) {
+define i128 @stdlib.unicode.grapheme.hangul_class_worker(i64 %p$cp) {
 entry:
   %t$0 = add i64 0, 44032
   %t$1 = icmp slt i64 %p$cp, %t$0
@@ -26204,9 +26273,11 @@ entry:
   %t$3 = trunc i64 %t$2 to i1
   br i1 %t$3, label %then_3, label %else_3
 then_3:
-  %t$4$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$4$r1 = insertvalue { i64, i64 } %t$4$r0, i64 0, 1
-  ret { i64, i64 } %t$4$r1
+  %t$4$lo = zext i64 0 to i128
+  %t$4$hw = zext i64 0 to i128
+  %t$4$hi = shl i128 %t$4$hw, 64
+  %t$4$r = or i128 %t$4$hi, %t$4$lo
+  ret i128 %t$4$r
 else_3:
   %t$5 = add i64 0, 55203
   %t$6 = icmp sgt i64 %p$cp, %t$5
@@ -26214,9 +26285,11 @@ else_3:
   %t$8 = trunc i64 %t$7 to i1
   br i1 %t$8, label %then_8, label %else_8
 then_8:
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 0, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 0 to i128
+  %t$9$hw = zext i64 0 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 else_8:
   %t$10 = add i64 0, 44032
   %t$11$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$cp, i64 %t$10)
@@ -26239,18 +26312,22 @@ ovfok_11:
 then_19:
   %t$20 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.304, i64 0, i32 1, i64 0
   %t$21 = ptrtoint ptr %t$20 to i64
-  %t$22$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$22$r1 = insertvalue { i64, i64 } %t$22$r0, i64 %t$21, 1
-  ret { i64, i64 } %t$22$r1
+  %t$22$lo = zext i64 1 to i128
+  %t$22$hw = zext i64 %t$21 to i128
+  %t$22$hi = shl i128 %t$22$hw, 64
+  %t$22$r = or i128 %t$22$hi, %t$22$lo
+  ret i128 %t$22$r
 else_19:
   %t$23 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.305, i64 0, i32 1, i64 0
   %t$24 = ptrtoint ptr %t$23 to i64
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 1 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 }
 
-define { i64, i64 } @stdlib.unicode.lookup.find_tag_worker(i64 %p$$l_count, i64 %p$chunk, i64 %p$cp) {
+define i128 @stdlib.unicode.lookup.find_tag_worker(i64 %p$$l_count, i64 %p$chunk, i64 %p$cp) {
 entry:
   %t$16 = alloca i64
   store i64 %p$chunk, ptr %t$16
@@ -26282,18 +26359,22 @@ ovfok_3:
   %t$9 = icmp eq i64 %t$7, %t$8
   br i1 %t$9, label %wrepack_hit_8, label %wrepack_next_8
 wrepack_hit_8:
-  %t$11$r0 = insertvalue { i64, i64 } undef, i64 %t$7, 0
-  %t$11$r1 = insertvalue { i64, i64 } %t$11$r0, i64 0, 1
-  ret { i64, i64 } %t$11$r1
+  %t$11$lo = zext i64 %t$7 to i128
+  %t$11$hw = zext i64 0 to i128
+  %t$11$hi = shl i128 %t$11$hw, 64
+  %t$11$r = or i128 %t$11$hi, %t$11$lo
+  ret i128 %t$11$r
 wrepack_next_8:
   %t$12 = add i64 0, 1
   %t$13 = icmp eq i64 %t$7, %t$12
   br i1 %t$13, label %wrepack_hit_12, label %wrepack_next_12
 wrepack_hit_12:
   %t$14 = call i64 @sprout_field(i64 %t$6, i64 0)
-  %t$15$r0 = insertvalue { i64, i64 } undef, i64 %t$7, 0
-  %t$15$r1 = insertvalue { i64, i64 } %t$15$r0, i64 %t$14, 1
-  ret { i64, i64 } %t$15$r1
+  %t$15$lo = zext i64 %t$7 to i128
+  %t$15$hw = zext i64 %t$14 to i128
+  %t$15$hi = shl i128 %t$15$hw, 64
+  %t$15$r = or i128 %t$15$hi, %t$15$lo
+  ret i128 %t$15$r
 wrepack_next_12:
   call void @sprout_abort_match()
   unreachable

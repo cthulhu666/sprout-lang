@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -233,9 +233,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$fallback, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.process.proc_stdout_text_worker(i64 %p$r)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.process.proc_stdout_text_worker(i64 %p$r)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -522,7 +523,7 @@ entry:
   ret i64 %t$0
 }
 
-define { i64, i64 } @stdlib.process.proc_stdout_text_worker(i64 %p$r) {
+define i128 @stdlib.process.proc_stdout_text_worker(i64 %p$r) {
 entry:
   %t$0 = call i64 @stdlib.process.proc_stdout_bytes(i64 %p$r)
   %t$11 = alloca i64
@@ -536,18 +537,22 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$2 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 wrepack_next_3:
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$2, %t$7
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$2 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   call void @sprout_abort_match()
   unreachable

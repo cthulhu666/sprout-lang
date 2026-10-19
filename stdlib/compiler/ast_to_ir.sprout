@@ -2284,9 +2284,9 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 # Tier-1 CPR peephole: unbox a `match` over a Maybe-returning C extern.
 # ---------------------------------------------------------------------------
 # When the scrutinee is a DIRECT call to one of the Maybe-returning externs that
-# has an `_unboxed` { i64, i64 } variant, and every arm is a simple Maybe pattern
+# has an `_unboxed` (two-word, i128) variant, and every arm is a simple Maybe pattern
 # (Nothing / Just <var|_> / wildcard), we emit IRCallUnboxed2 + a tag branch that
-# binds the Just payload straight from the returned struct — no heap `Just`.
+# binds the Just payload straight from the returned words — no heap `Just`.
 # This is a dedicated dispatcher: it does NOT touch the shared arm machinery
 # (translate_match_arms/…), so boxed matches are byte-identical to before.
 
@@ -2569,7 +2569,7 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
 
 # --- Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1) ---------------------
 # `match f(args) with | (a, b) -> body` over a top-level fn returning a 2-tuple of non-heap scalars
-# unboxes to `@f_worker` returning `{ i64, i64 }`, so the tuple never touches the heap. All-scalar
+# unboxes to `@f_worker` returning `i128`, so the tuple never touches the heap. All-scalar
 # fields ⇒ the two returned slots carry no GC-rooting obligation (the milestone-1 guard). The tuple
 # pattern is irrefutable (one arm, no tag test), so the call site is simpler than the Maybe path.
 
@@ -2580,7 +2580,7 @@ fn all_non_heap_scalar(ts: List types.Type) -> Bool =
   | Cons t rest -> type_kind.type_is_non_heap_scalar(t) && all_non_heap_scalar(rest)
 
 # The SINGLE width oracle for tuple-CPR (docs/scalar-replacement-v0.md). Returns the width of an
-# all-non-heap-scalar tuple type when it is one the tuple-CPR ABI supports (2 → { i64, i64 } direct;
+# all-non-heap-scalar tuple type when it is one the tuple-CPR ABI supports (2 → i128 direct;
 # 3 → { i64, i64, i64 } direct, no sret); Nothing for non-tuples, heap-field tuples, and widths
 # outside {2,3} (boxed fallback — a documented cap, not an error). The router (tuple_worker_shape),
 # the worker return-type (emit_worker_fn), and the repack tail all consult THIS on the same
@@ -2601,12 +2601,13 @@ fn tuple_repack_is_w3(body: typed_ast.TypedExpr) -> Bool =
 
 # The worker fn's declared LLVM return-type string. A width-3 scalar-tuple worker returns
 # { i64, i64, i64 } (direct, no sret); every other worker (ADT tier-2, width-2 tuple) uses
-# { i64, i64 }. Derived from the same scalar_tuple_width oracle the call site uses, so the
-# `define`'s ret type always matches the IRCallUnboxed{2,3} at the call site.
+# i128, the width-2 ABI it shares with the C `_unboxed` externs. Derived from the same
+# scalar_tuple_width oracle the call site uses, so the `define`'s ret type always matches the
+# IRCallUnboxed{2,3} at the call site.
 fn worker_ret_ty(body: typed_ast.TypedExpr) -> String =
   match scalar_tuple_width(typed_ast.typed_expr_type(body)) with
-  | Just w -> if w == 3 then "{ i64, i64, i64 }" else "{ i64, i64 }"
-  | Nothing -> "{ i64, i64 }"
+  | Just w -> if w == 3 then "{ i64, i64, i64 }" else "i128"
+  | Nothing -> "i128"
 
 # The unboxed struct width a worker-chain tail returns: a scalar 3-tuple → 3; everything else
 # (width-2 ADT chain, scalar 2-tuple, Maybe-extern) → 2. Must equal the chaining worker's
@@ -2932,7 +2933,7 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
                                         cur_label, cur_ops, captures)
   | Nothing ->
       # Tuple-CPR peephole: `match f(args) with (a,b) ->` over a scalar-2-tuple-returning top-level
-      # fn routes to `@f_worker` returning { i64, i64 } — the tuple never touches the heap.
+      # fn routes to `@f_worker` returning i128 — the tuple never touches the heap.
       match unboxed_tuple_match_target(scrut, arms, params, captures, env.prog) with
       | Just ttgt ->
           (match ttgt with
@@ -5799,7 +5800,7 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
   | (let_globals, runtime_lets) ->
       do
         (fns0, idx_map0) <- translate_decls(decls, penv, Nil, dict_empty())
-        # Tier-2 CPR: emit an unboxed { i64, i64 } worker for every matched
+        # Tier-2 CPR: emit an unboxed i128 worker for every matched
         # callee, appended after the boxed fns; their next-free idx is merged
         # into idx_map so the rooting pass can allocate fresh temps.  (The
         # active streaming path does the same in ir_pipeline.stream_workers.)
@@ -5828,7 +5829,7 @@ fn translate_program_after_classify(decls: List typed_ast.TypedDecl,
 # Tier-2 CPR: worker emission for width-2-ADT-returning Sprout fns / externs.
 # ===========================================================================
 # A `match f(args)` over a top-level fn/extern `f` whose result is a width-2 ADT
-# (every ctor holds <=1 field) routes to an emitted `{i64,i64}`-returning worker
+# (every ctor holds <=1 field) routes to an emitted `i128`-returning worker
 # `@f_worker` (unboxed_maybe_match_target) instead of allocating a boxed ctor.
 # Worker emission is TOTAL over the matched-callee set: recognized tail shapes
 # (nullary / 1-field ctor, `if`, chained call to a Maybe-extern) unbox directly;
@@ -6075,7 +6076,7 @@ fn ctor_tag_if(name: String, want_arity: Int, params: List String, captures: Dic
        | Just entry -> if entry.arity == want_arity then Just(entry.tag) else Nothing
        | Nothing -> Nothing
 
-# Translate `body` so every tail position returns the { i64, i64 } worker struct.
+# Translate `body` so every tail position returns the i128 worker value.
 # `worker_set` = fns that have an emitted worker (chain tail-calls to them);
 # `self_name` = the fn being emitted (self-recursive tail-calls stay boxed via the
 # catch-all to keep TCO, rather than chaining un-TCO'd into @self_worker).
@@ -6100,7 +6101,7 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
       | Nothing -> translate_tail_match(scrut, arms, body, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors,
                                 worker_set, self_name)
   | typed_ast.TTuple items _ _ ->
-      # Tuple-CPR worker tail: a 2-tuple literal returns its fields unboxed as { i64, i64 } (only
+      # Tuple-CPR worker tail: a 2-tuple literal returns its fields unboxed as an i128 (only
       # reached for a tuple worker; an ADT worker's result is never a tuple). Non-literal tuple tails
       # fall to the catch-all, which repacks via IRGetTupleField (see translate_tail_catchall).
       translate_tail_tuple(items, params, env, idx, cur_label, cur_ops, captures)
@@ -6263,7 +6264,7 @@ fn tuple_field_fetches(box_ssa: String, slots: List String, i: Int) -> List spro
 
 # Repack a NON-literal tuple tail (a match/var/call returning a 2-tuple, e.g. unwrapping a
 # `wrap (Int,Int)`): translate it normally to a boxed tuple (wrap-aware), then read its two fields
-# into the { i64, i64 } worker struct. The tuple already exists here, so this adds no allocation;
+# into the i128 worker value. The tuple already exists here, so this adds no allocation;
 # it just avoids handing the boxed handle back to the caller. Fields scalar in Stage 1 (no rooting).
 fn translate_tail_tuple_repack(body: typed_ast.TypedExpr, params: List String,
                                env: TxEnv, idx: Int,
@@ -6283,7 +6284,7 @@ fn translate_tail_tuple_repack(body: typed_ast.TypedExpr, params: List String,
         idx1 + width + 1))
 
 # tail chained call to an unboxed-returning target (a Maybe-extern _unboxed, or another fn's worker).
-# `width` is the returned struct's field count: 2 → { i64, i64 } (Maybe-extern, width-2 ADT, or a
+# `width` is the returned struct's field count: 2 → i128 (Maybe-extern, width-2 ADT, or a
 # scalar 2-tuple worker); 3 → { i64, i64, i64 } (a scalar 3-tuple worker). It MUST equal the chaining
 # fn's own declared worker_ret_ty, else the emitted `ret` mismatches the `define` (caught by opt-verify).
 fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, params: List String,

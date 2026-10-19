@@ -366,6 +366,11 @@ jobs:
       - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
+      - name: CPR declares match clang on arm64
+        # ci-fast-gates runs this on x86_64, where a two-word struct return is `{ i64, i64 }`;
+        # aarch64 lowers it to `[2 x i64]`, so only this runner sees that mismatch.
+        run: just cpr-declare-check
+
       - name: Task/IO smoke (kqueue backend)
         # The same battery the Linux job's ci-fast-gates runs, on the OTHER poller. Covers the
         # park/re-arm/cancel-drop surface plus the three HTTP-client fixtures added when the

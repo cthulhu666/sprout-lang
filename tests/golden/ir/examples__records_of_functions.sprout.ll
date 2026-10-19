@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -579,9 +579,10 @@ entry:
   %t$16 = alloca i64
   store i64 %p$close, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0$st = call { i64, i64 } @stdlib.string.strip_suffix_worker(i64 %p$text, i64 %p$close)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.strip_suffix_worker(i64 %p$text, i64 %p$close)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
@@ -599,9 +600,10 @@ body_0_2:
   %t$24 = alloca i64
   store i64 %p$open, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$6$st = call { i64, i64 } @stdlib.string.strip_prefix_worker(i64 %t$1, i64 %p$open)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
+  %t$6$st = call i128 @stdlib.string.strip_prefix_worker(i64 %t$1, i64 %p$open)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$27 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_8
@@ -1105,7 +1107,7 @@ entry:
   ret i64 %p$value
 }
 
-define { i64, i64 } @stdlib.string.strip_prefix_worker(i64 %p$raw, i64 %p$prefix) {
+define i128 @stdlib.string.strip_prefix_worker(i64 %p$raw, i64 %p$prefix) {
 entry:
   %t$6 = alloca i64
   store i64 %p$raw, ptr %t$6
@@ -1128,16 +1130,20 @@ then_1:
   %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$3 = call i64 @stdlib.string.drop(i64 %p$raw, i64 %t$2)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$4$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$4$r1 = insertvalue { i64, i64 } %t$4$r0, i64 %t$3, 1
-  ret { i64, i64 } %t$4$r1
+  %t$4$lo = zext i64 1 to i128
+  %t$4$hw = zext i64 %t$3 to i128
+  %t$4$hi = shl i128 %t$4$hw, 64
+  %t$4$r = or i128 %t$4$hi, %t$4$lo
+  ret i128 %t$4$r
 else_1:
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 0, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 0 to i128
+  %t$5$hw = zext i64 0 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 }
 
-define { i64, i64 } @stdlib.string.strip_suffix_worker(i64 %p$raw, i64 %p$suffix) {
+define i128 @stdlib.string.strip_suffix_worker(i64 %p$raw, i64 %p$suffix) {
 entry:
   %t$6 = alloca i64
   store i64 %p$suffix, ptr %t$6
@@ -1159,13 +1165,17 @@ then_1:
   %t$2 = call i64 @stdlib.string.length(i64 %p$suffix)
   %t$3 = call i64 @stdlib.string.drop_last(i64 %p$raw, i64 %t$2)
   %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$4$r1 = insertvalue { i64, i64 } %t$4$r0, i64 %t$3, 1
-  ret { i64, i64 } %t$4$r1
+  %t$4$lo = zext i64 1 to i128
+  %t$4$hw = zext i64 %t$3 to i128
+  %t$4$hi = shl i128 %t$4$hw, 64
+  %t$4$r = or i128 %t$4$hi, %t$4$lo
+  ret i128 %t$4$r
 else_1:
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 0, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 0 to i128
+  %t$5$hw = zext i64 0 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 }
 
 define void @__sprout_init_globals() {

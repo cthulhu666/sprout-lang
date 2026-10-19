@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -434,9 +434,10 @@ body_1_1:
   %t$24 = alloca i64
   store i64 %t$9, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$10$st = call { i64, i64 } @stdlib.json.first_non_finite_worker(i64 %t$8)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.json.first_non_finite_worker(i64 %t$8)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$26 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_12
 arm_0_12:
@@ -505,9 +506,10 @@ body_1_1:
   %t$24 = alloca i64
   store i64 %t$9, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$10$st = call { i64, i64 } @stdlib.json.first_non_finite_worker(i64 %t$8)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.json.first_non_finite_worker(i64 %t$8)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$26 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_12
 arm_0_12:
@@ -551,9 +553,10 @@ entry:
   %t$12 = alloca i64
   store i64 %p$value, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @stdlib.json.first_non_finite_worker(i64 %p$value)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.json.first_non_finite_worker(i64 %p$value)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -1009,9 +1012,10 @@ entry:
   %t$12 = alloca i64
   store i64 %p$value, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @stdlib.json.stringify_worker(i64 %p$value)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.json.stringify_worker(i64 %p$value)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -1089,7 +1093,7 @@ entry:
   ret i64 %p$value
 }
 
-define { i64, i64 } @stdlib.json.first_non_finite_worker(i64 %p$value) {
+define i128 @stdlib.json.first_non_finite_worker(i64 %p$value) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$value)
   br label %arm_0_1
@@ -1155,31 +1159,36 @@ join_1:
   %t$23 = icmp eq i64 %t$21, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 0, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$21 to i128
+  %t$25$hw = zext i64 0 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 1
   %t$27 = icmp eq i64 %t$21, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$21 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.json.stringify_worker(i64 %p$value) {
+define i128 @stdlib.json.stringify_worker(i64 %p$value) {
 entry:
   %t$21 = alloca i64
   store i64 %p$value, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$0$st = call { i64, i64 } @stdlib.json.first_non_finite_worker(i64 %p$value)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.json.first_non_finite_worker(i64 %p$value)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -1234,18 +1243,22 @@ join_2:
   br i1 %t$14, label %wrepack_hit_13, label %wrepack_next_13
 wrepack_hit_13:
   %t$15 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$16$r0 = insertvalue { i64, i64 } undef, i64 %t$12, 0
-  %t$16$r1 = insertvalue { i64, i64 } %t$16$r0, i64 %t$15, 1
-  ret { i64, i64 } %t$16$r1
+  %t$16$lo = zext i64 %t$12 to i128
+  %t$16$hw = zext i64 %t$15 to i128
+  %t$16$hi = shl i128 %t$16$hw, 64
+  %t$16$r = or i128 %t$16$hi, %t$16$lo
+  ret i128 %t$16$r
 wrepack_next_13:
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$12, %t$17
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$12, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$12 to i128
+  %t$20$hw = zext i64 %t$19 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   call void @sprout_abort_match()
   unreachable

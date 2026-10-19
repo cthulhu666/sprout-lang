@@ -23,14 +23,14 @@ declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare i64 @sprout_alloc_obj(i64, i64)
-declare { i64, i64 } @vector_get_unboxed(i64, i64)
-declare { i64, i64 } @map_get_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_key_unboxed(i64, i64)
-declare { i64, i64 } @map_nth_value_unboxed(i64, i64)
-declare { i64, i64 } @bytes_get_unboxed(i64, i64)
-declare { i64, i64 } @str_char_at_unboxed(i64, i64)
-declare { i64, i64 } @argv_get_unboxed(i64)
-declare { i64, i64 } @env_get_unboxed(i64)
+declare i128 @vector_get_unboxed(i64, i64)
+declare i128 @map_get_unboxed(i64, i64)
+declare i128 @map_nth_key_unboxed(i64, i64)
+declare i128 @map_nth_value_unboxed(i64, i64)
+declare i128 @bytes_get_unboxed(i64, i64)
+declare i128 @str_char_at_unboxed(i64, i64)
+declare i128 @argv_get_unboxed(i64)
+declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
 declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
@@ -2209,9 +2209,10 @@ join_0:
 
 define i64 @vec_get_or(i64 %p$index, i64 %p$fallback, i64 %p$vec) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$vec)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -2260,9 +2261,10 @@ tco_loop:
 then_2:
   br label %join_2
 else_2:
-  %t$4$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$vec)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -2386,9 +2388,10 @@ else_2:
 then_6:
   br label %join_6
 else_6:
-  %t$8$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$vec)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   br label %arm_0_10
 arm_0_10:
   %t$12 = add i64 0, 0
@@ -2510,9 +2513,10 @@ then_2:
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 else_2:
-  %t$7$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$vec)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   br label %arm_0_9
 arm_0_9:
   %t$11 = add i64 0, 0
@@ -2668,9 +2672,10 @@ tco_loop:
 then_3:
   br label %join_3
 else_3:
-  %t$5$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$vec)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   br label %arm_0_7
 arm_0_7:
   %t$9 = add i64 0, 0
@@ -3160,9 +3165,10 @@ tco_loop:
   %p$i = load i64, ptr %t$58
   %p$acc = load i64, ptr %t$59
   %p$seen = load i64, ptr %t$60
-  %t$0$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$s, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @str_char_at_unboxed(i64 %p$s, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -3347,9 +3353,10 @@ join_1:
 define i64 @parse_int(i64 %p$s) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$s, i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @str_char_at_unboxed(i64 %p$s, i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   br label %arm_0_3
 arm_0_3:
   %t$5 = add i64 0, 0
@@ -3432,9 +3439,10 @@ entry:
 
 define i64 @stdlib.bytes.get_or(i64 %p$value, i64 %p$index, i64 %p$fallback) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -3717,9 +3725,10 @@ tco_loop:
   %t$29 = alloca i64
   store i64 %t$0, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$1$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$0, i64 %p$sep)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.string.find_worker(i64 %t$0, i64 %p$sep)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_3
@@ -4025,9 +4034,10 @@ entry:
   %t$12 = alloca i64
   store i64 %p$needle, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$raw, i64 %p$needle)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.find_worker(i64 %p$raw, i64 %p$needle)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -4116,9 +4126,10 @@ entry:
 
 define i64 @stdlib.string.char_at_or(i64 %p$raw, i64 %p$index, i64 %p$fallback) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.string.char_at_worker(i64 %p$raw, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.char_at_worker(i64 %p$raw, i64 %p$index)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -4341,9 +4352,10 @@ entry:
   %t$18 = alloca i64
   store i64 %t$2, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$3$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$1, i64 %t$2)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.string.find_worker(i64 %t$1, i64 %t$2)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_5
 arm_0_5:
@@ -4623,9 +4635,10 @@ entry:
   %t$14 = alloca i64
   store i64 %t$0, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$1$st = call { i64, i64 } @stdlib.bytes.to_string_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.bytes.to_string_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -5112,9 +5125,10 @@ else_1:
   %t$24 = alloca i64
   store i64 %p$raw, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$4$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$raw, i64 %p$sep)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @stdlib.string.find_worker(i64 %p$raw, i64 %p$sep)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   %t$26 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_6
 arm_0_6:
@@ -6334,9 +6348,10 @@ arm_0_0:
   %t$25 = alloca i64
   store i64 %t$6, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$7$st = call { i64, i64 } @analysis_session_update_worker(i64 %t$2, i64 %t$6, i64 %p$line)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @analysis_session_update_worker(i64 %t$2, i64 %t$6, i64 %p$line)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_9
@@ -6426,9 +6441,10 @@ arm_0_0:
   %t$25 = alloca i64
   store i64 %t$6, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$7$st = call { i64, i64 } @analysis_session_update_worker(i64 %t$2, i64 %t$6, i64 %p$line)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @analysis_session_update_worker(i64 %t$2, i64 %t$6, i64 %p$line)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_9
@@ -6651,9 +6667,10 @@ join_3:
 
 define i64 @stdlib.compiler.source.decode_codepoint_at(i64 %p$b, i64 %p$i) {
 entry:
-  %t$0$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -6799,9 +6816,10 @@ ovfpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 ovfok_1:
-  %t$4$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %t$1)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %t$1)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -6915,9 +6933,10 @@ ovfpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 ovfok_1:
-  %t$4$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %t$1)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %t$1)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -6942,9 +6961,10 @@ ovfpanic_14:
   call i64 @panic(i64 %t$16)
   unreachable
 ovfok_14:
-  %t$17$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %t$14)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %t$14)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   br label %arm_0_19
 arm_0_19:
   %t$21 = add i64 0, 0
@@ -7106,9 +7126,10 @@ ovfpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 ovfok_1:
-  %t$4$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %t$1)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %t$1)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 1
@@ -7126,9 +7147,10 @@ ovfpanic_11:
   call i64 @panic(i64 %t$13)
   unreachable
 ovfok_11:
-  %t$14$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %t$11)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %t$11)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   br label %arm_0_16
 arm_0_16:
   %t$18 = add i64 0, 1
@@ -7146,9 +7168,10 @@ ovfpanic_21:
   call i64 @panic(i64 %t$23)
   unreachable
 ovfok_21:
-  %t$24$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$b, i64 %t$21)
-  %t$24 = extractvalue { i64, i64 } %t$24$st, 0
-  %t$25 = extractvalue { i64, i64 } %t$24$st, 1
+  %t$24$st = call i128 @bytes_get_unboxed(i64 %p$b, i64 %t$21)
+  %t$24 = trunc i128 %t$24$st to i64
+  %t$24$hi = lshr i128 %t$24$st, 64
+  %t$25 = trunc i128 %t$24$hi to i64
   br label %arm_0_26
 arm_0_26:
   %t$28 = add i64 0, 1
@@ -7610,9 +7633,10 @@ then_9:
   br label %join_9
 else_9:
   %t$12 = add i64 0, 0
-  %t$13$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$name, i64 %t$12)
-  %t$13 = extractvalue { i64, i64 } %t$13$st, 0
-  %t$14 = extractvalue { i64, i64 } %t$13$st, 1
+  %t$13$st = call i128 @str_char_at_unboxed(i64 %p$name, i64 %t$12)
+  %t$13 = trunc i128 %t$13$st to i64
+  %t$13$hi = lshr i128 %t$13$st, 64
+  %t$14 = trunc i128 %t$13$hi to i64
   br label %arm_0_15
 arm_0_15:
   %t$17 = add i64 0, 0
@@ -8348,9 +8372,10 @@ arm_0_0:
   %t$3 = call i64 @sprout_field(i64 %p$cursor, i64 1)
   %t$4 = call i64 @sprout_field(i64 %p$cursor, i64 2)
   %t$5 = call i64 @sprout_field(i64 %p$cursor, i64 3)
-  %t$6$st = call { i64, i64 } @bytes_get_unboxed(i64 %t$3, i64 %t$4)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
+  %t$6$st = call i128 @bytes_get_unboxed(i64 %t$3, i64 %t$4)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
   br label %arm_0_8
 arm_0_8:
   %t$10 = add i64 0, 0
@@ -8610,9 +8635,10 @@ tco_loop:
   %p$index = load i64, ptr %t$82
   %p$line = load i64, ptr %t$83
   %p$column = load i64, ptr %t$84
-  %t$0$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$bytes, i64 %p$off)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @bytes_get_unboxed(i64 %p$bytes, i64 %p$off)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -8974,9 +9000,10 @@ tco_loop:
 then_2:
   br label %join_2
 else_2:
-  %t$4$st = call { i64, i64 } @stdlib.string.char_at_worker(i64 %p$expected, i64 %p$index)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @stdlib.string.char_at_worker(i64 %p$expected, i64 %p$index)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 1
@@ -9243,9 +9270,10 @@ entry:
 
 define i64 @stdlib.compiler.token.is_eof_token(i64 %p$token) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$token)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$token)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 33
@@ -9267,9 +9295,10 @@ join_2:
 
 define i64 @stdlib.compiler.token.is_keyword_token(i64 %p$token, i64 %p$kw) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$token)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$token)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 27
@@ -9348,9 +9377,10 @@ entry:
   %t$37 = alloca i64
   store i64 %t$8, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.layout.run_worker(i64 %p$tokens, i64 %t$0, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.layout.run_worker(i64 %p$tokens, i64 %t$0, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$39 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_11
 arm_0_11:
@@ -9461,9 +9491,10 @@ tco_loop:
   %p$tokens = load i64, ptr %t$46
   %p$i = load i64, ptr %t$47
   %p$st = load i64, ptr %t$48
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$i, i64 %p$tokens)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$i, i64 %p$tokens)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -9545,9 +9576,10 @@ else_16:
   %t$75 = alloca i64
   store i64 %p$st, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$23$st = call { i64, i64 } @stdlib.compiler.layout.step_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %p$st)
-  %t$23 = extractvalue { i64, i64 } %t$23$st, 0
-  %t$24 = extractvalue { i64, i64 } %t$23$st, 1
+  %t$23$st = call i128 @stdlib.compiler.layout.step_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %p$st)
+  %t$23 = trunc i128 %t$23$st to i64
+  %t$23$hi = lshr i128 %t$23$st, 64
+  %t$24 = trunc i128 %t$23$hi to i64
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$78 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_25
@@ -9686,9 +9718,10 @@ arm_0_18:
   %t$65 = alloca i64
   store i64 %t$20, ptr %t$65
   %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.layout.head_line_member_worker(i64 %p$t, i64 %t$12, i64 %t$20)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.layout.head_line_member_worker(i64 %p$t, i64 %t$12, i64 %t$20)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$68 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_23
@@ -9706,9 +9739,10 @@ body_0_23:
   %t$73 = alloca i64
   store i64 %p$st, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
-  %t$27$st = call { i64, i64 } @stdlib.compiler.layout.open_pending_worker(i64 %p$st, i64 %p$t)
-  %t$27 = extractvalue { i64, i64 } %t$27$st, 0
-  %t$28 = extractvalue { i64, i64 } %t$27$st, 1
+  %t$27$st = call i128 @stdlib.compiler.layout.open_pending_worker(i64 %p$st, i64 %p$t)
+  %t$27 = trunc i128 %t$27$st to i64
+  %t$27$hi = lshr i128 %t$27$st, 64
+  %t$28 = trunc i128 %t$27$hi to i64
   %t$75 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$76 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_29
@@ -9754,9 +9788,10 @@ then_37:
   %t$91 = alloca i64
   store i64 %p$t, ptr %t$91
   %t$92 = call i64 @sprout_gc_push_i64_root(ptr %t$91)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.layout.on_line_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %t$28)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.layout.on_line_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %t$28)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$93 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_41
 arm_0_41:
@@ -10826,9 +10861,10 @@ entry:
   %t$31 = alloca i64
   store i64 %p$stack, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.layout.top_block_worker(i64 %p$stack)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.layout.top_block_worker(i64 %p$stack)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -10954,9 +10990,10 @@ tco_loop:
   %t$38 = alloca i64
   store i64 %t$0, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$1$st = call { i64, i64 } @stdlib.compiler.layout.top_block_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.compiler.layout.top_block_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$41 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_3
@@ -11099,9 +11136,10 @@ tco_loop:
   %t$22 = alloca i64
   store i64 %t$0, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$1$st = call { i64, i64 } @stdlib.compiler.layout.top_block_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.compiler.layout.top_block_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_3
@@ -12068,9 +12106,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.starts_decl(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 27
@@ -12109,9 +12148,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.starts_step(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 26
@@ -12375,9 +12415,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.expects_more(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 27
@@ -12854,9 +12895,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.binding_shaped(i64 %p$tokens, i64 %p$i) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$i, i64 %p$tokens)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$i, i64 %p$tokens)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -12902,9 +12944,10 @@ tco_loop:
   %p$i = load i64, ptr %t$145
   %p$prev_line = load i64, ptr %t$146
   %p$depth = load i64, ptr %t$147
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$i, i64 %p$tokens)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$i, i64 %p$tokens)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -13196,9 +13239,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.pattern_atom(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 26
@@ -13400,9 +13444,10 @@ then_32:
   %t$97 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %join_32
 else_32:
-  %t$36$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   br label %arm_0_38
 arm_0_38:
   %t$40 = add i64 0, 27
@@ -13581,9 +13626,10 @@ ovfpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 ovfok_1:
-  %t$4$st = call { i64, i64 } @vec_get_worker(i64 %t$1, i64 %p$tokens)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @vec_get_worker(i64 %t$1, i64 %p$tokens)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 1
@@ -15418,9 +15464,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.opens_bracket(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 34
@@ -15475,9 +15522,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.closes_bracket(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 38
@@ -16183,9 +16231,10 @@ ovfpanic_1:
   call i64 @panic(i64 %t$3)
   unreachable
 ovfok_1:
-  %t$4$st = call { i64, i64 } @vec_get_worker(i64 %t$1, i64 %p$tokens)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @vec_get_worker(i64 %t$1, i64 %p$tokens)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -16199,9 +16248,10 @@ arm_1_6:
   %t$12 = icmp eq i64 %t$4, %t$11
   br i1 %t$12, label %body_1_6, label %arm_2_6
 body_1_6:
-  %t$13$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %t$5)
-  %t$13 = extractvalue { i64, i64 } %t$13$st, 0
-  %t$14 = extractvalue { i64, i64 } %t$13$st, 1
+  %t$13$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %t$5)
+  %t$13 = trunc i128 %t$13$st to i64
+  %t$13$hi = lshr i128 %t$13$st, 64
+  %t$14 = trunc i128 %t$13$hi to i64
   br label %arm_0_15
 arm_0_15:
   %t$17 = add i64 0, 26
@@ -17364,9 +17414,10 @@ entry:
 
 define i64 @stdlib.compiler.layout.is_symbol(i64 %p$t, i64 %p$s) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 32
@@ -17392,9 +17443,10 @@ join_2:
 
 define i64 @stdlib.compiler.layout.is_ident(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 26
@@ -17977,9 +18029,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$e, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.ast.head_try_worker(i64 %p$e)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.ast.head_try_worker(i64 %p$e)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -18395,9 +18448,10 @@ entry:
 
 define i64 @stdlib.compiler.parser.tok_at(i64 %p$tokens, i64 %p$i) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$i, i64 %p$tokens)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$i, i64 %p$tokens)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -18498,9 +18552,10 @@ then_3:
   store i64 %p$acc, ptr %t$5$f0
   br label %join_3
 else_3:
-  %t$6$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$text, i64 %p$index)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
+  %t$6$st = call i128 @str_char_at_unboxed(i64 %p$text, i64 %p$index)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
   br label %arm_0_8
 arm_0_8:
   %t$10 = add i64 0, 0
@@ -18520,9 +18575,10 @@ body_1_8:
   %t$67 = alloca i64
   store i64 %p$text, ptr %t$67
   %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
-  %t$15$st = call { i64, i64 } @stdlib.string.hex_digit_value_worker(i64 %t$7)
-  %t$15 = extractvalue { i64, i64 } %t$15$st, 0
-  %t$16 = extractvalue { i64, i64 } %t$15$st, 1
+  %t$15$st = call i128 @stdlib.string.hex_digit_value_worker(i64 %t$7)
+  %t$15 = trunc i128 %t$15$st to i64
+  %t$15$hi = lshr i128 %t$15$st, 64
+  %t$16 = trunc i128 %t$15$hi to i64
   %t$69 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_17
 arm_0_17:
@@ -18726,9 +18782,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$text, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.radix_from_lexed_worker(i64 %p$text)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.radix_from_lexed_worker(i64 %p$text)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -18772,9 +18829,10 @@ entry:
   %t$22 = alloca i64
   store i64 %p$pos, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.int_from_lexed_worker(i64 %p$text)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.int_from_lexed_worker(i64 %p$text)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -18898,9 +18956,10 @@ arm_0_9:
   %t$51 = alloca i64
   store i64 %t$8, ptr %t$51
   %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.radix_from_lexed_worker(i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.radix_from_lexed_worker(i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$53 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_13
 arm_0_13:
@@ -18918,9 +18977,10 @@ body_1_13:
   %t$54 = alloca i64
   store i64 %t$8, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$20$st = call { i64, i64 } @parse_int_worker(i64 %t$8)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @parse_int_worker(i64 %t$8)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_22
 arm_0_22:
@@ -18948,9 +19008,10 @@ body_1_22:
   %t$62 = alloca i64
   store i64 %t$31, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$32$st = call { i64, i64 } @parse_int_worker(i64 %t$31)
-  %t$32 = extractvalue { i64, i64 } %t$32$st, 0
-  %t$33 = extractvalue { i64, i64 } %t$32$st, 1
+  %t$32$st = call i128 @parse_int_worker(i64 %t$31)
+  %t$32 = trunc i128 %t$32$st to i64
+  %t$32$hi = lshr i128 %t$32$st, 64
+  %t$33 = trunc i128 %t$32$hi to i64
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_34
 arm_0_34:
@@ -19049,9 +19110,10 @@ entry:
 
 define i64 @stdlib.compiler.parser.tok_is_symbol(i64 %p$t, i64 %p$sym) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 32
@@ -19077,9 +19139,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_ident(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 26
@@ -19101,9 +19164,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_int(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 28
@@ -19125,9 +19189,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_float(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 29
@@ -19149,9 +19214,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_string(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 31
@@ -19173,9 +19239,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_char(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 30
@@ -19200,9 +19267,10 @@ entry:
   %t$9 = alloca i64
   store i64 %p$text, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.source.first_codepoint_worker(i64 %p$text)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.source.first_codepoint_worker(i64 %p$text)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -19228,9 +19296,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_template_start(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 34
@@ -19252,9 +19321,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_template_lit(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 35
@@ -19276,9 +19346,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_template_interp_start(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 36
@@ -19300,9 +19371,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_template_interp_end(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 37
@@ -19324,9 +19396,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_template_end(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 38
@@ -19574,9 +19647,10 @@ entry:
   %t$23 = alloca i64
   store i64 %p$kw, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_keyword_worker(i64 %p$tokens, i64 %p$i, i64 %p$kw)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_keyword_worker(i64 %p$tokens, i64 %p$i, i64 %p$kw)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -19674,9 +19748,10 @@ entry:
   %t$23 = alloca i64
   store i64 %p$sym, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_symbol_worker(i64 %p$tokens, i64 %p$i, i64 %p$sym)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_symbol_worker(i64 %p$tokens, i64 %p$i, i64 %p$sym)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -19774,9 +19849,10 @@ entry:
   %t$17 = alloca i64
   store i64 %p$label, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_ident_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_ident_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -19847,9 +19923,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.expected_ident_msg(i64 %p$label, i64 %p$tok, i64 %p$pos) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$tok)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$tok)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 27
@@ -19958,9 +20035,10 @@ entry:
   %t$0 = call i64 @stdlib.string.after_last_dot(i64 %p$name)
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1 = add i64 0, 0
-  %t$2$st = call { i64, i64 } @str_char_at_unboxed(i64 %t$0, i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @str_char_at_unboxed(i64 %t$0, i64 %t$1)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   br label %arm_0_4
 arm_0_4:
   %t$6 = add i64 0, 0
@@ -19989,9 +20067,10 @@ entry:
   %t$31 = alloca i64
   store i64 %p$tokens, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_empty_params_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_empty_params_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -20052,9 +20131,10 @@ body_1_11:
   %t$49 = alloca i64
   store i64 %p$tokens, ptr %t$49
   %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_apply_worker(i64 %p$tokens, i64 %p$i)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.parse_type_apply_worker(i64 %p$tokens, i64 %p$i)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
   %t$51 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -20236,9 +20316,10 @@ ovfok_1:
   %t$18 = alloca i64
   store i64 %p$tokens, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$5$st = call { i64, i64 } @stdlib.compiler.parser.past_matching_paren_worker(i64 %p$tokens, i64 %t$1, i64 %t$4)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.compiler.parser.past_matching_paren_worker(i64 %p$tokens, i64 %t$1, i64 %t$4)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_7
 arm_0_7:
@@ -20451,9 +20532,10 @@ entry:
   %t$41 = alloca i64
   store i64 %p$mode, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -20492,9 +20574,10 @@ do_cont_2:
   %t$55 = alloca i64
   store i64 %t$9, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$57 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -20531,9 +20614,10 @@ do_cont_12:
   %t$70 = alloca i64
   store i64 %t$18, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$72 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -20565,9 +20649,10 @@ do_cont_21:
   %t$83 = alloca i64
   store i64 %t$25, ptr %t$83
   %t$84 = call i64 @sprout_gc_push_i64_root(ptr %t$83)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$85 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -20696,9 +20781,10 @@ arm_1_1:
   %t$47 = alloca i64
   store i64 %p$mode, ptr %t$47
   %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$49 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -20937,9 +21023,10 @@ body_1_4:
   %t$65 = alloca i64
   store i64 %t$19, ptr %t$65
   %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$19)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$19)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -20971,9 +21058,10 @@ do_cont_22:
   %t$76 = alloca i64
   store i64 %t$27, ptr %t$76
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.make_type_thunk_worker(i64 %t$26, i64 %p$tokens, i64 %t$27)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.make_type_thunk_worker(i64 %t$26, i64 %p$tokens, i64 %t$27)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
   %t$78 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -21086,9 +21174,10 @@ arm_1_1:
   %t$39 = alloca i64
   store i64 %p$right_raw, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$41 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -21191,9 +21280,10 @@ body_0_4:
   %t$55 = alloca i64
   store i64 %t$9, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$9)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$9)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$57 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -21228,9 +21318,10 @@ do_cont_12:
   %t$68 = alloca i64
   store i64 %t$17, ptr %t$68
   %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.make_type_arrow_worker(i64 %p$left, i64 %t$16, i64 %p$tokens, i64 %t$17)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.make_type_arrow_worker(i64 %p$left, i64 %t$16, i64 %p$tokens, i64 %t$17)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
   %t$70 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -21288,9 +21379,10 @@ body_1_4:
   %t$84 = alloca i64
   store i64 %p$left, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$31$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$31, %t$33
   %t$86 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -21462,9 +21554,10 @@ arm_1_1:
   %t$47 = alloca i64
   store i64 %p$left, ptr %t$47
   %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
   %t$49 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -21830,9 +21923,10 @@ entry:
   %t$16 = alloca i64
   store i64 %p$names, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.first_unknown_effect_label_worker(i64 %p$names)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.first_unknown_effect_label_worker(i64 %p$names)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -22228,9 +22322,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -22300,9 +22395,10 @@ then_1:
   %t$28 = alloca i64
   store i64 %p$base, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$3$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$5 = add i64 0, 8
   %t$6 = icmp eq i64 %t$3, %t$5
   %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -22536,9 +22632,10 @@ body_1_19:
   %t$85 = alloca i64
   store i64 %t$34, ptr %t$85
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
-  %t$35$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$34)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$34)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   %t$87 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$35, %t$37
@@ -22624,9 +22721,10 @@ body_0_4:
   %t$61 = alloca i64
   store i64 %t$9, ptr %t$61
   %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -22703,9 +22801,10 @@ body_1_4:
   %t$85 = alloca i64
   store i64 %t$25, ptr %t$85
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_type_items_worker(i64 %p$tokens, i64 %t$23, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_type_items_worker(i64 %p$tokens, i64 %t$23, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$87 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -22742,9 +22841,10 @@ do_cont_28:
   %t$98 = alloca i64
   store i64 %t$35, ptr %t$98
   %t$99 = call i64 @sprout_gc_push_i64_root(ptr %t$98)
-  %t$36$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   %t$100 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$36, %t$38
@@ -22832,9 +22932,10 @@ tco_loop:
   %t$32 = alloca i64
   store i64 %p$acc, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -23085,9 +23186,10 @@ body_1_4:
   %t$45 = alloca i64
   store i64 %p$pos, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$15$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$15 = extractvalue { i64, i64 } %t$15$st, 0
-  %t$16 = extractvalue { i64, i64 } %t$15$st, 1
+  %t$15$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$15 = trunc i128 %t$15$st to i64
+  %t$15$hi = lshr i128 %t$15$st, 64
+  %t$16 = trunc i128 %t$15$hi to i64
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
   %t$47 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -23172,9 +23274,10 @@ body_0_4:
   %t$63 = alloca i64
   store i64 %t$9, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$65 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -23254,9 +23357,10 @@ body_1_4:
   %t$89 = alloca i64
   store i64 %t$25, ptr %t$89
   %t$90 = call i64 @sprout_gc_push_i64_root(ptr %t$89)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_pattern_items_worker(i64 %p$tokens, i64 %t$23, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_pattern_items_worker(i64 %p$tokens, i64 %t$23, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$91 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -23296,9 +23400,10 @@ do_cont_28:
   %t$104 = alloca i64
   store i64 %t$35, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$36$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   %t$106 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$36, %t$38
@@ -23510,9 +23615,10 @@ then_32:
   %t$155 = alloca i64
   store i64 %t$36, ptr %t$155
   %t$156 = call i64 @sprout_gc_push_i64_root(ptr %t$155)
-  %t$37$st = call { i64, i64 } @stdlib.compiler.parser.int_literal_value_worker(i64 %t$35, i64 %t$36)
-  %t$37 = extractvalue { i64, i64 } %t$37$st, 0
-  %t$38 = extractvalue { i64, i64 } %t$37$st, 1
+  %t$37$st = call i128 @stdlib.compiler.parser.int_literal_value_worker(i64 %t$35, i64 %t$36)
+  %t$37 = trunc i128 %t$37$st to i64
+  %t$37$hi = lshr i128 %t$37$st, 64
+  %t$38 = trunc i128 %t$37$hi to i64
   %t$157 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$158 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_39
@@ -23922,9 +24028,10 @@ ovfok_16:
   %t$64 = alloca i64
   store i64 %t$19, ptr %t$64
   %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.collect_pattern_atoms_worker(i64 %p$tokens, i64 %t$16, i64 %t$19)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.collect_pattern_atoms_worker(i64 %p$tokens, i64 %t$16, i64 %t$19)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$66 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -24066,9 +24173,10 @@ tco_loop:
   %t$32 = alloca i64
   store i64 %p$acc, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -24351,9 +24459,10 @@ then_1:
   %t$28 = alloca i64
   store i64 %p$acc, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$3$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.compiler.parser.parse_pattern_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$5 = add i64 0, 8
   %t$6 = icmp eq i64 %t$3, %t$5
   %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -24566,9 +24675,10 @@ then_32:
   %t$168 = alloca i64
   store i64 %t$36, ptr %t$168
   %t$169 = call i64 @sprout_gc_push_i64_root(ptr %t$168)
-  %t$37$st = call { i64, i64 } @stdlib.compiler.parser.int_literal_value_worker(i64 %t$35, i64 %t$36)
-  %t$37 = extractvalue { i64, i64 } %t$37$st, 0
-  %t$38 = extractvalue { i64, i64 } %t$37$st, 1
+  %t$37$st = call i128 @stdlib.compiler.parser.int_literal_value_worker(i64 %t$35, i64 %t$36)
+  %t$37 = trunc i128 %t$37$st to i64
+  %t$37$hi = lshr i128 %t$37$st, 64
+  %t$38 = trunc i128 %t$37$hi to i64
   %t$170 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$171 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_39
@@ -25215,9 +25325,10 @@ tco_loop:
   %t$84 = alloca i64
   store i64 %p$pos, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$86 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -25288,9 +25399,10 @@ body_0_12:
   %t$112 = alloca i64
   store i64 %t$17, ptr %t$112
   %t$113 = call i64 @sprout_gc_push_i64_root(ptr %t$112)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %t$17)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %t$17)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$114 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
@@ -25336,9 +25448,10 @@ do_cont_20:
   %t$131 = alloca i64
   store i64 %t$27, ptr %t$131
   %t$132 = call i64 @sprout_gc_push_i64_root(ptr %t$131)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$27, i64 %p$tokens, i64 %t$25)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$27, i64 %p$tokens, i64 %t$25)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$133 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
@@ -25529,9 +25642,10 @@ body_1_48:
   %t$206 = alloca i64
   store i64 %t$63, ptr %t$206
   %t$207 = call i64 @sprout_gc_push_i64_root(ptr %t$206)
-  %t$64$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$63, i64 %p$tokens, i64 %t$7)
-  %t$64 = extractvalue { i64, i64 } %t$64$st, 0
-  %t$65 = extractvalue { i64, i64 } %t$64$st, 1
+  %t$64$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$63, i64 %p$tokens, i64 %t$7)
+  %t$64 = trunc i128 %t$64$st to i64
+  %t$64$hi = lshr i128 %t$64$st, 64
+  %t$65 = trunc i128 %t$64$hi to i64
   %t$208 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$66 = add i64 0, 8
   %t$67 = icmp eq i64 %t$64, %t$66
@@ -25678,9 +25792,10 @@ join_1:
 
 define i64 @stdlib.compiler.parser.tok_is_layout_open(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 39
@@ -25702,9 +25817,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_layout_sep(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 40
@@ -25726,9 +25842,10 @@ join_2:
 
 define i64 @stdlib.compiler.parser.tok_is_layout_close(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 41
@@ -26529,9 +26646,10 @@ entry:
   %t$61 = alloca i64
   store i64 %t$1, ptr %t$61
   %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -26557,9 +26675,10 @@ do_cont_4:
   %t$70 = alloca i64
   store i64 %t$8, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$72 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -26586,9 +26705,10 @@ do_cont_11:
   %t$81 = alloca i64
   store i64 %t$15, ptr %t$81
   %t$82 = call i64 @sprout_gc_push_i64_root(ptr %t$81)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.collect_let_bindings_worker(i64 %p$tokens, i64 %t$10, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.collect_let_bindings_worker(i64 %p$tokens, i64 %t$10, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$83 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -26650,9 +26770,10 @@ then_36:
   %t$99 = alloca i64
   store i64 %p$tokens, ptr %t$99
   %t$100 = call i64 @sprout_gc_push_i64_root(ptr %t$99)
-  %t$38$st = call { i64, i64 } @stdlib.compiler.parser.finish_let_in_worker(i64 %p$tokens, i64 %t$22, i64 %t$23)
-  %t$38 = extractvalue { i64, i64 } %t$38$st, 0
-  %t$39 = extractvalue { i64, i64 } %t$38$st, 1
+  %t$38$st = call i128 @stdlib.compiler.parser.finish_let_in_worker(i64 %p$tokens, i64 %t$22, i64 %t$23)
+  %t$38 = trunc i128 %t$38$st to i64
+  %t$38$hi = lshr i128 %t$38$st, 64
+  %t$39 = trunc i128 %t$38$hi to i64
   %t$101 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$40 = add i64 0, 8
   %t$41 = icmp eq i64 %t$38, %t$40
@@ -27039,9 +27160,10 @@ then_9:
   %t$127 = alloca i64
   store i64 %p$tokens, ptr %t$127
   %t$128 = call i64 @sprout_gc_push_i64_root(ptr %t$127)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$129 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -27077,9 +27199,10 @@ do_cont_13:
   %t$139 = alloca i64
   store i64 %t$20, ptr %t$139
   %t$140 = call i64 @sprout_gc_push_i64_root(ptr %t$139)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$141 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -27108,9 +27231,10 @@ do_cont_23:
   %t$150 = alloca i64
   store i64 %t$27, ptr %t$150
   %t$151 = call i64 @sprout_gc_push_i64_root(ptr %t$150)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$27)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$27)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$152 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
@@ -27170,9 +27294,10 @@ then_40:
   %t$174 = alloca i64
   store i64 %t$43, ptr %t$174
   %t$175 = call i64 @sprout_gc_push_i64_root(ptr %t$174)
-  %t$44$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$43, i64 %p$tokens, i64 %t$35)
-  %t$44 = extractvalue { i64, i64 } %t$44$st, 0
-  %t$45 = extractvalue { i64, i64 } %t$44$st, 1
+  %t$44$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$43, i64 %p$tokens, i64 %t$35)
+  %t$44 = trunc i128 %t$44$st to i64
+  %t$44$hi = lshr i128 %t$44$st, 64
+  %t$45 = trunc i128 %t$44$hi to i64
   %t$176 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$46 = add i64 0, 8
   %t$47 = icmp eq i64 %t$44, %t$46
@@ -27204,9 +27329,10 @@ do_cont_46:
   %t$187 = alloca i64
   store i64 %t$50, ptr %t$187
   %t$188 = call i64 @sprout_gc_push_i64_root(ptr %t$187)
-  %t$51$st = call { i64, i64 } @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$50)
-  %t$51 = extractvalue { i64, i64 } %t$51$st, 0
-  %t$52 = extractvalue { i64, i64 } %t$51$st, 1
+  %t$51$st = call i128 @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$50)
+  %t$51 = trunc i128 %t$51$st to i64
+  %t$51$hi = lshr i128 %t$51$st, 64
+  %t$52 = trunc i128 %t$51$hi to i64
   %t$189 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$53 = add i64 0, 8
   %t$54 = icmp eq i64 %t$51, %t$53
@@ -27477,9 +27603,10 @@ else_9:
   %t$274 = alloca i64
   store i64 %p$tokens, ptr %t$274
   %t$275 = call i64 @sprout_gc_push_i64_root(ptr %t$274)
-  %t$95$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %p$i)
-  %t$95 = extractvalue { i64, i64 } %t$95$st, 0
-  %t$96 = extractvalue { i64, i64 } %t$95$st, 1
+  %t$95$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %p$i)
+  %t$95 = trunc i128 %t$95$st to i64
+  %t$95$hi = lshr i128 %t$95$st, 64
+  %t$96 = trunc i128 %t$95$hi to i64
   %t$97 = add i64 0, 8
   %t$98 = icmp eq i64 %t$95, %t$97
   %t$276 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -27661,9 +27788,10 @@ else_2:
   %t$62 = alloca i64
   store i64 %p$acc, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_do_step_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_do_step_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$64 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -27697,9 +27825,10 @@ do_cont_13:
   %t$74 = alloca i64
   store i64 %t$18, ptr %t$74
   %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.do_step_end_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.do_step_end_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$76 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -27804,9 +27933,10 @@ entry:
   %t$49 = alloca i64
   store i64 %t$1, ptr %t$49
   %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$51 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -27838,9 +27968,10 @@ do_cont_4:
   %t$60 = alloca i64
   store i64 %t$9, ptr %t$60
   %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$9)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$9)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -27870,9 +28001,10 @@ do_cont_12:
   %t$73 = alloca i64
   store i64 %t$16, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.collect_do_steps_worker(i64 %p$tokens, i64 %t$11, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.collect_do_steps_worker(i64 %p$tokens, i64 %t$11, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$75 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -28000,9 +28132,10 @@ entry:
   %t$12 = alloca i64
   store i64 %p$tokens, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$e)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$e)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
@@ -28093,9 +28226,10 @@ body_0_4:
   %t$37 = alloca i64
   store i64 %t$9, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$9)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$9)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -28231,9 +28365,10 @@ entry:
   %t$66 = alloca i64
   store i64 %p$tokens, ptr %t$66
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -28269,9 +28404,10 @@ do_cont_2:
   %t$78 = alloca i64
   store i64 %t$9, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -28300,9 +28436,10 @@ do_cont_12:
   %t$89 = alloca i64
   store i64 %t$16, ptr %t$89
   %t$90 = call i64 @sprout_gc_push_i64_root(ptr %t$89)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$91 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -28362,9 +28499,10 @@ then_29:
   %t$113 = alloca i64
   store i64 %t$32, ptr %t$113
   %t$114 = call i64 @sprout_gc_push_i64_root(ptr %t$113)
-  %t$33$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$32, i64 %p$tokens, i64 %t$24)
-  %t$33 = extractvalue { i64, i64 } %t$33$st, 0
-  %t$34 = extractvalue { i64, i64 } %t$33$st, 1
+  %t$33$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$32, i64 %p$tokens, i64 %t$24)
+  %t$33 = trunc i128 %t$33$st to i64
+  %t$33$hi = lshr i128 %t$33$st, 64
+  %t$34 = trunc i128 %t$33$hi to i64
   %t$115 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$35 = add i64 0, 8
   %t$36 = icmp eq i64 %t$33, %t$35
@@ -28396,9 +28534,10 @@ do_cont_35:
   %t$126 = alloca i64
   store i64 %t$39, ptr %t$126
   %t$127 = call i64 @sprout_gc_push_i64_root(ptr %t$126)
-  %t$40$st = call { i64, i64 } @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$39)
-  %t$40 = extractvalue { i64, i64 } %t$40$st, 0
-  %t$41 = extractvalue { i64, i64 } %t$40$st, 1
+  %t$40$st = call i128 @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$39)
+  %t$40 = trunc i128 %t$40$st to i64
+  %t$40$hi = lshr i128 %t$40$st, 64
+  %t$41 = trunc i128 %t$40$hi to i64
   %t$128 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$40, %t$42
@@ -28632,9 +28771,10 @@ else_2:
   %t$50 = alloca i64
   store i64 %p$acc, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_let_binding_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_let_binding_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -28668,9 +28808,10 @@ do_cont_13:
   %t$62 = alloca i64
   store i64 %t$18, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.let_binding_end_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.let_binding_end_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -28840,9 +28981,10 @@ arm_1_1:
   %t$46 = alloca i64
   store i64 %t$11, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$11, i64 %p$tokens, i64 %p$i)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$11, i64 %p$tokens, i64 %p$i)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -28871,9 +29013,10 @@ do_cont_14:
   %t$57 = alloca i64
   store i64 %t$18, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -28949,9 +29092,10 @@ entry:
   %t$30 = alloca i64
   store i64 %t$1, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -28977,9 +29121,10 @@ do_cont_4:
   %t$39 = alloca i64
   store i64 %t$8, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -29006,9 +29151,10 @@ do_cont_11:
   %t$50 = alloca i64
   store i64 %t$15, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.collect_let_bindings_worker(i64 %p$tokens, i64 %t$10, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.collect_let_bindings_worker(i64 %p$tokens, i64 %t$10, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -29121,9 +29267,10 @@ entry:
   %t$43 = alloca i64
   store i64 %t$1, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -29170,9 +29317,10 @@ then_12:
   %t$61 = alloca i64
   store i64 %p$tokens, ptr %t$61
   %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %t$9)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %t$9)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
   %t$63 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -29210,9 +29358,10 @@ do_cont_16:
   %t$75 = alloca i64
   store i64 %t$22, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$23$st = call { i64, i64 } @stdlib.compiler.parser.parse_postfix_worker(i64 %p$tokens, i64 %t$21, i64 %t$20, i64 %t$22)
-  %t$23 = extractvalue { i64, i64 } %t$23$st, 0
-  %t$24 = extractvalue { i64, i64 } %t$23$st, 1
+  %t$23$st = call i128 @stdlib.compiler.parser.parse_postfix_worker(i64 %p$tokens, i64 %t$21, i64 %t$20, i64 %t$22)
+  %t$23 = trunc i128 %t$23$st to i64
+  %t$23$hi = lshr i128 %t$23$st, 64
+  %t$24 = trunc i128 %t$23$hi to i64
   %t$77 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$25 = add i64 0, 8
   %t$26 = icmp eq i64 %t$23, %t$25
@@ -29289,9 +29438,10 @@ do_done_4:
 
 define i64 @stdlib.compiler.parser.starts_try_operand(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 26
@@ -29820,9 +29970,10 @@ entry:
   %t$63 = alloca i64
   store i64 %t$1, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$65 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -29848,9 +29999,10 @@ do_cont_4:
   %t$72 = alloca i64
   store i64 %t$8, ptr %t$72
   %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$74 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -29887,9 +30039,10 @@ do_cont_11:
   %t$85 = alloca i64
   store i64 %t$18, ptr %t$85
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$87 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -29918,9 +30071,10 @@ do_cont_21:
   %t$96 = alloca i64
   store i64 %t$25, ptr %t$96
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$98 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -29960,9 +30114,10 @@ do_cont_28:
   %t$111 = alloca i64
   store i64 %t$35, ptr %t$111
   %t$112 = call i64 @sprout_gc_push_i64_root(ptr %t$111)
-  %t$36$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   %t$113 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$36, %t$38
@@ -29994,9 +30149,10 @@ do_cont_38:
   %t$124 = alloca i64
   store i64 %t$42, ptr %t$124
   %t$125 = call i64 @sprout_gc_push_i64_root(ptr %t$124)
-  %t$43$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$42)
-  %t$43 = extractvalue { i64, i64 } %t$43$st, 0
-  %t$44 = extractvalue { i64, i64 } %t$43$st, 1
+  %t$43$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$42)
+  %t$43 = trunc i128 %t$43$st to i64
+  %t$43$hi = lshr i128 %t$43$st, 64
+  %t$44 = trunc i128 %t$43$hi to i64
   %t$126 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$45 = add i64 0, 8
   %t$46 = icmp eq i64 %t$43, %t$45
@@ -30098,9 +30254,10 @@ entry:
   %t$95 = alloca i64
   store i64 %t$1, ptr %t$95
   %t$96 = call i64 @sprout_gc_push_i64_root(ptr %t$95)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$97 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -30126,9 +30283,10 @@ do_cont_4:
   %t$104 = alloca i64
   store i64 %t$8, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -30165,9 +30323,10 @@ do_cont_11:
   %t$117 = alloca i64
   store i64 %t$18, ptr %t$117
   %t$118 = call i64 @sprout_gc_push_i64_root(ptr %t$117)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$119 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -30196,9 +30355,10 @@ do_cont_21:
   %t$128 = alloca i64
   store i64 %t$25, ptr %t$128
   %t$129 = call i64 @sprout_gc_push_i64_root(ptr %t$128)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$130 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -30228,9 +30388,10 @@ do_cont_28:
   %t$141 = alloca i64
   store i64 %t$32, ptr %t$141
   %t$142 = call i64 @sprout_gc_push_i64_root(ptr %t$141)
-  %t$33$st = call { i64, i64 } @stdlib.compiler.parser.collect_match_branches_worker(i64 %p$tokens, i64 %t$27, i64 %t$32)
-  %t$33 = extractvalue { i64, i64 } %t$33$st, 0
-  %t$34 = extractvalue { i64, i64 } %t$33$st, 1
+  %t$33$st = call i128 @stdlib.compiler.parser.collect_match_branches_worker(i64 %p$tokens, i64 %t$27, i64 %t$32)
+  %t$33 = trunc i128 %t$33$st to i64
+  %t$33$hi = lshr i128 %t$33$st, 64
+  %t$34 = trunc i128 %t$33$hi to i64
   %t$143 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$35 = add i64 0, 8
   %t$36 = icmp eq i64 %t$33, %t$35
@@ -30521,9 +30682,10 @@ entry:
 
 define i64 @stdlib.compiler.parser.tok_is_infix(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 32
@@ -30751,9 +30913,10 @@ body_1_14:
   %t$132 = alloca i64
   store i64 %t$40, ptr %t$132
   %t$133 = call i64 @sprout_gc_push_i64_root(ptr %t$132)
-  %t$41$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %t$40)
-  %t$41 = extractvalue { i64, i64 } %t$41$st, 0
-  %t$42 = extractvalue { i64, i64 } %t$41$st, 1
+  %t$41$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %t$40)
+  %t$41 = trunc i128 %t$41$st to i64
+  %t$41$hi = lshr i128 %t$41$st, 64
+  %t$42 = trunc i128 %t$41$hi to i64
   %t$134 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$43 = add i64 0, 8
   %t$44 = icmp eq i64 %t$41, %t$43
@@ -30793,9 +30956,10 @@ do_cont_43:
   %t$147 = alloca i64
   store i64 %t$50, ptr %t$147
   %t$148 = call i64 @sprout_gc_push_i64_root(ptr %t$147)
-  %t$51$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$50, i64 %p$tokens, i64 %t$48)
-  %t$51 = extractvalue { i64, i64 } %t$51$st, 0
-  %t$52 = extractvalue { i64, i64 } %t$51$st, 1
+  %t$51$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$50, i64 %p$tokens, i64 %t$48)
+  %t$51 = trunc i128 %t$51$st to i64
+  %t$51$hi = lshr i128 %t$51$st, 64
+  %t$52 = trunc i128 %t$51$hi to i64
   %t$149 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$53 = add i64 0, 8
   %t$54 = icmp eq i64 %t$51, %t$53
@@ -30827,9 +30991,10 @@ do_cont_53:
   %t$160 = alloca i64
   store i64 %t$57, ptr %t$160
   %t$161 = call i64 @sprout_gc_push_i64_root(ptr %t$160)
-  %t$58$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$57)
-  %t$58 = extractvalue { i64, i64 } %t$58$st, 0
-  %t$59 = extractvalue { i64, i64 } %t$58$st, 1
+  %t$58$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$57)
+  %t$58 = trunc i128 %t$58$st to i64
+  %t$58$hi = lshr i128 %t$58$st, 64
+  %t$59 = trunc i128 %t$58$hi to i64
   %t$162 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$60 = add i64 0, 8
   %t$61 = icmp eq i64 %t$58, %t$60
@@ -30914,9 +31079,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_logical_or_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_logical_or_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -31027,9 +31193,10 @@ body_1_4:
   %t$56 = alloca i64
   store i64 %t$13, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_logical_or_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_logical_or_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
   %t$58 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -31237,9 +31404,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -31350,9 +31518,10 @@ body_1_4:
   %t$50 = alloca i64
   store i64 %t$13, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -31429,9 +31598,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -31542,9 +31712,10 @@ body_1_4:
   %t$50 = alloca i64
   store i64 %t$13, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -31621,9 +31792,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -31727,9 +31899,10 @@ ovfok_15:
   %t$51 = alloca i64
   store i64 %p$left, ptr %t$51
   %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %t$15)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %t$15)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
   %t$53 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -31822,9 +31995,10 @@ entry:
   %t$36 = alloca i64
   store i64 %p$tokens, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -31913,9 +32087,10 @@ body_1_12:
   %t$66 = alloca i64
   store i64 %t$21, ptr %t$66
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
-  %t$22$st = call { i64, i64 } @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %t$21)
-  %t$22 = extractvalue { i64, i64 } %t$22$st, 0
-  %t$23 = extractvalue { i64, i64 } %t$22$st, 1
+  %t$22$st = call i128 @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$24 = add i64 0, 8
   %t$25 = icmp eq i64 %t$22, %t$24
@@ -32004,9 +32179,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -32150,9 +32326,10 @@ ovfok_31:
   %t$77 = alloca i64
   store i64 %p$left, ptr %t$77
   %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
-  %t$34$st = call { i64, i64 } @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %t$31)
-  %t$34 = extractvalue { i64, i64 } %t$34$st, 0
-  %t$35 = extractvalue { i64, i64 } %t$34$st, 1
+  %t$34$st = call i128 @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %t$31)
+  %t$34 = trunc i128 %t$34$st to i64
+  %t$34$hi = lshr i128 %t$34$st, 64
+  %t$35 = trunc i128 %t$34$hi to i64
   %t$36 = add i64 0, 8
   %t$37 = icmp eq i64 %t$34, %t$36
   %t$79 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -32245,9 +32422,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -32351,9 +32529,10 @@ ovfok_15:
   %t$76 = alloca i64
   store i64 %p$left, ptr %t$76
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %t$15)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %t$15)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
   %t$78 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -32448,9 +32627,10 @@ ovfok_39:
   %t$103 = alloca i64
   store i64 %p$left, ptr %t$103
   %t$104 = call i64 @sprout_gc_push_i64_root(ptr %t$103)
-  %t$42$st = call { i64, i64 } @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %t$39)
-  %t$42 = extractvalue { i64, i64 } %t$42$st, 0
-  %t$43 = extractvalue { i64, i64 } %t$42$st, 1
+  %t$42$st = call i128 @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %t$39)
+  %t$42 = trunc i128 %t$42$st to i64
+  %t$42$hi = lshr i128 %t$42$st, 64
+  %t$43 = trunc i128 %t$42$hi to i64
   %t$44 = add i64 0, 8
   %t$45 = icmp eq i64 %t$42, %t$44
   %t$105 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -32546,9 +32726,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -32652,9 +32833,10 @@ ovfok_15:
   %t$51 = alloca i64
   store i64 %p$left, ptr %t$51
   %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %t$15)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %t$15)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
   %t$53 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -32747,9 +32929,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_unary_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_unary_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -32841,9 +33024,10 @@ ovfok_15:
   %t$48 = alloca i64
   store i64 %p$left, ptr %t$48
   %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %t$15)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %t$15)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
   %t$50 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -33114,9 +33298,10 @@ ovfok_26:
   %t$93 = alloca i64
   store i64 %p$tokens, ptr %t$93
   %t$94 = call i64 @sprout_gc_push_i64_root(ptr %t$93)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$26)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$26)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
   %t$95 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -33219,9 +33404,10 @@ ovfok_51:
   %t$119 = alloca i64
   store i64 %p$tokens, ptr %t$119
   %t$120 = call i64 @sprout_gc_push_i64_root(ptr %t$119)
-  %t$54$st = call { i64, i64 } @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$51)
-  %t$54 = extractvalue { i64, i64 } %t$54$st, 0
-  %t$55 = extractvalue { i64, i64 } %t$54$st, 1
+  %t$54$st = call i128 @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$51)
+  %t$54 = trunc i128 %t$54$st to i64
+  %t$54$hi = lshr i128 %t$54$st, 64
+  %t$55 = trunc i128 %t$54$hi to i64
   %t$56 = add i64 0, 8
   %t$57 = icmp eq i64 %t$54, %t$56
   %t$121 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -33312,9 +33498,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$tokens, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -33549,9 +33736,10 @@ entry:
   %t$40 = alloca i64
   store i64 %t$1, ptr %t$40
   %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i) noinline
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i) noinline
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -33587,9 +33775,10 @@ do_cont_4:
   %t$55 = alloca i64
   store i64 %t$9, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.collect_call_args_worker(i64 %p$tokens, i64 %t$8, i64 %t$9) noinline
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.collect_call_args_worker(i64 %p$tokens, i64 %t$8, i64 %t$9) noinline
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$57 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -33632,9 +33821,10 @@ do_cont_12:
   %t$72 = alloca i64
   store i64 %t$19, ptr %t$72
   %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$19, i64 %p$tokens, i64 %t$17) noinline
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$19, i64 %p$tokens, i64 %t$17) noinline
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$74 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -33764,9 +33954,10 @@ entry:
   %t$31 = alloca i64
   store i64 %t$1, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i) noinline
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i) noinline
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -33803,9 +33994,10 @@ do_cont_4:
   %t$46 = alloca i64
   store i64 %t$10, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8) noinline
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8) noinline
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$48 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -33983,9 +34175,10 @@ entry:
   %t$49 = alloca i64
   store i64 %t$1, ptr %t$49
   %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i) noinline
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i) noinline
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$51 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -34019,9 +34212,10 @@ do_cont_4:
   %t$62 = alloca i64
   store i64 %t$10, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$10, i64 %p$tokens, i64 %t$8) noinline
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$10, i64 %p$tokens, i64 %t$8) noinline
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$64 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -34054,9 +34248,10 @@ do_cont_13:
   %t$75 = alloca i64
   store i64 %t$18, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.collect_record_literal_fields_worker(i64 %p$tokens, i64 %t$17, i64 %t$18) noinline
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.collect_record_literal_fields_worker(i64 %p$tokens, i64 %t$17, i64 %t$18) noinline
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$77 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -34096,9 +34291,10 @@ do_cont_21:
   %t$90 = alloca i64
   store i64 %t$28, ptr %t$90
   %t$91 = call i64 @sprout_gc_push_i64_root(ptr %t$90)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$28, i64 %p$tokens, i64 %t$26) noinline
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$28, i64 %p$tokens, i64 %t$26) noinline
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$92 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -34582,9 +34778,10 @@ else_4:
   %t$52 = alloca i64
   store i64 %p$acc, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$8$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$10 = add i64 0, 8
   %t$11 = icmp eq i64 %t$8, %t$10
   %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -34891,9 +35088,10 @@ then_42:
   %t$271 = alloca i64
   store i64 %t$46, ptr %t$271
   %t$272 = call i64 @sprout_gc_push_i64_root(ptr %t$271)
-  %t$47$st = call { i64, i64 } @stdlib.compiler.parser.int_literal_value_worker(i64 %t$45, i64 %t$46)
-  %t$47 = extractvalue { i64, i64 } %t$47$st, 0
-  %t$48 = extractvalue { i64, i64 } %t$47$st, 1
+  %t$47$st = call i128 @stdlib.compiler.parser.int_literal_value_worker(i64 %t$45, i64 %t$46)
+  %t$47 = trunc i128 %t$47$st to i64
+  %t$47$hi = lshr i128 %t$47$st, 64
+  %t$48 = trunc i128 %t$47$hi to i64
   %t$273 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$274 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_49
@@ -35623,9 +35821,10 @@ do_cont_20:
   %t$78 = alloca i64
   store i64 %t$25, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_template_parts_worker(i64 %p$tokens, i64 %t$24, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_template_parts_worker(i64 %p$tokens, i64 %t$24, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -35841,9 +36040,10 @@ ovfok_28:
   %t$109 = alloca i64
   store i64 %p$acc, ptr %t$109
   %t$110 = call i64 @sprout_gc_push_i64_root(ptr %t$109)
-  %t$31$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$28)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$28)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$31, %t$33
   %t$111 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -36039,9 +36239,10 @@ entry:
   %t$44 = alloca i64
   store i64 %t$1, ptr %t$44
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -36067,9 +36268,10 @@ do_cont_4:
   %t$53 = alloca i64
   store i64 %t$8, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_lambda_params_worker(i64 %p$tokens, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_lambda_params_worker(i64 %p$tokens, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -36106,9 +36308,10 @@ do_cont_11:
   %t$66 = alloca i64
   store i64 %t$18, ptr %t$66
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$68 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -36137,9 +36340,10 @@ do_cont_21:
   %t$77 = alloca i64
   store i64 %t$25, ptr %t$77
   %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$79 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -36254,9 +36458,10 @@ body_0_4:
   %t$64 = alloca i64
   store i64 %t$10, ptr %t$64
   %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$66 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -36293,9 +36498,10 @@ do_cont_13:
   %t$77 = alloca i64
   store i64 %t$20, ptr %t$77
   %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$79 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -36360,9 +36566,10 @@ body_1_4:
   %t$96 = alloca i64
   store i64 %t$36, ptr %t$96
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
-  %t$37$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$36, i64 %p$tokens, i64 %p$i)
-  %t$37 = extractvalue { i64, i64 } %t$37$st, 0
-  %t$38 = extractvalue { i64, i64 } %t$37$st, 1
+  %t$37$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$36, i64 %p$tokens, i64 %p$i)
+  %t$37 = trunc i128 %t$37$st to i64
+  %t$37$hi = lshr i128 %t$37$st, 64
+  %t$38 = trunc i128 %t$37$hi to i64
   %t$98 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$39 = add i64 0, 8
   %t$40 = icmp eq i64 %t$37, %t$39
@@ -36462,9 +36669,10 @@ entry:
   %t$74 = alloca i64
   store i64 %t$1, ptr %t$74
   %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$76 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -36557,9 +36765,10 @@ body_1_13:
   %t$104 = alloca i64
   store i64 %p$tokens, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
   %t$106 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -36632,9 +36841,10 @@ else_38:
   %t$128 = alloca i64
   store i64 %p$tokens, ptr %t$128
   %t$129 = call i64 @sprout_gc_push_i64_root(ptr %t$128)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.collect_list_items_after_head_worker(i64 %p$tokens, i64 %t$33, i64 %t$32)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.collect_list_items_after_head_worker(i64 %p$tokens, i64 %t$33, i64 %t$32)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
   %t$130 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -36670,9 +36880,10 @@ do_cont_48:
   %t$140 = alloca i64
   store i64 %t$55, ptr %t$140
   %t$141 = call i64 @sprout_gc_push_i64_root(ptr %t$140)
-  %t$56$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$55, i64 %p$tokens, i64 %t$53)
-  %t$56 = extractvalue { i64, i64 } %t$56$st, 0
-  %t$57 = extractvalue { i64, i64 } %t$56$st, 1
+  %t$56$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$55, i64 %p$tokens, i64 %t$53)
+  %t$56 = trunc i128 %t$56$st to i64
+  %t$56$hi = lshr i128 %t$56$st, 64
+  %t$57 = trunc i128 %t$56$hi to i64
   %t$142 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$58 = add i64 0, 8
   %t$59 = icmp eq i64 %t$56, %t$58
@@ -36827,9 +37038,10 @@ body_1_4:
   %t$55 = alloca i64
   store i64 %t$16, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %t$15, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %t$15, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$57 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -36917,9 +37129,10 @@ entry:
   %t$29 = alloca i64
   store i64 %t$0, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$1$st = call { i64, i64 } @stdlib.compiler.parser.collect_comprehension_gens_worker(i64 %p$tokens, i64 %p$i, i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.compiler.parser.collect_comprehension_gens_worker(i64 %p$tokens, i64 %p$i, i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$3 = add i64 0, 8
   %t$4 = icmp eq i64 %t$1, %t$3
@@ -36962,9 +37175,10 @@ do_cont_3:
   %t$46 = alloca i64
   store i64 %t$10, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$48 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -37145,9 +37359,10 @@ else_1:
   %t$50 = alloca i64
   store i64 %p$acc, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$5$st = call { i64, i64 } @stdlib.compiler.parser.parse_comprehension_gen_worker(i64 %p$tokens, i64 %p$i)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.compiler.parser.parse_comprehension_gen_worker(i64 %p$tokens, i64 %p$i)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$5, %t$7
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -37288,9 +37503,10 @@ entry:
   %t$41 = alloca i64
   store i64 %p$tokens, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -37326,9 +37542,10 @@ do_cont_2:
   %t$53 = alloca i64
   store i64 %t$9, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$55 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -37357,9 +37574,10 @@ do_cont_12:
   %t$64 = alloca i64
   store i64 %t$16, ptr %t$64
   %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$66 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -37398,9 +37616,10 @@ do_cont_19:
   %t$79 = alloca i64
   store i64 %t$25, ptr %t$79
   %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_comprehension_guards_worker(i64 %p$tokens, i64 %t$24, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_comprehension_guards_worker(i64 %p$tokens, i64 %t$24, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$81 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -37521,9 +37740,10 @@ ovfok_7:
   %t$36 = alloca i64
   store i64 %p$acc, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
   %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -37705,9 +37925,10 @@ entry:
   %t$65 = alloca i64
   store i64 %t$1, ptr %t$65
   %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -37828,9 +38049,10 @@ body_1_13:
   %t$106 = alloca i64
   store i64 %t$30, ptr %t$106
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)
-  %t$31$st = call { i64, i64 } @stdlib.compiler.parser.collect_dict_entries_worker(i64 %p$tokens, i64 %t$8, i64 %t$30)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.compiler.parser.collect_dict_entries_worker(i64 %p$tokens, i64 %t$8, i64 %t$30)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$108 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$31, %t$33
@@ -37867,9 +38089,10 @@ do_cont_33:
   %t$119 = alloca i64
   store i64 %t$40, ptr %t$119
   %t$120 = call i64 @sprout_gc_push_i64_root(ptr %t$119)
-  %t$41$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$40, i64 %p$tokens, i64 %t$38)
-  %t$41 = extractvalue { i64, i64 } %t$41$st, 0
-  %t$42 = extractvalue { i64, i64 } %t$41$st, 1
+  %t$41$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$40, i64 %p$tokens, i64 %t$38)
+  %t$41 = trunc i128 %t$41$st to i64
+  %t$41$hi = lshr i128 %t$41$st, 64
+  %t$42 = trunc i128 %t$41$hi to i64
   %t$121 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$43 = add i64 0, 8
   %t$44 = icmp eq i64 %t$41, %t$43
@@ -38008,9 +38231,10 @@ tco_loop:
   %t$71 = alloca i64
   store i64 %t$1, ptr %t$71
   %t$72 = call i64 @sprout_gc_push_i64_root(ptr %t$71)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$73 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -38050,9 +38274,10 @@ do_cont_4:
   %t$86 = alloca i64
   store i64 %t$11, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -38084,9 +38309,10 @@ do_cont_14:
   %t$99 = alloca i64
   store i64 %t$18, ptr %t$99
   %t$100 = call i64 @sprout_gc_push_i64_root(ptr %t$99)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$101 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -38481,9 +38707,10 @@ entry:
   %t$56 = alloca i64
   store i64 %t$1, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -38596,9 +38823,10 @@ body_1_13:
   %t$98 = alloca i64
   store i64 %t$25, ptr %t$98
   %t$99 = call i64 @sprout_gc_push_i64_root(ptr %t$98)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_record_literal_fields_worker(i64 %p$tokens, i64 %t$8, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_record_literal_fields_worker(i64 %p$tokens, i64 %t$8, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$100 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -38641,9 +38869,10 @@ do_cont_28:
   %t$115 = alloca i64
   store i64 %t$35, ptr %t$115
   %t$116 = call i64 @sprout_gc_push_i64_root(ptr %t$115)
-  %t$36$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   %t$117 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$36, %t$38
@@ -38749,9 +38978,10 @@ tco_loop:
   %t$71 = alloca i64
   store i64 %t$1, ptr %t$71
   %t$72 = call i64 @sprout_gc_push_i64_root(ptr %t$71)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$73 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -38791,9 +39021,10 @@ do_cont_4:
   %t$86 = alloca i64
   store i64 %t$11, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -38825,9 +39056,10 @@ do_cont_14:
   %t$99 = alloca i64
   store i64 %t$18, ptr %t$99
   %t$100 = call i64 @sprout_gc_push_i64_root(ptr %t$99)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$101 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -39090,9 +39322,10 @@ tco_loop:
   %t$32 = alloca i64
   store i64 %p$acc, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -39230,9 +39463,10 @@ entry:
   %t$67 = alloca i64
   store i64 %t$1, ptr %t$67
   %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$69 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -39336,9 +39570,10 @@ then_29:
   %t$102 = alloca i64
   store i64 %p$tokens, ptr %t$102
   %t$103 = call i64 @sprout_gc_push_i64_root(ptr %t$102)
-  %t$31$st = call { i64, i64 } @stdlib.compiler.parser.parse_try_worker(i64 %p$tokens, i64 %t$8)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.compiler.parser.parse_try_worker(i64 %p$tokens, i64 %t$8)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$31, %t$33
   %t$104 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -39374,9 +39609,10 @@ do_cont_33:
   %t$114 = alloca i64
   store i64 %t$40, ptr %t$114
   %t$115 = call i64 @sprout_gc_push_i64_root(ptr %t$114)
-  %t$41$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$40, i64 %p$tokens, i64 %t$38)
-  %t$41 = extractvalue { i64, i64 } %t$41$st, 0
-  %t$42 = extractvalue { i64, i64 } %t$41$st, 1
+  %t$41$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$40, i64 %p$tokens, i64 %t$38)
+  %t$41 = trunc i128 %t$41$st to i64
+  %t$41$hi = lshr i128 %t$41$st, 64
+  %t$42 = trunc i128 %t$41$hi to i64
   %t$116 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$43 = add i64 0, 8
   %t$44 = icmp eq i64 %t$41, %t$43
@@ -39431,9 +39667,10 @@ else_29:
   %t$131 = alloca i64
   store i64 %p$tokens, ptr %t$131
   %t$132 = call i64 @sprout_gc_push_i64_root(ptr %t$131)
-  %t$52$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
-  %t$52 = extractvalue { i64, i64 } %t$52$st, 0
-  %t$53 = extractvalue { i64, i64 } %t$52$st, 1
+  %t$52$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$8)
+  %t$52 = trunc i128 %t$52$st to i64
+  %t$52$hi = lshr i128 %t$52$st, 64
+  %t$53 = trunc i128 %t$52$hi to i64
   %t$54 = add i64 0, 8
   %t$55 = icmp eq i64 %t$52, %t$54
   %t$133 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -39525,9 +39762,10 @@ body_0_4:
   %t$63 = alloca i64
   store i64 %t$9, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$65 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -39607,9 +39845,10 @@ body_1_4:
   %t$89 = alloca i64
   store i64 %t$25, ptr %t$89
   %t$90 = call i64 @sprout_gc_push_i64_root(ptr %t$89)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %t$23, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %t$23, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$91 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -39649,9 +39888,10 @@ do_cont_28:
   %t$104 = alloca i64
   store i64 %t$35, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$36$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$35, i64 %p$tokens, i64 %t$33)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   %t$106 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$36, %t$38
@@ -39734,9 +39974,10 @@ entry:
   %t$15 = alloca i64
   store i64 %t$1, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -40189,9 +40430,10 @@ body_1_4:
   store i64 %t$17, ptr %t$59
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
   %t$18 = call i64 @stdlib.compiler.parser.skip_param_mode(i64 %p$tokens, i64 %t$16)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
   %t$61 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -40325,9 +40567,10 @@ else_4:
   %t$52 = alloca i64
   store i64 %p$acc, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$8$st = call { i64, i64 } @stdlib.compiler.parser.parse_param_worker(i64 %p$tokens, i64 %p$i)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.compiler.parser.parse_param_worker(i64 %p$tokens, i64 %p$i)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$10 = add i64 0, 8
   %t$11 = icmp eq i64 %t$8, %t$10
   %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -40468,9 +40711,10 @@ entry:
   %t$28 = alloca i64
   store i64 %t$1, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -40506,9 +40750,10 @@ do_cont_4:
   %t$41 = alloca i64
   store i64 %t$10, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.collect_type_atoms_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.collect_type_atoms_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -40610,9 +40855,10 @@ then_1:
   %t$28 = alloca i64
   store i64 %p$acc, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$3$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$5 = add i64 0, 8
   %t$6 = icmp eq i64 %t$3, %t$5
   %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -40706,9 +40952,10 @@ tco_loop:
   %t$39 = alloca i64
   store i64 %p$acc, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$41 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -40959,9 +41206,10 @@ else_2:
   %t$70 = alloca i64
   store i64 %p$acc, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
   %t$72 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -41000,9 +41248,10 @@ do_cont_12:
   %t$84 = alloca i64
   store i64 %t$19, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$19, i64 %p$tokens, i64 %t$17)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$19, i64 %p$tokens, i64 %t$17)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$86 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -41034,9 +41283,10 @@ do_cont_22:
   %t$97 = alloca i64
   store i64 %t$26, ptr %t$97
   %t$98 = call i64 @sprout_gc_push_i64_root(ptr %t$97)
-  %t$27$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$26)
-  %t$27 = extractvalue { i64, i64 } %t$27$st, 0
-  %t$28 = extractvalue { i64, i64 } %t$27$st, 1
+  %t$27$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$26)
+  %t$27 = trunc i128 %t$27$st to i64
+  %t$27$hi = lshr i128 %t$27$st, 64
+  %t$28 = trunc i128 %t$27$hi to i64
   %t$99 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$29 = add i64 0, 8
   %t$30 = icmp eq i64 %t$27, %t$29
@@ -41084,9 +41334,10 @@ do_cont_29:
   %t$116 = alloca i64
   store i64 %t$38, ptr %t$116
   %t$117 = call i64 @sprout_gc_push_i64_root(ptr %t$116)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$34, i64 %t$36, i64 %t$38)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$34, i64 %t$36, i64 %t$38)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$118 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -41619,9 +41870,10 @@ body_1_2:
   %t$106 = alloca i64
   store i64 %t$34, ptr %t$106
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)
-  %t$35$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$34, i64 %p$tokens, i64 %p$i)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$34, i64 %p$tokens, i64 %p$i)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   %t$108 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$35, %t$37
@@ -41683,9 +41935,10 @@ entry:
   %t$57 = alloca i64
   store i64 %p$tokens, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_exists_prefix_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_exists_prefix_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -41721,9 +41974,10 @@ do_cont_2:
   %t$69 = alloca i64
   store i64 %t$9, ptr %t$69
   %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$71 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -41771,9 +42025,10 @@ do_cont_12:
   %t$88 = alloca i64
   store i64 %t$20, ptr %t$88
   %t$89 = call i64 @sprout_gc_push_i64_root(ptr %t$88)
-  %t$22$st = call { i64, i64 } @stdlib.compiler.parser.collect_ctor_fields_worker(i64 %p$tokens, i64 %t$17, i64 %t$18, i64 %t$19, i64 %t$20, i64 %t$21)
-  %t$22 = extractvalue { i64, i64 } %t$22$st, 0
-  %t$23 = extractvalue { i64, i64 } %t$22$st, 1
+  %t$22$st = call i128 @stdlib.compiler.parser.collect_ctor_fields_worker(i64 %p$tokens, i64 %t$17, i64 %t$18, i64 %t$19, i64 %t$20, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
   %t$90 = call i64 @sprout_gc_pop_roots(i64 4)
   %t$24 = add i64 0, 8
   %t$25 = icmp eq i64 %t$22, %t$24
@@ -41823,9 +42078,10 @@ do_cont_24:
   %t$107 = alloca i64
   store i64 %t$31, ptr %t$107
   %t$108 = call i64 @sprout_gc_push_i64_root(ptr %t$107)
-  %t$32$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$31)
-  %t$32 = extractvalue { i64, i64 } %t$32$st, 0
-  %t$33 = extractvalue { i64, i64 } %t$32$st, 1
+  %t$32$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$31)
+  %t$32 = trunc i128 %t$32$st to i64
+  %t$32$hi = lshr i128 %t$32$st, 64
+  %t$33 = trunc i128 %t$32$hi to i64
   %t$34 = add i64 0, 8
   %t$35 = icmp eq i64 %t$32, %t$34
   %t$109 = call i64 @sprout_gc_pop_roots(i64 7)
@@ -41874,9 +42130,10 @@ do_cont_34:
   %t$129 = alloca i64
   store i64 %t$39, ptr %t$129
   %t$130 = call i64 @sprout_gc_push_i64_root(ptr %t$129)
-  %t$40$st = call { i64, i64 } @stdlib.compiler.parser.validate_ctor_where_worker(i64 %t$6, i64 %t$38, i64 %p$tokens, i64 %t$31)
-  %t$40 = extractvalue { i64, i64 } %t$40$st, 0
-  %t$41 = extractvalue { i64, i64 } %t$40$st, 1
+  %t$40$st = call i128 @stdlib.compiler.parser.validate_ctor_where_worker(i64 %t$6, i64 %t$38, i64 %p$tokens, i64 %t$31)
+  %t$40 = trunc i128 %t$40$st to i64
+  %t$40$hi = lshr i128 %t$40$st, 64
+  %t$41 = trunc i128 %t$40$hi to i64
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$40, %t$42
   %t$131 = call i64 @sprout_gc_pop_roots(i64 9)
@@ -42024,9 +42281,10 @@ body_1_1:
   %t$53 = alloca i64
   store i64 %t$10, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.constraint_var_name_worker(i64 %t$9)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.constraint_var_name_worker(i64 %t$9)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$55 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_13
 arm_0_13:
@@ -42386,9 +42644,10 @@ then_22:
   %t$93 = alloca i64
   store i64 %p$cons_acc, ptr %t$93
   %t$94 = call i64 @sprout_gc_push_i64_root(ptr %t$93)
-  %t$24$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$24 = extractvalue { i64, i64 } %t$24$st, 0
-  %t$25 = extractvalue { i64, i64 } %t$24$st, 1
+  %t$24$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$24 = trunc i128 %t$24$st to i64
+  %t$24$hi = lshr i128 %t$24$st, 64
+  %t$25 = trunc i128 %t$24$hi to i64
   %t$26 = add i64 0, 8
   %t$27 = icmp eq i64 %t$24, %t$26
   %t$95 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -42953,9 +43212,10 @@ body_1_4:
   %t$47 = alloca i64
   store i64 %t$13, ptr %t$47
   %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -43104,9 +43364,10 @@ entry:
   %t$82 = alloca i64
   store i64 %t$1, ptr %t$82
   %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$84 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -43142,9 +43403,10 @@ do_cont_4:
   store i64 %t$11, ptr %t$95
   %t$96 = call i64 @sprout_gc_push_i64_root(ptr %t$95)
   %t$12 = call i64 @stdlib.compiler.parser.skip_linear_marker(i64 %p$tokens, i64 %t$8)
-  %t$13$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$11, i64 %p$tokens, i64 %t$12)
-  %t$13 = extractvalue { i64, i64 } %t$13$st, 0
-  %t$14 = extractvalue { i64, i64 } %t$13$st, 1
+  %t$13$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$11, i64 %p$tokens, i64 %t$12)
+  %t$13 = trunc i128 %t$13$st to i64
+  %t$13$hi = lshr i128 %t$13$st, 64
+  %t$14 = trunc i128 %t$13$hi to i64
   %t$97 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$13, %t$15
@@ -43183,9 +43445,10 @@ do_cont_15:
   %t$110 = alloca i64
   store i64 %t$21, ptr %t$110
   %t$111 = call i64 @sprout_gc_push_i64_root(ptr %t$110)
-  %t$22$st = call { i64, i64 } @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$20, i64 %t$21)
-  %t$22 = extractvalue { i64, i64 } %t$22$st, 0
-  %t$23 = extractvalue { i64, i64 } %t$22$st, 1
+  %t$22$st = call i128 @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$20, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
   %t$112 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$24 = add i64 0, 8
   %t$25 = icmp eq i64 %t$22, %t$24
@@ -43225,9 +43488,10 @@ do_cont_24:
   %t$126 = call i64 @sprout_gc_push_i64_root(ptr %t$125)
   %t$30 = call i64 @stdlib.compiler.parser.skip_visibility(i64 %p$tokens, i64 %t$29)
   %t$127 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$31$st = call { i64, i64 } @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %t$30)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %t$30)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$31, %t$33
   %t$128 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -43272,9 +43536,10 @@ do_cont_33:
   %t$144 = alloca i64
   store i64 %t$40, ptr %t$144
   %t$145 = call i64 @sprout_gc_push_i64_root(ptr %t$144)
-  %t$41$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$40, i64 %p$tokens, i64 %t$38)
-  %t$41 = extractvalue { i64, i64 } %t$41$st, 0
-  %t$42 = extractvalue { i64, i64 } %t$41$st, 1
+  %t$41$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$40, i64 %p$tokens, i64 %t$38)
+  %t$41 = trunc i128 %t$41$st to i64
+  %t$41$hi = lshr i128 %t$41$st, 64
+  %t$42 = trunc i128 %t$41$hi to i64
   %t$146 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$43 = add i64 0, 8
   %t$44 = icmp eq i64 %t$41, %t$43
@@ -43314,9 +43579,10 @@ do_cont_43:
   %t$162 = call i64 @sprout_gc_push_i64_root(ptr %t$161)
   %t$48 = call i64 @stdlib.compiler.parser.skip_optional_bar(i64 %p$tokens, i64 %t$47)
   %t$163 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$49$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %t$48)
-  %t$49 = extractvalue { i64, i64 } %t$49$st, 0
-  %t$50 = extractvalue { i64, i64 } %t$49$st, 1
+  %t$49$st = call i128 @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %t$48)
+  %t$49 = trunc i128 %t$49$st to i64
+  %t$49$hi = lshr i128 %t$49$st, 64
+  %t$50 = trunc i128 %t$49$hi to i64
   %t$51 = add i64 0, 8
   %t$52 = icmp eq i64 %t$49, %t$51
   %t$164 = call i64 @sprout_gc_pop_roots(i64 5)
@@ -43373,9 +43639,10 @@ do_cont_51:
   %t$185 = alloca i64
   store i64 %t$58, ptr %t$185
   %t$186 = call i64 @sprout_gc_push_i64_root(ptr %t$185)
-  %t$59$st = call { i64, i64 } @stdlib.compiler.parser.collect_type_constructors_worker(i64 %p$tokens, i64 %t$56, i64 %t$58)
-  %t$59 = extractvalue { i64, i64 } %t$59$st, 0
-  %t$60 = extractvalue { i64, i64 } %t$59$st, 1
+  %t$59$st = call i128 @stdlib.compiler.parser.collect_type_constructors_worker(i64 %p$tokens, i64 %t$56, i64 %t$58)
+  %t$59 = trunc i128 %t$59$st to i64
+  %t$59$hi = lshr i128 %t$59$st, 64
+  %t$60 = trunc i128 %t$59$hi to i64
   %t$187 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$61 = add i64 0, 8
   %t$62 = icmp eq i64 %t$59, %t$61
@@ -43545,9 +43812,10 @@ body_1_4:
   %t$77 = alloca i64
   store i64 %t$16, ptr %t$77
   %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$16, i64 %p$tokens, i64 %t$14)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$16, i64 %p$tokens, i64 %t$14)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$79 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -43577,9 +43845,10 @@ do_cont_19:
   %t$88 = alloca i64
   store i64 %t$24, ptr %t$88
   %t$89 = call i64 @sprout_gc_push_i64_root(ptr %t$88)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.collect_deriving_names_worker(i64 %p$tokens, i64 %t$23, i64 %t$24)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.collect_deriving_names_worker(i64 %p$tokens, i64 %t$23, i64 %t$24)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$90 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -43616,9 +43885,10 @@ do_cont_27:
   %t$101 = alloca i64
   store i64 %t$34, ptr %t$101
   %t$102 = call i64 @sprout_gc_push_i64_root(ptr %t$101)
-  %t$35$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$34, i64 %p$tokens, i64 %t$32)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$34, i64 %p$tokens, i64 %t$32)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   %t$103 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$35, %t$37
@@ -43797,9 +44067,10 @@ else_4:
   %t$58 = alloca i64
   store i64 %t$9, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$9, i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -44193,9 +44464,10 @@ entry:
   %t$106 = alloca i64
   store i64 %t$1, ptr %t$106
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$108 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -44226,9 +44498,10 @@ do_cont_4:
   %t$117 = alloca i64
   store i64 %t$10, ptr %t$117
   %t$118 = call i64 @sprout_gc_push_i64_root(ptr %t$117)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$119 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -44265,9 +44538,10 @@ do_cont_13:
   %t$130 = alloca i64
   store i64 %t$20, ptr %t$130
   %t$131 = call i64 @sprout_gc_push_i64_root(ptr %t$130)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$132 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -44300,9 +44574,10 @@ do_cont_23:
   %t$143 = alloca i64
   store i64 %t$28, ptr %t$143
   %t$144 = call i64 @sprout_gc_push_i64_root(ptr %t$143)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$145 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -44342,9 +44617,10 @@ do_cont_31:
   %t$158 = alloca i64
   store i64 %t$38, ptr %t$158
   %t$159 = call i64 @sprout_gc_push_i64_root(ptr %t$158)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$160 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -44376,9 +44652,10 @@ do_cont_41:
   %t$171 = alloca i64
   store i64 %t$45, ptr %t$171
   %t$172 = call i64 @sprout_gc_push_i64_root(ptr %t$171)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$45)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$45)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$173 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
@@ -44422,9 +44699,10 @@ do_cont_48:
   %t$188 = alloca i64
   store i64 %t$54, ptr %t$188
   %t$189 = call i64 @sprout_gc_push_i64_root(ptr %t$188)
-  %t$55$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$54)
-  %t$55 = extractvalue { i64, i64 } %t$55$st, 0
-  %t$56 = extractvalue { i64, i64 } %t$55$st, 1
+  %t$55$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$54)
+  %t$55 = trunc i128 %t$55$st to i64
+  %t$55$hi = lshr i128 %t$55$st, 64
+  %t$56 = trunc i128 %t$55$hi to i64
   %t$190 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = add i64 0, 8
   %t$58 = icmp eq i64 %t$55, %t$57
@@ -44473,9 +44751,10 @@ do_cont_57:
   %t$209 = alloca i64
   store i64 %t$64, ptr %t$209
   %t$210 = call i64 @sprout_gc_push_i64_root(ptr %t$209)
-  %t$65$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$64, i64 %p$tokens, i64 %t$62)
-  %t$65 = extractvalue { i64, i64 } %t$65$st, 0
-  %t$66 = extractvalue { i64, i64 } %t$65$st, 1
+  %t$65$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$64, i64 %p$tokens, i64 %t$62)
+  %t$65 = trunc i128 %t$65$st to i64
+  %t$65$hi = lshr i128 %t$65$st, 64
+  %t$66 = trunc i128 %t$65$hi to i64
   %t$211 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$67 = add i64 0, 8
   %t$68 = icmp eq i64 %t$65, %t$67
@@ -44516,9 +44795,10 @@ do_cont_67:
   %t$228 = alloca i64
   store i64 %t$71, ptr %t$228
   %t$229 = call i64 @sprout_gc_push_i64_root(ptr %t$228)
-  %t$72$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$71)
-  %t$72 = extractvalue { i64, i64 } %t$72$st, 0
-  %t$73 = extractvalue { i64, i64 } %t$72$st, 1
+  %t$72$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$71)
+  %t$72 = trunc i128 %t$72$st to i64
+  %t$72$hi = lshr i128 %t$72$st, 64
+  %t$73 = trunc i128 %t$72$hi to i64
   %t$230 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$74 = add i64 0, 8
   %t$75 = icmp eq i64 %t$72, %t$74
@@ -44565,9 +44845,10 @@ do_cont_74:
   %t$249 = alloca i64
   store i64 %t$79, ptr %t$249
   %t$250 = call i64 @sprout_gc_push_i64_root(ptr %t$249)
-  %t$80$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %t$79, i64 %t$78)
-  %t$80 = extractvalue { i64, i64 } %t$80$st, 0
-  %t$81 = extractvalue { i64, i64 } %t$80$st, 1
+  %t$80$st = call i128 @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %t$79, i64 %t$78)
+  %t$80 = trunc i128 %t$80$st to i64
+  %t$80$hi = lshr i128 %t$80$st, 64
+  %t$81 = trunc i128 %t$80$hi to i64
   %t$251 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$82 = add i64 0, 8
   %t$83 = icmp eq i64 %t$80, %t$82
@@ -44701,9 +44982,10 @@ entry:
   %t$79 = alloca i64
   store i64 %t$1, ptr %t$79
   %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$81 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -44734,9 +45016,10 @@ do_cont_4:
   %t$90 = alloca i64
   store i64 %t$10, ptr %t$90
   %t$91 = call i64 @sprout_gc_push_i64_root(ptr %t$90)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$92 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -44767,9 +45050,10 @@ do_cont_13:
   %t$101 = alloca i64
   store i64 %t$19, ptr %t$101
   %t$102 = call i64 @sprout_gc_push_i64_root(ptr %t$101)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$19, i64 %p$tokens, i64 %t$17)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$19, i64 %p$tokens, i64 %t$17)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$103 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -44806,9 +45090,10 @@ do_cont_22:
   %t$114 = alloca i64
   store i64 %t$29, ptr %t$114
   %t$115 = call i64 @sprout_gc_push_i64_root(ptr %t$114)
-  %t$30$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$29, i64 %p$tokens, i64 %t$27)
-  %t$30 = extractvalue { i64, i64 } %t$30$st, 0
-  %t$31 = extractvalue { i64, i64 } %t$30$st, 1
+  %t$30$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$29, i64 %p$tokens, i64 %t$27)
+  %t$30 = trunc i128 %t$30$st to i64
+  %t$30$hi = lshr i128 %t$30$st, 64
+  %t$31 = trunc i128 %t$30$hi to i64
   %t$116 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$32 = add i64 0, 8
   %t$33 = icmp eq i64 %t$30, %t$32
@@ -44841,9 +45126,10 @@ do_cont_32:
   %t$127 = alloca i64
   store i64 %t$37, ptr %t$127
   %t$128 = call i64 @sprout_gc_push_i64_root(ptr %t$127)
-  %t$38$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$36, i64 %t$37)
-  %t$38 = extractvalue { i64, i64 } %t$38$st, 0
-  %t$39 = extractvalue { i64, i64 } %t$38$st, 1
+  %t$38$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$36, i64 %t$37)
+  %t$38 = trunc i128 %t$38$st to i64
+  %t$38$hi = lshr i128 %t$38$st, 64
+  %t$39 = trunc i128 %t$38$hi to i64
   %t$129 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$40 = add i64 0, 8
   %t$41 = icmp eq i64 %t$38, %t$40
@@ -44883,9 +45169,10 @@ do_cont_40:
   %t$142 = alloca i64
   store i64 %t$47, ptr %t$142
   %t$143 = call i64 @sprout_gc_push_i64_root(ptr %t$142)
-  %t$48$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$47, i64 %p$tokens, i64 %t$45)
-  %t$48 = extractvalue { i64, i64 } %t$48$st, 0
-  %t$49 = extractvalue { i64, i64 } %t$48$st, 1
+  %t$48$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$47, i64 %p$tokens, i64 %t$45)
+  %t$48 = trunc i128 %t$48$st to i64
+  %t$48$hi = lshr i128 %t$48$st, 64
+  %t$49 = trunc i128 %t$48$hi to i64
   %t$144 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$50 = add i64 0, 8
   %t$51 = icmp eq i64 %t$48, %t$50
@@ -44917,9 +45204,10 @@ do_cont_50:
   %t$155 = alloca i64
   store i64 %t$54, ptr %t$155
   %t$156 = call i64 @sprout_gc_push_i64_root(ptr %t$155)
-  %t$55$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$54)
-  %t$55 = extractvalue { i64, i64 } %t$55$st, 0
-  %t$56 = extractvalue { i64, i64 } %t$55$st, 1
+  %t$55$st = call i128 @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$54)
+  %t$55 = trunc i128 %t$55$st to i64
+  %t$55$hi = lshr i128 %t$55$st, 64
+  %t$56 = trunc i128 %t$55$hi to i64
   %t$157 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = add i64 0, 8
   %t$58 = icmp eq i64 %t$55, %t$57
@@ -45088,9 +45376,10 @@ body_1_4:
   %t$42 = alloca i64
   store i64 %t$15, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -45192,9 +45481,10 @@ arm_1_1:
   %t$37 = alloca i64
   store i64 %p$tokens, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -45321,9 +45611,10 @@ body_1_4:
   %t$44 = alloca i64
   store i64 %t$15, ptr %t$44
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.collect_constraints_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.collect_constraints_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$46 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -45442,9 +45733,10 @@ body_1_4:
   %t$52 = alloca i64
   store i64 %t$13, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -45474,9 +45766,10 @@ do_cont_16:
   %t$65 = alloca i64
   store i64 %t$20, ptr %t$65
   %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.collect_where_bindings_worker(i64 %p$tokens, i64 %t$15, i64 %t$20)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.collect_where_bindings_worker(i64 %p$tokens, i64 %t$15, i64 %t$20)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -45597,9 +45890,10 @@ body_1_4:
   %t$41 = alloca i64
   store i64 %t$14, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$15$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$14)
-  %t$15 = extractvalue { i64, i64 } %t$15$st, 0
-  %t$16 = extractvalue { i64, i64 } %t$15$st, 1
+  %t$15$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$14)
+  %t$15 = trunc i128 %t$15$st to i64
+  %t$15$hi = lshr i128 %t$15$st, 64
+  %t$16 = trunc i128 %t$15$hi to i64
   %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
@@ -45671,9 +45965,10 @@ entry:
   %t$75 = alloca i64
   store i64 %t$1, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -45704,9 +45999,10 @@ do_cont_4:
   %t$86 = alloca i64
   store i64 %t$10, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -45738,9 +46034,10 @@ do_cont_13:
   %t$97 = alloca i64
   store i64 %t$18, ptr %t$97
   %t$98 = call i64 @sprout_gc_push_i64_root(ptr %t$97)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_type_anno_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_optional_type_anno_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$99 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -45780,9 +46077,10 @@ do_cont_21:
   %t$112 = alloca i64
   store i64 %t$28, ptr %t$112
   %t$113 = call i64 @sprout_gc_push_i64_root(ptr %t$112)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$28, i64 %p$tokens, i64 %t$26)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$28, i64 %p$tokens, i64 %t$26)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$114 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -45863,9 +46161,10 @@ else_40:
   %t$145 = alloca i64
   store i64 %p$tokens, ptr %t$145
   %t$146 = call i64 @sprout_gc_push_i64_root(ptr %t$145)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$35)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$35)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
   %t$147 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -46022,9 +46321,10 @@ entry:
   %t$36 = alloca i64
   store i64 %t$1, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -46061,9 +46361,10 @@ do_cont_4:
   %t$49 = alloca i64
   store i64 %t$11, ptr %t$49
   %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$51 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -46092,9 +46393,10 @@ do_cont_14:
   %t$60 = alloca i64
   store i64 %t$18, ptr %t$60
   %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$62 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -46223,9 +46525,10 @@ else_4:
   %t$57 = alloca i64
   store i64 %p$acc, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_record_field_decl_worker(i64 %p$tokens, i64 %p$i)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_record_field_decl_worker(i64 %p$tokens, i64 %p$i)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
   %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -46371,9 +46674,10 @@ entry:
   %t$91 = alloca i64
   store i64 %t$1, ptr %t$91
   %t$92 = call i64 @sprout_gc_push_i64_root(ptr %t$91)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$93 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -46409,9 +46713,10 @@ do_cont_4:
   store i64 %t$11, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
   %t$12 = call i64 @stdlib.compiler.parser.skip_linear_marker(i64 %p$tokens, i64 %t$8)
-  %t$13$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$11, i64 %p$tokens, i64 %t$12)
-  %t$13 = extractvalue { i64, i64 } %t$13$st, 0
-  %t$14 = extractvalue { i64, i64 } %t$13$st, 1
+  %t$13$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$11, i64 %p$tokens, i64 %t$12)
+  %t$13 = trunc i128 %t$13$st to i64
+  %t$13$hi = lshr i128 %t$13$st, 64
+  %t$14 = trunc i128 %t$13$hi to i64
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$13, %t$15
@@ -46450,9 +46755,10 @@ do_cont_15:
   %t$119 = alloca i64
   store i64 %t$21, ptr %t$119
   %t$120 = call i64 @sprout_gc_push_i64_root(ptr %t$119)
-  %t$22$st = call { i64, i64 } @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$20, i64 %t$21)
-  %t$22 = extractvalue { i64, i64 } %t$22$st, 0
-  %t$23 = extractvalue { i64, i64 } %t$22$st, 1
+  %t$22$st = call i128 @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$20, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
   %t$121 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$24 = add i64 0, 8
   %t$25 = icmp eq i64 %t$22, %t$24
@@ -46496,9 +46802,10 @@ do_cont_24:
   store i64 %t$31, ptr %t$136
   %t$137 = call i64 @sprout_gc_push_i64_root(ptr %t$136)
   %t$32 = call i64 @stdlib.compiler.parser.skip_visibility(i64 %p$tokens, i64 %t$29)
-  %t$33$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$31, i64 %p$tokens, i64 %t$32)
-  %t$33 = extractvalue { i64, i64 } %t$33$st, 0
-  %t$34 = extractvalue { i64, i64 } %t$33$st, 1
+  %t$33$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$31, i64 %p$tokens, i64 %t$32)
+  %t$33 = trunc i128 %t$33$st to i64
+  %t$33$hi = lshr i128 %t$33$st, 64
+  %t$34 = trunc i128 %t$33$hi to i64
   %t$138 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$35 = add i64 0, 8
   %t$36 = icmp eq i64 %t$33, %t$35
@@ -46538,9 +46845,10 @@ do_cont_35:
   %t$153 = alloca i64
   store i64 %t$41, ptr %t$153
   %t$154 = call i64 @sprout_gc_push_i64_root(ptr %t$153)
-  %t$42$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$41, i64 %p$tokens, i64 %t$39)
-  %t$42 = extractvalue { i64, i64 } %t$42$st, 0
-  %t$43 = extractvalue { i64, i64 } %t$42$st, 1
+  %t$42$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$41, i64 %p$tokens, i64 %t$39)
+  %t$42 = trunc i128 %t$42$st to i64
+  %t$42$hi = lshr i128 %t$42$st, 64
+  %t$43 = trunc i128 %t$42$hi to i64
   %t$155 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$44 = add i64 0, 8
   %t$45 = icmp eq i64 %t$42, %t$44
@@ -46579,9 +46887,10 @@ do_cont_44:
   %t$170 = alloca i64
   store i64 %t$49, ptr %t$170
   %t$171 = call i64 @sprout_gc_push_i64_root(ptr %t$170)
-  %t$50$st = call { i64, i64 } @stdlib.compiler.parser.collect_record_field_decls_worker(i64 %p$tokens, i64 %t$48, i64 %t$49)
-  %t$50 = extractvalue { i64, i64 } %t$50$st, 0
-  %t$51 = extractvalue { i64, i64 } %t$50$st, 1
+  %t$50$st = call i128 @stdlib.compiler.parser.collect_record_field_decls_worker(i64 %p$tokens, i64 %t$48, i64 %t$49)
+  %t$50 = trunc i128 %t$50$st to i64
+  %t$50$hi = lshr i128 %t$50$st, 64
+  %t$51 = trunc i128 %t$50$hi to i64
   %t$172 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$52 = add i64 0, 8
   %t$53 = icmp eq i64 %t$50, %t$52
@@ -46627,9 +46936,10 @@ do_cont_52:
   %t$189 = alloca i64
   store i64 %t$59, ptr %t$189
   %t$190 = call i64 @sprout_gc_push_i64_root(ptr %t$189)
-  %t$60$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$59, i64 %p$tokens, i64 %t$57)
-  %t$60 = extractvalue { i64, i64 } %t$60$st, 0
-  %t$61 = extractvalue { i64, i64 } %t$60$st, 1
+  %t$60$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$59, i64 %p$tokens, i64 %t$57)
+  %t$60 = trunc i128 %t$60$st to i64
+  %t$60$hi = lshr i128 %t$60$st, 64
+  %t$61 = trunc i128 %t$60$hi to i64
   %t$191 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$62 = add i64 0, 8
   %t$63 = icmp eq i64 %t$60, %t$62
@@ -46667,9 +46977,10 @@ do_cont_62:
   %t$206 = alloca i64
   store i64 %t$66, ptr %t$206
   %t$207 = call i64 @sprout_gc_push_i64_root(ptr %t$206)
-  %t$67$st = call { i64, i64 } @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %t$66)
-  %t$67 = extractvalue { i64, i64 } %t$67$st, 0
-  %t$68 = extractvalue { i64, i64 } %t$67$st, 1
+  %t$67$st = call i128 @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %t$66)
+  %t$67 = trunc i128 %t$67$st to i64
+  %t$67$hi = lshr i128 %t$67$st, 64
+  %t$68 = trunc i128 %t$67$hi to i64
   %t$208 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$69 = add i64 0, 8
   %t$70 = icmp eq i64 %t$67, %t$69
@@ -46794,9 +47105,10 @@ entry:
   %t$85 = alloca i64
   store i64 %t$1, ptr %t$85
   %t$86 = call i64 @sprout_gc_push_i64_root(ptr %t$85)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$87 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -46827,9 +47139,10 @@ do_cont_4:
   %t$96 = alloca i64
   store i64 %t$10, ptr %t$96
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$98 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -46866,9 +47179,10 @@ do_cont_13:
   %t$109 = alloca i64
   store i64 %t$20, ptr %t$109
   %t$110 = call i64 @sprout_gc_push_i64_root(ptr %t$109)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$111 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -46901,9 +47215,10 @@ do_cont_23:
   %t$122 = alloca i64
   store i64 %t$28, ptr %t$122
   %t$123 = call i64 @sprout_gc_push_i64_root(ptr %t$122)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$124 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -46943,9 +47258,10 @@ do_cont_31:
   %t$137 = alloca i64
   store i64 %t$38, ptr %t$137
   %t$138 = call i64 @sprout_gc_push_i64_root(ptr %t$137)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$139 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -46982,9 +47298,10 @@ do_cont_41:
   %t$152 = alloca i64
   store i64 %t$47, ptr %t$152
   %t$153 = call i64 @sprout_gc_push_i64_root(ptr %t$152)
-  %t$48$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$47, i64 %p$tokens, i64 %t$45)
-  %t$48 = extractvalue { i64, i64 } %t$48$st, 0
-  %t$49 = extractvalue { i64, i64 } %t$48$st, 1
+  %t$48$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$47, i64 %p$tokens, i64 %t$45)
+  %t$48 = trunc i128 %t$48$st to i64
+  %t$48$hi = lshr i128 %t$48$st, 64
+  %t$49 = trunc i128 %t$48$hi to i64
   %t$154 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$50 = add i64 0, 8
   %t$51 = icmp eq i64 %t$48, %t$50
@@ -47016,9 +47333,10 @@ do_cont_50:
   %t$165 = alloca i64
   store i64 %t$54, ptr %t$165
   %t$166 = call i64 @sprout_gc_push_i64_root(ptr %t$165)
-  %t$55$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$54)
-  %t$55 = extractvalue { i64, i64 } %t$55$st, 0
-  %t$56 = extractvalue { i64, i64 } %t$55$st, 1
+  %t$55$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$54)
+  %t$55 = trunc i128 %t$55$st to i64
+  %t$55$hi = lshr i128 %t$55$st, 64
+  %t$56 = trunc i128 %t$55$hi to i64
   %t$167 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = add i64 0, 8
   %t$58 = icmp eq i64 %t$55, %t$57
@@ -47061,9 +47379,10 @@ do_cont_57:
   %t$182 = alloca i64
   store i64 %t$64, ptr %t$182
   %t$183 = call i64 @sprout_gc_push_i64_root(ptr %t$182)
-  %t$65$st = call { i64, i64 } @stdlib.compiler.parser.make_class_method_sig_worker(i64 %t$63, i64 %t$64, i64 %t$61, i64 %p$tokens, i64 %t$62)
-  %t$65 = extractvalue { i64, i64 } %t$65$st, 0
-  %t$66 = extractvalue { i64, i64 } %t$65$st, 1
+  %t$65$st = call i128 @stdlib.compiler.parser.make_class_method_sig_worker(i64 %t$63, i64 %t$64, i64 %t$61, i64 %p$tokens, i64 %t$62)
+  %t$65 = trunc i128 %t$65$st to i64
+  %t$65$hi = lshr i128 %t$65$st, 64
+  %t$66 = trunc i128 %t$65$hi to i64
   %t$184 = call i64 @sprout_gc_pop_roots(i64 6)
   %t$67 = add i64 0, 8
   %t$68 = icmp eq i64 %t$65, %t$67
@@ -47159,9 +47478,10 @@ body_0_1:
   %t$49 = alloca i64
   store i64 %t$6, ptr %t$49
   %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   %t$51 = call i64 @sprout_gc_pop_roots(i64 5)
@@ -47256,9 +47576,10 @@ arm_1_1:
   %t$82 = alloca i64
   store i64 %p$name, ptr %t$82
   %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
   %t$84 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -47298,9 +47619,10 @@ do_cont_22:
   %t$98 = alloca i64
   store i64 %t$27, ptr %t$98
   %t$99 = call i64 @sprout_gc_push_i64_root(ptr %t$98)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$27)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$27)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$100 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
@@ -47420,9 +47742,10 @@ then_4:
   %t$32 = alloca i64
   store i64 %p$acc, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$6$st = call { i64, i64 } @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
+  %t$6$st = call i128 @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
   %t$8 = add i64 0, 8
   %t$9 = icmp eq i64 %t$6, %t$8
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -47569,9 +47892,10 @@ else_2:
   %t$54 = alloca i64
   store i64 %p$acc, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -47615,9 +47939,10 @@ do_cont_13:
   %t$70 = alloca i64
   store i64 %t$22, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$23$st = call { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$18, i64 %t$20, i64 %t$22)
-  %t$23 = extractvalue { i64, i64 } %t$23$st, 0
-  %t$24 = extractvalue { i64, i64 } %t$23$st, 1
+  %t$23$st = call i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$18, i64 %t$20, i64 %t$22)
+  %t$23 = trunc i128 %t$23$st to i64
+  %t$23$hi = lshr i128 %t$23$st, 64
+  %t$24 = trunc i128 %t$23$hi to i64
   %t$72 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$25 = add i64 0, 8
   %t$26 = icmp eq i64 %t$23, %t$25
@@ -47691,9 +48016,10 @@ then_4:
   %t$58 = alloca i64
   store i64 %t$7, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$8$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$7, i64 %p$tokens, i64 %p$i)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$7, i64 %p$tokens, i64 %p$i)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = add i64 0, 8
   %t$11 = icmp eq i64 %t$8, %t$10
@@ -47723,9 +48049,10 @@ do_cont_10:
   %t$69 = alloca i64
   store i64 %t$15, ptr %t$69
   %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.collect_class_method_sigs_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.collect_class_method_sigs_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$71 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -47762,9 +48089,10 @@ do_cont_18:
   %t$82 = alloca i64
   store i64 %t$25, ptr %t$82
   %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$25, i64 %p$tokens, i64 %t$23)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$25, i64 %p$tokens, i64 %t$23)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$84 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -47885,9 +48213,10 @@ entry:
   %t$56 = alloca i64
   store i64 %t$1, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -47918,9 +48247,10 @@ do_cont_4:
   %t$67 = alloca i64
   store i64 %t$10, ptr %t$67
   %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$69 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -47956,9 +48286,10 @@ do_cont_13:
   %t$80 = alloca i64
   store i64 %t$19, ptr %t$80
   %t$81 = call i64 @sprout_gc_push_i64_root(ptr %t$80)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$18, i64 %t$19)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$18, i64 %t$19)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$82 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -47993,9 +48324,10 @@ do_cont_22:
   %t$93 = alloca i64
   store i64 %t$27, ptr %t$93
   %t$94 = call i64 @sprout_gc_push_i64_root(ptr %t$93)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$27)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$27)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$95 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
@@ -48033,9 +48365,10 @@ do_cont_30:
   %t$108 = alloca i64
   store i64 %t$35, ptr %t$108
   %t$109 = call i64 @sprout_gc_push_i64_root(ptr %t$108)
-  %t$36$st = call { i64, i64 } @stdlib.compiler.parser.parse_class_body_worker(i64 %p$tokens, i64 %t$35)
-  %t$36 = extractvalue { i64, i64 } %t$36$st, 0
-  %t$37 = extractvalue { i64, i64 } %t$36$st, 1
+  %t$36$st = call i128 @stdlib.compiler.parser.parse_class_body_worker(i64 %p$tokens, i64 %t$35)
+  %t$36 = trunc i128 %t$36$st to i64
+  %t$36$hi = lshr i128 %t$36$st, 64
+  %t$37 = trunc i128 %t$36$hi to i64
   %t$110 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$36, %t$38
@@ -48140,9 +48473,10 @@ entry:
   %t$105 = alloca i64
   store i64 %t$1, ptr %t$105
   %t$106 = call i64 @sprout_gc_push_i64_root(ptr %t$105)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$107 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -48173,9 +48507,10 @@ do_cont_4:
   %t$116 = alloca i64
   store i64 %t$10, ptr %t$116
   %t$117 = call i64 @sprout_gc_push_i64_root(ptr %t$116)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$118 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -48212,9 +48547,10 @@ do_cont_13:
   %t$129 = alloca i64
   store i64 %t$20, ptr %t$129
   %t$130 = call i64 @sprout_gc_push_i64_root(ptr %t$129)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$131 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -48247,9 +48583,10 @@ do_cont_23:
   %t$142 = alloca i64
   store i64 %t$28, ptr %t$142
   %t$143 = call i64 @sprout_gc_push_i64_root(ptr %t$142)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$144 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -48289,9 +48626,10 @@ do_cont_31:
   %t$157 = alloca i64
   store i64 %t$38, ptr %t$157
   %t$158 = call i64 @sprout_gc_push_i64_root(ptr %t$157)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$159 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -48323,9 +48661,10 @@ do_cont_41:
   %t$170 = alloca i64
   store i64 %t$45, ptr %t$170
   %t$171 = call i64 @sprout_gc_push_i64_root(ptr %t$170)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$45)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$45)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$172 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
@@ -48369,9 +48708,10 @@ do_cont_48:
   %t$187 = alloca i64
   store i64 %t$54, ptr %t$187
   %t$188 = call i64 @sprout_gc_push_i64_root(ptr %t$187)
-  %t$55$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$54)
-  %t$55 = extractvalue { i64, i64 } %t$55$st, 0
-  %t$56 = extractvalue { i64, i64 } %t$55$st, 1
+  %t$55$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$54)
+  %t$55 = trunc i128 %t$55$st to i64
+  %t$55$hi = lshr i128 %t$55$st, 64
+  %t$56 = trunc i128 %t$55$hi to i64
   %t$189 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = add i64 0, 8
   %t$58 = icmp eq i64 %t$55, %t$57
@@ -48420,9 +48760,10 @@ do_cont_57:
   %t$208 = alloca i64
   store i64 %t$64, ptr %t$208
   %t$209 = call i64 @sprout_gc_push_i64_root(ptr %t$208)
-  %t$65$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$64, i64 %p$tokens, i64 %t$62)
-  %t$65 = extractvalue { i64, i64 } %t$65$st, 0
-  %t$66 = extractvalue { i64, i64 } %t$65$st, 1
+  %t$65$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$64, i64 %p$tokens, i64 %t$62)
+  %t$65 = trunc i128 %t$65$st to i64
+  %t$65$hi = lshr i128 %t$65$st, 64
+  %t$66 = trunc i128 %t$65$hi to i64
   %t$210 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$67 = add i64 0, 8
   %t$68 = icmp eq i64 %t$65, %t$67
@@ -48463,9 +48804,10 @@ do_cont_67:
   %t$227 = alloca i64
   store i64 %t$71, ptr %t$227
   %t$228 = call i64 @sprout_gc_push_i64_root(ptr %t$227)
-  %t$72$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$71)
-  %t$72 = extractvalue { i64, i64 } %t$72$st, 0
-  %t$73 = extractvalue { i64, i64 } %t$72$st, 1
+  %t$72$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$71)
+  %t$72 = trunc i128 %t$72$st to i64
+  %t$72$hi = lshr i128 %t$72$st, 64
+  %t$73 = trunc i128 %t$72$hi to i64
   %t$229 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$74 = add i64 0, 8
   %t$75 = icmp eq i64 %t$72, %t$74
@@ -48512,9 +48854,10 @@ do_cont_74:
   %t$248 = alloca i64
   store i64 %t$79, ptr %t$248
   %t$249 = call i64 @sprout_gc_push_i64_root(ptr %t$248)
-  %t$80$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %t$79, i64 %t$78)
-  %t$80 = extractvalue { i64, i64 } %t$80$st, 0
-  %t$81 = extractvalue { i64, i64 } %t$80$st, 1
+  %t$80$st = call i128 @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %t$79, i64 %t$78)
+  %t$80 = trunc i128 %t$80$st to i64
+  %t$80$hi = lshr i128 %t$80$st, 64
+  %t$81 = trunc i128 %t$80$hi to i64
   %t$250 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$82 = add i64 0, 8
   %t$83 = icmp eq i64 %t$80, %t$82
@@ -48663,9 +49006,10 @@ then_4:
   %t$32 = alloca i64
   store i64 %p$acc, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$6$st = call { i64, i64 } @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
+  %t$6$st = call i128 @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
   %t$8 = add i64 0, 8
   %t$9 = icmp eq i64 %t$6, %t$8
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -48812,9 +49156,10 @@ else_2:
   %t$54 = alloca i64
   store i64 %p$acc, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -48858,9 +49203,10 @@ do_cont_13:
   %t$70 = alloca i64
   store i64 %t$22, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$23$st = call { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$18, i64 %t$20, i64 %t$22)
-  %t$23 = extractvalue { i64, i64 } %t$23$st, 0
-  %t$24 = extractvalue { i64, i64 } %t$23$st, 1
+  %t$23$st = call i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$18, i64 %t$20, i64 %t$22)
+  %t$23 = trunc i128 %t$23$st to i64
+  %t$23$hi = lshr i128 %t$23$st, 64
+  %t$24 = trunc i128 %t$23$hi to i64
   %t$72 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$25 = add i64 0, 8
   %t$26 = icmp eq i64 %t$23, %t$25
@@ -48934,9 +49280,10 @@ then_4:
   %t$58 = alloca i64
   store i64 %t$7, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$8$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$7, i64 %p$tokens, i64 %p$i)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$7, i64 %p$tokens, i64 %p$i)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = add i64 0, 8
   %t$11 = icmp eq i64 %t$8, %t$10
@@ -48966,9 +49313,10 @@ do_cont_10:
   %t$69 = alloca i64
   store i64 %t$15, ptr %t$69
   %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.collect_instance_methods_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.collect_instance_methods_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$71 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -49005,9 +49353,10 @@ do_cont_18:
   %t$82 = alloca i64
   store i64 %t$25, ptr %t$82
   %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$25, i64 %p$tokens, i64 %t$23)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$25, i64 %p$tokens, i64 %t$23)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$84 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -49128,9 +49477,10 @@ entry:
   %t$43 = alloca i64
   store i64 %t$1, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -49156,9 +49506,10 @@ do_cont_4:
   %t$52 = alloca i64
   store i64 %t$8, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %t$8)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -49190,9 +49541,10 @@ do_cont_11:
   %t$63 = alloca i64
   store i64 %t$16, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$65 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -49227,9 +49579,10 @@ do_cont_19:
   %t$76 = alloca i64
   store i64 %t$24, ptr %t$76
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.parse_instance_body_worker(i64 %p$tokens, i64 %t$24)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.parse_instance_body_worker(i64 %p$tokens, i64 %t$24)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$78 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -49441,9 +49794,10 @@ join_4:
 
 define i64 @stdlib.compiler.parser.head_is_decl_keyword(i64 %p$t) {
 entry:
-  %t$0$st = call { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$t)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.token.token_kind_worker(i64 %p$t)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 27
@@ -49732,9 +50086,10 @@ entry:
   %t$67 = alloca i64
   store i64 %t$1, ptr %t$67
   %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$69 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -49765,9 +50120,10 @@ do_cont_4:
   %t$78 = alloca i64
   store i64 %t$10, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -49803,9 +50159,10 @@ do_cont_13:
   %t$91 = alloca i64
   store i64 %t$19, ptr %t$91
   %t$92 = call i64 @sprout_gc_push_i64_root(ptr %t$91)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$18, i64 %t$19)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$18, i64 %t$19)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$93 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -49846,9 +50203,10 @@ do_cont_22:
   store i64 %t$29, ptr %t$106
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)
   %t$30 = call i64 @stdlib.compiler.parser.skip_visibility(i64 %p$tokens, i64 %t$27)
-  %t$31$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$29, i64 %p$tokens, i64 %t$30)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$29, i64 %p$tokens, i64 %t$30)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$108 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$31, %t$33
@@ -49880,9 +50238,10 @@ do_cont_33:
   %t$119 = alloca i64
   store i64 %t$37, ptr %t$119
   %t$120 = call i64 @sprout_gc_push_i64_root(ptr %t$119)
-  %t$38$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$37)
-  %t$38 = extractvalue { i64, i64 } %t$38$st, 0
-  %t$39 = extractvalue { i64, i64 } %t$38$st, 1
+  %t$38$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$37)
+  %t$38 = trunc i128 %t$38$st to i64
+  %t$38$hi = lshr i128 %t$38$st, 64
+  %t$39 = trunc i128 %t$38$hi to i64
   %t$121 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$40 = add i64 0, 8
   %t$41 = icmp eq i64 %t$38, %t$40
@@ -49920,9 +50279,10 @@ do_cont_40:
   %t$134 = alloca i64
   store i64 %t$45, ptr %t$134
   %t$135 = call i64 @sprout_gc_push_i64_root(ptr %t$134)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %t$45)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %t$45)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$136 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
@@ -50130,9 +50490,10 @@ entry:
   %t$67 = alloca i64
   store i64 %t$1, ptr %t$67
   %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$69 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -50163,9 +50524,10 @@ do_cont_4:
   %t$78 = alloca i64
   store i64 %t$10, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -50196,9 +50558,10 @@ do_cont_13:
   %t$89 = alloca i64
   store i64 %t$19, ptr %t$89
   %t$90 = call i64 @sprout_gc_push_i64_root(ptr %t$89)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$19, i64 %p$tokens, i64 %t$17)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$19, i64 %p$tokens, i64 %t$17)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$91 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
@@ -50234,9 +50597,10 @@ do_cont_22:
   %t$102 = alloca i64
   store i64 %t$28, ptr %t$102
   %t$103 = call i64 @sprout_gc_push_i64_root(ptr %t$102)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$104 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -50276,9 +50640,10 @@ do_cont_31:
   %t$117 = alloca i64
   store i64 %t$38, ptr %t$117
   %t$118 = call i64 @sprout_gc_push_i64_root(ptr %t$117)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$119 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -50310,9 +50675,10 @@ do_cont_41:
   %t$130 = alloca i64
   store i64 %t$45, ptr %t$130
   %t$131 = call i64 @sprout_gc_push_i64_root(ptr %t$130)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$45)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$45)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$132 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
@@ -50615,9 +50981,10 @@ else_2:
   %t$39 = alloca i64
   store i64 %p$acc, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.parse_decl_worker(i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.parse_decl_worker(i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   %t$41 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -50674,9 +51041,10 @@ join_2:
 define i64 @stdlib.compiler.parser.parse_program(i64 %p$raw) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1$st = call { i64, i64 } @vec_get_worker(i64 %t$0, i64 %p$raw)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @vec_get_worker(i64 %t$0, i64 %p$raw)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   br label %arm_0_3
 arm_0_3:
   %t$5 = add i64 0, 1
@@ -50723,9 +51091,10 @@ arm_0_14:
   %t$43 = alloca i64
   store i64 %t$16, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.laid_out_worker(i64 %p$raw, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.laid_out_worker(i64 %p$raw, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$45 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -50753,9 +51122,10 @@ do_cont_19:
   %t$54 = alloca i64
   store i64 %t$24, ptr %t$54
   %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.collect_decls_worker(i64 %t$18, i64 %t$23, i64 %t$24)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.collect_decls_worker(i64 %t$18, i64 %t$23, i64 %t$24)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -51828,9 +52198,10 @@ entry:
   %t$12 = alloca i64
   store i64 %p$cursor, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %p$cursor)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.source.peek_worker(i64 %p$cursor)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -52596,9 +52967,10 @@ body_1_22:
   %t$34$ptr = inttoptr i64 %t$32 to ptr
   %t$34$gep = getelementptr i64, ptr %t$34$ptr, i64 1
   %t$34 = load i64, ptr %t$34$gep
-  %t$35$st = call { i64, i64 } @stdlib.compiler.lexer.decode_escape_worker(i64 %t$33)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.lexer.decode_escape_worker(i64 %t$33)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   br label %arm_0_37
 arm_0_37:
   %t$39 = add i64 0, 0
@@ -53034,9 +53406,10 @@ body_1_31:
   %t$43$ptr = inttoptr i64 %t$41 to ptr
   %t$43$gep = getelementptr i64, ptr %t$43$ptr, i64 1
   %t$43 = load i64, ptr %t$43$gep
-  %t$44$st = call { i64, i64 } @stdlib.compiler.lexer.decode_escape_worker(i64 %t$42)
-  %t$44 = extractvalue { i64, i64 } %t$44$st, 0
-  %t$45 = extractvalue { i64, i64 } %t$44$st, 1
+  %t$44$st = call i128 @stdlib.compiler.lexer.decode_escape_worker(i64 %t$42)
+  %t$44 = trunc i128 %t$44$st to i64
+  %t$44$hi = lshr i128 %t$44$st, 64
+  %t$45 = trunc i128 %t$44$hi to i64
   br label %arm_0_46
 arm_0_46:
   %t$48 = add i64 0, 0
@@ -54495,9 +54868,10 @@ body_1_2:
   %t$78 = alloca i64
   store i64 %t$13, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %t$13) noinline
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.source.peek_worker(i64 %t$13) noinline
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 7)
   br label %arm_0_16
 arm_0_16:
@@ -55226,9 +55600,10 @@ body_1_1:
   %t$27 = alloca i64
   store i64 %t$9, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.source.match_string_worker(i64 %t$8, i64 %p$cursor)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.source.match_string_worker(i64 %t$8, i64 %p$cursor)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_12
 arm_0_12:
@@ -55556,9 +55931,10 @@ then_15:
   %t$38 = alloca i64
   store i64 %t$11, ptr %t$38
   %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %t$11)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.source.peek_worker(i64 %t$11)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_19
 arm_0_19:
@@ -55625,9 +56001,10 @@ entry:
   %t$18 = alloca i64
   store i64 %p$cursor, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %p$cursor)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.source.peek_worker(i64 %p$cursor)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -55870,9 +56247,10 @@ arm_0_1:
   %t$37 = alloca i64
   store i64 %p$cursor, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$3$st = call { i64, i64 } @stdlib.compiler.lexer.scan_radix_end_worker(i64 %p$cursor)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.compiler.lexer.scan_radix_end_worker(i64 %p$cursor)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$39 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_5
 arm_0_5:
@@ -55920,9 +56298,10 @@ body_1_5:
   %t$56 = alloca i64
   store i64 %p$cursor, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.lexer.scan_float_frac_end_worker(i64 %t$0)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.lexer.scan_float_frac_end_worker(i64 %t$0)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$58 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_16
 arm_0_16:
@@ -56844,9 +57223,10 @@ entry:
   %t$42 = alloca i64
   store i64 %p$c1, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.lexer.try_multi_char_symbol_worker(i64 %p$cursor)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.lexer.try_multi_char_symbol_worker(i64 %p$cursor)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$44 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_2
 arm_0_2:
@@ -57020,9 +57400,10 @@ entry:
   %t$18 = alloca i64
   store i64 %t$1, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.lexer.tokenize_from_worker(i64 %p$raw, i64 %t$0, i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.lexer.tokenize_from_worker(i64 %p$raw, i64 %t$0, i64 %t$1)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$20 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_4
 arm_0_4:
@@ -57285,9 +57666,10 @@ entry:
   %t$10 = alloca i64
   store i64 %p$prefix, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0$st = call { i64, i64 } @stdlib.string.strip_prefix_worker(i64 %p$raw, i64 %p$prefix)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.strip_prefix_worker(i64 %p$raw, i64 %p$prefix)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
@@ -58125,9 +58507,10 @@ tco_loop:
   %p$names = load i64, ptr %t$19
   %p$value = load i64, ptr %t$20
   %p$index = load i64, ptr %t$21
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$names)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$names)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -58295,9 +58678,10 @@ else_3:
   %t$23 = alloca i64
   store i64 %t$6, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$7$st = call { i64, i64 } @stdlib.string.split_once_worker(i64 %p$raw, i64 %t$6) noinline
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %t$6) noinline
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$26 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_9
@@ -58401,9 +58785,10 @@ entry:
   %t$25 = alloca i64
   store i64 %t$2, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$3$st = call { i64, i64 } @stdlib.fs.read_text_worker(i64 %t$2)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.fs.read_text_worker(i64 %t$2)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_5
 arm_0_5:
@@ -58483,9 +58868,10 @@ tco_loop:
   %p$acc = load i64, ptr %t$14
   %p$names = load i64, ptr %t$15
   %p$index = load i64, ptr %t$16
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$names)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$names)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -58689,9 +59075,10 @@ entry:
   %t$11 = alloca i64
   store i64 %p$needle, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0$st = call { i64, i64 } @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$needle)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$needle)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
@@ -58740,9 +59127,10 @@ entry:
   %t$13 = alloca i64
   store i64 %p$needle, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$0$st = call { i64, i64 } @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$needle)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$needle)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -58776,9 +59164,10 @@ entry:
   %t$13 = alloca i64
   store i64 %p$after_left, ptr %t$13
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$0$st = call { i64, i64 } @stdlib.string.split_once_worker(i64 %p$after_left, i64 %p$right)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.split_once_worker(i64 %p$after_left, i64 %p$right)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -58815,9 +59204,10 @@ entry:
   %t$16 = alloca i64
   store i64 %p$left, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0$st = call { i64, i64 } @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$left)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$left)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$18 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
@@ -58898,9 +59288,10 @@ entry:
   %t$17 = alloca i64
   store i64 %t$1, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$2$st = call { i64, i64 } @stdlib.string.split_once_worker(i64 %p$raw, i64 %t$1) noinline
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %t$1) noinline
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$20 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_4
@@ -58950,9 +59341,10 @@ entry:
   %t$78 = alloca i64
   store i64 %t$1, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$2$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$line, i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.string.find_worker(i64 %p$line, i64 %t$1)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$81 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_4
@@ -58972,9 +59364,10 @@ body_0_4:
   %t$86 = alloca i64
   store i64 %t$9, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$10$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$line, i64 %t$9)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.string.find_worker(i64 %p$line, i64 %t$9)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$88 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$89 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_12
@@ -59081,9 +59474,10 @@ body_1_4:
   %t$133 = alloca i64
   store i64 %t$36, ptr %t$133
   %t$134 = call i64 @sprout_gc_push_i64_root(ptr %t$133)
-  %t$37$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$line, i64 %t$36)
-  %t$37 = extractvalue { i64, i64 } %t$37$st, 0
-  %t$38 = extractvalue { i64, i64 } %t$37$st, 1
+  %t$37$st = call i128 @stdlib.string.find_worker(i64 %p$line, i64 %t$36)
+  %t$37 = trunc i128 %t$37$st to i64
+  %t$37$hi = lshr i128 %t$37$st, 64
+  %t$38 = trunc i128 %t$37$hi to i64
   %t$135 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$136 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_39
@@ -59249,9 +59643,10 @@ tco_loop:
   %p$imports = load i64, ptr %t$31
   %p$index = load i64, ptr %t$32
   %p$acc = load i64, ptr %t$33
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$imports)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$imports)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -59370,9 +59765,10 @@ entry:
   %t$26 = alloca i64
   store i64 %t$1, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$2$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$module_name, i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.string.find_worker(i64 %p$module_name, i64 %t$1)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_4
@@ -59467,9 +59863,10 @@ entry:
   %t$18 = alloca i64
   store i64 %p$content, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.lexer.tokenize_source_worker(i64 %p$content)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.lexer.tokenize_source_worker(i64 %p$content)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -59555,9 +59952,10 @@ entry:
   %t$17 = alloca i64
   store i64 %p$surface, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_program_worker(i64 %p$toks)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_program_worker(i64 %p$toks)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -59815,9 +60213,10 @@ entry:
   %t$12 = alloca i64
   store i64 %p$content, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.lexer.tokenize_source_worker(i64 %p$content)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.lexer.tokenize_source_worker(i64 %p$content)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -59869,9 +60268,10 @@ tco_loop:
   %p$names = load i64, ptr %t$19
   %p$index = load i64, ptr %t$20
   %p$acc = load i64, ptr %t$21
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$names)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$names)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -59949,9 +60349,10 @@ entry:
   %t$53 = alloca i64
   store i64 %t$1, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$2$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$line, i64 %t$1)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.string.find_worker(i64 %p$line, i64 %t$1)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_4
@@ -59968,9 +60369,10 @@ body_0_4:
   %t$59 = alloca i64
   store i64 %t$9, ptr %t$59
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$10$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$line, i64 %t$9)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.string.find_worker(i64 %p$line, i64 %t$9)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$61 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_12
@@ -60040,9 +60442,10 @@ body_1_4:
   %t$84 = alloca i64
   store i64 %t$30, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$31$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$28, i64 %t$30)
-  %t$31 = extractvalue { i64, i64 } %t$31$st, 0
-  %t$32 = extractvalue { i64, i64 } %t$31$st, 1
+  %t$31$st = call i128 @stdlib.string.find_worker(i64 %t$28, i64 %t$30)
+  %t$31 = trunc i128 %t$31$st to i64
+  %t$31$hi = lshr i128 %t$31$st, 64
+  %t$32 = trunc i128 %t$31$hi to i64
   %t$86 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$87 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_33
@@ -60324,9 +60727,10 @@ tco_loop:
   %p$namespace = load i64, ptr %t$40
   %p$imports = load i64, ptr %t$41
   %p$index = load i64, ptr %t$42
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$imports)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$imports)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -60385,9 +60789,10 @@ then_10:
   %t$70 = alloca i64
   store i64 %t$16, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$17$st = call { i64, i64 } @stdlib.repl.imported_namespace_ref_for_namespace_worker(i64 %p$namespace, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.repl.imported_namespace_ref_for_namespace_worker(i64 %p$namespace, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$72 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$73 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_19
@@ -60525,9 +60930,10 @@ tco_loop:
   %p$names = load i64, ptr %t$34
   %p$imports = load i64, ptr %t$35
   %p$index = load i64, ptr %t$36
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$imports)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$imports)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -60657,9 +61063,10 @@ entry:
   %t$14 = alloca i64
   store i64 %t$0, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$1$st = call { i64, i64 } @stdlib.fs.read_text_worker(i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.fs.read_text_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -60707,9 +61114,10 @@ entry:
   %t$29 = alloca i64
   store i64 %t$2, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$4$st = call { i64, i64 } @stdlib.repl.find_imported_namespace_ref_worker(i64 %t$2, i64 %p$imports, i64 %t$3)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @stdlib.repl.find_imported_namespace_ref_worker(i64 %t$2, i64 %p$imports, i64 %t$3)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_6
 arm_0_6:
@@ -60984,9 +61392,10 @@ tco_loop:
   %p$declarations = load i64, ptr %t$15
   %p$index = load i64, ptr %t$16
   %p$acc = load i64, ptr %t$17
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$declarations)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$declarations)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -61188,9 +61597,10 @@ arm_0_1:
   %t$35 = alloca i64
   store i64 %t$4, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
-  %t$5$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$0, i64 %t$4)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.string.find_worker(i64 %t$0, i64 %t$4)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$38 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_7
@@ -62883,9 +63293,10 @@ tco_loop:
   %t$56 = alloca i64
   store i64 %t$0, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$1$st = call { i64, i64 } @stdlib.repl.read_input_line_worker(i64 %t$0, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @stdlib.repl.read_input_line_worker(i64 %t$0, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$59 = call i64 @sprout_gc_pop_roots(i64 5)
   br label %arm_0_3
@@ -63081,9 +63492,10 @@ entry:
   %t$26 = alloca i64
   store i64 %p$completion_cache, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$0$st = call { i64, i64 } @stdlib.repl.read_input_line_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.repl.read_input_line_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$28 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_2
 arm_0_2:
@@ -63419,9 +63831,10 @@ tco_loop:
   %p$index = load i64, ptr %t$61
   %p$chunks = load i64, ptr %t$62
   %p$current = load i64, ptr %t$63
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$lines)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$lines)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -63970,9 +64383,10 @@ entry:
   %t$16 = alloca i64
   store i64 %p$line, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.session_import_worker(i64 %p$session, i64 %p$line)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.session_import_worker(i64 %p$session, i64 %p$line)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
@@ -64041,9 +64455,10 @@ entry:
   %t$16 = alloca i64
   store i64 %p$line, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.session_declare_worker(i64 %p$session, i64 %p$line)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.session_declare_worker(i64 %p$session, i64 %p$line)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
@@ -64557,9 +64972,10 @@ join_1:
 
 define i64 @stdlib.repl.execute_block_chunks(i64 %p$chunks, i64 %p$index, i64 %p$outputs, i64 %p$session) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$chunks) noinline
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$chunks) noinline
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -64806,9 +65222,10 @@ tco_loop:
   %t$46 = alloca i64
   store i64 %p$completion_cache, ptr %t$46
   %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$0$st = call { i64, i64 } @stdlib.repl.read_submission_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.repl.read_submission_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$48 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_2
 arm_0_2:
@@ -64836,9 +65253,10 @@ body_0_2:
   %t$59 = alloca i64
   store i64 %t$7, ptr %t$59
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$8$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$1, i64 %t$7)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.string.find_worker(i64 %t$1, i64 %t$7)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$61 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$62 = call i64 @sprout_gc_pop_roots(i64 5)
   br label %arm_0_10
@@ -65221,7 +65639,7 @@ join_0:
   ret i64 %t$1
 }
 
-define { i64, i64 } @analysis_session_update_worker(i64 %p$session_id, i64 %p$kind, i64 %p$line) {
+define i128 @analysis_session_update_worker(i64 %p$session_id, i64 %p$kind, i64 %p$line) {
 entry:
   %t$10 = alloca i64
   store i64 %p$line, ptr %t$10
@@ -65237,29 +65655,34 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @parse_int_worker(i64 %p$s) {
+define i128 @parse_int_worker(i64 %p$s) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$s, i64 %t$0)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @str_char_at_unboxed(i64 %p$s, i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   br label %arm_0_3
 arm_0_3:
   %t$5 = add i64 0, 0
@@ -65316,34 +65739,41 @@ join_3:
   %t$27 = icmp eq i64 %t$25, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 0, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$25 to i128
+  %t$29$hw = zext i64 0 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 1
   %t$31 = icmp eq i64 %t$25, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
   %t$32 = call i64 @sprout_field(i64 %t$4, i64 0)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$25 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index) {
+define i128 @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index) {
 entry:
-  %t$0$st = call { i64, i64 } @bytes_get_unboxed(i64 %p$value, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  %t$2$r0 = insertvalue { i64, i64 } undef, i64 %t$0, 0
-  %t$2$r1 = insertvalue { i64, i64 } %t$2$r0, i64 %t$1, 1
-  ret { i64, i64 } %t$2$r1
+  %t$0$st = call i128 @bytes_get_unboxed(i64 %p$value, i64 %p$index)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$2$lo = zext i64 %t$0 to i128
+  %t$2$hw = zext i64 %t$1 to i128
+  %t$2$hi = shl i128 %t$2$hw, 64
+  %t$2$r = or i128 %t$2$hi, %t$2$lo
+  ret i128 %t$2$r
 }
 
-define { i64, i64 } @stdlib.bytes.to_string_worker(i64 %p$value) {
+define i128 @stdlib.bytes.to_string_worker(i64 %p$value) {
 entry:
   %t$10 = alloca i64
   store i64 %p$value, ptr %t$10
@@ -65356,24 +65786,28 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.ast.head_try_worker(i64 %p$e) {
+define i128 @stdlib.compiler.ast.head_try_worker(i64 %p$e) {
 entry:
   %t$21 = alloca i64
   store i64 %p$e, ptr %t$21
@@ -65429,24 +65863,28 @@ join_2:
   %t$14 = icmp eq i64 %t$12, %t$13
   br i1 %t$14, label %wrepack_hit_13, label %wrepack_next_13
 wrepack_hit_13:
-  %t$16$r0 = insertvalue { i64, i64 } undef, i64 %t$12, 0
-  %t$16$r1 = insertvalue { i64, i64 } %t$16$r0, i64 0, 1
-  ret { i64, i64 } %t$16$r1
+  %t$16$lo = zext i64 %t$12 to i128
+  %t$16$hw = zext i64 0 to i128
+  %t$16$hi = shl i128 %t$16$hw, 64
+  %t$16$r = or i128 %t$16$hi, %t$16$lo
+  ret i128 %t$16$r
 wrepack_next_13:
   %t$17 = add i64 0, 1
   %t$18 = icmp eq i64 %t$12, %t$17
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$12, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$12 to i128
+  %t$20$hw = zext i64 %t$19 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.layout.head_line_member_worker(i64 %p$t, i64 %p$line_start, i64 %p$stack) {
+define i128 @stdlib.compiler.layout.head_line_member_worker(i64 %p$t, i64 %p$line_start, i64 %p$stack) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$stack)
   br label %arm_0_1
@@ -65512,24 +65950,28 @@ join_1:
   %t$30 = icmp eq i64 %t$28, %t$29
   br i1 %t$30, label %wrepack_hit_29, label %wrepack_next_29
 wrepack_hit_29:
-  %t$32$r0 = insertvalue { i64, i64 } undef, i64 %t$28, 0
-  %t$32$r1 = insertvalue { i64, i64 } %t$32$r0, i64 0, 1
-  ret { i64, i64 } %t$32$r1
+  %t$32$lo = zext i64 %t$28 to i128
+  %t$32$hw = zext i64 0 to i128
+  %t$32$hi = shl i128 %t$32$hw, 64
+  %t$32$r = or i128 %t$32$hi, %t$32$lo
+  ret i128 %t$32$r
 wrepack_next_29:
   %t$33 = add i64 0, 1
   %t$34 = icmp eq i64 %t$28, %t$33
   br i1 %t$34, label %wrepack_hit_33, label %wrepack_next_33
 wrepack_hit_33:
   %t$35 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$36$r0 = insertvalue { i64, i64 } undef, i64 %t$28, 0
-  %t$36$r1 = insertvalue { i64, i64 } %t$36$r0, i64 %t$35, 1
-  ret { i64, i64 } %t$36$r1
+  %t$36$lo = zext i64 %t$28 to i128
+  %t$36$hw = zext i64 %t$35 to i128
+  %t$36$hi = shl i128 %t$36$hw, 64
+  %t$36$r = or i128 %t$36$hi, %t$36$lo
+  ret i128 %t$36$r
 wrepack_next_33:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.layout.on_line_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %p$st) {
+define i128 @stdlib.compiler.layout.on_line_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %p$st) {
 entry:
   %t$0 = add i64 0, 0
   %t$11 = alloca i64
@@ -65549,24 +65991,28 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$2 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 wrepack_next_3:
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$2, %t$7
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$2 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.layout.open_pending_worker(i64 %p$st, i64 %p$t) {
+define i128 @stdlib.compiler.layout.open_pending_worker(i64 %p$st, i64 %p$t) {
 entry:
   %t$0 = call i64 @stdlib.compiler.layout.pos_of(i64 %p$t)
   br label %arm_0_1
@@ -66029,28 +66475,33 @@ join_1:
   br i1 %t$113, label %wrepack_hit_112, label %wrepack_next_112
 wrepack_hit_112:
   %t$114 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$115$r0 = insertvalue { i64, i64 } undef, i64 %t$111, 0
-  %t$115$r1 = insertvalue { i64, i64 } %t$115$r0, i64 %t$114, 1
-  ret { i64, i64 } %t$115$r1
+  %t$115$lo = zext i64 %t$111 to i128
+  %t$115$hw = zext i64 %t$114 to i128
+  %t$115$hi = shl i128 %t$115$hw, 64
+  %t$115$r = or i128 %t$115$hi, %t$115$lo
+  ret i128 %t$115$r
 wrepack_next_112:
   %t$116 = add i64 0, 72
   %t$117 = icmp eq i64 %t$111, %t$116
   br i1 %t$117, label %wrepack_hit_116, label %wrepack_next_116
 wrepack_hit_116:
   %t$118 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$119$r0 = insertvalue { i64, i64 } undef, i64 %t$111, 0
-  %t$119$r1 = insertvalue { i64, i64 } %t$119$r0, i64 %t$118, 1
-  ret { i64, i64 } %t$119$r1
+  %t$119$lo = zext i64 %t$111 to i128
+  %t$119$hw = zext i64 %t$118 to i128
+  %t$119$hi = shl i128 %t$119$hw, 64
+  %t$119$r = or i128 %t$119$hi, %t$119$lo
+  ret i128 %t$119$r
 wrepack_next_116:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.layout.run_worker(i64 %p$tokens, i64 %p$i, i64 %p$st) {
+define i128 @stdlib.compiler.layout.run_worker(i64 %p$tokens, i64 %p$i, i64 %p$st) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$i, i64 %p$tokens)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$i, i64 %p$tokens)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -66132,9 +66583,10 @@ else_16:
   %t$80 = alloca i64
   store i64 %p$st, ptr %t$80
   %t$81 = call i64 @sprout_gc_push_i64_root(ptr %t$80)
-  %t$23$st = call { i64, i64 } @stdlib.compiler.layout.step_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %p$st)
-  %t$23 = extractvalue { i64, i64 } %t$23$st, 0
-  %t$24 = extractvalue { i64, i64 } %t$23$st, 1
+  %t$23$st = call i128 @stdlib.compiler.layout.step_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %p$st)
+  %t$23 = trunc i128 %t$23$st to i64
+  %t$23$hi = lshr i128 %t$23$st, 64
+  %t$24 = trunc i128 %t$23$hi to i64
   %t$82 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$83 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_25
@@ -66231,24 +66683,28 @@ join_2:
   br i1 %t$48, label %wrepack_hit_47, label %wrepack_next_47
 wrepack_hit_47:
   %t$49 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$50$r0 = insertvalue { i64, i64 } undef, i64 %t$46, 0
-  %t$50$r1 = insertvalue { i64, i64 } %t$50$r0, i64 %t$49, 1
-  ret { i64, i64 } %t$50$r1
+  %t$50$lo = zext i64 %t$46 to i128
+  %t$50$hw = zext i64 %t$49 to i128
+  %t$50$hi = shl i128 %t$50$hw, 64
+  %t$50$r = or i128 %t$50$hi, %t$50$lo
+  ret i128 %t$50$r
 wrepack_next_47:
   %t$51 = add i64 0, 8
   %t$52 = icmp eq i64 %t$46, %t$51
   br i1 %t$52, label %wrepack_hit_51, label %wrepack_next_51
 wrepack_hit_51:
   %t$53 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$54$r0 = insertvalue { i64, i64 } undef, i64 %t$46, 0
-  %t$54$r1 = insertvalue { i64, i64 } %t$54$r0, i64 %t$53, 1
-  ret { i64, i64 } %t$54$r1
+  %t$54$lo = zext i64 %t$46 to i128
+  %t$54$hw = zext i64 %t$53 to i128
+  %t$54$hi = shl i128 %t$54$hw, 64
+  %t$54$r = or i128 %t$54$hi, %t$54$lo
+  ret i128 %t$54$r
 wrepack_next_51:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.layout.step_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %p$st) {
+define i128 @stdlib.compiler.layout.step_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %p$st) {
 entry:
   %t$0 = call i64 @stdlib.compiler.layout.pos_of(i64 %p$t)
   %t$1 = call i64 @sprout_field(i64 %t$0, i64 1)
@@ -66293,9 +66749,10 @@ arm_0_18:
   %t$74 = alloca i64
   store i64 %t$20, ptr %t$74
   %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.layout.head_line_member_worker(i64 %p$t, i64 %t$12, i64 %t$20)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.layout.head_line_member_worker(i64 %p$t, i64 %t$12, i64 %t$20)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$76 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$77 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_23
@@ -66313,9 +66770,10 @@ body_0_23:
   %t$82 = alloca i64
   store i64 %p$st, ptr %t$82
   %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
-  %t$27$st = call { i64, i64 } @stdlib.compiler.layout.open_pending_worker(i64 %p$st, i64 %p$t)
-  %t$27 = extractvalue { i64, i64 } %t$27$st, 0
-  %t$28 = extractvalue { i64, i64 } %t$27$st, 1
+  %t$27$st = call i128 @stdlib.compiler.layout.open_pending_worker(i64 %p$st, i64 %p$t)
+  %t$27 = trunc i128 %t$27$st to i64
+  %t$27$hi = lshr i128 %t$27$st, 64
+  %t$28 = trunc i128 %t$27$hi to i64
   %t$84 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$85 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_29
@@ -66361,9 +66819,10 @@ then_37:
   %t$100 = alloca i64
   store i64 %p$t, ptr %t$100
   %t$101 = call i64 @sprout_gc_push_i64_root(ptr %t$100)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.layout.on_line_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %t$28)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.layout.on_line_worker(i64 %p$tokens, i64 %p$i, i64 %p$t, i64 %t$28)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$102 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_41
 arm_0_41:
@@ -66487,24 +66946,28 @@ join_18:
   br i1 %t$61, label %wrepack_hit_60, label %wrepack_next_60
 wrepack_hit_60:
   %t$62 = call i64 @sprout_field(i64 %t$19, i64 0)
-  %t$63$r0 = insertvalue { i64, i64 } undef, i64 %t$59, 0
-  %t$63$r1 = insertvalue { i64, i64 } %t$63$r0, i64 %t$62, 1
-  ret { i64, i64 } %t$63$r1
+  %t$63$lo = zext i64 %t$59 to i128
+  %t$63$hw = zext i64 %t$62 to i128
+  %t$63$hi = shl i128 %t$63$hw, 64
+  %t$63$r = or i128 %t$63$hi, %t$63$lo
+  ret i128 %t$63$r
 wrepack_next_60:
   %t$64 = add i64 0, 8
   %t$65 = icmp eq i64 %t$59, %t$64
   br i1 %t$65, label %wrepack_hit_64, label %wrepack_next_64
 wrepack_hit_64:
   %t$66 = call i64 @sprout_field(i64 %t$19, i64 0)
-  %t$67$r0 = insertvalue { i64, i64 } undef, i64 %t$59, 0
-  %t$67$r1 = insertvalue { i64, i64 } %t$67$r0, i64 %t$66, 1
-  ret { i64, i64 } %t$67$r1
+  %t$67$lo = zext i64 %t$59 to i128
+  %t$67$hw = zext i64 %t$66 to i128
+  %t$67$hi = shl i128 %t$67$hw, 64
+  %t$67$r = or i128 %t$67$hi, %t$67$lo
+  ret i128 %t$67$r
 wrepack_next_64:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.layout.top_block_worker(i64 %p$stack) {
+define i128 @stdlib.compiler.layout.top_block_worker(i64 %p$stack) {
 entry:
   %t$34 = alloca i64
   store i64 %p$stack, ptr %t$34
@@ -66571,24 +67034,28 @@ join_2:
   %t$27 = icmp eq i64 %t$25, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 0, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$25 to i128
+  %t$29$hw = zext i64 0 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 1
   %t$31 = icmp eq i64 %t$25, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
   %t$32 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$25 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.lexer.decode_escape_worker(i64 %p$ch) {
+define i128 @stdlib.compiler.lexer.decode_escape_worker(i64 %p$ch) {
 entry:
   %t$0 = add i64 0, 110
   %t$1 = icmp eq i64 %p$ch, %t$0
@@ -66597,9 +67064,11 @@ entry:
   br i1 %t$3, label %then_3, label %else_3
 then_3:
   %t$4 = add i64 0, 10
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 else_3:
   %t$6 = add i64 0, 114
   %t$7 = icmp eq i64 %p$ch, %t$6
@@ -66608,9 +67077,11 @@ else_3:
   br i1 %t$9, label %then_9, label %else_9
 then_9:
   %t$10 = add i64 0, 13
-  %t$11$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$11$r1 = insertvalue { i64, i64 } %t$11$r0, i64 %t$10, 1
-  ret { i64, i64 } %t$11$r1
+  %t$11$lo = zext i64 1 to i128
+  %t$11$hw = zext i64 %t$10 to i128
+  %t$11$hi = shl i128 %t$11$hw, 64
+  %t$11$r = or i128 %t$11$hi, %t$11$lo
+  ret i128 %t$11$r
 else_9:
   %t$12 = add i64 0, 116
   %t$13 = icmp eq i64 %p$ch, %t$12
@@ -66619,9 +67090,11 @@ else_9:
   br i1 %t$15, label %then_15, label %else_15
 then_15:
   %t$16 = add i64 0, 9
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 1 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 else_15:
   %t$18 = add i64 0, 34
   %t$19 = icmp eq i64 %p$ch, %t$18
@@ -66630,9 +67103,11 @@ else_15:
   br i1 %t$21, label %then_21, label %else_21
 then_21:
   %t$22 = add i64 0, 34
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 1 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 else_21:
   %t$24 = add i64 0, 39
   %t$25 = icmp eq i64 %p$ch, %t$24
@@ -66641,9 +67116,11 @@ else_21:
   br i1 %t$27, label %then_27, label %else_27
 then_27:
   %t$28 = add i64 0, 39
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 1 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 else_27:
   %t$30 = add i64 0, 92
   %t$31 = icmp eq i64 %p$ch, %t$30
@@ -66652,9 +67129,11 @@ else_27:
   br i1 %t$33, label %then_33, label %else_33
 then_33:
   %t$34 = add i64 0, 92
-  %t$35$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$35$r1 = insertvalue { i64, i64 } %t$35$r0, i64 %t$34, 1
-  ret { i64, i64 } %t$35$r1
+  %t$35$lo = zext i64 1 to i128
+  %t$35$hw = zext i64 %t$34 to i128
+  %t$35$hi = shl i128 %t$35$hw, 64
+  %t$35$r = or i128 %t$35$hi, %t$35$lo
+  ret i128 %t$35$r
 else_33:
   %t$36 = add i64 0, 48
   %t$37 = icmp eq i64 %p$ch, %t$36
@@ -66662,16 +67141,20 @@ else_33:
   %t$39 = trunc i64 %t$38 to i1
   br i1 %t$39, label %then_39, label %else_39
 then_39:
-  %t$40$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$40$r1 = insertvalue { i64, i64 } %t$40$r0, i64 0, 1
-  ret { i64, i64 } %t$40$r1
+  %t$40$lo = zext i64 0 to i128
+  %t$40$hw = zext i64 0 to i128
+  %t$40$hi = shl i128 %t$40$hw, 64
+  %t$40$r = or i128 %t$40$hi, %t$40$lo
+  ret i128 %t$40$r
 else_39:
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %p$ch, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 1 to i128
+  %t$41$hw = zext i64 %p$ch to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 }
 
-define { i64, i64 } @stdlib.compiler.lexer.scan_float_frac_end_worker(i64 %p$int_end) {
+define i128 @stdlib.compiler.lexer.scan_float_frac_end_worker(i64 %p$int_end) {
 entry:
   %t$44 = alloca i64
   store i64 %p$int_end, ptr %t$44
@@ -66708,9 +67191,10 @@ then_15:
   %t$47 = alloca i64
   store i64 %t$11, ptr %t$47
   %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %t$11)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.source.peek_worker(i64 %t$11)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_19
 arm_0_19:
@@ -66771,18 +67255,22 @@ join_2:
   %t$37 = icmp eq i64 %t$35, %t$36
   br i1 %t$37, label %wrepack_hit_36, label %wrepack_next_36
 wrepack_hit_36:
-  %t$39$r0 = insertvalue { i64, i64 } undef, i64 %t$35, 0
-  %t$39$r1 = insertvalue { i64, i64 } %t$39$r0, i64 0, 1
-  ret { i64, i64 } %t$39$r1
+  %t$39$lo = zext i64 %t$35 to i128
+  %t$39$hw = zext i64 0 to i128
+  %t$39$hi = shl i128 %t$39$hw, 64
+  %t$39$r = or i128 %t$39$hi, %t$39$lo
+  ret i128 %t$39$r
 wrepack_next_36:
   %t$40 = add i64 0, 1
   %t$41 = icmp eq i64 %t$35, %t$40
   br i1 %t$41, label %wrepack_hit_40, label %wrepack_next_40
 wrepack_hit_40:
   %t$42 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$43$r0 = insertvalue { i64, i64 } undef, i64 %t$35, 0
-  %t$43$r1 = insertvalue { i64, i64 } %t$43$r0, i64 %t$42, 1
-  ret { i64, i64 } %t$43$r1
+  %t$43$lo = zext i64 %t$35 to i128
+  %t$43$hw = zext i64 %t$42 to i128
+  %t$43$hi = shl i128 %t$43$hw, 64
+  %t$43$r = or i128 %t$43$hi, %t$43$lo
+  ret i128 %t$43$r
 wrepack_next_40:
   call void @sprout_abort_match()
   unreachable
@@ -66800,7 +67288,7 @@ entry:
   ret i64 %ret
 }
 
-define { i64, i64 } @stdlib.compiler.lexer.scan_radix_end_worker(i64 %p$cursor) {
+define i128 @stdlib.compiler.lexer.scan_radix_end_worker(i64 %p$cursor) {
 entry:
   %t$71 = alloca i64
   store i64 %p$cursor, ptr %t$71
@@ -66952,24 +67440,28 @@ join_2:
   %t$64 = icmp eq i64 %t$62, %t$63
   br i1 %t$64, label %wrepack_hit_63, label %wrepack_next_63
 wrepack_hit_63:
-  %t$66$r0 = insertvalue { i64, i64 } undef, i64 %t$62, 0
-  %t$66$r1 = insertvalue { i64, i64 } %t$66$r0, i64 0, 1
-  ret { i64, i64 } %t$66$r1
+  %t$66$lo = zext i64 %t$62 to i128
+  %t$66$hw = zext i64 0 to i128
+  %t$66$hi = shl i128 %t$66$hw, 64
+  %t$66$r = or i128 %t$66$hi, %t$66$lo
+  ret i128 %t$66$r
 wrepack_next_63:
   %t$67 = add i64 0, 1
   %t$68 = icmp eq i64 %t$62, %t$67
   br i1 %t$68, label %wrepack_hit_67, label %wrepack_next_67
 wrepack_hit_67:
   %t$69 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$70$r0 = insertvalue { i64, i64 } undef, i64 %t$62, 0
-  %t$70$r1 = insertvalue { i64, i64 } %t$70$r0, i64 %t$69, 1
-  ret { i64, i64 } %t$70$r1
+  %t$70$lo = zext i64 %t$62 to i128
+  %t$70$hw = zext i64 %t$69 to i128
+  %t$70$hi = shl i128 %t$70$hw, 64
+  %t$70$r = or i128 %t$70$hi, %t$70$lo
+  ret i128 %t$70$r
 wrepack_next_67:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.lexer.tokenize_from_worker(i64 %p$raw, i64 %p$cursor, i64 %p$acc) {
+define i128 @stdlib.compiler.lexer.tokenize_from_worker(i64 %p$raw, i64 %p$cursor, i64 %p$acc) {
 entry:
   %t$0 = add i64 0, 0
   %t$11 = alloca i64
@@ -66989,24 +67481,28 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$2 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 wrepack_next_3:
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$2, %t$7
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$2 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.lexer.tokenize_source_worker(i64 %p$src) {
+define i128 @stdlib.compiler.lexer.tokenize_source_worker(i64 %p$src) {
 entry:
   %t$11 = alloca i64
   store i64 %p$src, ptr %t$11
@@ -67024,24 +67520,28 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$2 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 wrepack_next_3:
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$2, %t$7
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$2 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.lexer.try_multi_char_symbol_worker(i64 %p$cursor) {
+define i128 @stdlib.compiler.lexer.try_multi_char_symbol_worker(i64 %p$cursor) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1006, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -67252,24 +67752,28 @@ entry:
   %t$43 = icmp eq i64 %t$41, %t$42
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 0, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$41 to i128
+  %t$45$hw = zext i64 0 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   %t$46 = add i64 0, 1
   %t$47 = icmp eq i64 %t$41, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
   %t$48 = call i64 @sprout_field(i64 %t$40, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$41 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_call_args_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_call_args_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$42 = alloca i64
   store i64 %p$tokens, ptr %t$42
@@ -67295,9 +67799,11 @@ then_4:
   %t$5$s1 = getelementptr i64, ptr %t$5$ptr, i64 1
   store i64 %p$i, ptr %t$5$s1
   %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 7 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 else_4:
   %t$50 = alloca i64
   store i64 %p$tokens, ptr %t$50
@@ -67305,9 +67811,10 @@ else_4:
   %t$52 = alloca i64
   store i64 %p$acc, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -67438,24 +67945,28 @@ do_done_9:
   br i1 %t$35, label %wrepack_hit_34, label %wrepack_next_34
 wrepack_hit_34:
   %t$36 = call i64 @sprout_field(i64 %t$32, i64 0)
-  %t$37$r0 = insertvalue { i64, i64 } undef, i64 %t$33, 0
-  %t$37$r1 = insertvalue { i64, i64 } %t$37$r0, i64 %t$36, 1
-  ret { i64, i64 } %t$37$r1
+  %t$37$lo = zext i64 %t$33 to i128
+  %t$37$hw = zext i64 %t$36 to i128
+  %t$37$hi = shl i128 %t$37$hw, 64
+  %t$37$r = or i128 %t$37$hi, %t$37$lo
+  ret i128 %t$37$r
 wrepack_next_34:
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$33, %t$38
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
   %t$40 = call i64 @sprout_field(i64 %t$32, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$33, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$33 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_class_method_sigs_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_class_method_sigs_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$28 = alloca i64
   store i64 %p$tokens, ptr %t$28
@@ -67477,9 +67988,10 @@ then_4:
   %t$35 = alloca i64
   store i64 %p$acc, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
-  %t$5$st = call { i64, i64 } @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$5, %t$7
   %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -67533,18 +68045,22 @@ do_done_7:
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$16 to i128
+  %t$20$hw = zext i64 %t$19 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$16, %t$21
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$16 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   call void @sprout_abort_match()
   unreachable
@@ -67564,12 +68080,14 @@ else_4:
   %t$26$s1 = getelementptr i64, ptr %t$26$ptr, i64 1
   store i64 %p$i, ptr %t$26$s1
   %t$57 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$27$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$27$r1 = insertvalue { i64, i64 } %t$27$r0, i64 %t$26, 1
-  ret { i64, i64 } %t$27$r1
+  %t$27$lo = zext i64 7 to i128
+  %t$27$hw = zext i64 %t$26 to i128
+  %t$27$hi = shl i128 %t$27$hw, 64
+  %t$27$r = or i128 %t$27$hi, %t$27$lo
+  ret i128 %t$27$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_comprehension_gens_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_comprehension_gens_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$40 = alloca i64
   store i64 %p$tokens, ptr %t$40
@@ -67587,9 +68105,11 @@ then_1:
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
   %t$2 = call i64 @stdlib.compiler.parser.comprehension_no_generator_err(i64 %p$tokens, i64 %p$i)
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$3$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$3$r1 = insertvalue { i64, i64 } %t$3$r0, i64 %t$2, 1
-  ret { i64, i64 } %t$3$r1
+  %t$3$lo = zext i64 8 to i128
+  %t$3$hw = zext i64 %t$2 to i128
+  %t$3$hi = shl i128 %t$3$hw, 64
+  %t$3$r = or i128 %t$3$hi, %t$3$lo
+  ret i128 %t$3$r
 else_1:
   %t$48 = alloca i64
   store i64 %p$tokens, ptr %t$48
@@ -67597,9 +68117,10 @@ else_1:
   %t$50 = alloca i64
   store i64 %p$acc, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$4$st = call { i64, i64 } @stdlib.compiler.parser.parse_comprehension_gen_worker(i64 %p$tokens, i64 %p$i)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @stdlib.compiler.parser.parse_comprehension_gen_worker(i64 %p$tokens, i64 %p$i)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$4, %t$6
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -67735,24 +68256,28 @@ do_done_6:
   br i1 %t$33, label %wrepack_hit_32, label %wrepack_next_32
 wrepack_hit_32:
   %t$34 = call i64 @sprout_field(i64 %t$30, i64 0)
-  %t$35$r0 = insertvalue { i64, i64 } undef, i64 %t$31, 0
-  %t$35$r1 = insertvalue { i64, i64 } %t$35$r0, i64 %t$34, 1
-  ret { i64, i64 } %t$35$r1
+  %t$35$lo = zext i64 %t$31 to i128
+  %t$35$hw = zext i64 %t$34 to i128
+  %t$35$hi = shl i128 %t$35$hw, 64
+  %t$35$r = or i128 %t$35$hi, %t$35$lo
+  ret i128 %t$35$r
 wrepack_next_32:
   %t$36 = add i64 0, 8
   %t$37 = icmp eq i64 %t$31, %t$36
   br i1 %t$37, label %wrepack_hit_36, label %wrepack_next_36
 wrepack_hit_36:
   %t$38 = call i64 @sprout_field(i64 %t$30, i64 0)
-  %t$39$r0 = insertvalue { i64, i64 } undef, i64 %t$31, 0
-  %t$39$r1 = insertvalue { i64, i64 } %t$39$r0, i64 %t$38, 1
-  ret { i64, i64 } %t$39$r1
+  %t$39$lo = zext i64 %t$31 to i128
+  %t$39$hw = zext i64 %t$38 to i128
+  %t$39$hi = shl i128 %t$39$hw, 64
+  %t$39$r = or i128 %t$39$hi, %t$39$lo
+  ret i128 %t$39$r
 wrepack_next_36:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_comprehension_guards_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_comprehension_guards_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$32 = alloca i64
   store i64 %p$tokens, ptr %t$32
@@ -67785,9 +68310,10 @@ ovfok_6:
   %t$39 = alloca i64
   store i64 %p$acc, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$6)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$6)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
   %t$41 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -67841,18 +68367,22 @@ do_done_11:
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$19, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$20 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   %t$25 = add i64 0, 8
   %t$26 = icmp eq i64 %t$20, %t$25
   br i1 %t$26, label %wrepack_hit_25, label %wrepack_next_25
 wrepack_hit_25:
   %t$27 = call i64 @sprout_field(i64 %t$19, i64 0)
-  %t$28$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$28$r1 = insertvalue { i64, i64 } %t$28$r0, i64 %t$27, 1
-  ret { i64, i64 } %t$28$r1
+  %t$28$lo = zext i64 %t$20 to i128
+  %t$28$hw = zext i64 %t$27 to i128
+  %t$28$hi = shl i128 %t$28$hw, 64
+  %t$28$r = or i128 %t$28$hi, %t$28$lo
+  ret i128 %t$28$r
 wrepack_next_25:
   call void @sprout_abort_match()
   unreachable
@@ -67872,12 +68402,14 @@ else_4:
   %t$30$s1 = getelementptr i64, ptr %t$30$ptr, i64 1
   store i64 %p$i, ptr %t$30$s1
   %t$61 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$31$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$31$r1 = insertvalue { i64, i64 } %t$31$r0, i64 %t$30, 1
-  ret { i64, i64 } %t$31$r1
+  %t$31$lo = zext i64 7 to i128
+  %t$31$hw = zext i64 %t$30 to i128
+  %t$31$hi = shl i128 %t$31$hw, 64
+  %t$31$r = or i128 %t$31$hi, %t$31$lo
+  ret i128 %t$31$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_constraints_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_constraints_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$42 = alloca i64
   store i64 %p$tokens, ptr %t$42
@@ -67885,9 +68417,10 @@ entry:
   %t$44 = alloca i64
   store i64 %p$acc, ptr %t$44
   %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$46 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -68078,24 +68611,28 @@ do_done_2:
   br i1 %t$35, label %wrepack_hit_34, label %wrepack_next_34
 wrepack_hit_34:
   %t$36 = call i64 @sprout_field(i64 %t$32, i64 0)
-  %t$37$r0 = insertvalue { i64, i64 } undef, i64 %t$33, 0
-  %t$37$r1 = insertvalue { i64, i64 } %t$37$r0, i64 %t$36, 1
-  ret { i64, i64 } %t$37$r1
+  %t$37$lo = zext i64 %t$33 to i128
+  %t$37$hw = zext i64 %t$36 to i128
+  %t$37$hi = shl i128 %t$37$hw, 64
+  %t$37$r = or i128 %t$37$hi, %t$37$lo
+  ret i128 %t$37$r
 wrepack_next_34:
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$33, %t$38
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
   %t$40 = call i64 @sprout_field(i64 %t$32, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$33, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$33 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_ctor_fields_worker(i64 %p$tokens, i64 %p$i, i64 %p$fields_acc, i64 %p$vars_acc, i64 %p$cons_acc, i64 %p$idx) {
+define i128 @stdlib.compiler.parser.collect_ctor_fields_worker(i64 %p$tokens, i64 %p$i, i64 %p$fields_acc, i64 %p$vars_acc, i64 %p$cons_acc, i64 %p$idx) {
 entry:
   %t$50 = alloca i64
   store i64 %p$vars_acc, ptr %t$50
@@ -68243,9 +68780,10 @@ then_22:
   %t$106 = alloca i64
   store i64 %p$cons_acc, ptr %t$106
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)
-  %t$24$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$24 = extractvalue { i64, i64 } %t$24$st, 0
-  %t$25 = extractvalue { i64, i64 } %t$24$st, 1
+  %t$24$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$24 = trunc i128 %t$24$st to i64
+  %t$24$hi = lshr i128 %t$24$st, 64
+  %t$25 = trunc i128 %t$24$hi to i64
   %t$26 = add i64 0, 8
   %t$27 = icmp eq i64 %t$24, %t$26
   %t$108 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -68356,24 +68894,28 @@ join_2:
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$41 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   %t$46 = add i64 0, 8
   %t$47 = icmp eq i64 %t$41, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
   %t$48 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$41 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_decls_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_decls_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$26 = alloca i64
   store i64 %p$tokens, ptr %t$26
@@ -68402,9 +68944,11 @@ then_2:
   %t$4$s1 = getelementptr i64, ptr %t$4$ptr, i64 1
   store i64 %p$i, ptr %t$4$s1
   %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 7 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 else_2:
   %t$37 = alloca i64
   store i64 %p$tokens, ptr %t$37
@@ -68412,9 +68956,10 @@ else_2:
   %t$39 = alloca i64
   store i64 %p$acc, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$6$st = call { i64, i64 } @stdlib.compiler.parser.parse_decl_worker(i64 %p$tokens, i64 %p$i)
-  %t$6 = extractvalue { i64, i64 } %t$6$st, 0
-  %t$7 = extractvalue { i64, i64 } %t$6$st, 1
+  %t$6$st = call i128 @stdlib.compiler.parser.parse_decl_worker(i64 %p$tokens, i64 %p$i)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
   %t$8 = add i64 0, 8
   %t$9 = icmp eq i64 %t$6, %t$8
   %t$41 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -68468,24 +69013,28 @@ do_done_8:
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$16, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$17 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$17, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$16, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$17 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_deriving_names_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_deriving_names_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$46 = alloca i64
   store i64 %p$tokens, ptr %t$46
@@ -68511,9 +69060,11 @@ then_4:
   %t$5$s1 = getelementptr i64, ptr %t$5$ptr, i64 1
   store i64 %p$i, ptr %t$5$s1
   %t$53 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 7 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 else_4:
   %t$7 = getelementptr inbounds { i64, [30 x i8] }, ptr @.str.1028, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
@@ -68526,9 +69077,10 @@ else_4:
   %t$58 = alloca i64
   store i64 %t$8, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$8, i64 %p$tokens, i64 %p$i)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$8, i64 %p$tokens, i64 %p$i)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
@@ -68663,24 +69215,28 @@ do_done_11:
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
   %t$40 = call i64 @sprout_field(i64 %t$36, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$37, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$37 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$37, %t$42
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$36, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$37, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$37 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_dict_entries_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_dict_entries_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$0 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.1030, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -68693,9 +69249,10 @@ entry:
   %t$76 = alloca i64
   store i64 %t$1, ptr %t$76
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$78 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -68735,9 +69292,10 @@ do_cont_4:
   %t$91 = alloca i64
   store i64 %t$11, ptr %t$91
   %t$92 = call i64 @sprout_gc_push_i64_root(ptr %t$91)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$93 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -68769,9 +69327,10 @@ do_cont_14:
   %t$104 = alloca i64
   store i64 %t$18, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -69017,24 +69576,28 @@ do_done_4:
   br i1 %t$65, label %wrepack_hit_64, label %wrepack_next_64
 wrepack_hit_64:
   %t$66 = call i64 @sprout_field(i64 %t$62, i64 0)
-  %t$67$r0 = insertvalue { i64, i64 } undef, i64 %t$63, 0
-  %t$67$r1 = insertvalue { i64, i64 } %t$67$r0, i64 %t$66, 1
-  ret { i64, i64 } %t$67$r1
+  %t$67$lo = zext i64 %t$63 to i128
+  %t$67$hw = zext i64 %t$66 to i128
+  %t$67$hi = shl i128 %t$67$hw, 64
+  %t$67$r = or i128 %t$67$hi, %t$67$lo
+  ret i128 %t$67$r
 wrepack_next_64:
   %t$68 = add i64 0, 8
   %t$69 = icmp eq i64 %t$63, %t$68
   br i1 %t$69, label %wrepack_hit_68, label %wrepack_next_68
 wrepack_hit_68:
   %t$70 = call i64 @sprout_field(i64 %t$62, i64 0)
-  %t$71$r0 = insertvalue { i64, i64 } undef, i64 %t$63, 0
-  %t$71$r1 = insertvalue { i64, i64 } %t$71$r0, i64 %t$70, 1
-  ret { i64, i64 } %t$71$r1
+  %t$71$lo = zext i64 %t$63 to i128
+  %t$71$hw = zext i64 %t$70 to i128
+  %t$71$hi = shl i128 %t$71$hw, 64
+  %t$71$r = or i128 %t$71$hi, %t$71$lo
+  ret i128 %t$71$r
 wrepack_next_68:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_do_steps_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_do_steps_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$49 = alloca i64
   store i64 %p$tokens, ptr %t$49
@@ -69074,9 +69637,11 @@ ovfok_5:
   %t$8$s1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %t$5, ptr %t$8$s1
   %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 7 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 else_2:
   %t$60 = alloca i64
   store i64 %p$tokens, ptr %t$60
@@ -69084,9 +69649,10 @@ else_2:
   %t$62 = alloca i64
   store i64 %p$acc, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.parse_do_step_worker(i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.parse_do_step_worker(i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
   %t$64 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -69120,9 +69686,10 @@ do_cont_12:
   %t$74 = alloca i64
   store i64 %t$17, ptr %t$74
   %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.do_step_end_worker(i64 %p$tokens, i64 %t$17)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.do_step_end_worker(i64 %p$tokens, i64 %t$17)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$76 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
@@ -69220,24 +69787,28 @@ do_done_12:
   br i1 %t$42, label %wrepack_hit_41, label %wrepack_next_41
 wrepack_hit_41:
   %t$43 = call i64 @sprout_field(i64 %t$39, i64 0)
-  %t$44$r0 = insertvalue { i64, i64 } undef, i64 %t$40, 0
-  %t$44$r1 = insertvalue { i64, i64 } %t$44$r0, i64 %t$43, 1
-  ret { i64, i64 } %t$44$r1
+  %t$44$lo = zext i64 %t$40 to i128
+  %t$44$hw = zext i64 %t$43 to i128
+  %t$44$hi = shl i128 %t$44$hw, 64
+  %t$44$r = or i128 %t$44$hi, %t$44$lo
+  ret i128 %t$44$r
 wrepack_next_41:
   %t$45 = add i64 0, 8
   %t$46 = icmp eq i64 %t$40, %t$45
   br i1 %t$46, label %wrepack_hit_45, label %wrepack_next_45
 wrepack_hit_45:
   %t$47 = call i64 @sprout_field(i64 %t$39, i64 0)
-  %t$48$r0 = insertvalue { i64, i64 } undef, i64 %t$40, 0
-  %t$48$r1 = insertvalue { i64, i64 } %t$48$r0, i64 %t$47, 1
-  ret { i64, i64 } %t$48$r1
+  %t$48$lo = zext i64 %t$40 to i128
+  %t$48$hw = zext i64 %t$47 to i128
+  %t$48$hi = shl i128 %t$48$hw, 64
+  %t$48$r = or i128 %t$48$hi, %t$48$lo
+  ret i128 %t$48$r
 wrepack_next_45:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$35 = alloca i64
   store i64 %p$tokens, ptr %t$35
@@ -69245,9 +69816,10 @@ entry:
   %t$37 = alloca i64
   store i64 %p$acc, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$39 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -69378,24 +69950,28 @@ do_done_2:
   br i1 %t$28, label %wrepack_hit_27, label %wrepack_next_27
 wrepack_hit_27:
   %t$29 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$30$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$30$r1 = insertvalue { i64, i64 } %t$30$r0, i64 %t$29, 1
-  ret { i64, i64 } %t$30$r1
+  %t$30$lo = zext i64 %t$26 to i128
+  %t$30$hw = zext i64 %t$29 to i128
+  %t$30$hi = shl i128 %t$30$hw, 64
+  %t$30$r = or i128 %t$30$hi, %t$30$lo
+  ret i128 %t$30$r
 wrepack_next_27:
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$26, %t$31
   br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
 wrepack_hit_31:
   %t$33 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$34$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$34$r1 = insertvalue { i64, i64 } %t$34$r0, i64 %t$33, 1
-  ret { i64, i64 } %t$34$r1
+  %t$34$lo = zext i64 %t$26 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
 wrepack_next_31:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_ident_list_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$26 = alloca i64
   store i64 %p$tokens, ptr %t$26
@@ -69485,24 +70061,28 @@ join_2:
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$17 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$17, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$17 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_instance_methods_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_instance_methods_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$28 = alloca i64
   store i64 %p$tokens, ptr %t$28
@@ -69524,9 +70104,10 @@ then_4:
   %t$35 = alloca i64
   store i64 %p$acc, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
-  %t$5$st = call { i64, i64 } @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$5, %t$7
   %t$37 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -69580,18 +70161,22 @@ do_done_7:
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 %t$19, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$16 to i128
+  %t$20$hw = zext i64 %t$19 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$16, %t$21
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$16 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   call void @sprout_abort_match()
   unreachable
@@ -69611,12 +70196,14 @@ else_4:
   %t$26$s1 = getelementptr i64, ptr %t$26$ptr, i64 1
   store i64 %p$i, ptr %t$26$s1
   %t$57 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$27$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$27$r1 = insertvalue { i64, i64 } %t$27$r0, i64 %t$26, 1
-  ret { i64, i64 } %t$27$r1
+  %t$27$lo = zext i64 7 to i128
+  %t$27$hw = zext i64 %t$26 to i128
+  %t$27$hi = shl i128 %t$27$hw, 64
+  %t$27$r = or i128 %t$27$hi, %t$27$lo
+  ret i128 %t$27$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_let_bindings_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_let_bindings_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$37 = alloca i64
   store i64 %p$tokens, ptr %t$37
@@ -69656,9 +70243,11 @@ ovfok_5:
   %t$8$s1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %t$5, ptr %t$8$s1
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 7 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 else_2:
   %t$48 = alloca i64
   store i64 %p$tokens, ptr %t$48
@@ -69666,9 +70255,10 @@ else_2:
   %t$50 = alloca i64
   store i64 %p$acc, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.parse_let_binding_worker(i64 %p$tokens, i64 %p$i)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.parse_let_binding_worker(i64 %p$tokens, i64 %p$i)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -69702,9 +70292,10 @@ do_cont_12:
   %t$62 = alloca i64
   store i64 %t$17, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.let_binding_end_worker(i64 %p$tokens, i64 %t$17)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.let_binding_end_worker(i64 %p$tokens, i64 %t$17)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$64 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
@@ -69757,24 +70348,28 @@ do_done_12:
   br i1 %t$30, label %wrepack_hit_29, label %wrepack_next_29
 wrepack_hit_29:
   %t$31 = call i64 @sprout_field(i64 %t$27, i64 0)
-  %t$32$r0 = insertvalue { i64, i64 } undef, i64 %t$28, 0
-  %t$32$r1 = insertvalue { i64, i64 } %t$32$r0, i64 %t$31, 1
-  ret { i64, i64 } %t$32$r1
+  %t$32$lo = zext i64 %t$28 to i128
+  %t$32$hw = zext i64 %t$31 to i128
+  %t$32$hi = shl i128 %t$32$hw, 64
+  %t$32$r = or i128 %t$32$hi, %t$32$lo
+  ret i128 %t$32$r
 wrepack_next_29:
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$28, %t$33
   br i1 %t$34, label %wrepack_hit_33, label %wrepack_next_33
 wrepack_hit_33:
   %t$35 = call i64 @sprout_field(i64 %t$27, i64 0)
-  %t$36$r0 = insertvalue { i64, i64 } undef, i64 %t$28, 0
-  %t$36$r1 = insertvalue { i64, i64 } %t$36$r0, i64 %t$35, 1
-  ret { i64, i64 } %t$36$r1
+  %t$36$lo = zext i64 %t$28 to i128
+  %t$36$hw = zext i64 %t$35 to i128
+  %t$36$hi = shl i128 %t$36$hw, 64
+  %t$36$r = or i128 %t$36$hi, %t$36$lo
+  ret i128 %t$36$r
 wrepack_next_33:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_list_items_after_head_worker(i64 %p$tokens, i64 %p$i, i64 %p$head_expr) {
+define i128 @stdlib.compiler.parser.collect_list_items_after_head_worker(i64 %p$tokens, i64 %p$i, i64 %p$head_expr) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1038, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -69852,9 +70447,10 @@ body_1_4:
   %t$64 = alloca i64
   store i64 %t$16, ptr %t$64
   %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %t$15, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.collect_expr_list_worker(i64 %p$tokens, i64 %t$15, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$66 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -69930,24 +70526,28 @@ join_4:
   br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
 wrepack_hit_31:
   %t$33 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$34$r0 = insertvalue { i64, i64 } undef, i64 %t$30, 0
-  %t$34$r1 = insertvalue { i64, i64 } %t$34$r0, i64 %t$33, 1
-  ret { i64, i64 } %t$34$r1
+  %t$34$lo = zext i64 %t$30 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
 wrepack_next_31:
   %t$35 = add i64 0, 8
   %t$36 = icmp eq i64 %t$30, %t$35
   br i1 %t$36, label %wrepack_hit_35, label %wrepack_next_35
 wrepack_hit_35:
   %t$37 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$38$r0 = insertvalue { i64, i64 } undef, i64 %t$30, 0
-  %t$38$r1 = insertvalue { i64, i64 } %t$38$r0, i64 %t$37, 1
-  ret { i64, i64 } %t$38$r1
+  %t$38$lo = zext i64 %t$30 to i128
+  %t$38$hw = zext i64 %t$37 to i128
+  %t$38$hi = shl i128 %t$38$hw, 64
+  %t$38$r = or i128 %t$38$hi, %t$38$lo
+  ret i128 %t$38$r
 wrepack_next_35:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_match_branches_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_match_branches_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$80 = alloca i64
   store i64 %p$tokens, ptr %t$80
@@ -69982,9 +70582,11 @@ ovfok_4:
   %t$7$s1 = getelementptr i64, ptr %t$7$ptr, i64 1
   store i64 %t$4, ptr %t$7$s1
   %t$87 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$8$r1 = insertvalue { i64, i64 } %t$8$r0, i64 %t$7, 1
-  ret { i64, i64 } %t$8$r1
+  %t$8$lo = zext i64 7 to i128
+  %t$8$hw = zext i64 %t$7 to i128
+  %t$8$hi = shl i128 %t$8$hw, 64
+  %t$8$r = or i128 %t$8$hi, %t$8$lo
+  ret i128 %t$8$r
 else_2:
   %t$9 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1040, i64 0, i32 1, i64 0
   %t$10 = ptrtoint ptr %t$9 to i64
@@ -70125,9 +70727,10 @@ body_1_13:
   %t$132 = alloca i64
   store i64 %t$39, ptr %t$132
   %t$133 = call i64 @sprout_gc_push_i64_root(ptr %t$132)
-  %t$40$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %t$39)
-  %t$40 = extractvalue { i64, i64 } %t$40$st, 0
-  %t$41 = extractvalue { i64, i64 } %t$40$st, 1
+  %t$40$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %t$39)
+  %t$40 = trunc i128 %t$40$st to i64
+  %t$40$hi = lshr i128 %t$40$st, 64
+  %t$41 = trunc i128 %t$40$hi to i64
   %t$134 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$40, %t$42
@@ -70167,9 +70770,10 @@ do_cont_42:
   %t$147 = alloca i64
   store i64 %t$49, ptr %t$147
   %t$148 = call i64 @sprout_gc_push_i64_root(ptr %t$147)
-  %t$50$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$49, i64 %p$tokens, i64 %t$47)
-  %t$50 = extractvalue { i64, i64 } %t$50$st, 0
-  %t$51 = extractvalue { i64, i64 } %t$50$st, 1
+  %t$50$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$49, i64 %p$tokens, i64 %t$47)
+  %t$50 = trunc i128 %t$50$st to i64
+  %t$50$hi = lshr i128 %t$50$st, 64
+  %t$51 = trunc i128 %t$50$hi to i64
   %t$149 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$52 = add i64 0, 8
   %t$53 = icmp eq i64 %t$50, %t$52
@@ -70201,9 +70805,10 @@ do_cont_52:
   %t$160 = alloca i64
   store i64 %t$56, ptr %t$160
   %t$161 = call i64 @sprout_gc_push_i64_root(ptr %t$160)
-  %t$57$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$56)
-  %t$57 = extractvalue { i64, i64 } %t$57$st, 0
-  %t$58 = extractvalue { i64, i64 } %t$57$st, 1
+  %t$57$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$56)
+  %t$57 = trunc i128 %t$57$st to i64
+  %t$57$hi = lshr i128 %t$57$st, 64
+  %t$58 = trunc i128 %t$57$hi to i64
   %t$162 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$59 = add i64 0, 8
   %t$60 = icmp eq i64 %t$57, %t$59
@@ -70283,24 +70888,28 @@ join_13:
   br i1 %t$73, label %wrepack_hit_72, label %wrepack_next_72
 wrepack_hit_72:
   %t$74 = call i64 @sprout_field(i64 %t$14, i64 0)
-  %t$75$r0 = insertvalue { i64, i64 } undef, i64 %t$71, 0
-  %t$75$r1 = insertvalue { i64, i64 } %t$75$r0, i64 %t$74, 1
-  ret { i64, i64 } %t$75$r1
+  %t$75$lo = zext i64 %t$71 to i128
+  %t$75$hw = zext i64 %t$74 to i128
+  %t$75$hi = shl i128 %t$75$hw, 64
+  %t$75$r = or i128 %t$75$hi, %t$75$lo
+  ret i128 %t$75$r
 wrepack_next_72:
   %t$76 = add i64 0, 8
   %t$77 = icmp eq i64 %t$71, %t$76
   br i1 %t$77, label %wrepack_hit_76, label %wrepack_next_76
 wrepack_hit_76:
   %t$78 = call i64 @sprout_field(i64 %t$14, i64 0)
-  %t$79$r0 = insertvalue { i64, i64 } undef, i64 %t$71, 0
-  %t$79$r1 = insertvalue { i64, i64 } %t$79$r0, i64 %t$78, 1
-  ret { i64, i64 } %t$79$r1
+  %t$79$lo = zext i64 %t$71 to i128
+  %t$79$hw = zext i64 %t$78 to i128
+  %t$79$hi = shl i128 %t$79$hw, 64
+  %t$79$r = or i128 %t$79$hi, %t$79$lo
+  ret i128 %t$79$r
 wrepack_next_76:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$42 = alloca i64
   store i64 %p$tokens, ptr %t$42
@@ -70326,9 +70935,11 @@ then_4:
   %t$5$s1 = getelementptr i64, ptr %t$5$ptr, i64 1
   store i64 %p$i, ptr %t$5$s1
   %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 7 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 else_4:
   %t$50 = alloca i64
   store i64 %p$tokens, ptr %t$50
@@ -70336,9 +70947,10 @@ else_4:
   %t$52 = alloca i64
   store i64 %p$acc, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.parse_param_worker(i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.parse_param_worker(i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -70469,24 +71081,28 @@ do_done_9:
   br i1 %t$35, label %wrepack_hit_34, label %wrepack_next_34
 wrepack_hit_34:
   %t$36 = call i64 @sprout_field(i64 %t$32, i64 0)
-  %t$37$r0 = insertvalue { i64, i64 } undef, i64 %t$33, 0
-  %t$37$r1 = insertvalue { i64, i64 } %t$37$r0, i64 %t$36, 1
-  ret { i64, i64 } %t$37$r1
+  %t$37$lo = zext i64 %t$33 to i128
+  %t$37$hw = zext i64 %t$36 to i128
+  %t$37$hi = shl i128 %t$37$hw, 64
+  %t$37$r = or i128 %t$37$hi, %t$37$lo
+  ret i128 %t$37$r
 wrepack_next_34:
   %t$38 = add i64 0, 8
   %t$39 = icmp eq i64 %t$33, %t$38
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
   %t$40 = call i64 @sprout_field(i64 %t$32, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$33, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$33 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_pattern_atoms_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_pattern_atoms_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$24 = alloca i64
   store i64 %p$tokens, ptr %t$24
@@ -70505,9 +71121,10 @@ then_1:
   %t$31 = alloca i64
   store i64 %p$acc, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.parse_pattern_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -70561,18 +71178,22 @@ do_done_4:
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
   %t$16 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$13 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$13, %t$18
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$13 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   call void @sprout_abort_match()
   unreachable
@@ -70587,12 +71208,14 @@ else_1:
   %t$22$s1 = getelementptr i64, ptr %t$22$ptr, i64 1
   store i64 %p$i, ptr %t$22$s1
   %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 7 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_pattern_items_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_pattern_items_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$35 = alloca i64
   store i64 %p$tokens, ptr %t$35
@@ -70600,9 +71223,10 @@ entry:
   %t$37 = alloca i64
   store i64 %p$acc, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$39 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -70733,24 +71357,28 @@ do_done_2:
   br i1 %t$28, label %wrepack_hit_27, label %wrepack_next_27
 wrepack_hit_27:
   %t$29 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$30$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$30$r1 = insertvalue { i64, i64 } %t$30$r0, i64 %t$29, 1
-  ret { i64, i64 } %t$30$r1
+  %t$30$lo = zext i64 %t$26 to i128
+  %t$30$hw = zext i64 %t$29 to i128
+  %t$30$hi = shl i128 %t$30$hw, 64
+  %t$30$r = or i128 %t$30$hi, %t$30$lo
+  ret i128 %t$30$r
 wrepack_next_27:
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$26, %t$31
   br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
 wrepack_hit_31:
   %t$33 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$34$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$34$r1 = insertvalue { i64, i64 } %t$34$r0, i64 %t$33, 1
-  ret { i64, i64 } %t$34$r1
+  %t$34$lo = zext i64 %t$26 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
 wrepack_next_31:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_record_field_decls_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_record_field_decls_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$44 = alloca i64
   store i64 %p$tokens, ptr %t$44
@@ -70781,9 +71409,11 @@ then_4:
   %t$6$s1 = getelementptr i64, ptr %t$6$ptr, i64 1
   store i64 %p$i, ptr %t$6$s1
   %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$7$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$7$r1 = insertvalue { i64, i64 } %t$7$r0, i64 %t$6, 1
-  ret { i64, i64 } %t$7$r1
+  %t$7$lo = zext i64 7 to i128
+  %t$7$hw = zext i64 %t$6 to i128
+  %t$7$hi = shl i128 %t$7$hw, 64
+  %t$7$r = or i128 %t$7$hi, %t$7$lo
+  ret i128 %t$7$r
 else_4:
   %t$55 = alloca i64
   store i64 %p$tokens, ptr %t$55
@@ -70791,9 +71421,10 @@ else_4:
   %t$57 = alloca i64
   store i64 %p$acc, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$8$st = call { i64, i64 } @stdlib.compiler.parser.parse_record_field_decl_worker(i64 %p$tokens, i64 %p$i)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.compiler.parser.parse_record_field_decl_worker(i64 %p$tokens, i64 %p$i)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$10 = add i64 0, 8
   %t$11 = icmp eq i64 %t$8, %t$10
   %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -70929,24 +71560,28 @@ do_done_10:
   br i1 %t$37, label %wrepack_hit_36, label %wrepack_next_36
 wrepack_hit_36:
   %t$38 = call i64 @sprout_field(i64 %t$34, i64 0)
-  %t$39$r0 = insertvalue { i64, i64 } undef, i64 %t$35, 0
-  %t$39$r1 = insertvalue { i64, i64 } %t$39$r0, i64 %t$38, 1
-  ret { i64, i64 } %t$39$r1
+  %t$39$lo = zext i64 %t$35 to i128
+  %t$39$hw = zext i64 %t$38 to i128
+  %t$39$hi = shl i128 %t$39$hw, 64
+  %t$39$r = or i128 %t$39$hi, %t$39$lo
+  ret i128 %t$39$r
 wrepack_next_36:
   %t$40 = add i64 0, 8
   %t$41 = icmp eq i64 %t$35, %t$40
   br i1 %t$41, label %wrepack_hit_40, label %wrepack_next_40
 wrepack_hit_40:
   %t$42 = call i64 @sprout_field(i64 %t$34, i64 0)
-  %t$43$r0 = insertvalue { i64, i64 } undef, i64 %t$35, 0
-  %t$43$r1 = insertvalue { i64, i64 } %t$43$r0, i64 %t$42, 1
-  ret { i64, i64 } %t$43$r1
+  %t$43$lo = zext i64 %t$35 to i128
+  %t$43$hw = zext i64 %t$42 to i128
+  %t$43$hi = shl i128 %t$43$hw, 64
+  %t$43$r = or i128 %t$43$hi, %t$43$lo
+  ret i128 %t$43$r
 wrepack_next_40:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_record_literal_fields_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_record_literal_fields_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$0 = getelementptr inbounds { i64, [18 x i8] }, ptr @.str.1048, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -70959,9 +71594,10 @@ entry:
   %t$76 = alloca i64
   store i64 %t$1, ptr %t$76
   %t$77 = call i64 @sprout_gc_push_i64_root(ptr %t$76)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$78 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -71001,9 +71637,10 @@ do_cont_4:
   %t$91 = alloca i64
   store i64 %t$11, ptr %t$91
   %t$92 = call i64 @sprout_gc_push_i64_root(ptr %t$91)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$93 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -71035,9 +71672,10 @@ do_cont_14:
   %t$104 = alloca i64
   store i64 %t$18, ptr %t$104
   %t$105 = call i64 @sprout_gc_push_i64_root(ptr %t$104)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$106 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -71283,24 +71921,28 @@ do_done_4:
   br i1 %t$65, label %wrepack_hit_64, label %wrepack_next_64
 wrepack_hit_64:
   %t$66 = call i64 @sprout_field(i64 %t$62, i64 0)
-  %t$67$r0 = insertvalue { i64, i64 } undef, i64 %t$63, 0
-  %t$67$r1 = insertvalue { i64, i64 } %t$67$r0, i64 %t$66, 1
-  ret { i64, i64 } %t$67$r1
+  %t$67$lo = zext i64 %t$63 to i128
+  %t$67$hw = zext i64 %t$66 to i128
+  %t$67$hi = shl i128 %t$67$hw, 64
+  %t$67$r = or i128 %t$67$hi, %t$67$lo
+  ret i128 %t$67$r
 wrepack_next_64:
   %t$68 = add i64 0, 8
   %t$69 = icmp eq i64 %t$63, %t$68
   br i1 %t$69, label %wrepack_hit_68, label %wrepack_next_68
 wrepack_hit_68:
   %t$70 = call i64 @sprout_field(i64 %t$62, i64 0)
-  %t$71$r0 = insertvalue { i64, i64 } undef, i64 %t$63, 0
-  %t$71$r1 = insertvalue { i64, i64 } %t$71$r0, i64 %t$70, 1
-  ret { i64, i64 } %t$71$r1
+  %t$71$lo = zext i64 %t$63 to i128
+  %t$71$hw = zext i64 %t$70 to i128
+  %t$71$hi = shl i128 %t$71$hw, 64
+  %t$71$r = or i128 %t$71$hi, %t$71$lo
+  ret i128 %t$71$r
 wrepack_next_68:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_template_parts_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_template_parts_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$83 = alloca i64
   store i64 %p$tokens, ptr %t$83
@@ -71335,9 +71977,11 @@ ovfok_4:
   %t$7$s1 = getelementptr i64, ptr %t$7$ptr, i64 1
   store i64 %t$4, ptr %t$7$s1
   %t$90 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$8$r1 = insertvalue { i64, i64 } %t$8$r0, i64 %t$7, 1
-  ret { i64, i64 } %t$8$r1
+  %t$8$lo = zext i64 7 to i128
+  %t$8$hw = zext i64 %t$7 to i128
+  %t$8$hi = shl i128 %t$8$hw, 64
+  %t$8$r = or i128 %t$8$hi, %t$8$lo
+  ret i128 %t$8$r
 else_2:
   %t$91 = alloca i64
   store i64 %p$tokens, ptr %t$91
@@ -71399,18 +72043,22 @@ ovfok_13:
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$20, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$21 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 8
   %t$27 = icmp eq i64 %t$21, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$20, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$21 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   call void @sprout_abort_match()
   unreachable
@@ -71444,9 +72092,10 @@ ovfok_34:
   %t$116 = alloca i64
   store i64 %p$acc, ptr %t$116
   %t$117 = call i64 @sprout_gc_push_i64_root(ptr %t$116)
-  %t$37$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$34)
-  %t$37 = extractvalue { i64, i64 } %t$37$st, 0
-  %t$38 = extractvalue { i64, i64 } %t$37$st, 1
+  %t$37$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$34)
+  %t$37 = trunc i128 %t$37$st to i64
+  %t$37$hi = lshr i128 %t$37$st, 64
+  %t$38 = trunc i128 %t$37$hi to i64
   %t$39 = add i64 0, 8
   %t$40 = icmp eq i64 %t$37, %t$39
   %t$118 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -71583,18 +72232,22 @@ do_done_39:
   br i1 %t$68, label %wrepack_hit_67, label %wrepack_next_67
 wrepack_hit_67:
   %t$69 = call i64 @sprout_field(i64 %t$65, i64 0)
-  %t$70$r0 = insertvalue { i64, i64 } undef, i64 %t$66, 0
-  %t$70$r1 = insertvalue { i64, i64 } %t$70$r0, i64 %t$69, 1
-  ret { i64, i64 } %t$70$r1
+  %t$70$lo = zext i64 %t$66 to i128
+  %t$70$hw = zext i64 %t$69 to i128
+  %t$70$hi = shl i128 %t$70$hw, 64
+  %t$70$r = or i128 %t$70$hi, %t$70$lo
+  ret i128 %t$70$r
 wrepack_next_67:
   %t$71 = add i64 0, 8
   %t$72 = icmp eq i64 %t$66, %t$71
   br i1 %t$72, label %wrepack_hit_71, label %wrepack_next_71
 wrepack_hit_71:
   %t$73 = call i64 @sprout_field(i64 %t$65, i64 0)
-  %t$74$r0 = insertvalue { i64, i64 } undef, i64 %t$66, 0
-  %t$74$r1 = insertvalue { i64, i64 } %t$74$r0, i64 %t$73, 1
-  ret { i64, i64 } %t$74$r1
+  %t$74$lo = zext i64 %t$66 to i128
+  %t$74$hw = zext i64 %t$73 to i128
+  %t$74$hi = shl i128 %t$74$hw, 64
+  %t$74$r = or i128 %t$74$hi, %t$74$lo
+  ret i128 %t$74$r
 wrepack_next_71:
   call void @sprout_abort_match()
   unreachable
@@ -71632,12 +72285,14 @@ else_32:
   %t$81$f1 = getelementptr i64, ptr %t$81$ptr, i64 1
   store i64 %t$80, ptr %t$81$f1
   %t$177 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$82$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$82$r1 = insertvalue { i64, i64 } %t$82$r0, i64 %t$81, 1
-  ret { i64, i64 } %t$82$r1
+  %t$82$lo = zext i64 8 to i128
+  %t$82$hw = zext i64 %t$81 to i128
+  %t$82$hi = shl i128 %t$82$hw, 64
+  %t$82$r = or i128 %t$82$hi, %t$82$lo
+  ret i128 %t$82$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_type_atoms_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_type_atoms_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$24 = alloca i64
   store i64 %p$tokens, ptr %t$24
@@ -71656,9 +72311,10 @@ then_1:
   %t$31 = alloca i64
   store i64 %p$acc, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -71712,18 +72368,22 @@ do_done_4:
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
   %t$16 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$13 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$13, %t$18
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$13 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   call void @sprout_abort_match()
   unreachable
@@ -71738,12 +72398,14 @@ else_1:
   %t$22$s1 = getelementptr i64, ptr %t$22$ptr, i64 1
   store i64 %p$i, ptr %t$22$s1
   %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 7 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_type_constructors_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_type_constructors_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1058, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -71803,9 +72465,10 @@ body_1_4:
   %t$52 = alloca i64
   store i64 %t$13, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -71866,24 +72529,28 @@ join_4:
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$25 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$25, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
   %t$32 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$25 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_type_items_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_type_items_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$35 = alloca i64
   store i64 %p$tokens, ptr %t$35
@@ -71891,9 +72558,10 @@ entry:
   %t$37 = alloca i64
   store i64 %p$acc, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$39 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -72024,24 +72692,28 @@ do_done_2:
   br i1 %t$28, label %wrepack_hit_27, label %wrepack_next_27
 wrepack_hit_27:
   %t$29 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$30$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$30$r1 = insertvalue { i64, i64 } %t$30$r0, i64 %t$29, 1
-  ret { i64, i64 } %t$30$r1
+  %t$30$lo = zext i64 %t$26 to i128
+  %t$30$hw = zext i64 %t$29 to i128
+  %t$30$hi = shl i128 %t$30$hw, 64
+  %t$30$r = or i128 %t$30$hi, %t$30$lo
+  ret i128 %t$30$r
 wrepack_next_27:
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$26, %t$31
   br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
 wrepack_hit_31:
   %t$33 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$34$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$34$r1 = insertvalue { i64, i64 } %t$34$r0, i64 %t$33, 1
-  ret { i64, i64 } %t$34$r1
+  %t$34$lo = zext i64 %t$26 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
 wrepack_next_31:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.collect_where_bindings_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
+define i128 @stdlib.compiler.parser.collect_where_bindings_worker(i64 %p$tokens, i64 %p$i, i64 %p$acc) {
 entry:
   %t$60 = alloca i64
   store i64 %p$tokens, ptr %t$60
@@ -72076,9 +72748,11 @@ ovfok_4:
   %t$7$s1 = getelementptr i64, ptr %t$7$ptr, i64 1
   store i64 %t$4, ptr %t$7$s1
   %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$8$r1 = insertvalue { i64, i64 } %t$8$r0, i64 %t$7, 1
-  ret { i64, i64 } %t$8$r1
+  %t$8$lo = zext i64 7 to i128
+  %t$8$hw = zext i64 %t$7 to i128
+  %t$8$hi = shl i128 %t$8$hw, 64
+  %t$8$r = or i128 %t$8$hi, %t$8$lo
+  ret i128 %t$8$r
 else_2:
   %t$68 = alloca i64
   store i64 %p$tokens, ptr %t$68
@@ -72086,9 +72760,10 @@ else_2:
   %t$70 = alloca i64
   store i64 %p$acc, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$9$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$9 = extractvalue { i64, i64 } %t$9$st, 0
-  %t$10 = extractvalue { i64, i64 } %t$9$st, 1
+  %t$9$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$9, %t$11
   %t$72 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -72127,9 +72802,10 @@ do_cont_11:
   %t$84 = alloca i64
   store i64 %t$18, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$18, i64 %p$tokens, i64 %t$16)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$86 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -72161,9 +72837,10 @@ do_cont_21:
   %t$97 = alloca i64
   store i64 %t$25, ptr %t$97
   %t$98 = call i64 @sprout_gc_push_i64_root(ptr %t$97)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$99 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -72211,9 +72888,10 @@ do_cont_28:
   %t$116 = alloca i64
   store i64 %t$37, ptr %t$116
   %t$117 = call i64 @sprout_gc_push_i64_root(ptr %t$116)
-  %t$38$st = call { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$33, i64 %t$35, i64 %t$37)
-  %t$38 = extractvalue { i64, i64 } %t$38$st, 0
-  %t$39 = extractvalue { i64, i64 } %t$38$st, 1
+  %t$38$st = call i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %t$33, i64 %t$35, i64 %t$37)
+  %t$38 = trunc i128 %t$38$st to i64
+  %t$38$hi = lshr i128 %t$38$st, 64
+  %t$39 = trunc i128 %t$38$hi to i64
   %t$118 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$40 = add i64 0, 8
   %t$41 = icmp eq i64 %t$38, %t$40
@@ -72284,24 +72962,28 @@ do_done_11:
   br i1 %t$53, label %wrepack_hit_52, label %wrepack_next_52
 wrepack_hit_52:
   %t$54 = call i64 @sprout_field(i64 %t$50, i64 0)
-  %t$55$r0 = insertvalue { i64, i64 } undef, i64 %t$51, 0
-  %t$55$r1 = insertvalue { i64, i64 } %t$55$r0, i64 %t$54, 1
-  ret { i64, i64 } %t$55$r1
+  %t$55$lo = zext i64 %t$51 to i128
+  %t$55$hw = zext i64 %t$54 to i128
+  %t$55$hi = shl i128 %t$55$hw, 64
+  %t$55$r = or i128 %t$55$hi, %t$55$lo
+  ret i128 %t$55$r
 wrepack_next_52:
   %t$56 = add i64 0, 8
   %t$57 = icmp eq i64 %t$51, %t$56
   br i1 %t$57, label %wrepack_hit_56, label %wrepack_next_56
 wrepack_hit_56:
   %t$58 = call i64 @sprout_field(i64 %t$50, i64 0)
-  %t$59$r0 = insertvalue { i64, i64 } undef, i64 %t$51, 0
-  %t$59$r1 = insertvalue { i64, i64 } %t$59$r0, i64 %t$58, 1
-  ret { i64, i64 } %t$59$r1
+  %t$59$lo = zext i64 %t$51 to i128
+  %t$59$hw = zext i64 %t$58 to i128
+  %t$59$hi = shl i128 %t$59$hw, 64
+  %t$59$r = or i128 %t$59$hi, %t$59$lo
+  ret i128 %t$59$r
 wrepack_next_56:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.constraint_var_name_worker(i64 %p$c) {
+define i128 @stdlib.compiler.parser.constraint_var_name_worker(i64 %p$c) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -72340,24 +73022,28 @@ join_0:
   %t$15 = icmp eq i64 %t$13, %t$14
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 0, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$13 to i128
+  %t$17$hw = zext i64 0 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   %t$18 = add i64 0, 1
   %t$19 = icmp eq i64 %t$13, %t$18
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$13 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.do_step_end_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.do_step_end_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.1064, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -72372,16 +73058,19 @@ entry:
   %t$11 = alloca i64
   store i64 %t$3, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$4$st = call { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %t$3)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %t$3)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$4, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$4 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$20 = alloca i64
   store i64 %p$tokens, ptr %t$20
@@ -72403,9 +73092,11 @@ ovfpanic_4:
   call i64 @panic(i64 %t$6)
   unreachable
 ovfok_4:
-  %t$7$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$7$r1 = insertvalue { i64, i64 } %t$7$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$7$r1
+  %t$7$lo = zext i64 7 to i128
+  %t$7$hw = zext i64 %t$4 to i128
+  %t$7$hi = shl i128 %t$7$hw, 64
+  %t$7$r = or i128 %t$7$hi, %t$7$lo
+  ret i128 %t$7$r
 else_2:
   %t$8 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.1067, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
@@ -72465,12 +73156,14 @@ else_2:
   %t$18$f1 = getelementptr i64, ptr %t$18$ptr, i64 1
   store i64 %t$17, ptr %t$18$f1
   %t$45 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$19$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$19$r1 = insertvalue { i64, i64 } %t$19$r0, i64 %t$18, 1
-  ret { i64, i64 } %t$19$r1
+  %t$19$lo = zext i64 8 to i128
+  %t$19$hw = zext i64 %t$18 to i128
+  %t$19$hi = shl i128 %t$19$hw, 64
+  %t$19$r = or i128 %t$19$hi, %t$19$lo
+  ret i128 %t$19$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %p$label, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.expected_ident_worker(i64 %p$label, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$24 = alloca i64
   store i64 %p$tokens, ptr %t$24
@@ -72478,9 +73171,10 @@ entry:
   %t$26 = alloca i64
   store i64 %p$label, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_ident_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_ident_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -72552,24 +73246,28 @@ join_2:
   br i1 %t$17, label %wrepack_hit_16, label %wrepack_next_16
 wrepack_hit_16:
   %t$18 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$19$r0 = insertvalue { i64, i64 } undef, i64 %t$15, 0
-  %t$19$r1 = insertvalue { i64, i64 } %t$19$r0, i64 %t$18, 1
-  ret { i64, i64 } %t$19$r1
+  %t$19$lo = zext i64 %t$15 to i128
+  %t$19$hw = zext i64 %t$18 to i128
+  %t$19$hi = shl i128 %t$19$hw, 64
+  %t$19$r = or i128 %t$19$hi, %t$19$lo
+  ret i128 %t$19$r
 wrepack_next_16:
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$15, %t$20
   br i1 %t$21, label %wrepack_hit_20, label %wrepack_next_20
 wrepack_hit_20:
   %t$22 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 %t$15, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 %t$15 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 wrepack_next_20:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %p$kw, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %p$kw, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$30 = alloca i64
   store i64 %p$tokens, ptr %t$30
@@ -72577,9 +73275,10 @@ entry:
   %t$32 = alloca i64
   store i64 %p$kw, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_keyword_worker(i64 %p$tokens, i64 %p$i, i64 %p$kw)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_keyword_worker(i64 %p$tokens, i64 %p$i, i64 %p$kw)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -72672,24 +73371,28 @@ join_2:
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$21 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 8
   %t$27 = icmp eq i64 %t$21, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$21 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %p$sym, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %p$sym, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$30 = alloca i64
   store i64 %p$tokens, ptr %t$30
@@ -72697,9 +73400,10 @@ entry:
   %t$32 = alloca i64
   store i64 %p$sym, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_symbol_worker(i64 %p$tokens, i64 %p$i, i64 %p$sym)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_symbol_worker(i64 %p$tokens, i64 %p$i, i64 %p$sym)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -72792,24 +73496,28 @@ join_2:
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$21 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 8
   %t$27 = icmp eq i64 %t$21, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$21 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.finish_let_in_worker(i64 %p$tokens, i64 %p$bindings, i64 %p$i) {
+define i128 @stdlib.compiler.parser.finish_let_in_worker(i64 %p$tokens, i64 %p$bindings, i64 %p$i) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$bindings)
   br label %arm_0_1
@@ -72858,9 +73566,10 @@ arm_1_1:
   %t$55 = alloca i64
   store i64 %t$11, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$11, i64 %p$tokens, i64 %p$i)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$11, i64 %p$tokens, i64 %p$i)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$57 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -72889,9 +73598,10 @@ do_cont_14:
   %t$66 = alloca i64
   store i64 %t$18, ptr %t$66
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -72960,24 +73670,28 @@ join_1:
   br i1 %t$34, label %wrepack_hit_33, label %wrepack_next_33
 wrepack_hit_33:
   %t$35 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$36$r0 = insertvalue { i64, i64 } undef, i64 %t$32, 0
-  %t$36$r1 = insertvalue { i64, i64 } %t$36$r0, i64 %t$35, 1
-  ret { i64, i64 } %t$36$r1
+  %t$36$lo = zext i64 %t$32 to i128
+  %t$36$hw = zext i64 %t$35 to i128
+  %t$36$hi = shl i128 %t$36$hw, 64
+  %t$36$r = or i128 %t$36$hi, %t$36$lo
+  ret i128 %t$36$r
 wrepack_next_33:
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$32, %t$37
   br i1 %t$38, label %wrepack_hit_37, label %wrepack_next_37
 wrepack_hit_37:
   %t$39 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$40$r0 = insertvalue { i64, i64 } undef, i64 %t$32, 0
-  %t$40$r1 = insertvalue { i64, i64 } %t$40$r0, i64 %t$39, 1
-  ret { i64, i64 } %t$40$r1
+  %t$40$lo = zext i64 %t$32 to i128
+  %t$40$hw = zext i64 %t$39 to i128
+  %t$40$hi = shl i128 %t$40$hw, 64
+  %t$40$r = or i128 %t$40$hi, %t$40$lo
+  ret i128 %t$40$r
 wrepack_next_37:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.first_unknown_effect_label_worker(i64 %p$names) {
+define i128 @stdlib.compiler.parser.first_unknown_effect_label_worker(i64 %p$names) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$names)
   br label %arm_0_1
@@ -73045,31 +73759,36 @@ join_1:
   %t$23 = icmp eq i64 %t$21, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 0, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$21 to i128
+  %t$25$hw = zext i64 0 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 1
   %t$27 = icmp eq i64 %t$21, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$21 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.int_from_lexed_worker(i64 %p$text) {
+define i128 @stdlib.compiler.parser.int_from_lexed_worker(i64 %p$text) {
 entry:
   %t$19 = alloca i64
   store i64 %p$text, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.radix_from_lexed_worker(i64 %p$text)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.radix_from_lexed_worker(i64 %p$text)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -73107,24 +73826,28 @@ join_2:
   %t$12 = icmp eq i64 %t$10, %t$11
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 0, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 0 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 1
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.int_literal_value_worker(i64 %p$text, i64 %p$pos) {
+define i128 @stdlib.compiler.parser.int_literal_value_worker(i64 %p$text, i64 %p$pos) {
 entry:
   %t$29 = alloca i64
   store i64 %p$text, ptr %t$29
@@ -73132,9 +73855,10 @@ entry:
   %t$31 = alloca i64
   store i64 %p$pos, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.int_from_lexed_worker(i64 %p$text)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.int_from_lexed_worker(i64 %p$text)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_2
 arm_0_2:
@@ -73238,24 +73962,28 @@ join_2:
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$20 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   %t$25 = add i64 0, 8
   %t$26 = icmp eq i64 %t$20, %t$25
   br i1 %t$26, label %wrepack_hit_25, label %wrepack_next_25
 wrepack_hit_25:
   %t$27 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$28$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$28$r1 = insertvalue { i64, i64 } %t$28$r0, i64 %t$27, 1
-  ret { i64, i64 } %t$28$r1
+  %t$28$lo = zext i64 %t$20 to i128
+  %t$28$hw = zext i64 %t$27 to i128
+  %t$28$hi = shl i128 %t$28$hw, 64
+  %t$28$r = or i128 %t$28$hi, %t$28$lo
+  ret i128 %t$28$r
 wrepack_next_25:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.laid_out_worker(i64 %p$raw, i64 %p$mode) {
+define i128 @stdlib.compiler.parser.laid_out_worker(i64 %p$raw, i64 %p$mode) {
 entry:
   %t$34 = alloca i64
   store i64 %p$raw, ptr %t$34
@@ -73373,24 +74101,28 @@ join_2:
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$25 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$25, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
   %t$32 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$25 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.let_binding_end_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.let_binding_end_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [14 x i8] }, ptr @.str.1077, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -73405,16 +74137,19 @@ entry:
   %t$11 = alloca i64
   store i64 %t$3, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$4$st = call { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %t$3)
-  %t$4 = extractvalue { i64, i64 } %t$4$st, 0
-  %t$5 = extractvalue { i64, i64 } %t$4$st, 1
+  %t$4$st = call i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %p$i, i64 %t$1, i64 %t$3)
+  %t$4 = trunc i128 %t$4$st to i64
+  %t$4$hi = lshr i128 %t$4$st, 64
+  %t$5 = trunc i128 %t$4$hi to i64
   %t$13 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$4, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$4 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.make_class_method_sig_worker(i64 %p$name, i64 %p$params, i64 %p$ret_raw, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.make_class_method_sig_worker(i64 %p$name, i64 %p$params, i64 %p$ret_raw, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$ret_raw)
   br label %arm_0_1
@@ -73440,9 +74175,10 @@ body_0_1:
   %t$58 = alloca i64
   store i64 %t$6, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
   %t$60 = call i64 @sprout_gc_pop_roots(i64 5)
@@ -73537,9 +74273,10 @@ arm_1_1:
   %t$91 = alloca i64
   store i64 %p$name, ptr %t$91
   %t$92 = call i64 @sprout_gc_push_i64_root(ptr %t$91)
-  %t$20$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$20 = extractvalue { i64, i64 } %t$20$st, 0
-  %t$21 = extractvalue { i64, i64 } %t$20$st, 1
+  %t$20$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$20 = trunc i128 %t$20$st to i64
+  %t$20$hi = lshr i128 %t$20$st, 64
+  %t$21 = trunc i128 %t$20$hi to i64
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$20, %t$22
   %t$93 = call i64 @sprout_gc_pop_roots(i64 4)
@@ -73579,9 +74316,10 @@ do_cont_22:
   %t$107 = alloca i64
   store i64 %t$27, ptr %t$107
   %t$108 = call i64 @sprout_gc_push_i64_root(ptr %t$107)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$27)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$27)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$109 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
@@ -73670,24 +74408,28 @@ join_1:
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$41 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   %t$46 = add i64 0, 8
   %t$47 = icmp eq i64 %t$41, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
   %t$48 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$41 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.make_type_arrow_worker(i64 %p$left, i64 %p$right_raw, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.make_type_arrow_worker(i64 %p$left, i64 %p$right_raw, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$right_raw)
   br label %arm_0_1
@@ -73759,9 +74501,10 @@ arm_1_1:
   %t$56 = alloca i64
   store i64 %p$left, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
   %t$58 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -73843,24 +74586,28 @@ join_1:
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$25 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$25, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
   %t$32 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$25 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.make_type_thunk_worker(i64 %p$right_raw, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.make_type_thunk_worker(i64 %p$right_raw, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$right_raw)
   br label %arm_0_1
@@ -73918,9 +74665,10 @@ arm_1_1:
   %t$48 = alloca i64
   store i64 %p$right_raw, ptr %t$48
   %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
   %t$50 = call i64 @sprout_gc_pop_roots(i64 2)
@@ -73990,24 +74738,28 @@ join_1:
   br i1 %t$25, label %wrepack_hit_24, label %wrepack_next_24
 wrepack_hit_24:
   %t$26 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$27$r0 = insertvalue { i64, i64 } undef, i64 %t$23, 0
-  %t$27$r1 = insertvalue { i64, i64 } %t$27$r0, i64 %t$26, 1
-  ret { i64, i64 } %t$27$r1
+  %t$27$lo = zext i64 %t$23 to i128
+  %t$27$hw = zext i64 %t$26 to i128
+  %t$27$hi = shl i128 %t$27$hw, 64
+  %t$27$r = or i128 %t$27$hi, %t$27$lo
+  ret i128 %t$27$r
 wrepack_next_24:
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$23, %t$28
   br i1 %t$29, label %wrepack_hit_28, label %wrepack_next_28
 wrepack_hit_28:
   %t$30 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$31$r0 = insertvalue { i64, i64 } undef, i64 %t$23, 0
-  %t$31$r1 = insertvalue { i64, i64 } %t$31$r0, i64 %t$30, 1
-  ret { i64, i64 } %t$31$r1
+  %t$31$lo = zext i64 %t$23 to i128
+  %t$31$hw = zext i64 %t$30 to i128
+  %t$31$hi = shl i128 %t$31$hw, 64
+  %t$31$r = or i128 %t$31$hi, %t$31$lo
+  ret i128 %t$31$r
 wrepack_next_28:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.match_empty_params_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.match_empty_params_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1079, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -74094,24 +74846,28 @@ join_4:
   %t$29 = icmp eq i64 %t$27, %t$28
   br i1 %t$29, label %wrepack_hit_28, label %wrepack_next_28
 wrepack_hit_28:
-  %t$31$r0 = insertvalue { i64, i64 } undef, i64 %t$27, 0
-  %t$31$r1 = insertvalue { i64, i64 } %t$31$r0, i64 0, 1
-  ret { i64, i64 } %t$31$r1
+  %t$31$lo = zext i64 %t$27 to i128
+  %t$31$hw = zext i64 0 to i128
+  %t$31$hi = shl i128 %t$31$hw, 64
+  %t$31$r = or i128 %t$31$hi, %t$31$lo
+  ret i128 %t$31$r
 wrepack_next_28:
   %t$32 = add i64 0, 1
   %t$33 = icmp eq i64 %t$27, %t$32
   br i1 %t$33, label %wrepack_hit_32, label %wrepack_next_32
 wrepack_hit_32:
   %t$34 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$35$r0 = insertvalue { i64, i64 } undef, i64 %t$27, 0
-  %t$35$r1 = insertvalue { i64, i64 } %t$35$r0, i64 %t$34, 1
-  ret { i64, i64 } %t$35$r1
+  %t$35$lo = zext i64 %t$27 to i128
+  %t$35$hw = zext i64 %t$34 to i128
+  %t$35$hi = shl i128 %t$35$hw, 64
+  %t$35$r = or i128 %t$35$hi, %t$35$lo
+  ret i128 %t$35$r
 wrepack_next_32:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.match_ident_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.match_ident_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$11 = alloca i64
   store i64 %p$tokens, ptr %t$11
@@ -74148,16 +74904,20 @@ ovfok_5:
   %t$8$s1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %t$5, ptr %t$8$s1
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 else_2:
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 0, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 0 to i128
+  %t$10$hw = zext i64 0 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.match_keyword_worker(i64 %p$tokens, i64 %p$i, i64 %p$kw) {
+define i128 @stdlib.compiler.parser.match_keyword_worker(i64 %p$tokens, i64 %p$i, i64 %p$kw) {
 entry:
   %t$11 = alloca i64
   store i64 %p$tokens, ptr %t$11
@@ -74197,16 +74957,20 @@ ovfok_5:
   %t$8$s1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %t$5, ptr %t$8$s1
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 else_2:
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 0, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 0 to i128
+  %t$10$hw = zext i64 0 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.match_symbol_worker(i64 %p$tokens, i64 %p$i, i64 %p$sym) {
+define i128 @stdlib.compiler.parser.match_symbol_worker(i64 %p$tokens, i64 %p$i, i64 %p$sym) {
 entry:
   %t$11 = alloca i64
   store i64 %p$tokens, ptr %t$11
@@ -74246,16 +75010,20 @@ ovfok_5:
   %t$8$s1 = getelementptr i64, ptr %t$8$ptr, i64 1
   store i64 %t$5, ptr %t$8$s1
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 else_2:
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 0, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 0 to i128
+  %t$10$hw = zext i64 0 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %p$i, i64 %p$item, i64 %p$rule) {
+define i128 @stdlib.compiler.parser.next_item_worker(i64 %p$tokens, i64 %p$i, i64 %p$item, i64 %p$rule) {
 entry:
   %t$34 = alloca i64
   store i64 %p$tokens, ptr %t$34
@@ -74283,9 +75051,11 @@ ovfpanic_4:
   call i64 @panic(i64 %t$6)
   unreachable
 ovfok_4:
-  %t$7$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$7$r1 = insertvalue { i64, i64 } %t$7$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$7$r1
+  %t$7$lo = zext i64 7 to i128
+  %t$7$hw = zext i64 %t$4 to i128
+  %t$7$hi = shl i128 %t$7$hw, 64
+  %t$7$r = or i128 %t$7$hi, %t$7$lo
+  ret i128 %t$7$r
 else_2:
   %t$41 = alloca i64
   store i64 %p$tokens, ptr %t$41
@@ -74302,9 +75072,11 @@ else_2:
   %t$47 = call i64 @sprout_gc_pop_roots(i64 3)
   br i1 %t$10, label %then_10, label %else_10
 then_10:
-  %t$11$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$11$r1 = insertvalue { i64, i64 } %t$11$r0, i64 %p$i, 1
-  ret { i64, i64 } %t$11$r1
+  %t$11$lo = zext i64 7 to i128
+  %t$11$hw = zext i64 %p$i to i128
+  %t$11$hi = shl i128 %t$11$hw, 64
+  %t$11$r = or i128 %t$11$hi, %t$11$lo
+  ret i128 %t$11$r
 else_10:
   %t$12 = getelementptr inbounds { i64, [35 x i8] }, ptr @.str.1085, i64 0, i32 1, i64 0
   %t$13 = ptrtoint ptr %t$12 to i64
@@ -74425,19 +75197,22 @@ else_10:
   %t$32$f1 = getelementptr i64, ptr %t$32$ptr, i64 1
   store i64 %t$31, ptr %t$32$f1
   %t$92 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 8 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -74479,24 +75254,28 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_class_body_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_class_body_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$67 = alloca i64
   store i64 %p$tokens, ptr %t$67
@@ -74517,9 +75296,10 @@ then_4:
   %t$72 = alloca i64
   store i64 %t$6, ptr %t$72
   %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$6, i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$6, i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$74 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
@@ -74549,9 +75329,10 @@ do_cont_9:
   %t$83 = alloca i64
   store i64 %t$14, ptr %t$83
   %t$84 = call i64 @sprout_gc_push_i64_root(ptr %t$83)
-  %t$15$st = call { i64, i64 } @stdlib.compiler.parser.collect_class_method_sigs_worker(i64 %p$tokens, i64 %t$13, i64 %t$14)
-  %t$15 = extractvalue { i64, i64 } %t$15$st, 0
-  %t$16 = extractvalue { i64, i64 } %t$15$st, 1
+  %t$15$st = call i128 @stdlib.compiler.parser.collect_class_method_sigs_worker(i64 %p$tokens, i64 %t$13, i64 %t$14)
+  %t$15 = trunc i128 %t$15$st to i64
+  %t$15$hi = lshr i128 %t$15$st, 64
+  %t$16 = trunc i128 %t$15$hi to i64
   %t$85 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
@@ -74588,9 +75369,10 @@ do_cont_17:
   %t$96 = alloca i64
   store i64 %t$24, ptr %t$96
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$24, i64 %p$tokens, i64 %t$22)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$24, i64 %p$tokens, i64 %t$22)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$98 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -74646,18 +75428,22 @@ do_done_9:
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
   %t$40 = call i64 @sprout_field(i64 %t$36, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$37, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$37 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$37, %t$42
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$36, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$37, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$37 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   call void @sprout_abort_match()
   unreachable
@@ -74697,18 +75483,22 @@ ovfok_50:
   br i1 %t$57, label %wrepack_hit_56, label %wrepack_next_56
 wrepack_hit_56:
   %t$58 = call i64 @sprout_field(i64 %t$54, i64 0)
-  %t$59$r0 = insertvalue { i64, i64 } undef, i64 %t$55, 0
-  %t$59$r1 = insertvalue { i64, i64 } %t$59$r0, i64 %t$58, 1
-  ret { i64, i64 } %t$59$r1
+  %t$59$lo = zext i64 %t$55 to i128
+  %t$59$hw = zext i64 %t$58 to i128
+  %t$59$hi = shl i128 %t$59$hw, 64
+  %t$59$r = or i128 %t$59$hi, %t$59$lo
+  ret i128 %t$59$r
 wrepack_next_56:
   %t$60 = add i64 0, 8
   %t$61 = icmp eq i64 %t$55, %t$60
   br i1 %t$61, label %wrepack_hit_60, label %wrepack_next_60
 wrepack_hit_60:
   %t$62 = call i64 @sprout_field(i64 %t$54, i64 0)
-  %t$63$r0 = insertvalue { i64, i64 } undef, i64 %t$55, 0
-  %t$63$r1 = insertvalue { i64, i64 } %t$63$r0, i64 %t$62, 1
-  ret { i64, i64 } %t$63$r1
+  %t$63$lo = zext i64 %t$55 to i128
+  %t$63$hw = zext i64 %t$62 to i128
+  %t$63$hi = shl i128 %t$63$hw, 64
+  %t$63$r = or i128 %t$63$hi, %t$63$lo
+  ret i128 %t$63$r
 wrepack_next_60:
   call void @sprout_abort_match()
   unreachable
@@ -74724,12 +75514,14 @@ else_48:
   %t$65$s1 = getelementptr i64, ptr %t$65$ptr, i64 1
   store i64 %p$i, ptr %t$65$s1
   %t$121 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$66$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$66$r1 = insertvalue { i64, i64 } %t$66$r0, i64 %t$65, 1
-  ret { i64, i64 } %t$66$r1
+  %t$66$lo = zext i64 7 to i128
+  %t$66$hw = zext i64 %t$65 to i128
+  %t$66$hi = shl i128 %t$66$hw, 64
+  %t$66$r = or i128 %t$66$hi, %t$66$lo
+  ret i128 %t$66$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_class_method_sig_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1092, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -74739,9 +75531,10 @@ entry:
   %t$94 = alloca i64
   store i64 %t$1, ptr %t$94
   %t$95 = call i64 @sprout_gc_push_i64_root(ptr %t$94)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$96 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -74772,9 +75565,10 @@ do_cont_4:
   %t$105 = alloca i64
   store i64 %t$10, ptr %t$105
   %t$106 = call i64 @sprout_gc_push_i64_root(ptr %t$105)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$107 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -74811,9 +75605,10 @@ do_cont_13:
   %t$118 = alloca i64
   store i64 %t$20, ptr %t$118
   %t$119 = call i64 @sprout_gc_push_i64_root(ptr %t$118)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$120 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -74846,9 +75641,10 @@ do_cont_23:
   %t$131 = alloca i64
   store i64 %t$28, ptr %t$131
   %t$132 = call i64 @sprout_gc_push_i64_root(ptr %t$131)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$133 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -74888,9 +75684,10 @@ do_cont_31:
   %t$146 = alloca i64
   store i64 %t$38, ptr %t$146
   %t$147 = call i64 @sprout_gc_push_i64_root(ptr %t$146)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$148 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -74927,9 +75724,10 @@ do_cont_41:
   %t$161 = alloca i64
   store i64 %t$47, ptr %t$161
   %t$162 = call i64 @sprout_gc_push_i64_root(ptr %t$161)
-  %t$48$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$47, i64 %p$tokens, i64 %t$45)
-  %t$48 = extractvalue { i64, i64 } %t$48$st, 0
-  %t$49 = extractvalue { i64, i64 } %t$48$st, 1
+  %t$48$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$47, i64 %p$tokens, i64 %t$45)
+  %t$48 = trunc i128 %t$48$st to i64
+  %t$48$hi = lshr i128 %t$48$st, 64
+  %t$49 = trunc i128 %t$48$hi to i64
   %t$163 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$50 = add i64 0, 8
   %t$51 = icmp eq i64 %t$48, %t$50
@@ -74961,9 +75759,10 @@ do_cont_50:
   %t$174 = alloca i64
   store i64 %t$54, ptr %t$174
   %t$175 = call i64 @sprout_gc_push_i64_root(ptr %t$174)
-  %t$55$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$54)
-  %t$55 = extractvalue { i64, i64 } %t$55$st, 0
-  %t$56 = extractvalue { i64, i64 } %t$55$st, 1
+  %t$55$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$54)
+  %t$55 = trunc i128 %t$55$st to i64
+  %t$55$hi = lshr i128 %t$55$st, 64
+  %t$56 = trunc i128 %t$55$hi to i64
   %t$176 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = add i64 0, 8
   %t$58 = icmp eq i64 %t$55, %t$57
@@ -75006,9 +75805,10 @@ do_cont_57:
   %t$191 = alloca i64
   store i64 %t$64, ptr %t$191
   %t$192 = call i64 @sprout_gc_push_i64_root(ptr %t$191)
-  %t$65$st = call { i64, i64 } @stdlib.compiler.parser.make_class_method_sig_worker(i64 %t$63, i64 %t$64, i64 %t$61, i64 %p$tokens, i64 %t$62)
-  %t$65 = extractvalue { i64, i64 } %t$65$st, 0
-  %t$66 = extractvalue { i64, i64 } %t$65$st, 1
+  %t$65$st = call i128 @stdlib.compiler.parser.make_class_method_sig_worker(i64 %t$63, i64 %t$64, i64 %t$61, i64 %p$tokens, i64 %t$62)
+  %t$65 = trunc i128 %t$65$st to i64
+  %t$65$hi = lshr i128 %t$65$st, 64
+  %t$66 = trunc i128 %t$65$hi to i64
   %t$193 = call i64 @sprout_gc_pop_roots(i64 6)
   %t$67 = add i64 0, 8
   %t$68 = icmp eq i64 %t$65, %t$67
@@ -75081,31 +75881,36 @@ do_done_4:
   br i1 %t$85, label %wrepack_hit_84, label %wrepack_next_84
 wrepack_hit_84:
   %t$86 = call i64 @sprout_field(i64 %t$82, i64 0)
-  %t$87$r0 = insertvalue { i64, i64 } undef, i64 %t$83, 0
-  %t$87$r1 = insertvalue { i64, i64 } %t$87$r0, i64 %t$86, 1
-  ret { i64, i64 } %t$87$r1
+  %t$87$lo = zext i64 %t$83 to i128
+  %t$87$hw = zext i64 %t$86 to i128
+  %t$87$hi = shl i128 %t$87$hw, 64
+  %t$87$r = or i128 %t$87$hi, %t$87$lo
+  ret i128 %t$87$r
 wrepack_next_84:
   %t$88 = add i64 0, 8
   %t$89 = icmp eq i64 %t$83, %t$88
   br i1 %t$89, label %wrepack_hit_88, label %wrepack_next_88
 wrepack_hit_88:
   %t$90 = call i64 @sprout_field(i64 %t$82, i64 0)
-  %t$91$r0 = insertvalue { i64, i64 } undef, i64 %t$83, 0
-  %t$91$r1 = insertvalue { i64, i64 } %t$91$r0, i64 %t$90, 1
-  ret { i64, i64 } %t$91$r1
+  %t$91$lo = zext i64 %t$83 to i128
+  %t$91$hw = zext i64 %t$90 to i128
+  %t$91$hi = shl i128 %t$91$hw, 64
+  %t$91$r = or i128 %t$91$hi, %t$91$lo
+  ret i128 %t$91$r
 wrepack_next_88:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -75147,31 +75952,36 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_unary_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_unary_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -75213,31 +76023,36 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_comprehension_gen_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_comprehension_gen_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$50 = alloca i64
   store i64 %p$tokens, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -75273,9 +76088,10 @@ do_cont_2:
   %t$62 = alloca i64
   store i64 %t$9, ptr %t$62
   %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$64 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -75304,9 +76120,10 @@ do_cont_12:
   %t$73 = alloca i64
   store i64 %t$16, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$75 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -75345,9 +76162,10 @@ do_cont_19:
   %t$88 = alloca i64
   store i64 %t$25, ptr %t$88
   %t$89 = call i64 @sprout_gc_push_i64_root(ptr %t$88)
-  %t$26$st = call { i64, i64 } @stdlib.compiler.parser.collect_comprehension_guards_worker(i64 %p$tokens, i64 %t$24, i64 %t$25)
-  %t$26 = extractvalue { i64, i64 } %t$26$st, 0
-  %t$27 = extractvalue { i64, i64 } %t$26$st, 1
+  %t$26$st = call i128 @stdlib.compiler.parser.collect_comprehension_guards_worker(i64 %p$tokens, i64 %t$24, i64 %t$25)
+  %t$26 = trunc i128 %t$26$st to i64
+  %t$26$hi = lshr i128 %t$26$st, 64
+  %t$27 = trunc i128 %t$26$hi to i64
   %t$90 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$28 = add i64 0, 8
   %t$29 = icmp eq i64 %t$26, %t$28
@@ -75426,24 +76244,28 @@ do_done_2:
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$40, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$41 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   %t$46 = add i64 0, 8
   %t$47 = icmp eq i64 %t$41, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
   %t$48 = call i64 @sprout_field(i64 %t$40, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$41 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_decl_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_decl_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$11 = alloca i64
   store i64 %p$tokens, ptr %t$11
@@ -75457,24 +76279,28 @@ entry:
   br i1 %t$4, label %wrepack_hit_3, label %wrepack_next_3
 wrepack_hit_3:
   %t$5 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$6$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$6$r1 = insertvalue { i64, i64 } %t$6$r0, i64 %t$5, 1
-  ret { i64, i64 } %t$6$r1
+  %t$6$lo = zext i64 %t$2 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
 wrepack_next_3:
   %t$7 = add i64 0, 8
   %t$8 = icmp eq i64 %t$2, %t$7
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$1, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$2, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$2 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_deriving_clause_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.1098, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -75534,9 +76360,10 @@ body_1_4:
   %t$86 = alloca i64
   store i64 %t$16, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$16, i64 %p$tokens, i64 %t$14)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$16, i64 %p$tokens, i64 %t$14)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -75566,9 +76393,10 @@ do_cont_19:
   %t$97 = alloca i64
   store i64 %t$24, ptr %t$97
   %t$98 = call i64 @sprout_gc_push_i64_root(ptr %t$97)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.collect_deriving_names_worker(i64 %p$tokens, i64 %t$23, i64 %t$24)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.collect_deriving_names_worker(i64 %p$tokens, i64 %t$23, i64 %t$24)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$99 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -75605,9 +76433,10 @@ do_cont_27:
   %t$110 = alloca i64
   store i64 %t$34, ptr %t$110
   %t$111 = call i64 @sprout_gc_push_i64_root(ptr %t$110)
-  %t$35$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$34, i64 %p$tokens, i64 %t$32)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$34, i64 %p$tokens, i64 %t$32)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   %t$112 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$35, %t$37
@@ -75730,24 +76559,28 @@ join_4:
   br i1 %t$63, label %wrepack_hit_62, label %wrepack_next_62
 wrepack_hit_62:
   %t$64 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$65$r0 = insertvalue { i64, i64 } undef, i64 %t$61, 0
-  %t$65$r1 = insertvalue { i64, i64 } %t$65$r0, i64 %t$64, 1
-  ret { i64, i64 } %t$65$r1
+  %t$65$lo = zext i64 %t$61 to i128
+  %t$65$hw = zext i64 %t$64 to i128
+  %t$65$hi = shl i128 %t$65$hw, 64
+  %t$65$r = or i128 %t$65$hi, %t$65$lo
+  ret i128 %t$65$r
 wrepack_next_62:
   %t$66 = add i64 0, 8
   %t$67 = icmp eq i64 %t$61, %t$66
   br i1 %t$67, label %wrepack_hit_66, label %wrepack_next_66
 wrepack_hit_66:
   %t$68 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$69$r0 = insertvalue { i64, i64 } undef, i64 %t$61, 0
-  %t$69$r1 = insertvalue { i64, i64 } %t$69$r0, i64 %t$68, 1
-  ret { i64, i64 } %t$69$r1
+  %t$69$lo = zext i64 %t$61 to i128
+  %t$69$hw = zext i64 %t$68 to i128
+  %t$69$hi = shl i128 %t$69$hw, 64
+  %t$69$r = or i128 %t$69$hi, %t$69$lo
+  ret i128 %t$69$r
 wrepack_next_66:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_do_step_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_do_step_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$141 = alloca i64
   store i64 %p$tokens, ptr %t$141
@@ -75771,18 +76604,22 @@ then_4:
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$6, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$6 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$6, %t$11
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$6, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$6 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   call void @sprout_abort_match()
   unreachable
@@ -75799,9 +76636,10 @@ then_17:
   %t$150 = alloca i64
   store i64 %p$tokens, ptr %t$150
   %t$151 = call i64 @sprout_gc_push_i64_root(ptr %t$150)
-  %t$18$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$18 = extractvalue { i64, i64 } %t$18$st, 0
-  %t$19 = extractvalue { i64, i64 } %t$18$st, 1
+  %t$18$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$18 = trunc i128 %t$18$st to i64
+  %t$18$hi = lshr i128 %t$18$st, 64
+  %t$19 = trunc i128 %t$18$hi to i64
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$18, %t$20
   %t$152 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -75837,9 +76675,10 @@ do_cont_20:
   %t$162 = alloca i64
   store i64 %t$27, ptr %t$162
   %t$163 = call i64 @sprout_gc_push_i64_root(ptr %t$162)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$27, i64 %p$tokens, i64 %t$25)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$27, i64 %p$tokens, i64 %t$25)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$164 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
@@ -75868,9 +76707,10 @@ do_cont_30:
   %t$173 = alloca i64
   store i64 %t$34, ptr %t$173
   %t$174 = call i64 @sprout_gc_push_i64_root(ptr %t$173)
-  %t$35$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$34)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$34)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   %t$175 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$35, %t$37
@@ -75930,9 +76770,10 @@ then_47:
   %t$197 = alloca i64
   store i64 %t$50, ptr %t$197
   %t$198 = call i64 @sprout_gc_push_i64_root(ptr %t$197)
-  %t$51$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$50, i64 %p$tokens, i64 %t$42)
-  %t$51 = extractvalue { i64, i64 } %t$51$st, 0
-  %t$52 = extractvalue { i64, i64 } %t$51$st, 1
+  %t$51$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$50, i64 %p$tokens, i64 %t$42)
+  %t$51 = trunc i128 %t$51$st to i64
+  %t$51$hi = lshr i128 %t$51$st, 64
+  %t$52 = trunc i128 %t$51$hi to i64
   %t$199 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$53 = add i64 0, 8
   %t$54 = icmp eq i64 %t$51, %t$53
@@ -75964,9 +76805,10 @@ do_cont_53:
   %t$210 = alloca i64
   store i64 %t$57, ptr %t$210
   %t$211 = call i64 @sprout_gc_push_i64_root(ptr %t$210)
-  %t$58$st = call { i64, i64 } @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$57)
-  %t$58 = extractvalue { i64, i64 } %t$58$st, 0
-  %t$59 = extractvalue { i64, i64 } %t$58$st, 1
+  %t$58$st = call i128 @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$57)
+  %t$58 = trunc i128 %t$58$st to i64
+  %t$58$hi = lshr i128 %t$58$st, 64
+  %t$59 = trunc i128 %t$58$hi to i64
   %t$212 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$60 = add i64 0, 8
   %t$61 = icmp eq i64 %t$58, %t$60
@@ -76238,18 +77080,22 @@ do_done_20:
   br i1 %t$104, label %wrepack_hit_103, label %wrepack_next_103
 wrepack_hit_103:
   %t$105 = call i64 @sprout_field(i64 %t$101, i64 0)
-  %t$106$r0 = insertvalue { i64, i64 } undef, i64 %t$102, 0
-  %t$106$r1 = insertvalue { i64, i64 } %t$106$r0, i64 %t$105, 1
-  ret { i64, i64 } %t$106$r1
+  %t$106$lo = zext i64 %t$102 to i128
+  %t$106$hw = zext i64 %t$105 to i128
+  %t$106$hi = shl i128 %t$106$hw, 64
+  %t$106$r = or i128 %t$106$hi, %t$106$lo
+  ret i128 %t$106$r
 wrepack_next_103:
   %t$107 = add i64 0, 8
   %t$108 = icmp eq i64 %t$102, %t$107
   br i1 %t$108, label %wrepack_hit_107, label %wrepack_next_107
 wrepack_hit_107:
   %t$109 = call i64 @sprout_field(i64 %t$101, i64 0)
-  %t$110$r0 = insertvalue { i64, i64 } undef, i64 %t$102, 0
-  %t$110$r1 = insertvalue { i64, i64 } %t$110$r0, i64 %t$109, 1
-  ret { i64, i64 } %t$110$r1
+  %t$110$lo = zext i64 %t$102 to i128
+  %t$110$hw = zext i64 %t$109 to i128
+  %t$110$hi = shl i128 %t$110$hw, 64
+  %t$110$r = or i128 %t$110$hi, %t$110$lo
+  ret i128 %t$110$r
 wrepack_next_107:
   call void @sprout_abort_match()
   unreachable
@@ -76257,9 +77103,10 @@ else_17:
   %t$297 = alloca i64
   store i64 %p$tokens, ptr %t$297
   %t$298 = call i64 @sprout_gc_push_i64_root(ptr %t$297)
-  %t$111$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %p$i)
-  %t$111 = extractvalue { i64, i64 } %t$111$st, 0
-  %t$112 = extractvalue { i64, i64 } %t$111$st, 1
+  %t$111$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %p$i)
+  %t$111 = trunc i128 %t$111$st to i64
+  %t$111$hi = lshr i128 %t$111$st, 64
+  %t$112 = trunc i128 %t$111$hi to i64
   %t$113 = add i64 0, 8
   %t$114 = icmp eq i64 %t$111, %t$113
   %t$299 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -76370,24 +77217,28 @@ do_done_113:
   br i1 %t$134, label %wrepack_hit_133, label %wrepack_next_133
 wrepack_hit_133:
   %t$135 = call i64 @sprout_field(i64 %t$131, i64 0)
-  %t$136$r0 = insertvalue { i64, i64 } undef, i64 %t$132, 0
-  %t$136$r1 = insertvalue { i64, i64 } %t$136$r0, i64 %t$135, 1
-  ret { i64, i64 } %t$136$r1
+  %t$136$lo = zext i64 %t$132 to i128
+  %t$136$hw = zext i64 %t$135 to i128
+  %t$136$hi = shl i128 %t$136$hw, 64
+  %t$136$r = or i128 %t$136$hi, %t$136$lo
+  ret i128 %t$136$r
 wrepack_next_133:
   %t$137 = add i64 0, 8
   %t$138 = icmp eq i64 %t$132, %t$137
   br i1 %t$138, label %wrepack_hit_137, label %wrepack_next_137
 wrepack_hit_137:
   %t$139 = call i64 @sprout_field(i64 %t$131, i64 0)
-  %t$140$r0 = insertvalue { i64, i64 } undef, i64 %t$132, 0
-  %t$140$r1 = insertvalue { i64, i64 } %t$140$r0, i64 %t$139, 1
-  ret { i64, i64 } %t$140$r1
+  %t$140$lo = zext i64 %t$132 to i128
+  %t$140$hw = zext i64 %t$139 to i128
+  %t$140$hi = shl i128 %t$140$hw, 64
+  %t$140$r = or i128 %t$140$hi, %t$140$lo
+  ret i128 %t$140$r
 wrepack_next_137:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_effect_annotation_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1106, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -76669,31 +77520,36 @@ join_4:
   br i1 %t$69, label %wrepack_hit_68, label %wrepack_next_68
 wrepack_hit_68:
   %t$70 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$71$r0 = insertvalue { i64, i64 } undef, i64 %t$67, 0
-  %t$71$r1 = insertvalue { i64, i64 } %t$71$r0, i64 %t$70, 1
-  ret { i64, i64 } %t$71$r1
+  %t$71$lo = zext i64 %t$67 to i128
+  %t$71$hw = zext i64 %t$70 to i128
+  %t$71$hi = shl i128 %t$71$hw, 64
+  %t$71$r = or i128 %t$71$hi, %t$71$lo
+  ret i128 %t$71$r
 wrepack_next_68:
   %t$72 = add i64 0, 8
   %t$73 = icmp eq i64 %t$67, %t$72
   br i1 %t$73, label %wrepack_hit_72, label %wrepack_next_72
 wrepack_hit_72:
   %t$74 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$75$r0 = insertvalue { i64, i64 } undef, i64 %t$67, 0
-  %t$75$r1 = insertvalue { i64, i64 } %t$75$r0, i64 %t$74, 1
-  ret { i64, i64 } %t$75$r1
+  %t$75$lo = zext i64 %t$67 to i128
+  %t$75$hw = zext i64 %t$74 to i128
+  %t$75$hi = shl i128 %t$75$hw, 64
+  %t$75$r = or i128 %t$75$hi, %t$75$lo
+  ret i128 %t$75$r
 wrepack_next_72:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -76735,24 +77591,28 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_exists_prefix_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_exists_prefix_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.1110, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -76825,24 +77685,28 @@ join_4:
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$17 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$17, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$17 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$70 = alloca i64
   store i64 %p$tokens, ptr %t$70
@@ -76866,18 +77730,22 @@ then_4:
   br i1 %t$8, label %wrepack_hit_7, label %wrepack_next_7
 wrepack_hit_7:
   %t$9 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$6, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$6 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 wrepack_next_7:
   %t$11 = add i64 0, 8
   %t$12 = icmp eq i64 %t$6, %t$11
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$6, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$6 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   call void @sprout_abort_match()
   unreachable
@@ -76904,18 +77772,22 @@ then_19:
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$20, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$21 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 8
   %t$27 = icmp eq i64 %t$21, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
   %t$28 = call i64 @sprout_field(i64 %t$20, i64 0)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$21, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$21 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   call void @sprout_abort_match()
   unreachable
@@ -76942,18 +77814,22 @@ then_34:
   br i1 %t$38, label %wrepack_hit_37, label %wrepack_next_37
 wrepack_hit_37:
   %t$39 = call i64 @sprout_field(i64 %t$35, i64 0)
-  %t$40$r0 = insertvalue { i64, i64 } undef, i64 %t$36, 0
-  %t$40$r1 = insertvalue { i64, i64 } %t$40$r0, i64 %t$39, 1
-  ret { i64, i64 } %t$40$r1
+  %t$40$lo = zext i64 %t$36 to i128
+  %t$40$hw = zext i64 %t$39 to i128
+  %t$40$hi = shl i128 %t$40$hw, 64
+  %t$40$r = or i128 %t$40$hi, %t$40$lo
+  ret i128 %t$40$r
 wrepack_next_37:
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$36, %t$41
   br i1 %t$42, label %wrepack_hit_41, label %wrepack_next_41
 wrepack_hit_41:
   %t$43 = call i64 @sprout_field(i64 %t$35, i64 0)
-  %t$44$r0 = insertvalue { i64, i64 } undef, i64 %t$36, 0
-  %t$44$r1 = insertvalue { i64, i64 } %t$44$r0, i64 %t$43, 1
-  ret { i64, i64 } %t$44$r1
+  %t$44$lo = zext i64 %t$36 to i128
+  %t$44$hw = zext i64 %t$43 to i128
+  %t$44$hi = shl i128 %t$44$hw, 64
+  %t$44$r = or i128 %t$44$hi, %t$44$lo
+  ret i128 %t$44$r
 wrepack_next_41:
   call void @sprout_abort_match()
   unreachable
@@ -76980,18 +77856,22 @@ then_49:
   br i1 %t$53, label %wrepack_hit_52, label %wrepack_next_52
 wrepack_hit_52:
   %t$54 = call i64 @sprout_field(i64 %t$50, i64 0)
-  %t$55$r0 = insertvalue { i64, i64 } undef, i64 %t$51, 0
-  %t$55$r1 = insertvalue { i64, i64 } %t$55$r0, i64 %t$54, 1
-  ret { i64, i64 } %t$55$r1
+  %t$55$lo = zext i64 %t$51 to i128
+  %t$55$hw = zext i64 %t$54 to i128
+  %t$55$hi = shl i128 %t$55$hw, 64
+  %t$55$r = or i128 %t$55$hi, %t$55$lo
+  ret i128 %t$55$r
 wrepack_next_52:
   %t$56 = add i64 0, 8
   %t$57 = icmp eq i64 %t$51, %t$56
   br i1 %t$57, label %wrepack_hit_56, label %wrepack_next_56
 wrepack_hit_56:
   %t$58 = call i64 @sprout_field(i64 %t$50, i64 0)
-  %t$59$r0 = insertvalue { i64, i64 } undef, i64 %t$51, 0
-  %t$59$r1 = insertvalue { i64, i64 } %t$59$r0, i64 %t$58, 1
-  ret { i64, i64 } %t$59$r1
+  %t$59$lo = zext i64 %t$51 to i128
+  %t$59$hw = zext i64 %t$58 to i128
+  %t$59$hi = shl i128 %t$59$hw, 64
+  %t$59$r = or i128 %t$59$hi, %t$59$lo
+  ret i128 %t$59$r
 wrepack_next_56:
   call void @sprout_abort_match()
   unreachable
@@ -77007,31 +77887,36 @@ else_49:
   br i1 %t$63, label %wrepack_hit_62, label %wrepack_next_62
 wrepack_hit_62:
   %t$64 = call i64 @sprout_field(i64 %t$60, i64 0)
-  %t$65$r0 = insertvalue { i64, i64 } undef, i64 %t$61, 0
-  %t$65$r1 = insertvalue { i64, i64 } %t$65$r0, i64 %t$64, 1
-  ret { i64, i64 } %t$65$r1
+  %t$65$lo = zext i64 %t$61 to i128
+  %t$65$hw = zext i64 %t$64 to i128
+  %t$65$hi = shl i128 %t$65$hw, 64
+  %t$65$r = or i128 %t$65$hi, %t$65$lo
+  ret i128 %t$65$r
 wrepack_next_62:
   %t$66 = add i64 0, 8
   %t$67 = icmp eq i64 %t$61, %t$66
   br i1 %t$67, label %wrepack_hit_66, label %wrepack_next_66
 wrepack_hit_66:
   %t$68 = call i64 @sprout_field(i64 %t$60, i64 0)
-  %t$69$r0 = insertvalue { i64, i64 } undef, i64 %t$61, 0
-  %t$69$r1 = insertvalue { i64, i64 } %t$69$r0, i64 %t$68, 1
-  ret { i64, i64 } %t$69$r1
+  %t$69$lo = zext i64 %t$61 to i128
+  %t$69$hw = zext i64 %t$68 to i128
+  %t$69$hi = shl i128 %t$69$hw, 64
+  %t$69$r = or i128 %t$69$hi, %t$69$lo
+  ret i128 %t$69$r
 wrepack_next_66:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_composition_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -77073,24 +77958,28 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_instance_body_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_instance_body_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$67 = alloca i64
   store i64 %p$tokens, ptr %t$67
@@ -77111,9 +78000,10 @@ then_4:
   %t$72 = alloca i64
   store i64 %t$6, ptr %t$72
   %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
-  %t$7$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$6, i64 %p$tokens, i64 %p$i)
-  %t$7 = extractvalue { i64, i64 } %t$7$st, 0
-  %t$8 = extractvalue { i64, i64 } %t$7$st, 1
+  %t$7$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$6, i64 %p$tokens, i64 %p$i)
+  %t$7 = trunc i128 %t$7$st to i64
+  %t$7$hi = lshr i128 %t$7$st, 64
+  %t$8 = trunc i128 %t$7$hi to i64
   %t$74 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9 = add i64 0, 8
   %t$10 = icmp eq i64 %t$7, %t$9
@@ -77143,9 +78033,10 @@ do_cont_9:
   %t$83 = alloca i64
   store i64 %t$14, ptr %t$83
   %t$84 = call i64 @sprout_gc_push_i64_root(ptr %t$83)
-  %t$15$st = call { i64, i64 } @stdlib.compiler.parser.collect_instance_methods_worker(i64 %p$tokens, i64 %t$13, i64 %t$14)
-  %t$15 = extractvalue { i64, i64 } %t$15$st, 0
-  %t$16 = extractvalue { i64, i64 } %t$15$st, 1
+  %t$15$st = call i128 @stdlib.compiler.parser.collect_instance_methods_worker(i64 %p$tokens, i64 %t$13, i64 %t$14)
+  %t$15 = trunc i128 %t$15$st to i64
+  %t$15$hi = lshr i128 %t$15$st, 64
+  %t$16 = trunc i128 %t$15$hi to i64
   %t$85 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
@@ -77182,9 +78073,10 @@ do_cont_17:
   %t$96 = alloca i64
   store i64 %t$24, ptr %t$96
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$24, i64 %p$tokens, i64 %t$22)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$24, i64 %p$tokens, i64 %t$22)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$98 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -77240,18 +78132,22 @@ do_done_9:
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
   %t$40 = call i64 @sprout_field(i64 %t$36, i64 0)
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$37, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 %t$40, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$37 to i128
+  %t$41$hw = zext i64 %t$40 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$37, %t$42
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$36, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$37, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$37 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   call void @sprout_abort_match()
   unreachable
@@ -77291,18 +78187,22 @@ ovfok_50:
   br i1 %t$57, label %wrepack_hit_56, label %wrepack_next_56
 wrepack_hit_56:
   %t$58 = call i64 @sprout_field(i64 %t$54, i64 0)
-  %t$59$r0 = insertvalue { i64, i64 } undef, i64 %t$55, 0
-  %t$59$r1 = insertvalue { i64, i64 } %t$59$r0, i64 %t$58, 1
-  ret { i64, i64 } %t$59$r1
+  %t$59$lo = zext i64 %t$55 to i128
+  %t$59$hw = zext i64 %t$58 to i128
+  %t$59$hi = shl i128 %t$59$hw, 64
+  %t$59$r = or i128 %t$59$hi, %t$59$lo
+  ret i128 %t$59$r
 wrepack_next_56:
   %t$60 = add i64 0, 8
   %t$61 = icmp eq i64 %t$55, %t$60
   br i1 %t$61, label %wrepack_hit_60, label %wrepack_next_60
 wrepack_hit_60:
   %t$62 = call i64 @sprout_field(i64 %t$54, i64 0)
-  %t$63$r0 = insertvalue { i64, i64 } undef, i64 %t$55, 0
-  %t$63$r1 = insertvalue { i64, i64 } %t$63$r0, i64 %t$62, 1
-  ret { i64, i64 } %t$63$r1
+  %t$63$lo = zext i64 %t$55 to i128
+  %t$63$hw = zext i64 %t$62 to i128
+  %t$63$hi = shl i128 %t$63$hw, 64
+  %t$63$r = or i128 %t$63$hi, %t$63$lo
+  ret i128 %t$63$r
 wrepack_next_60:
   call void @sprout_abort_match()
   unreachable
@@ -77318,12 +78218,14 @@ else_48:
   %t$65$s1 = getelementptr i64, ptr %t$65$ptr, i64 1
   store i64 %p$i, ptr %t$65$s1
   %t$121 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$66$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$66$r1 = insertvalue { i64, i64 } %t$66$r0, i64 %t$65, 1
-  ret { i64, i64 } %t$66$r1
+  %t$66$lo = zext i64 7 to i128
+  %t$66$hw = zext i64 %t$65 to i128
+  %t$66$hi = shl i128 %t$66$hw, 64
+  %t$66$r = or i128 %t$66$hi, %t$66$lo
+  ret i128 %t$66$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_instance_method_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1119, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -77333,9 +78235,10 @@ entry:
   %t$114 = alloca i64
   store i64 %t$1, ptr %t$114
   %t$115 = call i64 @sprout_gc_push_i64_root(ptr %t$114)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$116 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -77366,9 +78269,10 @@ do_cont_4:
   %t$125 = alloca i64
   store i64 %t$10, ptr %t$125
   %t$126 = call i64 @sprout_gc_push_i64_root(ptr %t$125)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$10, i64 %p$tokens, i64 %t$8)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$127 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -77405,9 +78309,10 @@ do_cont_13:
   %t$138 = alloca i64
   store i64 %t$20, ptr %t$138
   %t$139 = call i64 @sprout_gc_push_i64_root(ptr %t$138)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$140 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -77440,9 +78345,10 @@ do_cont_23:
   %t$151 = alloca i64
   store i64 %t$28, ptr %t$151
   %t$152 = call i64 @sprout_gc_push_i64_root(ptr %t$151)
-  %t$29$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
-  %t$29 = extractvalue { i64, i64 } %t$29$st, 0
-  %t$30 = extractvalue { i64, i64 } %t$29$st, 1
+  %t$29$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$27, i64 %t$28)
+  %t$29 = trunc i128 %t$29$st to i64
+  %t$29$hi = lshr i128 %t$29$st, 64
+  %t$30 = trunc i128 %t$29$hi to i64
   %t$153 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -77482,9 +78388,10 @@ do_cont_31:
   %t$166 = alloca i64
   store i64 %t$38, ptr %t$166
   %t$167 = call i64 @sprout_gc_push_i64_root(ptr %t$166)
-  %t$39$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
-  %t$39 = extractvalue { i64, i64 } %t$39$st, 0
-  %t$40 = extractvalue { i64, i64 } %t$39$st, 1
+  %t$39$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$38, i64 %p$tokens, i64 %t$36)
+  %t$39 = trunc i128 %t$39$st to i64
+  %t$39$hi = lshr i128 %t$39$st, 64
+  %t$40 = trunc i128 %t$39$hi to i64
   %t$168 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -77516,9 +78423,10 @@ do_cont_41:
   %t$179 = alloca i64
   store i64 %t$45, ptr %t$179
   %t$180 = call i64 @sprout_gc_push_i64_root(ptr %t$179)
-  %t$46$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$45)
-  %t$46 = extractvalue { i64, i64 } %t$46$st, 0
-  %t$47 = extractvalue { i64, i64 } %t$46$st, 1
+  %t$46$st = call i128 @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %t$45)
+  %t$46 = trunc i128 %t$46$st to i64
+  %t$46$hi = lshr i128 %t$46$st, 64
+  %t$47 = trunc i128 %t$46$hi to i64
   %t$181 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$46, %t$48
@@ -77562,9 +78470,10 @@ do_cont_48:
   %t$196 = alloca i64
   store i64 %t$54, ptr %t$196
   %t$197 = call i64 @sprout_gc_push_i64_root(ptr %t$196)
-  %t$55$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$54)
-  %t$55 = extractvalue { i64, i64 } %t$55$st, 0
-  %t$56 = extractvalue { i64, i64 } %t$55$st, 1
+  %t$55$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$54)
+  %t$55 = trunc i128 %t$55$st to i64
+  %t$55$hi = lshr i128 %t$55$st, 64
+  %t$56 = trunc i128 %t$55$hi to i64
   %t$198 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$57 = add i64 0, 8
   %t$58 = icmp eq i64 %t$55, %t$57
@@ -77613,9 +78522,10 @@ do_cont_57:
   %t$217 = alloca i64
   store i64 %t$64, ptr %t$217
   %t$218 = call i64 @sprout_gc_push_i64_root(ptr %t$217)
-  %t$65$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$64, i64 %p$tokens, i64 %t$62)
-  %t$65 = extractvalue { i64, i64 } %t$65$st, 0
-  %t$66 = extractvalue { i64, i64 } %t$65$st, 1
+  %t$65$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$64, i64 %p$tokens, i64 %t$62)
+  %t$65 = trunc i128 %t$65$st to i64
+  %t$65$hi = lshr i128 %t$65$st, 64
+  %t$66 = trunc i128 %t$65$hi to i64
   %t$219 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$67 = add i64 0, 8
   %t$68 = icmp eq i64 %t$65, %t$67
@@ -77656,9 +78566,10 @@ do_cont_67:
   %t$236 = alloca i64
   store i64 %t$71, ptr %t$236
   %t$237 = call i64 @sprout_gc_push_i64_root(ptr %t$236)
-  %t$72$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$71)
-  %t$72 = extractvalue { i64, i64 } %t$72$st, 0
-  %t$73 = extractvalue { i64, i64 } %t$72$st, 1
+  %t$72$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %t$71)
+  %t$72 = trunc i128 %t$72$st to i64
+  %t$72$hi = lshr i128 %t$72$st, 64
+  %t$73 = trunc i128 %t$72$hi to i64
   %t$238 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$74 = add i64 0, 8
   %t$75 = icmp eq i64 %t$72, %t$74
@@ -77705,9 +78616,10 @@ do_cont_74:
   %t$257 = alloca i64
   store i64 %t$79, ptr %t$257
   %t$258 = call i64 @sprout_gc_push_i64_root(ptr %t$257)
-  %t$80$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %t$79, i64 %t$78)
-  %t$80 = extractvalue { i64, i64 } %t$80$st, 0
-  %t$81 = extractvalue { i64, i64 } %t$80$st, 1
+  %t$80$st = call i128 @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %t$79, i64 %t$78)
+  %t$80 = trunc i128 %t$80$st to i64
+  %t$80$hi = lshr i128 %t$80$st, 64
+  %t$81 = trunc i128 %t$80$hi to i64
   %t$259 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$82 = add i64 0, 8
   %t$83 = icmp eq i64 %t$80, %t$82
@@ -77825,24 +78737,28 @@ do_done_4:
   br i1 %t$105, label %wrepack_hit_104, label %wrepack_next_104
 wrepack_hit_104:
   %t$106 = call i64 @sprout_field(i64 %t$102, i64 0)
-  %t$107$r0 = insertvalue { i64, i64 } undef, i64 %t$103, 0
-  %t$107$r1 = insertvalue { i64, i64 } %t$107$r0, i64 %t$106, 1
-  ret { i64, i64 } %t$107$r1
+  %t$107$lo = zext i64 %t$103 to i128
+  %t$107$hw = zext i64 %t$106 to i128
+  %t$107$hi = shl i128 %t$107$hw, 64
+  %t$107$r = or i128 %t$107$hi, %t$107$lo
+  ret i128 %t$107$r
 wrepack_next_104:
   %t$108 = add i64 0, 8
   %t$109 = icmp eq i64 %t$103, %t$108
   br i1 %t$109, label %wrepack_hit_108, label %wrepack_next_108
 wrepack_hit_108:
   %t$110 = call i64 @sprout_field(i64 %t$102, i64 0)
-  %t$111$r0 = insertvalue { i64, i64 } undef, i64 %t$103, 0
-  %t$111$r1 = insertvalue { i64, i64 } %t$111$r0, i64 %t$110, 1
-  ret { i64, i64 } %t$111$r1
+  %t$111$lo = zext i64 %t$103 to i128
+  %t$111$hw = zext i64 %t$110 to i128
+  %t$111$hi = shl i128 %t$111$hw, 64
+  %t$111$r = or i128 %t$111$hi, %t$111$lo
+  ret i128 %t$111$r
 wrepack_next_108:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_lambda_params_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_lambda_params_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1124, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -77876,9 +78792,10 @@ body_0_4:
   %t$73 = alloca i64
   store i64 %t$10, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.collect_params_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$75 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -77915,9 +78832,10 @@ do_cont_13:
   %t$86 = alloca i64
   store i64 %t$20, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$20, i64 %p$tokens, i64 %t$18)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -77982,9 +78900,10 @@ body_1_4:
   %t$105 = alloca i64
   store i64 %t$36, ptr %t$105
   %t$106 = call i64 @sprout_gc_push_i64_root(ptr %t$105)
-  %t$37$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$36, i64 %p$tokens, i64 %p$i)
-  %t$37 = extractvalue { i64, i64 } %t$37$st, 0
-  %t$38 = extractvalue { i64, i64 } %t$37$st, 1
+  %t$37$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$36, i64 %p$tokens, i64 %p$i)
+  %t$37 = trunc i128 %t$37$st to i64
+  %t$37$hi = lshr i128 %t$37$st, 64
+  %t$38 = trunc i128 %t$37$hi to i64
   %t$107 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$39 = add i64 0, 8
   %t$40 = icmp eq i64 %t$37, %t$39
@@ -78077,31 +78996,36 @@ join_4:
   br i1 %t$56, label %wrepack_hit_55, label %wrepack_next_55
 wrepack_hit_55:
   %t$57 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$58$r0 = insertvalue { i64, i64 } undef, i64 %t$54, 0
-  %t$58$r1 = insertvalue { i64, i64 } %t$58$r0, i64 %t$57, 1
-  ret { i64, i64 } %t$58$r1
+  %t$58$lo = zext i64 %t$54 to i128
+  %t$58$hw = zext i64 %t$57 to i128
+  %t$58$hi = shl i128 %t$58$hw, 64
+  %t$58$r = or i128 %t$58$hi, %t$58$lo
+  ret i128 %t$58$r
 wrepack_next_55:
   %t$59 = add i64 0, 8
   %t$60 = icmp eq i64 %t$54, %t$59
   br i1 %t$60, label %wrepack_hit_59, label %wrepack_next_59
 wrepack_hit_59:
   %t$61 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$62$r0 = insertvalue { i64, i64 } undef, i64 %t$54, 0
-  %t$62$r1 = insertvalue { i64, i64 } %t$62$r0, i64 %t$61, 1
-  ret { i64, i64 } %t$62$r1
+  %t$62$lo = zext i64 %t$54 to i128
+  %t$62$hw = zext i64 %t$61 to i128
+  %t$62$hi = shl i128 %t$62$hw, 64
+  %t$62$r = or i128 %t$62$hi, %t$62$lo
+  ret i128 %t$62$r
 wrepack_next_59:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_let_binding_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_let_binding_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$75 = alloca i64
   store i64 %p$tokens, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -78137,9 +79061,10 @@ do_cont_2:
   %t$87 = alloca i64
   store i64 %t$9, ptr %t$87
   %t$88 = call i64 @sprout_gc_push_i64_root(ptr %t$87)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$89 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -78168,9 +79093,10 @@ do_cont_12:
   %t$98 = alloca i64
   store i64 %t$16, ptr %t$98
   %t$99 = call i64 @sprout_gc_push_i64_root(ptr %t$98)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$100 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -78230,9 +79156,10 @@ then_29:
   %t$122 = alloca i64
   store i64 %t$32, ptr %t$122
   %t$123 = call i64 @sprout_gc_push_i64_root(ptr %t$122)
-  %t$33$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$32, i64 %p$tokens, i64 %t$24)
-  %t$33 = extractvalue { i64, i64 } %t$33$st, 0
-  %t$34 = extractvalue { i64, i64 } %t$33$st, 1
+  %t$33$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$32, i64 %p$tokens, i64 %t$24)
+  %t$33 = trunc i128 %t$33$st to i64
+  %t$33$hi = lshr i128 %t$33$st, 64
+  %t$34 = trunc i128 %t$33$hi to i64
   %t$124 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$35 = add i64 0, 8
   %t$36 = icmp eq i64 %t$33, %t$35
@@ -78264,9 +79191,10 @@ do_cont_35:
   %t$135 = alloca i64
   store i64 %t$39, ptr %t$135
   %t$136 = call i64 @sprout_gc_push_i64_root(ptr %t$135)
-  %t$40$st = call { i64, i64 } @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$39)
-  %t$40 = extractvalue { i64, i64 } %t$40$st, 0
-  %t$41 = extractvalue { i64, i64 } %t$40$st, 1
+  %t$40$st = call i128 @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %t$39)
+  %t$40 = trunc i128 %t$40$st to i64
+  %t$40$hi = lshr i128 %t$40$st, 64
+  %t$41 = trunc i128 %t$40$hi to i64
   %t$137 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$40, %t$42
@@ -78435,24 +79363,28 @@ do_done_2:
   br i1 %t$68, label %wrepack_hit_67, label %wrepack_next_67
 wrepack_hit_67:
   %t$69 = call i64 @sprout_field(i64 %t$65, i64 0)
-  %t$70$r0 = insertvalue { i64, i64 } undef, i64 %t$66, 0
-  %t$70$r1 = insertvalue { i64, i64 } %t$70$r0, i64 %t$69, 1
-  ret { i64, i64 } %t$70$r1
+  %t$70$lo = zext i64 %t$66 to i128
+  %t$70$hw = zext i64 %t$69 to i128
+  %t$70$hi = shl i128 %t$70$hw, 64
+  %t$70$r = or i128 %t$70$hi, %t$70$lo
+  ret i128 %t$70$r
 wrepack_next_67:
   %t$71 = add i64 0, 8
   %t$72 = icmp eq i64 %t$66, %t$71
   br i1 %t$72, label %wrepack_hit_71, label %wrepack_next_71
 wrepack_hit_71:
   %t$73 = call i64 @sprout_field(i64 %t$65, i64 0)
-  %t$74$r0 = insertvalue { i64, i64 } undef, i64 %t$66, 0
-  %t$74$r1 = insertvalue { i64, i64 } %t$74$r0, i64 %t$73, 1
-  ret { i64, i64 } %t$74$r1
+  %t$74$lo = zext i64 %t$66 to i128
+  %t$74$hw = zext i64 %t$73 to i128
+  %t$74$hi = shl i128 %t$74$hw, 64
+  %t$74$r = or i128 %t$74$hi, %t$74$lo
+  ret i128 %t$74$r
 wrepack_next_71:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %p$e) {
+define i128 @stdlib.compiler.parser.parse_let_else_clause_worker(i64 %p$tokens, i64 %p$e) {
 entry:
   %t$22 = alloca i64
   store i64 %p$tokens, ptr %t$22
@@ -78507,31 +79439,36 @@ join_2:
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
   %t$16 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$13 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$13, %t$18
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$13 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_equality_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -78573,31 +79510,36 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_logical_or_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_logical_or_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_logical_and_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -78639,24 +79581,28 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1130, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -78715,9 +79661,10 @@ body_1_4:
   %t$53 = alloca i64
   store i64 %t$15, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.collect_constraints_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.collect_constraints_worker(i64 %p$tokens, i64 %t$14, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$55 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -78779,24 +79726,28 @@ join_4:
   br i1 %t$30, label %wrepack_hit_29, label %wrepack_next_29
 wrepack_hit_29:
   %t$31 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$32$r0 = insertvalue { i64, i64 } undef, i64 %t$28, 0
-  %t$32$r1 = insertvalue { i64, i64 } %t$32$r0, i64 %t$31, 1
-  ret { i64, i64 } %t$32$r1
+  %t$32$lo = zext i64 %t$28 to i128
+  %t$32$hw = zext i64 %t$31 to i128
+  %t$32$hi = shl i128 %t$32$hw, 64
+  %t$32$r = or i128 %t$32$hi, %t$32$lo
+  ret i128 %t$32$r
 wrepack_next_29:
   %t$33 = add i64 0, 8
   %t$34 = icmp eq i64 %t$28, %t$33
   br i1 %t$34, label %wrepack_hit_33, label %wrepack_next_33
 wrepack_hit_33:
   %t$35 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$36$r0 = insertvalue { i64, i64 } undef, i64 %t$28, 0
-  %t$36$r1 = insertvalue { i64, i64 } %t$36$r0, i64 %t$35, 1
-  ret { i64, i64 } %t$36$r1
+  %t$36$lo = zext i64 %t$28 to i128
+  %t$36$hw = zext i64 %t$35 to i128
+  %t$36$hi = shl i128 %t$36$hw, 64
+  %t$36$r = or i128 %t$36$hi, %t$36$lo
+  ret i128 %t$36$r
 wrepack_next_33:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_optional_return_type_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1131, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -78857,9 +79808,10 @@ body_1_4:
   %t$51 = alloca i64
   store i64 %t$15, ptr %t$51
   %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$16$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$15)
-  %t$16 = extractvalue { i64, i64 } %t$16$st, 0
-  %t$17 = extractvalue { i64, i64 } %t$16$st, 1
+  %t$16$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$15)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
   %t$53 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$16, %t$18
@@ -78908,24 +79860,28 @@ join_4:
   br i1 %t$28, label %wrepack_hit_27, label %wrepack_next_27
 wrepack_hit_27:
   %t$29 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$30$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$30$r1 = insertvalue { i64, i64 } %t$30$r0, i64 %t$29, 1
-  ret { i64, i64 } %t$30$r1
+  %t$30$lo = zext i64 %t$26 to i128
+  %t$30$hw = zext i64 %t$29 to i128
+  %t$30$hi = shl i128 %t$30$hw, 64
+  %t$30$r = or i128 %t$30$hi, %t$30$lo
+  ret i128 %t$30$r
 wrepack_next_27:
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$26, %t$31
   br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
 wrepack_hit_31:
   %t$33 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$34$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$34$r1 = insertvalue { i64, i64 } %t$34$r0, i64 %t$33, 1
-  ret { i64, i64 } %t$34$r1
+  %t$34$lo = zext i64 %t$26 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
 wrepack_next_31:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_optional_type_anno_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_optional_type_anno_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1132, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -78980,9 +79936,10 @@ body_1_4:
   %t$50 = alloca i64
   store i64 %t$14, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$15$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$14)
-  %t$15 = extractvalue { i64, i64 } %t$15$st, 0
-  %t$16 = extractvalue { i64, i64 } %t$15$st, 1
+  %t$15$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$14)
+  %t$15 = trunc i128 %t$15$st to i64
+  %t$15$hi = lshr i128 %t$15$st, 64
+  %t$16 = trunc i128 %t$15$hi to i64
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
@@ -79047,24 +80004,28 @@ join_4:
   br i1 %t$29, label %wrepack_hit_28, label %wrepack_next_28
 wrepack_hit_28:
   %t$30 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$31$r0 = insertvalue { i64, i64 } undef, i64 %t$27, 0
-  %t$31$r1 = insertvalue { i64, i64 } %t$31$r0, i64 %t$30, 1
-  ret { i64, i64 } %t$31$r1
+  %t$31$lo = zext i64 %t$27 to i128
+  %t$31$hw = zext i64 %t$30 to i128
+  %t$31$hi = shl i128 %t$31$hw, 64
+  %t$31$r = or i128 %t$31$hi, %t$31$lo
+  ret i128 %t$31$r
 wrepack_next_28:
   %t$32 = add i64 0, 8
   %t$33 = icmp eq i64 %t$27, %t$32
   br i1 %t$33, label %wrepack_hit_32, label %wrepack_next_32
 wrepack_hit_32:
   %t$34 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$35$r0 = insertvalue { i64, i64 } undef, i64 %t$27, 0
-  %t$35$r1 = insertvalue { i64, i64 } %t$35$r0, i64 %t$34, 1
-  ret { i64, i64 } %t$35$r1
+  %t$35$lo = zext i64 %t$27 to i128
+  %t$35$hw = zext i64 %t$34 to i128
+  %t$35$hi = shl i128 %t$35$hw, 64
+  %t$35$r = or i128 %t$35$hi, %t$35$lo
+  ret i128 %t$35$r
 wrepack_next_32:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %p$i, i64 %p$body) {
+define i128 @stdlib.compiler.parser.parse_optional_where_body_worker(i64 %p$tokens, i64 %p$i, i64 %p$body) {
 entry:
   %t$0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1133, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -79124,9 +80085,10 @@ body_1_4:
   %t$61 = alloca i64
   store i64 %t$13, ptr %t$61
   %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$13)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.expected_block_open_worker(i64 %p$tokens, i64 %t$13)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -79156,9 +80118,10 @@ do_cont_16:
   %t$74 = alloca i64
   store i64 %t$20, ptr %t$74
   %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.collect_where_bindings_worker(i64 %p$tokens, i64 %t$15, i64 %t$20)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.collect_where_bindings_worker(i64 %p$tokens, i64 %t$15, i64 %t$20)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$76 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
@@ -79227,24 +80190,28 @@ join_4:
   br i1 %t$36, label %wrepack_hit_35, label %wrepack_next_35
 wrepack_hit_35:
   %t$37 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$38$r0 = insertvalue { i64, i64 } undef, i64 %t$34, 0
-  %t$38$r1 = insertvalue { i64, i64 } %t$38$r0, i64 %t$37, 1
-  ret { i64, i64 } %t$38$r1
+  %t$38$lo = zext i64 %t$34 to i128
+  %t$38$hw = zext i64 %t$37 to i128
+  %t$38$hi = shl i128 %t$38$hw, 64
+  %t$38$r = or i128 %t$38$hi, %t$38$lo
+  ret i128 %t$38$r
 wrepack_next_35:
   %t$39 = add i64 0, 8
   %t$40 = icmp eq i64 %t$34, %t$39
   br i1 %t$40, label %wrepack_hit_39, label %wrepack_next_39
 wrepack_hit_39:
   %t$41 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$42$r0 = insertvalue { i64, i64 } undef, i64 %t$34, 0
-  %t$42$r1 = insertvalue { i64, i64 } %t$42$r0, i64 %t$41, 1
-  ret { i64, i64 } %t$42$r1
+  %t$42$lo = zext i64 %t$34 to i128
+  %t$42$hw = zext i64 %t$41 to i128
+  %t$42$hi = shl i128 %t$42$hw, 64
+  %t$42$r = or i128 %t$42$hi, %t$42$lo
+  ret i128 %t$42$r
 wrepack_next_39:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_param_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_param_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.1134, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -79254,9 +80221,10 @@ entry:
   %t$24 = alloca i64
   store i64 %t$1, ptr %t$24
   %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -79300,24 +80268,28 @@ do_done_4:
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
   %t$16 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 %t$16, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$13 to i128
+  %t$17$hw = zext i64 %t$16 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   %t$18 = add i64 0, 8
   %t$19 = icmp eq i64 %t$13, %t$18
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$13, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$13 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_pattern_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.1135, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -79376,24 +80348,28 @@ join_4:
   br i1 %t$17, label %wrepack_hit_16, label %wrepack_next_16
 wrepack_hit_16:
   %t$18 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$19$r0 = insertvalue { i64, i64 } undef, i64 %t$15, 0
-  %t$19$r1 = insertvalue { i64, i64 } %t$19$r0, i64 %t$18, 1
-  ret { i64, i64 } %t$19$r1
+  %t$19$lo = zext i64 %t$15 to i128
+  %t$19$hw = zext i64 %t$18 to i128
+  %t$19$hi = shl i128 %t$19$hw, 64
+  %t$19$r = or i128 %t$19$hi, %t$19$lo
+  ret i128 %t$19$r
 wrepack_next_16:
   %t$20 = add i64 0, 8
   %t$21 = icmp eq i64 %t$15, %t$20
   br i1 %t$21, label %wrepack_hit_20, label %wrepack_next_20
 wrepack_hit_20:
   %t$22 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 %t$15, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 %t$15 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 wrepack_next_20:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_pattern_atom_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_pattern_atom_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$151 = alloca i64
   store i64 %p$tokens, ptr %t$151
@@ -79443,9 +80419,11 @@ ovfok_9:
   %t$12$s1 = getelementptr i64, ptr %t$12$ptr, i64 1
   store i64 %t$9, ptr %t$12$s1
   %t$162 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$13$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$13$r1 = insertvalue { i64, i64 } %t$13$r0, i64 %t$12, 1
-  ret { i64, i64 } %t$13$r1
+  %t$13$lo = zext i64 7 to i128
+  %t$13$hw = zext i64 %t$12 to i128
+  %t$13$hi = shl i128 %t$13$hw, 64
+  %t$13$r = or i128 %t$13$hi, %t$13$lo
+  ret i128 %t$13$r
 else_4:
   %t$163 = alloca i64
   store i64 %p$tokens, ptr %t$163
@@ -79495,9 +80473,11 @@ ovfok_23:
   %t$26$s1 = getelementptr i64, ptr %t$26$ptr, i64 1
   store i64 %t$23, ptr %t$26$s1
   %t$174 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$27$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$27$r1 = insertvalue { i64, i64 } %t$27$r0, i64 %t$26, 1
-  ret { i64, i64 } %t$27$r1
+  %t$27$lo = zext i64 7 to i128
+  %t$27$hw = zext i64 %t$26 to i128
+  %t$27$hi = shl i128 %t$27$hw, 64
+  %t$27$r = or i128 %t$27$hi, %t$27$lo
+  ret i128 %t$27$r
 else_18:
   %t$175 = alloca i64
   store i64 %p$tokens, ptr %t$175
@@ -79520,9 +80500,10 @@ then_30:
   %t$182 = alloca i64
   store i64 %t$33, ptr %t$182
   %t$183 = call i64 @sprout_gc_push_i64_root(ptr %t$182)
-  %t$34$st = call { i64, i64 } @stdlib.compiler.parser.int_literal_value_worker(i64 %t$32, i64 %t$33)
-  %t$34 = extractvalue { i64, i64 } %t$34$st, 0
-  %t$35 = extractvalue { i64, i64 } %t$34$st, 1
+  %t$34$st = call i128 @stdlib.compiler.parser.int_literal_value_worker(i64 %t$32, i64 %t$33)
+  %t$34 = trunc i128 %t$34$st to i64
+  %t$34$hi = lshr i128 %t$34$st, 64
+  %t$35 = trunc i128 %t$34$hi to i64
   %t$184 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$185 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_36
@@ -79604,18 +80585,22 @@ join_36:
   br i1 %t$53, label %wrepack_hit_52, label %wrepack_next_52
 wrepack_hit_52:
   %t$54 = call i64 @sprout_field(i64 %t$37, i64 0)
-  %t$55$r0 = insertvalue { i64, i64 } undef, i64 %t$51, 0
-  %t$55$r1 = insertvalue { i64, i64 } %t$55$r0, i64 %t$54, 1
-  ret { i64, i64 } %t$55$r1
+  %t$55$lo = zext i64 %t$51 to i128
+  %t$55$hw = zext i64 %t$54 to i128
+  %t$55$hi = shl i128 %t$55$hw, 64
+  %t$55$r = or i128 %t$55$hi, %t$55$lo
+  ret i128 %t$55$r
 wrepack_next_52:
   %t$56 = add i64 0, 8
   %t$57 = icmp eq i64 %t$51, %t$56
   br i1 %t$57, label %wrepack_hit_56, label %wrepack_next_56
 wrepack_hit_56:
   %t$58 = call i64 @sprout_field(i64 %t$37, i64 0)
-  %t$59$r0 = insertvalue { i64, i64 } undef, i64 %t$51, 0
-  %t$59$r1 = insertvalue { i64, i64 } %t$59$r0, i64 %t$58, 1
-  ret { i64, i64 } %t$59$r1
+  %t$59$lo = zext i64 %t$51 to i128
+  %t$59$hw = zext i64 %t$58 to i128
+  %t$59$hi = shl i128 %t$59$hw, 64
+  %t$59$r = or i128 %t$59$hi, %t$59$lo
+  ret i128 %t$59$r
 wrepack_next_56:
   call void @sprout_abort_match()
   unreachable
@@ -79672,9 +80657,11 @@ ovfok_69:
   %t$72$s1 = getelementptr i64, ptr %t$72$ptr, i64 1
   store i64 %t$69, ptr %t$72$s1
   %t$217 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$73$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$73$r1 = insertvalue { i64, i64 } %t$73$r0, i64 %t$72, 1
-  ret { i64, i64 } %t$73$r1
+  %t$73$lo = zext i64 7 to i128
+  %t$73$hw = zext i64 %t$72 to i128
+  %t$73$hi = shl i128 %t$73$hw, 64
+  %t$73$r = or i128 %t$73$hi, %t$73$lo
+  ret i128 %t$73$r
 else_62:
   %t$218 = alloca i64
   store i64 %p$tokens, ptr %t$218
@@ -79725,9 +80712,11 @@ ovfok_82:
   %t$85$s1 = getelementptr i64, ptr %t$85$ptr, i64 1
   store i64 %t$82, ptr %t$85$s1
   %t$230 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$86$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$86$r1 = insertvalue { i64, i64 } %t$86$r0, i64 %t$85, 1
-  ret { i64, i64 } %t$86$r1
+  %t$86$lo = zext i64 7 to i128
+  %t$86$hw = zext i64 %t$85 to i128
+  %t$86$hi = shl i128 %t$86$hw, 64
+  %t$86$r = or i128 %t$86$hi, %t$86$lo
+  ret i128 %t$86$r
 else_76:
   %t$231 = alloca i64
   store i64 %p$tokens, ptr %t$231
@@ -79758,18 +80747,22 @@ then_89:
   br i1 %t$96, label %wrepack_hit_95, label %wrepack_next_95
 wrepack_hit_95:
   %t$97 = call i64 @sprout_field(i64 %t$93, i64 0)
-  %t$98$r0 = insertvalue { i64, i64 } undef, i64 %t$94, 0
-  %t$98$r1 = insertvalue { i64, i64 } %t$98$r0, i64 %t$97, 1
-  ret { i64, i64 } %t$98$r1
+  %t$98$lo = zext i64 %t$94 to i128
+  %t$98$hw = zext i64 %t$97 to i128
+  %t$98$hi = shl i128 %t$98$hw, 64
+  %t$98$r = or i128 %t$98$hi, %t$98$lo
+  ret i128 %t$98$r
 wrepack_next_95:
   %t$99 = add i64 0, 8
   %t$100 = icmp eq i64 %t$94, %t$99
   br i1 %t$100, label %wrepack_hit_99, label %wrepack_next_99
 wrepack_hit_99:
   %t$101 = call i64 @sprout_field(i64 %t$93, i64 0)
-  %t$102$r0 = insertvalue { i64, i64 } undef, i64 %t$94, 0
-  %t$102$r1 = insertvalue { i64, i64 } %t$102$r0, i64 %t$101, 1
-  ret { i64, i64 } %t$102$r1
+  %t$102$lo = zext i64 %t$94 to i128
+  %t$102$hw = zext i64 %t$101 to i128
+  %t$102$hi = shl i128 %t$102$hw, 64
+  %t$102$r = or i128 %t$102$hi, %t$102$lo
+  ret i128 %t$102$r
 wrepack_next_99:
   call void @sprout_abort_match()
   unreachable
@@ -79811,18 +80804,22 @@ ovfok_109:
   br i1 %t$116, label %wrepack_hit_115, label %wrepack_next_115
 wrepack_hit_115:
   %t$117 = call i64 @sprout_field(i64 %t$113, i64 0)
-  %t$118$r0 = insertvalue { i64, i64 } undef, i64 %t$114, 0
-  %t$118$r1 = insertvalue { i64, i64 } %t$118$r0, i64 %t$117, 1
-  ret { i64, i64 } %t$118$r1
+  %t$118$lo = zext i64 %t$114 to i128
+  %t$118$hw = zext i64 %t$117 to i128
+  %t$118$hi = shl i128 %t$118$hw, 64
+  %t$118$r = or i128 %t$118$hi, %t$118$lo
+  ret i128 %t$118$r
 wrepack_next_115:
   %t$119 = add i64 0, 8
   %t$120 = icmp eq i64 %t$114, %t$119
   br i1 %t$120, label %wrepack_hit_119, label %wrepack_next_119
 wrepack_hit_119:
   %t$121 = call i64 @sprout_field(i64 %t$113, i64 0)
-  %t$122$r0 = insertvalue { i64, i64 } undef, i64 %t$114, 0
-  %t$122$r1 = insertvalue { i64, i64 } %t$122$r0, i64 %t$121, 1
-  ret { i64, i64 } %t$122$r1
+  %t$122$lo = zext i64 %t$114 to i128
+  %t$122$hw = zext i64 %t$121 to i128
+  %t$122$hi = shl i128 %t$122$hw, 64
+  %t$122$r = or i128 %t$122$hi, %t$122$lo
+  ret i128 %t$122$r
 wrepack_next_119:
   call void @sprout_abort_match()
   unreachable
@@ -79864,18 +80861,22 @@ ovfok_129:
   br i1 %t$136, label %wrepack_hit_135, label %wrepack_next_135
 wrepack_hit_135:
   %t$137 = call i64 @sprout_field(i64 %t$133, i64 0)
-  %t$138$r0 = insertvalue { i64, i64 } undef, i64 %t$134, 0
-  %t$138$r1 = insertvalue { i64, i64 } %t$138$r0, i64 %t$137, 1
-  ret { i64, i64 } %t$138$r1
+  %t$138$lo = zext i64 %t$134 to i128
+  %t$138$hw = zext i64 %t$137 to i128
+  %t$138$hi = shl i128 %t$138$hw, 64
+  %t$138$r = or i128 %t$138$hi, %t$138$lo
+  ret i128 %t$138$r
 wrepack_next_135:
   %t$139 = add i64 0, 8
   %t$140 = icmp eq i64 %t$134, %t$139
   br i1 %t$140, label %wrepack_hit_139, label %wrepack_next_139
 wrepack_hit_139:
   %t$141 = call i64 @sprout_field(i64 %t$133, i64 0)
-  %t$142$r0 = insertvalue { i64, i64 } undef, i64 %t$134, 0
-  %t$142$r1 = insertvalue { i64, i64 } %t$142$r0, i64 %t$141, 1
-  ret { i64, i64 } %t$142$r1
+  %t$142$lo = zext i64 %t$134 to i128
+  %t$142$hw = zext i64 %t$141 to i128
+  %t$142$hi = shl i128 %t$142$hw, 64
+  %t$142$r = or i128 %t$142$hi, %t$142$lo
+  ret i128 %t$142$r
 wrepack_next_139:
   call void @sprout_abort_match()
   unreachable
@@ -79913,12 +80914,14 @@ else_127:
   %t$149$f1 = getelementptr i64, ptr %t$149$ptr, i64 1
   store i64 %t$148, ptr %t$149$f1
   %t$271 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$150$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$150$r1 = insertvalue { i64, i64 } %t$150$r0, i64 %t$149, 1
-  ret { i64, i64 } %t$150$r1
+  %t$150$lo = zext i64 8 to i128
+  %t$150$hw = zext i64 %t$149 to i128
+  %t$150$hi = shl i128 %t$150$hw, 64
+  %t$150$r = or i128 %t$150$hi, %t$150$lo
+  ret i128 %t$150$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_postfix_worker(i64 %p$tokens, i64 %p$i, i64 %p$base, i64 %p$updates) {
+define i128 @stdlib.compiler.parser.parse_postfix_worker(i64 %p$tokens, i64 %p$i, i64 %p$base, i64 %p$updates) {
 entry:
   %t$10 = alloca i64
   store i64 %p$updates, ptr %t$10
@@ -79937,24 +80940,28 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$257 = alloca i64
   store i64 %p$tokens, ptr %t$257
@@ -79983,9 +80990,11 @@ then_4:
   %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
   store i64 %t$6, ptr %t$7$f1
   %t$265 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$8$r1 = insertvalue { i64, i64 } %t$8$r0, i64 %t$7, 1
-  ret { i64, i64 } %t$8$r1
+  %t$8$lo = zext i64 8 to i128
+  %t$8$hw = zext i64 %t$7 to i128
+  %t$8$hi = shl i128 %t$8$hw, 64
+  %t$8$r = or i128 %t$8$hi, %t$8$lo
+  ret i128 %t$8$r
 else_4:
   %t$266 = alloca i64
   store i64 %p$tokens, ptr %t$266
@@ -80035,9 +81044,11 @@ ovfok_18:
   %t$21$s1 = getelementptr i64, ptr %t$21$ptr, i64 1
   store i64 %t$18, ptr %t$21$s1
   %t$277 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$22$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$22$r1 = insertvalue { i64, i64 } %t$22$r0, i64 %t$21, 1
-  ret { i64, i64 } %t$22$r1
+  %t$22$lo = zext i64 7 to i128
+  %t$22$hw = zext i64 %t$21 to i128
+  %t$22$hi = shl i128 %t$22$hw, 64
+  %t$22$r = or i128 %t$22$hi, %t$22$lo
+  ret i128 %t$22$r
 else_13:
   %t$278 = alloca i64
   store i64 %p$tokens, ptr %t$278
@@ -80087,9 +81098,11 @@ ovfok_32:
   %t$35$s1 = getelementptr i64, ptr %t$35$ptr, i64 1
   store i64 %t$32, ptr %t$35$s1
   %t$289 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$36$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$36$r1 = insertvalue { i64, i64 } %t$36$r0, i64 %t$35, 1
-  ret { i64, i64 } %t$36$r1
+  %t$36$lo = zext i64 7 to i128
+  %t$36$hw = zext i64 %t$35 to i128
+  %t$36$hi = shl i128 %t$36$hw, 64
+  %t$36$r = or i128 %t$36$hi, %t$36$lo
+  ret i128 %t$36$r
 else_27:
   %t$290 = alloca i64
   store i64 %p$tokens, ptr %t$290
@@ -80112,9 +81125,10 @@ then_39:
   %t$297 = alloca i64
   store i64 %t$42, ptr %t$297
   %t$298 = call i64 @sprout_gc_push_i64_root(ptr %t$297)
-  %t$43$st = call { i64, i64 } @stdlib.compiler.parser.int_literal_value_worker(i64 %t$41, i64 %t$42)
-  %t$43 = extractvalue { i64, i64 } %t$43$st, 0
-  %t$44 = extractvalue { i64, i64 } %t$43$st, 1
+  %t$43$st = call i128 @stdlib.compiler.parser.int_literal_value_worker(i64 %t$41, i64 %t$42)
+  %t$43 = trunc i128 %t$43$st to i64
+  %t$43$hi = lshr i128 %t$43$st, 64
+  %t$44 = trunc i128 %t$43$hi to i64
   %t$299 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$300 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_45
@@ -80196,18 +81210,22 @@ join_45:
   br i1 %t$62, label %wrepack_hit_61, label %wrepack_next_61
 wrepack_hit_61:
   %t$63 = call i64 @sprout_field(i64 %t$46, i64 0)
-  %t$64$r0 = insertvalue { i64, i64 } undef, i64 %t$60, 0
-  %t$64$r1 = insertvalue { i64, i64 } %t$64$r0, i64 %t$63, 1
-  ret { i64, i64 } %t$64$r1
+  %t$64$lo = zext i64 %t$60 to i128
+  %t$64$hw = zext i64 %t$63 to i128
+  %t$64$hi = shl i128 %t$64$hw, 64
+  %t$64$r = or i128 %t$64$hi, %t$64$lo
+  ret i128 %t$64$r
 wrepack_next_61:
   %t$65 = add i64 0, 8
   %t$66 = icmp eq i64 %t$60, %t$65
   br i1 %t$66, label %wrepack_hit_65, label %wrepack_next_65
 wrepack_hit_65:
   %t$67 = call i64 @sprout_field(i64 %t$46, i64 0)
-  %t$68$r0 = insertvalue { i64, i64 } undef, i64 %t$60, 0
-  %t$68$r1 = insertvalue { i64, i64 } %t$68$r0, i64 %t$67, 1
-  ret { i64, i64 } %t$68$r1
+  %t$68$lo = zext i64 %t$60 to i128
+  %t$68$hw = zext i64 %t$67 to i128
+  %t$68$hi = shl i128 %t$68$hw, 64
+  %t$68$r = or i128 %t$68$hi, %t$68$lo
+  ret i128 %t$68$r
 wrepack_next_65:
   call void @sprout_abort_match()
   unreachable
@@ -80261,9 +81279,11 @@ ovfok_77:
   %t$80$s1 = getelementptr i64, ptr %t$80$ptr, i64 1
   store i64 %t$77, ptr %t$80$s1
   %t$330 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$81$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$81$r1 = insertvalue { i64, i64 } %t$81$r0, i64 %t$80, 1
-  ret { i64, i64 } %t$81$r1
+  %t$81$lo = zext i64 7 to i128
+  %t$81$hw = zext i64 %t$80 to i128
+  %t$81$hi = shl i128 %t$81$hw, 64
+  %t$81$r = or i128 %t$81$hi, %t$81$lo
+  ret i128 %t$81$r
 else_71:
   %t$331 = alloca i64
   store i64 %p$tokens, ptr %t$331
@@ -80317,9 +81337,11 @@ ovfok_91:
   %t$94$s1 = getelementptr i64, ptr %t$94$ptr, i64 1
   store i64 %t$91, ptr %t$94$s1
   %t$345 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$95$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$95$r1 = insertvalue { i64, i64 } %t$95$r0, i64 %t$94, 1
-  ret { i64, i64 } %t$95$r1
+  %t$95$lo = zext i64 7 to i128
+  %t$95$hw = zext i64 %t$94 to i128
+  %t$95$hi = shl i128 %t$95$hw, 64
+  %t$95$r = or i128 %t$95$hi, %t$95$lo
+  ret i128 %t$95$r
 else_84:
   %t$346 = alloca i64
   store i64 %p$tokens, ptr %t$346
@@ -80370,9 +81392,11 @@ ovfok_104:
   %t$107$s1 = getelementptr i64, ptr %t$107$ptr, i64 1
   store i64 %t$104, ptr %t$107$s1
   %t$358 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$108$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$108$r1 = insertvalue { i64, i64 } %t$108$r0, i64 %t$107, 1
-  ret { i64, i64 } %t$108$r1
+  %t$108$lo = zext i64 7 to i128
+  %t$108$hw = zext i64 %t$107 to i128
+  %t$108$hi = shl i128 %t$108$hw, 64
+  %t$108$r = or i128 %t$108$hi, %t$108$lo
+  ret i128 %t$108$r
 else_98:
   %t$359 = alloca i64
   store i64 %p$tokens, ptr %t$359
@@ -80394,18 +81418,22 @@ then_111:
   br i1 %t$115, label %wrepack_hit_114, label %wrepack_next_114
 wrepack_hit_114:
   %t$116 = call i64 @sprout_field(i64 %t$112, i64 0)
-  %t$117$r0 = insertvalue { i64, i64 } undef, i64 %t$113, 0
-  %t$117$r1 = insertvalue { i64, i64 } %t$117$r0, i64 %t$116, 1
-  ret { i64, i64 } %t$117$r1
+  %t$117$lo = zext i64 %t$113 to i128
+  %t$117$hw = zext i64 %t$116 to i128
+  %t$117$hi = shl i128 %t$117$hw, 64
+  %t$117$r = or i128 %t$117$hi, %t$117$lo
+  ret i128 %t$117$r
 wrepack_next_114:
   %t$118 = add i64 0, 8
   %t$119 = icmp eq i64 %t$113, %t$118
   br i1 %t$119, label %wrepack_hit_118, label %wrepack_next_118
 wrepack_hit_118:
   %t$120 = call i64 @sprout_field(i64 %t$112, i64 0)
-  %t$121$r0 = insertvalue { i64, i64 } undef, i64 %t$113, 0
-  %t$121$r1 = insertvalue { i64, i64 } %t$121$r0, i64 %t$120, 1
-  ret { i64, i64 } %t$121$r1
+  %t$121$lo = zext i64 %t$113 to i128
+  %t$121$hw = zext i64 %t$120 to i128
+  %t$121$hi = shl i128 %t$121$hw, 64
+  %t$121$r = or i128 %t$121$hi, %t$121$lo
+  ret i128 %t$121$r
 wrepack_next_118:
   call void @sprout_abort_match()
   unreachable
@@ -80432,18 +81460,22 @@ then_126:
   br i1 %t$130, label %wrepack_hit_129, label %wrepack_next_129
 wrepack_hit_129:
   %t$131 = call i64 @sprout_field(i64 %t$127, i64 0)
-  %t$132$r0 = insertvalue { i64, i64 } undef, i64 %t$128, 0
-  %t$132$r1 = insertvalue { i64, i64 } %t$132$r0, i64 %t$131, 1
-  ret { i64, i64 } %t$132$r1
+  %t$132$lo = zext i64 %t$128 to i128
+  %t$132$hw = zext i64 %t$131 to i128
+  %t$132$hi = shl i128 %t$132$hw, 64
+  %t$132$r = or i128 %t$132$hi, %t$132$lo
+  ret i128 %t$132$r
 wrepack_next_129:
   %t$133 = add i64 0, 8
   %t$134 = icmp eq i64 %t$128, %t$133
   br i1 %t$134, label %wrepack_hit_133, label %wrepack_next_133
 wrepack_hit_133:
   %t$135 = call i64 @sprout_field(i64 %t$127, i64 0)
-  %t$136$r0 = insertvalue { i64, i64 } undef, i64 %t$128, 0
-  %t$136$r1 = insertvalue { i64, i64 } %t$136$r0, i64 %t$135, 1
-  ret { i64, i64 } %t$136$r1
+  %t$136$lo = zext i64 %t$128 to i128
+  %t$136$hw = zext i64 %t$135 to i128
+  %t$136$hi = shl i128 %t$136$hw, 64
+  %t$136$r = or i128 %t$136$hi, %t$136$lo
+  ret i128 %t$136$r
 wrepack_next_133:
   call void @sprout_abort_match()
   unreachable
@@ -80470,18 +81502,22 @@ then_141:
   br i1 %t$145, label %wrepack_hit_144, label %wrepack_next_144
 wrepack_hit_144:
   %t$146 = call i64 @sprout_field(i64 %t$142, i64 0)
-  %t$147$r0 = insertvalue { i64, i64 } undef, i64 %t$143, 0
-  %t$147$r1 = insertvalue { i64, i64 } %t$147$r0, i64 %t$146, 1
-  ret { i64, i64 } %t$147$r1
+  %t$147$lo = zext i64 %t$143 to i128
+  %t$147$hw = zext i64 %t$146 to i128
+  %t$147$hi = shl i128 %t$147$hw, 64
+  %t$147$r = or i128 %t$147$hi, %t$147$lo
+  ret i128 %t$147$r
 wrepack_next_144:
   %t$148 = add i64 0, 8
   %t$149 = icmp eq i64 %t$143, %t$148
   br i1 %t$149, label %wrepack_hit_148, label %wrepack_next_148
 wrepack_hit_148:
   %t$150 = call i64 @sprout_field(i64 %t$142, i64 0)
-  %t$151$r0 = insertvalue { i64, i64 } undef, i64 %t$143, 0
-  %t$151$r1 = insertvalue { i64, i64 } %t$151$r0, i64 %t$150, 1
-  ret { i64, i64 } %t$151$r1
+  %t$151$lo = zext i64 %t$143 to i128
+  %t$151$hw = zext i64 %t$150 to i128
+  %t$151$hi = shl i128 %t$151$hw, 64
+  %t$151$r = or i128 %t$151$hi, %t$151$lo
+  ret i128 %t$151$r
 wrepack_next_148:
   call void @sprout_abort_match()
   unreachable
@@ -80508,18 +81544,22 @@ then_156:
   br i1 %t$160, label %wrepack_hit_159, label %wrepack_next_159
 wrepack_hit_159:
   %t$161 = call i64 @sprout_field(i64 %t$157, i64 0)
-  %t$162$r0 = insertvalue { i64, i64 } undef, i64 %t$158, 0
-  %t$162$r1 = insertvalue { i64, i64 } %t$162$r0, i64 %t$161, 1
-  ret { i64, i64 } %t$162$r1
+  %t$162$lo = zext i64 %t$158 to i128
+  %t$162$hw = zext i64 %t$161 to i128
+  %t$162$hi = shl i128 %t$162$hw, 64
+  %t$162$r = or i128 %t$162$hi, %t$162$lo
+  ret i128 %t$162$r
 wrepack_next_159:
   %t$163 = add i64 0, 8
   %t$164 = icmp eq i64 %t$158, %t$163
   br i1 %t$164, label %wrepack_hit_163, label %wrepack_next_163
 wrepack_hit_163:
   %t$165 = call i64 @sprout_field(i64 %t$157, i64 0)
-  %t$166$r0 = insertvalue { i64, i64 } undef, i64 %t$158, 0
-  %t$166$r1 = insertvalue { i64, i64 } %t$166$r0, i64 %t$165, 1
-  ret { i64, i64 } %t$166$r1
+  %t$166$lo = zext i64 %t$158 to i128
+  %t$166$hw = zext i64 %t$165 to i128
+  %t$166$hi = shl i128 %t$166$hw, 64
+  %t$166$r = or i128 %t$166$hi, %t$166$lo
+  ret i128 %t$166$r
 wrepack_next_163:
   call void @sprout_abort_match()
   unreachable
@@ -80546,18 +81586,22 @@ then_171:
   br i1 %t$175, label %wrepack_hit_174, label %wrepack_next_174
 wrepack_hit_174:
   %t$176 = call i64 @sprout_field(i64 %t$172, i64 0)
-  %t$177$r0 = insertvalue { i64, i64 } undef, i64 %t$173, 0
-  %t$177$r1 = insertvalue { i64, i64 } %t$177$r0, i64 %t$176, 1
-  ret { i64, i64 } %t$177$r1
+  %t$177$lo = zext i64 %t$173 to i128
+  %t$177$hw = zext i64 %t$176 to i128
+  %t$177$hi = shl i128 %t$177$hw, 64
+  %t$177$r = or i128 %t$177$hi, %t$177$lo
+  ret i128 %t$177$r
 wrepack_next_174:
   %t$178 = add i64 0, 8
   %t$179 = icmp eq i64 %t$173, %t$178
   br i1 %t$179, label %wrepack_hit_178, label %wrepack_next_178
 wrepack_hit_178:
   %t$180 = call i64 @sprout_field(i64 %t$172, i64 0)
-  %t$181$r0 = insertvalue { i64, i64 } undef, i64 %t$173, 0
-  %t$181$r1 = insertvalue { i64, i64 } %t$181$r0, i64 %t$180, 1
-  ret { i64, i64 } %t$181$r1
+  %t$181$lo = zext i64 %t$173 to i128
+  %t$181$hw = zext i64 %t$180 to i128
+  %t$181$hi = shl i128 %t$181$hw, 64
+  %t$181$r = or i128 %t$181$hi, %t$181$lo
+  ret i128 %t$181$r
 wrepack_next_178:
   call void @sprout_abort_match()
   unreachable
@@ -80678,18 +81722,22 @@ ovfok_217:
   br i1 %t$226, label %wrepack_hit_225, label %wrepack_next_225
 wrepack_hit_225:
   %t$227 = call i64 @sprout_field(i64 %t$223, i64 0)
-  %t$228$r0 = insertvalue { i64, i64 } undef, i64 %t$224, 0
-  %t$228$r1 = insertvalue { i64, i64 } %t$228$r0, i64 %t$227, 1
-  ret { i64, i64 } %t$228$r1
+  %t$228$lo = zext i64 %t$224 to i128
+  %t$228$hw = zext i64 %t$227 to i128
+  %t$228$hi = shl i128 %t$228$hw, 64
+  %t$228$r = or i128 %t$228$hi, %t$228$lo
+  ret i128 %t$228$r
 wrepack_next_225:
   %t$229 = add i64 0, 8
   %t$230 = icmp eq i64 %t$224, %t$229
   br i1 %t$230, label %wrepack_hit_229, label %wrepack_next_229
 wrepack_hit_229:
   %t$231 = call i64 @sprout_field(i64 %t$223, i64 0)
-  %t$232$r0 = insertvalue { i64, i64 } undef, i64 %t$224, 0
-  %t$232$r1 = insertvalue { i64, i64 } %t$232$r0, i64 %t$231, 1
-  ret { i64, i64 } %t$232$r1
+  %t$232$lo = zext i64 %t$224 to i128
+  %t$232$hw = zext i64 %t$231 to i128
+  %t$232$hi = shl i128 %t$232$hw, 64
+  %t$232$r = or i128 %t$232$hi, %t$232$lo
+  ret i128 %t$232$r
 wrepack_next_229:
   call void @sprout_abort_match()
   unreachable
@@ -80734,9 +81782,11 @@ ovfok_238:
   %t$241$s1 = getelementptr i64, ptr %t$241$ptr, i64 1
   store i64 %t$238, ptr %t$241$s1
   %t$417 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$242$r0 = insertvalue { i64, i64 } undef, i64 7, 0
-  %t$242$r1 = insertvalue { i64, i64 } %t$242$r0, i64 %t$241, 1
-  ret { i64, i64 } %t$242$r1
+  %t$242$lo = zext i64 7 to i128
+  %t$242$hw = zext i64 %t$241 to i128
+  %t$242$hi = shl i128 %t$242$hw, 64
+  %t$242$r = or i128 %t$242$hi, %t$242$lo
+  ret i128 %t$242$r
 else_184:
   %t$243 = getelementptr inbounds { i64, [24 x i8] }, ptr @.str.1168, i64 0, i32 1, i64 0
   %t$244 = ptrtoint ptr %t$243 to i64
@@ -80791,17 +81841,20 @@ else_184:
   %t$255$f1 = getelementptr i64, ptr %t$255$ptr, i64 1
   store i64 %t$254, ptr %t$255$f1
   %t$442 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$256$r0 = insertvalue { i64, i64 } undef, i64 8, 0
-  %t$256$r1 = insertvalue { i64, i64 } %t$256$r0, i64 %t$255, 1
-  ret { i64, i64 } %t$256$r1
+  %t$256$lo = zext i64 8 to i128
+  %t$256$hw = zext i64 %t$255 to i128
+  %t$256$hi = shl i128 %t$256$hw, 64
+  %t$256$r = or i128 %t$256$hi, %t$256$lo
+  ret i128 %t$256$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_program_worker(i64 %p$raw) {
+define i128 @stdlib.compiler.parser.parse_program_worker(i64 %p$raw) {
 entry:
   %t$0 = add i64 0, 0
-  %t$1$st = call { i64, i64 } @vec_get_worker(i64 %t$0, i64 %p$raw)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
+  %t$1$st = call i128 @vec_get_worker(i64 %t$0, i64 %p$raw)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
   br label %arm_0_3
 arm_0_3:
   %t$5 = add i64 0, 1
@@ -80848,9 +81901,10 @@ arm_0_14:
   %t$52 = alloca i64
   store i64 %t$16, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$17$st = call { i64, i64 } @stdlib.compiler.parser.laid_out_worker(i64 %p$raw, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.compiler.parser.laid_out_worker(i64 %p$raw, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$19 = add i64 0, 8
   %t$20 = icmp eq i64 %t$17, %t$19
@@ -80878,9 +81932,10 @@ do_cont_19:
   %t$63 = alloca i64
   store i64 %t$24, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$25$st = call { i64, i64 } @stdlib.compiler.parser.collect_decls_worker(i64 %t$18, i64 %t$23, i64 %t$24)
-  %t$25 = extractvalue { i64, i64 } %t$25$st, 0
-  %t$26 = extractvalue { i64, i64 } %t$25$st, 1
+  %t$25$st = call i128 @stdlib.compiler.parser.collect_decls_worker(i64 %t$18, i64 %t$23, i64 %t$24)
+  %t$25 = trunc i128 %t$25$st to i64
+  %t$25$hi = lshr i128 %t$25$st, 64
+  %t$26 = trunc i128 %t$25$hi to i64
   %t$65 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$27 = add i64 0, 8
   %t$28 = icmp eq i64 %t$25, %t$27
@@ -80939,31 +81994,36 @@ join_14:
   br i1 %t$38, label %wrepack_hit_37, label %wrepack_next_37
 wrepack_hit_37:
   %t$39 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$40$r0 = insertvalue { i64, i64 } undef, i64 %t$36, 0
-  %t$40$r1 = insertvalue { i64, i64 } %t$40$r0, i64 %t$39, 1
-  ret { i64, i64 } %t$40$r1
+  %t$40$lo = zext i64 %t$36 to i128
+  %t$40$hw = zext i64 %t$39 to i128
+  %t$40$hi = shl i128 %t$40$hw, 64
+  %t$40$r = or i128 %t$40$hi, %t$40$lo
+  ret i128 %t$40$r
 wrepack_next_37:
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$36, %t$41
   br i1 %t$42, label %wrepack_hit_41, label %wrepack_next_41
 wrepack_hit_41:
   %t$43 = call i64 @sprout_field(i64 %t$15, i64 0)
-  %t$44$r0 = insertvalue { i64, i64 } undef, i64 %t$36, 0
-  %t$44$r1 = insertvalue { i64, i64 } %t$44$r0, i64 %t$43, 1
-  ret { i64, i64 } %t$44$r1
+  %t$44$lo = zext i64 %t$36 to i128
+  %t$44$hw = zext i64 %t$43 to i128
+  %t$44$hi = shl i128 %t$44$hw, 64
+  %t$44$r = or i128 %t$44$hi, %t$44$lo
+  ret i128 %t$44$r
 wrepack_next_41:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_range_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$45 = alloca i64
   store i64 %p$tokens, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -81052,9 +82112,10 @@ body_1_12:
   %t$75 = alloca i64
   store i64 %t$21, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$22$st = call { i64, i64 } @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %t$21)
-  %t$22 = extractvalue { i64, i64 } %t$22$st, 0
-  %t$23 = extractvalue { i64, i64 } %t$22$st, 1
+  %t$22$st = call i128 @stdlib.compiler.parser.parse_comparison_worker(i64 %p$tokens, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$24 = add i64 0, 8
   %t$25 = icmp eq i64 %t$22, %t$24
@@ -81141,24 +82202,28 @@ do_done_2:
   br i1 %t$38, label %wrepack_hit_37, label %wrepack_next_37
 wrepack_hit_37:
   %t$39 = call i64 @sprout_field(i64 %t$35, i64 0)
-  %t$40$r0 = insertvalue { i64, i64 } undef, i64 %t$36, 0
-  %t$40$r1 = insertvalue { i64, i64 } %t$40$r0, i64 %t$39, 1
-  ret { i64, i64 } %t$40$r1
+  %t$40$lo = zext i64 %t$36 to i128
+  %t$40$hw = zext i64 %t$39 to i128
+  %t$40$hi = shl i128 %t$40$hw, 64
+  %t$40$r = or i128 %t$40$hi, %t$40$lo
+  ret i128 %t$40$r
 wrepack_next_37:
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$36, %t$41
   br i1 %t$42, label %wrepack_hit_41, label %wrepack_next_41
 wrepack_hit_41:
   %t$43 = call i64 @sprout_field(i64 %t$35, i64 0)
-  %t$44$r0 = insertvalue { i64, i64 } undef, i64 %t$36, 0
-  %t$44$r1 = insertvalue { i64, i64 } %t$44$r0, i64 %t$43, 1
-  ret { i64, i64 } %t$44$r1
+  %t$44$lo = zext i64 %t$36 to i128
+  %t$44$hw = zext i64 %t$43 to i128
+  %t$44$hi = shl i128 %t$44$hw, 64
+  %t$44$r = or i128 %t$44$hi, %t$44$lo
+  ret i128 %t$44$r
 wrepack_next_41:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_record_field_decl_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_record_field_decl_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.1171, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -81168,9 +82233,10 @@ entry:
   %t$45 = alloca i64
   store i64 %t$1, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -81207,9 +82273,10 @@ do_cont_4:
   %t$58 = alloca i64
   store i64 %t$11, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$12$st = call { i64, i64 } @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
-  %t$12 = extractvalue { i64, i64 } %t$12$st, 0
-  %t$13 = extractvalue { i64, i64 } %t$12$st, 1
+  %t$12$st = call i128 @stdlib.compiler.parser.expected_symbol_worker(i64 %t$11, i64 %p$tokens, i64 %t$9)
+  %t$12 = trunc i128 %t$12$st to i64
+  %t$12$hi = lshr i128 %t$12$st, 64
+  %t$13 = trunc i128 %t$12$hi to i64
   %t$60 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 8
   %t$15 = icmp eq i64 %t$12, %t$14
@@ -81238,9 +82305,10 @@ do_cont_14:
   %t$69 = alloca i64
   store i64 %t$18, ptr %t$69
   %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
-  %t$19$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$18)
-  %t$19 = extractvalue { i64, i64 } %t$19$st, 0
-  %t$20 = extractvalue { i64, i64 } %t$19$st, 1
+  %t$19$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
   %t$71 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$21 = add i64 0, 8
   %t$22 = icmp eq i64 %t$19, %t$21
@@ -81313,24 +82381,28 @@ do_done_4:
   br i1 %t$36, label %wrepack_hit_35, label %wrepack_next_35
 wrepack_hit_35:
   %t$37 = call i64 @sprout_field(i64 %t$33, i64 0)
-  %t$38$r0 = insertvalue { i64, i64 } undef, i64 %t$34, 0
-  %t$38$r1 = insertvalue { i64, i64 } %t$38$r0, i64 %t$37, 1
-  ret { i64, i64 } %t$38$r1
+  %t$38$lo = zext i64 %t$34 to i128
+  %t$38$hw = zext i64 %t$37 to i128
+  %t$38$hi = shl i128 %t$38$hw, 64
+  %t$38$r = or i128 %t$38$hi, %t$38$lo
+  ret i128 %t$38$r
 wrepack_next_35:
   %t$39 = add i64 0, 8
   %t$40 = icmp eq i64 %t$34, %t$39
   br i1 %t$40, label %wrepack_hit_39, label %wrepack_next_39
 wrepack_hit_39:
   %t$41 = call i64 @sprout_field(i64 %t$33, i64 0)
-  %t$42$r0 = insertvalue { i64, i64 } undef, i64 %t$34, 0
-  %t$42$r1 = insertvalue { i64, i64 } %t$42$r0, i64 %t$41, 1
-  ret { i64, i64 } %t$42$r1
+  %t$42$lo = zext i64 %t$34 to i128
+  %t$42$hw = zext i64 %t$41 to i128
+  %t$42$hi = shl i128 %t$42$hw, 64
+  %t$42$r = or i128 %t$42$hi, %t$42$lo
+  ret i128 %t$42$r
 wrepack_next_39:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_rhs_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$11 = alloca i64
   store i64 %p$tokens, ptr %t$11
@@ -81346,34 +82418,41 @@ then_4:
   %t$14 = alloca i64
   store i64 %p$tokens, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$5$st = call { i64, i64 } @stdlib.compiler.parser.parse_try_worker(i64 %p$tokens, i64 %p$i)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @stdlib.compiler.parser.parse_try_worker(i64 %p$tokens, i64 %p$i)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$7$r0 = insertvalue { i64, i64 } undef, i64 %t$5, 0
-  %t$7$r1 = insertvalue { i64, i64 } %t$7$r0, i64 %t$6, 1
-  ret { i64, i64 } %t$7$r1
+  %t$7$lo = zext i64 %t$5 to i128
+  %t$7$hw = zext i64 %t$6 to i128
+  %t$7$hi = shl i128 %t$7$hw, 64
+  %t$7$r = or i128 %t$7$hi, %t$7$lo
+  ret i128 %t$7$r
 else_4:
   %t$17 = alloca i64
   store i64 %p$tokens, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$8$st = call { i64, i64 } @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
-  %t$8 = extractvalue { i64, i64 } %t$8$st, 0
-  %t$9 = extractvalue { i64, i64 } %t$8$st, 1
+  %t$8$st = call i128 @stdlib.compiler.parser.parse_expression_worker(i64 %p$tokens, i64 %p$i)
+  %t$8 = trunc i128 %t$8$st to i64
+  %t$8$hi = lshr i128 %t$8$st, 64
+  %t$9 = trunc i128 %t$8$hi to i64
   %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 %t$8, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 %t$9, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 %t$8 to i128
+  %t$10$hw = zext i64 %t$9 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_term_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_factor_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -81415,24 +82494,28 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_try_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_try_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [4 x i8] }, ptr @.str.1174, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -81442,9 +82525,10 @@ entry:
   %t$52 = alloca i64
   store i64 %t$1, ptr %t$52
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_keyword_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -81491,9 +82575,10 @@ then_12:
   %t$70 = alloca i64
   store i64 %p$tokens, ptr %t$70
   %t$71 = call i64 @sprout_gc_push_i64_root(ptr %t$70)
-  %t$14$st = call { i64, i64 } @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %t$9)
-  %t$14 = extractvalue { i64, i64 } %t$14$st, 0
-  %t$15 = extractvalue { i64, i64 } %t$14$st, 1
+  %t$14$st = call i128 @stdlib.compiler.parser.parse_primary_worker(i64 %p$tokens, i64 %t$9)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
   %t$72 = call i64 @sprout_gc_pop_roots(i64 3)
@@ -81531,9 +82616,10 @@ do_cont_16:
   %t$84 = alloca i64
   store i64 %t$22, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
-  %t$23$st = call { i64, i64 } @stdlib.compiler.parser.parse_postfix_worker(i64 %p$tokens, i64 %t$21, i64 %t$20, i64 %t$22)
-  %t$23 = extractvalue { i64, i64 } %t$23$st, 0
-  %t$24 = extractvalue { i64, i64 } %t$23$st, 1
+  %t$23$st = call i128 @stdlib.compiler.parser.parse_postfix_worker(i64 %p$tokens, i64 %t$21, i64 %t$20, i64 %t$22)
+  %t$23 = trunc i128 %t$23$st to i64
+  %t$23$hi = lshr i128 %t$23$st, 64
+  %t$24 = trunc i128 %t$23$hi to i64
   %t$86 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$25 = add i64 0, 8
   %t$26 = icmp eq i64 %t$23, %t$25
@@ -81611,31 +82697,36 @@ do_done_4:
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
   %t$44 = call i64 @sprout_field(i64 %t$40, i64 0)
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 %t$44, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$41 to i128
+  %t$45$hw = zext i64 %t$44 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   %t$46 = add i64 0, 8
   %t$47 = icmp eq i64 %t$41, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
   %t$48 = call i64 @sprout_field(i64 %t$40, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$41, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$41 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_type_apply_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_type_apply_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$19 = alloca i64
   store i64 %p$tokens, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -81677,24 +82768,28 @@ do_done_2:
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
   %t$13 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 %t$13, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 8
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$9, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_type_atom_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$54 = alloca i64
   store i64 %p$tokens, ptr %t$54
@@ -81826,9 +82921,10 @@ body_1_19:
   %t$94 = alloca i64
   store i64 %t$34, ptr %t$94
   %t$95 = call i64 @sprout_gc_push_i64_root(ptr %t$94)
-  %t$35$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$34)
-  %t$35 = extractvalue { i64, i64 } %t$35$st, 0
-  %t$36 = extractvalue { i64, i64 } %t$35$st, 1
+  %t$35$st = call i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %t$34)
+  %t$35 = trunc i128 %t$35$st to i64
+  %t$35$hi = lshr i128 %t$35$st, 64
+  %t$36 = trunc i128 %t$35$hi to i64
   %t$96 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$37 = add i64 0, 8
   %t$38 = icmp eq i64 %t$35, %t$37
@@ -81883,24 +82979,28 @@ join_2:
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
   %t$48 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$45, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 %t$48, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$45 to i128
+  %t$49$hw = zext i64 %t$48 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   %t$50 = add i64 0, 8
   %t$51 = icmp eq i64 %t$45, %t$50
   br i1 %t$51, label %wrepack_hit_50, label %wrepack_next_50
 wrepack_hit_50:
   %t$52 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$53$r0 = insertvalue { i64, i64 } undef, i64 %t$45, 0
-  %t$53$r1 = insertvalue { i64, i64 } %t$53$r0, i64 %t$52, 1
-  ret { i64, i64 } %t$53$r1
+  %t$53$lo = zext i64 %t$45 to i128
+  %t$53$hw = zext i64 %t$52 to i128
+  %t$53$hi = shl i128 %t$53$hw, 64
+  %t$53$r = or i128 %t$53$hi, %t$53$lo
+  ret i128 %t$53$r
 wrepack_next_50:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_type_constraint_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.1177, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -81910,9 +83010,10 @@ entry:
   %t$37 = alloca i64
   store i64 %t$1, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$2$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
-  %t$2 = extractvalue { i64, i64 } %t$2$st, 0
-  %t$3 = extractvalue { i64, i64 } %t$2$st, 1
+  %t$2$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$1, i64 %p$tokens, i64 %p$i)
+  %t$2 = trunc i128 %t$2$st to i64
+  %t$2$hi = lshr i128 %t$2$st, 64
+  %t$3 = trunc i128 %t$2$hi to i64
   %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 8
   %t$5 = icmp eq i64 %t$2, %t$4
@@ -81948,9 +83049,10 @@ do_cont_4:
   %t$50 = alloca i64
   store i64 %t$10, ptr %t$50
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.collect_type_atoms_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.collect_type_atoms_worker(i64 %p$tokens, i64 %t$9, i64 %t$10)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$13 = add i64 0, 8
   %t$14 = icmp eq i64 %t$11, %t$13
@@ -82024,31 +83126,36 @@ do_done_4:
   br i1 %t$28, label %wrepack_hit_27, label %wrepack_next_27
 wrepack_hit_27:
   %t$29 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$30$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$30$r1 = insertvalue { i64, i64 } %t$30$r0, i64 %t$29, 1
-  ret { i64, i64 } %t$30$r1
+  %t$30$lo = zext i64 %t$26 to i128
+  %t$30$hw = zext i64 %t$29 to i128
+  %t$30$hi = shl i128 %t$30$hw, 64
+  %t$30$r = or i128 %t$30$hi, %t$30$lo
+  ret i128 %t$30$r
 wrepack_next_27:
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$26, %t$31
   br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
 wrepack_hit_31:
   %t$33 = call i64 @sprout_field(i64 %t$25, i64 0)
-  %t$34$r0 = insertvalue { i64, i64 } undef, i64 %t$26, 0
-  %t$34$r1 = insertvalue { i64, i64 } %t$34$r0, i64 %t$33, 1
-  ret { i64, i64 } %t$34$r1
+  %t$34$lo = zext i64 %t$26 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
 wrepack_next_31:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_type_constructor_def_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$66 = alloca i64
   store i64 %p$tokens, ptr %t$66
   %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.parse_exists_prefix_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.parse_exists_prefix_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 8
   %t$3 = icmp eq i64 %t$0, %t$2
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -82084,9 +83191,10 @@ do_cont_2:
   %t$78 = alloca i64
   store i64 %t$9, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$10$st = call { i64, i64 } @stdlib.compiler.parser.expected_ident_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
-  %t$10 = extractvalue { i64, i64 } %t$10$st, 0
-  %t$11 = extractvalue { i64, i64 } %t$10$st, 1
+  %t$10$st = call i128 @stdlib.compiler.parser.expected_ident_worker(i64 %t$9, i64 %p$tokens, i64 %t$7)
+  %t$10 = trunc i128 %t$10$st to i64
+  %t$10$hi = lshr i128 %t$10$st, 64
+  %t$11 = trunc i128 %t$10$hi to i64
   %t$80 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$12 = add i64 0, 8
   %t$13 = icmp eq i64 %t$10, %t$12
@@ -82134,9 +83242,10 @@ do_cont_12:
   %t$97 = alloca i64
   store i64 %t$20, ptr %t$97
   %t$98 = call i64 @sprout_gc_push_i64_root(ptr %t$97)
-  %t$22$st = call { i64, i64 } @stdlib.compiler.parser.collect_ctor_fields_worker(i64 %p$tokens, i64 %t$17, i64 %t$18, i64 %t$19, i64 %t$20, i64 %t$21)
-  %t$22 = extractvalue { i64, i64 } %t$22$st, 0
-  %t$23 = extractvalue { i64, i64 } %t$22$st, 1
+  %t$22$st = call i128 @stdlib.compiler.parser.collect_ctor_fields_worker(i64 %p$tokens, i64 %t$17, i64 %t$18, i64 %t$19, i64 %t$20, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
   %t$99 = call i64 @sprout_gc_pop_roots(i64 4)
   %t$24 = add i64 0, 8
   %t$25 = icmp eq i64 %t$22, %t$24
@@ -82186,9 +83295,10 @@ do_cont_24:
   %t$116 = alloca i64
   store i64 %t$31, ptr %t$116
   %t$117 = call i64 @sprout_gc_push_i64_root(ptr %t$116)
-  %t$32$st = call { i64, i64 } @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$31)
-  %t$32 = extractvalue { i64, i64 } %t$32$st, 0
-  %t$33 = extractvalue { i64, i64 } %t$32$st, 1
+  %t$32$st = call i128 @stdlib.compiler.parser.parse_optional_constraints_worker(i64 %p$tokens, i64 %t$31)
+  %t$32 = trunc i128 %t$32$st to i64
+  %t$32$hi = lshr i128 %t$32$st, 64
+  %t$33 = trunc i128 %t$32$hi to i64
   %t$34 = add i64 0, 8
   %t$35 = icmp eq i64 %t$32, %t$34
   %t$118 = call i64 @sprout_gc_pop_roots(i64 7)
@@ -82237,9 +83347,10 @@ do_cont_34:
   %t$138 = alloca i64
   store i64 %t$39, ptr %t$138
   %t$139 = call i64 @sprout_gc_push_i64_root(ptr %t$138)
-  %t$40$st = call { i64, i64 } @stdlib.compiler.parser.validate_ctor_where_worker(i64 %t$6, i64 %t$38, i64 %p$tokens, i64 %t$31)
-  %t$40 = extractvalue { i64, i64 } %t$40$st, 0
-  %t$41 = extractvalue { i64, i64 } %t$40$st, 1
+  %t$40$st = call i128 @stdlib.compiler.parser.validate_ctor_where_worker(i64 %t$6, i64 %t$38, i64 %p$tokens, i64 %t$31)
+  %t$40 = trunc i128 %t$40$st to i64
+  %t$40$hi = lshr i128 %t$40$st, 64
+  %t$41 = trunc i128 %t$40$hi to i64
   %t$42 = add i64 0, 8
   %t$43 = icmp eq i64 %t$40, %t$42
   %t$140 = call i64 @sprout_gc_pop_roots(i64 9)
@@ -82335,31 +83446,36 @@ do_done_2:
   br i1 %t$59, label %wrepack_hit_58, label %wrepack_next_58
 wrepack_hit_58:
   %t$60 = call i64 @sprout_field(i64 %t$56, i64 0)
-  %t$61$r0 = insertvalue { i64, i64 } undef, i64 %t$57, 0
-  %t$61$r1 = insertvalue { i64, i64 } %t$61$r0, i64 %t$60, 1
-  ret { i64, i64 } %t$61$r1
+  %t$61$lo = zext i64 %t$57 to i128
+  %t$61$hw = zext i64 %t$60 to i128
+  %t$61$hi = shl i128 %t$61$hw, 64
+  %t$61$r = or i128 %t$61$hi, %t$61$lo
+  ret i128 %t$61$r
 wrepack_next_58:
   %t$62 = add i64 0, 8
   %t$63 = icmp eq i64 %t$57, %t$62
   br i1 %t$63, label %wrepack_hit_62, label %wrepack_next_62
 wrepack_hit_62:
   %t$64 = call i64 @sprout_field(i64 %t$56, i64 0)
-  %t$65$r0 = insertvalue { i64, i64 } undef, i64 %t$57, 0
-  %t$65$r1 = insertvalue { i64, i64 } %t$65$r0, i64 %t$64, 1
-  ret { i64, i64 } %t$65$r1
+  %t$65$lo = zext i64 %t$57 to i128
+  %t$65$hw = zext i64 %t$64 to i128
+  %t$65$hi = shl i128 %t$65$hw, 64
+  %t$65$r = or i128 %t$65$hi, %t$65$lo
+  ret i128 %t$65$r
 wrepack_next_62:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_type_expr_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$40 = alloca i64
   store i64 %p$tokens, ptr %t$40
   %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$0$st = call { i64, i64 } @stdlib.compiler.parser.match_empty_params_worker(i64 %p$tokens, i64 %p$i)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.compiler.parser.match_empty_params_worker(i64 %p$tokens, i64 %p$i)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -82420,9 +83536,10 @@ body_1_11:
   %t$58 = alloca i64
   store i64 %p$tokens, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$21$st = call { i64, i64 } @stdlib.compiler.parser.parse_type_apply_worker(i64 %p$tokens, i64 %p$i)
-  %t$21 = extractvalue { i64, i64 } %t$21$st, 0
-  %t$22 = extractvalue { i64, i64 } %t$21$st, 1
+  %t$21$st = call i128 @stdlib.compiler.parser.parse_type_apply_worker(i64 %p$tokens, i64 %p$i)
+  %t$21 = trunc i128 %t$21$st to i64
+  %t$21$hi = lshr i128 %t$21$st, 64
+  %t$22 = trunc i128 %t$21$hi to i64
   %t$23 = add i64 0, 8
   %t$24 = icmp eq i64 %t$21, %t$23
   %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -82476,24 +83593,28 @@ join_2:
   br i1 %t$33, label %wrepack_hit_32, label %wrepack_next_32
 wrepack_hit_32:
   %t$34 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$35$r0 = insertvalue { i64, i64 } undef, i64 %t$31, 0
-  %t$35$r1 = insertvalue { i64, i64 } %t$35$r0, i64 %t$34, 1
-  ret { i64, i64 } %t$35$r1
+  %t$35$lo = zext i64 %t$31 to i128
+  %t$35$hw = zext i64 %t$34 to i128
+  %t$35$hi = shl i128 %t$35$hw, 64
+  %t$35$r = or i128 %t$35$hi, %t$35$lo
+  ret i128 %t$35$r
 wrepack_next_32:
   %t$36 = add i64 0, 8
   %t$37 = icmp eq i64 %t$31, %t$36
   br i1 %t$37, label %wrepack_hit_36, label %wrepack_next_36
 wrepack_hit_36:
   %t$38 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$39$r0 = insertvalue { i64, i64 } undef, i64 %t$31, 0
-  %t$39$r1 = insertvalue { i64, i64 } %t$39$r0, i64 %t$38, 1
-  ret { i64, i64 } %t$39$r1
+  %t$39$lo = zext i64 %t$31 to i128
+  %t$39$hw = zext i64 %t$38 to i128
+  %t$39$hi = shl i128 %t$39$hw, 64
+  %t$39$r = or i128 %t$39$hi, %t$39$lo
+  ret i128 %t$39$r
 wrepack_next_36:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.parse_unary_worker(i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.parse_unary_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$88 = alloca i64
   store i64 %p$tokens, ptr %t$88
@@ -82594,9 +83715,10 @@ ovfok_25:
   %t$109 = alloca i64
   store i64 %p$tokens, ptr %t$109
   %t$110 = call i64 @sprout_gc_push_i64_root(ptr %t$109)
-  %t$28$st = call { i64, i64 } @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$25)
-  %t$28 = extractvalue { i64, i64 } %t$28$st, 0
-  %t$29 = extractvalue { i64, i64 } %t$28$st, 1
+  %t$28$st = call i128 @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$25)
+  %t$28 = trunc i128 %t$28$st to i64
+  %t$28$hi = lshr i128 %t$28$st, 64
+  %t$29 = trunc i128 %t$28$hi to i64
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$28, %t$30
   %t$111 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -82678,18 +83800,22 @@ join_11:
   br i1 %t$45, label %wrepack_hit_44, label %wrepack_next_44
 wrepack_hit_44:
   %t$46 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$47$r0 = insertvalue { i64, i64 } undef, i64 %t$43, 0
-  %t$47$r1 = insertvalue { i64, i64 } %t$47$r0, i64 %t$46, 1
-  ret { i64, i64 } %t$47$r1
+  %t$47$lo = zext i64 %t$43 to i128
+  %t$47$hw = zext i64 %t$46 to i128
+  %t$47$hi = shl i128 %t$47$hw, 64
+  %t$47$r = or i128 %t$47$hi, %t$47$lo
+  ret i128 %t$47$r
 wrepack_next_44:
   %t$48 = add i64 0, 8
   %t$49 = icmp eq i64 %t$43, %t$48
   br i1 %t$49, label %wrepack_hit_48, label %wrepack_next_48
 wrepack_hit_48:
   %t$50 = call i64 @sprout_field(i64 %t$12, i64 0)
-  %t$51$r0 = insertvalue { i64, i64 } undef, i64 %t$43, 0
-  %t$51$r1 = insertvalue { i64, i64 } %t$51$r0, i64 %t$50, 1
-  ret { i64, i64 } %t$51$r1
+  %t$51$lo = zext i64 %t$43 to i128
+  %t$51$hw = zext i64 %t$50 to i128
+  %t$51$hi = shl i128 %t$51$hw, 64
+  %t$51$r = or i128 %t$51$hi, %t$51$lo
+  ret i128 %t$51$r
 wrepack_next_48:
   call void @sprout_abort_match()
   unreachable
@@ -82719,9 +83845,10 @@ ovfok_58:
   %t$135 = alloca i64
   store i64 %p$tokens, ptr %t$135
   %t$136 = call i64 @sprout_gc_push_i64_root(ptr %t$135)
-  %t$61$st = call { i64, i64 } @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$58)
-  %t$61 = extractvalue { i64, i64 } %t$61$st, 0
-  %t$62 = extractvalue { i64, i64 } %t$61$st, 1
+  %t$61$st = call i128 @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %t$58)
+  %t$61 = trunc i128 %t$61$st to i64
+  %t$61$hi = lshr i128 %t$61$st, 64
+  %t$62 = trunc i128 %t$61$hi to i64
   %t$63 = add i64 0, 8
   %t$64 = icmp eq i64 %t$61, %t$63
   %t$137 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -82797,18 +83924,22 @@ do_done_63:
   br i1 %t$78, label %wrepack_hit_77, label %wrepack_next_77
 wrepack_hit_77:
   %t$79 = call i64 @sprout_field(i64 %t$75, i64 0)
-  %t$80$r0 = insertvalue { i64, i64 } undef, i64 %t$76, 0
-  %t$80$r1 = insertvalue { i64, i64 } %t$80$r0, i64 %t$79, 1
-  ret { i64, i64 } %t$80$r1
+  %t$80$lo = zext i64 %t$76 to i128
+  %t$80$hw = zext i64 %t$79 to i128
+  %t$80$hi = shl i128 %t$80$hw, 64
+  %t$80$r = or i128 %t$80$hi, %t$80$lo
+  ret i128 %t$80$r
 wrepack_next_77:
   %t$81 = add i64 0, 8
   %t$82 = icmp eq i64 %t$76, %t$81
   br i1 %t$82, label %wrepack_hit_81, label %wrepack_next_81
 wrepack_hit_81:
   %t$83 = call i64 @sprout_field(i64 %t$75, i64 0)
-  %t$84$r0 = insertvalue { i64, i64 } undef, i64 %t$76, 0
-  %t$84$r1 = insertvalue { i64, i64 } %t$84$r0, i64 %t$83, 1
-  ret { i64, i64 } %t$84$r1
+  %t$84$lo = zext i64 %t$76 to i128
+  %t$84$hw = zext i64 %t$83 to i128
+  %t$84$hi = shl i128 %t$84$hw, 64
+  %t$84$r = or i128 %t$84$hi, %t$84$lo
+  ret i128 %t$84$r
 wrepack_next_81:
   call void @sprout_abort_match()
   unreachable
@@ -82816,16 +83947,19 @@ else_56:
   %t$158 = alloca i64
   store i64 %p$tokens, ptr %t$158
   %t$159 = call i64 @sprout_gc_push_i64_root(ptr %t$158)
-  %t$85$st = call { i64, i64 } @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %p$i)
-  %t$85 = extractvalue { i64, i64 } %t$85$st, 0
-  %t$86 = extractvalue { i64, i64 } %t$85$st, 1
+  %t$85$st = call i128 @stdlib.compiler.parser.parse_call_worker(i64 %p$tokens, i64 %p$i)
+  %t$85 = trunc i128 %t$85$st to i64
+  %t$85$hi = lshr i128 %t$85$st, 64
+  %t$86 = trunc i128 %t$85$hi to i64
   %t$160 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$87$r0 = insertvalue { i64, i64 } undef, i64 %t$85, 0
-  %t$87$r1 = insertvalue { i64, i64 } %t$87$r0, i64 %t$86, 1
-  ret { i64, i64 } %t$87$r1
+  %t$87$lo = zext i64 %t$85 to i128
+  %t$87$hw = zext i64 %t$86 to i128
+  %t$87$hi = shl i128 %t$87$hw, 64
+  %t$87$r = or i128 %t$87$hi, %t$87$lo
+  ret i128 %t$87$r
 }
 
-define { i64, i64 } @stdlib.compiler.parser.past_matching_paren_worker(i64 %p$tokens, i64 %p$i, i64 %p$depth) {
+define i128 @stdlib.compiler.parser.past_matching_paren_worker(i64 %p$tokens, i64 %p$i, i64 %p$depth) {
 entry:
   %t$0 = call i64 @vec_length(i64 %p$tokens)
   %t$1 = icmp sge i64 %p$i, %t$0
@@ -82848,9 +83982,11 @@ join_3:
   %t$9 = trunc i64 %t$4 to i1
   br i1 %t$9, label %then_9, label %else_9
 then_9:
-  %t$10$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$10$r1 = insertvalue { i64, i64 } %t$10$r0, i64 0, 1
-  ret { i64, i64 } %t$10$r1
+  %t$10$lo = zext i64 0 to i128
+  %t$10$hw = zext i64 0 to i128
+  %t$10$hi = shl i128 %t$10$hw, 64
+  %t$10$r = or i128 %t$10$hi, %t$10$lo
+  ret i128 %t$10$r
 else_9:
   %t$84 = alloca i64
   store i64 %p$tokens, ptr %t$84
@@ -82895,18 +84031,22 @@ ovfok_21:
   %t$27 = icmp eq i64 %t$25, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 0, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$25 to i128
+  %t$29$hw = zext i64 0 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 1
   %t$31 = icmp eq i64 %t$25, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
   %t$32 = call i64 @sprout_field(i64 %t$24, i64 0)
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$25, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 %t$32, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$25 to i128
+  %t$33$hw = zext i64 %t$32 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   call void @sprout_abort_match()
   unreachable
@@ -82944,18 +84084,22 @@ ovfok_41:
   %t$47 = icmp eq i64 %t$45, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$45, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 0, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$45 to i128
+  %t$49$hw = zext i64 0 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   %t$50 = add i64 0, 1
   %t$51 = icmp eq i64 %t$45, %t$50
   br i1 %t$51, label %wrepack_hit_50, label %wrepack_next_50
 wrepack_hit_50:
   %t$52 = call i64 @sprout_field(i64 %t$44, i64 0)
-  %t$53$r0 = insertvalue { i64, i64 } undef, i64 %t$45, 0
-  %t$53$r1 = insertvalue { i64, i64 } %t$53$r0, i64 %t$52, 1
-  ret { i64, i64 } %t$53$r1
+  %t$53$lo = zext i64 %t$45 to i128
+  %t$53$hw = zext i64 %t$52 to i128
+  %t$53$hi = shl i128 %t$53$hw, 64
+  %t$53$r = or i128 %t$53$hi, %t$53$lo
+  ret i128 %t$53$r
 wrepack_next_50:
   call void @sprout_abort_match()
   unreachable
@@ -82977,9 +84121,11 @@ ovfpanic_59:
   call i64 @panic(i64 %t$61)
   unreachable
 ovfok_59:
-  %t$62$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$62$r1 = insertvalue { i64, i64 } %t$62$r0, i64 %t$59, 1
-  ret { i64, i64 } %t$62$r1
+  %t$62$lo = zext i64 1 to i128
+  %t$62$hw = zext i64 %t$59 to i128
+  %t$62$hi = shl i128 %t$62$hw, 64
+  %t$62$r = or i128 %t$62$hi, %t$62$lo
+  ret i128 %t$62$r
 else_57:
   %t$63 = add i64 0, 1
   %t$64$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$i, i64 %t$63)
@@ -83013,24 +84159,28 @@ ovfok_68:
   %t$74 = icmp eq i64 %t$72, %t$73
   br i1 %t$74, label %wrepack_hit_73, label %wrepack_next_73
 wrepack_hit_73:
-  %t$76$r0 = insertvalue { i64, i64 } undef, i64 %t$72, 0
-  %t$76$r1 = insertvalue { i64, i64 } %t$76$r0, i64 0, 1
-  ret { i64, i64 } %t$76$r1
+  %t$76$lo = zext i64 %t$72 to i128
+  %t$76$hw = zext i64 0 to i128
+  %t$76$hi = shl i128 %t$76$hw, 64
+  %t$76$r = or i128 %t$76$hi, %t$76$lo
+  ret i128 %t$76$r
 wrepack_next_73:
   %t$77 = add i64 0, 1
   %t$78 = icmp eq i64 %t$72, %t$77
   br i1 %t$78, label %wrepack_hit_77, label %wrepack_next_77
 wrepack_hit_77:
   %t$79 = call i64 @sprout_field(i64 %t$71, i64 0)
-  %t$80$r0 = insertvalue { i64, i64 } undef, i64 %t$72, 0
-  %t$80$r1 = insertvalue { i64, i64 } %t$80$r0, i64 %t$79, 1
-  ret { i64, i64 } %t$80$r1
+  %t$80$lo = zext i64 %t$72 to i128
+  %t$80$hw = zext i64 %t$79 to i128
+  %t$80$hi = shl i128 %t$80$hw, 64
+  %t$80$r = or i128 %t$80$hi, %t$80$lo
+  ret i128 %t$80$r
 wrepack_next_77:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.parser.radix_from_lexed_worker(i64 %p$text) {
+define i128 @stdlib.compiler.parser.radix_from_lexed_worker(i64 %p$text) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.1194, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -83079,18 +84229,22 @@ then_10:
   %t$17 = icmp eq i64 %t$15, %t$16
   br i1 %t$17, label %wrepack_hit_16, label %wrepack_next_16
 wrepack_hit_16:
-  %t$19$r0 = insertvalue { i64, i64 } undef, i64 %t$15, 0
-  %t$19$r1 = insertvalue { i64, i64 } %t$19$r0, i64 0, 1
-  ret { i64, i64 } %t$19$r1
+  %t$19$lo = zext i64 %t$15 to i128
+  %t$19$hw = zext i64 0 to i128
+  %t$19$hi = shl i128 %t$19$hw, 64
+  %t$19$r = or i128 %t$19$hi, %t$19$lo
+  ret i128 %t$19$r
 wrepack_next_16:
   %t$20 = add i64 0, 1
   %t$21 = icmp eq i64 %t$15, %t$20
   br i1 %t$21, label %wrepack_hit_20, label %wrepack_next_20
 wrepack_hit_20:
   %t$22 = call i64 @sprout_field(i64 %t$14, i64 0)
-  %t$23$r0 = insertvalue { i64, i64 } undef, i64 %t$15, 0
-  %t$23$r1 = insertvalue { i64, i64 } %t$23$r0, i64 %t$22, 1
-  ret { i64, i64 } %t$23$r1
+  %t$23$lo = zext i64 %t$15 to i128
+  %t$23$hw = zext i64 %t$22 to i128
+  %t$23$hi = shl i128 %t$23$hw, 64
+  %t$23$r = or i128 %t$23$hi, %t$23$lo
+  ret i128 %t$23$r
 wrepack_next_20:
   call void @sprout_abort_match()
   unreachable
@@ -83142,25 +84296,31 @@ then_34:
   %t$41 = icmp eq i64 %t$39, %t$40
   br i1 %t$41, label %wrepack_hit_40, label %wrepack_next_40
 wrepack_hit_40:
-  %t$43$r0 = insertvalue { i64, i64 } undef, i64 %t$39, 0
-  %t$43$r1 = insertvalue { i64, i64 } %t$43$r0, i64 0, 1
-  ret { i64, i64 } %t$43$r1
+  %t$43$lo = zext i64 %t$39 to i128
+  %t$43$hw = zext i64 0 to i128
+  %t$43$hi = shl i128 %t$43$hw, 64
+  %t$43$r = or i128 %t$43$hi, %t$43$lo
+  ret i128 %t$43$r
 wrepack_next_40:
   %t$44 = add i64 0, 1
   %t$45 = icmp eq i64 %t$39, %t$44
   br i1 %t$45, label %wrepack_hit_44, label %wrepack_next_44
 wrepack_hit_44:
   %t$46 = call i64 @sprout_field(i64 %t$38, i64 0)
-  %t$47$r0 = insertvalue { i64, i64 } undef, i64 %t$39, 0
-  %t$47$r1 = insertvalue { i64, i64 } %t$47$r0, i64 %t$46, 1
-  ret { i64, i64 } %t$47$r1
+  %t$47$lo = zext i64 %t$39 to i128
+  %t$47$hw = zext i64 %t$46 to i128
+  %t$47$hi = shl i128 %t$47$hw, 64
+  %t$47$r = or i128 %t$47$hi, %t$47$lo
+  ret i128 %t$47$r
 wrepack_next_44:
   call void @sprout_abort_match()
   unreachable
 else_34:
-  %t$48$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$48$r1 = insertvalue { i64, i64 } %t$48$r0, i64 0, 1
-  ret { i64, i64 } %t$48$r1
+  %t$48$lo = zext i64 0 to i128
+  %t$48$hw = zext i64 0 to i128
+  %t$48$hi = shl i128 %t$48$hw, 64
+  %t$48$r = or i128 %t$48$hi, %t$48$lo
+  ret i128 %t$48$r
 }
 
 define i64 @__sprout_ir_eta___tc_Eq_String_eq_26(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
@@ -83169,7 +84329,7 @@ entry:
   ret i64 %ret
 }
 
-define { i64, i64 } @stdlib.compiler.parser.validate_ctor_where_worker(i64 %p$exist_vars, i64 %p$where_cons, i64 %p$tokens, i64 %p$i) {
+define i128 @stdlib.compiler.parser.validate_ctor_where_worker(i64 %p$exist_vars, i64 %p$where_cons, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$where_cons)
   br label %arm_0_1
@@ -83203,9 +84363,10 @@ body_1_1:
   %t$57 = alloca i64
   store i64 %t$10, ptr %t$57
   %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$11$st = call { i64, i64 } @stdlib.compiler.parser.constraint_var_name_worker(i64 %t$9)
-  %t$11 = extractvalue { i64, i64 } %t$11$st, 0
-  %t$12 = extractvalue { i64, i64 } %t$11$st, 1
+  %t$11$st = call i128 @stdlib.compiler.parser.constraint_var_name_worker(i64 %t$9)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
   %t$59 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_13
 arm_0_13:
@@ -83378,24 +84539,28 @@ join_1:
   br i1 %t$44, label %wrepack_hit_43, label %wrepack_next_43
 wrepack_hit_43:
   %t$45 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$46$r0 = insertvalue { i64, i64 } undef, i64 %t$42, 0
-  %t$46$r1 = insertvalue { i64, i64 } %t$46$r0, i64 %t$45, 1
-  ret { i64, i64 } %t$46$r1
+  %t$46$lo = zext i64 %t$42 to i128
+  %t$46$hw = zext i64 %t$45 to i128
+  %t$46$hi = shl i128 %t$46$hw, 64
+  %t$46$r = or i128 %t$46$hi, %t$46$lo
+  ret i128 %t$46$r
 wrepack_next_43:
   %t$47 = add i64 0, 8
   %t$48 = icmp eq i64 %t$42, %t$47
   br i1 %t$48, label %wrepack_hit_47, label %wrepack_next_47
 wrepack_hit_47:
   %t$49 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$50$r0 = insertvalue { i64, i64 } undef, i64 %t$42, 0
-  %t$50$r1 = insertvalue { i64, i64 } %t$50$r0, i64 %t$49, 1
-  ret { i64, i64 } %t$50$r1
+  %t$50$lo = zext i64 %t$42 to i128
+  %t$50$hw = zext i64 %t$49 to i128
+  %t$50$hi = shl i128 %t$50$hw, 64
+  %t$50$r = or i128 %t$50$hi, %t$50$lo
+  ret i128 %t$50$r
 wrepack_next_47:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.session_declare_worker(i64 %p$session, i64 %p$line) {
+define i128 @stdlib.compiler.session_declare_worker(i64 %p$session, i64 %p$line) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$session, i64 0)
   %t$1 = call i64 @sprout_field(i64 %p$session, i64 1)
@@ -83417,9 +84582,10 @@ entry:
   %t$34 = alloca i64
   store i64 %t$4, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$5$st = call { i64, i64 } @analysis_session_update_worker(i64 %t$0, i64 %t$4, i64 %p$line)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @analysis_session_update_worker(i64 %t$0, i64 %t$4, i64 %p$line)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$37 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_7
@@ -83488,24 +84654,28 @@ join_7:
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$8, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$17 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$17, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$8, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$17 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.session_import_worker(i64 %p$session, i64 %p$line) {
+define i128 @stdlib.compiler.session_import_worker(i64 %p$session, i64 %p$line) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$session, i64 0)
   %t$1 = call i64 @sprout_field(i64 %p$session, i64 1)
@@ -83527,9 +84697,10 @@ entry:
   %t$34 = alloca i64
   store i64 %t$4, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$5$st = call { i64, i64 } @analysis_session_update_worker(i64 %t$0, i64 %t$4, i64 %p$line)
-  %t$5 = extractvalue { i64, i64 } %t$5$st, 0
-  %t$6 = extractvalue { i64, i64 } %t$5$st, 1
+  %t$5$st = call i128 @analysis_session_update_worker(i64 %t$0, i64 %t$4, i64 %p$line)
+  %t$5 = trunc i128 %t$5$st to i64
+  %t$5$hi = lshr i128 %t$5$st, 64
+  %t$6 = trunc i128 %t$5$hi to i64
   %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$37 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_7
@@ -83598,24 +84769,28 @@ join_7:
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
   %t$20 = call i64 @sprout_field(i64 %t$8, i64 0)
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 %t$20, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$17 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   %t$22 = add i64 0, 8
   %t$23 = icmp eq i64 %t$17, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
   %t$24 = call i64 @sprout_field(i64 %t$8, i64 0)
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$17, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 %t$24, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$17 to i128
+  %t$25$hw = zext i64 %t$24 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.source.first_codepoint_worker(i64 %p$s) {
+define i128 @stdlib.compiler.source.first_codepoint_worker(i64 %p$s) {
 entry:
   %t$23 = alloca i64
   store i64 %p$s, ptr %t$23
@@ -83665,24 +84840,28 @@ join_4:
   %t$16 = icmp eq i64 %t$14, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$14, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 0, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$14 to i128
+  %t$18$hw = zext i64 0 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   %t$19 = add i64 0, 1
   %t$20 = icmp eq i64 %t$14, %t$19
   br i1 %t$20, label %wrepack_hit_19, label %wrepack_next_19
 wrepack_hit_19:
   %t$21 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$22$r0 = insertvalue { i64, i64 } undef, i64 %t$14, 0
-  %t$22$r1 = insertvalue { i64, i64 } %t$22$r0, i64 %t$21, 1
-  ret { i64, i64 } %t$22$r1
+  %t$22$lo = zext i64 %t$14 to i128
+  %t$22$hw = zext i64 %t$21 to i128
+  %t$22$hi = shl i128 %t$22$hw, 64
+  %t$22$r = or i128 %t$22$hi, %t$22$lo
+  ret i128 %t$22$r
 wrepack_next_19:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.source.match_string_worker(i64 %p$expected, i64 %p$cursor) {
+define i128 @stdlib.compiler.source.match_string_worker(i64 %p$expected, i64 %p$cursor) {
 entry:
   %t$0 = call i64 @stdlib.compiler.source.cursor_source(i64 %p$cursor)
   %t$1 = call i64 @stdlib.compiler.source.cursor_byte_offset(i64 %p$cursor)
@@ -83711,16 +84890,20 @@ then_3:
   %t$5 = call i64 @stdlib.string.length(i64 %p$expected)
   %t$6 = call i64 @stdlib.compiler.source.advance_expected(i64 %p$cursor, i64 %p$expected, i64 %t$4, i64 %t$5)
   %t$21 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$7$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$7$r1 = insertvalue { i64, i64 } %t$7$r0, i64 %t$6, 1
-  ret { i64, i64 } %t$7$r1
+  %t$7$lo = zext i64 1 to i128
+  %t$7$hw = zext i64 %t$6 to i128
+  %t$7$hi = shl i128 %t$7$hw, 64
+  %t$7$r = or i128 %t$7$hi, %t$7$lo
+  ret i128 %t$7$r
 else_3:
-  %t$8$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$8$r1 = insertvalue { i64, i64 } %t$8$r0, i64 0, 1
-  ret { i64, i64 } %t$8$r1
+  %t$8$lo = zext i64 0 to i128
+  %t$8$hw = zext i64 0 to i128
+  %t$8$hi = shl i128 %t$8$hw, 64
+  %t$8$r = or i128 %t$8$hi, %t$8$lo
+  ret i128 %t$8$r
 }
 
-define { i64, i64 } @stdlib.compiler.source.peek_worker(i64 %p$cursor) {
+define i128 @stdlib.compiler.source.peek_worker(i64 %p$cursor) {
 entry:
   %t$0 = call i64 @stdlib.compiler.source.cursor_bytes(i64 %p$cursor)
   %t$1 = call i64 @stdlib.compiler.source.cursor_byte_offset(i64 %p$cursor)
@@ -83766,24 +84949,28 @@ join_4:
   %t$16 = icmp eq i64 %t$14, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$14, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 0, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$14 to i128
+  %t$18$hw = zext i64 0 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   %t$19 = add i64 0, 1
   %t$20 = icmp eq i64 %t$14, %t$19
   br i1 %t$20, label %wrepack_hit_19, label %wrepack_next_19
 wrepack_hit_19:
   %t$21 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$22$r0 = insertvalue { i64, i64 } undef, i64 %t$14, 0
-  %t$22$r1 = insertvalue { i64, i64 } %t$22$r0, i64 %t$21, 1
-  ret { i64, i64 } %t$22$r1
+  %t$22$lo = zext i64 %t$14 to i128
+  %t$22$hw = zext i64 %t$21 to i128
+  %t$22$hi = shl i128 %t$22$hw, 64
+  %t$22$r = or i128 %t$22$hi, %t$22$lo
+  ret i128 %t$22$r
 wrepack_next_19:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.compiler.token.token_kind_worker(i64 %p$token) {
+define i128 @stdlib.compiler.token.token_kind_worker(i64 %p$token) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$token, i64 0)
   %t$1 = call i64 @sprout_tag(i64 %t$0)
@@ -83791,135 +84978,167 @@ entry:
   %t$3 = icmp eq i64 %t$1, %t$2
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 0, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 0 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 27
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 0, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 0 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   %t$10 = add i64 0, 28
   %t$11 = icmp eq i64 %t$1, %t$10
   br i1 %t$11, label %wrepack_hit_10, label %wrepack_next_10
 wrepack_hit_10:
-  %t$13$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$13$r1 = insertvalue { i64, i64 } %t$13$r0, i64 0, 1
-  ret { i64, i64 } %t$13$r1
+  %t$13$lo = zext i64 %t$1 to i128
+  %t$13$hw = zext i64 0 to i128
+  %t$13$hi = shl i128 %t$13$hw, 64
+  %t$13$r = or i128 %t$13$hi, %t$13$lo
+  ret i128 %t$13$r
 wrepack_next_10:
   %t$14 = add i64 0, 29
   %t$15 = icmp eq i64 %t$1, %t$14
   br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
 wrepack_hit_14:
-  %t$17$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$17$r1 = insertvalue { i64, i64 } %t$17$r0, i64 0, 1
-  ret { i64, i64 } %t$17$r1
+  %t$17$lo = zext i64 %t$1 to i128
+  %t$17$hw = zext i64 0 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 wrepack_next_14:
   %t$18 = add i64 0, 30
   %t$19 = icmp eq i64 %t$1, %t$18
   br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
 wrepack_hit_18:
-  %t$21$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$21$r1 = insertvalue { i64, i64 } %t$21$r0, i64 0, 1
-  ret { i64, i64 } %t$21$r1
+  %t$21$lo = zext i64 %t$1 to i128
+  %t$21$hw = zext i64 0 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
 wrepack_next_18:
   %t$22 = add i64 0, 31
   %t$23 = icmp eq i64 %t$1, %t$22
   br i1 %t$23, label %wrepack_hit_22, label %wrepack_next_22
 wrepack_hit_22:
-  %t$25$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$25$r1 = insertvalue { i64, i64 } %t$25$r0, i64 0, 1
-  ret { i64, i64 } %t$25$r1
+  %t$25$lo = zext i64 %t$1 to i128
+  %t$25$hw = zext i64 0 to i128
+  %t$25$hi = shl i128 %t$25$hw, 64
+  %t$25$r = or i128 %t$25$hi, %t$25$lo
+  ret i128 %t$25$r
 wrepack_next_22:
   %t$26 = add i64 0, 32
   %t$27 = icmp eq i64 %t$1, %t$26
   br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
 wrepack_hit_26:
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 0, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 %t$1 to i128
+  %t$29$hw = zext i64 0 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 wrepack_next_26:
   %t$30 = add i64 0, 33
   %t$31 = icmp eq i64 %t$1, %t$30
   br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
 wrepack_hit_30:
-  %t$33$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$33$r1 = insertvalue { i64, i64 } %t$33$r0, i64 0, 1
-  ret { i64, i64 } %t$33$r1
+  %t$33$lo = zext i64 %t$1 to i128
+  %t$33$hw = zext i64 0 to i128
+  %t$33$hi = shl i128 %t$33$hw, 64
+  %t$33$r = or i128 %t$33$hi, %t$33$lo
+  ret i128 %t$33$r
 wrepack_next_30:
   %t$34 = add i64 0, 34
   %t$35 = icmp eq i64 %t$1, %t$34
   br i1 %t$35, label %wrepack_hit_34, label %wrepack_next_34
 wrepack_hit_34:
-  %t$37$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$37$r1 = insertvalue { i64, i64 } %t$37$r0, i64 0, 1
-  ret { i64, i64 } %t$37$r1
+  %t$37$lo = zext i64 %t$1 to i128
+  %t$37$hw = zext i64 0 to i128
+  %t$37$hi = shl i128 %t$37$hw, 64
+  %t$37$r = or i128 %t$37$hi, %t$37$lo
+  ret i128 %t$37$r
 wrepack_next_34:
   %t$38 = add i64 0, 35
   %t$39 = icmp eq i64 %t$1, %t$38
   br i1 %t$39, label %wrepack_hit_38, label %wrepack_next_38
 wrepack_hit_38:
-  %t$41$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$41$r1 = insertvalue { i64, i64 } %t$41$r0, i64 0, 1
-  ret { i64, i64 } %t$41$r1
+  %t$41$lo = zext i64 %t$1 to i128
+  %t$41$hw = zext i64 0 to i128
+  %t$41$hi = shl i128 %t$41$hw, 64
+  %t$41$r = or i128 %t$41$hi, %t$41$lo
+  ret i128 %t$41$r
 wrepack_next_38:
   %t$42 = add i64 0, 36
   %t$43 = icmp eq i64 %t$1, %t$42
   br i1 %t$43, label %wrepack_hit_42, label %wrepack_next_42
 wrepack_hit_42:
-  %t$45$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$45$r1 = insertvalue { i64, i64 } %t$45$r0, i64 0, 1
-  ret { i64, i64 } %t$45$r1
+  %t$45$lo = zext i64 %t$1 to i128
+  %t$45$hw = zext i64 0 to i128
+  %t$45$hi = shl i128 %t$45$hw, 64
+  %t$45$r = or i128 %t$45$hi, %t$45$lo
+  ret i128 %t$45$r
 wrepack_next_42:
   %t$46 = add i64 0, 37
   %t$47 = icmp eq i64 %t$1, %t$46
   br i1 %t$47, label %wrepack_hit_46, label %wrepack_next_46
 wrepack_hit_46:
-  %t$49$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$49$r1 = insertvalue { i64, i64 } %t$49$r0, i64 0, 1
-  ret { i64, i64 } %t$49$r1
+  %t$49$lo = zext i64 %t$1 to i128
+  %t$49$hw = zext i64 0 to i128
+  %t$49$hi = shl i128 %t$49$hw, 64
+  %t$49$r = or i128 %t$49$hi, %t$49$lo
+  ret i128 %t$49$r
 wrepack_next_46:
   %t$50 = add i64 0, 38
   %t$51 = icmp eq i64 %t$1, %t$50
   br i1 %t$51, label %wrepack_hit_50, label %wrepack_next_50
 wrepack_hit_50:
-  %t$53$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$53$r1 = insertvalue { i64, i64 } %t$53$r0, i64 0, 1
-  ret { i64, i64 } %t$53$r1
+  %t$53$lo = zext i64 %t$1 to i128
+  %t$53$hw = zext i64 0 to i128
+  %t$53$hi = shl i128 %t$53$hw, 64
+  %t$53$r = or i128 %t$53$hi, %t$53$lo
+  ret i128 %t$53$r
 wrepack_next_50:
   %t$54 = add i64 0, 39
   %t$55 = icmp eq i64 %t$1, %t$54
   br i1 %t$55, label %wrepack_hit_54, label %wrepack_next_54
 wrepack_hit_54:
-  %t$57$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$57$r1 = insertvalue { i64, i64 } %t$57$r0, i64 0, 1
-  ret { i64, i64 } %t$57$r1
+  %t$57$lo = zext i64 %t$1 to i128
+  %t$57$hw = zext i64 0 to i128
+  %t$57$hi = shl i128 %t$57$hw, 64
+  %t$57$r = or i128 %t$57$hi, %t$57$lo
+  ret i128 %t$57$r
 wrepack_next_54:
   %t$58 = add i64 0, 40
   %t$59 = icmp eq i64 %t$1, %t$58
   br i1 %t$59, label %wrepack_hit_58, label %wrepack_next_58
 wrepack_hit_58:
-  %t$61$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$61$r1 = insertvalue { i64, i64 } %t$61$r0, i64 0, 1
-  ret { i64, i64 } %t$61$r1
+  %t$61$lo = zext i64 %t$1 to i128
+  %t$61$hw = zext i64 0 to i128
+  %t$61$hi = shl i128 %t$61$hw, 64
+  %t$61$r = or i128 %t$61$hi, %t$61$lo
+  ret i128 %t$61$r
 wrepack_next_58:
   %t$62 = add i64 0, 41
   %t$63 = icmp eq i64 %t$1, %t$62
   br i1 %t$63, label %wrepack_hit_62, label %wrepack_next_62
 wrepack_hit_62:
-  %t$65$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$65$r1 = insertvalue { i64, i64 } %t$65$r0, i64 0, 1
-  ret { i64, i64 } %t$65$r1
+  %t$65$lo = zext i64 %t$1 to i128
+  %t$65$hw = zext i64 0 to i128
+  %t$65$hi = shl i128 %t$65$hw, 64
+  %t$65$r = or i128 %t$65$hi, %t$65$lo
+  ret i128 %t$65$r
 wrepack_next_62:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.fs.read_text_worker(i64 %p$path) {
+define i128 @stdlib.fs.read_text_worker(i64 %p$path) {
 entry:
   %t$10 = alloca i64
   store i64 %p$path, ptr %t$10
@@ -83932,28 +85151,33 @@ entry:
   br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
 wrepack_hit_2:
   %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 %t$4, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 wrepack_next_2:
   %t$6 = add i64 0, 8
   %t$7 = icmp eq i64 %t$1, %t$6
   br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
 wrepack_hit_6:
   %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
-  %t$9$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$9$r1 = insertvalue { i64, i64 } %t$9$r0, i64 %t$8, 1
-  ret { i64, i64 } %t$9$r1
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
 wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.repl.find_imported_namespace_ref_worker(i64 %p$namespace, i64 %p$imports, i64 %p$index) {
+define i128 @stdlib.repl.find_imported_namespace_ref_worker(i64 %p$namespace, i64 %p$imports, i64 %p$index) {
 entry:
-  %t$0$st = call { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$imports)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @vec_get_worker(i64 %p$index, i64 %p$imports)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 1
@@ -84012,9 +85236,10 @@ then_10:
   %t$75 = alloca i64
   store i64 %t$16, ptr %t$75
   %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$17$st = call { i64, i64 } @stdlib.repl.imported_namespace_ref_for_namespace_worker(i64 %p$namespace, i64 %t$16)
-  %t$17 = extractvalue { i64, i64 } %t$17$st, 0
-  %t$18 = extractvalue { i64, i64 } %t$17$st, 1
+  %t$17$st = call i128 @stdlib.repl.imported_namespace_ref_for_namespace_worker(i64 %p$namespace, i64 %t$16)
+  %t$17 = trunc i128 %t$17$st to i64
+  %t$17$hi = lshr i128 %t$17$st, 64
+  %t$18 = trunc i128 %t$17$hi to i64
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$78 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_19
@@ -84104,24 +85329,28 @@ join_2:
   %t$42 = icmp eq i64 %t$40, %t$41
   br i1 %t$42, label %wrepack_hit_41, label %wrepack_next_41
 wrepack_hit_41:
-  %t$44$r0 = insertvalue { i64, i64 } undef, i64 %t$40, 0
-  %t$44$r1 = insertvalue { i64, i64 } %t$44$r0, i64 0, 1
-  ret { i64, i64 } %t$44$r1
+  %t$44$lo = zext i64 %t$40 to i128
+  %t$44$hw = zext i64 0 to i128
+  %t$44$hi = shl i128 %t$44$hw, 64
+  %t$44$r = or i128 %t$44$hi, %t$44$lo
+  ret i128 %t$44$r
 wrepack_next_41:
   %t$45 = add i64 0, 1
   %t$46 = icmp eq i64 %t$40, %t$45
   br i1 %t$46, label %wrepack_hit_45, label %wrepack_next_45
 wrepack_hit_45:
   %t$47 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$48$r0 = insertvalue { i64, i64 } undef, i64 %t$40, 0
-  %t$48$r1 = insertvalue { i64, i64 } %t$48$r0, i64 %t$47, 1
-  ret { i64, i64 } %t$48$r1
+  %t$48$lo = zext i64 %t$40 to i128
+  %t$48$hw = zext i64 %t$47 to i128
+  %t$48$hi = shl i128 %t$48$hw, 64
+  %t$48$r = or i128 %t$48$hi, %t$48$lo
+  ret i128 %t$48$r
 wrepack_next_45:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.repl.imported_namespace_ref_for_namespace_worker(i64 %p$namespace, i64 %p$line) {
+define i128 @stdlib.repl.imported_namespace_ref_for_namespace_worker(i64 %p$namespace, i64 %p$line) {
 entry:
   %t$0 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1207, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -84227,9 +85456,11 @@ then_19:
   %t$88 = call i64 @sprout_gc_push_i64_root(ptr %t$87)
   %t$28 = call i64 @__tc_Semigroup_String_append(i64 %t$26, i64 %t$27)
   %t$89 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$29$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$29$r1 = insertvalue { i64, i64 } %t$29$r0, i64 %t$28, 1
-  ret { i64, i64 } %t$29$r1
+  %t$29$lo = zext i64 1 to i128
+  %t$29$hw = zext i64 %t$28 to i128
+  %t$29$hi = shl i128 %t$29$hw, 64
+  %t$29$r = or i128 %t$29$hi, %t$29$lo
+  ret i128 %t$29$r
 else_19:
   %t$90 = alloca i64
   store i64 %p$namespace, ptr %t$90
@@ -84288,16 +85519,20 @@ then_35:
   %t$116 = call i64 @sprout_gc_push_i64_root(ptr %t$115)
   %t$42 = call i64 @__tc_Semigroup_String_append(i64 %t$40, i64 %t$41)
   %t$117 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$43$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$43$r1 = insertvalue { i64, i64 } %t$43$r0, i64 %t$42, 1
-  ret { i64, i64 } %t$43$r1
+  %t$43$lo = zext i64 1 to i128
+  %t$43$hw = zext i64 %t$42 to i128
+  %t$43$hi = shl i128 %t$43$hw, 64
+  %t$43$r = or i128 %t$43$hi, %t$43$lo
+  ret i128 %t$43$r
 else_35:
-  %t$44$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$44$r1 = insertvalue { i64, i64 } %t$44$r0, i64 0, 1
-  ret { i64, i64 } %t$44$r1
+  %t$44$lo = zext i64 0 to i128
+  %t$44$hw = zext i64 0 to i128
+  %t$44$hi = shl i128 %t$44$hw, 64
+  %t$44$r = or i128 %t$44$hi, %t$44$lo
+  ret i128 %t$44$r
 }
 
-define { i64, i64 } @stdlib.repl.read_input_line_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache) {
+define i128 @stdlib.repl.read_input_line_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$prompt)
   br label %arm_0_1
@@ -84339,24 +85574,28 @@ join_1:
   %t$12 = icmp eq i64 %t$10, %t$11
   br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
 wrepack_hit_11:
-  %t$14$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$14$r1 = insertvalue { i64, i64 } %t$14$r0, i64 0, 1
-  ret { i64, i64 } %t$14$r1
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 0 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
 wrepack_next_11:
   %t$15 = add i64 0, 1
   %t$16 = icmp eq i64 %t$10, %t$15
   br i1 %t$16, label %wrepack_hit_15, label %wrepack_next_15
 wrepack_hit_15:
   %t$17 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$18$r0 = insertvalue { i64, i64 } undef, i64 %t$10, 0
-  %t$18$r1 = insertvalue { i64, i64 } %t$18$r0, i64 %t$17, 1
-  ret { i64, i64 } %t$18$r1
+  %t$18$lo = zext i64 %t$10 to i128
+  %t$18$hw = zext i64 %t$17 to i128
+  %t$18$hi = shl i128 %t$18$hw, 64
+  %t$18$r = or i128 %t$18$hi, %t$18$lo
+  ret i128 %t$18$r
 wrepack_next_15:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.repl.read_submission_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache) {
+define i128 @stdlib.repl.read_submission_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache) {
 entry:
   %t$37 = alloca i64
   store i64 %p$session, ptr %t$37
@@ -84370,9 +85609,10 @@ entry:
   %t$43 = alloca i64
   store i64 %p$completion_cache, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$0$st = call { i64, i64 } @stdlib.repl.read_input_line_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
+  %t$0$st = call i128 @stdlib.repl.read_input_line_worker(i64 %p$prompt, i64 %p$history, i64 %p$session, i64 %p$completion_cache)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
   %t$45 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_2
 arm_0_2:
@@ -84457,51 +85697,62 @@ join_2:
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$20 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   %t$25 = add i64 0, 202
   %t$26 = icmp eq i64 %t$20, %t$25
   br i1 %t$26, label %wrepack_hit_25, label %wrepack_next_25
 wrepack_hit_25:
-  %t$28$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$28$r1 = insertvalue { i64, i64 } %t$28$r0, i64 0, 1
-  ret { i64, i64 } %t$28$r1
+  %t$28$lo = zext i64 %t$20 to i128
+  %t$28$hw = zext i64 0 to i128
+  %t$28$hi = shl i128 %t$28$hw, 64
+  %t$28$r = or i128 %t$28$hi, %t$28$lo
+  ret i128 %t$28$r
 wrepack_next_25:
   %t$29 = add i64 0, 203
   %t$30 = icmp eq i64 %t$20, %t$29
   br i1 %t$30, label %wrepack_hit_29, label %wrepack_next_29
 wrepack_hit_29:
   %t$31 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$32$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$32$r1 = insertvalue { i64, i64 } %t$32$r0, i64 %t$31, 1
-  ret { i64, i64 } %t$32$r1
+  %t$32$lo = zext i64 %t$20 to i128
+  %t$32$hw = zext i64 %t$31 to i128
+  %t$32$hi = shl i128 %t$32$hw, 64
+  %t$32$r = or i128 %t$32$hi, %t$32$lo
+  ret i128 %t$32$r
 wrepack_next_29:
   %t$33 = add i64 0, 204
   %t$34 = icmp eq i64 %t$20, %t$33
   br i1 %t$34, label %wrepack_hit_33, label %wrepack_next_33
 wrepack_hit_33:
   %t$35 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$36$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$36$r1 = insertvalue { i64, i64 } %t$36$r0, i64 %t$35, 1
-  ret { i64, i64 } %t$36$r1
+  %t$36$lo = zext i64 %t$20 to i128
+  %t$36$hw = zext i64 %t$35 to i128
+  %t$36$hi = shl i128 %t$36$hw, 64
+  %t$36$r = or i128 %t$36$hi, %t$36$lo
+  ret i128 %t$36$r
 wrepack_next_33:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.string.char_at_worker(i64 %p$raw, i64 %p$index) {
+define i128 @stdlib.string.char_at_worker(i64 %p$raw, i64 %p$index) {
 entry:
-  %t$0$st = call { i64, i64 } @str_char_at_unboxed(i64 %p$raw, i64 %p$index)
-  %t$0 = extractvalue { i64, i64 } %t$0$st, 0
-  %t$1 = extractvalue { i64, i64 } %t$0$st, 1
-  %t$2$r0 = insertvalue { i64, i64 } undef, i64 %t$0, 0
-  %t$2$r1 = insertvalue { i64, i64 } %t$2$r0, i64 %t$1, 1
-  ret { i64, i64 } %t$2$r1
+  %t$0$st = call i128 @str_char_at_unboxed(i64 %p$raw, i64 %p$index)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$2$lo = zext i64 %t$0 to i128
+  %t$2$hw = zext i64 %t$1 to i128
+  %t$2$hi = shl i128 %t$2$hw, 64
+  %t$2$r = or i128 %t$2$hi, %t$2$lo
+  ret i128 %t$2$r
 }
 
-define { i64, i64 } @stdlib.string.find_worker(i64 %p$raw, i64 %p$needle) {
+define i128 @stdlib.string.find_worker(i64 %p$raw, i64 %p$needle) {
 entry:
   %t$20 = alloca i64
   store i64 %p$raw, ptr %t$20
@@ -84540,24 +85791,28 @@ join_1:
   %t$13 = icmp eq i64 %t$11, %t$12
   br i1 %t$13, label %wrepack_hit_12, label %wrepack_next_12
 wrepack_hit_12:
-  %t$15$r0 = insertvalue { i64, i64 } undef, i64 %t$11, 0
-  %t$15$r1 = insertvalue { i64, i64 } %t$15$r0, i64 0, 1
-  ret { i64, i64 } %t$15$r1
+  %t$15$lo = zext i64 %t$11 to i128
+  %t$15$hw = zext i64 0 to i128
+  %t$15$hi = shl i128 %t$15$hw, 64
+  %t$15$r = or i128 %t$15$hi, %t$15$lo
+  ret i128 %t$15$r
 wrepack_next_12:
   %t$16 = add i64 0, 1
   %t$17 = icmp eq i64 %t$11, %t$16
   br i1 %t$17, label %wrepack_hit_16, label %wrepack_next_16
 wrepack_hit_16:
   %t$18 = call i64 @sprout_field(i64 %t$2, i64 0)
-  %t$19$r0 = insertvalue { i64, i64 } undef, i64 %t$11, 0
-  %t$19$r1 = insertvalue { i64, i64 } %t$19$r0, i64 %t$18, 1
-  ret { i64, i64 } %t$19$r1
+  %t$19$lo = zext i64 %t$11 to i128
+  %t$19$hw = zext i64 %t$18 to i128
+  %t$19$hi = shl i128 %t$19$hw, 64
+  %t$19$r = or i128 %t$19$hi, %t$19$lo
+  ret i128 %t$19$r
 wrepack_next_16:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.string.hex_digit_value_worker(i64 %p$ch) {
+define i128 @stdlib.string.hex_digit_value_worker(i64 %p$ch) {
 entry:
   %t$0 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.1215, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -84568,9 +85823,10 @@ entry:
   %t$27 = alloca i64
   store i64 %t$2, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$3$st = call { i64, i64 } @stdlib.string.find_worker(i64 %t$1, i64 %t$2)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.string.find_worker(i64 %t$1, i64 %t$2)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_5
 arm_0_5:
@@ -84614,32 +85870,38 @@ join_5:
   %t$18 = icmp eq i64 %t$16, %t$17
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
-  %t$20$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$20$r1 = insertvalue { i64, i64 } %t$20$r0, i64 0, 1
-  ret { i64, i64 } %t$20$r1
+  %t$20$lo = zext i64 %t$16 to i128
+  %t$20$hw = zext i64 0 to i128
+  %t$20$hi = shl i128 %t$20$hw, 64
+  %t$20$r = or i128 %t$20$hi, %t$20$lo
+  ret i128 %t$20$r
 wrepack_next_17:
   %t$21 = add i64 0, 1
   %t$22 = icmp eq i64 %t$16, %t$21
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
   %t$23 = call i64 @sprout_field(i64 %t$6, i64 0)
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$16, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 %t$23, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$16 to i128
+  %t$24$hw = zext i64 %t$23 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$sep) {
+define i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$sep) {
 entry:
   %t$0 = call i64 @stdlib.string.is_empty(i64 %p$sep)
   %t$1 = trunc i64 %t$0 to i1
   br i1 %t$1, label %then_1, label %else_1
 then_1:
-  %t$2$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$2$r1 = insertvalue { i64, i64 } %t$2$r0, i64 0, 1
-  ret { i64, i64 } %t$2$r1
+  %t$2$lo = zext i64 0 to i128
+  %t$2$hw = zext i64 0 to i128
+  %t$2$hi = shl i128 %t$2$hw, 64
+  %t$2$r = or i128 %t$2$hi, %t$2$lo
+  ret i128 %t$2$r
 else_1:
   %t$29 = alloca i64
   store i64 %p$sep, ptr %t$29
@@ -84647,9 +85909,10 @@ else_1:
   %t$31 = alloca i64
   store i64 %p$raw, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$3$st = call { i64, i64 } @stdlib.string.find_worker(i64 %p$raw, i64 %p$sep)
-  %t$3 = extractvalue { i64, i64 } %t$3$st, 0
-  %t$4 = extractvalue { i64, i64 } %t$3$st, 1
+  %t$3$st = call i128 @stdlib.string.find_worker(i64 %p$raw, i64 %p$sep)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_5
 arm_0_5:
@@ -84726,24 +85989,28 @@ join_5:
   %t$22 = icmp eq i64 %t$20, %t$21
   br i1 %t$22, label %wrepack_hit_21, label %wrepack_next_21
 wrepack_hit_21:
-  %t$24$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$24$r1 = insertvalue { i64, i64 } %t$24$r0, i64 0, 1
-  ret { i64, i64 } %t$24$r1
+  %t$24$lo = zext i64 %t$20 to i128
+  %t$24$hw = zext i64 0 to i128
+  %t$24$hi = shl i128 %t$24$hw, 64
+  %t$24$r = or i128 %t$24$hi, %t$24$lo
+  ret i128 %t$24$r
 wrepack_next_21:
   %t$25 = add i64 0, 1
   %t$26 = icmp eq i64 %t$20, %t$25
   br i1 %t$26, label %wrepack_hit_25, label %wrepack_next_25
 wrepack_hit_25:
   %t$27 = call i64 @sprout_field(i64 %t$6, i64 0)
-  %t$28$r0 = insertvalue { i64, i64 } undef, i64 %t$20, 0
-  %t$28$r1 = insertvalue { i64, i64 } %t$28$r0, i64 %t$27, 1
-  ret { i64, i64 } %t$28$r1
+  %t$28$lo = zext i64 %t$20 to i128
+  %t$28$hw = zext i64 %t$27 to i128
+  %t$28$hi = shl i128 %t$28$hw, 64
+  %t$28$r = or i128 %t$28$hi, %t$28$lo
+  ret i128 %t$28$r
 wrepack_next_25:
   call void @sprout_abort_match()
   unreachable
 }
 
-define { i64, i64 } @stdlib.string.strip_prefix_worker(i64 %p$raw, i64 %p$prefix) {
+define i128 @stdlib.string.strip_prefix_worker(i64 %p$raw, i64 %p$prefix) {
 entry:
   %t$6 = alloca i64
   store i64 %p$raw, ptr %t$6
@@ -84766,24 +86033,31 @@ then_1:
   %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$3 = call i64 @stdlib.string.drop(i64 %p$raw, i64 %t$2)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$4$r0 = insertvalue { i64, i64 } undef, i64 1, 0
-  %t$4$r1 = insertvalue { i64, i64 } %t$4$r0, i64 %t$3, 1
-  ret { i64, i64 } %t$4$r1
+  %t$4$lo = zext i64 1 to i128
+  %t$4$hw = zext i64 %t$3 to i128
+  %t$4$hi = shl i128 %t$4$hw, 64
+  %t$4$r = or i128 %t$4$hi, %t$4$lo
+  ret i128 %t$4$r
 else_1:
-  %t$5$r0 = insertvalue { i64, i64 } undef, i64 0, 0
-  %t$5$r1 = insertvalue { i64, i64 } %t$5$r0, i64 0, 1
-  ret { i64, i64 } %t$5$r1
+  %t$5$lo = zext i64 0 to i128
+  %t$5$hw = zext i64 0 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
 }
 
-define { i64, i64 } @vec_get_worker(i64 %p$index, i64 %p$vec) {
+define i128 @vec_get_worker(i64 %p$index, i64 %p$vec) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$vec, i64 0)
-  %t$1$st = call { i64, i64 } @vector_get_unboxed(i64 %t$0, i64 %p$index)
-  %t$1 = extractvalue { i64, i64 } %t$1$st, 0
-  %t$2 = extractvalue { i64, i64 } %t$1$st, 1
-  %t$3$r0 = insertvalue { i64, i64 } undef, i64 %t$1, 0
-  %t$3$r1 = insertvalue { i64, i64 } %t$3$r0, i64 %t$2, 1
-  ret { i64, i64 } %t$3$r1
+  %t$1$st = call i128 @vector_get_unboxed(i64 %t$0, i64 %p$index)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
+  %t$3$lo = zext i64 %t$1 to i128
+  %t$3$hw = zext i64 %t$2 to i128
+  %t$3$hi = shl i128 %t$3$hw, 64
+  %t$3$r = or i128 %t$3$hi, %t$3$lo
+  ret i128 %t$3$r
 }
 
 define void @__sprout_init_globals() {

@@ -247,30 +247,28 @@ export type IROp (..) =
   | IRCall String IRType String (List String)
   # IRCallUnboxed2 <tag> <val> <val_kind> <fn> <args> — Tier-1 CPR peephole.
   # A `match` whose scrutinee is a direct call to a Maybe-returning C extern with
-  # an `_unboxed` { i64, i64 } variant lowers to THIS instead of a boxed IRCall +
+  # an `_unboxed` variant lowers to THIS instead of a boxed IRCall +
   # IRGetTag + IRGetField.  <fn> is the FULL unboxed callee name (e.g.
   # "vector_get_unboxed").  Lowers to:
-  #   %<struct> = call { i64, i64 } @<fn>(<args>)
-  #   <tag>     = extractvalue { i64, i64 } %<struct>, 0
-  #   <val>     = extractvalue { i64, i64 } %<struct>, 1
-  # The struct SSA is synthesized at lowering (derived from <tag>); it never
-  # appears as an IR-level value, so the rooting pass sees exactly two defs:
+  #   %<st> = call i128 @<fn>(<args>)
+  #   <tag> = trunc i128 %<st> to i64              (low word)
+  #   <val> = trunc i128 (lshr i128 %<st>, 64) to i64  (high word)
+  # The i128 SSAs are synthesized at lowering (derived from <tag>); they never
+  # appear as IR-level values, so the rooting pass sees exactly two defs:
   # <tag> (always IRTScalar — a ctor tag) and <val> (the payload, kind <val_kind>).
-  # No `Just` heap allocation occurs (the C `_unboxed` variant returns the struct
-  # by value), eliminating ~20 ns/get of box+strip overhead.  GC: op_triggers_gc
+  # No `Just` heap allocation occurs (the C `_unboxed` variant returns both words
+  # in registers), eliminating ~20 ns/get of box+strip overhead.  GC: op_triggers_gc
   # = true (regex/term_read variants allocate their payload before returning);
   # <val> is rooted per <val_kind> exactly as the boxed IRGetField result was.
   | IRCallUnboxed2 String String IRType String (List String)
   # IRRetUnboxed2 <base> <tag> <val> — Tier-2 CPR: a CPR worker's return.  Packs
   # the ctor tag and its single payload (0 for a nullary ctor) into the
-  # { i64, i64 } worker ABI and returns by value — no `Just`/ctor heap box.
-  # <tag>/<val> may be SSA names OR integer literals ("13", "0"); <base> is a
-  # FRESH SSA name (e.g. %t$7) that seeds the two insertvalue temporaries so the
-  # emitted names are always valid regardless of literal operands.  Emitted only
-  # inside a `define { i64, i64 } @<fn>_worker`.  Lowers to:
-  #   <base>$r0 = insertvalue { i64, i64 } undef, i64 <tag>, 0
-  #   <base>$r1 = insertvalue { i64, i64 } <base>$r0, i64 <val>, 1
-  #   ret { i64, i64 } <base>$r1
+  # i128 worker ABI (tag low, payload high) and returns by value — no
+  # `Just`/ctor heap box. <tag>/<val> may be SSA names OR integer literals
+  # ("13", "0"); <base> is a FRESH SSA name (e.g. %t$7) that seeds the packing
+  # temporaries so the emitted names are always valid regardless of literal
+  # operands.  Emitted only inside a `define i128 @<fn>_worker`.  Lowers to:
+  #   ret i128 (zext <val> << 64) | zext <tag>   (four instructions)
   # No GC trigger between materializing <val> and the ret, so <val> needs no
   # extra root here (the callee already rooted it if heap).
   | IRRetUnboxed2 String String String

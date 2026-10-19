@@ -1303,6 +1303,18 @@ smoke-shapes: bootstrap-from-seed
   fi
   echo "==> smoke-shapes ✓"
 
+# The CPR `_unboxed` declares in emitted IR must match clang's definitions of the C
+# functions on this host, or whole-program linking cannot inline them.
+[group('smoke')]
+cpr-declare-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_cprdecl_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
+    tests/smoke_shapes/01_noparam.spr > "$TMPD/shape.ll"
+  bash scripts/cpr_declare_check.sh "$TMPD/shape.ll" runtime/sprout_runtime.c
+
 # Optimized-codegen smoke.  Each tests/codegen_o2/*.spr must emit IR that survives
 # `clang -O2`.  Nothing else checks this: `just test` links test IR with no -O flag,
 # so a backend failure that only -O2 reaches (an LLVM pass breaking a `musttail`,
@@ -3785,6 +3797,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
+    "cpr-declare-check|cpr-declare-check"
     "opt-harness-check|opt-harness-check"
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
@@ -4066,7 +4079,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate check-approved-builtins check-extern-signatures cpr-declare-check backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

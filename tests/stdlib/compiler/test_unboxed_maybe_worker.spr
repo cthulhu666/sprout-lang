@@ -10,7 +10,7 @@ import stdlib.compiler.source as source
 
 # Tier-2 CPR: a `match` whose scrutinee is a direct call to a Maybe-returning
 # *Sprout* function (not a C extern) must route to an emitted worker that
-# returns { i64, i64 } — NOT the boxed `i64 @mvget` that allocates a `Just`.
+# returns i128 — NOT the boxed `i64 @mvget` that allocates a `Just`.
 # `mvget` mirrors stdlib.mutable.mutvec_get: a thin wrapper whose Maybe escapes
 # as a return value, so Tier-1 (direct-extern only) never fires on it.
 
@@ -80,9 +80,9 @@ fn main() -> Unit !{IO} =
             let ir = ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
             in [
               check_true("worker define emitted",
-                str_find(ir, "define { i64, i64 } @mvget_worker(") >= 0),
+                str_find(ir, "define i128 @mvget_worker(") >= 0),
               check_true("match site calls the worker",
-                str_find(ir, "call { i64, i64 } @mvget_worker(") >= 0),
+                str_find(ir, "call i128 @mvget_worker(") >= 0),
               check_true("no boxed mvget call at match site",
                 str_find(ir, "call i64 @mvget(") < 0)
             ])

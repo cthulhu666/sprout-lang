@@ -4,7 +4,7 @@ import stdlib.test (TestState, new_state, assert_eq, summary)
 # GC-stress regression for Tier-2 CPR *workers* returning a HEAP payload.
 #
 # Tier-1's heap-payload stress test hits the extern `_unboxed` path. This one
-# exercises the new surface: a `{i64,i64}` Sprout `@<fn>_worker` whose `val`
+# exercises the new surface: an `i128` Sprout `@<fn>_worker` whose `val`
 # slot is a live heap String, held across a GC trigger, reached via a WORKER
 # CHAIN (outer_worker -> inner_worker) and consumed both through a `match` and a
 # `<-` do-bind. If the worker body / call site fails to root `val` (kind
