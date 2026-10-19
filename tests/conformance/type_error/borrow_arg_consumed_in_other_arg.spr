@@ -1,0 +1,19 @@
+module main
+
+# The callee holds a `borrowing` argument for the whole call, so it can read `b`
+# after consuming `c`. Left to right, the borrow comes first and the consume is
+# the normal next step, so the call was accepted and printed 2.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = match f with | File n -> n
+
+fn release(f: File) -> Int = match f with | File n -> n
+
+fn both(b: borrowing File, c: File) -> Int = release(c) + peek(b)
+
+fn bad() -> Int =
+  let f = File(1)
+  in both(f, f)
+
+fn main() -> Unit !{IO} = print(to_string(bad()))

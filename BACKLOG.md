@@ -1975,13 +1975,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   rejects a bare type variable only when it is discarded. Fix needs a design: a linearity bound on
   type parameters (P3 **Linearity bound on a type parameter**), or inferring per type parameter
   whether the body may copy it. Blocks `docs/persistent-array-v0.md` §5.3.
-- [ ] `P1` **One call can borrow and consume the same linear value.** `f(x, x)` with
-  `f(b: borrowing L, c: L)` is accepted and runs (verified 2026-10-19). The borrow is checked as a
-  read before the consume, left to right, but the callee holds both for the whole call, so `f` can
-  read `b` after consuming `c`. Spec §5.8 already states the whole-call rule for a lambda at a
-  `local` position; plain `borrowing` arguments need it too. Rust rejects `f(&x, x)` (E0505). Fix:
-  in `linear_check`, a value one argument borrows may not be consumed by another argument of the
-  same call. Blocks `docs/persistent-array-v0.md` §5.3.
 - [ ] `P1` **A top-level `let` can hold a linear value that every function consumes.** With
   `let g = L(1)` at module level, `fn a() -> Int = consume(g)` and `fn b` the same are accepted,
   and `a() + b()` consumes `g` twice (verified running, 2026-10-19). The linear pass tracks binders

@@ -455,6 +455,9 @@ fn local_tyvar_msg(name: String) -> String =
 fn lent_consumed_msg(name: String) -> String =
   "'" ++ name ++ "' is lent to a `local` closure for the whole call and cannot be consumed in another argument of it"
 
+fn borrow_arg_consumed_msg(name: String) -> String =
+  "'" ++ name ++ "' is borrowed by another argument of this call and cannot be consumed in it: the callee holds the borrow for the whole call, so it could read '" ++ name ++ "' after consuming it"
+
 fn once_reuse_msg(name: String) -> String =
   "`once` parameter '" ++ name ++ "' is used more than once: declaring it `once` promises callers this function invokes it AT MOST once, and that promise is what licenses them to move a linear value into the closure they pass"
 
@@ -756,16 +759,42 @@ fn lin_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
   | LinOk cc cb ->
       lin_call_args(drop_leading_dicts(args), typed_ast.typed_expr_type(callee), cc, cb, Nil, sc, env)
 
+# A borrow the callee holds for the whole call: one a literal lambda at a `local`
+# slot captures, or a variable passed at a `borrowing` slot. The kind picks the
+# wording only.
+type Loan (..) =
+  | LentToClosure LinUse
+  | LentToParam LinUse
+
+fn loan_name(l: Loan) -> String =
+  match l with
+  | LentToClosure u -> luse_name(u)
+  | LentToParam u -> luse_name(u)
+
+fn loan_consumed_msg(l: Loan) -> String =
+  match l with
+  | LentToClosure u -> lent_consumed_msg(luse_name(u))
+  | LentToParam u -> borrow_arg_consumed_msg(luse_name(u))
+
+# The first use in `us` that consumes a loaned name, with its loan.
+fn first_loaned(us: List LinUse, loans: List Loan) -> Maybe (LinUse, Loan) =
+  match us with
+  | Nil -> Nothing
+  | Cons u rest ->
+      match find(\l -> loan_name(l) == luse_name(u), loans) with
+      | Just l -> Just((u, l))
+      | Nothing -> first_loaned(rest, loans)
+
 # Arguments fold left-to-right (spec-v0.md §6.1), so `seq2` sees them in real
 # evaluation order and the borrow-after-consume rule is exact rather than
 # approximate.
 #
-# `lent` is what the lambdas at `local` slots so far borrow. That borrow lasts the
-# whole call, so a LATER argument may not consume it; seq2 cannot see that order
-# (borrow, then consume is the normal session shape), and the reverse order is
-# seq2's use-after-consume.
+# `lent` is what the call holds borrowed so far. That borrow lasts the whole call,
+# so a LATER argument may not consume it; seq2 cannot see that order (borrow, then
+# consume is the normal session shape), and the reverse order is seq2's
+# use-after-consume.
 fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
-                 ac: List LinUse, ab: List LinUse, lent: List LinUse,
+                 ac: List LinUse, ab: List LinUse, lent: List Loan,
                  sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match args with
   | Nil -> LinOk(ac, ab)
@@ -775,11 +804,11 @@ fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
       | LinOk c b -> lin_call_args_rest(a, rest, spine, ac, ab, lent, c, b, sc, env)
 
 fn lin_call_args_rest(a: typed_ast.TypedExpr, rest: List typed_ast.TypedExpr, spine: types.Type,
-                      ac: List LinUse, ab: List LinUse, lent: List LinUse,
+                      ac: List LinUse, ab: List LinUse, lent: List Loan,
                       c: List LinUse, b: List LinUse,
                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match first_shared(c, lent) with
-  | Just u -> LinErr(luse_pos(u), lent_consumed_msg(luse_name(u)))
+  match first_loaned(c, lent) with
+  | Just (u, l) -> LinErr(luse_pos(u), loan_consumed_msg(l))
   | Nothing ->
       match seq2(ac, ab, c, b) with
       | LinErr p m -> LinErr(p, m)
@@ -787,11 +816,16 @@ fn lin_call_args_rest(a: typed_ast.TypedExpr, rest: List typed_ast.TypedExpr, sp
           lin_call_args(rest, spine_rest(spine), nc, nb,
                         list_append(lent_by_arg(a, spine_own(spine), b), lent), sc, env)
 
-# Only a literal lambda at a `local` slot lends: its borrowed captures are the
-# lent set. Any other argument's borrows are over when it returns.
-fn lent_by_arg(a: typed_ast.TypedExpr, own: types.Ownership, borrows: List LinUse) -> List LinUse =
+# Two arguments lend: a literal lambda at a `local` slot lends its borrowed
+# captures, and a variable at a `borrowing` slot lends itself. Any other
+# argument's borrows end when it returns.
+# Regressions: tests/conformance/type_error/{local_borrow,borrow_arg}_consumed_in_other_arg.
+fn lent_by_arg(a: typed_ast.TypedExpr, own: types.Ownership, borrows: List LinUse) -> List Loan =
   match a with
-  | typed_ast.TLambda _ _ _ _ -> if types.own_is_local(own) then borrows else Nil
+  | typed_ast.TLambda _ _ _ _ ->
+      if types.own_is_local(own) then list_map(LentToClosure, borrows) else Nil
+  | typed_ast.TVar _ _ _ ->
+      if types.ownership_is_borrow(own) then list_map(LentToParam, borrows) else Nil
   | _ -> Nil
 
 # One argument, dispatched on how the callee's type says that parameter is
