@@ -108,6 +108,16 @@ fn main() -> Unit !{IO} =
       ! contains (rendered(response(204, "")), "content-length")),
     check_true("a 204 sends no body, even when given one",
       string.ends_with(rendered(response(204, "stray")), "\r\n\r\n")),
+    check_eq("a 204 gets no default content-type",
+      rendered(response(204, "")), "HTTP/1.1 204 No Content\r\n\r\n"),
+    # --- 304 Not Modified -----------------------------------------------------------------------
+    # §15.4.5: no content. §8.6: a Content-Length on a 304 must match the 200 it stands for, which
+    # render cannot know. A cache copies a 304's headers onto the stored response (RFC 9111
+    # §4.3.4), so a defaulted content-type would overwrite the real one.
+    check_eq("a 304 is a status line and nothing else",
+      rendered(response(304, "stray")), "HTTP/1.1 304 Not Modified\r\n\r\n"),
+    check_eq("a 304 keeps the headers its handler set",
+      rendered(with_header("etag", "\"v1\"", response(304, ""))), "HTTP/1.1 304 Not Modified\r\netag: \"v1\"\r\n\r\n"),
     # The whole message, byte for byte: status line, caller headers in order, the defaulted
     # content-type, content-length, one blank line, the body.
     check_eq("the full message, in order",

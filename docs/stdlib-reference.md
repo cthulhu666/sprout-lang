@@ -334,7 +334,7 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `HttpServerResponse` response values built via helper functions
 - `HttpServerError` variants (`HttpInvalidRequest`, `HttpServerUnsupportedStatus`)
 - `parse(raw) -> Result HttpServerError HttpRequest`
-- `render(resp) -> Result HttpServerError String` — a byte-accurate `content-length` on every status but 204, which carries neither that header nor a body (RFC 9110 §8.6, §15.3.5). A handler's own `content-length` and `transfer-encoding` are dropped: framing is the server's
+- `render(resp) -> Result HttpServerError String` — a byte-accurate `content-length` and a default `content-type: text/plain` on every status but 204 and 304. Those two carry no body, no `content-length` and no default `content-type` (RFC 9110 §8.6, §15.3.5, §15.4.5). A handler's own `content-length` and `transfer-encoding` are dropped: framing is the server's job
 - A reply to `HEAD` is the header block a `GET` would get, `content-length` included, with no body (RFC 9110 §9.3.2)
 - `response(status, body) -> HttpServerResponse`
 - `ok(body) -> HttpServerResponse`
@@ -472,8 +472,9 @@ fn payload() -> json.Json =
 ```
 
 `http_response` currently supports a practical fixed subset of common statuses:
-`200`, `201`, `202`, `204`, `400`, `401`, `403`, `404`, `405`, `409`, `410`,
-`422`, `429`, `500`, `501`, `502`, `503`, and `504`. Unsupported codes return
+`200`, `201`, `202`, `204`, `301`, `302`, `303`, `304`, `307`, `308`, `400`,
+`401`, `403`, `404`, `405`, `408`, `409`, `410`, `413`, `422`, `429`, `431`,
+`500`, `501`, `502`, `503`, and `504`. Unsupported codes return
 `Err(HttpUnsupportedStatus(code))` instead of being silently rewritten.
 
 ## stdlib.list
