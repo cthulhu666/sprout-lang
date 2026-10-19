@@ -600,7 +600,7 @@ itself. A constant used above where it was declared has to move up.
 | `stdlib.unicode.tables` | `{zerow,wide,gcb,extpict,incb}_{count,chunks}` |
 | `stdlib.compiler.types` | `effect_pure`, `effect_io` |
 | `stdlib.compiler.source` | `canonical_marker` |
-| `stdlib.compiler.compiler` | `source_entry_path`, `expr_sentinel_name` |
+| `stdlib.compiler.compiler` | `source_entry_path` |
 | `stdlib.compiler.opt_config` | `all_passes` |
 | `ide.saving` | `tick_ms` |
 

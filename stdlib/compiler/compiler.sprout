@@ -4,6 +4,7 @@ import stdlib.compiler.token as token
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.checker as checker
+import stdlib.compiler.infer as infer
 import stdlib.compiler.types as types
 import stdlib.compiler.unifier as unifier
 import stdlib.compiler.module_loader as module_loader
@@ -195,13 +196,16 @@ fn check_source_at(src: String, entry_path: String, stdlib_root: source.StdlibRo
                    extra_roots: List String, cache: bundler.LoadEnv) -> typed_ast.TypedResult !{IO} =
   do
     bundled <- bundler.bundle_source_with_roots(src, entry_path, stdlib_root, extra_roots, cache)
-    match bundled with
-    | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
-    | bundler.BundleOk modules -> check_bundled(modules)
+    check_bundle_result(bundled)
+
+fn check_bundle_result(bundled: bundler.BundleResult) -> typed_ast.TypedResult !{IO} =
+  match bundled with
+  | bundler.BundleErr pos msg -> typed_ast.TypedErr(pos, "bundle: " ++ msg)
+  | bundler.BundleOk modules -> check_bundled(modules)
 
 # Bundling qualifies a named module's own top-level names (`examples.foo.bar`), but every
-# consumer of this env looks them up as written in the file — the REPL's sentinel, the
-# analysis service's ops, `dump_typed_names`. Re-expose the entry module's own names bare
+# consumer of this env looks them up as written in the file — a bare-name `:type` or hover,
+# the analysis service's ops, `dump_typed_names`. Re-expose the entry module's own names bare
 # so the API's contract is unchanged by how it is now implemented. Qualified keys are
 # kept as well, since imported names are only reachable that way.
 fn unqualify_entry_names(module_name: String, env: Dict types.Scheme) -> Dict types.Scheme =
@@ -232,104 +236,87 @@ export fn compile_source_with_cache(src: String, stdlib_root: source.StdlibRoot,
 # The type of an expression in a source context
 # ---------------------------------------------------------------------------
 #
-# Append a sentinel binding to the module, typecheck it, and read the sentinel's Scheme
-# back out of the resulting env:
+# The expression is parsed on its own, its names resolved in the buffer's scope, and it is
+# typed after the buffer's declarations (`infer.typecheck_question`). It is never added to
+# the buffer, so no rule about what a top-level `let` may hold applies to it.
 #
-#   <src>
-#   let __repl_source_value = <expr>
-#
-# The single authority for that trick. Three callers need it — the analysis service's
+# The single authority for this. Three callers need it — the analysis service's
 # type_of_in_source and eval_expr_in_source, and hover in the LSP — and eval needs the
 # Scheme itself (it branches on pure vs !{IO} to decide how to print a value), so the
 # core returns the Scheme and rendering to a string is a wrapper over it.
 #
-# Failures are an ADT rather than a message: the service's error strings and the REPL's
-# :type output are observable, so each caller renders its own wording. A custom ADT and
-# not Result, for the LexParseResult reason above.
+# A failure carries its diagnostics rather than a message: the service's error strings
+# and the REPL's :type output are observable, so each caller renders its own wording. A
+# custom ADT and not Result, for the LexParseResult reason above. A diagnostic about the
+# expression is positioned in the expression's own text, not the buffer's.
 
 export type ExprSchemeResult (..) =
   | ExprSchemeOk types.Scheme
-  | ExprSentinelCollision
   | ExprCheckFailed (List Diagnostic)
-  | ExprNotInferable
-
-# Unlikely to collide with user code, but double-underscore names ARE valid Sprout
-# identifiers (the lexer accepts _ as identifier-start), so the collision is checked.
-# Exported because a caller rendering the collision message needs to name it.
-export let expr_sentinel_name: String = "__repl_source_value"
-
-fn augment_with_sentinel(src: String, expr: String) -> String =
-  src ++ "\nlet " ++ expr_sentinel_name ++ " = " ++ expr
 
 export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: source.StdlibRoot,
                                    extra_roots: List String, cache: bundler.LoadEnv) -> ExprSchemeResult !{IO} =
-  if str_find(src, "let " ++ expr_sentinel_name) != -1 then ExprSentinelCollision
-  else
-    do
-      result <- compile_source_with_cache_roots(
-        augment_with_sentinel(src, expr), stdlib_root, extra_roots, cache)
-      match result with
-      | CompileFail diags -> scheme_of_name_alone(src, expr, stdlib_root, extra_roots, cache, diags)
-      | CompileOk env -> scheme_from_env(expr, env)
+  match parse_question(expr) with
+  | Err diag -> ExprCheckFailed([diag])
+  | Ok question ->
+      do
+        bundled <- bundler.bundle_source_with_question(src, source_entry_path, question, stdlib_root,
+                                                       extra_roots, cache)
+        match bundled with
+        | bundler.QuestionBundleErr pos msg -> check_failed(pos, "bundle: " ++ msg)
+        | bundler.QuestionBundleOk modules qualified ->
+            do
+              checked <- checker.typecheck_bundle_question(modules, qualified)
+              answer_in_buffer(src, expr, checked)
 
-# The sentinel is a synthesized top-level `let`, so it answers to the rules a top-level
-# `let` answers to — including the rejection of one that generalizes a type variable its
-# initializer needs a class dictionary for (`infer.let_dict_ambiguity_msg`). That rule is
-# right for a module and wrong for a question. `:type minimum` asks what `minimum` is, and
-# "a top-level binding holds a single value, so the instance cannot be picked per use"
-# describes a binding nobody wrote. It made a constrained prelude name (`minimum`,
-# `min_by`) unaskable, and evaluating one an error rather than the `<fn: …>` display that
-# already exists for it. A constrained name declared in the source under test does NOT hit
-# this — every reproduction references a name from another module.
+fn parse_question(expr: String) -> Result Diagnostic ast.Expr =
+  match lexer.tokenize(expr) with
+  | Err e -> Err(lex_err_diag(e))
+  | Ok tokens ->
+      match parser.parse_whole_expr(tokens) with
+      | Err e -> Err(parse_err_diag(e))
+      | Ok question -> Ok(question)
+
+fn check_failed(pos: source.SourcePos, msg: String) -> ExprSchemeResult =
+  ExprCheckFailed([diag_error(pos, msg)])
+
+# The buffer must pass every check a compile of it would, the dictionary passes included.
 #
-# So when the augmented check fails, check the source ALONE and answer from the name's own
-# scheme. Only a bare name can be recovered this way, which is the point: an expression
-# has no env entry, so a real type error in one keeps its diagnostics rather than being
-# quietly replaced by an unrelated answer.
-#
-# The extra compile is on the failure path only. The successful case — every literal,
-# call and well-typed name — still costs exactly one.
-fn scheme_of_name_alone(src: String, expr: String, stdlib_root: source.StdlibRoot,
-                        extra_roots: List String, cache: bundler.LoadEnv,
-                        diags: List Diagnostic) -> ExprSchemeResult !{IO} =
+# A bare name answers with what it was DECLARED as. Typing a reference to it would drop an
+# effect that lives only on its Scheme (`fn main() -> Unit !{IO}` would read as `Unit`),
+# and its `where` clause, which Sprout does not infer back.
+fn answer_in_buffer(src: String, expr: String, checked: checker.BundleQuestion) -> ExprSchemeResult !{IO} =
+  match checked with
+  | checker.BundleQuestionErr pos msg -> check_failed(pos, "check: " ++ msg)
+  | checker.BundleQuestionOk prog env answer ->
+      do
+        resolved <- resolve_checked(prog, env)
+        match resolved with
+        | typed_ast.TypedErr pos msg -> check_failed(pos, msg)
+        | typed_ast.TypedOk _ _ ->
+            match env_scheme(string.trim(expr), unqualify_entry_names(bundler.scan_module_name(src), env)) with
+            | Just declared -> ExprSchemeOk(declared)
+            | Nothing -> scheme_of_answer(prog, env, answer)
+
+# The question passes the dictionary passes a declaration would. Only the dispatch
+# verifier sees a class method left at a type the expression does not fix
+# (`\x -> to_string(x)`): no dictionary argument marks it.
+fn scheme_of_answer(prog: typed_ast.TypedProgram, env: Dict types.Scheme,
+                    answer: infer.QuestionResult) -> ExprSchemeResult !{IO} =
   do
-    result <- compile_source_with_cache_roots(src, stdlib_root, extra_roots, cache)
-    match result with
-    | CompileFail _ -> ExprCheckFailed(diags)
-    | CompileOk env ->
-        match env_scheme(string.trim(expr), env) with
-        | Just declared -> ExprSchemeOk(declared)
-        | Nothing -> ExprCheckFailed(diags)
-
-# A bare name answers with what it was DECLARED as; anything else goes through the
-# sentinel.
-#
-# The sentinel re-infers the type of a *reference* to the name, and referencing a value is
-# pure — so a declared effect that lives only on the Scheme is replaced by the sentinel's
-# own, which reported `fn main() -> Unit !{IO}` as plain `Unit` in hover, the REPL's
-# `:type` and the analysis service alike, while the checked env held
-# `Unit !{IO}` under the name's own key the whole time.
-#
-# Only top-level names can hit, because the sentinel is appended at module scope and sees
-# exactly the same bindings — so this changes which Scheme is read, never which name
-# resolves.
-fn scheme_from_env(expr: String, env: Dict types.Scheme) -> ExprSchemeResult =
-  match env_scheme(string.trim(expr), env) with
-  | Just declared -> ExprSchemeOk(declared)
-  | Nothing ->
-      match env_scheme(expr_sentinel_name, env) with
-      | Nothing -> ExprNotInferable
-      | Just scheme -> ExprSchemeOk(scheme)
+    let infer.QuestionOk typed scheme = answer
+      else infer.QuestionErr pos msg -> check_failed(pos, "check: " ++ msg)
+    let Ok resolved = resolve.resolve_question(prog, env, typed)
+      else Err(pos, msg) -> check_failed(pos, "check: " ++ msg)
+    match enforced_dispatch_finding(verify_dispatch.verify_question(prog, resolved)) with
+    | Just (pos, msg) -> check_failed(pos, "check: dispatch-verify: " ++ msg)
+    | Nothing -> ExprSchemeOk(scheme)
 
 # Look up a TOP-LEVEL name that the caller knows only unqualified.
 #
 # A buffer being checked has no `module` header — it enters as `<source>`
 # (`source_entry_path`) — so the bundler gives it the synthetic module name and its
-# top-level declarations land in the env as `$entry.answer`, not `answer`. The
-# sentinel is one of those declarations, appended at module scope. Without this,
-# hover and `:type` on any headerless buffer silently answered Nothing: both
-# lookups in scheme_from_env missed, and ExprNotInferable is indistinguishable
-# from a genuinely untypeable expression.
+# top-level declarations land in the env as `$entry.answer`, not `answer`.
 #
 # Bare form FIRST: a named module's reference to a prelude name is unqualified and
 # must keep hitting the prelude's scheme rather than being re-sought under a
@@ -384,9 +371,7 @@ export fn type_of_expr_in_source(src: String, expr: String, stdlib_root: source.
                                  extra_roots: List String, cache: bundler.LoadEnv) -> Maybe String !{IO} =
   match scheme_of_expr_in_source(src, expr, stdlib_root, extra_roots, cache) with
   | ExprSchemeOk scheme -> Just(types.scheme_to_string(scheme))
-  | ExprSentinelCollision -> Nothing
   | ExprCheckFailed _ -> Nothing
-  | ExprNotInferable -> Nothing
 
 # compile_file: read a file, strip headers, then call compile_source.
 export fn compile_file(path: source.FilePath) -> CompileResult !{IO} =
@@ -565,27 +550,36 @@ fn check_bundled(modules: List (List ast.Decl)) -> typed_ast.TypedResult !{IO} =
     result <- checker.typecheck_bundle(modules, Nil)
     match result with
     | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-    | typed_ast.TypedOk typed_prog env ->
-        match resolve.resolve_program(typed_prog, env) with
-        | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
-        | resolve.ResolveOk resolved ->
-            # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
-            # soundness bug (a dict resolved to the wrong instance) — fatal by
-            # default, verified clean across the corpus + compiler source before
-            # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
-            # (escape hatch for an uncovered false positive in the wild);
-            # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
-            do
-              _ <- report_verify_stats(resolved)
-              match verify_dispatch.verify_program(resolved) with
-              | Nothing -> typed_ast.TypedOk(resolved, env)
-              | Just (vpos, vmsg) ->
-                  match sys_env.get("SPROUT_VERIFY_DISPATCH_OFF") with
-                  | Just _ ->
-                      do
-                        _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
-                        typed_ast.TypedOk(resolved, env)
-                  | Nothing -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
+    | typed_ast.TypedOk typed_prog env -> resolve_checked(typed_prog, env)
+
+# The dictionary passes over a program that type-checked.
+fn resolve_checked(typed_prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
+  match resolve.resolve_program(typed_prog, env) with
+  | resolve.ResolveErr pos msg -> typed_ast.TypedErr(pos, "check: " ++ msg)
+  | resolve.ResolveOk resolved ->
+      # Dictionary-passing verifier (retro item 1, phase 1). A finding is a
+      # soundness bug (a dict resolved to the wrong instance) — fatal by
+      # default, verified clean across the corpus + compiler source before
+      # this flip. SPROUT_VERIFY_DISPATCH_OFF downgrades it to a warning
+      # (escape hatch for an uncovered false positive in the wild);
+      # SPROUT_VERIFY_DISPATCH_STATS logs coverage (verified/skipped/mismatched).
+      do
+        _ <- report_verify_stats(resolved)
+        match enforced_dispatch_finding(verify_dispatch.verify_program(resolved)) with
+        | Nothing -> typed_ast.TypedOk(resolved, env)
+        | Just (vpos, vmsg) -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
+
+# SPROUT_VERIFY_DISPATCH_OFF downgrades a verifier finding to a warning.
+fn enforced_dispatch_finding(found: Maybe (source.SourcePos, String)) -> Maybe(source.SourcePos, String) !{IO} =
+  match found with
+  | Nothing -> Nothing
+  | Just (_, vmsg) ->
+      match sys_env.get("SPROUT_VERIFY_DISPATCH_OFF") with
+      | Nothing -> found
+      | Just _ ->
+          do
+            _ <- eprint("[verify-dispatch] (suppressed) " ++ vmsg)
+            Nothing
 
 export fn compile_phase_lower(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_lower_with_roots(path, stdlib_root, Nil)
@@ -614,15 +608,36 @@ export fn compile_full_ir(path: source.FilePath, stdlib_root: source.StdlibRoot)
     recheck_result <- compile_phase_recheck(path, stdlib_root)
     emit_ir(recheck_result)
 
-# As compile_full_ir for a buffer, reusing a caller-owned LoadEnv so a session that
-# compiles one buffer after another re-reads and re-parses only the buffer, not the
-# prelude and imports. `entry_path` is the buffer's key in the overlay; it need not exist.
-export fn compile_source_full_ir(src: String, entry_path: String, stdlib_root: source.StdlibRoot,
-                                 extra_roots: List String, cache: bundler.LoadEnv) -> IrFullResult !{IO} =
-  do
-    checked <- check_source_at(src, entry_path, stdlib_root, extra_roots, cache)
-    lowered <- lower_checked(checked)
-    emit_ir(lowered)
+# What eval's `main` does with the expression.
+export type EvalMain (..) =
+  | RunAction  # a `Unit !{IO}` action: `main` is the expression
+  | PrintValue  # `main` prints the value's `to_string`
+
+# The program eval runs: the buffer, and a `main` declared in it around the expression.
+# No binding is added, so no name is reserved; a buffer with its own `main` is refused as
+# a duplicate. The caller's LoadEnv is reused, so a session re-parses only the buffer;
+# `entry_path` is the buffer's key in the overlay and need not exist.
+export fn compile_question_ir(src: String, entry_path: String, expr: String, how: EvalMain,
+                              stdlib_root: source.StdlibRoot, extra_roots: List String,
+                              cache: bundler.LoadEnv) -> IrFullResult !{IO} =
+  match parse_question(expr) with
+  | Err diag -> IrFullFail([diag])
+  | Ok question ->
+      do
+        bundled <- bundler.bundle_source_with_decl(src, entry_path, eval_main(how, question), stdlib_root,
+                                                   extra_roots, cache)
+        checked <- check_bundle_result(bundled)
+        lowered <- lower_checked(checked)
+        emit_ir(lowered)
+
+fn eval_main(how: EvalMain, question: ast.Expr) -> ast.Decl =
+  ast.FnDecl("main", Nil, Just(ast.TypeName("Unit")), Just(["IO"]), Nil, eval_main_body(how, question, pos), pos)
+  where pos = ast.expr_pos(question)
+
+fn eval_main_body(how: EvalMain, question: ast.Expr, pos: source.SourcePos) -> ast.Expr =
+  match how with
+  | RunAction -> question
+  | PrintValue -> ast.CallExpr(ast.VarExpr("print", pos), [ast.CallExpr(ast.VarExpr("to_string", pos), [question], pos)], pos)
 
 fn emit_ir(lowered: typed_ast.TypedResult) -> IrFullResult !{IO} =
   match lowered with

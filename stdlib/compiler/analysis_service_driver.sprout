@@ -532,16 +532,10 @@ fn op_instances_in_source(src: String, query: String, state: StartupState) -> js
 # ---------------------------------------------------------------------------
 # type_of_in_source — infer the type of an expression in a source context
 #
-# The mechanism (append a sentinel binding, typecheck, read the sentinel's Scheme back
-# out of the env) lives in compiler.scheme_of_expr_in_source: hover in the LSP needs the
+# The mechanism lives in compiler.scheme_of_expr_in_source: hover in the LSP needs the
 # same answer, and a second copy here is how one question comes to have two answers.
-# This function is now only the wording of the failures, which is observable — the REPL
+# This function is only the wording of the failures, which is observable — the REPL
 # prints these strings.
-#
-# make_eval_source below still builds the binding itself, because it appends a `main` as
-# well; the NAME is shared so the two cannot drift apart.
-
-fn sentinel_name() -> String = compiler.expr_sentinel_name
 
 # First diagnostic's message, or a fallback when the list is empty. Three copies of this
 # rendering existed; the fallback string differs per operation, which is why it is a
@@ -554,22 +548,19 @@ fn first_diag_response(diags: List compiler.Diagnostic, fallback: String) -> jso
 fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.Json !{IO} =
   match compiler.scheme_of_expr_in_source(
       src, expr, source.StdlibRoot(state_stdlib_root(state)), Nil, state_cache(state)) with
-  | compiler.ExprSentinelCollision ->
-      error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot infer type")
   | compiler.ExprCheckFailed diags -> first_diag_response(diags, "type_of_in_source: typecheck failed")
-  | compiler.ExprNotInferable -> error_response("type_of_in_source: could not infer type of expression")
   | compiler.ExprSchemeOk scheme -> ok_response(json.JsonString(types.scheme_to_string(scheme)))
 
 # ---------------------------------------------------------------------------
 # eval_expr_in_source — compile and run an expression in a source context
 #
-# Strategy (mirrors Python's eval_expression_lines_in_source):
-#   1. Augment source with sentinel let-binding; compile to infer its type.
-#   2. Based on the inferred type:
-#      - Pure type T     → add fn main = print(sentinel); requires ToString T
-#      - Unit !{IO}      → add fn main = sentinel (runs the IO action directly)
+# Strategy:
+#   1. Infer the expression's type (compiler.scheme_of_expr_in_source).
+#   2. Declare a `main` around it in the buffer, chosen by that type:
+#      - Pure type T     → main prints its to_string; requires ToString T
+#      - Unit !{IO}      → main is the expression (runs the IO action directly)
 #      - Other T !{IO}   → error (cannot auto-print effectful non-Unit expressions)
-#   3. Compile the augmented source to LLVM IR in memory (compile_source_full_ir),
+#   3. Compile that program to LLVM IR in memory (compiler.compile_question_ir),
 #      reusing the session's LoadEnv (imports edited on disk are re-parsed);
 #      `eval_source_path` only names the buffer.
 #   4. Write the IR to a fixed /tmp path.
@@ -687,14 +678,10 @@ export fn compile_runtime_and_link_eval(
         then Ok(bin_path)
         else Err("clang link failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
-fn make_eval_source(src: String, expr: String, type_str: String) -> Maybe String =
+fn eval_main_for(type_str: String) -> Maybe compiler.EvalMain =
   if string.ends_with(type_str, " !{IO}") then
-    if type_str == "Unit !{IO}" then
-      Just(src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr ++ "\nfn main() -> Unit !{IO} = " ++ sentinel_name())
-    else
-      Nothing
-  else
-    Just(src ++ "\nlet " ++ sentinel_name() ++ " = " ++ expr ++ "\nfn main() -> Unit !{IO} = print(to_string(" ++ sentinel_name() ++ "))")
+    if type_str == "Unit !{IO}" then Just(compiler.RunAction) else Nothing
+  else Just(compiler.PrintValue)
 
 fn string_to_json(s: String) -> json.Json = json.JsonString(s)
 
@@ -759,9 +746,9 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
             | Err msg -> error_response("eval_expr_in_source: " ++ msg)
             | Ok _ -> run_eval_binary()
 
-fn compile_and_run_eval(src: String, state: StartupState) -> json.Json !{IO} =
+fn compile_and_run_eval(src: String, expr: String, how: compiler.EvalMain, state: StartupState) -> json.Json !{IO} =
   do
-    ir_result <- compiler.compile_source_full_ir(src, eval_source_path,
+    ir_result <- compiler.compile_question_ir(src, eval_source_path, expr, how,
       source.StdlibRoot(state_stdlib_root(state)), Nil, state_cache(state))
     link_and_run_eval(ir_result, state)
 
@@ -788,9 +775,9 @@ fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: type
   else if is_polymorphic_scheme(scheme) then
     ok_response(vec_strings_to_json_array(vec_singleton("<value: " ++ fn_display_type_str(type_str) ++ ">")))
   else
-    match make_eval_source(src, expr, type_str) with
+    match eval_main_for(type_str) with
     | Nothing -> error_response("eval_expr_in_source: cannot auto-print effectful non-Unit expression of type: " ++ type_str)
-    | Just full_src -> compile_and_run_eval(full_src, state)
+    | Just how -> compile_and_run_eval(src, expr, how, state)
   where type_str = types.scheme_to_string(scheme)
 
 # Evaluation needs the Scheme itself, not its rendering: it branches on function /
@@ -799,10 +786,7 @@ fn eval_with_scheme(src: String, expr: String, state: StartupState, scheme: type
 fn op_eval_expr_in_source(src: String, expr: String, state: StartupState) -> json.Json !{IO} =
   match compiler.scheme_of_expr_in_source(
       src, expr, source.StdlibRoot(state_stdlib_root(state)), Nil, state_cache(state)) with
-  | compiler.ExprSentinelCollision ->
-      error_response("source contains reserved name '" ++ sentinel_name() ++ "'; cannot eval")
   | compiler.ExprCheckFailed diags -> first_diag_response(diags, "eval_expr_in_source: typecheck failed")
-  | compiler.ExprNotInferable -> error_response("eval_expr_in_source: could not infer type of expression")
   | compiler.ExprSchemeOk scheme -> eval_with_scheme(src, expr, state, scheme)
 
 # ---------------------------------------------------------------------------

@@ -988,6 +988,16 @@ export fn parse_expr(raw: Vec token.Token, i: Int) -> Result ParseError (ast.Exp
     tokens <- laid_out(vec_slice(i, vec_length(raw) - i, raw), layout.ExprLayout)
     parse_expression(tokens, 0)
 
+# An input that is one expression and nothing else. Whatever follows it is an error, not
+# ignored: a second line could be a declaration.
+export fn parse_whole_expr(raw: Vec token.Token) -> Result ParseError ast.Expr =
+  do
+    tokens <- laid_out(raw, layout.ExprLayout)
+    (expr, next) <- parse_expression(tokens, 0)
+    let t = tok_at(tokens, next)
+    if tok_is_eof(t) then Ok(expr)
+    else Err(ParseError(`Unexpected token after the expression at ${pos_str(tok_pos(t))}`, tok_pos(t)))
+
 fn laid_out(raw: Vec token.Token, mode: layout.LayoutMode) -> Result ParseError (Vec token.Token) =
   match layout.layout(raw, mode) with
   | Ok tokens -> Ok(tokens)

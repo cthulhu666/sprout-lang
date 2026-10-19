@@ -36,6 +36,11 @@ export fn desugar_modules(modules: List (List ast.Decl)) -> List (List ast.Decl)
       fn_idx = build_fn_sig_index(ast.flatten_modules(expanded))
   in list_map(\decls -> desugar_decls_i(decls, fn_idx), expanded)
 
+# An expression asked about in `modules`, desugared against their signatures. It has no
+# expected type, as an unannotated `let` body has none.
+export fn desugar_question(modules: List (List ast.Decl), question: ast.Expr) -> ast.Expr =
+  desugar_expr_i(question, Nothing, build_fn_sig_index(ast.flatten_modules(modules)))
+
 # ---------------------------------------------------------------------------
 # Phase 4B.5 — FnSig index: maps fn name → List (Maybe String) of param types
 # ---------------------------------------------------------------------------

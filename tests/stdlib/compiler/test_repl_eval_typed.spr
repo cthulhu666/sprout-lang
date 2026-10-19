@@ -6,16 +6,14 @@ import stdlib.compiler.bundler as bundler
 import stdlib.fs as fs
 import stdlib.env as env
 
-# Coverage + forward-regression guard for `compile_full_ir_with_cache`, the
-# entry point the REPL / analysis-service daemon uses to compile an eval
-# expression (analysis_service_driver.compile_and_run_eval).
+# Coverage + forward-regression guard for `compile_full_ir` and
+# `compile_question_ir`, the entry the REPL / analysis-service daemon uses to
+# compile an eval expression (analysis_service_driver.compile_and_run_eval).
 #
-# Before this test, compile_full_ir_with_cache was exercised by ZERO tests.
-# It now emits through the typed IR pipeline (ir_pipeline) rather than the
-# retired direct backend.  Because the typed corpus is already compiled+run by
-# `just test` via --emit-ir, this guard only needs to prove that the
-# cache-threaded eval entry produces linkable IR and maps failures to the
-# IrFullResult shape link_and_run_eval depends on:
+# Because the typed corpus is already compiled+run by `just test` via
+# --emit-ir, this guard only needs to prove that the cache-threaded eval entry
+# produces linkable IR and maps failures to the IrFullResult shape
+# link_and_run_eval depends on:
 #   1. IrFullOk with a real `define ` block for a trivial valid source.
 #   2. IrFullFail for an unresolved-name source.
 #   3. IrFullFail with a "check: "-prefixed diagnostic for a type error, so the
@@ -77,17 +75,17 @@ fn main() -> Unit !{IO} =
           assert_true(state, "type-error diagnostic starts with 'check: '",
             str_starts_with(first_diag_msg(r_type_err), "check: "))
 
-          # The cached, in-memory entry the daemon's eval uses: the same IR as the
-          # file path, and a shared LoadEnv never serves one eval's source to the next.
+          # The cached, in-memory entry the daemon's eval uses: a shared LoadEnv never
+          # serves one eval's source to the next.
           cache <- bundler.new_load_env()
           let root = source.StdlibRoot(stdlib_root)
-          c1 <- compiler.compile_source_full_ir("fn answer() -> Int = 42\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
-          c2 <- compiler.compile_source_full_ir("fn answer() -> Int = 43\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
-          c3 <- compiler.compile_source_full_ir("fn answer() -> Int = 42\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
-          c_bad <- compiler.compile_source_full_ir("fn broken() -> Int = undefined_name_xyz_99887766\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
-          c_after_bad <- compiler.compile_source_full_ir("fn answer() -> Int = 42\n", "/tmp/sprout_eval_x.sprout", root, Nil, cache)
+          let x_path = "/tmp/sprout_eval_x.sprout"
+          c1 <- compiler.compile_question_ir("fn answer() -> Int = 42\n", x_path, "answer()", compiler.PrintValue, root, Nil, cache)
+          c2 <- compiler.compile_question_ir("fn answer() -> Int = 43\n", x_path, "answer()", compiler.PrintValue, root, Nil, cache)
+          c3 <- compiler.compile_question_ir("fn answer() -> Int = 42\n", x_path, "answer()", compiler.PrintValue, root, Nil, cache)
+          c_bad <- compiler.compile_question_ir("fn broken() -> Int = undefined_name_xyz_99887766\n", x_path, "1", compiler.PrintValue, root, Nil, cache)
+          c_after_bad <- compiler.compile_question_ir("fn answer() -> Int = 42\n", x_path, "answer()", compiler.PrintValue, root, Nil, cache)
           assert_true(state, "cached eval entry emits a `define ` block", ir_has_define(c1))
-          assert_true(state, "cached eval IR equals the file path's IR", ir_text(c1) == ir_text(r) && ir_text(c1) != "")
           assert_true(state, "a changed source changes the IR", ir_text(c1) != ir_text(c2))
           assert_true(state, "reverting the source restores the IR", ir_text(c1) == ir_text(c3))
           assert_true(state, "cached eval Fails on an unresolved name", is_ir_fail(c_bad))
@@ -102,11 +100,11 @@ fn main() -> Unit !{IO} =
           let user_src = "import memo_pkg.foo (answer)\n\nfn use_it() -> Int = answer()\n"
           let user_path = "/tmp/sprout_test_memo_user.sprout"
           memo_cache <- bundler.new_load_env()
-          m1 <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], memo_cache)
-          m1_again <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], memo_cache)
+          m1 <- compiler.compile_question_ir(user_src, user_path, "use_it()", compiler.PrintValue, root, [pkg_root], memo_cache)
+          m1_again <- compiler.compile_question_ir(user_src, user_path, "use_it()", compiler.PrintValue, root, [pkg_root], memo_cache)
           fs.write_text(mod_path, "module memo_pkg.foo\n\nexport fn answer() -> Int = 43\n")
-          m2 <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], memo_cache)
-          m2_fresh <- compiler.compile_source_full_ir(user_src, user_path, root, [pkg_root], bundler.new_load_env())
+          m2 <- compiler.compile_question_ir(user_src, user_path, "use_it()", compiler.PrintValue, root, [pkg_root], memo_cache)
+          m2_fresh <- compiler.compile_question_ir(user_src, user_path, "use_it()", compiler.PrintValue, root, [pkg_root], bundler.new_load_env())
           assert_true(state, "import compiles through the shared cache", ir_has_define(m1))
           assert_true(state, "an unchanged import gives identical IR on a memo hit", ir_text(m1) == ir_text(m1_again))
           assert_true(state, "an import edited on disk changes the IR", ir_text(m1) != ir_text(m2))

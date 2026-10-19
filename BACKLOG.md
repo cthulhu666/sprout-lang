@@ -1238,9 +1238,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `let t1 = (1,3,"foo",true)` then `let t2 = (t1, t1)`, then evaluating `t2` gives
   `SIGSEGV (no current function set)`. Flat tuples are fine. **Not a codegen bug** — the
   equivalent compiled program renders correctly under both paths — so the fault is in the REPL's
-  per-expression eval path (`analysis_service_driver.op_eval_expr_in_source`), most likely in how it
-  synthesizes the throwaway program referencing prior session let-bindings. Next step: dump the
-  synthesized source for `t2` and compile it standalone.
+  per-expression eval path (`analysis_service_driver.op_eval_expr_in_source`), most likely in the
+  program it builds over prior session let-bindings (`compiler.compile_question_ir`). Next step:
+  compile the session source with `fn main() -> Unit !{IO} = print(to_string(t2))` standalone.
 - [ ] `P3` **REPL completion reads modules relative to the cwd.** `repl.module_path` builds
   `stdlib/<m>.sprout` or `a/b/c.sprout` from the current directory, so a REPL started outside the
   repo root panics on the first TAB (`prelude_completion_names`: "read_file: prelude"), while the
@@ -1447,8 +1447,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   does not notice an imported module changing. What remains is the invalidation policy — which is
   why it was never folded into the feature work.
 - [ ] `P2` **Hover answers only for top-level names; a local or a parameter returns null.** Inherent
-  to the mechanism, not a handler defect: `scheme_of_expr_in_source` appends
-  `let __repl_source_value = <expr>` at **module scope**, where a local is not in scope, so the
+  to the mechanism, not a handler defect: `scheme_of_expr_in_source` types the expression after
+  the buffer's declarations, at **module scope**, where a local is not in scope, so the
   typecheck fails and hover declines rather than guessing. Fixing it needs a position-aware lookup
   — the type of the name *at that point* — i.e. the typed AST, the same capability
   `language-server-roadmap.md` §5.1's span refactor is about. Worth pairing rather than doing

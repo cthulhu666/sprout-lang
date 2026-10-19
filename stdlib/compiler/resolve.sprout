@@ -235,6 +235,14 @@ export fn resolve_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) 
   match prog with
   | typed_ast.TypedProgram decls -> resolve_with_tables(decls, build_tables(decls, env))
 
+# A question's dictionaries, resolved as a top-level `let` body's are: the program's
+# instances, and no `where` clause to forward from.
+export fn resolve_question(prog: typed_ast.TypedProgram, env: Dict types.Scheme,
+                           question: typed_ast.TypedExpr) -> Result(source.SourcePos, String) typed_ast.TypedExpr =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      resolve_expr(question, InFn, typed_ast.instance_table_empty(), build_tables(decls, env))
+
 # One walk over the typed decls: each TDict is checked (the diagnostic the type
 # checker owes for an unsatisfiable concrete-head constraint), then its Evidence
 # field is filled with the resolved instance/forward tree, which lowering consumes
