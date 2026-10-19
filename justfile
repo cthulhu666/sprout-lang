@@ -728,6 +728,11 @@ test-review-ledger:
 test-review-script:
   python3 scripts/test_review_script.py
 
+# Exercise scripts/check_clang_cpr.sh against stub clangs: one per lowering of `__int128`.
+[group('test')]
+test-check-clang-cpr:
+  bash scripts/test_check_clang_cpr.sh
+
 # Exercise setup planning without changing the host. This also guards against
 # Ubuntu's unrelated package named `opt` being mistaken for LLVM's optimizer.
 [group('test')]
@@ -1129,6 +1134,8 @@ bootstrap-from-seed:
     echo "ERROR: $SEED not found." >&2
     exit 1
   fi
+  # Before the guard, so a cached stage-1 does not hide an unusable clang.
+  bash scripts/check_clang_cpr.sh
   # No-op guard: if stage-1 binary is already up-to-date with seed + runtime,
   # skip the rebuild. CI steps each invoke `just bootstrap-from-seed` as a
   # `just` dependency in a fresh process, so just's dedupe doesn't apply —
@@ -3836,6 +3843,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "diagnostic-stream-smoke|diagnostic-stream-smoke"
     "gate-audit|gate-audit"
     "seed-dep-check|seed-dep-check"
+    "check-clang-cpr|test-check-clang-cpr"
     "review-gate|test-review-gate"
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"

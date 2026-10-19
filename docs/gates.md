@@ -254,6 +254,12 @@ a two-word struct, to `[2 x i64]` on aarch64: a base64 loop kept every read as a
 lowers that struct to `{ i64, i64 }`, so the gate runs on both: in `just ci-fast-gates` (Linux
 x86_64) and as its own step in the macOS (arm64) CI job.
 
+The declares now return `i128`, which aarch64 clang and x86_64 clang >= 22 both match. x86_64
+clang <= 21 lowers `unsigned __int128` as `{ i64, i64 }`, so `scripts/check_clang_cpr.sh` probes
+the lowering, not the version number (Apple clang 17 passes): LLVM discovery skips a clang that
+fails it, `just bootstrap-from-seed` refuses one, and `just test-check-clang-cpr` tests the probe.
+CI installs clang 22 from apt.llvm.org.
+
 ## fmt/lint batching — `just fmt-batch-smoke`
 
 Asserts what the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch is processed, an

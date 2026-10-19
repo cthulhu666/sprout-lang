@@ -23,7 +23,9 @@ The script is idempotent. It installs or verifies:
 
 - macOS: Xcode Command Line Tools are verified; Homebrew, LLVM, `mise`, and `ripgrep` are installed;
 - Debian/Ubuntu, Fedora/RHEL, Arch/Manjaro, and openSUSE: LLVM >= 16, Clang, C build tools,
-  `mise`, and `ripgrep` through the host package manager;
+  `mise`, and `ripgrep` through the host package manager. On x86_64 Sprout needs clang >= 22,
+  which most distributions do not ship yet: install it from [apt.llvm.org](https://apt.llvm.org)
+  (`llvm-22 clang-22`) and rerun;
 - repository-managed tools, the tracked Git hooks, and the stage-1 compiler.
 
 WSL follows its Linux distribution path. Native Windows is not yet a supported host; see
@@ -32,15 +34,19 @@ platform commands without changing the host.
 
 Build recipes discover matching versioned LLVM directories automatically, including
 `/usr/lib/llvm-N/bin` on Linux and Homebrew's keg-only LLVM directory on macOS. They reject the
-unrelated GNU package also named `opt`, so shell-profile PATH changes are unnecessary.
+unrelated GNU package also named `opt`, so shell-profile PATH changes are unnecessary. They also
+reject a clang that does not lower an `unsigned __int128` return as `i128`
+(`scripts/check_clang_cpr.sh`), so an installed clang 22 wins over an older distro default, and
+`just bootstrap-from-seed` refuses to build with one. That is x86_64 clang <= 21; Apple clang and
+every aarch64 clang pass.
 
 GitHub CLI installation retries transient Aqua failures. If GitHub's attestation endpoint remains
 unavailable, setup retries once with that check disabled; Aqua's checksum verification remains
 active. Setup fails rather than leaving a configured-but-missing tool that would break every
 `mise exec` command.
 
-For manual installation, provide `mise`, LLVM >= 16 `opt`, Clang >= 16, `ripgrep`, and the host C
-SDK, then run:
+For manual installation, provide `mise`, LLVM >= 16 `opt`, Clang >= 16 (x86_64: >= 22),
+`ripgrep`, and the host C SDK, then run:
 
 ```
 mise trust mise.toml
