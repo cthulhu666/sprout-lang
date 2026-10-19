@@ -610,24 +610,25 @@ fn with_default_header(name: String, value: String, headers: Vec (String, String
   if vec_any(\pair -> header_named(name, pair), headers) then headers
   else vec_append((name, value), headers)
 
-# A 204 has no content (RFC 9110 §15.3.5), so a body the handler passed is not sent, and it carries
-# no Content-Length (§8.6).
+# A 204 or 304 has no content (RFC 9110 §15.3.5, §15.4.5), so a body the handler passed is not
+# sent, and it carries no Content-Length (§8.6) and no default content-type.
 fn has_content(status: Int) -> Bool =
-  status != 204
+  status != 204 && status != 304
 
-# The final header lines written to the wire: caller headers in order, a defaulted content-type,
-# and a byte-accurate content-length wherever the status has content. Framing is the server's
-# responsibility, so every caller-supplied content-length and transfer-encoding is dropped, however
-# it was added: a transfer-encoding would override the content-length (RFC 9112 §6.3) for a body
-# that is not encoded. There is no default `connection`: an HTTP/1.1 connection persists unless a
-# side says close, and the server adds `connection: close` when it will close (see `closing`).
+# The final header lines written to the wire: caller headers in order, then a defaulted
+# content-type and a byte-accurate content-length wherever the status has content. Framing is the
+# server's responsibility, so every caller-supplied content-length and transfer-encoding is dropped,
+# however it was added: a transfer-encoding would override the content-length (RFC 9112 §6.3) for a
+# body that is not encoded. There is no default `connection`: an HTTP/1.1 connection persists unless
+# a side says close, and the server adds `connection: close` when it will close (see `closing`).
 fn response_headers(status: Int, headers: Vec (String, String), body: String) -> Vec (String, String) =
-  if has_content(status) then vec_append(("content-length", int_to_string(string.byte_length(body))), framed)
+  if has_content(status) then
+    framed
+      |> with_default_header("content-type", "text/plain")
+      |> vec_append(("content-length", int_to_string(string.byte_length(body))))
   else framed
 where
-  framed = without_header("content-length", headers)
-    |> without_header("transfer-encoding")
-    |> with_default_header("content-type", "text/plain")
+  framed = without_header("content-length", headers) |> without_header("transfer-encoding")
 
 # Everything up to and including the blank line that ends the header block. Cookies go after the
 # other headers. `push_header` sanitises them too, so a CR or LF in a cookie's name, path or domain
