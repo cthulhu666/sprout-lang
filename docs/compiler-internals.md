@@ -195,8 +195,10 @@ Only *parameters* were ever exposed. A `match` or `let` binding lowers to `%t$N`
 why `stdlib/fs.sprout` could always write `Ok entry`.
 
 Two `_` parameters would share `%p$_`, and LLVM rejects a repeated argument name.
-`ast_to_ir.ir_param_names` renames each `_` to `_$<position>` before any of the three modules
-sees it, for lambdas, top-level fns, instance methods, TCO'd fns and CPR workers alike.
+`lowering.name_wildcard_params` renames each `_` to `_$<position>` where params enter: fn
+decls, instance methods, class wrappers, externs and lambdas. Renaming later, in `ast_to_ir`,
+is too late: class wrappers, mutual-TCO trampolines and CPR workers forward params by name, so
+each must be built from the renamed one.
 
 Regression tests: `tests/conformance/run/param_named_after_block_label.spr` (compiles, links
 and runs a function per label family), `tests/conformance/run/wildcard_params.spr`, plus T11/T11b in
