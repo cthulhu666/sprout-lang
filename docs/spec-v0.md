@@ -1881,9 +1881,11 @@ Two consequences follow:
   `let` first must spell the mode.
 
   Only `borrowing` is taken this way. **`once` is never inferred for a lambda
-  parameter**: it is a promise about how often the parameter is invoked, checked
-  against a declaration's written mode, and a lambda has no declaration — so a
-  lambda whose own parameter sits at a `once` slot stays an ownership mismatch.
+  parameter**: it is a promise about how often the parameter is invoked, and a
+  promise must be written — so an unannotated lambda whose own parameter sits at
+  a `once` slot stays an ownership mismatch. Written
+  (`\(w: once Unit -> Int) -> w(())`), it is checked as a declared function's is
+  (below): at most one run per path, and no escape to a slot without the promise.
   This is about the lambda's *own* parameter, not the slot the lambda itself
   fills: passing an unannotated lambda **to** a `once` parameter is the one-shot
   move below, and compiles.
@@ -1920,8 +1922,8 @@ export fn task_spawn(scope: Scope, work: once Unit -> Unit !{IO}) -> Unit !{IO} 
 ```
 
 This is a promise by the **callee**: it invokes `work` **at most once**, and does
-not store or return it. The promise is **checked, not assumed** — a function
-declaring `once p` may use `p` at most once along any path, counted per
+not store or return it. The promise is **checked, not assumed** — a function, or
+a lambda, declaring `once p` may use `p` at most once along any path, counted per
 control-flow path, so `if c then p(x) else p(x)` is one invocation and is legal
 while `p(x) + p(x)` is not. Zero uses are legal: the bound is from above, so one
 path may invoke and another not (`if c then p(x) else 0`, or an invocation after

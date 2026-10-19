@@ -686,9 +686,10 @@ lambda has no declaration, so a `once` taken from the slot is a promise nobody c
 therefore borrowing or consuming only (`infer.mode_or_slot`), never `once` or `local`, and that
 is load-bearing.
 
-This narrows, but does not close, a hole that predates M4.4b: the same program with the mode
-**written** (`\(w: once Unit -> Int) -> …`) is accepted on master too. Filed `P1` in `BACKLOG.md`;
-the fix is to run `once_honesty` over lambda bodies, keyed on ownership rather than written mode.
+This narrowed a hole that predates M4.4b: the same program with the mode **written**
+(`\(w: once Unit -> Int) -> …`) was accepted too. Closed since: the escape walk and
+`once_honesty` now run over a lambda's body for each parameter whose type says `once`
+(`linear_check.lambda_once_after`), keyed on ownership rather than written mode.
 
 Three diagnostics were fixed in the same pass, all of them doors that no longer open.
 
