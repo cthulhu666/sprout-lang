@@ -1,11 +1,15 @@
 # Two `_` parameters in one function: a lambda, a lambda with a capture, a
-# top-level fn, a tail-recursive fn, an instance method and a fn returning a
-# scalar tuple, which also gets an unboxed `_worker` copy.
+# top-level fn, a tail-recursive fn, an instance method, a class method's
+# dispatch wrapper, a fn returning a scalar tuple (which also gets an unboxed
+# `_worker` copy) and a mutual tail call between fns of different arity (which
+# goes through a trampoline).
 class Pick a
-  fn pick(x: a, y: a, z: a) -> a
+  fn pick(x: a, _: a, _: a) -> a
 
 instance Pick Int
   fn pick(x: Int, _: Int, _: Int) -> Int = x
+
+fn pick_via(v: a) -> a where Pick a = pick(v, v, v)
 
 fn apply(f: Int -> Int -> Int -> Int) -> Int = f(1, 2, 3)
 
@@ -20,6 +24,10 @@ fn sum_split(n: Int) -> Int =
   match split(n, 0, 0) with
   | (x, y) -> x + y
 
+fn ping(n: Int, _: Int, _: Int) -> Int = if n == 0 then 1 else pong(n - 1)
+
+fn pong(n: Int) -> Int = if n == 0 then 2 else ping(n - 1, n, n)
+
 fn main() -> Unit !{IO} =
   let k = 10
   in do
@@ -28,4 +36,6 @@ fn main() -> Unit !{IO} =
     print(first(4, 5, 6))
     print(count(5, 2, 3))
     print(pick(8, 9, 0))
+    print(pick_via(3))
     print(sum_split(2))
+    print(ping(5, 0, 0))

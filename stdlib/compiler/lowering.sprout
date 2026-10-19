@@ -107,6 +107,27 @@ fn tfunc_result_type(t: types.Type) -> types.Type =
   | types.TThunk ret _ -> tfunc_result_type(ret)
   | _ -> t
 
+# Each `_` parameter becomes `_$<position>`. Code built from params forwards them
+# by name (class wrappers, trampolines, workers), and LLVM rejects two arguments
+# with one name. `$` lexes as its own token, so no source name collides.
+fn name_wildcard_params(params: List ast.Param) -> List ast.Param =
+  name_wildcard_params_from(params, 0)
+
+fn name_wildcard_params_from(params: List ast.Param, i: Int) -> List ast.Param =
+  match params with
+  | [] -> []
+  | [p | rest] -> Cons(name_wildcard_param(p, i), name_wildcard_params_from(rest, i + 1))
+
+fn name_wildcard_param(p: ast.Param, i: Int) -> ast.Param =
+  match p with
+  | ast.Param "_" ann mode -> ast.Param("_$" ++ int_to_string(i), ann, mode)
+  | _ -> p
+
+fn name_method_wildcards(m: typed_ast.TypedInstanceMethod) -> typed_ast.TypedInstanceMethod =
+  match m with
+  | typed_ast.TypedInstanceMethod name params ret effects constraints body ->
+      typed_ast.TypedInstanceMethod(name, name_wildcard_params(params), ret, effects, constraints, body)
+
 # generate_typed_param_vars: build TVar nodes for each user param, assigning
 # types by peeling the curried method type one layer per parameter.
 fn generate_typed_param_vars(params: List ast.Param, method_type: types.Type, pos: source.SourcePos) -> List typed_ast.TypedExpr =
@@ -251,7 +272,7 @@ fn lower_one_decl(
       | _ ->
           (Cons(typed_ast.TPassThrough(inner), user_rev), wrapper_rev, inst_rev)
   | typed_ast.TFnDecl name params ret_ty effects constraints body ->
-      (Cons(lower_fn_decl(name, params, ret_ty, effects, constraints, body, env), user_rev),
+      (Cons(lower_fn_decl(name, name_wildcard_params(params), ret_ty, effects, constraints, body, env), user_rev),
        wrapper_rev, inst_rev)
   | typed_ast.TLetDecl name body ->
       (Cons(typed_ast.TLetDecl(name,
@@ -260,9 +281,10 @@ fn lower_one_decl(
        wrapper_rev, inst_rev)
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
       (user_rev, wrapper_rev,
-       prepend_decls(generate_instance_fns(constraint, inst_constraints, methods, env), inst_rev))
+       prepend_decls(generate_instance_fns(constraint, inst_constraints, list_map(name_method_wildcards, methods), env),
+                     inst_rev))
   | typed_ast.TExternFnDecl name params ret_ty effects ->
-      (Cons(typed_ast.TExternFnDecl(name, params, ret_ty, effects), user_rev), wrapper_rev, inst_rev)
+      (Cons(typed_ast.TExternFnDecl(name, name_wildcard_params(params), ret_ty, effects), user_rev), wrapper_rev, inst_rev)
 
 fn prepend_decls(new_decls: List typed_ast.TypedDecl, acc: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
   match new_decls with
@@ -360,7 +382,7 @@ fn generate_one_class_wrapper(
 ) -> typed_ast.TypedDecl =
   match sig with
   | ast.ClassMethodSig method_name params ret_ty effects_maybe method_constraints ->
-      generate_class_wrapper_with(class_name, method_name, params, ret_ty, effects_maybe,
+      generate_class_wrapper_with(class_name, method_name, name_wildcard_params(params), ret_ty, effects_maybe,
         hidden_params, method_wrapper_slots(method_constraints, 1, class_order, super_map, Nil),
         scheme_env)
 
@@ -1150,7 +1172,8 @@ fn lower_expr(te: typed_ast.TypedExpr, ctx: LowerCtx) -> typed_ast.TypedExpr =
       # the type mismatch on the TUnit node is harmless.
       typed_ast.TUnit(t, pos)
   | typed_ast.TLambda params body t pos ->
-      typed_ast.TLambda(params, lower_expr(body, ctx_with_bound(ast.param_names(params), ctx)), t, pos)
+      typed_ast.TLambda(name_wildcard_params(params),
+                        lower_expr(body, ctx_with_bound(ast.param_names(params), ctx)), t, pos)
   | typed_ast.TBinary op l r t pos ->
       typed_ast.TBinary(op, lower_expr(l, ctx), lower_expr(r, ctx), t, pos)
   | typed_ast.TUnary op e t pos ->
