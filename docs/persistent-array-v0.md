@@ -188,6 +188,7 @@ Each row checked against the paper, reference manual or library source, 2026-10-
 | Haskell `vector` 0.13.2, `Data.Vector` | `accum :: (a -> b -> a) -> Vector a -> [(Int, b)] -> Vector a`; `(//)`, of which "The vector may not be modified in place"; `modify` "Perform[s] a safe destructive update in-place by applying an ST action to a mutable copy of the vector, then freezing the result" | a copy per bulk call | kept |
 | Koka local heap effect (`lib/std/core/types.kk`) | `type local :: (H) -> X`, "A local heap effect", where `X` is "(effect type)" (Koka spec); `local-scope(action : forall<h> () -> <local<h> \| e> a) : e a` | in place | the `forall<h>` index, as `ST`'s `s` |
 | Effekt regions (language tour, *Regions*) | `region r { var x in r = 1 }`: "Each mutable variable is allocated into an equally named region" | in place | the region's scope |
+| Pure Borrow (Matsushita & Ishii, PLDI 2026; arXiv 2604.15290v4) | Linear Haskell vectors borrowed through `Mut` and `Share` references inside a `BO` monad, run by `runBO` (Fig. 4); `updateAt :: β ≤ α ⇒ Int → (a ⊸ BOβ (b, a)) ⊸ Mutα (Vector a) ⊸ BOβ (b, Mutα (Vector a))` (Fig. 10) | in place, and in parallel on split borrows (`parBO`, Fig. 5) | not expressible |
 
 Cautions from the sources:
 
@@ -200,6 +201,9 @@ Cautions from the sources:
   higher-order argument to another function, unless that other function explicitly expects a
   consuming function." Clean, `linear-base` and Futhark all make reads hand the array back or
   borrow it; none lets a consumed array flow through an ordinary fold.
+
+- Pure Borrow §7: its metatheory "does not completely establish purity". Relating the in-place
+  semantics to one over plain values (§5.3) is a bisimulation it leaves as Conjecture 5.5.
 
 Lean's approach needs reference counts, and Sprout's collector traces. Clean, `linear-base` and
 Futhark need a linearity or uniqueness check, and Sprout has one (spec §5.8).
@@ -578,6 +582,12 @@ An index out of range gives `Nothing`, as `vec_get` does, in all three.
   top-level `let` array, a `once` closure run twice, `LArr (LArr Int)`, and `Boxed(arr)` unpacked
   twice.
 - §3.2's four kernels as executable tests, checked against a `MutVec` reference.
+- Value semantics as an oracle (5.3): a test build where `larr_set` copies through `vec_set`, in
+  plain Sprout. Every `LArr` test and §3.2 kernel must print the same in both builds; a difference
+  is a linearity hole seen as a wrong answer. It finds only holes a test reaches, so it adds to
+  the per-hole rejection tests above. The method is Pure Borrow's argument for purity (§4).
+- Ordering (5.3 *Invariants*): a borrowed read, then a set of the same cell, returns the old
+  value, at `-O0` and at `-O2`.
 - Cost (5.3): a set allocates nothing (a debug counter).
 - Bulk operations (5.3): `larr_scatter` and `larr_accum` against a `vec_set` reference, including
   repeated and out-of-range indices.
@@ -595,7 +605,10 @@ compile and count correctly against a prototype `LArr` written in Sprout over `V
 
 - Approve 5.3's builtins on §3.2's evidence, or wait for a program of ours to need them?
 - Names: `LArr`, `LinArray` or `Array`; and `PVec` or `PArray` for 5.2.
-- Nested arrays: the shape of swap or take-and-put-back for `LArr (LArr a)`.
+- Nested arrays: the shape of swap or take-and-put-back for `LArr (LArr a)`. Pure Borrow's
+  `updateAt` (§4) is one: `larr_update(i: Int, f: a -> (b, a), arr: LArr a) -> (b, LArr a)` takes
+  the element out and puts back what `f` returns. `f` consumes a linear parameter, which waits on
+  BACKLOG P2 **Higher-order linearity**.
 
 ## 12. Decision record
 
