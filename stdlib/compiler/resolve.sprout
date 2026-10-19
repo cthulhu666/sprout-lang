@@ -235,14 +235,14 @@ export fn resolve_program(prog: typed_ast.TypedProgram, env: Dict types.Scheme) 
   match prog with
   | typed_ast.TypedProgram decls -> resolve_with_tables(decls, build_tables(decls, env))
 
-# Two passes over the typed decls: check first (produce the diagnostic the type
-# checker owes for an unsatisfiable concrete-head constraint), then, only if the
-# program is well-formed, rewrite every TDict's Evidence field with the resolved
-# instance/forward tree, which lowering consumes (evidence_to_witness).
+# One walk over the typed decls: each TDict is checked (the diagnostic the type
+# checker owes for an unsatisfiable concrete-head constraint), then its Evidence
+# field is filled with the resolved instance/forward tree, which lowering consumes
+# (evidence_to_witness). The first error in declaration order is the one reported.
 fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> ResolveResult =
-  match check_decls(decls, tables) with
-  | Just (pos, msg) -> ResolveErr(pos, msg)
-  | Nothing -> ResolveOk(typed_ast.TypedProgram(rewrite_decls(decls, tables)))
+  match resolve_decls(decls, tables, []) with
+  | Err (pos, msg) -> ResolveErr(pos, msg)
+  | Ok resolved -> ResolveOk(typed_ast.TypedProgram(resolved))
 
 # ---------------------------------------------------------------------------
 # Table construction (from typed decls — prelude is bundled in)
@@ -689,13 +689,12 @@ fn constraint_args(c: ast.TypeConstraint) -> List ast.TypeExpr =
 # UNPACK order cannot drift apart — a divergence would mismap packed witnesses to
 # the wrong methods. See docs/gadts-v0.md §5b.
 
-# Value-position class method: derive the class-parameter head type from the
-# method's (substituted) type via the class-method scheme, then reuse
-# produce_one_class for that single class. Non-derivable / non-concrete head →
-# EvUnresolved (lowering falls back to its own eta reconstruction).
-fn method_ref_evidence(method: String, class_name: String, t: types.Type, fwd_keys: Forwarded, tables: Tables) -> typed_ast.Evidence =
-  let Just(ast.TypeConstraint _ args) = method_ref_constraint(method, class_name, t, tables)
-        else typed_ast.EvUnresolved
+# Value-position class method, given the constraint method_ref_constraint derived
+# from its type: produce_one_class for that single class. A method reference with
+# no derivable head keeps EvUnresolved (lowering falls back to its own eta
+# reconstruction).
+fn method_ref_evidence(c: ast.TypeConstraint, fwd_keys: Forwarded, tables: Tables) -> typed_ast.Evidence =
+  let ast.TypeConstraint class_name args = c
       [head_arg] = args else typed_ast.EvUnresolved
   in produce_one_class(class_name, head_arg, args, fwd_keys, tables)
 
@@ -723,147 +722,173 @@ fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   | types.TThunk _ _ -> typed_ast.type_to_type_expr(t)
 
 # ---------------------------------------------------------------------------
-# Evidence rewrite: fill every TDict's Evidence, structure otherwise unchanged
+# The walk: check every TDict, then fill its Evidence; structure otherwise unchanged
 # ---------------------------------------------------------------------------
 
-fn rewrite_decls(decls: List typed_ast.TypedDecl, tables: Tables) -> List typed_ast.TypedDecl =
-  list_map(\d -> rewrite_decl(d, tables), decls)
+fn resolve_decls(
+  decls: List typed_ast.TypedDecl,
+  tables: Tables,
+  acc: List typed_ast.TypedDecl
+) -> Result(source.SourcePos, String) (List typed_ast.TypedDecl) =
+  match decls with
+  | [] -> Ok(list_reverse(acc))
+  | [d | rest] ->
+      let r = try resolve_decl(d, tables)
+      in resolve_decls(rest, tables, Cons(r, acc))
 
-# Each decl body is rewritten under its own forwarded-key set: a function forwards
-# its where-clause constraints; an instance method forwards the instance's context
-# constraints and then its own (matching lowering's build_hidden_for_constraints
-# call sites). A top-level let forwards nothing.
-fn rewrite_decl(d: typed_ast.TypedDecl, tables: Tables) -> typed_ast.TypedDecl =
+# Each body is resolved under the keys it forwards: a function its where-clause
+# constraints; an instance method the instance's context constraints and then its
+# own (matching lowering's build_hidden_for_constraints call sites). A top-level
+# let forwards nothing.
+fn resolve_decl(d: typed_ast.TypedDecl, tables: Tables) -> Result(source.SourcePos, String) typed_ast.TypedDecl =
   match d with
   | typed_ast.TFnDecl name params ret_ty effects constraints body ->
-      typed_ast.TFnDecl(name, params, ret_ty, effects, constraints,
-        rewrite_expr(body, build_fwd_keys(constraints, tables), tables))
+      let b = try resolve_expr(body, InFn, build_fwd_keys(constraints, tables), tables)
+      in Ok(typed_ast.TFnDecl(name, params, ret_ty, effects, constraints, b))
   | typed_ast.TLetDecl name body ->
-      typed_ast.TLetDecl(name, rewrite_expr(body, typed_ast.instance_table_empty(), tables))
+      let b = try resolve_expr(body, InFn, typed_ast.instance_table_empty(), tables)
+      in Ok(typed_ast.TLetDecl(name, b))
   | typed_ast.TInstanceDecl constraint inst_constraints methods ->
-      typed_ast.TInstanceDecl(constraint, inst_constraints,
-        list_map(\m -> rewrite_method(m, head_bound(inst_constraints, head_vars(constraint)), tables), methods))
-  | typed_ast.TExternFnDecl _ _ _ _ -> d
-  | typed_ast.TPassThrough _ -> d
+      let bound = head_vars(constraint)
+          ms = try resolve_methods(methods, InInstanceMethod(bound), head_bound(inst_constraints, bound), tables)
+      in Ok(typed_ast.TInstanceDecl(constraint, inst_constraints, ms))
+  | typed_ast.TExternFnDecl _ _ _ _ -> Ok(d)
+  | typed_ast.TPassThrough _ -> Ok(d)
 
-fn rewrite_method(m: typed_ast.TypedInstanceMethod, inst_constraints: List ast.TypeConstraint,
-                  tables: Tables) -> typed_ast.TypedInstanceMethod =
-  match m with
-  | typed_ast.TypedInstanceMethod name params ret_ty effects cs body ->
-      typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs,
-        rewrite_expr(body, method_fwd_keys(inst_constraints, cs, tables), tables))
-
-# lowering's generate_one_instance_fn passes the instance head's dicts, then the
-# method's own.
-fn method_fwd_keys(inst_constraints: List ast.TypeConstraint, method_constraints: List ast.TypeConstraint,
-                   tables: Tables) -> Forwarded =
-  build_fwd_keys(list_append(inst_constraints, method_constraints), tables)
-
-# Structural rebuild that visits the same nodes as check_expr; at each TDict the
-# Evidence field is replaced.  Any node not walked keeps EvUnresolved, which
-# lowering resolves itself — so a missed site degrades to today's behavior, never
-# to a wrong witness. fwd_keys is constant within a body (lambdas add no constraints).
-fn rewrite_expr(e: typed_ast.TypedExpr, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedExpr =
-  match e with
-  | typed_ast.TDict c t pos _ -> typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables))
-  | typed_ast.TCall callee args t pos ->
-      typed_ast.TCall(rewrite_expr(callee, fwd_keys, tables), list_map(\a -> rewrite_expr(a, fwd_keys, tables), args), t, pos)
-  | typed_ast.TIf cnd thn els t pos ->
-      typed_ast.TIf(rewrite_expr(cnd, fwd_keys, tables), rewrite_expr(thn, fwd_keys, tables), rewrite_expr(els, fwd_keys, tables), t, pos)
-  | typed_ast.TMatch scrut branches t pos ->
-      typed_ast.TMatch(rewrite_expr(scrut, fwd_keys, tables), list_map(\b -> rewrite_branch(b, fwd_keys, tables), branches), t, pos)
-  | typed_ast.TLambda params body t pos ->
-      typed_ast.TLambda(params, rewrite_expr(body, fwd_keys, tables), t, pos)
-  | typed_ast.TTuple items t pos ->
-      typed_ast.TTuple(list_map(\i -> rewrite_expr(i, fwd_keys, tables), items), t, pos)
-  | typed_ast.TBinary op l r t pos ->
-      typed_ast.TBinary(op, rewrite_expr(l, fwd_keys, tables), rewrite_expr(r, fwd_keys, tables), t, pos)
-  | typed_ast.TUnary op x t pos ->
-      typed_ast.TUnary(op, rewrite_expr(x, fwd_keys, tables), t, pos)
-  | typed_ast.TRange lo hi t pos ->
-      typed_ast.TRange(rewrite_expr(lo, fwd_keys, tables), rewrite_expr(hi, fwd_keys, tables), t, pos)
-  | typed_ast.TDo steps t pos ->
-      typed_ast.TDo(list_map(\s -> rewrite_step(s, fwd_keys, tables), steps), t, pos)
-  | typed_ast.TRecord name fields t pos ->
-      typed_ast.TRecord(name, list_map(\f -> rewrite_field(f, fwd_keys, tables), fields), t, pos)
-  | typed_ast.TGetField obj fld t pos ->
-      typed_ast.TGetField(rewrite_expr(obj, fwd_keys, tables), fld, t, pos)
-  | typed_ast.TRecordUpdate base fields t pos ->
-      typed_ast.TRecordUpdate(rewrite_expr(base, fwd_keys, tables),
-        list_map(\f -> rewrite_field(f, fwd_keys, tables), fields), t, pos)
-  | typed_ast.TMethodRef method class_name t pos _ ->
-      typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(method, class_name, t, fwd_keys, tables))
-  | _ -> e
-
-fn rewrite_branch(b: typed_ast.TypedMatchBranch, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedMatchBranch =
-  match b with
-  | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite_expr(body, fwd_keys, tables))
-
-fn rewrite_step(s: typed_ast.TypedDoStep, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedDoStep =
-  match s with
-  | typed_ast.TDoBindStep pat ex mode -> typed_ast.TDoBindStep(pat, rewrite_expr(ex, fwd_keys, tables), mode)
-  | typed_ast.TDoLetStep name ex -> typed_ast.TDoLetStep(name, rewrite_expr(ex, fwd_keys, tables))
-  | typed_ast.TDoExprStep ex -> typed_ast.TDoExprStep(rewrite_expr(ex, fwd_keys, tables))
-
-fn rewrite_field(f: typed_ast.TypedRecordField, fwd_keys: Forwarded, tables: Tables) -> typed_ast.TypedRecordField =
-  match f with
-  | typed_ast.TypedRecordField name ex -> typed_ast.TypedRecordField(name, rewrite_expr(ex, fwd_keys, tables))
-
-# ---------------------------------------------------------------------------
-# Typed-AST walk: find every TDict and check its constraint
-# ---------------------------------------------------------------------------
-
-fn check_decls(
-  decls: List typed_ast.TypedDecl,
-  tables: Tables
-) -> Maybe(source.SourcePos, String) =
-  match decls with
-  | Nil -> Nothing
-  | Cons d rest ->
-      match check_decl(d, tables) with
-      | Just e -> Just(e)
-      | Nothing -> check_decls(rest, tables)
-
-# Each body is checked under the keys it forwards — the same sets rewrite_decl
-# resolves Evidence with.
-fn check_decl(d: typed_ast.TypedDecl, tables: Tables) -> Maybe(source.SourcePos, String) =
-  match d with
-  | typed_ast.TFnDecl _ _ _ _ constraints body -> check_body(body, InFn, constraints, tables)
-  | typed_ast.TLetDecl _ body -> check_expr(body, CoverFrom (InFn, typed_ast.instance_table_empty()), tables)
-  | typed_ast.TInstanceDecl constraint inst_constraints methods ->
-      check_methods(head_vars(constraint), head_bound(inst_constraints, head_vars(constraint)), methods, tables)
-  | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
-  | typed_ast.TPassThrough _ -> Nothing
-
-fn check_body(body: typed_ast.TypedExpr, kind: DeclKind, constraints: List ast.TypeConstraint,
-              tables: Tables) -> Maybe(source.SourcePos, String) =
-  check_expr(body, CoverFrom(kind, build_fwd_keys(constraints, tables)), tables)
-
-fn check_methods(
-  bound: List String,
-  inst_constraints: List ast.TypeConstraint,
+# The instance context's keys, then the method's own: the order lowering's
+# generate_one_instance_fn passes the dictionaries in.
+fn resolve_methods(
   methods: List typed_ast.TypedInstanceMethod,
+  kind: DeclKind,
+  inst_constraints: List ast.TypeConstraint,
   tables: Tables
-) -> Maybe(source.SourcePos, String) =
+) -> Result(source.SourcePos, String) (List typed_ast.TypedInstanceMethod) =
   match methods with
-  | Nil -> Nothing
-  | Cons m rest ->
-      match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ method_constraints body ->
-          match check_body(body, InInstanceMethod(bound), list_append(inst_constraints, method_constraints), tables) with
-          | Just e -> Just(e)
-          | Nothing -> check_methods(bound, inst_constraints, rest, tables)
+  | [] -> Ok([])
+  | [m | rest] ->
+      let typed_ast.TypedInstanceMethod name params ret_ty effects cs body = m
+          b = try resolve_expr(body, kind, build_fwd_keys(list_append(inst_constraints, cs), tables), tables)
+          ms = try resolve_methods(rest, kind, inst_constraints, tables)
+      in Ok(Cons(typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs, b), ms))
 
-# A dictionary or a method reference answers for itself; every other node defers
-# to typed_ast.children, which lists every variant with no wildcard, so a new
-# TypedExpr constructor stops the build there instead of skipping this check.
-fn check_expr(e: typed_ast.TypedExpr, cover: VarCover, tables: Tables) -> Maybe(source.SourcePos, String) =
+# Every variant is listed, with no wildcard: a new one stops the build here, so no
+# node is rewritten without its check. A TDict or method reference is checked
+# before its Evidence is built; children go left to right, as typed_ast.children
+# lists them, and the first error stops the walk. fwd_keys is constant within a
+# body (lambdas add no constraints).
+fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) typed_ast.TypedExpr =
   match e with
-  | typed_ast.TDict c _ pos _ -> check_constraint(c, pos, cover, tables)
+  | typed_ast.TVar _ _ _ -> Ok(e)
+  | typed_ast.TInt _ _ _ -> Ok(e)
+  | typed_ast.TFloat _ _ _ -> Ok(e)
+  | typed_ast.TBool _ _ _ -> Ok(e)
+  | typed_ast.TString _ _ _ -> Ok(e)
+  | typed_ast.TChar _ _ _ -> Ok(e)
+  | typed_ast.TUnit _ _ -> Ok(e)
+  | typed_ast.TDict c t pos _ ->
+      match check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) with
+      | Just err -> Err(err)
+      | Nothing -> Ok(typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables)))
   | typed_ast.TMethodRef method class_name t pos _ ->
-      let Just c = method_ref_constraint(method, class_name, t, tables) else Nothing
-      in check_constraint(c, pos, cover, tables)
-  | _ -> find_map(check_expr(_, cover, tables), typed_ast.children(e))
+      match method_ref_constraint(method, class_name, t, tables) with
+      | Nothing -> Ok(typed_ast.TMethodRef(method, class_name, t, pos, typed_ast.EvUnresolved))
+      | Just c ->
+          match check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) with
+          | Just err -> Err(err)
+          | Nothing -> Ok(typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(c, fwd_keys, tables)))
+  | typed_ast.TTuple items t pos ->
+      let xs = try resolve_exprs(items, kind, fwd_keys, tables)
+      in Ok(typed_ast.TTuple(xs, t, pos))
+  | typed_ast.TIf cnd thn els t pos ->
+      let c = try resolve_expr(cnd, kind, fwd_keys, tables)
+          a = try resolve_expr(thn, kind, fwd_keys, tables)
+          b = try resolve_expr(els, kind, fwd_keys, tables)
+      in Ok(typed_ast.TIf(c, a, b, t, pos))
+  | typed_ast.TMatch scrut branches t pos ->
+      let s = try resolve_expr(scrut, kind, fwd_keys, tables)
+          bs = try resolve_branches(branches, kind, fwd_keys, tables)
+      in Ok(typed_ast.TMatch(s, bs, t, pos))
+  | typed_ast.TCall callee args t pos ->
+      let f = try resolve_expr(callee, kind, fwd_keys, tables)
+          xs = try resolve_exprs(args, kind, fwd_keys, tables)
+      in Ok(typed_ast.TCall(f, xs, t, pos))
+  | typed_ast.TLambda params body t pos ->
+      let b = try resolve_expr(body, kind, fwd_keys, tables)
+      in Ok(typed_ast.TLambda(params, b, t, pos))
+  | typed_ast.TBinary op l r t pos ->
+      let a = try resolve_expr(l, kind, fwd_keys, tables)
+          b = try resolve_expr(r, kind, fwd_keys, tables)
+      in Ok(typed_ast.TBinary(op, a, b, t, pos))
+  | typed_ast.TUnary op x t pos ->
+      let a = try resolve_expr(x, kind, fwd_keys, tables)
+      in Ok(typed_ast.TUnary(op, a, t, pos))
+  | typed_ast.TRange lo hi t pos ->
+      let a = try resolve_expr(lo, kind, fwd_keys, tables)
+          b = try resolve_expr(hi, kind, fwd_keys, tables)
+      in Ok(typed_ast.TRange(a, b, t, pos))
+  | typed_ast.TDo steps t pos ->
+      let ss = try resolve_steps(steps, kind, fwd_keys, tables)
+      in Ok(typed_ast.TDo(ss, t, pos))
+  | typed_ast.TRecord name fields t pos ->
+      let fs = try resolve_fields(fields, kind, fwd_keys, tables)
+      in Ok(typed_ast.TRecord(name, fs, t, pos))
+  | typed_ast.TGetField obj fld t pos ->
+      let o = try resolve_expr(obj, kind, fwd_keys, tables)
+      in Ok(typed_ast.TGetField(o, fld, t, pos))
+  | typed_ast.TRecordUpdate base fields t pos ->
+      let b = try resolve_expr(base, kind, fwd_keys, tables)
+          fs = try resolve_fields(fields, kind, fwd_keys, tables)
+      in Ok(typed_ast.TRecordUpdate(b, fs, t, pos))
+
+fn resolve_exprs(es: List typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) (List typed_ast.TypedExpr) =
+  match es with
+  | [] -> Ok([])
+  | [e | rest] ->
+      let x = try resolve_expr(e, kind, fwd_keys, tables)
+          xs = try resolve_exprs(rest, kind, fwd_keys, tables)
+      in Ok(Cons(x, xs))
+
+fn resolve_branches(bs: List typed_ast.TypedMatchBranch, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) (List typed_ast.TypedMatchBranch) =
+  match bs with
+  | [] -> Ok([])
+  | [typed_ast.TypedMatchBranch pat body | rest] ->
+      let b = try resolve_expr(body, kind, fwd_keys, tables)
+          xs = try resolve_branches(rest, kind, fwd_keys, tables)
+      in Ok(Cons(typed_ast.TypedMatchBranch(pat, b), xs))
+
+fn resolve_steps(ss: List typed_ast.TypedDoStep, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) (List typed_ast.TypedDoStep) =
+  match ss with
+  | [] -> Ok([])
+  | [s | rest] ->
+      let x = try resolve_step(s, kind, fwd_keys, tables)
+          xs = try resolve_steps(rest, kind, fwd_keys, tables)
+      in Ok(Cons(x, xs))
+
+fn resolve_step(s: typed_ast.TypedDoStep, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) typed_ast.TypedDoStep =
+  match s with
+  | typed_ast.TDoBindStep pat ex mode ->
+      let x = try resolve_expr(ex, kind, fwd_keys, tables)
+      in Ok(typed_ast.TDoBindStep(pat, x, mode))
+  | typed_ast.TDoLetStep name ex ->
+      let x = try resolve_expr(ex, kind, fwd_keys, tables)
+      in Ok(typed_ast.TDoLetStep(name, x))
+  | typed_ast.TDoExprStep ex ->
+      let x = try resolve_expr(ex, kind, fwd_keys, tables)
+      in Ok(typed_ast.TDoExprStep(x))
+
+fn resolve_fields(fs: List typed_ast.TypedRecordField, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) (List typed_ast.TypedRecordField) =
+  match fs with
+  | [] -> Ok([])
+  | [typed_ast.TypedRecordField name ex | rest] ->
+      let x = try resolve_expr(ex, kind, fwd_keys, tables)
+          xs = try resolve_fields(rest, kind, fwd_keys, tables)
+      in Ok(Cons(typed_ast.TypedRecordField(name, x), xs))
 
 # ---------------------------------------------------------------------------
 # Type-expression helpers (ported from lowering; resolve owns its own copies)
