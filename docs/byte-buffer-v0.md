@@ -100,7 +100,8 @@ types. `Bytes` and a `ByteBuf` hold only bytes and avoid that.
 
 ## 4. Prior art
 
-Checked against each language's reference or library source, 2026-10-18.
+Checked against each language's reference or library source, 2026-10-18; the last three rows
+2026-10-19.
 
 | language | mechanism | purity comes from |
 |---|---|---|
@@ -114,6 +115,9 @@ Checked against each language's reference or library source, 2026-10-18.
 | Erlang | appending to a binary reserves room (twice the size, at least 256); "only the binary returned from the latest append operation will support further cheap append operations" (Efficiency Guide, *Constructing and Matching Binaries*) | a run-time check; older versions copy |
 | Go | `strings.Builder`: mutable; `String()` makes no copy; a copied Builder panics | not pure |
 | OCaml | `Buffer.contents` copies; `Bytes.unsafe_to_string` relies on convention | not pure |
+| Scala (research) | `@local` second-class values (Osvald et al., OOPSLA 2016, "Gentrification Gone too Far?"): "Second-class values cannot be stored in mutable variables, they cannot be returned from functions, and they cannot be accessed by first-class (named or anonymous) functions through free variables" | a binding mode, not a type: "parametric polymorphism does not pose major difficulties" |
+| Effekt | "values (that can be returned and stored)" against "computation (that can be passed, but not returned)" (language tour, *Captures*) | second-class blocks; boxing tracks captures |
+| OxCaml | `local` parameters on any value, not only closures: "a promise by a function not to let a particular argument escape the region where it belongs" (*Stack allocation*) | a mode, used for stack allocation |
 
 Lean's approach does not fit: Sprout's GC traces, it does not count references.
 
@@ -150,9 +154,10 @@ builder ends). Haskell and Koka both use rank-2 types for exactly this.
 - **For:** purity checked by the type checker; small runtime.
 - **Against:** a new effect level touches `unify_effects_applied`, `merge_effects`, the
   enforcement rules, method subsumption (spec §7 rule 8), diagnostics and the printer. It
-  covers one type and never becomes general local state without rank-2 types. When the
-  handlers draft ([effect-system-handlers-draft.md](effect-system-handlers-draft.md)) adds
-  rows, `Local` would be rebuilt as an ordinary label.
+  covers one type and never becomes general local state without rank-2 types or 5.5's
+  second-class parameters. When the handlers draft
+  ([effect-system-handlers-draft.md](effect-system-handlers-draft.md)) adds rows, `Local` would
+  be rebuilt as an ordinary label.
 
 ### 5.3 A private unsafe creator
 
@@ -201,13 +206,57 @@ b3 = push_byte(b1, 'C')       b1.len=1 < fill=2: copy   b3 = "AC", b2 still "AB"
   can share because its binaries are reference-counted. Zero-copy needs `Bytes` able to point
   into a `Storage`.
 
+### 5.5 A `Local` effect over second-class buffers
+
+5.2 with its escape argument replaced by a general one. A data parameter may be declared
+`local`, and the buffer reaches code only through one:
+
+```
+fn run_local(f: (local LocalVec a) -> b !{Local}) -> b       # pure
+fn local_set(v: local LocalVec a, i: Int, x: a) -> Unit !{Local}
+```
+
+The rules are Osvald et al.'s (§4), and Sprout's callee check for `local` closures already
+enforces them by name, whatever the type (`linear_check.escape_honesty`): a `local` parameter may
+be passed at another `local` position, never returned, stored, bound with `let`, passed at an
+ordinary position, or captured by a lambda outside a `local` position. So:
+
+- `b` cannot carry the buffer: returning it, or a closure over it, is an escape.
+- A buffer cannot be stored in another: `local_set`'s `x` is not `local`.
+- Nested runs stay separate. `f` is not a `local` slot, so a lambda passed to an inner
+  `run_local` cannot capture the outer buffer, and discharging `Local` there hides only the inner
+  buffer's writes.
+
+This is general local state, writes at any index included, without rank-2 types.
+
+- **For:** checked statically; extends to `LocalVec`, local maps, any local cell. Opt-in and not
+  breaking: a plain value is accepted at a `local` slot, as a closure is today, so a generic
+  function accepts a local argument once its parameter says `local`.
+- **Against:** 5.2's effect work, plus three checker changes:
+  - `local` on data parameters and type variables. Both are rejected today; spec *Non-escaping
+    closure parameters* gives `once a`'s reason, but the escape walk is by name and would hold
+    for any type. The real limit is that `local` licenses only closures capturing borrowed values.
+  - `local` pushed down onto a lambda's own parameter (`\buf -> …` at `f`), with the escape walk
+    run over the lambda's body. Today it is rejected because the walk covers declared functions
+    only.
+  - The walk counts any non-call use as an escape, including a field read or an operand. A data
+    `local` needs reads that return a first-class value to pass.
+
+  Every combinator a local buffer flows through must declare `local` (BACKLOG P2 **Mark the
+  prelude combinators' function arguments `local`** covers closures only); until then, loops
+  are written as recursion. Nothing proves it sound in Sprout's terms: the argument here is a
+  reading of the paper's rules.
+
 ## 6. How they combine
 
 - **5.4 then 5.1.** 5.4's `Storage` is 5.1's runtime half. A linear wrapper over it makes the
   version check a branch that never fails.
 - 5.2 and 5.1 compete: both check purity statically, and 5.1 is more general.
+- 5.5 is 5.2 made general, and competes with 5.1 for general in-place update: 5.1 asks every
+  generic function to opt out of linearity (breaking), 5.5 asks a function to opt in to `local`.
+  5.5 needs no run-time check, so it could replace 5.4 later; it is not built on it.
 - 5.3 is the fallback if nothing else ships.
-- **Bounds-check elimination.** Under 5.1, 5.2 and 5.3, types prove that a loop body cannot
+- **Bounds-check elimination.** Under 5.1, 5.2, 5.3 and 5.5, types prove that a loop body cannot
   change the buffer, so a loop's checks can move to one entry test. Under 5.4 they cannot, since
   `push_byte` is pure: lifting the version check out of a loop needs an alias rule
   ([bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) §6).
@@ -249,6 +298,8 @@ documents the cliff. `idiomatic-sprout.md`: build output with a `ByteBuf`, never
 
 ## 11. Open questions
 
+- 5.5: is the escape argument sound? It rests on Osvald et al.'s rules as the `local` walk
+  implements them, with no proof in Sprout's own terms.
 - Should `Bytes` be able to share a `Storage`, so `finish` need not copy?
 - Is `push4` worth its API once pushes are inlined and unrooted (6–15%)?
 - Which of §3's compiler steps lands first: inline access, alias tags, or rooting only on slow
