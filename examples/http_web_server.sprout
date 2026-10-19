@@ -1,5 +1,6 @@
 module examples.http_web_server
 
+import stdlib.http (InternalServerError500)
 import stdlib.http_server (HttpRequest, HttpServerResponse, Route, dispatch, serve, ok, bad_request, not_found, response, with_header, see_other, request_method, request_path, request_body, query_param, form_param)
 import stdlib.http_middleware (with_logging)
 import stdlib.log as log
@@ -113,7 +114,7 @@ fn json(body: String) -> HttpServerResponse =
 fn render_page(tmpl: Template, context: Json) -> HttpServerResponse =
   match render(tmpl, context) with
   | Ok body -> html(body)
-  | Err _ -> response(500, "template render error")
+  | Err _ -> response(InternalServerError500, "template render error")
 
 fn form_or(name: String, fallback: String, req: HttpRequest) -> String =
   match form_param(name, req) with

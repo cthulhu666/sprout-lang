@@ -1,6 +1,6 @@
 module stdlib.http_server
 
-import stdlib.http (HttpStatusError, HttpUnsupportedStatus, RequestLine, RequestPathVersion, http_response, parse_request_line, status_line)
+import stdlib.http (HttpStatus, Ok200, SeeOther303, BadRequest400, NotFound404, RequestTimeout408, ContentTooLarge413, RequestHeaderFieldsTooLarge431, NotImplemented501, RequestLine, RequestPathVersion, parse_request_line, status_code, status_has_content, status_line)
 import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpError, accept, close, close_listener, read_avail_timeout, tcp_error_message, write_all_utf8_by)
 import stdlib.string as string
 import stdlib.bytes as bytes
@@ -31,11 +31,10 @@ type HttpRequestMeta =
 # Headers in the order the handler set them, a name possibly repeated (`add_header`). Cookies are
 # kept apart and typed, so `with_cookie` replaces one by name and only `render` turns one into text.
 export type HttpServerResponse =
-  | HttpServerResponse Int (Vec (String, String)) (Vec SetCookie) String
+  | HttpServerResponse HttpStatus (Vec (String, String)) (Vec SetCookie) String
 
 export type HttpServerError (..) =
   | HttpInvalidRequest String
-  | HttpServerUnsupportedStatus Int
   # The client did not finish sending within its budget. Separate from HttpInvalidRequest because
   # it maps to a different status (408, not 400) and because it is not the client's request being
   # malformed — there simply was not one yet.
@@ -610,19 +609,15 @@ fn with_default_header(name: String, value: String, headers: Vec (String, String
   if vec_any(\pair -> header_named(name, pair), headers) then headers
   else vec_append((name, value), headers)
 
-# A 204 or 304 has no content (RFC 9110 §15.3.5, §15.4.5), so a body the handler passed is not
-# sent, and it carries no Content-Length (§8.6) and no default content-type.
-fn has_content(status: Int) -> Bool =
-  status != 204 && status != 304
-
 # The final header lines written to the wire: caller headers in order, then a defaulted
-# content-type and a byte-accurate content-length wherever the status has content. Framing is the
+# content-type and a byte-accurate content-length wherever the status has content
+# (`status_has_content`; a body the handler gave a 204 or 304 is not sent). Framing is the
 # server's responsibility, so every caller-supplied content-length and transfer-encoding is dropped,
 # however it was added: a transfer-encoding would override the content-length (RFC 9112 §6.3) for a
 # body that is not encoded. There is no default `connection`: an HTTP/1.1 connection persists unless
 # a side says close, and the server adds `connection: close` when it will close (see `closing`).
-fn response_headers(status: Int, headers: Vec (String, String), body: String) -> Vec (String, String) =
-  if has_content(status) then
+fn response_headers(status: HttpStatus, headers: Vec (String, String), body: String) -> Vec (String, String) =
+  if status_has_content(status) then
     framed
       |> with_default_header("content-type", "text/plain")
       |> vec_append(("content-length", int_to_string(string.byte_length(body))))
@@ -639,49 +634,52 @@ where
   with_headers = vec_fold(push_header, ["\r\n", line], headers)
   with_cookies = vec_fold(\ (acc, c) -> push_header(acc, ("set-cookie", set_cookie_text(c))), with_headers, cookies)
 
-export fn response(status: Int, body: String) -> HttpServerResponse =
+export fn response(status: HttpStatus, body: String) -> HttpServerResponse =
   HttpServerResponse(status, vec_empty(), vec_empty(), body)
 
 # The numeric status of a response — the accessor a logging/metrics middleware
 # needs, since the HttpServerResponse constructor is not exported for matching.
 export fn response_status(resp: HttpServerResponse) -> Int =
   match resp with
-  | HttpServerResponse status _ _ _ -> status
+  | HttpServerResponse status _ _ _ -> status_code(status)
 
 export fn ok(body: String) -> HttpServerResponse =
-  response(200, body)
+  response(Ok200, body)
 
 export fn bad_request(body: String) -> HttpServerResponse =
-  response(400, body)
+  response(BadRequest400, body)
 
 export fn not_found(body: String) -> HttpServerResponse =
-  response(404, body)
+  response(NotFound404, body)
 
 # 408, the answer to a client that connected but did not finish its request in time.
 export fn request_timeout(body: String) -> HttpServerResponse =
-  response(408, body)
+  response(RequestTimeout408, body)
 
 # 431 (RFC 6585), the answer to a header block that exceeded `max_header_bytes`.
 export fn headers_too_large(body: String) -> HttpServerResponse =
-  response(431, body)
+  response(RequestHeaderFieldsTooLarge431, body)
 
 # 413, the answer to a `Content-Length` above `max_body_bytes`. RFC 9110 §15.5.14 renamed the reason
 # phrase to "Content Too Large"; nginx still reports the RFC 7231 name for the same code.
 export fn body_too_large(body: String) -> HttpServerResponse =
-  response(413, body)
+  response(ContentTooLarge413, body)
 
 # 501, the answer to a request asking for something this server does not implement — today only a
 # `Transfer-Encoding`. Deliberately NOT 400: the request is well formed, so telling the client it is
 # malformed would send it looking for a defect it does not have (RFC 9112 §6.1).
 export fn not_implemented(body: String) -> HttpServerResponse =
-  response(501, body)
+  response(NotImplemented501, body)
 
-# A 303 See Other redirect to `location`, with an empty body. This is the Post/
-# Redirect/Get pattern: a form handler mutates state on POST, then returns this so the
-# browser re-GETs `location` — a refresh reloads the result page instead of re-POSTing
-# the form. `render` needs `303` in the shared status table (stdlib.http).
+# A redirect to `location`, with an empty body. The status says which kind (RFC 9110 §15.4): 301/308
+# permanent, 302/307 temporary; 307 and 308 keep the method and body.
+export fn redirect(status: HttpStatus, location: String) -> HttpServerResponse =
+  with_header("location", location, response(status, ""))
+
+# 303 See Other, the Post/Redirect/Get answer: a form handler mutates state on POST and returns this,
+# so a browser refresh re-GETs `location` instead of re-POSTing the form.
 export fn see_other(location: String) -> HttpServerResponse =
-  with_header("location", location, response(303, ""))
+  redirect(SeeOther303, location)
 
 # Sets `name` to `value`, removing every earlier line of that name (Go `Header.Set`). Names are
 # case-insensitive and go out lowercase.
@@ -1023,32 +1021,20 @@ export fn request_cookie(name: String, req: HttpRequest) -> Maybe String =
 where
   pairs = cookie_pairs(req)
 
-# Render a response to the wire. The header block is assembled from the response's
-# own header lines (not http_response's fixed base), so the content type is caller-
-# controlled, and every response carries a byte-accurate Content-Length.
-# `http_response` remains the shared status-line/body path for other callers
-# (http_client, echo helpers).
-fn as_server_error(err: HttpStatusError) -> HttpServerError =
-  match err with
-  | HttpUnsupportedStatus code -> HttpServerUnsupportedStatus(code)
-
-export fn render(resp: HttpServerResponse) -> ServerResult String =
-  match render_parts(resp) with
-  | Ok parts -> Ok(joined(parts))
-  | Err err -> Err(err)
+# Render a response to the wire. The header block is assembled from the response's own header
+# lines (not http_response's fixed base), so the content type is caller-controlled.
+export fn render(resp: HttpServerResponse) -> String =
+  joined(render_parts(resp))
 
 # The header block and the body apart, so a HEAD reply can send the first alone.
-fn render_parts(resp: HttpServerResponse) -> ServerResult (String, String) =
+fn render_parts(resp: HttpServerResponse) -> (String, String) =
   match resp with
-  | HttpServerResponse status headers cookies body ->
-      match status_line(status) with
-      | Ok line -> Ok(framed_parts(line, status, headers, cookies, body))
-      | Err err -> Err(as_server_error(err))
+  | HttpServerResponse status headers cookies body -> framed_parts(status, headers, cookies, body)
 
-fn framed_parts(line: String, status: Int, headers: Vec (String, String), cookies: Vec SetCookie, body: String) -> (String, String) =
-  (assemble_head(line, response_headers(status, headers, content), cookies), content)
+fn framed_parts(status: HttpStatus, headers: Vec (String, String), cookies: Vec SetCookie, body: String) -> (String, String) =
+  (assemble_head(status_line(status), response_headers(status, headers, content), cookies), content)
 where
-  content = if has_content(status) then body else ""
+  content = if status_has_content(status) then body else ""
 
 fn joined(parts: (String, String)) -> String =
   head ++ body
@@ -1098,7 +1084,6 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
   # connection would read it as the next request (RFC 9112 §6.3's unrecoverable-framing case).
   | HttpUnsupportedTransferCoding -> not_implemented("unsupported transfer coding")
   | HttpInvalidRequest _ -> bad_request("bad request")
-  | HttpServerUnsupportedStatus _ -> bad_request("bad request")
 
 # Whether a connection may stay open after its response, as far as the server's capacity goes.
 #
@@ -1188,18 +1173,17 @@ fn handler_closes(resp: HttpServerResponse) -> Bool =
 # One connection, request after request. Every path consumes `conn` exactly once: by a close, or by
 # the next turn of the loop, which owns it from then on.
 #
-# THE LOOP — handle_connection, respond, send_kept, write_kept, next_request, next_from, idle_wait.
+# THE LOOP — handle_connection, respond, write_kept, next_request, next_from, idle_wait.
 # Two invariants hold across it; check both before changing any of them:
 # A. Every call from one to the next is a tail call, and none calls itself: a call that is not a tail
 #    call keeps a frame per request, and the task's GC root pool runs out after a few thousand.
-# B. A place taken by `reserve` is given back exactly once: by `send_kept` when the response does not
-#    render, by `write_kept` when the write fails, by `next_from` when the next request starts, or by
-#    `idle_wait` when the wait ends without one.
+# B. A place taken by `reserve` is given back exactly once: by `write_kept` when the write fails, by
+#    `next_from` when the next request starts, or by `idle_wait` when the wait ends without one.
 fn handle_connection(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
                      handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int)) -> Unit !{IO} =
   match read_request(conn, config, pending) with
   # The framing of whatever follows a failed read is unknown, so the reply closes (RFC 9112 §9.3).
-  | Err err -> write_and_close(conn, joined(wire_parts(closing(read_error_response(err)))), config)
+  | Err err -> write_and_close(conn, joined(render_parts(closing(read_error_response(err)))), config)
   | Ok (req, rest) ->
       do
         resp <- handler(req)
@@ -1212,20 +1196,10 @@ fn respond(config: ServerConfig, adm: Admission, conn: consuming TcpConnection, 
   else
     do
       kept <- reserve(adm)
-      if kept then send_kept(config, adm, conn, handler, method, resp, rest)
+      # Rendered only once the connection is known to stay open, so a response that closes is
+      # rendered once, with its `connection: close`.
+      if kept then write_kept(config, adm, conn, handler, for_method(method, render_parts(resp)), rest)
       else close_with(conn, method, resp, config)
-
-# Rendered only once the connection is known to stay open, so a response that closes is rendered
-# once, with its `connection: close`. A response that does not render gets the 500 fallback, which
-# only the close frames.
-fn send_kept(config: ServerConfig, adm: Admission, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO},
-             method: String, resp: HttpServerResponse, rest: (Bytes, Int)) -> Unit !{IO} =
-  match render_parts(resp) with
-  | Ok parts -> write_kept(config, adm, conn, handler, for_method(method, parts), rest)
-  | Err _ ->
-      do
-        release(adm)
-        close_with(conn, method, resp, config)
 
 fn write_kept(config: ServerConfig, adm: Admission, conn: consuming TcpConnection, handler: HttpRequest -> HttpServerResponse !{IO},
               payload: String, rest: (Bytes, Int)) -> Unit !{IO} =
@@ -1243,7 +1217,7 @@ fn closing(resp: HttpServerResponse) -> HttpServerResponse =
   with_header("connection", "close", resp)
 
 fn close_with(conn: consuming TcpConnection, method: String, resp: HttpServerResponse, config: ServerConfig) -> Unit !{IO} =
-  write_and_close(conn, for_method(method, wire_parts(closing(resp))), config)
+  write_and_close(conn, for_method(method, render_parts(closing(resp))), config)
 
 # The next request starts in the bytes already read past the last one, or else after an idle wait of
 # at most `idle_ms` from now. Either way the connection's place in `idle` is given back.
@@ -1296,19 +1270,6 @@ fn for_method(method: String, parts: (String, String)) -> String =
   if method == "HEAD" then head else joined(parts)
 where
   (head, _) = parts
-
-# The 500 fallback (reachable only when a handler returns a status outside the
-# supported table) still uses http_response's fixed format — no Content-Length, its own
-# Content-Type — rather than the dict-assembled `render`. Acceptable for this rare
-# internal-error path; the normal response path goes through `render`. Its body is part of the
-# head, so a HEAD gets it too, framed by the close.
-fn wire_parts(resp: HttpServerResponse) -> (String, String) =
-  match render_parts(resp) with
-  | Ok parts -> parts
-  | Err _ ->
-      match http_response(500, "internal server error") with
-      | Ok raw -> (raw, "")
-      | Err _ -> ("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\ninternal server error", "")
 
 # Each accepted connection is handled in its own fire-and-forget green task, so a
 # slow connection (one dribbling its request) cannot block others: `tcp_accept`

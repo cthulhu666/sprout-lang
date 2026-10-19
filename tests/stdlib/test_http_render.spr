@@ -1,4 +1,5 @@
 import stdlib.test (check_true, check_eq, run_suite)
+import stdlib.http (NoContent204, NotModified304, Ok200, http_response, status_code, status_line)
 import stdlib.http_server (HttpServerResponse, ok, response, with_header, add_header, render, cookie, cookie_name, cookie_value, with_cookie)
 import stdlib.string as string
 
@@ -9,11 +10,6 @@ import stdlib.string as string
 # `Connection: close`. A usable server must (1) emit a single, caller-controlled
 # Content-Type and (2) emit a byte-accurate Content-Length. These assertions fail on the
 # unfixed render (missing content-length; duplicate `text/` values on override).
-
-fn rendered(resp: HttpServerResponse) -> String =
-  match render(resp) with
-  | Ok raw -> raw
-  | Err _ -> "RENDER_ERR"
 
 fn with_plain_cookie(name: String, resp: HttpServerResponse) -> HttpServerResponse =
   match (cookie_name(name), cookie_value("1")) with
@@ -34,21 +30,21 @@ fn main() -> Unit !{IO} =
   run_suite("http_render", [
     # (1) A plain response carries a byte-accurate Content-Length ("hello" = 5 bytes).
     check_true("content-length matches body length",
-      contains(rendered(ok("hello")), "content-length: 5")),
+      contains(render(ok("hello")), "content-length: 5")),
     # Content-Length is byte-oriented: "héllo" is 5 codepoints but 6 UTF-8 bytes. This
     # discriminates byte_length from the codepoint-counting length (which would emit 5).
     check_true("content-length counts bytes, not codepoints",
-      contains(rendered(ok("héllo")), "content-length: 6")),
+      contains(render(ok("héllo")), "content-length: 6")),
     # (2) The default content type is still text/plain when the caller sets nothing.
     check_true("default content-type is text/plain",
-      contains(rendered(ok("hi")), "text/plain")),
+      contains(render(ok("hi")), "text/plain")),
     # (3) Overriding the content type REPLACES it — exactly one media type on the wire.
     check_true("override sets text/html",
-      contains(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/html")),
+      contains(render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/html")),
     check_true("override drops the default text/plain",
-      ! contains (rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain")),
+      ! contains (render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain")),
     check_eq("exactly one media type on override",
-      count_from(rendered(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1),
+      count_from(render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1),
 
     # --- HTTP response splitting (code review, finding 1) --------------------------------------
     # Header values reached the wire verbatim, so a handler echoing request-derived text into one
@@ -64,67 +60,74 @@ fn main() -> Unit !{IO} =
     # the value). It is that the payload no longer STARTS A LINE: nothing may follow a CRLF except
     # a header this server chose to emit.
     check_true("a CRLF in a header value cannot start a new header line",
-      ! contains (rendered(with_header("x-lang", "en\r\nset-cookie: evil=1", ok("hi"))), "\r\nset-cookie")),
+      ! contains (render(with_header("x-lang", "en\r\nset-cookie: evil=1", ok("hi"))), "\r\nset-cookie")),
     # The sharper half: two CRLFs would end the header block early and make the remainder a BODY
     # the attacker controls. Exactly one blank-line separator may appear in a rendered response.
     check_eq("an injected blank line cannot terminate the header block early",
-      count_from(rendered(with_header("x-lang", "en\r\n\r\n<script>x</script>", ok("hi"))), "\r\n\r\n", 0), 1),
+      count_from(render(with_header("x-lang", "en\r\n\r\n<script>x</script>", ok("hi"))), "\r\n\r\n", 0), 1),
     # The value is preserved, just flattened — the sanitiser must not truncate at the CR (which
     # would silently drop data) nor delete it (which would splice `en` onto the payload).
     check_true("the sanitised value keeps its text, with CR/LF turned into spaces",
-      contains(rendered(with_header("x-lang", "en\r\nde", ok("hi"))), "x-lang: en  de\r\n")),
+      contains(render(with_header("x-lang", "en\r\nde", ok("hi"))), "x-lang: en  de\r\n")),
     # Header NAMES go through the same wire path and the same injection: `lower_ascii` lowercases a
     # name but has never removed anything from it.
     check_true("a CRLF in a header name cannot start a new header line",
-      ! contains (rendered(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie")),
+      ! contains (render(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie")),
 
     # --- Repeatable headers ---------------------------------------------------------------------
     # `add_header` appends a line (Go `Header.Add`); `with_header` replaces every earlier line of
     # that name (Go `Header.Set`). Lines go out in the order the handler set them.
     check_true("add_header twice gives two lines",
-      contains(rendered(add_header("x-a", "2", add_header("x-a", "1", ok("hi")))), "x-a: 1\r\nx-a: 2\r\n")),
+      contains(render(add_header("x-a", "2", add_header("x-a", "1", ok("hi")))), "x-a: 1\r\nx-a: 2\r\n")),
     check_eq("with_header replaces every earlier line of that name",
-      count_from(rendered(with_header("X-A", "3", add_header("x-a", "2", add_header("x-a", "1", ok("hi"))))), "x-a: ", 0), 1),
+      count_from(render(with_header("X-A", "3", add_header("x-a", "2", add_header("x-a", "1", ok("hi"))))), "x-a: ", 0), 1),
     check_true("with_header's value is the one that survives",
-      contains(rendered(with_header("X-A", "3", add_header("x-a", "2", add_header("x-a", "1", ok("hi"))))), "x-a: 3\r\n")),
+      contains(render(with_header("X-A", "3", add_header("x-a", "2", add_header("x-a", "1", ok("hi"))))), "x-a: 3\r\n")),
     check_true("headers go out in the order they were set",
-      contains(rendered(with_header("x-a", "1", with_header("x-b", "2", ok("hi")))), "x-b: 2\r\nx-a: 1\r\n")),
+      contains(render(with_header("x-a", "1", with_header("x-b", "2", ok("hi")))), "x-b: 2\r\nx-a: 1\r\n")),
     check_true("a content-type added by add_header suppresses the default",
-      ! contains (rendered(add_header("content-type", "text/html", ok("hi"))), "text/plain")),
+      ! contains (render(add_header("content-type", "text/html", ok("hi"))), "text/plain")),
     # Framing is the server's: a caller's content-length, however added, never reaches the wire.
     check_eq("a caller's content-length is replaced by the real one",
-      count_from(rendered(add_header("content-length", "999", add_header("content-length", "998", ok("hi")))), "content-length: ", 0), 1),
+      count_from(render(add_header("content-length", "999", add_header("content-length", "998", ok("hi")))), "content-length: ", 0), 1),
     check_true("the surviving content-length is the body's",
-      contains(rendered(add_header("content-length", "999", ok("hi"))), "content-length: 2\r\n")),
+      contains(render(add_header("content-length", "999", ok("hi"))), "content-length: 2\r\n")),
     # A transfer-encoding would override the content-length (RFC 9112 §6.3), and the body is not
     # chunked, so a client would misread it and the next response on the connection.
     check_true("a caller's transfer-encoding never reaches the wire",
-      ! contains (rendered(add_header("Transfer-Encoding", "chunked", ok("hi"))), "transfer-encoding")),
+      ! contains (render(add_header("Transfer-Encoding", "chunked", ok("hi"))), "transfer-encoding")),
 
     # --- 204 No Content -------------------------------------------------------------------------
     # RFC 9110 §8.6: no Content-Length on a 204. §15.3.5: a 204 has no content, so a body the
     # handler passed anyway is not sent — on a persistent connection it would be the next response.
     check_true("a 204 carries no content-length",
-      ! contains (rendered(response(204, "")), "content-length")),
+      ! contains (render(response(NoContent204, "")), "content-length")),
     check_true("a 204 sends no body, even when given one",
-      string.ends_with(rendered(response(204, "stray")), "\r\n\r\n")),
+      string.ends_with(render(response(NoContent204, "stray")), "\r\n\r\n")),
     check_eq("a 204 gets no default content-type",
-      rendered(response(204, "")), "HTTP/1.1 204 No Content\r\n\r\n"),
+      render(response(NoContent204, "")), "HTTP/1.1 204 No Content\r\n\r\n"),
     # --- 304 Not Modified -----------------------------------------------------------------------
     # §15.4.5: no content. §8.6: a Content-Length on a 304 must match the 200 it stands for, which
     # render cannot know. A cache copies a 304's headers onto the stored response (RFC 9111
     # §4.3.4), so a defaulted content-type would overwrite the real one.
     check_eq("a 304 is a status line and nothing else",
-      rendered(response(304, "stray")), "HTTP/1.1 304 Not Modified\r\n\r\n"),
+      render(response(NotModified304, "stray")), "HTTP/1.1 304 Not Modified\r\n\r\n"),
     check_eq("a 304 keeps the headers its handler set",
-      rendered(with_header("etag", "\"v1\"", response(304, ""))), "HTTP/1.1 304 Not Modified\r\netag: \"v1\"\r\n\r\n"),
+      render(with_header("etag", "\"v1\"", response(NotModified304, ""))), "HTTP/1.1 304 Not Modified\r\netag: \"v1\"\r\n\r\n"),
+    # stdlib.http's own writer follows the same no-content rule.
+    check_eq("http_response sends no body or content-type on a 304",
+      http_response(NotModified304, "stray"), "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n"),
+    check_eq("http_response sends both on a 200",
+      http_response(Ok200, "hi"), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nhi"),
+    check_eq("status_line", status_line(NotModified304), "HTTP/1.1 304 Not Modified"),
+    check_eq("status_code", status_code(NoContent204), 204),
     # The whole message, byte for byte: status line, caller headers in order, the defaulted
     # content-type, content-length, one blank line, the body.
     check_eq("the full message, in order",
-      rendered(with_header("x-b", "2", with_header("x-a", "1", ok("hi")))),
+      render(with_header("x-b", "2", with_header("x-a", "1", ok("hi")))),
       "HTTP/1.1 200 OK\r\nx-a: 1\r\nx-b: 2\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n\r\nhi"),
     check_eq("cookies come after every other header, in the order set",
-      rendered(with_plain_cookie("b", with_plain_cookie("a", with_header("x-a", "1", ok("hi"))))),
+      render(with_plain_cookie("b", with_plain_cookie("a", with_header("x-a", "1", ok("hi"))))),
       "HTTP/1.1 200 OK\r\nx-a: 1\r\ncontent-type: text/plain\r\ncontent-length: 2\r\n"
         ++ "set-cookie: a=1; Path=/; HttpOnly; SameSite=Lax\r\n"
         ++ "set-cookie: b=1; Path=/; HttpOnly; SameSite=Lax\r\n\r\nhi")

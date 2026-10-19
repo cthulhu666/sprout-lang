@@ -1,5 +1,5 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpServerUnsupportedStatus, HttpUnsupportedTransferCoding, parse, request_method, request_path, request_body)
+import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, HttpUnsupportedTransferCoding, parse, request_method, request_path, request_body)
 
 # Request-framing conformance (code review, findings 2-4). Every case here is a message that the
 # unfixed parser ACCEPTED, and accepted with a body different from what a conforming intermediary in
@@ -19,7 +19,6 @@ fn body_text(req: HttpRequest) -> String =
 fn describe_err(e: HttpServerError) -> String =
   match e with
   | HttpInvalidRequest msg -> `Err ${msg}`
-  | HttpServerUnsupportedStatus code -> `Err status ${int_to_string(code)}`
   | HttpUnsupportedTransferCoding -> "Err unsupported transfer coding"
   | HttpRequestTimeout -> "Err request timeout"
   | HttpHeadersTooLarge -> "Err headers too large"

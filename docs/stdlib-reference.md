@@ -298,9 +298,18 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - uses foundational prelude `Maybe` and `Result`
 - `HttpResponse(status, headers, body)` — `body` is **`Bytes`**, not `String`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
-- `HttpStatusError` variants (`HttpUnsupportedStatus`)
+- `HttpStatus` — the statuses a server can send, one constructor each, its code in its name:
+  `Ok200`, `Created201`, `Accepted202`, `NoContent204`, `MovedPermanently301`, `Found302`,
+  `SeeOther303`, `NotModified304`, `TemporaryRedirect307`, `PermanentRedirect308`,
+  `BadRequest400`, `Unauthorized401`, `Forbidden403`, `NotFound404`, `MethodNotAllowed405`,
+  `RequestTimeout408`, `Conflict409`, `Gone410`, `ContentTooLarge413`,
+  `UnprocessableContent422`, `TooManyRequests429`, `RequestHeaderFieldsTooLarge431`,
+  `InternalServerError500`, `NotImplemented501`, `BadGateway502`, `ServiceUnavailable503`,
+  `GatewayTimeout504`. Closed, so no response can carry a status without a status line.
+- `status_code(s) -> Int`, `status_reason(s) -> String`, `status_line(s) -> String` (`"HTTP/1.1 200 OK"`)
+- `status_has_content(s) -> Bool` — false for 204 and 304, which send no body, no `content-length` and no default content-type (RFC 9110 §8.6, §15.3.5, §15.4.5)
 - `parse_request_line(raw) -> Maybe RequestLine`
-- `http_response(status, body) -> Result HttpStatusError String`
+- `http_response(status, body) -> String` — a minimal `Connection: close` response
 - `http_response_body(resp: HttpResponse) -> Bytes`
 - `http_response_text(resp: HttpResponse) -> Result Utf8Error String`
 
@@ -332,11 +341,13 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 
 - `HttpRequest` request values with accessor helpers
 - `HttpServerResponse` response values built via helper functions
-- `HttpServerError` variants (`HttpInvalidRequest`, `HttpServerUnsupportedStatus`)
+- `HttpServerError` variants (`HttpInvalidRequest`, `HttpRequestTimeout`, `HttpHeadersTooLarge`, `HttpBodyTooLarge`, `HttpUnsupportedTransferCoding`)
 - `parse(raw) -> Result HttpServerError HttpRequest`
-- `render(resp) -> Result HttpServerError String` — a byte-accurate `content-length` and a default `content-type: text/plain` on every status but 204 and 304. Those two carry no body, no `content-length` and no default `content-type` (RFC 9110 §8.6, §15.3.5, §15.4.5). A handler's own `content-length` and `transfer-encoding` are dropped: framing is the server's job
+- `render(resp) -> String` — a byte-accurate `content-length` and a default `content-type: text/plain` on every status but 204 and 304. Those two carry no body, no `content-length` and no default `content-type` (RFC 9110 §8.6, §15.3.5, §15.4.5). A handler's own `content-length` and `transfer-encoding` are dropped: framing is the server's job
 - A reply to `HEAD` is the header block a `GET` would get, `content-length` included, with no body (RFC 9110 §9.3.2)
-- `response(status, body) -> HttpServerResponse`
+- `response(status: HttpStatus, body) -> HttpServerResponse`
+- `response_status(resp) -> Int`
+- `redirect(status: HttpStatus, location) -> HttpServerResponse` — an empty body and a `location` header; `see_other(location)` is `redirect(SeeOther303, location)`
 - `ok(body) -> HttpServerResponse`
 - `bad_request(body) -> HttpServerResponse`
 - `not_found(body) -> HttpServerResponse`
@@ -350,7 +361,7 @@ Experimental HTTP server helpers (in `stdlib/http_server.sprout`):
 - `request_header(name, req) -> Maybe String`
 - Every `serve*` (`serve`, `serve_n`, `serve_pooled` and their `_with` forms) takes a listener the caller has bound with `net.listen_on` or `net.listen_local`, so a bind failure is the caller's `Err`
 - `serve_n(listener, max_connections, handler) -> Unit !{IO}` — accepts up to `max_connections` connections, handling each in its own green task (a slow connection does not block others); joins all handlers before returning, so it returns when the last connection closes, which for a client holding its connection open is up to `idle_ms` after the last response
-- HTTP/1.1 persistent connections: a connection serves request after request until a side says close. The server closes, sending `connection: close`, when the request is HTTP/1.0 or carries the `close` option, when the handler set `connection: close`, after an error reply or the 500 fallback, or when it is at capacity: `max_idle_connections` connections already waiting under `serve`, or ¾ of the workers (rounded down, so a one-worker pool never keeps a connection) already holding one, or a connection queued, under `serve_pooled`. A connection counts against these from the moment its response is admitted, including while that response is being written. A `close` in any of several `Connection` lines counts. Requests sent back to back are served in order, and empty lines before a request line are skipped (RFC 9112 §2.2). A connection with no request for `idle_ms` is closed with nothing sent ([http-keep-alive-v0.md](http-keep-alive-v0.md))
+- HTTP/1.1 persistent connections: a connection serves request after request until a side says close. The server closes, sending `connection: close`, when the request is HTTP/1.0 or carries the `close` option, when the handler set `connection: close`, after an error reply, or when it is at capacity: `max_idle_connections` connections already waiting under `serve`, or ¾ of the workers (rounded down, so a one-worker pool never keeps a connection) already holding one, or a connection queued, under `serve_pooled`. A connection counts against these from the moment its response is admitted, including while that response is being written. A `close` in any of several `Connection` lines counts. Requests sent back to back are served in order, and empty lines before a request line are skipped (RFC 9112 §2.2). A connection with no request for `idle_ms` is closed with nothing sent ([http-keep-alive-v0.md](http-keep-alive-v0.md))
 - `ServerConfig` — record of per-connection bounds: `header_ms`, `body_ms`, `max_header_bytes`, `write_ms`, `max_body_bytes`, `min_rate_bps`, `idle_ms` (wait for the next request, default 65 s), `max_idle_connections` (default 256); `default_config()`, adjusted with record update
 
 Request params (low-level, lossless — derived on demand from the parsed request, so pure and socket-free). Values are percent/`+`-decoded via `stdlib.url`. `_param` returns the FIRST value for a key (the Go `url.Values.Get` / Werkzeug `MultiDict.get` convention); `_param_all` returns every value; `_pairs` is the ordered, duplicate-preserving source of truth:
@@ -470,12 +481,6 @@ fn payload() -> json.Json =
     ]
   )
 ```
-
-`http_response` currently supports a practical fixed subset of common statuses:
-`200`, `201`, `202`, `204`, `301`, `302`, `303`, `304`, `307`, `308`, `400`,
-`401`, `403`, `404`, `405`, `408`, `409`, `410`, `413`, `422`, `429`, `431`,
-`500`, `501`, `502`, `503`, and `504`. Unsupported codes return
-`Err(HttpUnsupportedStatus(code))` instead of being silently rewritten.
 
 ## stdlib.list
 
