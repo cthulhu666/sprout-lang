@@ -38,10 +38,11 @@ into `justfile` and `ci-fast-gates` in the same change.
   `grep -F`, so pick a message fragment, not the line/column suffix).
   A new diagnostic's `.err` pins the whole message, not a prefix.
   If the message carries a hint, add `<name>.fixed.spr`: the same program with the
-  hint applied. Once the rejection matches, it must pass `--phase check` cleanly
-  (exit 0, no `ERROR:`), so a hint nobody can follow fails the gate. If the hint
-  is conditional ("if `f` uses `a` exactly once"), make the fixed program meet the
-  condition. `*.fixed.spr` files are not fixtures.
+  hint applied, plus only the edits it forces (a caller that no longer releases a
+  value it handed over). Once the rejection matches, it must pass `--phase check`
+  cleanly (exit 0, no `ERROR:`), so a hint nobody can follow fails the gate. A
+  conditional hint ("if `f` uses `a` exactly once") whose condition is false for
+  the fixture gets no fixed file. `*.fixed.spr` files are not fixtures.
 
 ## `run/XFAIL` — visible quarantine
 
