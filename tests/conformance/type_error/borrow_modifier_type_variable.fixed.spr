@@ -1,0 +1,12 @@
+module main
+
+# The hint in the .err applied; the comments below describe the rejected program.
+
+# An unbounded type variable is never linear (docs/linearity-bound-v0.md §6.1), so
+# a modifier on it means nothing; the message points at `where linear`, which is
+# what makes `borrowing a` meaningful.
+
+fn bad(x: borrowing a) -> Int where linear a = 0
+
+fn main() -> Unit !{IO} =
+  print(to_string(bad(1)))

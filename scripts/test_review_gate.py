@@ -331,6 +331,17 @@ results.append(
     run("17e. garbage transcript -> fails safe and blocks", 2, session="sess7", tpath=str(S / "garbage.jsonl"))
 )
 
+write("tests/conformance/type_error/x_new.err", "msg\n")
+results.append(
+    run(
+        "17g. type_error .err -> fixed.spr item",
+        2,
+        session="sess7",
+        present=["x_new.err", ".fixed.spr"],
+        tpath=str(S / "nope.jsonl"),
+    )
+)
+
 # Well-formed JSON of the wrong SHAPE must not raise: a hook that crashes on a
 # malformed line stops gating. A bare list, a string, and a non-dict `message` or
 # content block all reach the same .get() calls.

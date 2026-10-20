@@ -1,0 +1,11 @@
+module main
+
+# Hint applied: `where linear b`; `konst` now uses its `b` once.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn konst(x: a, y: b) -> (a, b) where linear b = (x, y)
+
+fn main() -> Unit !{IO} = match konst(1, L(2)) with | (n, l) -> print(int_to_string(n + close(l)))

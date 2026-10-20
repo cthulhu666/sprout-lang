@@ -1,0 +1,19 @@
+module main
+
+# The hint in the .err applied; the comments below describe the rejected program.
+
+# In a mutually recursive group, `x`'s type is fixed to `L` only by `g`, a later
+# member. The discard is still found: each member is checked against the group's
+# final types.
+
+type linear L = L Int
+
+fn eat(l: L) -> Int = match l with | L n -> n
+
+fn f(x, n: Int) -> Int =
+  if n > 0 then eat(x) + g(n - 1)
+  else eat(x)
+
+fn g(n: Int) -> Int = f(L(n), n)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(1)))

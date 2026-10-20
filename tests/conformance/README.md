@@ -36,6 +36,12 @@ into `justfile` and `ci-fast-gates` in the same change.
 - **`type_error/` · `parse_error/` · `executable_error/`** — write `<name>.spr` and
   `<name>.err` holding a stable substring of the expected diagnostic (matched with
   `grep -F`, so pick a message fragment, not the line/column suffix).
+  A new diagnostic's `.err` pins the whole message, not a prefix.
+  If the message carries a hint, add `<name>.fixed.spr`: the same program with the
+  hint applied. Once the rejection matches, it must pass `--phase check` cleanly
+  (exit 0, no `ERROR:`), so a hint nobody can follow fails the gate. If the hint
+  is conditional ("if `f` uses `a` exactly once"), make the fixed program meet the
+  condition. `*.fixed.spr` files are not fixtures.
 
 ## `run/XFAIL` — visible quarantine
 

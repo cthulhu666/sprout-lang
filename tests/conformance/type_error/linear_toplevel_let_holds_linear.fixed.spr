@@ -1,0 +1,19 @@
+module main
+
+# The hint in the .err applied; the comments below describe the rejected program.
+
+# A module binding is not a binder the linear pass tracks: every function sees
+# it, so each one may consume it. Here `a() + b()` released `g` twice and
+# printed 2.
+
+type linear File = File Int
+
+fn release(f: File) -> Int = match f with | File n -> n
+
+
+
+fn a(g: File) -> Int = release(g)
+
+fn b(g: File) -> Int = release(g)
+
+fn main() -> Unit !{IO} = print(to_string(a(File(1)) + b(File(2))))
