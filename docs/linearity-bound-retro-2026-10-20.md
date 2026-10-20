@@ -95,3 +95,18 @@ To do after #697 lands and before step 3, in this order.
     marked expected-error where the text says it is rejected.
 
 Step 3 starts with T2's grid extended to dictionaries and existentials, as failing tests.
+
+## 6. Status (2026-10-21)
+
+| item | status |
+|---|---|
+| P1 | done: AGENTS.md §Design Change Process, "Removing or relaxing a check" |
+| C1 | dropped: `c7b851e1` marks a whole group bounded, so the round 7 #1 library is rejected standalone |
+| C2 | deferred to BACKLOG: the bugs it covers are fixed |
+| T1 | dropped: T2 pins a verdict per cell, so no base binary is needed |
+| T2 | done: `scripts/gen_linear_grid.sh`, `just test-linear-grid`, `just linear-grid-drift`; adds accept cells, no-linear-type rows and declaration cells (docs/gates.md §Linear grid) |
+| X1 | done: `<name>.fixed.spr`, checked by `_test-reject` |
+| X2 | done: a review-gate line |
+| T3 | deferred to BACKLOG: T2 is its deterministic form |
+| P2 | dropped: "add the neighbouring cells" is T2; the rest is judgment |
+| X3 | deferred to BACKLOG, rescoped: the cited bug is outside §5.8 |
