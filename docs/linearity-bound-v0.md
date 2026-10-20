@@ -78,7 +78,7 @@ parameters, which §6.1 leaves unbounded. What remains is generic *code* run at 
 
 | Function | At | Where |
 |---|---|---|
-| `chan_send`, `chan_recv`, `chan_new`, `chan_close` | `TcpConnection`, `SqliteDb`, `PoolSlot` | `http_server`, `bench/http_worker_pool`, `twelve_dollar_server`, sprout-pg `pool` |
+| `chan_send`, `chan_recv`, `chan_select`, `chan_new`, `chan_close` | `TcpConnection`, `SqliteDb`, `PoolSlot` | `http_server`, `bench/http_worker_pool`, `twelve_dollar_server`, sprout-pg `pool` |
 | `panic(msg) -> a` | `TcpListener`, `Link` | `testsupport/listen`, bench servers, uncharted-suns `app`, tests |
 | `after(effect, value: a) -> a` | `Result PgError PgConnection` | sprout-pg `connection`, `pool` |
 | `pure` (`Applicative`) | `L` in a `Result` block | probe; sound |
@@ -89,9 +89,10 @@ the opt-in and nothing downstream changes. There is no instance at a linear type
 rejection test, and no existential packs one. No real code maps, folds or measures a list of
 linear values; only tests do.
 
-`chan_select`, `task_fork`, `task_await`, `with_scope` and `with_timeout` also pass an `a` that a
-linear value could fill, but nothing instantiates them at one, so they stay unannotated until
-something does. `Task` is itself `type linear` with a phantom `a`.
+`task_fork`, `task_await`, `with_scope` and `with_timeout` also pass an `a` that a linear value
+could fill, but nothing instantiates them at one, so they stay unannotated until something does.
+`chan_select` takes the bound so that a channel of linear values can be selected on, as it can be
+received from. `Task` is itself `type linear` with a phantom `a`.
 
 ## 5. Options
 
@@ -244,7 +245,9 @@ Two places, each where the facts it needs already are:
   that stands for it, beside the name and position. Once the declaration's substitution is final
   it applies §6.3 to each. A mutually recursive group's substitution is final only at the group's
   boundary: a type a later member fixes to a linear one is still a bare variable at an earlier
-  member's own boundary, so that member's checks, §6.4's included, run again there. This covers partial application and a generic function passed as a
+  member's own boundary. Every member's checks, §6.4's included, therefore run there, and once.
+  They run with every member's bounded variables marked linear: an unannotated sibling's
+  parameter can be unified with one, and its own declaration has no bound to mark it. This covers partial application and a generic function passed as a
   value (`list_map(dup, xs)`): each mention is instantiated. It runs in inference rather than
   in `linear_check` because only inference resolves names: `linear_check` sees the global
   environment, so a local that shadows a generic global would be matched against the wrong

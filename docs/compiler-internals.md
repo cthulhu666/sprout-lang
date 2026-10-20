@@ -678,6 +678,15 @@ schemes. **Every `@`-marker family is keyed on that short name:**
 | `@class:`, `@type:` | short name (readers apply `after_last_dot`) | `infer` |
 | `@tyarity:<TypeName>` | short type name | `infer.type_arity_of` |
 
+The `where linear` markers are the exception, keyed by something other than a type
+name (`docs/linearity-bound-v0.md` §6–§7):
+
+| marker | keyed by | read at |
+|---|---|---|
+| `@linear:<id>` | a bounded variable's rigid type-variable id — never its written name, which `List`'s own `a` shares | `linear_check.head_type_name` |
+| `@boundname:<id>` | the same id; holds the written name for diagnostics | `linear_check.bound_names`, `infer.is_bound_var` |
+| `@linbound:<fn>`, `@sig:<fn>`, `@toplet:<name>` | a declaration's name | `infer` (bound check and its hint) |
+
 `@phantom:` marks a type-parameter position the declaration does **not** store, so
 containment declines to descend it (`type Chan a = | Chan Int`). It is written in
 `infer.mark_phantom_params` from the declaration's own name and read through the

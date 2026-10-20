@@ -1,0 +1,13 @@
+module main
+
+# Nor can it drop it: one branch of `drop_it` never uses `y`.
+
+type linear L = L Int
+
+fn eat(l: L) -> Int = match l with | L n -> n
+
+fn keep(x: a, n: Int) -> Int where linear a = drop_it(x, n)
+
+fn drop_it(y, n: Int) = if n > 0 then keep(y, n - 1) else 0
+
+fn main() -> Unit !{IO} = print(int_to_string(keep(L(7), 2)))
