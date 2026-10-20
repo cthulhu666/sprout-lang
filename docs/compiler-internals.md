@@ -685,6 +685,7 @@ name (`docs/linearity-bound-v0.md` §6–§7):
 |---|---|---|
 | `@linear:<id>` | a bounded variable's rigid type-variable id — never its written name, which `List`'s own `a` shares | `linear_check.head_type_name` |
 | `@boundname:<id>` | the same id; holds the written name for diagnostics (`types.bound_name_marker`) | `linear_check.bound_names` |
+| `@headvar:<id>` | an instance head variable's rigid id, in that instance method's body | `linear_check.is_head_var` |
 | `@linbound:<fn>`, `@sig:<fn>`, `@toplet:<name>` | a declaration's name | `infer` (bound check and its hint) |
 
 `@phantom:` marks a type-parameter position the declaration does **not** store, so

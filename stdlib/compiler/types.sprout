@@ -198,7 +198,7 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @type:<TypeName>                @linear:<TypeName or tyvar id>
 #   @any_linear                     @bounded_decl
 #   @linbound:<fn, extern or method>  @boundname:<tyvar id>
-#   @sig:<fn>                       @toplet:<let>
+#   @sig:<fn>                       @toplet:<let>             @headvar:<tyvar id>
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
@@ -243,6 +243,11 @@ export fn bound_name_key(id: String) -> String = "@boundname:" ++ id
 export fn bound_name_marker(written: String) -> Scheme = mono(TVar(tyvar_id(written)))
 
 export fn bound_name_of(marker: Scheme) -> String = type_to_string(scheme_type(marker))
+
+# An instance head's variable, by its rigid id, in an instance method's body. A
+# use of the instance can make it linear, unchecked until step 3 of
+# docs/linearity-bound-v0.md §12, so discarding one is rejected.
+export fn head_var_key(id: String) -> String = "@headvar:" ++ id
 
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)
@@ -411,6 +416,12 @@ export fn tyvar_name(v: TyVarId) -> String =
 # by design, that compile-error set IS Stage 3's worklist.
 export fn tyvar_identity(v: TyVarId) -> String =
   match v with | TyVarId s -> s
+
+# The identity of `t` when it is a bare type variable.
+export fn type_var_name(t: Type) -> Maybe String =
+  match t with
+  | TVar v -> Just(tyvar_identity(v))
+  | _ -> Nothing
 
 # Identity equality of two type variables (mirrors type_id_eq). E0: name-string
 # equality; E1: Int id equality.

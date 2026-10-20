@@ -1151,6 +1151,9 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, fallible: Bool, rest: L
   | LinOk ec eb -> lin_do_bind_checked(pat, do_bind_type(typed_ast.typed_expr_type(e), env),
                                        ec, eb, e, fallible, rest, sc, env)
 
+let head_var_reason: String =
+  "its type is a variable of the instance head, which a use of the instance may instantiate at a linear type (docs/linearity-bound-v0.md §12)"
+
 let wildcard_bind_msg: String =
   "`_ <-` discards a linear value: a wildcard binds no name, so nothing can consume it (linear values must be used exactly once); bind a name and consume it"
 
@@ -1171,15 +1174,19 @@ fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
                        rest: List typed_ast.TypedDoStep,
                        sc: LinScope, env: Dict types.Scheme) -> LinRes =
   if wildcard_discards_linear(pat, bind_type, env) then
-    LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_msg)
+    LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_error(bind_type, env))
   else
     lin_do_bind_rest(pattern_linear_binders(pat, bind_type, env),
                      ec, eb, e, fallible, rest, sc, env)
 
 fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Bool =
   match pat with
-  | ast.WildcardPattern _ -> type_mentions_linear(t, env)
+  | ast.WildcardPattern _ -> discardable_type(t, env)
   | _ -> false
+
+fn wildcard_bind_error(t: types.Type, env: Dict types.Scheme) -> String =
+  if type_mentions_linear(t, env) then wildcard_bind_msg
+  else "`_ <-` discards a value that may be linear: " ++ head_var_reason ++ "; bind a name and consume it"
 
 
 fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
@@ -1265,7 +1272,20 @@ fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep
                         env: Dict types.Scheme) -> Bool =
   match rest with
   | [] -> false
-  | [_ | _] -> type_mentions_linear(typed_ast.typed_expr_type(e), env)
+  | [_ | _] -> discardable_type(typed_ast.typed_expr_type(e), env)
+
+# A discarded value is an unmet obligation when it IS or CONTAINS a linear
+# resource, or when it is an instance head's variable: a use of the instance can
+# make that linear, and nothing checks the use until step 3 of
+# docs/linearity-bound-v0.md §12. Only a bare variable counts, not one nested in
+# a type such as `Maybe a`.
+fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
+  type_mentions_linear(t, env) || is_head_var(t, env)
+
+fn is_head_var(t: types.Type, env: Dict types.Scheme) -> Bool =
+  match t with
+  | types.TVar name -> dict_member(types.head_var_key(types.tyvar_identity(name)), env)
+  | _ -> false
 
 # The linear type inside `t`, if any — `t` itself when its head is linear, else
 # the first one found among its type arguments and tuple components.
@@ -1391,10 +1411,9 @@ fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme,
       # character is the difference between a memo and an exponential walk.
       | (Nothing, seen2) -> first_linear_in_list(rest, env, seen2)
 
-# A discarded value is an unmet obligation when it IS or CONTAINS a linear
-# resource. A type variable counts only under `where linear`, which marks it linear in
-# `env`: without the bound no caller can instantiate it at a linear type
-# (docs/linearity-bound-v0.md §6.4).
+# `t` is or contains a linear type. A type variable counts only under `where
+# linear`, which marks it linear in `env`: without the bound no caller can
+# instantiate it at a linear type (docs/linearity-bound-v0.md §6.4).
 fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
   match first_linear_in(t, env) with
   | Just _ -> true
@@ -1416,7 +1435,7 @@ fn discarded_value_msg(t: types.Type, env: Dict types.Scheme) -> String =
   if type_mentions_linear(t, env) then
     "this step discards a linear value (linear values must be used exactly once); bind its result with `<-` or `let` and consume the binding"
   else
-    "this step discards a value that may be linear: its type is a type variable, which a caller may instantiate at a linear type (Sprout cannot yet declare a type parameter non-linear); bind its result with `<-` or `let` and consume the binding"
+    "this step discards a value that may be linear: " ++ head_var_reason ++ "; bind its result with `<-` or `let` and consume the binding"
 
 fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
                    sc: LinScope, env: Dict types.Scheme) -> LinRes =
