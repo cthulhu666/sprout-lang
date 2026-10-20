@@ -1974,6 +1974,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   reads. `where linear` on an instance head or a constructor is rejected until this lands, so an
   existential cannot carry a linear value either. Step 3 of `docs/linearity-bound-v0.md` §12: walk
   dictionaries in `resolve.sprout`. Blocks `docs/persistent-array-v0.md` §5.3.
+- [ ] `P2` **Linearity-bound retro: checks and tools to land before step 3.** Steps 1–2 took
+  eight review rounds and 16 confirmed bugs, two of them accepting a copy or a leak. The plan:
+  premises before a check is removed, bound parking independent of `program_has_linear`, one
+  group-boundary check, an accept-diff tool over a generated misuse corpus, hint-is-followable
+  fixtures. `docs/linearity-bound-retro-2026-10-20.md` §5.
 - [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
   M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
   lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
