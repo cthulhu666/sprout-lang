@@ -1002,6 +1002,9 @@ compile-bench: bootstrap-from-seed (_compile-examples "build/compile_driver_bin_
 # it previously exited 0 — so `|| true` below is what keeps `set -e` from aborting
 # on the very rejection each fixture is asserting.) <noun> labels the summary; xfail =
 # fixtures whose expected diagnostic is not yet produced (tracked TODO).
+# Optional <n>.fixed.spr = the same program with the diagnostic's hint applied; once
+# the rejection matches it must check clean (exit 0, no `ERROR:`), so a hint that
+# cannot be followed fails the gate. `*.fixed.spr` files are not fixtures themselves.
 [private]
 _test-reject stage dir noun xfail="" phase="check":
   #!/usr/bin/env bash
@@ -1022,6 +1025,7 @@ _test-reject stage dir noun xfail="" phase="check":
   declare -a fixtures=()
   for spr in tests/conformance/{{dir}}/*.spr; do
     [ -f "$spr" ] || continue
+    [[ "$spr" == *.fixed.spr ]] && continue
     fixtures+=("$spr")
   done
   declare -a pids=()
@@ -1045,6 +1049,14 @@ _test-reject stage dir noun xfail="" phase="check":
           echo "  UNEXPECTED MATCH (remove from xfail)" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
         else
           echo "  OK (rejected)" >> "$TMPD/$idx.out"; echo ok > "$TMPD/$idx.st"
+          fixed="tests/conformance/{{dir}}/$name.fixed.spr"
+          if [[ -f "$fixed" ]]; then
+            fout="$("./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$fixed" 2>&1)"; fst=$?
+            if [[ $fst -ne 0 ]] || echo "$fout" | grep -q 'ERROR:'; then
+              first="$(echo "$fout" | grep -m1 'ERROR:' || echo "exit $fst")"
+              echo "  FAILED: $name.fixed.spr does not check clean: $first" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
+            fi
+          fi
         fi
       else
         if [[ $is_xfail -eq 1 ]]; then

@@ -1,0 +1,9 @@
+module main
+
+# Hint applied: `where linear a` on `ident`.
+
+fn ident(x: a) -> a where linear a = x
+
+fn hold(x: a) -> a where linear a = ident(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(hold(1)))

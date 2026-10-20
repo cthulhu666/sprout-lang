@@ -1,0 +1,16 @@
+module main
+
+# The hint in the .err applied; the comments below describe the rejected program.
+
+# An unannotated callee writes no type variable to put a bound on: the hint says
+# to annotate it first.
+
+type linear L = L Int
+
+fn b2(n: Int, x: a) -> a where linear a = x
+
+fn use_it(n: Int) -> Int =
+  let L(a) = b2(n, L(n))
+  in a
+
+fn main() -> Unit !{IO} = print(int_to_string(use_it(1)))

@@ -1,0 +1,11 @@
+module main
+
+# Hint applied: `dup` written as a `fn` with `where linear a`, using `a` once.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(x: a) -> a where linear a = x
+
+fn main() -> Unit !{IO} = print(int_to_string(close(dup(L(1)))))

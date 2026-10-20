@@ -1,0 +1,16 @@
+module main
+
+# The hint in the .err applied; the comments below describe the rejected program.
+
+# A borrowed capture at an ordinary slot stays rejected: the callee may keep the
+# closure past the call. The message points at `local`.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn run_plain(work: local Unit -> Int) -> Int = work(())
+
+fn lend(c: borrowing File) -> Int = run_plain(\_ -> peek(c))
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -68,6 +68,13 @@ CHECKLIST = [
         "and (for runtime/) the APPROVED_BUILTINS justification rule.",
     ),
     (
+        lambda p: p.startswith("tests/conformance/type_error/") and p.endswith(".err"),
+        "Does the new diagnostic's `.err` pin the whole message, with a `.fixed.spr` if it has a hint?",
+        "Pin the full message, not a prefix. A hint-bearing one gets a `<name>.fixed.spr`: "
+        "the same program with the hint applied, which must check clean "
+        "(tests/conformance/README.md).",
+    ),
+    (
         lambda p: True,
         "Are docs and spec in sync with the change?",
         "AGENTS.md §Docs & Spec: a change to syntax, semantics, typing, evaluation "

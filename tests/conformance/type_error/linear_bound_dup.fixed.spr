@@ -1,0 +1,12 @@
+module main
+
+# Hint applied: `where linear a`. The hint holds "if `dup` uses its `a` exactly
+# once", so `dup` now returns it once.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(x: a) -> a where linear a = x
+
+fn main() -> Unit !{IO} = print(int_to_string(close(dup(L(1)))))

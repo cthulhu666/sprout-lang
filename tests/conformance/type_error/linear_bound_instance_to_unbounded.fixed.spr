@@ -1,0 +1,15 @@
+module main
+
+# Hint applied: `where linear b` on `dup`, which now uses its `b` once.
+
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+type One a = One a
+
+fn dup(z: b) -> b where linear b = z
+
+instance Wrap One
+  fn wrap1(x: a) -> One a where linear a = One(dup(x))
+
+fn main() -> Unit !{IO} = print("x")

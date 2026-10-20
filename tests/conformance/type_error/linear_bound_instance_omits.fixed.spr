@@ -1,0 +1,13 @@
+module main
+
+# Hint applied: restate `where linear a` on the instance method.
+
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+type One a = One a
+
+instance Wrap One
+  fn wrap1(x: a) -> One a where linear a = One(x)
+
+fn main() -> Unit !{IO} = print("x")
