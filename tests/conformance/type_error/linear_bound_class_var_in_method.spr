@@ -1,0 +1,12 @@
+module main
+
+# A class's own variable takes no bound, in a method's `where` as in the class header:
+# an instance at a linear type is concrete code, checked as such.
+
+class Taker a
+  fn take(x: a) -> Int where linear a
+
+instance Taker Int
+  fn take(x: Int) -> Int = x + x
+
+fn main() -> Unit !{IO} = print(int_to_string(take(2)))

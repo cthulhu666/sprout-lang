@@ -1762,7 +1762,8 @@ function's and an extern's variables, a class method's own variables, a top-leve
 `let`'s generalized ones, and an existential's `exists` variables. Two kinds are
 unbounded: a data declaration's parameters (a constructor stores its argument and
 copies nothing, so `Maybe File` and `Ok(conn)` stay legal) and a class's own
-variable (an instance at a linear type is concrete code, checked as such).
+variable (an instance at a linear type is concrete code, checked as such), which
+takes no `where linear`, in the class header or in a method's `where`.
 
 `where linear v` lifts the restriction on `v`, in the same `where` list as class
 constraints; an `extern fn` takes a `where` that holds only these. Each bound names one
