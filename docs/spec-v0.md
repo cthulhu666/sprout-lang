@@ -301,7 +301,7 @@ type Step = Continue | Stop          # this file's own Continue
 type Box a = Full a | Empty
 
 instance Propagate Box
-  fn branch(value: Box a) -> ControlFlow (Box b) a =
+  fn branch(value: Box a) -> ControlFlow (Box b) a where linear a, linear b =
     match value with
     | Full v -> prelude.Continue(v)  # the prelude's
     | Empty -> Break(Empty)
@@ -1792,7 +1792,9 @@ nobody receives, so `detach` at a `Task File` is rejected.
 
 The error names the variable as the callee's signature writes it. A callee whose
 signature writes no type variable for it is told to annotate its parameters first, and
-a top-level `let`, which takes no `where`, to become a `fn`.
+a top-level `let`, which takes no `where`, to become a `fn`. A constructor's `exists`
+variable takes no bound yet, and the error says so. Inside a bounded declaration, every
+linearity error prints a bounded variable under its written name.
 
 A class method may declare the bound on its own variables; each instance method
 restates it under its own names, as it restates a class constraint, and its body is
@@ -3565,7 +3567,7 @@ constructors or different classes.  Lifting the restriction is tracked in `BACKL
 
 ```
 class Applicative f where Functor f
-  fn pure(x: a) -> f a
+  fn pure(x: a) -> f a where linear a
   fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
 ```
 
@@ -3768,7 +3770,7 @@ recursion depth for every instance.
 type ControlFlow r a = Continue a | Break r
 
 class Propagate t
-  fn branch(value: t a) -> ControlFlow (t b) a
+  fn branch(value: t a) -> ControlFlow (t b) a where linear a, linear b
 ```
 
 `branch` splits a `t a` into its value (`Continue`) or its failure (`Break`). The

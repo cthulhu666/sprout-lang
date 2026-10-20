@@ -1,0 +1,10 @@
+module main
+
+# A bounded variable keeps its written name in the linear walk's messages.
+
+fn first(xs: List a) -> Maybe a where linear a =
+  match xs with
+  | Nil -> Nothing
+  | Cons x rest -> Just(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(maybe_with_default(0, first([1, 2]))))

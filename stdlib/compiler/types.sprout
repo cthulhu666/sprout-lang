@@ -223,6 +223,10 @@ export fn written_sig_key(name: String) -> String = "@sig:" ++ name
 
 export fn top_let_key(name: String) -> String = "@toplet:" ++ name
 
+# A `where linear` variable's written name, keyed by its rigid variable, so a
+# diagnostic prints `a` and not `$t41`.
+export fn bound_name_key(id: String) -> String = "@boundname:" ++ id
+
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)
 

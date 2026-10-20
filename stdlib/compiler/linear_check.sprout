@@ -316,15 +316,27 @@ fn leak_msg(name: String) -> String =
 # wording — there is nothing to explain there.
 fn leak_binder_msg(b: LinBinder, env: Dict types.Scheme) -> String =
   if type_is_linear(lbind_type(b), env) then leak_msg(lbind_name(b))
-  else contained_leak_msg(lbind_name(b), lbind_type(b), first_linear_in(lbind_type(b), env))
+  else contained_leak_msg(lbind_name(b), lbind_type(b), first_linear_in(lbind_type(b), env), env)
 
-fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type) -> String =
+fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type, env: Dict types.Scheme) -> String =
   match inner with
   | Nothing -> leak_msg(name)
   | Just lin ->
-      "linear value '" ++ name ++ "' is never used: its type `" ++ types.type_to_string(t)
-        ++ "` contains the linear type `" ++ types.type_to_string(lin)
+      "linear value '" ++ name ++ "' is never used: its type `" ++ type_text(t, env)
+        ++ "` contains the linear type `" ++ type_text(lin, env)
         ++ "` (linear values must be used exactly once)"
+
+# `t` with each `where linear` variable under its written name.
+fn type_text(t: types.Type, env: Dict types.Scheme) -> String =
+  types.type_to_string(types.apply_rename_type(bound_names(t, env), t))
+
+export fn bound_names(t: types.Type, env: Dict types.Scheme) -> Dict String =
+  list_fold(bound_name_entry(env, _, _), dict_empty(), types.ftv(t))
+
+fn bound_name_entry(env: Dict types.Scheme, acc: Dict String, id: String) -> Dict String =
+  match dict_get(types.bound_name_key(id), env) with
+  | Just written -> dict_set(id, types.type_to_string(types.scheme_type(written)), acc)
+  | Nothing -> acc
 
 fn diverge_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is used in some branches but not others (every branch must use it exactly once)"
@@ -492,14 +504,15 @@ fn lambda_param_advice(name: String) -> String =
 fn lambda_param_binder_msg(b: LinBinder, env: Dict types.Scheme) -> String =
   if type_is_linear(lbind_type(b), env) then linear_lambda_param_msg(lbind_name(b))
   else contained_lambda_param_msg(lbind_name(b), lbind_type(b),
-                                  first_linear_in(lbind_type(b), env))
+                                  first_linear_in(lbind_type(b), env), env)
 
-fn contained_lambda_param_msg(name: String, t: types.Type, inner: Maybe types.Type) -> String =
+fn contained_lambda_param_msg(name: String, t: types.Type, inner: Maybe types.Type,
+                               env: Dict types.Scheme) -> String =
   match inner with
   | Nothing -> linear_lambda_param_msg(name)
   | Just lin ->
-      "lambda parameter '" ++ name ++ "' has type `" ++ types.type_to_string(t)
-        ++ "`, which contains the linear type `" ++ types.type_to_string(lin)
+      "lambda parameter '" ++ name ++ "' has type `" ++ type_text(t, env)
+        ++ "`, which contains the linear type `" ++ type_text(lin, env)
         ++ "`; this is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once). `borrowing` is not a way out here — it is only allowed on a parameter whose own type is linear — so take the container apart before the lambda, or walk it in a named recursive function"
 
 # Two captures, two ways out. `once` licenses a MOVE (M4.4a) — the answer for an
@@ -1167,7 +1180,7 @@ fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
 
 fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Bool =
   match pat with
-  | ast.WildcardPattern _ -> discardable_type(t, env)
+  | ast.WildcardPattern _ -> type_mentions_linear(t, env)
   | _ -> false
 
 
@@ -1254,14 +1267,7 @@ fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep
                         env: Dict types.Scheme) -> Bool =
   match rest with
   | [] -> false
-  | [_ | _] -> discardable_type(typed_ast.typed_expr_type(e), env)
-
-# A discarded value is an unmet obligation when it IS or CONTAINS a linear
-# resource. A type variable counts only under `where linear`, which marks it linear in
-# `env`: without the bound no caller can instantiate it at a linear type
-# (docs/linearity-bound-v0.md §6.4).
-fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
-  type_mentions_linear(t, env)
+  | [_ | _] -> type_mentions_linear(typed_ast.typed_expr_type(e), env)
 
 # The linear type inside `t`, if any — `t` itself when its head is linear, else
 # the first one found among its type arguments and tuple components.
@@ -1276,10 +1282,7 @@ fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
 #
 # Does NOT descend into a function type: `Unit -> File` is a recipe for a
 # resource, not a resource, and discarding one leaks nothing.
-export fn linear_type_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
-  first_linear_in(t, env)
-
-fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
+export fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
   match first_linear_seen(t, env, dict_empty()) with
   | (found, _) -> found
 
@@ -1390,6 +1393,10 @@ fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme,
       # character is the difference between a memo and an exponential walk.
       | (Nothing, seen2) -> first_linear_in_list(rest, env, seen2)
 
+# A discarded value is an unmet obligation when it IS or CONTAINS a linear
+# resource. A type variable counts only under `where linear`, which marks it linear in
+# `env`: without the bound no caller can instantiate it at a linear type
+# (docs/linearity-bound-v0.md §6.4).
 fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
   match first_linear_in(t, env) with
   | Just _ -> true

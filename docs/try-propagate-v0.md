@@ -137,16 +137,16 @@ so making it the discard would change old code silently. It takes OCaml's `ignor
 type ControlFlow r a = Continue a | Break r   # names: §9 Q3
 
 class Propagate t
-  fn branch(value: t a) -> ControlFlow (t b) a
+  fn branch(value: t a) -> ControlFlow (t b) a where linear a, linear b
 
 instance Propagate Maybe
-  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a =
+  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a where linear a, linear b =
     match value with
     | Just v -> Continue(v)
     | Nothing -> Break(Nothing)
 
 instance Propagate (Result e)
-  fn branch(value: Result e a) -> ControlFlow (Result e b) a =
+  fn branch(value: Result e a) -> ControlFlow (Result e b) a where linear a, linear b =
     match value with
     | Ok v -> Continue(v)
     | Err err -> Break(Err(err))

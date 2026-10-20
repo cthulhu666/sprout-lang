@@ -1,1 +1,1 @@
-`Boxed` takes `a` as a value it may copy or drop, and `L` is linear
+`Boxed` takes `a` as a value it may copy or drop, and `L` is linear; an `exists` variable takes no `where linear` yet
