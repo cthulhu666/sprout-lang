@@ -1,0 +1,13 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> a where linear a = if n > 0 then ping(y, n - 1) else y
+
+fn main() -> Unit !{IO} = print(int_to_string(close(ping(L(4), 2))))

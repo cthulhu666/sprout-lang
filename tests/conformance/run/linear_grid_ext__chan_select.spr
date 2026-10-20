@@ -1,0 +1,20 @@
+module main
+
+import stdlib.task as task
+import stdlib.chan as chan
+
+type linear L = L Int
+
+fn eat(l: L) -> Int = match l with | L n -> n
+
+fn first_ready(s: task.Scope) -> Int !{IO} =
+  do
+    a <- chan.chan_new(s, 1)
+    b <- chan.chan_new(s, 1)
+    chan.chan_send(b, L(5))
+    chan.chan_close(a)
+    match chan.chan_select([b, a]) with
+    | (i, chan.Got l) -> i + eat(l)
+    | (_, chan.Closed) -> -1
+
+fn main() -> Unit !{IO} = print(int_to_string(task.with_scope(first_ready)))

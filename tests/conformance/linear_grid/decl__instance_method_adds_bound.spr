@@ -1,0 +1,11 @@
+module main
+
+class Wrap f
+  fn wrap1(x: a) -> f a
+
+type One a = One a
+
+instance Wrap One
+  fn wrap1(x: a) -> One a where linear a = One(x)
+
+fn main() -> Unit !{IO} = print("x")

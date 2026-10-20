@@ -1,0 +1,11 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+instance Wrap Maybe
+  fn wrap1(x: a) -> Maybe a where linear a = Just(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(match wrap1(4) with | Just n -> n | Nothing -> 0))

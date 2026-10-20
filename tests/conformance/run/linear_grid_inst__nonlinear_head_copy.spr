@@ -1,0 +1,17 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Dup2 t
+  fn dup2(x: t) -> (t, t)
+
+instance Dup2 (Maybe a)
+  fn dup2(x: Maybe a) -> (Maybe a, Maybe a) = (x, x)
+
+fn eat(m: Maybe Int) -> Int = match m with | Just n -> n + 1 | Nothing -> 0
+
+fn main() -> Unit !{IO} = match dup2(Just(1)) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))

@@ -1,0 +1,6 @@
+module main
+
+class C a where linear a
+  fn c(x: a) -> Int
+
+fn main() -> Unit !{IO} = print("x")

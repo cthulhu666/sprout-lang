@@ -1,0 +1,5 @@
+module main
+
+extern fn peek_any(x: borrowing a) -> Int where linear a
+
+fn main() -> Unit !{IO} = print("ok")

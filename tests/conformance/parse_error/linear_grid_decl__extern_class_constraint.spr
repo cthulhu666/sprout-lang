@@ -1,0 +1,5 @@
+module main
+
+extern fn ext_show(x: a) -> String where ToString a
+
+fn main() -> Unit !{IO} = print("x")

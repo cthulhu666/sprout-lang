@@ -1,0 +1,5 @@
+module main
+
+fn f(x: Int) -> Int where linear Int = x
+
+fn main() -> Unit !{IO} = print(int_to_string(f(1)))

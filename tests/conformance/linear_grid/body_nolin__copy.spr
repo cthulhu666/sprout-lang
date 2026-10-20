@@ -1,0 +1,7 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn g(x: a) -> (a, a) where linear a = (x, x)
+
+fn main() -> Unit !{IO} = match g(1) with | (p, q) -> print(int_to_string((p) + (q)))

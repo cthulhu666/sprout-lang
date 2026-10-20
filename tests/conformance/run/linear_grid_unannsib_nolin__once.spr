@@ -1,0 +1,9 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else y
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(4, 2)))

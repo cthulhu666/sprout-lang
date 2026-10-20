@@ -1,0 +1,11 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class K t
+  fn m(s: t, x: a) -> (a, a) where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, a) where linear a = dup(x)
+
+fn main() -> Unit !{IO} = match m(0, 1) with | (p, q) -> print(int_to_string((p) + (q)))
