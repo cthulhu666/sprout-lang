@@ -154,7 +154,8 @@ type Boxed = | exists a. Boxed a where linear a, Taker a
 An `extern fn` takes a `where` too, holding only linear bounds: it has no dictionary parameter
 for a class constraint, but `panic` and the `__chan_*` primitives are externs whose `a` must
 admit a linear type. A class's own variable takes none (§6.1), so `class C a where linear a`
-is a parse error.
+is a parse error. Each bound names exactly one type variable: `where linear Int`,
+`where linear g a` and a bare `where linear` are parse errors too.
 
 `linear` is already a contextual word (`type linear`). It names the case being admitted; the
 non-linear types still fit, as `~Copyable` still admits copyable types in Swift. The reading

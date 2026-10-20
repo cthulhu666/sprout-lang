@@ -124,7 +124,7 @@ rooting).
 
 | Stage | Carrier |
 |---|---|
-| Parse | `parse_optional_constraints`, before `=` on an instance method — position separates it from the value-binding `where` after the body |
+| Parse | `parse_optional_where`, before `=` on an instance method — position separates it from the value-binding `where` after the body |
 | AST | `ClassMethodSig … (List TypeConstraint)`, `InstanceMethodImpl … (List TypeConstraint)` |
 | Scheme | `Scheme`'s existing constraint slot; positional `#pos:k` tokens in `infer`, name-keyed in `iface_codec` (whose method schemes quantify class params only) |
 | Typed AST | `TypedInstanceMethod … (List TypeConstraint)` |

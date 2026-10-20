@@ -1,0 +1,3 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A bare `where linear` names no variable; it is not a class called `linear`.
+fn ident(x: a) -> a where linear = x
