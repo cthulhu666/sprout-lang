@@ -1,0 +1,17 @@
+module main
+
+# No phantom exemption (docs/linearity-bound-v0.md §6.3): `detach` drops a task
+# whose result nobody will receive, so it does not opt in.
+
+import stdlib.task (Scope, with_scope, task_fork, detach)
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn go(s: Scope) -> Int !{IO} =
+  do
+    detach(task_fork(s, \_ -> L(1)))
+    0
+
+fn main() -> Unit !{IO} = print(int_to_string(with_scope(go)))

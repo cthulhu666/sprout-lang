@@ -34,7 +34,7 @@ type Box a =
   | Empty
 
 instance Propagate Box
-  fn branch(value: Box a) -> ControlFlow (Box b) a =
+  fn branch(value: Box a) -> ControlFlow (Box b) a where linear a, linear b =
     match value with
     | Full v -> prelude.Continue(v)
     | Empty -> prelude.Break(Empty)
@@ -60,7 +60,7 @@ type Fetch a =
   | Failed String
 
 instance Propagate Fetch
-  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a where linear a, linear b =
     match value with
     | Got v -> prelude.Continue(v)
     | Failed why -> prelude.Break(Failed(describe(why)))

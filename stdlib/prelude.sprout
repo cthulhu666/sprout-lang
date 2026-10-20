@@ -231,7 +231,7 @@ fn list_map_go(f: a -> b, xs: List a, acc: List b) -> List b =
   | Nil -> list_reverse_go(acc, Nil)
   | Cons x rest -> list_map_go(f, rest, Cons(f(x), acc))
 
-fn list_fold_go(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
+fn list_fold_go(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where linear a, linear b =
   match xs with
   | Nil -> init
   | Cons x rest ->
@@ -289,7 +289,8 @@ export fn list_map(f: a -> b, xs: List a) -> List b =
 
 # O(n): left fold; `step`'s effect row is polymorphic, so this serves both pure folds and
 # effectful accumulation (reading/writing mutable state inside `step`). Data-last.
-export fn list_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} =
+# Each element and the accumulator are used once, so a list of linear values folds.
+export fn list_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where linear a, linear b =
   list_fold_go(step, init, xs)
 
 # O(k) in the elements visited, not O(n): the walk itself stops, so the tail of
@@ -593,12 +594,12 @@ fn decorated_key_lt(left: (k, Int, a), right: (k, Int, a)) -> Bool where Ord k =
           else if ord_gt(left_key, right_key) then false
           else left_index < right_index
 
-fn list_reverse_go(xs: List a, acc: List a) -> List a =
+fn list_reverse_go(xs: List a, acc: List a) -> List a where linear a =
   match xs with
   | Nil -> acc
   | Cons item rest -> list_reverse_go(rest, Cons(item, acc))
 
-export fn list_reverse(xs: List a) -> List a =
+export fn list_reverse(xs: List a) -> List a where linear a =
   list_reverse_go(xs, Nil)
 
 export fn list_member(x: a, xs: List a) -> Bool where Eq a =
@@ -923,9 +924,11 @@ export class Filterable f
 # to values in a context), NOT `ap`/`<*>` — the latter feeds one wrapped argument at
 # a time, which needs curried partial application that Sprout does not have. `pure`
 # lifts a plain value; its `f`-only-in-return signature dispatches on the target type
-# (same as `Enum`). `map3`..`map5` derive from `map2` below.
+# (same as `Enum`). `map3`..`map5` derive from `map2` below. `pure` uses its `x`
+# once, so it takes `where linear a` and a block over `Result e L` can end in
+# `pure(l)` (docs/linearity-bound-v0.md §6.5).
 export class Applicative f where Functor f
-  fn pure(x: a) -> f a
+  fn pure(x: a) -> f a where linear a
   fn map2(g: a -> b -> c, xs: f a, ys: f b) -> f c
 
 # Monad completes the Functor -> Applicative -> Monad tower: `flat_map` is
@@ -950,9 +953,11 @@ export type ControlFlow r a deriving (Eq, ToString) =
 
 # `branch` splits a `t a` into its value or its failure. The failure holds no
 # `a`, so it comes back as `t b` for any `b` and fits whatever the enclosing
-# block returns (docs/try-propagate-v0.md §4.1).
+# block returns (docs/try-propagate-v0.md §4.1). Both variables are bounded, so a
+# `try` works on a linear value: in a `Result e L` block the failure's `b` is `L`
+# too (docs/linearity-bound-v0.md §6.5).
 export class Propagate t
-  fn branch(value: t a) -> ControlFlow(t b) a
+  fn branch(value: t a) -> ControlFlow(t b) a where linear a, linear b
 
 export fn and_then(f: a -> m b, xs: m a) -> m b where Monad m =
   flat_map(f, xs)
@@ -1455,7 +1460,7 @@ fn map2_list(g: a -> b -> c, xs: List a, ys: List b) -> List c =
 
 instance Applicative List
   # pure produces a singleton — the unit of the cartesian product.
-  fn pure(x: a) -> List a = Cons(x, Nil)
+  fn pure(x: a) -> List a where linear a = Cons(x, Nil)
   fn map2(g: a -> b -> c, xs: List a, ys: List b) -> List c = map2_list(g, xs, ys)
 
 instance Monad List
@@ -1464,7 +1469,7 @@ instance Monad List
   fn flat_map(f: a -> List b, xs: List a) -> List b = list_flat_map(f, xs)
 
 instance Applicative Maybe
-  fn pure(x: a) -> Maybe a = Just(x)
+  fn pure(x: a) -> Maybe a where linear a = Just(x)
   # Fail-fast: any Nothing collapses the whole result. `do` desugars to the same
   # nested match, so this is flat source with identical short-circuit codegen.
   fn map2(g: a -> b -> c, mx: Maybe a, my: Maybe b) -> Maybe c =
@@ -1525,7 +1530,7 @@ instance Traversable Vec
     vec_traverse_go(g, xs, 0, vec_length(xs), pure(Nil))
 
 instance Applicative (Result e)
-  fn pure(x: a) -> Result e a = Ok(x)
+  fn pure(x: a) -> Result e a where linear a = Ok(x)
   # Fail-fast: the first Err short-circuits (left-biased); `do` carries the Err
   # through automatically. Error-accumulating semantics need a distinct type
   # (Validation), deferred — a type has one instance.
@@ -1543,13 +1548,13 @@ instance Monad (Result e)
     | Ok x -> f(x)
 
 instance Propagate Maybe
-  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a =
+  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a where linear a, linear b =
     match value with
     | Just v -> Continue(v)
     | Nothing -> Break(Nothing)
 
 instance Propagate (Result e)
-  fn branch(value: Result e a) -> ControlFlow (Result e b) a =
+  fn branch(value: Result e a) -> ControlFlow (Result e b) a where linear a, linear b =
     match value with
     | Ok v -> Continue(v)
     | Err err -> Break(Err(err))
@@ -1709,7 +1714,7 @@ export fn is_err(r: Result e a) -> Bool =
   | Ok _ -> false
   | Err _ -> true
 
-export fn after(effect: Unit !{IO}, value: a) -> a !{IO} =
+export fn after(effect: Unit !{IO}, value: a) -> a !{IO} where linear a =
   value
 
 export fn when_ok(f: a -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
@@ -1861,7 +1866,7 @@ extern fn eprint(val: String) -> Unit !{IO}
 # they return and end in `| _ -> panic("... (internal error)")`; declaring panic
 # effectful made all nine advertise an impurity they do not have.
 # tests/effects/canaries.spr pins it via `unreachable_arm`.
-extern fn panic(msg: String) -> a
+extern fn panic(msg: String) -> a where linear a
 extern fn argv_get(idx: Int) -> Maybe String !{IO}
 
 export fn argv_all() -> List String !{IO} =

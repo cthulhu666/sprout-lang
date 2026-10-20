@@ -1,7 +1,7 @@
 # A linearity bound on type variables (v0, 2026-10-20)
 
-**Status:** design decided (§11). Implementation in four steps (§12); step 1, the syntax, is
-done: `where linear v` parses and is rejected as not yet supported. Not normative until it lands in
+**Status:** design decided (§11). Implementation in four steps (§12); steps 1 and 2 are done,
+and spec-v0.md §5.8 states what they enforce. Not normative beyond that until it lands in
 [spec-v0.md](spec-v0.md) §5.8. Closes the type-variable holes in §1, three of which
 [persistent-array-v0.md](persistent-array-v0.md) §5.3 lists as prerequisites.
 
@@ -191,7 +191,8 @@ dropped for it. `fn stmt(x: a) -> Int = do { x; 1 }` compiles.
 A class method that declares `where linear a` holds every instance to it: each instance body is
 checked with `a` linear. `pure` takes the bound on `a`; `branch(value: t a) -> ControlFlow (t b) a`
 takes it on both `a` and `b`, since in a `Result E L` block the failure arm's `b` is `L` too.
-Every prelude instance passes (`Cons(x, Nil)`, `Just(x)`, `Ok(x)`, one `match`). `map2` cannot
+Every prelude instance passes (`Cons(x, Nil)`, `Just(x)`, `Ok(x)`, one `match`). Each
+instance method restates the bound under its own variable names (§11, decision 7). `map2` cannot
 take it: over `List` it pairs each element with every element of the other list, so it repeats
 them. `flat_map` passes each element
 to a function, and a function that consumes a linear argument is higher-order linearity, still
@@ -341,18 +342,28 @@ Decided with Kuba, one question at a time.
    as a constraint named `linear`, so that no class-constraint consumer can mistake it for a
    class (guidelines #2a, #3, #4).
 
+7. **An instance method restates its class method's bound**, 2026-10-20, as it restates a
+   class constraint. Omitting it, or adding one the class lacks, is an error. Rust is the same
+   shape: an impl method may not be stricter than the trait's (E0276), and omitting the
+   relaxation is the stricter side. Inheriting it silently, as a GHC instance inherits the class
+   signature, would reject an instance body under a rule its text never states.
+
 An outside review (2026-10-20) checked decisions 1–4 together and found them consistent. It
 added the dictionary walk (§6.7), the instance-head and top-level `let` holes (§1), `branch`'s
 second bound and `pure`'s price (§6.5), and the class-signature mode gap (§6.6).
 
 ## 12. Implementation
 
-1. **Syntax.** The parser moves `linear v` out of each `where` list into its own field on
+1. ~~**Syntax.** The parser moves `linear v` out of each `where` list into its own field on
    `FnDecl`, `ExternFnDecl`, `TypeConstructor`, `ClassMethodSig`, `InstanceDecl` and
-   `InstanceMethodImpl`, so no class-constraint consumer sees it. Inference rejects any bound as
-   not yet supported.
-2. **The bound at references and in bodies** (§6.3, §6.4, §6.7's first walk), the stdlib opt-ins
-   of §4, and the spec. Closes §1's rows 1–5 and 7.
+   `InstanceMethodImpl`, so no class-constraint consumer sees it.~~ Done.
+2. ~~**The bound at references and in bodies** (§6.3, §6.4, §6.7's first walk), the stdlib opt-ins
+   of §4, and the spec. Closes §1's rows 1–5 and 7.~~ Done. The linear walk runs before the bound
+   check, so a comprehension over linear values keeps its own diagnostic rather than naming the
+   `list_fold` it elaborates to. Uses are recorded only in a program that declares a linear type
+   or in a declaration with a bound, where a variable can be linear. `list_fold` and
+   `list_reverse` opt in beyond §4's list: a comprehension that builds a list of linear values
+   elaborates to them.
 3. **Dictionaries and existentials** (§6.5, §6.7's second walk): row 6, a bound on an instance
    head, and an existential unpacked under a bound.
 4. **Modes** (§6.6).

@@ -1,0 +1,7 @@
+module main
+
+# Under the bound the body is checked as if `a` were linear.
+
+fn dup(x: a) -> (a, a) where linear a = (x, x)
+
+fn main() -> Unit !{IO} = match dup(1) with | (p, q) -> print(int_to_string(p + q))

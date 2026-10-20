@@ -1,0 +1,13 @@
+module main
+
+# The restated bound holds the instance body to it.
+
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+type Two a = Two a a
+
+instance Wrap Two
+  fn wrap1(x: a) -> Two a where linear a = Two(x, x)
+
+fn main() -> Unit !{IO} = print("x")

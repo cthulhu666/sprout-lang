@@ -434,7 +434,7 @@ fn bad_modifier_message(b: BadModifier) -> String =
 
 
 fn tyvar_modifier_msg(name: String) -> String =
-  "`borrowing`/`consuming` cannot be used on a type variable (parameter '" ++ name ++ "'): linearity is per-declaration, so whether the argument is linear is not known here"
+  "`borrowing`/`consuming` on a type variable needs `where linear` on it (parameter '" ++ name ++ "'): without the bound the variable is never linear, so the modifier means nothing"
 
 fn bad_modifier_msg(name: String) -> String =
   "`borrowing`/`consuming` is only allowed on a parameter of a linear type (parameter '" ++ name ++ "')"
@@ -1257,20 +1257,11 @@ fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep
   | [_ | _] -> discardable_type(typed_ast.typed_expr_type(e), env)
 
 # A discarded value is an unmet obligation when it IS or CONTAINS a linear
-# resource, or when it MIGHT be one.
-#
-# The "might" arm is a bare type variable. Inside a polymorphic function the body
-# is checked with the variable rigid, so `do { f(1); 7 }` with `f : Int -> a`
-# would otherwise escape entirely — and then a caller instantiating `a` at a
-# linear type leaks. Sprout has no linearity bound on a type parameter with which
-# to say "`a` is never linear" (the same universe gap that blocks `borrowing a`;
-# see BACKLOG), so the conservative answer is the only sound one available. A
-# tyvar NESTED in a container (`Maybe a`) is deliberately NOT counted: that needs
-# the bound to be usable at all, and counting it would reject most polymorphic
-# do-blocks over `Maybe`/`Result`.
+# resource. A type variable counts only under `where linear`, which marks it linear in
+# `env`: without the bound no caller can instantiate it at a linear type
+# (docs/linearity-bound-v0.md §6.4).
 fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
-  if type_is_tyvar(t) then true
-  else type_mentions_linear(t, env)
+  type_mentions_linear(t, env)
 
 # The linear type inside `t`, if any — `t` itself when its head is linear, else
 # the first one found among its type arguments and tuple components.
@@ -1285,6 +1276,9 @@ fn discardable_type(t: types.Type, env: Dict types.Scheme) -> Bool =
 #
 # Does NOT descend into a function type: `Unit -> File` is a recipe for a
 # resource, not a resource, and discarding one leaks nothing.
+export fn linear_type_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
+  first_linear_in(t, env)
+
 fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
   match first_linear_seen(t, env, dict_empty()) with
   | (found, _) -> found
@@ -1712,7 +1706,7 @@ fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
       else if ast.mode_is_once(ast.param_mode_of(prm))
       then bad_function_only_here(BadOnceOnTyvar, BadOnceNonFunction, prm, ret_te, a, rest, b, env)
       else if ! mode_is_written (ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
-      else if type_is_tyvar(a) then Just(BadOnTyvar(ast.param_name(prm)))
+      else if type_is_tyvar(a) && ! type_is_linear (a, env) then Just(BadOnTyvar(ast.param_name(prm)))
       else if ! type_is_linear (a, env) then Just(BadNonLinear(ast.param_name(prm)))
       else first_bad_modifier(rest, ret_te, b, env)
 
@@ -1781,7 +1775,7 @@ fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
   if ast.mode_is_local(mode) then function_only_fault(BadLocalOnTyvar, BadLocalNonFunction, name, a)
   else if ast.mode_is_once(mode) then function_only_fault(BadOnceOnTyvar, BadOnceNonFunction, name, a)
   else if ! mode_is_written (mode) then Nothing
-  else if type_is_tyvar(a) then Just(BadOnTyvar(name))
+  else if type_is_tyvar(a) && ! type_is_linear (a, env) then Just(BadOnTyvar(name))
   else if ! type_is_linear (a, env) then Just(BadNonLinear(name))
   else Nothing
 

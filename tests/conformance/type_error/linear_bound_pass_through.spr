@@ -1,0 +1,10 @@
+module main
+
+# An opted-in variable counts as linear: it may not be passed on to a function
+# that has not opted in.
+
+fn ident(x: a) -> a = x
+
+fn hold(x: a) -> a where linear a = ident(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(hold(1)))

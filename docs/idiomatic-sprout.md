@@ -862,6 +862,21 @@ storing a handler, returning it, handing it to `task_spawn` — is a compile err
 `examples/linear_resources.sprout` walks through every
 mode on one resource; [local-closures-v0.md §11](./local-closures-v0.md) has the table.
 
+A generic function takes a linear value only if it says so. Write `where linear a` when the body
+uses its `a` exactly once — passes it on, returns it, or matches it — and leave it off when the
+body may copy or drop one, as `list_length` and `konst` do:
+
+```
+fn keep_last(old: a, new: a) -> a = new                  # drops `old`: no bound
+fn hand_back(value: a, log: String) -> a !{IO} where linear a =
+  do
+    print(log)
+    value
+```
+
+Calling `keep_last(f, g)` with a `File` is rejected and names the fix. An instance method of a
+class method that declares the bound (`pure`, `branch`) restates it.
+
 Reach for this when a type has a release operation. For plain data with no
 release, `linear` only gets in the way — see
 [spec-v0.md §5.8](./spec-v0.md).

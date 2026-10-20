@@ -1740,12 +1740,9 @@ The rules:
   type's head could never fire in a short-circuiting block at all. It is the same
   containment the binder rules use, and one predicate answers for both — they
   disagreed until 2026-09-07, which made `Maybe File` a leak in statement position
-  and not in binder position. A bare type variable is rejected conservatively —
-  the body is checked with the variable rigid, and a caller may instantiate it at
-  a linear type — which can refuse a program that only ever instantiates it at a
-  non-linear type. Sprout has no linearity bound on a type parameter with which to
-  state the difference; a type variable *nested* in a container (`Maybe a`) is
-  therefore not checked. Two shapes remain accepted and are **not** guaranteed
+  and not in binder position. A type variable counts only under `where linear`
+  (**Type variables**, below): without the bound no caller can instantiate it at a
+  linear type, so `do { x; 1 }` with `x: a` is accepted. Two shapes remain accepted and are **not** guaranteed
   leak-free: a wildcard `match` arm over a linear value (`match f with | _ -> 0`,
   which does reference `f` exactly once) and a constructor pattern that drops a
   linear field (`Wrap _`).
@@ -1756,6 +1753,49 @@ it — so an *owned* linear record supports reading a single field or being pass
 once; reading two fields (`p.x + p.y`) is a reuse (records have no destructuring
 pattern). A `borrowing` parameter lifts that restriction (see below). For a value
 meant to be read freely, do not declare it `linear`.
+
+#### Type variables and `where linear`
+
+A type variable a piece of code is generic over admits only types that hold no
+linear value at a stored position — the containment test above. That covers a
+function's and an extern's variables, a class method's own variables, a top-level
+`let`'s generalized ones, and an existential's `exists` variables. Two kinds are
+unbounded: a data declaration's parameters (a constructor stores its argument and
+copies nothing, so `Maybe File` and `Ok(conn)` stay legal) and a class's own
+variable (an instance at a linear type is concrete code, checked as such).
+
+`where linear v` lifts the restriction on `v`, in the same `where` list as class
+constraints; an `extern fn` takes a `where` that holds only these. Each bound names one
+type variable: `where linear Int`, `where linear g a` and a bare `where linear` are parse
+errors. The body is then
+checked as if `v` were linear: a binder of type `v`, or one storing a `v`, must be
+used exactly once, and `borrowing v` is allowed. The non-linear types still fit.
+
+```
+fn ident(x: a) -> a where linear a = x       # ident(L(1)) and ident(1) both compile
+fn dup(x: a) -> (a, a) = (x, x)              # dup(L(1)) is rejected
+```
+
+The restriction is checked where a variable is **instantiated** — a call, a value
+reference such as `list_map(dup, xs)`, a constructor pack — once the declaration's
+types are known. A variable bounded by `where linear` counts as linear there, so it
+cannot be passed on to code that has not opted in. A variable that occurs only at a
+phantom position is not exempt: `detach(task: Task a)` discards a task whose result
+nobody receives, so `detach` at a `Task File` is rejected.
+
+```
+`dup` takes `a` as a value it may copy or drop, and `L` is linear; if `dup` uses its `a` exactly once, add `where linear a` to it
+```
+
+A class method may declare the bound on its own variables; each instance method
+restates it under its own names, as it restates a class constraint, and its body is
+held to it. `pure` (on `a`) and `branch` (on `a` and `b`) do, so a `Result e L`
+block can end in `pure(l)` and use `try`.
+
+**Not yet:** `where linear` on a constructor or an instance head is rejected, and an
+instance head's variables are not checked, so a generic instance (`instance Taker
+(Box a)`) can still duplicate through its dictionary. See `docs/linearity-bound-v0.md`
+§12.
 
 #### Borrowing (Milestone 4.5)
 
@@ -1907,15 +1947,10 @@ Two consequences follow:
   linear value, owned or borrowed, is still rejected.
 
 **A modifier on a non-linear parameter is an error**, as is one on a
-type-variable parameter (reported distinctly). The type-variable case is not a
-representation limit — ownership sits in the type and would survive
-instantiation — but a *universe* one: admitting `borrowing a` without a linearity
-bound on `a` would make `borrowing Int` an error while `borrowing a` instantiated
-at `Int` silently was not. Lifting it therefore requires polymorphism over linear
-types, which is a non-goal here. Both state-of-the-art designs bound the parameter
-first: Swift SE-0427 makes generic parameters `Copyable` by default and requires
-`<T: ~Copyable>` to opt out, and Austral annotates every type parameter with a
-universe (`Free`, `Linear`, or `Type`).
+type-variable parameter without `where linear` (reported distinctly): an unbounded
+variable is never linear, so the modifier would mean nothing. Under the bound
+`borrowing a` is allowed. Swift SE-0427 draws the same line, making generic
+parameters `Copyable` by default and requiring `<T: ~Copyable>` to opt out.
 `extern fn` signatures are checked the same way even though they have no body. This diverges deliberately from Swift, whose
 `borrowing`/`consuming` apply to any parameter because under ARC they still change
 retain/release traffic. Sprout has a tracing GC and erases the modifiers, so on a
@@ -2046,9 +2081,6 @@ caller keeps a borrowed value and releases it after either outcome.
   stays deferred. It no longer waits on a linearity bound for type parameters:
   the case that motivated that (`Chan a`) is a phantom parameter, which containment
   now declines to descend on its own. See `docs/linearity-virality-v0.md`.
-- A modifier on a **type-variable** parameter, described above: it needs a
-  linearity bound on type parameters, which this milestone deliberately did not
-  take on.
 
 ### 5.9 The fallible `<-` bind
 

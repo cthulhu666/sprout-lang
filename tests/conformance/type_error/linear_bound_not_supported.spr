@@ -1,8 +1,0 @@
-module main
-
-# Parsed but not checked yet: rejected rather than silently ignored until the
-# bound is enforced (docs/linearity-bound-v0.md).
-
-fn ident(x: a) -> a where linear a = x
-
-fn main() -> Unit !{IO} = print(to_string(ident(1)))

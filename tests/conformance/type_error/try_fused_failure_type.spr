@@ -8,7 +8,7 @@ type Res e a =
   | Gone
 
 instance Propagate (Res e)
-  fn branch(value: Res e a) -> ControlFlow (Res e b) a =
+  fn branch(value: Res e a) -> ControlFlow (Res e b) a where linear a, linear b =
     match value with
     | Good v -> Continue(v)
     | Bad _ -> Break(Gone)

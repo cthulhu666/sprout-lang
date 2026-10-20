@@ -1,0 +1,15 @@
+module main
+
+# A generic function passed as a value is instantiated where it is named.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(x: a) -> (a, a) = (x, x)
+
+fn main() -> Unit !{IO} =
+  do
+    let f = dup
+    match f(L(1)) with
+    | (p, q) -> print(int_to_string(close(p) + close(q)))

@@ -1,0 +1,11 @@
+module main
+
+# Step 3 of docs/linearity-bound-v0.md §12: until an unpacked value is tracked,
+# a constructor bound is rejected rather than ignored.
+
+class Taker a
+  fn take(x: a) -> Int
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn main() -> Unit !{IO} = print("x")

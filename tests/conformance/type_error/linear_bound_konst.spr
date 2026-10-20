@@ -1,0 +1,11 @@
+module main
+
+# The leak side of the same gap: `konst` drops its `b`.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn konst(x: a, y: b) -> a = x
+
+fn main() -> Unit !{IO} = print(int_to_string(konst(1, L(2))))

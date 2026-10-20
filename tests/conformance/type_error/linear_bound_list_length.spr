@@ -1,0 +1,9 @@
+module main
+
+# A prelude function that drops every element.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn main() -> Unit !{IO} = print(int_to_string(list_length([L(1), L(2)])))

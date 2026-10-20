@@ -1,1 +1,1 @@
-cannot be used on a type variable
+on a type variable needs `where linear` on it

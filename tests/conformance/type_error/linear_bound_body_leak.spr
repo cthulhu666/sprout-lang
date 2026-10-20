@@ -1,0 +1,5 @@
+module main
+
+fn forget(x: a) -> Int where linear a = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(forget(2)))

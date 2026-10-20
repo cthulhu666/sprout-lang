@@ -10,10 +10,10 @@ type Outcome a =
   | Bad String
 
 instance Propagate Outcome
-  fn branch(value: Outcome a) -> ControlFlow (Outcome b) a =
+  fn branch(value: Outcome a) -> ControlFlow (Outcome b) a where linear a, linear b =
     match value with
     | Good v -> Continue(v)
-    | Bad s -> Break(tagged(s))
+    | Bad s -> Break(Bad(tagged(s)))
 
 fn bump(o: Outcome Int) -> Outcome Int =
   let v = try o
@@ -28,7 +28,7 @@ fn first(m) =
   in Just(v)
 
 fn tagged(s) =
-  if first(Just(1)) == Just(1) && first(Just("a")) == Just("a") then Bad("tagged: " ++ s) else Bad(s)
+  if first(Just(1)) == Just(1) && first(Just("a")) == Just("a") then "tagged: " ++ s else s
 
 fn text(o: Outcome a) -> String where ToString a =
   match o with
