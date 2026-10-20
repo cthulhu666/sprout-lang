@@ -1,0 +1,12 @@
+module main
+
+# A declaration's own bounded variable is linear in its body, so it cannot be
+# handed to `dup`, which copies its `b`.
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn twice(x: a) -> (a, a) where linear a = dup(x)
+
+fn main() -> Unit !{IO} =
+  match twice(1) with
+  | (p, q) -> print(int_to_string(p + q))

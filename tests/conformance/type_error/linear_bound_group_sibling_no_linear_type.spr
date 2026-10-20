@@ -1,0 +1,15 @@
+module main
+
+# A program that declares no linear type still checks a group's sibling against
+# its bound: `pong` is handed `ping`'s bounded `a` and passes it to `dup`, which
+# copies it. Whether this is caught must not depend on another module.
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else dup(y)
+
+fn main() -> Unit !{IO} =
+  match ping(1, 2) with
+  | (p, q) -> print(int_to_string(p + q))

@@ -330,12 +330,12 @@ fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type, env:
 export fn type_text(t: types.Type, env: Dict types.Scheme) -> String =
   types.type_to_string(types.apply_rename_type(bound_names(t, env), t))
 
-export fn bound_names(t: types.Type, env: Dict types.Scheme) -> Dict String =
+fn bound_names(t: types.Type, env: Dict types.Scheme) -> Dict String =
   list_fold(bound_name_entry(env, _, _), dict_empty(), types.ftv(t))
 
 fn bound_name_entry(env: Dict types.Scheme, acc: Dict String, id: String) -> Dict String =
   match dict_get(types.bound_name_key(id), env) with
-  | Just written -> dict_set(id, types.type_to_string(types.scheme_type(written)), acc)
+  | Just written -> dict_set(id, types.bound_name_of(written), acc)
   | Nothing -> acc
 
 fn diverge_msg(name: String) -> String =

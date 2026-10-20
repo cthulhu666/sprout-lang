@@ -1,0 +1,18 @@
+module main
+
+# The bound a sibling breaks belongs to `ping`, so the error at `pong`'s call
+# names `ping`, not "this declaration".
+
+type linear L = L Int
+
+fn eat(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else dup(y)
+
+fn main() -> Unit !{IO} =
+  match ping(L(7), 2) with
+  | (p, q) -> print(int_to_string(eat(p) + eat(q)))
