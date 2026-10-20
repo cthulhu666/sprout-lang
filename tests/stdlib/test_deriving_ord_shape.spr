@@ -21,7 +21,7 @@ fn arm_branches(b: ast.MatchBranch) -> Int =
 
 fn compare_body(d: ast.Decl) -> Maybe ast.Expr =
   match d with
-  | ast.InstanceDecl _ _ [ast.InstanceMethodImpl "compare" _ _ _ _ body] _ -> Just(body)
+  | ast.InstanceDecl _ _ _ [ast.InstanceMethodImpl "compare" _ _ _ _ _ body] _ -> Just(body)
   | _ -> Nothing
 
 # Number of match arms in the first derived `compare` in `src`, or -1.

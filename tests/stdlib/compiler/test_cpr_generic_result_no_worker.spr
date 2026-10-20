@@ -40,8 +40,8 @@ fn box_tyvar() -> types.Type =
 fn box_decl() -> typed_ast.TypedDecl =
   typed_ast.TPassThrough(
     ast.TypeDecl("Box", Cons("a", Nil),
-      Cons(ast.TypeConstructor("Empty", Nil, Nil, Nil),
-        Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil), Nil, Nil), Nil)),
+      Cons(ast.TypeConstructor("Empty", Nil, Nil, Nil, Nil),
+        Cons(ast.TypeConstructor("Full", Cons(ast.TypeName("a"), Nil), Nil, Nil, Nil), Nil)),
       Nil, ast.Unrestricted, no_pos()))
 
 # fn bget(i) = Full(i)              -- concrete result: the positive control

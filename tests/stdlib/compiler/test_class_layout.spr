@@ -64,12 +64,12 @@ fn class_superclass_count(src: String) -> Int =
 
 fn instance_method_count(src: String) -> Int =
   match first_decl(src) with
-  | Just (ast.InstanceDecl _ _ methods _) -> list_length(methods)
+  | Just (ast.InstanceDecl _ _ _ methods _) -> list_length(methods)
   | _ -> -1
 
 fn second_is_fn(src: String) -> Bool =
   match second_decl(src) with
-  | Just (ast.FnDecl _ _ _ _ _ _ _) -> true
+  | Just (ast.FnDecl _ _ _ _ _ _ _ _) -> true
   | _ -> false
 
 fn parse_ok(src: String) -> Bool =

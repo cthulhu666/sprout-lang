@@ -8,7 +8,7 @@ import stdlib.compiler.typed_ast as typed_ast
 
 fn p() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
-fn sig(name: String) -> ast.ClassMethodSig = ast.ClassMethodSig(name, [], ast.TypeName("a"), Nothing, [])
+fn sig(name: String) -> ast.ClassMethodSig = ast.ClassMethodSig(name, [], ast.TypeName("a"), Nothing, [], [])
 
 fn class_decl(name: String, params: List String, methods: List String, supers: List String) -> typed_ast.TypedDecl =
   typed_ast.TPassThrough(ast.ClassDecl(name, params, list_map(sig, methods),

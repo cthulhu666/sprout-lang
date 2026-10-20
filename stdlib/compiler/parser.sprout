@@ -1697,16 +1697,52 @@ fn collect_type_atoms(tokens: Vec token.Token, i: Int, acc: List ast.TypeExpr) -
   else
     Ok((acc, i))
 
-fn collect_constraints(tokens: Vec token.Token, i: Int, acc: List ast.TypeConstraint) -> Result ParseError (List ast.TypeConstraint, Int) =
+# One entry of a `where` list: a class constraint, or `linear v`, a bound on a
+# type variable (docs/linearity-bound-v0.md). `linear` is contextual, as in
+# `type linear`.
+type WhereItem =
+  | WhereClass ast.TypeConstraint
+  | WhereLinear String
+
+fn parse_where_item(tokens: Vec token.Token, i: Int) -> Result ParseError (WhereItem, Int) =
+  if at_linear_marker(tokens, i) && starts_type_atom(tokens, i + 1) then
+    do
+      (te, i2) <- parse_type_atom(tokens, i + 1)
+      v <- linear_bound_var(te, cur_pos(tokens, i + 1))
+      Ok((WhereLinear(v), i2))
+  else
+    do
+      (c, i2) <- parse_type_constraint(tokens, i)
+      Ok((WhereClass(c), i2))
+
+fn linear_bound_var(te: ast.TypeExpr, pos: source.SourcePos) -> Result ParseError String =
+  match te with
+  | ast.TypeName v -> if source.is_lowercase_name(v) then Ok(v) else Err(linear_bound_error(pos))
+  | _ -> Err(linear_bound_error(pos))
+
+fn linear_bound_error(pos: source.SourcePos) -> ParseError =
+  ParseError("`where linear` takes a type variable, as in `where linear a`: it lets that variable be a linear type", pos)
+
+fn collect_where_items(tokens: Vec token.Token, i: Int, acc: List WhereItem) -> Result ParseError (List WhereItem, Int) =
   do
-    (c, i2) <- parse_type_constraint(tokens, i)
+    (item, i2) <- parse_where_item(tokens, i)
     match match_symbol(tokens, i2, ",") with
-    | Nothing -> Ok((Cons(c, acc), i2))
+    | Nothing -> Ok((Cons(item, acc), i2))
     | Just (_, i3) ->
         if starts_type_atom(tokens, i3) then
-          collect_constraints(tokens, i3, Cons(c, acc))
+          collect_where_items(tokens, i3, Cons(item, acc))
         else
-          Ok((Cons(c, acc), i2))
+          Ok((Cons(item, acc), i2))
+
+fn where_class(item: WhereItem) -> Maybe ast.TypeConstraint =
+  match item with
+  | WhereClass c -> Just(c)
+  | WhereLinear _ -> Nothing
+
+fn where_bound(item: WhereItem) -> Maybe String =
+  match item with
+  | WhereLinear v -> Just(v)
+  | WhereClass _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # Where clause desugaring
@@ -1784,13 +1820,14 @@ fn parse_type_constructor_def(tokens: Vec token.Token, i: Int) -> Result ParseEr
     # existential form `| exists a. Shown a where ToString a` (docs/gadts-v0.md §6),
     # `where` (not `=>`) matching every other Sprout constraint site. It is validated
     # against the `exists`-prefix vars below.
-    (where_cons, i4) <- parse_optional_constraints(tokens, i3)
+    (where_cons, bounds, i4) <- parse_optional_where(tokens, i3)
     _ <- validate_ctor_where(exist_vars, where_cons, tokens, i3)
+    _ <- validate_ctor_bounds(exist_vars, bounds, tokens, i3)
     # The `any C` sugar hoists a fresh existential var + constraint per occurrence;
     # they extend any explicit `exists`-prefix vars. Stage 0b (docs/gadts-v0.md §6).
     Ok((ast.TypeConstructor(token.token_text(t), fields,
                             list_append(exist_vars, any_vars),
-                            list_append(any_cons, where_cons)), i4))
+                            list_append(any_cons, where_cons), bounds), i4))
 
 # A constructor `where` clause is only meaningful for an existential: each
 # constraint must apply a class to a variable bound by the `exists` prefix.
@@ -1809,6 +1846,15 @@ fn validate_ctor_where(exist_vars: List String, where_cons: List ast.TypeConstra
           else Err(ParseError(string_concat_many(
                  ["constructor `where` constraint references `", v,
                   "`, which is not bound by an `exists` prefix"]), cur_pos(tokens, i)))
+
+# As validate_ctor_where: a data parameter is never bounded (docs/linearity-bound-v0.md
+# §6.1), so a constructor's bound must name an `exists` variable.
+fn validate_ctor_bounds(exist_vars: List String, bounds: List String, tokens: Vec token.Token, i: Int) -> Result ParseError Unit =
+  match find(\v -> ! list_member (v, exist_vars), bounds) with
+  | Nothing -> Ok(())
+  | Just v ->
+      Err(ParseError("constructor `where linear " ++ v ++ "` names `" ++ v
+                     ++ "`, which is not bound by an `exists` prefix: a data parameter takes no bound", cur_pos(tokens, i)))
 
 fn constraint_var_name(c: ast.TypeConstraint) -> Maybe String =
   match c with
@@ -1974,11 +2020,11 @@ fn parse_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl
     (params, i5) <- collect_params(tokens, i4, Nil)
     (_, i6) <- expected_symbol(")", tokens, i5)
     (return_type, effects, i7) <- parse_optional_return_type(tokens, i6)
-    (constraints, i8) <- parse_optional_constraints(tokens, i7)
+    (constraints, bounds, i8) <- parse_optional_where(tokens, i7)
     (_, i9) <- expected_symbol("=", tokens, i8)
     (body, i10) <- parse_expression(tokens, i9)
     (final_body, i11) <- parse_optional_where_body(tokens, i10, body)
-    Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body, cur_pos(tokens, i)), i11))
+    Ok((ast.FnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, bounds, final_body, cur_pos(tokens, i)), i11))
 
 fn parse_extern_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   do
@@ -1989,7 +2035,8 @@ fn parse_extern_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (a
     (params, i6) <- collect_params(tokens, i5, Nil)
     (_, i7) <- expected_symbol(")", tokens, i6)
     (return_type, effects, i8) <- parse_optional_return_type(tokens, i7)
-    Ok((ast.ExternFnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, cur_pos(tokens, i)), i8))
+    (bounds, i9) <- parse_extern_where(tokens, i8)
+    Ok((ast.ExternFnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, bounds, cur_pos(tokens, i)), i9))
 
 fn parse_optional_return_type(tokens: Vec token.Token, i: Int) -> Result ParseError (Maybe ast.TypeExpr, Maybe (List String), Int) =
   match match_symbol(tokens, i, "->") with
@@ -2007,16 +2054,36 @@ fn parse_return_type_cont(tokens: Vec token.Token, i: Int, ty_raw: ast.TypeExpr)
         (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
         Ok((Just(ty_raw), effs_maybe, i2))
 
-# Parse an optional trailing `where <constraints>` clause (function, constructor,
-# class or instance). collect_constraints is comma-separated and stops at `|` or a
-# non-type token; `where` is reserved, so constructor fields halt before it.
-fn parse_optional_constraints(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
+# Parse an optional trailing `where` clause (function, extern, constructor, class
+# or instance) into its class constraints and its linear bounds, each in written
+# order. collect_where_items is comma-separated and stops at `|` or a non-type
+# token; `where` is reserved, so constructor fields halt before it.
+fn parse_optional_where(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, List String, Int) =
   match match_keyword(tokens, i, "where") with
-  | Nothing -> Ok((Nil, i))
+  | Nothing -> Ok((Nil, Nil, i))
   | Just (_, i2) ->
       do
-        (cs, i3) <- collect_constraints(tokens, i2, Nil)
-        Ok((list_reverse(cs), i3))
+        (items, i3) <- collect_where_items(tokens, i2, Nil)
+        let written = list_reverse(items)
+        Ok((list_filter_map(where_class, written), list_filter_map(where_bound, written), i3))
+
+# An extern has no dictionary parameters, so a class constraint on it would bind
+# nothing; its `where` holds only linear bounds.
+fn parse_extern_where(tokens: Vec token.Token, i: Int) -> Result ParseError (List String, Int) =
+  do
+    (cs, bounds, i2) <- parse_optional_where(tokens, i)
+    match cs with
+    | [] -> Ok((bounds, i2))
+    | [_ | _] -> Err(ParseError("an `extern fn` takes only `where linear` bounds: it has no dictionary parameter to pass a class constraint through", cur_pos(tokens, i)))
+
+# A class's own variable takes no bound (docs/linearity-bound-v0.md §6.1): an
+# instance at a linear type is concrete code, checked as such.
+fn parse_superclasses(tokens: Vec token.Token, i: Int) -> Result ParseError (List ast.TypeConstraint, Int) =
+  do
+    (supers, bounds, i2) <- parse_optional_where(tokens, i)
+    match bounds with
+    | [] -> Ok((supers, i2))
+    | [_ | _] -> Err(ParseError("a class's own type variable takes no `linear` bound: an instance at a linear type is concrete code, checked as such", cur_pos(tokens, i)))
 
 fn parse_optional_where_body(tokens: Vec token.Token, i: Int, body: ast.Expr) -> Result ParseError (ast.Expr, Int) =
   match match_keyword(tokens, i, "where") with
@@ -2112,13 +2179,13 @@ fn make_class_method_sig(name: String, params: List ast.Param, ret_raw: ast.Type
   match ret_raw with
   | ast.TypeEffect base effs ->
       do
-        (cons, i2) <- parse_optional_constraints(tokens, i)
-        Ok((ast.ClassMethodSig(name, params, base, Just(effs), cons), i2))
+        (cons, bounds, i2) <- parse_optional_where(tokens, i)
+        Ok((ast.ClassMethodSig(name, params, base, Just(effs), cons, bounds), i2))
   | _ ->
       do
         (effs_maybe, i2) <- parse_effect_annotation(tokens, i)
-        (cons, i3) <- parse_optional_constraints(tokens, i2)
-        Ok((ast.ClassMethodSig(name, params, ret_raw, effs_maybe, cons), i3))
+        (cons, bounds, i3) <- parse_optional_where(tokens, i2)
+        Ok((ast.ClassMethodSig(name, params, ret_raw, effs_maybe, cons, bounds), i3))
 
 fn collect_class_method_sigs(tokens: Vec token.Token, i: Int, acc: List ast.ClassMethodSig) -> Result ParseError (List ast.ClassMethodSig, Int) =
   if token.is_keyword_token(tok_at(tokens, i), "fn") then
@@ -2155,7 +2222,7 @@ fn parse_class_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.D
     (_, i2) <- expected_keyword("class", tokens, i)
     (name_tok, i3) <- expected_ident("class name", tokens, i2)
     (params, i4) <- collect_ident_list(tokens, i3, Nil)
-    (superclasses, i5) <- parse_optional_constraints(tokens, i4)
+    (superclasses, i5) <- parse_superclasses(tokens, i4)
     (methods, i6) <- parse_class_body(tokens, i5)
     Ok((ast.ClassDecl(token.token_text(name_tok), params, methods, superclasses, cur_pos(tokens, i)), i6))
 
@@ -2169,11 +2236,11 @@ fn parse_instance_method(tokens: Vec token.Token, i: Int) -> Result ParseError (
     (return_type, effects, i7) <- parse_optional_return_type(tokens, i6)
     # Position separates the two `where`s: constraints bind before `=`, value
     # bindings after the body.
-    (constraints, i7b) <- parse_optional_constraints(tokens, i7)
+    (constraints, bounds, i7b) <- parse_optional_where(tokens, i7)
     (_, i8) <- expected_symbol("=", tokens, i7b)
     (body, i9) <- parse_expression(tokens, i8)
     (final_body, i10) <- parse_optional_where_body(tokens, i9, body)
-    Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, final_body), i10))
+    Ok((ast.InstanceMethodImpl(token.token_text(name_tok), list_reverse(params), return_type, effects, constraints, bounds, final_body), i10))
 
 fn collect_instance_methods(tokens: Vec token.Token, i: Int, acc: List ast.InstanceMethodImpl) -> Result ParseError (List ast.InstanceMethodImpl, Int) =
   if token.is_keyword_token(tok_at(tokens, i), "fn") then
@@ -2207,9 +2274,9 @@ fn parse_instance_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (as
   do
     (_, i2) <- expected_keyword("instance", tokens, i)
     (constraint, i3) <- parse_type_constraint(tokens, i2)
-    (inst_constraints, i4) <- parse_optional_constraints(tokens, i3)
+    (inst_constraints, bounds, i4) <- parse_optional_where(tokens, i3)
     (methods, i5) <- parse_instance_body(tokens, i4)
-    Ok((ast.InstanceDecl(constraint, inst_constraints, methods, cur_pos(tokens, i)), i5))
+    Ok((ast.InstanceDecl(constraint, inst_constraints, bounds, methods, cur_pos(tokens, i)), i5))
 
 # The keywords that begin a top-level declaration (the list is in `token`).
 # parse_decl_body guards its dispatch on this predicate, so the two cannot

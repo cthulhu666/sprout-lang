@@ -1,0 +1,5 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# A class's own variable is unbounded (docs/linearity-bound-v0.md §6.1): an
+# instance at a linear type is concrete code, checked as such.
+class Taker a where linear a
+  fn take(x: a) -> Int

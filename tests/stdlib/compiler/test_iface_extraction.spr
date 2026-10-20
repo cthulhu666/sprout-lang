@@ -18,9 +18,9 @@ import stdlib.compiler.iface_codec as iface_codec
 fn sample_type_decl_colour() -> ast.Decl =
   ast.TypeDecl("mymod.Colour",
     Nil,
-    Cons(ast.TypeConstructor("Red", Nil, Nil, Nil),
-      Cons(ast.TypeConstructor("Green", Nil, Nil, Nil),
-        Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil), Nil))),
+    Cons(ast.TypeConstructor("Red", Nil, Nil, Nil, Nil),
+      Cons(ast.TypeConstructor("Green", Nil, Nil, Nil, Nil),
+        Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil, Nil), Nil))),
     Nil,
     ast.Unrestricted,
     source.SourcePos(index = 0, line = 0, column = 0))
@@ -29,8 +29,8 @@ fn sample_type_decl_colour() -> ast.Decl =
 fn sample_type_decl_maybe() -> ast.Decl =
   ast.TypeDecl("mymod.Maybe",
     Cons("a", Nil),
-    Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil), Nil, Nil),
-      Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil), Nil)),
+    Cons(ast.TypeConstructor("Just", Cons(ast.TypeName("a"), Nil), Nil, Nil, Nil),
+      Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil, Nil), Nil)),
     Nil,
     ast.Unrestricted,
     source.SourcePos(index = 0, line = 0, column = 0))
@@ -39,7 +39,7 @@ fn sample_type_decl_maybe() -> ast.Decl =
 fn sample_type_decl_other() -> ast.Decl =
   ast.TypeDecl("other.mod.OtherThing",
     Nil,
-    Cons(ast.TypeConstructor("Blah", Nil, Nil, Nil), Nil),
+    Cons(ast.TypeConstructor("Blah", Nil, Nil, Nil, Nil), Nil),
     Nil,
     ast.Unrestricted,
     source.SourcePos(index = 0, line = 0, column = 0))
@@ -52,7 +52,7 @@ fn sample_class_decl() -> ast.Decl =
       Cons(ast.Param("x", Just(ast.TypeName("a")), ast.ModeDefault),
         Cons(ast.Param("y", Just(ast.TypeName("a")), ast.ModeDefault), Nil)),
       ast.TypeName("Bool"),
-      Nothing, Nil), Nil),
+      Nothing, Nil, Nil), Nil),
     Nil,
     source.SourcePos(index = 0, line = 0, column = 0))
 
@@ -97,7 +97,7 @@ fn sample_tuple_constraint_class() -> ast.Decl =
       Nothing,
       Cons(ast.TypeConstraint("ToString",
         Cons(ast.TupleType(Cons(ast.TypeApply(ast.TypeName("Maybe"), ast.TypeName("a")),
-                                Cons(ast.TypeName("b"), Nil))), Nil)), Nil)), Nil),
+                                Cons(ast.TypeName("b"), Nil))), Nil)), Nil), Nil), Nil),
     Nil,
     source.SourcePos(index = 0, line = 0, column = 0))
 

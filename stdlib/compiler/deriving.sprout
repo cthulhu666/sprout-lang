@@ -44,7 +44,7 @@ fn side_prefix(side: Side) -> String =
 # O(n).
 fn ctor_arity(ctor: ast.TypeConstructor) -> Int =
   match ctor with
-  | ast.TypeConstructor _ fields _ _ -> list_length(fields)
+  | ast.TypeConstructor _ fields _ _ _ -> list_length(fields)
 
 # Fresh-ish variable name for the i-th field of one side of an eq comparison.
 # Prefix `__d_` keeps these distinct from any user-declared name.
@@ -86,7 +86,7 @@ fn build_eq_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
 #   Ctor l0 .. -> match right with | Ctor r0 .. -> eq(l0, r0) && .. | <fallthrough>
 fn build_eq_ctor_branch(ctor: ast.TypeConstructor, fallthrough: List ast.MatchBranch,
                         pos: source.SourcePos) -> ast.MatchBranch =
-  let ast.TypeConstructor name _ _ _ = ctor in
+  let ast.TypeConstructor name _ _ _ _ = ctor in
   let arity = ctor_arity(ctor) in
   ast.MatchBranch(
     build_ctor_var_pattern(name, DLeft, arity, pos),
@@ -170,12 +170,13 @@ fn derived_instance(class_name: String, name: String, type_params: List String,
   ast.InstanceDecl(
     ast.TypeConstraint(class_name, [instance_head_typeexpr(name, type_params)]),
     ctx,
+    Nil,
     methods,
     pos)
 
 # A pure, effect-free method with an explicit return type.
 fn derived_method(method: String, params: List ast.Param, ret: ast.TypeExpr, body: ast.Expr) -> ast.InstanceMethodImpl =
-  ast.InstanceMethodImpl(method, params, Just(ret), Nothing, Nil, body)
+  ast.InstanceMethodImpl(method, params, Just(ret), Nothing, Nil, Nil, body)
 
 # A parameter of the instance's own type.
 fn self_param(param_name: String, name: String, type_params: List String) -> ast.Param =
@@ -244,7 +245,7 @@ fn build_to_string_field_call(i: Int, pos: source.SourcePos) -> ast.Expr =
 # Build one match branch: `| Ctor(f0, f1, ...) -> "Ctor(...)"`.
 fn build_to_string_ctor_branch(ctor: ast.TypeConstructor, pos: source.SourcePos) -> ast.MatchBranch =
   match ctor with
-  | ast.TypeConstructor name _ _ _ ->
+  | ast.TypeConstructor name _ _ _ _ ->
       ast.MatchBranch(
         build_ctor_var_pattern(name, DValue, ctor_arity(ctor), pos),
         build_to_string_branch_body(name, ctor_arity(ctor), pos))
@@ -321,7 +322,7 @@ fn ord_ordinal_branches(i: Int, ctors: List ast.TypeConstructor,
   match ctors with
   | Nil -> Nil
   | Cons c rest ->
-      let ast.TypeConstructor name _ _ _ = c in
+      let ast.TypeConstructor name _ _ _ _ = c in
       Cons(ast.MatchBranch(build_ctor_wildcard_pattern(name, ctor_arity(c), pos), ast.IntExpr(i, pos)),
            ord_ordinal_branches(i + 1, rest, pos))
 
@@ -340,7 +341,7 @@ fn build_ord_same_ctor_match(ctors: List ast.TypeConstructor, pos: source.Source
 
 fn build_ord_same_ctor_branch(ctor: ast.TypeConstructor, dead: List ast.MatchBranch,
                               pos: source.SourcePos) -> ast.MatchBranch =
-  let ast.TypeConstructor name _ _ _ = ctor in
+  let ast.TypeConstructor name _ _ _ _ = ctor in
   let arity = ctor_arity(ctor) in
   ast.MatchBranch(
     build_ctor_var_pattern(name, DLeft, arity, pos),
@@ -399,7 +400,7 @@ fn build_ordinal_branches(ctors: List ast.TypeConstructor, idx: Int, pos: source
   | Nil -> Nil
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor name _ _ _ ->
+      | ast.TypeConstructor name _ _ _ _ ->
           Cons(ast.MatchBranch(ast.ConstructorPattern(name, Nil, pos), ast.IntExpr(idx, pos)),
                build_ordinal_branches(rest, idx + 1, pos))
 
@@ -413,7 +414,7 @@ fn build_from_ordinal_ladder(ctors: List ast.TypeConstructor, idx: Int, pos: sou
   | Nil -> ast.VarExpr("Nothing", pos)
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor name _ _ _ ->
+      | ast.TypeConstructor name _ _ _ _ ->
           ast.IfExpr(
             ast.BinaryExpr("==", ast.VarExpr("n", pos), ast.IntExpr(idx, pos), pos),
             ast.CallExpr(ast.VarExpr("Just", pos), [ast.VarExpr(name, pos)], pos),
@@ -495,7 +496,7 @@ fn derive_instances_for_classes(name: String, type_params: List String, ctors: L
 # `Eq a` from its stored parameter and `wrap Tagged u = Int` gets nothing from its
 # phantom one — the inner type is the only field there is to mention them.
 fn wrap_synthetic_ctor(name: String, inner: ast.TypeExpr) -> ast.TypeConstructor =
-  ast.TypeConstructor(name, [inner], Nil, Nil)
+  ast.TypeConstructor(name, [inner], Nil, Nil, Nil)
 
 # Wraps derive Eq/Ord/ToString only. Enum is ill-defined: `from_ordinal` must
 # CONSTRUCT a value, and a wrap's payload cannot be rebuilt from an Int alone.
@@ -709,7 +710,7 @@ fn first_field_bearing_ctor(ctors: List ast.TypeConstructor) -> Maybe String =
   | Nil -> Nothing
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor cname _ _ _ ->
+      | ast.TypeConstructor cname _ _ _ _ ->
           if ctor_arity(c) > 0 then Just(cname)
           else first_field_bearing_ctor(rest)
 

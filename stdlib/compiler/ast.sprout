@@ -387,10 +387,10 @@ export fn elaborate_bindings(prog: Program) -> Program =
 
 fn elab_decl(d: Decl) -> Decl =
   match d with
-  | FnDecl name params ret effs cs body pos -> FnDecl(name, params, ret, effs, cs, elab_expr(body), pos)
+  | FnDecl name params ret effs cs bounds body pos -> FnDecl(name, params, ret, effs, cs, bounds, elab_expr(body), pos)
   | LetDecl name body anno pos -> LetDecl(name, elab_expr(body), anno, pos)
-  | InstanceDecl head ctx methods pos -> InstanceDecl(head, ctx, list_map(elab_impl, methods), pos)
-  | ExternFnDecl _ _ _ _ _ -> d
+  | InstanceDecl head ctx bounds methods pos -> InstanceDecl(head, ctx, bounds, list_map(elab_impl, methods), pos)
+  | ExternFnDecl _ _ _ _ _ _ -> d
   | TypeDecl _ _ _ _ _ _ -> d
   | RecordDecl _ _ _ _ _ _ _ -> d
   | ClassDecl _ _ _ _ _ -> d
@@ -398,8 +398,8 @@ fn elab_decl(d: Decl) -> Decl =
   | WrapDecl _ _ _ _ _ -> d
 
 fn elab_impl(m: InstanceMethodImpl) -> InstanceMethodImpl =
-  let InstanceMethodImpl name params ret effs cs body = m
-  in InstanceMethodImpl(name, params, ret, effs, cs, elab_expr(body))
+  let InstanceMethodImpl name params ret effs cs bounds body = m
+  in InstanceMethodImpl(name, params, ret, effs, cs, bounds, elab_expr(body))
 
 fn elab_expr(e: Expr) -> Expr =
   match e with
@@ -468,41 +468,46 @@ export type TemplateExprPart (..) =
 export type TypeConstraint (..) =
   | TypeConstraint String (List TypeExpr)
 
-# TypeConstructor name fields exist_vars exist_constraints
+# TypeConstructor name fields exist_vars exist_constraints linear_bounds
 # exist_vars: existentially-bound type variables introduced by an `exists` prefix
 # (`| exists a. Boxed a`); they scope over the fields but are ABSENT from the type
 # head, so `Boxed(x)` hides x's type. Nil for an ordinary constructor.
 # exist_constraints: class constraints on those vars (Stage 0b, `any C` sugar);
 # always Nil in Stage 0a. See docs/gadts-v0.md §6.
 export type TypeConstructor (..) =
-  | TypeConstructor String (List TypeExpr) (List String) (List TypeConstraint)
+  | TypeConstructor String (List TypeExpr) (List String) (List TypeConstraint) (List String)
 
 export type RecordFieldDecl (..) =
   | RecordFieldDecl String TypeExpr
 
-# ClassMethodSig name params ret effects constraints
+# ClassMethodSig name params ret effects constraints linear_bounds
 # constraints: a `where` on the METHOD, over a variable the method quantifies
 # rather than the class variable. Its dictionary is a hidden parameter resolved
 # per call site; the class variable's comes from dispatch.
 export type ClassMethodSig (..) =
-  | ClassMethodSig String (List Param) TypeExpr (Maybe (List String)) (List TypeConstraint)
+  | ClassMethodSig String (List Param) TypeExpr (Maybe (List String)) (List TypeConstraint) (List String)
 
-# InstanceMethodImpl name params ret effects constraints body
+# InstanceMethodImpl name params ret effects constraints linear_bounds body
 # constraints: the method-level `where` restated over THIS implementation's
 # variables, which it may name differently from the class declaration.
 export type InstanceMethodImpl (..) =
-  | InstanceMethodImpl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr
+  | InstanceMethodImpl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) (List String) Expr
 
 # --- Top-level declarations ---
 #
-# FnDecl name params return_type effects constraints body pos
+# FnDecl name params return_type effects constraints linear_bounds body pos
+# ExternFnDecl name params return_type effects linear_bounds pos
 # TypeDecl name type_params constructors deriving_classes multiplicity pos
 # RecordDecl name type_params fields deriving_classes multiplicity representation pos
 # LetDecl name body type_annotation pos
 # ClassDecl name type_params methods superclasses pos
-# InstanceDecl constraint instance_constraints methods pos
+# InstanceDecl constraint instance_constraints linear_bounds methods pos
 # AliasDecl name type_params rhs pos
 # WrapDecl  name type_params inner_type deriving_classes pos
+#
+# linear_bounds (here and on TypeConstructor, ClassMethodSig, InstanceMethodImpl):
+# the type variables a `where linear v` names. The parser takes them out of the
+# class constraints, which they are not. See docs/linearity-bound-v0.md.
 #
 # TypeDecl, RecordDecl and WrapDecl all carry deriving_classes: the (possibly
 # empty) list of class names from a `deriving (...)` clause; an empty list means
@@ -551,13 +556,13 @@ export type Representation (..) =
   | Abstract  # no marker — representation is private to the declaring module
 
 export type Decl (..) =
-  | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) Expr source.SourcePos
-  | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) source.SourcePos
+  | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) (List String) Expr source.SourcePos
+  | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List String) source.SourcePos
   | TypeDecl String (List String) (List TypeConstructor) (List String) Multiplicity source.SourcePos
   | RecordDecl String (List String) (List RecordFieldDecl) (List String) Multiplicity Representation source.SourcePos
   | LetDecl String Expr (Maybe TypeExpr) source.SourcePos
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
-  | InstanceDecl TypeConstraint (List TypeConstraint) (List InstanceMethodImpl) source.SourcePos
+  | InstanceDecl TypeConstraint (List TypeConstraint) (List String) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
   | WrapDecl String (List String) TypeExpr (List String) source.SourcePos
 
@@ -566,13 +571,13 @@ export type Decl (..) =
 # offending declaration's location (guideline #5).
 export fn decl_pos(d: Decl) -> source.SourcePos =
   match d with
-  | FnDecl _ _ _ _ _ _ p -> p
-  | ExternFnDecl _ _ _ _ p -> p
+  | FnDecl _ _ _ _ _ _ _ p -> p
+  | ExternFnDecl _ _ _ _ _ p -> p
   | TypeDecl _ _ _ _ _ p -> p
   | RecordDecl _ _ _ _ _ _ p -> p
   | LetDecl _ _ _ p -> p
   | ClassDecl _ _ _ _ p -> p
-  | InstanceDecl _ _ _ p -> p
+  | InstanceDecl _ _ _ _ p -> p
   | AliasDecl _ _ _ p -> p
   | WrapDecl _ _ _ _ p -> p
 
@@ -604,8 +609,8 @@ export type NameScope (..) =
 # method names, which are values.
 export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
   match d with
-  | FnDecl name _ _ _ _ _ _ -> [(name, ScopeModule)]
-  | ExternFnDecl name _ _ _ _ -> [(name, ScopeGlobal)]
+  | FnDecl name _ _ _ _ _ _ _ -> [(name, ScopeModule)]
+  | ExternFnDecl name _ _ _ _ _ -> [(name, ScopeGlobal)]
   | LetDecl name _ _ _ -> [(name, ScopeModule)]
   | TypeDecl _ _ ctors _ _ _ -> ctor_value_scopes(ctors)
   | ClassDecl _ _ methods _ _ -> method_value_scopes(methods)
@@ -616,12 +621,12 @@ export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
 fn ctor_value_scopes(ctors: List TypeConstructor) -> List (String, NameScope) =
   match ctors with
   | Nil -> Nil
-  | Cons (TypeConstructor name _ _ _) rest -> Cons((name, ScopeModule), ctor_value_scopes(rest))
+  | Cons (TypeConstructor name _ _ _ _) rest -> Cons((name, ScopeModule), ctor_value_scopes(rest))
 
 fn method_value_scopes(methods: List ClassMethodSig) -> List (String, NameScope) =
   match methods with
   | Nil -> Nil
-  | Cons (ClassMethodSig name _ _ _ _) rest -> Cons((name, ScopeModule), method_value_scopes(rest))
+  | Cons (ClassMethodSig name _ _ _ _ _) rest -> Cons((name, ScopeModule), method_value_scopes(rest))
 
 # The TYPE axis the comment above sets aside: every type-level name a declaration
 # introduces. Together with decl_value_scopes this covers every name a declaration brings
@@ -693,7 +698,7 @@ export fn type_expr_stores(p: String, te: TypeExpr) -> Bool =
 export fn ctor_field_type_exprs(ctors: List TypeConstructor) -> List TypeExpr =
   match ctors with
   | [] -> []
-  | [TypeConstructor _ fields _ _ | rest] ->
+  | [TypeConstructor _ fields _ _ _ | rest] ->
       list_append(fields, ctor_field_type_exprs(rest))
 
 export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr =
@@ -747,14 +752,14 @@ fn alias_head_table(decls: List Decl, acc: Dict AliasHead) -> Dict AliasHead =
 # Only the variants that carry a `where` change.
 fn expand_decl(table: Dict AliasHead, d: Decl) -> Decl =
   match d with
-  | FnDecl name params ret effs cs body pos ->
-      FnDecl(name, params, ret, effs, expand_constraints(table, cs), body, pos)
+  | FnDecl name params ret effs cs bounds body pos ->
+      FnDecl(name, params, ret, effs, expand_constraints(table, cs), bounds, body, pos)
   | ClassDecl name params sigs supers pos ->
       ClassDecl(name, params, list_map(\s -> expand_sig(table, s), sigs), supers, pos)
-  | InstanceDecl head ctx methods pos ->
-      InstanceDecl(expand_constraint(table, head), expand_constraints(table, ctx),
+  | InstanceDecl head ctx bounds methods pos ->
+      InstanceDecl(expand_constraint(table, head), expand_constraints(table, ctx), bounds,
                    list_map(\m -> expand_impl(table, m), methods), pos)
-  | ExternFnDecl _ _ _ _ _ -> d
+  | ExternFnDecl _ _ _ _ _ _ -> d
   | TypeDecl _ _ _ _ _ _ -> d
   | RecordDecl _ _ _ _ _ _ _ -> d
   | LetDecl _ _ _ _ -> d
@@ -762,12 +767,12 @@ fn expand_decl(table: Dict AliasHead, d: Decl) -> Decl =
   | WrapDecl _ _ _ _ _ -> d
 
 fn expand_sig(table: Dict AliasHead, s: ClassMethodSig) -> ClassMethodSig =
-  let ClassMethodSig name params ret effs cs = s
-  in ClassMethodSig(name, params, ret, effs, expand_constraints(table, cs))
+  let ClassMethodSig name params ret effs cs bounds = s
+  in ClassMethodSig(name, params, ret, effs, expand_constraints(table, cs), bounds)
 
 fn expand_impl(table: Dict AliasHead, m: InstanceMethodImpl) -> InstanceMethodImpl =
-  let InstanceMethodImpl name params ret effs cs body = m
-  in InstanceMethodImpl(name, params, ret, effs, expand_constraints(table, cs), body)
+  let InstanceMethodImpl name params ret effs cs bounds body = m
+  in InstanceMethodImpl(name, params, ret, effs, expand_constraints(table, cs), bounds, body)
 
 fn expand_constraints(table: Dict AliasHead, cs: List TypeConstraint) -> List TypeConstraint =
   list_map(\c -> expand_constraint(table, c), cs)

@@ -1,0 +1,3 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# `where linear` names a type variable: a concrete type has no bound to relax.
+fn ident(x: a) -> a where linear Int = x

@@ -1,6 +1,7 @@
 # A linearity bound on type variables (v0, 2026-10-20)
 
-**Status:** design decided (§11), not implemented. Not normative until it lands in
+**Status:** design decided (§11). Implementation in four steps (§12); step 1, the syntax, is
+done: `where linear v` parses and is rejected as not yet supported. Not normative until it lands in
 [spec-v0.md](spec-v0.md) §5.8. Closes the type-variable holes in §1, three of which
 [persistent-array-v0.md](persistent-array-v0.md) §5.3 lists as prerequisites.
 
@@ -150,6 +151,11 @@ export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} where linear a = …
 type Boxed = | exists a. Boxed a where linear a, Taker a
 ```
 
+An `extern fn` takes a `where` too, holding only linear bounds: it has no dictionary parameter
+for a class constraint, but `panic` and the `__chan_*` primitives are externs whose `a` must
+admit a linear type. A class's own variable takes none (§6.1), so `class C a where linear a`
+is a parse error.
+
 `linear` is already a contextual word (`type linear`). It names the case being admitted; the
 non-linear types still fit, as `~Copyable` still admits copyable types in Swift. The reading
 "`a` must be linear" would be useless, since no function needs to refuse `Int`. No sigil.
@@ -228,26 +234,32 @@ consumes", the reverse of what happened.
 
 ### 6.7 Where the check runs
 
-In `linear_check`, which already sees each use's substituted type. Two walks:
+Two places, each where the facts it needs already are:
 
-- **References.** At a reference to a generic name it matches the callee's scheme against the
-  use's type to recover what each variable became, then applies §6.3. This covers calls, partial
-  application and a generic function passed as a value (`list_map(dup, xs)`): each mention carries
-  its instantiated type. The scheme records which variables carry the bound, beside its class
-  constraints. An existential constructor's scheme quantifies the data parameters and the `exists`
-  variables together, so it must mark which are which.
-- **Dictionaries.** A generic instance's variables never appear in the method's scheme:
-  `take(Box(L(1)))` is `take` at the class's own (unbounded) variable, and `a := L` exists only in
-  the dictionary, `Taker (Box L)` built from `Taker L`. So the check also walks each dictionary
-  argument, nested ones included, recovers the instance head, matches it against the constraint's
-  type and applies §6.3 to the instance's variables. A forwarded dictionary needs nothing: the
-  forwarding function's own variable is already bounded.
+- **References, in inference.** Where inference instantiates a generic name — a call, a value
+  reference, a constructor — it records, for each unbounded variable, the fresh type variable
+  that stands for it, beside the name and position. Once the declaration's substitution is final
+  it applies §6.3 to each. This covers partial application and a generic function passed as a
+  value (`list_map(dup, xs)`): each mention is instantiated. It runs in inference rather than
+  in `linear_check` because only inference resolves names: `linear_check` sees the global
+  environment, so a local that shadows a generic global would be matched against the wrong
+  scheme. Field access defers its check the same way (`field_obligations`). A class method's
+  own class variable is exempt, as is a constructor's data parameter; an `exists` variable is
+  one absent from the constructor's result type.
+- **Dictionaries, in evidence resolution.** A generic instance's variables never appear in the
+  method's scheme: `take(Box(L(1)))` is `take` at the class's own (unbounded) variable, and
+  `a := L` exists only in the dictionary, `Taker (Box L)` built from `Taker L`. Which instance
+  a dictionary comes from is decided only in `resolve.sprout`, after inference, and that pass
+  holds the instance heads. So the check walks each dictionary there, nested ones included,
+  matches the instance head against the constraint's type and applies §6.3 to the instance's
+  variables. A forwarded dictionary needs nothing: the forwarding function's own variable is
+  already bounded.
 
 Dispatch does not change. Inference changes only in §6.6's mode comparison.
 
 ## 7. Impact
 
-- **Syntax:** `linear <var>` in a `where` list.
+- **Syntax:** `linear <var>` in a `where` list, which an `extern fn` now also takes (§6.2).
 - **Now rejected:** each program in §1, and a call that instantiates an unannotated variable at a
   linear type in sound code that has not opted in. The error names the function, the variable and
   the fix:
@@ -322,6 +334,24 @@ Decided with Kuba, one question at a time.
    puts in code what §5.8 refuses as fake enforcement; deferring loses the receiver-borrowing
    class. Swift SE-0377 is the same rule.
 
+6. **Where the check runs**, 2026-10-20, approved with the plan in §12: references in
+   inference and dictionaries in evidence resolution (§6.7), not both in `linear_check`, which
+   sees neither local names nor instance heads. The bound is carried in its own AST field, not
+   as a constraint named `linear`, so that no class-constraint consumer can mistake it for a
+   class (guidelines #2a, #3, #4).
+
 An outside review (2026-10-20) checked decisions 1–4 together and found them consistent. It
 added the dictionary walk (§6.7), the instance-head and top-level `let` holes (§1), `branch`'s
 second bound and `pure`'s price (§6.5), and the class-signature mode gap (§6.6).
+
+## 12. Implementation
+
+1. **Syntax.** The parser moves `linear v` out of each `where` list into its own field on
+   `FnDecl`, `ExternFnDecl`, `TypeConstructor`, `ClassMethodSig`, `InstanceDecl` and
+   `InstanceMethodImpl`, so no class-constraint consumer sees it. Inference rejects any bound as
+   not yet supported.
+2. **The bound at references and in bodies** (§6.3, §6.4, §6.7's first walk), the stdlib opt-ins
+   of §4, and the spec. Closes §1's rows 1–5 and 7.
+3. **Dictionaries and existentials** (§6.5, §6.7's second walk): row 6, a bound on an instance
+   head, and an existential unpacked under a bound.
+4. **Modes** (§6.6).

@@ -36,7 +36,7 @@ fn pat_shape(p: ast.Pattern) -> String =
 
 fn eq_body(d: ast.Decl) -> Maybe ast.Expr =
   match d with
-  | ast.InstanceDecl _ _ [ast.InstanceMethodImpl "eq" _ _ _ _ body] _ -> Just(body)
+  | ast.InstanceDecl _ _ _ [ast.InstanceMethodImpl "eq" _ _ _ _ _ body] _ -> Just(body)
   | _ -> Nothing
 
 # The shape of the first derived `eq` in `src`, or a string starting "ERR: ".

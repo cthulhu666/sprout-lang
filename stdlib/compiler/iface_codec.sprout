@@ -805,7 +805,7 @@ fn collect_ctors_for_type(ctors: List ast.TypeConstructor, adt_name: String, loc
   # `| exists a. Boxed a`). They are quantified into the exported scheme's field
   # types; a downstream importer recovers existential-ness the same way the
   # unpack path does (a ctor scheme var absent from the result). docs/gadts-v0.md.
-  | Cons (ast.TypeConstructor ctor_name field_exprs exist_vars _) rest ->
+  | Cons (ast.TypeConstructor ctor_name field_exprs exist_vars _ _) rest ->
       collect_ctors_for_type(rest, adt_name, local_vars,
         Cons(CtorInfo(ctor_name, adt_name, typeexpr_list_to_types(field_exprs, add_exist_iface_locals(exist_vars, local_vars))), acc))
 
@@ -854,7 +854,7 @@ fn extract_superclass_names(supers: List ast.TypeConstraint, acc: List String) -
 fn build_method_named_schemes(methods: List ast.ClassMethodSig, type_params: List String, acc: List NamedScheme) -> List NamedScheme =
   match methods with
   | Nil -> list_reverse(acc)
-  | Cons (ast.ClassMethodSig method_name params ret effects constraints) rest ->
+  | Cons (ast.ClassMethodSig method_name params ret effects constraints _) rest ->
       build_method_named_schemes(rest, type_params,
         Cons(NamedScheme(method_name, method_scheme(type_params, params, ret, effects, constraints)), acc))
 
