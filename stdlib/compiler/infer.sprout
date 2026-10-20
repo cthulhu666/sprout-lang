@@ -7770,32 +7770,27 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
 
 fn decl_has_linear_bound(decl: ast.Decl) -> Bool =
   match decl with
-  | ast.FnDecl _ _ _ _ _ bounds _ _ -> has_bound(bounds)
-  | ast.ExternFnDecl _ _ _ _ bounds _ -> has_bound(bounds)
+  | ast.FnDecl _ _ _ _ _ bounds _ _ -> bounds != Nil
+  | ast.ExternFnDecl _ _ _ _ bounds _ -> bounds != Nil
   | ast.TypeDecl _ _ ctors _ _ _ -> any(ctor_has_bound, ctors)
   | ast.ClassDecl _ _ sigs _ _ -> any(sig_has_bound, sigs)
-  | ast.InstanceDecl _ _ bounds methods _ -> has_bound(bounds) || any(impl_has_bound, methods)
+  | ast.InstanceDecl _ _ bounds methods _ -> bounds != Nil || any(impl_has_bound, methods)
   | ast.RecordDecl _ _ _ _ _ _ _ -> false
   | ast.LetDecl _ _ _ _ -> false
   | ast.AliasDecl _ _ _ _ -> false
   | ast.WrapDecl _ _ _ _ _ -> false
 
-fn has_bound(bounds: List String) -> Bool =
-  match bounds with
-  | [] -> false
-  | [_ | _] -> true
-
 fn ctor_has_bound(c: ast.TypeConstructor) -> Bool =
   let ast.TypeConstructor _ _ _ _ bounds = c
-  in has_bound(bounds)
+  in bounds != Nil
 
 fn sig_has_bound(s: ast.ClassMethodSig) -> Bool =
   let ast.ClassMethodSig _ _ _ _ _ bounds = s
-  in has_bound(bounds)
+  in bounds != Nil
 
 fn impl_has_bound(m: ast.InstanceMethodImpl) -> Bool =
   let ast.InstanceMethodImpl _ _ _ _ _ bounds _ = m
-  in has_bound(bounds)
+  in bounds != Nil
 
 # ---------------------------------------------------------------------------
 # Executable entrypoint validation

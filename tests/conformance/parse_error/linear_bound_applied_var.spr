@@ -1,0 +1,3 @@
+# sprout-ignore-all lint/unparsed: parse-error fixture — this file must not parse
+# `where linear` takes one variable: `g a` is an applied type, not a variable.
+fn keep(x: g a) -> g a where linear g a = x

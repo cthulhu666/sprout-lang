@@ -1704,11 +1704,15 @@ type WhereItem =
   | WhereClass ast.TypeConstraint
   | WhereLinear String
 
+# A class name is uppercase, so a lowercase `linear` always starts a bound: one
+# variable, with nothing missing and nothing applied to it.
 fn parse_where_item(tokens: Vec token.Token, i: Int) -> Result ParseError (WhereItem, Int) =
-  if at_linear_marker(tokens, i) && starts_type_atom(tokens, i + 1) then
+  if at_linear_marker(tokens, i) then
     do
+      _ <- guard(starts_type_atom(tokens, i + 1), linear_bound_error(cur_pos(tokens, i)))
       (te, i2) <- parse_type_atom(tokens, i + 1)
       v <- linear_bound_var(te, cur_pos(tokens, i + 1))
+      _ <- guard(! starts_type_atom (tokens, i2), linear_bound_error(cur_pos(tokens, i + 1)))
       Ok((WhereLinear(v), i2))
   else
     do
