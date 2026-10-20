@@ -1728,7 +1728,7 @@ The rules:
   branch; using it in some branches but not others is rejected.
 - **Discarded result** — a `do`-block statement in non-final position is rejected
   when its value is linear, *contains* a linear value as a type argument or tuple
-  component (`Maybe File`), or has a bare type-variable type. So is a wildcard bind
+  component (`Maybe File`), or has a bare type-variable type that may be linear. So is a wildcard bind
   (`_ <- e`) of such a value. The three rules above are keyed on binders, so a
   linear value that is never bound carries no obligation for them to find
   unfulfilled: `do { task_fork(s, w); 7 }` would otherwise drop the handle in
@@ -1740,9 +1740,11 @@ The rules:
   type's head could never fire in a short-circuiting block at all. It is the same
   containment the binder rules use, and one predicate answers for both — they
   disagreed until 2026-09-07, which made `Maybe File` a leak in statement position
-  and not in binder position. A type variable counts only under `where linear`
+  and not in binder position. A function's type variable counts only under `where linear`
   (**Type variables**, below): without the bound no caller can instantiate it at a
-  linear type, so `do { x; 1 }` with `x: a` is accepted. Two shapes remain accepted and are **not** guaranteed
+  linear type, so `do { x; 1 }` with `x: a` is accepted. An instance head's variable
+  counts too, because a use of the instance is not yet checked for linear types: the
+  same step in `instance Count (Maybe a)` is rejected. Two shapes remain accepted and are **not** guaranteed
   leak-free: a wildcard `match` arm over a linear value (`match f with | _ -> 0`,
   which does reference `f` exactly once) and a constructor pattern that drops a
   linear field (`Wrap _`).

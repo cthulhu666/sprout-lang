@@ -1,0 +1,15 @@
+module main
+
+# `a` is the class method's own variable, not the instance head's, so each call
+# of `ap1` checks it. The instance body may discard one.
+
+class Apply t
+  fn ap1(x: t, g: Int -> a) -> Int
+
+instance Apply Int
+  fn ap1(x: Int, g: Int -> a) -> Int =
+    do
+      g(x)
+      x
+
+fn main() -> Unit !{IO} = print(int_to_string(ap1(3, \n -> n + 1)))

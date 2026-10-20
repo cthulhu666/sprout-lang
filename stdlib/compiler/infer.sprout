@@ -134,7 +134,7 @@ type TypedDeclResult =
 # binding-group inference exists to preserve.
 # See docs/binding-group-inference-v0.md §6.
 type FnInferred =
-  | FnInferred ast.Decl typed_ast.TypedExpr types.Type (Dict types.Scheme) (List (String, String)) (List String) (Maybe LinearGate)
+  | FnInferred ast.Decl typed_ast.TypedExpr types.Type (Dict types.Scheme) (List (String, String)) (List String) LinearGate
   # FnInferred decl  typed_body  inferred_type  fwd_markers  decl_constraints  group_env_ftv  linear_gate
 
 type FnInferResult =
@@ -2038,14 +2038,14 @@ fn type_expects_arguments(t: types.Type) -> Bool =
 
 # Set in the body env of a declaration with a `where linear` variable. That variable
 # is linear even in a program that declares no linear type, so uses are recorded.
-fn with_bounded_decl(bounds: List String, env: Dict types.Scheme) -> Dict types.Scheme =
-  if bounds != Nil then dict_set(types.bounded_decl_key, types.presence_marker, env)
+fn with_bounded_decl(bounded: Bool, env: Dict types.Scheme) -> Dict types.Scheme =
+  if bounded then dict_set(types.bounded_decl_key, types.presence_marker, env)
   else env
 
 # Every member of a group records uses when one member has a bound: an unannotated
 # sibling's parameter can be unified with the bounded variable.
 fn with_group_bound(members: List (Int, ast.Decl), env: Dict types.Scheme) -> Dict types.Scheme =
-  with_bounded_decl(list_flat_map(member_bounds, members), env)
+  with_bounded_decl(any(\m -> member_bounds(m) != Nil, members), env)
 
 # A group holds only `fn` declarations (infer_fn_decl).
 fn member_bounds(m: (Int, ast.Decl)) -> List String =
@@ -5957,11 +5957,11 @@ fn first_fallible_step(steps: List typed_ast.TypedDoStep, subst: Dict types.Type
 # there is one. Falls back to the original generic wording otherwise, so every other cause
 # of a return-type mismatch reads exactly as it did before.
 fn return_mismatch_body_err(name: String, body: typed_ast.TypedExpr, ret_ty: types.Type,
-                            subst: Dict types.Type, generic: String) -> typed_ast.BodyResult =
+                            subst: Dict types.Type, generic: String) -> FnBody =
   match first_fallible_bind(body, subst) with
-  | Nothing -> typed_ast.BodyErr(typed_ast.typed_expr_pos(body), generic)
+  | Nothing -> FnBodyErr(typed_ast.typed_expr_pos(body), generic)
   | Just fam ->
-      typed_ast.BodyErr(
+      FnBodyErr(
         do_family_pos(fam),
         fallible_bind_msg(do_family_name(fam), do_family_type(fam),
                           "`" ++ name ++ "`", unifier.apply_subst(subst, ret_ty)))
@@ -10014,6 +10014,9 @@ fn typecheck_group(
   env_ftv: List String
 ) -> GroupResult !{IO} =
   do
+    # Each declaration takes the bound obligations its body parks; one that failed
+    # left its own behind.
+    _ <- unifier.take_bound_obligations(state)
     let members = group_members(decl_vec, g)
     # Every member of a group shares a module: a group is mutually recursive
     # declarations, and the bundler rejects import cycles, so one cannot span two.
@@ -10132,9 +10135,9 @@ fn typecheck_fn_group(
 # bounded variables marked, since an unannotated sibling's parameter can be unified
 # with one and its own env would not mark it linear.
 fn group_linear_error(inferred: List (Int, FnInferred), final_subst: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  linear_gates_error(list_filter_map(member_gate, inferred), final_subst)
+  linear_gates_error(list_map(member_gate, inferred), final_subst)
 
-fn member_gate(m: (Int, FnInferred)) -> Maybe LinearGate =
+fn member_gate(m: (Int, FnInferred)) -> LinearGate =
   let (_, FnInferred _ _ _ _ _ _ gate) = m
   in gate
 
@@ -10256,10 +10259,10 @@ fn infer_fn_decl(
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ decl_pos ->
       do
-        (r, fwd_markers, decl_constraints, body_subst, linear_gate) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env, group_env_ftv)
+        r <- check_fn_body(state, decl, env, subst, eff_subst, alias_env, group_env_ftv)
         match r with
-        | typed_ast.BodyErr pos e -> (FnInferErr(pos, e), body_subst)
-        | typed_ast.BodyOk typed_body inferred_fn_type ->
+        | FnBodyErr pos e -> (FnInferErr(pos, e), subst)
+        | FnBodyOk typed_body inferred_fn_type fwd_markers decl_constraints body_subst linear_gate ->
             # A skolem reaching the decl's own type escaped a match branch, and
             # generalize cannot notice: a skolem is a rigid TConst, so it has no
             # free type variables for the ftv-difference to quantify. Being
@@ -10340,14 +10343,9 @@ fn var_renaming(from: types.Scheme, to: types.Type) -> Dict String =
   in list_fold(rename_entry(matched, _, _), dict_empty(), types.scheme_vars(from))
 
 fn rename_entry(matched: Dict types.Type, acc: Dict String, v: String) -> Dict String =
-  match and_then(type_var_name, dict_get(v, matched)) with
+  match and_then(types.type_var_name, dict_get(v, matched)) with
   | Just n -> dict_set(v, n, acc)
   | Nothing -> acc
-
-fn type_var_name(t: types.Type) -> Maybe String =
-  match t with
-  | types.TVar v -> Just(types.tyvar_identity(v))
-  | _ -> Nothing
 
 fn typecheck_decl(
   state: unifier.InferState,
@@ -10392,7 +10390,6 @@ fn typecheck_decl(
   | ast.LetDecl name expr anno let_pos ->
       do
         unifier.census_enter(state, census_key(decl))
-        _ <- unifier.take_bound_obligations(state)
         r <- typecheck_let_rhs(state, global_env_dict(env), subst, eff_subst, expr, anno, alias_env)
         match r with
         | InferErr pos e -> TypedDeclErr(pos, e)
@@ -11513,8 +11510,16 @@ fn extern_redeclared_message(name: String, kept: types.Scheme, declared: types.S
 # renamed into the declared scheme's names before they are compared.
 fn same_bounds(kept: types.Scheme, kept_bounds: List String, declared: types.Scheme,
                declared_bounds: List String) -> Bool =
-  let renamed = renamed_vars(kept, types.scheme_type(declared), kept_bounds)
-  in all(list_member(_, declared_bounds), renamed) && all(list_member(_, renamed), declared_bounds)
+  match bound_mismatch(kept, kept_bounds, types.scheme_type(declared), declared_bounds) with
+  | (Nothing, Nothing) -> true
+  | _ -> false
+
+# The first of `from_bounds` that `to_bounds` lacks, and the first of `to_bounds`
+# that `from_bounds` lacks, once `from`'s variables take the names `to` gives them.
+fn bound_mismatch(from: types.Scheme, from_bounds: List String, to: types.Type,
+                  to_bounds: List String) -> (Maybe String, Maybe String) =
+  let renamed = renamed_vars(from, to, from_bounds)
+  in (find(\v -> ! list_member (v, to_bounds), renamed), find(\v -> ! list_member (v, renamed), to_bounds))
 
 fn extern_rebounded_message(name: String, kept: List String, declared: List String) -> String =
   "extern `" ++ name ++ "` is declared more than once with different `where linear` bounds: "
@@ -11537,8 +11542,15 @@ fn bound_marks(g: LinearGate, subst: Dict types.Type) -> List BoundMark =
   list_filter_map(bound_mark(g, subst, _), g.bounds)
 
 fn bound_mark(g: LinearGate, subst: Dict types.Type, v: String) -> Maybe BoundMark =
-  map(\id -> BoundMark(id = id, written = v, owner = g.owner),
-      and_then(type_var_name, map(unifier.apply_subst(subst, _), dict_get(v, g.prog_to_fresh))))
+  map(\id -> BoundMark(id = id, written = v, owner = g.owner), rigid_id(g, subst, v))
+
+# The rigid variable a signature variable of the gate's declaration became.
+fn rigid_id(g: LinearGate, subst: Dict types.Type, v: String) -> Maybe String =
+  and_then(types.type_var_name, map(unifier.apply_subst(subst, _), dict_get(v, g.prog_to_fresh)))
+
+fn with_head_vars(g: LinearGate, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  list_fold(\ (acc, id) -> dict_set(types.head_var_key(id), types.presence_marker, acc), env,
+            list_filter_map(rigid_id(g, subst, _), g.head_vars))
 
 fn with_bound_marks(marks: List BoundMark, env: Dict types.Scheme) -> Dict types.Scheme =
   list_fold(with_bound_mark, env, marks)
@@ -11548,8 +11560,10 @@ fn with_bound_mark(env: Dict types.Scheme, m: BoundMark) -> Dict types.Scheme =
 
 # A declaration's linearity checks, deferred to its binding group's boundary: its
 # own `where linear` variables, the bound obligations its body parked, and what the
-# linear walk reads. `owner` is the declaration as a diagnostic names it.
-type LinearGate = (owner: String, bounds: List String, prog_to_fresh: Dict types.Type,
+# linear walk reads. `owner` is the declaration as a diagnostic names it;
+# `head_vars` are an instance method's head variables (instance_head_vars).
+type LinearGate = (owner: String, bounds: List String, head_vars: List String,
+                   prog_to_fresh: Dict types.Type,
                    obligations: List unifier.BoundObligation, params: List ast.Param,
                    ret_te: Maybe ast.TypeExpr, inst_type: types.Type,
                    typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos, env: Dict types.Scheme)
@@ -11558,7 +11572,7 @@ type LinearGate = (owner: String, bounds: List String, prog_to_fresh: Dict types
 # The linear walk goes first: its diagnostics name what the user wrote, such as a
 # comprehension's generator, where the bound's would name `list_fold`.
 fn linear_gate_error(g: LinearGate, s2: Dict types.Type, marks: List BoundMark) -> Maybe(source.SourcePos, String) =
-  let bound_env = with_bound_marks(marks, g.env)
+  let bound_env = with_head_vars(g, s2, with_bound_marks(marks, g.env))
   in match fn_linear_gate(g.params, g.ret_te, s2, g.inst_type, g.typed_body, g.fn_pos, bound_env) with
      | linear_check.LinFail pos msg -> Just((pos, msg))
      | linear_check.LinPass -> bound_obligation_error(g.obligations, s2, bound_env, marks)
@@ -11631,7 +11645,7 @@ fn linear_reason(t: types.Type, lin: types.Type, env: Dict types.Scheme, marks: 
          else "`" ++ linear_check.type_text(t, env) ++ "` holds the linear `" ++ v ++ "`"
 
 fn bound_mark_of(t: types.Type, marks: List BoundMark) -> Maybe BoundMark =
-  let Just id = type_var_name(t) else Nothing
+  let Just id = types.type_var_name(t) else Nothing
   in find(\m -> m.id == id, marks)
 
 # M4.2 linear check, gated on the program declaring any linear type. When it does
@@ -12129,6 +12143,12 @@ fn open_dict_question_msg(quantified: List String, t: types.Type) -> String =
     ++ " leaves open, and Sprout does not infer `where` clauses"
     ++ " — make the type concrete, for example by annotating a lambda parameter"
 
+# check_fn_body's outcome. Its linear gate exists only beside a body that checked.
+type FnBody =
+  | FnBodyOk typed_ast.TypedExpr types.Type (Dict types.Scheme) (List (String, String)) (Dict types.Type) LinearGate
+  # FnBodyOk typed_body  fn_type  fwd_markers  decl_constraints  s2  linear_gate
+  | FnBodyErr source.SourcePos String
+
 fn check_fn_body(
   state: unifier.InferState,
   decl: ast.Decl,
@@ -12137,17 +12157,16 @@ fn check_fn_body(
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
-) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String), Dict types.Type, Maybe LinearGate) !{IO} =
+) -> FnBody !{IO} =
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints bounds body fn_pos ->
       do
         let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
-        _ <- unifier.take_bound_obligations(state)
         enter_try_decl(state, env, fn_return_type(inst_type, list_length(params)))
         unifier.census_enter(state, census_key(decl))
         let fwd_env = seed_unann_names(own_unann_vars(name, params, ret_type_maybe),
-                        seed_sig_var_names(prog_to_fresh, seed_forward_markers(constraints, prog_to_fresh, with_bounded_decl(bounds, env))))
+                        seed_sig_var_names(prog_to_fresh, seed_forward_markers(constraints, prog_to_fresh, with_bounded_decl(bounds != Nil, env))))
         # Compute @eta_fwd:* markers in parallel without walking fwd_env post-hoc.
         # Constraint-free decls return dict_empty() instantly.
         let fwd_markers = compute_eta_fwd_markers(constraints, prog_to_fresh, env)
@@ -12157,9 +12176,9 @@ fn check_fn_body(
         let body_env = fn_body_env(name, params, inst_type,
           self_binding_scheme(name, params, ret_type_maybe, decl_scheme, inst_type, constraint_source_tokens(constraints)),
           fwd_env)
-        InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> (fn_body_err(name, pos, msg), dict_empty(), Nil, subst, Nothing)
+        InferOk typed_body0 s1 es1 body_eff <- typecheck_fn_body(state, body_env, subst, eff_subst, body, ret_type_maybe, fn_return_type(inst_type, list_length(params))) else InferErr pos msg -> fn_body_err(name, pos, msg)
         tries <- unifier.take_try_positions(state)
-        let unifier.UnifyOk s2a es2a = unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> (return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e), dict_empty(), Nil, subst, Nothing)
+        let unifier.UnifyOk s2a es2a = unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) else unifier.UnifyErr e -> return_mismatch_body_err(name, typed_body0, fn_return_type(inst_type, list_length(params)), s1, "Return type mismatch in " ++ name ++ ": " ++ e)
         # The declaration boundary: the one place that holds both the declared
         # effect and the effect the body was inferred to perform. Recorded for
         # every declaration whether or not they agree; `checker.typecheck_bundle`
@@ -12178,12 +12197,12 @@ fn check_fn_body(
                  unifier.apply_effect_subst(es2a, body_eff), fn_pos, decl_scheme))
         # AFTER the return-type unify: the declared return type may be the only
         # thing that determines a deferred field access's receiver.
-        FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> (fn_body_err(name, fpos, fmsg), dict_empty(), Nil, subst, Nothing)
+        FinishOk typed_body s2 <- finish_field_obligations(state, body_env, s2a, typed_body0) else FinishErr fpos fmsg -> fn_body_err(name, fpos, fmsg)
         unifier.census_flush(state, s2, es2a)
         obligations <- unifier.take_bound_obligations(state)
         match rigidity_violation(prog_to_fresh, s2, types.scheme_vars(decl_scheme)) with
         | Just bad ->
-            (typed_ast.BodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad), dict_empty(), Nil, subst, Nothing)
+            FnBodyErr(fn_pos, "Signature too general for its body in " ++ name ++ ": type variable " ++ bad)
         | Nothing ->
           # A generalized type variable whose dictionary nothing supplies per call. Checked
           # before the linear gate only because it reports a signature defect, and a signature
@@ -12193,20 +12212,21 @@ fn check_fn_body(
           # nothing to it. `fn pass_through(f: a -> String, x: a) = f(x)` calls a parameter.
           match fn_dict_coverage_msg(name, params, constraints, prog_to_fresh, s2, inst_type,
                                      env_ftv, typed_body, body_env) with
-          | Just msg -> (typed_ast.BodyErr(fn_pos, msg), dict_empty(), Nil, subst, Nothing)
+          | Just msg -> FnBodyErr(fn_pos, msg)
           | Nothing ->
             # M4.2: consume-exactly-once for linear-typed bindings, checked by
             # group_linear_error once the binding group's types are final. Gated so a
             # linear-free program skips the check and its substitution copy.
-            let gate = LinearGate(owner = string.after_last_dot(name), bounds = bounds,
+            let gate = LinearGate(owner = string.after_last_dot(name), bounds = bounds, head_vars = Nil,
                                   prog_to_fresh = prog_to_fresh, obligations = obligations,
                                   params = params, ret_te = ret_type_maybe, inst_type = inst_type,
                                   typed_body = typed_body, fn_pos = fn_pos, env = with_try_markers(tries, env))
-            in (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
-                    eta_fwdvar_markers(prog_to_fresh, s2, fwd_markers),
-                    canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
-                    s2, Just(gate))
-  | _ -> (typed_ast.BodyOk(dummy_unit(), types.TConst(types.type_id("Unit"))), dict_empty(), Nil, subst, Nothing)
+            in FnBodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body),
+                        unifier.apply_subst(s2, inst_type),
+                        eta_fwdvar_markers(prog_to_fresh, s2, fwd_markers),
+                        canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
+                        s2, gate)
+  | _ -> FnBodyErr(no_pos(), "internal: check_fn_body on a non-FnDecl")
 
 # --- Positional constraint-var identity helpers (canonical-identity Stage 3) ---
 #
@@ -12376,13 +12396,13 @@ fn self_binding_scheme(
       | Nil -> decl_scheme
       | [_ | _] -> types.mono(inst_type)
 
-fn fn_body_err(name: String, pos: source.SourcePos, msg: String) -> typed_ast.BodyResult =
+fn fn_body_err(name: String, pos: source.SourcePos, msg: String) -> FnBody =
   # Every Unknown-variable / Unknown-constructor error is a hard error: accepting one
   # and substituting a dummy body masked real bugs, such as unresolved class-method
   # references like `__unresolved_Semigroup_a`.
   if str_starts_with(name, "stdlib.compiler.")
-  then typed_ast.BodyErr(pos, attribute_to_function("[DIAG] " ++ msg, name))
-  else typed_ast.BodyErr(pos, attribute_to_function(msg, name))
+  then FnBodyErr(pos, attribute_to_function("[DIAG] " ++ msg, name))
+  else FnBodyErr(pos, attribute_to_function(msg, name))
 
 # The attribution belongs on the headline. A diagnostic that elaborates on later
 # lines (see `unresolved_name_hint`) would otherwise get " in function f" stranded
@@ -12745,14 +12765,13 @@ fn check_instance_method(
       | Nothing ->
       do
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
-        _ <- unifier.take_bound_obligations(state)
         # The instance's own constraints and the method's restated ones seed the
         # same marker table: both name variables of THIS method's signature, and
         # both reach the body as hidden dictionaries.
         let fwd_env = seed_unann_names(own_unann_vars(types.inst_owner_prefix ++ name, params, ret_maybe),
                         seed_sig_var_names(prog_to_fresh,
                           seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh,
-                            with_bounded_decl(bounds, env))))
+                            with_bounded_decl(bounds != Nil, env))))
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
         enter_try_decl(state, env, fn_return_type(inst_type, list_length(params)))
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
@@ -12828,7 +12847,8 @@ fn instance_method_checked(
               obligations <- unifier.take_bound_obligations(state)
               finish_instance_method(name, label, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
                 typed_body, env, inst_constraints, method_constraints,
-                LinearGate(owner = label_text(label), bounds = bounds, prog_to_fresh = prog_to_fresh,
+                LinearGate(owner = label_text(label), bounds = bounds,
+                           head_vars = instance_head_vars(name, decl_scheme, env), prog_to_fresh = prog_to_fresh,
                            obligations = obligations,
                            params = params, ret_te = ret_maybe, inst_type = inst_type, typed_body = typed_body,
                            fn_pos = typed_ast.typed_expr_pos(typed_body), env = with_try_markers(tries, env)),
@@ -12878,9 +12898,19 @@ fn instance_bound_restate_error(name: String, label: MethodLabel, decl_scheme: t
                                 bounds: List String, env: Dict types.Scheme) -> Maybe String =
   let Just _ = dict_get(types.class_marker_key(name), env) else Nothing
       Just class_scheme = dict_get(name, env) else Nothing
-      declared = renamed_vars(class_scheme, types.scheme_type(decl_scheme), linear_bounds_of(name, env))
-  in maybe_or_else(map(omitted_bound_msg(label, _), find(\v -> ! list_member (v, bounds), declared)),
-                   map(added_bound_msg(label, _), find(\v -> ! list_member (v, declared), bounds)))
+      (omitted, added) = bound_mismatch(class_scheme, linear_bounds_of(name, env),
+                                        types.scheme_type(decl_scheme), bounds)
+  in maybe_or_else(map(omitted_bound_msg(label, _), omitted), map(added_bound_msg(label, _), added))
+
+# The variables of an instance method's signature that the class method's own
+# variables do not rename to: those the instance head brings. All of them when the
+# class method is not found, which errs toward checking.
+fn instance_head_vars(name: String, decl_scheme: types.Scheme, env: Dict types.Scheme) -> List String =
+  let Just _ = dict_get(types.class_marker_key(name), env) else types.scheme_vars(decl_scheme)
+      Just class_scheme = dict_get(name, env) else types.scheme_vars(decl_scheme)
+      method_vars = list_diff(types.scheme_vars(class_scheme), class_own_vars(name, env))
+  in list_diff(types.scheme_vars(decl_scheme),
+               renamed_vars(class_scheme, types.scheme_type(decl_scheme), method_vars))
 
 fn omitted_bound_msg(label: MethodLabel, v: String) -> String =
   "instance method `" ++ label_text(label) ++ "` omits `where linear " ++ v

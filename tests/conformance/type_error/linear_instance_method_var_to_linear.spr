@@ -1,0 +1,17 @@
+module main
+
+# The call checks the class method's own `a`: `ap1` may drop it, and here it is
+# the linear `L`.
+
+type linear L = L Int
+
+class Apply t
+  fn ap1(x: t, g: Int -> a) -> Int
+
+instance Apply Int
+  fn ap1(x: Int, g: Int -> a) -> Int =
+    do
+      g(x)
+      x
+
+fn main() -> Unit !{IO} = print(int_to_string(ap1(3, \n -> L(n))))

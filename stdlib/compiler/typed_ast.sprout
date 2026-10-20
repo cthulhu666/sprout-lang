@@ -345,11 +345,6 @@ export type TypedResult (..) =
   | TypedOk TypedProgram (Dict types.Scheme)
   | TypedErr source.SourcePos String
 
-# Result of inferring a single function/method body.
-export type BodyResult (..) =
-  | BodyOk TypedExpr types.Type
-  | BodyErr source.SourcePos String
-
 export type InstanceMethodsResult (..) =
   | InstanceMethodsOk (List TypedInstanceMethod)
   | InstanceMethodsErr source.SourcePos String

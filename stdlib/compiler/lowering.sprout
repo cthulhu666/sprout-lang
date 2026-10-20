@@ -798,11 +798,6 @@ fn make_eta_lambda_n(impl_name: String, method_type: types.Type, n: Int, pos: so
       tfunc_result_type(method_type), pos),
     method_type, pos)
 
-fn tvar_head_name(t: types.Type) -> Maybe String =
-  match t with
-  | types.TVar name -> Just(types.tyvar_identity(name))
-  | _ -> Nothing
-
 fn make_eta_lambda_with_dicts(impl_name: String, method_type: types.Type, dict_args: List typed_ast.TypedExpr, pos: source.SourcePos) -> typed_ast.TypedExpr =
   make_eta_lambda_with_dicts_n(impl_name, method_type, count_method_params(method_type), dict_args, pos)
 
@@ -885,7 +880,7 @@ fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -
 # The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
 # A missing tvar head or a for-tvar miss both fall through to the any-slot scan.
 fn eta_forwarded_impl(name: String, param: types.Type, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
-  let Just tvar_name = tvar_head_name(param) else find_forwarded_method_any(name, entries)
+  let Just tvar_name = types.type_var_name(param) else find_forwarded_method_any(name, entries)
       Just impl_name = find_forwarded_method_for_tvar(name, tvar_name, entries) else find_forwarded_method_any(name, entries)
   in Just(impl_name)
 
@@ -976,7 +971,7 @@ fn eta_fwd_slot_lambda(class_name: String, name: String, class_type: types.Type,
 # "@eta_fwd:{fresh_tvar}:{class_name}" — they map fresh TVar names back to programmer constraint
 # var names (e.g. "b"), enabling exact slot selection when multiple same-class constraints exist.
 fn eta_in_class_forwarded(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match tvar_head_name(class_type) with
+  match types.type_var_name(class_type) with
   | Just tvar_name -> eta_forwarded_method(name, class_name, tvar_name, t, ctx)
   | Nothing -> Nothing
 
