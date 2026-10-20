@@ -247,7 +247,8 @@ Two places, each where the facts it needs already are:
   boundary: a type a later member fixes to a linear one is still a bare variable at an earlier
   member's own boundary. Every member's checks, §6.4's included, therefore run there, and once.
   They run with every member's bounded variables marked linear: an unannotated sibling's
-  parameter can be unified with one, and its own declaration has no bound to mark it. This covers partial application and a generic function passed as a
+  parameter can be unified with one, and its own declaration has no bound to mark it. For the
+  same reason every member records its uses when any member has a bound. This covers partial application and a generic function passed as a
   value (`list_map(dup, xs)`): each mention is instantiated. It runs in inference rather than
   in `linear_check` because only inference resolves names: `linear_check` sees the global
   environment, so a local that shadows a generic global would be matched against the wrong
@@ -281,7 +282,9 @@ Dispatch does not change. Inference changes only in §6.6's mode comparison.
   bound, to become a `fn`; a constructor, whose `exists` variable takes no bound until step 3,
   gets no fix. A bounded variable is marked linear under its rigid id, since a written name is
   not unique (`List` declares an `a` too); `@boundname:<id>` keeps the written name, so every
-  linearity diagnostic prints `a`, not `$t41`.
+  linearity diagnostic prints `a`, not `$t41`. A bounded variable is named with the declaration
+  that bounds it, which in a group may be a sibling: `` `ping`'s `a` is linear under its `where
+  linear a` ``.
 - **Now accepted:** a bare type variable discarded in statement position (§6.4); `borrowing a`
   under the bound, which closes the P3 entry; an instance at a non-linear type of a class that
   borrows its variable, and such a function passed as a value (§6.6).

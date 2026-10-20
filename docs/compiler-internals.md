@@ -684,7 +684,7 @@ name (`docs/linearity-bound-v0.md` §6–§7):
 | marker | keyed by | read at |
 |---|---|---|
 | `@linear:<id>` | a bounded variable's rigid type-variable id — never its written name, which `List`'s own `a` shares | `linear_check.head_type_name` |
-| `@boundname:<id>` | the same id; holds the written name for diagnostics | `linear_check.bound_names`, `infer.is_bound_var` |
+| `@boundname:<id>` | the same id; holds the written name for diagnostics (`types.bound_name_marker`) | `linear_check.bound_names` |
 | `@linbound:<fn>`, `@sig:<fn>`, `@toplet:<name>` | a declaration's name | `infer` (bound check and its hint) |
 
 `@phantom:` marks a type-parameter position the declaration does **not** store, so

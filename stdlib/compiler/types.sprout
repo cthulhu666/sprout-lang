@@ -217,7 +217,8 @@ export fn rec_fields_prefix(rec_name: String) -> String = rec_marker_tag ++ rec_
 export fn rec_field_key(rec_name: String, field: String) -> String = rec_fields_prefix(rec_name) ++ field
 
 # A linear type constructor, or a `where linear` variable by its id; `@any_linear`
-# says the env has one, `@bounded_decl` that the body being checked has a bound.
+# says the env has one, `@bounded_decl` that the body being checked, or a group
+# sibling, has a bound.
 export fn linear_marker_key(name: String) -> String = "@linear:" ++ name
 export let any_linear_key: String = "@any_linear"
 export let bounded_decl_key: String = "@bounded_decl"
@@ -238,6 +239,10 @@ export let presence_marker: Scheme = mono(TConst(type_id("Unit")))
 # A `where linear` variable's written name, keyed by its rigid variable, so a
 # diagnostic prints `a` and not `$t41`.
 export fn bound_name_key(id: String) -> String = "@boundname:" ++ id
+
+export fn bound_name_marker(written: String) -> Scheme = mono(TVar(tyvar_id(written)))
+
+export fn bound_name_of(marker: Scheme) -> String = type_to_string(scheme_type(marker))
 
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)

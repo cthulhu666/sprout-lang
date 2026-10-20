@@ -1783,7 +1783,7 @@ reference such as `list_map(dup, xs)`, a constructor pack — once the declarati
 types are known; in a mutually recursive group, once the group's are. A variable
 bounded by `where linear` counts as linear there, so it
 cannot be passed on to code that has not opted in. In a group it counts as linear in
-every member, so an unannotated member handed one cannot copy or drop it. A variable that occurs only at a
+every member, so an unannotated member handed one cannot copy, drop or pass it on. A variable that occurs only at a
 phantom position is not exempt: `detach(task: Task a)` discards a task whose result
 nobody receives, so `detach` at a `Task File` is rejected.
 

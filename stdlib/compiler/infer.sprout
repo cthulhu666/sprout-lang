@@ -2042,6 +2042,18 @@ fn with_bounded_decl(bounds: List String, env: Dict types.Scheme) -> Dict types.
   if bounds != Nil then dict_set(types.bounded_decl_key, types.presence_marker, env)
   else env
 
+# Every member of a group records uses when one member has a bound: an unannotated
+# sibling's parameter can be unified with the bounded variable.
+fn with_group_bound(members: List (Int, ast.Decl), env: Dict types.Scheme) -> Dict types.Scheme =
+  with_bounded_decl(list_flat_map(member_bounds, members), env)
+
+# A group holds only `fn` declarations (infer_fn_decl).
+fn member_bounds(m: (Int, ast.Decl)) -> List String =
+  let (_, d) = m
+  in match d with
+     | ast.FnDecl _ _ _ _ _ bounds _ _ -> bounds
+     | _ -> Nil
+
 # docs/linearity-bound-v0.md §6.3: at each use of a generic name, park what the
 # use instantiated each of its unbounded variables to. The declaration boundary
 # checks them once the substitution is final (bound_obligation_error). A class's
@@ -2065,9 +2077,8 @@ fn unbounded_vars(name: String, scheme: types.Scheme, env: Dict types.Scheme) ->
   match types.scheme_vars(scheme) with
   | [] -> Nil
   | vars ->
-      let exempt = list_append(linear_bounds_of(name, env),
-                     list_append(class_own_vars(name, env), ctor_data_params(name, scheme, env)))
-      in list_filter(\v -> ! list_member (v, exempt), vars)
+      list_diff(list_diff(list_diff(vars, linear_bounds_of(name, env)), class_own_vars(name, env)),
+                ctor_data_params(name, scheme, env))
 
 fn class_own_vars(name: String, env: Dict types.Scheme) -> List String =
   match dict_get(types.class_marker_key(name), env) with
@@ -10104,7 +10115,8 @@ fn typecheck_fn_group(
     # would leave the first member quantifying over a sibling's still-unresolved
     # variable — or, worse, not quantifying its own.
     let group_env_ftv = env_ftv_for_decl(env_ftv, group_unann_vars(members, Nil))
-    (err, inferred, final_subst) <- infer_group_members(state, members, global_env_dict(env), subst,
+    (err, inferred, final_subst) <- infer_group_members(state, members,
+                                                        with_group_bound(members, global_env_dict(env)), subst,
                                                         eff_subst, alias_env, group_env_ftv)
     match err with
     | Just (pos, msg) -> GroupErr(pos, msg)
@@ -10127,8 +10139,8 @@ fn member_gate(m: (Int, FnInferred)) -> Maybe LinearGate =
   in gate
 
 fn linear_gates_error(gates: List LinearGate, subst: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  let marks = list_flat_map(\g -> bound_marks(g.bounds, g.prog_to_fresh, subst), gates)
-  in find_map(\g -> linear_gate_error(g, subst, with_bound_marks(marks, g.env)), gates)
+  let marks = list_flat_map(bound_marks(_, subst), gates)
+  in find_map(linear_gate_error(_, subst, marks), gates)
 
 fn group_members(decl_vec: Vec ast.Decl, g: List Int) -> List (Int, ast.Decl) =
   match g with
@@ -10328,13 +10340,13 @@ fn var_renaming(from: types.Scheme, to: types.Type) -> Dict String =
   in list_fold(rename_entry(matched, _, _), dict_empty(), types.scheme_vars(from))
 
 fn rename_entry(matched: Dict types.Type, acc: Dict String, v: String) -> Dict String =
-  match type_var_name(dict_get(v, matched)) with
+  match and_then(type_var_name, dict_get(v, matched)) with
   | Just n -> dict_set(v, n, acc)
   | Nothing -> acc
 
-fn type_var_name(t: Maybe types.Type) -> Maybe String =
+fn type_var_name(t: types.Type) -> Maybe String =
   match t with
-  | Just (types.TVar v) -> Just(types.tyvar_identity(v))
+  | types.TVar v -> Just(types.tyvar_identity(v))
   | _ -> Nothing
 
 fn typecheck_decl(
@@ -10413,7 +10425,7 @@ fn typecheck_decl(
                       do
                         unifier.census_flush(state, s1, es1a)
                         obligations <- unifier.take_bound_obligations(state)
-                        match bound_obligation_error(obligations, s1, global_env_dict(env)) with
+                        match bound_obligation_error(obligations, s1, global_env_dict(env), Nil) with
                         | Just (bp, bm) -> TypedDeclErr(bp, bm)
                         | Nothing ->
                             finish_let_decl(name, expr,
@@ -11458,14 +11470,6 @@ fn fresh_to_written_go(entries: List (String, types.Type), acc: Dict String) -> 
           | types.TVar id -> fresh_to_written_go(rest, dict_set(types.tyvar_identity(id), written, acc))
           | _ -> fresh_to_written_go(rest, acc)
 
-# M4.2 linear check, gated on the program declaring any linear type. When it does
-# not, skip the check AND the full-body substitution copy (evaluated only inside
-# the `if`), so linear-free compilation pays nothing.
-#
-# M4.5 widens the gate by one cheap disjunct: a program with NO linear type must
-# still REJECT `borrowing`/`consuming` written on a non-linear parameter, and such
-# a program never trips program_has_linear. The extra test walks a handful of
-# params and is only reached when the first disjunct already failed.
 # An extern's declared parameter types, built the same way its scheme is, so the
 # modifier guard sees exactly the types callers will see. Its scheme keeps the
 # written variable names, so a bound marks the variable it names (§6.4).
@@ -11524,56 +11528,54 @@ fn mark_linear(env: Dict types.Scheme, name: String) -> Dict types.Scheme =
     dict_set(types.linear_marker_key(name), types.presence_marker, env))
 
 # docs/linearity-bound-v0.md §6.4: a declaration's own `where linear` variables are
-# linear in its body. Marking them is also what makes them count as linear to
-# bound_obligation_error, so an opted-in variable cannot be passed on to a
-# function that has not opted in. Each is a rigid type variable under `subst`,
-# marked under its id, which no other type variable shares; a written name is not
-# unique, since `List` declares an `a` too. types.bound_name_key keeps the name.
-# Each mark pairs the id with the written name.
-fn bound_marks(bounds: List String, prog_to_fresh: Dict types.Type,
-               subst: Dict types.Type) -> List (String, String) =
-  list_filter_map(bound_mark(prog_to_fresh, subst, _), bounds)
+# linear in its body, so one cannot be passed on to a function that has not opted
+# in. A mark keys a variable by its rigid id under `subst`, since a written name is
+# not unique (`List` declares an `a` too), and keeps the name and the declaration.
+type BoundMark = (id: String, written: String, owner: String)
 
-fn bound_mark(prog_to_fresh: Dict types.Type, subst: Dict types.Type, v: String) -> Maybe (String, String) =
-  map(\id -> (id, v), type_var_name(map(unifier.apply_subst(subst, _), dict_get(v, prog_to_fresh))))
+fn bound_marks(g: LinearGate, subst: Dict types.Type) -> List BoundMark =
+  list_filter_map(bound_mark(g, subst, _), g.bounds)
 
-fn with_bound_marks(marks: List (String, String), env: Dict types.Scheme) -> Dict types.Scheme =
+fn bound_mark(g: LinearGate, subst: Dict types.Type, v: String) -> Maybe BoundMark =
+  map(\id -> BoundMark(id = id, written = v, owner = g.owner),
+      and_then(type_var_name, map(unifier.apply_subst(subst, _), dict_get(v, g.prog_to_fresh))))
+
+fn with_bound_marks(marks: List BoundMark, env: Dict types.Scheme) -> Dict types.Scheme =
   list_fold(with_bound_mark, env, marks)
 
-fn with_bound_mark(env: Dict types.Scheme, mark: (String, String)) -> Dict types.Scheme =
-  let (id, v) = mark
-  in dict_set(types.bound_name_key(id), types.mono(types.TVar(types.tyvar_id(v))), mark_linear(env, id))
+fn with_bound_mark(env: Dict types.Scheme, m: BoundMark) -> Dict types.Scheme =
+  dict_set(types.bound_name_key(m.id), types.bound_name_marker(m.written), mark_linear(env, m.id))
 
 # A declaration's linearity checks, deferred to its binding group's boundary: its
 # own `where linear` variables, the bound obligations its body parked, and what the
-# linear walk reads.
-type LinearGate = (bounds: List String, prog_to_fresh: Dict types.Type,
+# linear walk reads. `owner` is the declaration as a diagnostic names it.
+type LinearGate = (owner: String, bounds: List String, prog_to_fresh: Dict types.Type,
                    obligations: List unifier.BoundObligation, params: List ast.Param,
                    ret_te: Maybe ast.TypeExpr, inst_type: types.Type,
                    typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos, env: Dict types.Scheme)
 
-# The declaration boundary's two linearity checks, in `bound_env`. The linear walk
-# goes first: its diagnostics name what the user wrote, such as a comprehension's
-# generator, where the bound's would name `list_fold`, the call it elaborates to.
-fn linear_gate_error(g: LinearGate, s2: Dict types.Type,
-                     bound_env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  match fn_linear_gate(g.params, g.ret_te, s2, g.inst_type, g.typed_body, g.fn_pos, bound_env) with
-  | linear_check.LinFail pos msg -> Just((pos, msg))
-  | linear_check.LinPass -> bound_obligation_error(g.obligations, s2, bound_env)
+# The declaration boundary's two linearity checks, under every mark of its group.
+# The linear walk goes first: its diagnostics name what the user wrote, such as a
+# comprehension's generator, where the bound's would name `list_fold`.
+fn linear_gate_error(g: LinearGate, s2: Dict types.Type, marks: List BoundMark) -> Maybe(source.SourcePos, String) =
+  let bound_env = with_bound_marks(marks, g.env)
+  in match fn_linear_gate(g.params, g.ret_te, s2, g.inst_type, g.typed_body, g.fn_pos, bound_env) with
+     | linear_check.LinFail pos msg -> Just((pos, msg))
+     | linear_check.LinPass -> bound_obligation_error(g.obligations, s2, bound_env, marks)
 
 # §6.3 at the declaration boundary: the first parked use whose unbounded variable
 # became a type holding a linear value.
 fn bound_obligation_error(obligations: List unifier.BoundObligation, subst: Dict types.Type,
-                          env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  find_map(obligation_fault(_, subst, env), obligations)
+                          env: Dict types.Scheme, marks: List BoundMark) -> Maybe(source.SourcePos, String) =
+  find_map(obligation_fault(_, subst, env, marks), obligations)
 
-fn obligation_fault(o: unifier.BoundObligation, subst: Dict types.Type,
-                    env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+fn obligation_fault(o: unifier.BoundObligation, subst: Dict types.Type, env: Dict types.Scheme,
+                    marks: List BoundMark) -> Maybe(source.SourcePos, String) =
   let unifier.BoundObligation fresh callee v scheme pos = o
       t = unifier.apply_subst(subst, fresh)
       Just lin = linear_check.first_linear_in(t, env) else Nothing
   in Just((pos, bound_violation_msg(string.after_last_dot(callee), bound_fix(callee, scheme, v, env),
-                                    linear_reason(t, lin, env))))
+                                    linear_reason(t, lin, env, marks))))
 
 # What the callee can write to admit a linear type at that variable.
 type BoundFix =
@@ -11618,19 +11620,28 @@ fn bound_violation_msg(f: String, fix: BoundFix, reason: String) -> String =
 fn takes_msg(f: String, v: String, reason: String) -> String =
   "`" ++ f ++ "` takes `" ++ v ++ "` as a value it may copy or drop, and " ++ reason
 
-# Why the type a use instantiated the variable at is linear. One of this
-# declaration's own bounded variables is linear only by its `where linear`.
-fn linear_reason(t: types.Type, lin: types.Type, env: Dict types.Scheme) -> String =
+# Why the type a use instantiated the variable at is linear. A bounded variable is
+# linear only by its declaration's `where linear`, which may be a group sibling's.
+fn linear_reason(t: types.Type, lin: types.Type, env: Dict types.Scheme, marks: List BoundMark) -> String =
   let v = linear_check.type_text(lin, env)
-  in if is_bound_var(lin, env) then "this declaration's `" ++ v ++ "` is linear under its `where linear " ++ v ++ "`"
-     else if t == lin then "`" ++ v ++ "` is linear"
-     else "`" ++ linear_check.type_text(t, env) ++ "` holds the linear `" ++ v ++ "`"
+  in match bound_mark_of(lin, marks) with
+     | Just m -> "`" ++ m.owner ++ "`'s `" ++ v ++ "` is linear under its `where linear " ++ v ++ "`"
+     | Nothing ->
+         if t == lin then "`" ++ v ++ "` is linear"
+         else "`" ++ linear_check.type_text(t, env) ++ "` holds the linear `" ++ v ++ "`"
 
-fn is_bound_var(t: types.Type, env: Dict types.Scheme) -> Bool =
-  match type_var_name(Just(t)) with
-  | Just id -> dict_member(types.bound_name_key(id), env)
-  | Nothing -> false
+fn bound_mark_of(t: types.Type, marks: List BoundMark) -> Maybe BoundMark =
+  let Just id = type_var_name(t) else Nothing
+  in find(\m -> m.id == id, marks)
 
+# M4.2 linear check, gated on the program declaring any linear type. When it does
+# not, skip the check AND the full-body substitution copy (evaluated only inside
+# the `if`), so linear-free compilation pays nothing.
+#
+# M4.5 widens the gate by one cheap disjunct: a program with NO linear type must
+# still REJECT `borrowing`/`consuming` written on a non-linear parameter, and such
+# a program never trips program_has_linear. The extra test walks a handful of
+# params and is only reached when the first disjunct already failed.
 fn fn_linear_gate(params: List ast.Param, ret_te: Maybe ast.TypeExpr, s2: Dict types.Type,
                   inst_type: types.Type,
                   typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
@@ -12187,7 +12198,8 @@ fn check_fn_body(
             # M4.2: consume-exactly-once for linear-typed bindings, checked by
             # group_linear_error once the binding group's types are final. Gated so a
             # linear-free program skips the check and its substitution copy.
-            let gate = LinearGate(bounds = bounds, prog_to_fresh = prog_to_fresh, obligations = obligations,
+            let gate = LinearGate(owner = string.after_last_dot(name), bounds = bounds,
+                                  prog_to_fresh = prog_to_fresh, obligations = obligations,
                                   params = params, ret_te = ret_type_maybe, inst_type = inst_type,
                                   typed_body = typed_body, fn_pos = fn_pos, env = with_try_markers(tries, env))
             in (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
@@ -12816,7 +12828,8 @@ fn instance_method_checked(
               obligations <- unifier.take_bound_obligations(state)
               finish_instance_method(name, label, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
                 typed_body, env, inst_constraints, method_constraints,
-                LinearGate(bounds = bounds, prog_to_fresh = prog_to_fresh, obligations = obligations,
+                LinearGate(owner = label_text(label), bounds = bounds, prog_to_fresh = prog_to_fresh,
+                           obligations = obligations,
                            params = params, ret_te = ret_maybe, inst_type = inst_type, typed_body = typed_body,
                            fn_pos = typed_ast.typed_expr_pos(typed_body), env = with_try_markers(tries, env)),
                 prog_to_fresh, types.scheme_vars(decl_scheme), env_ftv)
