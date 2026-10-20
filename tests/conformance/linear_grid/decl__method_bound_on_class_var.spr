@@ -1,0 +1,9 @@
+module main
+
+class Taker a
+  fn take(x: a) -> Int where linear a
+
+instance Taker Int
+  fn take(x: Int) -> Int = x + x
+
+fn main() -> Unit !{IO} = print(int_to_string(take(2)))

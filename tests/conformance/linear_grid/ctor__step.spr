@@ -1,0 +1,14 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+type Box a = Box a
+
+fn main() -> Unit !{IO} =
+  do
+    Box(L(1))
+    print("x")

@@ -1,0 +1,14 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn g(x: a) -> Int where linear a =
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))

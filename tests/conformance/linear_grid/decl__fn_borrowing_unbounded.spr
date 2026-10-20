@@ -1,0 +1,5 @@
+module main
+
+fn peek_any(x: borrowing a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(peek_any(1)))

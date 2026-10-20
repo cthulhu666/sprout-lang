@@ -1,0 +1,5 @@
+module main
+
+fn f(x: g a) -> g a where linear g a = x
+
+fn main() -> Unit !{IO} = print("x")

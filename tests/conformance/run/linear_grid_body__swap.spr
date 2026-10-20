@@ -1,0 +1,16 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn swap(p: (a, b)) -> (b, a) where linear a, linear b = match p with | (x, y) -> (y, x)
+
+fn main() -> Unit !{IO} =
+  match swap((L(3), L(5))) with
+  | (m, n) ->
+    do
+      print(int_to_string(close(m)))
+      print(int_to_string(close(n)))

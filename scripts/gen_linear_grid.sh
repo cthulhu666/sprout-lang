@@ -1,0 +1,857 @@
+#!/usr/bin/env bash
+# Generates the linear misuse grid (docs/linearity-bound-retro-2026-10-20.md §5 T2).
+# Usage: scripts/gen_linear_grid.sh <out-root>
+#   reject cells: <out-root>/tests/conformance/linear_grid/<path>__<misuse>.{spr,err}
+#   accept cells: <out-root>/tests/conformance/run/linear_grid_<path>__<case>.{spr,out}
+#   parse-time rejections: <out-root>/tests/conformance/parse_error/linear_grid_decl__<name>.{spr,err}
+# A .err is a substring the `--phase check` output must contain.
+#
+# Rows (reach paths): direct, body, annsib, unannsib, inst, method, mbound, ext, ctor,
+# exist, tlet. Columns: copy, drop, step (discarded do-step), wild (`_ <-`), pass (to an
+# unbounded generic). `_nolin` rows declare no linear type anywhere in the program.
+#
+# N/A cells (not generated):
+#   - direct/inst/method/ext/ctor/exist/tlet _nolin: they need a linear value to reach
+#     the generic; with no linear type there is none.
+#   - exist step/wild/pass: the pack `Boxed(L(1))` is rejected before any misuse runs, so
+#     they repeat copy/drop's diagnostic.
+#   - ctor pass of a bound variable: a data parameter takes no bound (§6.1).
+set -euo pipefail
+
+OUT="${1:?usage: gen_linear_grid.sh <out-root>}"
+R="$OUT/tests/conformance/linear_grid"
+A="$OUT/tests/conformance/run"
+P="$OUT/tests/conformance/parse_error"
+rm -rf "$R"; rm -f "$A"/linear_grid_* "$P"/linear_grid_*
+mkdir -p "$R" "$A" "$P"
+
+HDR_L='module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+'
+HDR_N='module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+'
+HDR_B='module main
+'
+
+# rej <hdr> <name> <err>  (program body on stdin)
+rej() {
+  { printf '%s\n' "$1"; cat; } > "$R/$2.spr"
+  printf '%s\n' "$3" > "$R/$2.err"
+}
+# rejp <hdr> <name> <err>: rejected at parse time, so it lives in parse_error/, which
+# the pre-commit lint skips (a file that must not parse cannot be linted).
+rejp() {
+  { printf '%s\n' "$1"; cat; } > "$P/linear_grid_$2.spr"
+  printf '%s\n' "$3" > "$P/linear_grid_$2.err"
+}
+# acc <hdr> <name> <stdout>  (program body on stdin)
+acc() {
+  { printf '%s\n' "$1"; cat; } > "$A/linear_grid_$2.spr"
+  printf '%s\n' "$3" > "$A/linear_grid_$2.out"
+}
+
+TAKES='takes `a` as a value it may copy or drop'
+
+# ── direct: unbounded generic called at a linear type ─────────────────────────
+rej "$HDR_L" direct__copy "$TAKES" <<'EOF'
+fn g(x: a) -> (a, a) = (x, x)
+
+fn main() -> Unit !{IO} = match g(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+rej "$HDR_L" direct__drop "$TAKES" <<'EOF'
+fn g(x: a, y: Int) -> Int = y
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1), 2)))
+EOF
+rej "$HDR_L" direct__step "$TAKES" <<'EOF'
+fn g(x: a) -> Int =
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))
+EOF
+rej "$HDR_L" direct__wild "$TAKES" <<'EOF'
+fn g(x: a) -> Int !{IO} =
+  do
+    _ <- after(print("w"), x)
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))
+EOF
+rej "$HDR_L" direct__pass "$TAKES" <<'EOF'
+fn g(x: a) -> (a, a) = dup(x)
+
+fn main() -> Unit !{IO} = match g(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+
+# ── body: a declaration's own `where linear a` ────────────────────────────────
+body_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4"
+  rej "$h" "body${s}__copy" "is used more than once" <<EOF
+fn g(x: a) -> (a, a) where linear a = (x, x)
+
+fn main() -> Unit !{IO} = match g($v) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+  rej "$h" "body${s}__drop" "is never used" <<EOF
+fn g(x: a, y: Int) -> Int where linear a = y
+
+fn main() -> Unit !{IO} = print(int_to_string(g($v, 2)))
+EOF
+  rej "$h" "body${s}__step" "is referenced as a statement" <<EOF
+fn g(x: a) -> Int where linear a =
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g($v)))
+EOF
+  rej "$h" "body${s}__wild" "discards a linear value" <<EOF
+fn g(x: a) -> Int !{IO} where linear a =
+  do
+    _ <- after(print("w"), x)
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g($v)))
+EOF
+  rej "$h" "body${s}__pass" 'takes `b` as a value it may copy or drop, and `g`'"'"'s `a` is linear under its `where linear a`' <<EOF
+fn g(x: a) -> (a, a) where linear a = dup(x)
+
+fn main() -> Unit !{IO} = match g($v) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+}
+body_cells "" "$HDR_L" 'L(1)' close
+body_cells _nolin "$HDR_N" 1 ''
+
+# ── annsib: annotated binding-group sibling, no bound of its own ──────────────
+annsib_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4"
+  local E='takes `a` as a value it may copy or drop, and `ping`'"'"'s `a` is linear under its `where linear a`'
+  rej "$h" "annsib${s}__copy" "$E" <<EOF
+fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> (a, a) = if n > 0 then ping(y, n - 1) else (y, y)
+
+fn main() -> Unit !{IO} = match ping($v, 2) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+  rej "$h" "annsib${s}__drop" "$E" <<EOF
+fn ping(x: a, n: Int) -> Int where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> Int = if n > 0 then ping(y, n - 1) else 1
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+  rej "$h" "annsib${s}__step" "$E" <<EOF
+fn stmt(y: a) -> Int =
+  do
+    y
+    1
+
+fn ping(x: a, n: Int) -> Int where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> Int = if n > 0 then ping(y, n - 1) else stmt(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+  rej "$h" "annsib${s}__wild" "$E" <<EOF
+fn ping(x: a, n: Int) -> Int !{IO} where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> Int !{IO} =
+  if n > 0 then ping(y, n - 1)
+  else
+    do
+      _ <- after(print("w"), y)
+      1
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+  rej "$h" "annsib${s}__pass" "$E" <<EOF
+fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> (a, a) = if n > 0 then ping(y, n - 1) else dup(y)
+
+fn main() -> Unit !{IO} = match ping($v, 2) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+}
+annsib_cells "" "$HDR_L" 'L(1)' close
+annsib_cells _nolin "$HDR_N" 1 ''
+
+# ── unannsib: unannotated sibling handed the bounded variable ─────────────────
+unannsib_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4"
+  rej "$h" "unannsib${s}__copy" "is used more than once" <<EOF
+fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else (y, y)
+
+fn main() -> Unit !{IO} = match ping($v, 2) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+  rej "$h" "unannsib${s}__drop" "is used in some branches but not others" <<EOF
+fn ping(x: a, n: Int) -> Int where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else 1
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+  rej "$h" "unannsib${s}__step" "is referenced as a statement" <<EOF
+fn ping(x: a, n: Int) -> Int where linear a = pong(x, n)
+
+fn pong(y, n: Int) =
+  if n > 0 then ping(y, n - 1)
+  else
+    do
+      y
+      1
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+  rej "$h" "unannsib${s}__wild" '`_ <-` discards a linear value' <<EOF
+fn ping(x: a, n: Int) -> Int !{IO} where linear a = pong(x, n)
+
+fn pong(y, n: Int) =
+  if n > 0 then ping(y, n - 1)
+  else
+    do
+      _ <- after(print("w"), y)
+      1
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+  rej "$h" "unannsib${s}__pass" 'takes `b` as a value it may copy or drop, and `ping`'"'"'s `a` is linear under its `where linear a`' <<EOF
+fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else dup(y)
+
+fn main() -> Unit !{IO} = match ping($v, 2) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+}
+unannsib_cells "" "$HDR_L" 'L(1)' close
+unannsib_cells _nolin "$HDR_N" 1 ''
+
+# ── inst: the instance head's variable (docs/linearity-bound-v0.md §6.4, §12 step 3) ─
+rej "$HDR_L" inst__copy "$TAKES" <<'EOF'
+class Dup2 t
+  fn dup2(x: t) -> (t, t)
+
+instance Dup2 (Maybe a)
+  fn dup2(x: Maybe a) -> (Maybe a, Maybe a) = (x, x)
+
+fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
+
+fn main() -> Unit !{IO} = match dup2(Just (L(1))) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
+EOF
+rej "$HDR_L" inst__drop "$TAKES" <<'EOF'
+class Drop2 t
+  fn drop2(x: t) -> Int
+
+instance Drop2 (Maybe a)
+  fn drop2(x: Maybe a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(drop2(Just (L(1)))))
+EOF
+rej "$HDR_L" inst__step "discards a value that may be linear" <<'EOF'
+class Count t
+  fn count(x: t) -> Int
+
+fn first(m: Maybe a) -> a = match m with | Just v -> v | Nothing -> panic("none")
+
+instance Count (Maybe a)
+  fn count(x: Maybe a) -> Int =
+    do
+      first(x)
+      0
+
+fn main() -> Unit !{IO} = print(int_to_string(count(Just (L(1)))))
+EOF
+rej "$HDR_L" inst__wild "discards a value that may be linear" <<'EOF'
+class Count t
+  fn count(x: t) -> Maybe Int
+
+instance Count (Maybe a)
+  fn count(x: Maybe a) -> Maybe Int =
+    do
+      _ <- x
+      Just(0)
+
+fn main() -> Unit !{IO} =
+  print(match count(Just (L(1))) with | Just n -> int_to_string(n) | Nothing -> "none")
+EOF
+rej "$HDR_L" inst__pass "$TAKES" <<'EOF'
+class Dup2 t
+  fn dup2(x: t) -> (t, t)
+
+instance Dup2 (Maybe a)
+  fn dup2(x: Maybe a) -> (Maybe a, Maybe a) = dup(x)
+
+fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
+
+fn main() -> Unit !{IO} = match dup2(Just (L(1))) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
+EOF
+
+# ── method: a class method's own variable, unbounded ──────────────────────────
+rej "$HDR_L" method__copy "$TAKES" <<'EOF'
+class K t
+  fn m(s: t, x: a) -> (a, a)
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, a) = (x, x)
+
+fn main() -> Unit !{IO} = match m(0, L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+rej "$HDR_L" method__drop "$TAKES" <<'EOF'
+class K t
+  fn m(s: t, x: a) -> Int
+
+instance K Int
+  fn m(s: Int, x: a) -> Int = s
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, L(1))))
+EOF
+rej "$HDR_L" method__step "$TAKES" <<'EOF'
+class K t
+  fn m(s: t, x: a) -> Int
+
+instance K Int
+  fn m(s: Int, x: a) -> Int =
+    do
+      x
+      s
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, L(1))))
+EOF
+rej "$HDR_L" method__wild "$TAKES" <<'EOF'
+class K t
+  fn m(s: t, x: a) -> Int !{IO}
+
+instance K Int
+  fn m(s: Int, x: a) -> Int !{IO} =
+    do
+      _ <- after(print("w"), x)
+      s
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, L(1))))
+EOF
+rej "$HDR_L" method__pass "$TAKES" <<'EOF'
+class K t
+  fn m(s: t, x: a) -> (a, a)
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, a) = dup(x)
+
+fn main() -> Unit !{IO} = match m(0, L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+
+# ── mbound: a class method's own variable with `where linear a` ───────────────
+mbound_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4"
+  rej "$h" "mbound${s}__copy" "is used more than once" <<EOF
+class K t
+  fn m(s: t, x: a) -> (a, a) where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, a) where linear a = (x, x)
+
+fn main() -> Unit !{IO} = match m(0, $v) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+  rej "$h" "mbound${s}__drop" "is never used" <<EOF
+class K t
+  fn m(s: t, x: a) -> Int where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> Int where linear a = s
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
+EOF
+  rej "$h" "mbound${s}__step" "is referenced as a statement" <<EOF
+class K t
+  fn m(s: t, x: a) -> Int where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> Int where linear a =
+    do
+      x
+      s
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
+EOF
+  rej "$h" "mbound${s}__wild" "discards a linear value" <<EOF
+class K t
+  fn m(s: t, x: a) -> Int !{IO} where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> Int !{IO} where linear a =
+    do
+      _ <- after(print("w"), x)
+      s
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
+EOF
+  rej "$h" "mbound${s}__pass" 'takes `b` as a value it may copy or drop, and `m`'"'"'s `a` is linear under its `where linear a`' <<EOF
+class K t
+  fn m(s: t, x: a) -> (a, a) where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, a) where linear a = dup(x)
+
+fn main() -> Unit !{IO} = match m(0, $v) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
+EOF
+}
+mbound_cells "" "$HDR_L" 'L(1)' close
+mbound_cells _nolin "$HDR_N" 1 ''
+
+# ── ext: an extern that takes the variable without a bound ────────────────────
+rej "$HDR_L" ext__copy "$TAKES" <<'EOF'
+extern fn ext_dup(x: a) -> (a, a)
+
+fn main() -> Unit !{IO} = match ext_dup(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+rej "$HDR_L" ext__drop "$TAKES" <<'EOF'
+extern fn ext_drop(x: a) -> Int
+
+fn main() -> Unit !{IO} = print(int_to_string(ext_drop(L(1))))
+EOF
+rej "$HDR_L" ext__step "this step discards a linear value" <<'EOF'
+extern fn ext_id(x: a) -> a
+
+fn main() -> Unit !{IO} =
+  do
+    ext_id(L(1))
+    print("x")
+EOF
+rej "$HDR_L" ext__wild '`_ <-` discards a linear value' <<'EOF'
+extern fn ext_io(x: a) -> a !{IO}
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- ext_io(L(1))
+    print("x")
+EOF
+rej "$HDR_L" ext__pass 'takes `a` as a value it may copy or drop, and `g`'"'"'s `a` is linear under its `where linear a`' <<'EOF'
+extern fn ext_id(x: a) -> a
+
+fn g(x: a) -> a where linear a = ext_id(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(close(g(L(1)))))
+EOF
+
+# ── ctor: a constructor stores its argument; containment tracks the holder ────
+rej "$HDR_L" ctor__copy "is used more than once" <<'EOF'
+type Box a = Box a
+
+fn eat(b: Box L) -> Int = match b with | Box l -> close(l)
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Box(L(1))
+    print(int_to_string(eat(b) + eat(b)))
+EOF
+rej "$HDR_L" ctor__drop "is never used" <<'EOF'
+type Box a = Box a
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Box(L(1))
+    print("x")
+EOF
+rej "$HDR_L" ctor__step "this step discards a linear value" <<'EOF'
+type Box a = Box a
+
+fn main() -> Unit !{IO} =
+  do
+    Box(L(1))
+    print("x")
+EOF
+rej "$HDR_L" ctor__wild '`_ <-` discards a linear value' <<'EOF'
+type Box a = Box a
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- after(print("w"), Box (L(1)))
+    print("x")
+EOF
+rej "$HDR_L" ctor__pass 'takes `a` as a value it may copy or drop' <<'EOF'
+type Box a = Box a
+
+fn ident(x: a) -> a = x
+
+fn main() -> Unit !{IO} = match ident(Box (L(1))) with | Box l -> print(int_to_string(close(l)))
+EOF
+
+# ── exist: an `exists` variable takes no bound until step 3 ───────────────────
+EXIST='an `exists` variable takes no `where linear` yet'
+rej "$HDR_L" exist__copy "$EXIST" <<'EOF'
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+type Boxed = | exists a. Boxed a where Taker a
+
+fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Boxed(L(1))
+    print(int_to_string(unbox(b) + unbox(b)))
+EOF
+rej "$HDR_L" exist__drop "$EXIST" <<'EOF'
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+type Boxed = | exists a. Boxed a where Taker a
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Boxed(L(1))
+    print("x")
+EOF
+
+# ── tlet: a top-level `let` is generalized and takes no bound ─────────────────
+TLET='a top-level `let` takes no bound'
+rej "$HDR_L" tlet__copy "$TLET" <<'EOF'
+let dupl = \x -> (x, x)
+
+fn main() -> Unit !{IO} = match dupl(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+rej "$HDR_L" tlet__drop "$TLET" <<'EOF'
+let konst1 = \x -> 1
+
+fn main() -> Unit !{IO} = print(int_to_string(konst1(L(1))))
+EOF
+rej "$HDR_L" tlet__step "$TLET" <<'EOF'
+let stmt1 = \x ->
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(stmt1(L(1))))
+EOF
+rej "$HDR_L" tlet__wild "$TLET" <<'EOF'
+let wild1 = \x ->
+  do
+    _ <- after(print("w"), x)
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(wild1(L(1))))
+EOF
+rej "$HDR_L" tlet__pass "$TLET" <<'EOF'
+let fwd = \x -> dup(x)
+
+fn main() -> Unit !{IO} = match fwd(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
+EOF
+
+# ── decl: misuses in declarations ─────────────────────────────────────────────
+rejp "$HDR_B" decl__class_header_bound 'takes no `linear` bound' <<'EOF'
+class C a where linear a
+  fn c(x: a) -> Int
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__method_bound_on_class_var 'names the class'"'"'s own type variable' <<'EOF'
+class Taker a
+  fn take(x: a) -> Int where linear a
+
+instance Taker Int
+  fn take(x: Int) -> Int = x + x
+
+fn main() -> Unit !{IO} = print(int_to_string(take(2)))
+EOF
+rejp "$HDR_B" decl__extern_class_constraint 'takes only `where linear` bounds' <<'EOF'
+extern fn ext_show(x: a) -> String where ToString a
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__extern_redecl_drops_bound 'is declared more than once with different `where linear` bounds' <<'EOF'
+extern fn give_up(msg: String) -> a where linear a
+extern fn give_up(msg: String) -> a
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__extern_redecl_adds_bound 'is declared more than once with different `where linear` bounds' <<'EOF'
+extern fn give_up(msg: String) -> a
+extern fn give_up(msg: String) -> a where linear a
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rejp "$HDR_B" decl__bound_on_concrete_type '`where linear` takes a type variable' <<'EOF'
+fn f(x: Int) -> Int where linear Int = x
+
+fn main() -> Unit !{IO} = print(int_to_string(f(1)))
+EOF
+rejp "$HDR_B" decl__bound_on_applied_var '`where linear` takes a type variable' <<'EOF'
+fn f(x: g a) -> g a where linear g a = x
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rejp "$HDR_B" decl__bound_bare '`where linear` takes a type variable' <<'EOF'
+fn f(x: a) -> a where linear = x
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__bound_var_not_in_signature 'which does not appear in the signature of `ident`' <<'EOF'
+fn ident(x: a) -> a where linear b = x
+
+fn main() -> Unit !{IO} = print(int_to_string(ident(1)))
+EOF
+rej "$HDR_B" decl__extern_borrowing_unbounded 'needs `where linear` on it' <<'EOF'
+extern fn peek_any(x: borrowing a) -> Int
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__fn_borrowing_unbounded 'needs `where linear` on it' <<'EOF'
+fn peek_any(x: borrowing a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(peek_any(1)))
+EOF
+rej "$HDR_B" decl__instance_method_omits_bound 'instance method `wrap1` omits `where linear a`' <<'EOF'
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+type One a = One a
+
+instance Wrap One
+  fn wrap1(x: a) -> One a = One(x)
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__instance_method_adds_bound 'adds `where linear a`, which the class declaration does not declare' <<'EOF'
+class Wrap f
+  fn wrap1(x: a) -> f a
+
+type One a = One a
+
+instance Wrap One
+  fn wrap1(x: a) -> One a where linear a = One(x)
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__constructor_bound '`where linear` on a constructor or an instance head is not supported yet' <<'EOF'
+class Taker a
+  fn take(x: a) -> Int
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+rej "$HDR_B" decl__instance_head_bound '`where linear` on a constructor or an instance head is not supported yet' <<'EOF'
+class Taker a
+  fn take(x: a) -> Int
+
+type Box a = Box a
+
+instance Taker (Box a) where linear a, Taker a
+  fn take(b: Box a) -> Int = match b with | Box x -> take(x)
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+
+# ── accept cells ──────────────────────────────────────────────────────────────
+acc "$HDR_L" direct__bounded_generic $'3\n2' <<'EOF'
+fn ident(x: a) -> a where linear a = x
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(close(ident(L(3)))))
+    print(int_to_string(ident(2)))
+EOF
+acc "$HDR_L" direct__unbounded_nonlinear $'2\n1\n3' <<'EOF'
+fn konst(x: a, y: b) -> a = x
+
+fn main() -> Unit !{IO} =
+  do
+    match dup(1) with | (p, q) -> print(int_to_string(p + q))
+    print(int_to_string(konst(1, "s")))
+    print(int_to_string(list_length([1, 2, 3])))
+EOF
+acc "$HDR_L" body__swap $'5\n3' <<'EOF'
+fn swap(p: (a, b)) -> (b, a) where linear a, linear b = match p with | (x, y) -> (y, x)
+
+fn main() -> Unit !{IO} =
+  match swap((L(3), L(5))) with
+  | (m, n) ->
+    do
+      print(int_to_string(close(m)))
+      print(int_to_string(close(n)))
+EOF
+acc "$HDR_L" body__borrow $'7\n5' <<'EOF'
+fn view(x: borrowing a) -> Int where linear a = 7
+
+fn main() -> Unit !{IO} =
+  do
+    let l = L(5)
+    print(int_to_string(view(l)))
+    print(int_to_string(close(l)))
+EOF
+acc "$HDR_L" annsib__both_bounded '4' <<'EOF'
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> a where linear a = if n > 0 then ping(y, n - 1) else y
+
+fn main() -> Unit !{IO} = print(int_to_string(close(ping(L(4), 2))))
+EOF
+acc "$HDR_L" unannsib__once '4' <<'EOF'
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else y
+
+fn main() -> Unit !{IO} = print(int_to_string(close(ping(L(4), 2))))
+EOF
+acc "$HDR_L" unannsib__pass_to_bounded '4' <<'EOF'
+fn keep(z: b) -> b where linear b = z
+
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else keep(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(close(ping(L(4), 2))))
+EOF
+acc "$HDR_N" unannsib_nolin__once '4' <<'EOF'
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else y
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(4, 2)))
+EOF
+acc "$HDR_N" unannsib_nolin__pass_to_bounded '4' <<'EOF'
+fn keep(z: b) -> b where linear b = z
+
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else keep(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(4, 2)))
+EOF
+acc "$HDR_L" inst__nonlinear_head_copy '4' <<'EOF'
+class Dup2 t
+  fn dup2(x: t) -> (t, t)
+
+instance Dup2 (Maybe a)
+  fn dup2(x: Maybe a) -> (Maybe a, Maybe a) = (x, x)
+
+fn eat(m: Maybe Int) -> Int = match m with | Just n -> n + 1 | Nothing -> 0
+
+fn main() -> Unit !{IO} = match dup2(Just(1)) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
+EOF
+acc "$HDR_L" inst__consume_once '6' <<'EOF'
+class Take t
+  fn take(x: t) -> t
+
+instance Take (Maybe a)
+  fn take(x: Maybe a) -> Maybe a = x
+
+fn main() -> Unit !{IO} = print(int_to_string(match take(Just (L(6))) with | Just l -> close(l) | Nothing -> 0))
+EOF
+acc "$HDR_L" method__own_var_discard '3' <<'EOF'
+class Apply t
+  fn ap1(x: t, g: Int -> a) -> Int
+
+instance Apply Int
+  fn ap1(x: Int, g: Int -> a) -> Int =
+    do
+      g(x)
+      x
+
+fn main() -> Unit !{IO} = print(int_to_string(ap1(3, \n -> n + 1)))
+EOF
+acc "$HDR_L" mbound__once $'3\n4' <<'EOF'
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+instance Wrap Maybe
+  fn wrap1(x: a) -> Maybe a where linear a = Just(x)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(match wrap1(L(3)) with | Just l -> close(l) | Nothing -> 0))
+    print(int_to_string(match wrap1(4) with | Just n -> n | Nothing -> 0))
+EOF
+acc "$HDR_N" mbound_nolin__once '4' <<'EOF'
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+instance Wrap Maybe
+  fn wrap1(x: a) -> Maybe a where linear a = Just(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(match wrap1(4) with | Just n -> n | Nothing -> 0))
+EOF
+acc "$HDR_L" ext__panic_at_linear '2' <<'EOF'
+fn pick(n: Int) -> L = if n > 0 then L(n) else panic("neg")
+
+fn main() -> Unit !{IO} = print(int_to_string(close(pick(2))))
+EOF
+acc "$HDR_B" ext__borrowing_decl 'ok' <<'EOF'
+extern fn peek_any(x: borrowing a) -> Int where linear a
+
+fn main() -> Unit !{IO} = print("ok")
+EOF
+acc "$HDR_B" ext__redeclared_same 'ok' <<'EOF'
+extern fn give_up(msg: String) -> a where linear a
+extern fn give_up(msg: String) -> a where linear a
+
+fn main() -> Unit !{IO} = print("ok")
+EOF
+acc "$HDR_B" ext__chan_select '5' <<'EOF'
+import stdlib.task as task
+import stdlib.chan as chan
+
+type linear L = L Int
+
+fn eat(l: L) -> Int = match l with | L n -> n
+
+fn first_ready(s: task.Scope) -> Int !{IO} =
+  do
+    a <- chan.chan_new(s, 1)
+    b <- chan.chan_new(s, 1)
+    chan.chan_send(b, L(5))
+    chan.chan_close(a)
+    match chan.chan_select([b, a]) with
+    | (i, chan.Got l) -> i + eat(l)
+    | (_, chan.Closed) -> -1
+
+fn main() -> Unit !{IO} = print(int_to_string(task.with_scope(first_ready)))
+EOF
+acc "$HDR_L" ctor__consume_once $'6\n7' <<'EOF'
+type Box a = Box a
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(match Box(L(6)) with | Box l -> close(l)))
+    print(int_to_string(match Just(L(7)) with | Just l -> close(l) | Nothing -> 0))
+EOF
+acc "$HDR_L" exist__nonlinear '2' <<'EOF'
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker Int
+  fn take(x: Int) -> Int = x
+
+type Boxed = | exists a. Boxed a where Taker a
+
+fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Boxed(1)
+    print(int_to_string(unbox(b) + unbox(b)))
+EOF
+acc "$HDR_L" tlet__nonlinear_and_fn $'2\n5' <<'EOF'
+let dup0 = \x -> (x, x)
+
+fn ident(x: a) -> a where linear a = x
+
+fn main() -> Unit !{IO} =
+  do
+    match dup0(1) with | (p, q) -> print(int_to_string(p + q))
+    print(int_to_string(close(ident(L(5)))))
+EOF

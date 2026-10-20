@@ -1,0 +1,14 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+let stmt1 = \x ->
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(stmt1(L(1))))

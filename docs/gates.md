@@ -703,6 +703,24 @@ gone. Two things to keep if you touch this again:
 - **Give the writer neither stdin nor stderr.** Killing it orphans its trailing `sleep`, and an orphan
   holding the script's stderr open makes a caller reading to EOF wait out the delay just removed.
 
+## Linear grid — `just test-linear-grid`, `just linear-grid-drift`
+
+`scripts/gen_linear_grid.sh <out-root>` writes one program per reach path × misuse
+(docs/linearity-bound-retro-2026-10-20.md §5 T2): reject cells in `tests/conformance/linear_grid/`
+(`<path>__<misuse>.spr` + `.err` substring), accept cells in `tests/conformance/run/linear_grid_*`
+(golden stdout, run by `test-conformance-run`); declarations that fail to parse go to
+`parse_error/linear_grid_*` so the pre-commit lint skips them. The generator's header lists the
+N/A cells.
+
+- `test-linear-grid` runs `_test-reject` over the reject cells. Its xfail list holds the
+  instance-head copy, drop and pass-through cells: the compiler accepts them until
+  docs/linearity-bound-v0.md §12 step 3, so each flips the gate RED (UNEXPECTED MATCH) when step 3
+  lands and must leave the list then.
+- `linear-grid-drift` regenerates into a temp dir and diffs against the committed files. Edit the
+  generator, rerun it with the repo root as out-root, then `just fmt`; never edit a cell by hand.
+  Where `fmt` rewrites generator output (`Ctor(x)` spacing), the generator emits the formatted form.
+- A review bug in linearity adds its neighbouring reach paths here (retro P2).
+
 ## `just linux-smoke`
 
 Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways

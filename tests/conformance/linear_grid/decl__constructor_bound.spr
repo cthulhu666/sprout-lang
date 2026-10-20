@@ -1,0 +1,8 @@
+module main
+
+class Taker a
+  fn take(x: a) -> Int
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn main() -> Unit !{IO} = print("x")

@@ -1,0 +1,1 @@
+takes `a` as a value it may copy or drop, and `g`'s `a` is linear under its `where linear a`

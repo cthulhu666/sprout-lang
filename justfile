@@ -399,7 +399,7 @@ debug-run file: bootstrap-from-seed
 
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
-test: test-stdlib-stage1 test-ide test-type-errors test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
+test: test-stdlib-stage1 test-ide test-type-errors test-linear-grid test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
 
 # The two typecheck front ends must reach the same verdict, and the editor one must
 # terminate. `--phase check` runs the bundler; the DEFAULT phase runs the env path, which
@@ -1104,6 +1104,31 @@ _test-reject stage dir noun xfail="" phase="check":
 # UNEXPECTED MATCH, which was the signal to empty it.
 [group('test')]
 test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
+
+# Generated linear misuse grid: reach path x misuse, one program each (docs/gates.md
+# §Linear grid). The xfail cells are the instance-head copy, drop and pass-through,
+# accepted until docs/linearity-bound-v0.md §12 step 3. Each turns this gate RED
+# (UNEXPECTED MATCH) when step 3 lands, and must leave the list then.
+[group('test')]
+test-linear-grid: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "linear_grid" "linear-grid" "inst__copy inst__drop inst__pass")
+
+# The grid is generated: a hand edit, or a generator edit without regenerating, fails here.
+[group('test')]
+linear-grid-drift:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_linear_grid_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  bash scripts/gen_linear_grid.sh "$TMPD"
+  diff -r "$TMPD/tests/conformance/linear_grid" tests/conformance/linear_grid
+  # The accept cells (run/) and the parse-time rejections (parse_error/) sit among
+  # hand-written fixtures, so compare the linear_grid_* files only.
+  for d in run parse_error; do
+    want=$(cd "$TMPD/tests/conformance/$d" && ls linear_grid_* | sort)
+    have=$(cd "tests/conformance/$d" && ls linear_grid_* | sort)
+    [[ "$want" == "$have" ]] || { echo "linear-grid-drift: $d/ file set differs" >&2; exit 1; }
+    for f in $want; do cmp "$TMPD/tests/conformance/$d/$f" "tests/conformance/$d/$f"; done
+  done
+  echo "linear-grid-drift ✓"
 
 # Stage-1 negative parse gate: tests/conformance/parse_error/<n>.spr must be
 # rejected at parse time with the diagnostic substring in <n>.err.
@@ -3834,6 +3859,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "ide-smoke|ide-smoke"
     "render-cost|render-cost-gate"
     "type-errors|test-type-errors"
+    "linear-grid|test-linear-grid"
+    "linear-grid-drift|linear-grid-drift"
     "parse-errors|test-parse-errors"
     "executable-errors|test-executable-errors"
     "emit-errors|test-emit-errors"
@@ -4106,7 +4133,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check backlog-shape verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check backlog-shape linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

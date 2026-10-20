@@ -1,0 +1,10 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn g(x: a) -> Int where linear a =
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g(1)))

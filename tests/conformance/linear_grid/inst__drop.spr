@@ -1,0 +1,15 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Drop2 t
+  fn drop2(x: t) -> Int
+
+instance Drop2 (Maybe a)
+  fn drop2(x: Maybe a) -> Int = 1
+
+fn main() -> Unit !{IO} = print(int_to_string(drop2(Just (L(1)))))

@@ -1,0 +1,6 @@
+module main
+
+extern fn give_up(msg: String) -> a where linear a
+extern fn give_up(msg: String) -> a where linear a
+
+fn main() -> Unit !{IO} = print("ok")
