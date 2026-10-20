@@ -7821,7 +7821,7 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
       maybe_or_else(bound_sig_error(bounds, name, fn_sig_tyvars(params, ret)),
                     validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret)))
   | ast.ExternFnDecl name params ret _ bounds _ -> bound_sig_error(bounds, name, fn_sig_tyvars(params, ret))
-  | ast.ClassDecl _ _ sigs _ _ -> find_map(sig_bound_error, sigs)
+  | ast.ClassDecl _ class_vars sigs _ _ -> find_map(sig_bound_error(class_vars, _), sigs)
   | ast.TypeDecl _ _ ctors _ _ _ -> if any(ctor_has_bound, ctors) then Just(linear_bound_unsupported_msg) else Nothing
   | ast.InstanceDecl _ _ bounds _ _ -> if bounds != Nil then Just(linear_bound_unsupported_msg) else Nothing
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
@@ -7837,9 +7837,16 @@ fn bound_not_in_sig_msg(v: String, decl_name: String) -> String =
   "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the signature of `"
     ++ string.after_last_dot(decl_name) ++ "`; a bound lets a type variable of the signature be linear"
 
-fn sig_bound_error(sig: ast.ClassMethodSig) -> Maybe String =
+# A class's own variable takes no bound, in a method as in the class header
+# (docs/linearity-bound-v0.md §6.1).
+fn sig_bound_error(class_vars: List String, sig: ast.ClassMethodSig) -> Maybe String =
   let ast.ClassMethodSig name params ret _ _ bounds = sig
-  in bound_sig_error(bounds, name, fn_sig_tyvars(params, Just(ret)))
+  in maybe_or_else(map(bound_on_class_var_msg(_, name), find(list_member(_, class_vars), bounds)),
+                   bound_sig_error(bounds, name, fn_sig_tyvars(params, Just(ret))))
+
+fn bound_on_class_var_msg(v: String, method: String) -> String =
+  "`where linear " ++ v ++ "` on `" ++ string.after_last_dot(method)
+    ++ "` names the class's own type variable, which takes no bound: an instance at a linear type is concrete code, checked as such"
 
 fn ctor_has_bound(c: ast.TypeConstructor) -> Bool =
   let ast.TypeConstructor _ _ _ _ bounds = c
