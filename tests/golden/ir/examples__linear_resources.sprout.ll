@@ -104,7 +104,7 @@ declare i64 @__task_sleep(i64)
 declare i64 @__await_deadline(i64, i64, i64)
 declare i64 @__task_stop_reason()
 declare i64 @task_yield()
-@.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 652, column 45)\00" }
+@.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 653, column 45)\00" }
 @.str.1 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.2 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"--- 1. release once ---\00" }
 @.str.3 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"one\00" }

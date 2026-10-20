@@ -1,0 +1,7 @@
+module main
+
+# A bound names a type variable of the signature, as a class constraint does.
+
+fn ident(x: a) -> a where linear b = x
+
+fn main() -> Unit !{IO} = print(int_to_string(ident(1)))

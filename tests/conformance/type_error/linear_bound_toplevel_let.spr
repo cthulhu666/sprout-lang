@@ -1,0 +1,11 @@
+module main
+
+# A top-level `let` is generalized, so its variables are bounded too.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+let dup = \x -> (x, x)
+
+fn main() -> Unit !{IO} = match dup(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))

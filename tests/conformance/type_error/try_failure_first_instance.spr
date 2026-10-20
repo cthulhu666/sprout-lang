@@ -6,7 +6,7 @@ type Outcome e a =
   | Good a
 
 instance Propagate (Outcome e)
-  fn branch(value: Outcome e a) -> ControlFlow (Outcome e b) a =
+  fn branch(value: Outcome e a) -> ControlFlow (Outcome e b) a where linear a, linear b =
     match value with
     | Bad err -> Break(Bad(err))
     | Good v -> Continue(v)

@@ -57,7 +57,7 @@ let fetch_type =
 
 let fetch_rest =
   "instance Propagate Fetch\n" ++
-  "  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =\n" ++
+  "  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a where linear a, linear b =\n" ++
   "    match value with\n" ++
   "    | Got v -> Continue(v)\n" ++
   "    | NotFound -> Break(NotFound)\n" ++
@@ -110,11 +110,11 @@ let tagged_decls =
   "  | Hit a\n" ++
   "  | Miss String\n" ++
   "instance Propagate Tagged\n" ++
-  "  fn branch(value: Tagged a) -> ControlFlow (Tagged b) a =\n" ++
+  "  fn branch(value: Tagged a) -> ControlFlow (Tagged b) a where linear a, linear b =\n" ++
   "    match value with\n" ++
   "    | Hit v -> Continue(v)\n" ++
-  "    | Miss s -> Break(tag(s))\n" ++
-  "fn tag(s) = Miss(\"tagged: \" ++ s)\n" ++
+  "    | Miss s -> Break(Miss(tag(s)))\n" ++
+  "fn tag(s) = \"tagged: \" ++ s\n" ++
   "fn look(i: Int) -> Tagged Int = if i > 0 then Hit(i) else Miss(\"neg\")\n" ++
   "fn main() -> Unit !{IO} =\n" ++
   "  match f(1) with\n" ++
@@ -132,7 +132,7 @@ let tagged_hand =
   "fn f(i: Int) -> Tagged Int =\n" ++
   "  match look(i) with\n" ++
   "  | Hit a -> Hit(a * 2)\n" ++
-  "  | Miss s -> tag(s)\n"
+  "  | Miss s -> Miss(tag(s))\n"
 
 fn ir_text(r: compiler.IrFullResult) -> String =
   match r with

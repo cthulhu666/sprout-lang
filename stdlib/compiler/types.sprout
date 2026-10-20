@@ -195,7 +195,7 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @class:<method or class>        @inst:<class>:<head>      @arity:<ctor>
 #   @fwd:<tyvar>:<class>            @eta_fwd:<tyvar>:<class>   @eta_fwdvar:<tyvar>
 #   @super:<class>:<superclass>     @rec:<record>:<field>
-#   @type:<TypeName>
+#   @type:<TypeName>                @linbound:<fn, extern or method>
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
@@ -212,6 +212,13 @@ export fn super_marker_prefix(class_name: String) -> String = super_marker_tag +
 export fn super_marker_key(class_name: String, super_name: String) -> String = super_marker_prefix(class_name) ++ super_name
 export fn rec_fields_prefix(rec_name: String) -> String = rec_marker_tag ++ rec_name ++ ":"
 export fn rec_field_key(rec_name: String, field: String) -> String = rec_fields_prefix(rec_name) ++ field
+
+# The variables of a name's scheme that its `where linear` admits linear types at,
+# spelled as that scheme spells them (docs/linearity-bound-v0.md §6.7).
+export fn linear_bound_key(name: String) -> String = "@linbound:" ++ name
+
+export fn linear_bound_marker(vars: List String) -> Scheme =
+  Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)
 
 export fn type_mentions_skolem(t: Type) -> Bool =
   match t with
@@ -912,6 +919,10 @@ fn is_exist_var(name: String) -> Bool =
 # means something different in each, and only the name itself is common to them.
 fn build_var_rename(vars: List String, n: Int, acc: Dict String) -> Dict String =
   rename_generated(vars, n, vars, acc)
+
+# A scheme variable as scheme_to_string prints it, so a diagnostic and `:type` agree.
+export fn scheme_var_display(s: Scheme, v: String) -> String =
+  maybe_with_default(v, dict_get(v, build_var_rename(scheme_vars(s), 0, dict_empty())))
 
 # `taken` is every binder, source-written ones included: a generated var must not claim a
 # letter one of them already spells, or two distinct variables print as one name.

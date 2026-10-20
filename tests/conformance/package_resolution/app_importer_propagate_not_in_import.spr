@@ -5,7 +5,7 @@ import demo.orphan_try as lib
 # declares it. The instance is fusable, which must not put it in scope there.
 
 instance Propagate lib.Fetch
-  fn branch(value: lib.Fetch a) -> ControlFlow(lib.Fetch b) a =
+  fn branch(value: lib.Fetch a) -> ControlFlow(lib.Fetch b) a where linear a, linear b =
     match value with
     | lib.Got v -> Continue(v)
     | lib.Failed why -> Break(lib.Failed(why))

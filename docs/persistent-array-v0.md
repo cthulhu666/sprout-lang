@@ -271,15 +271,17 @@ first one's writes, so a pure function could return two answers. These BACKLOG P
 first:
 
 - ~~**A lambda's `once` promise is never checked.**~~ Landed: checked as a declared one is.
-- **Generic code can duplicate or drop a linear value**: `fn dup(x: a) -> (a, a) = (x, x)`.
+- ~~**Generic code can duplicate or drop a linear value**: `fn dup(x: a) -> (a, a) = (x, x)`.~~
+  Landed: an unbounded type variable admits no linear type ([linearity-bound-v0.md](linearity-bound-v0.md)
+  §12 step 2). Open: the same through a generic instance's dictionary (step 3).
 - ~~**One call can borrow and consume the same linear value**: `f(x, x)` with
   `f(b: borrowing L, c: L)`.~~ Landed: a borrow lasts the whole call (spec §5.8).
 - ~~**A top-level `let` can hold a linear value that every function consumes.**~~ Landed:
   rejected at the declaration.
-- **Reading a borrowed generic container hands out its linear element**: a generic `get` at a
-  linear element type. Until it is fixed, `LArr` rejects a linear element type.
-- **An existential hides a linear value from the checker**: `Boxed(L(1))` with
-  `type Boxed = | exists a. Boxed a where Taker a` is untracked, so it can be unpacked twice.
+- ~~**Reading a borrowed generic container hands out its linear element**~~ Landed with the
+  bound: a generic `get` at a linear element type is rejected unless it opts in.
+- ~~**An existential hides a linear value from the checker**~~ Landed with the bound: packing a
+  linear value into `exists a` is rejected.
 
 These are §5.8 bugs, not `LArr` bugs: each lets a `File` be closed twice today. A leak is not one
 of them: a wildcard that drops an array loses it but cannot expose a write. `LArr` raises their
@@ -545,7 +547,8 @@ value is unshared moves the ranking.
    linearity, so nothing below blocks it.
 3. ~~Fix the three linearity holes that are missing checks (5.3, *Prerequisites*).~~ Landed.
 4. ~~Design the linearity bound on type variables~~ Designed in
-   [linearity-bound-v0.md](linearity-bound-v0.md); implementing it closes the other three.
+   [linearity-bound-v0.md](linearity-bound-v0.md); its step 2 closed the other three, except a
+   generic instance duplicating through its dictionary (step 3).
 5. Ship 5.3, the linear array, with its bulk operations, as the one mechanism for in-place
    writes in pure code (`MutVec`, `Ref` and `MutMatrix` stay for `IO` code), after steps 3 and
    4, and keep 5.3's *Invariants*.

@@ -573,8 +573,9 @@ the test was checked to actually motivate the fix.
   descends type arguments and tuple components as well as the arrow spine, and covers the return
   type. `(borrowing T)` NOT followed by `->` stays an ordinary type application — these three words
   are not reserved, the same call `param_mode_at` makes.
-- **Not lifted: a modifier on a type-variable parameter.** Not a representation limit (ownership
-  survives instantiation) but a universe one: without a linearity bound on `a`, `borrowing Int`
+- **Since lifted, under `where linear a`** ([linearity-bound-v0.md](linearity-bound-v0.md)).
+  As first written: **Not lifted: a modifier on a type-variable parameter.** Not a
+  representation limit (ownership survives instantiation) but a universe one: without a linearity bound on `a`, `borrowing Int`
   would be an error while `borrowing a` at `Int` silently was not. That is polymorphism over linear
   types. Prior art bounds the parameter first — Swift SE-0427 (`<T: ~Copyable>` to opt out of the
   default `Copyable`), Austral (every type parameter annotated `Free`/`Linear`/`Type`).

@@ -7,7 +7,7 @@ type Slot a =
   | Blank
 
 instance Propagate Slot
-  fn branch(value: Slot a) -> ControlFlow (Slot b) a =
+  fn branch(value: Slot a) -> ControlFlow (Slot b) a where linear a, linear b =
     match value with
     | Filled v -> Continue(v)
     | _ -> Break(Blank)

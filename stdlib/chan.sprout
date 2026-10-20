@@ -44,8 +44,8 @@ type Selected a =
 # resume tasks via context switching). Internal: the public API below wraps them.
 # See runtime/APPROVED_BUILTINS.
 extern fn __chan_new(scope_id: Int, capacity: Int) -> Int !{IO}
-extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO}
-extern fn __chan_recv(chan_id: Int) -> Recv a !{IO}
+extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO} where linear a
+extern fn __chan_recv(chan_id: Int) -> Recv a !{IO} where linear a
 extern fn __chan_close(chan_id: Int) -> Unit !{IO}
 extern fn __chan_select(chan_ids: List Int) -> Selected a !{IO}
 
@@ -54,13 +54,13 @@ extern fn __chan_select(chan_ids: List Int) -> Selected a !{IO}
 # (direct sender→receiver hand-off). `capacity < 0` loud-fails.
 # `scope_handle` (from stdlib.task) reads the scope's raw scheduler handle without exposing
 # the opaque `Scope` constructor to this module — `chan_new` never destructures a `Scope`.
-export fn chan_new(scope: Scope, capacity: Int) -> Chan a !{IO} =
+export fn chan_new(scope: Scope, capacity: Int) -> Chan a !{IO} where linear a =
   Chan(__chan_new(scope_handle(scope), capacity))
 
 # Send `value` into `ch`. Returns once the value is buffered (or handed directly to a waiting
 # receiver). If the buffer is full — or the channel is rendezvous (capacity 0, no buffer) with no
 # receiver ready — the current task parks until a receiver takes the value.
-export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} =
+export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} where linear a =
   match ch with
   | Chan cid -> __chan_send(cid, value)
 
@@ -69,7 +69,7 @@ export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} =
 # directly). If the buffer is empty (rendezvous: always) and the channel is open, the current task
 # parks until a sender provides a value. Once the channel is closed AND drained, returns `Closed`
 # without parking (and a task already parked here is woken with `Closed`).
-export fn chan_recv(ch: Chan a) -> Recv a !{IO} =
+export fn chan_recv(ch: Chan a) -> Recv a !{IO} where linear a =
   match ch with
   | Chan cid -> __chan_recv(cid)
 
@@ -77,7 +77,7 @@ export fn chan_recv(ch: Chan a) -> Recv a !{IO} =
 # (`Got`), then observe `Closed`; a receiver parked on an empty channel is woken with `Closed`.
 # Any task holding the channel may close it. LOUD-FAILS on a send into a closed channel or a
 # double close — both are program bugs Sprout cannot recover from (no exceptions).
-export fn chan_close(ch: Chan a) -> Unit !{IO} =
+export fn chan_close(ch: Chan a) -> Unit !{IO} where linear a =
   match ch with
   | Chan cid -> __chan_close(cid)
 

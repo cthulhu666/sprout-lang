@@ -1,0 +1,11 @@
+module main
+
+# An unbounded `a` holds nothing linear, so discarding one in statement position
+# is no longer rejected as a possible leak.
+
+fn stmt(x: a) -> Int =
+  do
+    x
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(stmt("s")))

@@ -1,0 +1,13 @@
+module main
+
+# `dup` copies its `a`, so it may not be instantiated at a linear type
+# (docs/linearity-bound-v0.md §1). Two owners of one `L`, both closed, on the
+# commit before.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(x: a) -> (a, a) = (x, x)
+
+fn main() -> Unit !{IO} = match dup(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))

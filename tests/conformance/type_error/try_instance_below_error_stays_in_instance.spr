@@ -10,7 +10,7 @@ fn bump(f: Fetch Int) -> Fetch Int =
   in Got(v + 1)
 
 instance Propagate Fetch
-  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a where linear a, linear b =
     match value with
     | Got v -> Continue(v)
     | Failed why -> Break(Failed(why + 1))

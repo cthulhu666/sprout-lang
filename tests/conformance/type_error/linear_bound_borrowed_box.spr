@@ -1,0 +1,20 @@
+module main
+
+# Borrowing the box does not make its field borrowed: `box_peek` hands out an
+# owned `a` while `b` still holds it.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+type linear Box a = Box a
+
+fn box_peek(b: borrowing Box a) -> a = match b with | Box x -> x
+
+fn box_open(b: Box a) -> a = match b with | Box x -> x
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Box(L(1))
+    let n = close(box_peek(b))
+    print(int_to_string(n + close(box_open(b))))

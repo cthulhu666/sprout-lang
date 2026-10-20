@@ -1,0 +1,17 @@
+module main
+
+# Under the bound a class can borrow a type-variable parameter.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn peek_with(x: borrowing a, f: (borrowing a) -> Int) -> Int where linear a = f(x)
+
+fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+fn main() -> Unit !{IO} =
+  do
+    let l = L(5)
+    let n = peek_with(l, peek)
+    print(int_to_string(n + close(l)))

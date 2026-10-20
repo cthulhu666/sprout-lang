@@ -7,7 +7,7 @@ module demo
 type Maybe a = Just a | Nothing
 
 instance Propagate Maybe
-  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a =
+  fn branch(value: Maybe a) -> ControlFlow (Maybe b) a where linear a, linear b =
     match value with
     | Just v -> Continue(v)
     | Nothing -> Break(Nothing)

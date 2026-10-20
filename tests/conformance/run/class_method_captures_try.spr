@@ -13,9 +13,9 @@ type Box a =
 
 # Not one `match`, so a `try` on a `Box` calls `branch`.
 instance Propagate Box
-  fn branch(value: Box a) -> ControlFlow (Box b) a = box_flow(value)
+  fn branch(value: Box a) -> ControlFlow (Box b) a where linear a, linear b = box_flow(value)
 
-fn box_flow(value: Box a) -> ControlFlow (Box b) a =
+fn box_flow(value: Box a) -> ControlFlow (Box b) a where linear a, linear b =
   match value with
   | Full v -> Continue(v)
   | Empty -> Break(Empty)

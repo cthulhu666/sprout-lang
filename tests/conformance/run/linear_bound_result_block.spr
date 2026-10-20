@@ -1,0 +1,20 @@
+module main
+
+# `pure` and `branch` opt in, so a `Result` block can carry a linear value.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn open(n: Int) -> Result String L = if n > 0 then Ok(L(n)) else Err("neg")
+
+fn twice(n: Int) -> Result String L =
+  do
+    l <- open(n)
+    let m = try open(close(l) * 2)
+    pure(m)
+
+fn main() -> Unit !{IO} =
+  match twice(3) with
+  | Ok l -> print(int_to_string(close(l)))
+  | Err e -> print(e)

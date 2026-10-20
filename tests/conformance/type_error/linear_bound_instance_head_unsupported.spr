@@ -1,0 +1,11 @@
+module main
+
+class Taker a
+  fn take(x: a) -> Int
+
+type Box a = Box a
+
+instance Taker (Box a) where linear a, Taker a
+  fn take(b: Box a) -> Int = match b with | Box x -> take(x)
+
+fn main() -> Unit !{IO} = print("x")

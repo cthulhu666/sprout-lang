@@ -23,6 +23,13 @@ export type FieldObligation (..) =
   | FieldObligation types.Type String types.Type source.SourcePos
   # FieldObligation receiver_type  field_name  result_var  pos
 
+# A generic name instantiated at a use: the fresh type standing for one of its
+# variables that admits no linear type (docs/linearity-bound-v0.md §6.3). Checked
+# at the declaration boundary, once the substitution says what the variable became.
+export type BoundObligation (..) =
+  | BoundObligation types.Type String String source.SourcePos
+  # BoundObligation instantiated_as  callee  variable_as_displayed  pos
+
 export fn field_obligation_receiver(o: FieldObligation) -> types.Type =
   match o with
   | FieldObligation r _ _ _ -> r
@@ -254,6 +261,7 @@ export type InferState (..) = (
   next_effect_id: Ref Int,
   ctor_map: Ref (Dict (List String)),
   field_obligations: Ref (List FieldObligation),
+  bound_obligations: Ref (List BoundObligation),
   effect_reports: Ref (List EffectReport),
   parked_binds: Ref (List ParkedBind),
   try_fusions: Ref TryFusions,
@@ -267,12 +275,14 @@ export fn new_state() -> InferState !{IO} =
     e_id <- ref_new(0)
     ctor_ref <- ref_new(dict_empty())
     field_ref <- ref_new(Nil)
+    bound_ref <- ref_new(Nil)
     effect_ref <- ref_new(Nil)
     bind_ref <- ref_new(Nil)
     fusion_ref <- ref_new(TryFusions(by_head = dict_empty(), pending = set_empty(), decl = Nothing))
     try_ref <- ref_new(Nil)
     census_ref <- ref_new(bind_census.CensusOff)
     InferState(next_type_id = t_id, next_effect_id = e_id, ctor_map = ctor_ref, field_obligations = field_ref,
+               bound_obligations = bound_ref,
                effect_reports = effect_ref, parked_binds = bind_ref, try_fusions = fusion_ref,
                try_positions = try_ref, census = census_ref)
 
@@ -301,6 +311,18 @@ export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO
   do
     parked <- ref_read(state.field_obligations)
     ref_write(state.field_obligations, Nil)
+    list_reverse(parked)
+
+export fn park_bound_obligation(state: InferState, o: BoundObligation) -> Unit !{IO} =
+  do
+    parked <- ref_read(state.bound_obligations)
+    ref_write(state.bound_obligations, Cons(o, parked))
+
+# Read AND clear, at the same boundary and for the same reason as take_field_obligations.
+export fn take_bound_obligations(state: InferState) -> List BoundObligation !{IO} =
+  do
+    parked <- ref_read(state.bound_obligations)
+    ref_write(state.bound_obligations, Nil)
     list_reverse(parked)
 
 export fn park_bind(state: InferState, b: ParkedBind) -> Unit !{IO} =

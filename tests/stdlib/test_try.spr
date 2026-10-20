@@ -89,7 +89,7 @@ type Fetch a =
   | Failed String
 
 instance Propagate Fetch
-  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a =
+  fn branch(value: Fetch a) -> ControlFlow (Fetch b) a where linear a, linear b =
     match value with
     | Got v -> Continue(v)
     | NotFound -> Break(NotFound)
@@ -116,7 +116,7 @@ type Slot a =
   | Broken
 
 instance Propagate Slot
-  fn branch(value: Slot a) -> ControlFlow (Slot b) a =
+  fn branch(value: Slot a) -> ControlFlow (Slot b) a where linear a, linear b =
     match value with
     | Filled v -> Continue(v)
     | _ -> Break(Blank)
@@ -136,13 +136,13 @@ type Gate a =
   | Open a
   | Shut
 
-fn gate_flow(g: Gate a) -> ControlFlow (Gate b) a =
+fn gate_flow(g: Gate a) -> ControlFlow (Gate b) a where linear a, linear b =
   match g with
   | Open v -> Continue(v)
   | Shut -> Break(Shut)
 
 instance Propagate Gate
-  fn branch(value: Gate a) -> ControlFlow (Gate b) a = gate_flow(value)
+  fn branch(value: Gate a) -> ControlFlow (Gate b) a where linear a, linear b = gate_flow(value)
 
 fn gate_text(g: Gate Int) -> String =
   match g with

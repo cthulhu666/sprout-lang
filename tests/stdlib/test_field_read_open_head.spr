@@ -10,7 +10,7 @@ instance Functor Box
   fn fmap(f: a -> b, xs: Box a) -> Box b = Box(val = f(xs.val))
 
 instance Applicative Box
-  fn pure(x: a) -> Box a = Box(val = x)
+  fn pure(x: a) -> Box a where linear a = Box(val = x)
   fn map2(g: a -> b -> c, xs: Box a, ys: Box b) -> Box c = Box(val = g(xs.val, ys.val))
 
 fn same_box(b: Box Int) -> Box Int = b

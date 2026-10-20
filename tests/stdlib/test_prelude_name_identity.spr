@@ -67,7 +67,7 @@ type Box a =
   | Empty
 
 instance Propagate Box
-  fn branch(value: Box a) -> ControlFlow (Box b) a =
+  fn branch(value: Box a) -> ControlFlow (Box b) a where linear a, linear b =
     match value with
     | Full v -> prelude.Continue(v)
     | Empty -> Break(Empty)

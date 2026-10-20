@@ -1,0 +1,18 @@
+module main
+
+# `where linear a` admits a linear type at a function that uses its `a` once;
+# the non-linear types still fit (docs/linearity-bound-v0.md §6.2).
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn ident(x: a) -> a where linear a = x
+
+fn pick(c: Bool, x: a, y: Int) -> a where linear a = if c then x else x
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(ident(1) + close(ident(L(2)))))
+    print(int_to_string(close(pick(true, L(3), 0))))
+    print(int_to_string(close(after(print("after"), L(4)))))

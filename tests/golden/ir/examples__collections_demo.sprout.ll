@@ -94,13 +94,13 @@ declare i64 @str_slice_bytes(i64, i64, i64)
 declare i64 @str_starts_with_at_byte(i64, i64, i64)
 declare i64 @str_split_lines(i64)
 declare i64 @split_words(i64)
-@.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 416, column 67)\00" }
-@.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 504, column 45)\00" }
-@.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 505, column 26)\00" }
-@.str.3 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 509, column 61)\00" }
-@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 522, column 49)\00" }
-@.str.5 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 546, column 30)\00" }
-@.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 765, column 49)\00" }
+@.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 417, column 67)\00" }
+@.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 505, column 45)\00" }
+@.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 506, column 26)\00" }
+@.str.3 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 510, column 61)\00" }
+@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 523, column 49)\00" }
+@.str.5 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 547, column 30)\00" }
+@.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 766, column 49)\00" }
 @.str.7 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.8 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in / (line 6, column 36)\00" }
 @.str.9 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"second\00" }

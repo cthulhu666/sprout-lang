@@ -1968,29 +1968,12 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `docs/local-closures-v0.md`). Left: marking the prelude combinators `local` (own entry); a linear
   value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING linear
   lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
-- [ ] `P1` **Generic code can duplicate or drop a linear value.** `fn dup(x: a) -> (a, a) = (x, x)`
-  is accepted, since the body sees a rigid `a`, not a linear type; with `type linear L = L Int`,
-  `dup(L(1))` returns two owners and both are consumed (verified running, 2026-10-19). The drop
-  side too: `konst(1, L(2))` with `fn konst(x: a, y: b) -> a = x`, and `list_length([L(1)])`,
-  leak, as do a generic instance (`instance Taker (Box a)` calling `take(x)` twice, at `Box L`)
-  and a top-level `let dup = \x -> (x, x)` (all verified running, 2026-10-20). Design:
-  `docs/linearity-bound-v0.md`. Blocks `docs/persistent-array-v0.md` §5.3.
-- [ ] `P1` **Reading a borrowed generic container hands out its linear element.**
-  `fn box_peek(b: borrowing Box a) -> Maybe a` returns the field of a borrowed `Box`. At `Box L`
-  the caller gets an owned `L` while `b` still holds it, and both are consumed (verified running,
-  2026-10-19). Spec §5.8 binds a borrowed value's linear fields as borrowed, but in the generic
-  body `a` is not linear, so the field is free to return. Same root as **Generic code can
-  duplicate or drop a linear value**; every `get` on a generic container has this shape, including
-  `docs/persistent-array-v0.md` §5.3's `larr_get` at a linear element type. Design:
-  `docs/linearity-bound-v0.md`.
-- [ ] `P1` **An existential hides a linear value from the checker.** With
-  `type Boxed = | exists a. Boxed a where Taker a`, `let b = Boxed(L(1))` is accepted and
-  `unbox(b) + unbox(b)` consumes the `L` twice (verified running, 2026-10-19). Containment reads
-  the declaration's stored fields, and `exists a.` stores a hidden `a`, never a linear type, so `b`
-  carries no obligation. A linearity bound on type parameters does not reach it unless packing is
-  bounded too. Fix: reject packing a linear value into an existential, or give the `exists`
-  variable a linearity bound that makes the packed type linear. Design:
-  `docs/linearity-bound-v0.md`. Blocks `docs/persistent-array-v0.md` §5.3.
+- [ ] `P1` **A generic instance can duplicate a linear value through its dictionary.**
+  `instance Taker (Box a) where Taker a` whose `take` calls `take(x)` twice is accepted, and
+  `take(Box(L(1)))` consumes the `L` twice: `a := L` exists only in the dictionary, which no check
+  reads. `where linear` on an instance head or a constructor is rejected until this lands, so an
+  existential cannot carry a linear value either. Step 3 of `docs/linearity-bound-v0.md` §12: walk
+  dictionaries in `resolve.sprout`. Blocks `docs/persistent-array-v0.md` §5.3.
 - [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
   M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
   lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
@@ -2025,16 +2008,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   containment-computed, reaching parameter modes, `borrowing` filters and field reads; `consuming
   Crate` is still an error. What is left is §6 of `docs/linearity-virality-v0.md` — a type
   variable's universe.
-- [ ] `P3` **Linearity bound on a type parameter (enabler for `borrowing a`).** A modifier on a
-  type-variable parameter stays rejected, which also blocks the receiver-borrowing class shape
-  `class Peekable a { fn peek(r: borrowing a) -> Int }`, so M4.6's method lift reaches only a
-  method's *concrete* linear parameters. Not a representation limit — ownership sits in the type
-  and survives instantiation — but a *universe* limit: without a bound on `a`, `borrowing Int` is
-  an error while `borrowing a` instantiated at `Int` silently is not, the tell that this is
-  polymorphism over linear types (an explicit M4.2 non-goal). Prior art, both verified: Swift
-  SE-0427 makes generic parameters `Copyable` by default, `<T: ~Copyable>` opting out; Austral
-  annotates every type parameter with a universe. Design: `docs/linearity-bound-v0.md` (§6.6:
-  class method signatures are not mode-checked today, so `borrowing a` there slips through).
+- [ ] `P3` **A mode on a non-linear type should be no mode (receiver-borrowing classes).**
+  `class Peekable a { fn peek(r: borrowing a) -> Int }` cannot have `instance Peekable Int` with
+  `fn peek(r: Int)`: modes must match exactly, and `borrowing Int` is refused. Class method
+  signatures are not mode-checked at all, and the instance-vs-class mismatch has one wording for
+  both directions. Step 4 of `docs/linearity-bound-v0.md` §12 (§6.6).
 - [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
   parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The
   field-read borrow is keyed on the binding's mode, not on `TGetField` syntax, deliberately —

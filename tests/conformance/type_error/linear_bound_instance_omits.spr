@@ -1,0 +1,14 @@
+module main
+
+# An instance restates a class method's bound (docs/linearity-bound-v0.md §11.7),
+# as it restates a class constraint.
+
+class Wrap f
+  fn wrap1(x: a) -> f a where linear a
+
+type One a = One a
+
+instance Wrap One
+  fn wrap1(x: a) -> One a = One(x)
+
+fn main() -> Unit !{IO} = print("x")
