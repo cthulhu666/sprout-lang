@@ -275,7 +275,10 @@ Dispatch does not change. Inference changes only in §6.6's mode comparison.
   The variable is named as the callee's signature writes it, which a generalized scheme does not
   keep, so pre-scan stores each function's written signature (`@sig:`). A callee that writes no
   variable there is told to annotate its parameters first; a top-level `let`, which takes no
-  bound, to become a `fn`.
+  bound, to become a `fn`; a constructor, whose `exists` variable takes no bound until step 3,
+  gets no fix. A bounded variable is marked linear under its rigid id, since a written name is
+  not unique (`List` declares an `a` too); `@boundname:<id>` keeps the written name, so every
+  linearity diagnostic prints `a`, not `$t41`.
 - **Now accepted:** a bare type variable discarded in statement position (§6.4); `borrowing a`
   under the bound, which closes the P3 entry; an instance at a non-linear type of a class that
   borrows its variable, and such a function passed as a value (§6.6).
