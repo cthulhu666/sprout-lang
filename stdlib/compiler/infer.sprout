@@ -828,7 +828,7 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
       in mark_stored_fields(name, params, [inner], local,
            mark_phantom_params(name, params, [inner],
              register_ctors_for_type(name, params, local,
-               [ast.TypeConstructor(name, [inner], Nil, Nil)], env)))
+               [ast.TypeConstructor(name, [inner], Nil, Nil, Nil)], env)))
   | _ -> env
 
 fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.Type =
@@ -880,7 +880,7 @@ fn register_one_ctor(
   # function uses: `constrained_fn_field(name)` reads these back, so `Shown(42)`
   # requires `ToString Int`, resolves the witness, and rejects a missing instance
   # at the construction site — no constructor-specific obligation code needed.
-  | ast.TypeConstructor name fields exist_vars exist_constraints ->
+  | ast.TypeConstructor name fields exist_vars exist_constraints _ ->
       dict_set(
         ctor_arity_key(name),
         arity_marker(list_length(fields)),
@@ -949,7 +949,7 @@ fn collect_ctor_names(ctors: List ast.TypeConstructor, acc: List String) -> List
   | Nil -> acc
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor name _ _ _ -> collect_ctor_names(rest, Cons(name, acc))
+      | ast.TypeConstructor name _ _ _ _ -> collect_ctor_names(rest, Cons(name, acc))
 
 # ---------------------------------------------------------------------------
 # Effect merging
@@ -1537,7 +1537,7 @@ let unattributed_module: String = "?"
 # BACKLOG: `An instance is the one way past record opacity`.
 fn group_module(decl: ast.Decl) -> String =
   match decl with
-  | ast.InstanceDecl _ _ _ _ -> unattributed_module
+  | ast.InstanceDecl _ _ _ _ _ -> unattributed_module
   | _ ->
       match list_append(ast.decl_type_names(decl),
                         ast.scope_names_module(ast.decl_value_scopes(decl))) with
@@ -4990,9 +4990,9 @@ fn binding_shape(src: MatchSource, branches: List ast.MatchBranch) -> Maybe bind
 # unique across the bundle. Declarations without a body have no key.
 export fn census_key(d: ast.Decl) -> Maybe String =
   match d with
-  | ast.FnDecl name _ _ _ _ _ _ -> Just(name)
+  | ast.FnDecl name _ _ _ _ _ _ _ -> Just(name)
   | ast.LetDecl name _ _ _ -> Just(name)
-  | ast.InstanceDecl c _ _ _ ->
+  | ast.InstanceDecl c _ _ _ _ ->
       match instance_key_and_class(c) with
       | Just (key, _) -> Just(key)
       | Nothing -> Nothing
@@ -5001,7 +5001,7 @@ export fn census_key(d: ast.Decl) -> Maybe String =
   | ast.ClassDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
   | ast.WrapDecl _ _ _ _ _ -> Nothing
-  | ast.ExternFnDecl _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
 
 # --- `try` (spec §5.9) ---
 #
@@ -5175,20 +5175,20 @@ fn add_class_methods(d: ast.Decl, acc: Set) -> Set =
 # The value a declaration defines whose type is known only once it is checked.
 fn checked_value_name(d: ast.Decl) -> Maybe String =
   match d with
-  | ast.FnDecl name _ _ _ _ _ _ -> Just(name)
+  | ast.FnDecl name _ _ _ _ _ _ _ -> Just(name)
   | ast.LetDecl name _ _ _ -> Just(name)
   # An extern's type is its signature; the rest define no value.
-  | ast.ExternFnDecl _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
   | ast.TypeDecl _ _ _ _ _ _ -> Nothing
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.ClassDecl _ _ _ _ _ -> Nothing
-  | ast.InstanceDecl _ _ _ _ -> Nothing
+  | ast.InstanceDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
   | ast.WrapDecl _ _ _ _ _ -> Nothing
 
 fn add_try_fusion(callable: Set, acc: Dict unifier.Fusion, item: (Int, ast.Decl)) -> Dict unifier.Fusion =
   match item with
-  | (i, ast.InstanceDecl(ast.TypeConstraint "Propagate" [head]) [] [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ body] _) ->
+  | (i, ast.InstanceDecl(ast.TypeConstraint "Propagate" [head]) [] _ [ast.InstanceMethodImpl "branch" [ast.Param param _ _] _ _ _ _ body] _) ->
       match fusable_branch_arms(param, body) with
       | Just arms ->
           dict_set(type_head_str(type_from_ast(head, dict_empty())),
@@ -7530,14 +7530,14 @@ fn validate_alias_uses(decls: List ast.Decl, arities: Dict Int) -> Maybe(source.
 
 fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   match decl with
-  | ast.FnDecl _ params ret _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
-  | ast.ExternFnDecl _ params ret _ _ -> alias_uses_in_sig(params, ret, arities)
+  | ast.FnDecl _ params ret _ _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
+  | ast.ExternFnDecl _ params ret _ _ _ -> alias_uses_in_sig(params, ret, arities)
   | ast.TypeDecl _ _ ctors _ _ _ -> alias_uses_in_ctors(ctors, arities)
   | ast.RecordDecl _ _ fields _ _ _ _ -> alias_uses_in_fields(fields, arities)
   | ast.AliasDecl _ _ rhs _ -> alias_uses_in_te(rhs, arities)
   | ast.WrapDecl _ _ inner _ _ -> alias_uses_in_te(inner, arities)
   | ast.ClassDecl _ _ methods _ _ -> alias_uses_in_class_methods(methods, arities)
-  | ast.InstanceDecl _ _ methods _ -> alias_uses_in_instance_methods(methods, arities)
+  | ast.InstanceDecl _ _ _ methods _ -> alias_uses_in_instance_methods(methods, arities)
   | _ -> Nothing
 
 fn alias_uses_in_class_methods(methods: List ast.ClassMethodSig,
@@ -7546,7 +7546,7 @@ fn alias_uses_in_class_methods(methods: List ast.ClassMethodSig,
 
 fn alias_uses_in_class_method(arities: Dict Int, m: ast.ClassMethodSig) -> Maybe String =
   match m with
-  | ast.ClassMethodSig _ params ret _ _ -> alias_uses_in_sig(params, Just(ret), arities)
+  | ast.ClassMethodSig _ params ret _ _ _ -> alias_uses_in_sig(params, Just(ret), arities)
 
 fn alias_uses_in_instance_methods(methods: List ast.InstanceMethodImpl,
                                   arities: Dict Int) -> Maybe String =
@@ -7554,7 +7554,7 @@ fn alias_uses_in_instance_methods(methods: List ast.InstanceMethodImpl,
 
 fn alias_uses_in_instance_method(arities: Dict Int, m: ast.InstanceMethodImpl) -> Maybe String =
   match m with
-  | ast.InstanceMethodImpl _ params ret _ _ _ -> alias_uses_in_sig(params, ret, arities)
+  | ast.InstanceMethodImpl _ params ret _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
 
 fn alias_uses_in_sig(params: List ast.Param, ret: Maybe ast.TypeExpr,
                      arities: Dict Int) -> Maybe String =
@@ -7755,11 +7755,47 @@ let main_signature_hint: String =
 fn validate_constraints_all(decls: List ast.Decl, classes: Set) -> Maybe(source.SourcePos, String) =
   ast.first_decl_error(decl_constraint_error(classes, _), decls)
 
+# The parser accepts `where linear v`, but nothing checks it yet, so it is
+# rejected rather than ignored (docs/linearity-bound-v0.md).
+let linear_bound_unsupported_msg: String =
+  "`where linear` is not supported yet: the bound is parsed but not checked (docs/linearity-bound-v0.md)"
+
 fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
+  if decl_has_linear_bound(decl) then Just(linear_bound_unsupported_msg)
+  else
+    match decl with
+    | ast.FnDecl name params ret _ constraints _ _ _ ->
+        validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret))
+    | _ -> Nothing
+
+fn decl_has_linear_bound(decl: ast.Decl) -> Bool =
   match decl with
-  | ast.FnDecl name params ret _ constraints _ _ ->
-      validate_fn_constraints(constraints, name, classes, fn_sig_tyvars(params, ret))
-  | _ -> Nothing
+  | ast.FnDecl _ _ _ _ _ bounds _ _ -> has_bound(bounds)
+  | ast.ExternFnDecl _ _ _ _ bounds _ -> has_bound(bounds)
+  | ast.TypeDecl _ _ ctors _ _ _ -> any(ctor_has_bound, ctors)
+  | ast.ClassDecl _ _ sigs _ _ -> any(sig_has_bound, sigs)
+  | ast.InstanceDecl _ _ bounds methods _ -> has_bound(bounds) || any(impl_has_bound, methods)
+  | ast.RecordDecl _ _ _ _ _ _ _ -> false
+  | ast.LetDecl _ _ _ _ -> false
+  | ast.AliasDecl _ _ _ _ -> false
+  | ast.WrapDecl _ _ _ _ _ -> false
+
+fn has_bound(bounds: List String) -> Bool =
+  match bounds with
+  | [] -> false
+  | [_ | _] -> true
+
+fn ctor_has_bound(c: ast.TypeConstructor) -> Bool =
+  let ast.TypeConstructor _ _ _ _ bounds = c
+  in has_bound(bounds)
+
+fn sig_has_bound(s: ast.ClassMethodSig) -> Bool =
+  let ast.ClassMethodSig _ _ _ _ _ bounds = s
+  in has_bound(bounds)
+
+fn impl_has_bound(m: ast.InstanceMethodImpl) -> Bool =
+  let ast.InstanceMethodImpl _ _ _ _ _ bounds _ = m
+  in has_bound(bounds)
 
 # ---------------------------------------------------------------------------
 # Executable entrypoint validation
@@ -7833,7 +7869,7 @@ fn validate_entrypoint(decls: List ast.Decl) -> Maybe(source.SourcePos, String) 
 
 fn entrypoint_error(decl: ast.Decl) -> Maybe String =
   match decl with
-  | ast.FnDecl name params ret effects _ _ _ ->
+  | ast.FnDecl name params ret effects _ _ _ _ ->
       if is_main_decl_name(name) then check_main_signature(params, ret, effects)
       else Nothing
   | _ -> Nothing
@@ -7901,7 +7937,7 @@ fn check_duplicate_module_values(decls: List ast.Decl, seen: Dict NameOwner) -> 
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
-      | ast.FnDecl name _ _ _ _ _ pos -> check_value_name(name, OwnedByFn, pos, rest, seen)
+      | ast.FnDecl name _ _ _ _ _ _ pos -> check_value_name(name, OwnedByFn, pos, rest, seen)
       | ast.LetDecl name _ _ pos -> check_value_name(name, OwnedByLet, pos, rest, seen)
       | ast.ClassDecl class_name _ methods _ pos ->
           check_class_method_names(class_name, methods, pos, rest, seen)
@@ -7918,7 +7954,7 @@ fn check_class_method_names(class_name: String, methods: List ast.ClassMethodSig
                             rest: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
   match methods with
   | Nil -> check_duplicate_module_values(rest, seen)
-  | Cons (ast.ClassMethodSig name _ _ _ _) more ->
+  | Cons (ast.ClassMethodSig name _ _ _ _ _) more ->
       match dict_get(name, seen) with
       | Nothing -> check_class_method_names(class_name, more, pos, rest, dict_set(name, OwnedByClass(class_name), seen))
       | Just (OwnedByClass other) ->
@@ -8077,7 +8113,7 @@ fn check_tyvar_instance_heads(decls: List ast.Decl) -> Maybe(source.SourcePos, S
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
-      | ast.InstanceDecl constraint _ _ _ ->
+      | ast.InstanceDecl constraint _ _ _ _ ->
           match instance_head_tyvar(constraint) with
           | Nothing -> check_tyvar_instance_heads(rest)
           | Just (cls, rule) ->
@@ -8126,7 +8162,7 @@ fn class_own_depths(methods: List ast.ClassMethodSig, v: String,
                     local_vars: Dict types.Type, acc: List Int) -> List Int =
   match methods with
   | [] -> acc
-  | [ast.ClassMethodSig _ params ret _ _ | rest] ->
+  | [ast.ClassMethodSig _ params ret _ _ _ | rest] ->
       class_own_depths(rest, v, local_vars,
         var_app_depths(type_from_ast(ret, local_vars), v, 0,
           param_app_depths(params, v, local_vars, acc)))
@@ -8415,7 +8451,7 @@ fn method_wheres_arity_error(methods: List ast.ClassMethodSig,
                              arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
   match methods with
   | [] -> Nothing
-  | [ast.ClassMethodSig _ _ _ _ constraints | rest] ->
+  | [ast.ClassMethodSig _ _ _ _ constraints _ | rest] ->
       match constraints_arity_error("a constraint head", constraints, depths, supers,
                                     arities, env) with
       | Just msg -> Just(msg)
@@ -8429,7 +8465,7 @@ fn impl_wheres_arity_error(methods: List ast.InstanceMethodImpl,
                            arities: Dict Int, env: Dict types.Scheme) -> Maybe String =
   match methods with
   | [] -> Nothing
-  | [ast.InstanceMethodImpl _ _ _ _ constraints _ | rest] ->
+  | [ast.InstanceMethodImpl _ _ _ _ constraints _ _ | rest] ->
       match constraints_arity_error("a constraint head", constraints, depths, supers,
                                     arities, env) with
       | Just msg -> Just(msg)
@@ -8444,7 +8480,7 @@ fn decl_arity_error(decl: ast.Decl, depths: Dict (String, List Int),
   match decl with
   | ast.ClassDecl name _ methods superclasses _ ->
       class_decl_arity_error(name, superclasses, methods, depths, supers, arities, env)
-  | ast.InstanceDecl constraint inst_constraints methods _ ->
+  | ast.InstanceDecl constraint inst_constraints _ methods _ ->
       match constraint_arity_error("an instance head", constraint, depths, supers, arities, env) with
       | Just msg -> Just(msg)
       | Nothing ->
@@ -8452,7 +8488,7 @@ fn decl_arity_error(decl: ast.Decl, depths: Dict (String, List Int),
                                         arities, env) with
           | Just msg -> Just(msg)
           | Nothing -> impl_wheres_arity_error(methods, depths, supers, arities, env)
-  | ast.FnDecl _ _ _ _ constraints _ _ ->
+  | ast.FnDecl _ _ _ _ constraints _ _ _ ->
       constraints_arity_error("a constraint head", constraints, depths, supers, arities, env)
   | _ -> Nothing
 
@@ -8559,9 +8595,9 @@ fn indistinct_constraints_error(cs: List ast.TypeConstraint) -> Maybe String =
 # own `where`, a class method's, and an instance method's.
 fn decl_indistinct_error(decl: ast.Decl) -> Maybe String =
   match decl with
-  | ast.FnDecl _ _ _ _ constraints _ _ -> indistinct_constraints_error(constraints)
+  | ast.FnDecl _ _ _ _ constraints _ _ _ -> indistinct_constraints_error(constraints)
   | ast.ClassDecl _ _ methods _ _ -> class_method_indistinct_error(methods)
-  | ast.InstanceDecl _ _ methods _ -> impl_indistinct_error(methods)
+  | ast.InstanceDecl _ _ _ methods _ -> impl_indistinct_error(methods)
   | _ -> Nothing
 
 fn class_method_indistinct_error(methods: List ast.ClassMethodSig) -> Maybe String =
@@ -8569,14 +8605,14 @@ fn class_method_indistinct_error(methods: List ast.ClassMethodSig) -> Maybe Stri
 
 fn class_method_indistinct(m: ast.ClassMethodSig) -> Maybe String =
   match m with
-  | ast.ClassMethodSig _ _ _ _ constraints -> indistinct_constraints_error(constraints)
+  | ast.ClassMethodSig _ _ _ _ constraints _ -> indistinct_constraints_error(constraints)
 
 fn impl_indistinct_error(methods: List ast.InstanceMethodImpl) -> Maybe String =
   find_map(impl_method_indistinct, methods)
 
 fn impl_method_indistinct(m: ast.InstanceMethodImpl) -> Maybe String =
   match m with
-  | ast.InstanceMethodImpl _ _ _ _ constraints _ -> indistinct_constraints_error(constraints)
+  | ast.InstanceMethodImpl _ _ _ _ constraints _ _ -> indistinct_constraints_error(constraints)
 
 fn check_indistinct_constraints(decls: List ast.Decl) -> Maybe(source.SourcePos, String) =
   ast.first_decl_error(decl_indistinct_error, decls)
@@ -8587,7 +8623,7 @@ fn check_overlapping_instances(decls: List ast.Decl, seen: Dict Bool) -> Maybe(s
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
-      | ast.InstanceDecl constraint _ _ _ ->
+      | ast.InstanceDecl constraint _ _ _ _ ->
           match instance_key_and_class(constraint) with
           | Nothing -> check_overlapping_instances(rest, seen)
           | Just (key, cls) ->
@@ -8624,7 +8660,7 @@ where
 fn missing_superclass_error(super_map: Dict (List String), inst_set: Dict Bool,
                             decl: ast.Decl) -> Maybe String =
   match decl with
-  | ast.InstanceDecl constraint _ _ _ -> superclass_check_one(constraint, super_map, inst_set)
+  | ast.InstanceDecl constraint _ _ _ _ -> superclass_check_one(constraint, super_map, inst_set)
   | _ -> Nothing
 
 fn superclass_check_one(constraint: ast.TypeConstraint, super_map: Dict (List String), inst_set: Dict Bool) -> Maybe String =
@@ -8679,7 +8715,7 @@ fn build_inst_key_set(decls: List ast.Decl, acc: Dict Bool) -> Dict Bool =
   | Nil -> acc
   | Cons decl rest ->
       match decl with
-      | ast.InstanceDecl constraint _ _ _ ->
+      | ast.InstanceDecl constraint _ _ _ _ ->
           match constraint with
           | ast.TypeConstraint class_name type_args ->
               match type_args with
@@ -8716,7 +8752,7 @@ fn own_class_methods(decls: List ast.Decl, acc: Dict (List String)) -> Dict (Lis
 
 fn class_method_name(method: ast.ClassMethodSig) -> String =
   match method with
-  | ast.ClassMethodSig name _ _ _ _ -> string.after_last_dot(name)
+  | ast.ClassMethodSig name _ _ _ _ _ -> string.after_last_dot(name)
 
 fn class_methods_of(cls: String, class_methods: Dict (List String)) -> List String =
   match dict_get(cls, class_methods) with
@@ -8727,7 +8763,7 @@ fn first_missing_method(decls: List ast.Decl,
                         class_methods: Dict (List String)) -> Maybe(source.SourcePos, String) =
   match decls with
   | [] -> Nothing
-  | [ast.InstanceDecl constraint _ methods pos | rest] ->
+  | [ast.InstanceDecl constraint _ _ methods pos | rest] ->
       match instance_missing_method(constraint, methods, class_methods) with
       | Just msg -> Just((pos, msg))
       | Nothing -> first_missing_method(rest, class_methods)
@@ -8745,7 +8781,7 @@ fn instance_missing_method(constraint: ast.TypeConstraint, methods: List ast.Ins
 
 fn instance_method_name(method: ast.InstanceMethodImpl) -> String =
   match method with
-  | ast.InstanceMethodImpl name _ _ _ _ _ -> string.after_last_dot(name)
+  | ast.InstanceMethodImpl name _ _ _ _ _ _ -> string.after_last_dot(name)
 
 fn missing_method_msg(cls: String, type_args: List ast.TypeExpr, method: String) -> String =
   let short_cls = string.after_last_dot(cls)
@@ -8810,7 +8846,7 @@ fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List as
                             alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
   match decls with
   | [] -> Nothing
-  | [ast.InstanceDecl(ast.TypeConstraint cls [head_te]) _ methods pos | rest] ->
+  | [ast.InstanceDecl(ast.TypeConstraint cls [head_te]) _ _ methods pos | rest] ->
       let Just(param, sigs) = dict_get(cls, classes) else first_instance_sig_error(rest, classes, alias_env)
           site = InstanceSite(cls = cls, param = param, head = head_te, aliases = alias_env)
       in
@@ -8822,9 +8858,9 @@ fn first_instance_sig_error(decls: List ast.Decl, classes: Dict (String, List as
 fn method_sig_error(site: InstanceSite, sigs: List ast.ClassMethodSig,
                     method: ast.InstanceMethodImpl) -> Maybe String =
   match method with
-  | ast.InstanceMethodImpl name params ret_maybe _ wheres _ ->
+  | ast.InstanceMethodImpl name params ret_maybe _ wheres _ _ ->
       let short = string.after_last_dot(name)
-          Just(ast.ClassMethodSig _ cparams cret _ cwheres) = find(\s -> class_method_name(s) == short, sigs)
+          Just(ast.ClassMethodSig _ cparams cret _ cwheres _) = find(\s -> class_method_name(s) == short, sigs)
             else Just("instance " ++ instance_site_label(site) ++ " defines method `" ++ short
                       ++ "`, which class " ++ string.after_last_dot(site.cls) ++ " does not declare")
           inst = SigParts(params = list_map(param_type_expr, params), ret = ret_maybe, wheres = wheres)
@@ -8891,17 +8927,17 @@ fn seed_instance_method_types(decls: List ast.Decl, class_sigs: Dict (String, Li
 
 fn seed_instance_decl(classes: Dict (String, List ast.ClassMethodSig), aliases: Dict types.Type,
                       decl: ast.Decl) -> ast.Decl =
-  let ast.InstanceDecl(ast.TypeConstraint cls [head_te]) ctx methods pos = decl else decl
+  let ast.InstanceDecl(ast.TypeConstraint cls [head_te]) ctx bounds methods pos = decl else decl
       Just(param, sigs) = dict_get(cls, classes) else decl
       site = InstanceSite(cls = cls, param = param, head = head_te, aliases = aliases)
-  in ast.InstanceDecl(ast.TypeConstraint(cls, [head_te]), ctx,
+  in ast.InstanceDecl(ast.TypeConstraint(cls, [head_te]), ctx, bounds,
                       list_map(seed_method_types(site, sigs, _), methods), pos)
 
 fn seed_method_types(site: InstanceSite, sigs: List ast.ClassMethodSig,
                      m: ast.InstanceMethodImpl) -> ast.InstanceMethodImpl =
-  let ast.InstanceMethodImpl name params ret effs wheres body = m
+  let ast.InstanceMethodImpl name params ret effs wheres bounds body = m
       short = string.after_last_dot(name)
-      Just(ast.ClassMethodSig _ cparams cret _ cwheres) = find(\s -> class_method_name(s) == short, sigs) else m
+      Just(ast.ClassMethodSig _ cparams cret _ cwheres _) = find(\s -> class_method_name(s) == short, sigs) else m
       inst = SigParts(params = list_map(param_type_expr, params), ret = ret, wheres = wheres)
       cls = SigParts(params = list_map(param_type_expr, cparams), ret = Just(cret), wheres = cwheres)
       Nothing = sig_against_class(site, short, inst, cls) else m
@@ -8915,7 +8951,7 @@ fn seed_method_types(site: InstanceSite, sigs: List ast.ClassMethodSig,
       sub = apart_names(vars, taken, list_append(cls_vars, where_vars), dict_set(site.param, site.head, written))
       seed = seeded_type(sub, written_effect_vars(params, ret, effs), _)
   in ast.InstanceMethodImpl(name, seed_params(params, cparams, seed),
-                            maybe_or_else(ret, Just(seed(cret))), effs, wheres, body)
+                            maybe_or_else(ret, Just(seed(cret))), effs, wheres, bounds, body)
 
 fn fixed_type_expr(v: String, vars: Dict ClassVar, acc: Dict ast.TypeExpr) -> Dict ast.TypeExpr =
   match fixed_type(v, vars) with
@@ -9426,12 +9462,12 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
   | Nil -> env
   | Cons decl rest ->
       match decl with
-      | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
+      | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ _ ->
           pre_scan_fn_decls(rest,
             dict_set(types.arity_marker_key(name), arity_marker(list_length(params)),
               register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env)),
             alias_env)
-      | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ->
+      | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ _ ->
           pre_scan_fn_decls(rest,
             pre_scan_extern(name, params, ret_type_maybe, effects_maybe, alias_env, env),
             alias_env)
@@ -9448,7 +9484,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # Not here: both are registered at their module's start (group_plan,
       # typecheck_modules), or an instance would reach the modules checked before it.
       | ast.ClassDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
-      | ast.InstanceDecl _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
+      | ast.InstanceDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | _ -> pre_scan_fn_decls(rest, env, alias_env)
 
 # ---------------------------------------------------------------------------
@@ -9699,10 +9735,10 @@ type Placement =
 # Every kind is named: a new one is a barrier only once the header above says why.
 fn placement(item: (Int, ast.Decl)) -> Placement =
   match item with
-  | (_, ast.FnDecl _ _ _ _ _ _ _) -> InSegment
-  | (_, ast.InstanceDecl _ _ _ _) -> InSegment
+  | (_, ast.FnDecl _ _ _ _ _ _ _ _) -> InSegment
+  | (_, ast.InstanceDecl _ _ _ _ _) -> InSegment
   | (_, ast.ClassDecl _ _ _ _ _) -> AtModuleStart
-  | (_, ast.ExternFnDecl _ _ _ _ _) -> Barrier
+  | (_, ast.ExternFnDecl _ _ _ _ _ _) -> Barrier
   | (_, ast.TypeDecl _ _ _ _ _ _) -> Barrier
   | (_, ast.RecordDecl _ _ _ _ _ _ _) -> Barrier
   | (_, ast.LetDecl _ _ _ _) -> Barrier
@@ -9733,8 +9769,8 @@ type SegmentNode = (at: Int, name: String, bodies: List (List ast.Param, ast.Exp
 
 fn segment_node(m: (Int, ast.Decl)) -> Maybe SegmentNode =
   match m with
-  | (i, ast.FnDecl name params _ _ _ body _) -> Just (SegmentNode(at = i, name = name, bodies = [(params, body)]))
-  | (i, ast.InstanceDecl _ _ methods _) ->
+  | (i, ast.FnDecl name params _ _ _ _ body _) -> Just (SegmentNode(at = i, name = name, bodies = [(params, body)]))
+  | (i, ast.InstanceDecl _ _ _ methods _) ->
       Just(SegmentNode(at = i, name = instance_node(i), bodies = list_map(method_body, methods)))
   | _ -> Nothing
 
@@ -9743,7 +9779,7 @@ fn segment_node(m: (Int, ast.Decl)) -> Maybe SegmentNode =
 fn instance_node(i: Int) -> String = "@instance:" ++ int_to_string(i)
 
 fn method_body(m: ast.InstanceMethodImpl) -> (List ast.Param, ast.Expr) =
-  let ast.InstanceMethodImpl _ params _ _ _ body = m
+  let ast.InstanceMethodImpl _ params _ _ _ _ body = m
   in (params, body)
 
 fn add_node_edges(index: Set, acc: Dict Set, n: SegmentNode) -> Dict Set =
@@ -9848,7 +9884,7 @@ fn register_instances(items: List (Int, ast.Decl), env: GlobalEnv) -> GlobalEnv 
 
 fn register_instance_item(env: Dict types.Scheme, item: (Int, ast.Decl)) -> Dict types.Scheme =
   match item with
-  | (_, ast.InstanceDecl constraint _ _ _) -> register_instance_marker(constraint, env)
+  | (_, ast.InstanceDecl constraint _ _ _ _) -> register_instance_marker(constraint, env)
   | _ -> env
 
 fn typecheck_groups(
@@ -9945,7 +9981,7 @@ fn all_fn_decls(members: List (Int, ast.Decl)) -> Bool =
   | Nil -> true
   | Cons m rest ->
       match m with
-      | (_, ast.FnDecl _ _ _ _ _ _ _) -> all_fn_decls(rest)
+      | (_, ast.FnDecl _ _ _ _ _ _ _ _) -> all_fn_decls(rest)
       | _ -> false
 
 # A group of one. Alias declarations are handled here rather than in
@@ -10020,7 +10056,7 @@ fn group_unann_vars(members: List (Int, ast.Decl), acc: List String) -> List Str
       match m with
       | (_, decl) ->
           match decl with
-          | ast.FnDecl name params ret_type_maybe _ _ _ _ ->
+          | ast.FnDecl name params ret_type_maybe _ _ _ _ _ ->
               group_unann_vars(rest, list_union(own_unann_vars(name, params, ret_type_maybe), acc))
           | _ -> group_unann_vars(rest, acc)
 
@@ -10117,7 +10153,7 @@ fn infer_fn_decl(
   group_env_ftv: List String
 ) -> (FnInferResult, Dict types.Type) !{IO} =
   match decl with
-  | ast.FnDecl name _ _ _ _ _ decl_pos ->
+  | ast.FnDecl name _ _ _ _ _ _ decl_pos ->
       do
         (r, fwd_markers, decl_constraints, body_subst) <- check_fn_body(state, decl, env, subst, eff_subst, alias_env, group_env_ftv)
         match r with
@@ -10158,7 +10194,7 @@ fn commit_fn_decl(
   match inf with
   | FnInferred decl typed_body0 inferred0 fwd_markers decl_constraints group_env_ftv ->
       match decl with
-      | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ ->
+      | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ _ _ ->
           let typed_body = if needs_resolve then apply_subst_typed_expr(final_subst, typed_body0) else typed_body0
               inferred_fn_type = if needs_resolve then unifier.apply_subst(final_subst, inferred0) else inferred0
           in
@@ -10205,7 +10241,7 @@ fn typecheck_decl(
         env_ftv, subst)
   # Registered before the walk, by pre_scan_fn_decls.
   | ast.RecordDecl _ _ _ _ _ _ _ -> TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
-  | ast.FnDecl name _ _ _ _ _ decl_pos ->
+  | ast.FnDecl name _ _ _ _ _ _ decl_pos ->
       # Unreachable. typecheck_group routes EVERY FnDecl through typecheck_fn_group,
       # which is the single implementation of infer-then-commit. This arm exists
       # because the match must stay exhaustive, and it fails loudly rather than
@@ -10213,7 +10249,7 @@ fn typecheck_decl(
       # how the group and non-group cases would drift apart unnoticed.
       TypedDeclErr(decl_pos,
         "internal: FnDecl reached typecheck_decl, so binding-group routing is broken (" ++ name ++ ")")
-  | ast.ExternFnDecl name params ret_type_maybe effects_maybe ext_pos ->
+  | ast.ExternFnDecl name params ret_type_maybe effects_maybe _ ext_pos ->
       # An extern has no BODY, so `fn_linear_gate` (and with it the
       # "modifier only on a linear parameter" guard) never ran on one: an FFI
       # author could write `borrowing` on a non-linear extern parameter, see it
@@ -10266,7 +10302,7 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  | ast.InstanceDecl constraint inst_constraints methods _ ->
+  | ast.InstanceDecl constraint inst_constraints _ methods _ ->
       do
         unifier.census_enter(state, census_key(decl))
         r <- check_instance_methods(state, inst_constraints, methods, global_env_dict(env), subst, eff_subst, env_ftv)
@@ -11836,7 +11872,7 @@ fn check_fn_body(
   env_ftv: List String
 ) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String), Dict types.Type) !{IO} =
   match decl with
-  | ast.FnDecl name params ret_type_maybe effects_maybe constraints body fn_pos ->
+  | ast.FnDecl name params ret_type_maybe effects_maybe constraints _ body fn_pos ->
       do
         let decl_scheme = scheme_from_fn_parts(name, params, ret_type_maybe, effects_maybe, alias_env)
         (inst_type, prog_to_fresh) <- unifier.instantiate_with_vars(state, decl_scheme)
@@ -12110,7 +12146,7 @@ fn register_class_methods(type_params: List String, methods: List ast.ClassMetho
 fn register_class_method(type_params: List String, sig: ast.ClassMethodSig,
                          alias_env: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match sig with
-  | ast.ClassMethodSig name params ret_type effects_maybe constraints ->
+  | ast.ClassMethodSig name params ret_type effects_maybe constraints _ ->
       # Extend the class type params with any additional lowercase type variables
       # appearing in the method signature (e.g. `a` and `b` in
       # `fmap(f: a -> b, xs: f a) -> f b`).  Without this, method-specific
@@ -12156,7 +12192,7 @@ fn register_class_method_markers(class_name: String, type_params: List String, m
   | Nil -> env
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ _ _ ->
+      | ast.ClassMethodSig name _ _ _ _ _ ->
           register_class_method_markers(class_name, type_params, rest,
             dict_set(types.class_marker_key(name),
                      types.Scheme(type_params, Nil, types.TConst(types.type_id(class_name)), types.EffectPure, Nil),
@@ -12253,7 +12289,7 @@ fn first_class_method_row(class_name: String, methods: List ast.ClassMethodSig) 
   | Nil -> Nothing
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ effects_maybe _ ->
+      | ast.ClassMethodSig name _ _ effects_maybe _ _ ->
           let eff = types.effect_from_labels(effects_maybe)
           in
             if types.effect_is_row(eff)
@@ -12289,7 +12325,7 @@ fn class_method_effects(class_name: String, methods: List ast.ClassMethodSig,
   | Nil -> acc
   | Cons sig rest ->
       match sig with
-      | ast.ClassMethodSig name _ _ effects_maybe _ ->
+      | ast.ClassMethodSig name _ _ effects_maybe _ _ ->
           let eff = types.effect_from_labels(effects_maybe)
           in
             class_method_effects(class_name, rest,
@@ -12305,7 +12341,7 @@ fn first_instance_effect_error(decls: List ast.Decl,
   | Nil -> Nothing
   | Cons decl rest ->
       match decl with
-      | ast.InstanceDecl constraint _ methods pos ->
+      | ast.InstanceDecl constraint _ _ methods pos ->
           match instance_decl_effect_error(constraint, methods, declared) with
           | Just msg -> Just((pos, msg))
           | Nothing -> first_instance_effect_error(rest, declared)
@@ -12330,7 +12366,7 @@ fn first_instance_method_effect_error(class_name: String, methods: List ast.Inst
 fn instance_method_effect_error(class_name: String, method: ast.InstanceMethodImpl,
                                 declared: Dict types.Effect) -> Maybe String =
   match method with
-  | ast.InstanceMethodImpl name _ _ eff_maybe _ _ ->
+  | ast.InstanceMethodImpl name _ _ eff_maybe _ _ _ ->
       # No entry means the class declares no such method: either the class is not in
       # scope, already diagnosed as an unknown instance head, or the instance defines
       # a method the class does not, which check_instance_method_signatures rejects.
@@ -12418,7 +12454,7 @@ fn check_instance_method(
   env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
   match method with
-  | ast.InstanceMethodImpl name params ret_maybe eff_maybe method_constraints body ->
+  | ast.InstanceMethodImpl name params ret_maybe eff_maybe method_constraints _ body ->
       do
         # `name` is canonical and keys the schemes; messages take `label`.
         let label = method_label(name)

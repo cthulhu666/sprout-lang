@@ -326,7 +326,7 @@ fn add_class_tables(t: ClassTables, d: TypedDecl) -> ClassTables =
 
 fn class_method_name(m: ast.ClassMethodSig) -> String =
   match m with
-  | ast.ClassMethodSig name _ _ _ _ -> name
+  | ast.ClassMethodSig name _ _ _ _ _ -> name
 
 fn constraint_class(c: ast.TypeConstraint) -> String =
   match c with

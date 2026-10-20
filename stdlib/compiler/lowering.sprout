@@ -267,7 +267,7 @@ fn lower_one_decl(
            prepend_decls(generate_class_wrappers(class_name, methods, env.class_order, env.super_map, env.scheme_env), wrapper_rev),
            inst_rev)
       # Drop InstanceDecl — replaced by generated instance fns.
-      | ast.InstanceDecl _ _ _ _ ->
+      | ast.InstanceDecl _ _ _ _ _ ->
           (user_rev, wrapper_rev, inst_rev)
       | _ ->
           (Cons(typed_ast.TPassThrough(inner), user_rev), wrapper_rev, inst_rev)
@@ -381,7 +381,7 @@ fn generate_one_class_wrapper(
   scheme_env: Dict types.Scheme
 ) -> typed_ast.TypedDecl =
   match sig with
-  | ast.ClassMethodSig method_name params ret_ty effects_maybe method_constraints ->
+  | ast.ClassMethodSig method_name params ret_ty effects_maybe method_constraints _ ->
       generate_class_wrapper_with(class_name, method_name, name_wildcard_params(params), ret_ty, effects_maybe,
         hidden_params, method_wrapper_slots(method_constraints, 1, class_order, super_map, Nil),
         scheme_env)

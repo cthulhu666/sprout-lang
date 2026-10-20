@@ -18,15 +18,15 @@ import stdlib.string as string
 
 fn decl_name(d: ast.Decl) -> String =
   match d with
-  | ast.FnDecl name _ _ _ _ _ _ -> name
-  | ast.ExternFnDecl name _ _ _ _ -> name
+  | ast.FnDecl name _ _ _ _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name
   | ast.WrapDecl name _ _ _ _ -> name
-  | ast.InstanceDecl _ _ _ _ -> ""
+  | ast.InstanceDecl _ _ _ _ _ -> ""
 
 fn decl_names(decls: List ast.Decl) -> List String =
   list_map(decl_name, decls)

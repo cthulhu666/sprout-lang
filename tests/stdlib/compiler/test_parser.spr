@@ -3,6 +3,7 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.parser as parser
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # One named reason per destructure step, so the `let … in` block's per-binding
 # `else` records *where* it stopped — the whole point of distinct `else`s.
@@ -26,14 +27,14 @@ fn first_fn_body_line(src: String) -> Result BodyLineError Int =
   let Ok toks = lexer.tokenize(src) else Err(LexError)
       Ok prog = parser.parse_program(toks) else Err(ParseError)
       ast.Program([d | _]) _ = prog else Err(NoDecls)
-      ast.FnDecl _ _ _ _ _ body _ = d else Err(FirstNotFn)
+      ast.FnDecl _ _ _ _ _ _ body _ = d else Err(FirstNotFn)
       ast.LetBindExpr _ _ _ _ pos = body else Err(BodyNotLet)
   in Ok(pos.line)
 
 fn first_fn_body(src: String) -> Maybe ast.Expr =
   let Ok toks = lexer.tokenize(src) else Nothing
       Ok prog = parser.parse_program(toks) else Nothing
-      ast.Program([ast.FnDecl _ _ _ _ _ body _ | _]) _ = prog else Nothing
+      ast.Program([ast.FnDecl _ _ _ _ _ _ body _ | _]) _ = prog else Nothing
   in Just(body)
 
 # The steps of a fn whose body is a `do`, one word each: what each step parsed to.
@@ -99,7 +100,7 @@ fn first_fn_body_shape(src: String) -> String =
               | [] -> "no-decls"
               | [d | _] ->
                   match d with
-                  | ast.FnDecl _ _ _ _ _ body _ -> expr_shape(body)
+                  | ast.FnDecl _ _ _ _ _ _ body _ -> expr_shape(body)
                   | _ -> "not-fn"
 
 fn expr_shape(e: ast.Expr) -> String =
@@ -156,8 +157,34 @@ fn first_fn_name(src: String) -> String =
               | [] -> ""
               | [d | _] ->
                   match d with
-                  | ast.FnDecl name _ _ _ _ _ _ -> name
+                  | ast.FnDecl name _ _ _ _ _ _ _ -> name
                   | _ -> ""
+
+# The first declaration's `where`, as `classes=<names> linear=<vars>`. A type
+# reports its first constructor, a class its first method, an instance its own
+# head's and then its first method's.
+fn first_where(src: String) -> String =
+  let Ok toks = lexer.tokenize(src) else "lex-error"
+      Ok prog = parser.parse_program(toks) else "parse-error"
+      ast.Program([d | _]) _ = prog else "no-decl"
+  in decl_where(d)
+
+fn decl_where(d: ast.Decl) -> String =
+  match d with
+  | ast.FnDecl _ _ _ _ cs bounds _ _ -> where_text(cs, bounds)
+  | ast.ExternFnDecl _ _ _ _ bounds _ -> where_text(Nil, bounds)
+  | ast.TypeDecl _ _ [ast.TypeConstructor _ _ _ cs bounds | _] _ _ _ -> where_text(cs, bounds)
+  | ast.ClassDecl _ _ [ast.ClassMethodSig _ _ _ _ cs bounds | _] _ _ -> where_text(cs, bounds)
+  | ast.InstanceDecl _ ctx bounds [ast.InstanceMethodImpl _ _ _ _ cs mb _ | _] _ ->
+      where_text(ctx, bounds) ++ "; " ++ where_text(cs, mb)
+  | _ -> "other"
+
+fn where_text(cs: List ast.TypeConstraint, bounds: List String) -> String =
+  `classes=${string.join(",", list_map(constraint_name, cs))} linear=${string.join(",", bounds)}`
+
+fn constraint_name(c: ast.TypeConstraint) -> String =
+  let ast.TypeConstraint name _ = c
+  in name
 
 fn first_is_type_decl(src: String) -> Bool =
   match lexer.tokenize(src) with
@@ -270,7 +297,7 @@ fn first_param_mode(src: String) -> String =
               | [] -> "no-decl"
               | [d | _] ->
                   match d with
-                  | ast.FnDecl _ params _ _ _ _ _ -> first_param_mode_of(params)
+                  | ast.FnDecl _ params _ _ _ _ _ _ -> first_param_mode_of(params)
                   | _ -> "not-fn"
 
 fn first_param_mode_of(params: List ast.Param) -> String =
@@ -626,6 +653,34 @@ fn main() -> Unit !{IO} =
       parse_fails("let x = try g()\n"))
     assert_true(state, "try: is a keyword",
       parse_fails("fn f() -> Int =\n  let try = 1\n  in try"))
+
+    # `where linear v` is a bound, not a class: it leaves the class list.
+    assert_eq(state, "linear bound: fn, beside a class",
+      first_where("fn f(x: a, y: b) -> a where linear a, Eq b, linear b = x"),
+      "classes=Eq linear=a,b")
+    assert_eq(state, "linear bound: none written",
+      first_where("fn f(x: a) -> a where Eq a = x"), "classes=Eq linear=")
+    assert_eq(state, "linear bound: extern",
+      first_where("extern fn f(x: a) -> a where linear a"), "classes= linear=a")
+    assert_eq(state, "linear bound: existential constructor",
+      first_where("type Boxed = | exists a. Boxed a where linear a, Show a"),
+      "classes=Show linear=a")
+    assert_eq(state, "linear bound: class method",
+      first_where("class C f\n  fn pure(x: a) -> f a where linear a"),
+      "classes= linear=a")
+    assert_eq(state, "linear bound: instance head and method",
+      first_where("instance C (Box a) where linear a, C a\n  fn pure(x: b) -> Box b where linear b = Box(x)"),
+      "classes=C linear=a; classes= linear=b")
+    assert_true(state, "linear bound: names a type variable, not a type",
+      parse_fails("fn f(x: a) -> a where linear Int = x"))
+    assert_true(state, "linear bound: one variable per bound",
+      parse_fails("fn f(x: a) -> a where linear (Maybe a) = x"))
+    assert_true(state, "linear bound: an extern takes no class constraint",
+      parse_fails("extern fn f(x: a) -> a where Eq a"))
+    assert_true(state, "linear bound: not on a class's own variable",
+      parse_fails("class C a where linear a\n  fn take(x: a) -> Int"))
+    assert_true(state, "linear bound: a constructor's only on an exists variable",
+      parse_fails("type Foo a = | Bar a where linear a"))
 
     # Constructor vs variable patterns: the last dotted component decides.
     assert_eq(state, "pattern: bare upper is a ctor", arm_kind("Foo"), "ctor")

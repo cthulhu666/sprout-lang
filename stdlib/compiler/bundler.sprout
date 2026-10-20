@@ -815,7 +815,7 @@ fn build_symbols_from_decls(mod_name: String, exported: List String, ctor_types:
 
 fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List String, decl: ast.Decl, acc: ModuleSymbols) -> ModuleSymbols =
   match decl with
-  | ast.FnDecl _ _ _ _ _ _ _ ->
+  | ast.FnDecl _ _ _ _ _ _ _ _ ->
       add_scoped_values(mod_name, exported, decl, acc)
   | ast.LetDecl _ _ _ _ ->
       add_scoped_values(mod_name, exported, decl, acc)
@@ -826,7 +826,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
         str_list_member(name, ctor_types), acc)
   | ast.ClassDecl name _ methods _ _ ->
       add_class_to_symbols(mod_name, name, methods, str_list_member(name, exported), acc)
-  | ast.InstanceDecl _ _ _ _ -> acc
+  | ast.InstanceDecl _ _ _ _ _ -> acc
   # An alias declares a name for a type and nothing else — no constructor, so
   # nothing for `(..)` to govern.
   | ast.AliasDecl name _ _ _ ->
@@ -835,7 +835,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
   | ast.WrapDecl name _ inner _ _ ->
       add_type_to_symbols(mod_name, name,
-        [ast.TypeConstructor(name, [inner], Nil, Nil)],
+        [ast.TypeConstructor(name, [inner], Nil, Nil, Nil)],
         exported, ctor_types, acc)
   # An extern contributes no module symbol, and that is DERIVED rather than
   # asserted here: ast.decl_value_scopes classifies it ScopeGlobal, so
@@ -846,7 +846,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   # The NAME is still recorded, in extern_names — listing an extern in an import
   # is how its module gets bundled, so the import checks must not read it as a
   # name the module does not have.
-  | ast.ExternFnDecl name _ _ _ _ ->
+  | ast.ExternFnDecl name _ _ _ _ _ ->
       add_extern_name(name, add_scoped_values(mod_name, exported, decl, acc))
 
 fn add_extern_name(name: String, acc: ModuleSymbols) -> ModuleSymbols =
@@ -927,7 +927,7 @@ fn bind_method(is_exported: Bool, acc: ModuleSymbols, entry: (String, String)) -
   match entry with | (name, canonical) -> bind_value(name, canonical, is_exported, acc)
 
 fn method_sig_name(m: ast.ClassMethodSig) -> String =
-  match m with | ast.ClassMethodSig name _ _ _ _ -> name
+  match m with | ast.ClassMethodSig name _ _ _ _ _ -> name
 
 fn add_type_to_symbols(mod_name: String, type_name: String, ctors: List ast.TypeConstructor, exported: List String, ctor_types: List String, acc: ModuleSymbols) -> ModuleSymbols =
   match acc with
@@ -951,7 +951,7 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
   | Nil -> (vl, ev, ctor_map)
   | Cons ctor rest ->
       match ctor with
-      | ast.TypeConstructor ctor_name _ _ _ ->
+      | ast.TypeConstructor ctor_name _ _ _ _ ->
           let canonical = canonical_of(mod_name, ctor_name)
           in add_ctors(mod_name, rest, export_ctors,
             dict_set(ctor_name, canonical, vl),
@@ -1012,11 +1012,11 @@ fn defines_type(d: ast.Decl) -> Bool =
   | ast.TypeDecl _ _ _ _ _ _ -> true
   | ast.RecordDecl _ _ _ _ _ _ _ -> true
   | ast.WrapDecl _ _ _ _ _ -> true
-  | ast.FnDecl _ _ _ _ _ _ _ -> false
-  | ast.ExternFnDecl _ _ _ _ _ -> false
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> false
+  | ast.ExternFnDecl _ _ _ _ _ _ -> false
   | ast.LetDecl _ _ _ _ -> false
   | ast.ClassDecl _ _ _ _ _ -> false
-  | ast.InstanceDecl _ _ _ _ -> false
+  | ast.InstanceDecl _ _ _ _ _ -> false
 
 fn add_type_bodies(ctx: ResolveCtx, acc: Dict (List ast.TypeExpr), d: ast.Decl) -> Dict (List ast.TypeExpr) =
   match d with
@@ -1024,11 +1024,11 @@ fn add_type_bodies(ctx: ResolveCtx, acc: Dict (List ast.TypeExpr), d: ast.Decl) 
   | ast.TypeDecl name _ ctors _ _ _ -> add_type_body(ctx, name, list_flat_map(ctor_field_types, ctors), acc)
   | ast.RecordDecl name _ fields _ _ _ _ -> add_type_body(ctx, name, list_map(record_field_type, fields), acc)
   | ast.WrapDecl name _ inner _ _ -> add_type_body(ctx, name, [inner], acc)
-  | ast.FnDecl _ _ _ _ _ _ _ -> acc
-  | ast.ExternFnDecl _ _ _ _ _ -> acc
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> acc
+  | ast.ExternFnDecl _ _ _ _ _ _ -> acc
   | ast.LetDecl _ _ _ _ -> acc
   | ast.ClassDecl _ _ _ _ _ -> acc
-  | ast.InstanceDecl _ _ _ _ -> acc
+  | ast.InstanceDecl _ _ _ _ _ -> acc
 
 fn add_type_body(ctx: ResolveCtx, name: String, bodies: List ast.TypeExpr,
                  acc: Dict (List ast.TypeExpr)) -> Dict (List ast.TypeExpr) =
@@ -1036,7 +1036,7 @@ fn add_type_body(ctx: ResolveCtx, name: String, bodies: List ast.TypeExpr,
 
 fn ctor_field_types(c: ast.TypeConstructor) -> List ast.TypeExpr =
   match c with
-  | ast.TypeConstructor _ fields _ _ -> fields
+  | ast.TypeConstructor _ fields _ _ _ -> fields
 
 fn record_field_type(f: ast.RecordFieldDecl) -> ast.TypeExpr =
   match f with
@@ -1052,13 +1052,13 @@ fn private_externs_in_module(mod: ParsedModule, defs: Dict (List ast.TypeExpr),
 
 fn is_extern_decl(d: ast.Decl) -> Bool =
   match d with
-  | ast.ExternFnDecl _ _ _ _ _ -> true
+  | ast.ExternFnDecl _ _ _ _ _ _ -> true
   | _ -> false
 
 fn private_extern_in(mod_name: String, ctx: ResolveCtx, defs: Dict (List ast.TypeExpr),
                      d: ast.Decl) -> Maybe (String, String) =
   match d with
-  | ast.ExternFnDecl name params ret _ _ ->
+  | ast.ExternFnDecl name params ret _ _ _ ->
       if any(param_writes_local(ctx, defs, _), params) || type_writes_local(ctx, defs, ret)
       then Just((mod_name, name))
       else Nothing
@@ -1778,10 +1778,10 @@ fn qualify_class_methods(ctx: ResolveCtx, methods: List ast.ClassMethodSig) -> L
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.ClassMethodSig name params ret_type effects constraints ->
+      | ast.ClassMethodSig name params ret_type effects constraints bounds ->
           Cons(ast.ClassMethodSig(dict_get_or(name, ctx.value_locals, name), qualify_param_types(ctx, params),
                                   qualify_type_expr(ctx, ret_type), effects,
-                                  qualify_constraints(ctx, constraints)),
+                                  qualify_constraints(ctx, constraints), bounds),
                qualify_class_methods(ctx, rest))
 
 # An instance names its methods through its class, not through scope, so it need
@@ -1791,12 +1791,13 @@ fn qualify_instance_methods(ctx: ResolveCtx, class_name: String, methods: List a
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl name params ret_type effects constraints body ->
+      | ast.InstanceMethodImpl name params ret_type effects constraints bounds body ->
           Cons(ast.InstanceMethodImpl(class_method_canonical(class_name, name),
                                       qualify_params(ctx, params),
                                       qualify_maybe_type(ctx, ret_type),
                                       effects,
                                       qualify_constraints(ctx, constraints),
+                                      bounds,
                                       qualify_expr(ctx, ast.param_names(params), body)),
                qualify_instance_methods(ctx, class_name, rest))
 
@@ -1823,9 +1824,9 @@ fn qualify_ctor_args(ctx: ResolveCtx, ctors: List ast.TypeConstructor) -> List a
       # use, or its instance/witness lookups (@inst / @fwd) miss for a user-defined class
       # in a module. qualify_constraints qualifies the class name; the existential var arg
       # is a local tyvar and passes through unchanged (like any where-constraint var).
-      | ast.TypeConstructor name args exist_vars exist_constraints ->
+      | ast.TypeConstructor name args exist_vars exist_constraints bounds ->
           Cons(ast.TypeConstructor(qualify_value_name(ctx, Nil, name), qualify_type_list(ctx, args), exist_vars,
-                                   qualify_constraints(ctx, exist_constraints)),
+                                   qualify_constraints(ctx, exist_constraints), bounds),
                qualify_ctor_args(ctx, rest))
 
 fn qualify_record_field_decls(ctx: ResolveCtx, fields: List ast.RecordFieldDecl) -> List ast.RecordFieldDecl =
@@ -1839,13 +1840,14 @@ fn qualify_record_field_decls(ctx: ResolveCtx, fields: List ast.RecordFieldDecl)
 
 fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
   match decl with
-  | ast.FnDecl name params ret_type effects constraints body pos ->
+  | ast.FnDecl name params ret_type effects constraints bounds body pos ->
       ast.FnDecl(
         dict_get_or(name, ctx.value_locals, name),
         qualify_params(ctx, params),
         qualify_maybe_type(ctx, ret_type),
         effects,
         qualify_constraints(ctx, constraints),
+        bounds,
         qualify_expr(ctx, ast.param_names(params), body),
         pos)
   | ast.TypeDecl name type_params ctors deriving_classes mult pos ->
@@ -1878,13 +1880,14 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         qualify_class_methods(ctx, methods),
         qualify_constraints(ctx, superclasses),
         pos)
-  | ast.InstanceDecl constraint instance_constraints methods pos ->
+  | ast.InstanceDecl constraint instance_constraints bounds methods pos ->
       match constraint with
       | ast.TypeConstraint class_name args ->
           let qclass = qualify_type_name(ctx, class_name)
           in ast.InstanceDecl(
                ast.TypeConstraint(qclass, qualify_type_list(ctx, args)),
                qualify_constraints(ctx, instance_constraints),
+               bounds,
                qualify_instance_methods(ctx, qclass, methods),
                pos)
   | ast.AliasDecl name type_params rhs pos ->
@@ -1896,8 +1899,8 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         qualify_type_expr(ctx, inner),
         deriving_classes,
         pos)
-  | ast.ExternFnDecl name params ret_type effects pos ->
-      ast.ExternFnDecl(name, qualify_param_types(ctx, params), qualify_maybe_type(ctx, ret_type), effects, pos)
+  | ast.ExternFnDecl name params ret_type effects bounds pos ->
+      ast.ExternFnDecl(name, qualify_param_types(ctx, params), qualify_maybe_type(ctx, ret_type), effects, bounds, pos)
 
 fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
   match decls with
@@ -2056,7 +2059,7 @@ fn params_over_floor(params: List ast.Param) -> Bool =
 # check is written to fail closed rather than assume that stays true.
 fn is_floor_extern(d: ast.Decl) -> Bool =
   match d with
-  | ast.ExternFnDecl _ params ret _ _ ->
+  | ast.ExternFnDecl _ params ret _ _ _ ->
       params_over_floor(params) && maybe_type_over_floor(ret)
   | _ -> false
 
@@ -2071,7 +2074,7 @@ fn floor_export_names(decls: List ast.Decl) -> List String =
   | Nil -> Nil
   | Cons d rest ->
       match d with
-      | ast.ExternFnDecl name _ _ _ _ -> Cons(name, floor_export_names(rest))
+      | ast.ExternFnDecl name _ _ _ _ _ -> Cons(name, floor_export_names(rest))
       | _ -> floor_export_names(rest)
 
 # The prelude reduced to its floor: the primitive-only externs and nothing else.
@@ -2255,7 +2258,7 @@ fn unresolved_in_class_methods(ms: List ast.ClassMethodSig, declared: Dict Strin
 
 fn unresolved_in_class_method(m: ast.ClassMethodSig, declared: Dict String) -> Maybe String =
   match m with
-  | ast.ClassMethodSig _ params ret _ cs ->
+  | ast.ClassMethodSig _ params ret _ cs _ ->
       unresolved_in_signature(params, Just(ret), cs, declared)
 
 fn unresolved_in_instance_methods(ms: List ast.InstanceMethodImpl, declared: Dict String) -> Maybe String =
@@ -2263,7 +2266,7 @@ fn unresolved_in_instance_methods(ms: List ast.InstanceMethodImpl, declared: Dic
 
 fn unresolved_in_instance_method(m: ast.InstanceMethodImpl, declared: Dict String) -> Maybe String =
   match m with
-  | ast.InstanceMethodImpl _ params ret _ cs body ->
+  | ast.InstanceMethodImpl _ params ret _ cs _ body ->
       match unresolved_in_signature(params, ret, cs, declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_expr(body, declared)
@@ -2273,7 +2276,7 @@ fn unresolved_in_ctors(ctors: List ast.TypeConstructor, declared: Dict String) -
 
 fn unresolved_in_ctor(c: ast.TypeConstructor, declared: Dict String) -> Maybe String =
   match c with
-  | ast.TypeConstructor _ args _ exist_constraints ->
+  | ast.TypeConstructor _ args _ exist_constraints _ ->
       match unresolved_in_types(args, declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_constraints(exist_constraints, declared)
@@ -2286,25 +2289,25 @@ fn unresolved_in_record_fields(fields: List ast.RecordFieldDecl, declared: Dict 
 # which of 4,400 lines the annotation was on.
 fn decl_display_name(decl: ast.Decl) -> String =
   match decl with
-  | ast.FnDecl name _ _ _ _ _ _ -> name
-  | ast.ExternFnDecl name _ _ _ _ -> name
+  | ast.FnDecl name _ _ _ _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name
   | ast.WrapDecl name _ _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
-  | ast.InstanceDecl constraint _ _ _ ->
+  | ast.InstanceDecl constraint _ _ _ _ ->
       match constraint with
       | ast.TypeConstraint class_name _ -> "instance " ++ class_name
 
 fn unresolved_in_decl(decl: ast.Decl, declared: Dict String) -> Maybe String =
   match decl with
-  | ast.FnDecl _ params ret _ cs body _ ->
+  | ast.FnDecl _ params ret _ cs _ body _ ->
       match unresolved_in_signature(params, ret, cs, declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_expr(body, declared)
-  | ast.ExternFnDecl _ params ret _ _ -> unresolved_in_signature(params, ret, Nil, declared)
+  | ast.ExternFnDecl _ params ret _ _ _ -> unresolved_in_signature(params, ret, Nil, declared)
   | ast.TypeDecl _ _ ctors _ _ _ -> unresolved_in_ctors(ctors, declared)
   | ast.RecordDecl _ _ fields _ _ _ _ -> unresolved_in_record_fields(fields, declared)
   | ast.AliasDecl _ _ rhs _ -> unresolved_in_type(rhs, declared)
@@ -2313,7 +2316,7 @@ fn unresolved_in_decl(decl: ast.Decl, declared: Dict String) -> Maybe String =
       match unresolved_in_class_methods(methods, declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_constraints(supers, declared)
-  | ast.InstanceDecl constraint inst_cs methods _ ->
+  | ast.InstanceDecl constraint inst_cs _ methods _ ->
       match unresolved_in_constraints(Cons(constraint, inst_cs), declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_instance_methods(methods, declared)
@@ -2394,7 +2397,7 @@ fn type_vocab(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> TypeVocab
 # like its constructor.
 fn one_ctor_named_apart(decl: ast.Decl) -> Maybe (String, List String, String, source.SourcePos) =
   match decl with
-  | ast.TypeDecl name params [ast.TypeConstructor ctor _ _ _] _ _ pos ->
+  | ast.TypeDecl name params [ast.TypeConstructor ctor _ _ _ _] _ _ pos ->
       if ctor == name then Nothing else Just((name, params, ctor, pos))
   | _ -> Nothing
 
@@ -2463,7 +2466,7 @@ fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbo
 
 fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
   match decl with
-  | ast.FnDecl name _ _ _ _ _ _ ->
+  | ast.FnDecl name _ _ _ _ _ _ _ ->
       if str_starts_with(name, ".") then Just("FnDecl name starts with '.': " ++ name)
       else Nothing
   | ast.TypeDecl name _ _ _ _ _ ->
@@ -2639,17 +2642,17 @@ fn qualify_question(question: ast.Expr, entry_path: String, root: String, extra_
 
 fn decl_orig_name(decl: ast.Decl) -> String =
   match decl with
-  | ast.FnDecl name _ _ _ _ _ _ -> name
+  | ast.FnDecl name _ _ _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
-  | ast.InstanceDecl constraint _ _ _ ->
+  | ast.InstanceDecl constraint _ _ _ _ ->
       match constraint with
       | ast.TypeConstraint class_name _ -> "instance:" ++ class_name
   | ast.AliasDecl name _ _ _ -> name
   | ast.WrapDecl name _ _ _ _ -> name
-  | ast.ExternFnDecl name _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ _ -> name
 
 fn ctx_status_line(path: String, all_symbols: Dict ModuleSymbols) -> String =
   match dict_get(path, all_symbols) with

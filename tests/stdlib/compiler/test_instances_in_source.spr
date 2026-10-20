@@ -17,7 +17,7 @@ fn tapp(head: String, arg: String) -> ast.TypeExpr =
   ast.TypeApply(ast.TypeName(head), ast.TypeName(arg))
 
 fn inst(cls: String, arg: ast.TypeExpr) -> ast.Decl =
-  ast.InstanceDecl(ast.TypeConstraint(cls, Cons(arg, Nil)), Nil, Nil, pos())
+  ast.InstanceDecl(ast.TypeConstraint(cls, Cons(arg, Nil)), Nil, Nil, Nil, pos())
 
 # Eq String, Ord String, Semigroup String, Functor List, Eq (List a)
 fn sample_program() -> ast.Program =

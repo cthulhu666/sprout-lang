@@ -631,7 +631,7 @@ export fn compile_question_ir(src: String, entry_path: String, expr: String, how
         emit_ir(lowered)
 
 fn eval_main(how: EvalMain, question: ast.Expr) -> ast.Decl =
-  ast.FnDecl("main", Nil, Just(ast.TypeName("Unit")), Just(["IO"]), Nil, eval_main_body(how, question, pos), pos)
+  ast.FnDecl("main", Nil, Just(ast.TypeName("Unit")), Just(["IO"]), Nil, Nil, eval_main_body(how, question, pos), pos)
   where pos = ast.expr_pos(question)
 
 fn eval_main_body(how: EvalMain, question: ast.Expr, pos: source.SourcePos) -> ast.Expr =

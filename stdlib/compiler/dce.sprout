@@ -420,12 +420,12 @@ fn refs_passthrough(d: ast.Decl, acc: Set) -> Set =
   | ast.ClassDecl _ _ _ _ _ -> acc
   | ast.AliasDecl _ _ _ _ -> acc
   | ast.WrapDecl _ _ _ _ _ -> acc
-  | ast.ExternFnDecl _ _ _ _ _ -> acc
-  | ast.FnDecl name _ _ _ _ _ _ ->
+  | ast.ExternFnDecl _ _ _ _ _ _ -> acc
+  | ast.FnDecl name _ _ _ _ _ _ _ ->
       panic("dce.refs_passthrough: untyped FnDecl `" ++ name ++ "` reached codegen (internal error)")
   | ast.LetDecl name _ _ _ ->
       panic("dce.refs_passthrough: untyped LetDecl `" ++ name ++ "` reached codegen (internal error)")
-  | ast.InstanceDecl _ _ _ _ ->
+  | ast.InstanceDecl _ _ _ _ _ ->
       panic("dce.refs_passthrough: untyped InstanceDecl reached codegen (internal error)")
 
 fn refs_decl(d: typed_ast.TypedDecl, acc: Set) -> Set =

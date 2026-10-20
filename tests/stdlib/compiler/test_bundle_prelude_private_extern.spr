@@ -22,7 +22,7 @@ let entry_src: String =
 # The name a function's body calls, or "" when the body is not a plain call.
 fn called_name(d: ast.Decl) -> String =
   match d with
-  | ast.FnDecl _ _ _ _ _ body _ ->
+  | ast.FnDecl _ _ _ _ _ _ body _ ->
       match body with
       | ast.CallExpr (ast.VarExpr n _) _ _ -> n
       | _ -> ""
@@ -35,7 +35,7 @@ fn decl_called(decls: List ast.Decl, fn_name: String) -> String =
 
 fn is_fn_named(d: ast.Decl, fn_name: String) -> Bool =
   match d with
-  | ast.FnDecl name _ _ _ _ _ _ -> name == fn_name
+  | ast.FnDecl name _ _ _ _ _ _ _ -> name == fn_name
   | _ -> false
 
 fn marked(n: String) -> Bool = string.starts_with(n, source.private_extern_marker)

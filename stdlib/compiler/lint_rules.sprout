@@ -444,10 +444,10 @@ fn patterns_in_decls(decls: List ast.Decl) -> List ast.Pattern =
 
 fn patterns_in_decl(d: ast.Decl) -> List ast.Pattern =
   match d with
-  | ast.FnDecl _ _ _ _ _ body _ -> patterns_in_expr(body)
+  | ast.FnDecl _ _ _ _ _ _ body _ -> patterns_in_expr(body)
   | ast.LetDecl _ body _ _ -> patterns_in_expr(body)
-  | ast.InstanceDecl _ _ methods _ ->
-      concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ body -> patterns_in_expr(body), methods)
+  | ast.InstanceDecl _ _ _ methods _ ->
+      concat_map(\m -> match m with | ast.InstanceMethodImpl _ _ _ _ _ _ body -> patterns_in_expr(body), methods)
   | _ -> Nil
 
 fn patterns_in_expr(e: ast.Expr) -> List ast.Pattern =
@@ -792,7 +792,7 @@ fn ctor_arm_names(ctors: List ast.TypeConstructor) -> List String =
 
 fn ctor_name(c: ast.TypeConstructor) -> String =
   match c with
-  | ast.TypeConstructor name _ _ _ -> name
+  | ast.TypeConstructor name _ _ _ _ -> name
 
 # True when the body names one of them anywhere — a linear payload nested in an
 # unrestricted wrapper carries the same obligation as a bare one. Matching on the
@@ -832,7 +832,7 @@ fn nullary_const_go(decls: List ast.Decl, linear: List String) -> List LintFindi
 
 fn nullary_const_finding(d: ast.Decl, linear: List String) -> List LintFinding =
   match d with
-  | ast.FnDecl name params _ effects constraints body pos ->
+  | ast.FnDecl name params _ effects constraints _ body pos ->
       if name != entry_point_name && list_is_empty(params) && declared_pure(effects)
          && list_is_empty(constraints) && is_const_body(body)
          && ! mentions_linear_ctor (linear, body)
@@ -853,14 +853,14 @@ fn walk_instance_methods(written: Set, methods: List ast.InstanceMethodImpl) -> 
   | Nil -> Nil
   | Cons m rest ->
       match m with
-      | ast.InstanceMethodImpl _ params _ _ _ body ->
+      | ast.InstanceMethodImpl _ params _ _ _ _ body ->
           list_append(walk_expr(written, ast.param_names(params), body), walk_instance_methods(written, rest))
 
 fn walk_decl(written: Set, d: ast.Decl) -> List LintFinding =
   match d with
-  | ast.FnDecl _ params _ _ _ body _ -> walk_expr(written, ast.param_names(params), body)
+  | ast.FnDecl _ params _ _ _ _ body _ -> walk_expr(written, ast.param_names(params), body)
   | ast.LetDecl _ body _ _ -> walk_expr(written, Nil, body)
-  | ast.InstanceDecl _ _ methods _ -> walk_instance_methods(written, methods)
+  | ast.InstanceDecl _ _ _ methods _ -> walk_instance_methods(written, methods)
   | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
 
 fn walk_decls(written: Set, decls: List ast.Decl) -> List LintFinding =
@@ -993,7 +993,7 @@ export fn maybe_with_default(fallback: a, m: Maybe a) -> a =
 
 fn decl_is_fn_named(name: String, d: ast.Decl) -> Bool =
   match d with
-  | ast.FnDecl n _ _ _ _ _ _ -> n == name
+  | ast.FnDecl n _ _ _ _ _ _ _ -> n == name
   | _ -> false
 
 # §5.3: "one expression" is vacuous, since every body is one. `where` and
@@ -1036,7 +1036,7 @@ fn shadowed_hole(holes: List String, binders: List String) -> Maybe String =
 fn derive_one(name: String, decls: List ast.Decl) -> Result String Combinator =
   match find(\ (d: ast.Decl) -> decl_is_fn_named(name, d), decls) with
   | Nothing -> Err(name ++ ": not defined in the combinator source")
-  | Just (ast.FnDecl _ params _ _ _ body _) ->
+  | Just (ast.FnDecl _ params _ _ _ _ body _) ->
       let holes = list_map(ast.param_name, params)
           Ok binders = admissible_body(name, body) else Err msg -> Err(msg)
       in match shadowed_hole(holes, binders) with
@@ -1274,11 +1274,11 @@ fn decl_declared_type_name(d: ast.Decl) -> String =
   | ast.RecordDecl n _ _ _ _ _ _ -> n
   | ast.AliasDecl n _ _ _ -> n
   | ast.WrapDecl n _ _ _ _ -> n
-  | ast.FnDecl _ _ _ _ _ _ _ -> ""
-  | ast.ExternFnDecl _ _ _ _ _ -> ""
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> ""
+  | ast.ExternFnDecl _ _ _ _ _ _ -> ""
   | ast.LetDecl _ _ _ _ -> ""
   | ast.ClassDecl _ _ _ _ _ -> ""
-  | ast.InstanceDecl _ _ _ _ -> ""
+  | ast.InstanceDecl _ _ _ _ _ -> ""
 
 fn header_line_text(numbered: (Int, String)) -> String =
   match numbered with

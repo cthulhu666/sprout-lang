@@ -527,7 +527,7 @@ fn max_arity_of(ctors: List ast.TypeConstructor, m: Int) -> Int =
   | Nil -> m
   | Cons tc rest ->
       match tc with
-      | ast.TypeConstructor _ args _ _ ->
+      | ast.TypeConstructor _ args _ _ _ ->
           match list_length(args) with
           | n -> max_arity_of(rest, if n > m then n else m)
 
@@ -539,7 +539,7 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
   | Nil -> (acc, next_tag, regs)
   | Cons tc rest ->
       match tc with
-      | ast.TypeConstructor ctor_name ctor_args _ exist_constraints ->
+      | ast.TypeConstructor ctor_name ctor_args _ exist_constraints _ ->
           # Stage 0b: a constrained existential packs one hidden dictionary field
           # per witness slot — one per method across each constraint's class AND
           # its transitive superclasses (docs/gadts-v0.md §5b). These extra `'p'`
@@ -5931,7 +5931,7 @@ fn adt_ctor_entries(cs: List ast.TypeConstructor,
   | Nil -> Nil
   | Cons c rest ->
       match c with
-      | ast.TypeConstructor cname args _ _ ->
+      | ast.TypeConstructor cname args _ _ _ ->
           match dict_get(cname, ctors) with
           | Just entry ->
               Cons((entry.tag, list_length(args)), adt_ctor_entries(rest, ctors))
