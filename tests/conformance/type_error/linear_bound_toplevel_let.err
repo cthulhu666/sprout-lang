@@ -1,1 +1,1 @@
-`dup` takes `a` as a value it may copy or drop, and `L` is linear
+a top-level `let` takes no bound: if it uses its `a` exactly once, write `dup` as a `fn` with `where linear a`

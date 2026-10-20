@@ -217,6 +217,12 @@ export fn rec_field_key(rec_name: String, field: String) -> String = rec_fields_
 # spelled as that scheme spells them (docs/linearity-bound-v0.md §6.7).
 export fn linear_bound_key(name: String) -> String = "@linbound:" ++ name
 
+# A function's signature as written, kept after its scheme is generalized, so a
+# diagnostic can name a variable as the source spells it.
+export fn written_sig_key(name: String) -> String = "@sig:" ++ name
+
+export fn top_let_key(name: String) -> String = "@toplet:" ++ name
+
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)
 
@@ -903,7 +909,7 @@ export let inst_owner_prefix: String = "#inst/"
 # unifier-minted variable and `_unann@` every unannotated-slot placeholder — neither is a
 # name source can write, so those two are exact. The parser's existential variable is the
 # odd one out: `existv0` is writeable, so it is matched only with a numeric tail.
-fn is_generated_var(name: String) -> Bool =
+export fn is_generated_var(name: String) -> Bool =
   str_starts_with(name, "$") || is_unann_placeholder(name) || is_exist_var(name)
 
 fn is_exist_var(name: String) -> Bool =

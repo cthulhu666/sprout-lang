@@ -153,7 +153,7 @@ type Boxed = | exists a. Boxed a where linear a, Taker a
 
 An `extern fn` takes a `where` too, holding only linear bounds: it has no dictionary parameter
 for a class constraint, but `panic` and the `__chan_*` primitives are externs whose `a` must
-admit a linear type. A class's own variable takes none (§6.1), so `class C a where linear a`
+admit a linear type. A redeclared extern must repeat its bounds, as it repeats its signature. A class's own variable takes none (§6.1), so `class C a where linear a`
 is a parse error, and a method's `where linear a` on it a type error. Each bound names exactly
 one type variable: `where linear Int`, `where linear g a` and a bare `where linear` are parse
 errors too.
@@ -242,7 +242,9 @@ Two places, each where the facts it needs already are:
 - **References, in inference.** Where inference instantiates a generic name — a call, a value
   reference, a constructor — it records, for each unbounded variable, the fresh type variable
   that stands for it, beside the name and position. Once the declaration's substitution is final
-  it applies §6.3 to each. This covers partial application and a generic function passed as a
+  it applies §6.3 to each. A mutually recursive group's substitution is final only at the group's
+  boundary: a type a later member fixes to a linear one is still a bare variable at an earlier
+  member's own boundary, so that member's checks, §6.4's included, run again there. This covers partial application and a generic function passed as a
   value (`list_map(dup, xs)`): each mention is instantiated. It runs in inference rather than
   in `linear_check` because only inference resolves names: `linear_check` sees the global
   environment, so a local that shadows a generic global would be matched against the wrong
@@ -270,6 +272,10 @@ Dispatch does not change. Inference changes only in §6.6's mode comparison.
   `ident` takes `a` as a value it may copy or drop, and `L` is linear.
   If `ident` uses its `a` exactly once, add `where linear a` to it.
   ```
+  The variable is named as the callee's signature writes it, which a generalized scheme does not
+  keep, so pre-scan stores each function's written signature (`@sig:`). A callee that writes no
+  variable there is told to annotate its parameters first; a top-level `let`, which takes no
+  bound, to become a `fn`.
 - **Now accepted:** a bare type variable discarded in statement position (§6.4); `borrowing a`
   under the bound, which closes the P3 entry; an instance at a non-linear type of a class that
   borrows its variable, and such a function passed as a value (§6.6).

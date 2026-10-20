@@ -1,0 +1,13 @@
+module main
+
+# The hint names the variable as the callee's signature writes it.
+
+type linear L = L Int
+
+fn dupb(x: b) -> (b, b) = (x, x)
+
+fn use_it(n: Int) -> Int =
+  let (L(a), L(c)) = dupb(L(n))
+  in a + c
+
+fn main() -> Unit !{IO} = print(int_to_string(use_it(1)))
