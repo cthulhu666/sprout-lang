@@ -223,6 +223,9 @@ export fn written_sig_key(name: String) -> String = "@sig:" ++ name
 
 export fn top_let_key(name: String) -> String = "@toplet:" ++ name
 
+# The value of an env marker whose presence is all it says.
+export let presence_marker: Scheme = mono(TConst(type_id("Unit")))
+
 # A `where linear` variable's written name, keyed by its rigid variable, so a
 # diagnostic prints `a` and not `$t41`.
 export fn bound_name_key(id: String) -> String = "@boundname:" ++ id

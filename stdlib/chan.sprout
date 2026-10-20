@@ -47,7 +47,7 @@ extern fn __chan_new(scope_id: Int, capacity: Int) -> Int !{IO}
 extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO} where linear a
 extern fn __chan_recv(chan_id: Int) -> Recv a !{IO} where linear a
 extern fn __chan_close(chan_id: Int) -> Unit !{IO}
-extern fn __chan_select(chan_ids: List Int) -> Selected a !{IO}
+extern fn __chan_select(chan_ids: List Int) -> Selected a !{IO} where linear a
 
 # Create a `capacity`-slot channel belonging to `scope`, freed when the scope closes.
 # `capacity >= 1` is bounded buffered; `capacity == 0` is a rendezvous (unbuffered) channel
@@ -82,7 +82,7 @@ export fn chan_close(ch: Chan a) -> Unit !{IO} where linear a =
   | Chan cid -> __chan_close(cid)
 
 # The raw scheduler handle inside a `Chan` — used only to pass a channel list to `__chan_select`.
-fn chan_id(ch: Chan a) -> Int =
+fn chan_id(ch: Chan a) -> Int where linear a =
   match ch with
   | Chan cid -> cid
 
@@ -91,6 +91,6 @@ fn chan_id(ch: Chan a) -> Int =
 # closed channel is always ready (yields `Closed`). When several are ready at entry, the LOWEST
 # index wins. An empty list loud-fails (a select with no cases can never proceed). Recv-only:
 # there are no send cases in this increment. See docs/concurrency-select-design-2026-07-17.md.
-export fn chan_select(chans: List (Chan a)) -> (Int, Recv a) !{IO} =
+export fn chan_select(chans: List (Chan a)) -> (Int, Recv a) !{IO} where linear a =
   match __chan_select(list_map(chan_id, chans)) with
   | Selected i r -> (i, r)

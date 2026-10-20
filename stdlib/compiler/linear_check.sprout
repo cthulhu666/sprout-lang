@@ -411,12 +411,10 @@ fn borrowed_binder_msg(name: String) -> String =
 let nonvar_borrow_msg: String =
   "a borrowing argument must be a variable reference (a freshly-built linear value here would never be consumed)"
 
-# Which of the three reasons a modifier was rejected. They need different
-# messages: telling the author of `fn f(x: borrowing a)` that `a` "is not a
-# linear type" invites them to make `a` linear, which is not expressible — the
-# real reason is that linearity is per-declaration and cannot be decided for a
-# type variable. `once` fails for a reason of its own (M4.4a): it constrains how
-# often the parameter is INVOKED, so it needs a function to invoke.
+# Why a modifier was rejected. They need different messages: an unbounded type
+# variable (BadOnTyvar) is fixed by `where linear` on it, which "is not a linear
+# type" would not suggest. `once` fails for a reason of its own (M4.4a): it
+# constrains how often the parameter is INVOKED, so it needs a function to invoke.
 type BadModifier (..) =
   | BadOnTyvar String
   | BadNonLinear String
@@ -1713,9 +1711,17 @@ fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
       else if ast.mode_is_once(ast.param_mode_of(prm))
       then bad_function_only_here(BadOnceOnTyvar, BadOnceNonFunction, prm, ret_te, a, rest, b, env)
       else if ! mode_is_written (ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
-      else if type_is_tyvar(a) && ! type_is_linear (a, env) then Just(BadOnTyvar(ast.param_name(prm)))
-      else if ! type_is_linear (a, env) then Just(BadNonLinear(ast.param_name(prm)))
-      else first_bad_modifier(rest, ret_te, b, env)
+      else
+        match ownership_fault(ast.param_name(prm), a, env) with
+        | Just bad -> Just(bad)
+        | Nothing -> first_bad_modifier(rest, ret_te, b, env)
+
+# `borrowing`/`consuming` needs a linear type. A type variable is linear only under
+# `where linear`, so an unbounded one gets the message that names the bound.
+fn ownership_fault(name: String, a: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
+  if type_is_linear(a, env) then Nothing
+  else if type_is_tyvar(a) then Just(BadOnTyvar(name))
+  else Just(BadNonLinear(name))
 
 # The same rules, for a modifier written INSIDE a type rather than on a declared
 # parameter: `g: (borrowing Int) -> Int`. Without this an arrow was the one place
@@ -1782,9 +1788,7 @@ fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
   if ast.mode_is_local(mode) then function_only_fault(BadLocalOnTyvar, BadLocalNonFunction, name, a)
   else if ast.mode_is_once(mode) then function_only_fault(BadOnceOnTyvar, BadOnceNonFunction, name, a)
   else if ! mode_is_written (mode) then Nothing
-  else if type_is_tyvar(a) && ! type_is_linear (a, env) then Just(BadOnTyvar(name))
-  else if ! type_is_linear (a, env) then Just(BadNonLinear(name))
-  else Nothing
+  else ownership_fault(name, a, env)
 
 # A type variable is REJECTED, like it is for `borrowing` — though for a different
 # reason, and post-review: an earlier version accepted it, reasoning that `once`

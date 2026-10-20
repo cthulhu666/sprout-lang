@@ -134,7 +134,7 @@ type TypedDeclResult =
 # binding-group inference exists to preserve.
 # See docs/binding-group-inference-v0.md §6.
 type FnInferred =
-  | FnInferred ast.Decl typed_ast.TypedExpr types.Type (Dict types.Scheme) (List (String, String)) (List String) (Dict types.Type -> linear_check.LinCheck)
+  | FnInferred ast.Decl typed_ast.TypedExpr types.Type (Dict types.Scheme) (List (String, String)) (List String) LinearGate
   # FnInferred decl  typed_body  inferred_type  fwd_markers  decl_constraints  group_env_ftv  linear_gate
 
 type FnInferResult =
@@ -2041,7 +2041,7 @@ fn type_expects_arguments(t: types.Type) -> Bool =
 let bounded_decl_key: String = "@bounded_decl"
 
 fn with_bounded_decl(bounds: List String, env: Dict types.Scheme) -> Dict types.Scheme =
-  if bounds != Nil then dict_set(bounded_decl_key, types.mono(types.TConst(types.type_id("Unit"))), env)
+  if bounds != Nil then dict_set(bounded_decl_key, types.presence_marker, env)
   else env
 
 # docs/linearity-bound-v0.md §6.3: at each use of a generic name, park what the
@@ -2064,9 +2064,12 @@ fn park_one_bound(state: unifier.InferState, name: String, scheme: types.Scheme,
   | Nothing -> ()
 
 fn unbounded_vars(name: String, scheme: types.Scheme, env: Dict types.Scheme) -> List String =
-  let exempt = list_append(linear_bounds_of(name, env),
-                 list_append(class_own_vars(name, env), ctor_data_params(name, scheme, env)))
-  in list_filter(\v -> ! list_member (v, exempt), types.scheme_vars(scheme))
+  match types.scheme_vars(scheme) with
+  | [] -> Nil
+  | vars ->
+      let exempt = list_append(linear_bounds_of(name, env),
+                     list_append(class_own_vars(name, env), ctor_data_params(name, scheme, env)))
+      in list_filter(\v -> ! list_member (v, exempt), vars)
 
 fn class_own_vars(name: String, env: Dict types.Scheme) -> List String =
   match dict_get(types.class_marker_key(name), env) with
@@ -3848,7 +3851,7 @@ fn fresh_for_prog_var(prog_var: String, prog_to_fresh: Dict types.Type) -> Maybe
 # A compound constraint (`where ToString (List a)`), under its class and every
 # transitive superclass, keyed as its hidden slot is (compound_fwd_key).
 fn seed_compound_marker(class_name: String, te: ast.TypeExpr, env: Dict types.Scheme) -> Dict types.Scheme =
-  list_fold(\ (acc, cls) -> dict_set(compound_fwd_key(cls, te), types.mono(types.TConst(types.type_id("Unit"))), acc),
+  list_fold(\ (acc, cls) -> dict_set(compound_fwd_key(cls, te), types.presence_marker, acc),
             env, Cons(class_name, env_superclasses(class_name, vec_to_list(dict_entries_with_prefix(types.super_marker_tag, env)))))
 
 # Every superclass `@super:` markers record for a class, transitively. A class already
@@ -5151,7 +5154,7 @@ fn steps_tail(steps: List ast.DoStep, pos: source.SourcePos) -> BlockTail =
 
 # The declaration's `try` matches, marked for linear_check.
 fn with_try_markers(positions: List source.SourcePos, env: Dict types.Scheme) -> Dict types.Scheme =
-  list_fold(\ (e, p) -> dict_set(linear_check.try_marker(p), types.mono(types.TConst(types.type_id("Unit"))), e),
+  list_fold(\ (e, p) -> dict_set(linear_check.try_marker(p), types.presence_marker, e),
             env, positions)
 
 fn splice_try_operand(call: typed_ast.TypedExpr, operand: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
@@ -9545,7 +9548,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       | ast.ClassDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | ast.InstanceDecl _ _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
       | ast.LetDecl name _ _ _ ->
-          pre_scan_fn_decls(rest, dict_set(types.top_let_key(name), types.mono(types.TConst(types.type_id("Unit"))), env),
+          pre_scan_fn_decls(rest, dict_set(types.top_let_key(name), types.presence_marker, env),
                             alias_env)
 
 # The scheme pre-scan just registered, under the name commit cannot overwrite.
@@ -10111,19 +10114,29 @@ fn typecheck_fn_group(
             let (new_out, new_env, new_env_ftv) = commit_group_members(inferred, final_subst, env, env_ftv, out)
             in GroupOk(new_out, new_env, final_subst, alias_env, new_env_ftv)
 
-# A member checked before the group's last saw only part of its substitution, so a
-# type a later sibling fixed to a linear one was still a bare variable at its own
-# boundary. Its linear gate runs again here, under the group's final types; the
-# last member's already ran under them.
+# Every member's linear gate, under the group's final types: a member checked before
+# the last saw only part of the group's substitution. Each runs with every member's
+# bounded variables marked, since an unannotated sibling's parameter can be unified
+# with one and its own env would not mark it linear.
 fn group_linear_error(inferred: List (Int, FnInferred), final_subst: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  match inferred with
-  | [] -> Nothing
-  | [_] -> Nothing
-  | [(_, inf) | rest] ->
-      let FnInferred _ _ _ _ _ _ gate = inf
-      in match gate(final_subst) with
-         | linear_check.LinFail pos msg -> Just((pos, msg))
-         | linear_check.LinPass -> group_linear_error(rest, final_subst)
+  let gates = list_map(member_gate, inferred)
+      mark_group = \env -> list_fold(\ (e, g) -> mark_with(g, final_subst, e), env, gates)
+  in find_map(gate_failure(_, final_subst, mark_group), gates)
+
+fn member_gate(m: (Int, FnInferred)) -> LinearGate =
+  let (_, FnInferred _ _ _ _ _ _ gate) = m
+  in gate
+
+fn mark_with(g: LinearGate, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+  let marks = g.marks
+  in marks(subst, env)
+
+fn gate_failure(g: LinearGate, subst: Dict types.Type,
+                mark: Dict types.Scheme -> Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  let check = g.check
+  in match check(subst, mark) with
+     | linear_check.LinFail pos msg -> Just((pos, msg))
+     | linear_check.LinPass -> Nothing
 
 fn group_members(decl_vec: Vec ast.Decl, g: List Int) -> List (Int, ast.Decl) =
   match g with
@@ -10311,11 +10324,21 @@ fn committed_bounds(name: String, bounds: List String, inferred: types.Type,
   | ([_ | _], Just sig) -> renamed_vars(sig, inferred, bounds)
   | _ -> Nil
 
-# `vs`, variables of `from`, under the names `to` gives them: two signatures of one
-# declaration may spell a variable differently.
+# `vs`, variables of `from`, under the names `to` gives them.
 fn renamed_vars(from: types.Scheme, to: types.Type, vs: List String) -> List String =
+  let renaming = var_renaming(from, to)
+  in list_filter_map(dict_get(_, renaming), vs)
+
+# Each variable of `from` that `to` leaves a variable, to the name `to` gives it: two
+# signatures of one declaration may spell a variable differently.
+fn var_renaming(from: types.Scheme, to: types.Type) -> Dict String =
   let matched = match_scheme_body(types.scheme_type(from), types.scheme_vars(from), to)
-  in list_filter_map(\v -> type_var_name(dict_get(v, matched)), vs)
+  in list_fold(rename_entry(matched, _, _), dict_empty(), types.scheme_vars(from))
+
+fn rename_entry(matched: Dict types.Type, acc: Dict String, v: String) -> Dict String =
+  match type_var_name(dict_get(v, matched)) with
+  | Just n -> dict_set(v, n, acc)
+  | Nothing -> acc
 
 fn type_var_name(t: Maybe types.Type) -> Maybe String =
   match t with
@@ -11524,20 +11547,29 @@ fn mark_bounded(prog_to_fresh: Dict types.Type, subst: Dict types.Type, env: Dic
   | Just id -> dict_set(types.bound_name_key(id), types.mono(types.TVar(types.tyvar_id(v))), mark_linear(env, id))
   | Nothing -> env
 
+# A declaration's linearity checks, deferred to its binding group's boundary.
+# `marks` adds its bounded variables' markers to an env, under a substitution.
+# `check` runs the walk and the bound check under a substitution, in its own env
+# extended by the function it is given, which adds every member's markers.
+type LinearGate = (marks: Dict types.Type -> Dict types.Scheme -> Dict types.Scheme,
+                   check: Dict types.Type -> (Dict types.Scheme -> Dict types.Scheme) -> linear_check.LinCheck)
+
 # The gate a declaration that failed earlier hands back: nothing is left to check.
-fn no_linear_gate(subst: Dict types.Type) -> linear_check.LinCheck = linear_check.LinPass
+let no_linear_gate: LinearGate =
+  LinearGate(marks = \ (_, env) -> env, check = \ (_, _) -> linear_check.LinPass)
 
 # The declaration boundary's two linearity checks. The linear walk goes first: its
 # diagnostics name what the user wrote, such as a comprehension's generator, where
 # the bound's would name `list_fold`, the call the comprehension elaborates to.
-fn bounded_linear_gate(bound_check: BoundCheck, prog_to_fresh: Dict types.Type,
-                       params: List ast.Param, ret_te: Maybe ast.TypeExpr, s2: Dict types.Type,
-                       inst_type: types.Type, typed_body: typed_ast.TypedExpr,
-                       fn_pos: source.SourcePos, env: Dict types.Scheme) -> linear_check.LinCheck =
-  let bound_env = bounded_env(bound_check.bounds, prog_to_fresh, s2, env)
+fn bounded_linear_gate(obligations: List unifier.BoundObligation, params: List ast.Param,
+                       ret_te: Maybe ast.TypeExpr, inst_type: types.Type,
+                       typed_body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
+                       env: Dict types.Scheme, s2: Dict types.Type,
+                       mark: Dict types.Scheme -> Dict types.Scheme) -> linear_check.LinCheck =
+  let bound_env = mark(env)
   in match fn_linear_gate(params, ret_te, s2, inst_type, typed_body, fn_pos, bound_env) with
      | linear_check.LinPass ->
-         match bound_obligation_error(bound_check.obligations, s2, bound_env) with
+         match bound_obligation_error(obligations, s2, bound_env) with
          | Just (bp, bm) -> linear_check.LinFail(bp, bm)
          | Nothing -> linear_check.LinPass
      | fail -> fail
@@ -11578,8 +11610,8 @@ fn bound_fix(callee: String, scheme: types.Scheme, v: String, env: Dict types.Sc
         | Nothing -> AnnotateFirst
 
 fn written_var(sig: types.Scheme, scheme: types.Scheme, v: String) -> Maybe String =
-  let matched = match_scheme_body(types.scheme_type(sig), types.scheme_vars(sig), types.scheme_type(scheme))
-  in find(\w -> type_var_name(dict_get(w, matched)) == Just(v), types.scheme_vars(sig))
+  let renaming = var_renaming(sig, types.scheme_type(scheme))
+  in find(\w -> dict_get(w, renaming) == Just(v), types.scheme_vars(sig))
 
 fn bound_violation_msg(f: String, fix: BoundFix, reason: String) -> String =
   match fix with
@@ -12110,7 +12142,7 @@ fn check_fn_body(
   eff_subst: Dict types.Effect,
   alias_env: Dict types.Type,
   env_ftv: List String
-) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String), Dict types.Type, Dict types.Type -> linear_check.LinCheck) !{IO} =
+) -> (typed_ast.BodyResult, Dict types.Scheme, List (String, String), Dict types.Type, LinearGate) !{IO} =
   match decl with
   | ast.FnDecl name params ret_type_maybe effects_maybe constraints bounds body fn_pos ->
       do
@@ -12168,17 +12200,13 @@ fn check_fn_body(
                                      env_ftv, typed_body, body_env) with
           | Just msg -> (typed_ast.BodyErr(fn_pos, msg), dict_empty(), Nil, subst, no_linear_gate)
           | Nothing ->
-            # M4.2: enforce consume-exactly-once for linear-typed bindings, on the
-            # fully-substituted body/type. A violation becomes a BodyErr, surfacing
-            # through the same path as any type error. Gated so a linear-free
-            # program skips the check and its substitution copy. See linear_check.
-            let gate = bounded_linear_gate(BoundCheck(bounds = bounds, obligations = obligations), prog_to_fresh,
-                                           params, ret_type_maybe, _, inst_type, typed_body, fn_pos,
-                                           with_try_markers(tries, env))
-            in match gate(s2) with
-               | linear_check.LinFail lp lm -> (typed_ast.BodyErr(lp, lm), dict_empty(), Nil, subst, no_linear_gate)
-               | linear_check.LinPass ->
-                   (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
+            # M4.2: consume-exactly-once for linear-typed bindings, checked by
+            # group_linear_error once the binding group's types are final. Gated so a
+            # linear-free program skips the check and its substitution copy.
+            let gate = LinearGate(marks = bounded_env(bounds, prog_to_fresh, _, _),
+                                  check = bounded_linear_gate(obligations, params, ret_type_maybe, inst_type,
+                                                              typed_body, fn_pos, with_try_markers(tries, env), _, _))
+            in (typed_ast.BodyOk(resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(name, params, ret_type_maybe), s2, fwd_env), s2, bind_params(params, set_empty()), typed_body), unifier.apply_subst(s2, inst_type)),
                     eta_fwdvar_markers(prog_to_fresh, s2, fwd_markers),
                     canonicalize_constrained_constraints(constraints, prog_to_fresh, s2, inst_type, env_ftv),
                     s2, gate)
@@ -12651,7 +12679,7 @@ fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Sche
       | [head_te | _] ->
           dict_set(
             types.inst_marker_key(class_name, type_head_str(type_from_ast(head_te, dict_empty()))),
-            types.mono(types.TConst(types.type_id("Unit"))),
+            types.presence_marker,
             env
           )
 
@@ -12940,8 +12968,9 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
                                   method_constraints: List ast.TypeConstraint,
                                   bound_check: BoundCheck,
                                   prog_to_fresh: Dict types.Type) -> InstanceMethodResult =
-  match bounded_linear_gate(bound_check, prog_to_fresh, params, ret_maybe, s2, inst_type, typed_body,
-                            typed_ast.typed_expr_pos(typed_body), env) with
+  match bounded_linear_gate(bound_check.obligations, params, ret_maybe, inst_type, typed_body,
+                            typed_ast.typed_expr_pos(typed_body), env, s2,
+                            bounded_env(bound_check.bounds, prog_to_fresh, s2, _)) with
   | linear_check.LinFail lp lm -> InstanceMethodErr(lp, lm)
   | linear_check.LinPass ->
       InstanceMethodOk(
