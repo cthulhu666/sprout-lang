@@ -162,6 +162,12 @@ and the branch waiting for it was written for a different case; the type checker
 and will reassure you. "All 19 call sites already match on `Maybe`, so no caller changes"
 (bigint-v0 §5.2) was true of the types, false of the behaviour, and cost two bugs a month apart.
 
+**Removing or relaxing a check** — list the premises it rests on ("no caller can instantiate this
+variable at a linear type"), with a test for each. A premise a later step of a staged design
+delivers moves the removal to that step. An incomplete new check misses errors; a premature
+removal accepts bad programs. linearity-bound step 2 dropped a discard rule whose premise was step
+3's, and it cost two bugs (`docs/linearity-bound-retro-2026-10-20.md` §3.1).
+
 **Prior-art survey** — when the decision is a choice among established alternatives that comparable
 languages have also faced, show briefly how a handful of state-of-the-art languages handle it and
 where they diverge, so the choice is grounded rather than invented. Every claim must be verified
