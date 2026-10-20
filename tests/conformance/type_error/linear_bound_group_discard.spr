@@ -1,0 +1,18 @@
+module main
+
+# In a mutually recursive group, `x`'s type is fixed to `L` only by `g`, a later
+# member. The discard is still found: each member is checked against the group's
+# final types.
+
+type linear L = L Int
+
+fn f(x, n: Int) -> Int =
+  if n > 0 then g(n - 1)
+  else
+    do
+      x
+      0
+
+fn g(n: Int) -> Int = f(L(n), n)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(1)))

@@ -27,8 +27,8 @@ export type FieldObligation (..) =
 # variables that admits no linear type (docs/linearity-bound-v0.md §6.3). Checked
 # at the declaration boundary, once the substitution says what the variable became.
 export type BoundObligation (..) =
-  | BoundObligation types.Type String String source.SourcePos
-  # BoundObligation instantiated_as  callee  variable_as_displayed  pos
+  | BoundObligation types.Type String String types.Scheme source.SourcePos
+  # BoundObligation instantiated_as  callee  variable  callee_scheme  pos
 
 export fn field_obligation_receiver(o: FieldObligation) -> types.Type =
   match o with

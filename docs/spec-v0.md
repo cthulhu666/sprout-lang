@@ -1766,7 +1766,8 @@ variable (an instance at a linear type is concrete code, checked as such), which
 takes no `where linear`, in the class header or in a method's `where`.
 
 `where linear v` lifts the restriction on `v`, in the same `where` list as class
-constraints; an `extern fn` takes a `where` that holds only these. Each bound names one
+constraints; an `extern fn` takes a `where` that holds only these, and a redeclared extern
+must repeat them. Each bound names one
 type variable: `where linear Int`, `where linear g a` and a bare `where linear` are parse
 errors. The body is then
 checked as if `v` were linear: a binder of type `v`, or one storing a `v`, must be
@@ -1779,7 +1780,8 @@ fn dup(x: a) -> (a, a) = (x, x)              # dup(L(1)) is rejected
 
 The restriction is checked where a variable is **instantiated** — a call, a value
 reference such as `list_map(dup, xs)`, a constructor pack — once the declaration's
-types are known. A variable bounded by `where linear` counts as linear there, so it
+types are known; in a mutually recursive group, once the group's are. A variable
+bounded by `where linear` counts as linear there, so it
 cannot be passed on to code that has not opted in. A variable that occurs only at a
 phantom position is not exempt: `detach(task: Task a)` discards a task whose result
 nobody receives, so `detach` at a `Task File` is rejected.
@@ -1787,6 +1789,10 @@ nobody receives, so `detach` at a `Task File` is rejected.
 ```
 `dup` takes `a` as a value it may copy or drop, and `L` is linear; if `dup` uses its `a` exactly once, add `where linear a` to it
 ```
+
+The error names the variable as the callee's signature writes it. A callee whose
+signature writes no type variable for it is told to annotate its parameters first, and
+a top-level `let`, which takes no `where`, to become a `fn`.
 
 A class method may declare the bound on its own variables; each instance method
 restates it under its own names, as it restates a class constraint, and its body is

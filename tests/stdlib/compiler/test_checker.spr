@@ -121,4 +121,11 @@ fn main() -> Unit !{IO} =
     r24 <- run_check("type List a = | Nil | Cons a (List a)\nextern fn vec_from_list(xs: List Int) -> Vec Int\nfn f(v: Vec Int) -> Int = 1\nfn g() -> Int = f([1, 2, 3])")
     assert_true(state, "bare list literal at Vec-typed call arg typechecks (desugar_ctx coercion)", is_check_ok(r24))
 
+    # An extern's `where linear a` makes `a` linear in its signature, so `borrowing a`
+    # is allowed there as on a `fn`; without the bound it is still rejected.
+    r25 <- run_check("type linear L = L Int\nextern fn peek_any(x: borrowing a) -> Int where linear a")
+    assert_true(state, "bounded extern takes `borrowing a`", is_check_ok(r25))
+    r26 <- run_check("type linear L = L Int\nextern fn peek_any(x: borrowing a) -> Int")
+    assert_true(state, "unbounded extern rejects `borrowing a`", is_check_err(r26))
+
     summary(state)

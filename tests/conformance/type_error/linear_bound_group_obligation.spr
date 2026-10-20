@@ -1,0 +1,12 @@
+module main
+
+# `list_length` takes an unbounded `a`. In this group `a` becomes `L` only through
+# `g`, a later member; the use is still checked against the group's final types.
+
+type linear L = L Int
+
+fn f(x, n: Int) -> Int = list_length([x]) + (if n > 0 then g(n - 1) else 0)
+
+fn g(n: Int) -> Int = f(L(n), n)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(1)))

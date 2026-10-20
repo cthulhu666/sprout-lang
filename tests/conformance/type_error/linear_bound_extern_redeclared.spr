@@ -1,0 +1,11 @@
+module main
+
+# A redeclared extern must agree on its `where linear` bounds too: the first
+# declaration's would otherwise be kept for a signature that did not write them.
+
+type linear L = L Int
+
+extern fn give_up(msg: String) -> a where linear a
+extern fn give_up(msg: String) -> a
+
+fn main() -> Unit !{IO} = print("x")
