@@ -271,7 +271,7 @@ first one's writes, so a pure function could return two answers. These BACKLOG P
 first:
 
 - ~~**A lambda's `once` promise is never checked.**~~ Landed: checked as a declared one is.
-- **Generic code can duplicate a linear value**: `fn dup(x: a) -> (a, a) = (x, x)`.
+- **Generic code can duplicate or drop a linear value**: `fn dup(x: a) -> (a, a) = (x, x)`.
 - ~~**One call can borrow and consume the same linear value**: `f(x, x)` with
   `f(b: borrowing L, c: L)`.~~ Landed: a borrow lasts the whole call (spec §5.8).
 - ~~**A top-level `let` can hold a linear value that every function consumes.**~~ Landed:
@@ -289,8 +289,8 @@ two answers in silence. So their rejection tests gate `LArr`.
 They split by cost. Three were missing checks in existing code, and have landed: `once`, the
 borrow-and-consume call and the top-level `let`. The other three share one cause, a type variable that hides
 linearity: generic duplication, the generic container and the existential. One design closes all
-three, a linearity bound on type variables at instantiation and at packing (BACKLOG P3
-**Linearity bound on a type parameter**). M4.2 made polymorphism over linear types a non-goal;
+three, a linearity bound on type variables at instantiation and at packing
+([linearity-bound-v0.md](linearity-bound-v0.md)). M4.2 made polymorphism over linear types a non-goal;
 Swift added such a bound in SE-0427, making every generic parameter `Copyable` unless it opts out.
 
 **Invariants.** Three rules that make `larr_set` safe to call pure, for any later pass to keep:
@@ -544,7 +544,8 @@ value is unshared moves the ranking.
 2. Ship 5.2, the trie, as the general persistent array. It needs no builtins and no
    linearity, so nothing below blocks it.
 3. ~~Fix the three linearity holes that are missing checks (5.3, *Prerequisites*).~~ Landed.
-4. Design the linearity bound on type variables, which closes the other three.
+4. ~~Design the linearity bound on type variables~~ Designed in
+   [linearity-bound-v0.md](linearity-bound-v0.md); implementing it closes the other three.
 5. Ship 5.3, the linear array, with its bulk operations, as the one mechanism for in-place
    writes in pure code (`MutVec`, `Ref` and `MutMatrix` stay for `IO` code), after steps 3 and
    4, and keep 5.3's *Invariants*.
