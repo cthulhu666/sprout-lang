@@ -114,12 +114,12 @@ fn head_type_name(t: types.Type) -> String =
   | _ -> types.type_to_string(t)
 
 fn type_is_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
-  dict_member("@linear:" ++ head_type_name(t), env)
+  dict_member(types.linear_marker_key(head_type_name(t)), env)
 
 # True when the program declares any linear type (a cheap gate that lets a
 # linear-free compilation skip the whole pass — set alongside @linear:<name>).
 export fn program_has_linear(env: Dict types.Scheme) -> Bool =
-  dict_member("@any_linear", env)
+  dict_member(types.any_linear_key, env)
 
 # --- resolving the types of pattern-bound variables (for linear tracking) ---
 #
@@ -327,7 +327,7 @@ fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type, env:
         ++ "` (linear values must be used exactly once)"
 
 # `t` with each `where linear` variable under its written name.
-fn type_text(t: types.Type, env: Dict types.Scheme) -> String =
+export fn type_text(t: types.Type, env: Dict types.Scheme) -> String =
   types.type_to_string(types.apply_rename_type(bound_names(t, env), t))
 
 export fn bound_names(t: types.Type, env: Dict types.Scheme) -> Dict String =

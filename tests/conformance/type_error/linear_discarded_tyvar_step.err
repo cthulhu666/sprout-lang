@@ -1,1 +1,1 @@
-`run_it` takes `a` as a value it may copy or drop, and `Task Int` is linear
+`run_it` takes `a` as a value it may copy or drop, and `stdlib.task.Task Int` is linear

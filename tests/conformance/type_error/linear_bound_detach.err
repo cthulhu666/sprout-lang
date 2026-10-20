@@ -1,1 +1,1 @@
-`detach` takes `a` as a value it may copy or drop, and `L` is linear
+`detach` takes `a` as a value it may copy or drop, and `main.L` is linear

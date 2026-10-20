@@ -195,7 +195,10 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @class:<method or class>        @inst:<class>:<head>      @arity:<ctor>
 #   @fwd:<tyvar>:<class>            @eta_fwd:<tyvar>:<class>   @eta_fwdvar:<tyvar>
 #   @super:<class>:<superclass>     @rec:<record>:<field>
-#   @type:<TypeName>                @linbound:<fn, extern or method>
+#   @type:<TypeName>                @linear:<TypeName or tyvar id>
+#   @any_linear                     @bounded_decl
+#   @linbound:<fn, extern or method>  @boundname:<tyvar id>
+#   @sig:<fn>                       @toplet:<let>
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
@@ -212,6 +215,12 @@ export fn super_marker_prefix(class_name: String) -> String = super_marker_tag +
 export fn super_marker_key(class_name: String, super_name: String) -> String = super_marker_prefix(class_name) ++ super_name
 export fn rec_fields_prefix(rec_name: String) -> String = rec_marker_tag ++ rec_name ++ ":"
 export fn rec_field_key(rec_name: String, field: String) -> String = rec_fields_prefix(rec_name) ++ field
+
+# A linear type constructor, or a `where linear` variable by its id; `@any_linear`
+# says the env has one, `@bounded_decl` that the body being checked has a bound.
+export fn linear_marker_key(name: String) -> String = "@linear:" ++ name
+export let any_linear_key: String = "@any_linear"
+export let bounded_decl_key: String = "@bounded_decl"
 
 # The variables of a name's scheme that its `where linear` admits linear types at,
 # spelled as that scheme spells them (docs/linearity-bound-v0.md §6.7).

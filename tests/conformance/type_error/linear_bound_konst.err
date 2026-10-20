@@ -1,1 +1,1 @@
-`konst` takes `b` as a value it may copy or drop, and `L` is linear
+`konst` takes `b` as a value it may copy or drop, and `main.L` is linear
