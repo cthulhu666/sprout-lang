@@ -77,8 +77,8 @@ load_show() {
 }
 
 # Dependency names on a recipe's header line -> DEPS. Parenthesised dependencies
-# carry arguments — `(_test-stdlib "build/...")` — so strip the parens and keep
-# only tokens shaped like recipe names, which drops the quoted path arguments.
+# carry arguments — `(_test-stdlib "build/...")` — so drop the quoted ones, strip the
+# parens and keep only tokens shaped like recipe names.
 declare -a DEPS=()
 deps_of() {
   local r="$1" line="" candidate d
@@ -90,6 +90,9 @@ deps_of() {
   [[ -n "$line" ]] || return 0
   line=${line#*:}
   line=${line%%#*}
+  # Drop quoted arguments whole: a multi-word one (`"inst__copy inst__drop"`) would
+  # otherwise split into tokens shaped like recipe names.
+  while [[ "$line" =~ \"[^\"]*\" ]]; do line=${line/"${BASH_REMATCH[0]}"/ }; done
   line=${line//[()]/ }
   # Disable globbing: the argument lists contain patterns like `bench/*.sprout`,
   # and unquoted word-splitting would expand them against the working directory
