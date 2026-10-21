@@ -717,8 +717,8 @@ N/A cells.
   docs/linearity-bound-v0.md §12 step 3, so each flips the gate RED (UNEXPECTED MATCH) when step 3
   lands and must leave the list then.
 - `linear-grid-drift` regenerates into a temp dir and diffs against the committed files. Edit the
-  generator, rerun it with the repo root as out-root, then `just fmt`; never edit a cell by hand.
-  Where `fmt` rewrites generator output (`Ctor(x)` spacing), the generator emits the formatted form.
+  generator and rerun it with the repo root as out-root; never edit a cell by hand. Its output
+  must already be what `just fmt` writes (e.g. `Ctor(x)` spacing): `fmt-check` fails otherwise.
 - A review bug in linearity adds its neighbouring reach paths here (retro §6: the half of
   P2 that T2 keeps).
 
