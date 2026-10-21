@@ -476,7 +476,7 @@ fn main() -> Unit !{IO} =
     _ <- after(print("w"), Box (L(1)))
     print("x")
 EOF
-rej "$HDR_L" ctor__pass 'takes `a` as a value it may copy or drop' <<'EOF'
+rej "$HDR_L" ctor__pass "$TAKES" <<'EOF'
 type Box a = Box a
 
 fn ident(x: a) -> a = x
