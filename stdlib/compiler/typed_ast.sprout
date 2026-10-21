@@ -598,3 +598,42 @@ fn applied_base(te: ast.TypeExpr) -> ast.TypeExpr =
   match te with
   | ast.TypeApply base _ -> applied_base(base)
   | _ -> te
+
+# A position nothing names: `_`, or an inference variable (`$t<n>`, as
+# type_to_type_expr writes one). An existential (`$ex_<binder>`, a `$sk<n>`
+# skolem), an unannotated slot's placeholder and a headerless file's own type
+# (`$entry.Never`, source.entry_module_prefix) are types of their own; reading them as
+# unknown let `where Eq (Maybe a)` serve them with `a`'s dictionary.
+export fn is_unnamed(name: String) -> Bool =
+  name == "_"
+    || (str_starts_with(name, "$") && is_existential_name(name) == false
+          && str_starts_with(name, source.entry_module_prefix) == false)
+
+fn is_existential_name(name: String) -> Bool =
+  types.is_existential_head(name) || types.is_skolem_name(name)
+
+# What a message prints as `_`: every compiler-made name, none of which the program wrote.
+fn displays_as_hole(name: String) -> Bool =
+  is_unnamed(name) || is_existential_name(name) || types.is_unann_placeholder(name)
+
+# A type as the program would write it. Module prefixes are dropped, a tuple is
+# `(a, Int)` rather than its internal head `Tuple2`, and a variable no signature
+# named prints as `_`.
+export fn te_display(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeName n -> if displays_as_hole(n) then "_" else string.after_last_dot(n)
+  | ast.TypeApply base arg -> te_display(base) ++ " " ++ te_display_atom(arg)
+  | ast.TupleType items -> "(" ++ string.join(", ", list_map(te_display, items)) ++ ")"
+  | ast.TypeArrow param ret _ _ -> te_display_atom(param) ++ " -> " ++ te_display(ret)
+  # A thunk or effect type in a context position: its head (`Fn`, `Eff`) still names it.
+  | _ -> type_expr_head_name(te)
+
+export fn te_display_atom(te: ast.TypeExpr) -> String =
+  match te with
+  | ast.TypeApply _ _ -> "(" ++ te_display(te) ++ ")"
+  | ast.TypeArrow _ _ _ _ -> "(" ++ te_display(te) ++ ")"
+  | _ -> te_display(te)
+
+# An instance as a diagnostic names it: `Dup2 (Maybe a)`, `ToString (a, b)`.
+export fn instance_display(cls: String, type_args: List ast.TypeExpr) -> String =
+  string.join(" ", Cons(string.after_last_dot(cls), list_map(te_display_atom, type_args)))
