@@ -1,0 +1,9 @@
+module main
+
+# A class method signature is mode-checked as a function's is: `Int` is not
+# linear, so `borrowing` on it means nothing (linearity-bound-v0.md §6.6).
+
+class Sized a
+  fn size(r: a, n: borrowing Int) -> Int
+
+fn main() -> Unit !{IO} = print("x")

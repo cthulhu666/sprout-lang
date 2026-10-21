@@ -77,6 +77,10 @@ export fn ownership_is_borrow(o: Ownership) -> Bool =
   | OwnLocal -> false
   | OwnOnceLocal -> false
 
+# Consuming or `borrowing`: the pair that coincides on a type holding no linear
+# value (docs/linearity-bound-v0.md §6.6).
+export fn borrow_axis_only(o: Ownership) -> Bool = ! own_is_once (o) && ! own_is_local (o)
+
 # `once` and `local` are separate axes that ride one tag; read them one at a time.
 export fn own_is_once(o: Ownership) -> Bool =
   match o with

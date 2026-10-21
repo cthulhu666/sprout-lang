@@ -409,6 +409,9 @@ fn method_once_local_mismatch_msg(name: String) -> String =
 fn method_mismatch_msg(name: String) -> String =
   "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that only borrows where the class consumes discharges the caller's obligation and leaks the value"
 
+fn method_consumes_mismatch_msg(name: String) -> String =
+  "instance method parameter '" ++ name ++ "' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that consumes where the class only borrows releases a value its caller still owns"
+
 let borrowed_field_read_msg: String =
   "a linear field cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
 
@@ -1648,21 +1651,36 @@ fn any_type_expr_writes_mode(tes: List ast.TypeExpr) -> Bool =
 # The single leak-flavoured sentence it used to return was written when Ownership
 # had two values, and described a leak even when the actual disagreement was about
 # `once`, whose failure is an unbounded invocation count.
-export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type) -> Maybe String =
+#
+# `inst_type` is the instance method's own type: on a parameter type holding no
+# linear value `borrowing` and consuming coincide (docs/linearity-bound-v0.md §6.6).
+export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type, inst_type: types.Type,
+                               env: Dict types.Scheme) -> Maybe String =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
-      if ownership_agrees(ast.param_mode_of(prm), class_type)
-      then method_mode_mismatch(rest, spine_rest(class_type))
-      else Just(method_mismatch_for(ast.param_name(prm), ownership_of_param_mode(ast.param_mode_of(prm)),
-                                    spine_own(class_type)))
+      let inst = ownership_of_param_mode(ast.param_mode_of(prm))
+          cls = spine_own(class_type)
+      in
+        if ownership_agrees(inst, cls, inst_type, env)
+        then method_mode_mismatch(rest, spine_rest(class_type), spine_rest(inst_type), env)
+        else Just(method_mismatch_for(ast.param_name(prm), inst, cls))
 
-fn ownership_agrees(m: ast.ParamMode, class_type: types.Type) -> Bool =
-  ownership_of_param_mode(m) == spine_own(class_type)
+fn ownership_agrees(inst: types.Ownership, cls: types.Ownership, inst_type: types.Type,
+                    env: Dict types.Scheme) -> Bool =
+  inst == cls
+    || (types.borrow_axis_only(inst) && types.borrow_axis_only(cls) && ! spine_param_holds_linear (inst_type, env))
+
+fn spine_param_holds_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
+  match t with
+  | types.TFunc p _ _ _ -> is_just(first_linear_in(p, env))
+  | _ -> true
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
   match types.mode_diff(inst, cls) with
-  | types.DiffBorrow -> method_mismatch_msg(name)
+  | types.DiffBorrow ->
+      if types.ownership_is_borrow(inst) then method_mismatch_msg(name)
+      else method_consumes_mismatch_msg(name)
   | types.DiffOnceLocal -> method_once_local_mismatch_msg(name)
   | types.DiffOnce -> method_once_mismatch_msg(name)
   | types.DiffLocal -> method_local_mismatch_msg(name)

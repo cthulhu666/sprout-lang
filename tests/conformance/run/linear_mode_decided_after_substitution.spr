@@ -1,0 +1,12 @@
+module main
+
+# The modes of `peek_it` and `apply`'s `f` differ while `b` is still unknown; the
+# check waits for `b = Int`, where they coincide (linearity-bound-v0.md §6.6).
+
+fn peek_it(r: borrowing a) -> Int where linear a = 1
+
+fn apply(f: b -> Int, x: b) -> Int = f(x)
+
+fn use(f: Int -> Int) -> Int = f(2)
+
+fn main() -> Unit !{IO} = print(int_to_string(apply(peek_it, 40) + use(peek_it)))

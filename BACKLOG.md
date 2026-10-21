@@ -2008,11 +2008,15 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   containment-computed, reaching parameter modes, `borrowing` filters and field reads; `consuming
   Crate` is still an error. What is left is §6 of `docs/linearity-virality-v0.md` — a type
   variable's universe.
-- [ ] `P3` **A mode on a non-linear type should be no mode (receiver-borrowing classes).**
-  `class Peekable a { fn peek(r: borrowing a) -> Int }` cannot have `instance Peekable Int` with
-  `fn peek(r: Int)`: modes must match exactly, and `borrowing Int` is refused. Class method
-  signatures are not mode-checked at all, and the instance-vs-class mismatch has one wording for
-  both directions. Step 4 of `docs/linearity-bound-v0.md` §12 (§6.6).
+- [ ] `P3` **A deferred mode mismatch is reported at the declaration, not the expression.**
+  Arrows differing in `borrowing` unify and wait in the substitution under `@modes`
+  (`unifier.defer_modes`) until the parameter's type is known; the pair carries no position, so the
+  error points at the declaration head. Carrying one means a typed channel out of every unify site
+  (`docs/linearity-bound-v0.md` §6.6).
+- [ ] `P3` **An arrow's mode inside an instance method's parameter type must match exactly.**
+  `infer.sig_against_class` compares instance and class signatures before any type is marked
+  linear, so `f: Int -> Int` cannot implement `f: (borrowing a) -> Int` at `Int`, and `borrowing
+  Int` is refused there. Needs the linear types and bounds at that check (§6.6).
 - [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
   parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The
   field-read borrow is keyed on the binding's mode, not on `TGetField` syntax, deliberately —

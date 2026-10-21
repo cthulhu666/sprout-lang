@@ -1,0 +1,10 @@
+module main
+
+# A `where linear` variable is linear, so its modes must match: `k` consumes the
+# value `apply_b` only lends it (linearity-bound-v0.md §6.6).
+
+fn apply_b(g: (borrowing a) -> Int, x: borrowing a) -> Int where linear a = g(x)
+
+fn h(k: a -> Int, x: borrowing a) -> Int where linear a = apply_b(k, x)
+
+fn main() -> Unit !{IO} = print("x")

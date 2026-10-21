@@ -949,8 +949,9 @@ fn io_into_pure_error() -> String =
     ++ " — spec-v0.md §7. A pure function is accepted wherever an `!{IO}` one is"
     ++ " expected; the reverse would let the IO run behind a pure signature."
 
-# Parameter ownership is INVARIANT (M4.6): the two conventions are different
-# types and neither substitutes for the other. Both directions are unsound —
+# Parameter ownership is INVARIANT (M4.6) at a type holding a linear value: the
+# two conventions are different types and neither substitutes for the other. Both
+# directions are unsound —
 # supplying a consuming function where a borrowing one is expected means the
 # argument is released by a call the caller still owns the value after (double
 # consume); supplying a borrowing one where consuming is expected discharges the
@@ -960,20 +961,58 @@ fn io_into_pure_error() -> String =
 #
 # Effects are deliberately still ignored above; ownership is not, because an
 # ownership mismatch is a soundness bug rather than a conservatism knob.
+#
+# On a type holding no linear value `borrowing` and consuming coincide, and the
+# parameter's type may not be known yet, so a pair that differs on that axis alone
+# unifies and waits in the substitution (defer_modes). `once` and `local` stay exact.
 fn unify_tfunc_owned(subst: Dict types.Type, eff_subst: Dict types.Effect, polarity: Polarity,
                      l: types.Type, r: types.Type,
                      p1: types.Type, r1: types.Type, e1: types.Effect, o1: types.Ownership,
                      p2: types.Type, r2: types.Type, e2: types.Effect, o2: types.Ownership) -> Unified =
   if o1 == o2
   then unify_tfunc(subst, eff_subst, polarity, p1, r1, e1, p2, r2, e2)
+  else if types.borrow_axis_only(o1) && types.borrow_axis_only(o2)
+  then
+    match unify_tfunc(subst, eff_subst, polarity, p1, r1, e1, p2, r2, e2) with
+    | UnifyOk s es -> UnifyOk(defer_modes(s, l, r), es)
+    | UnifyErr e -> UnifyErr(e)
   else UnifyErr(ownership_mismatch_error(l, r, o1, o2))
+
+# The arrow pairs waiting for their parameter's type (docs/linearity-bound-v0.md
+# §6.6), under a key no variable has. They ride the substitution, so every site
+# threads them and a discarded unification discards them. The value is a tuple of
+# `(l, r)` tuples, written and read only by the functions below.
+let deferred_modes_key: String = "@modes"
+
+fn defer_modes(subst: Dict types.Type, l: types.Type, r: types.Type) -> Dict types.Type =
+  dict_set(deferred_modes_key, types.TTuple(Cons(types.TTuple([l, r]), deferred_mode_items(subst))), subst)
+
+fn deferred_mode_items(subst: Dict types.Type) -> List types.Type =
+  match dict_get(deferred_modes_key, subst) with
+  | Just (types.TTuple items) -> items
+  | _ -> Nil
+
+# Each pair as unified, before `subst` is applied.
+export fn deferred_modes(subst: Dict types.Type) -> List(types.Type, types.Type) =
+  list_filter_map(mode_pair, deferred_mode_items(subst))
+
+fn mode_pair(item: types.Type) -> Maybe(types.Type, types.Type) =
+  match item with
+  | types.TTuple [l, r] -> Just((l, r))
+  | _ -> Nothing
+
+export fn has_deferred_modes(subst: Dict types.Type) -> Bool = dict_member(deferred_modes_key, subst)
+
+# A declaration checks its own pairs; the next one starts without them.
+export fn without_deferred_modes(subst: Dict types.Type) -> Dict types.Type =
+  dict_remove(deferred_modes_key, subst)
 
 # The explanation branches on WHICH pair actually mismatched. It used to be a
 # single sentence about `borrowing`, written when Ownership had two values; once
 # `once` was added that text named the wrong modifier and offered a workaround
 # about a modifier the program did not use.
-fn ownership_mismatch_error(l: types.Type, r: types.Type,
-                            o1: types.Ownership, o2: types.Ownership) -> String =
+export fn ownership_mismatch_error(l: types.Type, r: types.Type,
+                                   o1: types.Ownership, o2: types.Ownership) -> String =
   "ownership mismatch: " ++ types.type_to_string(l) ++ " vs " ++ types.type_to_string(r)
     ++ " — " ++ ownership_mismatch_reason(o1, o2)
 

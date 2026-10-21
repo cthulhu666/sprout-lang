@@ -1925,15 +1925,32 @@ either direction. Supplying a consuming function where a borrowing one is expect
 means the value is released by a call whose caller still owns it (double consume);
 supplying a borrowing one where consuming is expected discharges the caller's
 obligation through a call that releases nothing (leak). A mismatch is a type
-error where the mismatch occurs.
+error. One between `borrowing` and consuming is decided once types are known
+(below), so it is reported at the declaration that holds it.
+
+**On a type holding no linear value the two coincide.** The modes are erased, and
+such a type has nothing to own, so `(borrowing Int) -> Int` is the type
+`Int -> Int`. The rule is decided once the parameter's type is known, not when the
+two arrows meet: `apply(peek_it, 40)` with `peek_it: (borrowing a) -> Int` and
+`apply(f: b -> Int, x: b)` compiles, since `b` is `Int`; with `where linear b` on
+`apply`, `apply(peek_it, L(1))` is a mismatch. A `where linear` variable counts as
+linear. This is the `borrowing` axis
+only: `once` and `local` must still match exactly. A function type inside an
+instance method's parameter type is compared before any type is known to be linear,
+so there its modes must match exactly.
 
 Two consequences follow:
 
 - **An instance method's modifiers must match its class declaration's.** A call
   dispatches through the class signature, so an instance that borrows where the
-  class consumes would leak. Compared as *ownership*, not as written text:
-  `consuming` on the instance against an unmodified class parameter agrees, since
-  both consume.
+  class consumes would leak, and one that consumes where the class borrows would
+  release a value its caller still owns. Compared as *ownership*, not as written
+  text: `consuming` on the instance against an unmodified class parameter agrees,
+  since both consume, and on a parameter type holding no linear value any two of
+  them agree (`fn peek(r: Int)` implements `fn peek(r: borrowing a)` at `Int`). A
+  class method's signature takes the modifier rules a function's does, except that
+  the class's own variable may be borrowed, since an instance may put a linear type
+  there.
 - **An UNMARKED arrow type means consuming.** Passing a borrowing function to a
   parameter annotated `(T) -> U` is an ownership mismatch. To accept one, mark
   the arrow's parameter: `(borrowing T) -> U`. The modifier is written inside the

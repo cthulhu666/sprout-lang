@@ -1,0 +1,1 @@
+ownership mismatch: borrowing main.L -> Int vs main.L -> Int — these differ only in how the parameter is taken, and a `borrowing` parameter's convention must match exactly in either direction: a borrowing function standing in for a consuming one leaves the value unreleased, and a consuming one standing in for a borrowing one releases a value its caller still owns
