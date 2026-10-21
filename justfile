@@ -1114,11 +1114,9 @@ _test-reject stage dir noun xfail="" phase="check":
 test-type-errors: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "type_error" "type-error" "")
 
 # Generated linear misuse grid: reach path x misuse, one program each (docs/gates.md
-# §Linear grid). The xfail cells are the instance-head copy, drop and pass-through,
-# accepted until docs/linearity-bound-v0.md §12 step 3. Each turns this gate RED
-# (UNEXPECTED MATCH) when step 3 lands, and must leave the list then.
+# §Linear grid).
 [group('test')]
-test-linear-grid: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "linear_grid" "linear-grid" "inst__copy inst__drop inst__pass")
+test-linear-grid: bootstrap-from-seed (_test-reject "build/compile_driver_bin_stage1" "linear_grid" "linear-grid" "")
 
 # The grid is generated: a hand edit, or a generator edit without regenerating, fails here.
 [group('test')]

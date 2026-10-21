@@ -1742,9 +1742,8 @@ The rules:
   disagreed until 2026-09-07, which made `Maybe File` a leak in statement position
   and not in binder position. A function's type variable counts only under `where linear`
   (**Type variables**, below): without the bound no caller can instantiate it at a
-  linear type, so `do { x; 1 }` with `x: a` is accepted. An instance head's variable
-  counts too, because a use of the instance is not yet checked for linear types: the
-  same step in `instance Count (Maybe a)` is rejected. Two shapes remain accepted and are **not** guaranteed
+  linear type, so `do { x; 1 }` with `x: a` is accepted, and so is the same step at an
+  instance head's variable without the instance's bound. Two shapes remain accepted and are **not** guaranteed
   leak-free: a wildcard `match` arm over a linear value (`match f with | _ -> 0`,
   which does reference `f` exactly once) and a constructor pattern that drops a
   linear field (`Wrap _`).
@@ -1804,10 +1803,25 @@ restates it under its own names, as it restates a class constraint, and its body
 held to it. `pure` (on `a`) and `branch` (on `a` and `b`) do, so a `Result e L`
 block can end in `pure(l)` and use `try`.
 
-**Not yet:** `where linear` on a constructor or an instance head is rejected, and an
-instance head's variables are not checked, so a generic instance (`instance Taker
-(Box a)`) can still duplicate through its dictionary. See `docs/linearity-bound-v0.md`
-§12.
+An instance head takes the bound on its variables, `instance Taker (Box a) where
+linear a, Taker a`, and each method body is checked with them linear. Without it, a
+head variable admits no linear type, and the rule is checked at each dictionary: a
+call or a method used as a value that selects a generic instance, through its
+context and its superclasses, must not instantiate an unbounded head variable at a
+type holding a linear value, and a bounded variable of the enclosing declaration
+counts as linear. So `take(Box(L(1)))` is rejected when the `Box` instance has no
+bound:
+
+```
+the `Taker` instance for `Box a` takes `a` as a value it may copy or drop, and `L` is linear; if the instance uses its `a` exactly once, add `where linear a` to its head
+```
+
+The prelude's `ToString` instances over `Maybe`, `Result` and tuples, and `Propagate
+(Result e)`, take the bound. Its `Eq` and `Ord` instances and those over `List` do
+not: each drops a value on some path, so they are rejected at a linear type.
+
+**Not yet:** `where linear` on a constructor is rejected. See
+`docs/linearity-bound-v0.md` §12.
 
 #### Borrowing (Milestone 4.5)
 

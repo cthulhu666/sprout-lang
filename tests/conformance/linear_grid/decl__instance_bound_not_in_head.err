@@ -1,0 +1,1 @@
+`where linear b` names `b`, which does not appear in the instance head `Taker (Box a)`; a bound lets a variable of the head be linear

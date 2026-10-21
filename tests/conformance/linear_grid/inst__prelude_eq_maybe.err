@@ -1,0 +1,1 @@
+the `Eq` instance for `Maybe a` takes `a` as a value it may copy or drop, and `L` is linear; if the instance uses its `a` exactly once, add `where linear a` to its head

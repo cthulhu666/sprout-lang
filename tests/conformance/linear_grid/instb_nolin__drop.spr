@@ -1,0 +1,11 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Drop2 t
+  fn drop2(x: t, n: Int) -> Int
+
+instance Drop2 (Maybe a) where linear a
+  fn drop2(x: Maybe a, n: Int) -> Int = n
+
+fn main() -> Unit !{IO} = print(int_to_string(drop2(Just(1), 1)))

@@ -6,9 +6,11 @@
 #   parse-time rejections: <out-root>/tests/conformance/parse_error/linear_grid_decl__<name>.{spr,err}
 # A .err is a substring the `--phase check` output must contain.
 #
-# Rows (reach paths): direct, body, annsib, unannsib, inst, method, mbound, ext, ctor,
-# exist, tlet. Columns: copy, drop, step (discarded do-step), wild (`_ <-`), pass (to an
-# unbounded generic). `_nolin` rows declare no linear type anywhere in the program.
+# Rows (reach paths): direct, body, annsib, unannsib, inst, instb, method, mbound, ext,
+# ctor, exist, tlet. Columns: copy, drop, step (discarded do-step), wild (`_ <-`), pass (to
+# an unbounded generic). `_nolin` rows declare no linear type anywhere in the program.
+# `inst` also holds one cell per way a dictionary reaches an instance: nested context,
+# superclass, tuple head, method value, an enclosing bound, an instance method's bound.
 #
 # N/A cells (not generated):
 #   - direct/inst/method/ext/ctor/exist/tlet _nolin: they need a linear value to reach
@@ -58,6 +60,11 @@ bound_msg() {
 }
 
 TAKES='takes `a` as a value it may copy or drop'
+# inst_msg <class> <head> <var> <reason>: the dictionary walk's error (§6.7).
+inst_msg() {
+  printf 'the `%s` instance for `%s` takes `%s` as a value it may copy or drop, and %s; if the instance uses its `%s` exactly once, add `where linear %s` to its head' "$1" "$2" "$3" "$4" "$3" "$3"
+}
+LIN='`L` is linear'
 
 # ── direct: unbounded generic called at a linear type ─────────────────────────
 rej "$HDR_L" direct__copy "$TAKES" <<'EOF'
@@ -235,8 +242,8 @@ EOF
 unannsib_cells "" "$HDR_L" 'L(1)' close
 unannsib_cells _nolin "$HDR_N" 1 ''
 
-# ── inst: the instance head's variable (docs/linearity-bound-v0.md §6.4, §12 step 3) ─
-rej "$HDR_L" inst__copy "$TAKES" <<'EOF'
+# ── inst: an instance head's variable, reached through a dictionary (§6.7) ─────
+rej "$HDR_L" inst__copy "$(inst_msg Dup2 'Maybe a' a "$LIN")" <<'EOF'
 class Dup2 t
   fn dup2(x: t) -> (t, t)
 
@@ -247,7 +254,7 @@ fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
 
 fn main() -> Unit !{IO} = match dup2(Just (L(1))) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
 EOF
-rej "$HDR_L" inst__drop "$TAKES" <<'EOF'
+rej "$HDR_L" inst__drop "$(inst_msg Drop2 'Maybe a' a "$LIN")" <<'EOF'
 class Drop2 t
   fn drop2(x: t) -> Int
 
@@ -256,7 +263,7 @@ instance Drop2 (Maybe a)
 
 fn main() -> Unit !{IO} = print(int_to_string(drop2(Just (L(1)))))
 EOF
-rej "$HDR_L" inst__step "discards a value that may be linear" <<'EOF'
+rej "$HDR_L" inst__step "$(inst_msg Count 'Maybe a' a "$LIN")" <<'EOF'
 class Count t
   fn count(x: t) -> Int
 
@@ -270,7 +277,7 @@ instance Count (Maybe a)
 
 fn main() -> Unit !{IO} = print(int_to_string(count(Just (L(1)))))
 EOF
-rej "$HDR_L" inst__wild "discards a value that may be linear" <<'EOF'
+rej "$HDR_L" inst__wild "$(inst_msg Count 'Maybe a' a "$LIN")" <<'EOF'
 class Count t
   fn count(x: t) -> Maybe Int
 
@@ -283,7 +290,7 @@ instance Count (Maybe a)
 fn main() -> Unit !{IO} =
   print(match count(Just (L(1))) with | Just n -> int_to_string(n) | Nothing -> "none")
 EOF
-rej "$HDR_L" inst__pass "$TAKES" <<'EOF'
+rej "$HDR_L" inst__pass "$(inst_msg Dup2 'Maybe a' a "$LIN")" <<'EOF'
 class Dup2 t
   fn dup2(x: t) -> (t, t)
 
@@ -294,6 +301,176 @@ fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
 
 fn main() -> Unit !{IO} = match dup2(Just (L(1))) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
 EOF
+
+TAKER='class Taker t
+  fn take(x: t) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+type Box a = | Box a
+
+type Wrap a = | Wrap a
+'
+# A context dictionary: `Box` is bounded, the `Wrap` inside it is not.
+rej "$HDR_L" inst__nested_ctx "$(inst_msg Taker 'Wrap a' a "$LIN")" <<EOF
+$TAKER
+instance Taker (Box a) where linear a, Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(y)
+
+instance Taker (Wrap a) where Taker a
+  fn take(x: Wrap a) -> Int = match x with | Wrap y -> take(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(take(Box (Wrap (L(1))))))
+EOF
+# A superclass dictionary, packed beside the one the call names.
+rej "$HDR_L" inst__super "$(inst_msg Base 'Maybe a' a "$LIN")" <<'EOF'
+class Base t
+  fn base(x: t) -> Int
+
+class Sub t where Base t
+  fn sub(x: t) -> t
+
+instance Base (Maybe a)
+  fn base(x: Maybe a) -> Int = 0
+
+instance Sub (Maybe a) where linear a
+  fn sub(x: Maybe a) -> Maybe a = x
+
+fn main() -> Unit !{IO} = print(int_to_string(match sub(Just (L(1))) with | Just l -> close(l) | Nothing -> 0))
+EOF
+rej "$HDR_L" inst__tuple "$(inst_msg Taker '(a, b)' a "$LIN")" <<EOF
+$TAKER
+instance Taker (a, b)
+  fn take(x: (a, b)) -> Int = 0
+
+fn main() -> Unit !{IO} = print(int_to_string(take((L(1), 2))))
+EOF
+# A method passed as a value: its dictionary is built where it is named.
+rej "$HDR_L" inst__method_ref "$(inst_msg Taker 'Box a' a "$LIN")" <<EOF
+$TAKER
+instance Taker (Box a) where Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(y) + take(y)
+
+fn apply(f: Box L -> Int, b: Box L) -> Int = f(b)
+
+fn main() -> Unit !{IO} = print(int_to_string(apply(take, Box (L(1)))))
+EOF
+# The enclosing declaration's own bound makes its `a` linear at the dictionary.
+rej "$HDR_L" inst__fwd_bounded "$(inst_msg Taker 'Box a' a '`wrapit`'"'"'s `a` is linear under its `where linear a`')" <<EOF
+$TAKER
+instance Taker (Box a) where Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(y) + take(y)
+
+fn wrapit(x: a) -> Int where linear a, Taker a = take(Box(x))
+
+fn main() -> Unit !{IO} = print(int_to_string(wrapit(L(1))))
+EOF
+# The instance head's own bound makes its `a` linear at a dictionary in its body.
+rej "$HDR_L" inst__head_bounded "$(inst_msg Taker 'Wrap a' a '`Taker (Box a)`'"'"'s `a` is linear under its `where linear a`')" <<EOF
+$TAKER
+instance Taker (Wrap a) where Taker a
+  fn take(x: Wrap a) -> Int = match x with | Wrap y -> take(y) + take(y)
+
+instance Taker (Box a) where linear a, Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(Wrap(y))
+
+fn main() -> Unit !{IO} = print(int_to_string(take(Box (L(1)))))
+EOF
+# An instance method's own bound, spelled as the instance writes it.
+rej "$HDR_L" inst__method_bound "$(inst_msg Taker 'Box a' a '`m`'"'"'s `b` is linear under its `where linear b`')" <<EOF
+$TAKER
+instance Taker (Box a) where Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(y) + take(y)
+
+class K t
+  fn m(s: t, x: c) -> Int where linear c, Taker c
+
+instance K Int
+  fn m(s: Int, x: b) -> Int where linear b, Taker b = take(Box(x))
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, L(1))))
+EOF
+# Prelude instances that cannot take the bound: each drops a value on some path.
+rej "$HDR_L" inst__prelude_eq_maybe "$(inst_msg Eq 'Maybe a' a "$LIN")" <<'EOF'
+instance Eq L
+  fn eq(x: L, y: L) -> Bool = close(x) == close(y)
+
+fn main() -> Unit !{IO} = print(if Just(L(1)) == Just (L(2)) then "eq" else "ne")
+EOF
+rej "$HDR_L" inst__prelude_list_eq "$(inst_msg Eq 'List a' a "$LIN")" <<'EOF'
+instance Eq L
+  fn eq(x: L, y: L) -> Bool = close(x) == close(y)
+
+fn main() -> Unit !{IO} = print(if [L(1)] == [L(2)] then "eq" else "ne")
+EOF
+
+# ── instb: an instance head's own `where linear a` ────────────────────────────
+instb_cells() { # suffix hdr value type eat-body
+  local s="$1" h="$2" v="$3" ty="$4" eat="$5" jv
+  # `Just` applied as fmt writes it: spaced before a call, not before a literal.
+  if [[ "$v" == *"("* ]]; then jv="Just ($v)"; else jv="Just($v)"; fi
+  rej "$h" "instb${s}__copy" "is used more than once" <<EOF
+class Dup2 t
+  fn dup2(x: t) -> (t, t)
+
+instance Dup2 (Maybe a) where linear a
+  fn dup2(x: Maybe a) -> (Maybe a, Maybe a) = (x, x)
+
+fn eat(m: Maybe $ty) -> Int = $eat
+
+fn main() -> Unit !{IO} = match dup2($jv) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
+EOF
+  rej "$h" "instb${s}__drop" "is never used" <<EOF
+class Drop2 t
+  fn drop2(x: t, n: Int) -> Int
+
+instance Drop2 (Maybe a) where linear a
+  fn drop2(x: Maybe a, n: Int) -> Int = n
+
+fn main() -> Unit !{IO} = print(int_to_string(drop2($jv, 1)))
+EOF
+  rej "$h" "instb${s}__step" "is referenced as a statement" <<EOF
+class Count t
+  fn count(x: t) -> Int
+
+instance Count (Maybe a) where linear a
+  fn count(x: Maybe a) -> Int =
+    do
+      x
+      0
+
+fn main() -> Unit !{IO} = print(int_to_string(count($jv)))
+EOF
+  rej "$h" "instb${s}__wild" "discards a linear value" <<EOF
+class Count t
+  fn count(x: t) -> Int !{IO}
+
+instance Count (Maybe a) where linear a
+  fn count(x: Maybe a) -> Int !{IO} =
+    match x with
+    | Just y ->
+      do
+        _ <- after(print("w"), y)
+        0
+    | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(count($jv)))
+EOF
+  rej "$h" "instb${s}__pass" "$(bound_msg b 'Dup2 (Maybe a)')" <<EOF
+class Dup2 t
+  fn dup2(x: t) -> (t, t)
+
+instance Dup2 (Maybe a) where linear a
+  fn dup2(x: Maybe a) -> (Maybe a, Maybe a) = dup(x)
+
+fn eat(m: Maybe $ty) -> Int = $eat
+
+fn main() -> Unit !{IO} = match dup2($jv) with | (p, q) -> print(int_to_string(eat(p) + eat(q)))
+EOF
+}
+instb_cells "" "$HDR_L" 'L(1)' L 'match m with | Just l -> close(l) | Nothing -> 0'
+instb_cells _nolin "$HDR_N" 1 Int 'maybe_with_default(0, m)'
 
 # ── method: a class method's own variable, unbounded ──────────────────────────
 rej "$HDR_L" method__copy "$TAKES" <<'EOF'
@@ -484,7 +661,7 @@ fn ident(x: a) -> a = x
 fn main() -> Unit !{IO} = match ident(Box (L(1))) with | Box l -> print(int_to_string(close(l)))
 EOF
 
-# ── exist: an `exists` variable takes no bound until step 3 ───────────────────
+# ── exist: an `exists` variable takes no bound yet ────────────────────────────
 EXIST='an `exists` variable takes no `where linear` yet'
 rej "$HDR_L" exist__copy "$EXIST" <<'EOF'
 class Taker a
@@ -636,7 +813,7 @@ instance Wrap One
 
 fn main() -> Unit !{IO} = print("x")
 EOF
-rej "$HDR_B" decl__constructor_bound '`where linear` on a constructor or an instance head is not supported yet' <<'EOF'
+rej "$HDR_B" decl__constructor_bound '`where linear` on a constructor is not supported yet (docs/linearity-bound-v0.md §12)' <<'EOF'
 class Taker a
   fn take(x: a) -> Int
 
@@ -644,14 +821,15 @@ type Boxed = | exists a. Boxed a where linear a, Taker a
 
 fn main() -> Unit !{IO} = print("x")
 EOF
-rej "$HDR_B" decl__instance_head_bound '`where linear` on a constructor or an instance head is not supported yet' <<'EOF'
+
+rej "$HDR_B" decl__instance_bound_not_in_head '`where linear b` names `b`, which does not appear in the instance head `Taker (Box a)`; a bound lets a variable of the head be linear' <<'EOF'
 class Taker a
   fn take(x: a) -> Int
 
-type Box a = Box a
+type Box a = | Box a
 
-instance Taker (Box a) where linear a, Taker a
-  fn take(b: Box a) -> Int = match b with | Box x -> take(x)
+instance Taker (Box a) where linear b
+  fn take(x: Box a) -> Int = 0
 
 fn main() -> Unit !{IO} = print("x")
 EOF
@@ -747,10 +925,87 @@ acc "$HDR_L" inst__consume_once '6' <<'EOF'
 class Take t
   fn take(x: t) -> t
 
-instance Take (Maybe a)
+instance Take (Maybe a) where linear a
   fn take(x: Maybe a) -> Maybe a = x
 
 fn main() -> Unit !{IO} = print(int_to_string(match take(Just (L(6))) with | Just l -> close(l) | Nothing -> 0))
+EOF
+acc "$HDR_L" inst__nested_bounded '5' <<EOF
+$TAKER
+instance Taker (Box a) where linear a, Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(y)
+
+instance Taker (Wrap a) where linear a, Taker a
+  fn take(x: Wrap a) -> Int = match x with | Wrap y -> take(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(take(Box (Wrap (L(5))))))
+EOF
+# An unbounded head variable is non-linear: discarding one is fine (§6.4).
+acc "$HDR_L" inst__head_var_discard '0' <<'EOF'
+class Count t
+  fn count(x: t) -> Int
+
+fn first(m: Maybe a) -> a = match m with | Just v -> v | Nothing -> panic("none")
+
+instance Count (Maybe a)
+  fn count(x: Maybe a) -> Int =
+    do
+      first(x)
+      0
+
+fn main() -> Unit !{IO} = print(int_to_string(count(Just(1))))
+EOF
+acc "$HDR_L" inst__head_var_wild '0' <<'EOF'
+class Count t
+  fn count(x: t) -> Maybe Int
+
+instance Count (Maybe a)
+  fn count(x: Maybe a) -> Maybe Int =
+    do
+      _ <- x
+      Just(0)
+
+fn main() -> Unit !{IO} = print(match count(Just(1)) with | Just n -> int_to_string(n) | Nothing -> "none")
+EOF
+acc "$HDR_L" instb__once $'3\n4' <<'EOF'
+class Take t
+  fn take(x: t) -> t
+
+instance Take (Maybe a) where linear a
+  fn take(x: Maybe a) -> Maybe a = match x with | Just y -> Just(y) | Nothing -> Nothing
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(match take(Just (L(3))) with | Just l -> close(l) | Nothing -> 0))
+    print(int_to_string(match take(Just(4)) with | Just n -> n | Nothing -> 0))
+EOF
+acc "$HDR_N" instb_nolin__once '4' <<'EOF'
+class Take t
+  fn take(x: t) -> t
+
+instance Take (Maybe a) where linear a
+  fn take(x: Maybe a) -> Maybe a = match x with | Just y -> Just(y) | Nothing -> Nothing
+
+fn main() -> Unit !{IO} = print(int_to_string(match take(Just(4)) with | Just n -> n | Nothing -> 0))
+EOF
+# The prelude instances that take the bound, at a linear type: `ToString` over
+# `Maybe`, `Result` and tuples, and `try` with a linear error.
+acc "$HDR_L" inst__prelude_opt_ins $'Just(L)\n(L, 2)\nOk(L)\n4' <<'EOF'
+instance ToString L
+  fn to_string(x: L) -> String = match x with | L _ -> "L"
+
+fn ok(l: L) -> Result String L = Ok(l)
+
+fn bump(r: Result L Int) -> Result L Int =
+  let n = try r
+  in Ok(n + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(Just (L(1))))
+    print(to_string((L(1), 2)))
+    print(to_string(ok(L(3))))
+    print(match bump(Err (L(4))) with | Ok n -> int_to_string(n) | Err l -> int_to_string(close(l)))
 EOF
 acc "$HDR_L" method__own_var_discard '3' <<'EOF'
 class Apply t

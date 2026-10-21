@@ -1,0 +1,24 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Taker t
+  fn take(x: t) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+type Box a = | Box a
+
+type Wrap a = | Wrap a
+
+instance Taker (Box a) where Taker a
+  fn take(x: Box a) -> Int = match x with | Box y -> take(y) + take(y)
+
+fn apply(f: Box L -> Int, b: Box L) -> Int = f(b)
+
+fn main() -> Unit !{IO} = print(int_to_string(apply(take, Box (L(1)))))

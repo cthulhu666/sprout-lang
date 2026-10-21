@@ -273,7 +273,7 @@ first:
 - ~~**A lambda's `once` promise is never checked.**~~ Landed: checked as a declared one is.
 - ~~**Generic code can duplicate or drop a linear value**: `fn dup(x: a) -> (a, a) = (x, x)`.~~
   Landed: an unbounded type variable admits no linear type ([linearity-bound-v0.md](linearity-bound-v0.md)
-  §12 step 2). Open: the same through a generic instance's dictionary (step 3).
+  §12 steps 2 and 3), including through a generic instance's dictionary.
 - ~~**One call can borrow and consume the same linear value**: `f(x, x)` with
   `f(b: borrowing L, c: L)`.~~ Landed: a borrow lasts the whole call (spec §5.8).
 - ~~**A top-level `let` can hold a linear value that every function consumes.**~~ Landed:
@@ -547,8 +547,7 @@ value is unshared moves the ranking.
    linearity, so nothing below blocks it.
 3. ~~Fix the three linearity holes that are missing checks (5.3, *Prerequisites*).~~ Landed.
 4. ~~Design the linearity bound on type variables~~ Designed in
-   [linearity-bound-v0.md](linearity-bound-v0.md); its step 2 closed the other three, except a
-   generic instance duplicating through its dictionary (step 3).
+   [linearity-bound-v0.md](linearity-bound-v0.md); its steps 2 and 3 closed the other three.
 5. Ship 5.3, the linear array, with its bulk operations, as the one mechanism for in-place
    writes in pure code (`MutVec`, `Ref` and `MutMatrix` stay for `IO` code), after steps 3 and
    4, and keep 5.3's *Invariants*.

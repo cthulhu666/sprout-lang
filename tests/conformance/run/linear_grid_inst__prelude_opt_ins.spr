@@ -1,0 +1,23 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+instance ToString L
+  fn to_string(x: L) -> String = match x with | L _ -> "L"
+
+fn ok(l: L) -> Result String L = Ok(l)
+
+fn bump(r: Result L Int) -> Result L Int =
+  let n = try r
+  in Ok(n + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(Just (L(1))))
+    print(to_string((L(1), 2)))
+    print(to_string(ok(L(3))))
+    print(match bump(Err (L(4))) with | Ok n -> int_to_string(n) | Err l -> int_to_string(close(l)))

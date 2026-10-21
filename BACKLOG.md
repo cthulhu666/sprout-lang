@@ -1968,21 +1968,18 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `docs/local-closures-v0.md`). Left: marking the prelude combinators `local` (own entry); a linear
   value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING linear
   lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
-- [ ] `P1` **A generic instance can duplicate a linear value through its dictionary.**
-  `instance Taker (Box a) where Taker a` whose `take` calls `take(x)` twice is accepted, and
-  `take(Box(L(1)))` consumes the `L` twice: `a := L` exists only in the dictionary, which no check
-  reads. `where linear` on an instance head or a constructor is rejected until this lands, so an
-  existential cannot carry a linear value either. Step 3 of `docs/linearity-bound-v0.md` §12: walk
-  dictionaries in `resolve.sprout`. Blocks `docs/persistent-array-v0.md` §5.3. The same gap
-  accepts an instance method that never uses, or binds and drops, a value of a head variable;
-  the grid's `inst__copy`/`drop`/`pass` cells are its xfail tests. Start by adding grid rows for
-  dictionaries and existentials, as failing cells.
+- [ ] `P2` **An existential cannot carry a linear value.** `type Boxed = | exists a. Boxed a
+  where Taker a` rejects `Boxed(L(1))`, and `where linear a` on the constructor is rejected rather
+  than ignored: nothing yet tracks the value a match unpacks. Step 3's second half,
+  `docs/linearity-bound-v0.md` §12: allow the bound, make the type linear, and mark the unpacked
+  skolem linear in the declaration's gate env, so both the body walk and the bound obligations see
+  it. The grid's `exist` row turns into the misuse cells.
 - [ ] `P3` **Linearity-bound retro: deferred items.** From
   `docs/linearity-bound-retro-2026-10-20.md` §5–6: C2, one group-boundary check deciding bound
   obligations and marks under the final substitution; T3, a `/sprout-review` pass that writes
   linear misuse programs and runs them on master and head; X3, check the spec's `sprout` blocks
-  that mention `linear`, expected-error where the text says so. Also drop the `program_has_linear`
-  disjunct in `park_bound_obligations`, which no longer changes a result, at step 3's reseed.
+  that mention `linear`, expected-error where the text says so. Also park bound obligations
+  unconditionally: drop the whole gate in `park_bound_obligations` (retro §3.3 measured it free).
 - [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
   M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
   lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
