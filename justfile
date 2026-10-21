@@ -726,6 +726,11 @@ test-shell-hooks:
 test-review-ledger:
   bash scripts/test_review_ledger.sh
 
+# Exercise the `#~^ ERROR` line check the reject fixtures run (_test-reject).
+[group('test')]
+test-error-line-marker:
+  bash scripts/test_error_line_marker.sh
+
 # Exercise the workflow script inside .claude/skills/sprout-review/SKILL.md. Same
 # rationale as the three above, one level worse: that script is JS in a markdown
 # fence, so nothing runs it until a review is already several agents in, and a slip
@@ -1005,6 +1010,8 @@ compile-bench: bootstrap-from-seed (_compile-examples "build/compile_driver_bin_
 # Optional <n>.fixed.spr = the same program with the diagnostic's hint applied; once
 # the rejection matches it must check clean (exit 0, no `ERROR:`), so a hint that
 # cannot be followed fails the gate. `*.fixed.spr` files are not fixtures themselves.
+# A `#~^ ERROR` line in the fixture marks the line the error must be reported on
+# (scripts/error_line_marker.sh).
 [private]
 _test-reject stage dir noun xfail="" phase="check":
   #!/usr/bin/env bash
@@ -1057,6 +1064,10 @@ _test-reject stage dir noun xfail="" phase="check":
           echo "  UNEXPECTED MATCH (remove from xfail)" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
         else
           echo "  OK (rejected)" >> "$TMPD/$idx.out"; echo ok > "$TMPD/$idx.st"
+          echo "$out" > "$TMPD/$idx.log"
+          if ! where="$(bash scripts/error_line_marker.sh "$spr" "$TMPD/$idx.log")"; then
+            echo "  FAILED: $where" >> "$TMPD/$idx.out"; echo fail > "$TMPD/$idx.st"
+          fi
           fixed="tests/conformance/{{dir}}/$name.fixed.spr"
           if [[ -f "$fixed" ]]; then
             fout="$("./$STAGE" --phase {{phase}} "{{stdlib_root}}" "$fixed" 2>&1)"; fst=$?
@@ -3900,6 +3911,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "review-gate|test-review-gate"
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"
+    "error-line-marker|test-error-line-marker"
     "review-script|test-review-script"
     "setup-dev|test-setup-dev"
     # Added with the prelude-extern relocation: one C symbol, one `extern fn`

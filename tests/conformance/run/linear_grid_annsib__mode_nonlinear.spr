@@ -1,0 +1,19 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn run_a(f: a -> Int, x: a) -> Int where linear a = f(x)
+
+fn run_i(f: Int -> Int, x: Int) -> Int = f(x)
+
+fn ping(n: Int) -> Int = if n > 0 then pong(n - 1) else 0
+
+fn pong(n: Int) -> Int = if n > 0 then ping(n - 1) else run_i(peek_a, n)
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(3)))

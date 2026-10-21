@@ -720,6 +720,12 @@ N/A cells.
   must already be what `just fmt` writes (e.g. `Ctor(x)` spacing): `fmt-check` fails otherwise.
 - A review bug in linearity adds its neighbouring reach paths here (retro §6: the half of
   P2 that T2 keeps).
+- A new linearity check gets a column, not only standalone fixtures. The `mode` column (§6.6)
+  was first written as single-declaration fixtures; a group of one has one position, so an
+  error reported at the group's first member instead of the member holding it passed, and
+  only the `annsib`/`unannsib` cells catch it. Its cells mark the reported line with `#~^
+  ERROR` (`scripts/error_line_marker.sh`, run by `_test-reject`; `just
+  test-error-line-marker` tests it).
 
 ## `just linux-smoke`
 

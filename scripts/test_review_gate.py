@@ -334,14 +334,25 @@ results.append(
 write("tests/conformance/type_error/x_new.err", "msg\n")
 results.append(
     run(
-        "17g. type_error .err -> fixed.spr item",
+        "17g. type_error .err -> fixed.spr item, and the line marker",
         2,
         session="sess7",
-        present=["x_new.err", ".fixed.spr"],
+        present=["x_new.err", ".fixed.spr", "#~^ ERROR"],
         tpath=str(S / "nope.jsonl"),
     )
 )
 (S / "tests/conformance/type_error/x_new.err").unlink()
+write("stdlib/compiler/linear_check.sprout", "s\n")
+results.append(
+    run(
+        "17i. a linear check change -> the linear grid item",
+        2,
+        session="sess7",
+        present=["linear_check.sprout", "gen_linear_grid.sh"],
+        tpath=str(S / "nope.jsonl"),
+    )
+)
+(S / "stdlib/compiler/linear_check.sprout").unlink()
 write("tests/conformance/executable_error/x_new.err", "msg\n")
 results.append(
     run(

@@ -8,7 +8,9 @@
 #
 # Rows (reach paths): direct, body, annsib, unannsib, inst, instb, method, mbound, ext,
 # ctor, exist, tlet. Columns: copy, drop, step (discarded do-step), wild (`_ <-`), pass (to
-# an unbounded generic). `_nolin` rows declare no linear type anywhere in the program.
+# an unbounded generic), mode (a borrowing function where a consuming one is expected,
+# §6.6). `_nolin` rows declare no linear type anywhere in the program. A `mode` cell marks
+# the line its error is reported on with `#~^ ERROR` (scripts/error_line_marker.sh).
 # `inst` also holds one cell per way a dictionary reaches an instance: nested context,
 # superclass, tuple head, method value, an enclosing bound, an instance method's bound.
 #
@@ -796,6 +798,77 @@ let fwd = \x -> dup(x)
 fn main() -> Unit !{IO} = match fwd(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))
 EOF
 
+# ── mode: a borrowing function where a consuming one is expected (§6.6) ─────────
+# The pair is decided at the declaration that holds it, so each cell marks that line.
+MODE='these differ only in how the parameter is taken, and a `borrowing` parameter'"'"'s convention must match exactly in either direction: a borrowing function standing in for a consuming one leaves the value unreleased, and a consuming one standing in for a borrowing one releases a value its caller still owns'
+MODEL='fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+fn run(f: L -> Int, x: L) -> Int = f(x)
+'
+MODEA='fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn run_a(f: a -> Int, x: a) -> Int where linear a = f(x)
+'
+rej "$HDR_L" direct__mode "$MODE" <<EOF
+$MODEL
+fn g(x: L) -> Int = run(peek, x)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))
+EOF
+rej "$HDR_L" body__mode "$MODE" <<EOF
+$MODEA
+fn g(x: a) -> Int where linear a = run_a(peek_a, x)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))
+EOF
+rej "$HDR_L" annsib__mode "$MODE" <<EOF
+$MODEL
+fn ping(x: L, n: Int) -> Int = if n > 0 then pong(x, n - 1) else close(x)
+
+fn pong(y: L, n: Int) -> Int = if n > 0 then ping(y, n) else run(peek, y)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(L(1), 2)))
+EOF
+rej "$HDR_L" unannsib__mode "$MODE" <<EOF
+$MODEL
+fn ping(x: L, n: Int) -> Int = if n > 0 then pong(x, n - 1) else close(x)
+
+fn pong(y, n: Int) = if n > 0 then ping(y, n) else run(peek, y)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(L(1), 2)))
+EOF
+rej "$HDR_L" inst__mode "$MODE" <<EOF
+$MODEL
+class Use a
+  fn use(x: a) -> Int
+
+instance Use L
+  fn use(x: L) -> Int = run(peek, x)
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(use(L(1))))
+EOF
+rej "$HDR_L" tlet__mode "$MODE" <<EOF
+$MODEL
+let k: Int = run(peek, L(1))
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
+EOF
+rej "$HDR_L" exist__mode "$MODE" <<EOF
+$MODEA
+type Lent = | exists a. Lent a where linear a
+
+fn g(b: Lent) -> Int = match b with | Lent x -> run_a(peek_a, x)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Lent (L(1)))))
+EOF
+
 # ── decl: misuses in declarations ─────────────────────────────────────────────
 rejp "$HDR_B" decl__class_header_bound 'takes no `linear` bound' <<'EOF'
 class C a where linear a
@@ -894,6 +967,16 @@ fn main() -> Unit !{IO} = print("x")
 EOF
 
 # ── accept cells ──────────────────────────────────────────────────────────────
+acc "$HDR_L" annsib__mode_nonlinear '1' <<EOF
+$MODEA
+fn run_i(f: Int -> Int, x: Int) -> Int = f(x)
+
+fn ping(n: Int) -> Int = if n > 0 then pong(n - 1) else 0
+
+fn pong(n: Int) -> Int = if n > 0 then ping(n - 1) else run_i(peek_a, n)
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(3)))
+EOF
 acc "$HDR_L" direct__bounded_generic $'3\n2' <<'EOF'
 fn ident(x: a) -> a where linear a = x
 

@@ -77,7 +77,15 @@ CHECKLIST = [
         "Does the new diagnostic's `.err` pin the whole message, with a `.fixed.spr` if it has a hint?",
         "Pin the full message, not a prefix. A hint-bearing one gets a `<name>.fixed.spr`: "
         "the same program with the hint applied, which must check clean "
-        "(tests/conformance/README.md).",
+        "(tests/conformance/README.md). If the spec or the change says WHERE the error is "
+        "reported, a `#~^ ERROR` line under that line pins it.",
+    ),
+    (
+        lambda p: p in ("stdlib/compiler/linear_check.sprout", "stdlib/compiler/unifier.sprout"),
+        "Does a new or changed linearity check run through every reach path, group siblings included?",
+        "A standalone fixture tests one shape. Add a column to scripts/gen_linear_grid.sh "
+        "across every row with a body, with `#~^ ERROR` on the line each error belongs to "
+        "(docs/gates.md §Linear grid).",
     ),
     (
         lambda p: True,
