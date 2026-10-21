@@ -15,8 +15,8 @@
 # N/A cells (not generated):
 #   - direct/inst/method/ext/ctor/exist/tlet _nolin: they need a linear value to reach
 #     the generic; with no linear type there is none.
-#   - exist step/wild/pass: the pack `Boxed(L(1))` is rejected before any misuse runs, so
-#     they repeat copy/drop's diagnostic.
+#   - exist pack without the bound: type_error/linear_bound_existential_pack, which carries
+#     the hint's fixed file.
 #   - ctor pass of a bound variable: a data parameter takes no bound (§6.1).
 set -euo pipefail
 
@@ -661,37 +661,93 @@ fn ident(x: a) -> a = x
 fn main() -> Unit !{IO} = match ident(Box (L(1))) with | Box l -> print(int_to_string(close(l)))
 EOF
 
-# ── exist: an `exists` variable takes no bound yet ────────────────────────────
-EXIST='an `exists` variable takes no `where linear` yet'
-rej "$HDR_L" exist__copy "$EXIST" <<'EOF'
-class Taker a
+# ── exist: a constructor's `where linear a`, and what a match unpacks ─────────
+# The bound makes `Boxed` linear whatever it carries; the unpacked `x` is linear too.
+EXB='class Taker a
   fn take(x: a) -> Int
 
 instance Taker L
   fn take(x: L) -> Int = close(x)
 
-type Boxed = | exists a. Boxed a where Taker a
+instance Taker Int
+  fn take(x: Int) -> Int = x
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
 
 fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
-
+'
+UNPACKED='`Boxed`'"'"'s `a` is linear under its `where linear a`'
+rej "$HDR_L" exist__copy "is used more than once" <<EOF
+$EXB
 fn main() -> Unit !{IO} =
   do
     let b = Boxed(L(1))
     print(int_to_string(unbox(b) + unbox(b)))
 EOF
-rej "$HDR_L" exist__drop "$EXIST" <<'EOF'
-class Taker a
-  fn take(x: a) -> Int
-
-instance Taker L
-  fn take(x: L) -> Int = close(x)
-
-type Boxed = | exists a. Boxed a where Taker a
-
+rej "$HDR_L" exist__drop "is never used" <<EOF
+$EXB
 fn main() -> Unit !{IO} =
   do
     let b = Boxed(L(1))
     print("x")
+EOF
+rej "$HDR_L" exist__step "is referenced as a statement" <<EOF
+$EXB
+fn g(b: Boxed) -> Int =
+  do
+    b
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(1)))))
+EOF
+rej "$HDR_L" exist__wild "discards a linear value" <<EOF
+$EXB
+fn g(b: Boxed) -> Int !{IO} =
+  do
+    _ <- after(print("w"), b)
+    1
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(1)))))
+EOF
+rej "$HDR_L" exist__pass 'takes `b` as a value it may copy or drop, and `main.Boxed` is linear' <<EOF
+$EXB
+fn main() -> Unit !{IO} = match dup(Boxed (L(1))) with | (p, q) -> print(int_to_string(unbox(p) + unbox(q)))
+EOF
+rej "$HDR_L" exist__nonlinear_copy "is used more than once" <<EOF
+$EXB
+fn main() -> Unit !{IO} =
+  do
+    let b = Boxed(1)
+    print(int_to_string(unbox(b) + unbox(b)))
+EOF
+rej "$HDR_L" exist__unpack_copy "is used more than once" <<EOF
+$EXB
+fn twice(b: Boxed) -> Int = match b with | Boxed x -> take(x) + take(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(twice(Boxed (L(1)))))
+EOF
+rej "$HDR_L" exist__unpack_drop "is never used" <<EOF
+$EXB
+fn none(b: Boxed) -> Int = match b with | Boxed x -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(none(Boxed (L(1)))))
+EOF
+rej "$HDR_L" exist__unpack_pass "takes \`b\` as a value it may copy or drop, and $UNPACKED" <<EOF
+$EXB
+fn pass(b: Boxed) -> Int = match b with | Boxed x -> match dup(x) with | (p, q) -> take(p) + take(q)
+
+fn main() -> Unit !{IO} = print(int_to_string(pass(Boxed (L(1)))))
+EOF
+rej "$HDR_L" exist__unpack_dict "$(inst_msg Taker 'Box a' a "$UNPACKED")" <<EOF
+$EXB
+type Box a = | Box a
+
+instance Taker (Box a)
+  fn take(x: Box a) -> Int = 0
+
+fn viabox(b: Boxed) -> Int = match b with | Boxed x -> take(Box(x))
+
+fn main() -> Unit !{IO} = print(int_to_string(viabox(Boxed (L(1)))))
 EOF
 
 # ── tlet: a top-level `let` is generalized and takes no bound ─────────────────
@@ -813,15 +869,6 @@ instance Wrap One
 
 fn main() -> Unit !{IO} = print("x")
 EOF
-rej "$HDR_B" decl__constructor_bound '`where linear` on a constructor is not supported yet (docs/linearity-bound-v0.md §12)' <<'EOF'
-class Taker a
-  fn take(x: a) -> Int
-
-type Boxed = | exists a. Boxed a where linear a, Taker a
-
-fn main() -> Unit !{IO} = print("x")
-EOF
-
 rej "$HDR_B" decl__instance_bound_not_in_head '`where linear b` names `b`, which does not appear in the instance head `Taker (Box a)`; a bound lets a variable of the head be linear' <<'EOF'
 class Taker a
   fn take(x: a) -> Int
@@ -1083,6 +1130,13 @@ fn main() -> Unit !{IO} =
   do
     print(int_to_string(match Box(L(6)) with | Box l -> close(l)))
     print(int_to_string(match Just(L(7)) with | Just l -> close(l) | Nothing -> 0))
+EOF
+acc "$HDR_L" exist__bounded_once $'4\n5' <<EOF
+$EXB
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(unbox(Boxed (L(4)))))
+    print(int_to_string(unbox(Boxed(5))))
 EOF
 acc "$HDR_L" exist__nonlinear '2' <<'EOF'
 class Taker a

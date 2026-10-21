@@ -196,10 +196,10 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @fwd:<tyvar>:<class>            @eta_fwd:<tyvar>:<class>   @eta_fwdvar:<tyvar>
 #   @super:<class>:<superclass>     @rec:<record>:<field>
 #   @type:<TypeName>                @linear:<TypeName or tyvar id>
-#   @any_linear                     @bounded_decl
-#   @linbound:<fn, extern or method>  @boundname:<tyvar id>
+#   @any_linear                     @bounded_decl             @unpacked:<skolem or $ex_ name>
+#   @linbound:<fn, extern, method or constructor>  @boundname:<tyvar id>
 #   @sig:<fn>                       @sigbound:<fn>            @toplet:<let>
-#   @instbound:<class>:<head>[/<method>]
+#   @instbound:<class>:<head>[/<method>]  @unpack:<ctor>:<pattern offset>
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
@@ -256,6 +256,22 @@ export fn inst_bound_key(class_name: String, head: String) -> String = "@instbou
 
 export fn inst_method_bound_key(class_name: String, head: String, method: String) -> String =
   inst_bound_key(class_name, head) ++ "/" ++ method
+
+# The constructor type a pattern of a bounded constructor instantiated, its `exists`
+# variables the skolems the unpack minted, keyed by the pattern's position; infer
+# passes it to linear_check's walk (unifier.Unpack).
+export fn unpack_key(ctor: String, pattern_offset: Int) -> String =
+  "@unpack:" ++ ctor ++ ":" ++ int_to_string(pattern_offset)
+
+# An unpacked value's skolem or `$ex_` name, linear, with its constructor and the
+# variable as written, for resolve's diagnostic (unifier.Unpack).
+export fn unpacked_key(id: String) -> String = "@unpacked:" ++ id
+
+export fn unpacked_marker(owner: String, written: String) -> Scheme = linear_bound_marker([owner, written])
+
+export fn unpacked_of(marker: Scheme) -> Maybe (String, String) =
+  let [owner, written] = scheme_vars(marker) else Nothing
+  in Just((owner, written))
 
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)

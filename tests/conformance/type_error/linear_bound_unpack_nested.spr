@@ -1,0 +1,14 @@
+module main
+
+# A value unpacked through a nested pattern is linear too.
+
+type linear L = L Int
+
+type Opt = | exists a. Opt (Maybe a) where linear a
+
+fn g(b: Opt) -> Int =
+  match b with
+  | Opt (Just x) -> 1
+  | Opt Nothing -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Opt (Just (L(1))))))

@@ -1,7 +1,7 @@
 module main
 
-# An `exists` variable is bounded like a function's: the pack is rejected,
-# since `unbox` could otherwise reach the `L` twice.
+# An `exists` variable is bounded like a function's: without its bound the pack
+# is rejected, since `unbox` could otherwise reach the `L` twice.
 
 type linear L = L Int
 

@@ -877,7 +877,9 @@ fn hand_back(value: a, log: String) -> a !{IO} where linear a =
 Calling `keep_last(f, g)` with a `File` is rejected and names the fix. An instance method of a
 class method that declares the bound (`pure`, `branch`) restates it. A generic instance takes
 the bound on its head the same way, `instance ToString (Maybe a) where linear a, ToString a`,
-when each method uses an `a` exactly once.
+when each method uses an `a` exactly once. An existential that may hide a resource takes it on
+its `exists` variable, `| exists a. Boxed a where linear a, Taker a`, which makes the type
+linear: unpack each box once.
 
 Reach for this when a type has a release operation. For plain data with no
 release, `linear` only gets in the way — see

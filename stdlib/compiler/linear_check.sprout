@@ -151,15 +151,18 @@ fn apply_tvar_subst(sub: Dict types.Type, t: types.Type) -> types.Type =
   | types.TTuple items -> types.TTuple(list_map(\i -> apply_tvar_subst(sub, i), items))
   | _ -> t
 
-# The field types of constructor `ctor` when its result equals `value_type`.
-fn ctor_field_types_at(ctor: String, value_type: types.Type, env: Dict types.Scheme) -> Maybe (List types.Type) =
-  match dict_get(ctor, env) with
+# The field types of constructor `ctor` when its result equals `value_type`. A
+# pattern of a bounded constructor reads the type it instantiated, whose `exists`
+# variables are the skolems it unpacked (types.unpack_key); any other reads the
+# constructor's scheme.
+fn ctor_field_types_at(ctor: String, pos: source.SourcePos, value_type: types.Type,
+                       env: Dict types.Scheme) -> Maybe (List types.Type) =
+  match maybe_or_else(dict_get(types.unpack_key(ctor, pos.index), env), dict_get(ctor, env)) with
   | Nothing -> Nothing
   | Just scheme ->
-      match scheme with
-      | types.Scheme _ _ body _ _ ->
-          Just(list_map(\ft -> apply_tvar_subst(types.match_type_vars(ctor_result_ty(body), value_type, dict_empty()), ft),
-                        ctor_param_tys(body)))
+      let body = types.scheme_type(scheme)
+      in Just(list_map(\ft -> apply_tvar_subst(types.match_type_vars(ctor_result_ty(body), value_type, dict_empty()), ft),
+                       ctor_param_tys(body)))
 
 # The variables a pattern binds that carry a linear obligation, when matched
 # against `value_type`.
@@ -183,8 +186,8 @@ fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict ty
       match value_type with
       | types.TTuple items -> pattern_binders_list(pats, items, env)
       | _ -> Nil
-  | ast.ConstructorPattern ctor subpats _ ->
-      match ctor_field_types_at(ctor, value_type, env) with
+  | ast.ConstructorPattern ctor subpats pos ->
+      match ctor_field_types_at(ctor, pos, value_type, env) with
       | Just field_tys -> pattern_binders_list(subpats, field_tys, env)
       | Nothing -> Nil
 
