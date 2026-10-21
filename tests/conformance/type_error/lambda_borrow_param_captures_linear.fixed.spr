@@ -1,11 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# M4.4b GUARD: admitting the lambda's own borrowing parameter must not admit
-# what it CAPTURES. `outer` is a linear value from the enclosing scope, and the
-# closure may run 0..n times, so crediting the capture as a consume here would
-# be a guess — that is the M4.4 case still deferred.
+# `lambda_borrow_param_captures_linear.spr` with its error's hint applied.
 
 type linear File = File Int
 

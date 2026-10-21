@@ -341,6 +341,17 @@ results.append(
         tpath=str(S / "nope.jsonl"),
     )
 )
+(S / "tests/conformance/type_error/x_new.err").unlink()
+write("tests/conformance/executable_error/x_new.err", "msg\n")
+results.append(
+    run(
+        "17h. executable_error .err -> fixed.spr item too",
+        2,
+        session="sess7",
+        present=["executable_error/x_new.err", ".fixed.spr"],
+        tpath=str(S / "nope.jsonl"),
+    )
+)
 
 # Well-formed JSON of the wrong SHAPE must not raise: a hook that crashes on a
 # malformed line stops gating. A bare list, a string, and a non-dict `message` or

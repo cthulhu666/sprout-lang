@@ -1,11 +1,7 @@
 import stdlib.task (Scope, with_scope, task_fork, task_await)
 
-# The hint in the .err applied; the comments below describe the rejected program.
+# `linear_discarded_wildcard_bind.spr` with its error's hint applied.
 
-# `_ <-` binds nothing, so the binder-keyed rules attach no obligation to the
-# forked handle and it leaks. This is the shape a user reaches by following the
-# discarded-step diagnostic's own advice to "bind its result with `<-`", so it
-# must be rejected too. The named form `_h <- …` is already caught as a leak.
 fn body(s: Scope) -> Int !{IO} =
   do
     t <- task_fork(s, \_ -> 41)

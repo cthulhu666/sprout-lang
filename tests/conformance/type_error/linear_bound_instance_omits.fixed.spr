@@ -1,6 +1,6 @@
 module main
 
-# Hint applied: restate `where linear a` on the instance method.
+# `linear_bound_instance_omits.spr` with its error's hint applied.
 
 class Wrap f
   fn wrap1(x: a) -> f a where linear a

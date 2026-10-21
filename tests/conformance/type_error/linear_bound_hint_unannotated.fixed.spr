@@ -1,9 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# An unannotated callee writes no type variable to put a bound on: the hint says
-# to annotate it first.
+# `linear_bound_hint_unannotated.spr` with its error's hint applied.
 
 type linear L = L Int
 

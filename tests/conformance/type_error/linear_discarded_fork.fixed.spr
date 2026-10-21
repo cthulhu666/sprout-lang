@@ -1,11 +1,7 @@
 import stdlib.task (Scope, with_scope, task_fork, task_await)
 
-# The hint in the .err applied; the comments below describe the rejected program.
+# `linear_discarded_fork.spr` with its error's hint applied.
 
-# The real-world shape of the discarded-linear-result hole: forking without
-# binding the handle. `linear_task_leak` covers the BOUND-and-dropped case
-# (`h <- task_fork(...)`, `h` never used); this is the never-bound one, which
-# the binder-keyed analysis cannot see at all. Both leak the `Task`.
 fn body(s: Scope) -> Int !{IO} =
   do
     t <- task_fork(s, \_ -> 41)

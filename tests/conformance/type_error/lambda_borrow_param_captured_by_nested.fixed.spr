@@ -1,12 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# M4.4b GUARD: the parameter is now a tracked BORROWED binding, so the v0 rule
-# that a borrowed value may not be captured (design note §7) must reach it. It
-# would otherwise be the one borrow in the language a closure could capture,
-# and soundness there turns on whether the inner closure outlives the consume —
-# a distinction Sprout does not have.
+# `lambda_borrow_param_captured_by_nested.spr` with its error's hint applied.
 
 type linear File = File Int
 

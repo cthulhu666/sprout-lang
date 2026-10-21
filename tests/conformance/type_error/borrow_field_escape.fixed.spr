@@ -1,10 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# Same root cause as borrow_field_extract, via RETURN rather than a consume:
-# handing a linear field out of a borrow launders an owned linear value to a
-# caller that never acquired it.
+# `borrow_field_escape.spr` with its error's hint applied.
 
 type linear File = File Int
 type linear Wrap = (inner: File, tag: Int)

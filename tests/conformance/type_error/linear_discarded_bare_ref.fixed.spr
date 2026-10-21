@@ -1,11 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# A bare reference to a linear binding as a statement. The reference itself
-# satisfies "used exactly once" syntactically, but nothing is done with the
-# value — it is simply dropped. The diagnostic must say that rather than tell
-# the author to bind a result they already hold.
+# `linear_discarded_bare_ref.spr` with its error's hint applied.
 
 type linear File = File Int
 

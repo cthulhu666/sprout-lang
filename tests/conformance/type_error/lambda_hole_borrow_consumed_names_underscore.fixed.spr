@@ -1,11 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# The `_`-hole form of lambda_borrow_param_consumed, and the reason it is a
-# separate fixture: the desugaring names the parameter `__sprout_ph_0`, which the
-# author never wrote. The diagnostic must say `_`. Same rule, and same reason, as
-# comprehension_binder_subject.
+# `lambda_hole_borrow_consumed_names_underscore.spr` with its error's hint applied.
 
 type linear File = File Int
 

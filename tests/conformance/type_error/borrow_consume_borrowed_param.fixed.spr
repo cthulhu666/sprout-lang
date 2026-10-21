@@ -1,10 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# M4.5: a `borrowing` parameter is used non-consumingly; the consume obligation
-# stays with the CALLER. Passing it to a consuming position inside the callee
-# would spend a use that is not this function's to spend.
+# `borrow_consume_borrowed_param.spr` with its error's hint applied.
 
 type linear File = File Int
 

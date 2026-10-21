@@ -1,10 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# D7, capture case: the linear value comes from the ENCLOSING scope, not from a
-# generator. The old wording told the user to declare a callee parameter `once`
-# — impossible advice here, since the callee is the elaboration's own fold.
+# `comprehension_linear_capture.spr` with its error's hint applied.
 
 type linear File = File Int
 

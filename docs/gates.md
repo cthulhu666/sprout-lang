@@ -719,7 +719,8 @@ N/A cells.
 - `linear-grid-drift` regenerates into a temp dir and diffs against the committed files. Edit the
   generator, rerun it with the repo root as out-root, then `just fmt`; never edit a cell by hand.
   Where `fmt` rewrites generator output (`Ctor(x)` spacing), the generator emits the formatted form.
-- A review bug in linearity adds its neighbouring reach paths here (retro P2).
+- A review bug in linearity adds its neighbouring reach paths here (retro §6: the half of
+  P2 that T2 keeps).
 
 ## `just linux-smoke`
 

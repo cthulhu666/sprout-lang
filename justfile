@@ -1023,9 +1023,17 @@ _test-reject stage dir noun xfail="" phase="check":
   TMPD=$(mktemp -d /tmp/sprout_reject_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   declare -a fixtures=()
+  orphans=0
   for spr in tests/conformance/{{dir}}/*.spr; do
     [ -f "$spr" ] || continue
-    [[ "$spr" == *.fixed.spr ]] && continue
+    if [[ "$spr" == *.fixed.spr ]]; then
+      # A fixed file whose fixture was renamed away would never be checked.
+      if [[ ! -f "${spr%.fixed.spr}.spr" ]]; then
+        echo "==> ORPHAN $(basename "$spr") has no $(basename "${spr%.fixed.spr}").spr"
+        orphans=$((orphans + 1))
+      fi
+      continue
+    fi
     fixtures+=("$spr")
   done
   declare -a pids=()
@@ -1075,7 +1083,7 @@ _test-reject stage dir noun xfail="" phase="check":
     fi
   done
   for pid in "${pids[@]}"; do wait "$pid" || true; done
-  total_failed=0
+  total_failed=$orphans
   total_xfail=0
   for (( i = 0; i < idx; i++ )); do
     cat "$TMPD/$i.out" 2>/dev/null || true
@@ -1118,16 +1126,17 @@ linear-grid-drift:
   #!/usr/bin/env bash
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_linear_grid_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
-  bash scripts/gen_linear_grid.sh "$TMPD"
-  diff -r "$TMPD/tests/conformance/linear_grid" tests/conformance/linear_grid
+  bash scripts/gen_linear_grid.sh "$TMPD/want"
   # The accept cells (run/) and the parse-time rejections (parse_error/) sit among
-  # hand-written fixtures, so compare the linear_grid_* files only.
+  # hand-written fixtures, so copy only the grid's files before one `diff -r`.
+  have="$TMPD/have/tests/conformance"
+  mkdir -p "$have/run" "$have/parse_error"
+  cp -R tests/conformance/linear_grid "$have/"
+  shopt -s nullglob
   for d in run parse_error; do
-    want=$(cd "$TMPD/tests/conformance/$d" && ls linear_grid_* | sort)
-    have=$(cd "tests/conformance/$d" && ls linear_grid_* | sort)
-    [[ "$want" == "$have" ]] || { echo "linear-grid-drift: $d/ file set differs" >&2; exit 1; }
-    for f in $want; do cmp "$TMPD/tests/conformance/$d/$f" "tests/conformance/$d/$f"; done
+    for f in tests/conformance/$d/linear_grid_*; do cp "$f" "$have/$d/"; done
   done
+  diff -r "$TMPD/want/tests/conformance" "$have"
   echo "linear-grid-drift ✓"
 
 # Stage-1 negative parse gate: tests/conformance/parse_error/<n>.spr must be
