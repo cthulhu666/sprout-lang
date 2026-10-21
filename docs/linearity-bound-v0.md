@@ -1,7 +1,7 @@
 # A linearity bound on type variables (v0, 2026-10-20)
 
-**Status:** design decided (§11). Implementation in four steps (§12); steps 1 and 2 are done,
-and spec-v0.md §5.8 states what they enforce. Not normative beyond that until it lands in
+**Status:** design decided (§11). Implementation in four steps (§12); steps 1 and 2 and step 3's
+dictionary walk are done, and spec-v0.md §5.8 states what they enforce. Not normative beyond that until it lands in
 [spec-v0.md](spec-v0.md) §5.8. Closes the type-variable holes in §1, three of which
 [persistent-array-v0.md](persistent-array-v0.md) §5.3 lists as prerequisites.
 
@@ -188,9 +188,9 @@ accepted. An existential declared `where linear a` makes its constructor's field
 Without the bound, `a` is known to hold nothing linear, so the bare-type-variable discard rule is
 dropped for it. `fn stmt(x: a) -> Int = do { x; 1 }` compiles.
 
-An instance head's variable keeps the rule until step 3 (§12): a use of `instance Count (Maybe a)`
-can make `a` linear, and only §6.7's dictionary walk checks that use. So `do { first(x); 0 }` in
-that instance is rejected. A class method's own variable is not the head's; each call checks it.
+An instance head's variable without the instance's bound is dropped from the rule too: §6.7's
+dictionary walk rejects each use of the instance that would make it linear. Step 2 kept the rule
+for it until that walk landed in step 3 (§12).
 
 ### 6.5 Instances
 
@@ -289,8 +289,7 @@ Dispatch does not change. Inference changes only in §6.6's mode comparison.
   linearity diagnostic prints `a`, not `$t41`. A bounded variable is named with the declaration
   that bounds it, which in a group may be a sibling: `` `ping`'s `a` is linear under its `where
   linear a` ``.
-- **Now accepted:** a bare type variable discarded in statement position, except an instance
-  head's until step 3 (§6.4); `borrowing a`
+- **Now accepted:** a bare type variable discarded in statement position (§6.4); `borrowing a`
   under the bound, which closes the P3 entry; an instance at a non-linear type of a class that
   borrows its variable, and such a function passed as a value (§6.6).
 - **Migration:** §4's functions take the opt-in in `stdlib/`. Downstream repos change nothing.
@@ -388,5 +387,11 @@ second bound and `pure`'s price (§6.5), and the class-signature mode gap (§6.6
    elaborates to them.
 3. **Dictionaries and existentials** (§6.5, §6.7's second walk): row 6, a bound on an instance
    head, and an existential unpacked under a bound. With the dictionary walk in, drop the discard
-   rule for an instance head's variable (§6.4, `@headvar:`).
+   rule for an instance head's variable (§6.4, `@headvar:`). ~~The dictionary walk, the instance
+   head's bound and the discard rule's removal~~ done. resolve walks each dictionary's instances
+   with their superclasses and contexts, and reads a function's bounds from `@sigbound:`, as its
+   signature writes them, since commit renames `@linbound:`. The prelude's `ToString` instances
+   over `Maybe`, `Result` and tuples and `Propagate (Result e)` take the bound; `Eq`, `Ord` and
+   the `List` instances drop a value on some path and do not. Existentials remain: BACKLOG P1
+   **An existential cannot carry a linear value**.
 4. **Modes** (§6.6).

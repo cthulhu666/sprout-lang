@@ -7811,10 +7811,9 @@ fn validate_constraints_all(decls: List ast.Decl, classes: Set) -> Maybe(source.
   ast.first_decl_error(decl_constraint_error(classes, _), decls)
 
 # Step 3 of docs/linearity-bound-v0.md §12 tracks a value unpacked from an
-# existential and walks dictionaries; until then these bounds are rejected rather
-# than ignored.
+# existential; until then this bound is rejected rather than ignored.
 let linear_bound_unsupported_msg: String =
-  "`where linear` on a constructor or an instance head is not supported yet (docs/linearity-bound-v0.md §12)"
+  "`where linear` on a constructor is not supported yet (docs/linearity-bound-v0.md §12)"
 
 fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
   match decl with
@@ -7824,7 +7823,7 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
   | ast.ExternFnDecl name params ret _ bounds _ -> bound_sig_error(bounds, name, fn_sig_tyvars(params, ret))
   | ast.ClassDecl _ class_vars sigs _ _ -> find_map(sig_bound_error(class_vars, _), sigs)
   | ast.TypeDecl _ _ ctors _ _ _ -> unsupported_bound_if(any(ctor_has_bound, ctors))
-  | ast.InstanceDecl _ _ bounds _ _ -> unsupported_bound_if(bounds != Nil)
+  | ast.InstanceDecl constraint _ bounds _ _ -> head_bound_error(bounds, constraint)
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
@@ -7840,6 +7839,24 @@ fn bound_sig_error(bounds: List String, decl_name: String, sig_tyvars: List Stri
 fn bound_not_in_sig_msg(v: String, decl_name: String) -> String =
   "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the signature of `"
     ++ string.after_last_dot(decl_name) ++ "`; a bound lets a type variable of the signature be linear"
+
+# An instance's bound names a variable of its head.
+fn head_bound_error(bounds: List String, constraint: ast.TypeConstraint) -> Maybe String =
+  let ast.TypeConstraint _ args = constraint
+      head_vars = collect_te_vars_list(args, Nil)
+  in map(\v -> "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the instance head `"
+                  ++ instance_owner(constraint) ++ "`; a bound lets a variable of the head be linear",
+         find(\v -> ! list_member (v, head_vars), bounds))
+
+# An instance as a diagnostic names it, `Dup2 (Maybe a)` or `Eq (a, b)`, as
+# resolve.instance_owner does.
+fn instance_owner(constraint: ast.TypeConstraint) -> String =
+  let ast.TypeConstraint cls args = constraint
+  in string.join(" ", Cons(string.after_last_dot(cls), list_map(owner_arg_text, args)))
+
+fn owner_arg_text(te: ast.TypeExpr) -> String =
+  let text = type_display(type_from_ast(te, dict_empty()))
+  in if string.contains(text, " ") && ! str_starts_with (text, "(") then "(" ++ text ++ ")" else text
 
 # A class's own variable takes no bound, in a method as in the class header
 # (docs/linearity-bound-v0.md §6.1).
@@ -9519,8 +9536,10 @@ fn pre_scan_extern(
 # A name's `where linear` variables, spelled as its scheme in `env` spells them.
 # Absent for a name with none, which is nearly every one.
 fn with_linear_bounds(name: String, bounds: List String, env: Dict types.Scheme) -> Dict types.Scheme =
-  if bounds != Nil then dict_set(types.linear_bound_key(name), types.linear_bound_marker(bounds), env)
-  else env
+  with_bound_marker(types.linear_bound_key(name), bounds, env)
+
+fn with_bound_marker(key: String, bounds: List String, env: Dict types.Scheme) -> Dict types.Scheme =
+  if bounds != Nil then dict_set(key, types.linear_bound_marker(bounds), env) else env
 
 fn linear_bounds_of(name: String, env: Dict types.Scheme) -> List String =
   match dict_get(types.linear_bound_key(name), env) with
@@ -9537,9 +9556,10 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       | ast.FnDecl name params ret_type_maybe effects_maybe constraints bounds _ _ ->
           pre_scan_fn_decls(rest,
             with_written_sig(name,
-              with_linear_bounds(name, bounds,
-                dict_set(types.arity_marker_key(name), arity_marker(list_length(params)),
-                  register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env)))),
+              with_bound_marker(types.written_bound_key(name), bounds,
+                with_linear_bounds(name, bounds,
+                  dict_set(types.arity_marker_key(name), arity_marker(list_length(params)),
+                    register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env))))),
             alias_env)
       | ast.ExternFnDecl name params ret_type_maybe effects_maybe bounds _ ->
           pre_scan_fn_decls(rest,
@@ -9966,8 +9986,23 @@ fn register_instances(items: List (Int, ast.Decl), env: GlobalEnv) -> GlobalEnv 
 
 fn register_instance_item(env: Dict types.Scheme, item: (Int, ast.Decl)) -> Dict types.Scheme =
   match item with
-  | (_, ast.InstanceDecl constraint _ _ _ _) -> register_instance_marker(constraint, env)
+  | (_, ast.InstanceDecl constraint _ bounds methods _) ->
+      register_instance_bounds(constraint, bounds, methods, register_instance_marker(constraint, env))
   | _ -> env
+
+# The instance's `where linear` and each method's, as the instance spells them, for
+# resolve's dictionary walk (docs/linearity-bound-v0.md §6.7).
+fn register_instance_bounds(constraint: ast.TypeConstraint, bounds: List String,
+                            methods: List ast.InstanceMethodImpl, env: Dict types.Scheme) -> Dict types.Scheme =
+  let ast.TypeConstraint cls args = constraint
+      [head_te | _] = args else env
+      head = type_head_str(type_from_ast(head_te, dict_empty()))
+  in list_fold(\ (acc, m) -> with_method_bounds(cls, head, m, acc),
+               with_bound_marker(types.inst_bound_key(cls, head), bounds, env), methods)
+
+fn with_method_bounds(cls: String, head: String, m: ast.InstanceMethodImpl, env: Dict types.Scheme) -> Dict types.Scheme =
+  let ast.InstanceMethodImpl name _ _ _ _ bounds _ = m
+  in with_bound_marker(types.inst_method_bound_key(cls, head, name), bounds, env)
 
 fn typecheck_groups(
   state: unifier.InferState,
@@ -10436,10 +10471,11 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  | ast.InstanceDecl constraint inst_constraints _ methods _ ->
+  | ast.InstanceDecl constraint inst_constraints head_bounds methods _ ->
       do
         unifier.census_enter(state, census_key(decl))
-        r <- check_instance_methods(state, inst_constraints, methods, global_env_dict(env), subst, eff_subst, env_ftv)
+        r <- check_instance_methods(state, InstanceHead(bounds = head_bounds, owner = instance_owner(constraint)),
+                                    inst_constraints, methods, global_env_dict(env), subst, eff_subst, env_ftv)
         match r with
         | typed_ast.InstanceMethodsErr pos e -> TypedDeclErr(pos, e)
         | typed_ast.InstanceMethodsOk typed_methods ->
@@ -11538,19 +11574,17 @@ fn mark_linear(env: Dict types.Scheme, name: String) -> Dict types.Scheme =
 # not unique (`List` declares an `a` too), and keeps the name and the declaration.
 type BoundMark = (id: String, written: String, owner: String)
 
+# An instance method's head variables are bounded by the instance, and named with it.
 fn bound_marks(g: LinearGate, subst: Dict types.Type) -> List BoundMark =
-  list_filter_map(bound_mark(g, subst, _), g.bounds)
+  list_append(list_filter_map(bound_mark(g, subst, g.owner, _), g.bounds),
+              list_filter_map(bound_mark(g, subst, g.head.owner, _), g.head.bounds))
 
-fn bound_mark(g: LinearGate, subst: Dict types.Type, v: String) -> Maybe BoundMark =
-  map(\id -> BoundMark(id = id, written = v, owner = g.owner), rigid_id(g, subst, v))
+fn bound_mark(g: LinearGate, subst: Dict types.Type, owner: String, v: String) -> Maybe BoundMark =
+  map(\id -> BoundMark(id = id, written = v, owner = owner), rigid_id(g, subst, v))
 
 # The rigid variable a signature variable of the gate's declaration became.
 fn rigid_id(g: LinearGate, subst: Dict types.Type, v: String) -> Maybe String =
   and_then(types.type_var_name, map(unifier.apply_subst(subst, _), dict_get(v, g.prog_to_fresh)))
-
-fn with_head_vars(g: LinearGate, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  list_fold(\ (acc, id) -> dict_set(types.head_var_key(id), types.presence_marker, acc), env,
-            list_filter_map(rigid_id(g, subst, _), g.head_vars))
 
 fn with_bound_marks(marks: List BoundMark, env: Dict types.Scheme) -> Dict types.Scheme =
   list_fold(with_bound_mark, env, marks)
@@ -11558,11 +11592,17 @@ fn with_bound_marks(marks: List BoundMark, env: Dict types.Scheme) -> Dict types
 fn with_bound_mark(env: Dict types.Scheme, m: BoundMark) -> Dict types.Scheme =
   dict_set(types.bound_name_key(m.id), types.bound_name_marker(m.written), mark_linear(env, m.id))
 
+# An instance's `where linear` variables, as its head spells them, and the name a
+# diagnostic gives the instance.
+type InstanceHead = (bounds: List String, owner: String)
+
+let no_instance_head: InstanceHead = InstanceHead(bounds = Nil, owner = "")
+
 # A declaration's linearity checks, deferred to its binding group's boundary: its
 # own `where linear` variables, the bound obligations its body parked, and what the
-# linear walk reads. `owner` is the declaration as a diagnostic names it;
-# `head_vars` are an instance method's head variables (instance_head_vars).
-type LinearGate = (owner: String, bounds: List String, head_vars: List String,
+# linear walk reads. `owner` is the declaration as a diagnostic names it; `head` is
+# an instance method's instance, no_instance_head for a function.
+type LinearGate = (owner: String, bounds: List String, head: InstanceHead,
                    prog_to_fresh: Dict types.Type,
                    obligations: List unifier.BoundObligation, params: List ast.Param,
                    ret_te: Maybe ast.TypeExpr, inst_type: types.Type,
@@ -11572,7 +11612,7 @@ type LinearGate = (owner: String, bounds: List String, head_vars: List String,
 # The linear walk goes first: its diagnostics name what the user wrote, such as a
 # comprehension's generator, where the bound's would name `list_fold`.
 fn linear_gate_error(g: LinearGate, s2: Dict types.Type, marks: List BoundMark) -> Maybe(source.SourcePos, String) =
-  let bound_env = with_head_vars(g, s2, with_bound_marks(marks, g.env))
+  let bound_env = with_bound_marks(marks, g.env)
   in match fn_linear_gate(g.params, g.ret_te, s2, g.inst_type, g.typed_body, g.fn_pos, bound_env) with
      | linear_check.LinFail pos msg -> Just((pos, msg))
      | linear_check.LinPass -> bound_obligation_error(g.obligations, s2, bound_env, marks)
@@ -12217,7 +12257,7 @@ fn check_fn_body(
             # M4.2: consume-exactly-once for linear-typed bindings, checked by
             # group_linear_error once the binding group's types are final. Gated so a
             # linear-free program skips the check and its substitution copy.
-            let gate = LinearGate(owner = string.after_last_dot(name), bounds = bounds, head_vars = Nil,
+            let gate = LinearGate(owner = string.after_last_dot(name), bounds = bounds, head = no_instance_head,
                                   prog_to_fresh = prog_to_fresh, obligations = obligations,
                                   params = params, ret_te = ret_type_maybe, inst_type = inst_type,
                                   typed_body = typed_body, fn_pos = fn_pos, env = with_try_markers(tries, env))
@@ -12705,6 +12745,7 @@ fn register_instance_marker(constraint: ast.TypeConstraint, env: Dict types.Sche
 
 fn check_instance_methods(
   state: unifier.InferState,
+  head: InstanceHead,
   inst_constraints: List ast.TypeConstraint,
   methods: List ast.InstanceMethodImpl,
   env: Dict types.Scheme,
@@ -12712,10 +12753,11 @@ fn check_instance_methods(
   eff_subst: Dict types.Effect,
   env_ftv: List String
 ) -> typed_ast.InstanceMethodsResult !{IO} =
-  check_instance_methods_acc(state, inst_constraints, methods, env, subst, eff_subst, env_ftv, Nil)
+  check_instance_methods_acc(state, head, inst_constraints, methods, env, subst, eff_subst, env_ftv, Nil)
 
 fn check_instance_methods_acc(
   state: unifier.InferState,
+  head: InstanceHead,
   inst_constraints: List ast.TypeConstraint,
   methods: List ast.InstanceMethodImpl,
   env: Dict types.Scheme,
@@ -12728,14 +12770,16 @@ fn check_instance_methods_acc(
   | Nil -> typed_ast.InstanceMethodsOk(list_reverse(acc))
   | Cons method rest ->
       do
-        r <- check_instance_method(state, inst_constraints, method, env, subst, eff_subst, env_ftv)
+        r <- check_instance_method(state, head, inst_constraints, method, env, subst, eff_subst, env_ftv)
         match r with
         | InstanceMethodErr pos e -> typed_ast.InstanceMethodsErr(pos, e)
         | InstanceMethodOk typed_method ->
-            check_instance_methods_acc(state, inst_constraints, rest, env, subst, eff_subst, env_ftv, Cons(typed_method, acc))
+            check_instance_methods_acc(state, head, inst_constraints, rest, env, subst, eff_subst, env_ftv,
+                                       Cons(typed_method, acc))
 
 fn check_instance_method(
   state: unifier.InferState,
+  head: InstanceHead,
   inst_constraints: List ast.TypeConstraint,
   method: ast.InstanceMethodImpl,
   env: Dict types.Scheme,
@@ -12771,7 +12815,7 @@ fn check_instance_method(
         let fwd_env = seed_unann_names(own_unann_vars(types.inst_owner_prefix ++ name, params, ret_maybe),
                         seed_sig_var_names(prog_to_fresh,
                           seed_forward_markers(list_append(inst_constraints, method_constraints), prog_to_fresh,
-                            with_bounded_decl(bounds != Nil, env))))
+                            with_bounded_decl(bounds != Nil || head.bounds != Nil, env))))
         let body_env = extend_env_with_params(params, ctor_param_types(inst_type), fwd_env)
         enter_try_decl(state, env, fn_return_type(inst_type, list_length(params)))
         br <- typecheck_expr(state, body_env, subst, eff_subst, body)
@@ -12792,7 +12836,7 @@ fn check_instance_method(
             # return-type unify — same ordering and same reasons as check_fn_body.
             instance_method_checked(state, name, label, params, ret_maybe, eff_maybe,
               body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme,
-              inst_constraints, method_constraints, bounds, prog_to_fresh, env_ftv)
+              inst_constraints, method_constraints, bounds, head, prog_to_fresh, env_ftv)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -12823,6 +12867,7 @@ fn instance_method_checked(
   inst_constraints: List ast.TypeConstraint,
   method_constraints: List ast.TypeConstraint,
   bounds: List String,
+  head: InstanceHead,
   prog_to_fresh: Dict types.Type,
   env_ftv: List String
 ) -> InstanceMethodResult !{IO} =
@@ -12847,8 +12892,7 @@ fn instance_method_checked(
               obligations <- unifier.take_bound_obligations(state)
               finish_instance_method(name, label, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
                 typed_body, env, inst_constraints, method_constraints,
-                LinearGate(owner = label_text(label), bounds = bounds,
-                           head_vars = instance_head_vars(name, decl_scheme, env), prog_to_fresh = prog_to_fresh,
+                LinearGate(owner = label_text(label), bounds = bounds, head = head, prog_to_fresh = prog_to_fresh,
                            obligations = obligations,
                            params = params, ret_te = ret_maybe, inst_type = inst_type, typed_body = typed_body,
                            fn_pos = typed_ast.typed_expr_pos(typed_body), env = with_try_markers(tries, env)),
@@ -12901,16 +12945,6 @@ fn instance_bound_restate_error(name: String, label: MethodLabel, decl_scheme: t
       (omitted, added) = bound_mismatch(class_scheme, linear_bounds_of(name, env),
                                         types.scheme_type(decl_scheme), bounds)
   in maybe_or_else(map(omitted_bound_msg(label, _), omitted), map(added_bound_msg(label, _), added))
-
-# The variables of an instance method's signature that the class method's own
-# variables do not rename to: those the instance head brings. All of them when the
-# class method is not found, which errs toward checking.
-fn instance_head_vars(name: String, decl_scheme: types.Scheme, env: Dict types.Scheme) -> List String =
-  let Just _ = dict_get(types.class_marker_key(name), env) else types.scheme_vars(decl_scheme)
-      Just class_scheme = dict_get(name, env) else types.scheme_vars(decl_scheme)
-      method_vars = list_diff(types.scheme_vars(class_scheme), class_own_vars(name, env))
-  in list_diff(types.scheme_vars(decl_scheme),
-               renamed_vars(class_scheme, types.scheme_type(decl_scheme), method_vars))
 
 fn omitted_bound_msg(label: MethodLabel, v: String) -> String =
   "instance method `" ++ label_text(label) ++ "` omits `where linear " ++ v

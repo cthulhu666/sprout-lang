@@ -1,0 +1,20 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Count t
+  fn count(x: t) -> Int
+
+fn first(m: Maybe a) -> a = match m with | Just v -> v | Nothing -> panic("none")
+
+instance Count (Maybe a)
+  fn count(x: Maybe a) -> Int =
+    do
+      first(x)
+      0
+
+fn main() -> Unit !{IO} = print(int_to_string(count(Just(1))))

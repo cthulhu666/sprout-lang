@@ -1,0 +1,11 @@
+module main
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Take t
+  fn take(x: t) -> t
+
+instance Take (Maybe a) where linear a
+  fn take(x: Maybe a) -> Maybe a = match x with | Just y -> Just(y) | Nothing -> Nothing
+
+fn main() -> Unit !{IO} = print(int_to_string(match take(Just(4)) with | Just n -> n | Nothing -> 0))

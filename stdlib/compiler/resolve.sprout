@@ -1,6 +1,7 @@
 module stdlib.compiler.resolve
 
 import stdlib.compiler.ast as ast
+import stdlib.compiler.linear_check as linear_check
 import stdlib.compiler.source as source
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
@@ -32,28 +33,45 @@ export type ResolveResult (..) =
   | ResolveOk typed_ast.TypedProgram
   | ResolveErr source.SourcePos String
 
-# Instance tables: existence (constraint_key → present from bundled decls),
-# context (constraint_key → (instance head type args, instance context constraints)),
+# Instance tables: existence (constraint_key → the instance head's type args, for
+# every bundled instance), context (constraint_key → (instance head type args,
+# instance context constraints), for one that has a context),
 # the full checker env (carries @inst: markers for instances defined in imported
 # modules whose decls are NOT bundled into this program), and super_map
 # (class_name → direct superclass names, for transitive-super expansion — the same
-# source lowering's collect_super_map reads).
-type Tables = Tables(typed_ast.InstanceTable Bool)(typed_ast.InstanceTable(List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String)) (Dict String)
+# source lowering's collect_super_map reads), and the `where linear` variables of the
+# declaration being resolved (with_bounded).
+type Tables = Tables(typed_ast.InstanceTable(List ast.TypeExpr))(typed_ast.InstanceTable(List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String)) (Dict String) (List BoundVar)
 
-fn tables_exists(t: Tables) -> typed_ast.InstanceTable Bool =
-  match t with | Tables e _ _ _ _ -> e
+fn tables_exists(t: Tables) -> typed_ast.InstanceTable(List ast.TypeExpr) =
+  match t with | Tables e _ _ _ _ _ -> e
 
 fn tables_ctx(t: Tables) -> typed_ast.InstanceTable(List ast.TypeExpr, List ast.TypeConstraint) =
-  match t with | Tables _ c _ _ _ -> c
+  match t with | Tables _ c _ _ _ _ -> c
 
 fn tables_env(t: Tables) -> Dict types.Scheme =
-  match t with | Tables _ _ v _ _ -> v
+  match t with | Tables _ _ v _ _ _ -> v
 
 fn tables_super(t: Tables) -> Dict (List String) =
-  match t with | Tables _ _ _ s _ -> s
+  match t with | Tables _ _ _ s _ _ -> s
 
 fn tables_class_params(t: Tables) -> Dict String =
-  match t with | Tables _ _ _ _ p -> p
+  match t with | Tables _ _ _ _ p _ -> p
+
+fn tables_bounded(t: Tables) -> List BoundVar =
+  match t with | Tables _ _ _ _ _ b -> b
+
+# A `where linear` variable of the declaration being resolved, as it is written, and
+# the declaration a diagnostic names as bounding it (docs/linearity-bound-v0.md §6.7).
+type BoundVar = (written: String, owner: String)
+
+# The tables for one declaration's body: its bounded variables, each marked linear
+# in the env, so linear_check.first_linear_in finds them.
+fn with_bounded(bounded: List BoundVar, t: Tables) -> Tables =
+  match t with
+  | Tables e c v s p b ->
+      Tables(e, c, list_fold(\ (acc, bv) -> dict_set(types.linear_marker_key(bv.written), types.presence_marker, acc), v, bounded),
+             s, p, list_append(bounded, b))
 
 # The constraints a declaration forwards as hidden dictionaries, grouped by class and
 # head constructor (constraint_key_str): each slot's key (typed_ast.dict_slot_key, one slot
@@ -257,7 +275,7 @@ fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> Resol
 # ---------------------------------------------------------------------------
 
 fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
-  collect_tables(decls, Tables(typed_ast.instance_table_empty(), typed_ast.instance_table_empty(), env, classes.supers, classes.params))
+  collect_tables(decls, Tables(typed_ast.instance_table_empty(), typed_ast.instance_table_empty(), env, classes.supers, classes.params, Nil))
   where classes = typed_ast.class_tables(decls)
 
 fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
@@ -276,8 +294,8 @@ fn add_instance(
 ) -> Tables =
   let ast.TypeConstraint _ type_args = constraint
       key = typed_ast.constraint_key_from_tc(constraint)
-  in Tables(typed_ast.instance_set(key, true, tables_exists(acc)), add_ctx(key, type_args, inst_constraints, tables_ctx(acc)),
-            tables_env(acc), tables_super(acc), tables_class_params(acc))
+  in Tables(typed_ast.instance_set(key, type_args, tables_exists(acc)), add_ctx(key, type_args, inst_constraints, tables_ctx(acc)),
+            tables_env(acc), tables_super(acc), tables_class_params(acc), tables_bounded(acc))
 
 fn add_ctx(
   key: typed_ast.InstanceKey,
@@ -314,6 +332,90 @@ fn check_constraint(
       in if instance_exists(class_name, key, head_arg, tables)
          then check_context(key, class_name, head_arg, type_args, pos, cover, tables)
          else Just((pos, "No instance of " ++ class_bare ++ " for " ++ typed_ast.type_expr_head_name(head_arg)))
+
+# docs/linearity-bound-v0.md §6.7: a dictionary built from a generic instance
+# instantiates the instance head's variables, which no scheme shows. One the
+# instance does not bound must hold no linear value, and the enclosing
+# declaration's own `where linear` variables count as linear. The tree is walked
+# as produce_evidence builds it: each superclass, and each instance's context.
+fn dictionary_linearity_error(c: ast.TypeConstraint, pos: source.SourcePos, fwd_keys: Forwarded,
+                              tables: Tables) -> Maybe(source.SourcePos, String) =
+  let ast.TypeConstraint class_name type_args = c
+      [head_arg | _] = type_args else Nothing
+  in if head_is_concrete(head_arg) && may_hold_linear(tables) then
+       find_map(class_linearity_error(_, head_arg, type_args, pos, fwd_keys, tables),
+                types.class_with_transitive_supers(class_name, tables_super(tables)))
+     else Nothing
+
+# Without a linear type in the program or a bounded variable in scope, no type is linear.
+fn may_hold_linear(tables: Tables) -> Bool =
+  linear_check.program_has_linear(tables_env(tables)) || list_length(tables_bounded(tables)) > 0
+
+# A forwarded dictionary needs nothing: its caller instantiated the forwarding
+# declaration's variable, and that use was checked.
+fn class_linearity_error(cls: String, head_arg: ast.TypeExpr, type_args: List ast.TypeExpr,
+                         pos: source.SourcePos, fwd_keys: Forwarded,
+                         tables: Tables) -> Maybe(source.SourcePos, String) =
+  let Nothing = forwarded_slot(cls, type_args, fwd_keys) else Just _ -> Nothing
+      key = typed_ast.constraint_key_str(cls, type_args)
+      Just patterns = typed_ast.instance_get(key, tables_exists(tables)) else Nothing
+      subs = unify_type_args_list(patterns, type_args, dict_empty())
+      bounds = instance_bounds(cls, head_arg, tables)
+      unbounded = list_filter(\v -> ! list_member (v, bounds), list_reverse(te_vars_list(patterns, [])))
+  in match find_map(head_var_fault(cls, patterns, subs, pos, tables, _), unbounded) with
+     | Just err -> Just(err)
+     | Nothing -> context_linearity_error(key, subs, pos, fwd_keys, tables)
+
+fn context_linearity_error(key: typed_ast.InstanceKey, subs: Dict ast.TypeExpr, pos: source.SourcePos,
+                           fwd_keys: Forwarded, tables: Tables) -> Maybe(source.SourcePos, String) =
+  let Just(_, inst_constraints) = typed_ast.instance_get(key, tables_ctx(tables)) else Nothing
+  in find_map(\ic -> dictionary_linearity_error(substitute_constraint(ic, subs), pos, fwd_keys, tables),
+              inst_constraints)
+
+fn instance_bounds(cls: String, head_arg: ast.TypeExpr, tables: Tables) -> List String =
+  match dict_get(types.inst_bound_key(cls, typed_ast.type_expr_head_name(head_arg)), tables_env(tables)) with
+  | Just marker -> types.scheme_vars(marker)
+  | Nothing -> Nil
+
+fn head_var_fault(cls: String, patterns: List ast.TypeExpr, subs: Dict ast.TypeExpr, pos: source.SourcePos,
+                  tables: Tables, v: String) -> Maybe(source.SourcePos, String) =
+  let Just arg = dict_get(v, subs) else Nothing
+      t = te_type(arg)
+      Just lin = linear_check.first_linear_in(t, tables_env(tables)) else Nothing
+  in Just((pos, "the `" ++ string.after_last_dot(cls) ++ "` instance for `" ++ te_display(head_pattern(patterns))
+                  ++ "` takes `" ++ v ++ "` as a value it may copy or drop, and " ++ linear_reason(t, lin, tables)
+                  ++ "; if the instance uses its `" ++ v ++ "` exactly once, add `where linear " ++ v
+                  ++ "` to its head"))
+
+fn head_pattern(patterns: List ast.TypeExpr) -> ast.TypeExpr =
+  match patterns with
+  | [p | _] -> p
+  | [] -> ast.TypeName("_")
+
+# Why `t` is linear, worded as infer.linear_reason words it at a call.
+fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
+  let v = type_display(lin)
+  in match find(\bv -> types.type_var_name(lin) == Just(bv.written), tables_bounded(tables)) with
+     | Just bv -> "`" ++ bv.owner ++ "`'s `" ++ v ++ "` is linear under its `where linear " ++ v ++ "`"
+     | Nothing ->
+         if t == lin then "`" ++ v ++ "` is linear"
+         else "`" ++ type_display(t) ++ "` holds the linear `" ++ v ++ "`"
+
+fn type_display(t: types.Type) -> String = te_display(typed_ast.type_to_type_expr(t))
+
+let holds_nothing: types.Type = types.TVar(types.tyvar_id("_"))
+
+# A dispatch type as the linear check reads it. A function, thunk or effect type
+# holds no value, as first_linear_in decides for TFunc and TThunk, so it becomes
+# `_`, which no bound marks.
+fn te_type(te: ast.TypeExpr) -> types.Type =
+  match te with
+  | ast.TypeName n -> if head_is_concrete(te) then types.TConst(types.type_id(n)) else types.TVar(types.tyvar_id(n))
+  | ast.TypeApply base arg -> types.TApp(te_type(base), te_type(arg))
+  | ast.TupleType items -> types.TTuple(list_map(te_type, items))
+  | ast.TypeArrow _ _ _ _ -> holds_nothing
+  | ast.TypeThunk _ _ -> holds_nothing
+  | ast.TypeEffect _ _ -> holds_nothing
 
 # A dictionary the declaration forwards arrives whole, context included, so no instance
 # has to exist for it and its context is not this body's to supply. Decided as
@@ -740,7 +842,8 @@ fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
 fn resolve_decl(d: typed_ast.TypedDecl, tables: Tables) -> Result(source.SourcePos, String) typed_ast.TypedDecl =
   match d with
   | typed_ast.TFnDecl name params ret_ty effects constraints body ->
-      let b = try resolve_expr(body, InFn, build_fwd_keys(constraints, tables), tables)
+      let fn_tables = with_bounded(bound_vars(types.written_bound_key(name), string.after_last_dot(name), tables), tables)
+          b = try resolve_expr(body, InFn, build_fwd_keys(constraints, fn_tables), fn_tables)
       in Ok(typed_ast.TFnDecl(name, params, ret_ty, effects, constraints, b))
   | typed_ast.TLetDecl name body ->
       let b = try resolve_expr(body, InFn, typed_ast.instance_table_empty(), tables)
@@ -749,10 +852,21 @@ fn resolve_decl(d: typed_ast.TypedDecl, tables: Tables) -> Result(source.SourceP
       let bound = head_vars(constraint)
           kind = InInstanceMethod(bound)
           ctx = head_bound(inst_constraints, bound)
-          ms = try resolve_all(resolve_method(_, kind, ctx, tables), methods)
+          ast.TypeConstraint cls type_args = constraint
+          head = typed_ast.type_expr_head_name(head_pattern(type_args))
+          inst_tables = with_bounded(bound_vars(types.inst_bound_key(cls, head), instance_owner(cls, type_args), tables),
+                                     tables)
+          ms = try resolve_all(resolve_method(_, kind, ctx, (cls, head), inst_tables), methods)
       in Ok(typed_ast.TInstanceDecl(constraint, inst_constraints, ms))
   | typed_ast.TExternFnDecl _ _ _ _ -> Ok(d)
   | typed_ast.TPassThrough _ -> Ok(d)
+
+# A dictionary's instances exist, and none instantiates a head variable at a linear type.
+fn check_dictionary(c: ast.TypeConstraint, pos: source.SourcePos, kind: DeclKind, fwd_keys: Forwarded,
+                    tables: Tables) -> Maybe(source.SourcePos, String) =
+  match check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) with
+  | Just err -> Just(err)
+  | Nothing -> dictionary_linearity_error(c, pos, fwd_keys, tables)
 
 # The instance context's keys, then the method's own: the order lowering's
 # generate_one_instance_fn passes the dictionaries in.
@@ -760,11 +874,25 @@ fn resolve_method(
   m: typed_ast.TypedInstanceMethod,
   kind: DeclKind,
   inst_constraints: List ast.TypeConstraint,
-  tables: Tables
+  inst: (String, String),
+  inst_tables: Tables
 ) -> Result(source.SourcePos, String) typed_ast.TypedInstanceMethod =
   let typed_ast.TypedInstanceMethod name params ret_ty effects cs body = m
+      (cls, head) = inst
+      tables = with_bounded(bound_vars(types.inst_method_bound_key(cls, head, name), string.after_last_dot(name),
+                                       inst_tables), inst_tables)
       b = try resolve_expr(body, kind, build_fwd_keys(list_append(inst_constraints, cs), tables), tables)
   in Ok(typed_ast.TypedInstanceMethod(name, params, ret_ty, effects, cs, b))
+
+# The `where linear` variables a marker records, named with `owner`.
+fn bound_vars(key: String, owner: String, tables: Tables) -> List BoundVar =
+  match dict_get(key, tables_env(tables)) with
+  | Just marker -> list_map(\v -> BoundVar(written = v, owner = owner), types.scheme_vars(marker))
+  | Nothing -> Nil
+
+# An instance as a diagnostic names it, `Dup2 (Maybe a)`, as infer.instance_owner does.
+fn instance_owner(cls: String, type_args: List ast.TypeExpr) -> String =
+  string.join(" ", Cons(string.after_last_dot(cls), list_map(te_display_atom, type_args)))
 
 # Every variant is listed, with no wildcard: a new one stops the build here, so
 # whether it needs a check is decided, not defaulted. A TDict or method reference
@@ -774,12 +902,12 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
     -> Result(source.SourcePos, String) typed_ast.TypedExpr =
   match e with
   | typed_ast.TDict c t pos _ ->
-      let Nothing = check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) else Just err -> Err(err)
+      let Nothing = check_dictionary(c, pos, kind, fwd_keys, tables) else Just err -> Err(err)
       in Ok(typed_ast.TDict(c, t, pos, produce_evidence(c, fwd_keys, tables)))
   | typed_ast.TMethodRef method class_name t pos _ ->
       let Just c = method_ref_constraint(method, class_name, t, tables)
             else Ok(typed_ast.TMethodRef(method, class_name, t, pos, typed_ast.EvUnresolved))
-          Nothing = check_constraint(c, pos, CoverFrom(kind, fwd_keys), tables) else Just err -> Err(err)
+          Nothing = check_dictionary(c, pos, kind, fwd_keys, tables) else Just err -> Err(err)
       in Ok(typed_ast.TMethodRef(method, class_name, t, pos, method_ref_evidence(c, fwd_keys, tables)))
   | typed_ast.TVar _ _ _ -> Ok(e)
   | typed_ast.TInt _ _ _ -> Ok(e)

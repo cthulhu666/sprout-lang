@@ -712,10 +712,9 @@ gone. Two things to keep if you touch this again:
 `parse_error/linear_grid_*` so the pre-commit lint skips them. The generator's header lists the
 N/A cells.
 
-- `test-linear-grid` runs `_test-reject` over the reject cells. Its xfail list holds the
-  instance-head copy, drop and pass-through cells: the compiler accepts them until
-  docs/linearity-bound-v0.md §12 step 3, so each flips the gate RED (UNEXPECTED MATCH) when step 3
-  lands and must leave the list then.
+- `test-linear-grid` runs `_test-reject` over the reject cells, with an empty xfail list. A cell
+  the compiler does not yet reject goes on that list, and flips the gate RED (UNEXPECTED MATCH)
+  once it is rejected.
 - `linear-grid-drift` regenerates into a temp dir and diffs against the committed files. Edit the
   generator and rerun it with the repo root as out-root; never edit a cell by hand. Its output
   must already be what `just fmt` writes (e.g. `Ctor(x)` spacing): `fmt-check` fails otherwise.

@@ -1553,7 +1553,7 @@ instance Propagate Maybe
     | Just v -> Continue(v)
     | Nothing -> Break(Nothing)
 
-instance Propagate (Result e)
+instance Propagate (Result e) where linear e
   fn branch(value: Result e a) -> ControlFlow (Result e b) a where linear a, linear b =
     match value with
     | Ok v -> Continue(v)
@@ -1727,7 +1727,7 @@ export fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   | Ok x -> Ok(x)
   | Err e -> after(f(e), r)
 
-instance ToString (Maybe a) where ToString a
+instance ToString (Maybe a) where linear a, ToString a
   fn to_string(x: Maybe a) -> String =
     match x with
     | Nothing -> "Nothing"
@@ -1749,7 +1749,7 @@ instance ToString (List a) where ToString a
   fn to_string(xs: List a) -> String =
     "[" ++ list_to_string_go(list_map(\ (v) -> to_string(v), xs)) ++ "]"
 
-instance ToString (Result e a) where ToString e, ToString a
+instance ToString (Result e a) where linear e, linear a, ToString e, ToString a
   fn to_string(x: Result e a) -> String =
     match x with
     | Ok v -> "Ok(" ++ to_string(v) ++ ")"
@@ -1792,25 +1792,25 @@ instance ToString Set
     "{" ++ list_to_string_go(set_to_list(s)) ++ "}"
 
 # O(1)
-instance ToString (a, b) where ToString a, ToString b
+instance ToString (a, b) where linear a, linear b, ToString a, ToString b
   fn to_string(t: (a, b)) -> String =
     match t with
     | (x, y) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ")"
 
 # O(1)
-instance ToString (a, b, c) where ToString a, ToString b, ToString c
+instance ToString (a, b, c) where linear a, linear b, linear c, ToString a, ToString b, ToString c
   fn to_string(t: (a, b, c)) -> String =
     match t with
     | (x, y, z) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ")"
 
 # O(1)
-instance ToString (a, b, c, d) where ToString a, ToString b, ToString c, ToString d
+instance ToString (a, b, c, d) where linear a, linear b, linear c, linear d, ToString a, ToString b, ToString c, ToString d
   fn to_string(t: (a, b, c, d)) -> String =
     match t with
     | (x, y, z, w) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ")"
 
 # O(1)
-instance ToString (a, b, c, d, e) where ToString a, ToString b, ToString c, ToString d, ToString e
+instance ToString (a, b, c, d, e) where linear a, linear b, linear c, linear d, linear e, ToString a, ToString b, ToString c, ToString d, ToString e
   fn to_string(t: (a, b, c, d, e)) -> String =
     match t with
     | (x, y, z, w, v) -> "(" ++ to_string(x) ++ ", " ++ to_string(y) ++ ", " ++ to_string(z) ++ ", " ++ to_string(w) ++ ", " ++ to_string(v) ++ ")"

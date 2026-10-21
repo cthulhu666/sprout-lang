@@ -1,1 +1,0 @@
-this step discards a value that may be linear: its type is a variable of the instance head, which a use of the instance may instantiate at a linear type (docs/linearity-bound-v0.md §12); bind its result with `<-` or `let` and consume the binding

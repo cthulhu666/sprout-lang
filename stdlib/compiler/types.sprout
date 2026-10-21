@@ -198,7 +198,8 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @type:<TypeName>                @linear:<TypeName or tyvar id>
 #   @any_linear                     @bounded_decl
 #   @linbound:<fn, extern or method>  @boundname:<tyvar id>
-#   @sig:<fn>                       @toplet:<let>             @headvar:<tyvar id>
+#   @sig:<fn>                       @sigbound:<fn>            @toplet:<let>
+#   @instbound:<class>:<head>[/<method>]
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
@@ -231,6 +232,10 @@ export fn linear_bound_key(name: String) -> String = "@linbound:" ++ name
 # diagnostic can name a variable as the source spells it.
 export fn written_sig_key(name: String) -> String = "@sig:" ++ name
 
+# A function's `where linear` variables as its signature writes them; `@linbound:`
+# follows its scheme's names, which commit regenerates.
+export fn written_bound_key(name: String) -> String = "@sigbound:" ++ name
+
 export fn top_let_key(name: String) -> String = "@toplet:" ++ name
 
 # The value of an env marker whose presence is all it says.
@@ -244,10 +249,13 @@ export fn bound_name_marker(written: String) -> Scheme = mono(TVar(tyvar_id(writ
 
 export fn bound_name_of(marker: Scheme) -> String = type_to_string(scheme_type(marker))
 
-# An instance head's variable, by its rigid id, in an instance method's body. A
-# use of the instance can make it linear, unchecked until step 3 of
-# docs/linearity-bound-v0.md §12, so discarding one is rejected.
-export fn head_var_key(id: String) -> String = "@headvar:" ++ id
+# An instance's `where linear` variables, as its head spells them, keyed like its
+# `@inst:` marker; with a method name, that instance method's own, as it spells
+# them. resolve checks a dictionary's head variables against them.
+export fn inst_bound_key(class_name: String, head: String) -> String = "@instbound:" ++ class_name ++ ":" ++ head
+
+export fn inst_method_bound_key(class_name: String, head: String, method: String) -> String =
+  inst_bound_key(class_name, head) ++ "/" ++ method
 
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)

@@ -1,0 +1,12 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+instance Eq L
+  fn eq(x: L, y: L) -> Bool = close(x) == close(y)
+
+fn main() -> Unit !{IO} = print(if Just(L(1)) == Just (L(2)) then "eq" else "ne")
