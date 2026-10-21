@@ -1449,7 +1449,7 @@ fn named_forward_miss(ev: typed_ast.Evidence, ctx: LowerCtx) -> Bool =
   | typed_ast.EvMissing _ -> false
 
 # The variable a forward key (typed_ast.dict_slot_key) names is `_` or an inference variable,
-# as resolve.is_unnamed reads it; an existential (`$ex_`, a skolem) is a type of its own.
+# as typed_ast.is_unnamed reads it; an existential (`$ex_`, a skolem) is a type of its own.
 fn unnamed_forward(key: typed_ast.SlotKey) -> Bool =
   let Just arg = typed_ast.slot_key_sole_arg(key) else false
   in arg == "_"

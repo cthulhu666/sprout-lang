@@ -1,0 +1,9 @@
+module main
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker (a, Maybe b) where linear c
+  fn take(x: (a, Maybe b)) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

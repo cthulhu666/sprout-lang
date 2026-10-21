@@ -134,30 +134,13 @@ fn te_conflicts(use: ast.TypeExpr, written: ast.TypeExpr) -> Bool =
   # Compared without module prefixes: a `where` clause and an inferred type may
   # spell one type `Box` and `main.Box`, and a false conflict here is a rejection.
   | (ast.TypeName u, ast.TypeName w) ->
-      string.after_last_dot(u) != string.after_last_dot(w) && is_unnamed(u) == false
-  | (ast.TypeName u, _) -> is_unnamed(u) == false
+      string.after_last_dot(u) != string.after_last_dot(w) && typed_ast.is_unnamed(u) == false
+  | (ast.TypeName u, _) -> typed_ast.is_unnamed(u) == false
   | (ast.TypeApply ub ua, ast.TypeApply wb wa) -> te_conflicts(ub, wb) || te_conflicts(ua, wa)
   | (ast.TupleType us, ast.TupleType ws) -> args_conflict(us, ws)
   # Any other pair, arrows included: the key-level answer, by head constructor. It is
   # what forwarding meant before arguments were compared, so it stays right for any shape.
   | (_, _) -> typed_ast.type_expr_head_name(use) != typed_ast.type_expr_head_name(written)
-
-# A position nothing names: `_`, or an inference variable (`$t<n>`, as
-# typed_ast.type_to_type_expr writes one). An existential (`$ex_<binder>`, a `$sk<n>`
-# skolem), an unannotated slot's placeholder and a headerless file's own type
-# (`$entry.Never`, source.entry_module_prefix) are types of their own; reading them as
-# unknown let `where Eq (Maybe a)` serve them with `a`'s dictionary.
-fn is_unnamed(name: String) -> Bool =
-  name == "_"
-    || (str_starts_with(name, "$") && is_existential_name(name) == false
-          && str_starts_with(name, source.entry_module_prefix) == false)
-
-fn is_existential_name(name: String) -> Bool =
-  types.is_existential_head(name) || types.is_skolem_name(name)
-
-# What a message prints as `_`: every compiler-made name, none of which the program wrote.
-fn displays_as_hole(name: String) -> Bool =
-  is_unnamed(name) || is_existential_name(name) || types.is_unann_placeholder(name)
 
 # A `where` argument with its type aliases expanded, as the use-site types it is
 # compared with already are. Aliases reach resolve as the checker's `@aliasty:`
@@ -382,7 +365,7 @@ fn head_var_fault(cls: String, patterns: List ast.TypeExpr, subs: Dict ast.TypeE
   let Just arg = dict_get(v, subs) else Nothing
       t = te_type(arg)
       Just lin = linear_check.first_linear_in(t, tables_env(tables)) else Nothing
-  in Just((pos, "the `" ++ string.after_last_dot(cls) ++ "` instance for `" ++ te_display(head_pattern(patterns))
+  in Just((pos, "the `" ++ string.after_last_dot(cls) ++ "` instance for `" ++ typed_ast.te_display(head_pattern(patterns))
                   ++ "` takes `" ++ v ++ "` as a value it may copy or drop, and " ++ linear_reason(t, lin, tables)
                   ++ "; if the instance uses its `" ++ v ++ "` exactly once, add `where linear " ++ v
                   ++ "` to its head"))
@@ -401,7 +384,7 @@ fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
          if t == lin then "`" ++ v ++ "` is linear"
          else "`" ++ type_display(t) ++ "` holds the linear `" ++ v ++ "`"
 
-fn type_display(t: types.Type) -> String = te_display(typed_ast.type_to_type_expr(t))
+fn type_display(t: types.Type) -> String = typed_ast.te_display(typed_ast.type_to_type_expr(t))
 
 let holds_nothing: types.Type = types.TVar(types.tyvar_id("_"))
 
@@ -550,7 +533,7 @@ fn unsupplied_context_var(
     if is_checked_var(typed_ast.type_expr_head_name(head_arg)) == false then Nothing
     else if forwards(class_name, type_args, fwd_keys) then Nothing
     else Just((pos, "the `" ++ string.after_last_dot(outer_class) ++ "` instance for `"
-                      ++ te_display(outer_head) ++ "` "
+                      ++ typed_ast.te_display(outer_head) ++ "` "
                       ++ unsupplied_remedy(kind, class_bare, head_arg)))
 
 fn is_checked_var(name: String) -> Bool =
@@ -563,7 +546,7 @@ fn is_checked_var(name: String) -> Bool =
 fn unsupplied_remedy(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
   if types.is_unann_placeholder(typed_ast.type_expr_head_name(arg)) then unann_remedy(cls, typed_ast.type_expr_head_name(arg))
   else
-    "needs `" ++ cls ++ " " ++ te_display_atom(arg) ++ "`, which nothing in scope supplies — "
+    "needs `" ++ cls ++ " " ++ typed_ast.te_display_atom(arg) ++ "`, which nothing in scope supplies — "
       ++ supply_hint(kind, cls, arg)
 
 # An instance head's context reaches only the variables the head binds; for any other
@@ -576,9 +559,9 @@ fn supply_hint(kind: DeclKind, cls: String, arg: ast.TypeExpr) -> String =
   | (_, InInstanceMethod bound) ->
       if list_member(typed_ast.type_expr_head_name(arg), bound) then "add it to the instance head's `where`"
       else
-        "constrain `" ++ te_display(arg) ++ "` with a method-level `where` (the class declaration "
+        "constrain `" ++ typed_ast.te_display(arg) ++ "` with a method-level `where` (the class declaration "
           ++ "must declare it too) — or, if it is the instance head's variable, spell it as the head does"
-  | (_, InFn) -> "add `where " ++ cls ++ " " ++ te_display_atom(arg) ++ "`"
+  | (_, InFn) -> "add `where " ++ cls ++ " " ++ typed_ast.te_display_atom(arg) ++ "`"
 
 # A slot's own type takes a type variable; a variable INSIDE its type
 # (types.is_unann_inner) cannot — `b: t` where `b: Box p` was inferred forces `t` to
@@ -618,24 +601,6 @@ fn unann_slot(owner_and_param: String) -> String =
   if str_starts_with(owner_and_param, types.inst_owner_prefix)
   then string.drop(owner_and_param, string.length(types.inst_owner_prefix))
   else owner_and_param
-
-# A type as the program would write it. Module prefixes are dropped, a tuple is
-# `(a, Int)` rather than its internal head `Tuple2`, and a variable no signature
-# named prints as `_`.
-fn te_display(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeName n -> if displays_as_hole(n) then "_" else string.after_last_dot(n)
-  | ast.TypeApply base arg -> te_display(base) ++ " " ++ te_display_atom(arg)
-  | ast.TupleType items -> "(" ++ string.join(", ", list_map(te_display, items)) ++ ")"
-  | ast.TypeArrow param ret _ _ -> te_display_atom(param) ++ " -> " ++ te_display(ret)
-  # A thunk or effect type in a context position: its head (`Fn`, `Eff`) still names it.
-  | _ -> typed_ast.type_expr_head_name(te)
-
-fn te_display_atom(te: ast.TypeExpr) -> String =
-  match te with
-  | ast.TypeApply _ _ -> "(" ++ te_display(te) ++ ")"
-  | ast.TypeArrow _ _ _ _ -> "(" ++ te_display(te) ++ ")"
-  | _ -> te_display(te)
 
 # ---------------------------------------------------------------------------
 # Evidence production
@@ -854,7 +819,7 @@ fn resolve_decl(d: typed_ast.TypedDecl, tables: Tables) -> Result(source.SourceP
           ctx = head_bound(inst_constraints, bound)
           ast.TypeConstraint cls type_args = constraint
           head = typed_ast.type_expr_head_name(head_pattern(type_args))
-          inst_tables = with_bounded(bound_vars(types.inst_bound_key(cls, head), instance_owner(cls, type_args), tables),
+          inst_tables = with_bounded(bound_vars(types.inst_bound_key(cls, head), typed_ast.instance_display(cls, type_args), tables),
                                      tables)
           ms = try resolve_all(resolve_method(_, kind, ctx, (cls, head), inst_tables), methods)
       in Ok(typed_ast.TInstanceDecl(constraint, inst_constraints, ms))
@@ -889,10 +854,6 @@ fn bound_vars(key: String, owner: String, tables: Tables) -> List BoundVar =
   match dict_get(key, tables_env(tables)) with
   | Just marker -> list_map(\v -> BoundVar(written = v, owner = owner), types.scheme_vars(marker))
   | Nothing -> Nil
-
-# An instance as a diagnostic names it, `Dup2 (Maybe a)`, as infer.instance_owner does.
-fn instance_owner(cls: String, type_args: List ast.TypeExpr) -> String =
-  string.join(" ", Cons(string.after_last_dot(cls), list_map(te_display_atom, type_args)))
 
 # Every variant is listed, with no wildcard: a new one stops the build here, so
 # whether it needs a check is decided, not defaulted. A TDict or method reference

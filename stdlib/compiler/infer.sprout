@@ -7848,15 +7848,9 @@ fn head_bound_error(bounds: List String, constraint: ast.TypeConstraint) -> Mayb
                   ++ instance_owner(constraint) ++ "`; a bound lets a variable of the head be linear",
          find(\v -> ! list_member (v, head_vars), bounds))
 
-# An instance as a diagnostic names it, `Dup2 (Maybe a)` or `Eq (a, b)`, as
-# resolve.instance_owner does.
 fn instance_owner(constraint: ast.TypeConstraint) -> String =
   let ast.TypeConstraint cls args = constraint
-  in string.join(" ", Cons(string.after_last_dot(cls), list_map(owner_arg_text, args)))
-
-fn owner_arg_text(te: ast.TypeExpr) -> String =
-  let text = type_display(type_from_ast(te, dict_empty()))
-  in if string.contains(text, " ") && ! str_starts_with (text, "(") then "(" ++ text ++ ")" else text
+  in typed_ast.instance_display(cls, args)
 
 # A class's own variable takes no bound, in a method as in the class header
 # (docs/linearity-bound-v0.md §6.1).
@@ -9996,7 +9990,7 @@ fn register_instance_bounds(constraint: ast.TypeConstraint, bounds: List String,
                             methods: List ast.InstanceMethodImpl, env: Dict types.Scheme) -> Dict types.Scheme =
   let ast.TypeConstraint cls args = constraint
       [head_te | _] = args else env
-      head = type_head_str(type_from_ast(head_te, dict_empty()))
+      head = typed_ast.type_expr_head_name(head_te)
   in list_fold(\ (acc, m) -> with_method_bounds(cls, head, m, acc),
                with_bound_marker(types.inst_bound_key(cls, head), bounds, env), methods)
 
