@@ -45,6 +45,11 @@ into `justfile` and `ci-fast-gates` in the same change.
   conditional hint ("if `f` uses `a` exactly once") whose condition is false for
   the fixture gets no fixed file. `*.fixed.spr` files are not fixtures; one with no
   `<name>.spr` fails as ORPHAN.
+  The `.err` names no line. To pin one, put a comment line `#~^ ERROR` under it (each
+  further `^` reaches one line higher, as rustc's `//~^`): the first `<line>:<col>: ERROR`
+  must be on that line (`scripts/error_line_marker.sh`). Pin one wherever the spec or the
+  change says where an error is reported; a claim no fixture checks is how a wrong
+  position landed (PR #701 review).
 
 ## `run/XFAIL` — visible quarantine
 
