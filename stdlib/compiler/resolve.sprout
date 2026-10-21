@@ -380,17 +380,14 @@ fn head_pattern(patterns: List ast.TypeExpr) -> ast.TypeExpr =
 fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
   let v = type_display(lin)
   in match find(\bv -> types.type_var_name(lin) == Just(bv.written), tables_bounded(tables)) with
-     | Just bv -> bounded_reason(bv.owner, v)
+     | Just bv -> linear_check.bounded_reason(bv.owner, v)
      | Nothing ->
          match and_then(types.unpacked_of, and_then(\id -> dict_get(types.unpacked_key(id), tables_env(tables)),
                                                     types.type_var_name(lin))) with
-         | Just (owner, written) -> bounded_reason(owner, written)
+         | Just (owner, written) -> linear_check.bounded_reason(owner, written)
          | Nothing ->
              if t == lin then "`" ++ v ++ "` is linear"
              else "`" ++ type_display(t) ++ "` holds the linear `" ++ v ++ "`"
-
-fn bounded_reason(owner: String, v: String) -> String =
-  "`" ++ owner ++ "`'s `" ++ v ++ "` is linear under its `where linear " ++ v ++ "`"
 
 fn type_display(t: types.Type) -> String = typed_ast.te_display(typed_ast.type_to_type_expr(t))
 

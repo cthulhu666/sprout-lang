@@ -664,6 +664,14 @@ let nullary_linear_record =
   "\n" ++
   "fn make_handle() -> Handle = Handle(fd = 1)\n"
 
+# A constructor's `where linear` makes its type linear without the `linear`
+# keyword, so the gate reads the bound too.
+let nullary_bounded_ctor =
+  "type Boxed =\n" ++
+  "  | exists a. Boxed a where linear a\n" ++
+  "\n" ++
+  "fn make_boxed() -> Boxed = Boxed(0)\n"
+
 # The same shape at an UNRESTRICTED type still converts, so the gate keys on the
 # declaration's multiplicity and not merely on naming a local constructor.
 let nullary_unrestricted_ctor =
@@ -1049,6 +1057,8 @@ fn main() -> Unit !{IO} =
       count_by_rule(lint_rules.lint_ast(nullary_linear_ctor), "nullary-const-fn"), 0)
     assert_eq(state, "nullary fn building a linear RECORD: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_linear_record), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn building a bounded-constructor value: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_bounded_ctor), "nullary-const-fn"), 0)
     assert_eq(state, "the same shape at an unrestricted type: one finding",
       count_by_rule(lint_rules.lint_ast(nullary_unrestricted_ctor), "nullary-const-fn"), 1)
 
