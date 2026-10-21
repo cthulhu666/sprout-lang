@@ -1,0 +1,1 @@
+instance method `mk` of instance Mk Int has type `(Int) -> Int -> Int`, but class Mk declares `(Int) -> borrowing Int -> Int` for this head. A call dispatches through the class signature, so the method takes and returns what the class says (spec-v0.md §8.5).

@@ -1936,8 +1936,9 @@ two arrows meet: `apply(peek_it, 40)` with `peek_it: (borrowing a) -> Int` and
 `apply`, `apply(peek_it, L(1))` is a mismatch. A `where linear` variable counts as
 linear. This is the `borrowing` axis
 only: `once` and `local` must still match exactly. A function type inside an
-instance method's parameter type is compared before any type is known to be linear,
-so there its modes must match exactly.
+instance method's signature, in a parameter or the return type, is compared with
+the class's before any type is known to be linear, so there its modes must match
+exactly.
 
 Two consequences follow:
 

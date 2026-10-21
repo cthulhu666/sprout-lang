@@ -2013,10 +2013,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   (`unifier.defer_modes`) until the parameter's type is known; the pair carries no position, so the
   error points at the declaration head. Carrying one means a typed channel out of every unify site
   (`docs/linearity-bound-v0.md` §6.6).
-- [ ] `P3` **An arrow's mode inside an instance method's parameter type must match exactly.**
-  `infer.sig_against_class` compares instance and class signatures before any type is marked
-  linear, so `f: Int -> Int` cannot implement `f: (borrowing a) -> Int` at `Int`, and `borrowing
-  Int` is refused there. Needs the linear types and bounds at that check (§6.6).
+- [ ] `P3` **An arrow's mode inside an instance method's signature must match exactly.**
+  `infer.sig_against_class` compares instance and class signatures, parameters and return type,
+  before any type is marked linear, so `f: Int -> Int` cannot implement `f: (borrowing a) -> Int`
+  at `Int` (`type_error/linear_mode_instance_return_arrow`). Needs the linear types and bounds at
+  that check (§6.6).
 - [ ] `P3` **Linear-record ergonomics for OWNED records.** M4.5 lifted this only for `borrowing`
   parameters: `p.x + p.y` is legal for `p: borrowing Pos` and remains a reuse for an owned `p`. The
   field-read borrow is keyed on the binding's mode, not on `TGetField` syntax, deliberately —

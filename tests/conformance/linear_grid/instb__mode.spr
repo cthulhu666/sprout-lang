@@ -1,0 +1,20 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn run_a(f: a -> Int, x: a) -> Int where linear a = f(x)
+
+class Use t
+  fn use(x: t) -> Int
+
+instance Use (Maybe a) where linear a
+  fn use(x: Maybe a) -> Int = run_a(peek_a, x)
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(use(Just (L(1)))))
