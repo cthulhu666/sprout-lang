@@ -234,11 +234,11 @@ function values convert between conventions, and for noncopyable types "the conv
 exactly" (SE-0377 §Ownership convention conversions). OxCaml's mode crossing ignores modes on
 immediates.
 
-Two fixes ride along. A class declaration's method signatures are not mode-checked today, so
-`borrowing` on a concrete non-linear parameter there is accepted; they get the check functions
-and externs have. And the instance-vs-class mismatch has one wording for both directions, so
-`fn peek(r: Int)` against `borrowing a` reports "the instance only borrows where the class
-consumes", the reverse of what happened.
+Two fixes ride along. A class declaration's method signatures take the modifier check functions
+and externs have, with the class's own variable counted linear, since an instance may put a
+linear type there; `borrowing` on a concrete non-linear parameter there is refused. And the
+instance-vs-class mismatch is worded per direction: an instance that consumes where the class
+borrows is no longer told it "only borrows where the class consumes".
 
 ### 6.7 Where the check runs
 
