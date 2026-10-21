@@ -1,0 +1,26 @@
+module main
+
+# On a non-linear type `borrowing` and consuming coincide (linearity-bound-v0.md
+# §6.6): `Int` has nothing to own, so the instance takes a plain `Int` against the
+# class's `borrowing a`, and `peek` at `Int` is an `Int -> Int`.
+
+type linear L = L Int
+
+class Peekable a
+  fn peek(r: borrowing a) -> Int
+
+instance Peekable L
+  fn peek(r: borrowing L) -> Int = match r with | L n -> n
+
+instance Peekable Int
+  fn peek(r: Int) -> Int = r
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn use(f: Int -> Int) -> Int = f(40)
+
+fn main() -> Unit !{IO} =
+  do
+    let l = L(1)
+    let n = peek(l)
+    print(int_to_string(use(peek) + n + close(l)))

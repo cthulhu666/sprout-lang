@@ -1,0 +1,12 @@
+module main
+
+# A top-level `let` checks its deferred modes too: at `L` a borrowing function is
+# not a consuming one (linearity-bound-v0.md §6.6).
+
+type linear L = L Int
+
+fn peek_it(r: borrowing a) -> Int where linear a = 1
+
+let take: L -> Int = peek_it
+
+fn main() -> Unit !{IO} = print("x")

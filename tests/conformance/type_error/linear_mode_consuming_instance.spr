@@ -1,0 +1,20 @@
+module main
+
+# A consuming instance of a borrowing class releases a value its caller still
+# owns. The message names this direction (linearity-bound-v0.md §6.6).
+
+type linear L = L Int
+
+class Peekable a
+  fn peek(r: borrowing a) -> Int
+
+instance Peekable L
+  fn peek(r: L) -> Int = match r with | L n -> n
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn main() -> Unit !{IO} =
+  do
+    let l = L(1)
+    let n = peek(l)
+    print(int_to_string(n + close(l)))

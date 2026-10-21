@@ -1,0 +1,1 @@
+instance method parameter 'r' must match the class declaration's ownership: a call dispatches through the CLASS signature, so an instance that consumes where the class only borrows releases a value its caller still owns

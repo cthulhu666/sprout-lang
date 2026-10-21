@@ -9140,7 +9140,7 @@ fn is_type_var(t: types.Type) -> Bool =
 
 fn same_written_type(a: types.Type, b: types.Type) -> Bool =
   match unifier.unify_join(dict_empty(), dict_empty(), a, b) with
-  | unifier.UnifyOk _ _ -> true
+  | unifier.UnifyOk s _ -> ! unifier.has_deferred_modes (s)
   | unifier.UnifyErr _ -> false
 
 # Each slot's name for messages, the return first, as the slot lists run.
@@ -9268,7 +9268,9 @@ fn sig_against_class(site: InstanceSite, name: String, inst: SigParts, cls: SigP
                               list_append(cparams, cret)) with
         | Nothing -> Just(sig_mismatch_msg(site, name, inst, cls))
         | Just (subst, _) ->
-            if ! arrows_flow (iparams, cparams, iret, cret)
+            # An arrow's mode inside a parameter type must match: this runs before any
+            # type is known linear, so it cannot tell where modes coincide (§6.6).
+            if unifier.has_deferred_modes(subst) || ! arrows_flow (iparams, cparams, iret, cret)
             then Just(sig_mismatch_msg(site, name, inst, cls))
             else
               match renamed_head_var(subst, sig_te_vars(inst)) with
@@ -10041,9 +10043,10 @@ fn typecheck_groups(
             # new_subst, not subst: this is the whole of what makes an
             # unannotated declaration's placeholder mean anything. The pin a
             # caller puts on it has to survive to the declaration that owns
-            # it, or the two are inferred as if they were unrelated.
-            typecheck_groups(state, decl_vec, rest, new_env, new_subst, eff_subst,
-                             new_alias_env, new_out, new_env_ftv)
+            # it, or the two are inferred as if they were unrelated. The group
+            # checked its own deferred modes.
+            typecheck_groups(state, decl_vec, rest, new_env, unifier.without_deferred_modes(new_subst),
+                             eff_subst, new_alias_env, new_out, new_env_ftv)
 
 # Dispatch is by DECL KIND, not by group size, and that is deliberate: a group of
 # one FnDecl takes the same path as a group of five. It means the group machinery
@@ -10193,7 +10196,26 @@ fn member_gate(m: (Int, FnInferred)) -> LinearGate =
 
 fn linear_gates_error(gates: List LinearGate, subst: Dict types.Type) -> Maybe(source.SourcePos, String) =
   let marks = list_flat_map(bound_marks(_, subst), gates)
+      [g | _] = gates else Nothing
+      Nothing = map(\m -> (g.fn_pos, m), deferred_mode_error(subst, with_bound_marks(marks, g.env)))
+        else found -> found
   in find_map(linear_gate_error(_, subst, marks), gates)
+
+# docs/linearity-bound-v0.md §6.6: arrows that unified across `borrowing` and
+# consuming, now that their parameter's type is final. On a type holding a linear
+# value the modes must match; on any other they coincide.
+fn deferred_mode_error(subst: Dict types.Type, env: Dict types.Scheme) -> Maybe String =
+  find_map(mode_pair_fault(subst, env, _), unifier.deferred_modes(subst))
+
+fn mode_pair_fault(subst: Dict types.Type, env: Dict types.Scheme,
+                   pair: (types.Type, types.Type)) -> Maybe String =
+  let (l0, r0) = pair
+      l = unifier.apply_subst(subst, l0)
+      r = unifier.apply_subst(subst, r0)
+      types.TFunc p _ _ o1 = l else Nothing
+      types.TFunc _ _ _ o2 = r else Nothing
+      Just _ = linear_check.first_linear_in(p, env) else Nothing
+  in Just(unifier.ownership_mismatch_error(l, r, o1, o2))
 
 fn group_members(decl_vec: Vec ast.Decl, g: List Int) -> List (Int, ast.Decl) =
   match g with
@@ -10475,7 +10497,8 @@ fn typecheck_decl(
                         unpacks <- unifier.take_decl_unpacks(state)
                         let marks = unifier.unpack_marks(unpacks)
                         let bound_env = with_unpack_types(unpacks, with_bound_marks(marks, global_env_dict(env)))
-                        match bound_obligation_error(obligations, s1, bound_env, marks) with
+                        match maybe_or_else(map(\m -> (let_pos, m), deferred_mode_error(s1, bound_env)),
+                                            bound_obligation_error(obligations, s1, bound_env, marks)) with
                         | Just (bp, bm) -> TypedDeclErr(bp, bm)
                         | Nothing ->
                             finish_let_decl(name, expr,
@@ -10485,10 +10508,14 @@ fn typecheck_decl(
       TypedDeclOk(typed_ast.TPassThrough(decl), env, env_ftv, subst)
   # Checked at its module's start (group_plan), so its methods are in scope
   # throughout the module and in no module before it.
-  | ast.ClassDecl class_name type_params methods superclasses _ ->
-      TypedDeclOk(typed_ast.TPassThrough(decl),
-        GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
-        env_ftv, subst)
+  | ast.ClassDecl class_name type_params methods superclasses class_pos ->
+      match find_map(class_method_modes_error(type_params, class_pos, alias_env, global_env_dict(env), _),
+                     methods) with
+      | Just (p, m) -> TypedDeclErr(p, m)
+      | Nothing ->
+          TypedDeclOk(typed_ast.TPassThrough(decl),
+            GlobalEnv(register_class(class_name, type_params, methods, superclasses, alias_env, global_env_dict(env))),
+            env_ftv, subst)
   | ast.InstanceDecl constraint inst_constraints head_bounds methods _ ->
       do
         unifier.census_enter(state, census_key(decl))
@@ -11520,6 +11547,18 @@ fn fresh_to_written_go(entries: List (String, types.Type), acc: Dict String) -> 
           match t with
           | types.TVar id -> fresh_to_written_go(rest, dict_set(types.tyvar_identity(id), written, acc))
           | _ -> fresh_to_written_go(rest, acc)
+
+# A class method's signature takes an extern's modifier check. The class's own
+# variable counts as linear, since an instance may put a linear type there (§6.6).
+fn class_method_modes_error(type_params: List String, pos: source.SourcePos, alias_env: Dict types.Type,
+                            env: Dict types.Scheme, sig: ast.ClassMethodSig) -> Maybe(source.SourcePos, String) =
+  match sig with
+  | ast.ClassMethodSig name params ret_type effects_maybe _ bounds ->
+      match linear_check.check_signature_modes(params, Just(ret_type),
+              types.scheme_type(scheme_from_fn_parts(name, params, Just(ret_type), effects_maybe, alias_env)),
+              pos, list_fold(mark_linear, env, list_append(type_params, bounds))) with
+      | linear_check.LinFail lp lm -> Just((lp, lm))
+      | linear_check.LinPass -> Nothing
 
 # An extern's declared parameter types, built the same way its scheme is, so the
 # modifier guard sees exactly the types callers will see. Its scheme keeps the
@@ -12944,7 +12983,8 @@ fn finish_instance_method(name: String, label: MethodLabel, params: List ast.Par
                           prog_to_fresh: Dict types.Type,
                           sig_vars: List String,
                           env_ftv: List String) -> InstanceMethodResult =
-  match maybe_or_else(maybe_or_else(class_method_mode_error(name, params, env),
+  match maybe_or_else(maybe_or_else(class_method_mode_error(name, params, unifier.apply_subst(s2, inst_type),
+                                                            with_bound_marks(bound_marks(gate, s2), env)),
                                     class_method_constraints_error(name, label, method_constraints, env)),
                       instance_method_rigidity_error(label, prog_to_fresh, s2, sig_vars)) with
   | Just bad ->
@@ -12996,19 +13036,21 @@ fn instance_method_rigidity_error(label: MethodLabel, prog_to_fresh: Dict types.
 # a plain top-level function that happens to share the name is never the
 # comparison target; only `register_class_method` binds a class method under its
 # bare name, so the scheme fetched here is the class's.
-fn class_method_mode_error(name: String, params: List ast.Param,
+# `inst_type` is the method's own type and `env` marks its bounded variables, so
+# modes on a parameter type holding no linear value coincide.
+fn class_method_mode_error(name: String, params: List ast.Param, inst_type: types.Type,
                            env: Dict types.Scheme) -> Maybe String =
   match dict_get(types.class_marker_key(name), env) with
   | Nothing -> Nothing
-  | Just _ -> class_method_mode_error_at(name, params, env)
+  | Just _ -> class_method_mode_error_at(name, params, inst_type, env)
 
-fn class_method_mode_error_at(name: String, params: List ast.Param,
+fn class_method_mode_error_at(name: String, params: List ast.Param, inst_type: types.Type,
                               env: Dict types.Scheme) -> Maybe String =
   match dict_get(name, env) with
   | Nothing -> Nothing
   | Just scheme ->
       match scheme with
-      | types.Scheme _ _ body _ _ -> linear_check.method_mode_mismatch(params, body)
+      | types.Scheme _ _ body _ _ -> linear_check.method_mode_mismatch(params, body, inst_type, env)
 
 # The instance must restate the class's method-level `where` class for class and
 # in order. Each constraint is one positional dictionary slot, so a different

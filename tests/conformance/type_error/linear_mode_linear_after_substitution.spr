@@ -1,0 +1,12 @@
+module main
+
+# At a linear type the modes must still match: `apply` consumes `x` through `f`,
+# and a borrowing `f` would release nothing (linearity-bound-v0.md §6.6).
+
+type linear L = L Int
+
+fn peek_it(r: borrowing a) -> Int where linear a = 1
+
+fn apply(f: b -> Int, x: b) -> Int where linear b = f(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(apply(peek_it, L(1))))
