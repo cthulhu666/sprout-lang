@@ -1,16 +1,10 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# A module binding is not a binder the linear pass tracks: every function sees
-# it, so each one may consume it. Here `a() + b()` released `g` twice and
-# printed 2.
+# `linear_toplevel_let_holds_linear.spr` with its error's hint applied.
 
 type linear File = File Int
 
 fn release(f: File) -> Int = match f with | File n -> n
-
-
 
 fn a(g: File) -> Int = release(g)
 

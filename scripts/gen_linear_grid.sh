@@ -40,21 +40,21 @@ fn dup(z: b) -> (b, b) = (z, z)
 HDR_B='module main
 '
 
-# rej <hdr> <name> <err>  (program body on stdin)
-rej() {
-  { printf '%s\n' "$1"; cat; } > "$R/$2.spr"
-  printf '%s\n' "$3" > "$R/$2.err"
+# emit <dir> <prefix> <ext> <hdr> <name> <expected>  (program body on stdin)
+emit() {
+  { printf '%s\n' "$4"; cat; } > "$1/$2$5.spr"
+  printf '%s\n' "$6" > "$1/$2$5.$3"
 }
+# rej <hdr> <name> <err>: a reject cell.
+rej() { emit "$R" "" err "$@"; }
 # rejp <hdr> <name> <err>: rejected at parse time, so it lives in parse_error/, which
 # the pre-commit lint skips (a file that must not parse cannot be linted).
-rejp() {
-  { printf '%s\n' "$1"; cat; } > "$P/linear_grid_$2.spr"
-  printf '%s\n' "$3" > "$P/linear_grid_$2.err"
-}
-# acc <hdr> <name> <stdout>  (program body on stdin)
-acc() {
-  { printf '%s\n' "$1"; cat; } > "$A/linear_grid_$2.spr"
-  printf '%s\n' "$3" > "$A/linear_grid_$2.out"
+rejp() { emit "$P" linear_grid_ err "$@"; }
+# acc <hdr> <name> <stdout>: an accept cell.
+acc() { emit "$A" linear_grid_ out "$@"; }
+# bound_msg <callee var> <bounded fn>: the obligation error's key phrase.
+bound_msg() {
+  printf 'takes `%s` as a value it may copy or drop, and `%s`'"'"'s `a` is linear under its `where linear a`' "$1" "$2"
 }
 
 TAKES='takes `a` as a value it may copy or drop'
@@ -121,7 +121,7 @@ fn g(x: a) -> Int !{IO} where linear a =
 
 fn main() -> Unit !{IO} = print(int_to_string(g($v)))
 EOF
-  rej "$h" "body${s}__pass" 'takes `b` as a value it may copy or drop, and `g`'"'"'s `a` is linear under its `where linear a`' <<EOF
+  rej "$h" "body${s}__pass" "$(bound_msg b g)" <<EOF
 fn g(x: a) -> (a, a) where linear a = dup(x)
 
 fn main() -> Unit !{IO} = match g($v) with | (p, q) -> print(int_to_string($show(p) + $show(q)))
@@ -133,7 +133,7 @@ body_cells _nolin "$HDR_N" 1 ''
 # ── annsib: annotated binding-group sibling, no bound of its own ──────────────
 annsib_cells() { # suffix hdr value show
   local s="$1" h="$2" v="$3" show="$4"
-  local E='takes `a` as a value it may copy or drop, and `ping`'"'"'s `a` is linear under its `where linear a`'
+  local E="$(bound_msg a ping)"
   rej "$h" "annsib${s}__copy" "$E" <<EOF
 fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
 
@@ -224,7 +224,7 @@ fn pong(y, n: Int) =
 
 fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
 EOF
-  rej "$h" "unannsib${s}__pass" 'takes `b` as a value it may copy or drop, and `ping`'"'"'s `a` is linear under its `where linear a`' <<EOF
+  rej "$h" "unannsib${s}__pass" "$(bound_msg b ping)" <<EOF
 fn ping(x: a, n: Int) -> (a, a) where linear a = pong(x, n)
 
 fn pong(y, n: Int) = if n > 0 then ping(y, n - 1) else dup(y)
@@ -393,7 +393,7 @@ instance K Int
 
 fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
 EOF
-  rej "$h" "mbound${s}__pass" 'takes `b` as a value it may copy or drop, and `m`'"'"'s `a` is linear under its `where linear a`' <<EOF
+  rej "$h" "mbound${s}__pass" "$(bound_msg b m)" <<EOF
 class K t
   fn m(s: t, x: a) -> (a, a) where linear a
 
@@ -433,7 +433,7 @@ fn main() -> Unit !{IO} =
     _ <- ext_io(L(1))
     print("x")
 EOF
-rej "$HDR_L" ext__pass 'takes `a` as a value it may copy or drop, and `g`'"'"'s `a` is linear under its `where linear a`' <<'EOF'
+rej "$HDR_L" ext__pass "$(bound_msg a g)" <<'EOF'
 extern fn ext_id(x: a) -> a
 
 fn g(x: a) -> a where linear a = ext_id(x)

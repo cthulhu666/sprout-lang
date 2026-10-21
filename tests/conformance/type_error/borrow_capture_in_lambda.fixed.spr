@@ -1,11 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# M4.5 v0 limit (design note 7): a borrowed value may not be captured by a
-# lambda. Soundness would turn on whether the closure escapes and outlives the
-# consume, and Sprout has no escaping/non-escaping distinction. Unlocked by the
-# same non-escaping-closure notion M4.4 needs -- filed once, not twice.
+# `borrow_capture_in_lambda.spr` with its error's hint applied.
 
 type linear File = File Int
 

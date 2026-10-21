@@ -1,10 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# M4.5: returning a `borrowing` parameter would let the borrow outlive the call
-# and escape the caller's ownership. A bare reference in return position is a
-# consume, so this is caught by the same borrowing-param rule.
+# `borrow_return_borrowed_param.spr` with its error's hint applied.
 
 type linear File = File Int
 

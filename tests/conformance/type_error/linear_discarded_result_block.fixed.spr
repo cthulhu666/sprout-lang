@@ -1,10 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# In a short-circuiting block EVERY step has type `Result E X` / `Maybe X`, so a
-# head-only linearity test could never fire there at all. `acquire(1)`'s payload
-# is a linear `File` that is created and dropped.
+# `linear_discarded_result_block.spr` with its error's hint applied.
 
 type linear File = File Int
 

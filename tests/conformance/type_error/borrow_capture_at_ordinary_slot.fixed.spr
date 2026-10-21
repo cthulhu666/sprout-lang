@@ -1,9 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# A borrowed capture at an ordinary slot stays rejected: the callee may keep the
-# closure past the call. The message points at `local`.
+# `borrow_capture_at_ordinary_slot.spr` with its error's hint applied.
 
 type linear File = File Int
 

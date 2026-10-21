@@ -48,6 +48,10 @@ IGNORED = (
     "bootstrap/compile_driver.ll",
 )
 
+# Hand-written fixture dirs the justfile's `_test-reject` checks, `.fixed.spr` included.
+# `linear_grid/` is generated, so its pins are the generator's.
+REJECT_DIRS = ("type_error", "parse_error", "executable_error", "emit_error")
+
 # (predicate on a changed path, item, how to answer it)
 CHECKLIST = [
     (
@@ -68,7 +72,8 @@ CHECKLIST = [
         "and (for runtime/) the APPROVED_BUILTINS justification rule.",
     ),
     (
-        lambda p: p.startswith("tests/conformance/type_error/") and p.endswith(".err"),
+        lambda p: p.startswith(tuple(f"tests/conformance/{d}/" for d in REJECT_DIRS))
+        and p.endswith(".err"),
         "Does the new diagnostic's `.err` pin the whole message, with a `.fixed.spr` if it has a hint?",
         "Pin the full message, not a prefix. A hint-bearing one gets a `<name>.fixed.spr`: "
         "the same program with the hint applied, which must check clean "

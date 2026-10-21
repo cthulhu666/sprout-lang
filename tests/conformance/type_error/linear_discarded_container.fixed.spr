@@ -1,9 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# A linear value inside a NON-linear container: the step's type head is `Maybe`,
-# which is not linear, but the `File` it carries is created and dropped.
+# `linear_discarded_container.spr` with its error's hint applied.
 
 type linear File = File Int
 

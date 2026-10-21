@@ -1,13 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# M4.4b GUARD: the parameter is admitted because it BORROWS, so a body that
-# consumes it must still be refused — the caller keeps the obligation and
-# `with_file` releases the File itself.
-#
-# Delete this fixture and "a lambda may take a borrowing linear parameter"
-# stops being distinguishable from "a lambda may take a linear parameter".
+# `lambda_borrow_param_consumed.spr` with its error's hint applied.
 
 type linear File = File Int
 

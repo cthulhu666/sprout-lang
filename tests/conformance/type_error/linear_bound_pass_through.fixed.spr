@@ -1,6 +1,6 @@
 module main
 
-# Hint applied: `where linear a` on `ident`.
+# `linear_bound_pass_through.spr` with its error's hint applied.
 
 fn ident(x: a) -> a where linear a = x
 

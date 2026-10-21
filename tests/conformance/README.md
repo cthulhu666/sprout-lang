@@ -43,7 +43,8 @@ into `justfile` and `ci-fast-gates` in the same change.
   value it handed over). Once the rejection matches, it must pass `--phase check`
   cleanly (exit 0, no `ERROR:`), so a hint nobody can follow fails the gate. A
   conditional hint ("if `f` uses `a` exactly once") whose condition is false for
-  the fixture gets no fixed file. `*.fixed.spr` files are not fixtures.
+  the fixture gets no fixed file. `*.fixed.spr` files are not fixtures; one with no
+  `<name>.spr` fails as ORPHAN.
 
 ## `run/XFAIL` — visible quarantine
 

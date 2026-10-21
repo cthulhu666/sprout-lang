@@ -1,10 +1,6 @@
 module main
 
-# The hint in the .err applied; the comments below describe the rejected program.
-
-# In a mutually recursive group, `x`'s type is fixed to `L` only by `g`, a later
-# member. The discard is still found: each member is checked against the group's
-# final types.
+# `linear_bound_group_discard.spr` with its error's hint applied.
 
 type linear L = L Int
 
