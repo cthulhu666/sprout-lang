@@ -329,6 +329,10 @@ fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type, env:
         ++ "` contains the linear type `" ++ type_text(lin, env)
         ++ "` (linear values must be used exactly once)"
 
+# Why a variable a `where linear` bounds is linear, as infer and resolve both word it.
+export fn bounded_reason(owner: String, v: String) -> String =
+  "`" ++ owner ++ "`'s `" ++ v ++ "` is linear under its `where linear " ++ v ++ "`"
+
 # `t` with each `where linear` variable under its written name.
 export fn type_text(t: types.Type, env: Dict types.Scheme) -> String =
   types.type_to_string(types.apply_rename_type(bound_names(t, env), t))

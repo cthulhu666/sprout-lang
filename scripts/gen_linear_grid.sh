@@ -749,6 +749,18 @@ fn viabox(b: Boxed) -> Int = match b with | Boxed x -> take(Box(x))
 
 fn main() -> Unit !{IO} = print(int_to_string(viabox(Boxed (L(1)))))
 EOF
+rej "$HDR_L" exist__let_unpack_copy "is used more than once" <<EOF
+$EXB
+let k: Int = match Boxed(L(1)) with | Boxed x -> take(x) + take(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
+EOF
+rej "$HDR_L" exist__let_unpack_drop "is never used" <<EOF
+$EXB
+let k: Int = match Boxed(L(1)) with | Boxed x -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
+EOF
 
 # ── tlet: a top-level `let` is generalized and takes no bound ─────────────────
 TLET='a top-level `let` takes no bound'
@@ -1137,6 +1149,12 @@ fn main() -> Unit !{IO} =
   do
     print(int_to_string(unbox(Boxed (L(4)))))
     print(int_to_string(unbox(Boxed(5))))
+EOF
+acc "$HDR_L" exist__let_unpack_once '6' <<EOF
+$EXB
+let k: Int = match Boxed(L(6)) with | Boxed x -> take(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
 EOF
 acc "$HDR_L" exist__nonlinear '2' <<'EOF'
 class Taker a

@@ -542,6 +542,15 @@ export type Multiplicity (..) =
   | Unrestricted  # default — use any number of times (ω)
   | Linear  # must be used exactly once (=1)
 
+# A type's multiplicity with its constructors' bounds: a constructor's `where linear`
+# makes its type linear, whatever it holds (docs/linearity-bound-v0.md §6.4).
+export fn ctors_multiplicity(mult: Multiplicity, ctors: List TypeConstructor) -> Multiplicity =
+  if any(ctor_has_bound, ctors) then Linear else mult
+
+fn ctor_has_bound(c: TypeConstructor) -> Bool =
+  let TypeConstructor _ _ _ _ bounds = c
+  in bounds != Nil
+
 # Whether a record declaration published its representation. `(..)` on the
 # declaration publishes the constructor AND the fields, so `P(x = 1)`, `p.x` and
 # `p with (x = 1)` all work from anywhere; without the marker the type may still

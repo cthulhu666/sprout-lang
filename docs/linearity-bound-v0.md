@@ -395,7 +395,8 @@ second bound and `pure`'s price (§6.5), and the class-signature mode gap (§6.6
    the `List` instances drop a value on some path and do not. ~~Existentials~~ done. A
    constructor's bound makes its type linear. Each pattern of a bounded constructor records the
    constructor type it instantiated and the skolem of each bounded variable
-   (`unifier.Unpack`); the declaration's gate marks those skolems linear and hands the walk the
-   instantiated field types, and the checked env carries them to resolve's dictionary walk as
-   `@unpacked:`. A wildcard over the unpacked value is the open BACKLOG P2 wildcard question.
+   (`unifier.Unpack`). The checks of the declaration holding the pattern, a top-level `let`
+   included, mark those skolems linear and hand the walk the instantiated field types, and the
+   checked env carries them to resolve's dictionary walk as `@unpacked:`. A wildcard over the
+   unpacked value is the open BACKLOG P2 wildcard question.
 4. **Modes** (§6.6).
