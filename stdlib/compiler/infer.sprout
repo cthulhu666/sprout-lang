@@ -11588,8 +11588,9 @@ fn mark_linear(env: Dict types.Scheme, name: String) -> Dict types.Scheme =
 
 # docs/linearity-bound-v0.md §6.4: a declaration's own `where linear` variables are
 # linear in its body, so one cannot be passed on to a function that has not opted
-# in. A mark (unifier.BoundMark) keys a variable by its rigid id under `subst`, since
-# a written name is not unique (`List` declares an `a` too).
+# in. A mark (unifier.BoundMark) keys a variable by its rigid id under `subst`, or an
+# unpack's by its skolem or `$ex_` name, since a written name is not unique (`List`
+# declares an `a` too).
 # An instance method's head variables are bounded by the instance, and named with it.
 # What a pattern unpacked is marked too.
 fn bound_marks(g: LinearGate, subst: Dict types.Type) -> List unifier.BoundMark =

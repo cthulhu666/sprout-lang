@@ -1789,7 +1789,7 @@ phantom position is not exempt: `detach(task: Task a)` discards a task whose res
 nobody receives, so `detach` at a `Task File` is rejected.
 
 ```
-`dup` takes `a` as a value it may copy or drop, and `L` is linear; if `dup` uses its `a` exactly once, add `where linear a` to it
+`dup` takes `a` as a value it may copy or drop, and `main.L` is linear; if `dup` uses its `a` exactly once, add `where linear a` to it
 ```
 
 The error names the variable as the callee's signature writes it. A callee whose
@@ -1833,7 +1833,7 @@ so is passing `x` on to code that has not opted in:
 Without the bound, the pack is rejected:
 
 ```
-`Boxed` takes `a` as a value it may copy or drop, and `L` is linear; add `where linear a` to the constructor, which makes its type linear
+`Boxed` takes `a` as a value it may copy or drop, and `main.L` is linear; add `where linear a` to the constructor, which makes its type linear
 ```
 
 #### Borrowing (Milestone 4.5)
