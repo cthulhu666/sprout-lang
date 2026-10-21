@@ -1,7 +1,7 @@
 # A linearity bound on type variables (v0, 2026-10-20)
 
-**Status:** design decided (§11). Implementation in four steps (§12); steps 1 and 2 and step 3's
-dictionary walk are done, and spec-v0.md §5.8 states what they enforce. Not normative beyond that until it lands in
+**Status:** design decided (§11). Implementation in four steps (§12); steps 1–3 are done, and
+spec-v0.md §5.8 states what they enforce. Not normative beyond that until it lands in
 [spec-v0.md](spec-v0.md) §5.8. Closes the type-variable holes in §1, three of which
 [persistent-array-v0.md](persistent-array-v0.md) §5.3 lists as prerequisites.
 
@@ -283,8 +283,8 @@ Dispatch does not change. Inference changes only in §6.6's mode comparison.
   The variable is named as the callee's signature writes it, which a generalized scheme does not
   keep, so pre-scan stores each function's written signature (`@sig:`). A callee that writes no
   variable there is told to annotate its parameters first; a top-level `let`, which takes no
-  bound, to become a `fn`; a constructor, whose `exists` variable takes no bound until step 3,
-  gets no fix. A bounded variable is marked linear under its rigid id, since a written name is
+  bound, to become a `fn`; a constructor, to bound its `exists` variable, which makes its
+  type linear. A bounded variable is marked linear under its rigid id, since a written name is
   not unique (`List` declares an `a` too); `@boundname:<id>` keeps the written name, so every
   linearity diagnostic prints `a`, not `$t41`. A bounded variable is named with the declaration
   that bounds it, which in a group may be a sibling: `` `ping`'s `a` is linear under its `where
@@ -392,6 +392,10 @@ second bound and `pure`'s price (§6.5), and the class-signature mode gap (§6.6
    with their superclasses and contexts, and reads a function's bounds from `@sigbound:`, as its
    signature writes them, since commit renames `@linbound:`. The prelude's `ToString` instances
    over `Maybe`, `Result` and tuples and `Propagate (Result e)` take the bound; `Eq`, `Ord` and
-   the `List` instances drop a value on some path and do not. Existentials remain: BACKLOG P1
-   **An existential cannot carry a linear value**.
+   the `List` instances drop a value on some path and do not. ~~Existentials~~ done. A
+   constructor's bound makes its type linear. Each pattern of a bounded constructor records the
+   constructor type it instantiated and the skolem of each bounded variable
+   (`unifier.Unpack`); the declaration's gate marks those skolems linear and hands the walk the
+   instantiated field types, and the checked env carries them to resolve's dictionary walk as
+   `@unpacked:`. A wildcard over the unpacked value is the open BACKLOG P2 wildcard question.
 4. **Modes** (§6.6).

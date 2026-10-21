@@ -626,13 +626,17 @@ export fn te_display(te: ast.TypeExpr) -> String =
   | ast.TupleType items -> "(" ++ string.join(", ", list_map(te_display, items)) ++ ")"
   | ast.TypeArrow param ret _ _ -> te_display_atom(param) ++ " -> " ++ te_display(ret)
   # A thunk or effect type in a context position: its head (`Fn`, `Eff`) still names it.
-  | _ -> type_expr_head_name(te)
+  | ast.TypeThunk _ _ -> type_expr_head_name(te)
+  | ast.TypeEffect _ _ -> type_expr_head_name(te)
 
 export fn te_display_atom(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeApply _ _ -> "(" ++ te_display(te) ++ ")"
   | ast.TypeArrow _ _ _ _ -> "(" ++ te_display(te) ++ ")"
-  | _ -> te_display(te)
+  | ast.TypeName _ -> te_display(te)
+  | ast.TupleType _ -> te_display(te)
+  | ast.TypeThunk _ _ -> te_display(te)
+  | ast.TypeEffect _ _ -> te_display(te)
 
 # An instance as a diagnostic names it: `Dup2 (Maybe a)`, `ToString (a, b)`.
 export fn instance_display(cls: String, type_args: List ast.TypeExpr) -> String =

@@ -1203,8 +1203,8 @@ expresses a hidden variable spanning several fields (shared hidden state) and a
 constrained variable that appears only nested inside a compound field. The `where`
 keyword matches every other constraint site in the language; `=>` is not used. A
 `where` clause is valid only on an existential: each constraint must apply a class
-to a variable bound by the `exists` prefix — otherwise it is a parse error (it must
-not constrain a head parameter).
+to a variable bound by the `exists` prefix, or be `linear` on one (§5.8) — otherwise
+it is a parse error (it must not constrain a head parameter).
 
 **Runtime.** The packed dictionary is the class's method function-pointer(s)
 stored as hidden constructor fields (traced by the GC); a method call on the
@@ -1794,9 +1794,9 @@ nobody receives, so `detach` at a `Task File` is rejected.
 
 The error names the variable as the callee's signature writes it. A callee whose
 signature writes no type variable for it is told to annotate its parameters first, and
-a top-level `let`, which takes no `where`, to become a `fn`. A constructor's `exists`
-variable takes no bound yet, and the error says so. Inside a bounded declaration, every
-linearity error prints a bounded variable under its written name.
+a top-level `let`, which takes no `where`, to become a `fn`, and a constructor to bound
+its `exists` variable. Inside a bounded declaration, every linearity error prints a
+bounded variable under its written name.
 
 A class method may declare the bound on its own variables; each instance method
 restates it under its own names, as it restates a class constraint, and its body is
@@ -1820,8 +1820,21 @@ The prelude's `ToString` instances over `Maybe`, `Result` and tuples, and `Propa
 (Result e)`, take the bound. Its `Eq` and `Ord` instances and those over `List` do
 not: each drops a value on some path, so they are rejected at a linear type.
 
-**Not yet:** `where linear` on a constructor is rejected. See
-`docs/linearity-bound-v0.md` §12.
+A constructor takes the bound on its `exists` variables, `type Boxed = | exists a.
+Boxed a where linear a, Taker a`, and its type is then linear whatever a value holds:
+`Boxed(1)` is used exactly once too. A value a pattern unpacks from a bounded variable
+is linear in its arm, so `match b with | Boxed x -> take(x) + take(x)` is rejected, and
+so is passing `x` on to code that has not opted in:
+
+```
+`dup` takes `b` as a value it may copy or drop, and `Boxed`'s `a` is linear under its `where linear a`
+```
+
+Without the bound, the pack is rejected:
+
+```
+`Boxed` takes `a` as a value it may copy or drop, and `L` is linear; add `where linear a` to the constructor, which makes its type linear
+```
 
 #### Borrowing (Milestone 4.5)
 

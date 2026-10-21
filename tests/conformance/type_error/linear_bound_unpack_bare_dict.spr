@@ -1,0 +1,20 @@
+module main
+
+# An `exists` variable with no class: the dictionary for `Box a` is still checked,
+# and the unpacked `x` is linear under the constructor's bound.
+
+type linear L = L Int
+
+class Taker a
+  fn take(x: a) -> Int
+
+type Box a = | Box a
+
+instance Taker (Box a)
+  fn take(x: Box a) -> Int = 0
+
+type Bare = | exists a. Bare a where linear a
+
+fn f(b: Bare) -> Int = match b with | Bare x -> take(Box(x))
+
+fn main() -> Unit !{IO} = print("x")

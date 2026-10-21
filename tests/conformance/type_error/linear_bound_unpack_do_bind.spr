@@ -1,0 +1,22 @@
+module main
+
+# A `<-` bind unpacks like a match arm.
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn mk() -> Boxed !{IO} = Boxed(L(1))
+
+fn main() -> Unit !{IO} =
+  do
+    Boxed x <- mk()
+    print(int_to_string(take(x) + take(x)))

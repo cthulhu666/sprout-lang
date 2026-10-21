@@ -12,7 +12,12 @@ class Taker a
 instance Taker L
   fn take(x: L) -> Int = close(x)
 
-type Boxed = | exists a. Boxed a where Taker a
+instance Taker Int
+  fn take(x: Int) -> Int = x
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
 
 fn main() -> Unit !{IO} =
   do

@@ -1968,12 +1968,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `docs/local-closures-v0.md`). Left: marking the prelude combinators `local` (own entry); a linear
   value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING linear
   lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
-- [ ] `P2` **An existential cannot carry a linear value.** `type Boxed = | exists a. Boxed a
-  where Taker a` rejects `Boxed(L(1))`, and `where linear a` on the constructor is rejected rather
-  than ignored: nothing yet tracks the value a match unpacks. Step 3's second half,
-  `docs/linearity-bound-v0.md` §12: allow the bound, make the type linear, and mark the unpacked
-  skolem linear in the declaration's gate env, so both the body walk and the bound obligations see
-  it. The grid's `exist` row turns into the misuse cells.
 - [ ] `P3` **Linearity-bound retro: deferred items.** From
   `docs/linearity-bound-retro-2026-10-20.md` §5–6: C2, one group-boundary check deciding bound
   obligations and marks under the final substitution; T3, a `/sprout-review` pass that writes
