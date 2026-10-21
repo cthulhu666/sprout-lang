@@ -1,0 +1,14 @@
+module main
+
+# An arrow in an instance method's signature is compared with the class's before any
+# type is known to be linear, so its mode must match exactly: in the return type as
+# in a parameter type, even at `Int` (spec §5.8).
+
+class Mk a
+  fn mk(n: Int) -> (borrowing a) -> Int
+
+instance Mk Int
+  fn mk(n: Int) -> Int -> Int = \x -> x + n
+#~^^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

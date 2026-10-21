@@ -403,5 +403,5 @@ second bound and `pure`'s price (§6.5), and the class-signature mode gap (§6.6
    in the substitution (`@modes`) for the declaration's gate, which rejects it on a type holding a
    linear value. The instance-vs-class check reads the instance's parameter type, and class
    method signatures take the extern check with the class's variable counted linear. A deferred
-   mismatch is reported at the declaration, and an arrow inside an instance method's parameter
-   type still matches exactly: both are BACKLOG P3 entries.
+   mismatch is reported at the declaration, and an arrow inside an instance method's signature
+   (parameter or return type) still matches exactly: both are BACKLOG P3 entries.

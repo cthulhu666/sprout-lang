@@ -20,6 +20,8 @@
 #   - exist pack without the bound: type_error/linear_bound_existential_pack, which carries
 #     the hint's fixed file.
 #   - ctor pass of a bound variable: a data parameter takes no bound (§6.1).
+#   - method/ext mode: an unbounded variable is never linear, so the modes coincide there;
+#     its misuse is the `pass` cell's. An extern has no body to hold the pair.
 set -euo pipefail
 
 OUT="${1:?usage: gen_linear_grid.sh <out-root>}"
@@ -851,6 +853,37 @@ instance Use L
   #~^ ERROR
 
 fn main() -> Unit !{IO} = print(int_to_string(use(L(1))))
+EOF
+rej "$HDR_L" instb__mode "$MODE" <<EOF
+$MODEA
+class Use t
+  fn use(x: t) -> Int
+
+instance Use (Maybe a) where linear a
+  fn use(x: Maybe a) -> Int = run_a(peek_a, x)
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(use(Just (L(1)))))
+EOF
+rej "$HDR_L" mbound__mode "$MODE" <<EOF
+$MODEA
+class K t
+  fn m(s: t, x: a) -> Int where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> Int where linear a = run_a(peek_a, x)
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, L(1))))
+EOF
+rej "$HDR_L" ctor__mode "$MODE" <<EOF
+$MODEL
+type Taker = Taker(L -> Int)
+
+fn mk() -> Taker = Taker(peek)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = match mk() with | Taker f -> print(int_to_string(f(L(1))))
 EOF
 rej "$HDR_L" tlet__mode "$MODE" <<EOF
 $MODEL
