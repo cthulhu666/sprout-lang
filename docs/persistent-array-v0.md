@@ -563,6 +563,45 @@ again only at the boundary. Under 5.3 the old name is dead after a set, so every
 can still be written has one value. The option's gains, no threading and writes from lambdas,
 are paid for with exactly that. 5.3 is also cheaper, and its prerequisite is shared.
 
+### 5.7 Types: branded indices (a layer over 5.3)
+
+Not an alternative to 5.3. It replaces 5.3's out-of-range trap (§12 step 13) with a check the
+compiler places. A `LinVec` never changes length, so an index checked once is in range for that
+vector's whole life. A brand ties the two together: an existential gives each length a type `s`
+no other length has, and abstract wraps make `Idx s` constructible only by the check.
+
+```sprout
+export wrap Len s = Int
+export wrap Idx s = Int
+export wrap linear BVec s a = LinVec a
+export type Sized(..) = | exists s. Sized(Len s)
+
+export fn bvec_index(i: Int, len: Len s) -> Maybe (Idx s)     # the one check
+export fn bvec_set(i: Idx s, x: a, v: BVec s a) -> BVec s a  # total
+
+fn histogram(buckets: Int, xs: List Int) -> Maybe (Vec Int) =
+  match sized(buckets) with
+  | Sized(len) ->
+      let is = try traverse(\x -> bvec_index(x, len), xs)
+      in Just(bvec_new(len, 0) |> bvec_accum(\n -> n + 1, is) |> bvec_freeze)
+```
+
+A prototype in plain Sprout (2026-10-22) runs this, and rejects a raw `Int` index (type
+mismatch), an index checked against another length (existential escape) and `Idx(9)` (not
+exported). The indices are checked before the vector exists, so a failure has no vector to drop.
+
+- Index arithmetic (`i + 1`, BFS neighbours, LCS's `i - 1`) leaves the brand: each result is
+  checked again. A `bvec_indices(len) -> List (Idx s)` covers whole-range loops. Measure on
+  §3.2's BFS and LCS before pricing it.
+- The brand appears in every helper's signature (`Len s`, `BVec s a`).
+- `linvec_set`'s own check stays until unsafe primitives exist; under the brand it cannot fire.
+- Unsound over `MutVec`: `mutvec_push` changes the length.
+
+Prior art: Rust's `indexing` crate ("The container and its indices and ranges are 'branded'
+with a lifetime parameter 'id"); Haskell's `justified-containers` ("type-checked proofs of key
+presence"); Idris's `index : Fin n -> Vect n a -> a`, which also proves index arithmetic but
+needs dependent types.
+
 ## 6. How they combine
 
 No design is fastest everywhere. Any array that keeps old versions readable at reasonable space
@@ -756,6 +795,10 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
     the bulk operations, tests and the sieve example. Out, each its own BACKLOG entry: B1 and
     bounds-check elimination for `LinVec Double` writes (§5.3 *Compiler tables*), and marking the
     combinators `local`. A scatter or accum index out of range traps, since they call the set.
+15. **Out-of-range writes, later** (2026-10-22). Kuba: the bulk operations keep trapping, and
+    branded indices (5.7) are the way to rule the trap out, filed at P2. A `Result`-returning
+    write was set aside: on failure it must return the vector or drop it, and every caller pays
+    for that. Consuming the vector on failure composes with `try` today if a caller needs it.
 
 **Revisit when** any of these holds; each would reopen step 7:
 
