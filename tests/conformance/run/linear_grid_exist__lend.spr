@@ -1,0 +1,28 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+instance Taker Int
+  fn take(x: Int) -> Int = x
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
+
+fn peek_boxed(b: borrowing Boxed) -> Int = 1
+
+fn g(b: Boxed) -> Int =
+  let n = list_fold(\ (acc, i) -> acc + i + peek_boxed(b), 0, [1, 2])
+  in n + unbox(b)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(10)))))

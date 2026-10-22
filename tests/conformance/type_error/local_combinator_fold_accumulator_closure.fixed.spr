@@ -1,0 +1,13 @@
+module main
+
+# `local_combinator_fold_accumulator_closure.spr` with its error's hint applied.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> Unit -> Int =
+  let n = peek(c)
+  in list_fold(\ (acc, x) -> \_ -> n + x, \_ -> 0, xs)
+
+fn main() -> Unit !{IO} = print("unreachable")

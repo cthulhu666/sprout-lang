@@ -333,15 +333,24 @@ more programs at `local` positions.
 - **#342.** Resolved by this: `with_timeout` takes a lending closure, and the issue's moving
   version is answered by §1.
 
-**Follow-up (separate change).** Mark the prelude's effectful combinators' function arguments
-`local` — `list_each`, `list_fold`, `list_map`, the `vec_` family — closing the borrow half of the
-BACKLOG M4.4 entry. Its design must decide `Functor.fmap`: left plain, `map(\x -> peek(c) + x, xs)`
-is rejected where `list_map` accepts it; made `local` in the class, it forbids any instance whose
-`fmap` keeps the function (a function functor). No such instance exists today. A comprehension
-reading a borrowed value becomes legal there too, since comprehensions elaborate to folds. The `_`
-placeholder form, `list_each(\x -> write(c, x), _)`, desugars to an ordinary lambda and stays
-rejected. The prelude is in the compiler's closure, so this one needs the 2-step
-bootstrap, and is kept out of the first change for that reason alone.
+**Follow-up: the prelude combinators (landed).** `local` is on the concrete combinators (`range_`,
+`list_`, `vec_`, `result_*`, `when_ok`/`when_error`, `mutvec_`/`mutmatrix_`, `linvec_accum`), on
+the `Foldable` class, and on the generic functions over it (`fold`, `fold_while`, `any`, `all`,
+`find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`). It is not on `Functor.fmap`,
+`Filterable`, `Applicative`, `Monad` or `Traversable`, nor on `map`, `filter`, `and_then`,
+`traverse`, `concat_map`: `local` in a class binds every instance, and an instance for a
+function-shaped type (a parser, state or reader monad, a lazy functor) keeps the function. A
+`Foldable` returns the final `b`, so it cannot usefully keep `step`. Swift draws the same line:
+the eager `Sequence.map` takes a non-`@escaping` closure (`Sequence.swift`), while
+`LazySequenceProtocol.map` takes an `@escaping` one (`Map.swift`), because the lazy type stores
+it. So `map(\x -> peek(c) + x, xs)` stays rejected where `list_map` accepts it, and the rejection
+message names both. A comprehension reading a borrowed value is legal, since it elaborates to
+`list_fold`/`range_fold`; the checker judges its lambda like any other at a `local` slot, with
+the comprehension's wording. A `_` hole inside the function argument (`list_fold(step(c, _, _),
+0, xs)`) is a lambda at the `local` slot and lends. A `_` for the data argument,
+`list_each(\x -> write(c, x), _)`, desugars to an ordinary lambda around the whole call and stays
+rejected: write the direct call. Tests:
+`tests/stdlib/test_local_combinators.spr`, `tests/conformance/type_error/local_combinator_*`.
 
 ## 9. Tests
 
@@ -409,8 +418,11 @@ TDD, each red before the change.
 calls its body and returns, so marking the body `local` lets callers lend it a borrowed resource.
 The callee check (§6.3) holds the combinator to it. `examples/linear_resources.sprout` has one.
 
-**Planned: the prelude combinators** (§8). Until `list_each` and the rest take `local`, iterate in
-a recursive function that takes the resource `borrowing`.
+**The prelude combinators** (§8): `list_each`, `list_fold`, the `vec_` and `range_` families,
+`fold` and the other `Foldable` functions take `local`, so a lambda passed to them may borrow.
+`map`, `filter` and `and_then` do not; use `list_map`, `list_filter` or `list_flat_map`. A `_`
+hole inside the function argument lends; a `_` for the data argument does not, so write the
+direct call there.
 
 **Where it does not fit.**
 
@@ -420,7 +432,7 @@ a recursive function that takes the resource `borrowing`.
   extern is trusted instead (§6.5).
 - A plain value: `local` is function-typed only (§6.4); `borrowing` already lends a linear value.
 - A class method whose instances may keep the function: `local` in the class binds every instance
-  (the `Functor.fmap` question, §8).
+  (`Functor.fmap`, `Monad.flat_map`; §8).
 
 **Not a speed feature yet.** Modes are erased (§2), so a closure at a `local` slot is
 heap-allocated like any other. OxCaml's `local` exists mainly to stack-allocate. A `local` slot

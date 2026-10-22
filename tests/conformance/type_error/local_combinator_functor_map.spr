@@ -1,0 +1,13 @@
+module main
+
+# `Functor.fmap` stays plain: an instance may keep the function (a lazy or function-shaped
+# functor), so `map` cannot promise the closure does not outlive the call. `list_map` takes
+# `local`; this counterpart does not.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> List Int = map(\x -> x + peek(c), xs)
+
+fn main() -> Unit !{IO} = print("unreachable")

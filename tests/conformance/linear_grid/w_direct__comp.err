@@ -1,0 +1,1 @@
+linear value 'l' cannot be used inside a comprehension (a comprehension elaborates to a fold, and higher-order linearity is deferred: the step function runs once per element, so the compiler cannot yet prove 'l' is consumed exactly once); consume it before the comprehension and use the result inside

@@ -2161,6 +2161,20 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   check runs only over declared functions.
 - `local` is **erased** and is part of the function type, so it is compared
   invariantly at unification.
+- **In the standard library.** The concrete combinators (the prelude's `range_*`, `list_*`,
+  `vec_*`, `result_*`, `when_ok`, `when_error`; `stdlib.mutable`'s `mutvec_*` and
+  `mutmatrix_*`; `stdlib.linvec`'s `linvec_accum`), the
+  `Foldable` methods and the generic functions over them (`fold`, `fold_while`, `any`,
+  `all`, `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`) take their
+  function `local`, so a lambda passed to them may read a borrowed value, comprehensions
+  included. `Functor`, `Filterable`, `Applicative`, `Monad` and `Traversable`, and `map`,
+  `filter`, `filter_map`, `partition`, `map2`..`map5`, `and_then`, `traverse`,
+  `concat_map`, do not: an instance for a function-shaped type (a parser, state or reader
+  monad, a lazy functor) keeps the function, and `local` in the class would forbid it. A
+  `Foldable` returns the final accumulator, so it has no use for keeping `step`. A `_` hole
+  inside the function argument (`list_fold(step(c, _, _), 0, xs)`) is a lambda at the `local`
+  slot and lends; a `_` for the data argument (`xs |> list_each(f, _)`) is an ordinary lambda
+  around the whole call and does not, so use the direct call there.
 - An `extern fn`'s modes cannot be checked and are trusted. An extern whose
   signature writes `local` is therefore reachable only from its declaring module
   (§Externs). See `docs/local-closures-v0.md` §6.5.
@@ -2188,12 +2202,12 @@ caller keeps a borrowed value and releases it after either outcome.
 - Higher-order linearity beyond the `once` case — a linear binding captured by a
   lambda at an **unannotated** parameter, and **consuming** linear lambda
   parameters, are not yet supported, nor is capturing a **borrowed** value
-  at a parameter that is not `local`. This is why the combinator form
-  (`list_each(\x -> write(conn, x), xs)`) is still out of reach: the prelude
-  combinators do not take `local` yet. Two shapes are no longer: the spawn-a-handler server, a
-  move into a one-shot closure, so `stdlib.http_server` runs on the linear socket
-  API throughout; and the with-resource combinator, whose work function takes the
-  resource `borrowing` (§5.8).
+  at a parameter that is not `local`. The prelude's `list_*`, `vec_*` and `range_*`
+  combinators and `fold` take `local`, so `list_each(\x -> write(conn, x), xs)` lends
+  `conn`; `map`, `filter` and `and_then` do not. Two shapes are no longer deferred: the
+  spawn-a-handler server, a move into a one-shot closure, so `stdlib.http_server` runs on
+  the linear socket API throughout; and the with-resource combinator, whose work function
+  takes the resource `borrowing` (§5.8).
 - Containment virality **as a property of types** — linearity is still
   *per-declaration*: a record that merely contains a linear field is not itself
   linear (contrast Austral), so `Maybe File` is not a linear type. What containment
@@ -2219,7 +2233,7 @@ linvec_length(v: borrowing LinVec a) -> Int
 linvec_freeze(v: LinVec a) -> Vec a                      # O(1); the vector's life ends
 linvec_drop(v: LinVec a) -> Unit
 linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a
-linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
+linvec_accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
 ```
 
 - `linvec_set` out of range, and `linvec_scatter` or `linvec_accum` with an index out of range,
@@ -2230,7 +2244,8 @@ linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
 - Every path must consume the vector: return it, pass it on, or end it with `linvec_freeze` or
   `linvec_drop`. Otherwise the leak rule (above) fires. A set
   inside a lambda is rejected: a lambda may not consume a linear parameter. Use explicit
-  recursion or the bulk operations.
+  recursion or the bulk operations. A lambda may READ a `LinVec` it captures inside a
+  combinator that takes `local`: `list_fold(\ (n, c) -> … linvec_get(c, seen) …, 0, cells)`.
 - `LinVec (LinVec a)` is rejected where it is built, by the bound on `linvec_new`'s `a`.
 
 Design and measurements: `docs/persistent-array-v0.md` §5.3.

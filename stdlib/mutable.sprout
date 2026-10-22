@@ -201,7 +201,7 @@ export fn mutvec_insert(v: MutVec a, i: Int, val: a) -> Bool !{IO} =
     else if i == len then mutvec_appended(v, val)
     else mutvec_inserted(mutvec_raw(v), i, len, val)
 
-fn mutvec_each_go(f: a -> Unit !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
+fn mutvec_each_go(f: local a -> Unit !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
   if i >= total then ()
   else
     do
@@ -210,10 +210,10 @@ fn mutvec_each_go(f: a -> Unit !{IO}, raw: Vector a, i: Int, total: Int) -> Unit
       mutvec_each_go(f, raw, i + 1, total)
 
 # O(n). Visit each element in index order.
-export fn mutvec_each(f: a -> Unit !{IO}, v: MutVec a) -> Unit !{IO} =
+export fn mutvec_each(f: local a -> Unit !{IO}, v: MutVec a) -> Unit !{IO} =
   mutvec_each_go(f, mutvec_raw(v), 0, mutvec_len(v))
 
-fn mutvec_fold_go(step: b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total: Int) -> b !{IO} =
+fn mutvec_fold_go(step: local b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total: Int) -> b !{IO} =
   if i >= total then acc
   else
     do
@@ -222,13 +222,13 @@ fn mutvec_fold_go(step: b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total:
       mutvec_fold_go(step, next, raw, i + 1, total)
 
 # O(n). Left fold over elements in index order.
-export fn mutvec_fold(step: b -> a -> b !{IO}, init: b, v: MutVec a) -> b !{IO} =
+export fn mutvec_fold(step: local b -> a -> b !{IO}, init: b, v: MutVec a) -> b !{IO} =
   mutvec_fold_go(step, init, mutvec_raw(v), 0, mutvec_len(v))
 
 fn min_int(a: Int, b: Int) -> Int =
   if a < b then a else b
 
-fn mutvec_zip_fold_go(step: b -> a -> c -> b !{IO}, acc: b, raw_a: Vector a, raw_c: Vector c, i: Int, total: Int) -> b !{IO} =
+fn mutvec_zip_fold_go(step: local b -> a -> c -> b !{IO}, acc: b, raw_a: Vector a, raw_c: Vector c, i: Int, total: Int) -> b !{IO} =
   if i >= total then acc
   else
     do
@@ -238,10 +238,10 @@ fn mutvec_zip_fold_go(step: b -> a -> c -> b !{IO}, acc: b, raw_a: Vector a, raw
       mutvec_zip_fold_go(step, next, raw_a, raw_c, i + 1, total)
 
 # O(min(len a, len c)). Fold over corresponding element pairs.
-export fn mutvec_zip_fold(step: b -> a -> c -> b !{IO}, init: b, va: MutVec a, vc: MutVec c) -> b !{IO} =
+export fn mutvec_zip_fold(step: local b -> a -> c -> b !{IO}, init: b, va: MutVec a, vc: MutVec c) -> b !{IO} =
   mutvec_zip_fold_go(step, init, mutvec_raw(va), mutvec_raw(vc), 0, min_int(mutvec_len(va), mutvec_len(vc)))
 
-fn mutvec_map_inplace_go(f: a -> a !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
+fn mutvec_map_inplace_go(f: local a -> a !{IO}, raw: Vector a, i: Int, total: Int) -> Unit !{IO} =
   if i >= total then ()
   else
     do
@@ -251,7 +251,7 @@ fn mutvec_map_inplace_go(f: a -> a !{IO}, raw: Vector a, i: Int, total: Int) -> 
       mutvec_map_inplace_go(f, raw, i + 1, total)
 
 # O(n). Replace each element in place with f applied to it.
-export fn mutvec_map_inplace(f: a -> a !{IO}, v: MutVec a) -> Unit !{IO} =
+export fn mutvec_map_inplace(f: local a -> a !{IO}, v: MutVec a) -> Unit !{IO} =
   mutvec_map_inplace_go(f, mutvec_raw(v), 0, mutvec_len(v))
 
 # ---------------------------------------------------------------------------
@@ -262,20 +262,20 @@ export fn mutvec_map_inplace(f: a -> a !{IO}, v: MutVec a) -> Unit !{IO} =
 
 let sort_block = 16
 
-fn sort_shift(less: a -> a -> Bool, raw: Vector a, x: a, j: Int, lo: Int, prev: a) -> Unit !{IO} =
+fn sort_shift(less: local a -> a -> Bool, raw: Vector a, x: a, j: Int, lo: Int, prev: a) -> Unit !{IO} =
   do
     _ <- vector_mutset(raw, j, prev)
     sort_insert(less, raw, x, j - 1, lo)
 
 # Slide `x` down from slot `j` past every element greater than it, stopping at `lo`.
-fn sort_insert(less: a -> a -> Bool, raw: Vector a, x: a, j: Int, lo: Int) -> Unit !{IO} =
+fn sort_insert(less: local a -> a -> Bool, raw: Vector a, x: a, j: Int, lo: Int) -> Unit !{IO} =
   if j <= lo then vector_mutset(raw, j, x)
   else
     do
       prev <- vector_get_direct(raw, j - 1)
       if less(x, prev) then sort_shift(less, raw, x, j, lo, prev) else vector_mutset(raw, j, x)
 
-fn sort_insertion(less: a -> a -> Bool, raw: Vector a, i: Int, lo: Int, hi: Int) -> Unit !{IO} =
+fn sort_insertion(less: local a -> a -> Bool, raw: Vector a, i: Int, lo: Int, hi: Int) -> Unit !{IO} =
   if i >= hi then ()
   else
     do
@@ -283,7 +283,7 @@ fn sort_insertion(less: a -> a -> Bool, raw: Vector a, i: Int, lo: Int, hi: Int)
       _ <- sort_insert(less, raw, x, i, lo)
       sort_insertion(less, raw, i + 1, lo, hi)
 
-fn sort_blocks(less: a -> a -> Bool, raw: Vector a, lo: Int, n: Int) -> Unit !{IO} =
+fn sort_blocks(less: local a -> a -> Bool, raw: Vector a, lo: Int, n: Int) -> Unit !{IO} =
   if lo >= n then ()
   else
     do
@@ -302,7 +302,7 @@ fn sort_copy(src: Vector a, dst: Vector a, i: Int, stop: Int, k: Int) -> Unit !{
 # One store and one tail call, the choice in their arguments: LLVM makes selects of
 # that. Two arms that each store and recurse stay a branch, which random input
 # mispredicts about half the time (docs/native-sprout-runtime-v0.md §Phase 2).
-fn sort_merge(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: Int, j: Int, hi: Int,
+fn sort_merge(less: local a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: Int, j: Int, hi: Int,
               k: Int) -> Unit !{IO} =
   if i >= mid then sort_copy(src, dst, j, hi, k)
   else if j >= hi then sort_copy(src, dst, i, mid, k)
@@ -315,7 +315,7 @@ fn sort_merge(less: a -> a -> Bool, src: Vector a, dst: Vector a, i: Int, mid: I
       sort_merge(less, src, dst, if right then i else i + 1, mid, if right then j + 1 else j, hi,
                  k + 1)
 
-fn sort_pass(less: a -> a -> Bool, src: Vector a, dst: Vector a, lo: Int, n: Int, w: Int) -> Unit !{IO} =
+fn sort_pass(less: local a -> a -> Bool, src: Vector a, dst: Vector a, lo: Int, n: Int, w: Int) -> Unit !{IO} =
   if lo >= n then ()
   else
     do
@@ -326,7 +326,7 @@ fn sort_pass(less: a -> a -> Bool, src: Vector a, dst: Vector a, lo: Int, n: Int
 
 # Each pass merges runs of width `w` from `src` into `dst`, then the two swap.
 # Returns whether the last pass wrote the scratch buffer.
-fn sort_passes(less: a -> a -> Bool, src: Vector a, dst: Vector a, n: Int, w: Int,
+fn sort_passes(less: local a -> a -> Bool, src: Vector a, dst: Vector a, n: Int, w: Int,
                in_scratch: Bool) -> Bool !{IO} =
   if w >= n then in_scratch
   else
@@ -335,7 +335,7 @@ fn sort_passes(less: a -> a -> Bool, src: Vector a, dst: Vector a, n: Int, w: In
       let swapped = ! in_scratch
       sort_passes(less, dst, src, n, w * 2, swapped)
 
-fn sort_merge_all(less: a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =
+fn sort_merge_all(less: local a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =
   do
     fill <- vector_get_direct(raw, 0)
     let scratch = vec_make_filled(n, fill)
@@ -344,7 +344,7 @@ fn sort_merge_all(less: a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =
 
 # The comparators below call `compare` directly: `ord_lt` inlines, but its GC
 # root pushes stay, about 40% of the sort (docs/sorting-v0.md).
-fn mutvec_sort_with(less: a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
+fn mutvec_sort_with(less: local a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
   do
     n <- mutvec_len(v)
     _ <- sort_blocks(less, mutvec_raw(v), 0, n)
@@ -359,7 +359,7 @@ export fn mutvec_sort(v: MutVec a) -> Unit !{IO} where Ord a =
 # As `mutvec_sort`, ordered by `f`. Unlike `vec_sort_by`, which computes each key
 # once, this calls `f` twice per comparison; when `f` is costly, sort (key, value)
 # pairs instead.
-export fn mutvec_sort_by(f: a -> k, v: MutVec a) -> Unit !{IO} where Ord k =
+export fn mutvec_sort_by(f: local a -> k, v: MutVec a) -> Unit !{IO} where Ord k =
   mutvec_sort_with(\ (x, y) -> compare(f(x), f(y)) < 0, v)
 
 # ---------------------------------------------------------------------------
@@ -420,7 +420,7 @@ export fn mutmatrix_set(m: MutMatrix a, r: Int, c: Int, val: a) -> Unit !{IO} =
       if r < 0 || r >= rows || c < 0 || c >= cols then ()
       else mutvec_set(data, r * cols + c, val)
 
-fn mutmatrix_fold_go(step: b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total: Int) -> b !{IO} =
+fn mutmatrix_fold_go(step: local b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, total: Int) -> b !{IO} =
   if i >= total then acc
   else
     do
@@ -429,13 +429,13 @@ fn mutmatrix_fold_go(step: b -> a -> b !{IO}, acc: b, raw: Vector a, i: Int, tot
       mutmatrix_fold_go(step, next, raw, i + 1, total)
 
 # O(rows*cols). Fold over every cell in row-major order.
-export fn mutmatrix_fold(step: b -> a -> b !{IO}, init: b, m: MutMatrix a) -> b !{IO} =
+export fn mutmatrix_fold(step: local b -> a -> b !{IO}, init: b, m: MutMatrix a) -> b !{IO} =
   match m with
   | MutMatrix rows cols data ->
       if rows <= 0 || cols <= 0 then init
       else mutmatrix_fold_go(step, init, mutvec_raw(data), 0, rows * cols)
 
-fn mutmatrix_fill_go(f: Int -> Int -> a !{IO}, raw: Vector a, cols: Int, i: Int, total: Int) -> Unit !{IO} =
+fn mutmatrix_fill_go(f: local Int -> Int -> a !{IO}, raw: Vector a, cols: Int, i: Int, total: Int) -> Unit !{IO} =
   if i >= total then ()
   else
     do
@@ -446,13 +446,13 @@ fn mutmatrix_fill_go(f: Int -> Int -> a !{IO}, raw: Vector a, cols: Int, i: Int,
       mutmatrix_fill_go(f, raw, cols, i + 1, total)
 
 # O(rows*cols). Set every cell (r, c) to f(r, c).
-export fn mutmatrix_fill(f: Int -> Int -> a !{IO}, m: MutMatrix a) -> Unit !{IO} =
+export fn mutmatrix_fill(f: local Int -> Int -> a !{IO}, m: MutMatrix a) -> Unit !{IO} =
   match m with
   | MutMatrix rows cols data ->
       if rows <= 0 || cols <= 0 then ()
       else mutmatrix_fill_go(f, mutvec_raw(data), cols, 0, rows * cols)
 
-fn mutmatrix_row_zip_fold_go(step: b -> a -> c -> b !{IO}, acc: b, raw_m: Vector a, raw_v: Vector c, row_start: Int, i: Int, total: Int) -> b !{IO} =
+fn mutmatrix_row_zip_fold_go(step: local b -> a -> c -> b !{IO}, acc: b, raw_m: Vector a, raw_v: Vector c, row_start: Int, i: Int, total: Int) -> b !{IO} =
   if i >= total then acc
   else
     do
@@ -462,13 +462,13 @@ fn mutmatrix_row_zip_fold_go(step: b -> a -> c -> b !{IO}, acc: b, raw_m: Vector
       mutmatrix_row_zip_fold_go(step, next, raw_m, raw_v, row_start, i + 1, total)
 
 # O(min(cols, len v)). Fold over row r zipped with vector v.
-export fn mutmatrix_row_zip_fold(step: b -> a -> c -> b !{IO}, init: b, m: MutMatrix a, r: Int, v: MutVec c) -> b !{IO} =
+export fn mutmatrix_row_zip_fold(step: local b -> a -> c -> b !{IO}, init: b, m: MutMatrix a, r: Int, v: MutVec c) -> b !{IO} =
   match m with
   | MutMatrix rows cols data ->
       if r < 0 || r >= rows then init
       else mutmatrix_row_zip_fold_go(step, init, mutvec_raw(data), mutvec_raw(v), r * cols, 0, min_int(cols, mutvec_len(v)))
 
-fn mutmatrix_row_zip_update_go(f: a -> c -> a !{IO}, raw_m: Vector a, raw_v: Vector c, row_start: Int, i: Int, total: Int) -> Unit !{IO} =
+fn mutmatrix_row_zip_update_go(f: local a -> c -> a !{IO}, raw_m: Vector a, raw_v: Vector c, row_start: Int, i: Int, total: Int) -> Unit !{IO} =
   if i >= total then ()
   else
     do
@@ -479,7 +479,7 @@ fn mutmatrix_row_zip_update_go(f: a -> c -> a !{IO}, raw_m: Vector a, raw_v: Vec
       mutmatrix_row_zip_update_go(f, raw_m, raw_v, row_start, i + 1, total)
 
 # O(min(cols, len v)). Update each cell of row r in place from (cell, v-element).
-export fn mutmatrix_row_zip_update(f: a -> c -> a !{IO}, m: MutMatrix a, r: Int, v: MutVec c) -> Unit !{IO} =
+export fn mutmatrix_row_zip_update(f: local a -> c -> a !{IO}, m: MutMatrix a, r: Int, v: MutVec c) -> Unit !{IO} =
   match m with
   | MutMatrix rows cols data ->
       if r < 0 || r >= rows then ()

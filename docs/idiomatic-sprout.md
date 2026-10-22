@@ -880,6 +880,26 @@ close(conn)
 r
 ```
 
+The prelude's combinators lend too: `list_*`, `vec_*`, `range_*`, `fold`, `any`, `find`, `count`
+and the rest of the `Foldable` functions take their function `local`, so a lambda may read a
+borrowed value, and so may a comprehension. `map`, `filter` and `and_then` do not, because an
+instance may keep the function; use `list_map` or `list_filter` when you need to lend.
+
+```sprout
+fn count_unseen(seen: borrowing LinVec Bool, n: Int, c: Int) -> Int =
+  match linvec_get(c, seen) with
+  | Just b -> if b then n else n + 1
+  | Nothing -> n
+
+fn unseen(cells: List Int, seen: borrowing LinVec Bool) -> Int =
+  list_fold(count_unseen(seen, _, _), 0, cells)
+```
+
+Holes inside the function argument, as above, lend: that argument is a lambda at the `local`
+slot. A `_` standing for the *data* argument does not: `xs |> list_each(\x -> write(c, x), _)` is
+an ordinary lambda wrapped around the whole call, so the borrow is rejected; write
+`list_each(\x -> write(c, x), xs)` instead.
+
 Your own combinator can lend the same way. If it calls a callback and is done with it before it
 returns, mark the callback `local`, and callers may capture a borrowed resource in it:
 

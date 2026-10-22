@@ -1,0 +1,14 @@
+module main
+
+# The `_` placeholder form desugars to an ordinary lambda around the call, so the borrow is
+# captured by a lambda at an ordinary slot even though `list_each` takes `local`. The direct
+# call form lends; see local_combinator_pipe_placeholder.fixed.spr.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> Unit !{IO} =
+  xs |> list_each(\x -> print(to_string(x + peek(c))), _)
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -1,0 +1,13 @@
+module main
+
+# `local_combinator_monad_and_then.spr` with its error's hint applied.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, m: Maybe Int) -> Maybe Int =
+  let n = peek(c)
+  in and_then(\x -> Just(x + n), m)
+
+fn main() -> Unit !{IO} = print("unreachable")

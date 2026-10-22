@@ -1,0 +1,13 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+let k: Int = match L(10) with | l -> list_fold(\ (acc, i) -> acc + i + peek(l), 0, [1, 2]) + close(l)
+
+fn main() -> Unit !{IO} = print(int_to_string(k))

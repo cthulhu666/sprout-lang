@@ -490,7 +490,7 @@ fn once_reuse_msg(name: String) -> String =
   "`once` parameter '" ++ name ++ "' is used more than once: declaring it `once` promises callers this function invokes it AT MOST once, and that promise is what licenses them to move a linear value into the closure they pass"
 
 fn once_borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure; or, if the callee does not keep this closure past the call, also declare that parameter `local`"
+  "borrowed value '" ++ name ++ "' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure; or, if the callee is your own and does not keep this closure past the call, also declare that parameter `local`"
 
 # The lambda restriction M4.4b did NOT lift — a CONSUMING linear parameter. It
 # names `borrowing` so the wall has a door in it: an author whose lambda only
@@ -545,7 +545,7 @@ fn local_move_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (a plain `local` closure may run many times, so it cannot take a move; if the callee invokes this closure at most once, declare that parameter `once local`)"
 
 fn borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee does not keep this closure past the call, declare that parameter `local`"
+  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee is your own and does not keep this closure past the call, declare that parameter `local`; the prelude's `list_`, `vec_` and `range_` functions and `fold` already do, `map`, `filter` and `and_then` do not"
 
 # A comprehension elaborates to a fold over lambdas the user never wrote
 # (infer.build_comp_fold), so the two messages above misdescribe it three ways:
@@ -948,15 +948,21 @@ fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: 
 
 # The walk a lambda gets at a `once` or `local` slot: raw consumed and borrowed
 # captures, for the slot's own rule to judge. Owned linear parameters are
-# rejected here.
+# rejected here. A comprehension's fold lands here too, so it gets lin_lambda's
+# accumulator drop and its generator wording.
 fn lin_slot_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
                    p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  match first_owned_linear_param(params, lam_type, env) with
-  | Just b -> LinErr(p, lambda_param_binder_msg(b, env))
-  | Nothing ->
-      lambda_once_after(
-        lin_slot_lambda_body(borrowed_linear_params(params, lam_type, env), params, body, sc, env),
-        params, lam_type, body, env)
+  let from_comp = is_comprehension_fold(params)
+  in match first_owned_linear_param(drop_comp_acc_params(params),
+                                    drop_comp_acc_type(params, lam_type), env) with
+     | Just b -> LinErr(p, linear_param_msg(from_comp, b, env))
+     | Nothing ->
+         lambda_once_after(
+           lin_slot_lambda_body(
+             borrowed_linear_params(drop_comp_acc_params(params),
+                                    drop_comp_acc_type(params, lam_type), env),
+             params, body, sc, env),
+           params, lam_type, body, env)
 
 # The borrowing parameters are discharged first and on their own terms — not
 # consumed, then dropped from both sets — so what the slot's rule sees is the
@@ -1017,19 +1023,27 @@ fn lin_local_arg(a: typed_ast.TypedExpr, moves_ok: Bool, sc: LinScope,
                  env: Dict types.Scheme) -> LinRes =
   match a with
   | typed_ast.TLambda params body lam_type p ->
-      lin_local_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), moves_ok, p)
+      lin_local_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), moves_ok,
+                         is_comprehension_fold(params), p)
   | _ -> lin_consumed(a, sc, env)
 
 # As lin_once_captures: a capture both borrowed and consumed is a move.
-fn lin_local_captures(res: LinRes, moves_ok: Bool, p: source.SourcePos) -> LinRes =
+fn lin_local_captures(res: LinRes, moves_ok: Bool, from_comp: Bool, p: source.SourcePos) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_local_moves(bc, luse_remove_all(list_map(luse_name, bc), bb), moves_ok, p)
+  | LinOk bc bb ->
+      lin_local_moves(bc, luse_remove_all(list_map(luse_name, bc), bb), moves_ok, from_comp, p)
 
-fn lin_local_moves(bc: List LinUse, bb: List LinUse, moves_ok: Bool, p: source.SourcePos) -> LinRes =
+fn lin_local_moves(bc: List LinUse, bb: List LinUse, moves_ok: Bool, from_comp: Bool,
+                   p: source.SourcePos) -> LinRes =
   match bc with
-  | [u | _] -> if moves_ok then LinOk(bc, bb) else LinErr(p, local_move_capture_msg(luse_name(u)))
+  | [u | _] ->
+      if moves_ok then LinOk(bc, bb)
+      else LinErr(p, local_move_msg_for(from_comp, luse_name(u)))
   | Nil -> LinOk(bc, bb)
+
+fn local_move_msg_for(from_comp: Bool, name: String) -> String =
+  if from_comp then comprehension_capture_msg(name) else local_move_capture_msg(name)
 
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
   list_filter(\u -> ! list_member (luse_name(u), names), uses)

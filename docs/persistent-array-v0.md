@@ -372,9 +372,9 @@ An index out of range traps, since both call `linvec_set` (`linvec_accum` reads 
 that read).
 
 They fit the sieve and the histogram. They do not make a BFS easier: picking a level's unvisited
-neighbours reads the array inside a lambda (`list_filter`), which is rejected today ("borrowed
-value 'dist' captured by a lambda is not yet supported") until the combinators are `local` (BACKLOG
-P2 **Mark the prelude combinators' function arguments `local`**). Scatter also keeps duplicates:
+neighbours reads the array inside a lambda (`list_filter`), which was rejected ("borrowed value
+'dist' captured by a lambda is not yet supported") until the combinators became `local` (landed,
+`docs/local-closures-v0.md` §8), so that read now compiles. Scatter also keeps duplicates:
 a cell next to two frontier cells enters the next frontier twice. A BFS stays explicit recursion,
 as §3.2's is. DP builds by rows (5.1) and needs neither.
 
@@ -418,8 +418,8 @@ a `wrap`, not an ADT.
     inside `list_fold` or `fold_indexed` is rejected and the loop must be explicit recursion.
     `owners` and meadow's folds would need rewriting. BACKLOG P2 **Higher-order linearity**
     lists consuming linear lambda parameters as left to do; whether `list_fold` would then take
-    a linear accumulator was not checked. Reads too: a lambda that captures the array is
-    rejected until the combinators are `local` (bulk operations, above).
+    a linear accumulator was not checked. Reads are fine: the combinators are `local` now, so
+    a lambda may capture the array to read it (bulk operations, above).
   - Threading: every set returns the array, extra results travel in a tuple (the BFS queue),
     and every path must end in `linvec_freeze` or `linvec_drop`, or the leak rule fires.
   - No old versions. Backtracking copies explicitly.
@@ -479,13 +479,12 @@ buffer cannot escape. Two designs follow: A with a `Local` effect, B without one
   optimiser may delete.
 - **Design A exists:** [byte-buffer-v0.md](byte-buffer-v0.md) §5.5, `run_local` over a `local`
   buffer parameter with a `Local` effect, which replaces the rank-2 type with Sprout's `local`
-  escape walk. It needs the effect, three checker changes, and BACKLOG P2 **Mark the prelude
-  combinators' function arguments `local`** before a lambda may capture the buffer; its
-  soundness is "a reading of the paper's rules", not a proof.
+  escape walk. It needs the effect and three checker changes; the combinators are already
+  `local`, so a lambda may capture the buffer; its soundness is "a reading of the paper's rules", not a proof.
 - **For:** existing `MutVec` code and its speed, behind a pure signature; no new array type.
   Writes return `Unit`, so nothing is threaded, where 5.3 returns the array from every set and
-  carries extra results in tuples. Once the combinators are `local`, writes inside `list_each`
-  are allowed; 5.3 needs consuming linear lambda parameters, left open under BACKLOG P2
+  carries extra results in tuples. The combinators are `local` now, so writes inside `list_each`
+  would be allowed; 5.3 needs consuming linear lambda parameters, left open under BACKLOG P2
   **Higher-order linearity**, an entry it calls known-hard. One effect covers `Ref` and
   `MutMatrix` too, where 5.3 needs a linear twin per type. Every kernel in §3.2 and the three
   `!{IO}` cases in §1 are scratch inside one call, which is this option's shape.
@@ -645,8 +644,9 @@ value is unshared moves the ranking.
    writes in pure code (`MutVec`, `Ref` and `MutMatrix` stay for `IO` code), after steps 3 and
    4, and keep 5.3's *Invariants*. **Landed 2026-10-22, core only**: the module, the builtin
    `linvec_set`, the `ir_rooting` entry, the bulk operations, tests and `examples/sieve.sprout`.
-   Out of it, as BACKLOG entries: B1 and bounds-check elimination for `LinVec Double` writes, and
-   marking the combinators `local`, without which a lambda cannot read the array.
+   Out of it, as a BACKLOG entry: B1 and bounds-check elimination for `LinVec Double` writes.
+   Marking the combinators `local`, so that a lambda can read the array, **landed after**
+   (`docs/local-closures-v0.md` §8); `linvec_accum` takes its `f` `local`.
    Other mutable structures are linear types over it. It needs `wrap linear`
    ([linear-wrap-v0.md](linear-wrap-v0.md), landed) and one builtin, `linvec_set`; §3.2 is the measured
    case: typical programs, not our own; in our own code it removes `!{IO}` from the three cases
@@ -732,7 +732,7 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
    conversions, but is 2–20× slower on §3.2. 5.3's builtins are what a transient's writes
    would need, so it can still come later.
 2. **5.6 raised: is `ST` redundant next to 5.3?** Not for ergonomics: inside a run, writes
-   return `Unit` (no threading), lambdas can write once the combinators are `local`, and one
+   return `Unit` (no threading), lambdas can write now that the combinators are `local`, and one
    mechanism covers `Ref` and `MutMatrix`. Every kernel in §3.2 and every `!{IO}` case in §1 is
    scratch inside one call, 5.6's shape; 5.3's own niche, an array that outlives a call, had no
    user. Recommendation moved to "size 5.6 before approving 5.3".
@@ -794,7 +794,7 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
     only. In: the module, the one builtin, `vec_make_filled` made pure, the `ir_rooting` entry,
     the bulk operations, tests and the sieve example. Out, each its own BACKLOG entry: B1 and
     bounds-check elimination for `LinVec Double` writes (§5.3 *Compiler tables*), and marking the
-    combinators `local`. A scatter or accum index out of range traps, since they call the set.
+    combinators `local` (since landed). A scatter or accum index out of range traps, since they call the set.
 15. **Out-of-range writes, later** (2026-10-22). Kuba: the bulk operations keep trapping, and
     branded indices (5.7) are the way to rule the trap out, filed at P2. A `Result`-returning
     write was set aside: on failure it must return the vector or drop it, and every caller pays

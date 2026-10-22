@@ -1,0 +1,13 @@
+module main
+
+# `local_combinator_result_closure_escapes.spr` with its error's hint applied.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> List (Unit -> Int) =
+  let n = peek(c)
+  in list_map(\x -> \_ -> n, xs)
+
+fn main() -> Unit !{IO} = print("unreachable")

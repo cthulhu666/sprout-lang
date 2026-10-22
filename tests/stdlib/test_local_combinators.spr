@@ -1,0 +1,219 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop, linvec_accum)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_each, mutvec_fold)
+
+# The prelude's concrete combinators, `Foldable`'s methods and the generic folds over them
+# take their function `local` (docs/local-closures-v0.md §8), so a lambda passed to them may
+# READ a borrowed linear value. Each case lends `c` (a `File` holding n) to one combinator and
+# the owner releases it afterwards. `Functor`, `Filterable`, `Applicative`, `Monad` and
+# `Traversable` stay plain: tests/conformance/type_error/local_combinator_*.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int =
+  match f with
+  | File n -> n
+
+fn drop_file(f: consuming File) -> Int =
+  match f with
+  | File _ -> 0
+
+# Runs `use` on a fresh file the caller then releases: a borrowing function cannot be
+# handed a freshly-built linear value directly.
+fn on_file(n: Int, use: (borrowing File) -> Int) -> Int =
+  do
+    let f = File(n)
+    let r = use(f)
+    r + drop_file(f)
+
+fn on_file_io(n: Int, use: (borrowing File) -> Int !{IO}) -> Int !{IO} =
+  do
+    let f = File(n)
+    r <- use(f)
+    r + drop_file(f)
+
+fn sum(xs: List Int) -> Int = list_fold(\ (a, x) -> a + x, 0, xs)
+
+fn b2i(b: Bool) -> Int = if b then 1 else 0
+
+fn abs_diff(a: Int, b: Int) -> Int = if a > b then a - b else b - a
+
+fn bump(total: MutVec Int, d: Int) -> Unit !{IO} =
+  do
+    cur <- mutvec_at(total, 0)
+    mutvec_set(total, 0, cur + d)
+
+# --- the `list_` family ------------------------------------------------------
+fn list_fold_case(c: borrowing File) -> Int =
+  list_fold(\ (acc, x) -> acc + x + peek(c), 0, [1, 2, 3])
+
+# `_` holes inside the function argument make a lambda at the `local` slot, so they lend.
+fn add_peek(c: borrowing File, acc: Int, x: Int) -> Int = acc + x + peek(c)
+
+fn list_fold_hole_case(c: borrowing File) -> Int =
+  list_fold(add_peek(c, _, _), 0, [1, 2, 3])
+
+fn list_map_case(c: borrowing File) -> Int =
+  sum(list_map(\x -> x + peek(c), [1, 2, 3]))
+
+fn list_filter_case(c: borrowing File) -> Int =
+  list_length(list_filter(\x -> x > peek(c), [1, 2, 3, 4, 5]))
+
+fn list_fold_while_case(c: borrowing File) -> Int =
+  list_fold_while(\ (acc, x) -> acc + x, \acc -> acc < peek(c), 0, [1, 2, 3, 4, 5])
+
+fn list_flat_map_case(c: borrowing File) -> Int =
+  sum(list_flat_map(\x -> [x, peek(c)], [1, 2]))
+
+fn list_each_case(c: borrowing File) -> Int !{IO} =
+  do
+    total <- mutvec_new(1, 0)
+    list_each(\x -> bump(total, x + peek(c)), [1, 2, 3])
+    mutvec_at(total, 0)
+
+# --- the `vec_` family ------------------------------------------------------
+fn vec_fold_case(c: borrowing File) -> Int =
+  vec_fold(\ (acc, x) -> acc + x + peek(c), 0, vec_from_list([1, 2, 3]))
+
+fn vec_map_case(c: borrowing File) -> Int =
+  vec_fold(\ (a, x) -> a + x, 0, vec_map(\x -> x + peek(c), vec_from_list([1, 2, 3])))
+
+fn vec_any_case(c: borrowing File) -> Int =
+  b2i(vec_any(\x -> x == peek(c), vec_from_list([1, 2, 3])))
+
+# --- ranges ------------------------------------------------------------------
+fn range_fold_case(c: borrowing File) -> Int =
+  range_fold(\ (acc, i) -> acc + i + peek(c), 0, 1..3)
+
+fn range_each_case(c: borrowing File) -> Int !{IO} =
+  do
+    total <- mutvec_new(1, 0)
+    range_each(\i -> bump(total, i + peek(c)), 1..3)
+    mutvec_at(total, 0)
+
+# --- comprehensions elaborate to folds ---------------------------------------
+fn list_comp_case(c: borrowing File) -> Int =
+  sum([x + peek(c) for x in [1, 2, 3]])
+
+fn range_comp_case(c: borrowing File) -> Int =
+  sum([i + peek(c) for i in 1..3])
+
+fn filtered_comp_case(c: borrowing File) -> Int =
+  sum([i for i in 1..6 if i > peek(c)])
+
+# --- generic Foldable wrappers, over a List and over a Vec ------------------
+fn fold_case(xs: f Int, c: borrowing File) -> Int where Foldable f =
+  fold(\ (acc, x) -> acc + x + peek(c), 0, xs)
+
+fn any_case(xs: f Int, c: borrowing File) -> Int where Foldable f =
+  b2i(any(\x -> x == peek(c), xs))
+
+fn find_case(xs: f Int, c: borrowing File) -> Int where Foldable f =
+  maybe_with_default(-1, find(\x -> x > peek(c), xs))
+
+fn count_case(xs: f Int, c: borrowing File) -> Int where Foldable f =
+  count(\x -> x > peek(c), xs)
+
+fn min_by_case(xs: f Int, c: borrowing File) -> Int where Foldable f =
+  maybe_with_default(-1, min_by(\x -> abs_diff(x, peek(c)), xs))
+
+let list_xs: List Int = [1, 2, 3, 4, 5]
+
+let vec_xs: Vec Int = [1, 2, 3, 4, 5]
+
+fn fold_list(c: borrowing File) -> Int = fold_case(list_xs, c)
+
+fn fold_vec(c: borrowing File) -> Int = fold_case(vec_xs, c)
+
+fn any_list(c: borrowing File) -> Int = any_case(list_xs, c)
+
+fn any_vec(c: borrowing File) -> Int = any_case(vec_xs, c)
+
+fn find_list(c: borrowing File) -> Int = find_case(list_xs, c)
+
+fn find_vec(c: borrowing File) -> Int = find_case(vec_xs, c)
+
+fn count_list(c: borrowing File) -> Int = count_case(list_xs, c)
+
+fn count_vec(c: borrowing File) -> Int = count_case(vec_xs, c)
+
+fn min_by_list(c: borrowing File) -> Int = min_by_case(list_xs, c)
+
+fn min_by_vec(c: borrowing File) -> Int = min_by_case(vec_xs, c)
+
+# --- MutVec -----------------------------------------------------------------
+fn mutvec_each_case(c: borrowing File) -> Int !{IO} =
+  do
+    v <- mutvec_new(3, 2)
+    total <- mutvec_new(1, 0)
+    mutvec_each(\x -> bump(total, x + peek(c)), v)
+    mutvec_at(total, 0)
+
+fn mutvec_fold_case(c: borrowing File) -> Int !{IO} =
+  do
+    v <- mutvec_new(3, 2)
+    mutvec_fold(\ (acc, x) -> acc + x + peek(c), 0, v)
+
+# --- LinVec: a second borrowed LinVec read inside accum and fold -------------
+fn first_of(v: borrowing LinVec Int) -> Int =
+  maybe_with_default(0, linvec_get(0, v))
+
+fn accum_reads_other(other: borrowing LinVec Int) -> Int =
+  let acc = linvec_accum(\ (a, b) -> a + b + first_of(other), [(0, 1), (1, 2)], linvec_new(2, 0))
+      r = maybe_with_default(0, linvec_get(0, acc)) + maybe_with_default(0, linvec_get(1, acc))
+      _ = linvec_drop(acc)
+  in r
+
+fn accum_case() -> Int =
+  let other = linvec_set(0, 10, linvec_new(1, 0))
+      r = accum_reads_other(other)
+      _ = linvec_drop(other)
+  in r
+
+# One BFS step (docs/persistent-array-v0.md §3.2): count the cells not yet seen.
+fn unseen(cells: List Int, seen: borrowing LinVec Bool) -> Int =
+  list_fold(\ (n, c) -> if maybe_with_default(true, linvec_get(c, seen)) then n else n + 1, 0, cells)
+
+fn bfs_step_case() -> Int =
+  let seen = linvec_set(1, true, linvec_set(3, true, linvec_new(5, false)))
+      r = unseen([0, 1, 2, 3, 4], seen)
+      _ = linvec_drop(seen)
+  in r
+
+fn main() -> Unit !{IO} =
+  do
+    each_r <- on_file_io(1, list_each_case)
+    range_each_r <- on_file_io(10, range_each_case)
+    mutvec_each_r <- on_file_io(1, mutvec_each_case)
+    mutvec_fold_r <- on_file_io(1, mutvec_fold_case)
+    run_suite("local_combinators", [
+      check_eq("list_fold reads a borrowed value", on_file(1, list_fold_case), 9),
+      check_eq("placeholder holes in the step lend", on_file(1, list_fold_hole_case), 9),
+      check_eq("list_map", on_file(10, list_map_case), 36),
+      check_eq("list_filter", on_file(2, list_filter_case), 3),
+      check_eq("list_fold_while", on_file(4, list_fold_while_case), 6),
+      check_eq("list_flat_map", on_file(7, list_flat_map_case), 17),
+      check_eq("list_each", each_r, 9),
+      check_eq("vec_fold", on_file(1, vec_fold_case), 9),
+      check_eq("vec_map", on_file(10, vec_map_case), 36),
+      check_eq("vec_any", on_file(2, vec_any_case), 1),
+      check_eq("range_fold", on_file(1, range_fold_case), 9),
+      check_eq("range_each", range_each_r, 36),
+      check_eq("list comprehension", on_file(10, list_comp_case), 36),
+      check_eq("range comprehension", on_file(10, range_comp_case), 36),
+      check_eq("filtered comprehension", on_file(3, filtered_comp_case), 15),
+      check_eq("fold over a List", on_file(1, fold_list), 20),
+      check_eq("fold over a Vec", on_file(1, fold_vec), 20),
+      check_eq("any over a List", on_file(4, any_list), 1),
+      check_eq("any over a Vec", on_file(9, any_vec), 0),
+      check_eq("find over a List", on_file(3, find_list), 4),
+      check_eq("find over a Vec", on_file(3, find_vec), 4),
+      check_eq("count over a List", on_file(2, count_list), 3),
+      check_eq("count over a Vec", on_file(2, count_vec), 3),
+      check_eq("min_by over a List", on_file(4, min_by_list), 4),
+      check_eq("min_by over a Vec", on_file(4, min_by_vec), 4),
+      check_eq("mutvec_each", mutvec_each_r, 9),
+      check_eq("mutvec_fold", mutvec_fold_r, 9),
+      check_eq("linvec_accum reads a second LinVec", accum_case(), 23),
+      check_eq("a BFS step reads the seen set", bfs_step_case(), 3)
+    ])

@@ -1,0 +1,16 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+type Box a = Box a
+
+fn eat(b: Box L) -> Int = match b with | Box l -> close(l)
+
+fn g(b: Box L) -> List Int = [i + eat(b) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

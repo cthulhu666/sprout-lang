@@ -1,1 +1,1 @@
-borrowed value 'f' cannot be captured by a closure passed to a `once` parameter
+borrowed value 'f' cannot be captured by a closure passed to a `once` parameter: the closure may run after the value is consumed. Move it instead — pass ownership in and consume it inside the closure; or, if the callee is your own and does not keep this closure past the call, also declare that parameter `local`

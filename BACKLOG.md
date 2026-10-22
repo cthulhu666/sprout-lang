@@ -1727,8 +1727,8 @@ deferral happened, not for current behaviour. Still open:
   only use is the call it is passed to, and specialising an `IRApplyClosure` whose arity is
   statically known so the check is dropped. The closure allocation also feeds the collection rate,
   so it is upstream of the GC entries in §1. Profile: `bench/results-2026-09-20-gc-root-stack.md`.
-  A `local` parameter states that non-escape at the slot and the callee check proves it, so the
-  first lever needs no analysis once the combinators take `local` (`docs/local-closures-v0.md` §11).
+  A `local` parameter states that non-escape and the callee check proves it, so the first lever
+  needs no analysis now the combinators take `local` (`docs/local-closures-v0.md` §11).
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Chunked reads are
   filed in §2.
@@ -1981,9 +1981,9 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   consume — a distinction Sprout does not have. Known-hard: Linear Haskell shipped it incomplete.
   Landed: the move-into-a-one-shot-closure slice (M4.4a), and borrowing lambda parameters (M4.4b,
   `docs/linear-borrowing-v0.md` §20), and the escape notion for the borrow half (`local`,
-  `docs/local-closures-v0.md`). Left: marking the prelude combinators `local` (own entry); a linear
-  value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING linear
-  lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
+  `docs/local-closures-v0.md`), with the prelude combinators marked `local` (design §8). Left: a
+  linear value MOVED into a closure at an UNANNOTATED parameter (the true 0..n case); CONSUMING
+  linear lambda parameters (`\c -> close(c)`); a linear `Scope`, both at once.
 - [ ] `P3` **Linearity-bound retro: deferred items.** From
   `docs/linearity-bound-retro-2026-10-20.md` §5–6: C2, one group-boundary check deciding bound
   obligations and marks under the final substitution; T3, a `/sprout-review` pass that writes
@@ -2054,11 +2054,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   re-queued, so a loop on `task_yield` runs past the deadline and `task_cancelled()` never turns
   true (1 ms timeout: 2,000,000 steps, `Completed`). Setting the reason on that path would let a
   cooperative body see it and return. `TimedOut` is unobservable for the same reason.
-- [ ] `P2` **Mark the prelude combinators' function arguments `local`.** `local` exists
-  (`docs/local-closures-v0.md`) but no prelude function declares it, so `list_each(\x ->
-  write(conn, x), xs)` still cannot capture a borrowed `conn`. Covers `list_each`/`list_fold`/
-  `list_map` and the `vec_` family. Each one must pass the callee check (§6.3) and `Functor.fmap`
-  needs a decision (design §8). Touches `stdlib/prelude.sprout`, so it needs the 2-step bootstrap.
 - [ ] `P3` **Tree-cancel cascade must drop a deadline's child before its owner.** A cancel of an
   outer scope while a task is parked in `with_timeout` aborts loudly today (`force_drop_task`
   refuses a task with `deadline_child`). Once a cancel may drop that owner instead, it must drop

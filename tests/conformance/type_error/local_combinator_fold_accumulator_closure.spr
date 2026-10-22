@@ -1,0 +1,13 @@
+module main
+
+# Soundness pin: a fold whose accumulator is a closure over the borrow returns that closure
+# out of the call. The step lambda is lent the borrow, the closure it builds is not.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> Unit -> Int =
+  list_fold(\ (acc, x) -> \_ -> peek(c) + x, \_ -> 0, xs)
+
+fn main() -> Unit !{IO} = print("unreachable")
