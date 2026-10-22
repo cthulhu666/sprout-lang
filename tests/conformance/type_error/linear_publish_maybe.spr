@@ -1,0 +1,14 @@
+module main
+
+# Only a linear type guards what is inside it. `Maybe Res` holds nothing
+# untracked, but the rule does not look inside a type that is not linear
+# (docs/linear-publish-v0.md §4).
+
+type linear Res =
+  | Res Int
+
+export type linear Slot (..) =
+#~^ ERROR
+  | Slot (Maybe Res)
+
+fn main() -> Unit !{IO} = print("x")

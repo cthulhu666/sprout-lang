@@ -1,0 +1,15 @@
+module main
+
+# The rule reads a field's type with its aliases expanded, so naming the tuple
+# does not hide its `Vector Int`.
+
+type linear Res =
+  | Res Int
+
+type alias Shared = (Res, Vector Int)
+
+export type linear Weird (..) =
+#~^ ERROR
+  | Weird Shared
+
+fn main() -> Unit !{IO} = print("x")

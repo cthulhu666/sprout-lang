@@ -1,7 +1,8 @@
 import stdlib.test (check_eq, run_suite)
+import stdlib.net as net
 
 # Published linear types the rule accepts (docs/linear-publish-v0.md §4): every
-# field a pattern binds is tracked, so `(..)` lets no module copy or forge one.
+# field's type is linear, so `(..)` lets no module copy or forge one.
 # The rejections are tests/conformance/type_error/linear_publish_*.
 
 # Abstract, so its `Int` field stays inside this module.
@@ -12,6 +13,14 @@ export type linear Pair (..) =
   | Pair Res Res
 
 export wrap linear Held (..) = Res
+
+# A field whose type is a linear wrap.
+export type linear Kept (..) =
+  | Kept Held
+
+# A field whose type is another module's linear type.
+export type linear Link (..) =
+  | Link net.TcpConnection
 
 class Taker a
   fn take(x: a) -> Int
@@ -41,6 +50,10 @@ fn free_held(h: Held) -> Int =
   match h with
   | Held r -> free_res(r)
 
+fn free_kept(k: Kept) -> Int =
+  match k with
+  | Kept h -> free_held(h)
+
 fn unbox(b: Boxed) -> Int =
   match b with
   | Boxed x -> take(x)
@@ -53,6 +66,7 @@ fn main() -> Unit !{IO} =
   run_suite("linear_publish", [
     check_eq("a pair of linear fields", free_pair(Pair (Res(1), Res(2))), 3),
     check_eq("a linear wrap over a linear type", free_held(Held (Res(4))), 4),
+    check_eq("a field whose type is a linear wrap", free_kept(Kept (Held (Res(5)))), 5),
     check_eq("a bounded existential", unbox(Boxed (Res(6))), 6),
     check_eq("an abstract linear wrap", arr_length(Arr(vector_from_list([1, 2]))), 2)
   ])

@@ -1,0 +1,23 @@
+module main
+
+# The hint applied: `Slot` is abstract, and the module exports the functions
+# that build and take it apart.
+
+type linear Res =
+  | Res Int
+
+export type linear Slot =
+  | Slot (Maybe Res)
+
+fn free_res(r: Res) -> Int =
+  match r with
+  | Res n -> n
+
+export fn slot_of(n: Int) -> Slot = Slot(Just (Res(n)))
+
+export fn slot_free(s: Slot) -> Int =
+  match s with
+  | Slot (Just(r)) -> free_res(r)
+  | Slot (Nothing) -> 0
+
+fn main() -> Unit !{IO} = print("x")

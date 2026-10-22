@@ -178,11 +178,11 @@ fi
 # A published linear type is allowed when every field is linear, and refused in
 # the module that declares it when one is not (docs/linear-publish-v0.md §4).
 lpo="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_publish_ok.spr" 2>&1)"
-if ! echo "$lpo" | grep -q 'ERROR'; then
+if echo "$lpo" | grep -q '^OK$' && ! errors "$lpo" >/dev/null; then
   echo "PASS linear publish: an importer destructures a published all-linear Pair"
 else
   echo "FAIL linear publish: expected demo.linpub.Pair to check clean"
-  echo "$lpo" | tail -3
+  errors "$lpo" | head -3
   fail=1
 fi
 

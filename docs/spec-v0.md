@@ -1783,24 +1783,28 @@ that is trusted code. Outside it, the constructor would let any module copy such
 a field out of a linear value, or build one around a value it shares — a second
 owner of a file descriptor, or of an array written in place.
 
-So a linear type whose representation is **published** may not have a field that
-is not tracked. Published means `export` with `(..)` (§5.6.1, §5.6.4), or
-declared in the prelude, whose constructors are in scope everywhere (§3.1). A
-field is tracked when its type contains a linear type, by the containment test
-above, or mentions a variable of its constructor's `where linear`, which is linear
-where a pattern unpacks it. A function type is not descended, so a function field
-is not tracked. Every field of every constructor is checked, and the error is
-reported at the declaration:
+So a linear type whose representation is **published** may only have fields whose
+type **is** linear: a linear type, whose own declaration guards what it holds, or
+a variable of its constructor's `where linear`, which is linear where a pattern
+unpacks it. Containing a linear type is not enough: a pattern takes a tuple or a
+`Maybe` apart and binds each part at its own type, so `(File, Vector Int)` would
+hand out its `Vector`. Aliases are expanded first. Published means `export` with
+`(..)` (§5.6.1, §5.6.4), or declared in the prelude, whose constructors are in
+scope everywhere (§3.1). Every field of every constructor is checked, and the
+error is reported at the declaration:
 
 ```sprout
 export wrap linear LArr a (..) = Vector a        # error: `Vector a` is not linear
+export type linear W (..) = | W (File, Vector Int)   # error: not itself a linear type
 export type linear Pair (..) = | Pair File File  # accepted: both fields are linear
 export type Boxed (..) = | exists a. Boxed a where linear a   # accepted
 export wrap linear LArr a = Vector a             # accepted: abstract
 ```
 
-The fix is the abstract form: drop `(..)` and export functions that build and
-take the type apart. A linear type that is not published is not checked.
+The rule is stricter than it must be: `(File, File)` and `Maybe File` hold nothing
+untracked, and are rejected too. The fix is the abstract form: drop `(..)` and
+export functions that build and take the type apart. A linear type that is not
+published is not checked.
 
 **Records are covered by the rule, not by the guarantee.** An `instance` method
 can read an abstract record's fields from any module (§5.6.4), so an abstract
