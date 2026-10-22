@@ -236,7 +236,16 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   module, so a module could not read its OWN record inside one — and closed nothing, since an
   instance *for* an abstract record resolves to that record's module anyway. The fix is an
   orphan-instance rule, or the writing module on `ast.InstanceDecl` (74 sites, 18 files).
-  Recorded in `spec-v0.md` §5.6.4.
+  Recorded in `spec-v0.md` §5.6.4. It also lets any module copy an abstract linear record's
+  untracked field (`docs/linear-publish-v0.md` §5.3).
+- [ ] `P2` **A published linear type can be copied or forged.** `export wrap linear Fd (..) = Int`
+  lets any module write `Fd(5)`, or unwrap one and rebuild it twice: the field is not linear, so
+  it is untracked. Rule, migration (sprout-pg `PgConnection`) and tests:
+  `docs/linear-publish-v0.md`. Blocks the linear array, whose in-place write needs it.
+- [ ] `P3` **A field unwrapped from a borrowed linear value can escape its module's code.** Inside
+  a linear type's module, `match arr with | LArr raw -> raw` from a borrowed `arr` returns an
+  alias. Extend `linear_check.esc_value` so such a binder cannot be returned, captured or stored
+  (`docs/linear-publish-v0.md` §7).
 - [ ] `P3` **An unresolved name under a renamed alias gets no "declared here" note.** The note that
   names the module declaring an unexported symbol (`infer.unresolved_name_hint`) searches the
   environment by last component alone, so it cannot confirm the reference's alias names the module
