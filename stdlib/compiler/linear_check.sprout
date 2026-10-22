@@ -4,6 +4,7 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
+import stdlib.string as string
 
 # ---------------------------------------------------------------------------
 # Linear-types M4.2 — consume-exactly-once enforcement.
@@ -419,7 +420,7 @@ fn field_read_drops_msg(field: String, base: String, other: String) -> String =
   "reading `" ++ field ++ "` consumes " ++ base ++ " and drops its linear field `" ++ other ++ "`; use a constructor type and `match` it to take every linear field"
 
 fn update_drops_msg(field: String) -> String =
-  "updating `" ++ field ++ "` drops its old linear value; take it out first, or use a constructor type and `match` it"
+  "updating `" ++ field ++ "` drops its old linear value; use a constructor type and `match` it to replace a linear field"
 
 fn borrowed_binder_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
@@ -758,10 +759,7 @@ fn zip_tvars(vars: List String, args: List types.Type) -> Dict types.Type =
 
 fn record_field_names(rec: String, env: Dict types.Scheme) -> List String =
   let prefix = types.rec_fields_prefix(rec)
-  in vec_to_list(vec_filter_map(\k -> after_prefix(prefix, k), dict_keys(env)))
-
-fn after_prefix(prefix: String, k: String) -> Maybe String =
-  if str_starts_with(k, prefix) then Just(str_slice(k, str_len(prefix), str_len(k))) else Nothing
+  in vec_to_list(vec_filter_map(\k -> string.strip_prefix(k, prefix), dict_keys(env)))
 
 # `e with (f = v)` drops the old `f`, so an updated field that holds a linear
 # value would leak it.
