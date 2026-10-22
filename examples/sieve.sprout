@@ -76,11 +76,9 @@ fn mark_all(ms: List Int, composite: LinVec Bool) -> LinVec Bool =
 fn sieve_from(p: Int, n: Int, composite: LinVec Bool) -> LinVec Bool =
   if p * p > n then composite
   else
-    match linvec_get(p, composite) with
-    | Just marked ->
-        if marked then sieve_from(p + 1, n, composite)
-        else sieve_from(p + 1, n, mark_all(multiples(p, n), composite))
-    | Nothing -> composite
+    let Just marked = linvec_get(p, composite) else composite
+    in if marked then sieve_from(p + 1, n, composite)
+    else sieve_from(p + 1, n, mark_all(multiples(p, n), composite))
 
 fn sieve_linvec(n: Int) -> Int =
   count_primes(n, linvec_freeze(sieve_from(2, n, linvec_new(n + 1, false))))
@@ -92,11 +90,9 @@ fn sieve_linvec(n: Int) -> Int =
 fn sieve_from_scatter(p: Int, n: Int, composite: LinVec Bool) -> LinVec Bool =
   if p * p > n then composite
   else
-    match linvec_get(p, composite) with
-    | Just marked ->
-        if marked then sieve_from_scatter(p + 1, n, composite)
-        else sieve_from_scatter(p + 1, n, linvec_scatter(multiples(p, n), true, composite))
-    | Nothing -> composite
+    let Just marked = linvec_get(p, composite) else composite
+    in if marked then sieve_from_scatter(p + 1, n, composite)
+    else sieve_from_scatter(p + 1, n, linvec_scatter(multiples(p, n), true, composite))
 
 fn sieve_scatter(n: Int) -> Int =
   count_primes(n, linvec_freeze(sieve_from_scatter(2, n, linvec_new(n + 1, false))))

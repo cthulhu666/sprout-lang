@@ -24,13 +24,21 @@ fail=0
 
 bad() { echo "linvec-smoke: FAIL $*" >&2; fail=1; }
 
-# build <source> <stdlib root> <out binary>: -O2, runtime sources linked in.
-build() {
-  "$BIN" --emit-ir "$2" --package-root "$ROOT" "$1" > "$TMPD/b.ll" 2> "$TMPD/b.err" \
-    || { echo "linvec-smoke: emit-IR failed for $1" >&2; cat "$TMPD/b.err" >&2; return 1; }
+# The runtime is compiled once (each source -> its own .o); every build links the set.
+mkdir -p "$TMPD/rtobj"
+for src in "$ROOT"/runtime/*.c; do
   # shellcheck disable=SC2086
-  clang "$TMPD/b.ll" "$ROOT"/runtime/*.c -O2 $CC_EXTRA -o "$3" 2> "$TMPD/b.err" \
-    || { echo "linvec-smoke: link failed for $1" >&2; cat "$TMPD/b.err" >&2; return 1; }
+  clang -c "$src" -O2 $CC_EXTRA -o "$TMPD/rtobj/$(basename "$src" .c).o" 2> "$TMPD/rt.err" \
+    || { echo "linvec-smoke: runtime compile failed ($src)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+done
+
+# build <source> <stdlib root> <out binary>: -O2; the IR is kept at <out binary>.ll.
+build() {
+  "$BIN" --emit-ir "$2" --package-root "$ROOT" "$1" > "$3.ll" 2> "$3.err" \
+    || { echo "linvec-smoke: emit-IR failed for $1" >&2; cat "$3.err" >&2; return 1; }
+  # shellcheck disable=SC2086
+  clang "$3.ll" "$TMPD"/rtobj/*.o -O2 $CC_EXTRA -o "$3" 2> "$3.err" \
+    || { echo "linvec-smoke: link failed for $1" >&2; cat "$3.err" >&2; return 1; }
 }
 
 # --- -O2 and oracle ---
@@ -103,14 +111,15 @@ else
 fi
 
 # --- IR: the read gets a CPR worker over the unboxed read ---
-if "$BIN" --emit-ir "$STDLIB" "$TMPD/alloc_0_0.spr" > "$TMPD/ir.ll" 2> "$TMPD/ir.err"; then
-  grep -q 'call i128 @stdlib.linvec.linvec_get_worker(' "$TMPD/ir.ll" \
+ir="$TMPD/alloc_0_0.ll"
+if [ -s "$ir" ]; then
+  grep -q 'call i128 @stdlib.linvec.linvec_get_worker(' "$ir" \
     || bad "no caller uses linvec_get_worker"
-  awk '/^define i128 @stdlib.linvec.linvec_get_worker\(/ {on=1} on {print} on && /^}/ {exit}' "$TMPD/ir.ll" > "$TMPD/worker.ll"
+  awk '/^define i128 @stdlib.linvec.linvec_get_worker\(/ {on=1} on {print} on && /^}/ {exit}' "$ir" > "$TMPD/worker.ll"
   grep -q 'call i128 @vector_get_unboxed(' "$TMPD/worker.ll" \
     || bad "linvec_get_worker does not read through vector_get_unboxed"
 else
-  bad "emit-IR failed for the alloc fixture"; cat "$TMPD/ir.err" >&2
+  bad "no IR for the alloc fixture"
 fi
 
 if [ "$fail" -ne 0 ]; then exit 1; fi

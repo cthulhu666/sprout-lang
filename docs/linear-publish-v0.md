@@ -20,7 +20,7 @@ fn forge() -> Fd = Fd(5)
 Inside the declaring module that is trusted code. Outside it, the constructor is reachable through
 `(..)`, and through the prelude, whose constructors are in scope everywhere (spec §3.1). For a
 handle over an fd that means a double close. For `LinVec`, whose `linvec_set` writes in place under a
-pure signature, an `LinVec` around a shared `Vector` changes a value someone else holds: a wrong
+pure signature, a `LinVec` around a shared `Vector` changes a value someone else holds: a wrong
 answer, not a crash.
 
 Nothing reaches it today: every stdlib linear type is abstract, and the one published linear type

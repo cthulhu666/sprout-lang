@@ -2244,8 +2244,8 @@ extern fn str_compare(a: String, b: String) -> Int
 
 # Raw vector — the PERSISTENT ops only. These back the immutable `Vec` whose combinators are
 # prelude code below, so they cannot move: the prelude has no imports (bundler.sprout:536) and a
-# prelude wrapper therefore pins its extern. The three MUTABLE ops (vec_make_filled,
-# vector_mutset, vector_get_direct) back MutVec and nothing here, and now live in stdlib.mutable.
+# prelude wrapper therefore pins its extern. The mutable and fill ops (vec_make_filled,
+# vector_mutset, vector_get_direct, ...) are never called here and live in stdlib.mutable.
 extern fn vector_empty() -> Vector a
 extern fn vector_length(v: Vector a) -> Int
 extern fn vector_get(v: Vector a, i: Int) -> Maybe a
