@@ -242,6 +242,22 @@ Added 2026-09-11 for a specific class: LLVM passes that break the `musttail` inv
 A fixture belongs here when its *shape* is what provokes the optimizer, not its output; assert
 nothing about what it prints, and keep it small enough that the IR is readable when it fires.
 
+## LinVec — `just linvec-smoke`
+
+`linvec_set` is pure to the checker and a C store underneath, so its soundness rests on linearity
+(docs/persistent-array-v0.md §5.3). `just test` links at `-O0` and cannot see most of what could
+go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
+
+- `tests/stdlib/test_linvec.spr` at `-O2`, where an optimizer could move a borrowed read past a set.
+- The same test against a copy of the stdlib root whose `linvec_set` copies through `vec_set`. Both
+  must print the same: a difference is a linearity hole seen as a wrong answer. The root is a
+  command-line argument, so nothing in the compiler is involved. It finds only holes the test
+  reaches.
+- A set, scatter or accum out of range exits non-zero with its message.
+- Allocation counters (`SPROUT_DEBUG_ALLOC`) match between runs that differ only in the number of
+  sets, so a set allocates nothing, and grow by one vector per `linvec_new`.
+- A `linvec_get` matched with a binding compiles to a worker over `vector_get_unboxed`.
+
 ## CPR declares — `just cpr-declare-check`
 
 Compares each `declare … @<name>_unboxed(…)` in emitted IR with clang's `define` of that C

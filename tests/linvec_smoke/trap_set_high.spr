@@ -1,0 +1,11 @@
+module main
+import stdlib.linvec (linvec_new, linvec_set, linvec_length, linvec_drop)
+
+# `linvec_set` past the end traps (docs/persistent-array-v0.md §12 step 13). The length is
+# printed so the set has a use and cannot be dropped as dead code.
+
+fn main() -> Unit !{IO} =
+  let v = linvec_set(3, 1, linvec_new(3, 0))
+  in let n = linvec_length(v)
+  in let _ = linvec_drop(v)
+  in print(int_to_string(n))

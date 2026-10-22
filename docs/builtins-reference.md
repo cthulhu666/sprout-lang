@@ -87,6 +87,7 @@ through the module's wrapper API:
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
 | `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push`, `vector_truncate` | `stdlib.mutable` | the `MutVec` API |
+| `linvec_set(i, x, v) -> LinVec a` | `stdlib.linvec` | the `LinVec` API; pure, writes in place, traps out of range |
 | `bytes_*` | `stdlib.bytes` | bare name |
 | `crypto_*` | `stdlib.crypto` | bare name |
 | `regex_*` | `stdlib.regex` | bare name |

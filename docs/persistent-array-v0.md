@@ -1,8 +1,8 @@
 # A pure array with cheap index writes (v0, 2026-10-19)
 
-**Status:** proposal, not approved. No code change. Not normative until it lands in
-[spec-v0.md](spec-v0.md). Comes from [byte-buffer-v0.md](byte-buffer-v0.md) §5.4, *Beyond append*.
-Revised 2026-10-22: 5.3 is a `wrap linear` over `Vector` with one builtin (§12 step 12).
+**Status:** 5.3 landed 2026-10-22 as `LinVec`, core only (§12 step 14); Experimental, as spec §5.8
+is. The rest is a proposal. Comes from [byte-buffer-v0.md](byte-buffer-v0.md) §5.4, *Beyond append*.
+5.3 is a `wrap linear` over `Vector` with one builtin (§12 step 12).
 
 ## 1. Problem
 
@@ -267,44 +267,44 @@ An abstract linear type with pure operations that write in place. Linearity (spe
 guarantees no one holds the old version, so the write cannot be observed, as in Clean and Futhark.
 
 ```
-export wrap linear LArr a = Vector a     # abstract: only its module unwraps one
-larr_new(n: Int, x: a) -> LArr a
-larr_get(i: Int, arr: borrowing LArr a) -> Maybe a
-larr_set(i: Int, x: a, arr: LArr a) -> LArr a
-larr_length(arr: borrowing LArr a) -> Int
-larr_freeze(arr: LArr a) -> Vec a
+export wrap linear LinVec a = Vector a     # abstract: only its module unwraps one
+linvec_new(n: Int, x: a) -> LinVec a
+linvec_get(i: Int, arr: borrowing LinVec a) -> Maybe a
+linvec_set(i: Int, x: a, arr: LinVec a) -> LinVec a
+linvec_length(arr: borrowing LinVec a) -> Int
+linvec_freeze(arr: LinVec a) -> Vec a
 ```
 
-**Representation.** A `wrap` is its inner value at runtime (spec §5.6.1), so an `LArr` is a
+**Representation.** A `wrap` is its inner value at runtime (spec §5.6.1), so an `LinVec` is a
 `Vector` with no box, and `wrap linear` ([linear-wrap-v0.md](linear-wrap-v0.md)) gives it the
-linear rules. Four operations are Sprout in `LArr`'s module, over externs that exist:
-`larr_get` and `larr_length` unwrap the borrowed array and call `vector_get` and
-`vector_length`, and `larr_new` wraps a fresh `vec_make_filled`. That one is `!{IO}` today
-(`stdlib/mutable.sprout`) and becomes pure, with `mutvec_new` keeping the `!{IO}`, as
+linear rules. Four operations are Sprout in `LinVec`'s module, over externs that exist:
+`linvec_get` and `linvec_length` unwrap the borrowed array and call `vector_get` and
+`vector_length`, and `linvec_new` wraps a fresh `vec_make_filled`. That one was `!{IO}`
+(`stdlib/mutable.sprout`) and is now pure, with `mutvec_new` keeping the `!{IO}`, as
 `vector_empty` is pure under an `!{IO}` `mutvec_empty`; building from a list instead costs ~94 ms
-per 1M elements against the fill's ~1 ms. One is a builtin: `larr_set` writes in place and returns
+per 1M elements against the fill's ~1 ms. One is a builtin: `linvec_set` writes in place and returns
 the same pointer, and an index out of range traps, as `mutvec_set` does (§12 step 13).
 
-Its type takes and returns `LArr`, never a bare `Vector`, so no Sprout code holding a shared `Vec`
+Its type takes and returns `LinVec`, never a bare `Vector`, so no Sprout code holding a shared `Vec`
 can reach it. An `extern fn` line is trusted code, though: a module that does not import
-`LArr`'s may declare `larr_set` over `Vector` itself, as any module may declare `vector_mutset`
-pure today (spec, *Externs are outside the module system*). And inside `LArr`'s module,
+`LinVec`'s may declare `linvec_set` over `Vector` itself, as any module may declare `vector_mutset`
+pure today (spec, *Externs are outside the module system*). And inside `LinVec`'s module,
 unwrapping a borrowed array binds the `Vector` untracked, so returning it would alias the array:
 that module is trusted code too.
 
 A read borrows, so it does not hand the array back as Clean's and `linear-base`'s do, and it
 allocates nothing when the caller matches it with a binding (§3.4). A set consumes the array and
-returns it; the builtin returns the same object, so a set allocates nothing. `larr_freeze` ends
+returns it; the builtin returns the same object, so a set allocates nothing. `linvec_freeze` ends
 the array's life as an ordinary `Vec`, in O(1): `Vec a` is `Vec(Vector a)`
 (`stdlib/prelude.sprout`), so freezing unwraps the `Vector` and wraps it as a `Vec`, one box,
-whose constructor is in scope everywhere. `LArr` itself cannot live in the prelude: a prelude
+whose constructor is in scope everywhere. `LinVec` itself cannot live in the prelude: a prelude
 constructor is in scope everywhere too, so an abstract wrap there would let any code build an
-`LArr` around a shared `Vector` (spec §3.1). It gets its own module. A thaw from `Vec` must copy,
-since a `Vec` may be shared. A drop needs no builtin: `larr_drop(arr) = let _ = larr_freeze(arr)
+`LinVec` around a shared `Vector` (spec §3.1). It gets its own module. A thaw from `Vec` must copy,
+since a `Vec` may be shared. A drop needs no builtin: `linvec_drop(arr) = let _ = linvec_freeze(arr)
 in ()`, in Sprout, O(1), since a `Vec` may be discarded.
 
 **Prerequisites.** The purity rests on linearity being sound. Today a linear value can be used
-twice in six ways, each verified running on master. With `LArr`, the second use would see the
+twice in six ways, each verified running on master. With `LinVec`, the second use would see the
 first one's writes, so a pure function could return two answers. These BACKLOG P1 entries land
 first:
 
@@ -321,10 +321,10 @@ first:
 - ~~**An existential hides a linear value from the checker**~~ Landed with the bound: packing a
   linear value into `exists a` is rejected.
 
-These are §5.8 bugs, not `LArr` bugs: each lets a `File` be closed twice today. A leak is not one
-of them: a wildcard that drops an array loses it but cannot expose a write. `LArr` raises their
-stakes: a double close fails loudly, while a double use of an `LArr` makes a pure function return
-two answers in silence. So their rejection tests gate `LArr`.
+These are §5.8 bugs, not `LinVec` bugs: each lets a `File` be closed twice today. A leak is not one
+of them: a wildcard that drops an array loses it but cannot expose a write. `LinVec` raises their
+stakes: a double close fails loudly, while a double use of an `LinVec` makes a pure function return
+two answers in silence. So their rejection tests gate `LinVec`.
 
 They split by cost. Three were missing checks in existing code, and have landed: `once`, the
 borrow-and-consume call and the top-level `let`. The other three share one cause, a type variable that hides
@@ -333,39 +333,43 @@ three, a linearity bound on type variables at instantiation and at packing
 ([linearity-bound-v0.md](linearity-bound-v0.md)). M4.2 made polymorphism over linear types a non-goal;
 Swift added such a bound in SE-0427, making every generic parameter `Copyable` unless it opts out.
 
-**Invariants.** Three rules that make `larr_set` safe to call pure, for any later pass to keep:
+**Invariants.** Three rules that make `linvec_set` safe to call pure, for any later pass to keep:
 
 - No pass moves a call that borrows a linear value across the call that consumes it. Today no
   pass moves a call: `dce.sprout` only deletes pure ones, which is safe here, since a dropped set
   writes an array no one can read. [opt-passes-v0.md](opt-passes-v0.md) declined CSE and
   proposes LICM; either must treat a shared linear argument as ordering the two calls.
-- `larr_set`'s Sprout purity never reaches LLVM as a purity attribute (`readnone`, `memory(none)`),
+- `linvec_set`'s Sprout purity never reaches LLVM as a purity attribute (`readnone`, `memory(none)`),
   which would let LLVM merge or reorder two reads across a write. The compiler emits none today.
 - A call whose result is or contains a linear type is an allocation: no pass merges two of them
   (CSE), hoists one out of a loop (LICM) or duplicates one. Hoisting a per-iteration
-  `larr_new(n, 0)` with a fixed `n` would make every iteration share one buffer. The rule
-  covers every call that returns a fresh buffer, linear or not: `larr_new`'s `vec_make_filled`
+  `linvec_new(n, 0)` with a fixed `n` would make every iteration share one buffer. The rule
+  covers every call that returns a fresh buffer, linear or not: `linvec_new`'s `vec_make_filled`
   returns a plain `Vector`, and only the wrap makes it linear; `vector_empty` under
   `mutvec_empty` is the same case today.
 
-`larr_set`, and in-place reuse below, are also write-barrier sites for a generational collector,
+`linvec_set`, and in-place reuse below, are also write-barrier sites for a generational collector,
 as `vector_mutset` is ([gc-generational-v0.md](gc-generational-v0.md) §7).
 
-**Compiler tables.** Three key on `vector_mutset` by name, and `larr_set` joins each, in scope,
-since a `MutVec` loop would otherwise beat an `LArr` one:
-`ir_rooting.is_nonallocating_read`, or every live pointer is rooted around each write; the
-barrier sites of gc-generational-v0.md §7, with the `sprout_ap_on_store` call `vector_mutset`
-makes; and B1's `ast_to_ir.recognize_vector_op` with `bce.direct_shape`, so an `LArr Double`
-write inlines and loses its bounds check as a `MutVec` one does.
+**Compiler tables.** Three key on `vector_mutset` by name, and `linvec_set` joins each, since a
+`MutVec` loop would otherwise beat a `LinVec` one: `ir_rooting.is_nonallocating_read`, or every
+live pointer is rooted around each write (landed); the barrier sites of gc-generational-v0.md §7,
+with the `sprout_ap_on_store` call `vector_mutset` makes (landed, in `linvec_set`'s C body); and
+B1's `ast_to_ir.recognize_vector_op` with `bce.direct_shape`, so a `LinVec Double` write inlines
+and loses its bounds check as a `MutVec` one does. The third is out of the first landing (§12
+step 14), and stays a BACKLOG entry.
 
-**Bulk operations**, in Sprout over `larr_set`, as Futhark's `scatter` and `reduce_by_index`
+**Bulk operations**, in Sprout over `linvec_set`, as Futhark's `scatter` and `reduce_by_index`
 (§4): one call consumes the array and returns it, so a loop threads it once per batch rather
 than once per element. They need no builtins.
 
 ```
-larr_scatter(is: List Int, x: a, arr: LArr a) -> LArr a          # sieve: a prime's multiples
-larr_accum(f: a -> b -> a, pairs: List (Int, b), arr: LArr a) -> LArr a   # histogram
+linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a          # sieve: a prime's multiples
+linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a   # histogram
 ```
+
+An index out of range traps, since both call `linvec_set` (`linvec_accum` reads first and traps in
+that read).
 
 They fit the sieve and the histogram. They do not make a BFS easier: picking a level's unvisited
 neighbours reads the array inside a lambda (`list_filter`), which is rejected today ("borrowed
@@ -374,17 +378,17 @@ P2 **Mark the prelude combinators' function arguments `local`**). Scatter also k
 a cell next to two frontier cells enters the next frontier twice. A BFS stays explicit recursion,
 as §3.2's is. DP builds by rows (5.1) and needs neither.
 
-**Structures over `LArr`.** Other mutable structures are linear types written in Sprout over
+**Structures over `LinVec`.** Other mutable structures are linear types written in Sprout over
 it. A binder whose type contains a linear type carries the use-once obligation
 ([linearity-virality-v0.md](linearity-virality-v0.md)), and "destructuring a borrowed value
 binds its linear fields as borrowed too" (spec §5.8), so a read can `match` a borrowed wrapper.
 
-| Structure | Over `LArr` | Limit |
+| Structure | Over `LinVec` | Limit |
 |---|---|---|
-| matrix, ring buffer, heap, bitset, open-addressing hash map | directly: `type linear LMatrix a = LMatrix Int Int (LArr a)` | one wrapper allocation per write, until reuse (below) |
-| growable vector | copy into a larger `LArr` | amortised O(1) |
+| matrix, ring buffer, heap, bitset, open-addressing hash map | directly: `type linear LMatrix a = LMatrix Int Int (LinVec a)` | one wrapper allocation per write, until reuse (below) |
+| growable vector | copy into a larger `LinVec` | amortised O(1) |
 | graphs, union-find, linked lists with shared nodes | index arenas: nodes are indices | nothing collects an unreachable node; free slots are managed by hand |
-| an array of mutable arrays, `LArr (LArr a)` | no: `larr_get`, `larr_new` and `larr_freeze` would duplicate a linear element, so `LArr` rejects one (*Prerequisites*) | needs swap or take-and-put-back operations, and the generic-container fix |
+| an array of mutable arrays, `LinVec (LinVec a)` | no: `linvec_get`, `linvec_new` and `linvec_freeze` would duplicate a linear element, so `LinVec` rejects one (*Prerequisites*) | needs swap or take-and-put-back operations, and the generic-container fix |
 | state shared between tasks | no: one owner at a time | ownership can move to a task, not be shared |
 
 Not arrays at all: files, sockets and handles, which are linear types of their own already.
@@ -393,16 +397,16 @@ Not arrays at all: files, sockets and handles, which are linear types of their o
 consumes a linear constructor and builds one of the same shape, the compiler can reuse its
 memory, since the type guarantees nothing else holds it. Koka does this for values whose count is
 1 ("functional but in-place", [byte-buffer-v0.md](byte-buffer-v0.md) §4); Sprout would decide it
-from the type, at compile time. Then `LArr` is the array case of one rule, a linear value is
+from the type, at compile time. Then `LinVec` is the array case of one rule, a linear value is
 updated in place, and every linear type gets it. Not designed.
 
 **What it can grow into** without an API break: push and bulk fill or copy; 5.2's transient
 mode, whose writes need the same pure, linearity-guarded builtins; and a compiler pass that
 writes a provably unshared `vec_set` in place, which would emit the same builtin.
 
-Prototype: `type linear LArr = LArr (MutVec Int)` with `!{IO}` operations, since a pure signature
+Prototype: `type linear LinVec = LinVec (MutVec Int)` with `!{IO}` operations, since a pure signature
 needs a builtin. The sieve and the BFS type-check and run (§3.2, sieve 7 ms against `MutVec`'s 6).
-A first cut re-boxed `LArr(m)` on every set and took 767 ms on the sieve: the allocation per write
+A first cut re-boxed `LinVec(m)` on every set and took 767 ms on the sieve: the allocation per write
 fed the count-blind trigger, so neither the builtin nor the type around it may allocate: hence
 a `wrap`, not an ADT.
 
@@ -417,11 +421,11 @@ a `wrap`, not an ADT.
     a linear accumulator was not checked. Reads too: a lambda that captures the array is
     rejected until the combinators are `local` (bulk operations, above).
   - Threading: every set returns the array, extra results travel in a tuple (the BFS queue),
-    and every path must end in `larr_freeze` or `larr_drop`, or the leak rule fires.
+    and every path must end in `linvec_freeze` or `linvec_drop`, or the leak rule fires.
   - No old versions. Backtracking copies explicitly.
-  - One builtin, `larr_set`, with a `runtime/APPROVED_BUILTINS` entry, and one language
+  - One builtin, `linvec_set`, with a `runtime/APPROVED_BUILTINS` entry, and one language
     change, `wrap linear`. Once unsafe primitives exist (BACKLOG P3 **Unsafe primitives**),
-    `larr_set` is Sprout over `vector_mutset` and the builtin goes (§12 step 12).
+    `linvec_set` is Sprout over `vector_mutset` and the builtin goes (§12 step 12).
 
 ### 5.4 Runtime: a Baker array in C
 
@@ -570,7 +574,7 @@ gives old versions up; 5.2 pays a little on every operation; 5.4 pays unpredicta
 
 So 5.2 and 5.3 answer different needs: 5.3 for a loop that only ever uses the newest array, which
 is every kernel in §3.2; 5.2 for everything that needs values that can be stored, passed and
-kept. `larr_freeze` and a `PVec` builder connect them. 5.6 covers 5.3's cases with a different
+kept. `linvec_freeze` and a `PVec` builder connect them. 5.6 covers 5.3's cases with a different
 trade (§12, step 7); one of the two ships. 5.2's transient mode could stand in for
 5.3 with O(1) conversions, at 2–20× its cost. 5.4 tries to serve both needs, and pays with the
 cliff, the retention and the version check. 5.1's build-by-rows needs neither.
@@ -600,14 +604,16 @@ value is unshared moves the ranking.
    [linearity-bound-v0.md](linearity-bound-v0.md); its steps 2 and 3 closed the other three.
 5. Ship 5.3, the linear array, with its bulk operations, as the one mechanism for in-place
    writes in pure code (`MutVec`, `Ref` and `MutMatrix` stay for `IO` code), after steps 3 and
-   4, and keep 5.3's *Invariants*.
-   Marking the combinators `local` should land with it, or lambdas cannot even read the array.
+   4, and keep 5.3's *Invariants*. **Landed 2026-10-22, core only**: the module, the builtin
+   `linvec_set`, the `ir_rooting` entry, the bulk operations, tests and `examples/sieve.sprout`.
+   Out of it, as BACKLOG entries: B1 and bounds-check elimination for `LinVec Double` writes, and
+   marking the combinators `local`, without which a lambda cannot read the array.
    Other mutable structures are linear types over it. It needs `wrap linear`
-   ([linear-wrap-v0.md](linear-wrap-v0.md), landed) and one builtin, `larr_set`; §3.2 is the measured
+   ([linear-wrap-v0.md](linear-wrap-v0.md), landed) and one builtin, `linvec_set`; §3.2 is the measured
    case: typical programs, not our own; in our own code it removes `!{IO}` from the three cases
    in §1.
 6. Follow with in-place reuse of consumed linear constructors (5.3), which makes the wrappers
-   allocation-free and generalises `LArr`'s rule to every linear type.
+   allocation-free and generalises `LinVec`'s rule to every linear type.
 7. Do not build 5.4, 5.5 or 5.6. The transient (5.2) can come later on 5.3's builtin.
 
 §12 records how this was decided and when to revisit it.
@@ -620,7 +626,7 @@ value is unshared moves the ranking.
 | Semantics | new opaque type, pure operations | new abstract linear type, pure operations | the same as 5.2, plus a performance cliff on far-apart versions |
 | Types | none | uses §5.8 linearity; Experimental | none |
 | Errors | none new | linear errors (reuse, leak, a set inside a lambda, the array captured by a lambda at a non-`local` parameter), and the bound's error for a linear element type | none new |
-| Runtime | none | one builtin, `larr_set` | four builtins; 4-word version nodes, no new heap kind |
+| Runtime | none | one builtin, `linvec_set` | four builtins; 4-word version nodes, no new heap kind |
 | Migration | additive | additive | additive |
 
 A read out of range gives `Nothing`, as `vec_get` does, in all three. A 5.3 set out of range
@@ -630,43 +636,52 @@ traps, as `mutvec_set` does.
 
 - Version semantics (5.2, 5.4): many versions, each a set on a random earlier one, every version
   read against a `vec_set` reference. Run under `SPROUT_GC_STRESS=1 SPROUT_GC_HDRCHECK=1` for 5.4.
+Where each 5.3 item lives: `tests/stdlib/test_linvec.spr` (run by `just test`),
+`tests/conformance/type_error/linvec_*` and `just linvec-smoke` (`scripts/linvec_smoke.sh`,
+`tests/linvec_smoke/`).
+
 - Linearity (5.3): reuse after a set, a set inside a lambda, and a path that neither freezes nor
-  drops are each rejected; a borrowed read followed by a set is accepted.
-- Aliasing (5.3, *Prerequisites*): one rejection test per hole, each with an `LArr` that a second
-  use would observe: `dup(arr)`, `f(arr, arr)` at a borrowing and a consuming parameter, a
-  top-level `let` array, a `once` closure run twice, `LArr (LArr Int)`, and `Boxed(arr)` unpacked
-  twice.
-- §3.2's four kernels as executable tests, checked against a `MutVec` reference.
-- Value semantics as an oracle (5.3): a test build where `larr_set` copies through `vec_set`, in
-  plain Sprout. Every `LArr` test and §3.2 kernel must print the same in both builds; a difference
-  is a linearity hole seen as a wrong answer. It finds only holes a test reaches, so it adds to
-  the per-hole rejection tests above. The method is Pure Borrow's argument for purity (§4).
+  drops are each rejected (`type_error/linvec_{reuse_after_set,set_in_lambda,leak}`); a borrowed
+  read followed by a set is accepted (`test_linvec`).
+- Aliasing (5.3, *Prerequisites*): one rejection test per hole, each with a linear value that a
+  second use would observe, are the linear grid's and [linearity-bound-v0.md](linearity-bound-v0.md)'s,
+  not `LinVec`'s. `LinVec` adds `LinVec (LinVec Int)` (`type_error/linvec_nested`).
+- §3.2's four kernels as executable tests, checked against a `MutVec` reference (`test_linvec`).
+- Value semantics as an oracle (5.3): `linvec-smoke` runs `test_linvec` against a copy of the
+  stdlib root whose `linvec_set` copies through `vec_set`, in plain Sprout. Both builds must print
+  the same; a difference is a linearity hole seen as a wrong answer. It finds only holes a test
+  reaches, so it adds to the per-hole rejection tests above. The method is Pure Borrow's argument
+  for purity (§4).
 - Ordering (5.3 *Invariants*): a borrowed read, then a set of the same cell, returns the old
-  value, at `-O0` and at `-O2`.
-- Cost (5.3): a set allocates nothing (a debug counter), and a `larr_get` matched with a binding
-  compiles to a worker over `vector_get_unboxed` (an IR check).
-- Abstraction (5.3): a module that imports `LArr` cannot build one from a `Vector` or unwrap one
-  (`Unknown constructor`).
-- Range (5.3): `larr_set` out of range traps, and `larr_new` allocates once (a debug counter).
-- Bulk operations (5.3): `larr_scatter` and `larr_accum` against a `vec_set` reference, including
-  repeated and out-of-range indices.
+  value (`test_linvec`), at `-O0` under `just test` and at `-O2` under `linvec-smoke`. Nothing
+  else runs a test at `-O2`: `o2-codegen-smoke` only compiles.
+- Cost (5.3): a set allocates nothing (the runtime's debug counters, `SPROUT_DEBUG_ALLOC`), and a
+  `linvec_get` matched with a binding compiles to a worker over `vector_get_unboxed` (an IR
+  check), both in `linvec-smoke`.
+- Abstraction (5.3): a module that imports `LinVec` cannot build one from a `Vector` or unwrap one
+  (`Unknown variable: LinVec`, `type_error/linvec_build_outside`).
+- Range (5.3): `linvec_set`, `linvec_scatter` and `linvec_accum` out of range trap, and
+  `linvec_new` allocates one vector (`linvec-smoke`).
+- Bulk operations (5.3): `linvec_scatter` and `linvec_accum` against a `vec_set` reference, with
+  repeated indices (`test_linvec`). Out-of-range indices trap, so they are in the range item.
 
 ## 10. Spec and docs
 
 `spec-v0.md` gains the type and its operations, normative when they land; for 5.3, Experimental
 while §5.8 is. `stdlib-reference.md` gets a row in *Collection costs*. `idiomatic-sprout.md`
 shows build-by-rows for DP and the chosen array for the rest, in place of a fold of `vec_set`.
-`examples/sieve.sprout` runs the `vec_set` and `MutVec` sieves and keeps 5.3's two versions,
-element by element and with `larr_scatter`, commented out; uncomment them when 5.3 lands. Both
-compile and count correctly against a prototype `LArr` written in Sprout over `Vector`.
+`examples/sieve.sprout` runs the `vec_set` and `MutVec` sieves and 5.3's two versions, element by
+element and with `linvec_scatter`. Landed with the type; `idiomatic-sprout.md` and
+`stdlib-reference.md` have their rows.
 
 ## 11. Open questions
 
 - ~~Approve 5.3's builtins on §3.2's evidence, or wait for a program of ours to need them?~~
-  One builtin, `larr_set`, over a `wrap linear` (§12 step 12).
-- Names: `LArr`, `LinArray` or `Array`; and `PVec` or `PArray` for 5.2.
-- Nested arrays: the shape of swap or take-and-put-back for `LArr (LArr a)`. Pure Borrow's
-  `updateAt` (§4) is one: `larr_update(i: Int, f: a -> (b, a), arr: LArr a) -> (b, LArr a)` takes
+  One builtin, `linvec_set`, over a `wrap linear` (§12 step 12).
+- ~~Names: `LArr`, `LinArray` or `Array`.~~ `LinVec` (§12 step 14). `PVec` or `PArray` for 5.2 is
+  still open.
+- Nested arrays: the shape of swap or take-and-put-back for `LinVec (LinVec a)`. Pure Borrow's
+  `updateAt` (§4) is one: `linvec_update(i: Int, f: a -> (b, a), arr: LinVec a) -> (b, LinVec a)` takes
   the element out and puts back what `f` returns. `f` consumes a linear parameter, which waits on
   BACKLOG P2 **Higher-order linearity**.
 
@@ -699,13 +714,13 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
    A for putting effectful code inside a pure function, and reversed step 4: 5.3, which keeps
    substitution, with bulk operations (as Futhark's `scatter` and `reduce_by_index` on unique
    arrays), so threading is per batch, not per element.
-8. **Generality**, 5.6's remaining advantage: answered by structures over `LArr` (5.3's
+8. **Generality**, 5.6's remaining advantage: answered by structures over `LinVec` (5.3's
    table, which also records its limits) and by in-place reuse of linear values, which makes
    the rule general rather than array-specific.
 9. **Review.** An outside review found four more holes in the linearity that 5.3's purity rests
    on, beyond the `once` one, each reproduced on master. They became *Prerequisites* and BACKLOG
    P1 entries. It also showed that bulk operations do not rescue a BFS, which moved the
-   combinators' `local` into §7's `LArr` step. The direction stood.
+   combinators' `local` into §7's `LinVec` step. The direction stood.
 10. **Second review.** It found a sixth hole, through existentials (reproduced), and the
     allocation invariant, and corrected the trie's range and the lower bound's source. The
     direction stood again: the checker holds where a linear type is visible in a type, and
@@ -720,18 +735,27 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
 12. **Fewer builtins** (2026-10-22, after the bound landed). Kuba: as few builtins as possible,
     a generic one over several specific ones, performance paramount, and unsafe primitives
     later, so a builtin now should be one an unsafe primitive can delete without an API change.
-    Five opaque builtins became `wrap linear LArr a = Vector a` and one builtin: a `wrap` is
+    Five opaque builtins became `wrap linear LinVec a = Vector a` and one builtin: a `wrap` is
     the raw inner value at runtime, so four operations are Sprout over existing externs, and
     only the in-place write needs C. A direct-read builtin was measured out (§3.4).
-    Goal "no new syntax" gave way to it. Once unsafe primitives exist, `larr_set` is Sprout over
+    Goal "no new syntax" gave way to it. Once unsafe primitives exist, `linvec_set` is Sprout over
     `vector_mutset` and the last builtin goes.
-13. **Review** (2026-10-22). `larr_new` over a list cost ~94 ms per 1M elements, so it uses
-    `vec_make_filled`, made pure: no new builtin. Kuba: an out-of-range `larr_set` traps rather
+13. **Review** (2026-10-22). `linvec_new` over a list cost ~94 ms per 1M elements, so it uses
+    `vec_make_filled`, made pure: no new builtin. Kuba: an out-of-range `linvec_set` traps rather
     than returning the array unchanged as `vec_set` does. An off-by-one fails where it happens,
     the later Sprout version is `vector_mutset` with no added check, and linear-base's `set`
     (`assertIndexInRange`) and `mutvec_set` do the same. That departs from guidelines.md #2,
     Total over partial, for a write with no meaningful result. The compiler tables and the
     unsafe-primitives entry came from the same review.
+14. **Name and first landing** (2026-10-22). Kuba: the type is `LinVec`, in `stdlib.linvec`, with
+    `linvec_*` functions. Linearity is the property a user must act on (thread it, no copy,
+    freeze or drop) and the only one that separates it from `Vec` (pure, shared, O(n) write) and
+    `MutVec` (`IO`, shared, O(1) write). "Mut" would contradict purity; "Vec" is Sprout's own
+    family word (`Vec`, `MutVec`, raw `Vector`), and `linvec_freeze` returns a `Vec`. Scope: core
+    only. In: the module, the one builtin, `vec_make_filled` made pure, the `ir_rooting` entry,
+    the bulk operations, tests and the sieve example. Out, each its own BACKLOG entry: B1 and
+    bounds-check elimination for `LinVec Double` writes (§5.3 *Compiler tables*), and marking the
+    combinators `local`. A scatter or accum index out of range traps, since they call the set.
 
 **Revisit when** any of these holds; each would reopen step 7:
 
@@ -739,11 +763,11 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
   to show in review; consuming linear lambdas (BACKLOG P2 **Higher-order linearity**) not
   landing makes this likelier.
 - A nested mutable structure is needed and swap or take does not make it workable.
-- In-place reuse proves infeasible, leaving every structure over `LArr` an allocation per
+- In-place reuse proves infeasible, leaving every structure over `LinVec` an allocation per
   write.
 - Mutable state other than arrays is wanted in pure code: counters, cells, maps not built
-  over `LArr`.
+  over `LinVec`.
 
-Separately, if the linearity bound on type variables (§7 step 4) proves infeasible, `LArr`
+Separately, if the linearity bound on type variables (§7 step 4) proves infeasible, `LinVec`
 cannot be made sound. Then reopen 5.4: its faults (§3.3's retention, the cliff on far-apart
 versions, the version check) still hold, but its purity needs no types.

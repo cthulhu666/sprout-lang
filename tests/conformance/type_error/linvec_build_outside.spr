@@ -1,0 +1,9 @@
+module main
+import stdlib.linvec (LinVec)
+
+# The type is abstract: only its module builds or takes one apart.
+
+fn fake(raw: Vector Int) -> LinVec Int = LinVec(raw)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

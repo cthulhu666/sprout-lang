@@ -1,0 +1,1 @@
+`linvec_new` takes `a` as a value it may copy or drop, and `stdlib.linvec.LinVec Int` is linear

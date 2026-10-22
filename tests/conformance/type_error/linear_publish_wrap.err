@@ -1,1 +1,1 @@
-`LArr` is linear, and `(..)` publishes its constructor, but its field `Vector a` is not linear: another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `LArr`
+`LinVec` is linear, and `(..)` publishes its constructor, but its field `Vector a` is not linear: another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `LinVec`

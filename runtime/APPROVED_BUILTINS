@@ -87,6 +87,7 @@ http_request
 int_to_string
 json_parse
 json_stringify
+linvec_set  # O(1) in-place write behind a PURE signature, for stdlib.linvec's linear vector; returns the same vector, traps out of range. Pure Sprout cannot call vector_mutset (!{IO}) and an unsafe primitive does not exist yet, so this needs C. It is the last builtin the type needs: once unsafe primitives exist it is Sprout over vector_mutset and this entry goes (docs/persistent-array-v0.md §12 steps 12 and 13; approved 2026-10-22)
 map_empty
 map_get
 map_keys  # In-order key list, O(n). Replaces native_set_to_list when Set became a Map Unit, so set_remove can use map_remove (O(log n)) instead of rebuilding the set: that rebuild was ~60% of a self-compile (#599). From Sprout the keys are reachable only through map_nth_key, one O(log n) descent and one Just per key. Approved 2026-10-12; the five native_set_* go, so 4 fewer builtins net.

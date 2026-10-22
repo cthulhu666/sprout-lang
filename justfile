@@ -1416,6 +1416,13 @@ o2-codegen-smoke: bootstrap-from-seed
   fi
   echo "==> o2-codegen-smoke ✓ ($checked shapes)"
 
+# What `just test` cannot see of `LinVec` (stdlib/linvec.sprout): its test at -O2, the same
+# test against a copying `linvec_set`, the out-of-range traps, that a set allocates nothing,
+# and that a read compiles to a worker over `vector_get_unboxed`. Details in the script.
+[group('smoke')]
+linvec-smoke: bootstrap-from-seed
+  SPROUT_LINVEC_BIN="{{build_dir}}/compile_driver_bin_stage1" SPROUT_LINVEC_STDLIB="{{stdlib_root}}" SPROUT_LINVEC_CC_EXTRA="{{clang_extra}}" bash scripts/linvec_smoke.sh
+
 # The pass A/B harness's self-check (docs/opt-passes-v0.md §M0).  Three properties,
 # each with a silent-wrong failure mode: the switch reaches emitted IR at all, the
 # pass it disables is semantics-preserving, and an unset variable leaves the
@@ -3866,6 +3873,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "approved-builtins|check-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
+    "linvec-smoke|linvec-smoke"
     "cpr-declare-check|cpr-declare-check"
     "opt-harness-check|opt-harness-check"
     "bundle-smoke|bundle-smoke"

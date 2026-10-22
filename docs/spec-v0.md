@@ -1799,11 +1799,11 @@ scope everywhere (§3.1). Every field of every constructor is checked, and the
 error is reported at the declaration:
 
 ```sprout
-export wrap linear LArr a (..) = Vector a        # error: `Vector a` is not linear
+export wrap linear LinVec a (..) = Vector a        # error: `Vector a` is not linear
 export type linear W (..) = | W (File, Vector Int)   # error: not itself a linear type
 export type linear Pair (..) = | Pair File File  # accepted: both fields are linear
 export type Boxed (..) = | exists a. Boxed a where linear a   # accepted
-export wrap linear LArr a = Vector a             # accepted: abstract
+export wrap linear LinVec a = Vector a             # accepted: abstract
 ```
 
 The rule is stricter than it must be: `(File, File)` and `Maybe File` hold nothing
@@ -2200,6 +2200,36 @@ caller keeps a borrowed value and releases it after either outcome.
   stays deferred. It no longer waits on a linearity bound for type parameters:
   the case that motivated that (`Chan a`) is a phantom parameter, which containment
   now declines to descend on its own. See `docs/linearity-virality-v0.md`.
+
+#### `LinVec`: a pure vector with in-place writes (Experimental)
+
+`stdlib.linvec` declares `export wrap linear LinVec a = Vector a`, abstract: only its module
+builds or takes one apart. A set consumes the vector and returns it, and linearity guarantees no
+one holds the old one, so the write cannot be observed and the signature is pure. A `LinVec` is a
+`Vector` at runtime (§5.6.1), so a set allocates nothing.
+
+```
+linvec_new(n: Int, x: a) -> LinVec a                     # n copies of x
+linvec_get(i: Int, v: borrowing LinVec a) -> Maybe a     # Nothing out of range
+linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a        # traps out of range
+linvec_length(v: borrowing LinVec a) -> Int
+linvec_freeze(v: LinVec a) -> Vec a                      # O(1); the vector's life ends
+linvec_drop(v: LinVec a) -> Unit
+linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a
+linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
+```
+
+- `linvec_set` out of range, and `linvec_scatter` or `linvec_accum` with an index out of range,
+  stop the program with a runtime error, as `mutvec_set` does. `linvec_get` out of range is
+  `Nothing`, as `vec_get` is.
+- `linvec_scatter` sets `x` at each index in order; `linvec_accum` sets `f(old, y)` for each
+  `(i, y)` in order, so a repeated index folds.
+- Every path must end in `linvec_freeze` or `linvec_drop`, or the leak rule (above) fires. A set
+  inside a lambda is rejected: a lambda may not consume a linear parameter. Use explicit
+  recursion or the bulk operations.
+- `LinVec (LinVec a)` is rejected where it is built, by the bound on `linvec_new`'s `a`.
+
+Design and measurements: `docs/persistent-array-v0.md` §5.3.
 
 ### 5.9 The fallible `<-` bind
 

@@ -40,6 +40,8 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #                       boxes a Just/Nothing Maybe — that MUST stay a trigger).
 #   vector_mutset     — v->data[index] = value (plain store; Phase 2 GC's write
 #                       barrier will make this a trigger again — revisit then).
+#   linvec_set        — bounds check + plain store, returns its vector argument (the same
+#                       store as vector_mutset, behind a pure signature).
 #   vector_length     — returns v->len (pure read).
 #   vector_truncate   — zeroes v->data[n..len) and lowers v->len (plain stores;
 #                       no barrier, since a zero creates no old-to-young edge).
@@ -49,6 +51,7 @@ import stdlib.compiler.sprout_ir as sprout_ir
 fn is_nonallocating_read(fname: String) -> Bool =
   fname == "vector_get_direct"
   || fname == "vector_mutset"
+  || fname == "linvec_set"
   || fname == "vector_length"
   || fname == "vector_truncate"
 
