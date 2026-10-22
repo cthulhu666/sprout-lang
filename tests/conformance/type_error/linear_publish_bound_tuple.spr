@@ -1,0 +1,13 @@
+module main
+
+# A `where linear` variable passes only as the field's whole type: inside a
+# tuple, the `Int` beside it is still untracked (docs/linear-publish-v0.md §4).
+
+class Taker a
+  fn take(x: a) -> Int
+
+export type Boxed (..) =
+#~^ ERROR
+  | exists a. Boxed (a, Int) where linear a, Taker a
+
+fn main() -> Unit !{IO} = print("x")

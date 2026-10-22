@@ -123,9 +123,10 @@ A fixture with the hint applied (`.fixed.spr`) checks the hint can be followed.
 2. `infer.check_published_linear_types` runs with the other declaration checks in
    `typecheck_decls_resolved`, under `program_has_linear`. For each linear, published
    declaration it converts each field's type expression as registration does (`type_from_ast`,
-   which expands aliases), marks the constructor's `where linear` variables linear in the env, and
-   asks whether the type's head carries the `@linear:` marker. The bound has to be marked there: a
-   scheme's variable carries no `@linear:` mark until a pattern unpacks it.
+   which expands aliases), and accepts it when the type's head carries the `@linear:` marker or is
+   one of the constructor's `where linear` variables. The bound is compared by name: a scheme's
+   variable carries no `@linear:` mark until a pattern unpacks it. Fields are built only for a
+   declaration already known to be published and linear, since every prelude type is published.
 3. Spec §5.8 states the rule; §5.6.1 and §5.6.4 point to it.
 
 ### 5.3 Records
@@ -173,7 +174,8 @@ Breaking for a published linear type with an untracked field. In our four repos:
 - Type errors: `tests/conformance/type_error/linear_publish_*`, one per kind of rejected field
   (a wrap, an `Int`, an unbounded parameter, a field beside a linear one, a second constructor,
   a record, a tuple holding a linear type, the same tuple behind an alias, a `Maybe` of a linear
-  type), each pinning its line and the full message, with a `.fixed.spr` that applies the hint.
+  type, a tuple holding a bounded `exists` variable), each pinning its line and the full message,
+  with a `.fixed.spr` that applies the hint.
 - Accepted: `tests/stdlib/test_linear_publish.spr` (a pair of linear fields, a linear wrap over a
   linear type, another module's linear type, the bounded existential, an abstract linear wrap);
   across modules, the
