@@ -395,7 +395,7 @@ fn elab_decl(d: Decl) -> Decl =
   | RecordDecl _ _ _ _ _ _ _ -> d
   | ClassDecl _ _ _ _ _ -> d
   | AliasDecl _ _ _ _ -> d
-  | WrapDecl _ _ _ _ _ -> d
+  | WrapDecl _ _ _ _ _ _ -> d
 
 fn elab_impl(m: InstanceMethodImpl) -> InstanceMethodImpl =
   let InstanceMethodImpl name params ret effs cs bounds body = m
@@ -503,7 +503,7 @@ export type InstanceMethodImpl (..) =
 # ClassDecl name type_params methods superclasses pos
 # InstanceDecl constraint instance_constraints linear_bounds methods pos
 # AliasDecl name type_params rhs pos
-# WrapDecl  name type_params inner_type deriving_classes pos
+# WrapDecl  name type_params inner_type deriving_classes multiplicity pos
 #
 # linear_bounds (here and on TypeConstructor, ClassMethodSig, InstanceMethodImpl):
 # the type variables a `where linear v` names. The parser takes them out of the
@@ -573,7 +573,7 @@ export type Decl (..) =
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
   | InstanceDecl TypeConstraint (List TypeConstraint) (List String) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
-  | WrapDecl String (List String) TypeExpr (List String) source.SourcePos
+  | WrapDecl String (List String) TypeExpr (List String) Multiplicity source.SourcePos
 
 # Position of a declaration — every Decl variant carries a SourcePos in its last
 # field. Used at diagnostic-construction seams so bundle-time errors report the
@@ -588,7 +588,7 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   | ClassDecl _ _ _ _ p -> p
   | InstanceDecl _ _ _ _ p -> p
   | AliasDecl _ _ _ p -> p
-  | WrapDecl _ _ _ _ p -> p
+  | WrapDecl _ _ _ _ _ p -> p
 
 # The first declaration `check` rejects, at that declaration's position.
 export fn first_decl_error(check: Decl -> Maybe String,
@@ -624,7 +624,7 @@ export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
   | TypeDecl _ _ ctors _ _ _ -> ctor_value_scopes(ctors)
   | ClassDecl _ _ methods _ _ -> method_value_scopes(methods)
   # WrapDecl: the synthetic constructor is a value sharing the type's name.
-  | WrapDecl name _ _ _ _ -> [(name, ScopeModule)]
+  | WrapDecl name _ _ _ _ _ -> [(name, ScopeModule)]
   | _ -> Nil
 
 fn ctor_value_scopes(ctors: List TypeConstructor) -> List (String, NameScope) =
@@ -773,7 +773,7 @@ fn expand_decl(table: Dict AliasHead, d: Decl) -> Decl =
   | RecordDecl _ _ _ _ _ _ _ -> d
   | LetDecl _ _ _ _ -> d
   | AliasDecl _ _ _ _ -> d
-  | WrapDecl _ _ _ _ _ -> d
+  | WrapDecl _ _ _ _ _ _ -> d
 
 fn expand_sig(table: Dict AliasHead, s: ClassMethodSig) -> ClassMethodSig =
   let ClassMethodSig name params ret effs cs bounds = s

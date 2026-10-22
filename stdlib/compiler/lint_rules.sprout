@@ -772,8 +772,8 @@ fn any_takes_type_from_context(exprs: List ast.Expr) -> Bool =
   | [] -> false
   | [h | t] -> takes_type_from_context(h) || any_takes_type_from_context(t)
 
-# The constructors of every LINEAR type declared in this file. A record's
-# constructor is its own name; a linear `type` lists its arms.
+# The constructors of every LINEAR type declared in this file. A record's or a
+# wrap's constructor is its own name; a linear `type` lists its arms.
 fn linear_ctor_names(decls: List ast.Decl) -> List String =
   match decls with
   | [] -> Nil
@@ -786,6 +786,7 @@ fn linear_ctors_of(d: ast.Decl) -> List String =
       | ast.Linear -> ctor_arm_names(ctors)
       | ast.Unrestricted -> Nil
   | ast.RecordDecl name _ _ _ ast.Linear _ _ -> [name]
+  | ast.WrapDecl name _ _ _ ast.Linear _ -> [name]
   | _ -> Nil
 
 fn ctor_arm_names(ctors: List ast.TypeConstructor) -> List String =
@@ -1276,7 +1277,7 @@ fn decl_declared_type_name(d: ast.Decl) -> String =
   | ast.TypeDecl n _ _ _ _ _ -> n
   | ast.RecordDecl n _ _ _ _ _ _ -> n
   | ast.AliasDecl n _ _ _ -> n
-  | ast.WrapDecl n _ _ _ _ -> n
+  | ast.WrapDecl n _ _ _ _ _ -> n
   | ast.FnDecl _ _ _ _ _ _ _ _ -> ""
   | ast.ExternFnDecl _ _ _ _ _ _ -> ""
   | ast.LetDecl _ _ _ _ -> ""

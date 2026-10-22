@@ -1,0 +1,24 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+instance Taker Int
+  fn take(x: Int) -> Int = x
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
+
+fn none(b: Boxed) -> Int = match b with | Boxed x -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(none(Boxed (L(1)))))

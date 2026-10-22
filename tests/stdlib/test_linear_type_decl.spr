@@ -16,6 +16,9 @@ type linear Pos = (x: Int, y: Int)
 # tests/conformance/type_error/linear_task_* (the imported parametric `Task a`).
 type linear Box a = Box Int
 
+# Derived methods consume their arguments, so `a == a` is a reuse; `L(1) == L(1)` is not.
+type linear Tok deriving (Eq, ToString) = Tok Int
+
 # `f` is consumed exactly once — as the match scrutinee.
 fn fd(f: File) -> Int =
   match f with
@@ -39,5 +42,7 @@ fn main() -> Unit !{IO} =
     check_eq("linear ADT single-use", fd(File(7)), 7),
     check_eq("linear record single field", get_x(Pos(x = 3, y = 4)), 3),
     check_eq("linear convergent branches", choose(true, File(9)), 9),
-    check_eq("parametric linear single-use", unbox(Box(5)), 5)
+    check_eq("parametric linear single-use", unbox(Box(5)), 5),
+    check_eq("derived Eq on a linear type", Tok(2) == Tok(2), true),
+    check_eq("derived ToString on a linear type", to_string(Tok(3)), "Tok(3)")
   ])

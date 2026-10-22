@@ -1,0 +1,13 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+type Box a = Box a
+
+fn ident(x: a) -> a = x
+
+fn main() -> Unit !{IO} = match ident(Box (L(1))) with | Box l -> print(int_to_string(close(l)))

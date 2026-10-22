@@ -778,7 +778,8 @@ A resource with an explicit release — a socket, a file handle — is
 **acquire → use N times → release once**. Declare the handle `type linear`, take
 it `borrowing` in the operations that only read or write it, and `consuming` in
 the one that releases it. Then forgetting the release is a compile error rather
-than a leak found in production.
+than a leak found in production. A handle over one value is a `wrap linear`, which costs no
+box: `export wrap linear Fd = Int`. Leave off `(..)`, so only its module can unwrap it.
 
 ```sprout
 # stdlib.net, the shipped example:

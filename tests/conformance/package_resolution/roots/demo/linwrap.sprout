@@ -1,0 +1,12 @@
+module demo.linwrap
+
+# An abstract `wrap linear`: importers see the type and its linearity, and reach
+# the value only through the functions below.
+
+export wrap linear Token = Int
+
+export fn mint(n: Int) -> Token = Token(n)
+
+export fn spend(t: Token) -> Int =
+  match t with
+  | Token n -> n

@@ -1,0 +1,18 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn ping(x: a, n: Int) -> Int !{IO} where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> Int !{IO} =
+  if n > 0 then ping(y, n - 1)
+  else
+    do
+      _ <- after(print("w"), y)
+      1
+
+fn main() -> Unit !{IO} = print(int_to_string(ping(L(1), 2)))

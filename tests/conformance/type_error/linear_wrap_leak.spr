@@ -1,0 +1,9 @@
+module main
+
+# A `wrap linear` value that no path consumes is a leak, as for a `type linear`.
+
+wrap linear Handle = Int
+
+fn ignore(h: Handle) -> Int = 0
+
+fn main() -> Unit !{IO} = print(int_to_string(ignore(Handle(3))))

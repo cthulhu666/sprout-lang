@@ -1,0 +1,18 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn run_a(f: a -> Int, x: a) -> Int where linear a = f(x)
+
+type Lent = | exists a. Lent a where linear a
+
+fn g(b: Lent) -> Int = match b with | Lent x -> run_a(peek_a, x)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Lent (L(1)))))

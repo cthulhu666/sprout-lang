@@ -660,7 +660,7 @@ fn expand_one_deriving_decl(d: ast.Decl) -> List ast.Decl =
       Cons(d, derive_record_instances_for_classes(name, type_params, fields, pos, deriving_classes))
   # A wrap reuses the ADT emitters over its synthetic constructor, with its
   # own type parameters.
-  | ast.WrapDecl name params inner deriving_classes pos ->
+  | ast.WrapDecl name params inner deriving_classes _ pos ->
       Cons(d, derive_instances_for_classes(name, params, [wrap_synthetic_ctor(name, inner)], pos, deriving_classes))
   | _ -> [d]
 
@@ -683,7 +683,7 @@ fn validate_one_deriving_decl(d: ast.Decl) -> Maybe String =
       validate_deriving_classes_list(name, ctors, deriving_classes)
   | ast.RecordDecl name _ _ deriving_classes _ _ _ ->
       validate_record_deriving_classes_list(name, deriving_classes)
-  | ast.WrapDecl name _ _ deriving_classes _ ->
+  | ast.WrapDecl name _ _ deriving_classes _ _ ->
       validate_wrap_deriving_classes_list(name, deriving_classes)
   | _ -> Nothing
 

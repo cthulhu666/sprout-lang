@@ -1301,6 +1301,21 @@ Where the compiler can identify the declaring module it adds a note naming
 it and this marker, so the case stays distinguishable from a misspelling;
 the note is advisory and withheld when that module cannot be confirmed.
 
+**Linear wraps (Experimental).** `wrap linear Name params = T` declares a wrap
+that is also a linear type (§5.8): its representation is `T`'s, unchanged, and
+its values follow every §5.8 rule a linear ADT does. The marker sits between
+`wrap` and the name, as on `type linear`.
+
+```sprout
+export wrap linear Fd = Int           # abstract: importers cannot build or unwrap one
+wrap linear Handle s = Int            # `s` phantom, as on a plain wrap
+```
+
+Matching `Fd n` binds `n` at `T`, which is tracked only if `T` is itself linear.
+So the guarantee holds only as far as the constructor reaches: an abstract
+linear wrap is unwrapped only by its own module. Design:
+`docs/linear-wrap-v0.md`.
+
 Wrap types primarily enable **mistake-prevention without runtime cost**: types
 like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /
 `GlobalEnv` distinction in the self-hosted compiler can be enforced by the
@@ -1640,15 +1655,16 @@ the comprehension extension is D8 of `docs/list-comprehensions-v0.md`.
 > `docs/linear-borrowing-v0.md` and `docs/one-shot-closures-v0.md`.
 
 A type declaration may carry the contextual modifier `linear`, written between
-`type` and the type name (mirroring `type alias`). It applies to ADT and record
-declarations:
+`type` and the type name (mirroring `type alias`), or between `wrap` and the
+name. It applies to ADT, record and wrap (§5.6.1) declarations:
 
 ```
 type linear File = File Int
 type linear Pos = (x: Int, y: Int)
+wrap linear Fd = Int
 ```
 
-`linear` is recognized only in that one position; it remains an ordinary
+`linear` is recognized only in those two positions; it remains an ordinary
 identifier everywhere else (no reserved word).
 
 **Semantics — consume exactly once.** A value of a linear type must be used

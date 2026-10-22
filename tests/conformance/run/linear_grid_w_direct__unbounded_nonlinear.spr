@@ -1,0 +1,15 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn konst(x: a, y: b) -> a = x
+
+fn main() -> Unit !{IO} =
+  do
+    match dup(1) with | (p, q) -> print(int_to_string(p + q))
+    print(int_to_string(konst(1, "s")))
+    print(int_to_string(list_length([1, 2, 3])))

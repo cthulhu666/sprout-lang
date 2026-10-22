@@ -1,0 +1,18 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Apply t
+  fn ap1(x: t, g: Int -> a) -> Int
+
+instance Apply Int
+  fn ap1(x: Int, g: Int -> a) -> Int =
+    do
+      g(x)
+      x
+
+fn main() -> Unit !{IO} = print(int_to_string(ap1(3, \n -> n + 1)))

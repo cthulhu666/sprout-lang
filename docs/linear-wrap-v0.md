@@ -1,11 +1,11 @@
 # A linear `wrap` (v0, 2026-10-22)
 
-**Status:** proposal, approved in shape 2026-10-22. No code change. Experimental when it lands,
-as spec §5.8 is. Comes from [persistent-array-v0.md](persistent-array-v0.md) §12 step 12.
+**Status:** landed 2026-10-22, Experimental as spec §5.8 is (spec §5.6.1 *Linear wraps*).
+Comes from [persistent-array-v0.md](persistent-array-v0.md) §12 step 12.
 
 ## 1. Problem
 
-A linear type must be an ADT or a record (spec §5.8: `linear` "applies to ADT and record
+A linear type had to be an ADT or a record (spec §5.8 said `linear` "applies to ADT and record
 declarations"). Both are boxed: a one-field linear type costs an allocation to build and a load
 to read, and a function that consumes one and returns a new one allocates again.
 
@@ -94,48 +94,53 @@ used for a linear ADT, naming the wrap.
 
 ## 5. Implementation
 
-The gaps, read from the compiler on 2026-10-22:
+The gaps, read from the compiler on 2026-10-22, all closed in the landing change:
 
-1. `ast.WrapDecl` gains a `Multiplicity` field, as `TypeDecl` and `RecordDecl` carry.
-2. `parser.parse_wrap_decl` reads the marker with `linear_marker_mult` and
-   `skip_linear_marker`, as `parse_type_decl` does. Today `wrap linear LA a = Vector a`
-   compiles without a word, as a wrap named `linear` with parameters `LA` and `a`; only a later
-   use of `LA` fails ("unknown type `LA`"). Checked on master 2026-10-22.
-3. The export pre-scan's `wrap` arm skips the marker, as `scan_exported_type` does.
-4. `infer.register_type_decl_raw`'s `WrapDecl` arm calls `mark_type_multiplicity`, which it
-   does not today.
-5. `lint_rules.linear_ctors_of` gains a `WrapDecl` arm.
-6. A cross-module test that an importer sees the wrap as linear. `iface_codec` carries no
-   `@linear:` marker for any type; the bundle merges every module's declarations and infer
-   registers the marker from each, so a wrap should behave as a `type linear` does.
-7. A formatter test for `export wrap linear X a (..) = T deriving (…)`: `formatter.sprout` is
-   token-based and has no case for `linear` to prove it is left alone.
+1. ~~`ast.WrapDecl` gains a `Multiplicity` field, as `TypeDecl` and `RecordDecl` carry.~~
+2. ~~`parser.parse_wrap_decl` reads the marker with `linear_marker_mult` and
+   `skip_linear_marker`.~~ Before, `wrap linear LA a = Vector a` compiled as a wrap named
+   `linear` with parameters `LA` and `a`; only a later use of `LA` failed.
+3. ~~The export pre-scan's `wrap` arm skips the marker.~~ It now shares `scan_named_type` with
+   the ADT arm.
+4. ~~`infer.register_type_decl_raw`'s `WrapDecl` arm calls `mark_type_multiplicity`.~~
+5. ~~`lint_rules.linear_ctors_of` gains a `WrapDecl` arm.~~
+6. ~~A cross-module test that an importer sees the wrap as linear.~~ `iface_codec` carries no
+   `@linear:` marker for any type; the bundle merges every module's declarations, and infer
+   registers the marker from each.
+7. ~~A formatter test for `export wrap linear X a (..) = T deriving (…)`.~~ The formatter
+   already left it alone; the test pins that.
 
 `linear_check` and `ast_to_ir` need no wrap-specific change: infer registers a wrap as a
 one-constructor ADT, so the checker already walks its constructor and pattern.
 
 ## 6. Compatibility
 
-Additive. The one source that changes meaning is a wrap named `linear`, which today is how
-`wrap linear …` is silently read (§5 item 2). None exists in this repo, uncharted-suns, repbit
-or sprout-pg, worktrees included (grepped 2026-10-22; sprout-pg as checked out, not fetched).
+Additive. The one source that changes meaning is a wrap named `linear`, which is how
+`wrap linear …` was silently read before (§5 item 2). None exists in this repo,
+uncharted-suns, repbit or sprout-pg, worktrees included (grepped 2026-10-22; sprout-pg as
+checked out, not fetched).
 
 ## 7. Open questions
 
-- `deriving` on a linear type is untested for `type linear` today. A linear wrap follows
-  whatever that is; the implementation adds a test for both before relying on it.
+None. `deriving` on a linear type works: the derived methods consume their arguments, so
+`a == a` is a reuse (`tests/conformance/type_error/linear_derived_eq_reuse.spr`), on an ADT and
+a wrap alike.
 
 ## 8. Tests
 
-- Parser: `wrap linear` with parameters, a phantom parameter, `(..)`, `deriving`.
-- Type errors, each also for a linear ADT where none exists: reuse, leak, consume through a
-  borrow, a linear wrap at an unbounded type variable, and an importer unwrapping an abstract
-  linear wrap (`Unknown constructor`).
-- Run: build, borrow, consume and freeze a `wrap linear` over `Vector`; and the CPR worker
-  through a borrowed unwrap, checked in IR.
-- The linear grid (`just test-linear-grid`) runs its rows a second time under a linear-wrap
-  header beside `HDR_L` (`scripts/gen_linear_grid.sh`): a new way to declare a linear type is a
-  new header, not a new reach path.
+- Parser: `tests/stdlib/compiler/test_parser.spr`, with parameters, a phantom parameter, `(..)`
+  and `deriving`, and that the marker is not read as a parameter.
+- Type errors: `tests/conformance/type_error/linear_wrap_{reuse,leak,consume_borrowed}`. The
+  unbounded type variable is the grid's `pass` column.
+- Cross-module: `scripts/package_resolution_gate.sh` checks that an importer sees the wrap as
+  linear and cannot unwrap an abstract one (`Unknown constructor`);
+  `tests/stdlib/test_linear_cross_module.spr` uses one.
+- Run: `tests/stdlib/test_linear_wrap.spr` builds, borrows, consumes and freezes a
+  `wrap linear` over `Vector`; `tests/stdlib/test_linear_wrap_cpr.spr` checks in IR that a
+  borrowed unwrap gets a CPR worker over `vector_get_unboxed`.
+- The linear grid repeats every `HDR_L` cell as `w_<name>` under a linear-wrap header
+  (`scripts/gen_linear_grid.sh`): a new way to declare a linear type is a new header, not a new
+  reach path.
 
 ## 9. Spec and docs
 

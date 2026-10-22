@@ -1,0 +1,15 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class K t
+  fn m(s: t, x: a) -> (a, a) where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, a) where linear a = (x, x)
+
+fn main() -> Unit !{IO} = match m(0, L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))

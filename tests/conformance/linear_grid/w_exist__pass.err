@@ -1,0 +1,1 @@
+takes `b` as a value it may copy or drop, and `main.Boxed` is linear

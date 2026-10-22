@@ -111,6 +111,15 @@ fn main() -> Unit !{IO} =
       formatter.format_source("wrap Age(..) = Int\n"), "wrap Age (..) = Int\n"),
     check_eq("a wrap without the marker is untouched",
       formatter.format_source("wrap Age = Int\n"), "wrap Age = Int\n"),
+    # `linear` sits between the keyword and the name, so the marker is two tokens
+    # past the keyword, not one.
+    check_eq("the marker on a linear wrap is spaced",
+      formatter.format_source("export wrap linear Arr a (..) = Vector a deriving (Eq)\n"),
+      "export wrap linear Arr a (..) = Vector a deriving (Eq)\n"),
+    check_eq("a tight marker on a linear wrap is spaced out",
+      formatter.format_source("wrap linear Fd(..) = Int\n"), "wrap linear Fd (..) = Int\n"),
+    check_eq("a tight marker on a linear type is spaced out",
+      formatter.format_source("type linear File(..) =\n"), "type linear File (..) =\n"),
 
     # `try` is a keyword, so a parenthesised operand is not a call on it.
     check_eq("try keeps the space before a parenthesised operand",
