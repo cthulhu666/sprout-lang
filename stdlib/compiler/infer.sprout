@@ -7505,24 +7505,30 @@ fn check_published_linear_types(decls: List ast.Decl, env: Dict types.Scheme,
 
 fn published_linear_fault(decl: ast.Decl, env: Dict types.Scheme,
                           alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
-  let Just pt = published_type(decl, alias_env) else Nothing
-  in if dict_member(types.linear_marker_key(pt.name), env) then
-       map(\t -> (pt.pos, published_linear_msg(pt.name, pt.published, t, env)), find_map(untracked_field(_, env), pt.fields))
-     else Nothing
+  let Just pt = published_linear_type(decl, env, alias_env) else Nothing
+  in map(\t -> (pt.pos, published_linear_msg(pt.name, pt.published, t, env)), find_map(untracked_field(_, env), pt.fields))
 
 # Every variant is spelled out: a declaration form added later that declares a
-# type has fields this check must see.
-fn published_type(decl: ast.Decl, alias_env: Dict types.Type) -> Maybe PublishedType =
+# type has fields this check must see. The fields are built only for a type that
+# is published and linear; the prelude stamps every one of its types published.
+fn published_linear_type(decl: ast.Decl, env: Dict types.Scheme,
+                         alias_env: Dict types.Type) -> Maybe PublishedType =
   match decl with
   | ast.TypeDecl name params ctors _ _ repr pos ->
-      when_published(repr, PublishedType(name = name, published = "its constructor", pos = pos,
-        fields = list_flat_map(ctor_published_fields(_, build_local_params(params, alias_env)), ctors)))
+      if is_published_linear(repr, name, env) then
+        Just(PublishedType(name = name, published = "its constructor", pos = pos,
+          fields = list_flat_map(ctor_published_fields(_, build_local_params(params, alias_env)), ctors)))
+      else Nothing
   | ast.WrapDecl name params inner _ _ repr pos ->
-      when_published(repr, PublishedType(name = name, published = "its constructor", pos = pos,
-        fields = unbounded_fields([inner], build_local_params(params, alias_env))))
+      if is_published_linear(repr, name, env) then
+        Just(PublishedType(name = name, published = "its constructor", pos = pos,
+          fields = unbounded_fields([inner], build_local_params(params, alias_env))))
+      else Nothing
   | ast.RecordDecl name params fields _ _ repr pos ->
-      when_published(repr, PublishedType(name = name, published = "its constructor and fields", pos = pos,
-        fields = unbounded_fields(ast.record_field_type_exprs(fields), build_local_params(params, alias_env))))
+      if is_published_linear(repr, name, env) then
+        Just(PublishedType(name = name, published = "its constructor and fields", pos = pos,
+          fields = unbounded_fields(ast.record_field_type_exprs(fields), build_local_params(params, alias_env))))
+      else Nothing
   | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
   | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
@@ -7530,10 +7536,10 @@ fn published_type(decl: ast.Decl, alias_env: Dict types.Type) -> Maybe Published
   | ast.InstanceDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
 
-fn when_published(repr: ast.Representation, pt: PublishedType) -> Maybe PublishedType =
+fn is_published_linear(repr: ast.Representation, name: String, env: Dict types.Scheme) -> Bool =
   match repr with
-  | ast.Published -> Just(pt)
-  | ast.Abstract -> Nothing
+  | ast.Published -> type_name_is_linear(name, env)
+  | ast.Abstract -> false
 
 fn ctor_published_fields(ctor: ast.TypeConstructor, vars: Dict types.Type) -> List PublishedField =
   let ast.TypeConstructor _ fields exist_vars _ bounds = ctor
@@ -7547,8 +7553,9 @@ fn unbounded_fields(tes: List ast.TypeExpr, vars: Dict types.Type) -> List Publi
 # pattern takes a tuple or a `Maybe` apart and binds each part at its own type.
 fn untracked_field(field: PublishedField, env: Dict types.Scheme) -> Maybe types.Type =
   let t = type_from_ast(field.te, field.vars)
-      bound_env = list_fold(\ (e, b) -> mark_linear(e, types.tyvar_identity(types.tyvar_id(b))), env, field.bounds)
-  in if type_name_is_linear(type_head_str(t), bound_env) then Nothing else Just(t)
+      head = type_head_str(t)
+  in if type_name_is_linear(head, env) || any(\b -> types.tyvar_identity(types.tyvar_id(b)) == head, field.bounds) then Nothing
+     else Just(t)
 
 fn published_linear_msg(name: String, published: String, field: types.Type, env: Dict types.Scheme) -> String =
   let short = string.after_last_dot(name)

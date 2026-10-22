@@ -1,0 +1,22 @@
+module main
+
+# The hint applied: `Boxed` is abstract, and the module exports the functions
+# that build and take it apart.
+
+class Taker a
+  fn take(x: a) -> Int
+
+export type Boxed =
+  | exists a. Boxed (a, Int) where linear a, Taker a
+
+export fn boxed_of(x: a, n: Int) -> Boxed where linear a, Taker a = Boxed((x, n))
+
+fn take_pair(p: (a, Int)) -> Int where linear a, Taker a =
+  match p with
+  | (x, n) -> take(x) + n
+
+export fn boxed_free(b: Boxed) -> Int =
+  match b with
+  | Boxed p -> take_pair(p)
+
+fn main() -> Unit !{IO} = print("x")
