@@ -5718,7 +5718,8 @@ fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, 
 # seed_forward_markers — so `to_string(x)` in the branch resolves the packed
 # witness through the standard forward path. The constructor pattern owns the
 # dictionary, so its field sub-patterns may be anything. Recurses into tuple/ctor
-# sub-patterns so `(Shown x, ...)` is handled; nested existentials use the same s1.
+# sub-patterns so `(Shown x, ...)` is handled; a nested existential reads its own
+# pattern's recorded skolem from the same subst.
 fn extend_env_with_existential_givens(pat: ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pat with
   | ast.ConstructorPattern name fields pos ->
