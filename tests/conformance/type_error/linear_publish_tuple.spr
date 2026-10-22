@@ -1,0 +1,13 @@
+module main
+
+# A linear part does not cover its siblings: a pattern takes the tuple apart and
+# binds the `Vector Int` untracked (docs/linear-publish-v0.md §4).
+
+type linear Res =
+  | Res Int
+
+export type linear Weird (..) =
+#~^ ERROR
+  | Weird (Res, Vector Int)
+
+fn main() -> Unit !{IO} = print("x")

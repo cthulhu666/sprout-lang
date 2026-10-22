@@ -1,0 +1,1 @@
+`Weird` is linear, and `(..)` publishes its constructor, but its field `(main.Res, Vector Int)` is not itself a linear type: a pattern can take it apart, and its parts are not checked. Remove `(..)` and export functions that build and take apart `Weird`

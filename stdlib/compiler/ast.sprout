@@ -520,11 +520,12 @@ export type InstanceMethodImpl (..) =
 # (per-declaration marker, M4.1). M4.1 parses + records it but does not yet enforce
 # use-once (that is M4.2). See docs/linear-types-m4-scoping-2026-08-01.md.
 #
-# representation (the Representation before pos): whether the declaration wrote
-# `(..)`. Recorded on the declaration rather than derived from the export list
-# because the export list is a token pre-scan the bundler consumes, while this
-# bit has to survive into inference, where field access is resolved and a
-# published linear type's fields are checked (docs/linear-publish-v0.md).
+# representation (the Representation before pos): whether the representation is
+# published, which the bundler stamps: `export` with `(..)`, or any prelude
+# declaration (bundler.publish_if_marked). Recorded on the declaration because
+# the export list is a token pre-scan the bundler consumes, while this bit has to
+# survive into inference, where field access is resolved and a published linear
+# type's fields are checked (docs/linear-publish-v0.md).
 #
 # WrapDecl is a zero-cost distinct type. `wrap Foo = T` declares Foo with a
 # single constructor Foo(x: T) -> Foo. Construction Foo(x) and destruction
@@ -563,7 +564,7 @@ fn ctor_has_bound(c: TypeConstructor) -> Bool =
 # Not a Bool: the reading site asks "is this abstract HERE", and `Abstract`
 # answers that in the source where `false` would not.
 export type Representation (..) =
-  | Published  # `(..)` — constructor and fields are part of the module's surface
+  | Published  # `export` + `(..)`, or the prelude — constructor and fields are public
   | Abstract  # no marker — representation is private to the declaring module
 
 export type Decl (..) =

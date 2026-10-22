@@ -1,0 +1,1 @@
+`Slot` is linear, and `(..)` publishes its constructor, but its field `Maybe main.Res` is not itself a linear type: a pattern can take it apart, and its parts are not checked. Remove `(..)` and export functions that build and take apart `Slot`

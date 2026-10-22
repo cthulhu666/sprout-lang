@@ -7487,8 +7487,9 @@ fn typecheck_decls_resolved(
 # A pattern binds each field at its own type, so a field whose type holds no
 # linear value is untracked. Where the constructor is published, any module can
 # copy such a field out of a linear value, or build the value around one it
-# shares. A field is tracked when its type holds a linear type, or a variable of
-# its constructor's `where linear`, which a pattern marks linear where it unpacks.
+# shares. So each field's type must be a linear type, whose own declaration
+# guards its interior, or a variable of its constructor's `where linear`, which a
+# pattern marks linear where it unpacks.
 
 # One field of a published declaration, with the type variables in scope at it.
 type PublishedField = (te: ast.TypeExpr, vars: Dict types.Type, bounds: List String)
@@ -7542,24 +7543,25 @@ fn ctor_published_fields(ctor: ast.TypeConstructor, vars: Dict types.Type) -> Li
 fn unbounded_fields(tes: List ast.TypeExpr, vars: Dict types.Type) -> List PublishedField =
   list_map(\te -> PublishedField(te = te, vars = vars, bounds = Nil), tes)
 
+# The field's type itself must be linear, not merely contain a linear type: a
+# pattern takes a tuple or a `Maybe` apart and binds each part at its own type.
 fn untracked_field(field: PublishedField, env: Dict types.Scheme) -> Maybe types.Type =
   let t = type_from_ast(field.te, field.vars)
       bound_env = list_fold(\ (e, b) -> mark_linear(e, types.tyvar_identity(types.tyvar_id(b))), env, field.bounds)
-  in match linear_check.first_linear_in(t, bound_env) with
-     | Just _ -> Nothing
-     | Nothing -> Just(t)
+  in if type_name_is_linear(type_head_str(t), bound_env) then Nothing else Just(t)
 
 fn published_linear_msg(name: String, published: String, field: types.Type, env: Dict types.Scheme) -> String =
   let short = string.after_last_dot(name)
   in "`" ++ short ++ "` is linear, and `(..)` publishes " ++ published ++ ", but its field `"
-       ++ linear_check.type_text(field, env) ++ "` " ++ untracked_reason(field)
-       ++ ": another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `"
-       ++ short ++ "`"
+       ++ linear_check.type_text(field, env) ++ "` " ++ untracked_reason(field, env)
+       ++ ". Remove `(..)` and export functions that build and take apart `" ++ short ++ "`"
 
-fn untracked_reason(field: types.Type) -> String =
-  match types.type_var_name(field) with
-  | Just _ -> "can hold a value that is not linear"
-  | Nothing -> "is not linear"
+fn untracked_reason(field: types.Type, env: Dict types.Scheme) -> String =
+  let lost = ": another module could copy it out, or build one around a value it shares"
+  in match (types.type_var_name(field), linear_check.first_linear_in(field, env)) with
+     | (Just _, _) -> "can hold a value that is not linear" ++ lost
+     | (Nothing, Just _) -> "is not itself a linear type: a pattern can take it apart, and its parts are not checked"
+     | (Nothing, Nothing) -> "is not linear" ++ lost
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
