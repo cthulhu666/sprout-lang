@@ -115,10 +115,10 @@ Breaking for a published linear type with an untracked field. In our four repos:
 
 - sprout-pg `postgres/types.sprout`: `PgConnection (..)`. Its comment gives the reason it is
   published: `postgres.connection` destructures it in place, borrowing the `TcpConnection`, which
-  no accessor can return. Move `PgConnection`, `pg_connection` and its five accessors into
-  `postgres.connection` (already imports `types`), and import it there in `pool.sprout`. Twelve
-  destructure sites, about 60 lines moved. It compiles before and after this change, so it lands
-  in sprout-pg first.
+  no accessor can return. `PgConnection` and its five accessors move into `postgres.connection`
+  without `(..)`, and `pg_connection` is deleted (sprout-pg#20). The import path changes, and
+  Sprout has no re-export, so repbit's eight imports move too (repbit#15). The two merge together,
+  before this change.
 - `testsupport/rec_fixture.sprout`: `Tok (..)`, read field by field by
   `tests/stdlib/test_imported_records.spr`. Becomes non-linear, or gets accessors.
 
