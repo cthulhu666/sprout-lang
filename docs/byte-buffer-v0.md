@@ -301,10 +301,10 @@ This is general local state, writes at any index included, without rank-2 types.
   - The walk counts any non-call use as an escape, including a field read or an operand. A data
     `local` needs reads that return a first-class value to pass.
 
-  Every combinator a local buffer flows through must declare `local` (BACKLOG P2 **Mark the
-  prelude combinators' function arguments `local`** covers closures only); until then, loops
-  are written as recursion. Nothing proves it sound in Sprout's terms: the argument here is a
-  reading of the paper's rules.
+  Every combinator a local buffer flows through must declare `local`. The prelude's function
+  parameters are `local` now (`docs/local-closures-v0.md` §8), but that covers closures only, and a
+  local buffer is a data parameter, so loops over one are still written as recursion. Nothing
+  proves it sound in Sprout's terms: the argument here is a reading of the paper's rules.
 
 ## 6. How they combine
 

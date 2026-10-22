@@ -60,10 +60,10 @@ attached to a fold.
 
 ```sprout
 export class Foldable f
-  fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
-  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b
+  fn fold_values(step: local b -> a -> b, init: b, xs: f a) -> b
+  fn fold_while_values(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: f a) -> b
 
-export fn fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b where Foldable f =
+export fn fold_while(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: f a) -> b where Foldable f =
   fold_while_values(step, cond, init, xs)
 ```
 

@@ -1,0 +1,13 @@
+module main
+
+# `local_combinator_functor_map.spr` with its error's hint applied.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> List Int =
+  let n = peek(c)
+  in map(\x -> x + n, xs)
+
+fn main() -> Unit !{IO} = print("unreachable")

@@ -250,11 +250,15 @@ so the same function serves both pure and `!{IO}` code, and all follow the
 data-last argument convention (the collection is the final argument).
 
 ```sprout
-range_each(f: Int -> Unit !{e}, r: IntRange) -> Unit !{e}          # imperative loop
-range_fold(step: b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e}
-list_each (f: a -> Unit !{e}, xs: List a)  -> Unit !{e}            # traverse for effect
-list_fold (step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
+range_each(f: local Int -> Unit !{e}, r: IntRange) -> Unit !{e}    # imperative loop
+range_fold(step: local b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e}
+list_each (f: local a -> Unit !{e}, xs: List a)  -> Unit !{e}      # traverse for effect
+list_fold (step: local b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
 ```
+
+`local` promises the combinator does not keep the function past the call, so a lambda
+passed to it (or to `fold`, `any`, `find` and the other `Foldable` functions) may read a
+borrowed linear value. `map`, `filter` and `and_then` do not make that promise.
 
 To *build* a list rather than loop for effect, prefer a comprehension. It reads in
 the order the data flows, works over either source type, and runs in constant

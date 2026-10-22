@@ -1,0 +1,24 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+class Use t
+  fn use(x: t) -> (t, Int)
+
+instance Use (Maybe a) where linear a
+  fn use(x: Maybe a) -> (Maybe a, Int) =
+    match x with
+    | Just y ->
+      let n = list_fold(\ (acc, i) -> acc + i + peek_a(y), 0, [1, 2])
+      in (Just(y), n)
+    | Nothing -> (Nothing, 0)
+
+fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
+
+fn main() -> Unit !{IO} = match use(Just (L(10))) with | (m, n) -> print(int_to_string(n + eat(m)))

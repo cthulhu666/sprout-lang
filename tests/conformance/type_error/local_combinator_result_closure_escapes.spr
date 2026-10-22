@@ -1,0 +1,13 @@
+module main
+
+# Soundness pin: a lambda at a `local` slot may read the borrow, but a closure it builds
+# and hands back is an ordinary lambda, and list_map's result outlives the call.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> List (Unit -> Int) =
+  list_map(\x -> \_ -> peek(c), xs)
+
+fn main() -> Unit !{IO} = print("unreachable")

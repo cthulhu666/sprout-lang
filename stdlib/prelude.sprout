@@ -194,7 +194,7 @@ fn range_to_list_go(current: Int, end_value: Int, step: Int, acc: List Int) -> L
 export fn range_to_list(value: IntRange) -> List Int =
   range_to_list_go(range_start(value), range_end(value), range_step(value), Nil)
 
-fn range_fold_go(current: Int, end_value: Int, by: Int, acc: b, step: b -> Int -> b !{e}) -> b !{e} =
+fn range_fold_go(current: Int, end_value: Int, by: Int, acc: b, step: local b -> Int -> b !{e}) -> b !{e} =
   if range_past_end(current, end_value, by) then acc
   else if range_at_end(current, end_value) then step(acc, current)
   else
@@ -206,10 +206,10 @@ fn range_fold_go(current: Int, end_value: Int, by: Int, acc: b, step: b -> Int -
 # when the range is empty — `step` is not applied even once. The step's effect row
 # is polymorphic (`!{e}`), so pure callers get `e = {}` and effectful callers may
 # read/write mutable state inside `step`. Data-last: the range is the final argument.
-export fn range_fold(step: b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e} =
+export fn range_fold(step: local b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e} =
   range_fold_go(range_start(r), range_end(r), range_step(r), init, step)
 
-fn range_each_go(f: Int -> Unit !{e}, current: Int, end_value: Int, by: Int) -> Unit !{e} =
+fn range_each_go(f: local Int -> Unit !{e}, current: Int, end_value: Int, by: Int) -> Unit !{e} =
   if range_past_end(current, end_value, by) then ()
   else if range_at_end(current, end_value) then f(current)
   else
@@ -219,19 +219,19 @@ fn range_each_go(f: Int -> Unit !{e}, current: Int, end_value: Int, by: Int) -> 
 
 # O(n): inclusive imperative loop over the range; `f` runs for its effect at each
 # index, and zero times when the range is empty.
-export fn range_each(f: Int -> Unit !{e}, r: IntRange) -> Unit !{e} =
+export fn range_each(f: local Int -> Unit !{e}, r: IntRange) -> Unit !{e} =
   range_each_go(f, range_start(r), range_end(r), range_step(r))
 
 # The accumulator family below (map, filter, filter_map, partition, flat_map, union,
 # diff) all build reversed and reverse once at the end. Depth is O(1) in the input;
 # the cost is 2k cells for k results — the accumulator's, then the reversed copy that
 # becomes the result. `Cons(x, recurse(...))` allocated k but recursed k deep.
-fn list_map_go(f: a -> b, xs: List a, acc: List b) -> List b =
+fn list_map_go(f: local a -> b, xs: List a, acc: List b) -> List b =
   match xs with
   | Nil -> list_reverse_go(acc, Nil)
   | Cons x rest -> list_map_go(f, rest, Cons(f(x), acc))
 
-fn list_fold_go(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where linear a, linear b =
+fn list_fold_go(step: local b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where linear a, linear b =
   match xs with
   | Nil -> init
   | Cons x rest ->
@@ -239,7 +239,7 @@ fn list_fold_go(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where lin
         next <- step(init, x)
         list_fold_go(step, next, rest)
 
-fn list_each_go(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
+fn list_each_go(f: local a -> Unit !{e}, xs: List a) -> Unit !{e} =
   match xs with
   | Nil -> ()
   | Cons x rest ->
@@ -247,7 +247,7 @@ fn list_each_go(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
         _ <- f(x)
         list_each_go(f, rest)
 
-fn list_filter_go(pred: a -> Bool, xs: List a, acc: List a) -> List a =
+fn list_filter_go(pred: local a -> Bool, xs: List a, acc: List a) -> List a =
   match xs with
   | Nil -> list_reverse_go(acc, Nil)
   | Cons x rest ->
@@ -256,10 +256,10 @@ fn list_filter_go(pred: a -> Bool, xs: List a, acc: List a) -> List a =
 
 # O(n): keep the elements satisfying `pred`, in order. The concrete List form
 # behind `Filterable List`; generic code wants `filter`.
-export fn list_filter(pred: a -> Bool, xs: List a) -> List a =
+export fn list_filter(pred: local a -> Bool, xs: List a) -> List a =
   list_filter_go(pred, xs, Nil)
 
-fn list_filter_map_go(f: a -> Maybe b, xs: List a, acc: List b) -> List b =
+fn list_filter_map_go(f: local a -> Maybe b, xs: List a, acc: List b) -> List b =
   match xs with
   | Nil -> list_reverse_go(acc, Nil)
   | Cons x rest ->
@@ -269,10 +269,10 @@ fn list_filter_map_go(f: a -> Maybe b, xs: List a, acc: List b) -> List b =
 
 # O(n): drop and transform in one pass — `Nothing` discards the element, `Just`
 # keeps the mapped value. The concrete List form behind `Filterable List`.
-export fn list_filter_map(f: a -> Maybe b, xs: List a) -> List b =
+export fn list_filter_map(f: local a -> Maybe b, xs: List a) -> List b =
   list_filter_map_go(f, xs, Nil)
 
-fn list_partition_go(pred: a -> Bool, xs: List a, yes: List a, no: List a) -> (List a, List a) =
+fn list_partition_go(pred: local a -> Bool, xs: List a, yes: List a, no: List a) -> (List a, List a) =
   match xs with
   | Nil -> (list_reverse_go(yes, Nil), list_reverse_go(no, Nil))
   | Cons x rest ->
@@ -281,16 +281,16 @@ fn list_partition_go(pred: a -> Bool, xs: List a, yes: List a, no: List a) -> (L
 
 # O(n), `pred` applied exactly once per element: the elements satisfying `pred` and
 # those not, each in original order.
-export fn list_partition(pred: a -> Bool, xs: List a) -> (List a, List a) =
+export fn list_partition(pred: local a -> Bool, xs: List a) -> (List a, List a) =
   list_partition_go(pred, xs, Nil, Nil)
 
-export fn list_map(f: a -> b, xs: List a) -> List b =
+export fn list_map(f: local a -> b, xs: List a) -> List b =
   list_map_go(f, xs, Nil)
 
 # O(n): left fold; `step`'s effect row is polymorphic, so this serves both pure folds and
 # effectful accumulation (reading/writing mutable state inside `step`). Data-last.
 # Each element and the accumulator are used once, so a list of linear values folds.
-export fn list_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where linear a, linear b =
+export fn list_fold(step: local b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where linear a, linear b =
   list_fold_go(step, init, xs)
 
 # O(k) in the elements visited, not O(n): the walk itself stops, so the tail of
@@ -298,7 +298,7 @@ export fn list_fold(step: b -> a -> b !{e}, init: b, xs: List a) -> b !{e} where
 # — folding proceeds while it holds of the accumulator. Pure, unlike
 # `list_fold`: the accumulator is queried between steps and an effectful `cond`
 # would fire an effect per element for a question about a value.
-export fn list_fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: List a) -> b =
+export fn list_fold_while(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: List a) -> b =
   if ! cond (init) then init
   else
     match xs with
@@ -306,7 +306,7 @@ export fn list_fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: List 
     | Cons x rest -> list_fold_while(step, cond, step(init, x), rest)
 
 # O(n): imperative traversal; `f` runs for its effect on each element.
-export fn list_each(f: a -> Unit !{e}, xs: List a) -> Unit !{e} =
+export fn list_each(f: local a -> Unit !{e}, xs: List a) -> Unit !{e} =
   list_each_go(f, xs)
 
 # O(|left|), two passes: `left` is reversed, then unreversed onto `right`, which is
@@ -317,14 +317,14 @@ export fn list_append(left: List a, right: List a) -> List a =
 
 # Each chunk is prepended REVERSED onto acc, never appended to it: appending
 # would cost O(|acc|) per chunk and make the whole thing quadratic.
-fn list_flat_map_go(f: a -> List b, xs: List a, acc: List b) -> List b =
+fn list_flat_map_go(f: local a -> List b, xs: List a, acc: List b) -> List b =
   match xs with
   | Nil -> list_reverse_go(acc, Nil)
   | Cons x rest -> list_flat_map_go(f, rest, list_reverse_go(f(x), acc))
 
 # O(sum of |f(x)|): bind for the List monad — apply f to each element and
 # concatenate the results (flatten-map). Backs `Monad List`.
-export fn list_flat_map(f: a -> List b, xs: List a) -> List b =
+export fn list_flat_map(f: local a -> List b, xs: List a) -> List b =
   list_flat_map_go(f, xs, Nil)
 
 # Builds a list left-to-right at O(1) per element, for code that ADDS rather than
@@ -398,7 +398,7 @@ export fn vec_set(index: Int, value: a, vec: Vec a) -> Vec a =
   match vec with
   | Vec raw -> Vec(vector_set(raw, index, value))
 
-fn vec_map_indexed(f: a -> b, vec: Vec a, index: Int, total: Int, acc: List b) -> Vec b =
+fn vec_map_indexed(f: local a -> b, vec: Vec a, index: Int, total: Int, acc: List b) -> Vec b =
   if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
@@ -406,20 +406,20 @@ fn vec_map_indexed(f: a -> b, vec: Vec a, index: Int, total: Int, acc: List b) -
     | Just value -> vec_map_indexed(f, vec, index + 1, total, Cons(f(value), acc))
 
 # O(n): one pass over the vec; result built via vec_from_list in a single allocation.
-export fn vec_map(f: a -> b, vec: Vec a) -> Vec b =
+export fn vec_map(f: local a -> b, vec: Vec a) -> Vec b =
   vec_map_indexed(f, vec, 0, vec_length(vec), Nil)
 
-fn vec_fold_indexed(f: b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) -> b =
+fn vec_fold_indexed(f: local b -> a -> b, acc: b, vec: Vec a, index: Int, total: Int) -> b =
   if index >= total then acc
   else
     match vec_get(index, vec) with
     | Nothing -> acc
     | Just value -> vec_fold_indexed(f, f(acc, value), vec, index + 1, total)
 
-export fn vec_fold(f: b -> a -> b, init: b, vec: Vec a) -> b =
+export fn vec_fold(f: local b -> a -> b, init: b, vec: Vec a) -> b =
   vec_fold_indexed(f, init, vec, 0, vec_length(vec))
 
-fn vec_fold_while_indexed(step: b -> a -> b, cond: b -> Bool, acc: b, vec: Vec a,
+fn vec_fold_while_indexed(step: local b -> a -> b, cond: local b -> Bool, acc: b, vec: Vec a,
                           index: Int, total: Int) -> b =
   if ! cond (acc) then acc
   else if index >= total then acc
@@ -431,10 +431,10 @@ fn vec_fold_while_indexed(step: b -> a -> b, cond: b -> Bool, acc: b, vec: Vec a
 # O(k) in the elements visited: the index walk stops, so the tail of the vector
 # is never read. See `list_fold_while` for why `cond` is pure and why it reads
 # as a continue condition.
-export fn vec_fold_while(step: b -> a -> b, cond: b -> Bool, init: b, vec: Vec a) -> b =
+export fn vec_fold_while(step: local b -> a -> b, cond: local b -> Bool, init: b, vec: Vec a) -> b =
   vec_fold_while_indexed(step, cond, init, vec, 0, vec_length(vec))
 
-fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
+fn vec_filter_indexed(pred: local a -> Bool, vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
   if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
@@ -444,10 +444,10 @@ fn vec_filter_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: 
         else vec_filter_indexed(pred, vec, index + 1, total, acc)
 
 # O(n): one pass; result built via vec_from_list in a single allocation.
-export fn vec_filter(pred: a -> Bool, vec: Vec a) -> Vec a =
+export fn vec_filter(pred: local a -> Bool, vec: Vec a) -> Vec a =
   vec_filter_indexed(pred, vec, 0, vec_length(vec), Nil)
 
-fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, acc: List b) -> Vec b =
+fn vec_filter_map_indexed(f: local a -> Maybe b, vec: Vec a, index: Int, total: Int, acc: List b) -> Vec b =
   if index >= total then vec_from_list(list_reverse_go(acc, Nil))
   else
     match vec_get(index, vec) with
@@ -458,10 +458,10 @@ fn vec_filter_map_indexed(f: a -> Maybe b, vec: Vec a, index: Int, total: Int, a
         | Just mapped -> vec_filter_map_indexed(f, vec, index + 1, total, Cons(mapped, acc))
 
 # O(n): one pass; result built via vec_from_list in a single allocation.
-export fn vec_filter_map(f: a -> Maybe b, vec: Vec a) -> Vec b =
+export fn vec_filter_map(f: local a -> Maybe b, vec: Vec a) -> Vec b =
   vec_filter_map_indexed(f, vec, 0, vec_length(vec), Nil)
 
-fn vec_partition_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int,
+fn vec_partition_indexed(pred: local a -> Bool, vec: Vec a, index: Int, total: Int,
                          yes: List a, no: List a) -> (Vec a, Vec a) =
   if index >= total then
     (vec_from_list(list_reverse_go(yes, Nil)), vec_from_list(list_reverse_go(no, Nil)))
@@ -475,19 +475,19 @@ fn vec_partition_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int,
 
 # O(n), one pass, `pred` applied exactly once per element: both halves are built
 # side by side rather than by filtering twice.
-export fn vec_partition(pred: a -> Bool, vec: Vec a) -> (Vec a, Vec a) =
+export fn vec_partition(pred: local a -> Bool, vec: Vec a) -> (Vec a, Vec a) =
   vec_partition_indexed(pred, vec, 0, vec_length(vec), Nil, Nil)
 
 # Both stop at the deciding element, and both are now the generic `any`/`all`
 # specialised to `Vec` rather than a second hand-written index loop — the two
 # spellings cannot drift apart in behaviour or in complexity.
-export fn vec_any(pred: a -> Bool, vec: Vec a) -> Bool =
+export fn vec_any(pred: local a -> Bool, vec: Vec a) -> Bool =
   vec_fold_while(\ (acc, x) -> pred(x), \acc -> ! acc, false, vec)
 
-export fn vec_all(pred: a -> Bool, vec: Vec a) -> Bool =
+export fn vec_all(pred: local a -> Bool, vec: Vec a) -> Bool =
   vec_fold_while(\ (acc, x) -> pred(x), \acc -> acc, true, vec)
 
-fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: Int) -> Int =
+fn vec_count_indexed(pred: local a -> Bool, vec: Vec a, index: Int, total: Int, acc: Int) -> Int =
   if index >= total then acc
   else
     match vec_get(index, vec) with
@@ -496,7 +496,7 @@ fn vec_count_indexed(pred: a -> Bool, vec: Vec a, index: Int, total: Int, acc: I
         if pred(value) then vec_count_indexed(pred, vec, index + 1, total, acc + 1)
         else vec_count_indexed(pred, vec, index + 1, total, acc)
 
-export fn vec_count(pred: a -> Bool, vec: Vec a) -> Int =
+export fn vec_count(pred: local a -> Bool, vec: Vec a) -> Int =
   vec_count_indexed(pred, vec, 0, vec_length(vec), 0)
 
 fn vec_slice_from(start: Int, count: Int, vec: Vec a, index: Int, total: Int, acc: List a) -> Vec a =
@@ -543,7 +543,7 @@ export fn negate(x: Int) -> Int = -x
 export fn vec_sum(vec: Vec Int) -> Int =
   vec_fold(add_ints, 0, vec)
 
-export fn vec_sum_by(f: a -> Int, vec: Vec a) -> Int =
+export fn vec_sum_by(f: local a -> Int, vec: Vec a) -> Int =
   vec_fold(\ (acc, x) -> acc + f(x), 0, vec)
 
 export class Eq a
@@ -578,7 +578,7 @@ export fn ord_gt(x: a, y: a) -> Bool where Ord a =
 export fn ord_gte(x: a, y: a) -> Bool where Ord a =
   compare(x, y) >= 0
 
-fn vec_sort_by_collect(f: a -> k, vec: Vec a, index: Int, total: Int, acc: List (k, Int, a)) -> List(k, Int, a) =
+fn vec_sort_by_collect(f: local a -> k, vec: Vec a, index: Int, total: Int, acc: List (k, Int, a)) -> List(k, Int, a) =
   if index >= total then acc
   else
     match vec_get(index, vec) with
@@ -719,7 +719,7 @@ fn decorated_values_go(xs: List (k, Int, a), acc: List a) -> List a =
 # (the old top-down merge exhausted the GC root pool above ~50k). The collect pass
 # emits the decorated tuples in reverse index order, which is fine: merge_all sorts
 # by the (key, index) total order regardless of input arrangement.
-export fn vec_sort_by(f: a -> k, vec: Vec a) -> Vec a where Ord k =
+export fn vec_sort_by(f: local a -> k, vec: Vec a) -> Vec a where Ord k =
   vec_from_list(
     list_reverse(
       decorated_values_go(
@@ -897,8 +897,8 @@ export class Functor f
 # one loop, which is why this is a second method rather than a replacement:
 # deriving the other direction would tax every fold in the language.
 export class Foldable f
-  fn fold_values(step: b -> a -> b, init: b, xs: f a) -> b
-  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b
+  fn fold_values(step: local b -> a -> b, init: b, xs: f a) -> b
+  fn fold_while_values(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: f a) -> b
 
 # Filterable is Foldable's structure-preserving counterpart: `f` appears in the
 # RESULT as well as the argument, so filtering a Vec yields a Vec. That return
@@ -973,7 +973,7 @@ export fn sequence(xs: t (f a)) -> f(t a) where Traversable t, Applicative f =
 export fn map(f: a -> b, xs: c a) -> c b where Functor c =
   fmap(f, xs)
 
-export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
+export fn fold(step: local b -> a -> b, init: b, xs: f a) -> b where Foldable f =
   fold_values(step, init, xs)
 
 # O(k) in the elements visited: folds while `cond` holds of the accumulator and
@@ -984,7 +984,7 @@ export fn fold(step: b -> a -> b, init: b, xs: f a) -> b where Foldable f =
 # which `cond` answers false; with no such accumulator it is exactly `fold`.
 # `cond` is pure and may be asked more than once about equal values, because a
 # non-linear instance re-checks it between substructures.
-export fn fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b where Foldable f =
+export fn fold_while(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: f a) -> b where Foldable f =
   fold_while_values(step, cond, init, xs)
 
 # O(n) per instance: keep the elements satisfying `pred`, in order, in the same
@@ -1018,30 +1018,30 @@ export fn partition(pred: a -> Bool, xs: c a) -> (c a, c a) where Filterable c =
 # traversal STOPS at the first hit — `fold_while` is what buys that, and it is
 # why these five are built on it rather than on `fold`. `vec_any` is this same
 # function specialised to `Vec`, not a faster one.
-export fn any(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
+export fn any(pred: local a -> Bool, xs: c a) -> Bool where Foldable c =
   fold_while(\ (acc, x) -> if acc then acc else pred(x), \acc -> ! acc, false, xs)
 
 # O(k) up to the first element failing `pred`. True for an empty structure — the
 # vacuous case, matching every language that ships this pair.
-export fn all(pred: a -> Bool, xs: c a) -> Bool where Foldable c =
+export fn all(pred: local a -> Bool, xs: c a) -> Bool where Foldable c =
   fold_while(\ (acc, x) -> if acc then pred(x) else acc, \acc -> acc, true, xs)
 
 # O(k) up to the match: the FIRST element satisfying `pred`, or `Nothing`. Total
 # — an empty structure yields `Nothing`, never a panic.
-export fn find(pred: a -> Bool, xs: c a) -> Maybe a where Foldable c =
+export fn find(pred: local a -> Bool, xs: c a) -> Maybe a where Foldable c =
   fold_while(\ (acc, x) -> if pred(x) then Just(x) else acc,
              \acc -> match acc with | Just _ -> false | Nothing -> true,
              Nothing, xs)
 
 # O(k) up to the match: the first `Just` that `f` produces — search and
 # transform in one step, for when the test and the result share work.
-export fn find_map(f: a -> Maybe b, xs: c a) -> Maybe b where Foldable c =
+export fn find_map(f: local a -> Maybe b, xs: c a) -> Maybe b where Foldable c =
   fold_while(\ (acc, x) -> match acc with | Just _ -> acc | Nothing -> f(x),
              \acc -> match acc with | Just _ -> false | Nothing -> true,
              Nothing, xs)
 
 # O(n), applying `pred` to every element: how many satisfy it.
-export fn count(pred: a -> Bool, xs: c a) -> Int where Foldable c =
+export fn count(pred: local a -> Bool, xs: c a) -> Int where Foldable c =
   fold(\ (acc, x) -> if pred(x) then acc + 1 else acc, 0, xs)
 
 # O(k) up to the hit: whether `x` occurs, by the `Eq` instance rather than by
@@ -1051,14 +1051,14 @@ export fn member(x: a, xs: c a) -> Bool where Foldable c, Eq a =
   any(\y -> eq(y, x), xs)
 
 # O(n): fold exposing the 0-based element index to the step function.
-export fn fold_indexed(f: b -> Int -> a -> b, init: b, xs: f a) -> b where Foldable f =
+export fn fold_indexed(f: local b -> Int -> a -> b, init: b, xs: f a) -> b where Foldable f =
   match fold(\ (s, x) -> match s with | (i, acc) -> (i + 1, f(acc, i, x)), (0, init), xs) with
   | (_, result) -> result
 
 # One step of the argmin fold. The accumulator carries the incumbent's KEY next
 # to it, so `f` runs exactly once per element instead of again at every
 # comparison. The strict `ord_lt` is what keeps the FIRST of several equal keys.
-fn min_by_step(f: a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
+fn min_by_step(f: local a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
   let key = f(x)
   in
     match best with
@@ -1069,7 +1069,7 @@ fn min_by_step(f: a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
 
 # The argmax twin. `ord_gte`, not `ord_gt`: an equal key displaces the
 # incumbent, so the LAST of several equal keys is kept. See `max_by`.
-fn max_by_step(f: a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
+fn max_by_step(f: local a -> k, best: Maybe (k, a), x: a) -> Maybe(k, a) where Ord k =
   let key = f(x)
   in
     match best with
@@ -1088,12 +1088,12 @@ fn keyed_value(best: Maybe (k, a)) -> Maybe a =
 # or `Nothing` when empty. Returns the ELEMENT, not the key. A tie keeps the
 # FIRST such element; `max_by` keeps the last, which makes the two exactly the
 # ends of `vec_sort_by`'s stable order.
-export fn min_by(f: a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
+export fn min_by(f: local a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
   keyed_value(fold(\ (best, x) -> min_by_step(f, best, x), Nothing, xs))
 
 # O(n), applying `f` exactly once per element. A tie keeps the LAST such
 # element — see `min_by` for why the two rules differ.
-export fn max_by(f: a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
+export fn max_by(f: local a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
   keyed_value(fold(\ (best, x) -> max_by_step(f, best, x), Nothing, xs))
 
 # O(n): the least element, or `Nothing` when empty — the identity-key case of
@@ -1437,9 +1437,9 @@ instance Functor (Result e)
     | Ok v -> Ok(f(v))
 
 instance Foldable List
-  fn fold_values(step: b -> a -> b, init: b, xs: List a) -> b =
+  fn fold_values(step: local b -> a -> b, init: b, xs: List a) -> b =
     list_fold(step, init, xs)
-  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: List a) -> b =
+  fn fold_while_values(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: List a) -> b =
     list_fold_while(step, cond, init, xs)
 
 instance Filterable List
@@ -1564,9 +1564,9 @@ instance Functor Vec
     vec_map(f, xs)
 
 instance Foldable Vec
-  fn fold_values(step: b -> a -> b, init: b, xs: Vec a) -> b =
+  fn fold_values(step: local b -> a -> b, init: b, xs: Vec a) -> b =
     vec_fold(step, init, xs)
-  fn fold_while_values(step: b -> a -> b, cond: b -> Bool, init: b, xs: Vec a) -> b =
+  fn fold_while_values(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: Vec a) -> b =
     vec_fold_while(step, cond, init, xs)
 
 instance Filterable Vec
@@ -1633,17 +1633,17 @@ export fn rcompose(f: a -> b, g: b -> c) =
 export fn lcompose(f: b -> c, g: a -> b) =
   \x -> f(g(x))
 
-export fn result_map(f: a -> b, r: Result e a) -> Result e b =
+export fn result_map(f: local a -> b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> Ok(f(x))
   | Err e -> Err(e)
 
-export fn result_map_error(f: e -> f_err, r: Result e a) -> Result f_err a =
+export fn result_map_error(f: local e -> f_err, r: Result e a) -> Result f_err a =
   match r with
   | Ok x -> Ok(x)
   | Err e -> Err(f(e))
 
-export fn result_and_then(f: a -> Result e b, r: Result e a) -> Result e b =
+export fn result_and_then(f: local a -> Result e b, r: Result e a) -> Result e b =
   match r with
   | Ok x -> f(x)
   | Err e -> Err(e)
@@ -1653,13 +1653,13 @@ export fn result_with_default(fallback: a, r: Result e a) -> a =
   | Ok x -> x
   | Err _ -> fallback
 
-export fn result_pipe(f: a -> Result e b, r: Result e a) -> Result e b =
+export fn result_pipe(f: local a -> Result e b, r: Result e a) -> Result e b =
   result_and_then(f, r)
 
-export fn result_pipe_ok(f: a -> b, r: Result e a) -> Result e b =
+export fn result_pipe_ok(f: local a -> b, r: Result e a) -> Result e b =
   result_map(f, r)
 
-export fn result_pipe_error(f: e -> f_err, r: Result e a) -> Result f_err a =
+export fn result_pipe_error(f: local e -> f_err, r: Result e a) -> Result f_err a =
   result_map_error(f, r)
 
 # The two ways into a Result the family above could not spell. `result_with_default` unwraps
@@ -1717,12 +1717,12 @@ export fn is_err(r: Result e a) -> Bool =
 export fn after(effect: Unit !{IO}, value: a) -> a !{IO} where linear a =
   value
 
-export fn when_ok(f: a -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
+export fn when_ok(f: local a -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> after(f(x), r)
   | Err e -> Err(e)
 
-export fn when_error(f: e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
+export fn when_error(f: local e -> Unit !{IO}, r: Result e a) -> Result e a !{IO} =
   match r with
   | Ok x -> Ok(x)
   | Err e -> after(f(e), r)

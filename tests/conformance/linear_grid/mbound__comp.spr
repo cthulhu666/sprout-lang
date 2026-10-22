@@ -1,0 +1,18 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn give(z: a) -> a where linear a = z
+
+class K t
+  fn m(s: t, x: a) -> List a where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> List a where linear a = [give(x) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

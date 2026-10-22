@@ -1,0 +1,18 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn give_m(z: Maybe a) -> Maybe a where linear a = z
+
+class Use t
+  fn use(x: t) -> List t
+
+instance Use (Maybe a) where linear a
+  fn use(x: Maybe a) -> List (Maybe a) = [give_m(x) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

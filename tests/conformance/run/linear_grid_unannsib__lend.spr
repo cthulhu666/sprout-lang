@@ -1,0 +1,19 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn ping(x: a, n: Int) -> (a, Int) where linear a = pong(x, n)
+
+fn pong(y, n: Int) =
+  if n > 0 then ping(y, n - 1)
+  else
+    let s = list_fold(\ (acc, i) -> acc + i + peek_a(y), 0, [1, 2])
+    in (y, s)
+
+fn main() -> Unit !{IO} = match ping(L(10), 2) with | (l, n) -> print(int_to_string(n + close(l)))

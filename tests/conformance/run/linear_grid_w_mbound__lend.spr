@@ -1,0 +1,19 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+class K t
+  fn m(s: t, x: a) -> (a, Int) where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, Int) where linear a =
+    let n = list_fold(\ (acc, i) -> acc + i + peek_a(x), s, [1, 2])
+    in (x, n)
+
+fn main() -> Unit !{IO} = match m(0, L(10)) with | (l, n) -> print(int_to_string(n + close(l)))

@@ -1,0 +1,12 @@
+module main
+
+# `local_combinator_pipe_placeholder.spr` with the direct call form.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, xs: List Int) -> Unit !{IO} =
+  list_each(\x -> print(to_string(x + peek(c))), xs)
+
+fn main() -> Unit !{IO} = print("unreachable")

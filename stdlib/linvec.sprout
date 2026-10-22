@@ -44,7 +44,7 @@ export fn linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a =
 
 # Replaces the cell at each index `i` with `f(old, y)`, left to right, so a repeated index
 # folds. An index out of range traps.
-export fn linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a =
+export fn linvec_accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a =
   match pairs with
   | [] -> v
   | [(i, y) | rest] ->

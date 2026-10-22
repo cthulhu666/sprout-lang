@@ -9,8 +9,11 @@
 # Rows (reach paths): direct, body, annsib, unannsib, inst, instb, method, mbound, ext,
 # ctor, exist, tlet. Columns: copy, drop, step (discarded do-step), wild (`_ <-`), pass (to
 # an unbounded generic), mode (a borrowing function where a consuming one is expected,
-# §6.6). `_nolin` rows declare no linear type anywhere in the program. A `mode` cell marks
-# the line its error is reported on with `#~^ ERROR` (scripts/error_line_marker.sh).
+# §6.6), lend (ACCEPT: a lambda passed to `list_fold` reads a borrowed linear value, and the
+# owner releases it after the call), comp (a list comprehension, which elaborates to
+# `list_fold`, consumes a captured linear value). `_nolin` rows declare no linear type
+# anywhere in the program. `mode` and `comp` cells mark the line their error is reported on
+# with `#~^ ERROR` (scripts/error_line_marker.sh).
 # `inst` also holds one cell per way a dictionary reaches an instance: nested context,
 # superclass, tuple head, method value, an enclosing bound, an instance method's bound.
 # Every cell on the linear ADT header repeats as `w_<name>` on a linear wrap (HDR_W).
@@ -23,6 +26,12 @@
 #   - ctor pass of a bound variable: a data parameter takes no bound (§6.1).
 #   - method/ext mode: an unbounded variable is never linear, so the modes coincide there;
 #     its misuse is the `pass` cell's. An extern has no body to hold the pair.
+#   - ext lend/comp: an extern has no body to hold a lambda or a comprehension.
+#   - method lend/comp: the method's own variable is unbounded, so never linear; a linear
+#     value reaching its body is the `inst` row's. `mbound` is the bounded form.
+#   - any _nolin lend/comp: no linear value to borrow or consume.
+#   - inst, ctor, exist, tlet, direct lend/comp: hosted on a concrete `L` (or a holder of
+#     one), since an unbounded variable cannot be linear there.
 set -euo pipefail
 
 OUT="${1:?usage: gen_linear_grid.sh <out-root>}"
@@ -917,6 +926,239 @@ fn g(b: Lent) -> Int = match b with | Lent x -> run_a(peek_a, x)
 #~^ ERROR
 
 fn main() -> Unit !{IO} = print(int_to_string(g(Lent (L(1)))))
+EOF
+
+# ── lend and comp: a lambda at a `local` combinator slot ──────────────────────
+# `lend` (accept): a lambda passed to `list_fold` reads a borrowed value; the owner releases
+# it after the call. `comp` (reject): a comprehension elaborates to `list_fold`, whose
+# lambda may not consume a captured linear value. Both go through
+# `linear_check.lin_slot_lambda`; each row hosts them in its own declaration form.
+# comp_msg <var>: the comprehension error, whole.
+comp_msg() {
+  printf "linear value '%s' cannot be used inside a comprehension (a comprehension elaborates to a fold, and higher-order linearity is deferred: the step function runs once per element, so the compiler cannot yet prove '%s' is consumed exactly once); consume it before the comprehension and use the result inside" "$1" "$1"
+}
+# direct: a plain function holding the value (an unbounded variable is never linear).
+acc "$HDR_L" direct__lend '33' <<'EOF'
+fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+fn g(l: L) -> Int =
+  let n = list_fold(\ (acc, i) -> acc + i + peek(l), 0, [1, 2])
+  in n + close(l)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(10))))
+EOF
+rej "$HDR_L" direct__comp "$(comp_msg l)" <<'EOF'
+fn g(l: L) -> List Int = [i + close(l) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# body
+acc "$HDR_L" body__lend '15' <<'EOF'
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn g(x: a) -> (a, Int) where linear a =
+  let n = list_fold(\ (acc, i) -> acc + i + peek_a(x), 0, [1, 2])
+  in (x, n)
+
+fn main() -> Unit !{IO} = match g(L(10)) with | (l, n) -> print(int_to_string(n + close(l)))
+EOF
+rej "$HDR_L" body__comp "$(comp_msg x)" <<'EOF'
+fn give(z: a) -> a where linear a = z
+
+fn g(x: a) -> List a where linear a = [give(x) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# annsib: the lambda sits in the sibling that loops back.
+acc "$HDR_L" annsib__lend '15' <<'EOF'
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn ping(x: a, n: Int) -> (a, Int) where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> (a, Int) where linear a =
+  if n > 0 then ping(y, n - 1)
+  else
+    let s = list_fold(\ (acc, i) -> acc + i + peek_a(y), 0, [1, 2])
+    in (y, s)
+
+fn main() -> Unit !{IO} = match ping(L(10), 2) with | (l, n) -> print(int_to_string(n + close(l)))
+EOF
+rej "$HDR_L" annsib__comp "$(comp_msg y)" <<'EOF'
+fn give(z: a) -> a where linear a = z
+
+fn ping(x: a, n: Int) -> List a where linear a = pong(x, n)
+
+fn pong(y: a, n: Int) -> List a where linear a =
+  if n > 0 then ping(y, n - 1)
+  else [give(y) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# unannsib
+acc "$HDR_L" unannsib__lend '15' <<'EOF'
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+fn ping(x: a, n: Int) -> (a, Int) where linear a = pong(x, n)
+
+fn pong(y, n: Int) =
+  if n > 0 then ping(y, n - 1)
+  else
+    let s = list_fold(\ (acc, i) -> acc + i + peek_a(y), 0, [1, 2])
+    in (y, s)
+
+fn main() -> Unit !{IO} = match ping(L(10), 2) with | (l, n) -> print(int_to_string(n + close(l)))
+EOF
+rej "$HDR_L" unannsib__comp "$(comp_msg y)" <<'EOF'
+fn give(z: a) -> a where linear a = z
+
+fn ping(x: a, n: Int) -> List a where linear a = pong(x, n)
+
+fn pong(y, n: Int) =
+  if n > 0 then ping(y, n - 1)
+  else [give(y) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# inst: an instance head's variable is unbounded, so the instance is on `L` itself.
+acc "$HDR_L" inst__lend '33' <<'EOF'
+fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+class Use t
+  fn use(x: t) -> Int
+
+instance Use L
+  fn use(x: L) -> Int =
+    let n = list_fold(\ (acc, i) -> acc + i + peek(x), 0, [1, 2])
+    in n + close(x)
+
+fn main() -> Unit !{IO} = print(int_to_string(use(L(10))))
+EOF
+rej "$HDR_L" inst__comp "$(comp_msg x)" <<'EOF'
+class Use t
+  fn use(x: t) -> List Int
+
+instance Use L
+  fn use(x: L) -> List Int = [i + close(x) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# instb
+acc "$HDR_L" instb__lend '15' <<'EOF'
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+class Use t
+  fn use(x: t) -> (t, Int)
+
+instance Use (Maybe a) where linear a
+  fn use(x: Maybe a) -> (Maybe a, Int) =
+    match x with
+    | Just y ->
+      let n = list_fold(\ (acc, i) -> acc + i + peek_a(y), 0, [1, 2])
+      in (Just(y), n)
+    | Nothing -> (Nothing, 0)
+
+fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
+
+fn main() -> Unit !{IO} = match use(Just (L(10))) with | (m, n) -> print(int_to_string(n + eat(m)))
+EOF
+rej "$HDR_L" instb__comp "$(comp_msg x)" <<'EOF'
+fn give_m(z: Maybe a) -> Maybe a where linear a = z
+
+class Use t
+  fn use(x: t) -> List t
+
+instance Use (Maybe a) where linear a
+  fn use(x: Maybe a) -> List (Maybe a) = [give_m(x) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# mbound
+acc "$HDR_L" mbound__lend '15' <<'EOF'
+fn peek_a(r: borrowing a) -> Int where linear a = 1
+
+class K t
+  fn m(s: t, x: a) -> (a, Int) where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> (a, Int) where linear a =
+    let n = list_fold(\ (acc, i) -> acc + i + peek_a(x), s, [1, 2])
+    in (x, n)
+
+fn main() -> Unit !{IO} = match m(0, L(10)) with | (l, n) -> print(int_to_string(n + close(l)))
+EOF
+rej "$HDR_L" mbound__comp "$(comp_msg x)" <<'EOF'
+fn give(z: a) -> a where linear a = z
+
+class K t
+  fn m(s: t, x: a) -> List a where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> List a where linear a = [give(x) for i in [1, 2]]
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# ctor: the value is unpacked from a holder (`borrowing` needs a declared linear type).
+acc "$HDR_L" ctor__lend '33' <<'EOF'
+type Box a = Box a
+
+fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+fn g(b: Box L) -> Int =
+  match b with
+  | Box l ->
+    let n = list_fold(\ (acc, i) -> acc + i + peek(l), 0, [1, 2])
+    in n + close(l)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Box (L(10)))))
+EOF
+rej "$HDR_L" ctor__comp "$(comp_msg b)" <<'EOF'
+type Box a = Box a
+
+fn eat(b: Box L) -> Int = match b with | Box l -> close(l)
+
+fn g(b: Box L) -> List Int = [i + eat(b) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# exist
+acc "$HDR_L" exist__lend '15' <<EOF
+$EXB
+fn peek_boxed(b: borrowing Boxed) -> Int = 1
+
+fn g(b: Boxed) -> Int =
+  let n = list_fold(\ (acc, i) -> acc + i + peek_boxed(b), 0, [1, 2])
+  in n + unbox(b)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(10)))))
+EOF
+rej "$HDR_L" exist__comp "$(comp_msg b)" <<EOF
+$EXB
+fn g(b: Boxed) -> List Int = [i + unbox(b) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
+EOF
+# tlet: the body of a top-level `let` holds the value.
+acc "$HDR_L" tlet__lend '33' <<'EOF'
+fn peek(l: borrowing L) -> Int = match l with | L n -> n
+
+let k: Int = match L(10) with | l -> list_fold(\ (acc, i) -> acc + i + peek(l), 0, [1, 2]) + close(l)
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
+EOF
+rej "$HDR_L" tlet__comp "$(comp_msg l)" <<'EOF'
+let k: List Int = match L(10) with | l -> [i + close(l) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
 EOF
 
 # ── decl: misuses in declarations ─────────────────────────────────────────────

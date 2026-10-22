@@ -1,0 +1,12 @@
+module main
+
+# `Monad.and_then` stays plain: a function-shaped monad (Parser, State, Reader) keeps the
+# continuation inside the monadic value. `list_flat_map` takes `local`; this does not.
+
+type linear File = File Int
+
+fn peek(f: borrowing File) -> Int = 0
+
+fn lend(c: borrowing File, m: Maybe Int) -> Maybe Int = and_then(\x -> Just(x + peek(c)), m)
+
+fn main() -> Unit !{IO} = print("unreachable")

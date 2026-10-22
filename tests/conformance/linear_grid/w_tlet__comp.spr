@@ -1,0 +1,12 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+let k: List Int = match L(10) with | l -> [i + close(l) for i in [1, 2]]
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
