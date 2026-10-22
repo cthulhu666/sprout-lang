@@ -1,0 +1,11 @@
+module main
+
+# `with` replaces `a`, so its old linear value is dropped.
+
+type linear R = R(Int)
+type linear P = (a: R, b: R)
+
+fn replace(p: P) -> P = p with (a = R(9))
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

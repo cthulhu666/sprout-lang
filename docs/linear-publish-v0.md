@@ -136,10 +136,9 @@ An instance method can read any abstract record's fields, from any module (BACKL
 `type linear LBuf = (vec: Vec Int)`). The rule above stops `(..)` on such a record, but cannot
 close that path. Until the follow-up PR closes it, the spec says linear records are covered by the
 rule and not by the guarantee. Wraps and ADTs are not affected: an instance cannot name an
-abstract constructor (`Unknown constructor`, checked 2026-10-22). A published record with two
-linear fields also rests on a separate bug: reading one field drops the others unchecked
-(BACKLOG P2 **A field read drops the record's other linear fields**). The rule neither causes
-nor closes it.
+abstract constructor (`Unknown constructor`, checked 2026-10-22). A field read or `with` update
+that would drop another linear field is an error (spec §5.8), so a record with two linear fields
+cannot be read field by field.
 
 ## 6. Compatibility and migration
 
@@ -153,9 +152,8 @@ Breaking for a published linear type with an untracked field. In our four repos:
   before this change.
 - `testsupport/rec_fixture.sprout`: `Tok (..)`, read across the module boundary by
   `tests/stdlib/test_imported_records.spr`. Its one field is now a linear `Ticket`, which keeps
-  what the test checks: a field read consumes an imported linear record. Two linear fields
-  would rest on a separate bug, BACKLOG P2 **A field read drops the record's other linear
-  fields**.
+  what the test checks: a field read consumes an imported linear record. A second linear field
+  would make that read an error (spec §5.8).
 
 ## 7. Follow-ups
 

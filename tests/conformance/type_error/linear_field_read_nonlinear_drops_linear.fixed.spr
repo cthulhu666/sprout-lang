@@ -1,0 +1,16 @@
+module main
+
+# The hint applied: a constructor type, matched to take the linear field too.
+
+type linear File = File Int
+type linear Wrap = Wrap File Int
+
+fn release(f: File) -> Int =
+  match f with
+  | File (n) -> n
+
+fn tag_of(w: Wrap) -> Int =
+  match w with
+  | Wrap f tag -> release(f) + tag
+
+fn main() -> Unit !{IO} = print("x")

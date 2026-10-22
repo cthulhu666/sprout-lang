@@ -1,0 +1,11 @@
+module main
+
+# Even a NON-linear field read consumes the record and drops its linear field.
+
+type linear File = File Int
+type linear Wrap = (inner: File, tag: Int)
+
+fn tag_of(w: Wrap) -> Int = w.tag
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

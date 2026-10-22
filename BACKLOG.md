@@ -234,10 +234,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   orphan-instance rule, or the writing module on `ast.InstanceDecl` (74 sites, 18 files).
   Recorded in `spec-v0.md` §5.6.4. It also lets any module copy an abstract linear record's
   untracked field (`docs/linear-publish-v0.md` §5.3).
-- [ ] `P2` **A field read drops the record's other linear fields.** With `type linear P = (a: R,
-  b: R)`, `fn first(p: P) -> Int = spend(p.a)` checks clean: `linear_check.lin_getfield` counts the
-  read as one use of `p` and never asks what else `p` held, so the linear `b` is never consumed.
-  Reading a field should be refused while another field is linear, as reading from a borrow is.
 - [ ] `P3` **A field unwrapped from a borrowed linear value can escape its module's code.** Inside
   a linear type's module, `match arr with | LinVec raw -> raw` from a borrowed `arr` returns an
   alias. Extend `linear_check.esc_value` so such a binder cannot be returned, captured or stored

@@ -1777,8 +1777,11 @@ A linear ADT is consumed once by matching it (`match f with | File n -> …`) or
 passing it to a function. A linear record is read via field access, which consumes
 it — so an *owned* linear record supports reading a single field or being passed
 once; reading two fields (`p.x + p.y`) is a reuse (records have no destructuring
-pattern). A `borrowing` parameter lifts that restriction (see below). For a value
-meant to be read freely, do not declare it `linear`.
+pattern). A `borrowing` parameter lifts that restriction (see below). A field read
+or a `with` update that would drop another linear field is an error: `p.a` when
+`p.b` is linear, or `p with (a = v)` when the old `a` is linear. Declare a record with
+several linear fields as a constructor type and `match` it, so every field is taken.
+For a value meant to be read freely, do not declare it `linear`.
 
 #### Publishing a linear type
 

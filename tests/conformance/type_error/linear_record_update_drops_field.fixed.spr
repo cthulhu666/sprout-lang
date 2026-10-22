@@ -1,0 +1,16 @@
+module main
+
+# The hint applied: a constructor type, matched to take the old value out first.
+
+type linear R = R(Int)
+type linear P = P R R
+
+fn spend(r: R) -> Int =
+  match r with
+  | R (n) -> n
+
+fn replace(p: P) -> P =
+  match p with
+  | P a b -> P(R(spend(a) + 9), b)
+
+fn main() -> Unit !{IO} = print("x")
