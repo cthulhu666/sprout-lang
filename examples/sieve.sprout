@@ -76,8 +76,12 @@ fn main() -> Unit !{IO} =
 #
 # fn sieve_from(p: Int, n: Int, composite: LArr Bool) -> LArr Bool =
 #   if p * p > n then composite
-#   else if larr_get(p, composite) == Just(true) then sieve_from(p + 1, n, composite)
-#   else sieve_from(p + 1, n, mark_all(multiples(p, n), composite))
+#   else
+#     match larr_get(p, composite) with
+#     | Just marked ->
+#         if marked then sieve_from(p + 1, n, composite)
+#         else sieve_from(p + 1, n, mark_all(multiples(p, n), composite))
+#     | Nothing -> composite
 #
 # fn sieve_larr(n: Int) -> Int =
 #   count_primes(n, larr_freeze(sieve_from(2, n, larr_new(n + 1, false))))
