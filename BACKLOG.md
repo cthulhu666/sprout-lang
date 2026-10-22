@@ -2410,6 +2410,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   the largest single contributor out of that share — nqueens now allocates 33.4M objects, not 50.1M
   — so re-measure before pricing this. See also the generational-step entry in §1, whose
   measurements re-scope it as compiler-only.
+- [ ] `P2` **Branded indices for `LinVec`, so a write cannot be out of range.** Today
+  `linvec_set`, `linvec_scatter` and `linvec_accum` trap on a bad index. An existential brand
+  `s` on `Len s`, `Idx s` and `BVec s a`, with `Idx s` made only by a check against `Len s`,
+  makes every write total in plain Sprout: no compiler change, prototype run. Open: the cost of
+  re-checking index arithmetic in BFS and LCS. `docs/persistent-array-v0.md` §5.7.
 - [ ] `P3` **`LinVec Double` writes do not inline.** `ast_to_ir.recognize_vector_op` and
   `bce.direct_shape` key on `vector_mutset` by name, so `linvec_set` on a `Vector Double` stays a
   call with its bounds check, where a `MutVec Double` write inlines (B1) and loses the check (BCE).
