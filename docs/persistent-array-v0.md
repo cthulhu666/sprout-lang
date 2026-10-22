@@ -275,7 +275,7 @@ linvec_length(arr: borrowing LinVec a) -> Int
 linvec_freeze(arr: LinVec a) -> Vec a
 ```
 
-**Representation.** A `wrap` is its inner value at runtime (spec §5.6.1), so an `LinVec` is a
+**Representation.** A `wrap` is its inner value at runtime (spec §5.6.1), so a `LinVec` is a
 `Vector` with no box, and `wrap linear` ([linear-wrap-v0.md](linear-wrap-v0.md)) gives it the
 linear rules. Four operations are Sprout in `LinVec`'s module, over externs that exist:
 `linvec_get` and `linvec_length` unwrap the borrowed array and call `vector_get` and
@@ -323,7 +323,7 @@ first:
 
 These are §5.8 bugs, not `LinVec` bugs: each lets a `File` be closed twice today. A leak is not one
 of them: a wildcard that drops an array loses it but cannot expose a write. `LinVec` raises their
-stakes: a double close fails loudly, while a double use of an `LinVec` makes a pure function return
+stakes: a double close fails loudly, while a double use of a `LinVec` makes a pure function return
 two answers in silence. So their rejection tests gate `LinVec`.
 
 They split by cost. Three were missing checks in existing code, and have landed: `once`, the

@@ -87,11 +87,9 @@ fn count_primes(n: Int, composite: Vec Bool) -> Int =
 fn sieve_loop(p: Int, n: Int, composite: LinVec Bool) -> LinVec Bool =
   if p * p > n then composite
   else
-    match linvec_get(p, composite) with
-    | Just marked ->
-        if marked then sieve_loop(p + 1, n, composite)
-        else sieve_loop(p + 1, n, linvec_scatter(multiples(p, n), true, composite))
-    | Nothing -> composite
+    let Just marked = linvec_get(p, composite) else composite
+    in if marked then sieve_loop(p + 1, n, composite)
+    else sieve_loop(p + 1, n, linvec_scatter(multiples(p, n), true, composite))
 
 fn sieve_linvec(n: Int) -> Int =
   count_primes(n, linvec_freeze(sieve_loop(2, n, linvec_new(n + 1, false))))
@@ -166,11 +164,9 @@ fn bfs(w: Int, seen: LinVec Bool, fresh: List Int, pending: List Int, count: Int
   | [c | rest] ->
       if is_wall(w, c) then bfs(w, seen, fresh, rest, count)
       else
-        match linvec_get(c, seen) with
-        | Just marked ->
-            if marked then bfs(w, seen, fresh, rest, count)
-            else bfs(w, linvec_set(c, true, seen), Cons(c, fresh), rest, count + 1)
-        | Nothing -> bfs(w, seen, fresh, rest, count)
+        let Just marked = linvec_get(c, seen) else bfs(w, seen, fresh, rest, count)
+        in if marked then bfs(w, seen, fresh, rest, count)
+        else bfs(w, linvec_set(c, true, seen), Cons(c, fresh), rest, count + 1)
   | [] ->
       match fresh with
       | [] -> let _ = linvec_drop(seen) in count

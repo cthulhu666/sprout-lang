@@ -101,13 +101,13 @@ declare i64 @wall_time_micros()
 @.str.16 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 62, column 106)\00" }
 @.str.17 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" ms)\00" }
 @.str.18 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in * (line 77, column 8)\00" }
-@.str.19 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 81, column 37)\00" }
-@.str.20 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 82, column 27)\00" }
-@.str.21 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 86, column 63)\00" }
-@.str.22 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in * (line 93, column 8)\00" }
-@.str.23 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 97, column 45)\00" }
-@.str.24 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 98, column 35)\00" }
-@.str.25 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 102, column 71)\00" }
+@.str.19 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 80, column 36)\00" }
+@.str.20 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 81, column 23)\00" }
+@.str.21 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 84, column 63)\00" }
+@.str.22 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in * (line 91, column 8)\00" }
+@.str.23 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 94, column 44)\00" }
+@.str.24 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 95, column 31)\00" }
+@.str.25 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 98, column 71)\00" }
 @.str.26 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"vec_set:\00" }
 @.str.27 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"MutVec: \00" }
 @.str.28 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"LinVec: \00" }
@@ -1704,18 +1704,18 @@ join_1:
 
 define i64 @examples.sieve.sieve_from(i64 %p$p$in, i64 %p$n$in, i64 %p$composite$in) {
 entry:
+  %t$29 = alloca i64
+  store i64 %p$p$in, ptr %t$29
+  %t$30 = alloca i64
+  store i64 %p$n$in, ptr %t$30
   %t$31 = alloca i64
-  store i64 %p$p$in, ptr %t$31
-  %t$32 = alloca i64
-  store i64 %p$n$in, ptr %t$32
-  %t$33 = alloca i64
-  store i64 %p$composite$in, ptr %t$33
-  %t$34 = call ptr @llvm.stacksave()
+  store i64 %p$composite$in, ptr %t$31
+  %t$32 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$p = load i64, ptr %t$31
-  %p$n = load i64, ptr %t$32
-  %p$composite = load i64, ptr %t$33
+  %p$p = load i64, ptr %t$29
+  %p$n = load i64, ptr %t$30
+  %p$composite = load i64, ptr %t$31
   %t$0$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %p$p, i64 %p$p)
   %t$0 = extractvalue { i64, i1 } %t$0$agg, 0
   %t$0$ovf = extractvalue { i64, i1 } %t$0$agg, 1
@@ -1728,8 +1728,8 @@ ovfpanic_0:
 ovfok_0:
   %t$3 = icmp sgt i64 %t$0, %p$n
   %t$4 = zext i1 %t$3 to i64
-  %t$30 = trunc i64 %t$4 to i1
-  br i1 %t$30, label %then_5, label %else_5
+  %t$28 = trunc i64 %t$4 to i1
+  br i1 %t$28, label %then_5, label %else_5
 then_5:
   br label %join_5
 else_5:
@@ -1757,10 +1757,10 @@ ovfpanic_16:
   call i64 @panic(i64 %t$18)
   unreachable
 ovfok_16:
-  store i64 %t$16, ptr %t$31
-  store i64 %p$n, ptr %t$32
-  store i64 %p$composite, ptr %t$33
-  call void @llvm.stackrestore(ptr %t$34)
+  store i64 %t$16, ptr %t$29
+  store i64 %p$n, ptr %t$30
+  store i64 %p$composite, ptr %t$31
+  call void @llvm.stackrestore(ptr %t$32)
   br label %tco_loop
 else_13:
   %t$20 = add i64 0, 1
@@ -1774,28 +1774,24 @@ ovfpanic_21:
   call i64 @panic(i64 %t$23)
   unreachable
 ovfok_21:
-  %t$35 = alloca i64
-  store i64 %p$composite, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$33 = alloca i64
+  store i64 %p$composite, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$24 = call i64 @examples.sieve.multiples(i64 %p$p, i64 %p$n)
   %t$25 = call i64 @examples.sieve.mark_all(i64 %t$24, i64 %p$composite)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %t$21, ptr %t$31
-  store i64 %p$n, ptr %t$32
-  store i64 %t$25, ptr %t$33
-  call void @llvm.stackrestore(ptr %t$34)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$21, ptr %t$29
+  store i64 %p$n, ptr %t$30
+  store i64 %t$25, ptr %t$31
+  call void @llvm.stackrestore(ptr %t$32)
   br label %tco_loop
 arm_1_9:
-  %t$28 = add i64 0, 0
-  %t$29 = icmp eq i64 %t$7, %t$28
-  br i1 %t$29, label %body_1_9, label %arm_2_9
-body_1_9:
   br label %join_9
 arm_2_9:
   call void @sprout_abort_match()
   unreachable
 join_9:
-  %t$10 = phi i64 [%p$composite, %body_1_9]
+  %t$10 = phi i64 [%p$composite, %arm_1_9]
   br label %join_5
 join_5:
   %t$6 = phi i64 [%p$composite, %then_5], [%t$10, %join_9]
@@ -1838,18 +1834,18 @@ ovfok_2:
 
 define i64 @examples.sieve.sieve_from_scatter(i64 %p$p$in, i64 %p$n$in, i64 %p$composite$in) {
 entry:
+  %t$30 = alloca i64
+  store i64 %p$p$in, ptr %t$30
+  %t$31 = alloca i64
+  store i64 %p$n$in, ptr %t$31
   %t$32 = alloca i64
-  store i64 %p$p$in, ptr %t$32
-  %t$33 = alloca i64
-  store i64 %p$n$in, ptr %t$33
-  %t$34 = alloca i64
-  store i64 %p$composite$in, ptr %t$34
-  %t$35 = call ptr @llvm.stacksave()
+  store i64 %p$composite$in, ptr %t$32
+  %t$33 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
-  %p$p = load i64, ptr %t$32
-  %p$n = load i64, ptr %t$33
-  %p$composite = load i64, ptr %t$34
+  %p$p = load i64, ptr %t$30
+  %p$n = load i64, ptr %t$31
+  %p$composite = load i64, ptr %t$32
   %t$0$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %p$p, i64 %p$p)
   %t$0 = extractvalue { i64, i1 } %t$0$agg, 0
   %t$0$ovf = extractvalue { i64, i1 } %t$0$agg, 1
@@ -1862,8 +1858,8 @@ ovfpanic_0:
 ovfok_0:
   %t$3 = icmp sgt i64 %t$0, %p$n
   %t$4 = zext i1 %t$3 to i64
-  %t$31 = trunc i64 %t$4 to i1
-  br i1 %t$31, label %then_5, label %else_5
+  %t$29 = trunc i64 %t$4 to i1
+  br i1 %t$29, label %then_5, label %else_5
 then_5:
   br label %join_5
 else_5:
@@ -1891,10 +1887,10 @@ ovfpanic_16:
   call i64 @panic(i64 %t$18)
   unreachable
 ovfok_16:
-  store i64 %t$16, ptr %t$32
-  store i64 %p$n, ptr %t$33
-  store i64 %p$composite, ptr %t$34
-  call void @llvm.stackrestore(ptr %t$35)
+  store i64 %t$16, ptr %t$30
+  store i64 %p$n, ptr %t$31
+  store i64 %p$composite, ptr %t$32
+  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 else_13:
   %t$20 = add i64 0, 1
@@ -1908,29 +1904,25 @@ ovfpanic_21:
   call i64 @panic(i64 %t$23)
   unreachable
 ovfok_21:
-  %t$36 = alloca i64
-  store i64 %p$composite, ptr %t$36
-  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$34 = alloca i64
+  store i64 %p$composite, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$24 = call i64 @examples.sieve.multiples(i64 %p$p, i64 %p$n)
   %t$25 = add i64 0, 1
   %t$26 = call i64 @stdlib.linvec.linvec_scatter(i64 %t$24, i64 %t$25, i64 %p$composite)
-  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
-  store i64 %t$21, ptr %t$32
-  store i64 %p$n, ptr %t$33
-  store i64 %t$26, ptr %t$34
-  call void @llvm.stackrestore(ptr %t$35)
+  %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$21, ptr %t$30
+  store i64 %p$n, ptr %t$31
+  store i64 %t$26, ptr %t$32
+  call void @llvm.stackrestore(ptr %t$33)
   br label %tco_loop
 arm_1_9:
-  %t$29 = add i64 0, 0
-  %t$30 = icmp eq i64 %t$7, %t$29
-  br i1 %t$30, label %body_1_9, label %arm_2_9
-body_1_9:
   br label %join_9
 arm_2_9:
   call void @sprout_abort_match()
   unreachable
 join_9:
-  %t$10 = phi i64 [%p$composite, %body_1_9]
+  %t$10 = phi i64 [%p$composite, %arm_1_9]
   br label %join_5
 join_5:
   %t$6 = phi i64 [%p$composite, %then_5], [%t$10, %join_9]
@@ -1946,7 +1938,7 @@ entry:
   %t$2$ovf = extractvalue { i64, i1 } %t$2$agg, 1
   br i1 %t$2$ovf, label %ovfpanic_2, label %ovfok_2
 ovfpanic_2:
-  %t$3 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
+  %t$3 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   call i64 @panic(i64 %t$4)
   unreachable

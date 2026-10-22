@@ -11,10 +11,10 @@ module stdlib.mutable
 # (bundler.sprout:536 gives it `Nil` import specs), so a prelude wrapper pins its
 # extern. They are visible here implicitly.
 #
-# The five MUTABLE ones are declared below instead. They back `MutVec` and
-# nothing else — the prelude never calls them — so under the rule "an extern lives
-# in the module that owns its type" this is where they belong. The split falls
-# on the persistent/mutable line.
+# The five MUTABLE ones are declared below instead. The prelude never calls them
+# and `MutVec` is their main user (`stdlib.linvec` shares `vec_make_filled`), so
+# under the rule "an extern lives in the module that owns its type" this is where
+# they belong. The split falls on the persistent/mutable line.
 #
 # Declaring them here does not change how callers name them: externs are invisible
 # to the module system (bundler.sprout:597 drops `ExternFnDecl`), so they resolve
