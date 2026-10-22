@@ -1,0 +1,61 @@
+import stdlib.test (new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# A read through a borrowed `wrap linear` allocates nothing when its caller matches
+# it with a binding: the read gets a CPR worker over the unboxed `vector_get`. The
+# linear array's reads rest on this (docs/persistent-array-v0.md §3.4).
+
+let fixture =
+  "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+    ++ "extern fn vector_get(v: Vector a, i: Int) -> Maybe a\n\n"
+    ++ "wrap linear W a = Vector a\n\n"
+    ++ "fn w_get(i: Int, w: borrowing W a) -> Maybe a =\n"
+    ++ "  match w with\n"
+    ++ "  | W raw -> vector_get(raw, i)\n\n"
+    ++ "fn probe(i: Int, w: borrowing W Int) -> Int =\n"
+    ++ "  match w_get(i, w) with\n"
+    ++ "  | Just v -> v\n"
+    ++ "  | Nothing -> 0 - 1\n"
+
+# The emitted IR, or a string starting "ERR: ", so a broken fixture fails every check.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+fn translated(out: String) -> Bool =
+  if str_starts_with(out, "ERR: ") then false else true
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ir <- translate_or_msg(fixture)
+    assert_true(state, "fixture translates", translated(ir))
+    assert_true(state, "the borrowed read gets a CPR worker", has(ir, "define i128 @w_get_worker("))
+    assert_true(state, "the matching caller calls the worker", has(ir, "call i128 @w_get_worker("))
+    assert_true(state, "the worker reads unboxed", has(ir, "call i128 @vector_get_unboxed"))
+    summary(state)

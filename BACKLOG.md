@@ -1988,11 +1988,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   linear misuse programs and runs them on master and head; X3, check the spec's `sprout` blocks
   that mention `linear`, expected-error where the text says so. Also park bound obligations
   unconditionally: drop the whole gate in `park_bound_obligations` (retro §3.3 measured it free).
-- [ ] `P3` **`wrap linear`: a zero-cost linear type.** A linear type must be an ADT or record,
-  so a one-field one is boxed; the linear array needs it unboxed to drop four of its five
-  builtins. Worse today: `wrap linear LA a = Vector a` compiles silently as a wrap named `linear`
-  with parameters `LA` and `a`. Small gaps (AST field, parser, export scan,
-  `mark_type_multiplicity`, a lint arm, the spec): `docs/linear-wrap-v0.md`.
 - [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
   M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
   lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
@@ -2067,15 +2062,12 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   refuses a task with `deadline_child`). Once a cancel may drop that owner instead, it must drop
   the child first: `with_timeout`'s `local` body may borrow a value lent from the owner's frame,
   and a surviving child would run against a frame that is gone (`docs/local-closures-v0.md` §6.5).
-- [ ] `P3` **A linear `TcpConnection` costs an allocation and a GC root per connection; `wrap` +
-  `linear` would not.** Migrating `http_server.sprout` from raw `Int` handles turned `pop_roots(1)`
-  into `pop_roots(2)` in the read loop, because a connection went from an unboxed integer to a boxed
-  single-constructor ADT rooted across the recursive call. Correct, and the price of the guarantee
-  — but not *inherent*: `type linear TcpConnection = | TcpConnection Int` is exactly the
-  single-field shape `wrap` already unboxes. Scope: find out whether the restriction is deliberate
-  or simply unimplemented (`ast.WrapDecl` vs `ast.Linearity`), then lift it or record why it cannot
-  be. **Measure before assuming it matters** — a server doing per-connection syscalls will not
-  notice one allocation; this is a "no hidden cost" argument, not a demonstrated bottleneck.
+- [ ] `P3` **A linear `TcpConnection` costs an allocation and a GC root per connection; a
+  `wrap linear` would not.** Migrating `http_server.sprout` from raw `Int` handles turned
+  `pop_roots(1)` into `pop_roots(2)` in the read loop: a connection became a boxed one-field ADT
+  rooted across the recursive call. `wrap linear` now exists (`docs/linear-wrap-v0.md`), so
+  `TcpConnection`, `TcpListener` and `Task a` could each drop the box. **Measure first** — a
+  server doing per-connection syscalls may not notice one allocation.
 - [ ] `P3` **Cross-module linear-reject conformance coverage.** The `type_error` harness invokes
   `--phase check` without `--package-root`, so a cross-module *misuse* of an imported `type linear`
   cannot be a conformance fixture. Enforcement is verified manually and by the positive
@@ -2417,9 +2409,8 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   own code is not bottlenecked, but three uncharted-suns functions are `!{IO}` only for a scratch
   `MutVec`. Proposal: `docs/persistent-array-v0.md` — a trie as the persistent array, and a
   linear array with bulk operations as the one in-place mechanism; no Baker array, no `ST`-style
-  `run_local`. The trie waits on nothing. The linear array's soundness holes are closed; it is a
-  `wrap linear` over `Vector` with one builtin, `larr_set`, and waits on `wrap linear`
-  (`docs/linear-wrap-v0.md`). When it lands, uncomment the `LArr` sieves in
+  `run_local`. Neither waits on anything now: the linear array is a `wrap linear` over `Vector`
+  with one builtin, `larr_set`. When it lands, uncomment the `LArr` sieves in
   `examples/sieve.sprout`. Revisit per the doc's §12 triggers.
 - [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
   (`LMatrix Int Int (LArr a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a

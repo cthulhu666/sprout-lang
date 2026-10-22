@@ -155,6 +155,26 @@ else
   fail=1
 fi
 
+# A `wrap linear` is linear in its importer too, and an abstract one stays shut: its
+# field is not linear, so unwrapping it would let an importer copy what it holds.
+lwl="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_leak.spr" 2>&1)"
+if echo "$lwl" | grep -qF "linear value 't' is never used"; then
+  echo "PASS linear wrap: an importer sees the wrap as linear"
+else
+  echo "FAIL linear wrap: expected the unspent demo.linwrap.Token to be a leak"
+  echo "$lwl" | tail -3
+  fail=1
+fi
+
+lwp="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_wrap_pattern.spr" 2>&1)"
+if echo "$lwp" | grep -qF 'Unknown constructor: linwrap.Token'; then
+  echo "PASS linear wrap: an abstract linear wrap cannot be unwrapped cross-module"
+else
+  echo "FAIL linear wrap: expected 'Unknown constructor: linwrap.Token'"
+  echo "$lwp" | tail -3
+  fail=1
+fi
+
 # The batch CLI's half of the canonical-name rule. The env front end has its own
 # (tests/stdlib/compiler/test_canonical_name_rejected.spr); the two have diverged
 # before over package roots, which is why neither stands in for the other.

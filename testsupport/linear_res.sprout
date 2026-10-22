@@ -12,3 +12,12 @@ export fn open_handle(n: Int) -> Handle = Handle(n)
 export fn read_handle(h: Handle) -> Int =
   match h with
   | Handle n -> n
+
+# The same as an abstract `wrap linear`: no box, and no constructor for importers.
+export wrap linear Ticket = Int
+
+export fn issue_ticket(n: Int) -> Ticket = Ticket(n)
+
+export fn redeem(t: Ticket) -> Int =
+  match t with
+  | Ticket n -> n

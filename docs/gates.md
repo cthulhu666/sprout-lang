@@ -726,6 +726,8 @@ N/A cells.
   only the `annsib`/`unannsib` cells catch it. Its cells mark the reported line with `#~^
   ERROR` (`scripts/error_line_marker.sh`, run by `_test-reject`; `just
   test-error-line-marker` tests it).
+- A new way to declare a linear type gets a header, not a row. Every cell on the linear ADT
+  header repeats as `w_<name>` on a `wrap linear` (docs/linear-wrap-v0.md §8).
 
 ## `just linux-smoke`
 

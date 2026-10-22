@@ -1,0 +1,11 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn pick(n: Int) -> L = if n > 0 then L(n) else panic("neg")
+
+fn main() -> Unit !{IO} = print(int_to_string(close(pick(2))))

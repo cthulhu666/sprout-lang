@@ -1,0 +1,21 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Count t
+  fn count(x: t) -> Int !{IO}
+
+instance Count (Maybe a) where linear a
+  fn count(x: Maybe a) -> Int !{IO} =
+    match x with
+    | Just y ->
+      do
+        _ <- after(print("w"), y)
+        0
+    | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(count(Just (L(1)))))

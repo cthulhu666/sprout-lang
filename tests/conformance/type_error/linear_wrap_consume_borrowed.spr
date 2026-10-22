@@ -1,0 +1,17 @@
+module main
+
+# A borrowed `wrap linear` cannot be consumed: freezing it would end a life the
+# caller still owns.
+
+extern fn vector_from_list(xs: List a) -> Vector a
+
+wrap linear Arr a = Vector a
+
+fn freeze(arr: Arr a) -> Vec a = match arr with | Arr raw -> Vec(raw)
+
+fn peek(arr: borrowing Arr a) -> Vec a = freeze(arr)
+
+fn main() -> Unit !{IO} =
+  do
+    let arr = Arr(vector_from_list([1, 2]))
+    print(int_to_string(vec_length(peek(arr)) + vec_length(freeze(arr))))

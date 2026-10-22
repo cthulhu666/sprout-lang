@@ -1,0 +1,14 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+extern fn ext_id(x: a) -> a
+
+fn main() -> Unit !{IO} =
+  do
+    ext_id(L(1))
+    print("x")

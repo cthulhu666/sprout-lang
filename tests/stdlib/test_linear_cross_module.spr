@@ -1,5 +1,5 @@
 import stdlib.test (check_eq, run_suite)
-import testsupport.linear_res (Handle, open_handle, read_handle)
+import testsupport.linear_res (Handle, Ticket, issue_ticket, open_handle, read_handle, redeem)
 
 # A linear type imported from another module retains its linearity through the
 # interface round-trip (M4.1 iface_codec) and M4.2 enforcement accepts correct
@@ -24,8 +24,12 @@ fn consume(h) -> Int = read_handle(h)
 # defining one — i.e. borrowing was unusable across module boundaries.
 fn consume_annotated(h: Handle) -> Int = read_handle(h)
 
+# An imported `wrap linear`, annotated by name.
+fn redeem_annotated(t: Ticket) -> Int = redeem(t)
+
 fn main() -> Unit !{IO} =
   run_suite("linear_cross_module", [
     check_eq("imported linear used once", consume(open_handle(42)), 42),
-    check_eq("imported linear annotated by name", consume_annotated(open_handle(7)), 7)
+    check_eq("imported linear annotated by name", consume_annotated(open_handle(7)), 7),
+    check_eq("imported linear wrap annotated by name", redeem_annotated(issue_ticket(9)), 9)
   ])

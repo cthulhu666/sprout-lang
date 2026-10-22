@@ -1,0 +1,16 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+let dup0 = \x -> (x, x)
+
+fn ident(x: a) -> a where linear a = x
+
+fn main() -> Unit !{IO} =
+  do
+    match dup0(1) with | (p, q) -> print(int_to_string(p + q))
+    print(int_to_string(close(ident(L(5)))))

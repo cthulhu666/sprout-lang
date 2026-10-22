@@ -664,6 +664,18 @@ let nullary_linear_record =
   "\n" ++
   "fn make_handle() -> Handle = Handle(fd = 1)\n"
 
+# A linear WRAP's constructor is its own name, and so is a plain wrap's: only the
+# marker separates the two.
+let nullary_linear_wrap =
+  "wrap linear Fd (..) = Int\n" ++
+  "\n" ++
+  "fn make_fd() -> Fd = Fd(0)\n"
+
+let nullary_unrestricted_wrap =
+  "wrap Fd (..) = Int\n" ++
+  "\n" ++
+  "fn make_fd() -> Fd = Fd(0)\n"
+
 # A constructor's `where linear` makes its type linear without the `linear`
 # keyword, so the gate reads the bound too.
 let nullary_bounded_ctor =
@@ -1057,6 +1069,10 @@ fn main() -> Unit !{IO} =
       count_by_rule(lint_rules.lint_ast(nullary_linear_ctor), "nullary-const-fn"), 0)
     assert_eq(state, "nullary fn building a linear RECORD: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_linear_record), "nullary-const-fn"), 0)
+    assert_eq(state, "nullary fn building a linear WRAP: no finding",
+      count_by_rule(lint_rules.lint_ast(nullary_linear_wrap), "nullary-const-fn"), 0)
+    assert_eq(state, "the same shape at a plain wrap: one finding",
+      count_by_rule(lint_rules.lint_ast(nullary_unrestricted_wrap), "nullary-const-fn"), 1)
     assert_eq(state, "nullary fn building a bounded-constructor value: no finding",
       count_by_rule(lint_rules.lint_ast(nullary_bounded_ctor), "nullary-const-fn"), 0)
     assert_eq(state, "the same shape at an unrestricted type: one finding",

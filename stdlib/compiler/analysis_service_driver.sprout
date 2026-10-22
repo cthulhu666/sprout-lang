@@ -151,7 +151,7 @@ fn decl_category(d: ast.Decl) -> Maybe (String, String) =
   | ast.ClassDecl name _ _ _ _ -> Just(("class", name))
   | ast.InstanceDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl name _ _ _ -> Just(("alias", name))
-  | ast.WrapDecl name _ _ _ _ -> Just(("type", name))
+  | ast.WrapDecl name _ _ _ _ _ -> Just(("type", name))
   | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
 
 fn collect_decl_locations(

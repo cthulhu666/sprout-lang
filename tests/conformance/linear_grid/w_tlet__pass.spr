@@ -1,0 +1,11 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+let fwd = \x -> dup(x)
+
+fn main() -> Unit !{IO} = match fwd(L(1)) with | (p, q) -> print(int_to_string(close(p) + close(q)))

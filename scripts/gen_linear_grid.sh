@@ -13,6 +13,7 @@
 # the line its error is reported on with `#~^ ERROR` (scripts/error_line_marker.sh).
 # `inst` also holds one cell per way a dictionary reaches an instance: nested context,
 # superclass, tuple head, method value, an enclosing bound, an instance method's bound.
+# Every cell on the linear ADT header repeats as `w_<name>` on a linear wrap (HDR_W).
 #
 # N/A cells (not generated):
 #   - direct/inst/method/ext/ctor/exist/tlet _nolin: they need a linear value to reach
@@ -39,6 +40,16 @@ fn close(l: L) -> Int = match l with | L n -> n
 
 fn dup(z: b) -> (b, b) = (z, z)
 '
+# The same `L` as a linear wrap: every HDR_L cell runs again under it as `w_<name>`,
+# since `L(1)` and `| L n ->` read the same either way (docs/linear-wrap-v0.md §8).
+HDR_W='module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+'
 HDR_N='module main
 
 fn dup(z: b) -> (b, b) = (z, z)
@@ -48,8 +59,14 @@ HDR_B='module main
 
 # emit <dir> <prefix> <ext> <hdr> <name> <expected>  (program body on stdin)
 emit() {
-  { printf '%s\n' "$4"; cat; } > "$1/$2$5.spr"
+  local body
+  body="$(cat; printf x)"; body="${body%x}"
+  { printf '%s\n' "$4"; printf '%s' "$body"; } > "$1/$2$5.spr"
   printf '%s\n' "$6" > "$1/$2$5.$3"
+  if [ "$4" = "$HDR_L" ]; then
+    { printf '%s\n' "$HDR_W"; printf '%s' "$body"; } > "$1/$2w_$5.spr"
+    printf '%s\n' "$6" > "$1/$2w_$5.$3"
+  fi
 }
 # rej <hdr> <name> <err>: a reject cell.
 rej() { emit "$R" "" err "$@"; }

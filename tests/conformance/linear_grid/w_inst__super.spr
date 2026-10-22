@@ -1,0 +1,21 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Base t
+  fn base(x: t) -> Int
+
+class Sub t where Base t
+  fn sub(x: t) -> t
+
+instance Base (Maybe a)
+  fn base(x: Maybe a) -> Int = 0
+
+instance Sub (Maybe a) where linear a
+  fn sub(x: Maybe a) -> Maybe a = x
+
+fn main() -> Unit !{IO} = print(int_to_string(match sub(Just (L(1))) with | Just l -> close(l) | Nothing -> 0))

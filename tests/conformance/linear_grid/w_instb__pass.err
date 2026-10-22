@@ -1,0 +1,1 @@
+takes `b` as a value it may copy or drop, and `Dup2 (Maybe a)`'s `a` is linear under its `where linear a`

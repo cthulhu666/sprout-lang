@@ -1,0 +1,61 @@
+import stdlib.test (check_eq, run_suite)
+
+# A `wrap linear` (docs/linear-wrap-v0.md): a wrap's representation with a linear
+# type's rules. This file runs the valid shapes; the rejections are the linear grid's
+# `w_*` cells and tests/conformance/type_error/linear_wrap_*.
+
+extern fn vector_from_list(xs: List a) -> Vector a
+extern fn vector_get(v: Vector a, i: Int) -> Maybe a
+extern fn vector_length(v: Vector a) -> Int
+
+wrap linear Arr a = Vector a
+
+# A phantom parameter, as on a plain wrap.
+wrap linear Handle s = Int
+
+# The derived methods consume their arguments, as on a `type linear`.
+wrap linear Tag = Int deriving (Eq, ToString)
+
+fn arr_of(xs: List a) -> Arr a = Arr(vector_from_list(xs))
+
+# Reads borrow: the array stays live for the caller.
+fn arr_get(i: Int, arr: borrowing Arr a) -> Maybe a =
+  match arr with
+  | Arr raw -> vector_get(raw, i)
+
+fn arr_length(arr: borrowing Arr a) -> Int =
+  match arr with
+  | Arr raw -> vector_length(raw)
+
+# Ends the array's life as an ordinary Vec.
+fn arr_freeze(arr: Arr a) -> Vec a =
+  match arr with
+  | Arr raw -> Vec(raw)
+
+# Matched with a binding, so the read compiles to a worker over the unboxed read.
+fn read_or(i: Int, fallback: Int, arr: borrowing Arr Int) -> Int =
+  match arr_get(i, arr) with
+  | Just v -> v
+  | Nothing -> fallback
+
+fn borrow_then_freeze(i: Int, arr: Arr Int) -> (Int, Int, Vec Int) =
+  let n = arr_length(arr)
+  in let x = read_or(i, -1, arr)
+  in (n, x, arr_freeze(arr))
+
+fn close(h: Handle s) -> Int =
+  match h with
+  | Handle fd -> fd
+
+fn summary(t: (Int, Int, Vec Int)) -> String =
+  match t with
+  | (n, x, v) -> `${int_to_string(n)} ${int_to_string(x)} ${int_to_string(vec_length(v))}`
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_wrap", [
+    check_eq("borrow, read, then freeze", summary(borrow_then_freeze(1, arr_of([10, 20, 30]))), "3 20 3"),
+    check_eq("a read out of range is Nothing", summary(borrow_then_freeze(9, arr_of([1]))), "1 -1 1"),
+    check_eq("a phantom-parameter linear wrap consumes", close(Handle(7)), 7),
+    check_eq("derived Eq consumes both sides", Tag(3) == Tag(3), true),
+    check_eq("derived ToString", to_string(Tag(4)), "Tag(4)")
+  ])

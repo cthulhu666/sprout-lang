@@ -833,7 +833,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
       add_type_name_to_symbols(mod_name, name, str_list_member(name, exported), acc)
   # WrapDecl: register the type AND the synthetic constructor (same name) so
   # callers can reference both Foo (as a type) and Foo(...) (as a constructor).
-  | ast.WrapDecl name _ inner _ _ ->
+  | ast.WrapDecl name _ inner _ _ _ ->
       add_type_to_symbols(mod_name, name,
         [ast.TypeConstructor(name, [inner], Nil, Nil, Nil)],
         exported, ctor_types, acc)
@@ -1011,7 +1011,7 @@ fn defines_type(d: ast.Decl) -> Bool =
   | ast.AliasDecl _ _ _ _ -> true
   | ast.TypeDecl _ _ _ _ _ _ -> true
   | ast.RecordDecl _ _ _ _ _ _ _ -> true
-  | ast.WrapDecl _ _ _ _ _ -> true
+  | ast.WrapDecl _ _ _ _ _ _ -> true
   | ast.FnDecl _ _ _ _ _ _ _ _ -> false
   | ast.ExternFnDecl _ _ _ _ _ _ -> false
   | ast.LetDecl _ _ _ _ -> false
@@ -1023,7 +1023,7 @@ fn add_type_bodies(ctx: ResolveCtx, acc: Dict (List ast.TypeExpr), d: ast.Decl) 
   | ast.AliasDecl name _ rhs _ -> add_type_body(ctx, name, [rhs], acc)
   | ast.TypeDecl name _ ctors _ _ _ -> add_type_body(ctx, name, list_flat_map(ctor_field_types, ctors), acc)
   | ast.RecordDecl name _ fields _ _ _ _ -> add_type_body(ctx, name, list_map(record_field_type, fields), acc)
-  | ast.WrapDecl name _ inner _ _ -> add_type_body(ctx, name, [inner], acc)
+  | ast.WrapDecl name _ inner _ _ _ -> add_type_body(ctx, name, [inner], acc)
   | ast.FnDecl _ _ _ _ _ _ _ _ -> acc
   | ast.ExternFnDecl _ _ _ _ _ _ -> acc
   | ast.LetDecl _ _ _ _ -> acc
@@ -1892,12 +1892,13 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
                pos)
   | ast.AliasDecl name type_params rhs pos ->
       ast.AliasDecl(dict_get_or(name, ctx.type_locals, name), type_params, qualify_type_expr(ctx, rhs), pos)
-  | ast.WrapDecl name type_params inner deriving_classes pos ->
+  | ast.WrapDecl name type_params inner deriving_classes mult pos ->
       ast.WrapDecl(
         dict_get_or(name, ctx.type_locals, name),
         type_params,
         qualify_type_expr(ctx, inner),
         deriving_classes,
+        mult,
         pos)
   | ast.ExternFnDecl name params ret_type effects bounds pos ->
       ast.ExternFnDecl(name, qualify_param_types(ctx, params), qualify_maybe_type(ctx, ret_type), effects, bounds, pos)
@@ -2102,7 +2103,7 @@ fn add_declared_type_name(decl: ast.Decl, acc: Dict String) -> Dict String =
   | ast.TypeDecl name _ _ _ _ _ -> dict_set(name, name, acc)
   | ast.RecordDecl name _ _ _ _ _ _ -> dict_set(name, name, acc)
   | ast.AliasDecl name _ _ _ -> dict_set(name, name, acc)
-  | ast.WrapDecl name _ _ _ _ -> dict_set(name, name, acc)
+  | ast.WrapDecl name _ _ _ _ _ -> dict_set(name, name, acc)
   # Classes share the namespace: a constraint's head and an `any C` existential
   # both reach a class through a type position.
   | ast.ClassDecl name _ _ _ _ -> dict_set(name, name, acc)
@@ -2294,7 +2295,7 @@ fn decl_display_name(decl: ast.Decl) -> String =
   | ast.TypeDecl name _ _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name
-  | ast.WrapDecl name _ _ _ _ -> name
+  | ast.WrapDecl name _ _ _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.InstanceDecl constraint _ _ _ _ ->
@@ -2311,7 +2312,7 @@ fn unresolved_in_decl(decl: ast.Decl, declared: Dict String) -> Maybe String =
   | ast.TypeDecl _ _ ctors _ _ _ -> unresolved_in_ctors(ctors, declared)
   | ast.RecordDecl _ _ fields _ _ _ _ -> unresolved_in_record_fields(fields, declared)
   | ast.AliasDecl _ _ rhs _ -> unresolved_in_type(rhs, declared)
-  | ast.WrapDecl _ _ inner _ _ -> unresolved_in_type(inner, declared)
+  | ast.WrapDecl _ _ inner _ _ _ -> unresolved_in_type(inner, declared)
   | ast.ClassDecl _ _ methods supers _ ->
       match unresolved_in_class_methods(methods, declared) with
       | Just n -> Just(n)
@@ -2478,7 +2479,7 @@ fn validate_qualified_decl(decl: ast.Decl) -> Maybe String =
   | ast.ClassDecl name _ _ _ _ ->
       if str_starts_with(name, ".") then Just("ClassDecl name starts with '.': " ++ name)
       else Nothing
-  | ast.WrapDecl name _ _ _ _ ->
+  | ast.WrapDecl name _ _ _ _ _ ->
       if str_starts_with(name, ".") then Just("WrapDecl name starts with '.': " ++ name)
       else Nothing
   | _ -> Nothing
@@ -2651,7 +2652,7 @@ fn decl_orig_name(decl: ast.Decl) -> String =
       match constraint with
       | ast.TypeConstraint class_name _ -> "instance:" ++ class_name
   | ast.AliasDecl name _ _ _ -> name
-  | ast.WrapDecl name _ _ _ _ -> name
+  | ast.WrapDecl name _ _ _ _ _ -> name
   | ast.ExternFnDecl name _ _ _ _ _ -> name
 
 fn ctx_status_line(path: String, all_symbols: Dict ModuleSymbols) -> String =

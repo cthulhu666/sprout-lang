@@ -603,7 +603,7 @@ value is unshared moves the ranking.
    4, and keep 5.3's *Invariants*.
    Marking the combinators `local` should land with it, or lambdas cannot even read the array.
    Other mutable structures are linear types over it. It needs `wrap linear`
-   ([linear-wrap-v0.md](linear-wrap-v0.md)) and one builtin, `larr_set`; §3.2 is the measured
+   ([linear-wrap-v0.md](linear-wrap-v0.md), landed) and one builtin, `larr_set`; §3.2 is the measured
    case: typical programs, not our own; in our own code it removes `!{IO}` from the three cases
    in §1.
 6. Follow with in-place reuse of consumed linear constructors (5.3), which makes the wrappers

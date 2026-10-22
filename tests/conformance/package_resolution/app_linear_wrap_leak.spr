@@ -1,0 +1,8 @@
+module main
+import demo.linwrap as linwrap
+
+# An imported `wrap linear` keeps its linearity: the token is minted and never spent.
+
+fn drop_it(t: linwrap.Token) -> Int = 0
+
+fn main() -> Unit !{IO} = print(int_to_string(drop_it(linwrap.mint(1))))

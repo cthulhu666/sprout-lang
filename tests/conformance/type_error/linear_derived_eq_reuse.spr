@@ -1,0 +1,10 @@
+module main
+
+# A derived method consumes its arguments, so comparing a linear value with itself
+# spends it twice.
+
+type linear Tok deriving (Eq) = Tok Int
+
+fn same(a: Tok) -> Bool = a == a
+
+fn main() -> Unit !{IO} = print(if same(Tok(1)) then "eq" else "ne")

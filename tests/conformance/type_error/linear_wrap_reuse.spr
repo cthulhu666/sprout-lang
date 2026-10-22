@@ -1,0 +1,12 @@
+module main
+
+# A `wrap linear` is used exactly once, as a `type linear` is: `close(h)` twice
+# spends one handle twice.
+
+wrap linear Handle = Int
+
+fn close(h: Handle) -> Int = match h with | Handle fd -> fd
+
+fn twice(h: Handle) -> Int = close(h) + close(h)
+
+fn main() -> Unit !{IO} = print(int_to_string(twice(Handle(3))))

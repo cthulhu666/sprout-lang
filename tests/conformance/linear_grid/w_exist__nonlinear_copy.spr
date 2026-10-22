@@ -1,0 +1,25 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker L
+  fn take(x: L) -> Int = close(x)
+
+instance Taker Int
+  fn take(x: Int) -> Int = x
+
+type Boxed = | exists a. Boxed a where linear a, Taker a
+
+fn unbox(b: Boxed) -> Int = match b with | Boxed x -> take(x)
+
+fn main() -> Unit !{IO} =
+  do
+    let b = Boxed(1)
+    print(int_to_string(unbox(b) + unbox(b)))

@@ -1,0 +1,15 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+fn view(x: borrowing a) -> Int where linear a = 7
+
+fn main() -> Unit !{IO} =
+  do
+    let l = L(5)
+    print(int_to_string(view(l)))
+    print(int_to_string(close(l)))

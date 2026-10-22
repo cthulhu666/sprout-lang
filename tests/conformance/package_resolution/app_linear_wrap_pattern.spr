@@ -1,0 +1,11 @@
+module main
+import demo.linwrap as linwrap
+
+# An abstract `wrap linear` cannot be unwrapped outside its module. Its field is
+# not linear, so this is what keeps an importer from copying what it holds.
+
+fn peek(t: linwrap.Token) -> Int =
+  match t with
+  | linwrap.Token n -> n
+
+fn main() -> Unit !{IO} = print(int_to_string(peek(linwrap.mint(1))))
