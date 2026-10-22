@@ -58,7 +58,7 @@ if build "$TEST" "$ORACLE" "$TMPD/oracle"; then
   "$TMPD/oracle" > "$TMPD/oracle.out" 2>&1
   if cmp -s "$TMPD/real.out" "$TMPD/oracle.out"; then :; else
     bad "test_linvec prints differently with a copying linvec_set"
-    diff "$TMPD/real.out" "$TMPD/oracle.out" >&2 | head -10
+    diff "$TMPD/real.out" "$TMPD/oracle.out" | head -10 >&2
   fi
 else
   fail=1
