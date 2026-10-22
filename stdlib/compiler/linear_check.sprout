@@ -545,7 +545,13 @@ fn local_move_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (a plain `local` closure may run many times, so it cannot take a move; if the callee invokes this closure at most once, declare that parameter `once local`)"
 
 fn borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee is your own and does not keep this closure past the call, declare that parameter `local`; the prelude's `list_`, `vec_` and `range_` functions and `fold` already do, `map`, `filter` and `and_then` do not"
+  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee is your own and does not keep this closure past the call, declare that parameter `local`, as the prelude's concrete `list_`, `vec_`, `range_` and `result_` functions and the `Foldable` functions do; the class methods `map`, `filter`, `and_then` and `traverse` do not"
+
+# A `_` makes an ordinary lambda of the call it stands in. For the data argument
+# (`xs |> list_each(f, _)`) the advice above would send the reader to a `local`
+# slot they already use, so name the hole instead.
+fn placeholder_borrow_capture_msg(name: String) -> String =
+  "borrowed value '" ++ name ++ "' is captured by the lambda that a `_` placeholder makes of its call, which is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it); read '" ++ name ++ "' before the call and capture the result instead, or write the call without the `_` so a `local` slot inside it can lend '" ++ name ++ "'"
 
 # A comprehension elaborates to a fold over lambdas the user never wrote
 # (infer.build_comp_fold), so the two messages above misdescribe it three ways:
@@ -952,17 +958,8 @@ fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: 
 # accumulator drop and its generator wording.
 fn lin_slot_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
                    p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  let from_comp = is_comprehension_fold(params)
-  in match first_owned_linear_param(drop_comp_acc_params(params),
-                                    drop_comp_acc_type(params, lam_type), env) with
-     | Just b -> LinErr(p, linear_param_msg(from_comp, b, env))
-     | Nothing ->
-         lambda_once_after(
-           lin_slot_lambda_body(
-             borrowed_linear_params(drop_comp_acc_params(params),
-                                    drop_comp_acc_type(params, lam_type), env),
-             params, body, sc, env),
-           params, lam_type, body, env)
+  lin_lambda_params(params, body, lam_type, p, env,
+    \ (_, borrowed) -> lin_slot_lambda_body(borrowed, params, body, sc, env))
 
 # The borrowing parameters are discharged first and on their own terms — not
 # consumed, then dropped from both sets — so what the slot's rule sees is the
@@ -1024,26 +1021,30 @@ fn lin_local_arg(a: typed_ast.TypedExpr, moves_ok: Bool, sc: LinScope,
   match a with
   | typed_ast.TLambda params body lam_type p ->
       lin_local_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), moves_ok,
-                         is_comprehension_fold(params), p)
+                         lambda_origin(params), p)
   | _ -> lin_consumed(a, sc, env)
 
 # As lin_once_captures: a capture both borrowed and consumed is a move.
-fn lin_local_captures(res: LinRes, moves_ok: Bool, from_comp: Bool, p: source.SourcePos) -> LinRes =
+fn lin_local_captures(res: LinRes, moves_ok: Bool, origin: LambdaOrigin,
+                      p: source.SourcePos) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk bc bb ->
-      lin_local_moves(bc, luse_remove_all(list_map(luse_name, bc), bb), moves_ok, from_comp, p)
+      lin_local_moves(bc, luse_remove_all(list_map(luse_name, bc), bb), moves_ok, origin, p)
 
-fn lin_local_moves(bc: List LinUse, bb: List LinUse, moves_ok: Bool, from_comp: Bool,
+fn lin_local_moves(bc: List LinUse, bb: List LinUse, moves_ok: Bool, origin: LambdaOrigin,
                    p: source.SourcePos) -> LinRes =
   match bc with
   | [u | _] ->
       if moves_ok then LinOk(bc, bb)
-      else LinErr(p, local_move_msg_for(from_comp, luse_name(u)))
+      else LinErr(p, local_move_msg_for(origin, luse_name(u)))
   | Nil -> LinOk(bc, bb)
 
-fn local_move_msg_for(from_comp: Bool, name: String) -> String =
-  if from_comp then comprehension_capture_msg(name) else local_move_capture_msg(name)
+fn local_move_msg_for(origin: LambdaOrigin, name: String) -> String =
+  match origin with
+  | LamComprehension -> comprehension_capture_msg(name)
+  | LamWritten -> local_move_capture_msg(name)
+  | LamPlaceholder -> local_move_capture_msg(name)
 
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
   list_filter(\u -> ! list_member (luse_name(u), names), uses)
@@ -1552,16 +1553,23 @@ fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
 # usually is not written — it is pushed down from the slot (infer.seed_param_modes).
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
               p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  let from_comp = is_comprehension_fold(params)
-  in match first_owned_linear_param(drop_comp_acc_params(params),
-                                    drop_comp_acc_type(params, lam_type), env) with
-     | Just b -> LinErr(p, linear_param_msg(from_comp, b, env))
+  lin_lambda_params(params, body, lam_type, p, env,
+    \ (origin, borrowed) -> lin_lambda_body(body, p, params, borrowed, sc, env, origin))
+
+# The parameter step both lambda walks share: an owned linear parameter is
+# rejected, the borrowing ones go to `walk` as names, and the result is held to
+# the lambda's own `once` parameters.
+fn lin_lambda_params(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
+                     p: source.SourcePos, env: Dict types.Scheme,
+                     walk: LambdaOrigin -> List String -> LinRes) -> LinRes =
+  let origin = lambda_origin(params)
+      written = drop_comp_acc_params(params)
+      written_type = drop_comp_acc_type(params, lam_type)
+  in match first_owned_linear_param(written, written_type, env) with
+     | Just b -> LinErr(p, linear_param_msg(origin, b, env))
      | Nothing ->
          lambda_once_after(
-           lin_lambda_body(body, p, params,
-             borrowed_linear_params(drop_comp_acc_params(params),
-                                    drop_comp_acc_type(params, lam_type), env),
-             sc, env, from_comp),
+           walk(origin, borrowed_linear_params(written, written_type, env)),
            params, lam_type, body, env)
 
 # A lambda's own `once` parameter makes the promise a declared one does, and a
@@ -1585,13 +1593,30 @@ fn once_lambda_params(params: List ast.Param, t: types.Type) -> List String =
                         once_lambda_params(rest, spine_rest(t)))
 
 # The rejection is identical either way; only the wording differs, so provenance
-# is carried as a flag rather than duplicating the analysis.
-fn linear_param_msg(from_comp: Bool, b: LinBinder, env: Dict types.Scheme) -> String =
-  if from_comp then comprehension_binder_msg(lbind_name(b))
-  else lambda_param_binder_msg(b, env)
+# is carried as a value rather than duplicating the analysis.
+fn linear_param_msg(origin: LambdaOrigin, b: LinBinder, env: Dict types.Scheme) -> String =
+  match origin with
+  | LamComprehension -> comprehension_binder_msg(lbind_name(b))
+  | LamWritten -> lambda_param_binder_msg(b, env)
+  | LamPlaceholder -> lambda_param_binder_msg(b, env)
 
-fn lambda_capture_msg_for(from_comp: Bool, name: String, borrowed: Bool) -> String =
-  if from_comp then comprehension_capture_msg(name) else lambda_capture_msg(name, borrowed)
+fn lambda_capture_msg_for(origin: LambdaOrigin, name: String, borrowed: Bool) -> String =
+  match origin with
+  | LamComprehension -> comprehension_capture_msg(name)
+  | LamWritten -> lambda_capture_msg(name, borrowed)
+  | LamPlaceholder ->
+      if borrowed then placeholder_borrow_capture_msg(name) else owned_capture_msg(name)
+
+# Who made a lambda: the author, the comprehension elaboration, or a `_` hole.
+type LambdaOrigin (..) =
+  | LamWritten
+  | LamComprehension
+  | LamPlaceholder
+
+fn lambda_origin(params: List ast.Param) -> LambdaOrigin =
+  if is_comprehension_fold(params) then LamComprehension
+  else if any(\prm -> is_placeholder_param(ast.param_name(prm)), params) then LamPlaceholder
+  else LamWritten
 
 # Every fold the comprehension elaboration builds takes the accumulator as its
 # first parameter, under a generated name; a lambda holding any such binder is
@@ -1609,33 +1634,33 @@ fn is_comprehension_fold(params: List ast.Param) -> Bool =
 # identity, so this is the pre-M4.4b walk unchanged for them.
 fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
                    params: List ast.Param, borrowed: List String,
-                   sc: LinScope, env: Dict types.Scheme, from_comp: Bool) -> LinRes =
+                   sc: LinScope, env: Dict types.Scheme, origin: LambdaOrigin) -> LinRes =
   match lin_consumed(body,
           scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)),
           env) with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_lambda_close(borrow_params_discharged(LinOk(bc, bb), borrowed), p, from_comp)
+  | LinOk bc bb -> lin_lambda_close(borrow_params_discharged(LinOk(bc, bb), borrowed), p, origin)
 
 # What is left once the lambda's own borrowing parameters are discharged is a
 # CAPTURE, and captures are still rejected outright. Which set it came from picks
 # the wording; a name in BOTH is owned, because a borrow the body later consumes
 # is the lambda's own value — the rule lin_once_captures already applies.
-fn lin_lambda_close(res: LinRes, p: source.SourcePos, from_comp: Bool) -> LinRes =
+fn lin_lambda_close(res: LinRes, p: source.SourcePos, origin: LambdaOrigin) -> LinRes =
   match res with
   | LinErr ep m -> LinErr(ep, m)
-  | LinOk bc bb -> lin_lambda_captures(bc, luse_remove_all(list_map(luse_name, bc), bb), p, from_comp)
+  | LinOk bc bb -> lin_lambda_captures(bc, luse_remove_all(list_map(luse_name, bc), bb), p, origin)
 
 fn lin_lambda_captures(consumed: List LinUse, borrowed: List LinUse,
-                       p: source.SourcePos, from_comp: Bool) -> LinRes =
+                       p: source.SourcePos, origin: LambdaOrigin) -> LinRes =
   match consumed with
-  | Nil -> lin_lambda_borrow_captures(borrowed, p, from_comp)
-  | [u | _] -> LinErr(p, lambda_capture_msg_for(from_comp, luse_name(u), false))
+  | Nil -> lin_lambda_borrow_captures(borrowed, p, origin)
+  | [u | _] -> LinErr(p, lambda_capture_msg_for(origin, luse_name(u), false))
 
 fn lin_lambda_borrow_captures(borrowed: List LinUse, p: source.SourcePos,
-                              from_comp: Bool) -> LinRes =
+                              origin: LambdaOrigin) -> LinRes =
   match borrowed with
   | Nil -> LinOk(Nil, Nil)
-  | [u | _] -> LinErr(p, lambda_capture_msg_for(from_comp, luse_name(u), true))
+  | [u | _] -> LinErr(p, lambda_capture_msg_for(origin, luse_name(u), true))
 
 # --- parameter modes ---
 

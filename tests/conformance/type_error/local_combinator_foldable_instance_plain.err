@@ -1,0 +1,1 @@
+instance method parameter 'step' must match the class declaration on `local`: a call dispatches through the CLASS signature, so callers lend borrowed values to the closure they pass on the strength of the class's promise, and an instance free to keep the closure would let it outlive those borrows

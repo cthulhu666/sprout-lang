@@ -1,0 +1,10 @@
+module main
+
+# `local_combinator_passed_as_value.spr` with the combinator wrapped in a lambda.
+
+fn use_folder(g: (Int -> Int -> Int) -> Int -> List Int -> Int) -> Int =
+  g(\ (a, b) -> a + b, 0, [1, 2, 3])
+
+fn total() -> Int = use_folder(\ (f, init, xs) -> list_fold(f, init, xs))
+
+fn main() -> Unit !{IO} = print(to_string(total()))

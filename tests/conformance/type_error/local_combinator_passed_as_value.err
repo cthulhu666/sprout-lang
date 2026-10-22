@@ -1,0 +1,1 @@
+these differ only in whether the parameter is `local`, and that must match exactly: `local` promises the callee does not keep the closure past the call, which is what licenses a caller to lend it borrowed values — a function without the promise cannot stand in for one with it in function main.total

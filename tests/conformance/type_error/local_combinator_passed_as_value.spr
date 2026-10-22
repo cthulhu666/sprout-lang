@@ -1,0 +1,13 @@
+module main
+
+# `local` is part of the function type, so a combinator whose function parameter is `local` does not
+# unify with a plain function type. Wrap it in a lambda; see
+# local_combinator_passed_as_value.fixed.spr. The .err pins the message after the printed
+# types, whose type-variable ids are not stable.
+
+fn use_folder(g: (Int -> Int -> Int) -> Int -> List Int -> Int) -> Int =
+  g(\ (a, b) -> a + b, 0, [1, 2, 3])
+
+fn total() -> Int = use_folder(list_fold)
+
+fn main() -> Unit !{IO} = print("unreachable")

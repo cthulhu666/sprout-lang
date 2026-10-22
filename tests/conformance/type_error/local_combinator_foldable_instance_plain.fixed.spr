@@ -1,0 +1,15 @@
+module main
+
+# `local_combinator_foldable_instance_plain.spr` with `local` on the instance's step.
+
+type Box a = Box(a)
+
+instance Foldable Box
+  fn fold_values(step: local b -> a -> b, init: b, xs: Box a) -> b =
+    match xs with
+    | Box x -> step(init, x)
+  fn fold_while_values(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: Box a) -> b =
+    match xs with
+    | Box x -> list_fold_while(step, cond, init, [x])
+
+fn main() -> Unit !{IO} = print(to_string(fold(\ (acc, x) -> acc + x, 0, Box(41))))
