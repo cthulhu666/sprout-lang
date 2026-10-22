@@ -1206,6 +1206,11 @@ keyword matches every other constraint site in the language; `=>` is not used. A
 to a variable bound by the `exists` prefix, or be `linear` on one (§5.8) — otherwise
 it is a parse error (it must not constrain a head parameter).
 
+The packed dictionaries belong to the constructor pattern, so a field may be matched
+by any pattern: a variable, `_`, a tuple or a nested constructor
+(`| Boxed((x, n)) -> take(x) + n`). Each constrained variable keeps its own
+dictionary, including two variables of one constructor.
+
 **Runtime.** The packed dictionary is the class's method function-pointer(s)
 stored as hidden constructor fields (traced by the GC); a method call on the
 unpacked value forwards them. No new runtime mechanism — the existing

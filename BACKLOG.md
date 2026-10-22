@@ -172,10 +172,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the constraint's var free, so no witness is injected and it surfaces as
   `ctor application has wrong arity`. It fails loudly, but the message should be a located "cannot
   determine which `C` instance to pack". Unique to compound-field existentials.
-- [ ] `P4` **Existentials — first-mentioning field wildcard-bound while a later field binds the
-  var.** Both passes select the first field *mentioning* the constrained var, so `T _ x` seeds no
-  given and fails with "No instance". Consistent across both passes and loud, so not a soundness
-  hole. Fix: pick the first VAR-BOUND mentioning field, in both passes, in lockstep.
 - [ ] `P4` **Existentials Stage 1 — index refinement (full GADTs) (XL).** Needs an OutsideIn-style
   local-equality solver, bidirectional checking and constraint-aware exhaustiveness. Out of scope
   for v0/v1 (`docs/scoped-type-variables-analysis-2026-07-26.md`).
