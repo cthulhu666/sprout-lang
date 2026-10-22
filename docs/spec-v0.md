@@ -2174,7 +2174,11 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   `Foldable` returns the final accumulator, so it has no use for keeping `step`. A `_` hole
   inside the function argument (`list_fold(step(c, _, _), 0, xs)`) is a lambda at the `local`
   slot and lends; a `_` for the data argument (`xs |> list_each(f, _)`) is an ordinary lambda
-  around the whole call and does not, so use the direct call there.
+  around the whole call and does not, so use the direct call there. Because `local` is part of
+  the function type, two kinds of program that compiled before are now rejected: a user `instance
+  Foldable` whose `fold_values` or `fold_while_values` function parameter lacks `local` (write
+  `local`), and a combinator passed as a value where a plain function type is expected, such
+  as `list_fold` for a `(b -> a -> b) -> b -> List a -> b` parameter (wrap it in a lambda).
 - An `extern fn`'s modes cannot be checked and are trusted. An extern whose
   signature writes `local` is therefore reachable only from its declaring module
   (§Externs). See `docs/local-closures-v0.md` §6.5.
@@ -2202,9 +2206,10 @@ caller keeps a borrowed value and releases it after either outcome.
 - Higher-order linearity beyond the `once` case — a linear binding captured by a
   lambda at an **unannotated** parameter, and **consuming** linear lambda
   parameters, are not yet supported, nor is capturing a **borrowed** value
-  at a parameter that is not `local`. The prelude's `list_*`, `vec_*` and `range_*`
-  combinators and `fold` take `local`, so `list_each(\x -> write(conn, x), xs)` lends
-  `conn`; `map`, `filter` and `and_then` do not. Two shapes are no longer deferred: the
+  at a parameter that is not `local`. The prelude's concrete `list_*`, `vec_*`, `range_*`
+  and `result_*` combinators and the `Foldable` functions take `local`, so
+  `list_each(\x -> write(conn, x), xs)` lends `conn`; the class methods `map`, `filter`,
+  `and_then` and `traverse` do not. Two shapes are no longer deferred: the
   spawn-a-handler server, a move into a one-shot closure, so `stdlib.http_server` runs on
   the linear socket API throughout; and the with-resource combinator, whose work function
   takes the resource `borrowing` (§5.8).

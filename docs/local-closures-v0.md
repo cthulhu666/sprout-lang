@@ -318,8 +318,9 @@ frame that is gone. BACKLOG: *Tree-cancel cascade must drop a deadline's child b
 
 ## 8. Compatibility and migration
 
-Additive: `local` is contextual, unmarked parameters check as before, and the change only accepts
-more programs at `local` positions.
+The original `local` feature is additive: `local` is contextual, unmarked parameters check as
+before, and the change only accepts more programs at `local` positions. The prelude follow-up
+below is not (it rejects two shapes that compiled before).
 
 - `stdlib/task.sprout`: `with_scope.body` becomes `once local`; `with_timeout.body` and
   `run_with_deadline.body` become `local`; `run_with_deadline` calls `__task_fork` directly;
@@ -349,7 +350,15 @@ message names both. A comprehension reading a borrowed value is legal, since it 
 the comprehension's wording. A `_` hole inside the function argument (`list_fold(step(c, _, _),
 0, xs)`) is a lambda at the `local` slot and lends. A `_` for the data argument,
 `list_each(\x -> write(c, x), _)`, desugars to an ordinary lambda around the whole call and stays
-rejected: write the direct call. Tests:
+rejected, with a message that names the placeholder and says to write the direct call.
+
+**Breaking.** `local` is part of the function type, so two shapes that compiled before are now
+rejected: a user `instance Foldable` whose `fold_values` or `fold_while_values` function
+parameter lacks `local` ("must match the class declaration on `local`"), and a combinator passed
+as a value where a plain function type is expected, e.g. `use_folder(list_fold)` for a
+`(Int -> Int -> Int) -> Int -> List Int -> Int` parameter ("ownership mismatch … differ only in
+whether the parameter is `local`"). Migration: write `local` on the instance's parameter; wrap the
+combinator in a lambda, `\ (f, init, xs) -> list_fold(f, init, xs)`. Tests:
 `tests/stdlib/test_local_combinators.spr`, `tests/conformance/type_error/local_combinator_*`.
 
 ## 9. Tests
