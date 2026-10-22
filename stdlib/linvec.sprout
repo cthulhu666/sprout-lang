@@ -48,6 +48,5 @@ export fn linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> Lin
   match pairs with
   | [] -> v
   | [(i, y) | rest] ->
-      match linvec_get(i, v) with
-      | Just old -> linvec_accum(f, rest, linvec_set(i, f(old, y), v))
-      | Nothing -> let _ = linvec_drop(v) in panic("linvec_accum: index out of bounds")
+      let Just old = linvec_get(i, v) else (let _ = linvec_drop(v) in panic("linvec_accum: index out of bounds"))
+      in linvec_accum(f, rest, linvec_set(i, f(old, y), v))

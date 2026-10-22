@@ -22,6 +22,6 @@ fn spare(k: Int) -> Int =
 
 fn main() -> Unit !{IO} =
   let v = churn(0, SETS, linvec_new(1000, 0))
-  in let first = cell(0, v)
-  in let _ = linvec_drop(v)
+      first = cell(0, v)
+      _ = linvec_drop(v)
   in print(int_to_string(first + spare(NEWS)))

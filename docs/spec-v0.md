@@ -2224,7 +2224,8 @@ linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
   `Nothing`, as `vec_get` is.
 - `linvec_scatter` sets `x` at each index in order; `linvec_accum` sets `f(old, y)` for each
   `(i, y)` in order, so a repeated index folds.
-- Every path must end in `linvec_freeze` or `linvec_drop`, or the leak rule (above) fires. A set
+- Every path must consume the vector: return it, pass it on, or end it with `linvec_freeze` or
+  `linvec_drop`. Otherwise the leak rule (above) fires. A set
   inside a lambda is rejected: a lambda may not consume a linear parameter. Use explicit
   recursion or the bulk operations.
 - `LinVec (LinVec a)` is rejected where it is built, by the bound on `linvec_new`'s `a`.

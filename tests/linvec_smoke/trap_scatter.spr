@@ -5,6 +5,6 @@ import stdlib.linvec (linvec_new, linvec_scatter, linvec_length, linvec_drop)
 
 fn main() -> Unit !{IO} =
   let v = linvec_scatter([0, 1, 7], 1, linvec_new(3, 0))
-  in let n = linvec_length(v)
-  in let _ = linvec_drop(v)
+      n = linvec_length(v)
+      _ = linvec_drop(v)
   in print(int_to_string(n))
