@@ -1,0 +1,16 @@
+module demo.linpub
+
+# A published linear type whose every field is linear: an importer may build and
+# take apart a `Pair`, and still cannot copy or forge the `Res` inside.
+
+export type linear Res =
+  | Res Int
+
+export type linear Pair (..) =
+  | Pair Res Res
+
+export fn mint(n: Int) -> Res = Res(n)
+
+export fn spend(r: Res) -> Int =
+  match r with
+  | Res n -> n

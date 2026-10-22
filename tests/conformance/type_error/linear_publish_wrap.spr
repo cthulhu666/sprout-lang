@@ -1,0 +1,9 @@
+module main
+
+# `(..)` on a `wrap linear` over a non-linear type lets another module copy the
+# `Vector` out, or wrap one it shares (docs/linear-publish-v0.md §4).
+
+export wrap linear LArr a (..) = Vector a
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

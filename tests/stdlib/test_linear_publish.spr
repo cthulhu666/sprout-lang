@@ -1,0 +1,58 @@
+import stdlib.test (check_eq, run_suite)
+
+# Published linear types the rule accepts (docs/linear-publish-v0.md §4): every
+# field a pattern binds is tracked, so `(..)` lets no module copy or forge one.
+# The rejections are tests/conformance/type_error/linear_publish_*.
+
+# Abstract, so its `Int` field stays inside this module.
+export type linear Res =
+  | Res Int
+
+export type linear Pair (..) =
+  | Pair Res Res
+
+export wrap linear Held (..) = Res
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker Res
+  fn take(x: Res) -> Int = free_res(x)
+
+# A bounded existential's field is linear where a pattern unpacks it.
+export type Boxed (..) =
+  | exists a. Boxed a where linear a, Taker a
+
+# Abstract: the rule leaves an unpublished linear wrap alone.
+export wrap linear Arr a = Vector a
+
+extern fn vector_from_list(xs: List a) -> Vector a
+extern fn vector_length(v: Vector a) -> Int
+
+fn free_res(r: Res) -> Int =
+  match r with
+  | Res n -> n
+
+fn free_pair(p: Pair) -> Int =
+  match p with
+  | Pair a b -> free_res(a) + free_res(b)
+
+fn free_held(h: Held) -> Int =
+  match h with
+  | Held r -> free_res(r)
+
+fn unbox(b: Boxed) -> Int =
+  match b with
+  | Boxed x -> take(x)
+
+fn arr_length(arr: Arr Int) -> Int =
+  match arr with
+  | Arr raw -> vector_length(raw)
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_publish", [
+    check_eq("a pair of linear fields", free_pair(Pair (Res(1), Res(2))), 3),
+    check_eq("a linear wrap over a linear type", free_held(Held (Res(4))), 4),
+    check_eq("a bounded existential", unbox(Boxed (Res(6))), 6),
+    check_eq("an abstract linear wrap", arr_length(Arr(vector_from_list([1, 2]))), 2)
+  ])

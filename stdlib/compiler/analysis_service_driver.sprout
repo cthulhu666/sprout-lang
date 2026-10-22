@@ -145,13 +145,13 @@ fn parse_decl_names(src: String) -> List String =
 fn decl_category(d: ast.Decl) -> Maybe (String, String) =
   match d with
   | ast.FnDecl name _ _ _ _ _ _ _ -> Just(("fn", name))
-  | ast.TypeDecl name _ _ _ _ _ -> Just(("type", name))
+  | ast.TypeDecl name _ _ _ _ _ _ -> Just(("type", name))
   | ast.RecordDecl name _ _ _ _ _ _ -> Just(("type", name))
   | ast.LetDecl name _ _ _ -> Just(("let", name))
   | ast.ClassDecl name _ _ _ _ -> Just(("class", name))
   | ast.InstanceDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl name _ _ _ -> Just(("alias", name))
-  | ast.WrapDecl name _ _ _ _ _ -> Just(("type", name))
+  | ast.WrapDecl name _ _ _ _ _ _ -> Just(("type", name))
   | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
 
 fn collect_decl_locations(

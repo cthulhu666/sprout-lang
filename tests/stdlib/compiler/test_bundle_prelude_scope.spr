@@ -20,16 +20,35 @@ fn decl_name(d: ast.Decl) -> String =
   match d with
   | ast.FnDecl name _ _ _ _ _ _ _ -> name
   | ast.ExternFnDecl name _ _ _ _ _ -> name
-  | ast.TypeDecl name _ _ _ _ _ -> name
+  | ast.TypeDecl name _ _ _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.LetDecl name _ _ _ -> name
   | ast.ClassDecl name _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name
-  | ast.WrapDecl name _ _ _ _ _ -> name
+  | ast.WrapDecl name _ _ _ _ _ _ -> name
   | ast.InstanceDecl _ _ _ _ _ -> ""
 
 fn decl_names(decls: List ast.Decl) -> List String =
   list_map(decl_name, decls)
+
+# "<name> published" for each type declaration that publishes its representation.
+fn published_marks(decls: List ast.Decl) -> List String =
+  list_filter_map(published_mark, decls)
+
+fn published_mark(d: ast.Decl) -> Maybe String =
+  match d with
+  | ast.TypeDecl name _ _ _ _ ast.Published _ -> Just(name ++ " published")
+  | ast.RecordDecl name _ _ _ _ ast.Published _ -> Just(name ++ " published")
+  | ast.WrapDecl name _ _ _ _ ast.Published _ -> Just(name ++ " published")
+  | _ -> Nothing
+
+fn bundled_published(src: String, path: String, stdlib_root: String) -> List String !{IO} =
+  do
+    fs.write_text(path, src)
+    r <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    match r with
+    | bundler.BundleErr _ msg -> Cons("ERR: " ++ msg, Nil)
+    | bundler.BundleOk modules -> published_marks(ast.flatten_modules(modules))
 
 # Bundle a source string written to `path`, and return its declaration names.
 #
@@ -124,6 +143,20 @@ fn main() -> Unit !{IO} =
           assert_false(state, "a name starting with the directive bundles cleanly", errored(lookalike))
           assert_true(state, "a name starting with the directive does NOT opt out",
             has(lookalike, "negate"))
+
+          # ── The prelude publishes every type it declares ──────────────────
+          # Its constructors are in scope everywhere, so its declarations are
+          # stamped Published whatever their marker; a module's own type is
+          # Published only with `export` AND `(..)` (docs/linear-publish-v0.md §5).
+          reprs <- bundled_published(
+            "module demo\n\ntype Hidden =\n  | Hidden Int\n\nexport type Shown (..) =\n  | Shown Int\n\nexport wrap Kept = Int\n\nfn main() -> Unit !{IO} =\n  print(1)\n",
+            "/tmp/sprout_prelude_scope_reprs.spr", stdlib_root)
+          assert_false(state, "the representation probe bundles cleanly", errored(reprs))
+          assert_true(state, "the prelude's Maybe is published", has(reprs, "Maybe published"))
+          assert_true(state, "the prelude's unmarked Dict is published", has(reprs, "Dict published"))
+          assert_true(state, "an exported (..) type is published", has(reprs, "demo.Shown published"))
+          assert_false(state, "an unexported type is abstract", has(reprs, "demo.Hidden published"))
+          assert_false(state, "an exported wrap without (..) is abstract", has(reprs, "demo.Kept published"))
 
           # The diagnostic for a headerless IMPORTED file needs a real package
           # tree — a directory per dotted segment — which this suite cannot build

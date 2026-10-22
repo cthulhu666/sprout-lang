@@ -1,0 +1,12 @@
+module main
+
+# The hint applied: `Buf` is abstract, and the module exports the functions that
+# build and take it apart.
+
+export type linear Buf = (vec: Vec Int)
+
+export fn buf_of(v: Vec Int) -> Buf = Buf(vec = v)
+
+export fn buf_free(b: Buf) -> Vec Int = b.vec
+
+fn main() -> Unit !{IO} = print("x")

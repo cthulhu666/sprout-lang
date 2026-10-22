@@ -1,0 +1,9 @@
+module main
+
+# A type parameter is not tracked: `Box(5)` holds an `Int` an importer could copy.
+
+export type linear Box a (..) =
+#~^ ERROR
+  | Box a
+
+fn main() -> Unit !{IO} = print("x")

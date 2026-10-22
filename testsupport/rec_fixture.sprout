@@ -42,8 +42,16 @@ export type Other (..) = (header_ms: String)
 export type Holder (..) = | Holder Cfg | Empty
 
 # Reading one field of an owned linear record consumes it, so a two-field read is
-# a reuse. The rule must survive the module boundary.
-export type linear Tok (..) = (id: Int, tag: String)
+# a reuse. The rule must survive the module boundary. The field is linear: a
+# published linear record may not hold one that is not (docs/linear-publish-v0.md).
+export type linear Ticket =
+  | Ticket Int
+
+export type linear Tok (..) = (id: Ticket)
+
+export fn ticket_value(t: Ticket) -> Int =
+  match t with
+  | Ticket n -> n
 
 export fn default_cfg() -> Cfg =
   Cfg(header_ms = 10, body_ms = 20, max_header_bytes = 30, write_ms = 40)
@@ -57,7 +65,7 @@ export fn mk_box(n: Int) -> Box Int = Box(val = n, label = "int")
 
 export fn hold(c: Cfg) -> Holder = Holder(c)
 
-export fn mk_tok(n: Int) -> Tok = Tok(id = n, tag = "t")
+export fn mk_tok(n: Int) -> Tok = Tok(id = Ticket(n))
 
 # Module-level `let` bindings, for tests/stdlib/test_dot_access_module_level.spr.
 # A dotted name whose head is one of these is a field-access chain, not a module

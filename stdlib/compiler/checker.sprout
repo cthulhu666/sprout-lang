@@ -263,8 +263,8 @@ fn stored_effect_var_error(decls: List ast.Decl) -> Maybe(source.SourcePos, Stri
 fn stored_effect_var_in_decl(d: ast.Decl) -> Maybe(source.SourcePos, String) =
   match d with
   | ast.RecordDecl name _ fields _ _ _ pos -> stored_in_fields(name, fields, pos)
-  | ast.TypeDecl name _ ctors _ _ pos -> stored_in_ctors(name, ctors, pos)
-  | ast.WrapDecl name _ inner _ _ pos -> stored_in_wrap(name, inner, pos)
+  | ast.TypeDecl name _ ctors _ _ _ pos -> stored_in_ctors(name, ctors, pos)
+  | ast.WrapDecl name _ inner _ _ _ pos -> stored_in_wrap(name, inner, pos)
   | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
   | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
@@ -426,7 +426,7 @@ fn dump_decl_name(d: ast.Decl, env: Dict types.Scheme) -> Unit !{IO} =
   match d with
   | ast.FnDecl name _ _ _ _ _ _ _ -> print_name_scheme(name, env)
   | ast.LetDecl name _ _ _ -> print_name_scheme(name, env)
-  | ast.TypeDecl _ _ ctors _ _ _ -> dump_ctor_names(ctors, env)
+  | ast.TypeDecl _ _ ctors _ _ _ _ -> dump_ctor_names(ctors, env)
   | _ -> ()
 
 fn dump_ctor_names(ctors: List ast.TypeConstructor, env: Dict types.Scheme) -> Unit !{IO} =

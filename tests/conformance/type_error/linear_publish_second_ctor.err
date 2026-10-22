@@ -1,0 +1,1 @@
+`Two` is linear, and `(..)` publishes its constructor, but its field `Int` is not linear: another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `Two`

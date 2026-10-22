@@ -1,0 +1,13 @@
+module main
+
+# Every constructor is checked, not only the first.
+
+type linear Res =
+  | Res Int
+
+export type linear Two (..) =
+#~^ ERROR
+  | Held Res
+  | Bare Int
+
+fn main() -> Unit !{IO} = print("x")

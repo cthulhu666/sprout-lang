@@ -1312,9 +1312,10 @@ wrap linear Handle s = Int            # `s` phantom, as on a plain wrap
 ```
 
 Matching `Fd n` binds `n` at `T`, which is tracked only if `T` is itself linear.
-So the guarantee holds only as far as the constructor reaches: an abstract
-linear wrap is unwrapped only by its own module. Design:
-`docs/linear-wrap-v0.md`.
+So the guarantee holds only as far as the constructor reaches, and publishing it
+is refused unless `T` is tracked: `export wrap linear Fd (..) = Int` is an error
+(§5.8, *Publishing a linear type*). An abstract linear wrap is unwrapped only by
+its own module. Design: `docs/linear-wrap-v0.md`.
 
 Wrap types primarily enable **mistake-prevention without runtime cost**: types
 like `Metres` vs `Seconds`, `UserId` vs `OrderId`, or the `BodyEnv` /
@@ -1431,6 +1432,9 @@ type still escapes through an exported function's return type — the type is
 unnameable outside, but a value of it is not. This is how the marker already
 behaves on a sum, whose constructors are collected only from `export`ed
 declarations.
+
+A `linear` record may be published only if every field is tracked (§5.8,
+*Publishing a linear type*).
 
 This is the same marker, in the same slot, that an ADT (§5.6) and a `wrap`
 (§5.6.1) carry; a record simply has fields where those have constructors. Inside
@@ -1770,6 +1774,39 @@ it — so an *owned* linear record supports reading a single field or being pass
 once; reading two fields (`p.x + p.y`) is a reuse (records have no destructuring
 pattern). A `borrowing` parameter lifts that restriction (see below). For a value
 meant to be read freely, do not declare it `linear`.
+
+#### Publishing a linear type
+
+A pattern binds each field at its own type, so a field whose type holds no linear
+value is not tracked: it may be copied or dropped. Inside the declaring module
+that is trusted code. Outside it, the constructor would let any module copy such
+a field out of a linear value, or build one around a value it shares — a second
+owner of a file descriptor, or of an array written in place.
+
+So a linear type whose representation is **published** may not have a field that
+is not tracked. Published means `export` with `(..)` (§5.6.1, §5.6.4), or
+declared in the prelude, whose constructors are in scope everywhere (§3.1). A
+field is tracked when its type contains a linear type, by the containment test
+above, or mentions a variable of its constructor's `where linear`, which is linear
+where a pattern unpacks it. A function type is not descended, so a function field
+is not tracked. Every field of every constructor is checked, and the error is
+reported at the declaration:
+
+```sprout
+export wrap linear LArr a (..) = Vector a        # error: `Vector a` is not linear
+export type linear Pair (..) = | Pair File File  # accepted: both fields are linear
+export type Boxed (..) = | exists a. Boxed a where linear a   # accepted
+export wrap linear LArr a = Vector a             # accepted: abstract
+```
+
+The fix is the abstract form: drop `(..)` and export functions that build and
+take the type apart. A linear type that is not published is not checked.
+
+**Records are covered by the rule, not by the guarantee.** An `instance` method
+can read an abstract record's fields from any module (§5.6.4), so an abstract
+linear record's untracked field is still reachable that way. Wraps and ADTs are
+not affected: an instance cannot name an abstract constructor. Design:
+`docs/linear-publish-v0.md`.
 
 #### Type variables and `where linear`
 

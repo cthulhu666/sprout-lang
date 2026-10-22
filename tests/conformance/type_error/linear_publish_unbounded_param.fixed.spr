@@ -1,0 +1,15 @@
+module main
+
+# The hint applied: `Box` is abstract, and the module exports the functions that
+# build and take it apart.
+
+export type linear Box a =
+  | Box a
+
+export fn box_of(x: a) -> Box a = Box(x)
+
+export fn box_open(b: Box a) -> a =
+  match b with
+  | Box x -> x
+
+fn main() -> Unit !{IO} = print("x")

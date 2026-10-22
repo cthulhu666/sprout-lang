@@ -1,0 +1,10 @@
+module main
+import demo.linpub_bad as bad
+
+# Importing a module whose published linear type has an untracked field is
+# rejected at that declaration, whoever compiles it. Without the rule this forges
+# a `Ticket` from an `Int` and reads it back.
+
+fn main() -> Unit !{IO} =
+  match bad.Ticket(5) with
+  | bad.Ticket n -> print(int_to_string(n))

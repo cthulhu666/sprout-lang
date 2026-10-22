@@ -238,10 +238,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   orphan-instance rule, or the writing module on `ast.InstanceDecl` (74 sites, 18 files).
   Recorded in `spec-v0.md` §5.6.4. It also lets any module copy an abstract linear record's
   untracked field (`docs/linear-publish-v0.md` §5.3).
-- [ ] `P2` **A published linear type can be copied or forged.** `export wrap linear Fd (..) = Int`
-  lets any module write `Fd(5)`, or unwrap one and rebuild it twice: the field is not linear, so
-  it is untracked. Rule, migration (sprout-pg `PgConnection`) and tests:
-  `docs/linear-publish-v0.md`. Blocks the linear array, whose in-place write needs it.
+- [ ] `P2` **A field read drops the record's other linear fields.** With `type linear P = (a: R,
+  b: R)`, `fn first(p: P) -> Int = spend(p.a)` checks clean: `linear_check.lin_getfield` counts the
+  read as one use of `p` and never asks what else `p` held, so the linear `b` is never consumed.
+  Reading a field should be refused while another field is linear, as reading from a borrow is.
 - [ ] `P3` **A field unwrapped from a borrowed linear value can escape its module's code.** Inside
   a linear type's module, `match arr with | LArr raw -> raw` from a borrowed `arr` returns an
   alias. Extend `linear_check.esc_value` so such a binder cannot be returned, captured or stored
@@ -1249,7 +1249,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   file is not named, so the CLI and the LSP read the position against the entry: `fn unk(x: Nope)`
   on line 4 of `demo.unkdep` gives `4:8: ERROR: bundle: unknown type …` for a 3-line entry.
   `bundler.validate_type_names` runs on qualified decls, which carry no path, so it cannot apply
-  `pos_for_entry` the way `find_one_ctor_clash` does (#425). Found while fixing #422.
+  `pos_for_entry` the way `find_one_ctor_clash` does (#425). Found while fixing #422. A check
+  error at an imported declaration has the same gap (`app_linear_publish_bad.spr` gives `5:8`).
 - [ ] `P2` **REPL SIGSEGV on a tuple that nests let-bound tuple variables.**
   `let t1 = (1,3,"foo",true)` then `let t2 = (t1, t1)`, then evaluating `t2` gives
   `SIGSEGV (no current function set)`. Flat tuples are fine. **Not a codegen bug** — the

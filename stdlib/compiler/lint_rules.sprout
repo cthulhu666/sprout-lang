@@ -781,12 +781,12 @@ fn linear_ctor_names(decls: List ast.Decl) -> List String =
 
 fn linear_ctors_of(d: ast.Decl) -> List String =
   match d with
-  | ast.TypeDecl _ _ ctors _ mult _ ->
+  | ast.TypeDecl _ _ ctors _ mult _ _ ->
       match ast.ctors_multiplicity(mult, ctors) with
       | ast.Linear -> ctor_arm_names(ctors)
       | ast.Unrestricted -> Nil
   | ast.RecordDecl name _ _ _ ast.Linear _ _ -> [name]
-  | ast.WrapDecl name _ _ _ ast.Linear _ -> [name]
+  | ast.WrapDecl name _ _ _ ast.Linear _ _ -> [name]
   | _ -> Nil
 
 fn ctor_arm_names(ctors: List ast.TypeConstructor) -> List String =
@@ -1274,10 +1274,10 @@ fn any_name_in(names: List String, allowed: List String) -> Bool =
 # rewrite that does not typecheck, which is the bug this guard exists to stop.
 fn decl_declared_type_name(d: ast.Decl) -> String =
   match d with
-  | ast.TypeDecl n _ _ _ _ _ -> n
+  | ast.TypeDecl n _ _ _ _ _ _ -> n
   | ast.RecordDecl n _ _ _ _ _ _ -> n
   | ast.AliasDecl n _ _ _ -> n
-  | ast.WrapDecl n _ _ _ _ _ -> n
+  | ast.WrapDecl n _ _ _ _ _ _ -> n
   | ast.FnDecl _ _ _ _ _ _ _ _ -> ""
   | ast.ExternFnDecl _ _ _ _ _ _ -> ""
   | ast.LetDecl _ _ _ _ -> ""

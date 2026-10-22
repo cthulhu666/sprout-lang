@@ -324,7 +324,7 @@ fn ctor_names_of_decls(decls: List ast.Decl, exported: List String, acc: Vec Str
 
 fn ctor_names_of_decl(d: ast.Decl, exported: List String, acc: Vec String) -> Vec String =
   match d with
-  | ast.TypeDecl name _ _ _ _ _ ->
+  | ast.TypeDecl name _ _ _ _ _ _ ->
       if list_member(name, exported)
       then append_names_from_list(acc, ast.scope_names_module(ast.decl_value_scopes(d)))
       else acc

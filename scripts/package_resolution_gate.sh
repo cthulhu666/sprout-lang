@@ -175,6 +175,26 @@ else
   fail=1
 fi
 
+# A published linear type is allowed when every field is linear, and refused in
+# the module that declares it when one is not (docs/linear-publish-v0.md §4).
+lpo="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_publish_ok.spr" 2>&1)"
+if ! echo "$lpo" | grep -q 'ERROR'; then
+  echo "PASS linear publish: an importer destructures a published all-linear Pair"
+else
+  echo "FAIL linear publish: expected demo.linpub.Pair to check clean"
+  echo "$lpo" | tail -3
+  fail=1
+fi
+
+lpb="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_linear_publish_bad.spr" 2>&1)"
+if echo "$lpb" | grep -qF '`Ticket` is linear, and `(..)` publishes its constructor, but its field `Int` is not linear'; then
+  echo "PASS linear publish: a published linear wrap over Int is refused at its module"
+else
+  echo "FAIL linear publish: expected demo.linpub_bad.Ticket to be refused"
+  echo "$lpb" | tail -3
+  fail=1
+fi
+
 # The batch CLI's half of the canonical-name rule. The env front end has its own
 # (tests/stdlib/compiler/test_canonical_name_rejected.spr); the two have diverged
 # before over package roots, which is why neither stands in for the other.

@@ -1,0 +1,8 @@
+module main
+
+# A record is covered too: `(..)` publishes its fields, and `b.vec` copies one.
+
+export type linear Buf (..) = (vec: Vec Int)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

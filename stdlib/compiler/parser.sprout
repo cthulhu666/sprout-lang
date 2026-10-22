@@ -1961,7 +1961,8 @@ fn parse_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     let i5b = skip_optional_bar(tokens, i5)
     (first_ctor, i6) <- parse_type_constructor_def(tokens, i5b)
     (ctors, i7) <- collect_type_constructors(tokens, i6, Cons(first_ctor, Nil))
-    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), deriving_classes, mult, cur_pos(tokens, i)), i7))
+    # Abstract until the bundler reads the export surface, as on a record.
+    Ok((ast.TypeDecl(token.token_text(name_tok), params, list_reverse(ctors), deriving_classes, mult, ast.Abstract, cur_pos(tokens, i)), i7))
 
 # Parses an optional `deriving (ClassName, ClassName, ...)` clause.
 # Returns Nil if no `deriving` keyword is at the current position.
@@ -2156,7 +2157,7 @@ fn parse_record_type_decl(tokens: Vec token.Token, i: Int) -> Result ParseError 
     # swaps the field types at two. `parse_type_decl` is the correct precedent.
     # Abstract is the parser's non-answer, not a reading of the `(..)` it just
     # skipped: publishing a record's representation takes `export` AND `(..)`,
-    # and only the export pre-scan sees the first. `bundler.publish_marked_records`
+    # and only the export pre-scan sees the first. `bundler.publish_if_marked`
     # promotes. Deciding it here instead let an unexported `type R (..)` hand its
     # fields to every module that could get hold of a value.
     Ok((ast.RecordDecl(token.token_text(name_tok), params, fields, deriving_classes, mult, ast.Abstract, cur_pos(tokens, i)), i9))
@@ -2359,12 +2360,12 @@ fn parse_wrap_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.De
     (name_tok, i3) <- expected_ident("wrap name", tokens, skip_linear_marker(tokens, i2))
     (params, i3b) <- collect_ident_list(tokens, i3, Nil)
     # The optional `(..)` constructor-export marker, in the same slot an ADT
-    # carries it and discarded the same way: it never reaches the AST, and the
-    # module surface recovers it by token scan (scan_exported_decl).
+    # carries it and skipped the same way: the module surface recovers it by
+    # token scan (scan_exported_decl), and the bundler stamps the representation.
     (_, i4) <- expected_symbol("=", tokens, skip_visibility(tokens, i3b))
     (inner, i5) <- parse_type_expr(tokens, i4)
     (deriving_classes, i6) <- parse_deriving_clause(tokens, i5)
-    Ok((ast.WrapDecl(token.token_text(name_tok), params, inner, deriving_classes, mult, cur_pos(tokens, i)), i6))
+    Ok((ast.WrapDecl(token.token_text(name_tok), params, inner, deriving_classes, mult, ast.Abstract, cur_pos(tokens, i)), i6))
 
 fn parse_type_decl_or_record(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
   if is_alias_type_decl(tokens, i) then parse_alias_decl(tokens, i)

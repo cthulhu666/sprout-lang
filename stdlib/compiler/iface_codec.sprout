@@ -782,7 +782,7 @@ fn collect_ctor_infos_from_decls(decls: List typed_ast.TypedDecl, prefix: String
       match d with
       | typed_ast.TPassThrough inner_decl ->
           match inner_decl with
-          | ast.TypeDecl name type_params ctors _ _ _ ->
+          | ast.TypeDecl name type_params ctors _ _ _ _ ->
               if str_starts_with(name, prefix) then
                 collect_ctor_infos_from_decls(rest, prefix,
                   collect_ctors_for_type(ctors, name, make_local_vars(type_params), acc))

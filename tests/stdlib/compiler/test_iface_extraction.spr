@@ -23,6 +23,7 @@ fn sample_type_decl_colour() -> ast.Decl =
         Cons(ast.TypeConstructor("Blue", Nil, Nil, Nil, Nil), Nil))),
     Nil,
     ast.Unrestricted,
+    ast.Abstract,
     source.SourcePos(index = 0, line = 0, column = 0))
 
 # `type Maybe a = Just a | Nothing` in module "mymod"
@@ -33,6 +34,7 @@ fn sample_type_decl_maybe() -> ast.Decl =
       Cons(ast.TypeConstructor("Nothing", Nil, Nil, Nil, Nil), Nil)),
     Nil,
     ast.Unrestricted,
+    ast.Abstract,
     source.SourcePos(index = 0, line = 0, column = 0))
 
 # `type OtherThing = Blah` in module "other.mod"
@@ -42,6 +44,7 @@ fn sample_type_decl_other() -> ast.Decl =
     Cons(ast.TypeConstructor("Blah", Nil, Nil, Nil, Nil), Nil),
     Nil,
     ast.Unrestricted,
+    ast.Abstract,
     source.SourcePos(index = 0, line = 0, column = 0))
 
 # `class MyEq a { fn my_eq(a, a) -> Bool }` with no superclasses, in "mymod"
