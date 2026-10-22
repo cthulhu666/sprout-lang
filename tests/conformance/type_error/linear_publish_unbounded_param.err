@@ -1,0 +1,1 @@
+`Box` is linear, and `(..)` publishes its constructor, but its field `a` can hold a value that is not linear: another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `Box`

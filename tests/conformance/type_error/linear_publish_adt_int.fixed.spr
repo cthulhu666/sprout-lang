@@ -1,0 +1,15 @@
+module main
+
+# The hint applied: `Fd` is abstract, and the module exports the functions that
+# build and take it apart.
+
+export type linear Fd =
+  | Fd Int
+
+export fn fd_open(n: Int) -> Fd = Fd(n)
+
+export fn fd_close(fd: Fd) -> Int =
+  match fd with
+  | Fd n -> n
+
+fn main() -> Unit !{IO} = print("x")

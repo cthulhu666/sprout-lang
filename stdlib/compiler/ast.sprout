@@ -391,11 +391,11 @@ fn elab_decl(d: Decl) -> Decl =
   | LetDecl name body anno pos -> LetDecl(name, elab_expr(body), anno, pos)
   | InstanceDecl head ctx bounds methods pos -> InstanceDecl(head, ctx, bounds, list_map(elab_impl, methods), pos)
   | ExternFnDecl _ _ _ _ _ _ -> d
-  | TypeDecl _ _ _ _ _ _ -> d
+  | TypeDecl _ _ _ _ _ _ _ -> d
   | RecordDecl _ _ _ _ _ _ _ -> d
   | ClassDecl _ _ _ _ _ -> d
   | AliasDecl _ _ _ _ -> d
-  | WrapDecl _ _ _ _ _ _ -> d
+  | WrapDecl _ _ _ _ _ _ _ -> d
 
 fn elab_impl(m: InstanceMethodImpl) -> InstanceMethodImpl =
   let InstanceMethodImpl name params ret effs cs bounds body = m
@@ -497,13 +497,13 @@ export type InstanceMethodImpl (..) =
 #
 # FnDecl name params return_type effects constraints linear_bounds body pos
 # ExternFnDecl name params return_type effects linear_bounds pos
-# TypeDecl name type_params constructors deriving_classes multiplicity pos
+# TypeDecl name type_params constructors deriving_classes multiplicity representation pos
 # RecordDecl name type_params fields deriving_classes multiplicity representation pos
 # LetDecl name body type_annotation pos
 # ClassDecl name type_params methods superclasses pos
 # InstanceDecl constraint instance_constraints linear_bounds methods pos
 # AliasDecl name type_params rhs pos
-# WrapDecl  name type_params inner_type deriving_classes multiplicity pos
+# WrapDecl  name type_params inner_type deriving_classes multiplicity representation pos
 #
 # linear_bounds (here and on TypeConstructor, ClassMethodSig, InstanceMethodImpl):
 # the type variables a `where linear v` names. The parser takes them out of the
@@ -523,7 +523,8 @@ export type InstanceMethodImpl (..) =
 # representation (the Representation before pos): whether the declaration wrote
 # `(..)`. Recorded on the declaration rather than derived from the export list
 # because the export list is a token pre-scan the bundler consumes, while this
-# bit has to survive into inference, where field access is resolved.
+# bit has to survive into inference, where field access is resolved and a
+# published linear type's fields are checked (docs/linear-publish-v0.md).
 #
 # WrapDecl is a zero-cost distinct type. `wrap Foo = T` declares Foo with a
 # single constructor Foo(x: T) -> Foo. Construction Foo(x) and destruction
@@ -551,12 +552,13 @@ fn ctor_has_bound(c: TypeConstructor) -> Bool =
   let TypeConstructor _ _ _ _ bounds = c
   in bounds != Nil
 
-# Whether a record declaration published its representation. `(..)` on the
-# declaration publishes the constructor AND the fields, so `P(x = 1)`, `p.x` and
+# Whether a type declaration published its representation. `(..)` on a record
+# publishes the constructor AND the fields, so `P(x = 1)`, `p.x` and
 # `p with (x = 1)` all work from anywhere; without the marker the type may still
 # be exported, but only the declaring module can reach through it — the same
 # thing `(..)` means on a sum, applied to the one shape that has fields instead
-# of constructors (spec-v0 §5.6.4).
+# of constructors (spec-v0 §5.6.4). Sums and wraps carry it for the linear check
+# alone: the module system already hides their unpublished constructors.
 #
 # Not a Bool: the reading site asks "is this abstract HERE", and `Abstract`
 # answers that in the source where `false` would not.
@@ -567,13 +569,13 @@ export type Representation (..) =
 export type Decl (..) =
   | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) (List String) Expr source.SourcePos
   | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List String) source.SourcePos
-  | TypeDecl String (List String) (List TypeConstructor) (List String) Multiplicity source.SourcePos
+  | TypeDecl String (List String) (List TypeConstructor) (List String) Multiplicity Representation source.SourcePos
   | RecordDecl String (List String) (List RecordFieldDecl) (List String) Multiplicity Representation source.SourcePos
   | LetDecl String Expr (Maybe TypeExpr) source.SourcePos
   | ClassDecl String (List String) (List ClassMethodSig) (List TypeConstraint) source.SourcePos
   | InstanceDecl TypeConstraint (List TypeConstraint) (List String) (List InstanceMethodImpl) source.SourcePos
   | AliasDecl String (List String) TypeExpr source.SourcePos
-  | WrapDecl String (List String) TypeExpr (List String) Multiplicity source.SourcePos
+  | WrapDecl String (List String) TypeExpr (List String) Multiplicity Representation source.SourcePos
 
 # Position of a declaration — every Decl variant carries a SourcePos in its last
 # field. Used at diagnostic-construction seams so bundle-time errors report the
@@ -582,13 +584,13 @@ export fn decl_pos(d: Decl) -> source.SourcePos =
   match d with
   | FnDecl _ _ _ _ _ _ _ p -> p
   | ExternFnDecl _ _ _ _ _ p -> p
-  | TypeDecl _ _ _ _ _ p -> p
+  | TypeDecl _ _ _ _ _ _ p -> p
   | RecordDecl _ _ _ _ _ _ p -> p
   | LetDecl _ _ _ p -> p
   | ClassDecl _ _ _ _ p -> p
   | InstanceDecl _ _ _ _ p -> p
   | AliasDecl _ _ _ p -> p
-  | WrapDecl _ _ _ _ _ p -> p
+  | WrapDecl _ _ _ _ _ _ p -> p
 
 # The first declaration `check` rejects, at that declaration's position.
 export fn first_decl_error(check: Decl -> Maybe String,
@@ -621,10 +623,10 @@ export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
   | FnDecl name _ _ _ _ _ _ _ -> [(name, ScopeModule)]
   | ExternFnDecl name _ _ _ _ _ -> [(name, ScopeGlobal)]
   | LetDecl name _ _ _ -> [(name, ScopeModule)]
-  | TypeDecl _ _ ctors _ _ _ -> ctor_value_scopes(ctors)
+  | TypeDecl _ _ ctors _ _ _ _ -> ctor_value_scopes(ctors)
   | ClassDecl _ _ methods _ _ -> method_value_scopes(methods)
   # WrapDecl: the synthetic constructor is a value sharing the type's name.
-  | WrapDecl name _ _ _ _ _ -> [(name, ScopeModule)]
+  | WrapDecl name _ _ _ _ _ _ -> [(name, ScopeModule)]
   | _ -> Nil
 
 fn ctor_value_scopes(ctors: List TypeConstructor) -> List (String, NameScope) =
@@ -645,7 +647,7 @@ fn method_value_scopes(methods: List ClassMethodSig) -> List (String, NameScope)
 # constructor), so decl_value_scopes reports it and listing it here would duplicate.
 export fn decl_type_names(d: Decl) -> List String =
   match d with
-  | TypeDecl name _ _ _ _ _ -> [name]
+  | TypeDecl name _ _ _ _ _ _ -> [name]
   | RecordDecl name _ _ _ _ _ _ -> [name]
   | ClassDecl name _ _ _ _ -> [name]
   | AliasDecl name _ _ _ -> [name]
@@ -769,11 +771,11 @@ fn expand_decl(table: Dict AliasHead, d: Decl) -> Decl =
       InstanceDecl(expand_constraint(table, head), expand_constraints(table, ctx), bounds,
                    list_map(\m -> expand_impl(table, m), methods), pos)
   | ExternFnDecl _ _ _ _ _ _ -> d
-  | TypeDecl _ _ _ _ _ _ -> d
+  | TypeDecl _ _ _ _ _ _ _ -> d
   | RecordDecl _ _ _ _ _ _ _ -> d
   | LetDecl _ _ _ _ -> d
   | AliasDecl _ _ _ _ -> d
-  | WrapDecl _ _ _ _ _ _ -> d
+  | WrapDecl _ _ _ _ _ _ _ -> d
 
 fn expand_sig(table: Dict AliasHead, s: ClassMethodSig) -> ClassMethodSig =
   let ClassMethodSig name params ret effs cs bounds = s

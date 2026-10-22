@@ -173,7 +173,7 @@ fn decl_where(d: ast.Decl) -> String =
   match d with
   | ast.FnDecl _ _ _ _ cs bounds _ _ -> where_text(cs, bounds)
   | ast.ExternFnDecl _ _ _ _ bounds _ -> where_text(Nil, bounds)
-  | ast.TypeDecl _ _ [ast.TypeConstructor _ _ _ cs bounds | _] _ _ _ -> where_text(cs, bounds)
+  | ast.TypeDecl _ _ [ast.TypeConstructor _ _ _ cs bounds | _] _ _ _ _ -> where_text(cs, bounds)
   | ast.ClassDecl _ _ [ast.ClassMethodSig _ _ _ _ cs bounds | _] _ _ -> where_text(cs, bounds)
   | ast.InstanceDecl _ ctx bounds [ast.InstanceMethodImpl _ _ _ _ cs mb _ | _] _ ->
       where_text(ctx, bounds) ++ "; " ++ where_text(cs, mb)
@@ -199,7 +199,7 @@ fn first_is_type_decl(src: String) -> Bool =
               | [] -> false
               | [d | _] ->
                   match d with
-                  | ast.TypeDecl _ _ _ _ _ _ -> true
+                  | ast.TypeDecl _ _ _ _ _ _ _ -> true
                   | _ -> false
 
 fn first_typedecl_deriving(src: String) -> List String =
@@ -215,7 +215,7 @@ fn first_typedecl_deriving(src: String) -> List String =
               | [] -> Nil
               | [d | _] ->
                   match d with
-                  | ast.TypeDecl _ _ _ deriving_classes _ _ -> deriving_classes
+                  | ast.TypeDecl _ _ _ deriving_classes _ _ _ -> deriving_classes
                   | _ -> Nil
 
 fn first_wrapdecl_deriving(src: String) -> List String =
@@ -231,7 +231,7 @@ fn first_wrapdecl_deriving(src: String) -> List String =
               | [] -> Nil
               | [d | _] ->
                   match d with
-                  | ast.WrapDecl _ _ _ deriving_classes _ _ -> deriving_classes
+                  | ast.WrapDecl _ _ _ deriving_classes _ _ _ -> deriving_classes
                   | _ -> Nil
 
 # The type parameters the parser stored on the first WrapDecl. Asserting the
@@ -251,7 +251,7 @@ fn first_wrapdecl_params(src: String) -> List String =
               | [] -> Nil
               | [d | _] ->
                   match d with
-                  | ast.WrapDecl _ params _ _ _ _ -> params
+                  | ast.WrapDecl _ params _ _ _ _ _ -> params
                   | _ -> Nil
 
 # True when the first decl is a `type linear ...` (multiplicity recorded as Linear).
@@ -271,9 +271,9 @@ fn first_typedecl_is_linear(src: String) -> Bool =
               | [] -> false
               | [d | _] ->
                   match d with
-                  | ast.TypeDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+                  | ast.TypeDecl _ _ _ _ mult _ _ -> mult_is_linear(mult)
                   | ast.RecordDecl _ _ _ _ mult _ _ -> mult_is_linear(mult)
-                  | ast.WrapDecl _ _ _ _ mult _ -> mult_is_linear(mult)
+                  | ast.WrapDecl _ _ _ _ mult _ _ -> mult_is_linear(mult)
                   | _ -> false
 
 fn mult_is_linear(m: ast.Multiplicity) -> Bool =

@@ -813,7 +813,7 @@ fn template_ret(t: types.Type) -> types.Type =
 fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
                           env: Dict types.Scheme) -> Dict types.Scheme =
   match decl with
-  | ast.TypeDecl name params ctors _ mult _ ->
+  | ast.TypeDecl name params ctors _ mult _ _ ->
       mark_stored_fields(name, params, ast.ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
         mark_phantom_params(name, params, ast.ctor_field_type_exprs(ctors),
           mark_type_multiplicity(name, ast.ctors_multiplicity(mult, ctors),
@@ -823,7 +823,7 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
   # for `match | Foo x ->`. Params bind exactly as on a TypeDecl; one the inner
   # type never mentions is phantom and marked as such for linear_check.
-  | ast.WrapDecl name params inner _ mult _ ->
+  | ast.WrapDecl name params inner _ mult _ _ ->
       let local = build_local_params(params, alias_env)
       in mark_stored_fields(name, params, [inner], local,
            mark_phantom_params(name, params, [inner],
@@ -941,10 +941,10 @@ fn build_ctor_map(decls: List ast.Decl, acc: Dict (List String)) -> Dict (List S
       # Key by the bare type name: scrutinee types resolve to bare names via
       # lookup_type_var (TConst(after_last_dot(...))), so the ctor map must agree
       # or lookups for own-module ADTs (keyed `main.C`, looked up as `C`) miss.
-      | ast.TypeDecl name _ ctors _ _ _ ->
+      | ast.TypeDecl name _ ctors _ _ _ _ ->
           build_ctor_map(rest, dict_set(name, collect_ctor_names(ctors, Nil), acc))
       # WrapDecl: a single synthetic constructor with the same name as the type.
-      | ast.WrapDecl name _ _ _ _ _ ->
+      | ast.WrapDecl name _ _ _ _ _ _ ->
           build_ctor_map(rest, dict_set(name, Cons(name, Nil), acc))
       | _ -> build_ctor_map(rest, acc)
 
@@ -5055,11 +5055,11 @@ export fn census_key(d: ast.Decl) -> Maybe String =
       match instance_key_and_class(c) with
       | Just (key, _) -> Just(key)
       | Nothing -> Nothing
-  | ast.TypeDecl _ _ _ _ _ _ -> Nothing
+  | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.ClassDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
-  | ast.WrapDecl _ _ _ _ _ _ -> Nothing
+  | ast.WrapDecl _ _ _ _ _ _ _ -> Nothing
   | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
 
 # --- `try` (spec §5.9) ---
@@ -5238,12 +5238,12 @@ fn checked_value_name(d: ast.Decl) -> Maybe String =
   | ast.LetDecl name _ _ _ -> Just(name)
   # An extern's type is its signature; the rest define no value.
   | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
-  | ast.TypeDecl _ _ _ _ _ _ -> Nothing
+  | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.ClassDecl _ _ _ _ _ -> Nothing
   | ast.InstanceDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
-  | ast.WrapDecl _ _ _ _ _ _ -> Nothing
+  | ast.WrapDecl _ _ _ _ _ _ _ -> Nothing
 
 fn add_try_fusion(callable: Set, acc: Dict unifier.Fusion, item: (Int, ast.Decl)) -> Dict unifier.Fusion =
   match item with
@@ -7461,6 +7461,7 @@ fn typecheck_decls_resolved(
     let Nothing = check_instance_method_signatures(decls, class_sigs, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_missing_instance_methods(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
     let Nothing = check_instance_class_effects(decls) else Just(p, m) -> typed_ast.TypedErr(p, m)
+    let Nothing = check_published_linear_types(decls, scanned_env, qual_env) else Just(p, m) -> typed_ast.TypedErr(p, m)
     # Wrap scanned_env_with_types as GlobalEnv at this seam — it is the
     # output of pre_scan_fn_decls (Dict, raw pre-pass) plus this module's
     # @type: markers. From here on the env flows between decls as the
@@ -7478,6 +7479,87 @@ fn typecheck_decls_resolved(
         match validate_entrypoint(decls) with
         | Just (pos, msg) -> typed_ast.TypedErr(pos, msg)
         | Nothing -> typed_ast.TypedOk(prog, schemes)
+
+# ---------------------------------------------------------------------------
+# A published linear type's fields (docs/linear-publish-v0.md §4)
+# ---------------------------------------------------------------------------
+#
+# A pattern binds each field at its own type, so a field whose type holds no
+# linear value is untracked. Where the constructor is published, any module can
+# copy such a field out of a linear value, or build the value around one it
+# shares. A field is tracked when its type holds a linear type, or a variable of
+# its constructor's `where linear`, which a pattern marks linear where it unpacks.
+
+# One field of a published declaration, with the type variables in scope at it.
+type PublishedField = (te: ast.TypeExpr, vars: Dict types.Type, bounds: List String)
+
+# A type declaration whose representation is published: what `(..)` publishes on
+# it, for the message, and its fields.
+type PublishedType = (name: String, published: String, pos: source.SourcePos, fields: List PublishedField)
+
+fn check_published_linear_types(decls: List ast.Decl, env: Dict types.Scheme,
+                                alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  if linear_check.program_has_linear(env) then find_map(published_linear_fault(_, env, alias_env), decls)
+  else Nothing
+
+fn published_linear_fault(decl: ast.Decl, env: Dict types.Scheme,
+                          alias_env: Dict types.Type) -> Maybe(source.SourcePos, String) =
+  let Just pt = published_type(decl, alias_env) else Nothing
+  in if dict_member(types.linear_marker_key(pt.name), env) then
+       map(\t -> (pt.pos, published_linear_msg(pt.name, pt.published, t, env)), find_map(untracked_field(_, env), pt.fields))
+     else Nothing
+
+# Every variant is spelled out: a declaration form added later that declares a
+# type has fields this check must see.
+fn published_type(decl: ast.Decl, alias_env: Dict types.Type) -> Maybe PublishedType =
+  match decl with
+  | ast.TypeDecl name params ctors _ _ repr pos ->
+      when_published(repr, PublishedType(name = name, published = "its constructor", pos = pos,
+        fields = list_flat_map(ctor_published_fields(_, build_local_params(params, alias_env)), ctors)))
+  | ast.WrapDecl name params inner _ _ repr pos ->
+      when_published(repr, PublishedType(name = name, published = "its constructor", pos = pos,
+        fields = unbounded_fields([inner], build_local_params(params, alias_env))))
+  | ast.RecordDecl name params fields _ _ repr pos ->
+      when_published(repr, PublishedType(name = name, published = "its constructor and fields", pos = pos,
+        fields = unbounded_fields(ast.record_field_type_exprs(fields), build_local_params(params, alias_env))))
+  | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
+  | ast.LetDecl _ _ _ _ -> Nothing
+  | ast.ClassDecl _ _ _ _ _ -> Nothing
+  | ast.InstanceDecl _ _ _ _ _ -> Nothing
+  | ast.AliasDecl _ _ _ _ -> Nothing
+
+fn when_published(repr: ast.Representation, pt: PublishedType) -> Maybe PublishedType =
+  match repr with
+  | ast.Published -> Just(pt)
+  | ast.Abstract -> Nothing
+
+fn ctor_published_fields(ctor: ast.TypeConstructor, vars: Dict types.Type) -> List PublishedField =
+  let ast.TypeConstructor _ fields exist_vars _ bounds = ctor
+      ctor_vars = build_local_params(exist_vars, vars)
+  in list_map(\te -> PublishedField(te = te, vars = ctor_vars, bounds = bounds), fields)
+
+fn unbounded_fields(tes: List ast.TypeExpr, vars: Dict types.Type) -> List PublishedField =
+  list_map(\te -> PublishedField(te = te, vars = vars, bounds = Nil), tes)
+
+fn untracked_field(field: PublishedField, env: Dict types.Scheme) -> Maybe types.Type =
+  let t = type_from_ast(field.te, field.vars)
+      bound_env = list_fold(\ (e, b) -> mark_linear(e, types.tyvar_identity(types.tyvar_id(b))), env, field.bounds)
+  in match linear_check.first_linear_in(t, bound_env) with
+     | Just _ -> Nothing
+     | Nothing -> Just(t)
+
+fn published_linear_msg(name: String, published: String, field: types.Type, env: Dict types.Scheme) -> String =
+  let short = string.after_last_dot(name)
+  in "`" ++ short ++ "` is linear, and `(..)` publishes " ++ published ++ ", but its field `"
+       ++ linear_check.type_text(field, env) ++ "` " ++ untracked_reason(field)
+       ++ ": another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `"
+       ++ short ++ "`"
+
+fn untracked_reason(field: types.Type) -> String =
+  match types.type_var_name(field) with
+  | Just _ -> "can hold a value that is not linear"
+  | Nothing -> "is not linear"
 
 # ---------------------------------------------------------------------------
 # Strict type-name validation pass
@@ -7507,13 +7589,13 @@ fn collect_declared_type_names(decls: List ast.Decl, acc: List String) -> List S
   | Nil -> acc
   | Cons decl rest ->
       match decl with
-      | ast.TypeDecl name _ _ _ _ _ ->
+      | ast.TypeDecl name _ _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.RecordDecl name _ _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | ast.AliasDecl name _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
-      | ast.WrapDecl name _ _ _ _ _ ->
+      | ast.WrapDecl name _ _ _ _ _ _ ->
           collect_declared_type_names(rest, Cons(string.after_last_dot(name), acc))
       | _ -> collect_declared_type_names(rest, acc)
 
@@ -7550,13 +7632,13 @@ fn validate_record_fields(fields: List ast.RecordFieldDecl, decl_name: String,
 
 fn validate_decl(decl: ast.Decl, declared: Set) -> Maybe String =
   match decl with
-  | ast.TypeDecl name _ ctors _ _ _ ->
+  | ast.TypeDecl name _ ctors _ _ _ _ ->
       validate_ctors(ctors, name, declared)
   | ast.RecordDecl name _ fields _ _ _ _ ->
       validate_record_fields(fields, name, declared)
   | ast.AliasDecl name _ rhs _ ->
       validate_te(rhs, name, declared)
-  | ast.WrapDecl name _ inner _ _ _ ->
+  | ast.WrapDecl name _ inner _ _ _ _ ->
       validate_te(inner, name, declared)
   | _ -> Nothing
 
@@ -7613,10 +7695,10 @@ fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   match decl with
   | ast.FnDecl _ params ret _ _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
   | ast.ExternFnDecl _ params ret _ _ _ -> alias_uses_in_sig(params, ret, arities)
-  | ast.TypeDecl _ _ ctors _ _ _ -> alias_uses_in_ctors(ctors, arities)
+  | ast.TypeDecl _ _ ctors _ _ _ _ -> alias_uses_in_ctors(ctors, arities)
   | ast.RecordDecl _ _ fields _ _ _ _ -> alias_uses_in_fields(fields, arities)
   | ast.AliasDecl _ _ rhs _ -> alias_uses_in_te(rhs, arities)
-  | ast.WrapDecl _ _ inner _ _ _ -> alias_uses_in_te(inner, arities)
+  | ast.WrapDecl _ _ inner _ _ _ _ -> alias_uses_in_te(inner, arities)
   | ast.ClassDecl _ _ methods _ _ -> alias_uses_in_class_methods(methods, arities)
   | ast.InstanceDecl _ _ _ methods _ -> alias_uses_in_instance_methods(methods, arities)
   | _ -> Nothing
@@ -7843,12 +7925,12 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
       in maybe_or_else(bound_sig_error(bounds, name, tvs), validate_fn_constraints(constraints, name, classes, tvs))
   | ast.ExternFnDecl name params ret _ bounds _ -> bound_sig_error(bounds, name, fn_sig_tyvars(params, ret))
   | ast.ClassDecl _ class_vars sigs _ _ -> find_map(sig_bound_error(class_vars, _), sigs)
-  | ast.TypeDecl _ _ _ _ _ _ -> Nothing
+  | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
   | ast.InstanceDecl constraint _ bounds _ _ -> head_bound_error(bounds, constraint)
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
-  | ast.WrapDecl _ _ _ _ _ _ -> Nothing
+  | ast.WrapDecl _ _ _ _ _ _ _ -> Nothing
 
 # A bound names a variable of the signature, as a class constraint does.
 fn bound_sig_error(bounds: List String, decl_name: String, sig_tyvars: List String) -> Maybe String =
@@ -8397,11 +8479,11 @@ fn type_arities(decls: List ast.Decl, acc: Dict Int) -> Dict Int =
   | [] -> acc
   | [decl | rest] ->
       match decl with
-      | ast.TypeDecl name params _ _ _ _ ->
+      | ast.TypeDecl name params _ _ _ _ _ ->
           type_arities(rest, dict_set(name, list_length(params), acc))
       | ast.RecordDecl name params _ _ _ _ _ ->
           type_arities(rest, dict_set(name, list_length(params), acc))
-      | ast.WrapDecl name params _ _ _ _ -> type_arities(rest, dict_set(name, list_length(params), acc))
+      | ast.WrapDecl name params _ _ _ _ _ -> type_arities(rest, dict_set(name, list_length(params), acc))
       | _ -> type_arities(rest, acc)
 
 # "@tyarity:<ShortName>" for the env path, where imported modules arrive as schemes
@@ -9578,9 +9660,9 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
       # Every alias is already in `alias_env`, put there in dependency order by
       # register_all_aliases before this walk starts.
       | ast.AliasDecl _ _ _ _ -> pre_scan_fn_decls(rest, env, alias_env)
-      | ast.TypeDecl _ _ _ _ _ _ ->
+      | ast.TypeDecl _ _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
-      | ast.WrapDecl _ _ _ _ _ _ ->
+      | ast.WrapDecl _ _ _ _ _ _ _ ->
           pre_scan_fn_decls(rest, register_type_decl_raw(decl, alias_env, env), alias_env)
       # A record's fields are in scope throughout its module (spec §7).
       | ast.RecordDecl _ _ _ _ _ _ _ ->
@@ -9851,11 +9933,11 @@ fn placement(item: (Int, ast.Decl)) -> Placement =
   | (_, ast.InstanceDecl _ _ _ _ _) -> InSegment
   | (_, ast.ClassDecl _ _ _ _ _) -> AtModuleStart
   | (_, ast.ExternFnDecl _ _ _ _ _ _) -> Barrier
-  | (_, ast.TypeDecl _ _ _ _ _ _) -> Barrier
+  | (_, ast.TypeDecl _ _ _ _ _ _ _) -> Barrier
   | (_, ast.RecordDecl _ _ _ _ _ _ _) -> Barrier
   | (_, ast.LetDecl _ _ _ _) -> Barrier
   | (_, ast.AliasDecl _ _ _ _) -> Barrier
-  | (_, ast.WrapDecl _ _ _ _ _ _) -> Barrier
+  | (_, ast.WrapDecl _ _ _ _ _ _ _) -> Barrier
 
 # The segment's groups land on `acc` reversed, in one pass.
 fn flush_segment(seg: List (Int, ast.Decl), acc: List (List Int)) -> List (List Int) =
@@ -10435,11 +10517,11 @@ fn typecheck_decl(
   # dict_get/set) all work on raw Dict.  GlobalEnv is reconstructed at the
   # TypedDeclOk boundary.
   match decl with
-  | ast.TypeDecl _ _ _ _ _ _ ->
+  | ast.TypeDecl _ _ _ _ _ _ _ ->
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),
         env_ftv, subst)
-  | ast.WrapDecl _ _ _ _ _ _ ->
+  | ast.WrapDecl _ _ _ _ _ _ _ ->
       # WrapDecl uses the same single-ctor-synthesizing path as TypeDecl.
       TypedDeclOk(typed_ast.TPassThrough(decl),
         GlobalEnv(register_type_decl_raw(decl, alias_env, global_env_dict(env))),

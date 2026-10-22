@@ -1,0 +1,11 @@
+module main
+import demo.linpub as linpub
+
+# An importer builds and destructures a published linear `Pair`; each `Res` it
+# binds is linear, so it must spend both.
+
+fn total(p: linpub.Pair) -> Int =
+  match p with
+  | linpub.Pair a b -> linpub.spend(a) + linpub.spend(b)
+
+fn main() -> Unit !{IO} = print(int_to_string(total(linpub.Pair(linpub.mint(1), linpub.mint(2)))))

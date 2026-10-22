@@ -74,7 +74,9 @@ binds its linear fields as borrowed too").
 copied or dropped. `type linear File = File Int` has the same property today. So a linear
 wrap's guarantee is only as strong as its constructor's privacy: an abstract wrap
 (`export wrap linear X`, no `(..)`) is unwrapped only by its own module. `LArr` relies on this,
-and so cannot live in the prelude, whose constructors are in scope everywhere (spec §3.1).
+and so cannot live in the prelude, whose constructors are in scope everywhere (spec §3.1). The
+compiler now enforces it: `(..)` on a linear type with an untracked field is an error
+([linear-publish-v0.md](linear-publish-v0.md)).
 
 **Representation.** Unchanged: a wrap is its inner value (`ast_to_ir.build_ctor_table_acc`, tag
 sentinel −1). CPR already works through an unwrap: `fn w_get(i: Int, w: W a) -> Maybe a = match

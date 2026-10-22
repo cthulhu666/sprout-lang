@@ -1,0 +1,26 @@
+module main
+
+# The hint applied: `Two` is abstract, and the module exports the functions that
+# build and take it apart.
+
+type linear Res =
+  | Res Int
+
+export type linear Two =
+  | Held Res
+  | Bare Int
+
+fn free_res(r: Res) -> Int =
+  match r with
+  | Res n -> n
+
+export fn two_held(n: Int) -> Two = Held(Res(n))
+
+export fn two_bare(n: Int) -> Two = Bare(n)
+
+export fn two_free(t: Two) -> Int =
+  match t with
+  | Held r -> free_res(r)
+  | Bare n -> n
+
+fn main() -> Unit !{IO} = print("x")

@@ -1,0 +1,5 @@
+module demo.linpub_bad
+
+# A published linear wrap over an `Int`: any importer could forge or copy one.
+
+export wrap linear Ticket (..) = Int

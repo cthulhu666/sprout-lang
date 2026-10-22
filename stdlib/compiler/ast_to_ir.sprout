@@ -449,14 +449,14 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
   | Nil -> (acc, list_reverse(regs))
   | Cons decl rest ->
       match decl with
-      | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _ _) ->
+      | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _ _ _) ->
           match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), list_length(ctors) == 1,
                                      acc, regs, cenv) with
           | (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1, cenv)
       # Wrap types: synthetic ctor with tag sentinel -1 (mirrors codegen.sprout wrap_tag() = -1).
       # Not added to regs — wrap types have no runtime allocation or tag.
       # next_tag is not incremented: wrap consumes no numeric tag slot.
-      | typed_ast.TPassThrough (ast.WrapDecl type_name _ inner _ _ _) ->
+      | typed_ast.TPassThrough (ast.WrapDecl type_name _ inner _ _ _ _) ->
           build_ctor_table_acc(rest, next_tag,
             dict_set(type_name,
                      sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1,
@@ -5916,7 +5916,7 @@ fn build_adt_ctor_index_go(decls: List typed_ast.TypedDecl,
       match d with
       | typed_ast.TPassThrough pd ->
           match pd with
-          | ast.TypeDecl adt_name _ ctor_list _ _ _ ->
+          | ast.TypeDecl adt_name _ ctor_list _ _ _ _ ->
               # Keyed by the canonical name only, which is what TConst heads and
               # bundled TypeNames carry. A last-segment key would let a module's
               # own `type Maybe` replace the prelude's bare `Maybe` entry.

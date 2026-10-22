@@ -1,0 +1,22 @@
+module main
+
+# The hint applied: `Weird` is abstract, and the module exports the functions
+# that build and take it apart.
+
+type linear Res =
+  | Res Int
+
+export type linear Weird =
+  | Weird Res (Vector Int)
+
+fn free_res(r: Res) -> Int =
+  match r with
+  | Res n -> n
+
+export fn weird_of(n: Int, v: Vector Int) -> Weird = Weird(Res(n), v)
+
+export fn weird_free(w: Weird) -> Int =
+  match w with
+  | Weird r _ -> free_res(r)
+
+fn main() -> Unit !{IO} = print("x")

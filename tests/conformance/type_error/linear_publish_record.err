@@ -1,0 +1,1 @@
+`Buf` is linear, and `(..)` publishes its constructor and fields, but its field `Vec Int` is not linear: another module could copy it out, or build one around a value it shares. Remove `(..)` and export functions that build and take apart `Buf`

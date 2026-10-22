@@ -1,0 +1,10 @@
+module main
+
+# A published linear handle over an `Int`: another module could forge one with
+# `Fd(5)`, or copy one by matching it and building two.
+
+export type linear Fd (..) =
+#~^ ERROR
+  | Fd Int
+
+fn main() -> Unit !{IO} = print("x")

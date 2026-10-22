@@ -1,0 +1,13 @@
+module main
+
+# One linear field does not cover the others: the `Vector Int` beside the `Res`
+# can still be copied out (docs/linear-publish-v0.md §4, `Weird`).
+
+type linear Res =
+  | Res Int
+
+export type linear Weird (..) =
+#~^ ERROR
+  | Weird Res (Vector Int)
+
+fn main() -> Unit !{IO} = print("x")

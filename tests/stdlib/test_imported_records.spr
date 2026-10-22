@@ -1,6 +1,6 @@
 import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.string as string
-import testsupport.rec_fixture (Cfg, Point, Box, Line, Ops, Other, Holder, Empty, Tok, default_cfg, cfg_sum, mk_box, hold, mk_tok)
+import testsupport.rec_fixture (Cfg, Point, Box, Line, Ops, Other, Holder, Empty, Tok, default_cfg, cfg_sum, mk_box, hold, mk_tok, ticket_value)
 import testsupport.rec_fixture_mid (double_sum, bump_header)
 
 # Records used across a module boundary (spec §5.6.3). Every shape here was once
@@ -47,7 +47,7 @@ fn unwrap_sum(h: Holder) -> Int =
   | Empty -> 0
 
 # One field read is exactly one consumption of an owned linear record.
-fn tok_id(t: consuming Tok) -> Int = t.id
+fn tok_id(t: consuming Tok) -> Int = ticket_value(t.id)
 
 # `to_string` of an imported derived record currently prefixes the declaring
 # module (`testsupport.rec_fixture.Point(x = 1, y = 2)`) while a same-module one

@@ -1,6 +1,7 @@
 # Publishing a linear type's constructor (v0, 2026-10-22)
 
-**Status:** proposal; rule and plan chosen 2026-10-22 (Kuba). Experimental, as spec §5.8 is.
+**Status:** implemented 2026-10-22; rule and plan chosen the same day (Kuba). Experimental, as
+spec §5.8 is, which states the rule (*Publishing a linear type*).
 Follows [linear-wrap-v0.md](linear-wrap-v0.md); blocks the linear array
 ([persistent-array-v0.md](persistent-array-v0.md) §5.3).
 
@@ -8,7 +9,7 @@ Follows [linear-wrap-v0.md](linear-wrap-v0.md); blocks the linear array
 
 A destructure binds each field at its own type, so a field whose type is not linear is untracked:
 it may be copied or dropped (spec §5.8). Whoever can reach the constructor can therefore copy a
-linear value or make one from nothing. Both compile on master:
+linear value or make one from nothing. Both compiled before this rule:
 
 ```sprout
 wrap linear Fd = Int
@@ -81,24 +82,29 @@ linear constructor" also forbids `Pair File File`, which cannot be copied or for
 
 ```
 `LArr` is linear, and `(..)` publishes its constructor, but its field `Vector a` is not linear:
-another module could copy it out or build an `LArr` around a shared value. Remove `(..)` and
-export functions that build and take apart `LArr`.
+another module could copy it out, or build one around a value it shares. Remove `(..)` and
+export functions that build and take apart `LArr`
 ```
+
+A record says "its constructor and fields"; a bare type variable "can hold a value that is not
+linear".
 
 A fixture with the hint applied (`.fixed.spr`) checks the hint can be followed.
 
 ## 5. Implementation
 
 1. `ast.TypeDecl` and `ast.WrapDecl` gain the `Representation` field `RecordDecl` carries
-   (`ast.sprout`), all three stamped by the bundler from the export scan as records are today
+   (`ast.sprout`), all three stamped by the bundler from the export scan as records were
    (`bundler.publish_if_marked`). Prelude declarations are stamped `Published`, since their
    constructors are in scope everywhere whatever their marker (BACKLOG P2 **`(..)` is
    unenforced for everything the prelude declares**).
-2. `linear_check` gains a declaration pass, run under `program_has_linear`: for each linear,
-   published declaration, read each constructor's field types from its scheme in the env and
-   apply §4's test. Unverified until its tests pass: that the bounded-existential case needs the
-   bound named explicitly (the scheme's variable carries no `@linear:` mark).
-3. Spec §5.8 states the rule; §5.6.1, §5.6.4 and the ADT export text point to it.
+2. `infer.check_published_linear_types` runs with the other declaration checks in
+   `typecheck_decls_resolved`, under `program_has_linear`. For each linear, published
+   declaration it converts each field's type expression as registration does (`type_from_ast`),
+   marks the constructor's `where linear` variables linear in the env, and asks
+   `linear_check.first_linear_in`. The bound has to be marked there: a scheme's variable carries
+   no `@linear:` mark until a pattern unpacks it.
+3. Spec §5.8 states the rule; §5.6.1 and §5.6.4 point to it.
 
 ### 5.3 Records
 
@@ -119,8 +125,11 @@ Breaking for a published linear type with an untracked field. In our four repos:
   without `(..)`, and `pg_connection` is deleted (sprout-pg#20). The import path changes, and
   Sprout has no re-export, so repbit's eight imports move too (repbit#15). The two merge together,
   before this change.
-- `testsupport/rec_fixture.sprout`: `Tok (..)`, read field by field by
-  `tests/stdlib/test_imported_records.spr`. Becomes non-linear, or gets accessors.
+- `testsupport/rec_fixture.sprout`: `Tok (..)`, read across the module boundary by
+  `tests/stdlib/test_imported_records.spr`. Its one field is now a linear `Ticket`, which keeps
+  what the test checks: a field read consumes an imported linear record. Two linear fields
+  would rest on a separate bug, BACKLOG P2 **A field read drops the record's other linear
+  fields**.
 
 ## 7. Follow-ups
 
@@ -133,11 +142,15 @@ Breaking for a published linear type with an untracked field. In our four repos:
 
 ## 8. Tests
 
-- Type errors: one fixture per error row of §4's table, each pinning its line; a `.fixed.spr` for
-  the `LArr` one.
-- Accepted: `Pair File File` and the bounded existential, published and used across modules (the
-  package-resolution gate); an abstract linear wrap, unchanged.
-- The prelude stamp: a unit test that the bundler marks a prelude declaration `Published`.
+- Type errors: `tests/conformance/type_error/linear_publish_*`, one per kind of untracked field
+  (a wrap, an `Int`, an unbounded parameter, a field beside a linear one, a second constructor,
+  a record), each pinning its line and the full message, with a `.fixed.spr` that applies the
+  hint.
+- Accepted: `tests/stdlib/test_linear_publish.spr` (a pair of linear fields, a linear wrap over a
+  linear type, the bounded existential, an abstract linear wrap); across modules, the
+  package-resolution gate builds and destructures a published `Pair` and refuses a published
+  `wrap linear Ticket (..) = Int` in the module that declares it.
+- The prelude stamp: `tests/stdlib/compiler/test_bundle_prelude_scope.spr`.
 
 ## 9. Spec and docs
 

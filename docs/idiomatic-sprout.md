@@ -779,7 +779,9 @@ A resource with an explicit release — a socket, a file handle — is
 it `borrowing` in the operations that only read or write it, and `consuming` in
 the one that releases it. Then forgetting the release is a compile error rather
 than a leak found in production. A handle over one value is a `wrap linear`, which costs no
-box: `export wrap linear Fd = Int`. Leave off `(..)`, so only its module can unwrap it.
+box: `export wrap linear Fd = Int`. Leave off `(..)`, so only its module can unwrap it: the
+`Int` inside is not linear, so another module could copy it out or forge an `Fd`, and the
+compiler refuses `(..)` on a linear type whose fields are not all linear.
 
 ```sprout
 # stdlib.net, the shipped example:
