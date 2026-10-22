@@ -299,6 +299,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (`bench/results-2026-09-28-vec-box-tax.md`, harness `bench/vec_box/`). Extending it through a
   known non-escaping combinator, of which `maybe_with_default` is essentially the whole
   population, removes the gap and the hand-taught rule in `docs/idiomatic-sprout.md`.
+- [ ] `P2` **A literal inside a `Maybe` pattern loses CPR, so every read allocates.**
+  `ast_to_ir.is_simple_width2_arm` admits only a variable or `_` under the constructor, so
+  `match mutvec_get(c, p) with | Just false -> …` builds a `Just` per call, while `| Just b -> …`
+  calls the unboxed worker. A 1M sieve: ~400 ms against 7. With `SPROUT_GC_THRESHOLD=50000000` it
+  is 29–48 ms, so most of it is the count-blind trigger rescanning the live array. `Just false`
+  is how a sieve over `LArr` reads (`docs/persistent-array-v0.md` §3.4). Fix: bind the field to a
+  fresh variable in the worker arm and test the literal after.
 - [ ] `P3` **Phase B mutual-TCO: a member that is both self-tail-recursive and in a heterogeneous
   mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
   carrying an `IRTcoEntry`. No miscompile, but the mutual edge builds a native frame per
@@ -1697,6 +1704,13 @@ deferral happened, not for current behaviour. Still open:
   the sort pair, self-compile, nqueens, `gc_roots` and `http_log_middleware`, but not the
   `uncharted-suns` galaxy frame, which lives in another repo. Per-candidate Phase 3 port benches
   wait for Phase 2. Plan: `docs/native-sprout-runtime-v0.md`.
+- [ ] `P3` **Unsafe primitives: trusted Sprout in place of C.** Wanted later (Kuba, 2026-10-22),
+  and builtins are designed now so these can delete them without an API change. First user:
+  `larr_set`, a C builtin only because pure Sprout cannot call `vector_mutset`
+  (`docs/persistent-array-v0.md` §12); also `byte-buffer-v0.md` §5.3's private creator and the
+  GC-in-Sprout of `native-sprout-runtime-v0.md` Phase 4 (raw loads and stores). Not designed:
+  the gate (a keyword, or module-private externs beyond the `local` rule), the primitive set,
+  and who may use it.
 - [ ] `P2` **Make tight Sprout string-processing loops competitive with host builtins**, so moderate
   stdin/text workloads do not need dedicated host helpers to be practical. Investigate the native
   overhead in recursive stdlib string loops such as `string_lines` over stdin-loaded text — tail-
@@ -1974,6 +1988,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   linear misuse programs and runs them on master and head; X3, check the spec's `sprout` blocks
   that mention `linear`, expected-error where the text says so. Also park bound obligations
   unconditionally: drop the whole gate in `park_bound_obligations` (retro §3.3 measured it free).
+- [ ] `P3` **`wrap linear`: a zero-cost linear type.** A linear type must be an ADT or record,
+  so a one-field one is boxed; the linear array needs it unboxed to drop four of its five
+  builtins. Worse today: `wrap linear LA a = Vector a` compiles silently as a wrap named `linear`
+  with parameters `LA` and `a`. Small gaps (AST field, parser, export scan,
+  `mark_type_multiplicity`, a lint arm, the spec): `docs/linear-wrap-v0.md`.
 - [ ] `P3` **A `let`-bound lambda gets no expected type, so it must spell its ownership mode.**
   M4.4b pushes a slot's ownership onto an unwritten lambda parameter mode, but only where the
   lambda is written at the call argument — `let work = \c -> peek(c) in with_file(n, work)` still
@@ -2397,11 +2416,11 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   a histogram or a DP table takes 1.5–19 s and up to 12 GB with it, 0–12 ms with `MutVec`. Our
   own code is not bottlenecked, but three uncharted-suns functions are `!{IO}` only for a scratch
   `MutVec`. Proposal: `docs/persistent-array-v0.md` — a trie as the persistent array, and a
-  linear array with bulk operations (builtins, needs approval) as the one in-place mechanism; no
-  Baker array, no `ST`-style `run_local`. The trie waits on nothing. The linear array waits on
-  the three P1 linearity holes left (doc §5.3), which P3 **Linearity bound on a type
-  parameter** closes. When it lands, uncomment the `LArr` sieves in `examples/sieve.sprout`.
-  Revisit per the doc's §12 triggers.
+  linear array with bulk operations as the one in-place mechanism; no Baker array, no `ST`-style
+  `run_local`. The trie waits on nothing. The linear array's soundness holes are closed; it is a
+  `wrap linear` over `Vector` with one builtin, `larr_set`, and waits on `wrap linear`
+  (`docs/linear-wrap-v0.md`). When it lands, uncomment the `LArr` sieves in
+  `examples/sieve.sprout`. Revisit per the doc's §12 triggers.
 - [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
   (`LMatrix Int Int (LArr a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a
   function consumes a linear constructor and builds one of the same shape, reuse its memory, as
