@@ -415,6 +415,12 @@ fn method_consumes_mismatch_msg(name: String) -> String =
 let borrowed_field_read_msg: String =
   "a linear field cannot be read out of a borrowed value (its owner will still release it); take the parameter `consuming` if this function should own it"
 
+fn field_read_drops_msg(field: String, base: String, other: String) -> String =
+  "reading `" ++ field ++ "` consumes " ++ base ++ " and drops its linear field `" ++ other ++ "`; use a constructor type and `match` it to take every linear field"
+
+fn update_drops_msg(field: String) -> String =
+  "updating `" ++ field ++ "` drops its old linear value; take it out first, or use a constructor type and `match` it"
+
 fn borrowed_binder_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is borrowed and cannot be consumed (it was destructured from a borrowed value, which its owner will still release)"
 
@@ -671,15 +677,14 @@ fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
   | typed_ast.TUnit _ _ -> LinOk(Nil, Nil)
   | typed_ast.TDict _ _ _ _ -> LinOk(Nil, Nil)
   | typed_ast.TMethodRef _ _ _ _ _ -> LinOk(Nil, Nil)
-  | typed_ast.TGetField base _ fty fp -> lin_getfield(base, fty, fp, sc, env)
+  | typed_ast.TGetField base f fty fp -> lin_getfield(base, f, fty, fp, sc, env)
   | typed_ast.TUnary _ inner _ _ -> lin_consumed(inner, sc, env)
   | typed_ast.TTuple items _ _ -> seq_list(items, sc, env)
   | typed_ast.TCall callee args _ _ -> lin_call(callee, args, sc, env)
   | typed_ast.TBinary _ l r _ _ -> seq_list(Cons(l, Cons(r, Nil)), sc, env)
   | typed_ast.TRange lo hi _ _ -> seq_list(Cons(lo, Cons(hi, Nil)), sc, env)
   | typed_ast.TRecord _ fields _ _ -> seq_list(list_map(typed_ast.field_value, fields), sc, env)
-  | typed_ast.TRecordUpdate base fields _ _ ->
-      seq_list(Cons(base, list_map(typed_ast.field_value, fields)), sc, env)
+  | typed_ast.TRecordUpdate base fields _ p -> lin_update(base, fields, p, sc, env)
   | typed_ast.TIf c a b _ p -> lin_if(c, a, b, p, sc, env)
   | typed_ast.TMatch scrut arms _ p -> lin_match(scrut, arms, p, sc, env)
   | typed_ast.TDo steps _ _ -> lin_do(steps, sc, env)
@@ -720,11 +725,62 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # The `match` form of this hole is handled by `from_borrow` in arm_consumed; this
 # is the field-access form, which that path never reached.
 # Regressions: tests/conformance/type_error/borrow_field_{extract,escape}.
-fn lin_getfield(base: typed_ast.TypedExpr, field_ty: types.Type, p: source.SourcePos,
-                sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  if expr_is_borrowed_binding(base, sc) && type_is_linear(field_ty, env)
-  then LinErr(p, borrowed_field_read_msg)
-  else lin_read(base, sc, env)
+fn lin_getfield(base: typed_ast.TypedExpr, field: String, field_ty: types.Type,
+                p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  if expr_is_borrowed_binding(base, sc) then
+    if type_is_linear(field_ty, env) then LinErr(p, borrowed_field_read_msg)
+    else lin_read(base, sc, env)
+  else
+    match linear_sibling(typed_ast.typed_expr_type(base), field, env) with
+    | Just other -> LinErr(p, field_read_drops_msg(field, base_label(base), other))
+    | Nothing -> lin_read(base, sc, env)
+
+# An owned read consumes the whole record, so a linear field other than `field`
+# is dropped. `Nothing` when no other field holds a linear value.
+fn linear_sibling(rec_ty: types.Type, field: String, env: Dict types.Scheme) -> Maybe String =
+  if ! type_mentions_linear (rec_ty, env) then Nothing
+  else find(\g -> g != field && field_holds_linear(rec_ty, g, env),
+           record_field_names(head_type_name(rec_ty), env))
+
+fn field_holds_linear(rec_ty: types.Type, field: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(types.rec_field_key(head_type_name(rec_ty), field), env) with
+  | Nothing -> false
+  | Just scheme ->
+      type_mentions_linear(
+        apply_tvar_subst(zip_tvars(types.scheme_vars(scheme), app_spine_args(rec_ty)),
+                         types.scheme_type(scheme)),
+        env)
+
+fn zip_tvars(vars: List String, args: List types.Type) -> Dict types.Type =
+  match (vars, args) with
+  | (Cons v vrest, Cons a arest) -> dict_set(v, a, zip_tvars(vrest, arest))
+  | _ -> dict_empty()
+
+fn record_field_names(rec: String, env: Dict types.Scheme) -> List String =
+  let prefix = types.rec_fields_prefix(rec)
+  in vec_to_list(vec_filter_map(\k -> after_prefix(prefix, k), dict_keys(env)))
+
+fn after_prefix(prefix: String, k: String) -> Maybe String =
+  if str_starts_with(k, prefix) then Just(str_slice(k, str_len(prefix), str_len(k))) else Nothing
+
+# `e with (f = v)` drops the old `f`, so an updated field that holds a linear
+# value would leak it.
+fn lin_update(base: typed_ast.TypedExpr, fields: List typed_ast.TypedRecordField,
+              p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+  match find_map(\f -> updated_linear_field(typed_ast.typed_expr_type(base), f, env), fields) with
+  | Just name -> LinErr(p, update_drops_msg(name))
+  | Nothing -> seq_list(Cons(base, list_map(typed_ast.field_value, fields)), sc, env)
+
+fn updated_linear_field(rec_ty: types.Type, f: typed_ast.TypedRecordField,
+                        env: Dict types.Scheme) -> Maybe String =
+  match f with
+  | typed_ast.TypedRecordField name _ ->
+      if field_holds_linear(rec_ty, name, env) then Just(name) else Nothing
+
+fn base_label(base: typed_ast.TypedExpr) -> String =
+  match base with
+  | typed_ast.TVar name _ _ -> "`" ++ name ++ "`"
+  | _ -> "the record"
 
 fn lin_read(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match e with

@@ -1,0 +1,14 @@
+module main
+
+# The hint applied: a constructor type, matched to take every linear field.
+
+type linear File = File Int
+type Pair a b = | Pair a b
+
+fn release(f: File) -> Int = match f with | File n -> n
+
+fn first(p: Pair Int File) -> Int =
+  match p with
+  | Pair n f -> n + release(f)
+
+fn main() -> Unit !{IO} = print("x")

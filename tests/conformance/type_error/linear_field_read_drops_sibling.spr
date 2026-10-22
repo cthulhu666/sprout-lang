@@ -1,0 +1,16 @@
+module main
+
+# Reading a field consumes the record, so any OTHER linear field it holds is
+# dropped: `b` is never released.
+
+type linear R = R(Int)
+type linear P = (a: R, b: R)
+
+fn spend(r: R) -> Int =
+  match r with
+  | R (n) -> n
+
+fn first(p: P) -> Int = spend(p.a)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

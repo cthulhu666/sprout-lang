@@ -1,0 +1,53 @@
+import stdlib.test (check_eq, run_suite)
+
+# An owned field read, or a `with` update, consumes the record. It is refused when
+# that would drop ANOTHER linear field; these are the shapes it must still accept.
+# Rejection counterparts: tests/conformance/type_error/linear_field_read_*,
+# linear_record_update_drops_field. See docs/spec-v0.md §5.8.
+
+type linear File = File Int
+type linear Wrap = (inner: File, tag: Int)
+type linear Pos = (x: Int, y: Int)
+type Pt = (x: Int, y: Int)
+type linear Seg = (from: Pt, to: Pt)
+type Pair a b = (fst: a, snd: b)
+
+fn release(f: File) -> Int = match f with | File n -> n
+
+# The linear field is the only linear one, so reading it drops nothing.
+fn take_inner(w: Wrap) -> Int = release(w.inner)
+
+# Updating a non-linear field moves `inner` through into the new record.
+fn retag(w: Wrap) -> Wrap = w with (tag = 3)
+
+# A non-linear field read through a borrow is unchanged.
+fn peek_tag(w: borrowing Wrap) -> Int = w.tag
+
+fn tag_then_release(w: Wrap) -> Int =
+  do
+    let t = peek_tag(w)
+    t + take_inner(w)
+
+# All-non-linear fields: any read or update.
+fn pos_x(p: Pos) -> Int = p.x
+fn pos_move(p: Pos) -> Pos = p with (x = 5, y = 6)
+
+# Each level of a nested path is checked on its own: `from` has only a
+# non-linear sibling.
+fn seg_from_x(s: Seg) -> Int = s.from.x
+
+# The record's type arguments are substituted before the sibling is judged.
+fn first_of(p: Pair File Int) -> Int = release(p.fst)
+fn second_of(p: Pair Int Int) -> Int = p.snd
+
+fn main() -> Unit !{IO} =
+  run_suite("linear_field_read", [
+    check_eq("sole linear field read", take_inner(Wrap(inner = File(7), tag = 1)), 7),
+    check_eq("update of a non-linear field", take_inner(retag(Wrap(inner = File(8), tag = 1))), 8),
+    check_eq("borrowed non-linear read", tag_then_release(Wrap(inner = File(1), tag = 9)), 10),
+    check_eq("read on an all-non-linear linear record", pos_x(Pos(x = 4, y = 5)), 4),
+    check_eq("update on an all-non-linear linear record", pos_x(pos_move(Pos(x = 4, y = 5))), 5),
+    check_eq("nested path", seg_from_x(Seg(from = Pt(x = 2, y = 3), to = Pt(x = 4, y = 5))), 2),
+    check_eq("generic record, linear field first", first_of(Pair(fst = File(3), snd = 1)), 3),
+    check_eq("generic record, non-linear instantiation", second_of(Pair(fst = 1, snd = 6)), 6)
+  ])

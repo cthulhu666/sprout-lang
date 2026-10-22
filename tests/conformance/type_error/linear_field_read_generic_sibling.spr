@@ -1,0 +1,14 @@
+module main
+
+# The sibling is judged at the record's type arguments: `snd` is `File` here,
+# so reading `fst` would drop it.
+
+type linear File = File Int
+type Pair a b = (fst: a, snd: b)
+
+fn release(f: File) -> Int = match f with | File n -> n
+
+fn first(p: Pair Int File) -> Int = p.fst
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
