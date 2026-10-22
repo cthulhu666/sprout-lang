@@ -1,0 +1,74 @@
+# A constrained existential's packed dictionary belongs to the constructor pattern and
+# the existential var, not to any field sub-pattern (docs/gadts-v0.md §6). A nested,
+# wildcard or tuple-component field pattern must still see the right dictionary.
+#
+# `Taker` has two instances with different results, so a wrong dictionary shows.
+
+import stdlib.test (check_eq, run_suite)
+
+class Taker a
+  fn take(v: a) -> Int
+
+instance Taker Int
+  fn take(v: Int) -> Int = v
+
+instance Taker Bool
+  fn take(v: Bool) -> Int = if v then 100 else 200
+
+fn sum_takes(xs: List a) -> Int where Taker a =
+  list_fold(\ (acc, x) -> acc + take(x), 0, xs)
+
+fn take_pair(p: (a, b)) -> Int where Taker a, Taker b =
+  match p with
+  | (x, y) -> take(x) + take(y)
+
+# Control: the field is a plain variable pattern.
+type One = | exists a. One a where Taker a
+
+fn one_take(o: One) -> Int =
+  match o with
+  | One x -> take(x)
+
+# The field is matched by a tuple pattern.
+type Boxed = | exists a. Boxed (a, Int) where Taker a
+
+fn boxed_take(b: Boxed) -> Int =
+  match b with
+  | Boxed ((x, n)) -> take(x) + n
+
+# The field is matched by a constructor pattern.
+type Wrapped = | exists a. Wrapped (Maybe a) where Taker a
+
+fn wrapped_take(w: Wrapped) -> Int =
+  match w with
+  | Wrapped (Just(x)) -> take(x)
+  | Wrapped (Nothing) -> 0
+
+# The first field mentioning the var is a wildcard; a later field uses the dictionary.
+type Two = | exists a. Two a (List a) where Taker a
+
+fn sum_rest(t: Two) -> Int =
+  match t with
+  | Two _ xs -> sum_takes(xs)
+
+# Two existential vars in one field need distinct dictionaries.
+type Duo = | exists a b. Duo (a, b) where Taker a, Taker b
+
+fn both(d: Duo) -> Int =
+  match d with
+  | Duo (p) -> take_pair(p)
+
+fn main() -> Unit !{IO} =
+  run_suite("existential_nested_patterns", [
+    check_eq("var field, Int", one_take(One(7)), 7),
+    check_eq("var field, Bool", one_take(One(true)), 100),
+    check_eq("tuple sub-pattern, Int", boxed_take(Boxed((5, 1))), 6),
+    check_eq("tuple sub-pattern, Bool", boxed_take(Boxed((false, 1))), 201),
+    check_eq("Just sub-pattern, Int", wrapped_take(Wrapped (Just(9))), 9),
+    check_eq("Just sub-pattern, Bool", wrapped_take(Wrapped (Just(true))), 100),
+    check_eq("Nothing sub-pattern", wrapped_take(Wrapped (Nothing)), 0),
+    check_eq("wildcard first field, Bool", sum_rest(Two(true, [true, false])), 300),
+    check_eq("wildcard first field, Int", sum_rest(Two(1, [2, 3])), 5),
+    check_eq("two vars, Int and Bool", both(Duo((1, true))), 101),
+    check_eq("two vars, Bool and Int", both(Duo((false, 5))), 205)
+  ])

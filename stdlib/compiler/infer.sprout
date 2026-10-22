@@ -3642,7 +3642,10 @@ fn resolve_precise_head(
           (Just(unresolved_tdict(class_name,
             type_to_typeexpr_with_prog_vars(resolved, class_name, s3, env), pos)), "precise-just")
       | Nothing ->
-          (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
+          # An unpacked existential has no instance; its own given is the dict. A scan
+          # picks one for every constraint of the class (`where Taker a, Taker b`).
+          if types.is_skolem_name(head_str) then (skolem_given_tdict(class_name, head_str, env, pos), "precise_skolem_given")
+          else (resolve_via_fwd_or_scan(class_name, user_args, s3, env, pos), "precise_no_inst->fwd_or_scan")
   | Nothing ->
       # Resolved to a bare type variable, not a concrete head — forward/scan
       # instead of a bogus @inst lookup. Try the marker for THIS constraint's own
@@ -5491,8 +5494,8 @@ export fn infer_pattern(
   match pat with
   | ast.WildcardPattern _ ->
       InferOk(typed_ast.TUnit(expected, no_pos()), subst, eff_subst, types.EffectPure)
-  | ast.VarPattern name pos ->
-      InferOk(typed_ast.TUnit(expected, no_pos()), bind_pattern_var(name, pos, expected, subst), eff_subst, types.EffectPure)
+  | ast.VarPattern name _ ->
+      InferOk(typed_ast.TUnit(expected, no_pos()), dict_set(name, expected, subst), eff_subst, types.EffectPure)
   | ast.IntPattern _ pos ->
       check_pattern_type(pos, subst, eff_subst, expected, types.type_int(), "Int")
   | ast.BoolPattern _ pos ->
@@ -5507,23 +5510,6 @@ export fn infer_pattern(
       infer_tuple_pattern(pos, state, env, subst, eff_subst, expected, pats)
   | ast.ConstructorPattern name fields pos ->
       infer_ctor_pattern(pos, state, env, subst, eff_subst, expected, name, fields)
-
-# A pattern variable's type is kept under its name, which the next pattern binding that
-# name overwrites, and under its position, which stays this binding's. The post-pass
-# sees only the final substitution, so it reads the position (pattern_var_type). No
-# type variable's name starts with `@`, and nothing walks the substitution's keys, so
-# the `@pat:` key binds nothing a type can mention.
-fn bind_pattern_var(name: String, pos: source.SourcePos, t: types.Type,
-                    subst: Dict types.Type) -> Dict types.Type =
-  dict_set(pattern_var_key(name, pos), t, dict_set(name, t, subst))
-
-fn pattern_var_key(name: String, pos: source.SourcePos) -> String =
-  "@pat:" ++ name ++ ":" ++ int_to_string(pos.index)
-
-fn pattern_var_type(name: String, pos: source.SourcePos, subst: Dict types.Type) -> types.Type =
-  match dict_get(pattern_var_key(name, pos), subst) with
-  | Just t -> unifier.apply_subst(subst, t)
-  | Nothing -> unifier.apply_subst(subst, types.TVar(types.tyvar_id(name)))
 
 fn check_pattern_type(
   pos: source.SourcePos,
@@ -5614,28 +5600,49 @@ fn infer_ctor_pattern(
         # skolems (see instantiate_ctor_pattern), unlike the expression/pack path
         # which hides them as flexible unknowns. docs/gadts-v0.md §6/§7.
         ctor_type <- unifier.instantiate_ctor_pattern(state, scheme)
-        record_bounded_unpack(state, name, fields, pos, scheme, ctor_type, env)
-        infer_ctor_pattern_typed(pos, state, env, subst, eff_subst, expected, name, fields, ctor_type)
+        record_bounded_unpack(state, name, pos, scheme, ctor_type, env)
+        infer_ctor_pattern_typed(pos, state, env, record_existential_skolems(pos, scheme, ctor_type, subst),
+                                 eff_subst, expected, name, fields, ctor_type)
+
+# The skolem each constrained `exists` variable of the constructor pattern at `pos`
+# unpacked to, kept under a key of the pattern's position and the variable. The
+# post-pass sees only the final substitution, which still holds it after a later
+# pattern reuses a name. No type variable's name starts with `@`, and nothing walks
+# the substitution's keys, so the key binds nothing a type can mention.
+fn record_existential_skolems(pos: source.SourcePos, scheme: types.Scheme, ctor_type: types.Type,
+                              subst: Dict types.Type) -> Dict types.Type =
+  list_fold(record_existential_skolem(pos, types.scheme_type(scheme), ctor_type, _, _),
+            subst, types.scheme_constraints(scheme))
+
+fn record_existential_skolem(pos: source.SourcePos, declared: types.Type, ctor_type: types.Type,
+                             subst: Dict types.Type, constraint: (String, String)) -> Dict types.Type =
+  let (var, _) = constraint
+      Just sk = skolem_for_var_in(declared, ctor_type, var) else subst
+  in dict_set(existential_skolem_key(var, pos), types.TConst(types.type_id(sk)), subst)
+
+fn existential_skolem_key(var: String, pos: source.SourcePos) -> String =
+  "@exsk:" ++ types.existential_binder(var, pos.index)
+
+fn recorded_existential_skolem(var: String, pos: source.SourcePos, subst: Dict types.Type) -> Maybe String =
+  let Just t = dict_get(existential_skolem_key(var, pos), subst) else Nothing
+  in skolem_name_of_type(t)
 
 # A pattern of a constructor with `where linear` records what it unpacked: each bounded
 # `exists` variable's skolem, and the `$ex_` name a dictionary at it is written with
-# when a field binds it (seed_one_given).
-fn record_bounded_unpack(state: unifier.InferState, name: String, fields: List ast.Pattern, pos: source.SourcePos,
+# (seed_given_for_skolem).
+fn record_bounded_unpack(state: unifier.InferState, name: String, pos: source.SourcePos,
                          scheme: types.Scheme, ctor_type: types.Type, env: Dict types.Scheme) -> Unit !{IO} =
   match linear_bounds_of(name, env) with
   | [] -> ()
   | bounds ->
       unifier.record_unpack(state, unifier.Unpack(key = types.unpack_key(name, pos.index), ctor_type = ctor_type,
-                                                  vars = list_flat_map(unpacked_marks(name, fields, scheme, ctor_type, _),
+                                                  vars = list_flat_map(unpacked_marks(name, pos, scheme, ctor_type, _),
                                                                        bounds)))
 
-fn unpacked_marks(name: String, fields: List ast.Pattern, scheme: types.Scheme, ctor_type: types.Type,
+fn unpacked_marks(name: String, pos: source.SourcePos, scheme: types.Scheme, ctor_type: types.Type,
                   v: String) -> List unifier.BoundMark =
-  let declared = types.scheme_type(scheme)
-      Just sk = skolem_for_var_in(declared, ctor_type, v) else Nil
-      ids = match field_and_declared_for_var(ctor_param_types(declared), fields, v) with
-            | Just (ast.VarPattern vname vpos, _) -> [sk, types.existential_fwd_head(types.existential_binder(vname, vpos.index))]
-            | _ -> [sk]
+  let Just sk = skolem_for_var_in(types.scheme_type(scheme), ctor_type, v) else Nil
+      ids = [sk, types.existential_fwd_head(types.existential_binder(v, pos.index))]
   in list_map(\id -> unifier.BoundMark(id = id, written = v, owner = string.after_last_dot(name)), ids)
 
 fn infer_ctor_pattern_typed(
@@ -5705,16 +5712,17 @@ fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, 
 # Stage 0b: seed the pattern-provided "given" dictionaries for a constrained
 # existential (docs/gadts-v0.md §5b/§7). Unpacking `Shown x` (from `Shown (any
 # ToString)`) binds `x` at a rigid skolem `$sk<n>` that has no global ToString
-# instance; the witness travels INSIDE the box. We recover the skolem off `subst`
-# (the same `s1` that binds `x`, so both ends agree by construction) and seed
+# instance; the witness travels INSIDE the box. We read the skolem off `subst`
+# (recorded at the pattern by record_existential_skolems) and seed
 # `@fwd:{skolem}:{class}` — the identical marker a `where C a` function seeds via
 # seed_forward_markers — so `to_string(x)` in the branch resolves the packed
-# witness through the standard forward path. Recurses into tuple/ctor sub-patterns
-# so `(Shown x, ...)` is handled; nested existentials use the same s1.
+# witness through the standard forward path. The constructor pattern owns the
+# dictionary, so its field sub-patterns may be anything. Recurses into tuple/ctor
+# sub-patterns so `(Shown x, ...)` is handled; nested existentials use the same s1.
 fn extend_env_with_existential_givens(pat: ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pat with
-  | ast.ConstructorPattern name fields _ ->
-      extend_env_givens_list(fields, subst, seed_ctor_givens(name, fields, subst, env))
+  | ast.ConstructorPattern name fields pos ->
+      extend_env_givens_list(fields, subst, seed_ctor_givens(name, pos, subst, env))
   | ast.TuplePattern pats _ -> extend_env_givens_list(pats, subst, env)
   | _ -> env
 
@@ -5723,44 +5731,24 @@ fn extend_env_givens_list(pats: List ast.Pattern, subst: Dict types.Type, env: D
   | Nil -> env
   | Cons h t -> extend_env_givens_list(t, subst, extend_env_with_existential_givens(h, subst, env))
 
-fn seed_ctor_givens(name: String, fields: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
+fn seed_ctor_givens(name: String, pos: source.SourcePos, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match dict_get(name, env) with
-  | Just scheme ->
-      seed_existential_givens(types.scheme_constraints(scheme),
-                              ctor_param_types(types.scheme_type(scheme)), fields, subst, env)
+  | Just scheme -> list_fold(seed_one_given(pos, subst, _, _), env, types.scheme_constraints(scheme))
   | Nothing -> env
 
-# For each existential constraint (var, class) of the matched constructor, find the
-# field whose type is that var, read the skolem bound to the corresponding pattern
-# variable, and seed `@fwd:{skolem}:{class}`. A wildcard/non-var field or a
-# non-skolem binding (defensive) is skipped — nothing can call a method on it.
-fn seed_existential_givens(
-  constraints: List (String, String),
-  param_types: List types.Type,
-  fields: List ast.Pattern,
-  subst: Dict types.Type,
-  env: Dict types.Scheme
-) -> Dict types.Scheme =
-  match constraints with
-  | Nil -> env
-  | Cons entry rest ->
-      match entry with
-      | (var, class_name) ->
-          seed_existential_givens(rest, param_types, fields, subst,
-            seed_one_given(var, class_name, param_types, fields, subst, env))
-
-fn seed_one_given(var: String, class_name: String, param_types: List types.Type, fields: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  match field_and_declared_for_var(param_types, fields, var) with
-  | Just (ast.VarPattern vname vpos, declared_pt) ->
-      match skolem_for_var_in(declared_pt, pattern_var_type(vname, vpos, subst), var) with
-      | Just sk -> seed_given_for_skolem(class_name, types.existential_binder(vname, vpos.index), sk, env)
-      | Nothing -> env
-  | _ -> env
+# Seeds `@fwd:{skolem}:{class}` for one existential constraint (var, class) of the
+# constructor pattern at `pos`, from the skolem recorded at that pattern. A var no
+# field mentions has none: nothing can call a method on it.
+fn seed_one_given(pos: source.SourcePos, subst: Dict types.Type, env: Dict types.Scheme,
+                  constraint: (String, String)) -> Dict types.Scheme =
+  let (var, class_name) = constraint
+      Just sk = recorded_existential_skolem(var, pos, subst) else env
+  in seed_given_for_skolem(class_name, types.existential_binder(var, pos.index), sk, env)
 
 # Key the given marker by the SKOLEM (so a method call on the unpacked value, whose
 # arg type IS the skolem, finds it) but store the STABLE forwarding identity
 # `$ex_<binder>` as the value — that becomes the emitted TDict's head, and lowering
-# re-derives the identical name from the pattern var to seed ctx_fwd. See
+# re-derives the identical name from the constructor pattern to seed ctx_fwd. See
 # types.existential_fwd_head.
 fn seed_given_for_skolem(class_name: String, binder: String, sk: String, env: Dict types.Scheme) -> Dict types.Scheme =
   # Seed the direct `@fwd:sk:class` given, then layer superclass givens
@@ -5772,19 +5760,6 @@ fn seed_given_for_skolem(class_name: String, binder: String, sk: String, env: Di
   # already qualified (bundler.qualify_ctor_args qualifies exist_constraints),
   # so it matches resolve_skolem_given's lookup off the class marker.
   seed_fwd_with_supers(class_name, FreshTVarName(sk), ProgVarName(types.existential_fwd_head(binder)), env)
-
-# Find the first field whose DECLARED type MENTIONS the existential var, returning
-# its pattern together with that declared type. Uses the shared `types.ftv`
-# predicate so this and lowering's field_var_for_constraint select the identical
-# field — the `$ex_<binder>` forwarding head must agree across the two passes. A
-# constrained var may sit bare (`Shown a`), in a function (`s -> String`), or
-# nested in a compound field (`Bag (List a)`); all three mention the var.
-fn field_and_declared_for_var(param_types: List types.Type, fields: List ast.Pattern, var: String) -> Maybe(ast.Pattern, types.Type) =
-  match (param_types, fields) with
-  | (Cons pt pts, Cons f fs) ->
-      if list_member(var, types.ftv(pt)) then Just((f, pt))
-      else field_and_declared_for_var(pts, fs, var)
-  | _ -> Nothing
 
 # Locate the skolem the existential var `var` was instantiated to, by co-walking
 # the DECLARED field type (which mentions `var`) against the field's ACTUAL type
@@ -11409,10 +11384,10 @@ fn resolve_dispatch_typed_branches(env: Dict types.Scheme, subst: Dict types.Typ
   | Cons h t ->
       match h with
       # The arm's existential givens are seeded again from the final substitution, which
-      # still binds each pattern variable to its skolem by position (bind_pattern_var),
-      # even after a later pattern reuses the name: a dictionary rebuilt in the
-      # arm then names the skolem `$ex_<binder>`, the slot lowering forwards per arm. The
-      # declaration-level env does not carry the givens inference saw inside the arm.
+      # still holds each skolem under its constructor pattern's position
+      # (record_existential_skolems): a dictionary rebuilt in the arm then names the
+      # skolem `$ex_<binder>`, the slot lowering forwards per arm. The declaration-level
+      # env does not carry the givens inference saw inside the arm.
       | typed_ast.TypedMatchBranch pat body ->
           Cons(typed_ast.TypedMatchBranch(pat,
                  resolve_dispatch_typed_expr(extend_env_with_existential_givens(pat, subst, env), subst,

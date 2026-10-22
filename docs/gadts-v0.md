@@ -197,9 +197,11 @@ strictly smaller, self-contained feature. So:
   in a **compound field** (`Bag (List a) where Describe a`). The last needed a real
   fix: unpack given-seeding now co-walks the declared field type against the
   unpacked skolem type to recover the skolem even when the var only appears nested
-  (infer `skolem_for_var_in`), and both infer and lowering select the forwarding
-  field via the shared `types.ftv` "mentions" predicate so their `$ex_<binder>` heads
-  agree. Missing-instance construction (`Shown(NoShow)`) is rejected at the
+  (infer `skolem_for_var_in`). The constructor pattern, not a field sub-pattern, owns
+  the packed dictionaries: infer records each constrained `exists` var's skolem at the
+  pattern, and infer and lowering name the dictionary `$ex_<var>_<pattern position>`
+  (`types.existential_binder`), so any field sub-pattern (`_`, a tuple, `Just(x)`)
+  works and two vars of one constructor stay distinct. Missing-instance construction (`Shown(NoShow)`) is rejected at the
   construction site with the standard "No instance" diagnostic (§8). **Known gap:**
   an *ambiguous* existential construction whose element type is undetermined
   (`Bag([])` — an empty container) currently surfaces as an opaque ctor-arity
