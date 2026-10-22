@@ -9,11 +9,11 @@ A linear type had to be an ADT or a record (spec §5.8 said `linear` "applies to
 declarations"). Both are boxed: a one-field linear type costs an allocation to build and a load
 to read, and a function that consumes one and returns a new one allocates again.
 
-That cost decides the linear array. A prototype `type linear LArr = LArr (MutVec Int)` that
-rebuilt `LArr(m)` on every set ran the sieve in 767 ms against 7
-([persistent-array-v0.md](persistent-array-v0.md) §5.3). The way around it was to make `LArr`
+That cost decides the linear array. A prototype `type linear LinVec = LinVec (MutVec Int)` that
+rebuilt `LinVec(m)` on every set ran the sieve in 767 ms against 7
+([persistent-array-v0.md](persistent-array-v0.md) §5.3). The way around it was to make `LinVec`
 opaque in C, with five builtins. A `wrap` costs nothing (spec §5.6.1: construction and
-destruction "are identity at the LLVM IR level"), but cannot be linear. With a linear wrap, `LArr`
+destruction "are identity at the LLVM IR level"), but cannot be linear. With a linear wrap, `LinVec`
 is `Vector` at runtime, four of its five operations are Sprout over existing pure externs, and
 only the in-place write needs C.
 
@@ -56,7 +56,7 @@ Rust, Swift and Linear Haskell all let a wrapper be both zero-cost and non-copya
 **Syntax.** The marker sits where `type linear` puts it, between the keyword and the name:
 
 ```sprout
-export wrap linear LArr a = Vector a     # abstract: importers cannot build or unwrap one
+export wrap linear LinVec a = Vector a     # abstract: importers cannot build or unwrap one
 wrap linear Handle s = Int               # `s` phantom, as in a plain wrap
 ```
 
@@ -64,16 +64,16 @@ wrap linear Handle s = Int               # `s` phantom, as in a plain wrap
 slot, after the parameters.
 
 **Semantics.** A linear wrap is a linear type (spec §5.8), with every rule that implies: used
-exactly once, borrowed through `borrowing`, the leak and reuse errors. Construction `LArr(v)`
-consumes `v`, as every constructor does. A `match` on an owned `LArr` consumes it; on a borrowed
+exactly once, borrowed through `borrowing`, the leak and reuse errors. Construction `LinVec(v)`
+consumes `v`, as every constructor does. A `match` on an owned `LinVec` consumes it; on a borrowed
 one it borrows it and binds the field as borrowed (spec §5.8: "destructuring a borrowed value
 binds its linear fields as borrowed too").
 
 **Linearity ends at the destructure.** The field's type decides whether its binder is tracked.
-`match arr with | LArr raw -> …` binds `raw: Vector a`, which is not linear, so `raw` may be
+`match arr with | LinVec raw -> …` binds `raw: Vector a`, which is not linear, so `raw` may be
 copied or dropped. `type linear File = File Int` has the same property today. So a linear
 wrap's guarantee is only as strong as its constructor's privacy: an abstract wrap
-(`export wrap linear X`, no `(..)`) is unwrapped only by its own module. `LArr` relies on this,
+(`export wrap linear X`, no `(..)`) is unwrapped only by its own module. `LinVec` relies on this,
 and so cannot live in the prelude, whose constructors are in scope everywhere (spec §3.1). The
 compiler now enforces it: `(..)` on a linear type with a field whose type is not linear is an error
 ([linear-publish-v0.md](linear-publish-v0.md)).
@@ -88,7 +88,7 @@ the same worker, and `ast_to_ir` reads no parameter mode, so the two combine.
 **Type system.** One change: the declaration sets the type's `@linear:` marker, as `type linear`
 does. Everything that reads the marker (`linear_check.type_is_linear`,
 `infer.type_name_is_linear`, the bound of [linearity-bound-v0.md](linearity-bound-v0.md)) then
-sees the wrap. An unbounded type variable still admits no linear type, so `LArr File` is
+sees the wrap. An unbounded type variable still admits no linear type, so `LinVec File` is
 rejected where it is instantiated, by the bound's existing error.
 
 **Errors.** No new diagnostic. A linear wrap reports reuse, leak and borrow errors in the words

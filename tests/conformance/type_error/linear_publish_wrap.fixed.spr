@@ -3,12 +3,12 @@ module main
 # The hint applied: the wrap is abstract, and the module exports the functions
 # that build and take it apart.
 
-export wrap linear LArr a = Vector a
+export wrap linear LinVec a = Vector a
 
-export fn larr_of(v: Vector a) -> LArr a = LArr(v)
+export fn linvec_of(v: Vector a) -> LinVec a = LinVec(v)
 
-export fn larr_free(arr: LArr a) -> Unit =
+export fn linvec_free(arr: LinVec a) -> Unit =
   match arr with
-  | LArr _ -> ()
+  | LinVec _ -> ()
 
 fn main() -> Unit !{IO} = print("x")

@@ -1,0 +1,9 @@
+module main
+import stdlib.linvec (LinVec, linvec_length)
+
+# A path that neither freezes nor drops the vector leaks it.
+
+fn size(v: LinVec Int) -> Int = linvec_length(v)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

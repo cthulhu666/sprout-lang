@@ -8876,6 +8876,19 @@ long long vector_mutset(long long vec, long long index, long long value) {
   return 0;
 }
 
+/* Backs stdlib.linvec's pure in-place write: store `x` at `i` and return the SAME
+ * vector.  Sound only because `LinVec` is linear, so no one holds the old version
+ * (docs/persistent-array-v0.md §5.3).  Allocates nothing.  Out of range traps, as
+ * vector_mutset does, and the store takes the same write-barrier hook. */
+long long linvec_set(long long i, long long x, long long vec) {
+  VectorVal* v = (VectorVal*)(uintptr_t)vec;
+  if (v == NULL) sprout_fail("linvec_set: null vector");
+  if (i < 0 || i >= v->len) sprout_fail("linvec_set: index out of bounds");
+  sprout_ap_on_store(vec, x);
+  ((struct SproutSlot*)v->data)[i].w = x;
+  return vec;
+}
+
 /* Append `value`, growing the backing array by doubling when it is full.  Backs
  * mutvec_push; amortised O(1).
  *

@@ -484,6 +484,23 @@ fn payload() -> json.Json =
   )
 ```
 
+## stdlib.linvec
+
+A pure vector with in-place writes (in `stdlib/linvec.sprout`; Experimental, as spec §5.8 is). Spec:
+§5.8 *`LinVec`*; design: [persistent-array-v0.md](persistent-array-v0.md) §5.3.
+
+- `LinVec a` abstract linear type; only the functions below build or take one apart
+- `linvec_new(n, x) -> LinVec a` — n copies of `x`
+- `linvec_get(i, v: borrowing LinVec a) -> Maybe a` — `Nothing` out of range
+- `linvec_set(i, x, v) -> LinVec a` — O(1), in place, returns the same vector; traps out of range
+  (the one builtin, `linvec_set`)
+- `linvec_length(v: borrowing LinVec a) -> Int`
+- `linvec_freeze(v) -> Vec a` — O(1); the vector's life ends
+- `linvec_drop(v) -> Unit`
+- `linvec_scatter(is, x, v) -> LinVec a` — sets `x` at each index; out of range traps
+- `linvec_accum(f, pairs, v) -> LinVec a` — for each `(i, y)` in order, sets `f(old, y)` at `i`;
+  out of range traps
+
 ## stdlib.list
 
 Slicing a `List` (in `stdlib/list.sprout`; `import stdlib.list as list`). Data-last, so
@@ -787,6 +804,7 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 | `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. A loop that appends one builder per step is O(k²) in the chunk count; collect the parts in a list and join them with `bytes.builder_concat` (O(k log k)). |
 | `Dict v` | `++` (Semigroup instance) | O(m · log(n + m)) | Persistent: each of `right`'s m entries is folded into `left` via `dict_set`, which is O(log n) copy-on-write on the balanced AVL map (path copy, not a full-array copy). For very large merges, folding into a freshly built dict avoids re-walking the growing left. |
 | `MutVec a` (`stdlib.mutable`) | `mutvec_push` (one element) | amortised O(1) | **Mutable and in place**, unlike every other row here. Start from `mutvec_empty()` when the size is discovered at runtime; capacity doubles from 8 as it fills. See below. |
+| `LinVec a` (`stdlib.linvec`, Experimental) | `linvec_set` (one element, by index) | O(1) | **Linear and in place, with a pure signature.** A set consumes the vector and returns it, so there is no old version to read and nothing is copied or allocated. Reads borrow; every path ends in `linvec_freeze` (O(1), gives a `Vec`) or `linvec_drop`. A set out of range traps. A set inside a lambda is rejected: thread the vector through recursion, or use `linvec_scatter` / `linvec_accum`. |
 
 ### Growing a `MutVec`
 

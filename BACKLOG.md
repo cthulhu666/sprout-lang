@@ -239,7 +239,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   read as one use of `p` and never asks what else `p` held, so the linear `b` is never consumed.
   Reading a field should be refused while another field is linear, as reading from a borrow is.
 - [ ] `P3` **A field unwrapped from a borrowed linear value can escape its module's code.** Inside
-  a linear type's module, `match arr with | LArr raw -> raw` from a borrowed `arr` returns an
+  a linear type's module, `match arr with | LinVec raw -> raw` from a borrowed `arr` returns an
   alias. Extend `linear_check.esc_value` so such a binder cannot be returned, captured or stored
   (`docs/linear-publish-v0.md` §7).
 - [ ] `P3` **An unresolved name under a renamed alias gets no "declared here" note.** The note that
@@ -309,7 +309,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `match mutvec_get(c, p) with | Just false -> …` builds a `Just` per call, while `| Just b -> …`
   calls the unboxed worker. A 1M sieve: ~400 ms against 7. With `SPROUT_GC_THRESHOLD=50000000` it
   is 29–48 ms, so most of it is the count-blind trigger rescanning the live array. `Just false`
-  is how a sieve over `LArr` reads (`docs/persistent-array-v0.md` §3.4). Fix: bind the field to a
+  is how a sieve over `LinVec` reads (`docs/persistent-array-v0.md` §3.4). Fix: bind the field to a
   fresh variable in the worker arm and test the literal after.
 - [ ] `P3` **Phase B mutual-TCO: a member that is both self-tail-recursive and in a heterogeneous
   mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
@@ -1712,7 +1712,7 @@ deferral happened, not for current behaviour. Still open:
   wait for Phase 2. Plan: `docs/native-sprout-runtime-v0.md`.
 - [ ] `P3` **Unsafe primitives: trusted Sprout in place of C.** Wanted later (Kuba, 2026-10-22),
   and builtins are designed now so these can delete them without an API change. First user:
-  `larr_set`, a C builtin only because pure Sprout cannot call `vector_mutset`
+  `linvec_set`, a C builtin only because pure Sprout cannot call `vector_mutset`
   (`docs/persistent-array-v0.md` §12); also `byte-buffer-v0.md` §5.3's private creator and the
   GC-in-Sprout of `native-sprout-runtime-v0.md` Phase 4 (raw loads and stores). Not designed:
   the gate (a keyword, or module-private externs beyond the `local` rule), the primitive set,
@@ -2410,16 +2410,16 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   the largest single contributor out of that share — nqueens now allocates 33.4M objects, not 50.1M
   — so re-measure before pricing this. See also the generational-step entry in §1, whose
   measurements re-scope it as compiler-only.
-- [ ] `P3` **A pure array with cheap index writes.** `vec_set` copies, O(n): a sieve, a grid BFS,
-  a histogram or a DP table takes 1.5–19 s and up to 12 GB with it, 0–12 ms with `MutVec`. Our
-  own code is not bottlenecked, but three uncharted-suns functions are `!{IO}` only for a scratch
-  `MutVec`. Proposal: `docs/persistent-array-v0.md` — a trie as the persistent array, and a
-  linear array with bulk operations as the one in-place mechanism; no Baker array, no `ST`-style
-  `run_local`. Neither waits on anything now: the linear array is a `wrap linear` over `Vector`
-  with one builtin, `larr_set`. When it lands, uncomment the `LArr` sieves in
-  `examples/sieve.sprout`. Revisit per the doc's §12 triggers.
+- [ ] `P3` **`LinVec Double` writes do not inline.** `ast_to_ir.recognize_vector_op` and
+  `bce.direct_shape` key on `vector_mutset` by name, so `linvec_set` on a `Vector Double` stays a
+  call with its bounds check, where a `MutVec Double` write inlines (B1) and loses the check (BCE).
+  Add `linvec_set` to both; it returns its vector, so the inline form must too. Measure first: the
+  sieve and BFS run within 1.2-1.6x of `MutVec` without it. `docs/persistent-array-v0.md` §5.3.
+- [ ] `P3` **A persistent trie array, `PVec`.** `LinVec` has no old versions, so storing, sharing
+  or branching on an array needs a 32-way trie in plain Sprout: no builtin, 3-21x slower than a
+  Baker array on the kernels, fully persistent. `docs/persistent-array-v0.md` §5.2 and §7 step 2.
 - [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
-  (`LMatrix Int Int (LArr a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a
+  (`LMatrix Int Int (LinVec a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a
   function consumes a linear constructor and builds one of the same shape, reuse its memory, as
   Koka's Perceus does at count 1. Not designed; `docs/persistent-array-v0.md` §5.3.
 

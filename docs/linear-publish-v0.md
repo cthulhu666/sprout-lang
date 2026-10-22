@@ -19,8 +19,8 @@ fn forge() -> Fd = Fd(5)
 
 Inside the declaring module that is trusted code. Outside it, the constructor is reachable through
 `(..)`, and through the prelude, whose constructors are in scope everywhere (spec §3.1). For a
-handle over an fd that means a double close. For `LArr`, whose `larr_set` writes in place under a
-pure signature, an `LArr` around a shared `Vector` changes a value someone else holds: a wrong
+handle over an fd that means a double close. For `LinVec`, whose `linvec_set` writes in place under a
+pure signature, an `LinVec` around a shared `Vector` changes a value someone else holds: a wrong
 answer, not a crash.
 
 Nothing reaches it today: every stdlib linear type is abstract, and the one published linear type
@@ -66,7 +66,7 @@ it is published, so this rule checks it, or abstract, so its module is trusted.
 
 | declaration | published? |
 |---|---|
-| `export wrap linear LArr a (..) = Vector a` | error: `Vector a` |
+| `export wrap linear LinVec a (..) = Vector a` | error: `Vector a` |
 | `export type linear Fd (..) = Fd Int` | error: `Int` |
 | `export type linear Box a (..) = Box a` | error: `a` is unbounded |
 | `export type linear Weird (..) = Weird TcpConnection (Vector Int)` | error: `Vector Int` |
@@ -75,7 +75,7 @@ it is published, so this rule checks it, or abstract, so its module is trusted.
 | `export type linear Slot (..) = Slot (Maybe File)` | error: over-strict |
 | `export type linear Pair (..) = Pair File File` | allowed |
 | `export type Boxed (..) = \| exists a. Boxed a where linear a` | allowed |
-| `export wrap linear LArr a = Vector a` | allowed: abstract |
+| `export wrap linear LinVec a = Vector a` | allowed: abstract |
 
 A `where linear` bound can only name an `exists` variable (a data parameter's is a parse error),
 so the importer cannot open it, and a value it packs is its own.
@@ -97,9 +97,9 @@ Rejected criteria:
 **Error.** At the declaration, naming the first field whose type is not linear:
 
 ```
-`LArr` is linear, and `(..)` publishes its constructor, but its field `Vector a` is not linear:
+`LinVec` is linear, and `(..)` publishes its constructor, but its field `Vector a` is not linear:
 another module could copy it out, or build one around a value it shares. Remove `(..)` and
-export functions that build and take apart `LArr`
+export functions that build and take apart `LinVec`
 ```
 
 A record says "its constructor and fields"; a bare type variable "can hold a value that is not
@@ -165,7 +165,7 @@ Breaking for a published linear type with an untracked field. In our four repos:
   modules, and is not breaking.
 - Narrowing the trusted module: a non-linear binder destructured from a *borrowed* linear value may
   not escape (be returned, captured or stored). `linear_check`'s escape walk (`esc_value`) is the
-  place. It catches `larr_get` returning its `Vector`. A mode on non-linear binders, the stronger
+  place. It catches `linvec_get` returning its `Vector`. A mode on non-linear binders, the stronger
   form, was rejected: M4.6 moved modes onto function types, and it needs borrowing extern
   parameters.
 

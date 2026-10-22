@@ -267,6 +267,37 @@ do
   list_each(\body -> mut.mutvec_push(log, body), bodies)   # grows as needed
 ```
 
+## Writing at an index
+
+`vec_set` copies the whole vector, so a fold of `vec_set` over n elements costs O(n) per write.
+Pick by what the loop does:
+
+- **Each new value depends on earlier ones** (a DP table): build it, no write at all. Build each
+  row from the one before:
+
+```sprout
+fn next_row(row: Vec Int) -> Vec Int =
+  vec_from_list([vec_get_or(j - 1, 0, row) + vec_get_or(j, 0, row) for j in 0..vec_length(row)])
+
+fn pascal(n: Int) -> Vec Int =
+  range_fold(\ (row, _) -> next_row(row), vec_from_list([1]), 1..n)
+```
+
+- **Writes land where the data says** (a sieve, a histogram, a search), and the function is
+  pure: `LinVec` (`stdlib.linvec`, Experimental). A set consumes the vector and returns it, so
+  thread it through explicit recursion; a set inside a lambda is rejected. The bulk operations
+  take one call per batch, and every path ends in `linvec_freeze` or `linvec_drop`:
+
+```sprout
+import stdlib.linvec (linvec_new, linvec_accum, linvec_freeze)
+
+fn histogram(buckets: Int, xs: List Int) -> Vec Int =
+  linvec_freeze(linvec_accum(\ (n, k) -> n + k, list_map(\x -> (x, 1), xs), linvec_new(buckets, 0)))
+```
+
+- **`IO` is fine, or the writes sit in a lambda**: `MutVec`.
+- **Old versions must stay readable**: `vec_set`, and keep the vector small.
+
 ## Name the lambda that doesn't fit its line
 
 A lambda passed as a call argument stays on **one line**. When its body needs

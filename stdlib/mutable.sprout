@@ -14,7 +14,7 @@ module stdlib.mutable
 # The five MUTABLE ones are declared below instead. They back `MutVec` and
 # nothing else — the prelude never calls them — so under the rule "an extern lives
 # in the module that owns its type" this is where they belong. The split falls
-# exactly on the pure/`!{IO}` line.
+# on the persistent/mutable line.
 #
 # Declaring them here does not change how callers name them: externs are invisible
 # to the module system (bundler.sprout:597 drops `ExternFnDecl`), so they resolve
@@ -24,10 +24,15 @@ module stdlib.mutable
 # Two of them STORE A VALUE: `vector_mutset` and `vector_push`. Both are candidate
 # write-barrier sites for a future generational collector, and both carry the
 # ageprof hook that prices one. Every `MutVec`/`MutMatrix` mutation in this module
-# routes through those two, so there is no bypass. `vector_truncate` writes too,
-# but only zeros and a length — it can create no old-to-young edge, so it needs no
-# barrier.
-extern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}
+# routes through those two, so there is no bypass here. `linvec_set`
+# (stdlib/linvec.sprout) is a third store site, in C, with the same hook.
+# `vector_truncate` writes too, but only zeros and a length — it can create no
+# old-to-young edge, so it needs no barrier.
+#
+# `vec_make_filled` is PURE: it allocates a fresh vector and changes nothing that
+# exists. `mutvec_new` keeps its `!{IO}`, since a MutVec is state; `stdlib.linvec`
+# reaches the extern by importing this module.
+extern fn vec_make_filled(n: Int, val: a) -> Vector a
 extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
 extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 extern fn vector_push(v: Vector a, val: a) -> Unit !{IO}
@@ -42,9 +47,7 @@ fn mutvec_raw(v: MutVec a) -> Vector a =
   match v with | MutVec raw -> raw
 
 export fn mutvec_new(n: Int, val: a) -> MutVec a !{IO} =
-  do
-    raw <- vec_make_filled(n, val)
-    MutVec(raw)
+  MutVec(vec_make_filled(n, val))
 
 # A vector of length 0, to be filled with `mutvec_push`. Use this — not
 # `mutvec_new(0, dummy)` — when the size is discovered at runtime: it needs no fill
@@ -335,7 +338,7 @@ fn sort_passes(less: a -> a -> Bool, src: Vector a, dst: Vector a, n: Int, w: In
 fn sort_merge_all(less: a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =
   do
     fill <- vector_get_direct(raw, 0)
-    scratch <- vec_make_filled(n, fill)
+    let scratch = vec_make_filled(n, fill)
     in_scratch <- sort_passes(less, raw, scratch, n, sort_block, false)
     if in_scratch then sort_copy(scratch, raw, 0, n, 0) else ()
 

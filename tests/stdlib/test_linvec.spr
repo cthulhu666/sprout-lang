@@ -1,0 +1,282 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_length, linvec_freeze, linvec_drop, linvec_scatter, linvec_accum)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_fold)
+import stdlib.string (join)
+
+# `LinVec` (docs/persistent-array-v0.md §5.3, §9): operations, then the four kernels of
+# §3.2, each checked against a `MutVec` reference. The linear rejections are in
+# tests/conformance/type_error/linvec_*; the trap, the zero-allocation set and the IR
+# check are `just linvec-smoke`.
+
+fn imod(a: Int, b: Int) -> Int =
+  a - (a / b) * b
+
+fn imax(a: Int, b: Int) -> Int =
+  if a > b then a else b
+
+# A read matched with a binding: no `Maybe` is allocated.
+fn read_or(i: Int, fallback: Int, v: borrowing LinVec Int) -> Int =
+  match linvec_get(i, v) with
+  | Just x -> x
+  | Nothing -> fallback
+
+fn show(v: Vec Int) -> String =
+  join(",", list_map(int_to_string, vec_to_list(v)))
+
+# --- operations ---
+
+fn basic() -> String =
+  let v = linvec_set(2, 7, linvec_new(4, 0))
+  in let n = linvec_length(v)
+  in let hit = read_or(2, -1, v)
+  in let miss = read_or(9, -1, v)
+  in let neg = read_or(-1, -1, v)
+  in `${int_to_string(n)} ${int_to_string(hit)} ${int_to_string(miss)} ${int_to_string(neg)} ${show(linvec_freeze(v))}`
+
+# The read finishes before the set: `old` is the value before, `new` the value after.
+fn read_then_set() -> String =
+  let v = linvec_set(1, 5, linvec_new(3, 0))
+  in let old = read_or(1, -1, v)
+  in let v2 = linvec_set(1, 99, v)
+  in let new = read_or(1, -1, v2)
+  in `${int_to_string(old)} ${int_to_string(new)} ${show(linvec_freeze(v2))}`
+
+# A freeze is a Vec like any other; a later copy of it does not touch the first.
+fn freeze_is_a_vec() -> String =
+  let frozen = linvec_freeze(linvec_set(0, 4, linvec_new(2, 1)))
+  in let changed = vec_set(1, 8, frozen)
+  in `${show(frozen)} ${show(changed)}`
+
+fn drops() -> Bool =
+  let _ = linvec_drop(linvec_set(0, 1, linvec_new(2, 0)))
+  in true
+
+fn empty_len() -> Int =
+  let v = linvec_new(0, 0)
+  in let n = linvec_length(v)
+  in let _ = linvec_drop(v)
+  in n
+
+# --- bulk operations against a `vec_set` reference ---
+
+fn ref_scatter(is: List Int, x: Int, v: Vec Int) -> Vec Int =
+  list_fold(\ (acc, i) -> vec_set(i, x, acc), v, is)
+
+fn ref_add(acc: Vec Int, p: (Int, Int)) -> Vec Int =
+  match p with
+  | (i, y) -> vec_set(i, vec_get_or(i, 0, acc) + y, acc)
+
+fn ref_accum(pairs: List (Int, Int), v: Vec Int) -> Vec Int =
+  list_fold(ref_add, v, pairs)
+
+let zeros: Vec Int = [0, 0, 0, 0, 0]
+
+fn scatter_case(is: List Int) -> String =
+  show(linvec_freeze(linvec_scatter(is, 9, linvec_new(5, 0))))
+
+fn accum_case(pairs: List (Int, Int)) -> String =
+  show(linvec_freeze(linvec_accum(\ (a, b) -> a + b, pairs, linvec_new(5, 0))))
+
+# --- sieve ---
+
+fn multiples(p: Int, n: Int) -> List Int = [p * k for k in p..(n / p)]
+
+fn count_primes(n: Int, composite: Vec Bool) -> Int =
+  list_length([p for p in 2..n if vec_get(p, composite) == Just(false)])
+
+fn sieve_loop(p: Int, n: Int, composite: LinVec Bool) -> LinVec Bool =
+  if p * p > n then composite
+  else
+    match linvec_get(p, composite) with
+    | Just marked ->
+        if marked then sieve_loop(p + 1, n, composite)
+        else sieve_loop(p + 1, n, linvec_scatter(multiples(p, n), true, composite))
+    | Nothing -> composite
+
+fn sieve_linvec(n: Int) -> Int =
+  count_primes(n, linvec_freeze(sieve_loop(2, n, linvec_new(n + 1, false))))
+
+fn cross_out_mut(n: Int, composite: MutVec Bool, p: Int) -> Unit !{IO} =
+  do
+    marked <- mutvec_at(composite, p)
+    if marked then () else list_each(\m -> mutvec_set(composite, m, true), multiples(p, n))
+
+fn sieve_mutvec(n: Int) -> Int !{IO} =
+  do
+    composite <- mutvec_new(n + 1, false)
+    range_each(cross_out_mut(n, composite, _), 2..n)
+    unmarked <- mutvec_fold(\ (acc, c) -> if c then acc else acc + 1, 0, composite)
+    unmarked - 2
+
+# --- histogram ---
+
+fn bucket_of(i: Int, buckets: Int) -> Int =
+  imod(i * 7919 + (i / 3) * 104729, buckets)
+
+fn bucket_pairs(i: Int, k: Int, buckets: Int, acc: List (Int, Int)) -> List (Int, Int) =
+  if i >= k then acc else bucket_pairs(i + 1, k, buckets, Cons((bucket_of(i, buckets), 1), acc))
+
+# Per-element: read, add, write back.
+fn bump_all(i: Int, k: Int, buckets: Int, counts: LinVec Int) -> LinVec Int =
+  if i >= k then counts
+  else
+    let b = bucket_of(i, buckets)
+    in let n = read_or(b, 0, counts)
+    in bump_all(i + 1, k, buckets, linvec_set(b, n + 1, counts))
+
+fn largest(v: Vec Int) -> Int =
+  vec_fold(imax, 0, v)
+
+fn hist_loop(k: Int, buckets: Int) -> Int =
+  largest(linvec_freeze(bump_all(0, k, buckets, linvec_new(buckets, 0))))
+
+fn hist_accum(k: Int, buckets: Int) -> Int =
+  largest(linvec_freeze(linvec_accum(\ (a, b) -> a + b, bucket_pairs(0, k, buckets, Nil), linvec_new(buckets, 0))))
+
+fn hist_mutvec(k: Int, buckets: Int) -> Int !{IO} =
+  do
+    counts <- mutvec_new(buckets, 0)
+    range_each(\i -> bump_mut(counts, bucket_of(i, buckets)), 0..(k - 1))
+    mutvec_fold(imax, 0, counts)
+
+fn bump_mut(counts: MutVec Int, b: Int) -> Unit !{IO} =
+  do
+    n <- mutvec_at(counts, b)
+    mutvec_set(counts, b, n + 1)
+
+# --- BFS over a w x w grid, one cell in four a wall ---
+
+fn is_wall(w: Int, c: Int) -> Bool =
+  c != 0 && imod(c * 37 + (c / w) * 11, 4) == 0
+
+fn around(w: Int, c: Int) -> List Int =
+  let x = imod(c, w)
+  in let y = c / w
+  in (if x > 0 then [c - 1] else []) ++ (if x < w - 1 then [c + 1] else [])
+       ++ (if y > 0 then [c - w] else []) ++ (if y < w - 1 then [c + w] else [])
+
+fn around_all(w: Int, cells: List Int, acc: List Int) -> List Int =
+  match cells with
+  | [] -> acc
+  | [c | rest] -> around_all(w, rest, around(w, c) ++ acc)
+
+# Level by level: `pending` are cells to look at, `fresh` those marked this level.
+fn bfs(w: Int, seen: LinVec Bool, fresh: List Int, pending: List Int, count: Int) -> Int =
+  match pending with
+  | [c | rest] ->
+      if is_wall(w, c) then bfs(w, seen, fresh, rest, count)
+      else
+        match linvec_get(c, seen) with
+        | Just marked ->
+            if marked then bfs(w, seen, fresh, rest, count)
+            else bfs(w, linvec_set(c, true, seen), Cons(c, fresh), rest, count + 1)
+        | Nothing -> bfs(w, seen, fresh, rest, count)
+  | [] ->
+      match fresh with
+      | [] -> let _ = linvec_drop(seen) in count
+      | _ -> bfs(w, seen, [], around_all(w, fresh, []), count)
+
+fn bfs_linvec(w: Int) -> Int =
+  bfs(w, linvec_set(0, true, linvec_new(w * w, false)), [0], [], 1)
+
+fn bfs_mut(w: Int, seen: MutVec Bool, fresh: List Int, pending: List Int, count: Int) -> Int !{IO} =
+  match pending with
+  | [c | rest] ->
+      if is_wall(w, c) then bfs_mut(w, seen, fresh, rest, count)
+      else
+        do
+          marked <- mutvec_at(seen, c)
+          if marked then bfs_mut(w, seen, fresh, rest, count)
+          else
+            do
+              mutvec_set(seen, c, true)
+              bfs_mut(w, seen, Cons(c, fresh), rest, count + 1)
+  | [] ->
+      match fresh with
+      | [] -> count
+      | _ -> bfs_mut(w, seen, [], around_all(w, fresh, []), count)
+
+fn bfs_mutvec(w: Int) -> Int !{IO} =
+  do
+    seen <- mutvec_new(w * w, false)
+    mutvec_set(seen, 0, true)
+    bfs_mut(w, seen, [0], [], 1)
+
+# --- LCS table of two n-long sequences, one write per cell ---
+
+fn seq_a(n: Int) -> Vec Int = vec_from_list([imod(k * 7 + 3, 4) for k in 0..(n - 1)])
+
+fn seq_b(n: Int) -> Vec Int = vec_from_list([imod(k * 5 + 1, 4) for k in 0..(n - 1)])
+
+fn cell(i: Int, t: borrowing LinVec Int) -> Int =
+  read_or(i, -1, t)
+
+fn lcs_fill(n: Int, a: Vec Int, b: Vec Int, c: Int, t: LinVec Int) -> LinVec Int =
+  if c >= (n + 1) * (n + 1) then t
+  else
+    let i = c / (n + 1)
+    in let j = imod(c, n + 1)
+    in if i == 0 || j == 0 then lcs_fill(n, a, b, c + 1, t)
+       else
+         let len =
+           if vec_get_or(i - 1, -1, a) == vec_get_or(j - 1, -2, b) then 1 + cell(c - n - 2, t)
+           else imax(cell(c - n - 1, t), cell(c - 1, t))
+         in lcs_fill(n, a, b, c + 1, linvec_set(c, len, t))
+
+fn lcs_linvec(n: Int) -> Int =
+  let t = lcs_fill(n, seq_a(n), seq_b(n), 0, linvec_new((n + 1) * (n + 1), 0))
+  in let len = cell((n + 1) * (n + 1) - 1, t)
+  in let _ = linvec_drop(t)
+  in len
+
+fn lcs_mut_fill(n: Int, a: Vec Int, b: Vec Int, c: Int, t: MutVec Int) -> Unit !{IO} =
+  if c >= (n + 1) * (n + 1) then ()
+  else
+    let i = c / (n + 1)
+    in let j = imod(c, n + 1)
+    in if i == 0 || j == 0 then lcs_mut_fill(n, a, b, c + 1, t)
+       else
+         do
+           diag <- mutvec_at(t, c - n - 2)
+           up <- mutvec_at(t, c - n - 1)
+           left <- mutvec_at(t, c - 1)
+           let len = if vec_get_or(i - 1, -1, a) == vec_get_or(j - 1, -2, b) then 1 + diag else imax(up, left)
+           mutvec_set(t, c, len)
+           lcs_mut_fill(n, a, b, c + 1, t)
+
+fn lcs_mutvec(n: Int) -> Int !{IO} =
+  do
+    t <- mutvec_new((n + 1) * (n + 1), 0)
+    lcs_mut_fill(n, seq_a(n), seq_b(n), 0, t)
+    mutvec_at(t, (n + 1) * (n + 1) - 1)
+
+fn main() -> Unit !{IO} =
+  do
+    sieve_ref <- sieve_mutvec(10000)
+    hist_ref <- hist_mutvec(20000, 97)
+    hist_big_ref <- hist_mutvec(5000, 5000)
+    bfs_ref <- bfs_mutvec(40)
+    lcs_ref <- lcs_mutvec(40)
+    run_suite("linvec", [
+      check_eq("new, set, get, length, freeze", basic(), "4 7 -1 -1 0,0,7,0"),
+      check_eq("a read before a set sees the old value", read_then_set(), "5 99 0,99,0"),
+      check_eq("a frozen LinVec is an ordinary Vec", freeze_is_a_vec(), "4,1 4,8"),
+      check_eq("drop consumes", drops(), true),
+      check_eq("length of an empty LinVec", empty_len(), 0),
+      check_eq("scatter matches vec_set, repeats included",
+               scatter_case([1, 3, 1, 3, 0]), show(ref_scatter([1, 3, 1, 3, 0], 9, zeros))),
+      check_eq("scatter of nothing", scatter_case([]), "0,0,0,0,0"),
+      check_eq("accum matches vec_set, repeats included",
+               accum_case([(0, 1), (2, 5), (0, 2), (2, 3), (4, 10)]),
+               show(ref_accum([(0, 1), (2, 5), (0, 2), (2, 3), (4, 10)], zeros))),
+      check_eq("accum of nothing", accum_case([]), "0,0,0,0,0"),
+      check_eq("sieve counts the primes up to 10000", sieve_linvec(10000), 1229),
+      check_eq("sieve matches MutVec", sieve_linvec(10000), sieve_ref),
+      check_eq("histogram by get and set matches MutVec", hist_loop(20000, 97), hist_ref),
+      check_eq("histogram by accum matches MutVec", hist_accum(20000, 97), hist_ref),
+      check_eq("sparse histogram matches MutVec", hist_loop(5000, 5000), hist_big_ref),
+      check_eq("BFS matches MutVec", bfs_linvec(40), bfs_ref),
+      check_eq("BFS reaches more than the corner", bfs_linvec(40) > 1, true),
+      check_eq("LCS matches MutVec", lcs_linvec(40), lcs_ref),
+      check_eq("LCS is not trivial", lcs_linvec(40) > 0, true)
+    ])
