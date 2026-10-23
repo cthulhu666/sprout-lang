@@ -265,9 +265,11 @@ is memory-unsafe if a premise of `linear_check` leaks. `just test` counts `reuse
 IR (`test_linear_reuse_ir`) and checks values (`test_linear_reuse`); `scripts/linear_reuse_smoke.sh`
 adds what only `-O2` and the runtime counters show, in `just ci-fast-gates`:
 
-- The `Grid` sieve and a three-constructor CSV splitter (`tests/linear_reuse_smoke/`) allocate the
-  same number of objects (`SPROUT_DEBUG_ALLOC`) at two input sizes, so a step allocates nothing.
-- Both print the answer their input has.
+- The `Grid` sieve, a three-constructor CSV splitter and a linear binary search tree
+  (`tests/linear_reuse_smoke/`) allocate the same number of objects (`SPROUT_DEBUG_ALLOC`) at two
+  input sizes, so a step allocates nothing. The tree inserts keys `i * 37 mod 100`: once all 100
+  are present, an insert rebuilds its whole path in place.
+- All print the answer their input has.
 
 `test_linear_reuse` is also a `SPROUT_GC_STRESS=1` workload: `tock` is entered by a tail call, so
 only the token's rooting keeps its cell from being recycled under the rebuild.

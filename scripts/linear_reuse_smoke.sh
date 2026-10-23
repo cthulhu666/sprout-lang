@@ -4,9 +4,10 @@
 #
 #   alloc   a linear state stepped once per input unit allocates nothing per step: the
 #           runtime's SPROUT_DEBUG_ALLOC object count is the same for a small and a large
-#           input, for the Grid sieve (one rebuild per strike, same constructor) and the CSV
-#           splitter (a rebuild per byte, three constructors).
-#   value   both programs print the answer the input has, so a reused cell holds what was
+#           input, for the Grid sieve (one rebuild per strike, same constructor), the CSV
+#           splitter (a rebuild per byte, three constructors) and a binary search tree
+#           (an insert rebuilds a whole path; none allocates once every key is present).
+#   value   all programs print the answer the input has, so a reused cell holds what was
 #           written to it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,6 +66,8 @@ compare() {
 # 168 primes below 1000, 17984 below 200000; 7 fields per CSV row.
 compare grid NSIZE 1000 168 200000 17984
 compare csv ROWS 20 140 4000 28000
+# Keys 0..99 sum to 4950.
+compare tree INSERTS 1000 4950 200000 4950
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "==> linear-reuse-smoke ✓"

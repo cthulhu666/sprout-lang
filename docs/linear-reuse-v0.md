@@ -34,37 +34,33 @@ allocation.
 `g` is owned and linear: nothing else holds the cell, and after the match nothing can name it.
 The new `Grid` has the same shape. Its fields can be written into the old cell.
 
-### 1.1 State machines
+### 1.1 Rebuilding a tree
 
-A step function over a linear state allocates once per step, and some steps change constructor.
-Two examples, each stepping once per input byte, with every state of shape `Int (LinVec Int)`:
+A binary search tree insert rebuilds the path from the root to the new key. In a linear tree
+the old path has no other reference, so each rebuilt node can be written into the cell it
+replaces. [`examples/tree_set.sprout`](../examples/tree_set.sprout) keeps a class's distinct
+scores this way.
 
-- [`examples/words_per_line.sprout`](../examples/words_per_line.sprout): a histogram of words
-  per line. The state is `InWord` or `Between`, and changes twice per word.
-- [`examples/csv_fields.sprout`](../examples/csv_fields.sprout): an RFC 4180 splitter that
-  records where each field ends. The state is `Plain`, `Quoted` or `QuoteSeen`, and changes at
-  every quote.
+The same insert, 1,000,000 inserts of LCG keys mod 1,000,000, then a sum (`-O2`, best of 5):
 
-Each example's scanner, run on its own input repeated (`-O2`, best of 5), built by master's
-compiler and by this design's:
+| tree | compiler | time | objects | GC cycles |
+|---|---|---|---|---|
+| linear | master | 1,288 ms | 24,984,952 | 85 |
+| linear | reuse | 549 ms | 632,392 | 6 |
+| not linear | reuse | 1,285 ms | 24,984,952 | 85 |
 
-| scanner | input | compiler | time | objects | GC cycles |
-|---|---|---|---|---|---|
-| words per line | 4,400,000 bytes | master | 120 ms | 4,440,003 | 203 |
-| | | reuse | 52 ms | 40,003 | 4 |
-| CSV fields | 2,760,000 bytes | master | 1,022 ms | 2,790,003 | 255 |
-| | | reuse | 39 ms | 30,003 | 3 |
+The 632,392 objects left are one new node per distinct key. A non-linear tree is shared, so it
+must copy the path; it costs the same on both compilers.
 
-The objects left are the repeated input string, built once, not the scan. A rule that reuses
-only the same constructor would leave every state change allocating. The CSV time on master is
-mostly the rescan of §1: its `LinVec` holds one slot per input byte.
+A step that changes constructor reuses its cell too: a state machine kept as one value
+allocates nothing per step. `tests/linear_reuse_smoke/csv.spr` tests this.
 
 ## 2. Goals and non-goals
 
 Goals:
 - An owned linear parameter, matched and rebuilt on one path with a constructor of the same type
   and the same field count (§4.2 defines the count), reuses its cell: no allocation, no GC
-  trigger. The two scanners of §1.1 then allocate nothing per byte.
+  trigger. A rebuilt tree path (§1.1) and a state machine then allocate nothing per step.
 - Decided at compile time from the types. No runtime check, no slow path.
 - Generalises `LinVec`'s rule ("a linear value is updated in place") to every boxed linear type.
 
@@ -105,7 +101,7 @@ Where they diverge:
   requires the same type.
 - Sprout already proves uniqueness statically for linear types, so it needs neither the check
   nor the slow path. v0 takes Lean's first pass and Clean's rule: the same type. Same
-  constructor only (Idris RefC) would leave every state change in §1.1 allocating, and the
+  constructor only (Idris RefC) would leave every constructor change allocating, and the
   allocation-free form would be one constructor with an `Int` state field, against guidelines §3.
 
 Pitfalls the sources name, and how v0 meets them:
@@ -247,8 +243,8 @@ are the guard.
 
 ## 6. Tests
 
-- ~~`just linear-reuse-smoke`: the `Grid` sieve and the §1.1 CSV splitter allocate 0 objects per
-  step (`SPROUT_DEBUG_ALLOC`), like `just linvec-smoke`.~~ `scripts/linear_reuse_smoke.sh`.
+- ~~`just linear-reuse-smoke`: the `Grid` sieve, a CSV splitter and a tree insert allocate 0
+  objects per step (`SPROUT_DEBUG_ALLOC`), like `just linvec-smoke`.~~ `scripts/linear_reuse_smoke.sh`.
 - ~~An IR test~~ (`tests/stdlib/compiler/test_linear_reuse_ir.spr`, every bullet, plus a nested
   match whose outer token returns at the join):
   - an owned match-and-rebuild emits `IRReuseCtor` and no `sprout_alloc_obj`;

@@ -1,0 +1,41 @@
+module examples.tree_set
+import stdlib.string as string
+
+# The distinct scores of a class, in order, kept in a binary search tree. `insert` consumes
+# the tree and rebuilds the path down to the new score. A consumed linear value has no other
+# reference, so each rebuilt `Node` is written into the cell it replaces
+# (docs/linear-reuse-v0.md): an insert allocates only the node for a new score.
+#
+# Run:
+#   mise exec -- just run examples/tree_set.sprout
+# Expected output:
+#   6 distinct scores: 61 72 79 88 95 100
+
+type linear Tree = | Leaf | Node Tree Int Tree
+
+fn insert(k: Int, t: Tree) -> Tree =
+  match t with
+  | Leaf -> Node(Leaf, k, Leaf)
+  | Node l v r ->
+      if k < v then Node(insert(k, l), v, r)
+      else if k > v then Node(l, v, insert(k, r))
+      else Node(l, v, r)
+
+# A loop, not `list_fold`: a fold's lambda cannot consume a linear value yet.
+fn add_all(ks: List Int, t: Tree) -> Tree =
+  match ks with
+  | [] -> t
+  | [k | rest] -> add_all(rest, insert(k, t))
+
+# In order: the left subtree, the key, then the right subtree.
+fn to_list(t: Tree, acc: List Int) -> List Int =
+  match t with
+  | Leaf -> acc
+  | Node l v r -> to_list(l, Cons(v, to_list(r, acc)))
+
+let scores: List Int = [72, 88, 72, 95, 61, 88, 79, 95, 61, 100, 72]
+
+fn main() -> Unit !{IO} =
+  let distinct = to_list(add_all(scores, Leaf), Nil)
+      shown = string.join(" ", list_map(int_to_string, distinct))
+  in print(`${int_to_string(list_length(distinct))} distinct scores: ${shown}`)
