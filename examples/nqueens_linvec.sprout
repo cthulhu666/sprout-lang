@@ -1,0 +1,97 @@
+module examples.nqueens_linvec
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.time as time
+
+# N-Queens by mutate-and-undo: one set of constraint arrays, written in place when
+# a queen is placed and cleared when the search backs out, with a pure signature.
+#
+# examples/nqueens.sprout copies a `Vec Bool` on every placement, so the caller
+# keeps the old arrays for free. Here the arrays are `LinVec Bool`: linearity
+# means nothing else holds them, so `linvec_set` writes in place and no copy is
+# needed. The price is that the arrays must be threaded through the search and
+# come back from every call, so undoing a placement is an explicit second write.
+#
+# The solution count rides in the board, so a single linear value threads through
+# the whole search. Each rebuild of `Board` reuses the cell it matched, and the
+# search allocates nothing (docs/linear-reuse-v0.md).
+#
+# Constraint arrays, as in examples/nqueens.sprout:
+#   cols[c]           column c is occupied
+#   pos[r+c]          positive diagonal (r+c constant) is occupied
+#   neg[r-c+n-1]      negative diagonal (r-c constant, shifted) is occupied
+#
+# Run:
+#   mise exec -- just run examples/nqueens_linvec.sprout
+# Expected output (N= label, count, wall-clock time):
+#   N=1: 1  (0.0 ms)
+#   ...
+#   N=13: 73712  (...)
+
+# Solutions found so far, then the three constraint arrays.
+type linear Board = Board Int (LinVec Bool) (LinVec Bool) (LinVec Bool)
+
+fn free_at(i: Int, v: borrowing LinVec Bool) -> Bool =
+  let Just taken = linvec_get(i, v) else false
+  in ! taken
+
+# Sets (or, with `false`, clears) the three cells a queen at (row, col) covers.
+fn mark(c: Int, pd: Int, nd: Int, x: Bool, b: Board) -> Board =
+  match b with
+  | Board k cols pos neg -> Board(k, linvec_set(c, x, cols), linvec_set(pd, x, pos), linvec_set(nd, x, neg))
+
+fn found(b: Board) -> Board =
+  match b with
+  | Board k cols pos neg -> Board(k + 1, cols, pos, neg)
+
+# Place a queen at (row, col) if safe and search the rows below, then clear it and
+# try the next column. The undo restores the arrays the next column expects.
+fn try_col(n: Int, row: Int, col: Int, b: Board) -> Board =
+  match b with
+  | Board k cols pos neg ->
+      let pd = row + col
+          nd = row - col + n - 1
+      in if free_at(col, cols) && free_at(pd, pos) && free_at(nd, neg) then
+        let placed = queens(n, row + 1, 0, mark(col, pd, nd, true, Board(k, cols, pos, neg)))
+        in queens(n, row, col + 1, mark(col, pd, nd, false, placed))
+      else queens(n, row, col + 1, Board(k, cols, pos, neg))
+
+fn queens(n: Int, row: Int, col: Int, b: Board) -> Board =
+  if row == n then found(b)
+  else if col >= n then b
+  else try_col(n, row, col, b)
+
+fn finish(b: Board) -> Int =
+  match b with
+  | Board k cols pos neg ->
+      let _ = linvec_drop(cols)
+          _ = linvec_drop(pos)
+          _ = linvec_drop(neg)
+      in k
+
+fn count_solutions(n: Int) -> Int =
+  finish(queens(n, 0, 0, Board(0, linvec_new(n, false), linvec_new(2 * n - 1, false), linvec_new(2 * n - 1, false))))
+
+fn format_ms_parts(ms: Int, micros: Int) -> String =
+  string_concat_many(["(", int_to_string(ms), ".", int_to_string((micros - ms * 1000) / 100), " ms)"])
+
+fn format_ms(micros: Int) -> String =
+  format_ms_parts(micros / 1000, micros)
+
+fn print_result(n: Int, c: Int, t0: Int) -> Unit !{IO} =
+  do
+    t1 <- time.now_micros()
+    print(string_concat_many(["N=", int_to_string(n), ": ", int_to_string(c), "  ", format_ms(t1 - t0)]))
+
+fn bench_n(n: Int) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    print_result(n, count_solutions(n), t0)
+
+fn main() -> Unit !{IO} =
+  do
+    bench_n(1)
+    bench_n(4)
+    bench_n(8)
+    bench_n(10)
+    bench_n(12)
+    bench_n(13)

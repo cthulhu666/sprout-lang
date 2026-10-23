@@ -30,10 +30,9 @@ and the results below keep them apart.
 | **2. mutable in-place** | 3 boolean arrays, written and undone | none | tries every column, tests each |
 | **3. bitmask** | 3 `Int`s | none | visits only safe columns |
 
-Sprout appears in groups 1 and 3. Group 2 is expressible — `stdlib/mutable.sprout`
-has `MutVec` with `mutvec_new`/`mutvec_set`/`mutvec_at` — but every one of those
-is `!{IO}`, so a mutable variant would turn the whole search effectful. It is
-simply not written yet, not impossible.
+Sprout appears in all three. Its group-2 entry uses `LinVec`, a linear vector
+written in place, so the search stays pure. `MutVec` could express it too, but
+every `MutVec` operation is `!{IO}`, which would make the whole search effectful.
 
 ---
 
@@ -85,7 +84,8 @@ bench/nqueens/
 └── .gitignore          Excludes bin/ from version control
 ```
 
-The Sprout sources live at `../../examples/nqueens.sprout` (group 1) and
+The Sprout sources live at `../../examples/nqueens.sprout` (group 1),
+`../../examples/nqueens_linvec.sprout` (group 2) and
 `../../examples/nqueens_bitmask.sprout` (group 3).
 
 ---
@@ -136,10 +136,12 @@ bench/nqueens/bin/nqueens_go bitmask 13 14 15 16 17
 Measured on Apple M1 (arm64-darwin), 2026-09-25, one machine and one session —
 except the group-1 Sprout row, re-measured 2026-09-26 after element inlining
 landed, interleaved against Go in that session (Go re-read 63.7 / 378.4 ms
-against its recorded 64 / 381, so the two sessions are comparable).
-Compiled languages are execution-only. **Every N=12 and N=13 figure is a median
-of interleaved runs** — 5 for the compiled group-1 and group-3 entries, 3 for
-the interpreted ones and group 2; the smaller-N progression is a single pass.
+against its recorded 64 / 381, so the two sessions are comparable), and the
+group-2 Sprout and Go rows, measured interleaved 2026-10-24 (Go's group 1
+re-read 61.7 / 375.3 ms there, within 4% of the record). Compiled languages
+are execution-only. **Every N=12 and N=13 figure is a median of interleaved
+runs** — 5 for the compiled entries, 3 for the interpreted ones; the smaller-N
+progression is a single pass.
 Interleaving is not ceremony: running one implementation five times and then the
 next hands the second a differently-heated machine, which produced a spurious
 2× gap during this very refresh.
@@ -159,9 +161,13 @@ next hands the second a differently-heated machine, which produced a spurious
 
 | Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
 |---|---:|---:|---:|
-| Go — `[]bool` mutate/undo | 68 | 403 | 1.0× |
-| Ruby — mutate/undo | 966 | 5,624 | 14× |
-| Python — mutate/undo | 1,214 | 8,975 | 18× |
+| Go — `[]bool` mutate/undo | 64 | 381 | 1.0× |
+| **Sprout — `LinVec Bool`** | **65** | **370** | **1.0×** |
+| Ruby — mutate/undo | 966 | 5,624 | 15× |
+| Python — mutate/undo | 1,214 | 8,975 | 19× |
+
+Sprout and Go are level here too: 1.6% apart at N=12 and 3% at N=13, in
+opposite directions, and inside the run-to-run spread.
 
 ### Representation 3 — bitmask
 
@@ -185,6 +191,7 @@ group 1  Go pure          0.11 ms  2.2 ms
          Ruby dup         3.3     45.4
 
 group 2  Go mutable       0.16     2.2
+         Sprout LinVec    0.1      2.2
          Python mutate    1.2     25.9
          Ruby mutate      2.0     42.2
 
@@ -232,9 +239,13 @@ Because the representation removes the thing Sprout is slower at. Counted with
 | Variant | Allocations | GC cycles |
 |---|---:|---:|
 | `nqueens.sprout` (persistent) | 50,118,983 | 8,279 |
+| `nqueens_linvec.sprout` (mutable) | 91 | 1 |
 | `nqueens_bitmask.sprout` | 67 | 1 |
 
-The 67 are the result strings; the search itself allocates nothing. With no
+The 67 are the result strings; the search itself allocates nothing. The
+`LinVec` variant adds three vectors and one board per N, 24 objects, and its
+search allocates nothing either: every rebuild of the linear `Board` reuses the
+cell it matched (`docs/linear-reuse-v0.md`). With no
 allocation there is no GC, no rooting and no write traffic, so what remains is
 integer ALU work in a tight recursion — and Sprout's LLVM backend emits that as
 well as Go's does.
@@ -291,15 +302,23 @@ Despite the 58× difference in copy size, the runtime gap is only 1.7× because:
 The unboxed advantage grows with N and in workloads that are bandwidth-limited
 rather than call-overhead-limited.
 
-### Mutable helps the interpreters and does nothing for Go
+### Mutable helps Sprout and the interpreters, and does nothing for Go
 
-Comparing group 2 against group 1 within each language, at N=12:
+Comparing group 2 against group 1 within each language, at N=12. Each pair is
+from one session: Sprout's from 2026-10-24, the rest from 2026-09-25.
 
 | Language | persistent | mutable | mutable gain |
 |---|---:|---:|---:|
+| Sprout | 207 ms | 66 ms | **3.1×** |
 | Go | 64 ms | 68 ms | **0.94×** (slower) |
 | Ruby | 1,215 ms | 966 ms | 1.26× |
 | Python | 1,612 ms | 1,214 ms | 1.33× |
+
+In Sprout the copy is the expensive part. Each `vec_set` allocates two heap
+objects (see "Why Sprout trails on the persistent representation" above), and
+the mutable variant drops the N=1..13 run from 50 million allocations and 8,279
+collections to 91 and one. It pays three extra writes per placement to undo, as
+Go's does, and still runs 3× faster.
 
 In Python and Ruby the bottleneck is per-call overhead — frame creation and
 bytecode dispatch, method dispatch — but the copy is a whole extra O(n)
@@ -309,7 +328,8 @@ In Go it is worth nothing. The arrays are 8–23 bytes, well inside one cache
 line, and Go's escape analysis keeps the copies off the heap; meanwhile the
 mutable version pays six writes per placement (three to set, three to undo) that
 the pure version does not. The two effects cancel, and the mutable variant came
-out *slightly* slower in all three rounds.
+out *slightly* slower in all three rounds. Re-measured 2026-10-24 over five
+rounds, the pair is 61.7 vs 63.6 ms (0.97×), the same direction.
 
 This reverses what this file used to claim ("mutable barely helps in Ruby/Python
 but a lot in Go", from a 71-vs-74 ms pair). The direction was wrong in both

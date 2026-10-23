@@ -45,7 +45,7 @@ echo -n "  [Go]       go build  ... "
 (cd "$DIR" && go build -o "$BIN/nqueens_go" "$DIR/nqueens.go") \
   && echo "done" || echo -e "${RED}FAILED${RESET}"
 
-# Both Sprout variants go through `just compile-native`, which whole-program
+# Every Sprout variant goes through `just compile-native`, which whole-program
 # links (scripts/link_whole_program.sh) — the runtime is merged into the same
 # LLVM module, so GC root push/pop inline instead of becoming calls.
 build_sprout() { # <source> <output name> <label>
@@ -58,6 +58,7 @@ build_sprout() { # <source> <output name> <label>
     && echo "done" || echo -e "${RED}FAILED${RESET}"
 }
 build_sprout examples/nqueens.sprout         nqueens_sprout         "array  "
+build_sprout examples/nqueens_linvec.sprout  nqueens_sprout_linvec  "linvec "
 build_sprout examples/nqueens_bitmask.sprout nqueens_sprout_bitmask "bitmask"
 
 echo
@@ -107,9 +108,10 @@ fi
 
 if section mutable "REPRESENTATION 2: mutable in-place backtracking" \
   "One set of arrays, written on the way down and unwritten on the way back up.
-Zero allocation per step. No Sprout entry yet — stdlib/mutable.sprout's MutVec
-could express it, at the cost of making the whole search !{IO}."
+Zero allocation per step. Sprout threads a linear LinVec through the search,
+so the writes are in place and the search stays pure."
 then
+  entry "Sprout — LinVec Bool (whole-program linked, execution only)" "$BIN/nqueens_sprout_linvec"
   entry "Go — []bool mutate/undo" "$BIN/nqueens_go" mutable
   entry "Ruby — mutate/undo"      ruby    "$DIR/nqueens_mut.rb"
   entry "Python — mutate/undo"    python3 "$DIR/nqueens_mut.py"
