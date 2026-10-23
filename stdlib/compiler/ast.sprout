@@ -135,6 +135,17 @@ export fn mode_is_local(m: ParamMode) -> Bool =
   | ModeConsuming -> false
   | ModeOnce -> false
 
+# The callee owns the argument: a default or `consuming` parameter. A `borrowing`
+# one's cell outlives the call, and a `once`/`local` one is a closure.
+export fn mode_is_owned(m: ParamMode) -> Bool =
+  match m with
+  | ModeDefault -> true
+  | ModeConsuming -> true
+  | ModeBorrowing -> false
+  | ModeOnce -> false
+  | ModeLocal -> false
+  | ModeOnceLocal -> false
+
 export fn param_mode_of(p: Param) -> ParamMode =
   match p with
   | Param _ _ m -> m

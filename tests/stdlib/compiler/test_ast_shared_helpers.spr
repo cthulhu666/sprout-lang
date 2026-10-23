@@ -16,6 +16,11 @@ fn show(e: ast.Expr) -> String =
 
 fn param(name: String, mode: ast.ParamMode) -> ast.Param = ast.Param(name, Nothing, mode)
 
+# Every mode, in the order the predicate assertions list their answers.
+let modes: List ast.ParamMode =
+  [ast.ModeDefault, ast.ModeConsuming, ast.ModeBorrowing, ast.ModeOnce, ast.ModeLocal,
+   ast.ModeOnceLocal]
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -29,6 +34,15 @@ fn main() -> Unit !{IO} =
       ast.param_names([param("a", ast.ModeDefault), param("b", ast.ModeBorrowing),
                        param("c", ast.ModeOnce)]), ["a", "b", "c"])
     assert_eq(state, "no params", ast.param_names([]), Nil)
+
+    assert_eq(state, "mode_is_owned", list_map(ast.mode_is_owned, modes),
+      [true, true, false, false, false, false])
+    assert_eq(state, "mode_is_borrowing", list_map(ast.mode_is_borrowing, modes),
+      [false, false, true, false, false, false])
+    assert_eq(state, "mode_is_once", list_map(ast.mode_is_once, modes),
+      [false, false, false, true, false, true])
+    assert_eq(state, "mode_is_local", list_map(ast.mode_is_local, modes),
+      [false, false, false, false, true, true])
 
     assert_true(state, "a lowercase name", source.is_lowercase_name("x"))
     assert_true(state, "z is lowercase", source.is_lowercase_name("zeta"))
