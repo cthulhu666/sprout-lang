@@ -9,6 +9,7 @@ import stdlib.compiler.type_kind as type_kind
 import stdlib.compiler.scc as scc
 import stdlib.compiler.bce as bce
 import stdlib.string as string
+import stdlib.list as list
 
 # ---------------------------------------------------------------------------
 # Op accumulators are `ListBuilder IROp`, never `List IROp`.
@@ -678,24 +679,14 @@ fn inline_tx_env(env: TxEnv, lparams: List ast.Param, arg_ssas: List String) -> 
 fn borrowed_arg_ssas(lparams: List ast.Param, arg_ssas: List String) -> List String =
   match (lparams, arg_ssas) with
   | ([p | prest], [s | srest]) ->
-      if param_is_owned(ast.param_mode_of(p)) then borrowed_arg_ssas(prest, srest)
+      if ast.mode_is_owned(ast.param_mode_of(p)) then borrowed_arg_ssas(prest, srest)
       else Cons(s, borrowed_arg_ssas(prest, srest))
   | _ -> Nil
 
-# SSA names of the parameters a function owns. A `borrowing` parameter's cell outlives the
-# call, and a `once`/`local` one is a closure.
+# SSA names of the parameters a function owns (`ast.mode_is_owned`).
 fn owned_param_ssas(params: List ast.Param) -> Set =
   set_from_list(list_map(\p -> sprout_ir.param_ssa(ast.param_name(p)),
-                        list_filter(\p -> param_is_owned(ast.param_mode_of(p)), params)))
-
-fn param_is_owned(m: ast.ParamMode) -> Bool =
-  match m with
-  | ast.ModeDefault -> true
-  | ast.ModeConsuming -> true
-  | ast.ModeBorrowing -> false
-  | ast.ModeOnce -> false
-  | ast.ModeLocal -> false
-  | ast.ModeOnceLocal -> false
+                        list_filter(\p -> ast.mode_is_owned(ast.param_mode_of(p)), params)))
 
 # An arm that matched the cell `ssa` as `ctor` makes it available to the arm's body.
 fn reuse_mint(env: TxEnv, tok: ReuseTok) -> Unit !{IO} =
@@ -739,7 +730,7 @@ fn reuse_branch_end(env: TxEnv) -> Unit !{IO} =
     match st.frames with
     | [f | rest] ->
         ref_write(env.reuse_ref,
-                  st with (frames = Cons(f with (acc = reuse_join(f.acc, reuse_trim(list_length(f.base), st.stack))), rest)))
+                  st with (frames = Cons(f with (acc = reuse_join(f.acc, list.take_last(list_length(f.base), st.stack))), rest)))
     | [] -> ()
 
 fn reuse_frame_pop(env: TxEnv) -> Unit !{IO} =
@@ -748,14 +739,6 @@ fn reuse_frame_pop(env: TxEnv) -> Unit !{IO} =
     match st.frames with
     | [f | rest] -> ref_write(env.reuse_ref, ReuseState(stack = f.acc, frames = rest))
     | [] -> ()
-
-# The last `n` tokens of `stack`.
-fn reuse_trim(n: Int, stack: List ReuseTok) -> List ReuseTok =
-  if list_length(stack) <= n then stack
-  else
-    match stack with
-    | [_ | rest] -> reuse_trim(n, rest)
-    | [] -> []
 
 # Position-wise: a token is taken if either side took it. Both stacks have the frame's depth.
 fn reuse_join(a: List ReuseTok, b: List ReuseTok) -> List ReuseTok =
