@@ -142,6 +142,7 @@ fn main() -> Unit !{IO} =
     check_true("base64url_decode rejects an impossible final group", url_decode_rejects("Z")),
     check_true("base64url_decode rejects padding off a multiple of 4", url_decode_rejects("Zm9vYg=")),
     check_true("base64url_decode rejects = mid-string", url_decode_rejects("Zg=g")),
+    check_true("base64url_decode rejects a non-ASCII character", url_decode_rejects("Zm9vé")),
     check_true("base64url_decode rejects a space", url_decode_rejects("Zm9v Yg")),
     check_true("base64url_decode rejects three =", url_decode_rejects("Zg===")),
     check_true("base64url_decode rejects non-canonical trailing bits (1 byte)", url_decode_rejects("Zh")),

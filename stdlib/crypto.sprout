@@ -41,8 +41,17 @@ export fn base64url_encode(value: Bytes) -> String =
     |> string.replace_all("/", "_")
     |> string.replace_all("+", "-")
 
-fn is_base64url_char(ch: Char) -> Bool =
-  string.is_ascii_alnum(ch) || ch == '-' || ch == '_'
+fn is_base64url_byte(b: Int) -> Bool =
+  (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45 || b == 95
+
+# True when every byte from `index` on is in the `-`/`_` alphabet; a byte >= 128 is not.
+# `bytes.get` is matched directly, as in `or_all`. The unreachable arm answers false.
+fn all_base64url(value: Bytes, index: Int, total: Int) -> Bool =
+  if index >= total then true
+  else
+    match bytes.get(value, index) with
+    | Just b -> is_base64url_byte(b) && all_base64url(value, index + 1, total)
+    | Nothing -> false
 
 fn mod4(n: Int) -> Int =
   n - n / 4 * 4
@@ -65,16 +74,17 @@ fn require_canonical(body: String, decoded: Result Base64Error Bytes) -> Result 
 export fn base64url_decode(raw: String) -> Result Base64Error Bytes =
   if pad > 0 && mod4(string.byte_length(raw)) != 0 then
     Err(Base64DecodeError("invalid base64url padding"))
-  else if mod4(string.byte_length(body)) == 1 then
+  else if rem == 1 then
     Err(Base64DecodeError("invalid base64url length"))
-  else if ! vec_all (is_base64url_char, string.string_chars(body)) then
+  else if ! all_base64url (bytes.from_string(body), 0, string.byte_length(body)) then
     Err(Base64DecodeError("invalid base64url character"))
   else
-    require_canonical(body, base64_decode(string.replace_all("_", "/", string.replace_all("-", "+", body))
-      ++ string.repeat("=", mod4(4 - mod4(string.byte_length(body))))))
+    require_canonical(body, base64_decode(std ++ string.repeat("=", mod4(4 - rem))))
 where
   pad = base64url_pad_count(raw)
   body = string.drop_last(raw, pad)
+  rem = mod4(string.byte_length(body))
+  std = body |> string.replace_all("-", "+") |> string.replace_all("_", "/")
 
 export fn bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes =
   crypto_bytes_xor(left, right)
