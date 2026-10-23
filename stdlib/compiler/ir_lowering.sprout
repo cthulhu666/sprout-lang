@@ -113,7 +113,7 @@ fn mk_closure_cap_stores(caps: List String, raw_name: String, idx: Int) -> Strin
 
 # Render a single IROp as one LLVM IR line (without trailing newline).
 # str_table maps raw-ptr names (e.g. "%t0") introduced by IRStrConst to
-# (global_name, byte_length) — populated by collect_str_consts before lowering.
+# (global_name, byte_length) — populated by collect_module_consts before lowering.
 # Emit the 4-line bitcast dance for a Double binary op.  Intermediate names are
 # namespaced under the unique result name `r` (`r$la`, `r$lb`, `r$fr`), so they
 # stay SSA-unique without a fresh-name counter.
@@ -785,11 +785,11 @@ fn is_runtime_global(g: sprout_ir.IRGlobalDecl) -> Bool =
 # Text is collected as reversed parts and joined once, at each level, for
 # lower_ops_parts' reason: appending to a growing string copies all of it per
 # literal, quadratic in literals per function here and per program above.
-fn collect_str_consts(fns: List sprout_ir.IRFunction) -> (String, Dict (Dict (String, Int)), Int) =
-  match collect_str_consts_loop(fns, 0, Nil, dict_empty(), set_empty()) with
+fn collect_module_consts(fns: List sprout_ir.IRFunction) -> (String, Dict (Dict (String, Int)), Int) =
+  match collect_module_consts_loop(fns, 0, Nil, dict_empty(), set_empty()) with
   | (parts, tables, next_idx) -> (string_concat_many(list_reverse(parts)), tables, next_idx)
 
-fn collect_str_consts_loop(fns: List sprout_ir.IRFunction, next_idx: Int,
+fn collect_module_consts_loop(fns: List sprout_ir.IRFunction, next_idx: Int,
                            parts: List String, tables_acc: Dict (Dict (String, Int)),
                            statics: Set) ->
     (List String, Dict (Dict (String, Int)), Int) =
@@ -798,15 +798,15 @@ fn collect_str_consts_loop(fns: List sprout_ir.IRFunction, next_idx: Int,
   | Cons f rest ->
       match f with
       | sprout_ir.IRFunction name _ _ blocks ->
-          match walk_blocks_for_strs(blocks, next_idx, dict_empty(), statics) with
+          match walk_blocks_for_globals(blocks, next_idx, dict_empty(), statics) with
           | (text, idx2, fn_table, statics2) ->
-              collect_str_consts_loop(rest, idx2, Cons(text, parts),
+              collect_module_consts_loop(rest, idx2, Cons(text, parts),
                                       dict_set(name, fn_table, tables_acc), statics2)
 
 # One function's string and static-closure globals, as text, plus the next free index, its
 # string table, and `statics`: the code functions whose static closure is already emitted,
 # program-wide. A static closure global is not per function, so it is emitted once.
-export fn walk_blocks_for_strs(blocks: List sprout_ir.IRBlock, next_idx: Int,
+export fn walk_blocks_for_globals(blocks: List sprout_ir.IRBlock, next_idx: Int,
                                fn_table: Dict (String, Int), statics: Set) ->
     (String, Int, Dict (String, Int), Set) =
   match walk_blocks_parts(blocks, next_idx, Nil, fn_table, statics) with
@@ -820,10 +820,10 @@ fn walk_blocks_parts(blocks: List sprout_ir.IRBlock, next_idx: Int,
   | Cons b rest ->
       match b with
       | sprout_ir.IRBlock _ ops ->
-          match walk_ops_for_strs(ops, next_idx, parts, fn_table, statics) with
+          match walk_ops_for_globals(ops, next_idx, parts, fn_table, statics) with
           | (parts2, idx2, ft2, statics2) -> walk_blocks_parts(rest, idx2, parts2, ft2, statics2)
 
-fn walk_ops_for_strs(ops: List sprout_ir.IROp, next_idx: Int,
+fn walk_ops_for_globals(ops: List sprout_ir.IROp, next_idx: Int,
                      parts: List String, fn_table: Dict (String, Int), statics: Set) ->
     (List String, Int, Dict (String, Int), Set) =
   match ops with
@@ -833,15 +833,15 @@ fn walk_ops_for_strs(ops: List sprout_ir.IROp, next_idx: Int,
       | sprout_ir.IRStrConst _ raw s ->
           match emit_str_global(next_idx, s) with
           | (decl, len, gname) ->
-              walk_ops_for_strs(rest, next_idx + 1, Cons(decl, parts),
+              walk_ops_for_globals(rest, next_idx + 1, Cons(decl, parts),
                                 dict_set(raw, (gname, len), fn_table), statics)
       | sprout_ir.IRMkClosure _ code_fn arity caps ->
           if sprout_ir.closure_is_static(caps) && ! set_member (code_fn, statics)
-          then walk_ops_for_strs(rest, next_idx,
+          then walk_ops_for_globals(rest, next_idx,
                                  Cons(emit_static_closure_global(code_fn, arity), parts),
                                  fn_table, set_insert(code_fn, statics))
-          else walk_ops_for_strs(rest, next_idx, parts, fn_table, statics)
-      | _ -> walk_ops_for_strs(rest, next_idx, parts, fn_table, statics)
+          else walk_ops_for_globals(rest, next_idx, parts, fn_table, statics)
+      | _ -> walk_ops_for_globals(rest, next_idx, parts, fn_table, statics)
 
 # The static constant behind an IRMkClosure with no captures. A code function is
 # minted per reference site, so one name is one closure.
@@ -852,8 +852,8 @@ fn static_closure_global(code_fn: String) -> String = "@__sprout_sclo." ++ code_
 # never touches it: sprout_heap_lookup answers NULL outside the heap, as for a string literal.
 # Header = SPROUT_HEAP_CLOSURE (2) | (aux << 14), aux = n_caps (0) | (arity << 32), i.e.
 # 2 + arity * 2^46.
-# SYNC WITH runtime/sprout_runtime.c sprout_closure_aux / sprout_hdr_make: the third copy
-# of the header split, after the runtime's and IRMkClosure's.
+# SYNC WITH runtime/sprout_runtime.c sprout_closure_aux / sprout_hdr_make: the only copy
+# of the header split in emitted IR.
 # Int traps on overflow and the poison thunk's arity (262143) sets bit 63, so the header is
 # built as its signed 64-bit pattern: arity - 2^18 stands in for arity at 2^17 and above.
 fn emit_static_closure_global(code_fn: String, arity: Int) -> String =
@@ -884,7 +884,7 @@ export fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =
   match prog with
   | sprout_ir.IRProgram fns globals ctor_regs externs ->
-      match collect_str_consts(fns) with
+      match collect_module_consts(fns) with
       | (str_globals_text, fn_tables, _) ->
           lower_program_body(fns, globals, ctor_regs, externs, str_globals_text, fn_tables)
 

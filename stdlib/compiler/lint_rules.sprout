@@ -165,95 +165,95 @@ fn terminal_needs_own_payload(pat: ast.Pattern, body: ast.Expr) -> Bool =
 # desugar_expr_no_ctx_i so no shape is silently skipped (a missed variant here
 # is a silent false negative, the worst failure mode for a coverage tool).
 
-fn walk_expr(written: Set, bound: List String, e: ast.Expr) -> List LintFinding =
+fn walk_expr(written: Set, free_fns: Set, bound: List String, e: ast.Expr) -> List LintFinding =
   match e with
   | ast.MatchExpr scrut branches pos ->
-      list_append(combinator_findings(bound, e, pos), walk_match(written, bound, scrut, branches, pos))
+      list_append(combinator_findings(free_fns, bound, e, pos), walk_match(written, free_fns, bound, scrut, branches, pos))
   | ast.IfExpr cond then_ else_ pos ->
-      list_append(combinator_findings(bound, e, pos),
-        list_append(walk_expr(written, bound, cond),
-                    list_append(walk_expr(written, bound, then_), walk_expr(written, bound, else_))))
+      list_append(combinator_findings(free_fns, bound, e, pos),
+        list_append(walk_expr(written, free_fns, bound, cond),
+                    list_append(walk_expr(written, free_fns, bound, then_), walk_expr(written, free_fns, bound, else_))))
   | ast.CallExpr callee args _ ->
       list_append(multi_line_lambda_findings(args),
-                  list_append(walk_expr(written, bound, callee), walk_exprs(written, bound, args)))
-  | ast.TupleExpr elems _ -> walk_exprs(written, bound, elems)
+                  list_append(walk_expr(written, free_fns, bound, callee), walk_exprs(written, free_fns, bound, args)))
+  | ast.TupleExpr elems _ -> walk_exprs(written, free_fns, bound, elems)
   | ast.BinaryExpr _ left right _ ->
-      list_append(walk_expr(written, bound, left), walk_expr(written, bound, right))
-  | ast.UnaryExpr _ operand _ -> walk_expr(written, bound, operand)
-  | ast.LambdaExpr params body _ -> walk_expr(written, list_append(ast.param_names(params), bound), body)
-  | ast.DoExpr steps _ -> walk_do_steps(written, bound, steps)
-  | ast.RecordExpr _ fields _ -> walk_record_fields(written, bound, fields)
-  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(written, bound, rec_expr)
+      list_append(walk_expr(written, free_fns, bound, left), walk_expr(written, free_fns, bound, right))
+  | ast.UnaryExpr _ operand _ -> walk_expr(written, free_fns, bound, operand)
+  | ast.LambdaExpr params body _ -> walk_expr(written, free_fns, list_append(ast.param_names(params), bound), body)
+  | ast.DoExpr steps _ -> walk_do_steps(written, free_fns, bound, steps)
+  | ast.RecordExpr _ fields _ -> walk_record_fields(written, free_fns, bound, fields)
+  | ast.GetFieldExpr rec_expr _ _ -> walk_expr(written, free_fns, bound, rec_expr)
   | ast.RecordUpdateExpr base fields _ ->
-      list_append(walk_expr(written, bound, base), walk_record_fields(written, bound, fields))
+      list_append(walk_expr(written, free_fns, bound, base), walk_record_fields(written, free_fns, bound, fields))
   | ast.IntRangeExpr lo hi _ ->
-      list_append(walk_expr(written, bound, lo), walk_expr(written, bound, hi))
-  | ast.StringTemplateExpr parts _ -> walk_template_parts(written, bound, parts)
-  | ast.ComprehensionExpr elem gens _ -> walk_comprehension(written, bound, elem, gens)
-  | ast.LetBindExpr pat value els body pos -> walk_expr(written, bound, ast.let_bind_match(pat, value, els, body, pos))
-  | ast.TryExpr operand _ -> walk_expr(written, bound, operand)
+      list_append(walk_expr(written, free_fns, bound, lo), walk_expr(written, free_fns, bound, hi))
+  | ast.StringTemplateExpr parts _ -> walk_template_parts(written, free_fns, bound, parts)
+  | ast.ComprehensionExpr elem gens _ -> walk_comprehension(written, free_fns, bound, elem, gens)
+  | ast.LetBindExpr pat value els body pos -> walk_expr(written, free_fns, bound, ast.let_bind_match(pat, value, els, body, pos))
+  | ast.TryExpr operand _ -> walk_expr(written, free_fns, bound, operand)
   | _ -> Nil  # leaves: Var/Int/Float/Bool/String/Char/Unit — no sub-expressions
 
 # A generator's pattern scopes over its own guards, the generators after it and
 # the element expression, so the environment grows left to right.
-fn walk_comprehension(written: Set, bound: List String, elem: ast.Expr,
+fn walk_comprehension(written: Set, free_fns: Set, bound: List String, elem: ast.Expr,
                       gens: List ast.ComprehensionGen) -> List LintFinding =
   match gens with
-  | Nil -> walk_expr(written, bound, elem)
+  | Nil -> walk_expr(written, free_fns, bound, elem)
   | Cons g rest ->
       match g with
       | ast.ComprehensionGen pat src guards ->
           let inner = list_append(ast.pattern_names(pat), bound)
-          in list_append(walk_expr(written, bound, src),
-               list_append(walk_exprs(written, inner, guards), walk_comprehension(written, inner, elem, rest)))
+          in list_append(walk_expr(written, free_fns, bound, src),
+               list_append(walk_exprs(written, free_fns, inner, guards), walk_comprehension(written, free_fns, inner, elem, rest)))
 
-fn walk_exprs(written: Set, bound: List String, exprs: List ast.Expr) -> List LintFinding =
+fn walk_exprs(written: Set, free_fns: Set, bound: List String, exprs: List ast.Expr) -> List LintFinding =
   match exprs with
   | Nil -> Nil
-  | Cons e rest -> list_append(walk_expr(written, bound, e), walk_exprs(written, bound, rest))
+  | Cons e rest -> list_append(walk_expr(written, free_fns, bound, e), walk_exprs(written, free_fns, bound, rest))
 
 # A step's binder scopes over the steps after it, never over its own value.
-fn walk_do_steps(written: Set, bound: List String, steps: List ast.DoStep) -> List LintFinding =
+fn walk_do_steps(written: Set, free_fns: Set, bound: List String, steps: List ast.DoStep) -> List LintFinding =
   match steps with
   | Nil -> Nil
   | Cons s rest ->
       match s with
       | ast.DoBindStep pat value ->
-          list_append(walk_expr(written, bound, value),
-                      walk_do_steps(written, list_append(ast.pattern_names(pat), bound), rest))
+          list_append(walk_expr(written, free_fns, bound, value),
+                      walk_do_steps(written, free_fns, list_append(ast.pattern_names(pat), bound), rest))
       | ast.DoLetStep n value ->
-          list_append(walk_expr(written, bound, value), walk_do_steps(written, Cons(n, bound), rest))
+          list_append(walk_expr(written, free_fns, bound, value), walk_do_steps(written, free_fns, Cons(n, bound), rest))
       | ast.DoExprStep value ->
-          list_append(walk_expr(written, bound, value), walk_do_steps(written, bound, rest))
+          list_append(walk_expr(written, free_fns, bound, value), walk_do_steps(written, free_fns, bound, rest))
       | ast.DoPatStep kind pat value els pos ->
-          walk_do_steps(written, bound, ast.do_pat_steps(kind, pat, value, els, rest, pos))
+          walk_do_steps(written, free_fns, bound, ast.do_pat_steps(kind, pat, value, els, rest, pos))
 
-fn walk_record_fields(written: Set, bound: List String, fields: List ast.RecordField) -> List LintFinding =
+fn walk_record_fields(written: Set, free_fns: Set, bound: List String, fields: List ast.RecordField) -> List LintFinding =
   match fields with
   | Nil -> Nil
   | Cons f rest ->
       match f with
       | ast.RecordField _ value ->
-          list_append(walk_expr(written, bound, value), walk_record_fields(written, bound, rest))
+          list_append(walk_expr(written, free_fns, bound, value), walk_record_fields(written, free_fns, bound, rest))
 
-fn walk_template_parts(written: Set, bound: List String,
+fn walk_template_parts(written: Set, free_fns: Set, bound: List String,
                        parts: List ast.TemplateExprPart) -> List LintFinding =
   match parts with
   | Nil -> Nil
   | Cons p rest ->
       match p with
-      | ast.LitPart _ -> walk_template_parts(written, bound, rest)
+      | ast.LitPart _ -> walk_template_parts(written, free_fns, bound, rest)
       | ast.InterpPart e ->
-          list_append(walk_expr(written, bound, e), walk_template_parts(written, bound, rest))
+          list_append(walk_expr(written, free_fns, bound, e), walk_template_parts(written, free_fns, bound, rest))
 
-fn walk_branch(written: Set, bound: List String, b: ast.MatchBranch) -> List LintFinding =
+fn walk_branch(written: Set, free_fns: Set, bound: List String, b: ast.MatchBranch) -> List LintFinding =
   match b with
-  | ast.MatchBranch pat body -> walk_expr(written, list_append(ast.pattern_names(pat), bound), body)
+  | ast.MatchBranch pat body -> walk_expr(written, free_fns, list_append(ast.pattern_names(pat), bound), body)
 
-fn walk_branches(written: Set, bound: List String, branches: List ast.MatchBranch) -> List LintFinding =
+fn walk_branches(written: Set, free_fns: Set, bound: List String, branches: List ast.MatchBranch) -> List LintFinding =
   match branches with
   | Nil -> Nil
-  | Cons b rest -> list_append(walk_branch(written, bound, b), walk_branches(written, bound, rest))
+  | Cons b rest -> list_append(walk_branch(written, free_fns, bound, b), walk_branches(written, free_fns, bound, rest))
 
 # Minimum chain length (number of nested written matches, including the root)
 # before a chain is reported. The docs/idiomatic-sprout.md example is itself
@@ -283,19 +283,19 @@ fn is_written(written: Set, pos: source.SourcePos) -> Bool = set_member(pos_key(
 # non-chain subexpression along the way (the scrutinee at each link, each
 # link's terminal body) but never a finding for THIS node — the caller
 # decides that once it knows the total depth and blocked status.
-fn walk_chain(written: Set, bound: List String, branches: List ast.MatchBranch,
+fn walk_chain(written: Set, free_fns: Set, bound: List String, branches: List ast.MatchBranch,
               scrut: ast.Expr, pos: source.SourcePos) -> (Int, Bool, List LintFinding) =
   match branches with
   | [b1, b2] ->
       (match classify(b1, b2) with
        | Just (terminal_pat, terminal_body, continuing_pat, continuing_match) ->
-           (match walk_chain_expr(written, list_append(ast.pattern_names(continuing_pat), bound),
+           (match walk_chain_expr(written, free_fns, list_append(ast.pattern_names(continuing_pat), bound),
                                   continuing_match) with
             | (inner_depth, inner_blocked, inner_findings) ->
                 (own + inner_depth,
                   inner_blocked || here && terminal_needs_own_payload(terminal_pat, terminal_body),
-                  list_append(walk_expr(written, bound, scrut),
-                    list_append(walk_expr(written, list_append(ast.pattern_names(terminal_pat), bound),
+                  list_append(walk_expr(written, free_fns, bound, scrut),
+                    list_append(walk_expr(written, free_fns, list_append(ast.pattern_names(terminal_pat), bound),
                                           terminal_body),
                                 inner_findings))))
        | Nothing ->
@@ -304,9 +304,9 @@ fn walk_chain(written: Set, bound: List String, branches: List ast.MatchBranch,
            # fallback. Its arms stay ordinary match arms either way, free to
            # use their own bindings — hence `blocked = false` here even if
            # b1/b2 reference their own payload.
-           (own, false, list_append(walk_expr(written, bound, scrut),
-                          list_append(walk_branch(written, bound, b1), walk_branch(written, bound, b2)))))
-  | _ -> (own, false, list_append(walk_expr(written, bound, scrut), walk_branches(written, bound, branches)))
+           (own, false, list_append(walk_expr(written, free_fns, bound, scrut),
+                          list_append(walk_branch(written, free_fns, bound, b1), walk_branch(written, free_fns, bound, b2)))))
+  | _ -> (own, false, list_append(walk_expr(written, free_fns, bound, scrut), walk_branches(written, free_fns, bound, branches)))
 where
   here = is_written(written, pos)
   own = if here then 1 else 0
@@ -316,13 +316,13 @@ where
 # collected: `walk_chain` recurses through here rather than `walk_expr`, so until
 # this arm offered the node to the rule, no combinator nested in a 2-branch chain
 # was ever checked.
-fn walk_chain_expr(written: Set, bound: List String, e: ast.Expr) -> (Int, Bool, List LintFinding) =
+fn walk_chain_expr(written: Set, free_fns: Set, bound: List String, e: ast.Expr) -> (Int, Bool, List LintFinding) =
   match e with
   | ast.MatchExpr scrut branches pos ->
-      (match walk_chain(written, bound, branches, scrut, pos) with
+      (match walk_chain(written, free_fns, bound, branches, scrut, pos) with
        | (depth, blocked, findings) ->
-           (depth, blocked, list_append(combinator_findings(bound, e, pos), findings)))
-  | _ -> (1, false, walk_expr(written, bound, e))
+           (depth, blocked, list_append(combinator_findings(free_fns, bound, e, pos), findings)))
+  | _ -> (1, false, walk_expr(written, free_fns, bound, e))
 
 # Both shapes have a concrete fix in let..else, so both name it. A chain whose
 # terminal recovers using the *failing* pattern's payload needs the binding-else
@@ -335,12 +335,12 @@ fn staircase_message(blocked: Bool) -> String =
 
 # A chain is reported at its first written match: under an elaborated binding,
 # the arms are walked as ordinary code, so a written chain below starts its own.
-fn walk_match(written: Set, bound: List String, scrut: ast.Expr, branches: List ast.MatchBranch,
+fn walk_match(written: Set, free_fns: Set, bound: List String, scrut: ast.Expr, branches: List ast.MatchBranch,
               pos: source.SourcePos) -> List LintFinding =
   if ! is_written (written, pos)
-  then list_append(walk_expr(written, bound, scrut), walk_branches(written, bound, branches))
+  then list_append(walk_expr(written, free_fns, bound, scrut), walk_branches(written, free_fns, bound, branches))
   else
-    match walk_chain(written, bound, branches, scrut, pos) with
+    match walk_chain(written, free_fns, bound, branches, scrut, pos) with
     | (depth, blocked, findings) ->
         if depth >= min_staircase_depth
         then Cons(mk_finding(pos, "staircase-of-doom", staircase_message(blocked)), findings)
@@ -852,30 +852,42 @@ fn list_is_empty(xs: List a) -> Bool =
 # ---------------------------------------------------------------------------
 # Program-level entry points
 
-fn walk_instance_methods(written: Set, methods: List ast.InstanceMethodImpl) -> List LintFinding =
+fn walk_instance_methods(written: Set, free_fns: Set, methods: List ast.InstanceMethodImpl) -> List LintFinding =
   match methods with
   | Nil -> Nil
   | Cons m rest ->
       match m with
       | ast.InstanceMethodImpl _ params _ _ _ _ body ->
-          list_append(walk_expr(written, ast.param_names(params), body), walk_instance_methods(written, rest))
+          list_append(walk_expr(written, free_fns, ast.param_names(params), body), walk_instance_methods(written, free_fns, rest))
 
-fn walk_decl(written: Set, d: ast.Decl) -> List LintFinding =
+fn walk_decl(written: Set, free_fns: Set, d: ast.Decl) -> List LintFinding =
   match d with
-  | ast.FnDecl _ params _ _ _ _ body _ -> walk_expr(written, ast.param_names(params), body)
-  | ast.LetDecl _ body _ _ -> walk_expr(written, Nil, body)
-  | ast.InstanceDecl _ _ _ methods _ -> walk_instance_methods(written, methods)
+  | ast.FnDecl _ params _ _ _ _ body _ -> walk_expr(written, free_fns, ast.param_names(params), body)
+  | ast.LetDecl _ body _ _ -> walk_expr(written, free_fns, Nil, body)
+  | ast.InstanceDecl _ _ _ methods _ -> walk_instance_methods(written, free_fns, methods)
   | _ -> Nil  # ExternFnDecl/TypeDecl/RecordDecl/ClassDecl/AliasDecl/WrapDecl: no expr body
 
-fn walk_decls(written: Set, decls: List ast.Decl) -> List LintFinding =
+fn walk_decls(written: Set, free_fns: Set, decls: List ast.Decl) -> List LintFinding =
   match decls with
   | Nil -> Nil
-  | Cons d rest -> list_append(walk_decl(written, d), walk_decls(written, rest))
+  | Cons d rest -> list_append(walk_decl(written, free_fns, d), walk_decls(written, free_fns, rest))
+
+# A bare function name with no `where` constraint is a static closure, so reading
+# it as a value costs nothing. A constrained one captures its dictionary at a
+# polymorphic type, and this AST-level walk cannot tell the two uses apart.
+fn free_fn_names(decls: List ast.Decl) -> Set =
+  set_from_list(list_filter_map(free_fn_name, decls))
+
+fn free_fn_name(d: ast.Decl) -> Maybe String =
+  match d with
+  | ast.FnDecl name _ _ _ constraints _ _ _ ->
+      if list_is_empty(constraints) then Just(name) else Nothing
+  | _ -> Nothing
 
 fn lint_program(written: Set, prog: ast.Program) -> List LintFinding =
   match prog with
   | ast.Program decls _ ->
-      list_append(walk_decls(written, decls),
+      list_append(walk_decls(written, free_fn_names(decls), decls),
         list_append(nullary_const_findings(decls), redundant_vec_wrap_findings(prog)))
 
 # ---------------------------------------------------------------------------
@@ -1116,19 +1128,21 @@ fn holes_used_in(e: ast.Expr, holes: List String) -> List String =
 # it takes; and a wrapper handed to a call is boxed, while a match on the call
 # that produced it takes an unboxed worker. A rewrite failing either is not a
 # tidier equivalent, so it is not advice.
-fn rewrite_is_free(bound: List String, c: Combinator, subject: ast.Expr,
+fn rewrite_is_free(free_fns: Set, bound: List String, c: Combinator, subject: ast.Expr,
                    caps: List lint_pattern.Capture) -> Bool =
-  all(\ (e: ast.Expr) -> free_to_hoist(bound, e),
+  all(\ (e: ast.Expr) -> free_to_hoist(free_fns, bound, e),
       captured_exprs(conditional_holes(combinator_pattern(c), combinator_holes(c)), caps))
-  && scrutinee_is_in_hand(bound, combinator_pattern(c), subject)
+  && scrutinee_is_in_hand(free_fns, bound, combinator_pattern(c), subject)
 
-# Cost-free to evaluate early: no work and no allocation. A `VarExpr` is free only
-# when it names a LOCAL binding — a top-level function read as a value costs a
-# closure and a nullary constructor an interned-ctor call, both spelled like a
-# variable. Every variant is named so a new one cannot silently join the list.
-fn free_to_hoist(bound: List String, e: ast.Expr) -> Bool =
+# Cost-free to evaluate early: no work and no allocation. A `VarExpr` is free when
+# it names a LOCAL binding or an unconstrained function of this module (a static
+# closure). A constrained function captures a dictionary; an imported or prelude
+# name hides its constraints; a nullary constructor is an interned-ctor call; a
+# qualified name is none of the above. All are spelled like a variable and stay
+# not free. Every variant is named so a new one cannot silently join the list.
+fn free_to_hoist(free_fns: Set, bound: List String, e: ast.Expr) -> Bool =
   match e with
-  | ast.VarExpr n _ -> list_member(root_segment(n), bound)
+  | ast.VarExpr n _ -> list_member(root_segment(n), bound) || set_member(n, free_fns)
   | ast.IntExpr _ _ -> true
   | ast.FloatExpr _ _ -> true
   | ast.BoolExpr _ _ -> true
@@ -1156,12 +1170,12 @@ fn free_to_hoist(bound: List String, e: ast.Expr) -> Bool =
 # the call boxes nothing, so a computed condition is free (checked in IR). Only a
 # `match` consumes a wrapper, and there the subject's scrutinee must already hold
 # one: a call scrutinee would lose the callee's worker.
-fn scrutinee_is_in_hand(bound: List String, pattern: ast.Expr, subject: ast.Expr) -> Bool =
+fn scrutinee_is_in_hand(free_fns: Set, bound: List String, pattern: ast.Expr, subject: ast.Expr) -> Bool =
   match pattern with
   | ast.IfExpr _ _ _ _ -> true
   | ast.MatchExpr _ _ _ ->
       let ast.MatchExpr scrut _ _ = subject else false
-      in free_to_hoist(bound, scrut)
+      in free_to_hoist(free_fns, bound, scrut)
   | _ -> panic("lint_rules: derived a pattern that is neither a match nor an if (internal error)")
 
 # `cfg.cached` and `string.trim` are both one dotted `VarExpr` (§4A). The root
@@ -1174,22 +1188,23 @@ fn root_segment(name: String) -> String =
 # A combinator name bound locally — a parameter, a `let`, a lambda argument —
 # resolves to the shadow rather than the prelude, so the rewrite would not
 # typecheck. The file-level guards cannot see this; only the walk's scope can.
-fn combinator_finding(bound: List String, c: Combinator, e: ast.Expr,
+fn combinator_finding(free_fns: Set, bound: List String, c: Combinator, e: ast.Expr,
                       pos: source.SourcePos) -> Maybe LintFinding =
   if list_member(combinator_name(c), bound) then Nothing
   else
     let Just caps = lint_pattern.match_expr(combinator_pattern(c), e, combinator_holes(c))
           else Nothing
-    in if rewrite_is_free(bound, c, e, caps)
+    in if rewrite_is_free(free_fns, bound, c, e, caps)
        then Just(mk_finding(pos, combinator_rule_id,
                             "this is `" ++ combinator_name(c) ++ "(...)`"))
        else Nothing
 
 # At most one combinator can match a given node — they are structurally
 # distinct — but nothing depends on that, so two would simply both report.
-fn combinator_findings(bound: List String, e: ast.Expr,
+fn combinator_findings(free_fns: Set, bound: List String, e: ast.Expr,
                        pos: source.SourcePos) -> List LintFinding =
-  list_filter_map(\ (c: Combinator) -> combinator_finding(bound, c, e, pos), combinator_patterns)
+  list_filter_map(\ (c: Combinator) -> combinator_finding(free_fns, bound, c, e, pos),
+                  combinator_patterns)
 
 # §7 guards 2 and 3, both file-level and neither visible from the AST:
 # `ast_findings` parses `source.strip_headers(src)`, so the imports and the

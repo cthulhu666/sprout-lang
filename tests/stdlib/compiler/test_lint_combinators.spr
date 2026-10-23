@@ -300,9 +300,8 @@ let reuses_result_ctors: String =
   ++ "  | Ok x -> x\n"
   ++ "  | _ -> d\n"
 
-# A bare top-level function name is a `VarExpr`, but reading it as a value
-# eta-expands to a `sprout_alloc_closure` — the match allocates only on the
-# Nothing branch, the rewrite on every call.
+# A bare name of an unconstrained function in this module is free to hoist:
+# reading it as a value is a static closure, so it allocates nothing.
 let fallback_is_a_function_name: String =
   "fn bump(n: Int) -> Int = n + 1\n"
   ++ "\n"
@@ -310,6 +309,24 @@ let fallback_is_a_function_name: String =
   ++ "  match m with\n"
   ++ "  | Just g -> g\n"
   ++ "  | Nothing -> bump\n"
+
+# A constrained function read as a value captures its dictionary, so it still
+# allocates. The AST cannot tell it from an unconstrained one by its use alone.
+let fallback_is_a_constrained_function: String =
+  "fn same(x: a) -> a where Eq a = x\n"
+  ++ "\n"
+  ++ "fn f(m: Maybe (Int -> Int)) -> (Int -> Int) =\n"
+  ++ "  match m with\n"
+  ++ "  | Just g -> g\n"
+  ++ "  | Nothing -> same\n"
+
+# A prelude name is not declared in this module, so its constraints are not
+# visible here.
+let fallback_is_a_prelude_function: String =
+  "fn f(m: Maybe (Int -> Int)) -> (Int -> Int) =\n"
+  ++ "  match m with\n"
+  ++ "  | Just g -> g\n"
+  ++ "  | Nothing -> id\n"
 
 # A nullary constructor is a `VarExpr` too, and costs an interned-constructor
 # call. `checker.arrow_labels` is the live shape.
@@ -484,8 +501,12 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a non-Result type reusing `Ok`: not reported",
       hits(reuses_result_ctors), 0)
 
-    assert_eq(state, "function-name fallback: not reported — reading it allocates a closure",
-      hits(fallback_is_a_function_name), 0)
+    assert_eq(state, "unconstrained same-module function fallback: reported — a static closure",
+      hits(fallback_is_a_function_name), 1)
+    assert_eq(state, "constrained same-module function fallback: not reported — it captures a dictionary",
+      hits(fallback_is_a_constrained_function), 0)
+    assert_eq(state, "prelude function fallback: not reported — its constraints are not visible here",
+      hits(fallback_is_a_prelude_function), 0)
     assert_eq(state, "nullary-constructor fallback: not reported — it is an interned-ctor call",
       hits(fallback_is_a_nullary_ctor), 0)
     assert_eq(state, "module-qualified fallback: not reported — its root segment is not bound here",

@@ -1778,7 +1778,7 @@ fn float_cmp_predicate(op: String) -> Maybe String =
 # Renders a SourcePos as a panic message suffix (Int overflow, the unresolved-dict
 # poison thunk). Matches the "(line N, column N)" convention already used by
 # intrinsic_not_a_value_msg above.  Each IRStrConst gets its own global
-# (ir_lowering.collect_str_consts does not deduplicate), so a located message
+# (ir_lowering.collect_module_consts does not deduplicate), so a located message
 # costs one global per panic site in the IR, as the unlocated one did — not one
 # per operation performed at runtime.
 fn panic_loc(pos: source.SourcePos) -> String =
