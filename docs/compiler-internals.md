@@ -193,6 +193,9 @@ ctor tag args` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
 - **A closure gets a fresh state and no owned parameters** (`closure_tx_env`). Its parameters
   resolve to the same `%p$name` as the enclosing function's, and it may run 0..n times. CPR
   workers and the global-init body also build their `TxEnv` with no owned parameters.
+- **An inlined immediately-applied lambda is not a closure.** `translate_call` beta-reduces it
+  (`let`, `where`, `|>`), binding a `borrowing` parameter to the lender's SSA, so `inline_tx_env`
+  drops that SSA from `owned` for the body. The reuse state is shared; the body runs once.
 - **The runtime never builds or reads a linear constructor**, so a reused cell's tag is
   invisible to it: no `find_ctor_tag_by_name` call site names one (SYNC comment there).
 

@@ -464,15 +464,18 @@ fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
       "  store " ++ ty ++ " " ++ newv ++ ", ptr " ++ slot ++ "\n" ++
       lower_tco_back_stores(rest)
 
+# One step of a header's aux field: aux sits above the low 14 bits (kind, colour, age).
+# SYNC WITH runtime/sprout_runtime.c sprout_hdr_make (aux << 14).
+let hdr_aux_unit: Int = 16384
+
 # Rewrite a reused cell's header to constructor `tag`, keeping the low 14 bits
 # (kind, colour, age) and the arity.
-# SYNC WITH runtime/sprout_runtime.c sprout_obj_write_tag: aux, at bit 14, is
-# (tag << 8) | arity.
+# SYNC WITH runtime/sprout_runtime.c sprout_obj_write_tag: aux is (tag << 8) | arity.
 fn lower_reuse_header(r: String, tag: Int, arity: Int) -> String =
   "  " ++ r ++ "$hp = getelementptr i8, ptr " ++ r ++ "$ptr, i64 -8\n" ++
   "  " ++ r ++ "$h0 = load i64, ptr " ++ r ++ "$hp\n" ++
-  "  " ++ r ++ "$h1 = and i64 " ++ r ++ "$h0, 16383\n" ++
-  "  " ++ r ++ "$h2 = or i64 " ++ r ++ "$h1, " ++ int_to_string((tag * 256 + arity) * 16384) ++ "\n" ++
+  "  " ++ r ++ "$h1 = and i64 " ++ r ++ "$h0, " ++ int_to_string(hdr_aux_unit - 1) ++ "\n" ++
+  "  " ++ r ++ "$h2 = or i64 " ++ r ++ "$h1, " ++ int_to_string((tag * 256 + arity) * hdr_aux_unit) ++ "\n" ++
   "  store i64 " ++ r ++ "$h2, ptr " ++ r ++ "$hp"
 
 # Emit per-field store instructions for an IRMakeCtor (`tag` "$f") or IRMakeTuple
@@ -896,7 +899,7 @@ export fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
         body = encode_str_for_ir(s) ++ "\\00"
         byte_len = str_byte_len(s)
         len = byte_len + 1
-        hdr = 10 + byte_len * 16384
+        hdr = 10 + byte_len * hdr_aux_unit
 
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =

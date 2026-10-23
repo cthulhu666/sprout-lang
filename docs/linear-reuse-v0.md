@@ -176,10 +176,18 @@ lives in one `Ref` in the translation environment, so there is one token at a ti
   `fn f(g: Grid)` would mint a token on a borrowed cell under the outer set. A lambda's own
   owned parameters get no reuse in v0. CPR workers and the global initialiser also get an empty
   set.
+- An immediately-applied lambda (`let`, `where`, `x |> (\p -> …)`, `(\p -> …)(a)`) is inlined by
+  `translate_call`: its parameters are bound to the argument SSAs and the body is translated in
+  the enclosing env, without `closure_tx_env`. The body runs once, on the path that reached it,
+  so it shares the token stack and an outer token may be taken inside it. A non-owned (`borrowing`,
+  `once`, `local`) parameter is bound to the lender's SSA, which can be an owned parameter's, so
+  `inline_tx_env` takes the arguments of such parameters out of the owned set for the body.
+  Emptying the set would also lose `let j = 1 in match g with …`, which is sound.
 
 The failure modes are asymmetric. A branching construct that misses its save treats its branches
 as one sequence: the second branch finds the token taken and allocates, which is conservative. A
-missed reset in `translate_lambda` would be unsound. It is one call site, and it gets a test.
+missed reset in `translate_lambda`, or a borrowed alias left in the owned set by the inlined
+lambda path, would be unsound. Each is one call site, and each gets a test.
 
 ### 4.3 The op
 
@@ -213,7 +221,9 @@ A cell is reused only if nothing else can reach it. Each premise below is today'
 1. An owned linear parameter has no other reference at entry: a borrowed value cannot be passed
    to an owned parameter, a linear value cannot be used twice, and a generic parameter cannot be
    instantiated at a linear type without a `where linear` bound (`linearity-bound-v0.md`).
-   Covered by existing `type_error` conformance cases, cited in the test.
+   Covered by existing `type_error` conformance cases, cited in the test. The premise is about
+   the SSA name, and an inlined lambda's `borrowing` parameter is a second name for the lender's
+   SSA: `inline_tx_env` removes it (§4.2), with IR and behaviour tests.
 2. After the match, the arm cannot name the parameter again (use-once). Existing.
 3. No closure captured it before the match: capture of a linear binding is rejected (M4.2), and a
    move into a one-shot closure consumes it. Existing.
@@ -254,6 +264,9 @@ are the guard.
   - a rebuild in one `if` branch and another after the join gives exactly one `IRReuseCtor`;
   - a rebuild inside a lambda allocates, including a lambda whose `borrowing` parameter has the
     outer owned parameter's name;
+  - an inlined lambda (`(\x -> …)(g)`, `g |> \x -> …`) whose `borrowing` parameter is an owned
+    parameter allocates and leaves the lender's cell, constructor included, unchanged; a `let`
+    body or `let h = g` alias over an owned parameter still reuses;
   - a constrained existential constructor whose source count equals another constructor's
     allocates (§4.2 field count);
   - a type linear only through a `where linear` bound reuses;

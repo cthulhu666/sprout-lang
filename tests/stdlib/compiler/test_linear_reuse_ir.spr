@@ -163,7 +163,22 @@ let shapes_src =
   "  match a with\n" ++
   "  | Grid n k ->\n" ++
   "      let s = (match b with | Grid m j -> m + j)\n" ++
-  "      in (s, Grid(n, k))\n"
+  "      in (s, Grid(n, k))\n" ++
+  "fn iife_borrow(g: Grid) -> Int =\n" ++
+  "  let d = (\\(x: borrowing Grid) -> match x with | Grid n k -> Grid(n, k))(g)\n" ++
+  "  in drop_grid(d) + drop_grid(g)\n" ++
+  "fn piped_borrow(g: Grid) -> Int =\n" ++
+  "  let d = g |> (\\(x: borrowing Grid) -> match x with | Grid n k -> Grid(n, k))\n" ++
+  "  in drop_grid(d) + drop_grid(g)\n" ++
+  "fn iife_flip(t: Two) -> Int =\n" ++
+  "  let u = (\\(x: borrowing Two) -> match x with | A n k -> B(n, k) | B n k -> A(n, k))(t)\n" ++
+  "  in drop_two(u) + drop_two(t)\n" ++
+  "fn let_inline(g: Grid) -> Grid =\n" ++
+  "  let j = 1\n" ++
+  "  in match g with | Grid n k -> Grid(n + j, k)\n" ++
+  "fn alias_inline(g: Grid) -> Grid =\n" ++
+  "  let h = g\n" ++
+  "  in match h with | Grid n k -> Grid(n + 1, k)\n"
 
 # A rebuild inside a closure may run 0..n times, so it never takes the outer token.
 let lambda_src =
@@ -252,6 +267,19 @@ fn check_shapes(state: TestState, ir: String, ll: String) -> Unit !{IO} =
     assert_eq(state, "nested match: nothing allocates", makes(ir_fn(ir, "nested")), 0)
     assert_eq(state, "nested match: the outer token returns at the join", reuses(ir_fn(ir, "nested_back")), 1)
     assert_eq(state, "nested match: rebuild after the join does not allocate", makes(ir_fn(ir, "nested_back")), 0)
+
+    # An immediately-applied lambda is inlined: its `borrowing` parameter is the lender's cell.
+    assert_eq(state, "iife borrowing parameter: no reuse", reuses(ir_fn(ir, "iife_borrow")), 0)
+    assert_eq(state, "iife borrowing parameter: allocates", makes(ir_fn(ir, "iife_borrow")), 1)
+    assert_eq(state, "piped lambda borrowing parameter: no reuse", reuses(ir_fn(ir, "piped_borrow")), 0)
+    assert_eq(state, "piped lambda borrowing parameter: allocates", makes(ir_fn(ir, "piped_borrow")), 1)
+    assert_eq(state, "iife flip over a borrowed cell: no reuse", reuses(ir_fn(ir, "iife_flip")), 0)
+    assert_eq(state, "iife flip over a borrowed cell: allocates", makes(ir_fn(ir, "iife_flip")), 2)
+    assert_eq(state, "no header rewrite on a borrowed cell", count(ll_fn(ll, "iife_flip"), "16383"), 0)
+    assert_eq(state, "let body over an owned parameter: reuses", reuses(ir_fn(ir, "let_inline")), 1)
+    assert_eq(state, "let body over an owned parameter: no make", makes(ir_fn(ir, "let_inline")), 0)
+    assert_eq(state, "let alias of an owned parameter: reuses", reuses(ir_fn(ir, "alias_inline")), 1)
+    assert_eq(state, "let alias of an owned parameter: no make", makes(ir_fn(ir, "alias_inline")), 0)
 
 fn check_lambda(state: TestState, ir: String) -> Unit !{IO} =
   do
