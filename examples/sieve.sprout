@@ -54,10 +54,10 @@ fn sieve_mutvec(n: Int) -> Int !{IO} =
     unmarked <- mutvec_fold(\ (acc, c) -> if c then acc else acc + 1, 0, composite)
     unmarked - 2
 
-fn timed(label: String, n: Int, run: Unit -> Int !{IO}) -> Unit !{IO} =
+fn timed(label: String, n: Int, run: Int -> Int !{IO}) -> Unit !{IO} =
   do
     t0 <- time.now_micros()
-    count <- run(())
+    count <- run(n)
     t1 <- time.now_micros()
     print(`${label} ${int_to_string(count)} primes up to ${int_to_string(n)}  (${int_to_string((t1 - t0) / 1000)} ms)`)
 
@@ -99,7 +99,8 @@ fn sieve_scatter(n: Int) -> Int =
 
 fn main() -> Unit !{IO} =
   do
-    timed("vec_set:", 10000, \_ -> sieve_vec(10000))
-    timed("MutVec: ", 10000, \_ -> sieve_mutvec(10000))
-    timed("LinVec: ", 10000, \_ -> sieve_linvec(10000))
-    timed("scatter:", 10000, \_ -> sieve_scatter(10000))
+    let n = 10000
+    timed("vec_set:", n, sieve_vec)
+    timed("MutVec: ", n, sieve_mutvec)
+    timed("LinVec: ", n, sieve_linvec)
+    timed("scatter:", n, sieve_scatter)
