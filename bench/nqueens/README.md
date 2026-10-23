@@ -19,8 +19,8 @@ N=14 → 365,596, N=15 → 2,279,184, N=16 → 14,772,512, N=17 → 95,815,104.
 This is the one thing to understand before reading any number below. The
 implementations fall into three groups by **how the constraint state is
 represented**, and the groups do materially different amounts of work per node.
-A bitmask implementation is ~50× faster than a persistent one *in the same
-language*, so a cross-group comparison measures the representation, not the
+A bitmask implementation is 14× (Go) to 52× (Sprout) faster than a persistent
+one *in the same language*, so a cross-group comparison measures the representation, not the
 language. `bench.sh` prints them in three separate sections for that reason,
 and the results below keep them apart.
 
@@ -112,7 +112,7 @@ bash bench/nqueens/bench.sh
 bash bench/nqueens/bench.sh bitmask      # or: persistent, mutable
 ```
 
-The script compiles Haskell and Go (plus both Sprout binaries via
+The script compiles Haskell and Go (plus all three Sprout binaries via
 `just compile-native`) into `bench/nqueens/bin/`, then runs every variant
 grouped by representation.
 
@@ -133,70 +133,67 @@ bench/nqueens/bin/nqueens_go bitmask 13 14 15 16 17
 
 ## Results
 
-Measured on Apple M1 (arm64-darwin), 2026-09-25, one machine and one session —
-except the group-1 Sprout row, re-measured 2026-09-26 after element inlining
-landed, interleaved against Go in that session (Go re-read 63.7 / 378.4 ms
-against its recorded 64 / 381, so the two sessions are comparable), and the
-group-2 Sprout and Go rows, measured interleaved 2026-10-24 (Go's group 1
-re-read 61.7 / 375.3 ms there, within 4% of the record). Compiled languages
-are execution-only. **Every N=12 and N=13 figure is a median of interleaved
-runs** — 5 for the compiled entries, 3 for the interpreted ones; the smaller-N
-progression is a single pass.
-Interleaving is not ceremony: running one implementation five times and then the
-next hands the second a differently-heated machine, which produced a spurious
-2× gap during this very refresh.
+Measured on Apple M1 (arm64-darwin), 2026-10-24, one machine and one session.
+Compiled languages are execution-only. **Every figure is a median of interleaved
+runs**: 5 rounds for the compiled entries, their order rotated each round, then
+3 for the interpreted ones, run after them because they heat the machine. The
+range column is min–max at N=13. The bitmask scaling study further down is
+older (2026-09-25). Interleaving is not ceremony: running one implementation
+five times and then the next hands the second a differently-heated machine,
+which produced a spurious 2× gap during the 2026-09-25 refresh.
 
 ### Representation 1 — persistent / copy-on-write
 
-| Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
-|---|---:|---:|---:|
-| Go — `[]bool` + copy | 64 | 381 | 1.0× |
-| Haskell — `UArray Int Bool` (unboxed) | 96 | 556 | 1.5× |
-| Haskell — `Array Int Bool` (boxed) | 162 | 945 | 2.5× |
-| **Sprout — `Vec Bool`** | **196** | **1,157** | **3.1×** |
-| Ruby — `Array#dup` | 1,215 | 6,986 | 19× |
-| Python — `list[:]` | 1,612 | 8,574 | 25× |
+| Implementation | N=12 (ms) | N=13 (ms) | N=13 range | vs fastest |
+|---|---:|---:|---:|---:|
+| Go — `[]bool` + copy | 62.3 | 373.7 | 370–376 | 1.0× |
+| Haskell — `UArray Int Bool` (unboxed) | 92.2 | 533.1 | 527–538 | 1.43× |
+| Haskell — `Array Int Bool` (boxed) | 156.4 | 895.5 | 889–910 | 2.40× |
+| **Sprout — `Vec Bool`** | **207.1** | **1,215** | 1,208–1,218 | **3.25×** |
+| Ruby — `Array#dup` | 1,185 | 6,856 | 6,841–6,901 | 18× |
+| Python — `list[:]` | 1,545 | 8,526 | 8,391–8,928 | 23× |
 
 ### Representation 2 — mutable in-place
 
-| Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
-|---|---:|---:|---:|
-| Go — `[]bool` mutate/undo | 64 | 381 | 1.0× |
-| **Sprout — `LinVec Bool`** | **65** | **370** | **1.0×** |
-| Ruby — mutate/undo | 966 | 5,624 | 15× |
-| Python — mutate/undo | 1,214 | 8,975 | 19× |
+| Implementation | N=12 (ms) | N=13 (ms) | N=13 range | vs fastest |
+|---|---:|---:|---:|---:|
+| **Sprout — `LinVec Bool`** | **64.4** | **367.2** | 364–369 | **1.0×** |
+| Go — `[]bool` mutate/undo | 64.6 | 392.3 | 388–398 | 1.07× |
+| Ruby — mutate/undo | 965 | 5,622 | 5,614–5,623 | 15× |
+| Python — mutate/undo | 1,209 | 8,489 | 7,965–8,990 | 23× |
 
-Sprout and Go are level here too: 1.6% apart at N=12 and 3% at N=13, in
-opposite directions, and inside the run-to-run spread.
+Sprout and Go are level at N=12. At N=13 Go takes 7% longer, and the two
+ranges do not overlap.
 
 ### Representation 3 — bitmask
 
-| Implementation | N=12 (ms) | N=13 (ms) | vs fastest |
-|---|---:|---:|---:|
-| **Sprout — `Int` masks** | **4.6** | **24.9** | **1.0×** |
-| Go — `int` masks | 4.5 | 24.7 | 1.0× |
+| Implementation | N=12 (ms) | N=13 (ms) | N=13 range | vs fastest |
+|---|---:|---:|---:|---:|
+| **Sprout — `Int` masks** | **4.0** | **22.7** | 21.8–33.6 | **1.0×** |
+| Go — `int` masks | 4.5 | 25.0 | 24.8–26.2 | 1.10× |
 
-Sprout and Go are indistinguishable here — 2% apart at N=12, 1% at N=13, both
-inside the run-to-run spread.
+Sprout's median is 10% ahead at both sizes, but one of its five rounds was slow
+(9.3 / 33.6 ms), and the scaling study below puts the two 3–12% apart. Read it
+as parity, with Sprout marginally ahead.
 
-### Smaller N (single pass)
+### Smaller N (medians, same session)
 
 ```
                           N=8      N=10
-group 1  Go pure          0.11 ms  2.2 ms
-         Haskell UArray   0.3      5.2
-         Haskell Array    0.4      7.6
-         Sprout Vec       0.5     11.1
-         Python list[:]   1.5     31.3
-         Ruby dup         3.3     45.4
+group 1  Go copy          0.11 ms  2.1 ms
+         Haskell UArray   0.2      3.5
+         Haskell Array    0.3      5.9
+         Sprout Vec       0.3      6.9
+         Python list[:]   1.5     30.7
+         Ruby dup         3.6     45.2
 
-group 2  Go mutable       0.16     2.2
-         Sprout LinVec    0.1      2.2
-         Python mutate    1.2     25.9
-         Ruby mutate      2.0     42.2
+group 2  Sprout LinVec    0.1      2.2
+         Go mutable       0.11     2.3
+         Python mutate    1.2     25.6
+         Ruby mutate      1.6     34.1
 
-group 3  Sprout masks     0.0      0.4
-         Go masks         0.01     0.20
+group 3  Sprout masks     0.0      0.1
+         Go masks         0.01     0.2
 ```
 
 ### Bitmask scaling: does Go pull ahead at large N?
@@ -222,8 +219,8 @@ four orders of magnitude.
 
 ### The representation dominates the language
 
-Sprout's bitmask variant at N=12 (4.6 ms) is **14× faster than Go's persistent
-variant** (65 ms), and 52× faster than Sprout's own persistent variant. The
+Sprout's bitmask variant at N=12 (4.0 ms) is **16× faster than Go's persistent
+variant** (62 ms), and 52× faster than Sprout's own persistent variant. The
 single largest performance fact in this benchmark is which of the three groups
 an implementation is in — not which language it is written in.
 
@@ -252,8 +249,11 @@ well as Go's does.
 
 ### Why Sprout trails on the persistent representation
 
-3.1× behind Go and 2.0× behind Haskell's unboxed `UArray`, and the cost is
-allocation, not codegen. Each `vec_set` allocates **two** objects: the `Vec`
+3.25× behind Go and 2.3× behind Haskell's unboxed `UArray` at N=13, and the
+cost is mostly allocation, not codegen. Part of the gap is recent: 94372cc0,
+which retyped the CPR reads as `i128`, made this program 8% slower (its parent
+runs N=13 in 1,121 ms against its 1,214, paired; issue #716, cause not yet
+known). Each `vec_set` allocates **two** objects: the `Vec`
 constructor wrapper and the `VectorVal`, which since 2026-09-25 carries its
 elements inside its own slot. That is 16.7M placements × 2 = 33.4M allocations
 at N=1..13.
@@ -304,15 +304,15 @@ rather than call-overhead-limited.
 
 ### Mutable helps Sprout and the interpreters, and does nothing for Go
 
-Comparing group 2 against group 1 within each language, at N=12. Each pair is
-from one session: Sprout's from 2026-10-24, the rest from 2026-09-25.
+Comparing group 2 against group 1 within each language, at N=12, all from the
+session above:
 
 | Language | persistent | mutable | mutable gain |
 |---|---:|---:|---:|
-| Sprout | 207 ms | 66 ms | **3.1×** |
-| Go | 64 ms | 68 ms | **0.94×** (slower) |
-| Ruby | 1,215 ms | 966 ms | 1.26× |
-| Python | 1,612 ms | 1,214 ms | 1.33× |
+| Sprout | 207 ms | 64 ms | **3.2×** |
+| Go | 62 ms | 65 ms | **0.96×** (slower) |
+| Ruby | 1,185 ms | 965 ms | 1.23× |
+| Python | 1,545 ms | 1,209 ms | 1.28× |
 
 In Sprout the copy is the expensive part. Each `vec_set` allocates two heap
 objects (see "Why Sprout trails on the persistent representation" above), and
@@ -322,14 +322,13 @@ Go's does, and still runs 3× faster.
 
 In Python and Ruby the bottleneck is per-call overhead — frame creation and
 bytecode dispatch, method dispatch — but the copy is a whole extra O(n)
-interpreter-level operation per placement, so removing it is worth ~1.3×.
+interpreter-level operation per placement, so removing it is worth ~1.25×.
 
 In Go it is worth nothing. The arrays are 8–23 bytes, well inside one cache
 line, and Go's escape analysis keeps the copies off the heap; meanwhile the
 mutable version pays six writes per placement (three to set, three to undo) that
 the pure version does not. The two effects cancel, and the mutable variant came
-out *slightly* slower in all three rounds. Re-measured 2026-10-24 over five
-rounds, the pair is 61.7 vs 63.6 ms (0.97×), the same direction.
+out *slightly* slower in all five rounds, at both N=12 and N=13.
 
 This reverses what this file used to claim ("mutable barely helps in Ruby/Python
 but a lot in Go", from a 71-vs-74 ms pair). The direction was wrong in both
@@ -337,8 +336,9 @@ halves.
 
 ### The bitmask ceiling
 
-Group 3 beats group 1 by ~50× at N=12 in both Sprout and Go, and the gap holds
-as N grows. Three reasons:
+Group 3 beats group 1 at N=12 by 52× in Sprout and 14× in Go, and the gap holds
+at N=13. Sprout's ratio is larger because its group 1 also pays for allocation.
+Three reasons for the gap itself:
 
 - No allocation: zero GC pressure regardless of tree size.
 - A smaller tree: only safe columns are visited, where the array versions try

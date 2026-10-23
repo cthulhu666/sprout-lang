@@ -3,8 +3,8 @@
 #
 # The three representations solve the same problem with different amounts of
 # work per node, so a number from one says nothing about a number from another:
-# the bitmask variants are ~50x faster than the persistent ones in every
-# language that has both. Only compare within a section.
+# the bitmask variants are 14x (Go) to 52x (Sprout) faster than the persistent
+# ones. Only compare within a section.
 #
 # Compiled languages are pre-built so we time execution only, not compilation.
 #
@@ -120,7 +120,7 @@ fi
 if section bitmask "REPRESENTATION 3: bitmask" \
   "Constraints packed into three Ints, iterating only the safe columns rather
 than testing every column. No arrays, no allocation, and a smaller search
-tree — hence ~50x faster than representation 1 in both languages below."
+tree — hence 14x (Go) to 52x (Sprout) faster than representation 1."
 then
   entry "Sprout — Int masks (whole-program linked, execution only)" "$BIN/nqueens_sprout_bitmask"
   entry "Go — int masks"                                            "$BIN/nqueens_go" bitmask
