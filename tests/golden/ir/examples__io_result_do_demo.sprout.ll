@@ -96,17 +96,17 @@ declare i64 @bit_not(i64)
 declare i64 @bit_shr(i64, i64)
 declare i64 @bit_shl(i64, i64)
 declare i64 @bit_shr_zf(i64, i64)
+declare i64 @str_byte_len(i64)
+declare i64 @str_slice_bytes(i64, i64, i64)
+declare i64 @str_starts_with_at_byte(i64, i64, i64)
+declare i64 @str_split_lines(i64)
+declare i64 @split_words(i64)
 declare i64 @crypto_sha256(i64)
 declare i64 @crypto_hmac_sha256(i64, i64)
 declare i64 @crypto_base64_encode(i64)
 declare i64 @crypto_base64_decode(i64)
 declare i64 @crypto_bytes_xor(i64, i64)
 declare i64 @crypto_random_bytes(i64)
-declare i64 @str_byte_len(i64)
-declare i64 @str_slice_bytes(i64, i64, i64)
-declare i64 @str_starts_with_at_byte(i64, i64, i64)
-declare i64 @str_split_lines(i64)
-declare i64 @split_words(i64)
 @.str.0 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"do:io-result\00" }
 @.str.1 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"capturing payload size\00" }
 @.str.2 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"io-do:bytes=\00" }
@@ -172,15 +172,15 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.crypto.random_bytes(i64 %p$$l_count) {
-entry:
-  %t$0 = call i64 @crypto_random_bytes(i64 %p$$l_count)
-  ret i64 %t$0
-}
-
 define i64 @stdlib.string.concat(i64 %p$left, i64 %p$right) {
 entry:
   %t$0 = call i64 @str_concat(i64 %p$left, i64 %p$right)
+  ret i64 %t$0
+}
+
+define i64 @stdlib.crypto.random_bytes(i64 %p$$l_count) {
+entry:
+  %t$0 = call i64 @crypto_random_bytes(i64 %p$$l_count)
   ret i64 %t$0
 }
 

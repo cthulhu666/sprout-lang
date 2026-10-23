@@ -1,7 +1,7 @@
 module app.jwt
 
 import stdlib.bytes as bytes
-import stdlib.crypto (hmac_sha256, base64_decode, const_time_eq)
+import stdlib.crypto (hmac_sha256, base64url_decode, const_time_eq)
 import stdlib.json (Json, JsonString, JsonInt, json_parse, json_get_field)
 import stdlib.string as string
 
@@ -19,18 +19,11 @@ export fn auth_error_message(err: AuthError) -> String =
   | InvalidToken -> "invalid or expired token"
   | InvalidPayload -> "invalid token payload"
 
-# base64url without padding -> bytes. stdlib.crypto only knows the padded
-# standard alphabet, so translate first.
+# JWT segments are unpadded base64url (RFC 7515); the strict decoder is the right reader.
 fn b64url_decode(raw: String) -> Maybe Bytes =
-  if extra == 1 then Nothing
-  else
-    match base64_decode(std ++ string.repeat("=", if extra == 0 then 0 else 4 - extra)) with
-    | Ok data -> Just(data)
-    | Err _ -> Nothing
-where
-  std = string.replace_all("_", "/", string.replace_all("-", "+", raw))
-  len = string.byte_length(raw)
-  extra = len - len / 4 * 4
+  match base64url_decode(raw) with
+  | Ok data -> Just(data)
+  | Err _ -> Nothing
 
 fn decode_json(part: String) -> Maybe Json =
   let Just raw = b64url_decode(part) else Nothing

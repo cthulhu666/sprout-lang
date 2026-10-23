@@ -3,6 +3,7 @@ module stdlib.crypto
 # `bit_or` is an extern, so it is callable by bare name only — `bits.bit_or` does not exist.
 import stdlib.bits
 import stdlib.bytes as bytes
+import stdlib.string as string
 
 export type CryptoError (..) =
   | CryptoInvalidArgument String
@@ -32,6 +33,48 @@ export fn base64_encode(value: Bytes) -> String =
 
 export fn base64_decode(raw: String) -> Result Base64Error Bytes =
   crypto_base64_decode(raw)
+
+# RFC 4648 section 5: the `-`/`_` alphabet, no padding. O(n).
+export fn base64url_encode(value: Bytes) -> String =
+  base64_encode(value)
+    |> string.replace_all("=", "")
+    |> string.replace_all("/", "_")
+    |> string.replace_all("+", "-")
+
+fn is_base64url_char(ch: Char) -> Bool =
+  string.is_ascii_alnum(ch) || ch == '-' || ch == '_'
+
+fn mod4(n: Int) -> Int =
+  n - n / 4 * 4
+
+fn base64url_pad_count(raw: String) -> Int =
+  if string.ends_with(raw, "==") then 2
+  else if string.ends_with(raw, "=") then 1
+  else 0
+
+fn require_canonical(body: String, decoded: Result Base64Error Bytes) -> Result Base64Error Bytes =
+  match decoded with
+  | Err e -> Err(e)
+  | Ok out ->
+    if base64url_encode(out) == body then Ok(out)
+    else Err(Base64DecodeError("invalid base64url trailing bits"))
+
+# Reads only the `-`/`_` alphabet: `+`, `/` and a stray `=` are errors. Padding is optional, but
+# when present it must complete the last group of 4. Non-zero trailing bits are refused too, so
+# each value has one spelling. O(n).
+export fn base64url_decode(raw: String) -> Result Base64Error Bytes =
+  if pad > 0 && mod4(string.byte_length(raw)) != 0 then
+    Err(Base64DecodeError("invalid base64url padding"))
+  else if mod4(string.byte_length(body)) == 1 then
+    Err(Base64DecodeError("invalid base64url length"))
+  else if ! vec_all (is_base64url_char, string.string_chars(body)) then
+    Err(Base64DecodeError("invalid base64url character"))
+  else
+    require_canonical(body, base64_decode(string.replace_all("_", "/", string.replace_all("-", "+", body))
+      ++ string.repeat("=", mod4(4 - mod4(string.byte_length(body))))))
+where
+  pad = base64url_pad_count(raw)
+  body = string.drop_last(raw, pad)
 
 export fn bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes =
   crypto_bytes_xor(left, right)
