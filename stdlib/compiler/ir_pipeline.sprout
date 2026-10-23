@@ -54,7 +54,7 @@ type StreamState (..) =
 fn pair_first(p: (a, b)) -> a = match p with | (x, _) -> x
 fn pair_second(p: (a, b)) -> b = match p with | (_, y) -> y
 
-# Emit one IRFunction: root it, collect string constants, lower to text.
+# Emit one IRFunction: root it, collect string and static-closure globals, lower to text.
 # Prepends one chunk to each accumulator; threads next_str_idx.
 # Returns Ok(new_state) always (rooting and lowering are infallible).
 fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
@@ -69,7 +69,7 @@ fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
                          next_idx, str_acc, bodies_acc, defined, has_user_main, main_returns_int, summary, eligible, static_closures)
 
 # Helper: emit a pre-rooted IRFunction.  Separated so we name the rooted fn
-# once and pass it to both walk_blocks_for_strs and lower_fn_with_table.
+# once and pass it to both walk_blocks_for_globals and lower_fn_with_table.
 fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
                       str_acc: Ref (List String), bodies_acc: Ref (List String),
                       defined: Set, has_user_main: Bool, main_returns_int: Bool, summary: Dict Bool,
@@ -77,8 +77,8 @@ fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
     Result String StreamState !{IO} =
   match rooted with
   | sprout_ir.IRFunction fname _ _ rblocks ->
-      # This fn's string-constant chunk — O(1) prepend to str_acc below.
-      match ir_lowering.walk_blocks_for_strs(rblocks, next_idx, dict_empty(), static_closures) with
+      # This fn's string and static-closure globals chunk — O(1) prepend to str_acc below.
+      match ir_lowering.walk_blocks_for_globals(rblocks, next_idx, dict_empty(), static_closures) with
       | (fn_str_chunk, next_idx2, fn_table, static_closures2) ->
           do
             str_old <- ref_read(str_acc)

@@ -54,7 +54,7 @@ is the whole condition, read through one helper, `sprout_ir.closure_is_static(ca
 fact in the op, but every exhaustive match over `IROp` would gain an arm for something the
 operands already state, and the two ops would lower identically except at one line.
 
-**Lowering** (`ir_lowering`). The string-literal scan, `walk_ops_for_strs`, also emits each
+**Lowering** (`ir_lowering`). The globals scan, `walk_ops_for_globals`, emits string literals and each
 static closure's global, once per program: a set of emitted code functions is threaded through
 both the batch and the streaming path, since a global is module-wide. The global is
 
@@ -72,8 +72,9 @@ The payload is the code pointer at offset 8, exactly where a heap env puts it, s
 `IRApplyClosure` and `sprout_closure_arity_check` work unchanged. `<hdr>` is the CLOSURE header:
 kind 2, `n_caps` 0, the arity in `aux` above bit 32. The poison thunk's `SPROUT_CLOSURE_ARITY_ANY`
 sets bit 63, and `Int` traps on overflow, so the header is computed as its signed 64-bit pattern.
-This is the third copy of the header split (runtime, `IRMkClosure`, here); it gets the same SYNC
-comment and one test that reads a static closure's arity back through the runtime check.
+This is the only copy of the header split in emitted IR (`@sprout_alloc_closure` takes the arity as
+a plain int and the runtime packs it); it carries a SYNC comment and one test that reads a static
+closure's arity back through the runtime check.
 
 **Rooting** (`ir_rooting`). A static `IRMkClosure` is not a GC trigger and does not produce a
 heap value. So it is never rooted, and values live across it no longer need roots on its account.
@@ -152,7 +153,7 @@ sites): 1.40 s → 1.355 s, −3%. The output is byte-identical (same md5).
 ## 8. Spec and docs
 
 - No spec change: allocation is not observable.
-- `docs/compiler-internals.md` §Closure layout: static closures, the header's third copy, the
+- `docs/compiler-internals.md` §Closure layout: static closures, the header's one IR copy, the
   `sprout_heap_lookup` rule they rely on.
 - `docs/gates.md` and `scripts/rooting_cost_gate.sh`: the closure arm, per §5.
 - `docs/local-closures-v0.md` §11 *Not a speed feature yet*: the stack-env measurement.

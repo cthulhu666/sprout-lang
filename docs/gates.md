@@ -559,7 +559,7 @@ comparisons. The arm reads `closure_apply=` instead, which `sprout_closure_arity
 element (100/100), floor 105, the growth bound unchanged at 125/100.
 
 **The fixtures differed in more than element count.** Profiled by allocation site, the remaining
-byte growth had two sources. `ir_lowering.walk_ops_for_strs` appended each string global to the
+byte growth had two sources. `ir_lowering.walk_ops_for_globals` appended each string global to the
 function's growing globals text, 8,550 → 17,088 bytes per element: one literal per element, so
 quadratic. And `rooting_block_huge.sprout` had a three-line longer header comment than its siblings,
 while `strip_headers` re-scanned from byte 0 at every header line, so those lines read as 901 bytes

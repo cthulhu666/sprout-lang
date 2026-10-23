@@ -7,6 +7,12 @@ Experimental; no change to `docs/spec-v0.md`, which does not describe the linter
 Supersedes the "config file for per-rule enable/disable" line in `BACKLOG.md`'s `Formatter/linter
 beyond the baseline` entry — that entry points here.
 
+Revision 10. A closure with no captures is a static constant (`static-closures-v0.md`), so a bare
+name of an unconstrained function of the linted module costs nothing to read and is now free to
+hoist (§6). A constrained function still captures a dictionary at a polymorphic type, and an
+imported or prelude name hides its constraints, so both stay not free. The corpus count is
+unchanged at 0 combinator findings.
+
 Revision 9. An ensemble review (`high`, 3 passes) of revision 8 found four defects, all of the same
 shape: a guard written against the symptom that had been seen rather than the mechanism that
 produces it. The wrapper guard keyed on the TYPE name while the matcher dispatches on CONSTRUCTOR
@@ -390,15 +396,18 @@ build one. Worth revisiting if autocorrect (§9) ever lands, because *suggesting
 **Silent: the fallback is evaluable but not free.** Revision 8 removed the *note* case this section
 used to describe. Reporting an eager rewrite advisorily produced 51 findings nobody should act on,
 and a rule whose advice is mostly wrong teaches readers to skip it. A capture is now reportable only
-when hoisting it is free — a literal, or a variable **that names a local binding** (`free_to_hoist`).
-The scope qualifier is revision 9's, and it is what makes the predicate mean what it says: a nullary
-constructor, `[]`, and a bare top-level function name are all spelled exactly like a variable, and
-each costs an allocation when evaluated eagerly (an interned-constructor call for the first two, a
-`sprout_alloc_closure` for the third). Reading every `VarExpr` as free let all three through. The
-walk now carries the names bound at each point — parameters, `let`, lambda arguments, match and
-comprehension patterns, do-binds — so the test is "is this name local", which is exactly the
-question. It also settles `cfg.cached` against `string.trim`: both are one dotted `VarExpr` (§4A),
-and only the root segment tells a field read on a local from a module-qualified function.
+when hoisting it is free — a literal, a variable **that names a local binding**, or a bare name of
+an unconstrained function of this module (`free_to_hoist`). The scope qualifier is revision 9's, and
+it is what makes the predicate mean what it says: a nullary constructor, `[]`, a top-level function
+name and a qualified name are all spelled exactly like a variable. A nullary constructor costs an
+interned-constructor call when evaluated eagerly. A function name was a `sprout_alloc_closure`;
+since revision 10 an unconstrained same-module one is a static closure and free. A constrained one
+captures a dictionary at a polymorphic type, and an imported or prelude name hides its constraints
+from this AST-level walk, so those stay not free. The walk carries the names bound at each point —
+parameters, `let`, lambda arguments, match and comprehension patterns, do-binds — plus the
+module's unconstrained function names, built once per file. The root segment still tells a field
+read on a local (`cfg.cached`) from a module-qualified function (`string.trim`): both are one dotted
+`VarExpr` (§4A).
 
 `ast.is_syntactic_value` is the wrong test and was the one used: it admits a lambda, a tuple and a
 **constructor application**, each of which allocates once hoisted. `parser.sprout:1028`'s
@@ -673,10 +682,11 @@ shape reported clean; a closed fallback in the same position still reported.
 **Evaluation** (§6, §7.4) — **done**: not suggested for a panicking fallback (`p256.sprout:521`), a
 call fallback, or a constructor-application fallback (`parser.sprout:1028`); not suggested over a
 call scrutinee; suggested for a literal fallback over a variable scrutinee, and for a `guard` whose
-*condition* is a call, since a Bool is never boxed. Revision 9 adds the three `VarExpr` shapes that
-are not variables: a bare top-level function name (a closure), a nullary constructor (an interned-
-constructor call), and a module-qualified name, which is spelled exactly like the field read beside
-it and separated from it only by whether the root segment is bound.
+*condition* is a call, since a Bool is never boxed. Revision 9 adds the `VarExpr` shapes that are
+not variables: a top-level function name, a nullary constructor (an interned-constructor call), and
+a module-qualified name, which is spelled exactly like the field read beside it and separated from
+it only by whether the root segment is bound. Revision 10 makes an unconstrained same-module function
+name free (a static closure); a constrained, imported or prelude one is still not.
 
 **Scope** (revision 9): a parameter, a local `let` and a class method each shadow a combinator and
 suppress the suggestion; an unrelated class method does not, which is the control that proves the

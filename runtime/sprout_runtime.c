@@ -693,9 +693,6 @@ static int sprout_gc_hdrcheck_on(void) {
  * site reads it from the header word at `env - 8`, adjacent to the code pointer
  * it already loads.
  *
- * SYNC WITH stdlib/compiler/ir_lowering.sprout — `lower_closure_arity_load`
- * reproduces this shift/mask in emitted IR.  Changing the split here without
- * changing it there silently mis-reads every closure's arity.
  * SYNC WITH stdlib/compiler/ir_lowering.sprout — `emit_static_closure_global`
  * writes the whole header word (kind | aux << 14) for a capture-free closure.
  *
