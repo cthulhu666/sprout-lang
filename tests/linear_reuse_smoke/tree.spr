@@ -1,0 +1,28 @@
+module main
+
+# `just linear-reuse-smoke` compiles this with INSERTS replaced and compares the runtime's
+# allocation counters across sizes: keys `i * 37 mod 100` cover 0..99, so once every key is in
+# the tree, an insert rebuilds its path in place and allocates nothing. It prints the sum of
+# the keys in the tree.
+
+type linear Tree = | Leaf | Node Tree Int Tree
+
+fn rem(a: Int, n: Int) -> Int = a - (a / n) * n
+
+fn insert(k: Int, t: Tree) -> Tree =
+  match t with
+  | Leaf -> Node(Leaf, k, Leaf)
+  | Node l v r ->
+      if k < v then Node(insert(k, l), v, r)
+      else if k > v then Node(l, v, insert(k, r))
+      else Node(l, v, r)
+
+fn fill(i: Int, n: Int, t: Tree) -> Tree =
+  if i > n then t else fill(i + 1, n, insert(rem(i * 37, 100), t))
+
+fn sum(t: Tree, acc: Int) -> Int =
+  match t with
+  | Leaf -> acc
+  | Node l v r -> sum(l, sum(r, acc + v))
+
+fn main() -> Unit !{IO} = print(int_to_string(sum(fill(1, INSERTS, Leaf), 0)))

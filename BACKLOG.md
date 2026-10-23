@@ -852,6 +852,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Document true complexity inline or fix to linear.
   Findings and probes: `docs/fundamentals-code-review-handoff-2026-07-03.md`.
   `list_builder_*` fixes the list-append half: O(1) per add, one reverse at the end.
+- [ ] `P3` **Three stdlib loops build a `Vec` with `vec_append`, O(n²).** `vec_append` copies its
+  vector (O(n), `prelude.sprout`), and each loop calls it once per element:
+  `template.parse_seq` (via `dispatch_step`), `compiler.map_diagnostics` and
+  `repl.qualify_names`. The last two are an index loop doing `vec_map`; the first wants a list or
+  `ListBuilder` accumulator. Inputs are small today (template nodes, diagnostics, module names).
 - [ ] `P3` **`Dict` and `Set` box their map, so every update allocates a wrapper.** Both are
   one-constructor `type`s over the runtime `Map` (`prelude.sprout`), so `dict_set`, `set_insert`
   and `set_remove` each allocate a 12-byte box (`sprout_alloc_obj(12, 1)`) around the new tree,
@@ -2432,6 +2437,12 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   scrutinee is an owned parameter's own cell (`TxEnv.owned` holds parameter SSA names). A
   `let`-bound or pattern-bound owned linear value, or a call result, is as dead after its match
   and could be reused, but needs its own ownership fact in `TxEnv`. Doc §2.
+- [ ] `P3` **A linear ordered map in Sprout, `LinMap k v`.** `Dict`/`Set` are the runtime's
+  persistent AVL tree: `String` keys only, interned for the process's life, O(log n) new nodes per
+  insert. A balanced linear tree in plain Sprout would take any `Ord` key, free its keys, and
+  insert in place (`docs/linear-reuse-v0.md` §1.1: 25M → 632k objects for 1M inserts, unbalanced).
+  Blocked on the entry above: a rotation matches a child taken from a field, which mints no token
+  today, so every rebalance would allocate. One owner only, so it adds to `Dict`, never replaces it.
 
 **Server and scheduler**
 
