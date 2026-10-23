@@ -92,6 +92,7 @@ declare i64 @ref_write(i64, i64)
 @.str.15 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 51, column 35)\00" }
 @.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 59, column 22)\00" }
 @.str.17 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 60, column 26)\00" }
+@__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_1.apply_0 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.aoc_2025_day_1.apply_0 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -607,18 +608,13 @@ entry:
 
 define i64 @examples.aoc_2025_day_1.solve(i64 %p$rots) {
 entry:
-  %t$11 = alloca i64
-  store i64 %p$rots, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_examples.aoc_2025_day_1.apply_0, ptr %t$0$raw
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_1.apply_0, i64 8) to i64
   %t$1 = add i64 0, 50
   %t$2 = add i64 0, 0
   %t$3 = add i64 0, 0
-  %t$13 = alloca i64
-  store i64 %t$0, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$11 = alloca i64
+  store i64 %p$rots, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$4 = call i64 @sprout_alloc_obj(i64 18, i64 3)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
@@ -627,11 +623,11 @@ entry:
   store i64 %t$2, ptr %t$4$f1
   %t$4$f2 = getelementptr i64, ptr %t$4$ptr, i64 2
   store i64 %t$3, ptr %t$4$f2
-  %t$15 = alloca i64
-  store i64 %t$4, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$13 = alloca i64
+  store i64 %t$4, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$5 = call i64 @list_fold(i64 %t$0, i64 %t$4, i64 %p$rots)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_6
 arm_0_6:
   %t$8 = call i64 @sprout_field(i64 %t$5, i64 1)

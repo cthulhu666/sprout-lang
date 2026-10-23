@@ -121,8 +121,10 @@ A closure env is a heap block with the code pointer at slot 0 and captures at sl
 
 Two constraints if you touch this:
 
-- **The split is duplicated in emitted IR.** `ir_lowering.sprout` writes the arity through `@sprout_alloc_closure(size, arity)`, and both files carry SYNC comments. Changing the bit split in one place silently mis-reads every closure's arity.
+- **The split is duplicated in emitted IR, twice.** `ir_lowering.sprout` writes the arity through `@sprout_alloc_closure(size, arity)` and spells out the whole header word for a static closure (below); all three places carry SYNC comments. Changing the bit split in one place silently mis-reads every closure's arity.
 - **The check must stay call-shaped, not branch-shaped.** An inline compare-and-branch would open a new basic block mid-op, and `lower_op` renders ops inside a block whose label the builder has already fixed — any downstream `IRPhi` would then name a predecessor that is no longer the real one.
+
+**A closure with no captures is static.** `IRMkClosure` with an empty capture list (`sprout_ir.closure_is_static`) lowers to a `private unnamed_addr constant { i64 header, ptr code }`, one per code function, and the value is the address 8 bytes in: the same payload shape as a heap env. It is not a GC trigger and not a heap value, so `ir_rooting` never roots it. The runtime needs nothing for it: `sprout_heap_lookup` answers NULL outside the heap regions, so the GC never marks, sweeps or writes it, the rule static string literals already rely on. Capture-free lambdas and eta wrappers, which include each class method passed as a dictionary argument, are 70% of the compiler's closure sites. Design and measurements: [static-closures-v0.md](static-closures-v0.md).
 
 `SPROUT_CLOSURE_ARITY_ANY` (all arity bits set) marks a closure the check waves through. Only the unresolved-dict poison thunk uses it: that thunk declares no user parameters yet is applied with the method's arguments, so a truthful arity would make the guard fire first and replace its located message with a generic mismatch.
 

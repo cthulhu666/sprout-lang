@@ -77,6 +77,11 @@ declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 10, column 17)\00" }
 @.str.1 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"positive tuple\00" }
 @.str.2 = private unnamed_addr constant { i64, [19 x i8] } { i64 294922, [19 x i8] c"non-positive tuple\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_1 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_2 }
+@__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_3 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_4 }
 @.str.3 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
 @.str.4 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
 @.str.5 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
@@ -244,23 +249,13 @@ entry:
 
 define i64 @__sprout_ir_lambda_0(i64 %p$env$, i64 %p$__lp_0) {
 entry:
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_1, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_2, i64 8) to i64
   %t$3 = alloca i64
   store i64 %p$__lp_0, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_1, ptr %t$0$raw
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta___tc_ToString_Int_to_string_2, ptr %t$1$raw
-  %t$7 = alloca i64
-  store i64 %t$1, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$2 = call i64 @__tc_ToString_Tuple_a_b_to_string(i64 %p$__lp_0, i64 %t$0, i64 %t$1)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
@@ -339,29 +334,14 @@ entry:
   %t$14$s2 = getelementptr i64, ptr %t$14$ptr, i64 2
   store i64 %t$13, ptr %t$14$s2
   %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$15 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_0, i64 8) to i64
+  %t$16 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
+  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_4, i64 8) to i64
   %t$31 = alloca i64
   store i64 %t$14, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$15 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$15$raw = inttoptr i64 %t$15 to ptr
-  store ptr @__sprout_ir_lambda_0, ptr %t$15$raw
-  %t$33 = alloca i64
-  store i64 %t$15, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
-  %t$16 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$16$raw = inttoptr i64 %t$16 to ptr
-  store ptr @__sprout_ir_eta___tc_ToString_Int_to_string_3, ptr %t$16$raw
-  %t$35 = alloca i64
-  store i64 %t$16, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
-  %t$17 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$17$raw = inttoptr i64 %t$17 to ptr
-  store ptr @__sprout_ir_eta___tc_ToString_String_to_string_4, ptr %t$17$raw
-  %t$37 = alloca i64
-  store i64 %t$17, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
   %t$18 = call i64 @__tc_ToString_Tuple_a_b_c_to_string(i64 %t$14, i64 %t$15, i64 %t$16, i64 %t$17)
-  %t$39 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$19$ptr = inttoptr i64 %t$18 to ptr
   %t$19 = call i64 @print_str(ptr %t$19$ptr)
   ret i64 %t$19

@@ -283,11 +283,12 @@ fn main() -> Unit !{IO} =
     # (a "%t$N" fresh name) plus a "$raw" suffix builds a derived name in
     # ir_lowering. The `$raw` separator ensures derived names cannot match any
     # source identifier (a user param named `t0_raw` lowers to `%t0_raw`, never a
-    # `%t$…$raw`). Vehicle: a lifted lambda VALUE `\\x -> x + 1` produces the
+    # `%t$…$raw`). Vehicle: a lifted lambda VALUE `\\x -> x + t0_raw` produces the
     # IRMkClosure whose derived name carries `$raw` (outer IIFE `(\\g -> g(t0_raw))`
-    # inlines). Assertion: the emitted LLVM contains the `$raw` separator.
+    # inlines). It captures, so it allocates: a capture-free closure is a static
+    # constant with no derived name. Assertion: the LLVM contains the `$raw` separator.
     t19 <- translated_ok_ir_contains(
-      "fn f(t0_raw: Int) -> Int = (\\g -> g(t0_raw))(\\x -> x + 1)",
+      "fn f(t0_raw: Int) -> Int = (\\g -> g(t0_raw))(\\x -> x + t0_raw)",
       "$raw")
     assert_true(state, "T19: IRMkClosure-derived SSA name uses $raw separator (no collision with user param `t0_raw`)", t19)
 

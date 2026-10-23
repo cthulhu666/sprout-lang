@@ -443,8 +443,8 @@ direct call there.
 - A class method whose instances may keep the function: `local` in the class binds every instance
   (`Functor.fmap`, `Monad.flat_map`; §8).
 
-**Not a speed feature yet.** Modes are erased (§2), so a closure at a `local` slot is
-heap-allocated like any other. OxCaml's `local` exists mainly to stack-allocate. A `local` slot
-gives Sprout the same fact without escape analysis (BACKLOG *Non-escaping combinator closures
-allocate*), but using it is a separate design: it touches rooting and codegen, a `with_timeout`
-body runs in a child task, and externs are trusted rather than checked (§6.5).
+**Not a speed feature.** Modes are erased (§2), so a capturing closure at a `local` slot is
+heap-allocated like any other. OxCaml's `local` exists mainly to stack-allocate, and a `local` slot
+gives Sprout the same fact without escape analysis. Hand-applied to `bench/gc_roots`, stack envs
+gained ~0 (`docs/static-closures-v0.md` §7, BACKLOG *Capturing closures at `local` slots
+allocate*); the win was in closures with no captures, which are now static whatever the slot.

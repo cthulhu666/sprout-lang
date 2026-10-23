@@ -1,0 +1,180 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+import testsupport.ir_verify (clang_verifies_ir)
+
+# A closure with no captures lowers to a static constant, not a heap block:
+#   @__sprout_sclo.<code_fn> = private unnamed_addr constant { i64, ptr } { hdr, @code }
+# and ir_rooting treats it as neither a GC trigger nor a heap value.
+#
+# Each case runs through the production streaming path (ir_pipeline) and the batch path
+# (translate_program -> insert_roots -> lower_program).
+
+fn count(haystack: String, needle: String) -> Int =
+  count_from(haystack, needle, 0)
+
+fn count_from(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_from(str_slice(haystack, pos + str_len(needle),
+                            str_len(haystack) - pos - str_len(needle)), needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn typecheck(src: String) -> Result String typed_ast.TypedProgram !{IO} =
+  let Ok(toks) = lexer.tokenize(src) else Err("lex error")
+      Ok(prog) = parser.parse_program(toks) else Err("parse error")
+  in do
+       tc <- checker.typecheck_typed(prog, Nil)
+       match tc with
+       | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+       | typed_ast.TypedOk typed_prog env -> Ok(lowering.lower_program(typed_prog, env))
+
+fn stream_ir(src: String) -> String !{IO} =
+  match typecheck(src) with
+  | Err msg -> "ERROR: " ++ msg
+  | Ok p ->
+      match ir_pipeline.compile_program_streaming(p) with
+      | Ok ir -> ir
+      | Err msg -> "ERROR: " ++ msg
+
+fn batch_ir(src: String) -> String !{IO} =
+  match typecheck(src) with
+  | Err msg -> "ERROR: " ++ msg
+  | Ok p ->
+      match ast_to_ir.translate_program(p) with
+      | Err msg -> "ERROR: " ++ msg
+      | Ok (ir_prog, idx_map) -> ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+# The lowered text of one function, up to the next `define`.
+fn fn_body(ir: String, name: String) -> String =
+  body_from(ir, str_find(ir, "define i64 @" ++ name ++ "("))
+
+fn body_from(ir: String, start: Int) -> String =
+  if start == -1 then ""
+  else cut_at_next_define(str_slice(ir, start, str_len(ir) - start))
+
+fn cut_at_next_define(rest: String) -> String =
+  if stop == -1 then rest else str_slice(rest, 0, stop + 1)
+  where stop = str_find(str_slice(rest, 1, str_len(rest) - 1), "\ndefine ")
+
+# Capture-free lambda as a value.
+let lambda_src: String =
+  "fn mk() -> (a -> a) = \\x -> x\n"
+
+# A top-level function passed as a value (eta wrapper).
+fn eta_src() -> String =
+  "fn inc(n: Int) -> Int = n + 1\n" ++
+  "fn apply(f: Int -> Int, x: Int) -> Int = f(x)\n" ++
+  "fn go() -> Int = apply(inc, 3)\n"
+
+# A one-method class: the constrained call passes the method closure.
+fn dict_src() -> String =
+  "class Sized a\n" ++
+  "  fn size(x: a) -> Int\n" ++
+  "instance Sized Int\n" ++
+  "  fn size(x: Int) -> Int = x\n" ++
+  "fn total(x: a) -> Int where Sized a = size(x)\n" ++
+  "fn go() -> Int = total(5)\n"
+
+# A lambda that captures `n`.
+fn capture_src() -> String =
+  "fn apply(f: Int -> Int, x: Int) -> Int = f(x)\n" ++
+  "fn go(n: Int) -> Int = apply(\\x -> x + n, 3)\n"
+
+# `b` and the closure are both live when the tuple is built; the tuple is the trigger.
+fn live_static_src() -> String =
+  "type Box = Box(Int)\n" ++
+  "fn pair(b: Box) -> (Box, a -> a) = (b, \\x -> x)\n"
+
+fn live_capturing_src() -> String =
+  "type Box = Box(Int)\n" ++
+  "fn pair(b: Box, n: Int) -> (Box, Int -> Int) = (b, \\x -> x + n)\n"
+
+# Two references to one code function in one function body.
+let dup_program: sprout_ir.IRProgram =
+  sprout_ir.IRProgram(
+    [sprout_ir.IRFunction("dup", Nil, "i64",
+       [sprout_ir.IRBlock("entry",
+          [sprout_ir.IRMkClosure("%t$0", "shared_code", 1, Nil),
+           sprout_ir.IRMkClosure("%t$1", "shared_code", 1, Nil),
+           sprout_ir.IRRet("%t$1")])])],
+    Nil, Nil, Nil)
+
+# The poison thunk's arity sets bit 63 of the header word.
+let any_arity_program: sprout_ir.IRProgram =
+  sprout_ir.IRProgram(
+    [sprout_ir.IRFunction("anyar", Nil, "i64",
+       [sprout_ir.IRBlock("entry",
+          [sprout_ir.IRMkClosure("%t$0", "poison_code", 262143, Nil),
+           sprout_ir.IRRet("%t$0")])])],
+    Nil, Nil, Nil)
+
+fn check_static(state: TestState, label: String, ir: String) -> Unit !{IO} =
+  do
+    assert_true(state, label ++ ": emits a static closure global", count(ir, "@__sprout_sclo.") > 0)
+    assert_eq(state, label ++ ": no closure allocation", count(ir, "call i64 @sprout_alloc_closure"), 0)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    s_lambda <- stream_ir(lambda_src)
+    b_lambda <- batch_ir(lambda_src)
+    check_static(state, "lambda (stream)", s_lambda)
+    check_static(state, "lambda (batch)", b_lambda)
+
+    s_eta <- stream_ir(eta_src())
+    b_eta <- batch_ir(eta_src())
+    check_static(state, "eta wrapper (stream)", s_eta)
+    check_static(state, "eta wrapper (batch)", b_eta)
+
+    s_dict <- stream_ir(dict_src())
+    b_dict <- batch_ir(dict_src())
+    check_static(state, "method closure (stream)", s_dict)
+    check_static(state, "method closure (batch)", b_dict)
+
+    # The site reads the payload at offset 8, where a heap env keeps its code pointer.
+    assert_true(state, "site is a ptrtoint of the global + 8",
+                count(s_lambda, "ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.") == 1)
+    assert_true(state, "global header carries kind 2 and the arity above bit 46",
+                count(s_lambda, "{ i64 70368744177666, ptr @__sprout_ir_lambda_") == 1)
+
+    # One global per code function, however the IR repeats the reference.
+    assert_eq(state, "lambda: one global per code function",
+              count(s_lambda, "@__sprout_sclo.__sprout_ir_lambda_0 = "), 1)
+
+    let dup_ir = ir_lowering.lower_program(dup_program)
+    assert_eq(state, "repeated reference: one global", count(dup_ir, "@__sprout_sclo.shared_code = "), 1)
+    assert_eq(state, "repeated reference: both sites point at it",
+              count(dup_ir, "i8, ptr @__sprout_sclo.shared_code, i64 8"), 2)
+
+    assert_eq(state, "arity ANY header is the signed 64-bit pattern",
+              count(ir_lowering.lower_program(any_arity_program),
+                    "{ i64 -70368744177662, ptr @poison_code }"), 1)
+
+    # A capturing lambda still allocates and gets no static global.
+    s_cap <- stream_ir(capture_src())
+    assert_true(state, "capturing lambda: allocates its env",
+                count(s_cap, "call i64 @sprout_alloc_closure") >= 1)
+    assert_eq(state, "capturing lambda: no static global", count(s_cap, "@__sprout_sclo."), 0)
+
+    # Rooting: a static closure live across a trigger is not pushed; a capturing twin is.
+    s_live <- stream_ir(live_static_src())
+    c_live <- stream_ir(live_capturing_src())
+    let static_pushes = count(fn_body(s_live, "pair"), "sprout_gc_push_i64_root")
+    let capturing_pushes = count(fn_body(c_live, "pair"), "sprout_gc_push_i64_root")
+    assert_true(state, "static closure takes fewer root pushes than a capturing one",
+                static_pushes < capturing_pushes)
+    assert_eq(state, "static closure is not a trigger: no alloc_closure in pair",
+              count(fn_body(s_live, "pair"), "sprout_alloc_closure"), 0)
+
+    ok <- clang_verifies_ir(s_eta)
+    assert_true(state, "eta program with static closures verifies under clang", ok)
+    summary(state)

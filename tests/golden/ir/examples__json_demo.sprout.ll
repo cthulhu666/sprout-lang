@@ -101,6 +101,7 @@ declare i64 @json_stringify(i64)
 @.str.3 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"count\00" }
 @.str.4 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"items\00" }
 @.str.5 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"a\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0 }
 @.str.6 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"refused: \00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -978,17 +979,12 @@ entry:
   %t$26$f1 = getelementptr i64, ptr %t$26$ptr, i64 1
   store i64 %t$25, ptr %t$26$f1
   %t$77 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0, i64 8) to i64
   %t$78 = alloca i64
   store i64 %t$26, ptr %t$78
   %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$27 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$27$raw = inttoptr i64 %t$27 to ptr
-  store ptr @__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0, ptr %t$27$raw
-  %t$80 = alloca i64
-  store i64 %t$27, ptr %t$80
-  %t$81 = call i64 @sprout_gc_push_i64_root(ptr %t$80)
   %t$28 = call i64 @stdlib.json.object_from_pairs(i64 %t$26, i64 %t$27)
-  %t$82 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$80 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$28
 }
 

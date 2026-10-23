@@ -201,6 +201,9 @@ static int g_gc_collect_registered = 0;
 static int g_gc_active = 0;
 static long long g_debug_alloc_sprout_obj = 0;
 static long long g_debug_alloc_closure = 0;
+/* Closure applications, not allocations: a static closure never allocates, so only
+   this counts a dictionary's comparisons (scripts/rooting_cost_gate.sh). */
+static long long g_debug_alloc_closure_apply = 0;
 static long long g_debug_alloc_vector = 0;
 static long long g_debug_alloc_map = 0;
 static long long g_debug_alloc_bytes = 0;
@@ -428,7 +431,7 @@ static void sprout_debug_alloc_report(void) {
   if (!g_debug_alloc_enabled) return;
   fprintf(
     stderr,
-    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld arena_bytes=%lld offarena_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld gc_walked=%lld\n",
+    "[sprout alloc] sprout_obj=%lld closure=%lld vector=%lld map=%lld bytes=%lld builder=%lld arena_bytes=%lld offarena_bytes=%lld intern=%lld intern_bytes=%lld gc_swept=%lld gc_cycles=%lld gc_walked=%lld closure_apply=%lld\n",
     g_debug_alloc_sprout_obj,
     g_debug_alloc_closure,
     g_debug_alloc_vector,
@@ -441,7 +444,8 @@ static void sprout_debug_alloc_report(void) {
     g_intern_bytes,
     g_debug_gc_swept,
     g_gc_cycle_count,
-    g_debug_gc_walked
+    g_debug_gc_walked,
+    g_debug_alloc_closure_apply
   );
 }
 
@@ -692,6 +696,8 @@ static int sprout_gc_hdrcheck_on(void) {
  * SYNC WITH stdlib/compiler/ir_lowering.sprout — `lower_closure_arity_load`
  * reproduces this shift/mask in emitted IR.  Changing the split here without
  * changing it there silently mis-reads every closure's arity.
+ * SYNC WITH stdlib/compiler/ir_lowering.sprout — `emit_static_closure_global`
+ * writes the whole header word (kind | aux << 14) for a capture-free closure.
  *
  * 32 bits of captures is past any reachable program; 18 bits of arity leaves
  * room far beyond the parameter counts the parser accepts. */
@@ -1687,6 +1693,7 @@ long long sprout_alloc_closure(long long size, long long arity) {
  * builtin whose bug it would otherwise read as. */
 void sprout_closure_arity_check(long long handle, long long n_args) {
   void* payload = (void*)(uintptr_t)handle;
+  if (g_debug_alloc_enabled) g_debug_alloc_closure_apply++;
   if (payload == NULL) sprout_fail("applied a null function value");
   unsigned long long aux = sprout_hdr_aux(sprout_hdr_of(payload));
   unsigned long long arity = sprout_closure_arity_of(aux);

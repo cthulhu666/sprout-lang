@@ -549,7 +549,14 @@ after it, and liveness only shrinks within a block; a value pushed is still root
 Scanning just those gives byte-identical IR, 36 closures per element at every size, and 0.34 s at
 960 elements. The new **closure growth arm** bounds it at 125/100, and bytes tightened to 125. That
 arm sees the comparisons, not the walk: a rewrite that drops `list_member` but still visits the
-whole scope per trigger allocates no closure and would pass.
+whole scope per trigger applies no closure and would pass.
+
+**The closure arm counts applications, not allocations.** It first read `closure=`, which moved only
+because each `list_member` call built its dictionary as a fresh closure. A capture-free closure is a
+static constant now ([static-closures-v0.md](static-closures-v0.md)), so that count stops seeing the
+comparisons. The arm reads `closure_apply=` instead, which `sprout_closure_arity_check` bumps under
+`SPROUT_DEBUG_ALLOC`: the comparisons themselves. Measured on 2026-10-23 (stage-2): 211 → 212 per
+element (100/100), floor 105, the growth bound unchanged at 125/100.
 
 **The fixtures differed in more than element count.** Profiled by allocation site, the remaining
 byte growth had two sources. `ir_lowering.walk_ops_for_strs` appended each string global to the

@@ -1,0 +1,22 @@
+module main
+
+# Over-application of a capture-free lambda value must panic cleanly.
+#
+# A lambda with no captures is a static constant, not a heap block. Its header
+# word, which the apply-site arity check reads, is written by the compiler
+# (ir_lowering `emit_static_closure_global`) rather than by the allocator, so this
+# fixture pins that the written header carries the arity. Neither lambda below
+# captures anything: `\x -> \y -> 7` is a one-parameter closure returning another,
+# applied here with two arguments.
+fn curried() -> Int -> Int -> Int = \x -> \y -> 7
+
+fn nary() -> Int -> Int -> Int = \ (x, y) -> x + y
+
+fn pick(args: List String) -> Int -> Int -> Int =
+  if list_length(args) == 0 then curried() else nary()
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let f = pick(args)
+    print(int_to_string(f(1, 2)))

@@ -56,6 +56,8 @@ declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 10, column 21)\00" }
 @.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 11, column 21)\00" }
+@__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
+@__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
 
 define i64 @apply(i64 %p$f, i64 %p$x) {
 entry:
@@ -100,23 +102,11 @@ ovfok_1:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
-  %t$6 = alloca i64
-  store i64 %t$0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_lambda_1, ptr %t$1$raw
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_0, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_1, i64 8) to i64
   %t$2 = add i64 0, 3
-  %t$8 = alloca i64
-  store i64 %t$1, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$3 = call i64 @apply(i64 %t$1, i64 %t$2)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = call i64 @apply(i64 %t$0, i64 %t$3)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$5 = call i64 @print_value(i64 %t$4)
   ret i64 %t$5
 }

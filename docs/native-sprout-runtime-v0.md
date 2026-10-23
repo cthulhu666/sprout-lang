@@ -194,7 +194,8 @@ needs:
 - ~~The merge loop's branch, which C turns into a select.~~ Done 2026-10-18; see below.
 - Root call operands only for runtime builtins, not Sprout callees (same section; needs a written
   GC-safety argument first).
-- Non-escaping combinator closures allocate; every apply re-checks arity (same section).
+- Capturing closures at `local` slots allocate; every apply re-checks arity (same section;
+  measured small, [static-closures-v0.md](static-closures-v0.md) §7).
 - Tight string-processing loops (same section).
 - Specialise generic functions at concrete types (same section;
   [specialisation-v0.md](specialisation-v0.md)). It brings generic code down to the

@@ -75,9 +75,16 @@ declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c": \00" }
+@__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
 @.str.1 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"circle\00" }
 @.str.2 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"rect\00" }
 @.str.3 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"square\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area_1 }
+@__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name_2 }
+@__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area_3 }
+@__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name_4 }
+@__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area_5 }
+@__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name_6 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name_6 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -281,15 +288,9 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_0, i64 8) to i64
   %t$1 = load i64, ptr @examples.existential_shapes.scene
-  %t$3 = alloca i64
-  store i64 %t$0, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$2 = call i64 @list_each(i64 %t$0, i64 %t$1)
-  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
@@ -465,21 +466,11 @@ entry:
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
   store i64 %t$3, ptr %t$4$f0
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area_1, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name_2, i64 8) to i64
   %t$23 = alloca i64
   store i64 %t$4, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$5 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$5$raw = inttoptr i64 %t$5 to ptr
-  store ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_area_1, ptr %t$5$raw
-  %t$25 = alloca i64
-  store i64 %t$5, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$6$raw = inttoptr i64 %t$6 to ptr
-  store ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Circle_name_2, ptr %t$6$raw
-  %t$27 = alloca i64
-  store i64 %t$6, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$7 = call i64 @sprout_alloc_obj(i64 19, i64 3)
   %t$7$ptr = inttoptr i64 %t$7 to ptr
   %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
@@ -488,33 +479,23 @@ entry:
   store i64 %t$5, ptr %t$7$f1
   %t$7$f2 = getelementptr i64, ptr %t$7$ptr, i64 2
   store i64 %t$6, ptr %t$7$f2
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$8 = add i64 0, 3
   %t$9 = add i64 0, 4
-  %t$30 = alloca i64
-  store i64 %t$7, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$26 = alloca i64
+  store i64 %t$7, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$10 = call i64 @sprout_alloc_obj(i64 17, i64 2)
   %t$10$ptr = inttoptr i64 %t$10 to ptr
   %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
   store i64 %t$8, ptr %t$10$f0
   %t$10$f1 = getelementptr i64, ptr %t$10$ptr, i64 1
   store i64 %t$9, ptr %t$10$f1
-  %t$32 = alloca i64
-  store i64 %t$10, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$11 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$11$raw = inttoptr i64 %t$11 to ptr
-  store ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area_3, ptr %t$11$raw
-  %t$34 = alloca i64
-  store i64 %t$11, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$12 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$12$raw = inttoptr i64 %t$12 to ptr
-  store ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name_4, ptr %t$12$raw
-  %t$36 = alloca i64
-  store i64 %t$12, ptr %t$36
-  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$11 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_area_3, i64 8) to i64
+  %t$12 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Rect_name_4, i64 8) to i64
+  %t$28 = alloca i64
+  store i64 %t$10, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$13 = call i64 @sprout_alloc_obj(i64 19, i64 3)
   %t$13$ptr = inttoptr i64 %t$13 to ptr
   %t$13$f0 = getelementptr i64, ptr %t$13$ptr, i64 0
@@ -523,30 +504,20 @@ entry:
   store i64 %t$11, ptr %t$13$f1
   %t$13$f2 = getelementptr i64, ptr %t$13$ptr, i64 2
   store i64 %t$12, ptr %t$13$f2
-  %t$38 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = add i64 0, 5
-  %t$39 = alloca i64
-  store i64 %t$13, ptr %t$39
-  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
+  %t$31 = alloca i64
+  store i64 %t$13, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
   %t$15 = call i64 @sprout_alloc_obj(i64 18, i64 1)
   %t$15$ptr = inttoptr i64 %t$15 to ptr
   %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
   store i64 %t$14, ptr %t$15$f0
-  %t$41 = alloca i64
-  store i64 %t$15, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$16 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$16$raw = inttoptr i64 %t$16 to ptr
-  store ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area_5, ptr %t$16$raw
-  %t$43 = alloca i64
-  store i64 %t$16, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$17 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$17$raw = inttoptr i64 %t$17 to ptr
-  store ptr @__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name_6, ptr %t$17$raw
-  %t$45 = alloca i64
-  store i64 %t$17, ptr %t$45
-  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
+  %t$16 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_area_5, i64 8) to i64
+  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.existential_shapes.Shape_examples_existential_shapes_Square_name_6, i64 8) to i64
+  %t$33 = alloca i64
+  store i64 %t$15, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$18 = call i64 @sprout_alloc_obj(i64 19, i64 3)
   %t$18$ptr = inttoptr i64 %t$18 to ptr
   %t$18$f0 = getelementptr i64, ptr %t$18$ptr, i64 0
@@ -555,41 +526,41 @@ entry:
   store i64 %t$16, ptr %t$18$f1
   %t$18$f2 = getelementptr i64, ptr %t$18$ptr, i64 2
   store i64 %t$17, ptr %t$18$f2
-  %t$47 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$48 = alloca i64
-  store i64 %t$18, ptr %t$48
-  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$36 = alloca i64
+  store i64 %t$18, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$19 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$50 = alloca i64
-  store i64 %t$19, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
+  %t$38 = alloca i64
+  store i64 %t$19, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$20 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$20$ptr = inttoptr i64 %t$20 to ptr
   %t$20$f0 = getelementptr i64, ptr %t$20$ptr, i64 0
   store i64 %t$18, ptr %t$20$f0
   %t$20$f1 = getelementptr i64, ptr %t$20$ptr, i64 1
   store i64 %t$19, ptr %t$20$f1
-  %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$53 = alloca i64
-  store i64 %t$20, ptr %t$53
-  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
+  %t$40 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$41 = alloca i64
+  store i64 %t$20, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$21 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$21$ptr = inttoptr i64 %t$21 to ptr
   %t$21$f0 = getelementptr i64, ptr %t$21$ptr, i64 0
   store i64 %t$13, ptr %t$21$f0
   %t$21$f1 = getelementptr i64, ptr %t$21$ptr, i64 1
   store i64 %t$20, ptr %t$21$f1
-  %t$55 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$56 = alloca i64
-  store i64 %t$21, ptr %t$56
-  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$44 = alloca i64
+  store i64 %t$21, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
   %t$22 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$22$ptr = inttoptr i64 %t$22 to ptr
   %t$22$f0 = getelementptr i64, ptr %t$22$ptr, i64 0
   store i64 %t$7, ptr %t$22$f0
   %t$22$f1 = getelementptr i64, ptr %t$22$ptr, i64 1
   store i64 %t$21, ptr %t$22$f1
-  %t$58 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 2)
   store i64 %t$22, ptr @examples.existential_shapes.scene
   call i64 @sprout_gc_register_i64_root(ptr @examples.existential_shapes.scene)
   ret void

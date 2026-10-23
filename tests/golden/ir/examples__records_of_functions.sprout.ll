@@ -115,6 +115,7 @@ declare i64 @split_words(i64)
 @.str.18 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c" (roundtrip \00" }
 @.str.19 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.20 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"hello\00" }
+@__sprout_sclo.__sprout_ir_lambda_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_4 }
 @.str.21 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
 @.str.22 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
@@ -1064,18 +1065,13 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_4, ptr %t$0$raw
-  %t$3 = alloca i64
-  store i64 %t$0, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_4, i64 8) to i64
   %t$1 = call i64 @examples.records_of_functions.codecs()
-  %t$5 = alloca i64
-  store i64 %t$1, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$3 = alloca i64
+  store i64 %t$1, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$2 = call i64 @list_each(i64 %t$0, i64 %t$1)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 

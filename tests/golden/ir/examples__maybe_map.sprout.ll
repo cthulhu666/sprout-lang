@@ -75,6 +75,7 @@ declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 10, column 27)\00" }
+@__sprout_sclo.__sprout_ir_eta_$entry.inc_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_$entry.inc_0 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -180,27 +181,22 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_$entry.inc_0, ptr %t$0$raw
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_$entry.inc_0, i64 8) to i64
   %t$1 = add i64 0, 2
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$2 = call i64 @sprout_alloc_obj(i64 16, i64 1)
   %t$2$ptr = inttoptr i64 %t$2 to ptr
   %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
   store i64 %t$1, ptr %t$2$f0
-  %t$7 = alloca i64
-  store i64 %t$2, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$5 = alloca i64
+  store i64 %t$2, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$3 = call i64 @$entry.map(i64 %t$0, i64 %t$2)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10 = alloca i64
-  store i64 %t$3, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$8 = alloca i64
+  store i64 %t$3, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$4 = call i64 @print_value(i64 %t$3)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
 }
 
