@@ -21,11 +21,8 @@ fn insert(k: Int, t: Tree) -> Tree =
       else if k > v then Node(l, v, insert(k, r))
       else Node(l, v, r)
 
-# A loop, not `list_fold`: a fold's lambda cannot consume a linear value yet.
-fn add_all(ks: List Int, t: Tree) -> Tree =
-  match ks with
-  | [] -> t
-  | [k | rest] -> add_all(rest, insert(k, t))
+# The fold's step is a named function: a lambda cannot consume a linear value yet.
+fn add(t: Tree, k: Int) -> Tree = insert(k, t)
 
 # In order: the left subtree, the key, then the right subtree.
 fn to_list(t: Tree, acc: List Int) -> List Int =
@@ -36,6 +33,6 @@ fn to_list(t: Tree, acc: List Int) -> List Int =
 let scores: List Int = [72, 88, 72, 95, 61, 88, 79, 95, 61, 100, 72]
 
 fn main() -> Unit !{IO} =
-  let distinct = to_list(add_all(scores, Leaf), Nil)
+  let distinct = to_list(list_fold(add, Leaf, scores), Nil)
       shown = string.join(" ", list_map(int_to_string, distinct))
   in print(`${int_to_string(list_length(distinct))} distinct scores: ${shown}`)

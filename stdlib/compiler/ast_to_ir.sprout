@@ -669,6 +669,19 @@ fn new_tx_env(penv: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction), owned:
 fn closure_tx_env(env: TxEnv) -> TxEnv !{IO} =
   new_tx_env(env.prog, env.lifted_ref, set_empty())
 
+# The env for an inlined lambda body. A `borrowing` parameter is bound to the lender's SSA,
+# which may be an owned parameter's, so that SSA is not reusable inside the body. The reuse
+# state is shared: the body runs once, on the path that reached it.
+fn inline_tx_env(env: TxEnv, lparams: List ast.Param, arg_ssas: List String) -> TxEnv =
+  env with (owned = set_diff(env.owned, set_from_list(borrowed_arg_ssas(lparams, arg_ssas))))
+
+fn borrowed_arg_ssas(lparams: List ast.Param, arg_ssas: List String) -> List String =
+  match (lparams, arg_ssas) with
+  | ([p | prest], [s | srest]) ->
+      if param_is_owned(ast.param_mode_of(p)) then borrowed_arg_ssas(prest, srest)
+      else Cons(s, borrowed_arg_ssas(prest, srest))
+  | _ -> Nil
+
 # SSA names of the parameters a function owns. A `borrowing` parameter's cell outlives the
 # call, and a `once`/`local` one is a closure.
 fn owned_param_ssas(params: List ast.Param) -> Set =
@@ -3837,8 +3850,8 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
         # Bind params AFTER evaluating args: args see the outer scope
         # (call-by-value), the body sees params shadowing it (lexical scope).
         (body_blocks, body_lbl, body_ops, body_result, idx2) <-
-          translate_expr(lbody, params, env, idx1, arg_lbl, arg_ops,
-                         bind_params(ast.param_names(lparams), arg_names, captures))
+          translate_expr(lbody, params, inline_tx_env(env, lparams, arg_names), idx1, arg_lbl,
+                         arg_ops, bind_params(ast.param_names(lparams), arg_names, captures))
         Ok((list_append(arg_blocks, body_blocks), body_lbl, body_ops,
              body_result, idx2))
   | typed_ast.TCall _ _ _ _ ->

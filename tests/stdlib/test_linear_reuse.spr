@@ -101,6 +101,30 @@ fn copy_two(t: borrowing Two) -> Two =
   | A n k -> A(n, k)
   | B n k -> B(n, k)
 
+# An immediately-applied lambda is inlined, and its `borrowing` parameter is the caller's
+# own cell: matching and rebuilding it must allocate, and the lender is read afterwards.
+type linear Cell = Cell Int Int
+
+fn sum_cell(c: Cell) -> Int =
+  match c with
+  | Cell a b -> a + b
+
+fn peek(c: borrowing Cell) -> Int =
+  match c with
+  | Cell a b -> a + b
+
+fn iife_bump(c: Cell) -> Int =
+  let d = (\ (x: borrowing Cell) -> match x with | Cell a b -> Cell(a + 100, b))(c)
+  in peek(c) * 1000 + sum_cell(d) + sum_cell(c) * 0
+
+fn piped_bump(c: Cell) -> Int =
+  let d = c |> (\ (x: borrowing Cell) -> match x with | Cell a b -> Cell(a + 100, b))
+  in peek(c) * 1000 + sum_cell(d) + sum_cell(c) * 0
+
+fn iife_flip(t: Two) -> ((Bool, Int, Int), (Bool, Int, Int)) =
+  let u = (\ (x: borrowing Two) -> match x with | A n k -> B(n, k) | B n k -> A(n, k))(t)
+  in (read_two(t), read_two(u))
+
 # A wrapper around a LinVec, the sieve of docs/linear-reuse-v0.md §1.
 type linear Grid = Grid Int (LinVec Bool)
 
@@ -203,6 +227,17 @@ fn main() -> Unit !{IO} =
               assert_eq(state, "nested then rebuild: ctor", is_a, true)
               assert_eq(state, "nested then rebuild: field", n, 13)
               assert_eq(state, "nested then rebuild: kept", k, 2)
+
+    # An inlined lambda's borrowed parameter is not reusable: the lender keeps its cell.
+    assert_eq(state, "iife over a borrowed cell: lender intact", iife_bump(Cell(1, 2)), 3103)
+    assert_eq(state, "piped lambda over a borrowed cell: lender intact", piped_bump(Cell(1, 2)), 3103)
+    match iife_flip(A(1, 2)) with
+    | ((a1, n1, k1), (a2, n2, k2)) ->
+        do
+          assert_eq(state, "iife flip: lender keeps its constructor", a1, true)
+          assert_eq(state, "iife flip: lender keeps its fields", n1 * 10 + k1, 12)
+          assert_eq(state, "iife flip: copy has the other constructor", a2, false)
+          assert_eq(state, "iife flip: copy fields", n2 * 10 + k2, 12)
 
     # A borrowed cell is copied, never taken: both survive.
     let original = B(9, 8)
