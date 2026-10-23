@@ -19,14 +19,8 @@ export fn auth_error_message(err: AuthError) -> String =
   | InvalidToken -> "invalid or expired token"
   | InvalidPayload -> "invalid token payload"
 
-# JWT segments are unpadded base64url (RFC 7515); the strict decoder is the right reader.
-fn b64url_decode(raw: String) -> Maybe Bytes =
-  match base64url_decode(raw) with
-  | Ok data -> Just(data)
-  | Err _ -> Nothing
-
 fn decode_json(part: String) -> Maybe Json =
-  let Just raw = b64url_decode(part) else Nothing
+  let Ok raw = base64url_decode(part) else Nothing
       Ok text = bytes.to_string(raw) else Nothing
       Ok value = json_parse(text) else Nothing
   in Just(value)
@@ -62,7 +56,7 @@ fn claims(payload: Json) -> Result AuthError Claims =
 fn verify(secret: Bytes, now_s: Int, token: String) -> Result AuthError Claims =
   let [h, p, s] = string.split(token, ".") else Err(InvalidToken)
       Just header = decode_json(h) else Err(InvalidToken)
-      Just sig = b64url_decode(s) else Err(InvalidToken)
+      Ok sig = base64url_decode(s) else Err(InvalidToken)
       Just payload = decode_json(p) else Err(InvalidToken)
   in if ! field_is (header, "alg", "HS256") then Err(InvalidToken)
      else if !const_time_eq(hmac_sha256(secret, bytes.from_string(`${h}.${p}`)), sig) then Err(InvalidToken)
