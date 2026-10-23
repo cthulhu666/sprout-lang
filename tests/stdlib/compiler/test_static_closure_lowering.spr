@@ -107,6 +107,19 @@ let dup_program: sprout_ir.IRProgram =
            sprout_ir.IRRet("%t$1")])])],
     Nil, Nil, Nil)
 
+# One code function referenced from two functions: the global is program-wide.
+let cross_fn_program: sprout_ir.IRProgram =
+  sprout_ir.IRProgram(
+    [sprout_ir.IRFunction("first", Nil, "i64",
+       [sprout_ir.IRBlock("entry",
+          [sprout_ir.IRMkClosure("%t$0", "shared_code", 1, Nil),
+           sprout_ir.IRRet("%t$0")])]),
+     sprout_ir.IRFunction("second", Nil, "i64",
+       [sprout_ir.IRBlock("entry",
+          [sprout_ir.IRMkClosure("%t$0", "shared_code", 1, Nil),
+           sprout_ir.IRRet("%t$0")])])],
+    Nil, Nil, Nil)
+
 # The poison thunk's arity sets bit 63 of the header word.
 let any_arity_program: sprout_ir.IRProgram =
   sprout_ir.IRProgram(
@@ -154,6 +167,11 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "repeated reference: one global", count(dup_ir, "@__sprout_sclo.shared_code = "), 1)
     assert_eq(state, "repeated reference: both sites point at it",
               count(dup_ir, "i8, ptr @__sprout_sclo.shared_code, i64 8"), 2)
+
+    let cross_ir = ir_lowering.lower_program(cross_fn_program)
+    assert_eq(state, "shared across functions: one global", count(cross_ir, "@__sprout_sclo.shared_code = "), 1)
+    assert_eq(state, "shared across functions: both sites point at it",
+              count(cross_ir, "i8, ptr @__sprout_sclo.shared_code, i64 8"), 2)
 
     assert_eq(state, "arity ANY header is the signed 64-bit pattern",
               count(ir_lowering.lower_program(any_arity_program),
