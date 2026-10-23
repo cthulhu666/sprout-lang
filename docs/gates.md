@@ -258,6 +258,20 @@ go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
   sets, so a set allocates nothing, and grow by one vector per `linvec_new`.
 - A `linvec_get` matched with a binding compiles to a worker over `vector_get_unboxed`.
 
+## In-place reuse — `just linear-reuse-smoke`
+
+`ast_to_ir` writes a rebuilt linear value into the consumed cell (docs/linear-reuse-v0.md), which
+is memory-unsafe if a premise of `linear_check` leaks. `just test` counts `reuse_ctor` in printed
+IR (`test_linear_reuse_ir`) and checks values (`test_linear_reuse`); `scripts/linear_reuse_smoke.sh`
+adds what only `-O2` and the runtime counters show, in `just ci-fast-gates`:
+
+- The `Grid` sieve and a three-constructor CSV splitter (`tests/linear_reuse_smoke/`) allocate the
+  same number of objects (`SPROUT_DEBUG_ALLOC`) at two input sizes, so a step allocates nothing.
+- Both print the answer their input has.
+
+`test_linear_reuse` is also a `SPROUT_GC_STRESS=1` workload: `tock` is entered by a tail call, so
+only the token's rooting keeps its cell from being recycled under the rebuild.
+
 ## CPR declares — `just cpr-declare-check`
 
 Compares each `declare … @<name>_unboxed(…)` in emitted IR with clang's `define` of that C

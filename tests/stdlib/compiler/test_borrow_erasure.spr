@@ -1,12 +1,13 @@
 module main
-import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.fs as fs
 import stdlib.env as env
 
-# M4.5 ERASURE. `borrowing`/`consuming` are a type-checker feature: they must
-# reach no IR pass and change no emitted instruction.
+# M4.5 ERASURE. `borrowing`/`consuming` are a type-checker feature: they reach no
+# IR pass and change no emitted instruction, with one exception: whether an owned
+# linear parameter's cell may be reused (docs/linear-reuse-v0.md §4.1).
 #
 # This matters beyond tidiness. docs/linear-ir-m5-feasibility-2026-08-07.md found
 # that the historical GC-use-after-free bugs were all CLASSIFICATION-COMPLETENESS
@@ -14,12 +15,11 @@ import stdlib.env as env
 # never influences lowering cannot introduce that failure mode: ir_lowering and
 # ir_rooting see exactly the TcpConnection handle they saw before.
 #
-# The guarantee is enforced as "lowering never READS the mode", not "the mode is
-# absent from the AST" — ast_to_ir.ast_params_to_irtype_pairs destructures
-# `ast.Param _ ann _`, discarding it. Note this is weaker than the wording in
-# docs/linear-borrowing-v0.md §9 ("stripped before lowering"): the field is still
-# present on the node, it is simply never consulted. The testable form of that is
-# byte-identical IR, which is what the first assertion below pins.
+# The guarantee is enforced as "lowering reads the mode only to pick a reuse token",
+# not "the mode is absent from the AST" — ast_to_ir.owned_param_ssas reads it, and
+# only a `borrowing` parameter that is matched and rebuilt emits different IR from an
+# owned one. The field is still present on the node. The testable form is
+# byte-identical IR for every other case, which is what the first assertion below pins.
 #
 # `consuming` vs unmodified is the exact pair to compare: ParamMode.ModeConsuming
 # and ModeDefault mean the same thing to the checker (passing a linear value IS a
@@ -112,6 +112,43 @@ let borrowing_src =
   "    a + release(f)\n" ++
   "fn main() -> Int !{IO} = use_it(File(42))\n"
 
+# The one place the mode shows: a linear parameter matched and rebuilt. Owned, the cell is
+# reused; `borrowing`, the lender still holds it, so the rebuild allocates.
+let rebuild_owned_src =
+  "type linear Cell = Cell Int Int\n" ++
+  "fn bump(c: Cell) -> Cell = match c with | Cell a b -> Cell(b, a)\n" ++
+  "fn finish(c: Cell) -> Int = match c with | Cell a _ -> a\n" ++
+  "fn main() -> Int !{IO} = finish(bump(Cell(1, 2)))\n"
+
+let rebuild_consuming_src =
+  "type linear Cell = Cell Int Int\n" ++
+  "fn bump(c: consuming Cell) -> Cell = match c with | Cell a b -> Cell(b, a)\n" ++
+  "fn finish(c: Cell) -> Int = match c with | Cell a _ -> a\n" ++
+  "fn main() -> Int !{IO} = finish(bump(Cell(1, 2)))\n"
+
+let rebuild_borrowing_src =
+  "type linear Cell = Cell Int Int\n" ++
+  "fn bump(c: borrowing Cell) -> Cell = match c with | Cell a b -> Cell(b, a)\n" ++
+  "fn finish(c: Cell) -> Int = match c with | Cell a _ -> a\n" ++
+  "fn main() -> Int !{IO} =\n" ++
+  "  do\n" ++
+  "    let c = Cell(1, 2)\n" ++
+  "    let d = bump(c)\n" ++
+  "    finish(c) + finish(d)\n"
+
+# Calls to the allocator inside `@$entry.bump`.
+fn bump_allocs(ir: String) -> Int =
+  if start == -1 then -1
+  else
+    let rest = str_slice(ir, start, str_len(ir))
+    in count_allocs(str_slice(rest, 0, str_find(rest, "\n}\n")), 0)
+  where start = str_find(ir, "define i64 @$entry.bump(")
+
+fn count_allocs(text: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_allocs(str_slice(text, pos + 1, str_len(text)), acc + 1)
+  where pos = str_find(text, "@sprout_alloc_obj(")
+
 fn ir_ok(r: compiler.IrFullResult) -> Bool =
   match r with
   | compiler.IrFullOk _ -> true
@@ -138,6 +175,12 @@ fn main() -> Unit !{IO} =
           let local_path = "/tmp/sprout_test_borrow_erasure_local.sprout"
           let local_plain_path = "/tmp/sprout_test_borrow_erasure_local_plain.sprout"
           let local_absent_path = "/tmp/sprout_test_borrow_erasure_local_absent.sprout"
+          let rebuild_owned_path = "/tmp/sprout_test_borrow_erasure_rebuild_owned.sprout"
+          let rebuild_consuming_path = "/tmp/sprout_test_borrow_erasure_rebuild_consuming.sprout"
+          let rebuild_borrowing_path = "/tmp/sprout_test_borrow_erasure_rebuild_borrowing.sprout"
+          fs.write_text(rebuild_owned_path, rebuild_owned_src)
+          fs.write_text(rebuild_consuming_path, rebuild_consuming_src)
+          fs.write_text(rebuild_borrowing_path, rebuild_borrowing_src)
           fs.write_text(local_path, local_src)
           fs.write_text(local_plain_path, local_plain_src)
           fs.write_text(local_absent_path, local_absent_src)
@@ -157,6 +200,9 @@ fn main() -> Unit !{IO} =
           r_local <- compiler.compile_full_ir(source.FilePath(local_path), source.StdlibRoot(stdlib_root))
           r_local_plain <- compiler.compile_full_ir(source.FilePath(local_plain_path), source.StdlibRoot(stdlib_root))
           r_local_absent <- compiler.compile_full_ir(source.FilePath(local_absent_path), source.StdlibRoot(stdlib_root))
+          r_rebuild_owned <- compiler.compile_full_ir(source.FilePath(rebuild_owned_path), source.StdlibRoot(stdlib_root))
+          r_rebuild_consuming <- compiler.compile_full_ir(source.FilePath(rebuild_consuming_path), source.StdlibRoot(stdlib_root))
+          r_rebuild_borrowing <- compiler.compile_full_ir(source.FilePath(rebuild_borrowing_path), source.StdlibRoot(stdlib_root))
 
           assert_true(state, "unmodified linear param compiles", ir_ok(r_unmod))
           assert_true(state, "consuming linear param compiles", ir_ok(r_consuming))
@@ -205,5 +251,16 @@ fn main() -> Unit !{IO} =
             ir_text(r_local_plain) == ir_text(r_local_absent))
           assert_false(state, "no 'local' token survives into IR",
             contains(ir_text(r_local), "local"))
+
+          # The exception (docs/linear-reuse-v0.md §4.1): a linear parameter that is matched and
+          # rebuilt. `consuming` still means what an unmodified parameter means, byte for byte.
+          assert_true(state, "a matched-and-rebuilt linear parameter compiles", ir_ok(r_rebuild_owned))
+          assert_true(state, "a matched-and-rebuilt borrowed parameter compiles", ir_ok(r_rebuild_borrowing))
+          assert_true(state, "consuming rebuild emits byte-identical IR to an unmodified parameter",
+            ir_text(r_rebuild_consuming) == ir_text(r_rebuild_owned))
+          assert_eq(state, "an owned parameter's rebuild reuses its cell",
+            bump_allocs(ir_text(r_rebuild_owned)), 0)
+          assert_eq(state, "a borrowing parameter's rebuild allocates",
+            bump_allocs(ir_text(r_rebuild_borrowing)), 1)
 
     summary(state)

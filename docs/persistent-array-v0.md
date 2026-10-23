@@ -398,7 +398,8 @@ consumes a linear constructor and builds one of the same shape, the compiler can
 memory, since the type guarantees nothing else holds it. Koka does this for values whose count is
 1 ("functional but in-place", [byte-buffer-v0.md](byte-buffer-v0.md) §4); Sprout would decide it
 from the type, at compile time. Then `LinVec` is the array case of one rule, a linear value is
-updated in place, and every linear type gets it. Not designed.
+updated in place, and every linear type gets it. Design and status:
+[linear-reuse-v0.md](linear-reuse-v0.md).
 
 **What it can grow into** without an API break: push and bulk fill or copy; 5.2's transient
 mode, whose writes need the same pure, linearity-guarded builtins; and a compiler pass that

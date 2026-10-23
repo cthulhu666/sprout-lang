@@ -1,0 +1,70 @@
+module examples.words_per_line
+import stdlib.bytes as bytes
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_freeze)
+
+# How many lines have n words: one pass over the text's bytes. The scanner is in a
+# word or between words, and both states carry the words seen on the current line and
+# the histogram so far. `step` consumes the state and builds the next one. A consumed
+# linear value has no other reference, so the compiler builds the new state in the old
+# one's memory, even when the state changes (docs/linear-reuse-v0.md): the scan
+# allocates nothing per byte.
+#
+# Run:
+#   mise exec -- just run examples/words_per_line.sprout
+# Expected output:
+#   0 words: 1 line
+#   3 words: 2 lines
+#   4 words: 2 lines
+#   7 words: 1 line
+
+type linear Scan =
+  | InWord Int (LinVec Int)
+  | Between Int (LinVec Int)
+
+let newline: Int = 10
+
+# Lines with more words than this share the last bucket.
+let buckets: Int = 16
+
+fn is_blank(c: Int) -> Bool = c == 32 || c == 9
+
+fn count_line(words: Int, hist: LinVec Int) -> LinVec Int =
+  let k = if words < buckets then words else buckets - 1
+      Just n = linvec_get(k, hist) else hist
+  in linvec_set(k, n + 1, hist)
+
+fn step(c: Int, st: Scan) -> Scan =
+  match st with
+  | InWord n hist ->
+      if c == newline then Between(0, count_line(n, hist))
+      else if is_blank(c) then Between(n, hist)
+      else InWord(n, hist)
+  | Between n hist ->
+      if c == newline then Between(0, count_line(n, hist))
+      else if is_blank(c) then Between(n, hist)
+      else InWord(n + 1, hist)
+
+fn scan(i: Int, text: Bytes, st: Scan) -> Scan =
+  if i >= bytes.length(text) then st
+  else scan(i + 1, text, step(bytes.get_or(text, i, 0), st))
+
+fn histogram(text: String) -> Vec Int =
+  match scan(0, bytes.from_string(text), Between(0, linvec_new(buckets, 0))) with
+  | InWord _ hist -> linvec_freeze(hist)
+  | Between _ hist -> linvec_freeze(hist)
+
+fn plural(n: Int, word: String) -> String = if n == 1 then word else word ++ "s"
+
+let poem: String =
+  "The fog comes\n" ++
+  "on little cat feet.\n" ++
+  "\n" ++
+  "It sits looking\n" ++
+  "over harbor and city on silent haunches\n" ++
+  "and then moves on.\n"
+
+fn main() -> Unit !{IO} =
+  let counts = histogram(poem)
+      rows = [(k, vec_get_or(k, 0, counts)) for k in 0..(buckets - 1)]
+  in list_each(print, [`${int_to_string(k)} words: ${int_to_string(n)} ${plural(n, "line")}`
+                       for (k, n) in rows if n > 0])

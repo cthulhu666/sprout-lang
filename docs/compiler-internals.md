@@ -169,6 +169,33 @@ the roots, and it is the largest single frame in allocation-heavy code
 
 Regression tests: `tests/stdlib/compiler/test_scalar_global_no_root.spr` (globals — the four scalar types unrooted, a boxed ctor still rooted, and per-let discrimination in a mixed module); `tests/stdlib/compiler/test_ir_call_result_rooting.spr` and `test_ir_tuple_result_rooting.spr` (SSA values).
 
+### In-place reuse — `IRReuseCtor`
+
+Design: [linear-reuse-v0.md](linear-reuse-v0.md). `ast_to_ir` mints a token at a `match` arm over
+an owned linear parameter's own cell (`TxEnv.owned` holds parameter SSA names) and the first
+same-type, same-physical-field-count build on the path takes it: `IRReuseCtor dst token from_tag
+ctor tag args` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
+
+- **Not a GC trigger; its uses are the token and the args.** The token is therefore live from
+  the match to the rebuild and `ir_rooting` roots it across every trigger between them. A swept
+  cell would take a freelist link in word 0 and be recycled under the rebuild. A direct caller's
+  root on the argument hides a missing token root, so only a cell entered by a tail call shows
+  it: `tock` in `tests/stdlib/test_linear_reuse.spr`, which fails under `SPROUT_GC_STRESS=1` if
+  `op_uses` drops the token.
+- **Lowering** stores the fields as `IRMakeCtor` does. Another constructor of the same type
+  also rewrites the header's tag, keeping its low 14 bits and the arity
+  (`ir_lowering.lower_reuse_header`, SYNC with `sprout_obj_write_tag`).
+- **One token per path.** `TxEnv.reuse_ref` holds a stack of tokens. `if`, `match` and the
+  unboxed-`Maybe` match push a frame, start each branch from the entry stack and leave a token
+  taken after the join if any branch took it; a nested match's token sits above the outer one,
+  which is the head again after the join. A construct without a frame is treated as one
+  straight line, which only loses reuse.
+- **A closure gets a fresh state and no owned parameters** (`closure_tx_env`). Its parameters
+  resolve to the same `%p$name` as the enclosing function's, and it may run 0..n times. CPR
+  workers and the global-init body also build their `TxEnv` with no owned parameters.
+- **The runtime never builds or reads a linear constructor**, so a reused cell's tag is
+  invisible to it: no `find_ctor_tag_by_name` call site names one (SYNC comment there).
+
 ### Bounds-check elimination — `stdlib/compiler/bce.sprout`
 
 A typed-AST pass in `ir_pipeline`, after DCE and before Phase B, that clones a qualifying

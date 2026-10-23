@@ -1,0 +1,16 @@
+module main
+
+# docs/linear-reuse-v0.md §4.4, premise 2: once a `match` has taken an owned linear parameter
+# apart, its arm cannot name the parameter again. Reuse overwrites the matched cell, so an arm
+# that read it after the rebuild would see the new fields.
+
+type linear Grid = Grid Int Int
+
+fn total(g: Grid) -> Int = match g with | Grid a b -> a + b
+
+fn bump(g: Grid) -> Grid =
+  match g with
+  | Grid n k -> Grid(n + total(g), k)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(to_string(total(bump(Grid(1, 2)))))

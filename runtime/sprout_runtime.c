@@ -747,7 +747,11 @@ static inline void sprout_hdr_write(void* payload, SproutHeapKind kind, unsigned
  * size — slot_bytes() sizes the slot from it and sprout_heap_child_count_payload
  * scans that many words.  A wrong value there desyncs the sweep's slot walk
  * rather than failing loudly, so every OBJ allocation must write its true field
- * count here.  aux is 50 bits, leaving 42 for the tag. */
+ * count here.  aux is 50 bits, leaving 42 for the tag.
+ *
+ * SYNC WITH stdlib/compiler/ir_lowering.sprout lower_reuse_header: an in-place
+ * constructor change rewrites this header from emitted IR, so the bit 14 shift and
+ * the (tag << 8) | arity packing are reproduced there. */
 static inline void sprout_obj_write_tag(void* payload, long long tag, int arity) {
   /* Debug arity-range check: the 8-bit field physically holds 0..255. */
   if (sprout_gc_hdrcheck_on() && (arity < 0 || arity > SPROUT_MAX_OBJ_ARITY)) {
@@ -3074,6 +3078,9 @@ static CtorMeta* find_ctor(long long tag) {
   return NULL;
 }
 
+/* No call site may name a constructor of a linear type, and the runtime never reads a linear
+ * cell's fields: ast_to_ir reuses an owned linear cell in place and may change its constructor
+ * (docs/linear-reuse-v0.md §4.4). A channel or the scheduler only moves such a cell. */
 static long long find_ctor_tag_by_name(const char* name) {
   for (long long i = 0; i < g_ctor_meta_len; i++) {
     if (strcmp(g_ctor_meta[i].name, name) == 0) return g_ctor_meta[i].tag;

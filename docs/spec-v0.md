@@ -1688,6 +1688,10 @@ scrutinee; a constructor/tuple sub-pattern binds a linear field), and **`<-`
 do-bind** variables — in `fn`, top-level `let`, and instance-method bodies, and is
 checked on every control-flow path.
 
+*Non-normative:* an owned linear value has no other reference, so an implementation may reuse
+the memory of a consumed linear cell for a value of the same type it builds next. Reuse is not
+observable (`docs/linear-reuse-v0.md`).
+
 A **top-level `let` may not hold a linear value**, nor one that contains one: every
 function can name a module binding, so no scope holds it to one use. A function
 that makes one (`let mk = \(n: Int) -> File(n)`) holds nothing and is accepted.

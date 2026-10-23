@@ -298,6 +298,13 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
            ", i64 " ++ int_to_string(list_length(args)) ++ ")\n" ++
          "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
          lower_stores(r, "$f", args, 0))
+  | sprout_ir.IRReuseCtor r token from_tag _ tag args ->
+      # The token's cell, refilled: same field stores as IRMakeCtor. A different
+      # constructor also rewrites the header tag; the arity is the cell's own.
+      "  " ++ r ++ " = add i64 " ++ token ++ ", 0\n" ++
+      "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
+      lower_stores(r, "$f", args, 0) ++
+      (if from_tag == tag then "" else "\n" ++ lower_reuse_header(r, tag, list_length(args)))
   | sprout_ir.IRMkClosure r code_fn arity caps ->
       if sprout_ir.closure_is_static(caps)
       then
@@ -456,6 +463,17 @@ fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
   | Cons (slot, ty, newv) rest ->
       "  store " ++ ty ++ " " ++ newv ++ ", ptr " ++ slot ++ "\n" ++
       lower_tco_back_stores(rest)
+
+# Rewrite a reused cell's header to constructor `tag`, keeping the low 14 bits
+# (kind, colour, age) and the arity.
+# SYNC WITH runtime/sprout_runtime.c sprout_obj_write_tag: aux, at bit 14, is
+# (tag << 8) | arity.
+fn lower_reuse_header(r: String, tag: Int, arity: Int) -> String =
+  "  " ++ r ++ "$hp = getelementptr i8, ptr " ++ r ++ "$ptr, i64 -8\n" ++
+  "  " ++ r ++ "$h0 = load i64, ptr " ++ r ++ "$hp\n" ++
+  "  " ++ r ++ "$h1 = and i64 " ++ r ++ "$h0, 16383\n" ++
+  "  " ++ r ++ "$h2 = or i64 " ++ r ++ "$h1, " ++ int_to_string((tag * 256 + arity) * 16384) ++ "\n" ++
+  "  store i64 " ++ r ++ "$h2, ptr " ++ r ++ "$hp"
 
 # Emit per-field store instructions for an IRMakeCtor (`tag` "$f") or IRMakeTuple
 # (`tag` "$s") expansion.  Field `idx` lands at word offset `idx`, matching the

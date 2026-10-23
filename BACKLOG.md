@@ -2418,10 +2418,20 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P3` **A persistent trie array, `PVec`.** `LinVec` has no old versions, so storing, sharing
   or branching on an array needs a 32-way trie in plain Sprout: no builtin, 3-21x slower than a
   Baker array on the kernels, fully persistent. `docs/persistent-array-v0.md` §5.2 and §7 step 2.
-- [ ] `P3` **In-place reuse of a consumed linear value.** A wrapper over a linear array
-  (`LMatrix Int Int (LinVec a)`) allocates a new box per write: 767 ms against 7 on a sieve. When a
-  function consumes a linear constructor and builds one of the same shape, reuse its memory, as
-  Koka's Perceus does at count 1. Not designed; `docs/persistent-array-v0.md` §5.3.
+- [ ] `P3` **In-place reuse for a linear record's `with` update.** `p with (x = v)` on an owned
+  linear record allocates; `docs/linear-reuse-v0.md` reuses only from a `match` arm. The case is
+  narrow today: `with` cannot read its own base (`p with (x = p.x + 1)` uses `p` twice) or
+  replace a linear field (spec §5.8). Same `IRReuseCtor`, minted at a `TRecordUpdate` whose base
+  is an owned linear parameter. Worth it once `with` may read its base. Doc §2.
+- [ ] `P3` **In-place reuse across types.** `docs/linear-reuse-v0.md` pairs a rebuilt constructor
+  with the matched cell only when both belong to one type and have the same physical field count.
+  Lean's relaxed pass also reuses a cell for another type of the same size. The lowering is the
+  same header rewrite; only the type test in `reuse_take` goes. No measured program needs it.
+  Doc §2.
+- [ ] `P3` **In-place reuse of a non-parameter scrutinee.** A token is minted only when the
+  scrutinee is an owned parameter's own cell (`TxEnv.owned` holds parameter SSA names). A
+  `let`-bound or pattern-bound owned linear value, or a call result, is as dead after its match
+  and could be reused, but needs its own ownership fact in `TxEnv`. Doc §2.
 
 **Server and scheduler**
 
