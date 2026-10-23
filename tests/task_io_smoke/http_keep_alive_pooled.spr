@@ -50,18 +50,27 @@ fn contention(s: Scope, port: Int) -> Unit !{IO} =
     task_spawn(s, \_ -> slow_client(port))
     task_spawn(s, \_ -> queued_client(port))
 
-# Three held idle connections fill the reserve, so the fourth response closes, and then a slow
-# request plus a queued one exercise the queue rule.
-fn held(port: Int, a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing TcpConnection) -> Unit !{IO} =
+# Each connection opens only after the one before it is held idle, so no accepted connection is
+# queued when a held one's response is decided. Three held idle connections fill the reserve, so
+# the fourth response closes, and then a slow request plus a queued one exercise the queue rule.
+fn hold_a(port: Int, a: borrowing TcpConnection) -> Unit !{IO} =
   do
     expect(a, "/", false, "a-held-idle")
+    with_conn(port, \b -> hold_b(port, b))
+
+fn hold_b(port: Int, b: borrowing TcpConnection) -> Unit !{IO} =
+  do
     expect(b, "/", false, "b-held-idle")
+    with_conn(port, \c -> hold_c(port, c))
+
+fn hold_c(port: Int, c: borrowing TcpConnection) -> Unit !{IO} =
+  do
     expect(c, "/", false, "c-held-idle")
     with_conn(port, \d -> expect(d, "/", true, "reserve-full-closes"))
     with_scope(\s -> contention(s, port))
 
 fn clients(port: Int) -> Unit !{IO} =
-  with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> held(port, a, b, c))))
+  with_conn(port, \a -> hold_a(port, a))
 
 fn run(s: Scope) -> Unit !{IO} =
   do
