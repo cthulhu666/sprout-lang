@@ -197,6 +197,8 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 - `hmac_sha256(key: Bytes, message: Bytes) -> Bytes`
 - `base64_encode(value: Bytes) -> String`
 - `base64_decode(raw: String) -> Result Base64Error Bytes`
+- `base64url_encode(value: Bytes) -> String` — RFC 4648 §5 alphabet (`-`, `_`), no padding
+- `base64url_decode(raw: String) -> Result Base64Error Bytes` — strict: only the url alphabet, padding optional, non-canonical trailing bits refused (one spelling per value)
 - `bytes_xor(left: Bytes, right: Bytes) -> Result BytesOpError Bytes`
 - `const_time_eq(left: Bytes, right: Bytes) -> Bool` — equality for key-derived values (an
   HMAC tag, a session token, a challenge). Reads every byte whichever way the answer goes, so

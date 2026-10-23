@@ -43,6 +43,26 @@ fn decode_rejects(raw: String) -> Bool =
   | Ok _ -> false
   | Err _ -> true
 
+fn url_encode(text: String) -> String =
+  crypto.base64url_encode(bytes.from_string(text))
+
+# 0xfb 0xff encodes as "+/8=" in the standard alphabet, so it exercises both swapped
+# characters and the dropped padding.
+let plus_slash: Bytes = bytes.append(bytes.singleton(251), bytes.singleton(255))
+
+fn url_decodes_to(raw: String, want: Bytes) -> Bool =
+  match crypto.base64url_decode(raw) with
+  | Ok out -> out == want
+  | Err _ -> false
+
+fn url_decode_rejects(raw: String) -> Bool =
+  match crypto.base64url_decode(raw) with
+  | Ok _ -> false
+  | Err _ -> true
+
+fn url_roundtrips(value: Bytes) -> Bool =
+  url_decodes_to(crypto.base64url_encode(value), value)
+
 fn xor_b64(left: String, right: String) -> String =
   match crypto.bytes_xor(bytes.from_string(left), bytes.from_string(right)) with
   | Ok out -> crypto.base64_encode(out)
@@ -103,6 +123,30 @@ fn main() -> Unit !{IO} =
     check_eq("base64 round-trips ASCII", roundtrip("foobar"), "foobar"),
     check_eq("base64 round-trips non-ASCII", roundtrip("café 日本"), "café 日本"),
     check_true("base64_decode rejects a non-alphabet character", decode_rejects("Zm9v*mFy")),
+
+    # --- base64url (RFC 4648 section 5, unpadded; decode is strict) ---
+    check_eq("base64url empty input", url_encode(""), ""),
+    check_eq("base64url one byte", url_encode("f"), "Zg"),
+    check_eq("base64url two bytes", url_encode("fo"), "Zm8"),
+    check_eq("base64url three bytes", url_encode("foo"), "Zm9v"),
+    check_eq("base64url four bytes", url_encode("foob"), "Zm9vYg"),
+    check_eq("base64url uses - and _, no padding", crypto.base64url_encode(plus_slash), "-_8"),
+    check_true("base64url_decode accepts unpadded", url_decodes_to("Zm9vYg", bytes.from_string("foob"))),
+    check_true("base64url_decode accepts padded", url_decodes_to("Zm9vYg==", bytes.from_string("foob"))),
+    check_true("base64url_decode reads - and _", url_decodes_to("-_8", plus_slash)),
+    check_true("base64url_decode accepts the empty string", url_decodes_to("", bytes.empty())),
+    check_true("base64url round-trips - and _ bytes", url_roundtrips(plus_slash)),
+    check_true("base64url round-trips ASCII", url_roundtrips(bytes.from_string("foobar"))),
+    check_true("base64url round-trips a 32-byte tag", url_roundtrips(tag)),
+    check_true("base64url_decode rejects the standard alphabet", url_decode_rejects("+/8")),
+    check_true("base64url_decode rejects an impossible final group", url_decode_rejects("Z")),
+    check_true("base64url_decode rejects padding off a multiple of 4", url_decode_rejects("Zm9vYg=")),
+    check_true("base64url_decode rejects = mid-string", url_decode_rejects("Zg=g")),
+    check_true("base64url_decode rejects a space", url_decode_rejects("Zm9v Yg")),
+    check_true("base64url_decode rejects three =", url_decode_rejects("Zg===")),
+    check_true("base64url_decode rejects non-canonical trailing bits (1 byte)", url_decode_rejects("Zh")),
+    check_true("base64url_decode rejects non-canonical trailing bits (2 bytes)", url_decode_rejects("Zm9")),
+    check_true("base64url_decode rejects non-canonical trailing bits (padded)", url_decode_rejects("Zh==")),
 
     # --- bytes_xor ---
     # Self-XOR is all zeros, which needs no external vector to be obviously right.
