@@ -544,14 +544,18 @@ fn owned_capture_msg(name: String) -> String =
 fn local_move_capture_msg(name: String) -> String =
   "linear value '" ++ name ++ "' captured by a lambda is not yet supported (a plain `local` closure may run many times, so it cannot take a move; if the callee invokes this closure at most once, declare that parameter `once local`)"
 
+# Above its users: a top-level `let` is not visible before its declaration.
+let local_slot_advice: String =
+  "`local`, as the prelude's concrete `list_`, `vec_`, `range_` and `result_` functions and the `Foldable` functions do; the class methods `map`, `filter`, `and_then` and `traverse` do not"
+
 fn borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee is your own and does not keep this closure past the call, declare that parameter `local`, as the prelude's concrete `list_`, `vec_`, `range_` and `result_` functions and the `Foldable` functions do; the class methods `map`, `filter`, `and_then` and `traverse` do not"
+  "borrowed value '" ++ name ++ "' captured by a lambda is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it, and `once` is not a way out — it bounds how often the closure RUNS, not how long the borrow lasts); read '" ++ name ++ "' before the lambda and capture the result instead; or, if the callee is your own and does not keep this closure past the call, declare that parameter " ++ local_slot_advice
 
 # A `_` makes an ordinary lambda of the call it stands in. For the data argument
-# (`xs |> list_each(f, _)`) the advice above would send the reader to a `local`
-# slot they already use, so name the hole instead.
+# (`xs |> list_each(f, _)`) the fix is the direct call; for a hole in a function
+# argument (`map(f(c, _), xs)`) it is a `local` slot. Which one is not known here.
 fn placeholder_borrow_capture_msg(name: String) -> String =
-  "borrowed value '" ++ name ++ "' is captured by the lambda that a `_` placeholder makes of its call, which is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it); read '" ++ name ++ "' before the call and capture the result instead, or write the call without the `_` so a `local` slot inside it can lend '" ++ name ++ "'"
+  "borrowed value '" ++ name ++ "' is captured by the lambda that a `_` placeholder makes of its call, which is not yet supported (higher-order linearity is deferred; the closure may run after the owner releases it); read '" ++ name ++ "' before the call and capture the result instead; if the `_` stands for the call's data argument, write the call without it, so a `local` slot inside it can lend '" ++ name ++ "'; or, if the callee is your own and does not keep this closure past the call, declare that parameter " ++ local_slot_advice
 
 # A comprehension elaborates to a fold over lambdas the user never wrote
 # (infer.build_comp_fold), so the two messages above misdescribe it three ways:

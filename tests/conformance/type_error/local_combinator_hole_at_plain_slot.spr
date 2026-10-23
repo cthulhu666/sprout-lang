@@ -1,0 +1,13 @@
+module main
+
+# A `_` hole in the function argument of `map` makes a lambda at a slot that is not `local`.
+# Writing the call without the `_` does not help here, so the message must also name the
+# `local` slot; `list_map` takes one. See local_combinator_hole_at_plain_slot.fixed.spr.
+
+type linear File = File Int
+
+fn peek_add(f: borrowing File, x: Int) -> Int = x
+
+fn lend(c: borrowing File, xs: List Int) -> List Int = map(peek_add(c, _), xs)
+
+fn main() -> Unit !{IO} = print("unreachable")
