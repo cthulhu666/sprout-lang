@@ -110,8 +110,8 @@ fn main() -> Unit !{IO} =
     assert_true(state, "tco back-edge with an sp stackrestores",
       string.contains(sp_ir, "call void @llvm.stackrestore(ptr %sp)\n  br label %tco_loop"))
 
-    match ir_lowering.walk_blocks_for_strs(str_blocks, 5, dict_empty()) with
-    | (text, next_idx, table) ->
+    match ir_lowering.walk_blocks_for_strs(str_blocks, 5, dict_empty(), set_empty()) with
+    | (text, next_idx, table, _) ->
         do
           assert_true(state, "string globals come out in document order, numbered from 5",
             text == global_text(5, "x") ++ global_text(6, "yy") ++ global_text(7, "zzz"))

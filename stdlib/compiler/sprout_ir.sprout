@@ -344,6 +344,8 @@ export type IROp (..) =
   #     bodies access captures via IRLoadEnvSlot at the same slot index.
   #   Lowering: single call @sprout_alloc_closure(i64 sz, i64 arity) + GEP+store
   #   per capture + final ptrtoint pack to i64.
+  #   With no captures (closure_is_static) it is a pointer into a static constant
+  #   instead: no allocation, not a GC root.
   | IRMkClosure String String Int (List String)
   # IRApplyClosure <result> <callee> <args>
   #   - result: '%t<N>' for the i64 (or i1) call result.

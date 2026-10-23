@@ -786,61 +786,62 @@ fn is_runtime_global(g: sprout_ir.IRGlobalDecl) -> Bool =
 # lower_ops_parts' reason: appending to a growing string copies all of it per
 # literal, quadratic in literals per function here and per program above.
 fn collect_str_consts(fns: List sprout_ir.IRFunction) -> (String, Dict (Dict (String, Int)), Int) =
-  match collect_str_consts_loop(fns, 0, Nil, dict_empty()) with
+  match collect_str_consts_loop(fns, 0, Nil, dict_empty(), set_empty()) with
   | (parts, tables, next_idx) -> (string_concat_many(list_reverse(parts)), tables, next_idx)
 
 fn collect_str_consts_loop(fns: List sprout_ir.IRFunction, next_idx: Int,
-                           parts: List String, tables_acc: Dict (Dict (String, Int))) ->
+                           parts: List String, tables_acc: Dict (Dict (String, Int)),
+                           statics: Set) ->
     (List String, Dict (Dict (String, Int)), Int) =
   match fns with
   | Nil -> (parts, tables_acc, next_idx)
   | Cons f rest ->
       match f with
       | sprout_ir.IRFunction name _ _ blocks ->
-          match walk_blocks_for_strs(blocks, next_idx, dict_empty()) with
-          | (text, idx2, fn_table) ->
+          match walk_blocks_for_strs(blocks, next_idx, dict_empty(), statics) with
+          | (text, idx2, fn_table, statics2) ->
               collect_str_consts_loop(rest, idx2, Cons(text, parts),
-                                      dict_set(name, fn_table, tables_acc))
+                                      dict_set(name, fn_table, tables_acc), statics2)
 
-# One function's string and static-closure globals, as text, plus the next free index and its table.
+# One function's string and static-closure globals, as text, plus the next free index, its
+# string table, and `statics`: the code functions whose static closure is already emitted,
+# program-wide. A static closure global is not per function, so it is emitted once.
 export fn walk_blocks_for_strs(blocks: List sprout_ir.IRBlock, next_idx: Int,
-                               fn_table: Dict (String, Int)) ->
-    (String, Int, Dict (String, Int)) =
-  match walk_blocks_parts(blocks, next_idx, Nil, fn_table) with
-  | (parts, idx2, ft2) -> (string_concat_many(list_reverse(parts)), idx2, ft2)
+                               fn_table: Dict (String, Int), statics: Set) ->
+    (String, Int, Dict (String, Int), Set) =
+  match walk_blocks_parts(blocks, next_idx, Nil, fn_table, statics) with
+  | (parts, idx2, ft2, statics2) -> (string_concat_many(list_reverse(parts)), idx2, ft2, statics2)
 
 fn walk_blocks_parts(blocks: List sprout_ir.IRBlock, next_idx: Int,
-                     parts: List String, fn_table: Dict (String, Int)) ->
-    (List String, Int, Dict (String, Int)) =
+                     parts: List String, fn_table: Dict (String, Int), statics: Set) ->
+    (List String, Int, Dict (String, Int), Set) =
   match blocks with
-  | Nil -> (parts, next_idx, fn_table)
+  | Nil -> (parts, next_idx, fn_table, statics)
   | Cons b rest ->
       match b with
       | sprout_ir.IRBlock _ ops ->
-          match walk_ops_for_strs(ops, next_idx, parts, fn_table) with
-          | (parts2, idx2, ft2) -> walk_blocks_parts(rest, idx2, parts2, ft2)
+          match walk_ops_for_strs(ops, next_idx, parts, fn_table, statics) with
+          | (parts2, idx2, ft2, statics2) -> walk_blocks_parts(rest, idx2, parts2, ft2, statics2)
 
 fn walk_ops_for_strs(ops: List sprout_ir.IROp, next_idx: Int,
-                     parts: List String, fn_table: Dict (String, Int)) ->
-    (List String, Int, Dict (String, Int)) =
+                     parts: List String, fn_table: Dict (String, Int), statics: Set) ->
+    (List String, Int, Dict (String, Int), Set) =
   match ops with
-  | Nil -> (parts, next_idx, fn_table)
+  | Nil -> (parts, next_idx, fn_table, statics)
   | Cons op rest ->
       match op with
       | sprout_ir.IRStrConst _ raw s ->
           match emit_str_global(next_idx, s) with
           | (decl, len, gname) ->
               walk_ops_for_strs(rest, next_idx + 1, Cons(decl, parts),
-                                dict_set(raw, (gname, len), fn_table))
+                                dict_set(raw, (gname, len), fn_table), statics)
       | sprout_ir.IRMkClosure _ code_fn arity caps ->
-          # fn_table also records the static-closure globals already emitted here,
-          # keyed by global name; a raw-ptr key starts with '%', so none collides.
-          if sprout_ir.closure_is_static(caps) && ! dict_member (static_closure_global(code_fn), fn_table)
+          if sprout_ir.closure_is_static(caps) && ! set_member (code_fn, statics)
           then walk_ops_for_strs(rest, next_idx,
                                  Cons(emit_static_closure_global(code_fn, arity), parts),
-                                 dict_set(static_closure_global(code_fn), ("", 0), fn_table))
-          else walk_ops_for_strs(rest, next_idx, parts, fn_table)
-      | _ -> walk_ops_for_strs(rest, next_idx, parts, fn_table)
+                                 fn_table, set_insert(code_fn, statics))
+          else walk_ops_for_strs(rest, next_idx, parts, fn_table, statics)
+      | _ -> walk_ops_for_strs(rest, next_idx, parts, fn_table, statics)
 
 # The static constant behind an IRMkClosure with no captures. A code function is
 # minted per reference site, so one name is one closure.

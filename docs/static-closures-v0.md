@@ -54,8 +54,9 @@ is the whole condition, read through one helper, `sprout_ir.closure_is_static(ca
 fact in the op, but every exhaustive match over `IROp` would gain an arm for something the
 operands already state, and the two ops would lower identically except at one line.
 
-**Lowering** (`ir_lowering`). A collect pass over the program, beside `collect_str_consts`,
-gathers each static closure's `(code_fn, arity)` once and emits
+**Lowering** (`ir_lowering`). The string-literal scan, `walk_ops_for_strs`, also emits each
+static closure's global, once per program: a set of emitted code functions is threaded through
+both the batch and the streaming path, since a global is module-wide. The global is
 
 ```llvm
 @__sprout_sclo.<code_fn> = private unnamed_addr constant { i64, ptr } { i64 <hdr>, ptr @<code_fn> }
