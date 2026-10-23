@@ -51,6 +51,14 @@ fn drops() -> Bool =
   let _ = linvec_drop(linvec_set(0, 1, linvec_new(2, 0)))
   in true
 
+# The first index past the end, and the last one inside it.
+fn edges() -> String =
+  let v = linvec_set(3, 8, linvec_new(4, 0))
+      past = read_or(4, -1, v)
+      last = read_or(3, -1, v)
+      _ = linvec_drop(v)
+  in `${int_to_string(past)} ${int_to_string(last)}`
+
 fn empty_len() -> Int =
   let v = linvec_new(0, 0)
       n = linvec_length(v)
@@ -258,6 +266,7 @@ fn main() -> Unit !{IO} =
       check_eq("a read before a set sees the old value", read_then_set(), "5 99 0,99,0"),
       check_eq("a frozen LinVec is an ordinary Vec", freeze_is_a_vec(), "4,1 4,8"),
       check_eq("drop consumes", drops(), true),
+      check_eq("index == length is a miss; length - 1 a hit", edges(), "-1 8"),
       check_eq("length of an empty LinVec", empty_len(), 0),
       check_eq("scatter matches vec_set, repeats included",
                scatter_case([1, 3, 1, 3, 0]), show(ref_scatter([1, 3, 1, 3, 0], 9, zeros))),
