@@ -2473,11 +2473,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   on a long transfer. Both reference APIs offer both knobs (reqwest `timeout` + `read_timeout`; Go
   `Client.Timeout` + `Transport.ResponseHeaderTimeout`). Additive — it can wait for a caller that
   actually streams.
-- [ ] `P3` **`http_keep_alive_pooled` is flaky under `SPROUT_GC_STRESS=1`** (task-io-smoke). 2 of
-  15 stress runs on master print `MISMATCH`: `a-held-idle` gets `connection: close` though it
-  should stay open, and `reserve-full-closes` and `busy-with-queue-closes` stay open though they
-  should close — the admission counts see a different state than the fixture sets up. The
-  non-stress run passes. Likely the fixture's timing assumptions, which stress slows; unconfirmed.
 
 ### Prelude-helper cleanup arc (#602, #603) — review residuals
 
