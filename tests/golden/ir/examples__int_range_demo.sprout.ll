@@ -83,6 +83,7 @@ declare i64 @ref_write(i64, i64)
 @.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 186, column 18)\00" }
 @.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 203, column 29)\00" }
 @.str.8 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 23, column 36)\00" }
+@__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_0 }
 @.str.9 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c": \00" }
 @.str.10 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c" aisles, \00" }
 @.str.11 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c" min, step \00" }
@@ -558,18 +559,13 @@ ovfok_1:
 
 define i64 @examples.int_range_demo.route_minutes(i64 %p$route) {
 entry:
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_0, i64 8) to i64
+  %t$1 = add i64 0, 0
   %t$3 = alloca i64
   store i64 %p$route, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
-  %t$1 = add i64 0, 0
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$2 = call i64 @range_fold(i64 %t$0, i64 %t$1, i64 %p$route)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 

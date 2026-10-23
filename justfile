@@ -3153,7 +3153,7 @@ negative-shift-smoke: bootstrap-from-seed
 # picks its callee from argv at RUNTIME so neither Sprout nor clang can resolve
 # it statically and fold the mismatch away.
 #
-# The third fixture is a POSITIVE CONTROL: a guard that panicked on every closure
+# `saturated_value` is a POSITIVE CONTROL: a guard that panicked on every closure
 # application would satisfy the first two on its own.
 [group('smoke')]
 closure-arity-smoke: bootstrap-from-seed
@@ -3170,10 +3170,10 @@ closure-arity-smoke: bootstrap-from-seed
       echo "closure-arity-smoke: link failed for $1" >&2; cat "$TMPD/$1.link.err" >&2; exit 1
     fi
   }
-  for f in under_apply_value over_apply_value saturated_value; do build_fixture "$f"; done
+  for f in under_apply_value over_apply_value over_apply_static saturated_value; do build_fixture "$f"; done
 
   # Both mismatch directions must abort cleanly, naming the counts.
-  for f in under_apply_value over_apply_value; do
+  for f in under_apply_value over_apply_value over_apply_static; do
     set +e; "$TMPD/$f.bin" > "$TMPD/$f.out" 2>"$TMPD/$f.err"; ec=$?; set -e
     if [ "$ec" -eq 0 ]; then
       echo "closure-arity-smoke: $f did NOT panic (exit 0) — the arity guard is missing." >&2

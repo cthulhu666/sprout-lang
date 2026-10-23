@@ -109,7 +109,10 @@ declare i64 @split_words(i64)
 @.str.2 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c" step 3\00" }
 @.str.3 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"alice\00" }
 @.str.4 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"bob\00" }
+@__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
+@__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
 @.str.5 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"scope: opening\00" }
+@__sprout_sclo.__sprout_ir_lambda_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_2 }
 @.str.6 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"scope: all tasks joined\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -277,25 +280,14 @@ entry:
 
 define i64 @$entry.spawn_workers(i64 %p$s) {
 entry:
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_0, i64 8) to i64
   %t$4 = alloca i64
   store i64 %p$s, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
-  %t$6 = alloca i64
-  store i64 %t$0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$1 = call i64 @stdlib.task.task_spawn(i64 %p$s, i64 %t$0)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_1, ptr %t$2$raw
-  %t$9 = alloca i64
-  store i64 %t$2, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_1, i64 8) to i64
   %t$3 = call i64 @stdlib.task.task_spawn(i64 %p$s, i64 %t$2)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 
@@ -315,14 +307,8 @@ entry:
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2$ptr = inttoptr i64 %t$1 to ptr
   %t$2 = call i64 @print_str(ptr %t$2$ptr)
-  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_lambda_2, ptr %t$3$raw
-  %t$8 = alloca i64
-  store i64 %t$3, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_2, i64 8) to i64
   %t$4 = call i64 @stdlib.task.with_scope(i64 %t$3)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$5 = getelementptr inbounds { i64, [24 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$7$ptr = inttoptr i64 %t$6 to ptr

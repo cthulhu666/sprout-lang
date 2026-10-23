@@ -199,7 +199,7 @@ for f in "$err_small" "$err_large" "$err_huge"; do
   require_unique "$f" gc_swept
   require_unique "$f" arena_bytes
   require_unique "$f" sprout_obj
-  require_unique "$f" closure
+  require_unique "$f" closure_apply
 done
 
 map_s=$(counter "$err_small" map);        map_l=$(counter "$err_large" map)
@@ -207,8 +207,8 @@ swept_s=$(counter "$err_small" gc_swept); swept_l=$(counter "$err_large" gc_swep
 sb_s=$(counter "$err_small" arena_bytes);  sb_l=$(counter "$err_large" arena_bytes)
 obj_s=$(counter "$err_small" sprout_obj); obj_l=$(counter "$err_large" sprout_obj)
 obj_h=$(counter "$err_huge" sprout_obj);  sb_h=$(counter "$err_huge" arena_bytes)
-clo_s=$(counter "$err_small" closure); clo_l=$(counter "$err_large" closure)
-clo_h=$(counter "$err_huge" closure)
+clo_s=$(counter "$err_small" closure_apply); clo_l=$(counter "$err_large" closure_apply)
+clo_h=$(counter "$err_huge" closure_apply)
 
 # A missing counter means the report did not appear — the runtime lost
 # SPROUT_DEBUG_ALLOC, or its format changed. A blind gate must fail, not pass.
@@ -218,7 +218,7 @@ if [ -z "$map_s" ] || [ -z "$map_l" ] || [ -z "$swept_s" ] || [ -z "$swept_l" ] 
    || [ -z "$clo_h" ]; then
   echo "FAIL: could not read the counters (map='$map_s'/'$map_l' swept='$swept_s'/'$swept_l'" >&2
   echo "      arena_bytes='$sb_s'/'$sb_l' sprout_obj='$obj_s'/'$obj_l'" >&2
-  echo "      closure='$clo_s'/'$clo_l'/'$clo_h')" >&2
+  echo "      closure_apply='$clo_s'/'$clo_l'/'$clo_h')" >&2
   echo "--- small ---" >&2; cat "$err_small" >&2
   echo "--- large ---" >&2; cat "$err_large" >&2
   exit 1
@@ -322,34 +322,39 @@ if [ "$obj_growth" -gt "$MAX_OBJ_GROWTH_PCT" ] || [ "$sb_growth" -gt "$MAX_BYTES
   over=1
 fi
 
-# CLOSURES, the rooting pass's own growth arm. Every `list_member` call builds its
-# `Eq String` dictionary as a fresh closure, so a scan that compares strings and
-# allocates nothing else still counts here. The pass once ran `list_member` against
-# the root stack for every value in scope at every trigger: per-element closures
-# measured 1212 -> 2382 (196/100) on 2026-10-04 (stage-2), while objects and map
-# read flat and `--emit-ir` took 37 s on 960 elements. Scanning only the values
-# defined since the last trigger: 36 -> 36 (100/100), and 0.34 s.
+# CLOSURE APPLICATIONS, the rooting pass's own growth arm. Every `list_member` call
+# applies the `Eq String` dictionary's comparison once per element it visits, so a scan
+# that compares strings and allocates nothing else still counts here. The pass once ran
+# `list_member` against the root stack for every value in scope at every trigger:
+# per-element closures measured 1212 -> 2382 (196/100) on 2026-10-04 (stage-2), while
+# objects and map read flat and `--emit-ir` took 37 s on 960 elements. Scanning only the
+# values defined since the last trigger: 36 -> 36 (100/100), and 0.34 s.
+#
+# It counts applications (`closure_apply=`), not allocations (`closure=`). The arm first
+# read allocations, which only moved because each call built its dictionary as a fresh
+# closure; a capture-free closure is a static constant now, and an allocation count
+# would stop seeing the comparisons. Applications are the comparisons themselves.
+# Measured 2026-10-23 (stage-2): 211 -> 212 (100/100).
 #
 # BLIND SPOT: this sees the comparisons, not the walk. A rewrite that drops
 # `list_member` but still visits every in-scope value per trigger is quadratic and
-# allocates no closure; only time or a compiler-side counter would catch it. It also
-# goes blind if dictionaries stop being built per call.
+# applies no closure; only time or a compiler-side counter would catch it.
 MAX_CLOSURE_GROWTH_PCT=125
-# Floor at half the 36 observed, for the same reason as the floors above.
-MIN_CLOSURE_PER_ELEM=18
+# Floor at half the 211 observed, for the same reason as the floors above.
+MIN_CLOSURE_PER_ELEM=105
 
 clo_per=$(( (clo_l - clo_s) / DELTA_N ))
 clo_per2=$(( (clo_h - clo_l) / DELTA2_N ))
 if [ "$clo_per" -lt "$MIN_CLOSURE_PER_ELEM" ] || [ "$clo_per2" -lt "$MIN_CLOSURE_PER_ELEM" ]; then
-  echo "FAIL: $clo_per / $clo_per2 closures per element is below the floor of $MIN_CLOSURE_PER_ELEM." >&2
+  echo "FAIL: $clo_per / $clo_per2 closure applications per element is below the floor of $MIN_CLOSURE_PER_ELEM." >&2
   echo "      The ratio below would divide by nothing and read as flat. Check what the" >&2
-  echo "      fixtures still allocate per element before lowering the floor." >&2
+  echo "      fixtures still apply per element before lowering the floor." >&2
   exit 1
 fi
 clo_growth=$(( (100 * clo_per2) / clo_per ))
-echo "==> closures at 2x block length: ${clo_per} -> ${clo_per2} (${clo_growth}/100)"
+echo "==> closure applications at 2x block length: ${clo_per} -> ${clo_per2} (${clo_growth}/100)"
 if [ "$clo_growth" -gt "$MAX_CLOSURE_GROWTH_PCT" ]; then
-  echo "FAIL: closures per element grew ${clo_growth}/100 (budget ${MAX_CLOSURE_GROWTH_PCT}/100)." >&2
+  echo "FAIL: closure applications per element grew ${clo_growth}/100 (budget ${MAX_CLOSURE_GROWTH_PCT}/100)." >&2
   echo "      Suspect a membership test against a list that grows with the block --" >&2
   echo "      in ir_rooting, the scan at each trigger. Only values defined since the" >&2
   echo "      last trigger can need a root; walk those, not the whole scope." >&2

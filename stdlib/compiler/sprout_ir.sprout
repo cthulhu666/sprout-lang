@@ -534,6 +534,13 @@ export fn param_ssa(name: String) -> String = "%p$" ++ name
 # source-derived name: a source `t0` lowers to `%t0`, never `%t$0`.
 export fn temp_ssa(i: Int) -> String = "%t$" ++ int_to_string(i)
 
+# An IRMkClosure with no captures lowers to a static constant, not a heap block, so
+# ir_lowering and ir_rooting must agree on which closures those are. This is the one test.
+export fn closure_is_static(caps: List String) -> Bool =
+  match caps with
+  | [] -> true
+  | _ -> false
+
 # The function a direct call names. Nothing for every other op, including the
 # indirect IRApplyClosure and IRTailCall. Exhaustive: a new call op must say
 # here whether it names a callee, or the rooting summary never sees the call.

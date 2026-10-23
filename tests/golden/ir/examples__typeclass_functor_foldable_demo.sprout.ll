@@ -79,6 +79,14 @@ declare i64 @ref_write(i64, i64)
 @.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 429, column 85)\00" }
 @.str.3 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 3, column 31)\00" }
 @.str.4 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 4, column 39)\00" }
+@__sprout_sclo.__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_0 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_0 }
+@__sprout_sclo.__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_one_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_one_1 }
+@__sprout_sclo.__sprout_ir_eta___tc_Functor_List_fmap_2 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_List_fmap_2 }
+@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_3 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_3 }
+@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_4 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_4 }
+@__sprout_sclo.__sprout_ir_eta___tc_Functor_Vec_fmap_5 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Vec_fmap_5 }
+@__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_6 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_values_6 }
+@__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_7 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_7 }
 @.str.5 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 22, column 39)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -938,6 +946,9 @@ entry:
 
 define i64 @examples.typeclass_functor_foldable_demo.map_and_sum(i64 %p$xs, i64 %p$__tc_Functor_0_fmap, i64 %p$__tc_Foldable_1_fold_values, i64 %p$__tc_Foldable_1_fold_while_values) {
 entry:
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_0, i64 8) to i64
+  %t$1 = add i64 0, 0
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_one_1, i64 8) to i64
   %t$5 = alloca i64
   store i64 %p$xs, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
@@ -950,26 +961,12 @@ entry:
   %t$11 = alloca i64
   store i64 %p$__tc_Foldable_1_fold_values, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_0, ptr %t$0$raw
-  %t$1 = add i64 0, 0
-  %t$13 = alloca i64
-  store i64 %t$0, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_eta_examples.typeclass_functor_foldable_demo.add_one_1, ptr %t$2$raw
-  %t$15 = alloca i64
-  store i64 %t$2, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$3 = call i64 @map(i64 %t$2, i64 %p$xs, i64 %p$__tc_Functor_0_fmap)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$18 = alloca i64
-  store i64 %t$3, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$13 = alloca i64
+  store i64 %t$3, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$4 = call i64 @fold(i64 %t$0, i64 %t$1, i64 %t$3, i64 %p$__tc_Foldable_1_fold_values, i64 %p$__tc_Foldable_1_fold_while_values)
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 6)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 5)
   ret i64 %t$4
 }
 
@@ -1110,47 +1107,15 @@ entry:
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = load i64, ptr @examples.typeclass_functor_foldable_demo.sample_list
-  %t$1 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$1$raw = inttoptr i64 %t$1 to ptr
-  store ptr @__sprout_ir_eta___tc_Functor_List_fmap_2, ptr %t$1$raw
-  %t$14 = alloca i64
-  store i64 %t$1, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$2 = call i64 @sprout_alloc_closure(i64 8, i64 3)
-  %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_3, ptr %t$2$raw
-  %t$16 = alloca i64
-  store i64 %t$2, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$3 = call i64 @sprout_alloc_closure(i64 8, i64 4)
-  %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_4, ptr %t$3$raw
-  %t$18 = alloca i64
-  store i64 %t$3, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_List_fmap_2, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_3, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_4, i64 8) to i64
   %t$4 = call i64 @examples.typeclass_functor_foldable_demo.map_and_sum_list(i64 %t$0, i64 %t$1, i64 %t$2, i64 %t$3)
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$5 = load i64, ptr @examples.typeclass_functor_foldable_demo.sample_vec
-  %t$6 = call i64 @sprout_alloc_closure(i64 8, i64 2)
-  %t$6$raw = inttoptr i64 %t$6 to ptr
-  store ptr @__sprout_ir_eta___tc_Functor_Vec_fmap_5, ptr %t$6$raw
-  %t$21 = alloca i64
-  store i64 %t$6, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$7 = call i64 @sprout_alloc_closure(i64 8, i64 3)
-  %t$7$raw = inttoptr i64 %t$7 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_values_6, ptr %t$7$raw
-  %t$23 = alloca i64
-  store i64 %t$7, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$8 = call i64 @sprout_alloc_closure(i64 8, i64 4)
-  %t$8$raw = inttoptr i64 %t$8 to ptr
-  store ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_7, ptr %t$8$raw
-  %t$25 = alloca i64
-  store i64 %t$8, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Vec_fmap_5, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_6, i64 8) to i64
+  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_7, i64 8) to i64
   %t$9 = call i64 @examples.typeclass_functor_foldable_demo.map_and_sum_vec(i64 %t$5, i64 %t$6, i64 %t$7, i64 %t$8)
-  %t$27 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$10$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$4, i64 %t$9)
   %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
   %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1

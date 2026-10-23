@@ -98,10 +98,14 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.5 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"decode error: \00" }
 @.str.6 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"response body is not valid UTF-8 text\00" }
 @.str.7 = private unnamed_addr constant { i64, [53 x i8] } { i64 851978, [53 x i8] c"usage: sprout run examples/http_get_cli.sprout <url>\00" }
+@__sprout_sclo.__sprout_ir_eta_examples.http_get_cli.http_error_message_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_examples.http_get_cli.http_error_message_0 }
 @.str.8 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
 @.str.9 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"response body is not valid UTF-8 text\00" }
 @.str.10 = private unnamed_addr constant { i64, [53 x i8] } { i64 851978, [53 x i8] c"usage: sprout run examples/http_get_cli.sprout <url>\00" }
+@__sprout_sclo.__sprout_ir_eta_examples.http_get_cli.http_error_message_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_examples.http_get_cli.http_error_message_2 }
 @.str.11 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@__sprout_sclo.__sprout_ir_lambda_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_3 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -466,60 +470,51 @@ do_short_6:
   %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_6
 do_cont_6:
-  %t$34 = alloca i64
-  store i64 %t$5, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$10 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$10$raw = inttoptr i64 %t$10 to ptr
-  store ptr @__sprout_ir_eta_examples.http_get_cli.http_error_message_0, ptr %t$10$raw
+  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.http_get_cli.http_error_message_0, i64 8) to i64
   %t$11 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$13 = add i64 0, 5000
+  %t$34 = alloca i64
+  store i64 %t$5, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$36 = alloca i64
-  store i64 %t$10, ptr %t$36
+  store i64 %t$12, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
-  %t$38 = alloca i64
-  store i64 %t$12, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$14 = call i64 @stdlib.http_client.http_get(i64 %t$5, i64 %t$12, i64 %t$13)
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$41 = alloca i64
-  store i64 %t$14, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$39 = alloca i64
+  store i64 %t$14, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$15$st = call i128 @result_map_error_worker(i64 %t$10, i64 %t$14)
   %t$15 = trunc i128 %t$15$st to i64
   %t$15$hi = lshr i128 %t$15$st, 64
   %t$16 = trunc i128 %t$15$hi to i64
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
   br i1 %t$18, label %do_short_17, label %do_cont_17
 do_short_17:
-  %t$44 = alloca i64
-  store i64 %t$16, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$42 = alloca i64
+  store i64 %t$16, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
   %t$20 = call i64 @sprout_alloc_obj(i64 8, i64 1)
   %t$20$ptr = inttoptr i64 %t$20 to ptr
   %t$20$f0 = getelementptr i64, ptr %t$20$ptr, i64 0
   store i64 %t$16, ptr %t$20$f0
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_17
 do_cont_17:
-  %t$47 = alloca i64
-  store i64 %t$16, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$21 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$21$raw = inttoptr i64 %t$21 to ptr
-  store ptr @__sprout_ir_lambda_1, ptr %t$21$raw
-  %t$49 = alloca i64
-  store i64 %t$21, ptr %t$49
-  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
+  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_1, i64 8) to i64
+  %t$45 = alloca i64
+  store i64 %t$16, ptr %t$45
+  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
   %t$22 = call i64 @stdlib.http.http_response_text(i64 %t$16)
-  %t$51 = alloca i64
-  store i64 %t$22, ptr %t$51
-  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
+  %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$48 = alloca i64
+  store i64 %t$22, ptr %t$48
+  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
   %t$23 = call i64 @result_map_error(i64 %t$21, i64 %t$22)
-  %t$53 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_17
 do_done_17:
   %t$24 = phi i64 [%t$20, %do_short_17], [%t$23, %do_cont_17]
@@ -614,60 +609,51 @@ do_short_6:
   %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_6
 do_cont_6:
-  %t$43 = alloca i64
-  store i64 %t$5, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$10 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$10$raw = inttoptr i64 %t$10 to ptr
-  store ptr @__sprout_ir_eta_examples.http_get_cli.http_error_message_2, ptr %t$10$raw
+  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.http_get_cli.http_error_message_2, i64 8) to i64
   %t$11 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$13 = add i64 0, 5000
+  %t$43 = alloca i64
+  store i64 %t$5, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$45 = alloca i64
-  store i64 %t$10, ptr %t$45
+  store i64 %t$12, ptr %t$45
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
-  %t$47 = alloca i64
-  store i64 %t$12, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
   %t$14 = call i64 @stdlib.http_client.http_get(i64 %t$5, i64 %t$12, i64 %t$13)
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$50 = alloca i64
-  store i64 %t$14, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
+  %t$47 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$48 = alloca i64
+  store i64 %t$14, ptr %t$48
+  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
   %t$15$st = call i128 @result_map_error_worker(i64 %t$10, i64 %t$14)
   %t$15 = trunc i128 %t$15$st to i64
   %t$15$hi = lshr i128 %t$15$st, 64
   %t$16 = trunc i128 %t$15$hi to i64
-  %t$52 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = add i64 0, 8
   %t$18 = icmp eq i64 %t$15, %t$17
   br i1 %t$18, label %do_short_17, label %do_cont_17
 do_short_17:
-  %t$53 = alloca i64
-  store i64 %t$16, ptr %t$53
-  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
+  %t$51 = alloca i64
+  store i64 %t$16, ptr %t$51
+  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
   %t$20 = call i64 @sprout_alloc_obj(i64 8, i64 1)
   %t$20$ptr = inttoptr i64 %t$20 to ptr
   %t$20$f0 = getelementptr i64, ptr %t$20$ptr, i64 0
   store i64 %t$16, ptr %t$20$f0
-  %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$53 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_17
 do_cont_17:
-  %t$56 = alloca i64
-  store i64 %t$16, ptr %t$56
-  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$21 = call i64 @sprout_alloc_closure(i64 8, i64 1)
-  %t$21$raw = inttoptr i64 %t$21 to ptr
-  store ptr @__sprout_ir_lambda_3, ptr %t$21$raw
-  %t$58 = alloca i64
-  store i64 %t$21, ptr %t$58
-  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
+  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_3, i64 8) to i64
+  %t$54 = alloca i64
+  store i64 %t$16, ptr %t$54
+  %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
   %t$22 = call i64 @stdlib.http.http_response_text(i64 %t$16)
-  %t$60 = alloca i64
-  store i64 %t$22, ptr %t$60
-  %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
+  %t$56 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$57 = alloca i64
+  store i64 %t$22, ptr %t$57
+  %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
   %t$23 = call i64 @result_map_error(i64 %t$21, i64 %t$22)
-  %t$62 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_17
 do_done_17:
   %t$24 = phi i64 [%t$20, %do_short_17], [%t$23, %do_cont_17]

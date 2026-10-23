@@ -1065,6 +1065,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   for `)` followed by `(`, so the `is_word_like` fallback returns false. Confirm no legitimate
   no-space case exists in a *type* position, then add a formatter regression. A word before one
   loses it too: `type alias Forwarded = Dict (List T)` becomes `Dict(List T)` (resolve.sprout).
+- [ ] `P3` **`fmt` drops the space between a keyword and a lambda.** `if b then \x -> x + 1 else
+  \x -> x + 2` becomes `if b then\x -> x + 1 else\x -> x + 2`. It still parses and compiles, so it
+  is cosmetic, but no one writes it, and `tests/closure_arity_smoke/over_apply_static.spr` moved its
+  lambdas into separate functions to avoid it. Acceptance: a keyword before `\` keeps its space.
 - [ ] `P3` **`fmt` inserts a space into chained application when the argument starts with an
   uppercase identifier.** `pick_color()(Red)` becomes `pick_color() (Red)` while `pick_int()(4)` and
   `labeller_for(1)(2)` are untouched — discriminated by probe, so the trigger is the leading
@@ -1719,16 +1723,16 @@ deferral happened, not for current behaviour. Still open:
   recursive loop lowering, call/closure overhead, primitive boxing, string/vector iteration — and
   add stable benchmarks for `string_lines`, `trim` and AoC-style stdin parsing so wins are
   measurable. Target: `string_lines` over a `day5input`-style workload in low single-digit seconds.
-- [ ] `P2` **Non-escaping combinator closures allocate, and every apply re-checks arity.** In
-  `bench/gc_roots` — records in a list, nested `list_filter`/`list_fold`/`any`/`max_by` — the lambda
-  handed to each combinator is heap-allocated per call although it cannot escape the callee, and
-  `sprout_closure_arity_check` alone is ~10% of top-of-stack samples (`sprout_alloc_closure` a
-  further 3%). Two independent levers: escape analysis to stack-allocate or inline a closure whose
-  only use is the call it is passed to, and specialising an `IRApplyClosure` whose arity is
-  statically known so the check is dropped. The closure allocation also feeds the collection rate,
-  so it is upstream of the GC entries in §1. Profile: `bench/results-2026-09-20-gc-root-stack.md`.
-  A `local` parameter states that non-escape and the callee check proves it, so the first lever
-  needs no analysis now the combinators take `local` (`docs/local-closures-v0.md` §11).
+- [ ] `P3` **Capturing closures at `local` slots allocate, and every apply re-checks arity.** A
+  lambda passed to a `local` parameter cannot escape, so its env could live in the caller's frame,
+  and an `IRApplyClosure` whose arity is known could skip `sprout_closure_arity_check`. Both were
+  hand-applied to `bench/gc_roots`: stack envs gained ~0, and deleting the check outright gained
+  ~2%, although it shows as ~9% of top-of-stack samples (`docs/static-closures-v0.md` §7). Worth
+  revisiting only if inlining lets LLVM see through the env, which the out-of-line check blocks.
+- [ ] `P3` **One eta wrapper per reference site.** Each use of a top-level function as a value
+  mints its own `__sprout_ir_eta_<fn>_<n>` wrapper (`ast_to_ir`, the eta-expansion branch of
+  `translate_expr`), so a function passed in ten places is ten identical functions and, since
+  static closures, ten constants. One wrapper per `(function, arity)` would do. Code size only.
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Chunked reads are
   filed in §2.

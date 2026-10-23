@@ -1,0 +1,74 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, with_scope, task_fork, task_await, task_spawn)
+
+# A closure with no captures is a static constant outside the GC heap, so the collector
+# must pass over it wherever it is reachable from: a list cell, a record field, a task,
+# a phi. These pin the behaviour; run them under SPROUT_GC_STRESS=1 as well.
+# IR shape: tests/stdlib/compiler/test_static_closure_lowering.spr.
+
+type Ops = (inc: Int -> Int, dbl: Int -> Int)
+
+fn add_one(n: Int) -> Int = n + 1
+
+fn twice(n: Int) -> Int = n * 2
+
+fn noop(u: Unit) -> Unit !{IO} = ()
+
+fn churn(n: Int, acc: String) -> String =
+  if n == 0 then acc else churn(n - 1, acc ++ "x")
+
+# Allocates enough to force collections before `body` runs.
+fn after_churn(body: Int -> Int, x: Int) -> Int =
+  if str_len(churn(3000, "")) > 0 then body(x) else 0
+
+fn run_all(fs: List (Int -> Int), x: Int) -> Int =
+  list_fold(\ (acc, f) -> f(acc), x, fs)
+
+fn static_list() -> List (Int -> Int) =
+  [add_one, \n -> n * 3, twice]
+
+fn mixed_list(k: Int) -> List (Int -> Int) =
+  [add_one, \n -> n + k, twice, \n -> n - k]
+
+fn static_ops() -> Ops =
+  Ops(inc = add_one, dbl = \n -> n + n)
+
+fn adder(k: Int) -> Int -> Int = \n -> n + k
+
+# A static closure on one branch, a capturing one on the other.
+fn pick(b: Bool, k: Int) -> Int -> Int =
+  if b then add_one else adder(k)
+
+fn read_inc(o: Ops, x: Int) -> Int =
+  let f = o.inc
+  in f(x)
+
+fn read_dbl(o: Ops, x: Int) -> Int =
+  let f = o.dbl
+  in f(x)
+
+fn forked(s: Scope) -> Int !{IO} =
+  do
+    task_spawn(s, noop)
+    t <- task_fork(s, \_ -> 42)
+    let noise = churn(3000, "")
+    task_await(t)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let fs = static_list()
+    assert_eq(state, "list of static closures", after_churn(\x -> run_all(fs, x), 1), 12)
+    let o = static_ops()
+    assert_eq(state, "record field: eta closure", after_churn(\x -> read_inc(o, x), 5), 6)
+    assert_eq(state, "record field: lambda closure", after_churn(\x -> read_dbl(o, x), 5), 10)
+    let ms = mixed_list(10)
+    assert_eq(state, "static and capturing closures in one list",
+              after_churn(\x -> run_all(ms, x), 1), 14)
+    let on_true = pick(true, 100)
+    let on_false = pick(false, 100)
+    assert_eq(state, "phi: static branch", after_churn(on_true, 1), 2)
+    assert_eq(state, "phi: capturing branch", after_churn(on_false, 1), 101)
+    n <- with_scope(forked)
+    assert_eq(state, "static closure run as a task", n, 42)
+    summary(state)

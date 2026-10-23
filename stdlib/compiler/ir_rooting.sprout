@@ -119,8 +119,9 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRRetUnboxed3 _ _ _ _ -> false
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
-  # IRMkClosure allocates env via @sprout_alloc_closure; trigger.
-  | sprout_ir.IRMkClosure _ _ _ _ -> true
+  # IRMkClosure allocates env via @sprout_alloc_closure; trigger. With no captures it
+  # is a static constant (ir_lowering) and allocates nothing.
+  | sprout_ir.IRMkClosure _ _ _ caps -> ! sprout_ir.closure_is_static (caps)
   # IRMakeTuple lowers to @sprout_alloc_tuple_blob which calls
   # sprout_gc_maybe_collect_threshold() before allocating; trigger.
   | sprout_ir.IRMakeTuple _ _ -> true
@@ -213,8 +214,10 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   # IRPrintStr produces the i64 return of @print_str/@eprint_str (0/unit) — a scalar.
   | sprout_ir.IRPrintStr _ _ _ -> Nothing
   | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
-  # Closure value is heap-allocated (an env pointer packed as i64).
-  | sprout_ir.IRMkClosure r _ _ _ -> Just(r)
+  # Closure value is heap-allocated (an env pointer packed as i64), unless it has no
+  # captures: that one is a static constant, outside the heap.
+  | sprout_ir.IRMkClosure r _ _ caps ->
+      if sprout_ir.closure_is_static(caps) then Nothing else Just(r)
   # Closure-application result is conservatively heap-typed (M2: all results are i64).
   | sprout_ir.IRApplyClosure r _ _ -> Just(r)
   # A direct call's result is heap iff its return-type kind is heap/unknown.

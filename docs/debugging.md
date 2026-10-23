@@ -166,6 +166,9 @@ but the first is verbatim — the cycle line is elided at each `...`, since its 
 [sprout alloc] sprout_obj=5149588 closure=59263 vector=1983 map=168070 bytes=40 builder=0 arena_bytes=175114064 offarena_bytes=3834302 intern=5830 intern_bytes=196822 gc_swept=5914965 gc_cycles=141 gc_walked=15776682
 ```
 
+The line also ends in `closure_apply=<n>` (older output lacks it): closure values applied. `closure=`
+counts allocations, and a capture-free closure is a static constant that never allocates.
+
 **`walked` is what the sweep cost, `swept` is what it bought.** Every slot walked was kept, freed
 this cycle, or already FREE, so `walked - live - swept` is the FREE slots stepped over for nothing:
 116,666 above, 1.19 per object freed. The trigger reads `live` and nothing else, so this part of a
