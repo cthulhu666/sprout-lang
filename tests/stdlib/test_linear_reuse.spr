@@ -1,0 +1,245 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.string as string
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+
+# In-place reuse of a consumed linear cell (docs/linear-reuse-v0.md): values read
+# back after a reused write are right, and a later match sees the new
+# constructor. `grow` and `bump` call something that allocates between the match
+# and the rebuild, so a collection can run there: run this file under
+# SPROUT_GC_STRESS=1, and under SPROUT_GC_HDRCHECK=1 SPROUT_GC_LINEAGE=1 for the
+# header rewrite.
+
+type linear Two = | A Int Int | B Int Int
+
+fn flip(t: Two) -> Two =
+  match t with
+  | A n k -> B(n + 1, k)
+  | B n k -> A(n + 1, k)
+
+fn flips(i: Int, t: Two) -> Two =
+  if i == 0 then t else flips(i - 1, flip(t))
+
+fn read_two(t: Two) -> (Bool, Int, Int) =
+  match t with
+  | A n k -> (true, n, k)
+  | B n k -> (false, n, k)
+
+# A rebuild after a join, and a nested match whose outer cell is rebuilt after it.
+fn sum_then_rebuild(a: Two, b: Two) -> (Int, Two) =
+  match a with
+  | A n k ->
+      let s = (match b with | A m j -> m + j | B m j -> m * j)
+      in (s, A(n + s, k))
+  | B n k ->
+      let s = (match b with | A m j -> m + j | B m j -> m * j)
+      in (s, B(n + s, k))
+
+# A call that allocates sits between the match and the rebuild.
+type linear Msg = | Left Int String | Right Int String
+
+fn grow(m: Msg) -> Msg =
+  match m with
+  | Left n s -> Right(n + 1, s ++ "l")
+  | Right n s -> Left(n + 1, s ++ "r")
+
+fn grow_n(i: Int, m: Msg) -> Msg =
+  if i == 0 then m else grow_n(i - 1, grow(m))
+
+fn read_msg(m: Msg) -> (Int, String) =
+  match m with
+  | Left n s -> (n, "L" ++ s)
+  | Right n s -> (n, "R" ++ s)
+
+# The call between the match and the rebuild allocates cells of the reused cell's own size,
+# so if the cell were not kept alive across it a collection would recycle it into the list
+# being built, and the rebuild would write into a live cons cell.
+type linear Bag = | Open Int (List Int) | Shut Int (List Int)
+
+fn pile(k: Int, xs: List Int) -> List Int =
+  if k == 0 then xs else pile(k - 1, Cons(k, xs))
+
+fn refill(b: Bag) -> Bag =
+  match b with
+  | Open n xs -> Shut(n + 1, pile(5, xs))
+  | Shut n xs -> Open(n + 1, pile(5, xs))
+
+fn refill_n(i: Int, b: Bag) -> Bag =
+  if i == 0 then b else refill_n(i - 1, refill(b))
+
+fn len_upto(limit: Int, xs: List Int) -> Int =
+  if limit == 0 then 0
+  else
+    match xs with
+    | Nil -> 0
+    | Cons _ rest -> 1 + len_upto(limit - 1, rest)
+
+fn read_bag(b: Bag) -> (Bool, Int, Int) =
+  match b with
+  | Open n xs -> (true, n, len_upto(1000, xs))
+  | Shut n xs -> (false, n, len_upto(1000, xs))
+
+# `tock` is entered by a tail call, so no caller's root pins the cell. Only the token's own
+# liveness keeps it alive across `pile`, whose cons cells would otherwise recycle it.
+type linear Pile = Pile Int (List Int)
+
+fn tick(i: Int, acc: Int) -> Int =
+  if i == 0 then acc else tock(i - 1, Pile(acc, Nil))
+
+fn tock(i: Int, p: Pile) -> Int =
+  match p with
+  | Pile a xs ->
+      let q = Pile(a, pile(5, xs))
+      in tick(i, a + len_upto(1000, pile_list(q)))
+
+fn pile_list(q: Pile) -> List Int =
+  match q with
+  | Pile _ xs -> xs
+
+# A borrowing parameter is never reused: the lender still holds a good cell.
+fn copy_two(t: borrowing Two) -> Two =
+  match t with
+  | A n k -> A(n, k)
+  | B n k -> B(n, k)
+
+# A wrapper around a LinVec, the sieve of docs/linear-reuse-v0.md §1.
+type linear Grid = Grid Int (LinVec Bool)
+
+fn is_set(i: Int, g: borrowing Grid) -> Bool =
+  match g with
+  | Grid _ v ->
+      match linvec_get(i, v) with
+      | Just b -> b
+      | Nothing -> false
+
+fn grid_set(i: Int, x: Bool, g: Grid) -> Grid =
+  match g with
+  | Grid n v -> Grid(n, linvec_set(i, x, v))
+
+fn strike(j: Int, p: Int, n: Int, g: Grid) -> Grid =
+  if j >= n then g else strike(j + p, p, n, grid_set(j, true, g))
+
+fn sieve(p: Int, n: Int, g: Grid) -> Grid =
+  if p * p >= n then g
+  else if is_set(p, g) then sieve(p + 1, n, g)
+  else sieve(p + 1, n, strike(p * p, p, n, g))
+
+fn count_unset(i: Int, n: Int, acc: Int, g: borrowing Grid) -> Int =
+  if i >= n then acc
+  else count_unset(i + 1, n, if is_set(i, g) then acc else acc + 1, g)
+
+fn grid_free(g: Grid) -> Int =
+  match g with
+  | Grid _ v ->
+      let _ = linvec_drop(v)
+      in 0
+
+# A word-length histogram: some steps change constructor, and `bump` allocates
+# (a `linvec_get` result) between the match and the rebuild.
+type linear Lexer =
+  | InWord Int (LinVec Int)
+  | InSpace Int (LinVec Int)
+
+fn cell(k: Int, hist: borrowing LinVec Int) -> Int =
+  match linvec_get(k, hist) with
+  | Just x -> x
+  | Nothing -> 0
+
+fn bump(len: Int, hist: LinVec Int) -> LinVec Int =
+  let k = if len > 15 then 15 else len
+  in linvec_set(k, cell(k, hist) + 1, hist)
+
+fn step(c: Int, lx: Lexer) -> Lexer =
+  match lx with
+  | InWord len hist ->
+      if c == 32 then InSpace(0, bump(len, hist))
+      else InWord(len + 1, hist)
+  | InSpace len hist ->
+      if c == 32 then InSpace(len + 1, hist)
+      else InWord(1, hist)
+
+# Words of seven letters, one space between.
+fn byte_at(i: Int) -> Int =
+  if i - (i / 8) * 8 == 7 then 32 else 97
+
+fn run(i: Int, n: Int, lx: Lexer) -> Lexer =
+  if i >= n then lx else run(i + 1, n, step(byte_at(i), lx))
+
+fn words_of_seven(lx: Lexer) -> Int =
+  match lx with
+  | InWord _ hist ->
+      let w = cell(7, hist)
+          _ = linvec_drop(hist)
+      in w
+  | InSpace _ hist ->
+      let w = cell(7, hist)
+          _ = linvec_drop(hist)
+      in w
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # Constructor changes through the reused cell.
+    match read_two(flips(5, A(0, 7))) with
+    | (is_a, n, k) ->
+        do
+          assert_eq(state, "five flips: ends on B", is_a, false)
+          assert_eq(state, "five flips: counted", n, 5)
+          assert_eq(state, "five flips: payload kept", k, 7)
+    match read_two(flips(6, A(0, 7))) with
+    | (is_a, n, k) ->
+        do
+          assert_eq(state, "six flips: back on A", is_a, true)
+          assert_eq(state, "six flips: counted", n, 6)
+          assert_eq(state, "six flips: payload kept", k, 7)
+
+    # A rebuild after a nested match joins.
+    match sum_then_rebuild(A(1, 2), B(3, 4)) with
+    | (s, t) ->
+        match read_two(t) with
+        | (is_a, n, k) ->
+            do
+              assert_eq(state, "nested then rebuild: sum", s, 12)
+              assert_eq(state, "nested then rebuild: ctor", is_a, true)
+              assert_eq(state, "nested then rebuild: field", n, 13)
+              assert_eq(state, "nested then rebuild: kept", k, 2)
+
+    # A borrowed cell is copied, never taken: both survive.
+    let original = B(9, 8)
+    let copy = copy_two(original)
+    match read_two(original) with
+    | (a1, n1, k1) ->
+        match read_two(copy) with
+        | (a2, n2, k2) ->
+            do
+              assert_eq(state, "borrowed copy: same ctor", a1 == a2, true)
+              assert_eq(state, "borrowed copy: same fields", n1 + k1, n2 + k2)
+              assert_eq(state, "borrowed copy: original intact", n1, 9)
+
+    # Collections run between the match and the rebuild.
+    match read_msg(grow_n(40, Left(0, ""))) with
+    | (n, text) ->
+        do
+          assert_eq(state, "grow: counted", n, 40)
+          assert_eq(state, "grow: string built across reuse",
+                    text, "L" ++ string.repeat("lr", 20))
+
+    match read_bag(refill_n(4, Open(0, Nil))) with
+    | (is_open, n, len) ->
+        do
+          assert_eq(state, "refill: ends on Open", is_open, true)
+          assert_eq(state, "refill: counted", n, 4)
+          assert_eq(state, "refill: lists built across the reuse", len, 20)
+
+    assert_eq(state, "tail-called cell: lists built across the reuse", tick(4, 0), 20)
+
+    # The wrapper sieve: 303 primes below 2000.
+    let n = 2000
+    let g = sieve(2, n, Grid(n, linvec_new(n, false)))
+    assert_eq(state, "grid sieve: primes below 2000", count_unset(2, n, 0, g), 303)
+    assert_eq(state, "grid sieve: freed", grid_free(g), 0)
+
+    # The lexer: 100 words of seven.
+    assert_eq(state, "lexer: words of seven", words_of_seven(run(0, 800, InSpace(0, linvec_new(16, 0)))), 100)
+
+    summary(state)

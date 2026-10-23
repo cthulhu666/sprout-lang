@@ -1,0 +1,84 @@
+module examples.csv_fields
+import stdlib.bytes as bytes
+import stdlib.linvec (LinVec, linvec_new, linvec_set, linvec_freeze)
+import stdlib.string as string
+
+# Split CSV text into rows of fields (RFC 4180): a quoted field may hold commas, and
+# `""` inside it is an escaped quote. One pass over the bytes records where each field
+# ends; the fields are then sliced out of the text. The scanner's three states have the
+# same shape, the fields found so far and their end offsets. `step` consumes the state
+# and builds the next one, so the compiler builds it in the old state's memory, even
+# when the state changes (docs/linear-reuse-v0.md): the scan allocates nothing per byte.
+#
+# Run:
+#   mise exec -- just run examples/csv_fields.sprout
+# Expected output:
+#   id | name | said | city
+#   1042 | Smith, John | "hi" twice | Krakow
+#   1043 | Ada | 3, then "bye" | Paris
+
+type linear Csv =
+  | Plain Int (LinVec Int)
+  | Quoted Int (LinVec Int)
+  | QuoteSeen Int (LinVec Int)
+
+let comma: Int = 44
+let quote: Int = 34
+let newline: Int = 10
+
+fn ends_field(c: Int) -> Bool = c == comma || c == newline
+
+fn end_field(i: Int, k: Int, ends: LinVec Int) -> LinVec Int = linvec_set(k, i, ends)
+
+# A quote inside a quoted field either closes it or, doubled, stands for itself.
+fn step(i: Int, c: Int, st: Csv) -> Csv =
+  match st with
+  | Plain k ends ->
+      if ends_field(c) then Plain(k + 1, end_field(i, k, ends))
+      else if c == quote then Quoted(k, ends)
+      else Plain(k, ends)
+  | Quoted k ends ->
+      if c == quote then QuoteSeen(k, ends) else Quoted(k, ends)
+  | QuoteSeen k ends ->
+      if c == quote then Quoted(k, ends)
+      else if ends_field(c) then Plain(k + 1, end_field(i, k, ends))
+      else Plain(k, ends)
+
+fn scan(i: Int, raw: Bytes, st: Csv) -> Csv =
+  if i >= bytes.length(raw) then st
+  else scan(i + 1, raw, step(i, bytes.get_or(raw, i, 0), st))
+
+# The offset of each field's terminating comma or newline.
+fn field_ends(raw: Bytes) -> List Int =
+  match scan(0, raw, Plain(0, linvec_new(bytes.length(raw), 0))) with
+  | Plain k ends -> first(k, ends)
+  | Quoted k ends -> first(k, ends)
+  | QuoteSeen k ends -> first(k, ends)
+
+fn first(k: Int, ends: LinVec Int) -> List Int = vec_to_list(vec_slice(0, k, linvec_freeze(ends)))
+
+fn unquote(field: String) -> String =
+  if string.starts_with(field, "\"")
+  then string.replace_all("\"\"", "\"", string.slice_between(field, 1, string.length(field) - 1))
+  else field
+
+# Cut the text at the field ends; a field that ends at a newline closes its row.
+fn rows(text: String, raw: Bytes, start: Int, ends: List Int, row: List String) -> List (List String) =
+  match ends with
+  | [] -> []
+  | [stop | rest] ->
+      let cells = Cons(unquote(string.slice_between(text, start, stop)), row)
+      in if bytes.get_or(raw, stop, 0) == newline
+         then Cons(list_reverse(cells), rows(text, raw, stop + 1, rest, []))
+         else rows(text, raw, stop + 1, rest, cells)
+
+fn parse(text: String) -> List (List String) =
+  let raw = bytes.from_string(text)
+  in rows(text, raw, 0, field_ends(raw), [])
+
+let table: String =
+  "id,name,said,city\n" ++
+  "1042,\"Smith, John\",\"\"\"hi\"\" twice\",Krakow\n" ++
+  "1043,Ada,\"3, then \"\"bye\"\"\",Paris\n"
+
+fn main() -> Unit !{IO} = list_each(\row -> print(string.join(" | ", row)), parse(table))

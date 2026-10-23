@@ -434,6 +434,9 @@ modifier survives into `ast_to_ir` would fail. The testable form of the guarante
 byte-identical IR, pinned by `tests/stdlib/compiler/test_borrow_erasure.spr`: `consuming` and
 unmodified mean the same thing to the checker, so those two sources differ by one token and must
 emit identical IR. `just ir-golden-diff` is the standing whole-corpus version of the same guard.
+One reader exists since `docs/linear-reuse-v0.md` §4.1: `ast_to_ir.owned_param_ssas` reads the
+mode to pick a reuse token, so a `borrowing` parameter that is matched and rebuilt allocates where
+an owned one reuses its cell. Every other case is still byte-identical.
 
 **Also worth recording:** a `consuming` function must genuinely *destructure* the value. `close`
 was first written as `tcp_close(tcp_connection_handle(conn))`, but that accessor is `borrowing`,

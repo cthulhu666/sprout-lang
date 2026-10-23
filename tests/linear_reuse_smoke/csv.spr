@@ -1,0 +1,53 @@
+module main
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.bytes as bytes
+
+# `just linear-reuse-smoke` compiles this with ROWS replaced and compares the runtime's
+# allocation counters across sizes: every byte steps a linear state that changes constructor
+# on a quote, and each step rebuilds it in place, allocating nothing. It prints the number
+# of fields found, which is 7 per row. An RFC 4180 splitter: a quoted field may hold commas,
+# and `""` inside it is an escaped quote.
+
+type linear Csv =
+  | Plain Int (LinVec Int)
+  | Quoted Int (LinVec Int)
+  | QuoteSeen Int (LinVec Int)
+
+fn end_field(i: Int, k: Int, ends: LinVec Int) -> LinVec Int = linvec_set(k, i, ends)
+
+fn step(i: Int, c: Int, st: Csv) -> Csv =
+  match st with
+  | Plain k ends ->
+      if c == 44 || c == 10 then Plain(k + 1, end_field(i, k, ends))
+      else if c == 34 then Quoted(k, ends)
+      else Plain(k, ends)
+  | Quoted k ends ->
+      if c == 34 then QuoteSeen(k, ends) else Quoted(k, ends)
+  | QuoteSeen k ends ->
+      if c == 34 then Quoted(k, ends)
+      else if c == 44 || c == 10 then Plain(k + 1, end_field(i, k, ends))
+      else Plain(k, ends)
+
+# The input is ROWS copies of one row, read by index so the input itself allocates nothing per row.
+fn scan(i: Int, n: Int, row: Bytes, len: Int, st: Csv) -> Csv =
+  if i >= n then st
+  else scan(i + 1, n, row, len, step(i, bytes.get_or(row, i - (i / len) * len, 0), st))
+
+fn fields(st: Csv) -> Int =
+  match st with
+  | Plain k ends ->
+      let _ = linvec_drop(ends)
+      in k
+  | Quoted k ends ->
+      let _ = linvec_drop(ends)
+      in k
+  | QuoteSeen k ends ->
+      let _ = linvec_drop(ends)
+      in k
+
+let row: String = "1042,\"Smith, John\",\"said \"\"hi\"\" twice\",2026-10-23,PL,\"Krakow\",19.99\n"
+
+fn main() -> Unit !{IO} =
+  let b = bytes.from_string(row)
+      len = bytes.length(b)
+  in print(int_to_string(fields(scan(0, len * ROWS, b, len, Plain(0, linvec_new(7 * ROWS + 1, 0))))))

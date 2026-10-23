@@ -1423,6 +1423,13 @@ o2-codegen-smoke: bootstrap-from-seed
 linvec-smoke: bootstrap-from-seed
   SPROUT_LINVEC_BIN="{{build_dir}}/compile_driver_bin_stage1" SPROUT_LINVEC_STDLIB="{{stdlib_root}}" SPROUT_LINVEC_CC_EXTRA="{{clang_extra}}" bash scripts/linvec_smoke.sh
 
+# What `just test` cannot see of in-place reuse of a consumed linear cell
+# (docs/linear-reuse-v0.md): at -O2 a Grid sieve and a CSV splitter allocate the same number
+# of objects at two input sizes, so a step allocates nothing, and print the right answer.
+[group('smoke')]
+linear-reuse-smoke: bootstrap-from-seed
+  SPROUT_REUSE_BIN="{{build_dir}}/compile_driver_bin_stage1" SPROUT_REUSE_STDLIB="{{stdlib_root}}" SPROUT_REUSE_CC_EXTRA="{{clang_extra}}" bash scripts/linear_reuse_smoke.sh
+
 # The pass A/B harness's self-check (docs/opt-passes-v0.md §M0).  Three properties,
 # each with a silent-wrong failure mode: the switch reaches emitted IR at all, the
 # pass it disables is semantics-preserving, and an unset variable leaves the
@@ -3287,7 +3294,9 @@ test-stress: bootstrap-from-seed
   # is NOT is the oracle for that split: of four broken versions, stress catches
   # one and only as a livelock, which is why the timeout above exists. The file's
   # header comment has the measured table; HDRCHECK is what names all four.
-  STRESS_FILES="tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
+  # test_linear_reuse: a reused linear cell must stay rooted across an allocating call between
+  # the match and the rebuild; `tock` is entered by a tail call, so only its own token roots it.
+  STRESS_FILES="tests/stdlib/test_linear_reuse.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
@@ -3874,6 +3883,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
     "linvec-smoke|linvec-smoke"
+    "linear-reuse-smoke|linear-reuse-smoke"
     "cpr-declare-check|cpr-declare-check"
     "opt-harness-check|opt-harness-check"
     "bundle-smoke|bundle-smoke"

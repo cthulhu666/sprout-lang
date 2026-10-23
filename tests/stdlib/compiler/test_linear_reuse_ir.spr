@@ -1,0 +1,277 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.typed_ast as typed_ast
+
+# In-place reuse of a consumed linear cell (docs/linear-reuse-v0.md §6): which
+# shapes of "match an owned linear parameter, rebuild" reuse the cell
+# (`reuse_ctor`) and which allocate (`make_ctor`). Counts are read off the
+# printed IR; the header rewrite and the missing allocation off the lowered LLVM.
+#
+# Reuse is sound only while `linear_check` keeps its premises (§4.4); each has a rejecting
+# case in tests/conformance/type_error:
+#   1. an owned parameter has no other reference at entry: borrow_consume_borrowed_param,
+#      linear_reuse, linear_bound_dup, linear_bound_konst
+#   2. its arm cannot name it again: linear_reuse_arm_names_scrutinee, linear_alias_match
+#   3. no closure captured it: lambda_capture_still_rejected, borrow_capture_in_lambda
+#   4. the runtime never builds or reads a linear constructor: the SYNC comment at
+#      `find_ctor_tag_by_name` in runtime/sprout_runtime.c
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+# The text of one function: from `marker` up to the next function header.
+fn slice_fn(text: String, marker: String, next: String) -> String =
+  if start == -1 then ""
+  else
+    let rest = str_slice(text, start + 1, str_len(text))
+        stop = str_find(rest, next)
+    in if stop == -1 then rest else str_slice(rest, 0, stop)
+  where start = str_find(text, marker)
+
+# One function of the printed IR (`fn name(`).
+fn ir_fn(text: String, name: String) -> String =
+  slice_fn(text, "\nfn " ++ name ++ "(", "\nfn ")
+
+# One function of the lowered LLVM (`define i64 @name(`).
+fn ll_fn(text: String, name: String) -> String =
+  slice_fn(text, "\ndefine i64 @" ++ name ++ "(", "\ndefine ")
+
+fn translate_pair(src: String) -> Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            finish_translate(tc)
+
+fn finish_translate(tc: typed_ast.TypedResult) -> Result String (sprout_ir.IRProgram, Dict Int) !{IO} =
+  match tc with
+  | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+  | typed_ast.TypedOk typed_prog env ->
+      ast_to_ir.translate_program(lowering.lower_program(typed_prog, env))
+
+# (printed IR, lowered LLVM) of a program, or the error text in both.
+fn render(src: String) -> (String, String) !{IO} =
+  match translate_pair(src) with
+  | Err msg -> (msg, msg)
+  | Ok pair ->
+      match pair with
+      | (ir_prog, idx_map) ->
+          (sprout_ir.print_ir_program(ir_prog),
+           ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map)))
+
+fn reuses(text: String) -> Int = count(text, "reuse_ctor")
+fn makes(text: String) -> Int = count(text, "make_ctor")
+fn allocs(ll: String) -> Int = count(ll, "call i64 @sprout_alloc_obj(")
+
+# Every shape that matches an owned parameter and rebuilds. Lambda and shadowing
+# shapes are separate programs (below): their counts are program-wide.
+let shapes_src =
+  "type linear Grid = Grid Int Int\n" ++
+  "type linear Two = | A Int Int | B Int Int\n" ++
+  "type linear Three = | C Int Int Int\n" ++
+  "type linear Mixed = | M2 Int Int | M3 Int Int Int\n" ++
+  "type linear Pair2 = P2 Int Int\n" ++
+  "class Tell a\n" ++
+  "  fn tell(x: a) -> Int\n" ++
+  "instance Tell Int\n" ++
+  "  fn tell(x: Int) -> Int = x\n" ++
+  "type linear Mix = | Plain Int | exists a. Poly a where Tell a\n" ++
+  "type Holder = | exists a. Holder Int a where linear a\n" ++
+  "wrap linear Token = Int\n" ++
+  "fn drop_grid(g: Grid) -> Int = match g with | Grid a _ -> a\n" ++
+  "fn drop_two(t: Two) -> Int = match t with | A a _ -> a | B a _ -> a\n" ++
+  "fn owned(g: Grid) -> Grid = match g with | Grid n k -> Grid(n + 1, k)\n" ++
+  "fn borrowed(g: borrowing Grid) -> Grid = match g with | Grid n k -> Grid(n, k)\n" ++
+  "fn twice(g: Grid) -> (Grid, Grid) = match g with | Grid n k -> (Grid(n, k), Grid(k, n))\n" ++
+  "fn branches(c: Bool, g: Grid) -> Grid =\n" ++
+  "  match g with\n" ++
+  "  | Grid n k -> if c then Grid(n + 1, k) else Grid(n, k + 1)\n" ++
+  "fn after_join(c: Bool, g: Grid) -> (Int, Grid) =\n" ++
+  "  match g with\n" ++
+  "  | Grid n k ->\n" ++
+  "      let a = if c then drop_grid(Grid(n, k)) else 0\n" ++
+  "      in (a, Grid(n, k))\n" ++
+  "fn conv(m: Mix) -> Mix =\n" ++
+  "  match m with\n" ++
+  "  | Plain n -> Poly(n)\n" ++
+  "  | Poly _ -> Plain(0)\n" ++
+  "fn upd(h: Holder) -> Holder =\n" ++
+  "  match h with\n" ++
+  "  | Holder n x -> Holder(n + 1, x)\n" ++
+  "fn via_let(g: Grid) -> Grid =\n" ++
+  "  let Grid n k = g\n" ++
+  "  in Grid(n + 1, k)\n" ++
+  "fn wrap_bump(t: Token) -> Token = match t with | Token n -> Token(n + 1)\n" ++
+  "fn loop(i: Int, g: Grid) -> Grid =\n" ++
+  "  if i >= 10 then g\n" ++
+  "  else loop(i + 1, match g with | Grid n k -> Grid(n + 1, k))\n" ++
+  "fn shadow(c: Grid, h: borrowing Grid) -> Grid =\n" ++
+  "  let _ = drop_grid(c)\n" ++
+  "  in match h with\n" ++
+  "     | c -> match c with | Grid n k -> Grid(n, k)\n" ++
+  "fn wild(t: Two) -> Two =\n" ++
+  "  match t with\n" ++
+  "  | A n k -> A(n, k)\n" ++
+  "  | _ -> B(0, 0)\n" ++
+  "fn var_arm(t: Two) -> (Int, Two) =\n" ++
+  "  match t with\n" ++
+  "  | A n k -> (n, A(n, k))\n" ++
+  "  | other -> (drop_two(other), B(1, 1))\n" ++
+  "fn let_else(t: Two) -> Two =\n" ++
+  "  let A n k = t else B(0, 0)\n" ++
+  "  in A(n + 1, k)\n" ++
+  "fn flip(t: Two) -> Two =\n" ++
+  "  match t with\n" ++
+  "  | A n k -> B(n, k)\n" ++
+  "  | B n k -> A(n, k)\n" ++
+  "fn widen(t: Two) -> Three =\n" ++
+  "  match t with\n" ++
+  "  | A n k -> C(n, k, 0)\n" ++
+  "  | B n k -> C(k, n, 0)\n" ++
+  "fn grow(m: Mixed) -> Mixed =\n" ++
+  "  match m with\n" ++
+  "  | M2 a b -> M3(a, b, 0)\n" ++
+  "  | M3 a b _ -> M2(a, b)\n" ++
+  "fn retype(t: Two) -> Pair2 =\n" ++
+  "  match t with\n" ++
+  "  | A n k -> P2(n, k)\n" ++
+  "  | B n k -> P2(k, n)\n" ++
+  "fn nested(a: Grid, b: Grid) -> Grid =\n" ++
+  "  match a with\n" ++
+  "  | Grid n k -> match b with | Grid m j -> Grid(n + m, k + j)\n" ++
+  "fn nested_back(a: Grid, b: Grid) -> (Int, Grid) =\n" ++
+  "  match a with\n" ++
+  "  | Grid n k ->\n" ++
+  "      let s = (match b with | Grid m j -> m + j)\n" ++
+  "      in (s, Grid(n, k))\n"
+
+# A rebuild inside a closure may run 0..n times, so it never takes the outer token.
+let lambda_src =
+  "type linear Grid = Grid Int Int\n" ++
+  "fn drop_grid(g: Grid) -> Int = match g with | Grid a _ -> a\n" ++
+  "fn apply(f: Int -> Int, x: Int) -> Int = f(x)\n" ++
+  "fn in_lambda(g: Grid) -> Int =\n" ++
+  "  match g with\n" ++
+  "  | Grid n k -> apply(\\x -> drop_grid(Grid(x, k)), n)\n"
+
+# The lambda's `borrowing` parameter has the outer owned parameter's name, so it
+# resolves to the same `%p$g`. Matching it must not reuse the lender's cell.
+let lambda_shadow_src =
+  "type linear Grid = Grid Int Int\n" ++
+  "fn drop_grid(g: Grid) -> Int = match g with | Grid a _ -> a\n" ++
+  "fn with_grid(g: Grid, work: (borrowing Grid) -> Int) -> Int =\n" ++
+  "  do\n" ++
+  "    let r = work(g)\n" ++
+  "    r + drop_grid(g)\n" ++
+  "fn lam_shadow(g: Grid) -> Int =\n" ++
+  "  with_grid(g, \\(g: borrowing Grid) -> match g with | Grid a b -> drop_grid(Grid(a, b)))\n"
+
+fn check_shapes(state: TestState, ir: String, ll: String) -> Unit !{IO} =
+  do
+    assert_true(state, "shapes program translates", contains(ir, "fn owned("))
+
+    let owned_ir = ir_fn(ir, "owned")
+    assert_eq(state, "owned match-and-rebuild: reuse_ctor", reuses(owned_ir), 1)
+    assert_eq(state, "owned match-and-rebuild: no make_ctor", makes(owned_ir), 0)
+    assert_eq(state, "owned match-and-rebuild: no sprout_alloc_obj", allocs(ll_fn(ll, "owned")), 0)
+    assert_false(state, "same constructor: header untouched", contains(ll_fn(ll, "owned"), "16383"))
+
+    assert_eq(state, "borrowing parameter: no reuse", reuses(ir_fn(ir, "borrowed")), 0)
+    assert_eq(state, "borrowing parameter: allocates", makes(ir_fn(ir, "borrowed")), 1)
+
+    assert_eq(state, "two rebuilds on one path: one reuse", reuses(ir_fn(ir, "twice")), 1)
+    assert_eq(state, "two rebuilds on one path: one make", makes(ir_fn(ir, "twice")), 1)
+
+    assert_eq(state, "rebuild in each if branch: both reuse", reuses(ir_fn(ir, "branches")), 2)
+    assert_eq(state, "rebuild in each if branch: none allocates", makes(ir_fn(ir, "branches")), 0)
+
+    assert_eq(state, "branch rebuild then join rebuild: one reuse", reuses(ir_fn(ir, "after_join")), 1)
+    assert_eq(state, "branch rebuild then join rebuild: one make", makes(ir_fn(ir, "after_join")), 1)
+
+    assert_eq(state, "constrained existential vs plain ctor: no reuse", reuses(ir_fn(ir, "conv")), 0)
+    assert_eq(state, "constrained existential vs plain ctor: both allocate", makes(ir_fn(ir, "conv")), 2)
+
+    assert_eq(state, "where-linear bound type: reuses", reuses(ir_fn(ir, "upd")), 1)
+    assert_eq(state, "where-linear bound type: no make", makes(ir_fn(ir, "upd")), 0)
+
+    assert_eq(state, "sole ctor from a match: reuses", reuses(ir_fn(ir, "owned")), 1)
+    assert_eq(state, "sole ctor from let-destructure: reuses", reuses(ir_fn(ir, "via_let")), 1)
+    assert_eq(state, "sole ctor from let-destructure: no make", makes(ir_fn(ir, "via_let")), 0)
+
+    assert_eq(state, "wrap linear pattern: no token", reuses(ir_fn(ir, "wrap_bump")), 0)
+    assert_eq(state, "wrap linear pattern: no allocation", makes(ir_fn(ir, "wrap_bump")), 0)
+
+    let loop_ir = ir_fn(ir, "loop")
+    assert_eq(state, "tail-recursive loop: reuse in the body", reuses(loop_ir), 1)
+    assert_eq(state, "tail-recursive loop: no make", makes(loop_ir), 0)
+    assert_true(state, "tail-recursive loop: loops back", contains(loop_ir, "tco_back"))
+
+    assert_eq(state, "borrowed value under a shadowing pattern: no reuse", reuses(ir_fn(ir, "shadow")), 0)
+    assert_eq(state, "borrowed value under a shadowing pattern: allocates", makes(ir_fn(ir, "shadow")), 1)
+
+    assert_eq(state, "`_` arm: only the constructor arm reuses", reuses(ir_fn(ir, "wild")), 1)
+    assert_eq(state, "`_` arm: allocates", makes(ir_fn(ir, "wild")), 1)
+    assert_eq(state, "variable arm: only the constructor arm reuses", reuses(ir_fn(ir, "var_arm")), 1)
+    assert_eq(state, "variable arm: allocates", makes(ir_fn(ir, "var_arm")), 1)
+    assert_eq(state, "let..else fallback: only the matched arm reuses", reuses(ir_fn(ir, "let_else")), 1)
+    assert_eq(state, "let..else fallback: allocates", makes(ir_fn(ir, "let_else")), 1)
+
+    assert_eq(state, "another constructor, same type and field count: both reuse", reuses(ir_fn(ir, "flip")), 2)
+    assert_eq(state, "another constructor: no make", makes(ir_fn(ir, "flip")), 0)
+    assert_eq(state, "another constructor: no sprout_alloc_obj", allocs(ll_fn(ll, "flip")), 0)
+    assert_true(state, "another constructor: header rewritten", contains(ll_fn(ll, "flip"), "16383"))
+
+    assert_eq(state, "another type, same field count: no reuse", reuses(ir_fn(ir, "widen")), 0)
+    assert_eq(state, "another type: allocates", makes(ir_fn(ir, "widen")), 2)
+    assert_eq(state, "another field count, same type: no reuse", reuses(ir_fn(ir, "grow")), 0)
+    assert_eq(state, "another field count: allocates", makes(ir_fn(ir, "grow")), 2)
+    assert_eq(state, "another type, same shape: no reuse", reuses(ir_fn(ir, "retype")), 0)
+    assert_eq(state, "another type, same shape: allocates", makes(ir_fn(ir, "retype")), 2)
+
+    assert_eq(state, "nested match: the inner token is reused", reuses(ir_fn(ir, "nested")), 1)
+    assert_eq(state, "nested match: nothing allocates", makes(ir_fn(ir, "nested")), 0)
+    assert_eq(state, "nested match: the outer token returns at the join", reuses(ir_fn(ir, "nested_back")), 1)
+    assert_eq(state, "nested match: rebuild after the join does not allocate", makes(ir_fn(ir, "nested_back")), 0)
+
+fn check_lambda(state: TestState, ir: String) -> Unit !{IO} =
+  do
+    assert_true(state, "lambda program translates", contains(ir, "fn in_lambda("))
+    assert_eq(state, "rebuild inside a lambda: no reuse", reuses(ir), 0)
+    assert_eq(state, "rebuild inside a lambda: allocates", makes(ir), 1)
+
+fn check_lambda_shadow(state: TestState, ir: String) -> Unit !{IO} =
+  do
+    assert_true(state, "lambda shadow program translates", contains(ir, "fn lam_shadow("))
+    assert_eq(state, "lambda borrowing parameter named like an owned one: no reuse", reuses(ir), 0)
+    assert_eq(state, "lambda borrowing parameter named like an owned one: allocates", makes(ir), 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    (ir, ll) <- render(shapes_src)
+    check_shapes(state, ir, ll)
+    (lam_ir, _) <- render(lambda_src)
+    check_lambda(state, lam_ir)
+    (shadow_ir, _) <- render(lambda_shadow_src)
+    check_lambda_shadow(state, shadow_ir)
+    summary(state)

@@ -119,6 +119,8 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRRetUnboxed3 _ _ _ _ -> false
   # IRMakeCtor lowers to @sprout_makeN which always allocates; trigger.
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
+  # IRReuseCtor writes into a cell that already exists: no allocation, no trigger.
+  | sprout_ir.IRReuseCtor _ _ _ _ _ _ -> false
   # IRMkClosure allocates env via @sprout_alloc_closure; trigger. With no captures it
   # is a static constant (ir_lowering) and allocates nothing.
   | sprout_ir.IRMkClosure _ _ _ caps -> ! sprout_ir.closure_is_static (caps)
@@ -214,6 +216,8 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   # IRPrintStr produces the i64 return of @print_str/@eprint_str (0/unit) — a scalar.
   | sprout_ir.IRPrintStr _ _ _ -> Nothing
   | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
+  # The result is the token's cell: still a heap value.
+  | sprout_ir.IRReuseCtor r _ _ _ _ _ -> Just(r)
   # Closure value is heap-allocated (an env pointer packed as i64), unless it has no
   # captures: that one is a static constant, outside the heap.
   | sprout_ir.IRMkClosure r _ _ caps ->
@@ -478,6 +482,9 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRPrintStr _ _ arg -> Cons(arg, Nil)
   | sprout_ir.IRStrFromInt _ n -> Cons(n, Nil)
   | sprout_ir.IRMakeCtor _ _ _ args -> args
+  # The token is a use, so it is live from the match to the rebuild and is rooted
+  # across every trigger between them: a swept cell would take a freelist link in word 0.
+  | sprout_ir.IRReuseCtor _ token _ _ _ args -> Cons(token, args)
   | sprout_ir.IRMkClosure _ _ _ caps -> caps
   | sprout_ir.IRApplyClosure _ callee args -> Cons(callee, args)
   | sprout_ir.IRLoadEnvSlot _ env _ _ -> Cons(env, Nil)
@@ -560,6 +567,7 @@ fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRPrintStr r _ _ -> Just(r)
   | sprout_ir.IRStrFromInt r _ -> Just(r)
   | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
+  | sprout_ir.IRReuseCtor r _ _ _ _ _ -> Just(r)
   | sprout_ir.IRMkClosure r _ _ _ -> Just(r)
   | sprout_ir.IRApplyClosure r _ _ -> Just(r)
   | sprout_ir.IRLoadEnvSlot r _ _ _ -> Just(r)
@@ -874,6 +882,8 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRStrCompare _ _ _ _ -> false
   | sprout_ir.IRPrintStr _ _ _ -> false
   | sprout_ir.IRStrFromInt _ _ -> false
+  # Never reached (not a trigger); nothing allocates between its operands and the stores.
+  | sprout_ir.IRReuseCtor _ _ _ _ _ _ -> false
   | sprout_ir.IRApplyClosure _ _ _ -> false
   | sprout_ir.IRLoadEnvSlot _ _ _ _ -> false
   | sprout_ir.IRRoot _ _ _ -> false
