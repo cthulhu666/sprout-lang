@@ -161,14 +161,32 @@ Breaking for a published linear type with an untracked field. In our four repos:
 - Relaxing the rule to accept `(File, File)` and `Maybe File` (§4, the last rejected criterion),
   if a real program needs it. It needs a published/abstract mark on every type, visible across
   modules, and is not breaking.
-- Narrowing the trusted module: a non-linear binder destructured from a *borrowed* linear value may
-  not escape (be returned, captured or stored). `linear_check`'s escape walk (`esc_value`) is the
-  place. It catches `linvec_get` returning its `Vector`. A mode on non-linear binders, the stronger
-  form, was rejected: M4.6 moved modes onto function types, and it needs borrowing extern
-  parameters. Its premise, that only `stdlib.linvec` and `stdlib.mutable` can write a `Vector` in
-  place, was false until `docs/extern-visibility-v0.md`: any importer of `stdlib.mutable` could
-  call `vector_mutset`. Now a module can do so only if it is one of those two or declares the
-  extern itself.
+- Narrowing the trusted module: deferred (2026-10-23). In a linear type's own module, today's
+  checker accepts all of these with `wrap linear Box = Vector Int`:
+  - from `b: borrowing Box`, `Box raw -> raw`, `Box raw -> \_ -> vector_length(raw)` and
+    `Box raw -> Just(raw)`;
+  - from an owned `b: Box`, `Box raw -> (raw, Box(raw))`.
+
+  An alias does harm only where a `Vector` is written in place: `linvec_set` in `stdlib.linvec`,
+  and `vector_mutset`, `vector_push` and `vector_truncate` in `stdlib.mutable`. Those three are
+  private externs (`docs/extern-visibility-v0.md`), so another module reaches them only by
+  declaring one itself, which is deliberate FFI. Elsewhere the alias is harmless.
+
+  Three rules were weighed:
+  - A rule on borrowed binders alone, in `linear_check`'s escape walk (`esc_value`), would catch
+    `linvec_get` returning its `Vector`. It leaves the owned duplicate open, and `id(raw)`, since
+    calls are not tracked.
+  - A rule that is blind to type would reject `net`'s `tcp_connection_handle`, which returns an
+    `Int` from a borrow.
+  - A rule that exempts only scalars would reject a borrowed `String` accessor, with no way
+    around it.
+
+  Rust rejects moving out of a borrow ("A borrowed value was moved out", E0507) unless the type is
+  `Copy`. Swift makes borrowing parameters "not implicitly copyable", with an explicit `copy x`
+  (SE-0377). Sprout has neither, so `linvec.sprout`'s trust comment stays the guard. A mode on
+  non-linear binders, the stronger form, was rejected earlier: M4.6 moved modes onto function
+  types, and it needs borrowing extern parameters. A fix should cover the owned and borrowed
+  cases together (BACKLOG).
 
 ## 8. Tests
 

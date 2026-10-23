@@ -234,9 +234,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   orphan-instance rule, or the writing module on `ast.InstanceDecl` (74 sites, 18 files).
   Recorded in `spec-v0.md` §5.6.4. It also lets any module copy an abstract linear record's
   untracked field (`docs/linear-publish-v0.md` §5.3).
-- [ ] `P3` **A field unwrapped from a borrowed linear value can escape its module's code.** Inside
-  a linear type's module, `match arr with | LinVec raw -> raw` from a borrowed `arr` returns an
-  alias. Extend `linear_check.esc_value` so such a binder cannot be returned, captured or stored
+- [ ] `P3` **`LinVec`'s module is trusted, not checked, not to alias its `Vector`.** Inside
+  `stdlib.linvec`, a raw `Vector` unwrapped from a borrowed `LinVec` can be returned, captured or
+  stored, and one from an owned `LinVec` can be duplicated as `(raw, LinVec(raw))`. Both alias
+  what `linvec_set` writes in place. Only a comment guards it. A rule for borrowed binders alone
+  was declined: it leaves the owned case and `id(raw)` open, and Sprout has no `Copy` or `copy`
+  to exempt harmless fields. Revisit with a mechanism that covers both cases
   (`docs/linear-publish-v0.md` §7).
 - [ ] `P3` **An unresolved name under a renamed alias gets no "declared here" note.** The note that
   names the module declaring an unexported symbol (`infer.unresolved_name_hint`) searches the
