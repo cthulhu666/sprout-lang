@@ -233,11 +233,11 @@ A cell is reused only if nothing else can reach it. Each premise below is today'
    hands one to the scheduler until `__chan_recv`. That is a move, after which the sender cannot
    name it.
 
-The known holes in `linear_check` (BACKLOG P2 *wildcard … consume or leak*; P3 *a field
-unwrapped from a borrowed linear value*) concern leaks and the inner value of a `wrap`, not the
-cell of a boxed linear ADT. A future hole that lets an owned linear cell alias would now corrupt
-memory, where before it only broke a resource discipline. The reuse smoke and the premise tests
-are the guard.
+The known hole in `linear_check` (BACKLOG P3 *a field unwrapped from a borrowed linear value*)
+concerns the inner value of a `wrap`, not the cell of a boxed linear ADT. The wildcard leak
+that sat beside it is closed (`docs/linear-wildcard-v0.md`). A future hole that lets an owned
+linear cell alias would now corrupt memory, where before it only broke a resource discipline.
+The reuse smoke and the premise tests are the guard.
 
 ## 5. Impact
 

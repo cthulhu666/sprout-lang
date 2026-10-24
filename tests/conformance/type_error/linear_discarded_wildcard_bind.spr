@@ -7,6 +7,7 @@ import stdlib.task (Scope, with_scope, task_fork)
 fn body(s: Scope) -> Int !{IO} =
   do
     _ <- task_fork(s, \_ -> 41)
+#~^ ERROR
     7
 
 fn main() -> Unit !{IO} = print(to_string(with_scope(body)))

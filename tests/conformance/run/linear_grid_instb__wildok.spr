@@ -1,0 +1,17 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Take t
+  fn take(x: t) -> t
+
+instance Take (Maybe a) where linear a
+  fn take(x: Maybe a) -> Maybe a = match (x, 0) with | (y, _) -> y
+
+fn eat(m: Maybe L) -> Int = match m with | Just l -> close(l) | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(eat(take(Just (L(1))))))

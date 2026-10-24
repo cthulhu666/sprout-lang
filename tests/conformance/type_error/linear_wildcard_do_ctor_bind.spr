@@ -1,0 +1,15 @@
+# `Wrap _ <- m` binds `m`'s payload to a temporary and matches it, so the `_`
+# is a constructor field like any other. Reported at the `_`.
+
+type linear Conn = Conn Int
+type linear Wrap = Wrap Conn
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(m: Maybe Wrap) -> Maybe Int =
+  do
+    Wrap _ <- m
+#~^ ERROR
+    Just(0)
+
+fn main() -> Unit !{IO} = print(to_string(drop(Just (Wrap (Conn(1))))))

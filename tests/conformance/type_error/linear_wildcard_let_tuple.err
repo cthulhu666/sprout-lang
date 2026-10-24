@@ -1,0 +1,1 @@
+`_` drops a linear value of type `(Conn, Int)` without consuming it. Bind it and pass it on, or match its constructor and consume its linear fields.

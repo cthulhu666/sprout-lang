@@ -1,0 +1,13 @@
+# `linear_wildcard_let_in.spr` with its error's hint applied.
+
+type linear Conn = Conn Int
+
+fn open(n: Int) -> Conn = Conn(n)
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop() -> Int =
+  let c = open(1)
+  in close(c)
+
+fn main() -> Unit !{IO} = print(int_to_string(drop()))

@@ -1106,7 +1106,7 @@ fn lin_match_arms(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBra
                   sc_c: List LinUse, sc_b: List LinUse, try_pos: Maybe source.SourcePos,
                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match arm_sets(arms, sc, typed_ast.typed_expr_type(scrut),
-                 expr_is_borrowed_binding(scrut, sc), try_pos, env) with
+                 expr_is_borrowed_binding(scrut, sc), Nil, try_pos, env) with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk mc mb -> seq2(sc_c, sc_b, mc, mb)
 
@@ -1125,20 +1125,27 @@ fn expr_is_borrowed_binding(e: typed_ast.TypedExpr, sc: LinScope) -> Bool =
 # exactly once inside the arm) when the scrutinee is owned, borrowed (never
 # consumed) when it came from a borrow. Either way they are removed before the
 # convergence comparison.
+#
+# `taken` names the constructors earlier arms have matched whole, which a later
+# `_` can no longer reach (`arm_wildcard_drop`).
 fn arm_sets(arms: List typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
-            from_borrow: Bool, try_pos: Maybe source.SourcePos, env: Dict types.Scheme) -> LinRes =
+            from_borrow: Bool, taken: List String, try_pos: Maybe source.SourcePos,
+            env: Dict types.Scheme) -> LinRes =
   match arms with
   | Nil -> LinOk(Nil, Nil)
-  | [br] -> arm_consumed(br, sc, scrut_type, from_borrow, env)
+  | [br] -> arm_consumed(br, sc, scrut_type, from_borrow, taken, env)
   | Cons br rest ->
-      match arm_consumed(br, sc, scrut_type, from_borrow, env) with
+      match arm_consumed(br, sc, scrut_type, from_borrow, taken, env) with
       | LinErr p m -> LinErr(p, m)
-      | LinOk ac ab -> arm_sets_rest(rest, ac, ab, arm_pos(br), sc, scrut_type, from_borrow, try_pos, env)
+      | LinOk ac ab ->
+          arm_sets_rest(rest, ac, ab, arm_pos(br), sc, scrut_type, from_borrow,
+                        list_append(arm_takes(br), taken), try_pos, env)
 
 fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: List LinUse,
                  at: source.SourcePos, sc: LinScope, scrut_type: types.Type,
-                 from_borrow: Bool, try_pos: Maybe source.SourcePos, env: Dict types.Scheme) -> LinRes =
-  match arm_sets(rest, sc, scrut_type, from_borrow, try_pos, env) with
+                 from_borrow: Bool, taken: List String, try_pos: Maybe source.SourcePos,
+                 env: Dict types.Scheme) -> LinRes =
+  match arm_sets(rest, sc, scrut_type, from_borrow, taken, try_pos, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at, try_pos, scope_at_most(sc))
 
@@ -1146,12 +1153,15 @@ fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: Lis
 # `scope_shadow` gets EVERY binder, because a non-linear pattern variable must still
 # shadow a linear binding of the same name.
 fn arm_consumed(br: typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
-                from_borrow: Bool, env: Dict types.Scheme) -> LinRes =
+                from_borrow: Bool, taken: List String, env: Dict types.Scheme) -> LinRes =
   match br with
   | typed_ast.TypedMatchBranch pat body ->
-      scope_consumed(pattern_linear_binders(pat, scrut_type, env), from_borrow, body,
-                     typed_ast.typed_expr_pos(body),
-                     scope_shadow(ast.pattern_names(pat), sc), env)
+      match arm_wildcard_drop(pat, scrut_type, from_borrow, taken, env) with
+      | Just (p, m) -> LinErr(p, m)
+      | Nothing ->
+          scope_consumed(pattern_linear_binders(pat, scrut_type, env), from_borrow, body,
+                         typed_ast.typed_expr_pos(body),
+                         scope_shadow(ast.pattern_names(pat), sc), env)
 
 # Check `body` with `binders` in scope. Owned binders must each be consumed
 # exactly once inside (reuse is caught by seq2; a leftover binder is a leak);
@@ -1194,6 +1204,160 @@ fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
   match br with
   | typed_ast.TypedMatchBranch _ body -> typed_ast.typed_expr_pos(body)
 
+# --- `_` over an owned linear value (docs/linear-wildcard-v0.md) ---
+#
+# Use is syntactic, so a scrutinee referenced once is consumed and no binder rule
+# sees a `_` drop what it matched. A `_` is a leak when it can match a value that
+# holds linear content, at an owned position:
+#   1. nested (a constructor field or tuple component): the position's type
+#      mentions a linear type;
+#   2. a whole arm: the scrutinee's type mentions one, except that over a
+#      non-linear ADT it leaks only if a constructor it can still match has a
+#      linear field. A linear type, a tuple, a record or a type variable gets no
+#      refinement.
+# A borrowed scrutinee consumes nothing, so it is exempt.
+
+fn wildcard_value_msg(t: types.Type, env: Dict types.Scheme) -> String =
+  "`_` drops a linear value of type `" ++ type_text(t, env) ++ "` without consuming it. "
+    ++ "Bind it and pass it on, or match its constructor and consume its linear fields."
+
+# Where a nested `_` stands, for its diagnostic: a field of a constructor (its name,
+# the field's index and the constructor's arity), a tuple component, or the whole
+# pattern (rule 2's, which the caller decides).
+type WildcardSlot (..) =
+  | SlotWhole
+  | SlotField String Int Int
+  | SlotComponent
+
+fn wildcard_field_msg(t: types.Type, slot: WildcardSlot, env: Dict types.Scheme) -> String =
+  "`_` drops a linear field of type `" ++ type_text(t, env) ++ "`. " ++ field_bind_hint(slot)
+    ++ " and consume it."
+
+fn field_bind_hint(slot: WildcardSlot) -> String =
+  match slot with
+  | SlotWhole -> "Bind it"
+  | SlotComponent -> "Bind it to a name"
+  | SlotField ctor idx arity -> "Bind it, as in `" ++ field_example(ctor, idx, arity) ++ "`,"
+
+# `Wrap c` for the first of one field, `Pair c _` for the first of two.
+fn field_example(ctor: String, idx: Int, arity: Int) -> String =
+  string.join(" ", Cons(string.after_last_dot(ctor), field_example_args(idx, arity, 0)))
+
+fn field_example_args(idx: Int, arity: Int, i: Int) -> List String =
+  if i >= arity then Nil
+  else Cons(if i == idx then "c" else "_", field_example_args(idx, arity, i + 1))
+
+# Rule 1 under `pat`, matched against `t`: the first `_` at a field or component
+# whose type mentions a linear type, with its position and message. The `_` that
+# IS the whole pattern is not reported here (see `arm_wildcard_drop`).
+fn wildcard_drop(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  pattern_drop(pat, t, SlotWhole, env)
+
+fn pattern_drop(pat: ast.Pattern, t: types.Type, slot: WildcardSlot,
+                env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  match pat with
+  | ast.WildcardPattern pos -> slot_drop(slot, pos, t, env)
+  | ast.VarPattern _ _ -> Nothing
+  | ast.IntPattern _ _ -> Nothing
+  | ast.BoolPattern _ _ -> Nothing
+  | ast.StringPattern _ _ -> Nothing
+  | ast.CharPattern _ _ -> Nothing
+  | ast.UnitPattern _ -> Nothing
+  | ast.TuplePattern pats _ ->
+      match t with
+      | types.TTuple items -> slots_drop(pats, items, Nothing, 0, list_length(pats), env)
+      | _ -> Nothing
+  | ast.ConstructorPattern ctor subpats pos ->
+      match ctor_field_types_at(ctor, pos, t, env) with
+      | Just field_tys -> slots_drop(subpats, field_tys, Just(ctor), 0, list_length(subpats), env)
+      | Nothing -> Nothing
+
+fn slot_drop(slot: WildcardSlot, pos: source.SourcePos, t: types.Type,
+             env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  match slot with
+  | SlotWhole -> Nothing
+  | SlotField _ _ _ -> field_drop(slot, pos, t, env)
+  | SlotComponent -> field_drop(slot, pos, t, env)
+
+fn field_drop(slot: WildcardSlot, pos: source.SourcePos, t: types.Type,
+              env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  if type_mentions_linear(t, env) then Just((pos, wildcard_field_msg(t, slot, env))) else Nothing
+
+# The sub-patterns of one constructor (`owner` names it) or tuple, against the
+# types of its fields or components.
+fn slots_drop(pats: List ast.Pattern, tys: List types.Type, owner: Maybe String, idx: Int,
+              arity: Int, env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  match (pats, tys) with
+  | (Cons p prest, Cons ft trest) ->
+      match pattern_drop(p, ft, slot_of(owner, idx, arity), env) with
+      | Just found -> Just(found)
+      | Nothing -> slots_drop(prest, trest, owner, idx + 1, arity, env)
+  | _ -> Nothing
+
+fn slot_of(owner: Maybe String, idx: Int, arity: Int) -> WildcardSlot =
+  match owner with
+  | Just ctor -> SlotField(ctor, idx, arity)
+  | Nothing -> SlotComponent
+
+# The diagnostic for an arm's own pattern, when the scrutinee is owned.
+fn arm_wildcard_drop(pat: ast.Pattern, scrut_type: types.Type, from_borrow: Bool,
+                     taken: List String, env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+  if from_borrow then Nothing
+  else
+    match pat with
+    | ast.WildcardPattern pos ->
+        if whole_wildcard_leaks(scrut_type, taken, pos, env)
+        then Just((pos, wildcard_value_msg(scrut_type, env)))
+        else Nothing
+    | _ -> wildcard_drop(pat, scrut_type, env)
+
+# Rule 2. `taken` are the constructors earlier arms matched whole.
+fn whole_wildcard_leaks(t: types.Type, taken: List String, pos: source.SourcePos,
+                        env: Dict types.Scheme) -> Bool =
+  if ! type_mentions_linear (t, env) then false
+  else if type_is_linear(t, env) then true
+  else
+    match type_ctors(t, env) with
+    | Nothing -> true
+    | Just ctors -> any(\c -> ctor_holds_linear(c, pos, t, env), reachable_ctors(ctors, taken))
+
+fn reachable_ctors(ctors: List String, taken: List String) -> List String =
+  list_filter(\c -> ! list_member (c, taken), ctors)
+
+# Read through `types.ctors_marker_key`. A type without the marker (a record, an
+# extern, a type variable, a tuple) has no list, and so no refinement.
+fn type_ctors(t: types.Type, env: Dict types.Scheme) -> Maybe (List String) =
+  match dict_get(types.ctors_marker_key(head_type_name(t)), env) with
+  | Just marker -> Just(types.ctors_of(marker))
+  | Nothing -> Nothing
+
+# A constructor the env does not know counts as holding one: the answer that
+# rejects rather than accepts.
+fn ctor_holds_linear(ctor: String, pos: source.SourcePos, t: types.Type,
+                     env: Dict types.Scheme) -> Bool =
+  match ctor_field_types_at(ctor, pos, t, env) with
+  | Just field_tys -> any(\ft -> type_mentions_linear(ft, env), field_tys)
+  | Nothing -> true
+
+# The constructor an arm takes out of play for the arms after it: one whose
+# sub-patterns all match anything (a variable, `_`, unit, or a tuple of those).
+# Anything refutable leaves the constructor matchable.
+fn arm_takes(br: typed_ast.TypedMatchBranch) -> List String =
+  match br with
+  | typed_ast.TypedMatchBranch pat _ -> pattern_takes(pat)
+
+fn pattern_takes(pat: ast.Pattern) -> List String =
+  match pat with
+  | ast.ConstructorPattern ctor subpats _ -> if all(ast.pattern_irrefutable, subpats) then [ctor] else Nil
+  | ast.WildcardPattern _ -> Nil
+  | ast.VarPattern _ _ -> Nil
+  | ast.IntPattern _ _ -> Nil
+  | ast.BoolPattern _ _ -> Nil
+  | ast.StringPattern _ _ -> Nil
+  | ast.CharPattern _ _ -> Nil
+  | ast.UnitPattern _ -> Nil
+  | ast.TuplePattern _ _ -> Nil
+
 # Does THIS bind short-circuit? `Maybe` short-circuits on Nothing and `Result e`
 # is left-biased on the first Err (spec-v0.md §5.9), so the steps AFTER such a bind
 # are conditional: on failure the enclosing function returns and they never run.
@@ -1234,9 +1398,6 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, fallible: Bool, rest: L
   | LinOk ec eb -> lin_do_bind_checked(pat, do_bind_type(typed_ast.typed_expr_type(e), env),
                                        ec, eb, e, fallible, rest, sc, env)
 
-let wildcard_bind_msg: String =
-  "`_ <-` discards a linear value: a wildcard binds no name, so nothing can consume it (linear values must be used exactly once); bind a name and consume it"
-
 # `_ <- e` binds no name, so `pattern_linear_binders` yields nothing and the
 # binder-keyed rules attach no obligation — the payload is dropped exactly as a
 # bare step would drop it. Rejecting it is not optional politeness: the
@@ -1245,25 +1406,27 @@ let wildcard_bind_msg: String =
 # caught (a named binder that is never used is a leak), so this closes a
 # one-character gap between two spellings of the same mistake.
 #
-# Only a WILDCARD is treated this way. A constructor pattern that drops a linear
-# FIELD (`Wrap _ <- …`) is the separate open question of whether destructuring
-# discharges the obligation for what it does not bind — filed in BACKLOG, not
-# decided here.
+# A tuple pattern reaches here too (`(_, n) <- e` is lowered directly) and takes
+# the field rule. A constructor pattern (`Wrap _ <- e`) does not: it arrives as a
+# match over a temporary (ast.do_pat_steps), so `arm_consumed` covers it.
 fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
                        eb: List LinUse, e: typed_ast.TypedExpr, fallible: Bool,
                        rest: List typed_ast.TypedDoStep,
                        sc: LinScope, env: Dict types.Scheme) -> LinRes =
-  if wildcard_discards_linear(pat, bind_type, env) then
-    LinErr(typed_ast.typed_expr_pos(e), wildcard_bind_msg)
-  else
-    lin_do_bind_rest(pattern_linear_binders(pat, bind_type, env),
-                     ec, eb, e, fallible, rest, sc, env)
+  match bind_wildcard_drop(pat, bind_type, e, env) with
+  | Just (p, m) -> LinErr(p, m)
+  | Nothing ->
+      lin_do_bind_rest(pattern_linear_binders(pat, bind_type, env),
+                       ec, eb, e, fallible, rest, sc, env)
 
-fn wildcard_discards_linear(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Bool =
+# A bare `_` is reported at `e`, a `_` inside a tuple at itself.
+fn bind_wildcard_drop(pat: ast.Pattern, t: types.Type, e: typed_ast.TypedExpr,
+                      env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
   match pat with
-  | ast.WildcardPattern _ -> type_mentions_linear(t, env)
-  | _ -> false
-
+  | ast.WildcardPattern _ ->
+      if type_mentions_linear(t, env) then Just((typed_ast.typed_expr_pos(e), wildcard_value_msg(t, env)))
+      else Nothing
+  | _ -> wildcard_drop(pat, t, env)
 
 fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, fallible: Bool, rest: List typed_ast.TypedDoStep,
@@ -1525,8 +1688,11 @@ fn lin_do_let_close(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb:
   if ! is_lin then seq2(rc, rb, restc, restb)
   else if luse_member(name, restc) then
     seq2(rc, rb, luse_remove(name, restc), luse_remove(name, restb))
-  else LinErr(typed_ast.typed_expr_pos(rhs),
-              leak_binder_msg(LinBinder(name, typed_ast.typed_expr_type(rhs)), env))
+  else LinErr(typed_ast.typed_expr_pos(rhs), unused_let_msg(name, typed_ast.typed_expr_type(rhs), env))
+
+# `let _ = e` reads as every other `_` that drops a linear value.
+fn unused_let_msg(name: String, t: types.Type, env: Dict types.Scheme) -> String =
+  if name == "_" then wildcard_value_msg(t, env) else leak_binder_msg(LinBinder(name, t), env)
 
 # A non-linear do-`let` must SHADOW, not be ignored: `let c = 5` over a linear
 # `c` has to drop the old entry, or `c + 1` is credited as consuming the resource.

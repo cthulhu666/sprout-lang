@@ -1,0 +1,17 @@
+module main
+
+# The synthetic `_` arm of `let..else` over `Maybe Conn` can only match
+# `Nothing`: `Just(c)` rules `Just` out.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn first(w: Maybe Conn) -> Int =
+  let Just(c) = w else 0
+  in close(c)
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(first(Just (Conn(8)))))
+    print(int_to_string(first(Nothing)))

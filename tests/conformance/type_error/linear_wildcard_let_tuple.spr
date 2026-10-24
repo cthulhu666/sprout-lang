@@ -1,0 +1,15 @@
+# `let _ =` over a tuple that holds a linear component. The tuple gets no
+# per-constructor refinement, so the whole-value rule applies.
+
+type linear Conn = Conn Int
+
+fn open(n: Int) -> Conn = Conn(n)
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop() -> Int =
+  let _ = (open(1), 2)
+#~^ ERROR
+  in 0
+
+fn main() -> Unit !{IO} = print(int_to_string(drop()))

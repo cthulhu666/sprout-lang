@@ -1,0 +1,24 @@
+module main
+
+# Matching a BORROWED value consumes nothing, so a `_` over its linear field
+# (`Pg _ s`) or over the whole value drops nothing. The owner releases it.
+
+type linear Sock = Sock Int
+type linear Pg = Pg Sock Int
+
+fn release(c: Pg) -> Int =
+  match c with
+  | Pg s n ->
+      match s with
+      | Sock fd -> fd + n
+
+fn session(c: borrowing Pg) -> Int = match c with | Pg _ s -> s
+
+fn peek(c: borrowing Pg) -> Int = match c with | _ -> 1
+
+fn run(c: Pg) -> Int =
+  let s = session(c)
+      p = peek(c)
+  in s + p + release(c)
+
+fn main() -> Unit !{IO} = print(int_to_string(run(Pg (Sock(100), 20))))

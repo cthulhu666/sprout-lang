@@ -1,0 +1,25 @@
+module main
+
+# A `_` arm over a non-linear ADT is fine when every constructor it can still
+# match is free of linear fields: `Filled c` rules `Filled` out (its sub-pattern
+# is a variable), leaving `Blank` and `Broken`.
+
+type linear Conn = Conn Int
+
+type Slot a =
+  | Filled a
+  | Blank
+  | Broken
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn take(s: Slot Conn) -> Int =
+  match s with
+  | Filled c -> close(c)
+  | _ -> 0
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(take(Filled (Conn(5)))))
+    print(int_to_string(take(Blank)))
+    print(int_to_string(take(Broken)))

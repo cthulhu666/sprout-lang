@@ -1,0 +1,31 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+
+fn p() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_true(state, "wildcard", ast.pattern_irrefutable(ast.WildcardPattern(p())))
+    assert_true(state, "variable", ast.pattern_irrefutable(ast.VarPattern("x", p())))
+    assert_true(state, "unit", ast.pattern_irrefutable(ast.UnitPattern(p())))
+    assert_false(state, "int literal", ast.pattern_irrefutable(ast.IntPattern(3, p())))
+    assert_false(state, "bool literal", ast.pattern_irrefutable(ast.BoolPattern(true, p())))
+    assert_false(state, "string literal", ast.pattern_irrefutable(ast.StringPattern("s", p())))
+    assert_false(state, "char literal", ast.pattern_irrefutable(ast.CharPattern(97, p())))
+    assert_false(state, "nullary constructor",
+      ast.pattern_irrefutable(ast.ConstructorPattern("Nothing", [], p())))
+    assert_false(state, "constructor over irrefutable fields",
+      ast.pattern_irrefutable(ast.ConstructorPattern("Just", [ast.VarPattern("v", p())], p())))
+    assert_true(state, "empty-item tuple", ast.pattern_irrefutable(ast.TuplePattern([], p())))
+    assert_true(state, "nested tuple of vars, wildcard and unit",
+      ast.pattern_irrefutable(ast.TuplePattern([ast.VarPattern("a", p()),
+        ast.TuplePattern([ast.WildcardPattern(p()), ast.UnitPattern(p())], p())], p())))
+    assert_false(state, "nested tuple with a constructor inside",
+      ast.pattern_irrefutable(ast.TuplePattern([ast.VarPattern("a", p()),
+        ast.TuplePattern([ast.WildcardPattern(p()),
+          ast.ConstructorPattern("Just", [ast.VarPattern("v", p())], p())], p())], p())))
+
+    summary(state)

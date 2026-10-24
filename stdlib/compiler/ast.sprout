@@ -74,6 +74,22 @@ fn pattern_names_list_go(pats: List Pattern, acc: List String) -> List String =
   | Nil -> acc
   | Cons p rest -> pattern_names_list_go(rest, pattern_names_go(p, acc))
 
+# Refutable means "can fail to match a value of its type". Conservative without
+# type information: a constructor is refutable even for a single-constructor type,
+# and a literal always is. `()` is the sole value of `Unit`, so it is not.
+# Exhaustive on every variant. O(n) in pattern node count.
+export fn pattern_irrefutable(p: Pattern) -> Bool =
+  match p with
+  | WildcardPattern _ -> true
+  | VarPattern _ _ -> true
+  | UnitPattern _ -> true
+  | TuplePattern items _ -> all(pattern_irrefutable, items)
+  | ConstructorPattern _ _ _ -> false
+  | IntPattern _ _ -> false
+  | BoolPattern _ _ -> false
+  | StringPattern _ _ -> false
+  | CharPattern _ _ -> false
+
 # --- Function parameters ---
 
 # How a parameter takes ownership of a LINEAR argument (M4.5 borrowing). An enum
@@ -730,6 +746,11 @@ export fn ctor_field_type_exprs(ctors: List TypeConstructor) -> List TypeExpr =
   | [] -> []
   | [TypeConstructor _ fields _ _ _ | rest] ->
       list_append(fields, ctor_field_type_exprs(rest))
+
+export fn ctor_names(ctors: List TypeConstructor) -> List String =
+  match ctors with
+  | [] -> []
+  | [TypeConstructor name _ _ _ _ | rest] -> Cons(name, ctor_names(rest))
 
 export fn record_field_type_exprs(fields: List RecordFieldDecl) -> List TypeExpr =
   match fields with

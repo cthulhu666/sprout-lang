@@ -205,6 +205,7 @@ export let alias_param_prefix: String = "__aliasparam__"
 #   @linbound:<fn, extern, method or constructor>  @boundname:<tyvar id>
 #   @sig:<fn>                       @sigbound:<fn>            @toplet:<let>
 #   @instbound:<class>:<head>[/<method>]  @unpack:<ctor>:<pattern offset>
+#   @ctors:<TypeName>
 export let class_marker_tag: String = "@class:"
 export let fwd_marker_tag: String = "@fwd:"
 export let super_marker_tag: String = "@super:"
@@ -280,6 +281,18 @@ export fn unpacked_of(marker: Scheme) -> Maybe (String, String) =
 
 export fn linear_bound_marker(vars: List String) -> Scheme =
   Scheme(vars, Nil, TConst(type_id("Unit")), EffectPure, Nil)
+
+# A type's constructor names in declaration order, which the env otherwise
+# holds only per constructor (`@ctor:<name>` carries arity) or as one flattened
+# field tuple (`@stores:`). linear_check reads it to tell which constructors a
+# `_` arm can still match. The names ride as the scheme's variables, so the
+# marker has no free variables. Absent for a record and a type with no
+# constructor.
+export fn ctors_marker_key(tname: String) -> String = "@ctors:" ++ tname
+
+export fn ctors_marker(names: List String) -> Scheme = linear_bound_marker(names)
+
+export fn ctors_of(marker: Scheme) -> List String = scheme_vars(marker)
 
 export fn type_mentions_skolem(t: Type) -> Bool =
   match t with

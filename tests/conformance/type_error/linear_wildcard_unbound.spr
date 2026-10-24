@@ -1,0 +1,14 @@
+# `_` over a value that was never bound: nothing names it, so nothing can consume it.
+
+type linear Conn = Conn Int
+
+fn open(n: Int) -> Conn = Conn(n)
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop() -> Int =
+  match open(1) with
+  | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(drop()))

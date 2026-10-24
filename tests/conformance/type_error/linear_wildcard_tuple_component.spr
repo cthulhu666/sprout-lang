@@ -1,0 +1,12 @@
+# `(_, n)` over `(Conn, Int)`: the `_` stands at a component whose type is linear.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(p: (Conn, Int)) -> Int =
+  match p with
+  | (_, n) -> n
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(drop((Conn(1), 2))))

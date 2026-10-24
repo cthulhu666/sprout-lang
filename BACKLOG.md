@@ -2030,16 +2030,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   fails with an ownership mismatch, while the annotated `\(c: borrowing File) -> …` compiles. The
   fix is to propagate an expected type into a `let` right-hand side generally, which is wider than
   linearity. Limit recorded at `type_error/lambda_borrow_mode_needs_call_position`.
-- [ ] `P2` **Decide whether a wildcard pattern over a linear value is a consume or a leak.** A
-  *semantics* question, not a bug. Three shapes are accepted today: a linear parameter dropped by a
-  wildcard arm; the same over an unbound linear scrutinee; and `match w with | Wrap _ -> 0` dropping
-  a linear **field**. **Position A (ships today):** "use" is syntactic per spec §5.8 — the
-  scrutinee IS referenced and the third never names the field; this is the inherent "a consume need
-  not do anything useful" limit, which Rust shares minus `Drop`. **Position B:** a consume should
-  mean destructured *or* passed on, making all three leaks, at the cost of a rule saying which
-  patterns count. A's cost: `type linear Wrap = Wrap TcpConnection` plus `Wrap _` silently leaks an
-  fd and looks deliberate. Survey Rust's `let _ =` vs `let _x =` and Austral's linear-field rules
-  first.
 - [ ] `P3` **The effect-bind fallback still types `x <- e` as the payload.** `do_bind_type` cannot
   see the monad kind, so for `e : Container Linear !{IO}` it strips a type argument and tracks the
   payload rather than the container. The shape that made this `P2` is gone: a phantom position is no

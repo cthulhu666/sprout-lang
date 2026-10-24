@@ -388,7 +388,7 @@ let non_list_pattern_unaffected =
 
 # These exercise the list-shape/list-prefix lint on a refutable list pattern
 # reached via a do-bind. A refutable `<-` pattern now requires an `else` (parser:
-# is_irrefutable_do_bind_pattern), so each carries one; it desugars to a match at
+# ast.pattern_irrefutable), so each carries one; it desugars to a match at
 # parse time, and the lint still flags the hand-written list pattern in that match.
 let do_bind_hand_written_var_tail =
   "fn f() -> Int !{IO} =\n" ++

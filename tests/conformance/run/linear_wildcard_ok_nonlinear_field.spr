@@ -1,0 +1,22 @@
+module main
+
+# A linear type's own module consumes it by destructuring: `File _` over an
+# `Int` field drops nothing linear. Non-linear scrutinees keep every `_`.
+
+type linear File = File Int
+
+fn size(f: File) -> Int = match f with | File _ -> 0
+
+fn is_some(m: Maybe Int) -> Int =
+  match m with
+  | Just _ -> 0
+  | Nothing -> 1
+
+fn snd(p: (Int, Int)) -> Int = match p with | (_, n) -> n
+
+fn main() -> Unit !{IO} =
+  do
+    print(int_to_string(size(File(9))))
+    print(int_to_string(is_some(Just(2))))
+    print(int_to_string(is_some(Nothing)))
+    print(int_to_string(snd((1, 6))))

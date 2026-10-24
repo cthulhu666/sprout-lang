@@ -1775,8 +1775,8 @@ The rules:
   branch; using it in some branches but not others is rejected.
 - **Discarded result** — a `do`-block statement in non-final position is rejected
   when its value is linear, *contains* a linear value as a type argument or tuple
-  component (`Maybe File`), or has a bare type-variable type that may be linear. So is a wildcard bind
-  (`_ <- e`) of such a value. The three rules above are keyed on binders, so a
+  component (`Maybe File`), or has a bare type-variable type that may be linear. The
+  three rules above are keyed on binders, so a
   linear value that is never bound carries no obligation for them to find
   unfulfilled: `do { task_fork(s, w); 7 }` would otherwise drop the handle in
   silence. The **final** statement is exempt — it is the block's result, so the
@@ -1790,10 +1790,23 @@ The rules:
   and not in binder position. A function's type variable counts only under `where linear`
   (**Type variables**, below): without the bound no caller can instantiate it at a
   linear type, so `do { x; 1 }` with `x: a` is accepted, and so is the same step at an
-  instance head's variable without the instance's bound. Two shapes remain accepted and are **not** guaranteed
-  leak-free: a wildcard `match` arm over a linear value (`match f with | _ -> 0`,
-  which does reference `f` exactly once) and a constructor pattern that drops a
-  linear field (`Wrap _`).
+  instance head's variable without the instance's bound.
+- **Wildcard** — a `_` pattern at an *owned* position is rejected when it can match a
+  value that holds linear content (the containment test above). Use is syntactic, so
+  `match f with | _ -> 0` references `f` exactly once and the binder rules see no leak;
+  this rule closes it, for `match`, `let..in`, `let..else`, `<-` and `try` alike.
+  A `_` nested in a constructor field or a tuple component is rejected iff that
+  position's type contains a linear type (`Wrap _`, `(_, n)` over `(File, Int)`).
+  A `_` that is a whole arm — also `let _ = e`, `_ <- e` and the implicit arm of
+  `let..else` — is rejected iff the scrutinee's type contains a linear type, with one
+  refinement: over a non-linear ADT it is rejected only if some constructor it can
+  still match has a field whose type contains one. An earlier arm rules a constructor
+  out when it names it with only irrefutable sub-patterns (a variable, `_`, unit, or
+  a tuple of those); `| Filled v -> … | _ -> Blank` over `Slot File` is accepted.
+  A linear type, a tuple, a record or a type variable gets no refinement. A `_` over a
+  **borrowed** value consumes nothing and is accepted (`Pg _ session` on a
+  `borrowing Pg`), as is a `_` over a field of non-linear type (`File _` over an
+  `Int` field), which is how a linear type's own module consumes it.
 
 A linear ADT is consumed once by matching it (`match f with | File n -> …`) or by
 passing it to a function. A linear record is read via field access, which consumes

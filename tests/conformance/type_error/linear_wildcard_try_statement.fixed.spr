@@ -1,0 +1,11 @@
+# `linear_wildcard_try_statement.spr` with its error's hint applied.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(m: Maybe Conn) -> Maybe Int =
+  let c = try m
+  in Just(close(c))
+
+fn main() -> Unit !{IO} = print(to_string(drop(Just (Conn(1)))))
