@@ -1,0 +1,10 @@
+module main
+import stdlib.linheap (LinHeap)
+import stdlib.linheap as linheap
+
+# A path that neither pops to the end nor drops the heap leaks it.
+
+fn count(h: LinHeap Int) -> Int = linheap.size(h)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

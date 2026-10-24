@@ -486,6 +486,25 @@ fn payload() -> json.Json =
   )
 ```
 
+## stdlib.linheap
+
+A pure binary min-heap over `LinVec` (in `stdlib/linheap.sprout`; Experimental, as `LinVec` is).
+Design: [linheap-v0.md](linheap-v0.md).
+
+- `LinHeap a` abstract linear type; elements must not be linear
+- `linheap.new() -> LinHeap a` — allocates nothing
+- `linheap.from_list(xs) -> LinHeap a where Ord a` — O(n)
+- `linheap.push(x, h) -> LinHeap a where Ord a` — O(log n) amortised
+- `linheap.pop(h) -> Maybe (a, LinHeap a) where Ord a` — the least element; O(log n) amortised;
+  `Nothing` on empty, and the heap is gone
+- `linheap.peek(h: borrowing LinHeap a) -> Maybe a` — O(1)
+- `linheap.size(h: borrowing LinHeap a) -> Int`
+- `linheap.drop(h) -> Unit`
+
+Equal elements pop in no promised order; for insertion order, put a counter in the key. Key on a
+type that derives `Ord`, not a tuple: a 5-tuple key runs ~2.5× slower ([linheap-v0.md](linheap-v0.md)
+§5).
+
 ## stdlib.linvec
 
 A pure vector with in-place writes (in `stdlib/linvec.sprout`; Experimental, as spec §5.8 is;

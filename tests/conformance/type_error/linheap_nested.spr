@@ -1,0 +1,12 @@
+module main
+import stdlib.linheap (LinHeap)
+import stdlib.linheap as linheap
+import stdlib.linvec (LinVec)
+
+# A linear element would be duplicated by a read, so a `LinHeap` of linear values is
+# rejected where it is built.
+
+fn nothing() -> LinHeap (LinVec Int) = linheap.new()
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
