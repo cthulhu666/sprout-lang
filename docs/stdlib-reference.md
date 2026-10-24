@@ -486,6 +486,22 @@ fn payload() -> json.Json =
   )
 ```
 
+## stdlib.linalg.vec3
+
+A pure, immutable 3-vector (in `stdlib/linalg/vec3.sprout`). `Vec3` is a record of three
+`Double`s; read fields as `v.x`, `v.y`, `v.z`. No op needs `IO`.
+
+`import stdlib.linalg.vec3` and call `vec3.add(a, b)`; import the type with
+`import stdlib.linalg.vec3 (Vec3)`.
+
+- `new(x, y, z) -> Vec3`; `zero` is the zero vector
+- `add(a, b)`, `sub(a, b)`, `neg(v)` -> `Vec3`
+- `scale(s, v) -> Vec3` — the scalar first, the vector last
+- `dot(a, b) -> Double`
+- `cross(a, b) -> Vec3` — right-handed: x cross y = z
+- `length_squared(v)`, `length(v)`, `distance(a, b)` -> `Double`
+- `normalize(v) -> Vec3` — the zero vector normalizes to zero
+
 ## stdlib.linheap
 
 A pure binary min-heap over `LinVec` (in `stdlib/linheap.sprout`; Experimental, as `LinVec` is).

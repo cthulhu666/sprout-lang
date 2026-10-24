@@ -1,87 +1,49 @@
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.math (abs)
-import stdlib.linalg
-
-# TDD — Vec3 on `wrap Vec3 = MutVec Double` over the tested stdlib.mutable
-# foundation. RED until the real impls land.
-#
-# Components are checked inline (not via a Vec3-typed helper): a `wrap` type used
-# in a user annotation across modules does not currently canonicalize, so Vec3
-# values only flow into stdlib.linalg's own functions here.
+import stdlib.linalg.vec3 (Vec3)
+import stdlib.linalg.vec3
 
 fn close(a: Double, b: Double) -> Bool = abs(a - b) < 0.000001
+
+fn same(a: Vec3, b: Vec3) -> Bool = close(a.x, b.x) && close(a.y, b.y) && close(a.z, b.z)
 
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    a <- linalg.vec3(1.0, 2.0, 3.0)
-    b <- linalg.vec3(4.0, 5.0, 6.0)
+    let a = vec3.new(1.0, 2.0, 3.0)
+    let b = vec3.new(4.0, 5.0, 6.0)
+    let ex = vec3.new(1.0, 0.0, 0.0)
+    let ey = vec3.new(0.0, 1.0, 0.0)
+    let ez = vec3.new(0.0, 0.0, 1.0)
+    let v345 = vec3.new(3.0, 4.0, 0.0)
 
-    ax <- linalg.vec3_x(a)
-    ay <- linalg.vec3_y(a)
-    az <- linalg.vec3_z(a)
-    assert_true(state, "vec3 components", close(ax, 1.0) && close(ay, 2.0) && close(az, 3.0))
+    assert_true(state, "new components", close(a.x, 1.0) && close(a.y, 2.0) && close(a.z, 3.0))
+    assert_true(state, "zero", same(vec3.zero, vec3.new(0.0, 0.0, 0.0)))
+    assert_true(state, "add", same(vec3.add(a, b), vec3.new(5.0, 7.0, 9.0)))
+    assert_true(state, "sub", same(vec3.sub(b, a), vec3.new(3.0, 3.0, 3.0)))
+    assert_true(state, "neg", same(vec3.neg(a), vec3.new(-1.0, -2.0, -3.0)))
+    assert_true(state, "scale", same(vec3.scale(2.0, a), vec3.new(2.0, 4.0, 6.0)))
+    assert_true(state, "dot == 32", close(vec3.dot(a, b), 32.0))
 
-    sum <- linalg.vec3_add(a, b)
-    sx <- linalg.vec3_x(sum)
-    sy <- linalg.vec3_y(sum)
-    sz <- linalg.vec3_z(sum)
-    assert_true(state, "add", close(sx, 5.0) && close(sy, 7.0) && close(sz, 9.0))
+    assert_true(state, "cross x*y = z", same(vec3.cross(ex, ey), ez))
+    assert_true(state, "cross y*z = x", same(vec3.cross(ey, ez), ex))
+    assert_true(state, "cross z*x = y", same(vec3.cross(ez, ex), ey))
+    assert_true(state, "cross anti-commutes", same(vec3.cross(a, b), vec3.neg(vec3.cross(b, a))))
+    assert_true(state, "cross a*b", same(vec3.cross(a, b), vec3.new(-3.0, 6.0, -3.0)))
 
-    diff <- linalg.vec3_sub(b, a)
-    dx <- linalg.vec3_x(diff)
-    dy <- linalg.vec3_y(diff)
-    dz <- linalg.vec3_z(diff)
-    assert_true(state, "sub", close(dx, 3.0) && close(dy, 3.0) && close(dz, 3.0))
+    assert_true(state, "length_squared == 25", close(vec3.length_squared(v345), 25.0))
+    assert_true(state, "length == 5", close(vec3.length(v345), 5.0))
+    assert_true(state, "length of zero == 0", close(vec3.length(vec3.zero), 0.0))
+    assert_true(state, "distance == 5", close(vec3.distance(vec3.new(1.0, 1.0, 1.0), vec3.new(4.0, 5.0, 1.0)), 5.0))
 
-    scaled <- linalg.vec3_scale(a, 2.0)
-    cx <- linalg.vec3_x(scaled)
-    cy <- linalg.vec3_y(scaled)
-    cz <- linalg.vec3_z(scaled)
-    assert_true(state, "scale", close(cx, 2.0) && close(cy, 4.0) && close(cz, 6.0))
+    assert_true(state, "normalize direction", same(vec3.normalize(v345), vec3.new(0.6, 0.8, 0.0)))
+    assert_true(state, "normalized length == 1", close(vec3.length(vec3.normalize(v345)), 1.0))
+    assert_true(state, "normalize zero is zero", same(vec3.normalize(vec3.zero), vec3.zero))
 
-    dot <- linalg.vec3_dot(a, b)
-    assert_true(state, "dot == 32", close(dot, 32.0))
+    assert_true(state, "to_string non-empty", to_string(a) != "")
 
-    # |(3,4,0)| = 5
-    v345 <- linalg.vec3(3.0, 4.0, 0.0)
-    len <- linalg.vec3_length(v345)
-    assert_true(state, "length == 5", close(len, 5.0))
-
-    zero <- linalg.vec3(0.0, 0.0, 0.0)
-    zlen <- linalg.vec3_length(zero)
-    assert_true(state, "length of zero == 0", close(zlen, 0.0))
-
-    # normalize (3,4,0) -> (0.6, 0.8, 0), unit length
-    unit <- linalg.vec3_normalize(v345)
-    ux <- linalg.vec3_x(unit)
-    uy <- linalg.vec3_y(unit)
-    uz <- linalg.vec3_z(unit)
-    assert_true(state, "normalize direction", close(ux, 0.6) && close(uy, 0.8) && close(uz, 0.0))
-    ulen <- linalg.vec3_length(unit)
-    assert_true(state, "normalized length == 1", close(ulen, 1.0))
-
-    # a must be unchanged by the ops above (no aliasing / in-place surprises)
-    a2x <- linalg.vec3_x(a)
-    a2y <- linalg.vec3_y(a)
-    a2z <- linalg.vec3_z(a)
-    assert_true(state, "a unchanged", close(a2x, 1.0) && close(a2y, 2.0) && close(a2z, 3.0))
-
-    # camera_fit_distance(height, fovy_deg): distance so `height` fills the view.
-    # fovy=90 -> tan(45)=1 -> distance = height/2.
-    fit90 <- linalg.camera_fit_distance(2.0, 90.0)
-    assert_true(state, "fit distance h=2 fovy=90 == 1", close(fit90, 1.0))
-    fit90b <- linalg.camera_fit_distance(4.0, 90.0)
-    assert_true(state, "fit distance h=4 fovy=90 == 2", close(fit90b, 2.0))
-    # fovy=60 -> tan(30)=1/sqrt(3) -> distance = (h/2)*sqrt(3) = sqrt(3) for h=2
-    fit60 <- linalg.camera_fit_distance(2.0, 60.0)
-    assert_true(state, "fit distance h=2 fovy=60 == sqrt(3)", close(fit60, 1.7320508))
-
-    # anim_advance(frame, speed, keyframes): advance with wraparound at keyframes.
-    assert_true(state, "anim step no wrap", close(linalg.anim_advance(0.0, 1.5, 10.0), 1.5))
-    assert_true(state, "anim step wraps", close(linalg.anim_advance(9.0, 1.5, 10.0), 0.5))
-    assert_true(state, "anim step zero speed holds", close(linalg.anim_advance(5.0, 0.0, 10.0), 5.0))
-    assert_true(state, "anim step wraps near end", close(linalg.anim_advance(9.9, 0.2, 10.0), 0.1))
+    # values are immutable: a is unchanged by the ops above
+    assert_true(state, "a unchanged", same(a, vec3.new(1.0, 2.0, 3.0)))
 
     summary(state)

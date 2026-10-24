@@ -1139,9 +1139,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 **Gates and diagnostics**
 
-- [ ] `P3` **15 stdlib modules have no section in `docs/stdlib-reference.md`.** `args`, `bits`,
-  `chan`, `http_middleware`, `linalg`, `log`, `mutable`, `process`, `repl`, `rng`, `stamped`,
-  `task`, `template`, `test`, `version` — listed as `UNDOCUMENTED` in
+- [ ] `P3` **14 stdlib modules have no section in `docs/stdlib-reference.md`.** `args`, `bits`,
+  `chan`, `http_middleware`, `log`, `mutable`, `process`, `repl`, `rng`, `stamped`, `task`,
+  `template`, `test`, `version` — listed as `UNDOCUMENTED` in
   `scripts/stdlib_reference_gate.sh`, which fails once one gains a section until it leaves the
   list. Several (`task`, `chan`) have design docs but no API reference a user would find.
 - [ ] `P2` **`just gate-audit` derives "CI runs task X" by grepping the workflow's COMMENTS.** The
@@ -1579,21 +1579,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   uppercase in a parameter list needs no name resolution. Zero occurrences in `stdlib/`, `ide/`,
   `examples/` or `tests/` over every form and parameter position, so this breaks nothing here.
 
-- [ ] `P2` **A `wrap` type in a user-defined function's annotation does not canonicalize across
-  modules.** `fn f(v: linalg.Vec3)` in user code sees `linalg.Vec3` as distinct from the value's
-  `stdlib.linalg.Vec3` (Call type mismatch). Values flow fine into the defining module's own
-  functions, so stdlib APIs work; only user-written helpers over imported wrap types break. Likely
-  in the module-qualified-type-identity machinery.
 - [ ] `P2` **Unbox small fixed-shape numeric records** (`Vec3 {x,y,z}` as 3 raw f64s, not a heap
-  pointer) — the ergonomic-and-fast path for individual small vectors, additive on top of the
-  tested flat-buffer foundation.
-- [ ] `P2` **`stdlib.linalg`'s `Vec3` is a mutable buffer, so all its math is `!{IO}`.** `wrap
-  Vec3 = MutVec Double` makes `vec3`, `vec3_add`, `vec3_dot`, `vec3_normalize` effectful for pure
-  arithmetic, and the header promises Vec4/Mat4/Quat that do not exist. uncharted-suns already
-  replaced it with a pure record (`loam/vec.sprout`, `V3 (x, y, z: Double)`); it imports only
-  `camera_fit_distance` from linalg. Fix: a pure record `Vec3`, no IO; only
-  `tests/stdlib/test_linalg_vec3.spr` uses it here. Not `LinVec`: small vectors are reused, not
-  threaded. Unboxing (entry above) then makes the record fast.
+  pointer; `stdlib.linalg.vec3`'s `Vec3` is the first target) — the ergonomic-and-fast path for
+  individual small vectors, additive on top of the tested flat-buffer foundation.
 - [ ] `P2` **Native `Float` (f32) type + `Vector Float` unboxed path.** Doubles-everywhere is
   correct today; float32 earns its keep only when Sprout owns bulk GPU-bound buffers. Decide by
   measured buffer/upload cost.

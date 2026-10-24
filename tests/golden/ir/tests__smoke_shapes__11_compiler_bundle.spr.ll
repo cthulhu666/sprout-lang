@@ -1003,7 +1003,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.842 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
 @.str.843 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c":help :quit :q :exit :type :t :instances :i\00" }
 @.str.844 = private unnamed_addr constant { i64, [78 x i8] } { i64 1261578, [78 x i8] c"args bits bytes chan collections compiler crypto env fs hex http http_client \00" }
-@.str.845 = private unnamed_addr constant { i64, [96 x i8] } { i64 1556490, [96 x i8] c"http_middleware http_server json linalg linheap linvec list log math mutable net process regex \00" }
+@.str.845 = private unnamed_addr constant { i64, [89 x i8] } { i64 1441802, [89 x i8] c"http_middleware http_server json linheap linvec list log math mutable net process regex \00" }
 @.str.846 = private unnamed_addr constant { i64, [80 x i8] } { i64 1294346, [80 x i8] c"repl rng scram stamped string task template terminal test time url uuid version\00" }
 @.str.847 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"stdlib.prelude\00" }
 @.str.848 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"read_file: prelude: \00" }
@@ -60406,7 +60406,7 @@ entry:
   %t$0 = call i64 @vec_empty()
   %t$1 = getelementptr inbounds { i64, [78 x i8] }, ptr @.str.844, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
-  %t$3 = getelementptr inbounds { i64, [96 x i8] }, ptr @.str.845, i64 0, i32 1, i64 0
+  %t$3 = getelementptr inbounds { i64, [89 x i8] }, ptr @.str.845, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   %t$10 = alloca i64
   store i64 %t$0, ptr %t$10

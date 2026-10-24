@@ -55,7 +55,7 @@ Each citation names the enclosing function so `git grep` re-finds it once it dri
 |---|---|---|
 | `extern fn name(...) -> T`, no body | keyword absent from grammar | 152 declarations; `stdlib/bits.sprout:47` |
 | `deriving (C, ...)` trailing clause | absent | 84 clauses; `examples/records_demo.sprout:12` |
-| `wrap Name = TypeExpr` | absent — it is the 7th declaration keyword (`parser.sprout:2143 is_decl_keyword`) | `stdlib/linalg.sprout:12` |
+| `wrap Name = TypeExpr` | absent — it is the 7th declaration keyword (`parser.sprout:2143 is_decl_keyword`) | `stdlib/compiler/source.sprout:43` |
 | `(..)` constructor-visibility marker | absent (`parser.sprout:2382 exports_ctors`) | `stdlib/json.sprout:8` |
 | `type linear Name` | contextual marker, absent | `stdlib/net.sprout:100` |
 | **Records** | grammar says `{ }` (`grammar.js:142`); real syntax is `( field: T, ... )` | `examples/records_demo.sprout:14` |
