@@ -2108,6 +2108,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   user wrote `linvec.new`, and a bare `new` names no one function once modules use short names.
   The message is built in `resolve.sprout` and `infer.sprout` from the bare name; print it as the
   call site wrote it.
+- [ ] `P3` **"never used" for a linear value that is only borrowed.** `let v = linvec.new(5, "x")
+  in linvec.length(v)` reports "linear value 'v' is never used", but `v` is used: `length` borrows
+  it, and nothing consumes it. The wording sends a reader looking for a typo.
+  `linear_check.leak_msg` has one message for both; when the binder was borrowed, say "borrowed but
+  never consumed".
 
 ### Linear-typed Sprout-IR (Model C Milestone 5) — DEFERRED (2026-08-07)
 
@@ -2247,6 +2252,14 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   dylib, new expressions linked on the fly at native speed with no fork. Requires embedding LLVM as
   a library rather than shelling out to `--emit-ir` + clang. Precedent: cling, clang-repl,
   `lli --jit`. Revisit after the in-Sprout interpreter works.
+- [ ] `P3` **The REPL cannot show a linear result.** `linvec.new(5, "x")` at the prompt fails with
+  "No instance of ToString for stdlib.linvec.LinVec"; the user has to wrap it in `linvec.freeze`.
+  Options: a `ToString` instance per linear type that renders and then consumes, or the REPL
+  rendering a linear result through a borrow and dropping it. At least, name `freeze` in the error.
+- [ ] `P3` **`:t` refuses a constrained function.** `:t linheap.pop` fails with "the expression
+  needs a class instance that its type `LinHeap a -> (Maybe a, LinHeap a)` leaves open, and Sprout
+  does not infer `where` clauses": the ambiguity check in `infer.sprout` runs on a `:t` operand,
+  though `:t` needs only the type. It should print the scheme with its `where Ord a`.
 
 ### GC & Runtime Performance
 
