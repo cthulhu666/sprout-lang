@@ -1049,6 +1049,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 7) Tooling and Developer UX
 
+**Site**
+
+- [ ] `P3` **Nothing checks that `site/` examples still compile.** `site/linearity.html` shows
+  38 Sprout code blocks with their output or error text, copied by hand from one compiler run.
+  A change to a linearity diagnostic or rule silently makes the page wrong. Extract each `code.sp`
+  block with its expected verdict and compile it in CI.
+
 **Formatter and linter**
 
 - [ ] `P2` **`just fmt` inserts a space after every prefix `!`**, and a second before a call's
