@@ -84,47 +84,47 @@ declare i64 @time_now_micros()
 declare i64 @wall_time_micros()
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 19, column 23)\00" }
 @.str.1 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.2 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 34, column 10)\00" }
-@.str.3 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 34, column 15)\00" }
-@.str.4 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in - (line 34, column 5)\00" }
-@.str.5 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 40, column 51)\00" }
-@.str.6 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 40, column 59)\00" }
-@.str.7 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 40, column 55)\00" }
-@.str.8 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in * (line 43, column 5)\00" }
-@.str.9 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 43, column 11)\00" }
-@.str.10 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 46, column 10)\00" }
-@.str.11 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 46, column 24)\00" }
-@.str.12 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 46, column 15)\00" }
+@.str.2 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 35, column 10)\00" }
+@.str.3 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 35, column 15)\00" }
+@.str.4 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in - (line 35, column 5)\00" }
+@.str.5 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 41, column 51)\00" }
+@.str.6 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 41, column 59)\00" }
+@.str.7 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 41, column 55)\00" }
+@.str.8 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in * (line 44, column 5)\00" }
+@.str.9 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 44, column 11)\00" }
+@.str.10 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 47, column 10)\00" }
+@.str.11 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 47, column 24)\00" }
+@.str.12 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 47, column 15)\00" }
 @.str.13 = private unnamed_addr constant { i64, [31 x i8] } { i64 491530, [31 x i8] c"astar: cell index out of range\00" }
-@.str.14 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 84, column 71)\00" }
-@.str.15 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 88, column 15)\00" }
-@.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 88, column 39)\00" }
-@.str.17 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 88, column 66)\00" }
-@.str.18 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 88, column 90)\00" }
-@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 106, column 54)\00" }
-@.str.20 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 116, column 30)\00" }
-@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 117, column 32)\00" }
-@.str.22 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 117, column 41)\00" }
+@.str.14 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 85, column 71)\00" }
+@.str.15 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 89, column 15)\00" }
+@.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 89, column 39)\00" }
+@.str.17 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 89, column 66)\00" }
+@.str.18 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 89, column 90)\00" }
+@.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 107, column 54)\00" }
+@.str.20 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 117, column 30)\00" }
+@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 118, column 32)\00" }
+@.str.22 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 118, column 41)\00" }
 @.str.23 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.24 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 120, column 44)\00" }
+@.str.24 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 121, column 44)\00" }
 @.str.25 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.26 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.27 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 120, column 80)\00" }
+@.str.27 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 121, column 80)\00" }
 @.str.28 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.29 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 120, column 97)\00" }
-@.str.30 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 120, column 105)\00" }
-@.str.31 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 120, column 87)\00" }
+@.str.29 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 121, column 97)\00" }
+@.str.30 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 121, column 105)\00" }
+@.str.31 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 121, column 87)\00" }
 @.str.32 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" ms\00" }
 @.str.33 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"A* 100x100, \00" }
 @.str.34 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c" runs, path=\00" }
 @.str.35 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.36 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 125, column 101)\00" }
+@.str.36 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 126, column 101)\00" }
 @.str.37 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c" steps\00" }
-@.str.38 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 126, column 45)\00" }
+@.str.38 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 127, column 45)\00" }
 @.str.39 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"  (\00" }
-@.str.40 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 126, column 77)\00" }
+@.str.40 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 127, column 77)\00" }
 @.str.41 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.42 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 126, column 83)\00" }
+@.str.42 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 127, column 83)\00" }
 @.str.43 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c" us/run)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -209,7 +209,13 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.linvec.linvec_new(i64 %p$n, i64 %p$x) {
+define i64 @stdlib.linvec.set(i64 %p$i, i64 %p$x, i64 %p$v) {
+entry:
+  %t$0 = call i64 @linvec_set(i64 %p$i, i64 %p$x, i64 %p$v)
+  ret i64 %t$0
+}
+
+define i64 @stdlib.linvec.new(i64 %p$n, i64 %p$x) {
 entry:
   %t$1 = alloca i64
   store i64 %p$x, ptr %t$1
@@ -219,7 +225,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.linvec.linvec_get(i64 %p$i, i64 %p$v) {
+define i64 @stdlib.linvec.get(i64 %p$i, i64 %p$v) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -237,7 +243,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @stdlib.linvec.linvec_freeze(i64 %p$v) {
+define i64 @stdlib.linvec.freeze(i64 %p$v) {
 entry:
   br label %arm_0_0
 arm_0_0:
@@ -258,12 +264,12 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @stdlib.linvec.linvec_drop(i64 %p$v) {
+define i64 @stdlib.linvec.drop(i64 %p$v) {
 entry:
   %t$4 = alloca i64
   store i64 %p$v, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @stdlib.linvec.linvec_freeze(i64 %p$v)
+  %t$0 = call i64 @stdlib.linvec.freeze(i64 %p$v)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_1
 arm_0_1:
@@ -760,7 +766,7 @@ join_1:
 
 define i64 @examples.astar_linvec.cell_at(i64 %p$i, i64 %p$v) {
 entry:
-  %t$0$st = call i128 @stdlib.linvec.linvec_get_worker(i64 %p$i, i64 %p$v)
+  %t$0$st = call i128 @stdlib.linvec.get_worker(i64 %p$i, i64 %p$v)
   %t$0 = trunc i128 %t$0$st to i64
   %t$0$hi = lshr i128 %t$0$st, 64
   %t$1 = trunc i128 %t$0$hi to i64
@@ -870,7 +876,7 @@ then_28:
   store i64 %t$13, ptr %t$30$f2
   br label %join_28
 else_28:
-  %t$31 = call i64 @linvec_set(i64 %t$14, i64 %p$ng, i64 %t$11)
+  %t$31 = call i64 @stdlib.linvec.set(i64 %t$14, i64 %p$ng, i64 %t$11)
   %t$32 = call i64 @examples.astar_linvec.heuristic(i64 %p$nx, i64 %p$ny)
   %t$33$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$ng, i64 %t$32)
   %t$33 = extractvalue { i64, i1 } %t$33$agg, 0
@@ -1008,7 +1014,7 @@ entry:
   %t$15 = alloca i64
   store i64 %p$closed, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$0 = call i64 @stdlib.linvec.linvec_drop(i64 %p$g_score)
+  %t$0 = call i64 @stdlib.linvec.drop(i64 %p$g_score)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %arm_0_1
 arm_0_1:
@@ -1021,7 +1027,7 @@ arm_0_1:
   %t$22 = alloca i64
   store i64 %p$closed, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$3 = call i64 @stdlib.linvec.linvec_drop(i64 %p$closed)
+  %t$3 = call i64 @stdlib.linvec.drop(i64 %p$closed)
   %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_4
@@ -1181,7 +1187,7 @@ ovfpanic_45:
   unreachable
 ovfok_45:
   %t$48 = add i64 0, 1
-  %t$49 = call i64 @linvec_set(i64 %t$33, i64 %t$48, i64 %t$3)
+  %t$49 = call i64 @stdlib.linvec.set(i64 %t$33, i64 %t$48, i64 %t$3)
   %t$50 = add i64 %p$s, 0
   %t$50$ptr = inttoptr i64 %t$50 to ptr
   %t$50$f0 = getelementptr i64, ptr %t$50$ptr, i64 0
@@ -1224,8 +1230,8 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 10000
   %t$3 = add i64 0, 9999999
-  %t$4 = call i64 @stdlib.linvec.linvec_new(i64 %t$2, i64 %t$3)
-  %t$5 = call i64 @linvec_set(i64 %t$0, i64 %t$1, i64 %t$4)
+  %t$4 = call i64 @stdlib.linvec.new(i64 %t$2, i64 %t$3)
+  %t$5 = call i64 @stdlib.linvec.set(i64 %t$0, i64 %t$1, i64 %t$4)
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -1265,7 +1271,7 @@ arm_0_16:
   %t$31 = alloca i64
   store i64 %t$15, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$20 = call i64 @stdlib.linvec.linvec_new(i64 %t$18, i64 %t$19)
+  %t$20 = call i64 @stdlib.linvec.new(i64 %t$18, i64 %t$19)
   %t$33 = alloca i64
   store i64 %t$20, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
@@ -1764,8 +1770,8 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 10000
   %t$3 = add i64 0, 9999999
-  %t$4 = call i64 @stdlib.linvec.linvec_new(i64 %t$2, i64 %t$3)
-  %t$5 = call i64 @linvec_set(i64 %t$0, i64 %t$1, i64 %t$4)
+  %t$4 = call i64 @stdlib.linvec.new(i64 %t$2, i64 %t$3)
+  %t$5 = call i64 @stdlib.linvec.set(i64 %t$0, i64 %t$1, i64 %t$4)
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -1805,7 +1811,7 @@ arm_0_16:
   %t$40 = alloca i64
   store i64 %t$15, ptr %t$40
   %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$20 = call i64 @stdlib.linvec.linvec_new(i64 %t$18, i64 %t$19)
+  %t$20 = call i64 @stdlib.linvec.new(i64 %t$18, i64 %t$19)
   %t$42 = alloca i64
   store i64 %t$20, ptr %t$42
   %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
@@ -1861,7 +1867,7 @@ wrepack_next_28:
   unreachable
 }
 
-define i128 @stdlib.linvec.linvec_get_worker(i64 %p$i, i64 %p$v) {
+define i128 @stdlib.linvec.get_worker(i64 %p$i, i64 %p$v) {
 entry:
   %t$0$st = call i128 @vector_get_unboxed(i64 %p$v, i64 %p$i)
   %t$0 = trunc i128 %t$0$st to i64

@@ -237,7 +237,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **`LinVec`'s module is trusted, not checked, not to alias its `Vector`.** Inside
   `stdlib.linvec`, a raw `Vector` unwrapped from a borrowed `LinVec` can be returned, captured or
   stored, and one from an owned `LinVec` can be duplicated as `(raw, LinVec(raw))`. Both alias
-  what `linvec_set` writes in place. Only a comment guards it. A rule for borrowed binders alone
+  what `linvec.set` writes in place. Only a comment guards it. A rule for borrowed binders alone
   was declined: it leaves the owned case and `id(raw)` open, and Sprout has no `Copy` or `copy`
   to exempt harmless fields. Revisit with a mechanism that covers both cases
   (`docs/linear-publish-v0.md` §7).
@@ -2109,6 +2109,11 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   before settling the name.
 - [ ] `P3` **`&`/`&mut` (shared-XOR-mutable) split.** v0 ships borrow-vs-consume only; the
   read-vs-write refinement is a later increment. `docs/linear-borrowing-v0.md` §2, §13.
+- [ ] `P3` **Linear-bound error names a module function unqualified.** `linvec.new(2, linvec.new(2,
+  0))` reports `` `new` takes `a` as a value it may copy or drop, … `` (`linvec_nested.err`): the
+  user wrote `linvec.new`, and a bare `new` names no one function once modules use short names.
+  The message is built in `resolve.sprout` and `infer.sprout` from the bare name; print it as the
+  call site wrote it.
 
 ### Linear-typed Sprout-IR (Model C Milestone 5) — DEFERRED (2026-08-07)
 
@@ -2422,7 +2427,7 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   — so re-measure before pricing this. See also the generational-step entry in §1, whose
   measurements re-scope it as compiler-only.
 - [ ] `P2` **Branded indices for `LinVec`, so a write cannot be out of range.** Today
-  `linvec_set`, `linvec_scatter` and `linvec_accum` trap on a bad index. An existential brand
+  `linvec.set`, `linvec.scatter` and `linvec.accum` trap on a bad index. An existential brand
   `s` on `Len s`, `Idx s` and `BVec s a`, with `Idx s` made only by a check against `Len s`,
   makes every write total in plain Sprout: no compiler change, prototype run. Open: the cost of
   re-checking index arithmetic in BFS and LCS. `docs/persistent-array-v0.md` §5.7.

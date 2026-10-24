@@ -1,0 +1,10 @@
+module main
+import stdlib.linvec (LinVec)
+
+# `linvec_set` is the C builtin's name. `stdlib.linvec` keeps it private and exports
+# `linvec.set`, so the bare name is not reachable from an importer.
+
+fn put(v: LinVec Int) -> LinVec Int = linvec_set(0, 1, v)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

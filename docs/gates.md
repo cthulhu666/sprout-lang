@@ -255,8 +255,8 @@ go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
   reaches.
 - A set, scatter or accum out of range exits non-zero with its message.
 - Allocation counters (`SPROUT_DEBUG_ALLOC`) match between runs that differ only in the number of
-  sets, so a set allocates nothing, and grow by one vector per `linvec_new`.
-- A `linvec_get` matched with a binding compiles to a worker over `vector_get_unboxed`.
+  sets, so a set allocates nothing, and grow by one vector per `linvec.new`.
+- A `linvec.get` matched with a binding compiles to a worker over `vector_get_unboxed`.
 
 ## In-place reuse — `just linear-reuse-smoke`
 

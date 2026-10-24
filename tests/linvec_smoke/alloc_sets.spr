@@ -1,27 +1,28 @@
 module main
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 
 # `just linvec-smoke` compiles this with SETS and NEWS replaced, and compares the runtime's
-# allocation counters across runs: a set allocates nothing, and each `linvec_new` allocates
+# allocation counters across runs: a set allocates nothing, and each `linvec.new` allocates
 # one vector. The loop reads before it writes, so the read path is covered too.
 
 fn cell(i: Int, v: borrowing LinVec Int) -> Int =
-  match linvec_get(i, v) with
+  match linvec.get(i, v) with
   | Just x -> x
   | Nothing -> -1
 
 fn churn(i: Int, n: Int, v: LinVec Int) -> LinVec Int =
   if i >= n then v
-  else churn(i + 1, n, linvec_set(i - (i / 1000) * 1000, cell(i - (i / 1000) * 1000, v) + 1, v))
+  else churn(i + 1, n, linvec.set(i - (i / 1000) * 1000, cell(i - (i / 1000) * 1000, v) + 1, v))
 
 fn spare(k: Int) -> Int =
   if k <= 0 then 0
   else
-    let _ = linvec_drop(linvec_new(10, k))
+    let _ = linvec.drop(linvec.new(10, k))
     in 1 + spare(k - 1)
 
 fn main() -> Unit !{IO} =
-  let v = churn(0, SETS, linvec_new(1000, 0))
+  let v = churn(0, SETS, linvec.new(1000, 0))
       first = cell(0, v)
-      _ = linvec_drop(v)
+      _ = linvec.drop(v)
   in print(int_to_string(first + spare(NEWS)))

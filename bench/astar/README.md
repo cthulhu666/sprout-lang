@@ -57,7 +57,7 @@ entries are discarded when popped (closed check). This avoids the O(n)
 | Closed | `LinVec Int` (0/1) — O(1) in-place write, pure | `IOUArray` — O(1) mutable | `[10000]bool` — O(1) mutable | `boolean[]` — O(1) mutable | `Uint8Array` — O(1) mutable | `list` — O(1) mutable | `Array` — O(1) mutable |
 
 `LinVec a` is a linear vector (Experimental, spec §5.8): a set consumes it and
-returns it, so no one can see the old version, and `linvec_set` writes in place.
+returns it, so no one can see the old version, and `linvec.set` writes in place.
 The search is a pure function. `astar.sprout` keeps the earlier version for
 comparison: `MutVec Int` arrays, which make the search `!{IO}`, and a sorted list
 of tuples.
@@ -203,7 +203,7 @@ read against used other tie-breaks (see *Tie-breaks*).
 ### The LinVec version (2026-10-24)
 
 In `astar_linvec.sprout`, `g_score` and `closed` are `LinVec Int` and the open
-set is a linear list. Linearity lets `linvec_set` write in place, and reuse
+set is a linear list. Linearity lets `linvec.set` write in place, and reuse
 writes each rebuilt list node and `State` into the cell it was matched from
 (`docs/linear-reuse-v0.md`). Over 100 runs it allocates 33,915 objects, one node
 per insert, against the `MutVec` version's 536,314: that insert copies every

@@ -1,11 +1,12 @@
 module main
-import stdlib.linvec (LinVec, linvec_set)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 
 # A lambda may take a linear value only if it borrows it, so a set cannot run inside one.
-# Use explicit recursion, or `linvec_scatter`.
+# Use explicit recursion, or `linvec.scatter`.
 
 fn fill(is: List Int, v: LinVec Int) -> LinVec Int =
-  list_fold(\ (acc, i) -> linvec_set(i, 0, acc), v, is)
+  list_fold(\ (acc, i) -> linvec.set(i, 0, acc), v, is)
 #~^ ERROR
 
 fn main() -> Unit !{IO} = print("x")

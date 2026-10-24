@@ -335,7 +335,7 @@ below is not (it rejects two shapes that compiled before).
   version is answered by §1.
 
 **Follow-up: the prelude combinators (landed).** `local` is on the concrete combinators (`range_`,
-`list_`, `vec_`, `result_*`, `when_ok`/`when_error`, `mutvec_`/`mutmatrix_`, `linvec_accum`), on
+`list_`, `vec_`, `result_*`, `when_ok`/`when_error`, `mutvec_`/`mutmatrix_`, `linvec.accum`), on
 the `Foldable` class, and on the generic functions over it (`fold`, `fold_while`, `any`, `all`,
 `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`). It is not on `Functor.fmap`,
 `Filterable`, `Applicative`, `Monad` or `Traversable`, nor on `map`, `filter`, `and_then`,

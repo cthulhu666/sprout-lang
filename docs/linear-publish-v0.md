@@ -19,7 +19,7 @@ fn forge() -> Fd = Fd(5)
 
 Inside the declaring module that is trusted code. Outside it, the constructor is reachable through
 `(..)`, and through the prelude, whose constructors are in scope everywhere (spec §3.1). For a
-handle over an fd that means a double close. For `LinVec`, whose `linvec_set` writes in place under a
+handle over an fd that means a double close. For `LinVec`, whose `linvec.set` writes in place under a
 pure signature, a `LinVec` around a shared `Vector` changes a value someone else holds: a wrong
 answer, not a crash.
 
@@ -168,13 +168,13 @@ Breaking for a published linear type with an untracked field. In our four repos:
   - from an owned `b: Box`, `Box raw -> (raw, Box(raw))`.
 
   An alias does harm only where a `Vector` is written in place: `linvec_set` in `stdlib.linvec`,
-  and `vector_mutset`, `vector_push` and `vector_truncate` in `stdlib.mutable`. Those three are
+  and `vector_mutset`, `vector_push` and `vector_truncate` in `stdlib.mutable`. All four are
   private externs (`docs/extern-visibility-v0.md`), so another module reaches them only by
   declaring one itself, which is deliberate FFI. Elsewhere the alias is harmless.
 
   Three rules were weighed:
   - A rule on borrowed binders alone, in `linear_check`'s escape walk (`esc_value`), would catch
-    `linvec_get` returning its `Vector`. It leaves the owned duplicate open, and `id(raw)`, since
+    `linvec.get` returning its `Vector`. It leaves the owned duplicate open, and `id(raw)`, since
     calls are not tracked.
   - A rule that is blind to type would reject `net`'s `tcp_connection_handle`, which returns an
     `Int` from a borrow.

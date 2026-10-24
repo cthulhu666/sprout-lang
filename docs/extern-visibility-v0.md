@@ -207,7 +207,7 @@ Each of the 111 gets a decision in the migration PR:
     `import stdlib.mutable` and declare nothing. `just test` does not run them; `just b1-gate`
     does, so the migration PR runs it.
 - **`vec_make_filled`** is declared in `stdlib.mutable` and called by `stdlib.linvec`
-  (`linvec_new`), which declares no copy. It is pure: it allocates a fresh vector and changes
+  (`linvec.new`), which declares no copy. It is pure: it allocates a fresh vector and changes
   nothing that exists. So it gains `export`.
 
 The other three repos (uncharted-suns, repbit, sprout-pg) get the same scan before the change

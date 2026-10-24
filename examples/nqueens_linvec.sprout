@@ -1,5 +1,6 @@
 module examples.nqueens_linvec
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 import stdlib.time as time
 
 # N-Queens by mutate-and-undo: one set of constraint arrays, written in place when
@@ -8,7 +9,7 @@ import stdlib.time as time
 # examples/nqueens.sprout copies a `Vec Bool` on every placement, so the caller
 # keeps the old arrays for free. Here the arrays are `LinVec Bool`, a linear type
 # (Experimental, spec §5.8): linearity means nothing else holds them, so
-# `linvec_set` writes in place and no copy is needed. The price is that the arrays
+# `linvec.set` writes in place and no copy is needed. The price is that the arrays
 # must be threaded through the search and come back from every call, so undoing a
 # placement is an explicit second write.
 #
@@ -32,13 +33,13 @@ import stdlib.time as time
 type linear Board = Board Int (LinVec Bool) (LinVec Bool) (LinVec Bool)
 
 fn free_at(i: Int, v: borrowing LinVec Bool) -> Bool =
-  let Just taken = linvec_get(i, v) else false
+  let Just taken = linvec.get(i, v) else false
   in ! taken
 
 # Sets (or, with `false`, clears) the three cells a queen at (row, col) covers.
 fn mark(c: Int, pd: Int, nd: Int, x: Bool, b: Board) -> Board =
   match b with
-  | Board k cols pos neg -> Board(k, linvec_set(c, x, cols), linvec_set(pd, x, pos), linvec_set(nd, x, neg))
+  | Board k cols pos neg -> Board(k, linvec.set(c, x, cols), linvec.set(pd, x, pos), linvec.set(nd, x, neg))
 
 fn found(b: Board) -> Board =
   match b with
@@ -64,13 +65,13 @@ fn queens(n: Int, row: Int, col: Int, b: Board) -> Board =
 fn finish(b: Board) -> Int =
   match b with
   | Board k cols pos neg ->
-      let _ = linvec_drop(cols)
-          _ = linvec_drop(pos)
-          _ = linvec_drop(neg)
+      let _ = linvec.drop(cols)
+          _ = linvec.drop(pos)
+          _ = linvec.drop(neg)
       in k
 
 fn count_solutions(n: Int) -> Int =
-  finish(queens(n, 0, 0, Board(0, linvec_new(n, false), linvec_new(2 * n - 1, false), linvec_new(2 * n - 1, false))))
+  finish(queens(n, 0, 0, Board(0, linvec.new(n, false), linvec.new(2 * n - 1, false), linvec.new(2 * n - 1, false))))
 
 fn format_ms_parts(ms: Int, micros: Int) -> String =
   string_concat_many(["(", int_to_string(ms), ".", int_to_string((micros - ms * 1000) / 100), " ms)"])
