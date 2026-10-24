@@ -365,10 +365,11 @@ generational collector, as `vector_mutset` is ([gc-generational-v0.md](gc-genera
 
 **Compiler tables.** Three key on `vector_mutset` by name, and `linvec_set` joins each, since a
 `MutVec` loop would otherwise beat a `LinVec` one: `ir_rooting.is_nonallocating_read`, or every
-live pointer is rooted around each write (landed; `linvec_push` and `linvec_truncate` are listed
-too: `vector_push` reaches only malloc and realloc, never the collector); the barrier sites of
-gc-generational-v0.md §7, with the `sprout_ap_on_store` call `vector_mutset` makes (landed, in
-`linvec_set`'s C body, and `linvec_push` through `vector_push`); and
+live pointer is rooted around each write (landed; `vector_push`, `linvec_push` and
+`linvec_truncate` are listed too: `vector_push` reaches only malloc and realloc, never the
+collector); the barrier sites of gc-generational-v0.md §7, with the `sprout_ap_on_store` call
+`vector_mutset` makes (landed, in `linvec_set`'s C body, and `linvec_push` through
+`vector_push`); and
 B1's `ast_to_ir.recognize_vector_op` with `bce.direct_shape`, so a `LinVec Double` write inlines
 and loses its bounds check as a `MutVec` one does. The third is out of the first landing (§12
 step 14), and stays a BACKLOG entry. Bounds-check elimination keeps its length rule (only
