@@ -1,0 +1,14 @@
+# `(_, n) <- e` is lowered directly, not through a match, so the do-bind path
+# applies the field rule to a tuple pattern itself. Reported at the `_`.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(m: Maybe (Conn, Int)) -> Maybe Int =
+  do
+    (_, n) <- m
+#~^ ERROR
+    Just(n)
+
+fn main() -> Unit !{IO} = print(to_string(drop(Just((Conn(1), 2)))))

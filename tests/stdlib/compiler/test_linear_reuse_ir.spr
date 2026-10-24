@@ -129,16 +129,12 @@ let shapes_src =
   "  let _ = drop_grid(c)\n" ++
   "  in match h with\n" ++
   "     | c -> match c with | Grid n k -> Grid(n, k)\n" ++
-  "fn wild(t: Two) -> Two =\n" ++
-  "  match t with\n" ++
-  "  | A n k -> A(n, k)\n" ++
-  "  | _ -> B(0, 0)\n" ++
   "fn var_arm(t: Two) -> (Int, Two) =\n" ++
   "  match t with\n" ++
   "  | A n k -> (n, A(n, k))\n" ++
   "  | other -> (drop_two(other), B(1, 1))\n" ++
   "fn let_else(t: Two) -> Two =\n" ++
-  "  let A n k = t else B(0, 0)\n" ++
+  "  let A n k = t else other -> B(drop_two(other), 1)\n" ++
   "  in A(n + 1, k)\n" ++
   "fn flip(t: Two) -> Two =\n" ++
   "  match t with\n" ++
@@ -244,8 +240,8 @@ fn check_shapes(state: TestState, ir: String, ll: String) -> Unit !{IO} =
     assert_eq(state, "borrowed value under a shadowing pattern: no reuse", reuses(ir_fn(ir, "shadow")), 0)
     assert_eq(state, "borrowed value under a shadowing pattern: allocates", makes(ir_fn(ir, "shadow")), 1)
 
-    assert_eq(state, "`_` arm: only the constructor arm reuses", reuses(ir_fn(ir, "wild")), 1)
-    assert_eq(state, "`_` arm: allocates", makes(ir_fn(ir, "wild")), 1)
+    # A `_` arm over a linear type is rejected (docs/linear-wildcard-v0.md), so the
+    # fall-through arms here take the scrutinee by name.
     assert_eq(state, "variable arm: only the constructor arm reuses", reuses(ir_fn(ir, "var_arm")), 1)
     assert_eq(state, "variable arm: allocates", makes(ir_fn(ir, "var_arm")), 1)
     assert_eq(state, "let..else fallback: only the matched arm reuses", reuses(ir_fn(ir, "let_else")), 1)

@@ -1,0 +1,1 @@
+`_` drops a linear field of type `a`. Bind it, as in `Box c`, and consume it.

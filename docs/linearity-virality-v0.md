@@ -77,8 +77,8 @@ about where the rule *fires*, not about what a leak *is* — and it applies verb
 - Automatic destructors. Sprout has no `Drop`; a leak is a compile error, never a cleanup hook.
 - A linearity *bound* on a type parameter (`Chan a where a: Unrestricted`). §7 explains why this
   is the thing that would make virality cheap, and why it is out of scope for v0.
-- Revisiting the Position A/B wildcard question (`BACKLOG`, "wildcard pattern over a linear
-  value"). Adjacent, separately decidable, and unchanged by every option here.
+- Revisiting the Position A/B wildcard question (decided in `docs/linear-wildcard-v0.md`).
+  Adjacent, separately decidable, and unchanged by every option here.
 - Changing borrowing, `once` closures, or parameter ownership modes.
 
 ## 3. Prior-art survey

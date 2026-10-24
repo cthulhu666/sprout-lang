@@ -1,0 +1,16 @@
+# A `do` block's `let _ = e` reads as the `let _` of a pure body: the message
+# is the whole-value one, reported at `e`.
+
+type linear Conn = Conn Int
+
+fn open(n: Int) -> Conn = Conn(n)
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop() -> Maybe Int =
+  do
+    let _ = open(1)
+#~^ ERROR
+    Just(0)
+
+fn main() -> Unit !{IO} = print(to_string(drop()))

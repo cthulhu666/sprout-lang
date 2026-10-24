@@ -1,0 +1,36 @@
+module main
+
+# `try` over an instance whose failure arm is a `_`, at a linear success. Fusion
+# puts a tuple pattern under `Filled` (irrefutable, so it rules `Filled` out) and
+# the instance's own `_` stays on `Blank | Broken`. Nothing linear is dropped.
+
+type linear Conn = Conn Int
+
+type Slot a =
+  | Filled a
+  | Blank
+  | Broken
+
+instance Propagate Slot
+  fn branch(value: Slot a) -> ControlFlow (Slot b) a where linear a, linear b =
+    match value with
+    | Filled v -> Continue(v)
+    | _ -> Break(Blank)
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn pair(s: Slot (Conn, Int)) -> Slot Int =
+  let (c, n) = try s
+  in Filled(close(c) + n)
+
+fn slot_text(s: Slot Int) -> String =
+  match s with
+  | Filled v -> `filled ${v}`
+  | Blank -> "blank"
+  | Broken -> "broken"
+
+fn main() -> Unit !{IO} =
+  do
+    print(slot_text(pair(Filled((Conn(3), 4)))))
+    print(slot_text(pair(Blank)))
+    print(slot_text(pair(Broken)))

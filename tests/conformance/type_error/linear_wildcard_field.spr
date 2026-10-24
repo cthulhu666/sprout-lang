@@ -1,0 +1,13 @@
+# `Wrap _` drops the linear field of an owned `Wrap`. Reported at the `_`.
+
+type linear Conn = Conn Int
+type linear Wrap = Wrap Conn
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(w: Wrap) -> Int =
+  match w with
+  | Wrap _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(drop(Wrap (Conn(1)))))

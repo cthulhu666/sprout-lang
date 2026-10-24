@@ -1,0 +1,12 @@
+# `linear_wildcard_do_tuple_bind.spr` with its error's hint applied.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(m: Maybe (Conn, Int)) -> Maybe Int =
+  do
+    (c, n) <- m
+    Just(close(c) + n)
+
+fn main() -> Unit !{IO} = print(to_string(drop(Just((Conn(1), 2)))))

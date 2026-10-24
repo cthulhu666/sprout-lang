@@ -1,0 +1,15 @@
+module main
+
+wrap linear L = Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+type Box a = Box a
+
+fn eat(b: Box L) -> Int = match b with | Box l -> close(l)
+
+fn g(b: Box L) -> Int = match (b, 0) with | (c, _) -> eat(c)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Box (L(3)))))

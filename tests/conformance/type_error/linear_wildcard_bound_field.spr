@@ -1,0 +1,10 @@
+# A field whose type is a `where linear` variable is linear too.
+
+type Box a = Box a
+
+fn drop(b: Box a) -> Int where linear a =
+  match b with
+  | Box _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(drop(Box(3))))

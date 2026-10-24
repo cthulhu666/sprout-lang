@@ -817,7 +817,8 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
       mark_stored_fields(name, params, ast.ctor_field_type_exprs(ctors), build_local_params(params, alias_env),
         mark_phantom_params(name, params, ast.ctor_field_type_exprs(ctors),
           mark_type_multiplicity(name, ast.ctors_multiplicity(mult, ctors),
-            register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env))))
+            mark_ctor_names(name, ast.ctor_names(ctors),
+              register_ctors_for_type(name, params, build_local_params(params, alias_env), ctors, env)))))
   # WrapDecl: synthesize a single-constructor type with the same name as the
   # wrap. The constructor's argument type is the wrap's inner type. This gives
   # the typechecker a scheme `inner -> Foo` for Foo(x), and a destructor entry
@@ -828,9 +829,19 @@ fn register_type_decl_raw(decl: ast.Decl, alias_env: Dict types.Type,
       in mark_stored_fields(name, params, [inner], local,
            mark_phantom_params(name, params, [inner],
              mark_type_multiplicity(name, mult,
-               register_ctors_for_type(name, params, local,
-                 [ast.TypeConstructor(name, [inner], Nil, Nil, Nil)], env))))
+               mark_ctor_names(name, [name],
+                 register_ctors_for_type(name, params, local,
+                   [ast.TypeConstructor(name, [inner], Nil, Nil, Nil)], env)))))
   | _ -> env
+
+# "@ctors:<TypeName>" lists a type's constructors in declaration order, so
+# linear_check can tell which ones a `_` arm still matches once earlier arms
+# have taken theirs (types.ctors_marker). Like `@stores:` above it carries no
+# free type variables, and a type with no constructor adds nothing.
+fn mark_ctor_names(tname: String, names: List String, env: Dict types.Scheme) -> Dict types.Scheme =
+  match names with
+  | Nil -> env
+  | _ -> dict_set(types.ctors_marker_key(tname), types.ctors_marker(names), env)
 
 fn build_local_params(params: List String, acc: Dict types.Type) -> Dict types.Type =
   match params with

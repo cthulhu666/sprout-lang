@@ -1,0 +1,12 @@
+# `linear_wildcard_refutable_arm.spr` with its error's hint applied.
+
+type linear File = File Int
+
+fn close(f: File) -> Int = match f with | File n -> n
+
+fn peek(m: Maybe File) -> Int =
+  match m with
+  | Just f -> close(f)
+  | Nothing -> 0
+
+fn main() -> Unit !{IO} = print(int_to_string(peek(Just (File(1)))))

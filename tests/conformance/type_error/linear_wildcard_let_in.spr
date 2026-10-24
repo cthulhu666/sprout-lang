@@ -1,0 +1,15 @@
+# `let _ = e in body` in a pure body is a match with a `_` arm. The same
+# `let _ = open(1)` in a `do` block was already rejected.
+
+type linear Conn = Conn Int
+
+fn open(n: Int) -> Conn = Conn(n)
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop() -> Int =
+  let _ = open(1)
+#~^ ERROR
+  in 0
+
+fn main() -> Unit !{IO} = print(int_to_string(drop()))

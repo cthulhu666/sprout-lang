@@ -706,6 +706,7 @@ schemes. **Every `@`-marker family is keyed on that short name:**
 |---|---|---|
 | `@linear:<TypeName>` | short type name | `linear_check.head_type_name` |
 | `@phantom:<TypeName>:<index>` | short type name | `linear_check.param_is_phantom` |
+| `@ctors:<TypeName>` | short type name | `linear_check.type_ctors` |
 | `@inst:<Class>:<head>` | short type head | typeclass dispatch in `infer` |
 | `@class:`, `@type:` | short name (readers apply `after_last_dot`) | `infer` |
 | `@tyarity:<TypeName>` | short type name | `infer.type_arity_of` |
@@ -724,6 +725,10 @@ name (`docs/linearity-bound-v0.md` §6–§7):
 containment declines to descend it (`type Chan a = | Chan Int`). It is written in
 `infer.mark_phantom_params` from the declaration's own name and read through the
 same `head_type_name` as `@linear:`, so the two stand or fall together.
+
+`@ctors:` lists a type's constructors in declaration order, as the marker scheme's
+variables (`types.ctors_marker`), so a `_` arm can tell which constructors it can still
+match (`docs/linear-wildcard-v0.md` §4). A record has none, so it gets no refinement.
 
 **The predicate behind it is shared, and changing it moves two consumers.**
 `ast.type_expr_stores` decides "stored", and `deriving` uses the same answer to

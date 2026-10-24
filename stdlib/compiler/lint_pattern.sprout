@@ -810,29 +810,9 @@ fn wildcard_stand_in(ppat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
 # a pattern `_` leaves no binder unpaired, and what the subject binds is caught by
 # closedness instead — that is the `Err _` vs `Err err` case §5.2a is built on.
 fn pattern_wildcard_over(spat: ast.Pattern, s_is_last: Bool, r: Ren) -> Maybe Ren =
-  if pattern_irrefutable(spat) || s_is_last
+  if ast.pattern_irrefutable(spat) || s_is_last
   then Just(bind_right_names(ast.pattern_names(spat), r))
   else Nothing
-
-# Refutable means "can fail to match a value of its type". Conservative without
-# type information: a constructor is refutable even for a single-constructor type,
-# and a literal always is. `()` is the sole value of `Unit`, so it is not.
-fn pattern_irrefutable(p: ast.Pattern) -> Bool =
-  match p with
-  | ast.WildcardPattern _ -> true
-  | ast.VarPattern _ _ -> true
-  | ast.UnitPattern _ -> true
-  | ast.TuplePattern items _ -> patterns_irrefutable(items)
-  | ast.ConstructorPattern _ _ _ -> false
-  | ast.IntPattern _ _ -> false
-  | ast.BoolPattern _ _ -> false
-  | ast.StringPattern _ _ -> false
-  | ast.CharPattern _ _ -> false
-
-fn patterns_irrefutable(ps: List ast.Pattern) -> Bool =
-  match ps with
-  | [] -> true
-  | [p | rest] -> pattern_irrefutable(p) && patterns_irrefutable(rest)
 
 fn bind_right_names(names: List String, r: Ren) -> Ren =
   match names with

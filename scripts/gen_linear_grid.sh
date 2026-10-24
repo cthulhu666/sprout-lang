@@ -11,9 +11,12 @@
 # an unbounded generic), mode (a borrowing function where a consuming one is expected,
 # §6.6), lend (ACCEPT: a lambda passed to `list_fold` reads a borrowed linear value, and the
 # owner releases it after the call), comp (a list comprehension, which elaborates to
-# `list_fold`, consumes a captured linear value). `_nolin` rows declare no linear type
-# anywhere in the program. `mode` and `comp` cells mark the line their error is reported on
-# with `#~^ ERROR` (scripts/error_line_marker.sh).
+# `list_fold`, consumes a captured linear value), wildarm (a whole-arm `_` over the owned
+# linear value), wildfield (a tuple component `_` over it), wildok (ACCEPT: a tuple component
+# `_` over an `Int`, the linear component consumed; docs/linear-wildcard-v0.md). `_nolin`
+# rows declare no linear type anywhere in the program. `mode`, `comp`, `wildarm` and
+# `wildfield` cells mark the line their error is reported on with `#~^ ERROR`
+# (scripts/error_line_marker.sh).
 # `inst` also holds one cell per way a dictionary reaches an instance: nested context,
 # superclass, tuple head, method value, an enclosing bound, an instance method's bound.
 # Every cell on the linear ADT header repeats as `w_<name>` on a linear wrap (HDR_W).
@@ -31,7 +34,14 @@
 #     value reaching its body is the `inst` row's. `mbound` is the bounded form.
 #   - any _nolin lend/comp: no linear value to borrow or consume.
 #   - inst, ctor, exist, tlet, direct lend/comp: hosted on a concrete `L` (or a holder of
-#     one), since an unbounded variable cannot be linear there.
+#     one), since an unbounded variable cannot be linear there. So are the same rows'
+#     wildarm/wildfield/wildok, where `wild` pins the call-site error instead.
+#   - method wildarm/wildfield/wildok: the method's own variable is unbounded, so never
+#     linear; a linear value reaching its body is the `inst` row's.
+#   - ext wildok: an accept cell must link, and no runtime extern is generic over a linear
+#     value; ext wildarm/wildfield declare the extern with `where linear a`.
+#   - annsib wild*: both members carry `where linear a`, so the `_` in the second one is
+#     the rule's, not the unbounded sibling's call-site error that `wild` pins.
 set -euo pipefail
 
 OUT="${1:?usage: gen_linear_grid.sh <out-root>}"
@@ -150,7 +160,7 @@ fn g(x: a) -> Int where linear a =
 
 fn main() -> Unit !{IO} = print(int_to_string(g($v)))
 EOF
-  rej "$h" "body${s}__wild" "discards a linear value" <<EOF
+  rej "$h" "body${s}__wild" '`_` drops a linear value' <<EOF
 fn g(x: a) -> Int !{IO} where linear a =
   do
     _ <- after(print("w"), x)
@@ -249,7 +259,7 @@ fn pong(y, n: Int) =
 
 fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
 EOF
-  rej "$h" "unannsib${s}__wild" '`_ <-` discards a linear value' <<EOF
+  rej "$h" "unannsib${s}__wild" '`_` drops a linear value' <<EOF
 fn ping(x: a, n: Int) -> Int !{IO} where linear a = pong(x, n)
 
 fn pong(y, n: Int) =
@@ -472,7 +482,7 @@ instance Count (Maybe a) where linear a
 
 fn main() -> Unit !{IO} = print(int_to_string(count($jv)))
 EOF
-  rej "$h" "instb${s}__wild" "discards a linear value" <<EOF
+  rej "$h" "instb${s}__wild" '`_` drops a linear value' <<EOF
 class Count t
   fn count(x: t) -> Int !{IO}
 
@@ -588,7 +598,7 @@ instance K Int
 
 fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
 EOF
-  rej "$h" "mbound${s}__wild" "discards a linear value" <<EOF
+  rej "$h" "mbound${s}__wild" '`_` drops a linear value' <<EOF
 class K t
   fn m(s: t, x: a) -> Int !{IO} where linear a
 
@@ -632,7 +642,7 @@ fn main() -> Unit !{IO} =
     ext_id(L(1))
     print("x")
 EOF
-rej "$HDR_L" ext__wild '`_ <-` discards a linear value' <<'EOF'
+rej "$HDR_L" ext__wild '`_` drops a linear value' <<'EOF'
 extern fn ext_io(x: a) -> a !{IO}
 
 fn main() -> Unit !{IO} =
@@ -675,7 +685,7 @@ fn main() -> Unit !{IO} =
     Box(L(1))
     print("x")
 EOF
-rej "$HDR_L" ctor__wild '`_ <-` discards a linear value' <<'EOF'
+rej "$HDR_L" ctor__wild '`_` drops a linear value' <<'EOF'
 type Box a = Box a
 
 fn main() -> Unit !{IO} =
@@ -730,7 +740,7 @@ fn g(b: Boxed) -> Int =
 
 fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(1)))))
 EOF
-rej "$HDR_L" exist__wild "discards a linear value" <<EOF
+rej "$HDR_L" exist__wild '`_` drops a linear value' <<EOF
 $EXB
 fn g(b: Boxed) -> Int !{IO} =
   do
@@ -926,6 +936,296 @@ fn g(b: Lent) -> Int = match b with | Lent x -> run_a(peek_a, x)
 #~^ ERROR
 
 fn main() -> Unit !{IO} = print(int_to_string(g(Lent (L(1)))))
+EOF
+
+# ── wildarm, wildfield, wildok: a `_` pattern over a linear value (docs/linear-wildcard-v0.md) ──
+# `wildarm` (reject): a whole-arm `_` over the row's owned linear value (§4 rule 2).
+# `wildfield` (reject): a tuple component `_` over it, `match (x, 0) with | (_, n) -> n`
+# (rule 1). `wildok` (accept): the same tuple with the `_` over the `Int` component and the
+# linear value consumed. Each reject cell marks the `_`'s line. `direct`, `inst` and `tlet`
+# host the value on a concrete `L`, as `mode` does: an unbounded variable is never linear,
+# and the `wild` cell there pins the call-site error. `annsib` bounds both members, so the
+# `_` sits in the second one and the error must name that member.
+WV='`_` drops a linear value'
+WF='`_` drops a linear field'
+# wild_shown <show> <expr>: `show(expr)`, or `expr` when there is no show function.
+wild_shown() { if [ -n "$1" ]; then printf '%s(%s)' "$1" "$2"; else printf '%s' "$2"; fi; }
+
+# direct: a plain function over a concrete `L`.
+rej "$HDR_L" direct__wildarm "$WV" <<'EOF'
+fn g(x: L) -> Int = match x with | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))
+EOF
+rej "$HDR_L" direct__wildfield "$WF" <<'EOF'
+fn g(x: L) -> Int = match (x, 0) with | (_, n) -> n
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(1))))
+EOF
+acc "$HDR_L" direct__wildok '3' <<'EOF'
+fn g(x: L) -> Int = match (x, 0) with | (y, _) -> close(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(L(3))))
+EOF
+
+# body: a declaration's own `where linear a`.
+wild_body_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4"
+  rej "$h" "body${s}__wildarm" "$WV" <<EOF
+fn g(x: a) -> Int where linear a = match x with | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g($v)))
+EOF
+  rej "$h" "body${s}__wildfield" "$WF" <<EOF
+fn g(x: a) -> Int where linear a = match (x, 0) with | (_, n) -> n
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g($v)))
+EOF
+  acc "$h" "body${s}__wildok" '1' <<EOF
+fn g(x: a) -> a where linear a = match (x, 0) with | (y, _) -> y
+
+fn main() -> Unit !{IO} = print(int_to_string($(wild_shown "$show" "g($v)")))
+EOF
+}
+wild_body_cells "" "$HDR_L" 'L(1)' close
+wild_body_cells _nolin "$HDR_N" 1 ''
+
+# annsib and unannsib: the `_` sits in the second member, in the `else` arm of `pong`.
+wild_sib_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4" kind sib okb
+  for kind in annsib unannsib; do
+    if [ "$kind" = annsib ]; then
+      sib='fn pong(y: a, n: Int) -> Int where linear a ='
+      okb='fn pong(y: a, n: Int) -> a where linear a ='
+    else
+      sib='fn pong(y, n: Int) ='
+      okb='fn pong(y, n: Int) ='
+    fi
+    rej "$h" "${kind}${s}__wildarm" "$WV" <<EOF
+fn ping(x: a, n: Int) -> Int where linear a = pong(x, n)
+
+$sib
+  if n > 0 then ping(y, n - 1)
+  else match y with | _ -> 0
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+    rej "$h" "${kind}${s}__wildfield" "$WF" <<EOF
+fn ping(x: a, n: Int) -> Int where linear a = pong(x, n)
+
+$sib
+  if n > 0 then ping(y, n - 1)
+  else match (y, 0) with | (_, k) -> k
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(ping($v, 2)))
+EOF
+    acc "$h" "${kind}${s}__wildok" '1' <<EOF
+fn ping(x: a, n: Int) -> a where linear a = pong(x, n)
+
+$okb
+  if n > 0 then ping(y, n - 1)
+  else match (y, 0) with | (z, _) -> z
+
+fn main() -> Unit !{IO} = print(int_to_string($(wild_shown "$show" "ping($v, 2)")))
+EOF
+  done
+}
+wild_sib_cells "" "$HDR_L" 'L(1)' close
+wild_sib_cells _nolin "$HDR_N" 1 ''
+
+# inst: the instance is on a concrete `L`, since an unbounded head variable is never linear.
+rej "$HDR_L" inst__wildarm "$WV" <<'EOF'
+class Use t
+  fn use(x: t) -> Int
+
+instance Use L
+  fn use(x: L) -> Int = match x with | _ -> 0
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(use(L(1))))
+EOF
+rej "$HDR_L" inst__wildfield "$WF" <<'EOF'
+class Use t
+  fn use(x: t) -> Int
+
+instance Use L
+  fn use(x: L) -> Int = match (x, 0) with | (_, n) -> n
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(use(L(1))))
+EOF
+acc "$HDR_L" inst__wildok '3' <<'EOF'
+class Use t
+  fn use(x: t) -> Int
+
+instance Use L
+  fn use(x: L) -> Int = match (x, 0) with | (y, _) -> close(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(use(L(3))))
+EOF
+
+# instb: an instance head's own `where linear a`.
+wild_instb_cells() { # suffix hdr value type eat-body
+  local s="$1" h="$2" v="$3" ty="$4" eat="$5" jv
+  if [[ "$v" == *"("* ]]; then jv="Just ($v)"; else jv="Just($v)"; fi
+  rej "$h" "instb${s}__wildarm" "$WV" <<EOF
+class Count t
+  fn count(x: t) -> Int
+
+instance Count (Maybe a) where linear a
+  fn count(x: Maybe a) -> Int = match x with | _ -> 0
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(count($jv)))
+EOF
+  rej "$h" "instb${s}__wildfield" "$WF" <<EOF
+class Count t
+  fn count(x: t) -> Int
+
+instance Count (Maybe a) where linear a
+  fn count(x: Maybe a) -> Int = match (x, 0) with | (_, n) -> n
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(count($jv)))
+EOF
+  acc "$h" "instb${s}__wildok" '1' <<EOF
+class Take t
+  fn take(x: t) -> t
+
+instance Take (Maybe a) where linear a
+  fn take(x: Maybe a) -> Maybe a = match (x, 0) with | (y, _) -> y
+
+fn eat(m: Maybe $ty) -> Int = $eat
+
+fn main() -> Unit !{IO} = print(int_to_string(eat(take($jv))))
+EOF
+}
+wild_instb_cells "" "$HDR_L" 'L(1)' L 'match m with | Just l -> close(l) | Nothing -> 0'
+wild_instb_cells _nolin "$HDR_N" 1 Int 'maybe_with_default(0, m)'
+
+# mbound: a class method's own variable with `where linear a`.
+wild_mbound_cells() { # suffix hdr value show
+  local s="$1" h="$2" v="$3" show="$4"
+  rej "$h" "mbound${s}__wildarm" "$WV" <<EOF
+class K t
+  fn m(s: t, x: a) -> Int where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> Int where linear a = match x with | _ -> s
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
+EOF
+  rej "$h" "mbound${s}__wildfield" "$WF" <<EOF
+class K t
+  fn m(s: t, x: a) -> Int where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> Int where linear a = match (x, s) with | (_, k) -> k
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(m(0, $v)))
+EOF
+  acc "$h" "mbound${s}__wildok" '1' <<EOF
+class K t
+  fn m(s: t, x: a) -> a where linear a
+
+instance K Int
+  fn m(s: Int, x: a) -> a where linear a = match (x, s) with | (y, _) -> y
+
+fn main() -> Unit !{IO} = print(int_to_string($(wild_shown "$show" "m(0, $v)")))
+EOF
+}
+wild_mbound_cells "" "$HDR_L" 'L(1)' close
+wild_mbound_cells _nolin "$HDR_N" 1 ''
+
+# ext: an extern whose result is the owned value. It is bounded, so the `_` is the only
+# error: an unbounded extern called at `L` is rejected at the call too.
+rej "$HDR_L" ext__wildarm "$WV" <<'EOF'
+extern fn ext_id(x: a) -> a where linear a
+
+fn main() -> Unit !{IO} = match ext_id(L(1)) with | _ -> print("x")
+#~^ ERROR
+EOF
+rej "$HDR_L" ext__wildfield "$WF" <<'EOF'
+extern fn ext_id(x: a) -> a where linear a
+
+fn main() -> Unit !{IO} = match (ext_id(L(1)), 0) with | (_, n) -> print(int_to_string(n))
+#~^ ERROR
+EOF
+
+# ctor: a holder of the linear value. `Box` is not declared linear; it holds one.
+rej "$HDR_L" ctor__wildarm "$WV" <<'EOF'
+type Box a = Box a
+
+fn g(b: Box L) -> Int = match b with | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Box (L(1)))))
+EOF
+rej "$HDR_L" ctor__wildfield "$WF" <<'EOF'
+type Box a = Box a
+
+fn g(b: Box L) -> Int = match (b, 0) with | (_, n) -> n
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Box (L(1)))))
+EOF
+acc "$HDR_L" ctor__wildok '3' <<'EOF'
+type Box a = Box a
+
+fn eat(b: Box L) -> Int = match b with | Box l -> close(l)
+
+fn g(b: Box L) -> Int = match (b, 0) with | (c, _) -> eat(c)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Box (L(3)))))
+EOF
+
+# exist: `Boxed` is linear by its constructor's bound.
+rej "$HDR_L" exist__wildarm "$WV" <<EOF
+$EXB
+fn g(b: Boxed) -> Int = match b with | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(1)))))
+EOF
+rej "$HDR_L" exist__wildfield "$WF" <<EOF
+$EXB
+fn g(b: Boxed) -> Int = match (b, 0) with | (_, n) -> n
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(1)))))
+EOF
+acc "$HDR_L" exist__wildok '3' <<EOF
+$EXB
+fn g(b: Boxed) -> Int = match (b, 0) with | (c, _) -> unbox(c)
+
+fn main() -> Unit !{IO} = print(int_to_string(g(Boxed (L(3)))))
+EOF
+
+# tlet: the body of a top-level `let` holds the value.
+rej "$HDR_L" tlet__wildarm "$WV" <<'EOF'
+let k: Int = match L(1) with | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
+EOF
+rej "$HDR_L" tlet__wildfield "$WF" <<'EOF'
+let k: Int = match (L(1), 0) with | (_, n) -> n
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
+EOF
+acc "$HDR_L" tlet__wildok '3' <<'EOF'
+let k: Int = match (L(3), 0) with | (y, _) -> close(y)
+
+fn main() -> Unit !{IO} = print(int_to_string(k))
 EOF
 
 # ── lend and comp: a lambda at a `local` combinator slot ──────────────────────

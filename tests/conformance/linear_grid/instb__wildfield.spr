@@ -1,0 +1,16 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Count t
+  fn count(x: t) -> Int
+
+instance Count (Maybe a) where linear a
+  fn count(x: Maybe a) -> Int = match (x, 0) with | (_, n) -> n
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(count(Just (L(1)))))

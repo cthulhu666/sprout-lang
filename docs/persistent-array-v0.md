@@ -324,7 +324,8 @@ first:
   linear value into `exists a` is rejected.
 
 These are §5.8 bugs, not `LinVec` bugs: each lets a `File` be closed twice today. A leak is not one
-of them: a wildcard that drops an array loses it but cannot expose a write. `LinVec` raises their
+of them: a wildcard that drops an array is rejected (`docs/linear-wildcard-v0.md`), and a leak
+loses the array without exposing a write. `LinVec` raises their
 stakes: a double close fails loudly, while a double use of a `LinVec` makes a pure function return
 two answers in silence. So their rejection tests gate `LinVec`.
 

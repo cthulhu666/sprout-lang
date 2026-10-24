@@ -1,0 +1,17 @@
+# `let..else` with a constant `else` is a match with a `_` arm, which can still
+# match `B` and drop its `Conn`. The synthetic arm has no `_` of its own, so the
+# error is reported at the `let`.
+
+type linear Conn = Conn Int
+type Two =
+  | A Conn
+  | B Conn
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn first(t: Two) -> Int =
+  let A(c) = t else 0
+#~^ ERROR
+  in close(c)
+
+fn main() -> Unit !{IO} = print(int_to_string(first(A (Conn(1)))))

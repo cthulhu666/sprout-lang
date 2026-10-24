@@ -1,0 +1,54 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.types as types
+
+# The `@ctors:<T>` marker: T's constructor names, in declaration order, as the
+# scheme's variables. linear_check reads it to tell which constructors a
+# `_` arm can still match (docs/linear-wildcard-v0.md §6). It sits beside
+# `@stores:`, which flattens every constructor's fields into one tuple.
+
+fn env_of(src: String) -> Dict types.Scheme !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> dict_empty()
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> dict_empty()
+      | Ok prog ->
+          do
+            r <- checker.check_program(prog)
+            match r with
+            | checker.CheckOk env -> env
+            | checker.CheckErr _ _ -> dict_empty()
+
+fn ctor_names(env: Dict types.Scheme, tname: String) -> Maybe (List String) =
+  let Just(scheme) = dict_get(types.ctors_marker_key(tname), env) else Nothing
+  in Just(types.ctors_of(scheme))
+
+fn marker_free_vars(env: Dict types.Scheme, tname: String) -> List String =
+  match dict_get(types.ctors_marker_key(tname), env) with
+  | Just scheme -> types.ftv_scheme(scheme)
+  | Nothing -> Nil
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    env <- env_of("type Shape = | Circle Int | Square Int | Dot\ntype Pair a b = | Pair a b\ntype Color = | Red | Green | Blue\nwrap Id = Int\ntype Point = (x: Int, y: Int)\ntype linear Conn = Conn Int")
+
+    assert_eq(state, "constructors in declaration order", ctor_names(env, "Shape"),
+              Just(["Circle", "Square", "Dot"]))
+    assert_eq(state, "a fieldless enum is marked too", ctor_names(env, "Color"),
+              Just(["Red", "Green", "Blue"]))
+    assert_eq(state, "a single constructor", ctor_names(env, "Pair"), Just(["Pair"]))
+    assert_eq(state, "a linear type is marked", ctor_names(env, "Conn"), Just(["Conn"]))
+    assert_eq(state, "a wrap has its one constructor", ctor_names(env, "Id"), Just(["Id"]))
+    assert_eq(state, "a record has no constructor list", ctor_names(env, "Point"), Nothing)
+    assert_eq(state, "an undeclared type has none", ctor_names(env, "Nope"), Nothing)
+
+    # A marker is an env entry: a free variable would leak into every
+    # generalization (infer.mark_stored_fields).
+    assert_eq(state, "no free variables on a parametric type", marker_free_vars(env, "Pair"), [])
+    assert_eq(state, "no free variables on a plain type", marker_free_vars(env, "Shape"), [])
+
+    summary(state)

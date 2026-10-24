@@ -1,0 +1,13 @@
+# A whole-arm `_` over an owned linear parameter drops it: the scrutinee is
+# referenced once, so no binder rule sees a leak. Reported at the `_`.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(c: Conn) -> Int =
+  match c with
+  | _ -> 0
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(drop(Conn(1))))

@@ -1,0 +1,9 @@
+# `linear_wildcard_bound_field.spr` with its error's hint applied.
+
+type Box a = Box a
+
+fn unbox(b: Box a) -> a where linear a =
+  match b with
+  | Box c -> c
+
+fn main() -> Unit !{IO} = print(int_to_string(unbox(Box(3))))

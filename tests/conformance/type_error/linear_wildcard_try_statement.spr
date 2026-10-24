@@ -1,0 +1,15 @@
+# A non-final `try e` statement is `_ <- try e`, which fusion turns into a `_`
+# under the success constructor. Dropping a linear success value is a leak.
+# Reported at the `try`, where fusion places every pattern.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(m: Maybe Conn) -> Maybe Int =
+  do
+    try m
+#~^ ERROR
+    Just(0)
+
+fn main() -> Unit !{IO} = print(to_string(drop(Just (Conn(1)))))

@@ -720,25 +720,6 @@ type DoStepParse (..) =
   | DoStepPlain ast.DoStep
   | DoStepLets (List ast.DoStep)
 
-# Whether a do-bind pattern can be lowered DIRECTLY, without a match staircase:
-# a variable, wildcard, unit, or a tuple of those. This mirrors exactly what
-# `ast_to_ir.do_bind_captures` can lower. Anything else becomes an ast.DoPatStep
-# — this selects the lowering path and does not decide legality, which is W5's
-# job. O(n) in pattern nodes.
-fn is_irrefutable_do_bind_pattern(pat: ast.Pattern) -> Bool =
-  match pat with
-  | ast.VarPattern _ _ -> true
-  | ast.WildcardPattern _ -> true
-  | ast.UnitPattern _ -> true
-  | ast.TuplePattern items _ -> all_irrefutable_do_bind(items)
-  | _ -> false
-
-fn all_irrefutable_do_bind(pats: List ast.Pattern) -> Bool =
-  match pats with
-  | Nil -> true
-  | Cons p rest ->
-      if is_irrefutable_do_bind_pattern(p) then all_irrefutable_do_bind(rest) else false
-
 fn binding_name(pat: ast.Pattern) -> Maybe String =
   match pat with
   | ast.VarPattern name _ -> Just(name)
@@ -793,7 +774,9 @@ fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPa
           (_, i5) <- expected_keyword("else", tokens, i4)
           (residual, handler, i6) <- parse_let_else_clause(tokens, i5)
           Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Just(ast.LetElse(residual, handler)), cur_pos(tokens, i))), i6))
-      else if is_irrefutable_do_bind_pattern(pattern) && ! ast.starts_with_try (value) then
+      # An irrefutable pattern is what `ast_to_ir.do_bind_captures` lowers directly;
+      # anything else takes the match staircase. This picks the lowering, not legality.
+      else if ast.pattern_irrefutable(pattern) && ! ast.starts_with_try (value) then
         Ok((DoStepPlain(ast.DoBindStep(pattern, value)), i4))
       else
         Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Nothing, cur_pos(tokens, i))), i4))

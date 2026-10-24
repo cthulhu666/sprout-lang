@@ -1,0 +1,11 @@
+# `linear_wildcard_tuple_component.spr` with its error's hint applied.
+
+type linear Conn = Conn Int
+
+fn close(c: Conn) -> Int = match c with | Conn n -> n
+
+fn drop(p: (Conn, Int)) -> Int =
+  match p with
+  | (c, n) -> close(c) + n
+
+fn main() -> Unit !{IO} = print(int_to_string(drop((Conn(1), 2))))

@@ -1,0 +1,16 @@
+module main
+
+type linear L = L Int
+
+fn close(l: L) -> Int = match l with | L n -> n
+
+fn dup(z: b) -> (b, b) = (z, z)
+
+class Use t
+  fn use(x: t) -> Int
+
+instance Use L
+  fn use(x: L) -> Int = match x with | _ -> 0
+  #~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(use(L(1))))
