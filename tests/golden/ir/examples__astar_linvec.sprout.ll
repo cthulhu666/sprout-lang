@@ -823,45 +823,19 @@ arm_0_9:
   %t$14 = call i64 @examples.astar_linvec.cell_idx(i64 %p$nx, i64 %p$ny)
   br label %arm_0_15
 arm_0_15:
-  %t$40 = alloca i64
-  store i64 %t$13, ptr %t$40
-  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$42 = alloca i64
-  store i64 %t$12, ptr %t$42
-  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$44 = alloca i64
-  store i64 %t$11, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$46 = alloca i64
-  store i64 %p$s, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$17 = call i64 @examples.astar_linvec.cell_at(i64 %t$14, i64 %t$12)
   %t$18 = add i64 0, 1
   %t$19 = icmp eq i64 %t$17, %t$18
   %t$20 = zext i1 %t$19 to i64
   %t$27 = trunc i64 %t$20 to i1
-  %t$48 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$27, label %then_21, label %else_21
 then_21:
   %t$23 = add i64 0, 1
   br label %join_21
 else_21:
-  %t$49 = alloca i64
-  store i64 %t$13, ptr %t$49
-  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
-  %t$51 = alloca i64
-  store i64 %t$12, ptr %t$51
-  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
-  %t$53 = alloca i64
-  store i64 %t$11, ptr %t$53
-  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$55 = alloca i64
-  store i64 %p$s, ptr %t$55
-  %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
   %t$24 = call i64 @examples.astar_linvec.cell_at(i64 %t$14, i64 %t$11)
   %t$25 = icmp sge i64 %p$ng, %t$24
   %t$26 = zext i1 %t$25 to i64
-  %t$57 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_21
 join_21:
   %t$22 = phi i64 [%t$23, %then_21], [%t$26, %else_21]
@@ -890,18 +864,18 @@ ovfpanic_33:
   call i64 @panic(i64 %t$35)
   unreachable
 ovfok_33:
-  %t$58 = alloca i64
-  store i64 %t$31, ptr %t$58
-  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
-  %t$60 = alloca i64
-  store i64 %t$13, ptr %t$60
-  %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
-  %t$62 = alloca i64
-  store i64 %t$12, ptr %t$62
-  %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$64 = alloca i64
-  store i64 %p$s, ptr %t$64
-  %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
+  %t$40 = alloca i64
+  store i64 %t$31, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$42 = alloca i64
+  store i64 %t$13, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
+  %t$44 = alloca i64
+  store i64 %t$12, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$46 = alloca i64
+  store i64 %p$s, ptr %t$46
+  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$36 = call i64 @examples.astar_linvec.open_insert(i64 %t$33, i64 %p$ng, i64 %p$nx, i64 %p$ny, i64 %t$13)
   %t$37 = add i64 %p$s, 0
   %t$37$ptr = inttoptr i64 %t$37 to ptr
@@ -911,7 +885,7 @@ ovfok_33:
   store i64 %t$12, ptr %t$37$f1
   %t$37$f2 = getelementptr i64, ptr %t$37$ptr, i64 2
   store i64 %t$36, ptr %t$37$f2
-  %t$66 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$48 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_28
 join_28:
   %t$29 = phi i64 [%t$30, %then_28], [%t$37, %ovfok_33]
@@ -1145,24 +1119,11 @@ else_29:
   %t$33 = call i64 @examples.astar_linvec.cell_idx(i64 %t$16, i64 %t$17)
   br label %arm_0_34
 arm_0_34:
-  %t$75 = alloca i64
-  store i64 %t$3, ptr %t$75
-  %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
-  %t$77 = alloca i64
-  store i64 %t$2, ptr %t$77
-  %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
-  %t$79 = alloca i64
-  store i64 %t$18, ptr %t$79
-  %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
-  %t$81 = alloca i64
-  store i64 %p$s, ptr %t$81
-  %t$82 = call i64 @sprout_gc_push_i64_root(ptr %t$81)
   %t$36 = call i64 @examples.astar_linvec.cell_at(i64 %t$33, i64 %t$3)
   %t$37 = add i64 0, 1
   %t$38 = icmp eq i64 %t$36, %t$37
   %t$39 = zext i1 %t$38 to i64
   %t$53 = trunc i64 %t$39 to i1
-  %t$83 = call i64 @sprout_gc_pop_roots(i64 4)
   br i1 %t$53, label %then_40, label %else_40
 then_40:
   %t$42 = add i64 %p$s, 0
@@ -1198,11 +1159,11 @@ ovfok_45:
   store i64 %t$49, ptr %t$50$f1
   %t$50$f2 = getelementptr i64, ptr %t$50$ptr, i64 2
   store i64 %t$18, ptr %t$50$f2
-  %t$84 = alloca i64
-  store i64 %t$50, ptr %t$84
-  %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
+  %t$75 = alloca i64
+  store i64 %t$50, ptr %t$75
+  %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
   %t$51 = call i64 @examples.astar_linvec.expand_neighbors(i64 %t$16, i64 %t$17, i64 %t$45, i64 %t$50)
-  %t$86 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %t$51, ptr %t$55
   call void @llvm.stackrestore(ptr %t$56)
   br label %tco_loop

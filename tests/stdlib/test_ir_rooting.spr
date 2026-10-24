@@ -2,6 +2,7 @@ import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ast_to_ir as ast_to_ir
 import testsupport.ir_verify (clang_verifies_ir)
 
 # ---------------------------------------------------------------------------
@@ -699,6 +700,115 @@ fn test27_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil))), Nil, Nil, Nil)
 
+# ---------------------------------------------------------------------------
+# Noreturn blocks.  A block that calls a function which never returns (`panic`,
+# IRPanic, IRAbortMatch) cannot hand control back to the caller, so its triggers
+# and callees do not make the function "may trigger" for its callers.  The
+# relaxation is per BLOCK: a trigger on a returning path still counts.
+
+# Entry branches on %x to a returning block and a panic block.
+fn guarded_fn(name: String, ok_ops: List sprout_ir.IROp,
+              bad_ops: List sprout_ir.IROp) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(name, Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+    sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRCondBr(sprout_ir.param_ssa("x"), "ok", "bad"), Nil)),
+    Cons(sprout_ir.IRBlock("ok", ok_ops),
+    Cons(sprout_ir.IRBlock("bad", bad_ops), Nil))))
+
+fn ret_x() -> List sprout_ir.IROp =
+  Cons(sprout_ir.IRRet(sprout_ir.param_ssa("x")), Nil)
+
+# The shape a source `panic(...)` arm lowers to: the message is built (a trigger),
+# `panic` is called mid-block, and ops follow the call.
+let panic_message_ops: List sprout_ir.IROp =
+  Cons(sprout_ir.IRStrConst("%m0", "%m0r", "bad "),
+  Cons(sprout_ir.IRStrConst("%m1", "%m1r", "input"),
+  Cons(sprout_ir.IRStrConcat("%m", "%m0", "%m1"), Nil)))
+
+let panic_with_concat: List sprout_ir.IROp =
+  panic_message_ops ++
+  Cons(sprout_ir.IRCall("%pr", sprout_ir.IRTScalar, "panic", Cons("%m", Nil)),
+  Cons(sprout_ir.IRRet("%pr"), Nil))
+
+# A caller holding heap %p live across one call to `callee`.
+fn holder_fn(name: String, callee: String) -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction(name,
+    Cons(("p", sprout_ir.IRTHeap), Cons(("x", sprout_ir.IRTScalar), Nil)), "i64", Cons(
+    sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRCall("%r0", sprout_ir.IRTScalar, callee, Cons(sprout_ir.param_ssa("x"), Nil)),
+      Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
+    Nil))
+
+fn program_of(fns: List sprout_ir.IRFunction) -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(fns, Nil, Nil, Nil)
+
+fn two_fn_program(a: sprout_ir.IRFunction, b: sprout_ir.IRFunction) -> sprout_ir.IRProgram =
+  program_of(Cons(a, Cons(b, Nil)))
+
+# The first function of `prog`, rooted and lowered on its own: the callee's panic
+# block is rooted too, so a module-wide push count would not isolate the caller.
+fn lower_first(prog: sprout_ir.IRProgram) -> String =
+  match ir_rooting.insert_roots(prog, dict_empty()) with
+  | sprout_ir.IRProgram fns _ _ _ ->
+      match fns with
+      | [f | _] -> ir_lowering.lower_fn_with_table(f, dict_empty())
+      | [] -> ""
+
+fn may_trigger(prog: sprout_ir.IRProgram, name: String) -> Maybe Bool =
+  match prog with
+  | sprout_ir.IRProgram fns _ _ _ -> dict_get(name, ir_rooting.compute_alloc_summary(fns))
+
+# Test 28: the only trigger (and an unknown extern, `panic`) is in a panic block, so
+# g28 does not trigger and f28 roots nothing across the call.
+fn test28_program() -> sprout_ir.IRProgram =
+  two_fn_program(holder_fn("f28", "g28"), guarded_fn("g28", ret_x(), panic_with_concat))
+
+# Test 29 (premise 3, mirror): g29 has the same panic block AND allocates on its
+# returning path, so it still triggers and f29 still roots %p.
+fn test29_program() -> sprout_ir.IRProgram =
+  two_fn_program(holder_fn("f29", "g29"),
+    guarded_fn("g29",
+      Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons(sprout_ir.param_ssa("x"), Nil)),
+      Cons(sprout_ir.IRRet("%c"), Nil)),
+      panic_with_concat))
+
+# Test 30: f30's panic block calls Sprout fn h30, which allocates and calls f30 back.
+# The GC summary ignores that edge (f30 does not trigger; h30 does, by its own
+# allocation); mutual TCO still sees the f30 <-> h30 cycle, whose f30 -> h30 edge sits
+# only in the panic block.
+fn test30_fns() -> List sprout_ir.IRFunction =
+  Cons(guarded_fn("f30", ret_x(),
+         Cons(sprout_ir.IRCall("%h", sprout_ir.IRTScalar, "h30", Cons(sprout_ir.param_ssa("x"), Nil)),
+         Cons(sprout_ir.IRCall("%pr", sprout_ir.IRTScalar, "panic", Cons("%h", Nil)),
+         Cons(sprout_ir.IRRet("%pr"), Nil)))),
+  Cons(sprout_ir.IRFunction("h30", Cons(("x", sprout_ir.IRTScalar), Nil), "i64", Cons(
+         sprout_ir.IRBlock("entry",
+           Cons(sprout_ir.IRMakeCtor("%c", "Box", 1, Cons(sprout_ir.param_ssa("x"), Nil)),
+           Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "f30", Cons(sprout_ir.param_ssa("x"), Nil)),
+           Cons(sprout_ir.IRRet("%r"), Nil)))),
+         Nil)),
+  Nil))
+
+# Raw entries as the mutual-TCO pass consumes them.
+fn raw_entry(f: sprout_ir.IRFunction) -> (String, ir_rooting.RawSummary) =
+  match f with
+  | sprout_ir.IRFunction name _ _ _ -> (name, ir_rooting.fn_raw_summary(f))
+
+fn mutual_raw(fns: List sprout_ir.IRFunction) -> List (String, (Bool, Set)) =
+  ir_rooting.raw_call_graph(list_map(raw_entry, fns))
+
+fn test30_targets(name: String) -> List (String, Int) =
+  ast_to_ir.mutual_eligible_for(name,
+    ast_to_ir.mutual_build_eligible(mutual_raw(test30_fns()),
+      dict_set("f30", ast_to_ir.fn_info(1, false), dict_set("h30", ast_to_ir.fn_info(1, false), dict_empty())),
+      dict_set("f30", true, dict_set("h30", true, dict_empty()))))
+
+# Test 31: an IRPanic block is a noreturn block too; its message concat does not count.
+fn test31_program() -> sprout_ir.IRProgram =
+  two_fn_program(holder_fn("f31", "g31"),
+    guarded_fn("g31", ret_x(),
+      panic_message_ops ++ Cons(sprout_ir.IRPanic("%m"), Nil)))
+
 fn main() -> Unit !{IO} =
   do
     # Substring checks are blind to whole-module malformation; verify a
@@ -878,6 +988,26 @@ fn main() -> Unit !{IO} =
     # --- Test 27 (fixpoint transitive alloc): deepest fn allocates → propagates up → rooted.
     check_true("T27: push_i64_root present across transitively allocating chain (f27->a27->b27)",
                 contains(lower(test27_program()), "call i64 @sprout_gc_push_i64_root")),
+
+    # --- Tests 28-31 (noreturn blocks): the relaxation is per block.
+    check_eq("T28: g28 (trigger only in a panic block) does not trigger",
+             may_trigger(test28_program(), "g28"), Just(false)),
+    check_false("T28: no push_i64_root in f28 across the call to g28",
+                contains(lower_first(test28_program()), "call i64 @sprout_gc_push_i64_root")),
+    check_eq("T29: g29 (allocates on its returning path) still triggers",
+             may_trigger(test29_program(), "g29"), Just(true)),
+    check_true("T29: f29 still roots %p across the call to g29",
+               contains(lower_first(test29_program()), "call i64 @sprout_gc_push_i64_root")),
+    check_eq("T30: f30 does not trigger: its Sprout callee sits in a panic block",
+             may_trigger(program_of(test30_fns()), "f30"), Just(false)),
+    check_eq("T30: h30 triggers by its own allocation",
+             may_trigger(program_of(test30_fns()), "h30"), Just(true)),
+    check_eq("T30: mutual TCO still sees f30 -> h30, an edge only the panic block has",
+             list_length(test30_targets("f30")), 1),
+    check_eq("T30: mutual TCO still sees h30 -> f30",
+             list_length(test30_targets("h30")), 1),
+    check_eq("T31: g31 (concat in an IRPanic block) does not trigger",
+             may_trigger(test31_program(), "g31"), Just(false)),
 
     # Whole-module verification: the rooted+lowered IR is accepted by clang.
     check_true("T2 (single-fn) rooted IR compiles under clang", test2_compiles),

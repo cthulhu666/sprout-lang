@@ -173,19 +173,19 @@ fn stream_workers(names: List String, plan: ast_to_ir.WorkerPlan,
 # absent from the summary, so callers conservatively treat calls to it as GC triggers.
 
 fn summarize_one_fn(f: sprout_ir.IRFunction,
-                    acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
+                    acc: List (String, ir_rooting.RawSummary)) -> List (String, ir_rooting.RawSummary) =
   match f with
   | sprout_ir.IRFunction name _ _ _ -> Cons((name, ir_rooting.fn_raw_summary(f)), acc)
 
 fn summarize_lifted_then_fn(lifted: List sprout_ir.IRFunction, f: sprout_ir.IRFunction,
-                            acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
+                            acc: List (String, ir_rooting.RawSummary)) -> List (String, ir_rooting.RawSummary) =
   match lifted with
   | Nil -> summarize_one_fn(f, acc)
   | Cons lf rest -> summarize_lifted_then_fn(rest, f, summarize_one_fn(lf, acc))
 
 fn summarize_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
-                   acc: List (String, (Bool, Set))) ->
-    Result String (List (String, (Bool, Set))) !{IO} =
+                   acc: List (String, ir_rooting.RawSummary)) ->
+    Result String (List (String, ir_rooting.RawSummary)) !{IO} =
   match decls with
   | Nil -> Ok(acc)
   | Cons d rest ->
@@ -200,8 +200,8 @@ fn summarize_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                   summarize_decls(rest, penv, summarize_lifted_then_fn(lifted, f, acc))
 
 fn summarize_workers(names: List String, plan: ast_to_ir.WorkerPlan, penv: ast_to_ir.ProgEnv,
-                     acc: List (String, (Bool, Set))) ->
-    Result String (List (String, (Bool, Set))) !{IO} =
+                     acc: List (String, ir_rooting.RawSummary)) ->
+    Result String (List (String, ir_rooting.RawSummary)) !{IO} =
   match names with
   | Nil -> Ok(acc)
   | Cons name rest ->
@@ -217,10 +217,11 @@ fn summarize_workers(names: List String, plan: ast_to_ir.WorkerPlan, penv: ast_t
 
 # Combine the raw per-fn summary list into BOTH the may-trigger-GC summary and the
 # mutual-TCO eligible-edge map (same call graph, two consumers).
-fn finalize_summaries(raw: List (String, (Bool, Set)), arities: Dict ast_to_ir.FnInfo,
+fn finalize_summaries(raw: List (String, ir_rooting.RawSummary), arities: Dict ast_to_ir.FnInfo,
                       ret_i64: Dict Bool) ->
     (Dict Bool, Dict (List (String, Int))) =
-  (ir_rooting.summary_from_raw(raw), ast_to_ir.mutual_build_eligible(raw, arities, ret_i64))
+  (ir_rooting.summary_from_raw(raw),
+   ast_to_ir.mutual_build_eligible(ir_rooting.raw_call_graph(raw), arities, ret_i64))
 
 # Build the may-trigger-GC summary via the pre-pass.  Uses its own fresh Refs so it
 # does not perturb the emit pass's lambda/index state.
@@ -241,7 +242,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl, emit_penv: ast_to_ir.Pro
 # is conservative (its callers keep rooting).  Include it for completeness when
 # there are runtime lets.
 fn summarize_init_tail(runtime_lets: List (source.GlobalName, typed_ast.TypedExpr),
-                       penv: ast_to_ir.ProgEnv, after_workers: List (String, (Bool, Set)),
+                       penv: ast_to_ir.ProgEnv, after_workers: List (String, ir_rooting.RawSummary),
                        ret_i64: Dict Bool) ->
     Result String (Dict Bool, Dict (List (String, Int))) !{IO} =
   match runtime_lets with
