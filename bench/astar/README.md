@@ -8,8 +8,8 @@ and the functional/imperative divide.
 ## The Problem
 
 Find the shortest path from `(0,0)` to `(99,99)` on a 100×100 grid with a
-deterministic wall pattern. Each language uses its own iteration count tuned for
-~1 s total; see the results table for per-language ITERS.
+deterministic wall pattern. Each port sets its own run count in its source and
+reports µs per run.
 
 **Wall rule:**
 ```
@@ -50,16 +50,17 @@ entries are discarded when popped (closed check). This avoids the O(n)
 
 ## Data Structures
 
-| Concern | Sprout | Haskell | Go | Java | JS | Python | Ruby |
+| Concern | Sprout (`astar_linvec`) | Haskell | Go | Java | JS | Python | Ruby |
 |---|---|---|---|---|---|---|---|
-| Open set | Sorted `List` (O(n) insert) | Sorted list (O(n) insert) | Sorted slice, in-place copy (O(n) insert, O(1) amortised alloc) | `PriorityQueue` (O(log n)) | Sorted array (O(n) insert) | `heapq` (O(log n)) | `bsearch_index` (O(n) insert) |
-| g_score | `MutVec Int` — O(1) in-place write | `IOUArray` — O(1) mutable | `[10000]int` — O(1) mutable | `int[]` — O(1) mutable | `Int32Array` — O(1) mutable | `list` — O(1) mutable | `Array` — O(1) mutable |
-| Closed | `MutVec Int` (0/1) — O(1) in-place write | `IOUArray` — O(1) mutable | `[10000]bool` — O(1) mutable | `boolean[]` — O(1) mutable | `Uint8Array` — O(1) mutable | `list` — O(1) mutable | `Array` — O(1) mutable |
+| Open set | Linear sorted list (O(n) insert, one allocation) | Sorted list (O(n) insert) | Sorted slice, in-place copy (O(n) insert, O(1) amortised alloc) | `PriorityQueue` (O(log n)) | Sorted array (O(n) insert) | `heapq` (O(log n)) | `bsearch_index` (O(n) insert) |
+| g_score | `LinVec Int` — O(1) in-place write, pure | `IOUArray` — O(1) mutable | `[10000]int` — O(1) mutable | `int[]` — O(1) mutable | `Int32Array` — O(1) mutable | `list` — O(1) mutable | `Array` — O(1) mutable |
+| Closed | `LinVec Int` (0/1) — O(1) in-place write, pure | `IOUArray` — O(1) mutable | `[10000]bool` — O(1) mutable | `boolean[]` — O(1) mutable | `Uint8Array` — O(1) mutable | `list` — O(1) mutable | `Array` — O(1) mutable |
 
-`MutVec a` is Sprout's mutable array type (`MutVec (Vector a)` ADT wrapping a
-GC-managed `VectorVal`). `mutvec_set` writes directly into the existing slot
-via the `vector_mutset` C primitive — no allocation, no copy. The constructor
-is unexported so the backing store can never be aliased through a `Vec` handle.
+`LinVec a` is a linear vector (Experimental, spec §5.8): a set consumes it and
+returns it, so no one can see the old version, and `linvec_set` writes in place.
+The search is a pure function. `astar.sprout` keeps the earlier version for
+comparison: `MutVec Int` arrays, which make the search `!{IO}`, and a sorted list
+of tuples.
 
 ---
 
@@ -77,7 +78,8 @@ bench/astar/
 └── .gitignore      Excludes bin/ from version control
 ```
 
-The Sprout source lives at `../../examples/astar.sprout`.
+The Sprout sources are `../../examples/astar.sprout` (`MutVec`) and
+`../../examples/astar_linvec.sprout` (`LinVec`).
 
 ---
 
@@ -109,69 +111,54 @@ The script compiles Haskell, Go, Java, and the Sprout binary into
 
 ## Results
 
-Measured on Apple M1 (arm64-darwin), 100×100 grid, ~1 s per language.
-Path length 198 steps (optimal, confirmed by all implementations).
-Each language uses its own ITERS so the total run time is comparable.
+**The ports do not run the same search yet.** On equal `f` they break ties
+differently, and on this grid that changes the work ~20× (see *Tie-breaks*
+below). Only rows with the same rule compare. The cross-language table that
+stood here mixed rules: its "Sprout beats Go" came from Go expanding 4,178 nodes
+to Sprout's 198. It has been removed; one rule for every port is open work in
+`BACKLOG.md`.
 
-| Implementation | ITERS | Total (ms) | Per run (µs) | vs Haskell |
-|---|---:|---:|---:|---:|
-| Haskell (ghc -O2, mutable IOUArray, sorted list) | 60,000 | **848** | **14** | 1× |
-| Java (JIT warmed, PriorityQueue) | 9,000 | 866 | 96 | 6.9× |
-| **Sprout (clang -O2, MutVec O(1) writes, sorted list)** | **100** | **69** | **692** | **49×** |
-| JavaScript (V8 JIT, sorted array, TypedArrays) | 1,300 | 968 | 744 | 53× |
-| Go (sorted slice in-place, mutable arrays) | 600 | 1019 | 1,698 | 121× |
-| Python 3 (heapq, mutable lists) | 200 | 854 | 4,267 | 305× |
-| Ruby (bsearch\_index, mutable arrays) | 120 | 1,177 | 9,812 | 701× |
+Apple M1 (arm64-darwin), 2026-10-24, medians of 7 interleaved rounds, order
+rotated each round:
 
-Sprout's `MutVec` implementation (2026-05-31) moves from ~116,000 µs/run
-(estimated with `Vec` persistent copies) down to **~690 µs/run** — a >160×
-improvement — and places Sprout between Java and JavaScript, **faster than Go**.
-Numbers use 100 iterations (stable, ±5% across runs).
+| Implementation | On equal `f` | µs/run |
+|---|---|---:|
+| Go, `<` in place of `<=` in `insert` (for this table only) | newer first | 18 |
+| **Sprout, `astar_linvec.sprout`** | newer first | **35** |
+| Sprout, `astar.sprout` (`MutVec`) | newer first | 161 |
+| Go, as committed | older first | 1,533 |
 
-### Why Sprout beats Go (and why Go is slower than JavaScript)
+Under one rule Go is 1.9× faster than Sprout's `LinVec` version, which is 4.6×
+faster than the `MutVec` one (see *The LinVec version* below).
 
-All three use O(n) sorted open-set insertion. The difference is in HOW the
-elements are moved:
+### Tie-breaks
 
-- **Sprout**: cons-list insert allocates one 32-byte node and sets one pointer;
-  LLVM -O2 compiles the recursive traversal without bounds checks.
-- **JavaScript**: `Array.splice` shifts 8-byte pointers using V8's native
-  SIMD-optimized memmove; binary-search finds the insert position in O(log n).
-- **Go**: `copy(s[i+1:], s[i:...])` shifts 32-byte `entry` structs — 4× more
-  bytes per element than JS's 8-byte pointer shifts, with AOT-compiled code
-  that optimizes less aggressively than V8's JIT.
+Moving right or down raises `g` by 1 and lowers the Manhattan `h` by 1, so every
+cell reachable from the start by right and down moves has `f = 198`: 4,179 of
+the 7,045 open cells. A* pops nothing else before the goal, so the tie-break
+decides the whole search order.
 
-With ~600–2000 inserts per A* run and average open-set sizes of 50–150,
-the per-element cost compounds into a 2.4× disadvantage for Go relative
-to Sprout. JavaScript's pointer-shift advantage and V8's aggressive JIT
-specialization (1300+ iterations) explain why Go trails JS as well.
+| Port | On equal `f` | Why |
+|---|---|---|
+| Sprout, Haskell | newer entry first | inserts before equal entries |
+| Go, JavaScript, Ruby | older entry first | inserts after equal entries |
+| Python | smaller `g` first | `heapq` compares the whole `(f, g, x, y)` tuple |
+| Java | depends on heap layout | the `PriorityQueue` comparator reads `f` only |
 
-### Why Haskell is 45× faster
+Newer-first follows one right/down path to the goal; older-first is
+breadth-first across the plateau. Counted in Go, per run:
 
-Haskell's `IOUArray Int Int` stores unboxed `Int` values — no heap allocation
-per element, fully cache-line friendly, single `STG store` instruction per
-write. Sprout's `MutVec` stores `i64` values as `long long` in a
-GC-managed `VectorVal` on the heap; GC pressure and pointer chasing add
-overhead that unboxed storage avoids entirely. Closing this gap would require
-unboxed `MutVec` storage, a deeper runtime change.
+| | newer first | older first |
+|---|---:|---:|
+| nodes expanded | 198 | 4,178 |
+| inserts | 334 | 5,663 |
+| average open-list length | 68 | 734 |
+| entries walked per insert | 14 | 221 |
 
-### Why Java is 7× faster
-
-Java's JIT performs escape analysis, devirtualises `PriorityQueue` operations,
-and eliminates boxing for `int` at hotspots. The O(log n) heap also reduces
-open-set work by ~3–4× compared to Sprout's O(n) sorted-list insert.
-
-### Observed scaling from 60×60 to 100×100
-
-| Language | 60×60 µs/run | 100×100 µs/run | Observed scaling | Theory |
-|---|---:|---:|---:|---|
-| Haskell | 15 | 15 | **1.7×** | O(W²) to O(W⁴) |
-| Java | 78 | 94 | **1.2×** | O(W² log W) |
-| **Sprout (MutVec)** | — | **692** | — | O(W⁴) expected |
-| JavaScript | 223 | 744 | **3.3×** | O(W⁴) |
-| Go | 243 | 1,698 | **7.0×** | O(W⁴) |
-| Python | 1,541 | 4,637 | **3.0×** | O(W² log W) |
-| Ruby | 3,171 | 8,258 | **2.6×** | O(W⁴) |
+The list grows because older-first keeps a whole diagonal of `f = 198` entries
+ahead of each insert, and the `f = 200` entries it pushes (one step away from
+the goal) are never popped. Of the old table, only the Sprout and Haskell rows
+shared a rule.
 
 ---
 
@@ -181,8 +168,9 @@ open-set work by ~3–4× compared to Sprout's O(n) sorted-list insert.
 
 The sorted-list open set was chosen to match Sprout's stdlib, which has no
 native priority queue. Go, JavaScript, and Ruby use the same O(n) sorted
-insertion for a fair apples-to-apples comparison. Java and Python use real
-O(log n) heaps; their advantage in the open-set dimension is therefore a
+insertion, but pop the older of two equal-`f` entries where Sprout pops the
+newer, so they run a different search (see *Tie-breaks*). Java and Python use
+real O(log n) heaps; their advantage in the open-set dimension is therefore a
 deliberate "best of breed" measurement, not a controlled variable.
 
 ### The Go open-set allocation fix
@@ -209,5 +197,21 @@ Sprout at an estimated ~116,000 µs/run (~7,700× behind Haskell).
 existing slot. `mutvec_new` calls `vec_make_filled` — one `malloc` + `memset`
 equivalent, O(n) total rather than O(n²) via repeated `vec_append`.
 
-Result: **676 µs/run**, a >170× improvement, landing Sprout ahead of Go and
-within ~7× of Java.
+Result: **676 µs/run**, a >170× improvement. The Go and Java numbers it was
+read against used other tie-breaks (see *Tie-breaks*).
+
+### The LinVec version (2026-10-24)
+
+In `astar_linvec.sprout`, `g_score` and `closed` are `LinVec Int` and the open
+set is a linear list. Linearity lets `linvec_set` write in place, and reuse
+writes each rebuilt list node and `State` into the cell it was matched from
+(`docs/linear-reuse-v0.md`). Over 100 runs it allocates 33,915 objects, one node
+per insert, against the `MutVec` version's 536,314: that insert copies every
+list cell it walks past and boxes each entry in a tuple.
+
+The insert walks twice, onto an accumulator and back, in two tail-recursive
+loops. A recursive insert (`Node(h, insert(rest))`) keeps a stack frame and two
+GC roots for each entry it passes: 51 µs/run here against the loops' 35, and
+under the older-first rule, where an insert walks 221 entries, 13,300 against
+4,600. BACKLOG *Tail recursion modulo constructor (TRMC)* would make the
+recursive form compile to one loop.

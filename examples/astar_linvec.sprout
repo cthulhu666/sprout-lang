@@ -1,0 +1,131 @@
+module examples.astar_linvec
+import stdlib.math.int (abs)
+import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.time as time
+
+# A* shortest-path on a 100×100 grid, as a pure function.
+#
+# Wall rule (interior cells only; border always clear):
+#   is_wall(x, y) = x>0 && y>0 && x<99 && y<99 && int_mod(x*5+y*3, 13) < 4
+#   ~31% interior walls; a path via the border always exists.
+#
+# Start: (0,0)   Goal: (99,99)   W=H=100
+# Heuristic: Manhattan distance (admissible, consistent).
+#
+# Data structures:
+#   open set — linear sorted list of (f, g, x, y), ascending by f; lazy deletion.
+#              On equal f the newer entry pops first.
+#   g_score  — LinVec Int, len=10000, index=y*100+x, sentinel=9999999
+#   closed   — LinVec Int, len=10000, index=y*100+x (0=open, 1=closed)
+#
+# Everything is linear (Experimental, spec §5.8), so `linvec_set` writes in place
+# and each rebuilt list node or `State` reuses the cell it was matched from
+# (docs/linear-reuse-v0.md). An insert allocates one node; the search needs no `!{IO}`.
+#
+# Run:
+#   just compile-native examples/astar_linvec.sprout /tmp/astar_linvec && /tmp/astar_linvec
+
+type linear Open = | Empty | Node Int Int Int Int Open
+
+# g_score, closed, open set.
+type linear State = State(LinVec Int) (LinVec Int) Open
+
+fn int_mod(a: Int, b: Int) -> Int =
+  a - (a / b) * b
+
+fn in_bounds(x: Int, y: Int) -> Bool =
+  x >= 0 && x < 100 && y >= 0 && y < 100
+
+fn is_wall(x: Int, y: Int) -> Bool =
+  x > 0 && y > 0 && x < 99 && y < 99 && int_mod(x * 5 + y * 3, 13) < 4
+
+fn cell_idx(x: Int, y: Int) -> Int =
+  y * 100 + x
+
+fn heuristic(x: Int, y: Int) -> Int =
+  abs(99 - x) + abs(99 - y)
+
+fn open_insert(f: Int, g: Int, x: Int, y: Int, open: Open) -> Open =
+  insert_walk(f, g, x, y, open, Empty)
+
+# Moves the entries that pop before the new one onto `passed`, newest first, then
+# puts them back. Two tail-recursive loops, unlike a recursive insert that keeps a
+# stack frame per entry it passes.
+fn insert_walk(f: Int, g: Int, x: Int, y: Int, open: Open, passed: Open) -> Open =
+  match open with
+  | Empty -> unwind(passed, Node(f, g, x, y, Empty))
+  | Node hf hg hx hy rest ->
+      if f <= hf then unwind(passed, Node(f, g, x, y, Node(hf, hg, hx, hy, rest)))
+      else insert_walk(f, g, x, y, rest, Node(hf, hg, hx, hy, passed))
+
+fn unwind(passed: Open, tail: Open) -> Open =
+  match passed with
+  | Empty -> tail
+  | Node hf hg hx hy rest -> unwind(rest, Node(hf, hg, hx, hy, tail))
+
+fn open_drop(open: Open) -> Unit =
+  match open with
+  | Empty -> ()
+  | Node _ _ _ _ rest -> open_drop(rest)
+
+# Every index comes from `cell_idx` on an in-bounds cell, so a miss is a bug.
+fn cell_at(i: Int, v: borrowing LinVec Int) -> Int =
+  let Just x = linvec_get(i, v) else panic("astar: cell index out of range")
+  in x
+
+# Relax (nx, ny) if it is open floor, not closed, and `ng` beats its g_score.
+fn try_relax(nx: Int, ny: Int, ng: Int, s: State) -> State =
+  if ! in_bounds (nx, ny) || is_wall(nx, ny) then s
+  else
+    match s with
+    | State g_score closed open ->
+        let i = cell_idx(nx, ny)
+        in if cell_at(i, closed) == 1 || ng >= cell_at(i, g_score) then State(g_score, closed, open)
+        else State(linvec_set(i, ng, g_score), closed, open_insert(ng + heuristic(nx, ny), ng, nx, ny, open))
+
+# Up, down, left, right. Nested calls, not a pipe: a `_` hole cannot consume a linear value.
+fn expand_neighbors(x: Int, y: Int, ng: Int, s: State) -> State =
+  try_relax(x + 1, y, ng, try_relax(x - 1, y, ng, try_relax(x, y + 1, ng, try_relax(x, y - 1, ng, s))))
+
+fn finish(result: Maybe Int, g_score: LinVec Int, closed: LinVec Int, open: Open) -> Maybe Int =
+  let _ = linvec_drop(g_score)
+      _ = linvec_drop(closed)
+      _ = open_drop(open)
+  in result
+
+fn astar_loop(s: State) -> Maybe Int =
+  match s with
+  | State g_score closed open ->
+      match open with
+      | Empty -> finish(Nothing, g_score, closed, Empty)
+      | Node _ g x y rest ->
+          if x == 99 && y == 99 then finish(Just(g), g_score, closed, rest)
+          else
+            let i = cell_idx(x, y)
+            in if cell_at(i, closed) == 1 then astar_loop(State(g_score, closed, rest))
+            else astar_loop(expand_neighbors(x, y, g + 1, State(g_score, linvec_set(i, 1, closed), rest)))
+
+fn astar() -> Maybe Int =
+  let g_score = linvec_set(0, 0, linvec_new(10000, 9999999))
+      start = Node(heuristic(0, 0), 0, 0, 0, Empty)
+  in astar_loop(State(g_score, linvec_new(10000, 0), start))
+
+fn run_iters(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else match astar() with
+    | Nothing -> run_iters(n - 1, acc)
+    | Just path -> run_iters(n - 1, acc + path)
+
+fn format_ms(micros: Int) -> String =
+  string_concat_many([int_to_string(micros / 1000), ".", int_to_string((micros / 100) - (micros / 1000) * 10), " ms"])
+
+fn print_result(n: Int, total: Int, t0: Int) -> Unit !{IO} =
+  do
+    t1 <- time.now_micros()
+    print(string_concat_many(["A* 100x100, ", int_to_string(n), " runs, path=", int_to_string(total / n), " steps"]))
+    eprint(string_concat_many([format_ms(t1 - t0), "  (", int_to_string((t1 - t0) / n), " us/run)"]))
+
+fn main() -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    print_result(100, run_iters(100, 0), t0)
