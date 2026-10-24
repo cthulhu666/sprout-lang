@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # A* benchmark: Sprout vs Haskell (mutable IOUArray) vs Go vs Java vs JavaScript
 #              vs Python (heapq) vs Ruby (bsearch_index)
-# 100×100 grid; each language uses its own ITERS tuned for ~1 s total.
+# 100×100 grid; each port sets its own run count and reports µs per run.
 # Compiled languages are pre-built so we time execution only, not compilation.
 set -euo pipefail
 
@@ -30,10 +30,15 @@ mkdir -p "$BIN/java_cls"
 javac -d "$BIN/java_cls" "$DIR/Astar.java" 2>/dev/null \
   && echo "done" || echo -e "${RED}FAILED${RESET}"
 
-echo -n "  [Sprout]    just compile-native ... "
-if [[ -x "$REPO/build/compile_driver_bin_stage1" ]]; then
-  (cd "$REPO" && just compile-native examples/astar.sprout "$BIN/astar_sprout") 2>/dev/null \
+build_sprout() { # <source> <output name> <label>
+  echo -n "  [Sprout $3] just compile-native ... "
+  (cd "$REPO" && just compile-native "$1" "$BIN/$2") 2>/dev/null \
     && echo "done" || echo -e "${RED}FAILED${RESET}"
+}
+
+if [[ -x "$REPO/build/compile_driver_bin_stage1" ]]; then
+  build_sprout examples/astar.sprout        astar_sprout        "mutvec"
+  build_sprout examples/astar_linvec.sprout astar_sprout_linvec "linvec"
 else
   echo -e "${RED}compile_driver_bin_stage1 not found — run: just bootstrap-from-seed${RESET}"
 fi
@@ -43,7 +48,7 @@ sep
 
 # ── Run phase ─────────────────────────────────────────────────────────────────
 
-echo -e "${BOLD}=== Results (A* runs on a 100×100 grid; ~1 s per language) ===${RESET}"
+echo -e "${BOLD}=== Results (A* runs on a 100×100 grid) ===${RESET}"
 echo
 
 run_section() {
@@ -54,9 +59,11 @@ run_section() {
 }
 
 if [[ -x "$BIN/astar_sprout" ]]; then
-  echo -e "${CYAN}── Sprout (clang -O2, execution only; MutVec O(1) array writes)${RESET}"
-  "$BIN/astar_sprout"
-  echo
+  run_section "Sprout (clang -O2, execution only; MutVec, tuple-list open set)" "$BIN/astar_sprout"
+fi
+
+if [[ -x "$BIN/astar_sprout_linvec" ]]; then
+  run_section "Sprout (clang -O2, execution only; pure, LinVec, linear open list)" "$BIN/astar_sprout_linvec"
 fi
 
 if [[ -x "$BIN/astar_hs" ]]; then
@@ -95,4 +102,6 @@ sep
 echo -e "${BOLD}Note:${RESET} Sprout times are execution-only (no compilation overhead)."
 echo       "      Sprout/Haskell/Go/JS/Ruby open-set insert is O(n); Java/Python use O(log n) heaps."
 echo       "      Go/JS/Ruby insert uses in-place copy (O(1) amortised alloc); Haskell uses linked list."
-echo       "      Sprout uses MutVec (O(1) in-place writes); all other compiled languages also use O(1) mutable arrays."
+echo       "      Sprout MutVec writes in place under !{IO}; LinVec writes in place in a pure function."
+echo       "      The ports break ties on equal f differently, which changes the work ~20x;"
+echo       "      only Sprout and Haskell share a rule. See README.md, Tie-breaks."

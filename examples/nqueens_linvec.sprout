@@ -6,10 +6,11 @@ import stdlib.time as time
 # a queen is placed and cleared when the search backs out, with a pure signature.
 #
 # examples/nqueens.sprout copies a `Vec Bool` on every placement, so the caller
-# keeps the old arrays for free. Here the arrays are `LinVec Bool`: linearity
-# means nothing else holds them, so `linvec_set` writes in place and no copy is
-# needed. The price is that the arrays must be threaded through the search and
-# come back from every call, so undoing a placement is an explicit second write.
+# keeps the old arrays for free. Here the arrays are `LinVec Bool`, a linear type
+# (Experimental, spec §5.8): linearity means nothing else holds them, so
+# `linvec_set` writes in place and no copy is needed. The price is that the arrays
+# must be threaded through the search and come back from every call, so undoing a
+# placement is an explicit second write.
 #
 # The solution count rides in the board, so a single linear value threads through
 # the whole search. Each rebuild of `Board` reuses the cell it matched, and the
