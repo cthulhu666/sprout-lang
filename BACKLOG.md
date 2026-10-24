@@ -1720,14 +1720,16 @@ deferral happened, not for current behaviour. Still open:
   the sort pair, self-compile, nqueens, `gc_roots` and `http_log_middleware`, but not the
   `uncharted-suns` galaxy frame, which lives in another repo. Per-candidate Phase 3 port benches
   wait for Phase 2. Plan: `docs/native-sprout-runtime-v0.md`.
-- [ ] `P3` **Unsafe primitives: trusted Sprout in place of C.** Wanted later (Kuba, 2026-10-22),
-  and builtins are designed now so these can delete them without an API change. First user:
-  `linvec_set`, a C builtin only because pure Sprout cannot call `vector_mutset`
-  (`docs/persistent-array-v0.md` §12); also `byte-buffer-v0.md` §5.3's private creator and the
-  GC-in-Sprout of `native-sprout-runtime-v0.md` Phase 4 (raw loads and stores). Module privacy
-  is in place (`docs/extern-visibility-v0.md`); the open question is a gate on *declaring* an
-  extern. Not designed: that gate (a keyword, or a checked marker), the primitive set, and who
-  may use it.
+- [ ] `P1` **Unsafe primitives: trusted Sprout in place of C.** Wanted (Kuba, 2026-10-22). Deletes
+  the builtins `linvec_set`, `linvec_push` and `linvec_truncate` (Sprout over `vector_mutset`,
+  `vector_push`, `vector_truncate`); the last two are temporary for this reason: spec §3 makes a
+  redeclared extern keep its `!{IO}`, so pure Sprout cannot call them. An erased effect must stay
+  visible to the optimiser: the three rules of `docs/persistent-array-v0.md` §5.3, extended with
+  "or change a length", and the bounds-check pass's premise (`stdlib/compiler/bce.sprout`).
+  Other users: `byte-buffer-v0.md` §5.3's private creator and `native-sprout-runtime-v0.md`
+  Phase 4 (raw loads and stores). Module privacy is in place (`docs/extern-visibility-v0.md`).
+  Open: the gate on *declaring* an extern (a keyword, or a checked marker), the primitive set,
+  and who may use it.
 - [ ] `P2` **Make tight Sprout string-processing loops competitive with host builtins**, so moderate
   stdin/text workloads do not need dedicated host helpers to be practical. Investigate the native
   overhead in recursive stdlib string loops such as `string_lines` over stdin-loaded text — tail-

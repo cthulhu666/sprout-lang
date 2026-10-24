@@ -89,6 +89,7 @@ call the wrapper API:
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
 | `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push`, `vector_truncate` | `stdlib.mutable` | the `MutVec` API; `vec_make_filled` is pure and also backs `LinVec` |
 | `linvec_set(i, x, v) -> LinVec a` | `stdlib.linvec` | private; `linvec.set` wraps it. Pure, writes in place, traps out of range |
+| `linvec_push(x, v) -> LinVec a`, `linvec_truncate(n, v) -> LinVec a` | `stdlib.linvec` | private; `linvec.push` and `linvec.pop` use them. Pure, change the length in place. Temporary: they go when unsafe primitives land |
 | `bytes_*` | `stdlib.bytes` | bare name for `bytes_empty`, `bytes_length`, `bytes_get`, `bytes_slice`, `bytes_from_utf8`; the rest are private (`bytes.*` API) |
 | `crypto_*` | `stdlib.crypto` | private; the `crypto.*` API |
 | `regex_*` | `stdlib.regex` | bare name for `regex_find_match`; the rest are private (`regex.*` API) |

@@ -855,6 +855,13 @@ fn any_member(names: List String, s: Set) -> Bool =
 # Calls that could change a vector's length, as a summary over the call graph. Only
 # `vector_push` and `vector_truncate` do, both `!{IO}`; a function is unsafe if it can
 # reach an IO extern off a short safe list, or call a function value that is not pure.
+#
+# The pure `stdlib.linvec` push and pop (`linvec_push`, `linvec_truncate`) also change a
+# length, behind a pure type, so this summary does not see them. That is sound because a
+# `LinVec`'s `Vector` is fresh (`new`, `empty`, `from_list`), never reaches an access this
+# pass rewrites, and `freeze` hands out an immutable `Vec`. `just linvec-smoke` checks that
+# `stdlib/linvec.sprout` and `stdlib/linheap.sprout` never touch `vector_get_direct`,
+# `vector_mutset`, `vector_push` or `vector_truncate`.
 # ---------------------------------------------------------------------------
 
 fn safe_io_externs() -> Set =

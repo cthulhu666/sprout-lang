@@ -25,9 +25,10 @@ module stdlib.mutable
 # write-barrier sites for a future generational collector, and both carry the
 # ageprof hook that prices one. Every `MutVec`/`MutMatrix` mutation in this module
 # routes through those two, so there is no bypass here. `linvec_set`
-# (stdlib/linvec.sprout) is a third store site, in C, with the same hook.
+# (stdlib/linvec.sprout) is a third store site, in C, with the same hook, and
+# `linvec_push` a fourth: it calls `vector_push`, which carries the hook.
 # `vector_truncate` writes too, but only zeros and a length — it can create no
-# old-to-young edge, so it needs no barrier.
+# old-to-young edge, so it needs no barrier; `linvec_truncate` calls it.
 #
 # `vec_make_filled` is PURE: it allocates a fresh vector and changes nothing that
 # exists. `mutvec_new` keeps its `!{IO}`, since a MutVec is state; `stdlib.linvec`

@@ -8,7 +8,8 @@
 #           splitter (a rebuild per byte, three constructors) and a binary search tree
 #           (an insert rebuilds a whole path; none allocates once every key is present).
 #   count   a fixture run at two sizes differs in one runtime counter by an expected amount,
-#           for what the API hides: the heap's `vector` count is its grows and shrinks.
+#           for what the API hides: the `vector` counter counts element buffers allocated and
+#           reallocated, so the heap's growth shows in it.
 #   value   all programs print the answer the input has, so a reused cell holds what was
 #           written to it.
 set -uo pipefail
@@ -75,9 +76,10 @@ compare grid NSIZE 1000 168 200000 17984
 compare csv ROWS 20 140 4000 28000
 # Keys 0..99 sum to 4950.
 compare tree INSERTS 1000 4950 200000 4950
-# Keys i*37 mod 101 for i in 1..64 sum to 3230. 64 pushes allocate capacity 4, then grow to 8,
-# 16, 32 and 64 (5 vectors); draining shrinks at n = 16, 8, 4, 2, 1 (5 more).
-compare_delta linheap NPUSH 0 "0 ordered 0" 64 "64 ordered 3230" vector 10
+# Keys i*37 mod 101 for i in 1..64 sum to 3230. 64 pushes onto an empty heap take the element
+# buffer to capacity 8, then 16, 32 and 64: one allocation and three reallocations. Pops never
+# shrink it.
+compare_delta linheap NPUSH 0 "0 ordered 0" 64 "64 ordered 3230" vector 4
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "==> linear-reuse-smoke ✓"

@@ -508,11 +508,11 @@ A pure binary min-heap over `LinVec` (in `stdlib/linheap.sprout`; Experimental, 
 Design: [linheap-v0.md](linheap-v0.md).
 
 - `LinHeap a` abstract linear type; elements must not be linear
-- `linheap.new() -> LinHeap a` — allocates nothing
+- `linheap.new() -> LinHeap a` — an empty heap, O(1)
 - `linheap.from_list(xs) -> LinHeap a where Ord a` — O(n)
 - `linheap.push(x, h) -> LinHeap a where Ord a` — O(log n) amortised
-- `linheap.pop(h) -> Maybe (a, LinHeap a) where Ord a` — the least element; O(log n) amortised;
-  `Nothing` on empty, and the heap is gone
+- `linheap.pop(h) -> (Maybe a, LinHeap a) where Ord a` — the least element and the rest;
+  O(log n) amortised; `(Nothing, h)` on empty, the heap unchanged
 - `linheap.peek(h: borrowing LinHeap a) -> Maybe a` — O(1)
 - `linheap.size(h: borrowing LinHeap a) -> Int`
 - `linheap.drop(h) -> Unit`
@@ -530,8 +530,15 @@ A pure vector with in-place writes (in `stdlib/linvec.sprout`; Experimental, as 
 - `linvec.new(n, x) -> LinVec a` — n copies of `x`
 - `linvec.get(i, v: borrowing LinVec a) -> Maybe a` — `Nothing` out of range
 - `linvec.set(i, x, v) -> LinVec a` — O(1), in place, returns the same vector; traps out of range
-  (wraps the one builtin, `linvec_set`, which is private)
+  (wraps the builtin `linvec_set`, which is private)
 - `linvec.length(v: borrowing LinVec a) -> Int`
+- `linvec.empty() -> LinVec a` — a fresh vector of length 0
+- `linvec.from_list(xs) -> LinVec a` — a fresh vector of the list's elements
+- `linvec.push(x, v) -> LinVec a` — amortised O(1); the storage doubles when full
+  (wraps the temporary builtin `linvec_push`, which is private)
+- `linvec.pop(v) -> (Maybe a, LinVec a)` — the last element and the rest; `(Nothing, v)` on an
+  empty vector, which stays usable. The capacity never shrinks
+  (calls the temporary builtin `linvec_truncate`, which is private)
 - `linvec.freeze(v) -> Vec a` — O(1); the vector's life ends
 - `linvec.drop(v) -> Unit`
 - `linvec.scatter(is, x, v) -> LinVec a` — sets `x` at each index; out of range traps

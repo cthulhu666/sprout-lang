@@ -8985,6 +8985,19 @@ long long vector_truncate(long long vec, long long n) {
   return 0;
 }
 
+/* Backs stdlib.linvec's pure push and truncate: vector_push / vector_truncate, returning
+ * the SAME vector.  Sound only because `LinVec` is linear, so no one holds the old length
+ * (docs/persistent-array-v0.md §5.3).  Neither calls the collector, as linvec_set. */
+long long linvec_push(long long x, long long vec) {
+  vector_push(vec, x);
+  return vec;
+}
+
+long long linvec_truncate(long long n, long long vec) {
+  vector_truncate(vec, n);
+  return vec;
+}
+
 long long vector_get_direct(long long vec, long long index) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) sprout_fail("vector_get_direct: null vector");

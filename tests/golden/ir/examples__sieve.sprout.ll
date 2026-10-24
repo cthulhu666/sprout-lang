@@ -80,13 +80,15 @@ declare i64 @vector_get_direct(i64, i64)
 declare i64 @vector_push(i64, i64)
 declare i64 @vector_truncate(i64, i64)
 declare i64 @linvec_set(i64, i64, i64)
+declare i64 @linvec_push(i64, i64)
+declare i64 @linvec_truncate(i64, i64)
 declare i64 @time_now_micros()
 declare i64 @wall_time_micros()
 @.str.0 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 135, column 43)\00" }
 @.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 203, column 29)\00" }
 @.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 218, column 32)\00" }
 @.str.3 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 653, column 45)\00" }
-@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 222, column 41)\00" }
+@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 223, column 41)\00" }
 @.str.5 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 28, column 47)\00" }
 @.str.6 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.7 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 28, column 66)\00" }

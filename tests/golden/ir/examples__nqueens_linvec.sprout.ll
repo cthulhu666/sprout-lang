@@ -80,6 +80,8 @@ declare i64 @vector_get_direct(i64, i64)
 declare i64 @vector_push(i64, i64)
 declare i64 @vector_truncate(i64, i64)
 declare i64 @linvec_set(i64, i64, i64)
+declare i64 @linvec_push(i64, i64)
+declare i64 @linvec_truncate(i64, i64)
 declare i64 @time_now_micros()
 declare i64 @wall_time_micros()
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 46, column 37)\00" }
