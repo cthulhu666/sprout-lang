@@ -499,7 +499,7 @@ fn seed_queue(decls: List typed_ast.TypedDecl, acc: List String) -> List String 
   match decls with
   | Nil -> acc
   | Cons d rest ->
-      if ! is_rooted_decl (d) then seed_queue(rest, acc)
+      if !is_rooted_decl(d) then seed_queue(rest, acc)
       else
         match decl_name_of(d) with
         | Nothing -> seed_queue(rest, list_append(set_to_list(refs_decl(d, set_empty())), acc))
@@ -541,7 +541,7 @@ fn has_entry(decls: List typed_ast.TypedDecl) -> Bool =
 export fn elim_unreachable(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram decls ->
-      if ! has_entry (decls) then prog
+      if !has_entry(decls) then prog
       else
         typed_ast.TypedProgram(
           keep_live(decls,

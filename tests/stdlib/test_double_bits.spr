@@ -66,9 +66,9 @@ fn main() -> Unit !{IO} =
     # If these were numeric casts, to_bits(1.0) would be 1 and the whole point
     # would be lost. This guards against someone "simplifying" it to a sitofp.
     assert_true(state, "to_bits is not a numeric cast",
-      ! (double_to_bits(1.0) == 1))
+      !(double_to_bits(1.0) == 1))
     assert_true(state, "from_bits is not a numeric cast",
-      ! (bits(double_from_bits(1)) == bits(1.0)))
+      !(bits(double_from_bits(1)) == bits(1.0)))
 
     # --- the exponent-extraction identities the reduction depends on ---
     # biased exponent of a positive double = bits / 2^52, exact, no mask needed

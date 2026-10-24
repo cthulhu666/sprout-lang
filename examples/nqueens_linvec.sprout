@@ -34,7 +34,7 @@ type linear Board = Board Int (LinVec Bool) (LinVec Bool) (LinVec Bool)
 
 fn free_at(i: Int, v: borrowing LinVec Bool) -> Bool =
   let Just taken = linvec.get(i, v) else false
-  in ! taken
+  in !taken
 
 # Sets (or, with `false`, clears) the three cells a queen at (row, col) covers.
 fn mark(c: Int, pd: Int, nd: Int, x: Bool, b: Board) -> Board =

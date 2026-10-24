@@ -77,5 +77,5 @@ fn main() -> Unit !{IO} =
     # `sprout_fail` prepends `runtime error: ` to every message, so a literal that embeds it
     # prints the prefix twice. RED before the fix, which dropped it from the literal.
     assert_true(state, "poison message does not embed the runtime's own prefix",
-                ! contains (ll, "runtime error: dispatched"))
+                !contains(ll, "runtime error: dispatched"))
     summary(state)

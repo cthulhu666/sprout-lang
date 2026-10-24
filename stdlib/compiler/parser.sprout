@@ -66,7 +66,7 @@ fn radix_digits_value(text: String, index: Int, radix: Int, acc: Int) -> Maybe I
         | Nothing -> Nothing
         | Just v ->
             if v >= radix then Nothing
-            else if ! radix_digit_fits (acc, radix) then Nothing
+            else if !radix_digit_fits(acc, radix) then Nothing
             else if radix == 16
             then radix_digits_value(text, index + 1, radix, bit_or(bit_shl(acc, 4), v))
             else radix_digits_value(text, index + 1, radix, bit_or(bit_shl(acc, 1), v))
@@ -134,7 +134,7 @@ fn int_literal_value(text: String, pos: source.SourcePos) -> Result ParseError I
 # should take the ordinary unary-minus path).
 fn negated_decimal_literal(tokens: Vec token.Token, i: Int) -> Maybe (Int, Int) =
   let t = tok_at(tokens, i)
-  in if ! tok_is_int (t) then Nothing
+  in if !tok_is_int(t) then Nothing
      else
        let text = token.token_text(t)
        in match radix_from_lexed(text) with
@@ -327,7 +327,7 @@ fn arrow_follows_group(tokens: Vec token.Token, i: Int) -> Bool =
 fn past_matching_paren(tokens: Vec token.Token, i: Int, depth: Int) -> Maybe Int =
   if i >= vec_length(tokens) || tok_is_eof(tok_at(tokens, i)) then Nothing
   else if tok_is_symbol(tok_at(tokens, i), "(") then past_matching_paren(tokens, i + 1, depth + 1)
-  else if ! tok_is_symbol (tok_at(tokens, i), ")") then past_matching_paren(tokens, i + 1, depth)
+  else if !tok_is_symbol(tok_at(tokens, i), ")") then past_matching_paren(tokens, i + 1, depth)
   else if depth == 1 then Just(i + 1)
   else past_matching_paren(tokens, i + 1, depth - 1)
 
@@ -776,7 +776,7 @@ fn parse_do_step(tokens: Vec token.Token, i: Int) -> Result ParseError (DoStepPa
           Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Just(ast.LetElse(residual, handler)), cur_pos(tokens, i))), i6))
       # An irrefutable pattern is what `ast_to_ir.do_bind_captures` lowers directly;
       # anything else takes the match staircase. This picks the lowering, not legality.
-      else if ast.pattern_irrefutable(pattern) && ! ast.starts_with_try (value) then
+      else if ast.pattern_irrefutable(pattern) && !ast.starts_with_try(value) then
         Ok((DoStepPlain(ast.DoBindStep(pattern, value)), i4))
       else
         Ok((DoStepPlain(ast.DoPatStep(ast.ArrowBind, pattern, value, Nothing, cur_pos(tokens, i))), i4))
@@ -1616,7 +1616,7 @@ fn parse_param(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Param,
 # reserved word in all but name. See docs/linear-borrowing-v0.md §8.
 fn param_mode_at(tokens: Vec token.Token, i: Int) -> ast.ParamMode =
   if once_local_at(tokens, i) then ast.ModeOnceLocal
-  else if ! (tok_is_ident(tok_at(tokens, i)) && starts_type_atom(tokens, i + 1)) then ast.ModeDefault
+  else if !(tok_is_ident(tok_at(tokens, i)) && starts_type_atom(tokens, i + 1)) then ast.ModeDefault
   else param_mode_of_text(token.token_text(tok_at(tokens, i)))
 
 # `once local T`, in that order. The same guard applies: a type atom must follow
@@ -1695,7 +1695,7 @@ fn parse_where_item(tokens: Vec token.Token, i: Int) -> Result ParseError (Where
       _ <- guard(starts_type_atom(tokens, i + 1), linear_bound_error(cur_pos(tokens, i)))
       (te, i2) <- parse_type_atom(tokens, i + 1)
       v <- linear_bound_var(te, cur_pos(tokens, i + 1))
-      _ <- guard(! starts_type_atom (tokens, i2), linear_bound_error(cur_pos(tokens, i + 1)))
+      _ <- guard(!starts_type_atom(tokens, i2), linear_bound_error(cur_pos(tokens, i + 1)))
       Ok((WhereLinear(v), i2))
   else
     do
@@ -1837,7 +1837,7 @@ fn validate_ctor_where(exist_vars: List String, where_cons: List ast.TypeConstra
 # As validate_ctor_where: a data parameter is never bounded (docs/linearity-bound-v0.md
 # §6.1), so a constructor's bound must name an `exists` variable.
 fn validate_ctor_bounds(exist_vars: List String, bounds: List String, tokens: Vec token.Token, i: Int) -> Result ParseError Unit =
-  match find(\v -> ! list_member (v, exist_vars), bounds) with
+  match find(\v -> !list_member(v, exist_vars), bounds) with
   | Nothing -> Ok(())
   | Just v ->
       Err(ParseError("constructor `where linear " ++ v ++ "` names `" ++ v

@@ -60,7 +60,7 @@ fn defines(ir: String, name: String) -> Bool = has(ir, "define i64 @" ++ name ++
 # The function compiled and stayed a single body: a source that failed to compile
 # must not pass a "left alone" check.
 fn one_body(ir: String, name: String) -> Bool =
-  defines(ir, name) && ! defines (ir, name ++ "$fast") && ! defines (ir, name ++ "$chk")
+  defines(ir, name) && !defines(ir, name ++ "$fast") && !defines(ir, name ++ "$chk")
 
 let prelude_externs = "extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}\nextern fn vector_mutset(v: Vector a, i: Int, x: a) -> Unit !{IO}\nextern fn vector_push(v: Vector a, x: a) -> Unit !{IO}\nextern fn vec_make_filled(n: Int, val: a) -> Vector a !{IO}\n"
 
@@ -156,7 +156,7 @@ fn main() -> Unit !{IO} =
       check_true("copy: $chk keeps the checked store", has(body_of(copy_ir, "copy$chk"), "@vector_mutset")),
       check_true("copy: $fast is still a loop", has(body_of(copy_ir, "copy$fast"), "tco_loop")),
       check_true("copy: $chk is still a loop", has(body_of(copy_ir, "copy$chk"), "tco_loop")),
-      check_true("copy: $fast recurses into itself", has(body_of(copy_ir, "copy$fast"), "tco_loop") && ! has (body_of(copy_ir, "copy$fast"), "call i64 @copy")),
+      check_true("copy: $fast recurses into itself", has(body_of(copy_ir, "copy$fast"), "tco_loop") && !has(body_of(copy_ir, "copy$fast"), "call i64 @copy")),
       check_true("generic: $fast emitted", defines(generic_ir, "copy$fast")),
       check_false("generic: $fast read is unchecked", has(body_of(generic_ir, "copy$fast"), "@vector_get_direct")),
       check_true("generic: $fast store keeps the checked call", has(body_of(generic_ir, "copy$fast"), "@vector_mutset")),

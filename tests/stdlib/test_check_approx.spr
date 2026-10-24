@@ -27,9 +27,9 @@ fn main() -> Unit !{IO} =
 
     # --- check_approx: pass/fail on |actual - expected| < eps -----------------------------------
     assert_true(state, "within eps passes", passed(check_approx("x", 1.0, 1.00005, 0.0001)))
-    assert_true(state, "outside eps fails",! passed (check_approx("x", 1.0, 1.5, 0.0001)))
+    assert_true(state, "outside eps fails", !passed(check_approx("x", 1.0, 1.5, 0.0001)))
     # Boundary is strict: exactly eps apart is NOT within.
-    assert_true(state, "exactly eps apart fails (strict <)",! passed (check_approx("x", 1.0, 1.1, 0.1)))
+    assert_true(state, "exactly eps apart fails (strict <)", !passed(check_approx("x", 1.0, 1.1, 0.1)))
     # Sign-symmetric: actual below expected is treated the same as above.
     assert_true(state, "symmetric for a negative difference", passed(check_approx("x", 2.0, 1.99999, 0.0001)))
     # A passing case carries no detail; a failing case names the expected value.
@@ -39,7 +39,7 @@ fn main() -> Unit !{IO} =
 
     # --- check_approx2: both components must be within eps --------------------------------------
     assert_true(state, "both components within passes", passed(check_approx2("p", (1.0, 2.0), 1.00005, 2.00005, 0.0001)))
-    assert_true(state, "x component off fails",! passed (check_approx2("p", (1.5, 2.0), 1.0, 2.0, 0.0001)))
-    assert_true(state, "z component off fails",! passed (check_approx2("p", (1.0, 2.5), 1.0, 2.0, 0.0001)))
+    assert_true(state, "x component off fails", !passed(check_approx2("p", (1.5, 2.0), 1.0, 2.0, 0.0001)))
+    assert_true(state, "z component off fails", !passed(check_approx2("p", (1.0, 2.5), 1.0, 2.0, 0.0001)))
 
     summary(state)

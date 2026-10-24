@@ -29,5 +29,5 @@ fn main() -> Unit !{IO} =
     check_true("tyvar_eq: same identity",
                 types.tyvar_eq(types.tyvar_id("q7"), types.tyvar_id("q7"))),
     check_true("tyvar_eq: distinct identities",
-                ! types.tyvar_eq (types.tyvar_id("q7"), types.tyvar_id("q8")))
+                !types.tyvar_eq(types.tyvar_id("q7"), types.tyvar_id("q8")))
   ])

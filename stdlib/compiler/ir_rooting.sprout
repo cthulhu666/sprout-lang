@@ -131,7 +131,7 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRReuseCtor _ _ _ _ _ _ -> false
   # IRMkClosure allocates env via @sprout_alloc_closure; trigger. With no captures it
   # is a static constant (ir_lowering) and allocates nothing.
-  | sprout_ir.IRMkClosure _ _ _ caps -> ! sprout_ir.closure_is_static (caps)
+  | sprout_ir.IRMkClosure _ _ _ caps -> !sprout_ir.closure_is_static(caps)
   # IRMakeTuple lowers to @sprout_alloc_tuple_blob which calls
   # sprout_gc_maybe_collect_threshold() before allocating; trigger.
   | sprout_ir.IRMakeTuple _ _ -> true
@@ -1140,7 +1140,7 @@ fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, summary: Dict Bool) -> sp
 # allocas) an iteration adds. Without any, the pair goes: LLVM treats
 # stackrestore as a memory write, which keeps the loop's loads from being hoisted.
 fn drop_unused_stack_resets(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
-  if sprout_ir.blocks_have_op(sprout_ir.is_tco_entry, blocks) && ! sprout_ir.blocks_have_op (is_root_op, blocks) then
+  if sprout_ir.blocks_have_op(sprout_ir.is_tco_entry, blocks) && !sprout_ir.blocks_have_op(is_root_op, blocks) then
     list_map(block_without_stack_reset, blocks)
   else blocks
 

@@ -344,7 +344,7 @@ fn class_linearity_error(cls: String, head_arg: ast.TypeExpr, type_args: List as
       Just patterns = typed_ast.instance_get(key, tables_exists(tables)) else Nothing
       subs = unify_type_args_list(patterns, type_args, dict_empty())
       bounds = instance_bounds(cls, head_arg, tables)
-      unbounded = list_filter(\v -> ! list_member (v, bounds), list_reverse(te_vars_list(patterns, [])))
+      unbounded = list_filter(\v -> !list_member(v, bounds), list_reverse(te_vars_list(patterns, [])))
   in match find_map(head_var_fault(cls, patterns, subs, pos, tables, _), unbounded) with
      | Just err -> Just(err)
      | Nothing -> context_linearity_error(key, subs, pos, fwd_keys, tables)

@@ -61,7 +61,7 @@ fn is_two_branch_match(e: ast.Expr) -> Bool =
 # (excluding list-walk recursion via Cons) AND its body is itself a 2-branch
 # match — the shape a `let <pat> = e else fb` guard line could replace.
 fn continues(pat: ast.Pattern, body: ast.Expr) -> Bool =
-  is_binding_pattern(pat) && ! is_list_cons_pattern (pat) && is_two_branch_match(body)
+  is_binding_pattern(pat) && !is_list_cons_pattern(pat) && is_two_branch_match(body)
 
 # classify: given a match's two branches, decide whether exactly one of them
 # continues the staircase. Returns both patterns and both bodies — the terminal
@@ -76,8 +76,8 @@ fn classify(b1: ast.MatchBranch,
       | ast.MatchBranch p2 body2 ->
           let c1 = continues(p1, body1)
               c2 = continues(p2, body2)
-          in if c1 && ! c2 then Just((p2, body2, p1, body1))
-             else if c2 && ! c1 then Just((p1, body1, p2, body2))
+          in if c1 && !c2 then Just((p2, body2, p1, body1))
+             else if c2 && !c1 then Just((p1, body1, p2, body2))
              else Nothing
 
 # True when `e` references any of `names` as a plain variable — a simple,
@@ -337,7 +337,7 @@ fn staircase_message(blocked: Bool) -> String =
 # the arms are walked as ordinary code, so a written chain below starts its own.
 fn walk_match(written: Set, free_fns: Set, bound: List String, scrut: ast.Expr, branches: List ast.MatchBranch,
               pos: source.SourcePos) -> List LintFinding =
-  if ! is_written (written, pos)
+  if !is_written(written, pos)
   then list_append(walk_expr(written, free_fns, bound, scrut), walk_branches(written, free_fns, bound, branches))
   else
     match walk_chain(written, free_fns, bound, branches, scrut, pos) with
@@ -761,7 +761,7 @@ fn is_numeric_literal(e: ast.Expr) -> Bool =
 # `(label, 1)` hide the context-typed part one level down.
 fn takes_type_from_context(e: ast.Expr) -> Bool =
   match e with
-  | ast.VarExpr name _ -> ! ast.is_constructor_ref (name)
+  | ast.VarExpr name _ -> !ast.is_constructor_ref(name)
   | ast.LambdaExpr _ _ _ -> true
   | ast.TupleExpr items _ -> any_takes_type_from_context(items)
   | ast.CallExpr _ args _ -> any_takes_type_from_context(args)
@@ -817,7 +817,7 @@ fn any_mentions_linear_ctor(names: List String, exprs: List ast.Expr) -> Bool =
   | [h | t] -> mentions_linear_ctor(names, h) || any_mentions_linear_ctor(names, t)
 
 fn is_const_body(e: ast.Expr) -> Bool =
-  (ast.is_syntactic_value(e) || is_negated_literal(e)) && ! takes_type_from_context (e)
+  (ast.is_syntactic_value(e) || is_negated_literal(e)) && !takes_type_from_context(e)
 
 # `Nothing` is an absent effect row, which the checker proves means pure.
 fn declared_pure(effects: Maybe (List String)) -> Bool =
@@ -839,7 +839,7 @@ fn nullary_const_finding(d: ast.Decl, linear: List String) -> List LintFinding =
   | ast.FnDecl name params _ effects constraints _ body pos ->
       if name != entry_point_name && list_is_empty(params) && declared_pure(effects)
          && list_is_empty(constraints) && is_const_body(body)
-         && ! mentions_linear_ctor (linear, body)
+         && !mentions_linear_ctor(linear, body)
       then [mk_finding(pos, "nullary-const-fn", nullary_const_message(name))]
       else Nil
   | _ -> Nil
@@ -931,7 +931,7 @@ fn find_body_brace(tokens: Vec token.Token, i: Int, n: Int) -> Maybe source.Sour
   if i >= n then Nothing
   else if brace_is_decl_keyword(brace_tok_at(tokens, i)) then Nothing
   else if brace_is_symbol(brace_tok_at(tokens, i), "{")
-       && ! (brace_is_symbol(brace_tok_at(tokens, i - 1), "!")) then
+       && !(brace_is_symbol(brace_tok_at(tokens, i - 1), "!")) then
     Just(token.token_position(brace_tok_at(tokens, i)))
   else find_body_brace(tokens, i + 1, n)
 
@@ -1109,7 +1109,7 @@ fn captured_exprs(holes: List String, caps: List lint_pattern.Capture) -> List a
 # in a branch body can. Holding a scrutinee to the same test as a fallback once
 # mis-scored 139 of 165 corpus findings (docs/lint-rules-v0.md §12).
 fn conditional_holes(pattern: ast.Expr, holes: List String) -> List String =
-  list_filter(\ (h: String) -> ! list_member (h, unconditional_holes(pattern, holes)), holes)
+  list_filter(\ (h: String) -> !list_member(h, unconditional_holes(pattern, holes)), holes)
 
 # Only the two shapes `admissible_body` lets through can arrive. A third would
 # otherwise default to "nothing is unconditional" and quietly put the note back
@@ -1218,7 +1218,7 @@ fn combinator_rule_applies(src: String, decls: List ast.Decl) -> Bool =
   else if defines_a_combinator(decls) then false
   else if defines_a_wrapper_type(decls) then false
   else if redefines_a_matched_ctor(decls) then false
-  else ! imports_a_combinator (src)
+  else !imports_a_combinator(src)
 
 # Shadowing the combinator is not the only way to break the suggestion: a file
 # redefining `Maybe` or `Result` shadows the type the combinators are declared
@@ -1496,4 +1496,4 @@ export fn lint_ast_tokens(src: String, tokenized: Result token.TokenizeError (Ve
 where
   ds = file_directives(src)
   suppressed = list_filter_map(directive_rule, ds)
-  kept = \ (f: LintFinding) -> ! list_member (finding_rule_id(f), suppressed)
+  kept = \ (f: LintFinding) -> !list_member(finding_rule_id(f), suppressed)

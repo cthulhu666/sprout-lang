@@ -234,7 +234,7 @@ fn last_arg_is_phantom(t: types.Type, env: Dict types.Scheme) -> Bool =
 # Each name in `binders` must appear in `consumed` (else it leaked); returns the
 # first unconsumed one.
 fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe LinBinder =
-  find(\b -> ! luse_member (lbind_name(b), consumed), binders)
+  find(\b -> !luse_member(lbind_name(b), consumed), binders)
 
 # The lambda parameter that still defers the whole lambda: linear, and NOT taken
 # `borrowing` — a borrowing one is admissible (M4.4b), so only an owned one is a
@@ -252,7 +252,7 @@ fn first_owned_linear_param(params: List ast.Param, lam_type: types.Type,
   | Cons prm rest ->
       match lam_type with
       | types.TFunc a b _ own ->
-          if type_mentions_linear(a, env) && ! types.ownership_is_borrow (own)
+          if type_mentions_linear(a, env) && !types.ownership_is_borrow(own)
           then Just(LinBinder(ast.param_name(prm), a))
           else first_owned_linear_param(rest, b, env)
       | _ -> Nothing
@@ -749,7 +749,7 @@ fn lin_getfield(base: typed_ast.TypedExpr, field: String, field_ty: types.Type,
 # An owned read consumes the whole record, so a linear field other than `field`
 # is dropped. `Nothing` when no other field holds a linear value.
 fn linear_sibling(rec_ty: types.Type, field: String, env: Dict types.Scheme) -> Maybe String =
-  if ! type_mentions_linear (rec_ty, env) then Nothing
+  if !type_mentions_linear(rec_ty, env) then Nothing
   else find(\g -> g != field && field_holds_linear(rec_ty, g, env),
            record_field_names(head_type_name(rec_ty), env))
 
@@ -1051,7 +1051,7 @@ fn local_move_msg_for(origin: LambdaOrigin, name: String) -> String =
   | LamPlaceholder -> local_move_capture_msg(name)
 
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
-  list_filter(\u -> ! list_member (luse_name(u), names), uses)
+  list_filter(\u -> !list_member(luse_name(u), names), uses)
 
 fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match a with
@@ -1314,7 +1314,7 @@ fn arm_wildcard_drop(pat: ast.Pattern, scrut_type: types.Type, from_borrow: Bool
 # Rule 2. `taken` are the constructors earlier arms matched whole.
 fn whole_wildcard_leaks(t: types.Type, taken: List String, pos: source.SourcePos,
                         env: Dict types.Scheme) -> Bool =
-  if ! type_mentions_linear (t, env) then false
+  if !type_mentions_linear(t, env) then false
   else if type_is_linear(t, env) then true
   else
     match type_ctors(t, env) with
@@ -1322,7 +1322,7 @@ fn whole_wildcard_leaks(t: types.Type, taken: List String, pos: source.SourcePos
     | Just ctors -> any(\c -> ctor_holds_linear(c, pos, t, env), reachable_ctors(ctors, taken))
 
 fn reachable_ctors(ctors: List String, taken: List String) -> List String =
-  list_filter(\c -> ! list_member (c, taken), ctors)
+  list_filter(\c -> !list_member(c, taken), ctors)
 
 # Read through `types.ctors_marker_key`. A type without the marker (a record, an
 # extern, a type variable, a tuple) has no list, and so no refinement.
@@ -1469,7 +1469,7 @@ fn lin_do_bind_after(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                     luse_remove_all(binder_names(binders), restb))
 
 fn conditional_consume(sc_bind: Bool, outer: List LinUse) -> Maybe LinUse =
-  if ! sc_bind then Nothing
+  if !sc_bind then Nothing
   else
     match outer with
     | [] -> Nothing
@@ -1685,7 +1685,7 @@ fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: 
 fn lin_do_let_close(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
                     restc: List LinUse, restb: List LinUse, is_lin: Bool,
                     env: Dict types.Scheme) -> LinRes =
-  if ! is_lin then seq2(rc, rb, restc, restb)
+  if !is_lin then seq2(rc, rb, restc, restb)
   else if luse_member(name, restc) then
     seq2(rc, rb, luse_remove(name, restc), luse_remove(name, restb))
   else LinErr(typed_ast.typed_expr_pos(rhs), unused_let_msg(name, typed_ast.typed_expr_type(rhs), env))
@@ -1932,7 +1932,7 @@ export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type, i
 fn ownership_agrees(inst: types.Ownership, cls: types.Ownership, inst_type: types.Type,
                     env: Dict types.Scheme) -> Bool =
   inst == cls
-    || (types.borrow_axis_only(inst) && types.borrow_axis_only(cls) && ! spine_param_holds_linear (inst_type, env))
+    || (types.borrow_axis_only(inst) && types.borrow_axis_only(cls) && !spine_param_holds_linear(inst_type, env))
 
 fn spine_param_holds_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
   match t with
@@ -1994,7 +1994,7 @@ fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
       then bad_function_only_here(BadLocalOnTyvar, BadLocalNonFunction, prm, ret_te, a, rest, b, env)
       else if ast.mode_is_once(ast.param_mode_of(prm))
       then bad_function_only_here(BadOnceOnTyvar, BadOnceNonFunction, prm, ret_te, a, rest, b, env)
-      else if ! mode_is_written (ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
+      else if !mode_is_written(ast.param_mode_of(prm)) then first_bad_modifier(rest, ret_te, b, env)
       else
         match ownership_fault(ast.param_name(prm), a, env) with
         | Just bad -> Just(bad)
@@ -2071,7 +2071,7 @@ fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
                        env: Dict types.Scheme) -> Maybe BadModifier =
   if ast.mode_is_local(mode) then function_only_fault(BadLocalOnTyvar, BadLocalNonFunction, name, a)
   else if ast.mode_is_once(mode) then function_only_fault(BadOnceOnTyvar, BadOnceNonFunction, name, a)
-  else if ! mode_is_written (mode) then Nothing
+  else if !mode_is_written(mode) then Nothing
   else ownership_fault(name, a, env)
 
 # A type variable is REJECTED, like it is for `borrowing` — though for a different
@@ -2104,7 +2104,7 @@ fn bad_function_only_here(on_tyvar: String -> BadModifier, on_non_func: String -
 fn function_only_fault(on_tyvar: String -> BadModifier, on_non_func: String -> BadModifier,
                        name: String, a: types.Type) -> Maybe BadModifier =
   if type_is_tyvar(a) then Just(on_tyvar(name))
-  else if ! type_is_func (a) then Just(on_non_func(name))
+  else if !type_is_func(a) then Just(on_non_func(name))
   else Nothing
 
 fn type_is_tyvar(t: types.Type) -> Bool =
@@ -2131,7 +2131,7 @@ fn owned_param_binders(params: List ast.Param, fn_type: types.Type,
   | Cons prm rest ->
       match fn_type with
       | types.TFunc a b _ _ ->
-          linear_binder_cons(type_mentions_linear(a, env) && ! ast.mode_is_borrowing (ast.param_mode_of(prm)),
+          linear_binder_cons(type_mentions_linear(a, env) && !ast.mode_is_borrowing(ast.param_mode_of(prm)),
                              LinBinder(ast.param_name(prm), a), owned_param_binders(rest, b, env))
       | _ -> Nil
 

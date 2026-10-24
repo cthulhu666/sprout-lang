@@ -93,7 +93,7 @@ where
 fn bool_binding(x: Bool) -> Bool =
   a && a
 where
-  a = ! x
+  a = !x
 
 fn string_binding() -> Bool =
   s == "ab"

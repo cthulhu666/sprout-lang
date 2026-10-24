@@ -1051,16 +1051,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 **Formatter and linter**
 
-- [ ] `P2` **`just fmt` inserts a space after every prefix `!`**, and a second before a call's
-  argument list: `!f(x)` → `! f (x)`, `!flag` → `! flag`. Unary minus is unaffected, so it is
-  specific to `!`. Output is idempotent, lint-clean and parses identically — a readability defect
-  only — but `!` is the only boolean negation Sprout has and the docs present `!x` as the idiom,
-  which `just fmt` then rewrites into a form nobody would write by hand. In argument position the
-  preceding comma loses its space too. Mechanism: `is_call_like_pp_other` (`formatter.sprout`) does
-  not recognise `!` as a prev-prev token after which `ident(` is a call, so the `(`-spacing fallback
-  fires; the postfix-`.` and `..` cases have an explicit arm there and `!` wants the same, plus
-  `needs_space_curr_bang`'s counterpart for the space *after* `!`. It already costs something —
-  `test_ir_codegen_cpr_maybe_externs.spr` had to write `if … then false else true` instead.
 - [ ] `P3` **`fmt` drops the space between two adjacent parenthesized type atoms.**
   `Widget s (s -> s) (s -> String)` becomes `… (s -> s)(s -> String)`, which reads as application
   rather than two fields. Same family as the landed `[` fix: `needs_space_word_or_op` has no case

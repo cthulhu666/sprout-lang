@@ -362,7 +362,7 @@ export fn to_int(value: BigInt) -> Maybe Int =
   if mag_bit_length(mag_of(value)) > 64 then Nothing
   else
     let bits = pack_u64(mag_of(value), vec_length(mag_of(value)) - 1, 0)
-    in if ! sign_of (value) then
+    in if !sign_of(value) then
          if bits < 0 then Nothing
          else Just(bits)
        else if bits == -9223372036854775808 then Just(bits)
@@ -378,7 +378,7 @@ export fn is_negative(value: BigInt) -> Bool =
   sign_of(value)
 
 export fn negate(value: BigInt) -> BigInt =
-  make(! sign_of (value), mag_of(value))
+  make(!sign_of(value), mag_of(value))
 
 export fn abs(value: BigInt) -> BigInt =
   make(false, mag_of(value))
@@ -415,7 +415,7 @@ export fn mul(left: BigInt, right: BigInt) -> BigInt =
   if lesser(vec_length(mag_of(left)), vec_length(mag_of(right))) > limb_ceiling then
     panic("bigint.mul: both operands exceed the 2047-limb schoolbook ceiling")
   else
-    make(! (sign_of(left) == sign_of(right)), mul_mag(mag_of(left), mag_of(right)))
+    make(!(sign_of(left) == sign_of(right)), mul_mag(mag_of(left), mag_of(right)))
 
 # Truncated, matching `Int` division: the quotient rounds toward zero and the
 # remainder takes the DIVIDEND's sign, so `q * divisor + r == dividend` always.
@@ -423,7 +423,7 @@ export fn divmod(dividend: BigInt, divisor: BigInt) -> Maybe (BigInt, BigInt) =
   if is_zero(divisor) then Nothing
   else
     let (quotient, rem) = divmod_mag(mag_of(dividend), mag_of(divisor))
-    in Just((make(! (sign_of(dividend) == sign_of(divisor)), quotient),
+    in Just((make(!(sign_of(dividend) == sign_of(divisor)), quotient),
              make(sign_of(dividend), rem)))
 
 # --- bit surface (magnitude, per the header) ---

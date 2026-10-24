@@ -216,23 +216,23 @@ fn main() -> Unit !{IO} =
   in run_suite("dce_reachable", [
     check_true("keeps a called function", has_name("used", basic)),
     check_true("keeps the entry point", has_name("main", basic)),
-    check_true("drops an uncalled function",! has_name ("unused", basic)),
+    check_true("drops an uncalled function", !has_name("unused", basic)),
 
     check_true("reachability is transitive", has_name("deep", chain)),
-    check_true("drops a function off the call graph",! has_name ("orphan", chain)),
+    check_true("drops a function off the call graph", !has_name("orphan", chain)),
 
     check_true("a self-recursive dead fn does not root itself",
-      ! has_name ("dead_loop", selfrec)),
+      !has_name("dead_loop", selfrec)),
 
-    check_true("mutually recursive dead fns both go (a)",! has_name ("dead_a", mutual)),
-    check_true("mutually recursive dead fns both go (b)",! has_name ("dead_b", mutual)),
+    check_true("mutually recursive dead fns both go (a)", !has_name("dead_a", mutual)),
+    check_true("mutually recursive dead fns both go (b)", !has_name("dead_b", mutual)),
 
     check_true("main is a root with no callers", has_name("main", root_only)),
-    check_true("unused goes even when main calls nothing",! has_name ("unused", root_only)),
+    check_true("unused goes even when main calls nothing", !has_name("unused", root_only)),
 
     check_true("a qualified <module>.main is a root", has_name("app.main", qualified)),
     check_true("a qualified root reaches its callees", has_name("used", qualified)),
-    check_true("a qualified root still drops the unreachable",! has_name ("unused", qualified)),
+    check_true("a qualified root still drops the unreachable", !has_name("unused", qualified)),
 
     check_true("externs are kept unconditionally", has_name("str_len", externs)),
 
@@ -243,26 +243,26 @@ fn main() -> Unit !{IO} =
 
     check_true("a range literal roots the synthesized range_up callee",
       has_name("range_up", ranged)),
-    check_true("rooting range_up does not disable pruning",! has_name ("unused", ranged)),
+    check_true("rooting range_up does not disable pruning", !has_name("unused", ranged)),
 
     check_true("`++` roots the synthesized list_append callee",
       has_name("list_append", appended)),
-    check_true("rooting list_append does not disable pruning",! has_name ("unused", appended)),
+    check_true("rooting list_append does not disable pruning", !has_name("unused", appended)),
 
     check_true("a lambda parameter shadows the name it reuses",
-      ! has_name ("helper", lam_shadow)),
+      !has_name("helper", lam_shadow)),
     check_true("a parameter of another name shadows nothing",
       has_name("helper", lam_other)),
     check_true("a match binder shadows inside its arm",
-      ! has_name ("helper", arm_shadow)),
+      !has_name("helper", arm_shadow)),
     check_true("a match binder does not reach the scrutinee",
       has_name("helper", scrut_seen)),
     check_true("a do-binding shadows the steps after it",
-      ! has_name ("helper", do_shadow)),
+      !has_name("helper", do_shadow)),
     check_true("a do-binding does not shadow its own right-hand side",
       has_name("helper", do_rhs_seen)),
     check_true("a do-bind pattern shadows the steps after it",
-      ! has_name ("helper", bind_shadow)),
+      !has_name("helper", bind_shadow)),
     check_true("a do-bind pattern does not shadow its own right-hand side",
       has_name("helper", bind_rhs_seen))
   ])

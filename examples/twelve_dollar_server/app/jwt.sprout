@@ -31,11 +31,11 @@ fn field_is(value: Json, key: String, want: String) -> Bool =
   | _ -> false
 
 fn all_digits(s: String) -> Bool =
-  ! string.is_empty (s) && vec_all(string.is_ascii_digit, string.string_chars(s))
+  !string.is_empty(s) && vec_all(string.is_ascii_digit, string.string_chars(s))
 
 # `sub` must be a positive integer in a string.
 export fn positive_id(s: String) -> Maybe Int =
-  if string.byte_length(s) > 18 || ! all_digits (s) then Nothing
+  if string.byte_length(s) > 18 || !all_digits(s) then Nothing
   else
     match parse_int(s) with
     | Just n -> if n > 0 then Just(n) else Nothing
@@ -58,9 +58,9 @@ fn verify(secret: Bytes, now_s: Int, token: String) -> Result AuthError Claims =
       Just header = decode_json(h) else Err(InvalidToken)
       Ok sig = base64url_decode(s) else Err(InvalidToken)
       Just payload = decode_json(p) else Err(InvalidToken)
-  in if ! field_is (header, "alg", "HS256") then Err(InvalidToken)
+  in if !field_is(header, "alg", "HS256") then Err(InvalidToken)
      else if !const_time_eq(hmac_sha256(secret, bytes.from_string(`${h}.${p}`)), sig) then Err(InvalidToken)
-     else if ! not_expired (payload, now_s) then Err(InvalidToken)
+     else if !not_expired(payload, now_s) then Err(InvalidToken)
      else claims(payload)
 
 export fn authenticate(secret: Bytes, now_s: Int, header: Maybe String) -> Result AuthError Claims =

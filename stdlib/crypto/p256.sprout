@@ -663,5 +663,5 @@ export fn verify(message: Bytes, der: Bytes, key: PublicKey) -> Bool =
   match signature(der) with
   | Nothing -> false
   | Just ((r, s)) ->
-      if ! in_group_range (r) || ! in_group_range (s) then false
+      if !in_group_range(r) || !in_group_range(s) then false
       else verify_reduced(bigint.from_bytes_be(crypto.sha256(message)), r, s, key)

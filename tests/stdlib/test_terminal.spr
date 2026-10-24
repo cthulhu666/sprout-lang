@@ -39,7 +39,7 @@ fn main() -> Unit !{IO} =
 
     interactive <- terminal.term_is_interactive_once()
     assert_true(state, "term_is_interactive_once returns a usable Bool",
-      interactive || ! interactive)
+      interactive || !interactive)
 
     # --- session raw mode, size, parked input (M0) ---------------------------
     #

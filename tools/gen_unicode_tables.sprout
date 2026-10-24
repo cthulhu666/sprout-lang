@@ -58,7 +58,7 @@ export fn field_at(fields: List String, i: Int) -> String =
 
 fn is_data_line(fields: List String) -> Bool =
   if list_length(fields) < 2 then false
-  else ! string.is_empty (field_at(fields, 0))
+  else !string.is_empty(field_at(fields, 0))
 
 # ── Selecting ranges out of a file ──────────────────────────────────────────
 # `want` sees the whole field list (InCB rows carry two value fields) and
@@ -72,7 +72,7 @@ fn select_step(acc: List Range, line: String,
                want: List String -> Maybe String) -> List Range =
   let fields = line_fields(line)
   in
-  if ! is_data_line (fields) then acc
+  if !is_data_line(fields) then acc
   else
     match want(fields) with
     | Nothing -> acc

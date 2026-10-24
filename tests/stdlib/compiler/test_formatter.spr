@@ -135,6 +135,28 @@ fn main() -> Unit !{IO} =
       formatter.format_source("fn g(a: Int) -> Int = -a\n  foo(-1)\nf(a, -1)\n"),
       "fn g(a: Int) -> Int = -a\n  foo(-1)\nf(a, -1)\n"),
 
+    # Prefix `!` binds tight to its operand, like unary minus, and a call
+    # after it stays a call. `!{` is an effect annotation and keeps its space
+    # before the `!`.
+    check_eq("bang stays tight on an identifier",
+      formatter.format_source("if !flag then a else b\n"), "if !flag then a else b\n"),
+    check_eq("stray space after bang removed",
+      formatter.format_source("if ! flag then a else b\n"), "if !flag then a else b\n"),
+    check_eq("bang keeps its operand's call tight",
+      formatter.format_source("x && !f(y)\n"), "x && !f(y)\n"),
+    check_eq("bang on a parenthesised operand is tight",
+      formatter.format_source("!(n == 0)\n"), "!(n == 0)\n"),
+    check_eq("bang after a comma keeps the comma's space",
+      formatter.format_source("f(a, !b)\n"), "f(a, !b)\n"),
+    check_eq("bang in a lambda body",
+      formatter.format_source("\\acc -> !acc\n"), "\\acc -> !acc\n"),
+    check_eq("bang on a qualified call",
+      formatter.format_source("!string.is_empty(s)\n"), "!string.is_empty(s)\n"),
+    check_eq("double bang is tight",
+      formatter.format_source("!!x\n"), "!!x\n"),
+    check_eq("effect annotation unchanged",
+      formatter.format_source("fn main() -> Unit !{IO} =\n"), "fn main() -> Unit !{IO} =\n"),
+
     # is_formatted: the format_source fixed-point test, trailing newline optional.
     check_eq("is_formatted: formatted source",
       formatter.is_formatted("let x = 1\n"), true),

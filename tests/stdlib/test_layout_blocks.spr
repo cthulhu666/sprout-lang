@@ -174,7 +174,7 @@ type Shade =
   let shade_offset = 1
 
 # One-line brace members: a `fn` ends the member before it.
-instance Codec Bool {fn enc(b: Bool) -> Bool = match b with | true -> false | false -> true fn dec(b: Bool) -> Bool = ! b}
+instance Codec Bool {fn enc(b: Bool) -> Bool = match b with | true -> false | false -> true fn dec(b: Bool) -> Bool = !b}
 
 fn else_in_arm_column(c: Bool, m: Maybe Int) -> Int =
   match m with

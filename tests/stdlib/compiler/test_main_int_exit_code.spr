@@ -80,7 +80,7 @@ fn main() -> Unit !{IO} =
                 | true ->
                     do
                       wrote <- write_emitted_ir(ll_path, compiled)
-                      if ! wrote then assert_true(state, "write emitted IR", false)
+                      if !wrote then assert_true(state, "write emitted IR", false)
                       else
                         do
                           linked <- process.proc_run(link_argv(ll_path, bin_path, use_darwin))

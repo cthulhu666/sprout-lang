@@ -50,11 +50,11 @@ fn strip_suffix(raw: String, suffix: String) -> String =
   else raw
 
 fn missing_from_list(disk: List String, offered_names: Vec String) -> List String =
-  list_filter(\leaf -> ! member (leaf, offered_names), disk)
+  list_filter(\leaf -> !member(leaf, offered_names), disk)
 
 # Offered names with no `<root>/<name>.sprout`: modules that were removed or renamed.
 fn stale_in_list(offered_names: Vec String, disk: List String) -> List String =
-  list_filter(\name -> ! member (name, disk), vec_to_list(offered_names))
+  list_filter(\name -> !member(name, disk), vec_to_list(offered_names))
 
 fn report_missing(state: TestState, missing: List String) -> Unit !{IO} =
   match missing with

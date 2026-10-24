@@ -84,15 +84,15 @@ fn main() -> Unit !{IO} =
       Just(Person(name = "ada", age = 36))),
     check_eq("find of no match is Nothing", find(\n -> n > 1000, long), no_int),
     check_true("any stops at the first hit", any(is_even, long)),
-    check_true("any of no match is false",! any (\n -> n > 1000, long)),
-    check_true("all stops at the first miss",! all (is_even, long)),
+    check_true("any of no match is false", !any(\n -> n > 1000, long)),
+    check_true("all stops at the first miss", !all(is_even, long)),
     check_true("all of every match is true", all(\n -> n > 0, long)),
     check_true("all of the empty list is vacuously true", all(is_even, nil_int)),
-    check_true("any of the empty list is false",! any (is_even, nil_int)),
+    check_true("any of the empty list is false", !any(is_even, nil_int)),
     check_eq("find_map stops at the first Just",
       find_map(\n -> if is_even(n) then Just(n * 10) else Nothing, long), Just(20)),
     check_true("member stops at the hit", member(2, long)),
-    check_true("member of an absent value is false",! member (1000, long)),
+    check_true("member of an absent value is false", !member(1000, long)),
 
     # --- count must NOT short-circuit: it has to see every element ------------
     check_eq("count still visits everything", count(is_even, long), 50)

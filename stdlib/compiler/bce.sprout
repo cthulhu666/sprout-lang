@@ -115,7 +115,7 @@ fn scale_term(k: Int, t: (String, Int)) -> (String, Int) =
 
 # Nothing when the product would not stay small.
 fn lin_scale(k: Int, a: Lin) -> Maybe Lin =
-  if ! scale_ok (k, a) then Nothing
+  if !scale_ok(k, a) then Nothing
   else if k == 0 then Just(lin_const(0))
   else if lin_ok(scaled(k, a)) then Just(scaled(k, a))
   else Nothing
@@ -325,7 +325,7 @@ fn fact_of(d: String, op: String, bound: Maybe Lin) -> List Fact =
       else Nil
 
 fn cmp_facts(op: String, l: typed_ast.TypedExpr, r: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
-  if ! is_order_op (op) then Nil
+  if !is_order_op(op) then Nil
   else
     match l with
     | typed_ast.TVar d t _ ->
@@ -435,7 +435,7 @@ fn wrapper_of(d: typed_ast.TypedDecl, projs: Set) -> Maybe (String, Wrapper) =
 
 fn wrapper_from(name: String, pnames: List String, callee: String,
                 cargs: List typed_ast.TypedExpr, projs: Set) -> Maybe (String, Wrapper) =
-  if ! list_all_operands (cargs, projs) || ! same_names (names_in_order(cargs), pnames) then Nothing
+  if !list_all_operands(cargs, projs) || !same_names(names_in_order(cargs), pnames) then Nothing
   else
     match direct_shape(callee, cargs) with
     | Just shape -> Just((name, Wrapper(params = pnames, shape = shape)))
@@ -534,10 +534,10 @@ fn scan_all(es: List typed_ast.TypedExpr, ctx: Ctx, facts: List Fact, sc: Scan) 
   list_fold(\ (acc, e) -> scan(e, ctx, false, facts, acc), sc, es)
 
 fn scan(e: typed_ast.TypedExpr, ctx: Ctx, tail: Bool, facts: List Fact, sc: Scan) -> Scan =
-  if ! sc.ok then sc
+  if !sc.ok then sc
   else
     match e with
-    | typed_ast.TVar n _ _ -> if n == ctx.self && ! set_member (n, ctx.locals) then scan_fail(sc) else sc
+    | typed_ast.TVar n _ _ -> if n == ctx.self && !set_member(n, ctx.locals) then scan_fail(sc) else sc
     | typed_ast.TIf c t el _ _ ->
         scan(el, ctx, tail, list_append(facts, facts_false(c, ctx.cls)),
              scan(t, ctx, tail, list_append(facts, facts_true(c, ctx.cls)),
@@ -684,14 +684,14 @@ fn range_with(l: Lin, m: Int, dr: Driver) -> Maybe (Lin, Lin, List Req) =
   | Just mw ->
       let moved = lin_add(l, mw)
           extra = if dr.needs_nonneg then [req_nonneg(dr.w)] else Nil
-      in if ! lin_ok (moved) then Nothing
+      in if !lin_ok(moved) then Nothing
          else if m >= 0 then Just((l, moved, extra))
          else Just((moved, l, extra))
 
 # The conditions that put one access in range, or the reason none can be derived.
 fn derive_access(a: Acc, lp: Loop, projs: Set) -> Result String (List Req) =
-  if ! shape_converts (a.shape) then Ok(Nil)
-  else if ! vec_invariant (a.shape.vec, lp.cls, projs) then
+  if !shape_converts(a.shape) then Ok(Nil)
+  else if !vec_invariant(a.shape.vec, lp.cls, projs) then
     Err("a vector operand is not an invariant parameter or a projection of one")
   else
     match to_lin(a.shape.idx, lp.cls, true) with
@@ -843,7 +843,7 @@ fn collect_ptypes(e: typed_ast.TypedExpr, pset: Set, acc: Dict types.Type) -> Di
 
 fn note_ptype(e: typed_ast.TypedExpr, pset: Set, acc: Dict types.Type) -> Dict types.Type =
   match e with
-  | typed_ast.TVar n t _ -> if set_member(n, pset) && ! dict_member (n, acc) then dict_set(n, t, acc) else acc
+  | typed_ast.TVar n t _ -> if set_member(n, pset) && !dict_member(n, acc) then dict_set(n, t, acc) else acc
   | _ -> acc
 
 fn any_member(names: List String, s: Set) -> Bool =
@@ -970,9 +970,9 @@ fn analyze_fn(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff
       locals = set_union(binders, set_from_list(pnames))
       first = scan(body, Ctx(self = name, cls = dict_empty(), tables = tables, locals = locals), true, Nil,
                    Scan(ok = true, accs = Nil, calls = Nil))
-  in if ! first.ok || list_length(first.calls) == 0 || list_length(first.accs) == 0 then Nothing
+  in if !first.ok || list_length(first.calls) == 0 || list_length(first.accs) == 0 then Nothing
      else if any_member(pnames, binders) then skip(name, "a local rebinds a parameter")
-     else if ! calls_match_arity (list_length(pnames), first.calls) then
+     else if !calls_match_arity(list_length(pnames), first.calls) then
        skip(name, "a self-call passes the wrong number of arguments")
      else analyze_loop(name, params, ret, eff, body, tables, locals, classify(pnames, first.calls))
 
@@ -981,7 +981,7 @@ fn analyze_loop(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, e
   let sc = scan(body, Ctx(self = name, cls = cls, tables = tables, locals = locals), true, Nil,
                 Scan(ok = true, accs = Nil, calls = Nil))
       lp = Loop(cls = cls, cont = continuation_facts(sc.calls))
-  in if ! list_any_converts (sc.accs) then skip(name, "every access is a store of a value that may be a heap pointer")
+  in if !list_any_converts(sc.accs) then skip(name, "every access is a store of a value that may be a heap pointer")
      else
        match derive_all(sc.accs, lp, tables.projs, Reqs(reqs = dict_empty(), vecs = dict_empty())) with
        | Err why -> skip(name, why)
@@ -997,7 +997,7 @@ fn finish_cand(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, ef
   let ptypes = collect_ptypes(body, set_from_list(ast.param_names(params)), dict_empty())
       pos = typed_ast.typed_expr_pos(body)
       reqs = list_map(snd_req, vec_to_list(dict_entries(rs.reqs)))
-  in if ! atoms_are_int (all_atoms(reqs), ptypes) then skip(name, "a bound is not an Int parameter")
+  in if !atoms_are_int(all_atoms(reqs), ptypes) then skip(name, "a bound is not an Int parameter")
      else
        Just(Accept (Cand(name = name, params = params, ret = ret, eff = eff, body = body,
                         test = entry_test(rs, ptypes, pos), callee_ty = self_callee_type(body, name),
@@ -1131,7 +1131,7 @@ fn extern_purity(d: typed_ast.TypedDecl) -> Maybe (String, Bool) =
   | _ -> Nothing
 
 fn cand_safe(c: Cand, unsafe_fns: Set) -> Bool =
-  ! c.calls.unsafe && ! any_member (list_filter(is_other(c.name, _), c.calls.callees), unsafe_fns)
+  !c.calls.unsafe && !any_member(list_filter(is_other(c.name, _), c.calls.callees), unsafe_fns)
 
 fn is_other(self: String, n: String) -> Bool = n != self
 

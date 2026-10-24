@@ -45,7 +45,7 @@ fn roundtrips_at(width: Int) -> Bool =
 
 fn roundtrips_to(width: Int) -> Bool =
   if width <= 0 then true
-  else if ! roundtrips_at (width) then false
+  else if !roundtrips_at(width) then false
   else roundtrips_to(width - 1)
 
 let min_int: Int = -9223372036854775808

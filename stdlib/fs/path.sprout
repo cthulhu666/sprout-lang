@@ -100,7 +100,7 @@ export fn join(left: String, right: String) -> String =
 # `split("/a")` and `split("a")` are both `["a"]` — so ask `is_absolute`
 # separately rather than looking for a leading empty component.
 export fn split(p: String) -> List String =
-  list_filter(\c -> ! string.is_empty (c), string.split(p, "/"))
+  list_filter(\c -> !string.is_empty(c), string.split(p, "/"))
 
 fn clean_step(rooted: Bool, acc: List String, c: String) -> List String =
   if c == "." then acc

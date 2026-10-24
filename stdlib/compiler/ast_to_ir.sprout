@@ -1800,7 +1800,7 @@ fn translate_binary(op: String, left: typed_ast.TypedExpr, right: typed_ast.Type
       (blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2) <-
         translate_operands(left, right, params, env, idx, cur_label, cur_ops, captures)
       finish_binary(op, blocks, rcur_lbl, rcur_ops, l_name, r_name, idx2, false, pos)
-  else if ! ((is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
+  else if !((is_int_or_char_type(typed_ast.typed_expr_type(left)) && is_int_or_char_type(typed_ast.typed_expr_type(right)))
              || (is_double_type(typed_ast.typed_expr_type(left)) && is_double_type(typed_ast.typed_expr_type(right))))
   then Err("ast_to_ir: binary op '" ++ op ++ "' requires Int or Double operands")
   else
@@ -2533,7 +2533,7 @@ fn worker_callee_routable(name: String, params: List String, captures: Dict Stri
                           penv: ProgEnv) -> Bool =
   set_member(name, penv.top_level)
   && cpr_result_known(name, penv.fn_arities)
-  && ! callee_name_shadowed (name, params, captures, penv)
+  && !callee_name_shadowed(name, params, captures, penv)
 
 # Returns Just (unboxed_fn_name, call_args) when the peephole applies.
 # Shared Tier-2 SHAPE core (shadow-free): `name` is a non-extern callee whose
@@ -2562,7 +2562,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
         # Tier-1: direct Maybe-returning C extern with a runtime `_unboxed`.
         if is_maybe_type(call_ty) && all_arms_simple_maybe(arms)
            && dict_member("Just", penv.ctors) && dict_member("Nothing", penv.ctors)
-           && ! callee_name_shadowed (name, params, captures, penv)
+           && !callee_name_shadowed(name, params, captures, penv)
         then Just((ufn, args))
         else Nothing
     | Nothing ->
@@ -3108,7 +3108,7 @@ fn translate_match_after_scrut(arms: List typed_ast.TypedMatchBranch,
   # (not once per arm), so it is bounded and is NOT the O(N²) pattern that
   # fix #7/#8 eliminated. Widening the Cons-prepend convention upstream into
   # translate_expr is a broader refactor and is out of scope here.
-  if arms_have_ctor_anchor(arms) && ! is_sole_ctor_match (arms, env.prog.ctors)
+  if arms_have_ctor_anchor(arms) && !is_sole_ctor_match(arms, env.prog.ctors)
   then
     translate_match_dispatch(arms, match_ty, params, env, s_blocks, s_cur_lbl,
                              list_builder_add(sprout_ir.IRGetTag(fresh_name(idx), s_name), s_ops),
@@ -4988,7 +4988,7 @@ export fn mutual_tco_rewrite_fn(f: sprout_ir.IRFunction, targets: List (String, 
     sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      if ret_ty == "i64" && ! sprout_ir.blocks_have_op (sprout_ir.is_tco_entry, blocks) && ! mutual_has_self_call (name, blocks)
+      if ret_ty == "i64" && !sprout_ir.blocks_have_op(sprout_ir.is_tco_entry, blocks) && !mutual_has_self_call(name, blocks)
       then mutual_finish_rewrite(name, params, ret_ty, blocks, mutual_collect_hits(targets, blocks), f)
       else f
 
@@ -5083,7 +5083,7 @@ fn mutual_filter_targets(callees: List String, f: String, f_arity: Int, ids: Dic
   match callees with
   | Nil -> Nil
   | Cons g rest ->
-      if ! (g == f) && mutual_ret_i64_of(g, ret_i64) && mutual_arity_of(g, arities) == f_arity
+      if !(g == f) && mutual_ret_i64_of(g, ret_i64) && mutual_arity_of(g, arities) == f_arity
          && mutual_scc_of(g, ids) == mutual_scc_of(f, ids) && mutual_scc_of(f, ids) >= 0
       then Cons((g, f_arity), mutual_filter_targets(rest, f, f_arity, ids, arities, ret_i64))
       else mutual_filter_targets(rest, f, f_arity, ids, arities, ret_i64)
@@ -5231,7 +5231,7 @@ fn pb_any_differs(a0: Int, members: List String, arity: Dict Int) -> Bool =
   match members with
   | Nil -> false
   | Cons m rest ->
-      if ! (pb_arity_of(m, arity) == a0) then true else pb_any_differs(a0, rest, arity)
+      if !(pb_arity_of(m, arity) == a0) then true else pb_any_differs(a0, rest, arity)
 
 fn pb_members_with_arity(members: List String, arity: Dict Int) -> List (String, Int) =
   match members with
@@ -5382,7 +5382,7 @@ fn pb_retarget_tail(body: typed_ast.TypedExpr, mset: Set, arities: Dict Int, m: 
   | typed_ast.TCall callee args ty pos ->
       match callee with
       | typed_ast.TVar name vty vpos ->
-          if set_member(name, mset) && ! set_member (name, bound)
+          if set_member(name, mset) && !set_member(name, bound)
              && dict_get(name, arities) == Just(list_length(args))
           then typed_ast.TCall(typed_ast.TVar(name ++ "$u", vty, vpos), pb_pad_to(args, m, pos), ty, pos)
           else body
@@ -6333,7 +6333,7 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
           | Nothing ->
               match unboxed_maybe_extern_name(name) with
               | Just ufn ->
-                  if ! callee_name_shadowed (name, params, captures, env.prog)
+                  if !callee_name_shadowed(name, params, captures, env.prog)
                   then translate_tail_chain(ufn, args, params, env, idx, cur_label, cur_ops, captures, 2)
                   else translate_tail_catchall(body, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors)
               | Nothing ->
@@ -6341,7 +6341,7 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
                   # self — self stays boxed for TCO) chains to its @<name>_worker,
                   # so the whole call chain returns { tag, val } with no box.
                   if set_member(name, worker_set) && name != self_name
-                     && ! callee_name_shadowed (name, params, captures, env.prog)
+                     && !callee_name_shadowed(name, params, captures, env.prog)
                   then translate_tail_chain(name ++ "_worker", args, params, env, idx, cur_label, cur_ops, captures, chain_width(body))
                   else translate_tail_catchall(body, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors)
       | _ ->

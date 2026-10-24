@@ -76,7 +76,7 @@ fn cell_at(i: Int, v: borrowing LinVec Int) -> Int =
 
 # Relax (nx, ny) if it is open floor, not closed, and `ng` beats its g_score.
 fn try_relax(nx: Int, ny: Int, ng: Int, s: State) -> State =
-  if ! in_bounds (nx, ny) || is_wall(nx, ny) then s
+  if !in_bounds(nx, ny) || is_wall(nx, ny) then s
   else
     match s with
     | State g_score closed open ->

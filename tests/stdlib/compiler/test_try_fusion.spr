@@ -150,7 +150,7 @@ fn normalize(block: String) -> String =
   string.join("\n", list_map(normalize_line, string.split(block, "\n")))
 
 fn normalize_line(line: String) -> String =
-  if string.ends_with(line, ":") && ! string.contains (line, " ") then "_:"
+  if string.ends_with(line, ":") && !string.contains(line, " ") then "_:"
   else
     match string.split(line, "%") with
     | [] -> line
@@ -177,7 +177,7 @@ fn check_pair(state: TestState, stdlib_root: String, name: String, try_src: Stri
     hand <- compile(stdlib_root, name ++ "_hand", hand_src)
     assert_true(state, name ++ ": try compiles", fused != "")
     assert_true(state, name ++ ": hand-written compiles", hand != "")
-    assert_true(state, name ++ ": no branch call",! string.contains (fused, "branch"))
+    assert_true(state, name ++ ": no branch call", !string.contains(fused, "branch"))
     assert_eq(state, name ++ ": same IR as the hand-written match", normalize(fused), normalize(hand))
 
 fn main() -> Unit !{IO} =

@@ -93,7 +93,7 @@ fn passes(src: MutVec Int, dst: MutVec Int, n: Int, w: Int, in_scratch: Bool) ->
   else
     do
       _ <- pass(src, dst, 0, n, w)
-      passes(dst, src, n, w * 2,! in_scratch)
+      passes(dst, src, n, w * 2, !in_scratch)
 
 fn sort_int(v: MutVec Int, scratch: MutVec Int, n: Int) -> Unit !{IO} =
   do

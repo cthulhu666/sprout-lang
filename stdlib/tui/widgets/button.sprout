@@ -40,7 +40,7 @@ fn btn_key(b: Btn m,
 # application's chord to bind, not a press.
 fn btn_activate(b: Btn m, k: event.Key,
                 mods: event.Mods) -> Maybe(widget.Handled(Btn m) m) =
-  if b.has_focus && ! event.mods_is_chord (mods) && activates(k)
+  if b.has_focus && !event.mods_is_chord(mods) && activates(k)
   then Just((b, [b.on_press], Nil))
   else Nothing
 

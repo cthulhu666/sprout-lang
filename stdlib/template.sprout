@@ -279,9 +279,9 @@ fn truthy(value: Maybe Json) -> Bool =
       match v with
       | JsonNull -> false
       | JsonBool b -> b
-      | JsonInt n -> ! (n == 0)
+      | JsonInt n -> !(n == 0)
       | JsonFloat x -> (x < 0.0) || (x > 0.0)
-      | JsonString s -> ! string.is_empty (s)
+      | JsonString s -> !string.is_empty(s)
       | JsonArray arr -> match arr with | JsonArrayNil -> false | _ -> true
       | JsonObject obj -> match obj with | JsonObjectNil -> false | _ -> true
 
