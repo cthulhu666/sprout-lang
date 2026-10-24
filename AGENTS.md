@@ -200,6 +200,7 @@ it with a confidence label. Present this *with* the decision, before asking for 
 ## Directory Conventions
 
 - `docs/` normative and supporting design docs.
+- `site/` the GitHub Pages site (plain HTML, deployed by `.github/workflows/pages.yml`): articles for users.
 - `examples/` user-facing language examples.
 - `stdlib/` language-level standard library source (`prelude.sprout`).
 - `stdlib/compiler/` self-hosted compiler source (`parser`, `infer`, `ast_to_ir`, `ir_lowering`, `compile_driver`, etc.).
