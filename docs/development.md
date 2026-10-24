@@ -22,15 +22,18 @@ Supported macOS and Linux hosts can install the toolchain and bootstrap Sprout w
 The script is idempotent. It installs or verifies:
 
 - macOS: Xcode Command Line Tools are verified; Homebrew, LLVM, `mise`, and `ripgrep` are installed;
-- Debian/Ubuntu, Fedora/RHEL, Arch/Manjaro, and openSUSE: LLVM >= 16, Clang, C build tools,
-  `mise`, and `ripgrep` through the host package manager. On x86_64 Sprout needs clang >= 22,
-  which most distributions do not ship yet: install it from [apt.llvm.org](https://apt.llvm.org)
-  (`llvm-22 clang-22`) and rerun;
+- Debian/Ubuntu: LLVM/Clang 22 from [apt.llvm.org](https://apt.llvm.org), plus C build tools,
+  `mise`, and `ripgrep`;
+- Fedora/RHEL, Arch/Manjaro, and openSUSE: LLVM, Clang, C build tools, `mise`, and `ripgrep`
+  through the host package manager (x86_64 requires a distribution providing Clang 22 or newer);
 - repository-managed tools, the tracked Git hooks, and the stage-1 compiler.
 
 WSL follows its Linux distribution path. Native Windows is not yet a supported host; see
 [windows-port-v0.md](./windows-port-v0.md). Run `./scripts/setup-dev.sh --print-plan` to inspect
 platform commands without changing the host.
+
+After initial setup, `mise exec -- just install-deps` installs or upgrades only the host and
+repository-managed dependencies. It deliberately leaves Git hooks and compiler bootstrap alone.
 
 Build recipes discover matching versioned LLVM directories automatically, including
 `/usr/lib/llvm-N/bin` on Linux and Homebrew's keg-only LLVM directory on macOS. They reject the
@@ -57,6 +60,7 @@ mise exec -- just install-hooks bootstrap-from-seed
 
 Common tasks:
 
+- Install or upgrade dependencies: `mise exec -- just install-deps`
 - Format repo: `mise exec -- just fmt`
 - Check repo formatting: `mise exec -- just fmt-check`
 - Lint repo: `mise exec -- just lint`

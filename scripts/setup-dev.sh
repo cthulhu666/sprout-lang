@@ -3,22 +3,27 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRINT_PLAN=0
+DEPS_ONLY=0
 
 usage() {
   cat <<'USAGE'
-Usage: ./scripts/setup-dev.sh [--print-plan]
+Usage: ./scripts/setup-dev.sh [--print-plan] [--deps-only]
 
 Install Sprout's development toolchain and bootstrap the compiler.
 --print-plan prints the platform package commands without changing the system.
+--deps-only installs the toolchain without configuring hooks or bootstrapping.
 USAGE
 }
 
-case "${1:-}" in
-  "") ;;
-  --print-plan) PRINT_PLAN=1 ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --print-plan) PRINT_PLAN=1 ;;
+    --deps-only) DEPS_ONLY=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
 case "${SPROUT_SETUP_OS:-$(uname -s)}" in
   Darwin|darwin|macos) platform=macos ;;
@@ -76,8 +81,11 @@ PLAN
   fi
   case "$manager" in
     apt)
-      echo "sudo apt-get update"
-      echo "sudo apt-get install -y llvm clang libclang-rt-dev build-essential ripgrep curl ca-certificates git"
+      cat <<'PLAN'
+sudo apt-get update
+sudo apt-get install -y build-essential ripgrep curl ca-certificates git
+bash scripts/ci_install_llvm.sh --sanitizers  # apt.llvm.org: llvm-22 clang-22 libclang-rt-22-dev
+PLAN
       ;;
     dnf)
       echo "sudo dnf install -y llvm clang compiler-rt gcc gcc-c++ make ripgrep curl ca-certificates git"
@@ -125,7 +133,8 @@ install_linux_packages() {
   case "$manager" in
     apt)
       run_as_root apt-get update
-      run_as_root apt-get install -y llvm clang libclang-rt-dev build-essential ripgrep curl ca-certificates git
+      run_as_root apt-get install -y build-essential ripgrep curl ca-certificates git
+      bash "$ROOT/scripts/ci_install_llvm.sh" --sanitizers
       ;;
     dnf)
       run_as_root dnf install -y llvm clang compiler-rt gcc gcc-c++ make ripgrep curl ca-certificates git
@@ -222,6 +231,12 @@ cd "$ROOT"
 mise trust mise.toml
 mise install python just
 install_gh
+
+if ((DEPS_ONLY)); then
+  echo "==> Sprout dependencies are installed."
+  exit 0
+fi
+
 mise exec -- just install-hooks
 mise exec -- just bootstrap-from-seed
 

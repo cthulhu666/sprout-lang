@@ -112,8 +112,10 @@ mise exec -- just compile-native examples/fizzbuzz.sprout /tmp/fizzbuzz
 
 The setup installs the system and repository-managed toolchain, configures Git hooks, and
 bootstraps the self-hosted compiler. It supports Homebrew and the APT, DNF, Pacman, and Zypper
-Linux families; WSL follows the Linux path. Use `./scripts/setup-dev.sh --print-plan` to inspect
-what it would install.
+Linux families; on Debian and Ubuntu it installs the required LLVM/Clang 22 from apt.llvm.org.
+WSL follows the Linux path. Use `./scripts/setup-dev.sh --print-plan` to inspect what it would
+install. Once `just` is available, `mise exec -- just install-deps` upgrades dependencies without
+reconfiguring hooks or bootstrapping the compiler.
 
 Full toolchain, tasks, driver CLI, and platform support live in
 [docs/development.md](./docs/development.md). Run the test suite with

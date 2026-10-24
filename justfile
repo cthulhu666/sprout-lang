@@ -25,6 +25,12 @@ linux_just_sha_x86_64  := "1c53fa85a8c021ce7b19814e1a5e1dc0aa10c04bddca75196f7ab
 default:
   @just --list
 
+# Install or upgrade the host and repository-managed development dependencies.
+# Hooks and compiler bootstrap remain explicit so this is safe to rerun for tool upgrades.
+[group('bootstrap')]
+install-deps:
+  bash scripts/setup-dev.sh --deps-only
+
 # Wire the tracked .githooks/ directory as the active hook path (run once after cloning).
 [group('bootstrap')]
 install-hooks:

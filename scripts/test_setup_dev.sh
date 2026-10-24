@@ -24,10 +24,13 @@ plan_for() {
 
 ubuntu="$(plan_for linux ubuntu)"
 grep -q 'apt-get install' <<<"$ubuntu" || fail "Ubuntu plan does not use apt-get"
-grep -q 'llvm clang' <<<"$ubuntu" || fail "Ubuntu plan does not install LLVM and Clang"
+grep -q 'apt.llvm.org' <<<"$ubuntu" || fail "Ubuntu plan does not configure apt.llvm.org"
+grep -q 'llvm-22 clang-22' <<<"$ubuntu" || fail "Ubuntu plan does not install LLVM and Clang 22"
 grep -q 'build-essential' <<<"$ubuntu" || fail "Ubuntu plan lacks C build tools"
 grep -Eq '(^|[[:space:]])opt([[:space:]]|$)' <<<"$ubuntu" \
   && fail "Ubuntu plan installs the unrelated GNU opt package"
+
+grep -q '^install-deps:' "$ROOT/justfile" || fail "justfile lacks an install-deps recipe"
 
 fedora="$(plan_for linux fedora)"
 grep -q 'dnf install' <<<"$fedora" || fail "Fedora plan does not use dnf"
@@ -134,5 +137,20 @@ grep -q "attestation service is unavailable" <<<"$output" \
   || fail "Git hook setup was not run once per setup invocation"
 [[ "$(grep -c '^exec -- just bootstrap-from-seed$' "$SPROUT_SETUP_TEST_LOG")" -eq 2 ]] \
   || fail "compiler bootstrap was not run once per setup invocation"
+
+: >"$SPROUT_SETUP_TEST_LOG"
+deps_output="$(
+  SPROUT_SETUP_OS=linux \
+  SPROUT_SETUP_DISTRO=ubuntu \
+  SPROUT_LLVM_BINDIR="$TMPD/installed/bin" \
+  SPROUT_SETUP_RETRY_DELAY=0 \
+  PATH="$TMPD/installed/bin:/usr/bin:/bin" \
+    bash "$SETUP" --deps-only 2>&1
+)"
+grep -q 'dependencies are installed' <<<"$deps_output" \
+  || fail "dependency-only setup did not report completion"
+if grep -q '^exec -- just' "$SPROUT_SETUP_TEST_LOG"; then
+  fail "dependency-only setup configured hooks or bootstrapped the compiler"
+fi
 
 echo "==> setup-dev platform and idempotency tests passed"
