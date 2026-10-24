@@ -165,7 +165,8 @@ without breaking anything this proposal adds.
    discarding it, and `ModuleSurface`'s globals carry the flag, so completion offers only what a
    module may reach.
 2. **Bundler.**
-   - `private_externs_in_module` skips the prelude and the floor (module `""`).
+   - The prelude and the floor are found by path, not by module `""`: a headerless
+     `no_prelude` entry has module `""` too, and must not export its externs.
    - The externs list becomes the names that no declaring module exports, plus every name whose
      signature writes `local`. Today `foreign_externs` builds name → module last-wins
      (`dict_set`). Under the general rule, a private redeclaration in one module would then hide an
@@ -217,7 +218,9 @@ lands. A call that breaks gets §4.4's diagnostic, which names the module and th
 - Conformance, rejected:
   - §1's program, at `vector_mutset`, naming `stdlib.mutable`;
   - a call to a `package_resolution` demo module's private extern;
-  - `export` on an extern that writes `local`.
+  - `export` on an extern that writes `local`;
+  - a private extern reached from an import of a headerless `no_prelude` entry that declares the
+    same name.
 - Conformance, accepted:
   - an exported extern called by bare name;
   - a module calling its own private extern;

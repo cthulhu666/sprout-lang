@@ -1,0 +1,4 @@
+module demo.privcall
+
+# Calls demo.privext's private extern bare, without declaring it.
+export let call_priv: Int = __priv_add(1, 2)
