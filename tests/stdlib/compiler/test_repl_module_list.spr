@@ -49,19 +49,12 @@ fn strip_suffix(raw: String, suffix: String) -> String =
   then string.slice(raw, 0, string.length(raw) - string.length(suffix))
   else raw
 
-fn offered(name: String, names: Vec String) -> Bool = vec_has(name, names, 0)
-
-fn vec_has(name: String, names: Vec String, index: Int) -> Bool =
-  match vec_get(index, names) with
-  | Nothing -> false
-  | Just candidate -> if candidate == name then true else vec_has(name, names, index + 1)
-
 fn missing_from_list(disk: List String, offered_names: Vec String) -> List String =
-  match disk with
-  | Nil -> Nil
-  | Cons leaf rest ->
-      if offered(leaf, offered_names) then missing_from_list(rest, offered_names)
-      else Cons(leaf, missing_from_list(rest, offered_names))
+  list_filter(\leaf -> ! member (leaf, offered_names), disk)
+
+# Offered names with no `<root>/<name>.sprout`: modules that were removed or renamed.
+fn stale_in_list(offered_names: Vec String, disk: List String) -> List String =
+  list_filter(\name -> ! member (name, disk), vec_to_list(offered_names))
 
 fn report_missing(state: TestState, missing: List String) -> Unit !{IO} =
   match missing with
@@ -88,9 +81,15 @@ fn main() -> Unit !{IO} =
     # Name each straggler, so a failure says WHICH module to add.
     report_missing(state, missing_from_list(disk, offered_names))
 
-    # And a spot check in the other direction: the list must not invent modules.
-    assert_true(state, "`bits` is offered", offered("bits", offered_names))
+    # The other direction: every offered name is a module on disk. Name each stale one.
+    let stale = stale_in_list(offered_names, disk)
+    assert_true(state, "every offered module exists on disk", list_length(stale) == 0)
+    list_each(\name -> assert_true(state, "offered module `" ++ name ++ "` exists on disk", false),
+      stale)
+
+    # Spot checks.
+    assert_true(state, "`bits` is offered", member("bits", offered_names))
     assert_true(state, "a module that does not exist is not offered",
-      offered("no_such_module", offered_names) == false)
+      member("no_such_module", offered_names) == false)
 
     summary(state)

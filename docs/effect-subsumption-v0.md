@@ -830,8 +830,7 @@ stdlib-wide, not prelude-wide** — a first draft of this section said "`Ref` is
 mutable container in the prelude", which is true and misleading. `stdlib/mutable.sprout`
 exports two more: `MutVec a` (`mutvec_set(v, i, val)`, `mutvec_push`) and `MutMatrix a`
 (`mutmatrix_set`). Both take the parameter as an argument, so all three are invariant, and
-`MutVec` is load-bearing downstream — `stdlib/linalg.sprout` builds every `Vec3` through
-it.
+`MutVec` is load-bearing — `examples/astar.sprout` keeps its scores in one.
 
 **Decide by enumeration, and make an unlisted constructor invariant by default** — a wrong
 invariance is a rejected legal program, a wrong covariance is this hole, so the default
