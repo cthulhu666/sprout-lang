@@ -1587,6 +1587,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P2` **Unbox small fixed-shape numeric records** (`Vec3 {x,y,z}` as 3 raw f64s, not a heap
   pointer) — the ergonomic-and-fast path for individual small vectors, additive on top of the
   tested flat-buffer foundation.
+- [ ] `P2` **`stdlib.linalg`'s `Vec3` is a mutable buffer, so all its math is `!{IO}`.** `wrap
+  Vec3 = MutVec Double` makes `vec3`, `vec3_add`, `vec3_dot`, `vec3_normalize` effectful for pure
+  arithmetic, and the header promises Vec4/Mat4/Quat that do not exist. uncharted-suns already
+  replaced it with a pure record (`loam/vec.sprout`, `V3 (x, y, z: Double)`); it imports only
+  `camera_fit_distance` from linalg. Fix: a pure record `Vec3`, no IO; only
+  `tests/stdlib/test_linalg_vec3.spr` uses it here. Not `LinVec`: small vectors are reused, not
+  threaded. Unboxing (entry above) then makes the record fast.
 - [ ] `P2` **Native `Float` (f32) type + `Vector Float` unboxed path.** Doubles-everywhere is
   correct today; float32 earns its keep only when Sprout owns bulk GPU-bound buffers. Decide by
   measured buffer/upload cost.
