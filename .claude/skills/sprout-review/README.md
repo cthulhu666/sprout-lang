@@ -256,13 +256,14 @@ bash scripts/review_ledger.sh count          # completed runs on this branch
 bash scripts/review_ledger.sh show           # "review:2 9 found 3 real @max"
 bash scripts/review_ledger.sh findings <id>  # path to that run's findings
 bash scripts/review_ledger.sh raw <id>       # path to that run's findings as each pass worded them
+bash scripts/review_ledger.sh findings <id> --write < file  # write stdin there; same for raw
 just test-review-ledger                      # the suite, also in ci-fast-gates
 ```
 
 `findings` returns `$GIT_DIR/claude-review/findings-<id>.md`, creating the directory. The skill writes
-every finding there — confirmed, unverified and refuted — before reporting, so a review can be
-pointed at afterwards instead of recalled. The counts say a review happened; the file says what it
-said, and it is where the reports are grouped into issues, since `found` deliberately counts the
+every finding there via `--write` — confirmed, unverified and refuted — before reporting, so a
+review can be pointed at afterwards instead of recalled. The counts say a review happened; the file
+says what it said, and it is where the reports are grouped into issues, since `found` deliberately counts the
 former. The path is absolute (`--absolute-git-dir`, not `--git-dir`, which answers `.git` at the root
 and an absolute path from a subdirectory).
 

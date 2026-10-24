@@ -138,11 +138,16 @@ step 6 reports them — bugs confirmed, unverified, refuted, then cleanups confi
 refuted. It is how the reader picks what to act on ("fix 2 and 5"), so use it as given and never
 renumber: the findings file and the report must agree.
 
-**4. Write the findings to disk** before reporting them, at the path the ledger names:
+**4. Write the findings to disk** before reporting them, through the ledger script. Write the
+content to a scratch file with your file tools, then:
 
 ```
-bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" findings <run-id>
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" findings <run-id> --write < <file>
 ```
+
+The script writes the ledger's file and prints its path. Do not write to that path yourself: in a
+worktree the ledger dir sits inside the main checkout's `.git`, which an isolated session's file
+tools refuse.
 
 Write every finding there — confirmed, unverified and refuted, each under its `n`, with its
 file:line, severity and scenario. **Group them as you write**: two reports of one bug become one
@@ -158,9 +163,9 @@ bugs, with their category, and grouped the same way. Give each confirmed one its
 decision, and state the threshold once: a DO count means nothing without it, which is why it is
 here and not in the ledger.
 
-**Also write the workflow's `raw` array**, verbatim JSON, to the path `review_ledger.sh raw <id>`
-names. That file is the only record of what each pass said in its own words, and it is what made the
-clustering constants measurable at all. They were carried for three runs on recollection — "synonyms,
+**Also write the workflow's `raw` array**, verbatim JSON, the same way
+(`review_ledger.sh raw <run-id> --write < <file>`). That file is the only record of what each pass
+said in its own words, and it is what made the clustering constants measurable at all. They were carried for three runs on recollection — "synonyms,
 ~0.3 overlap" — because the summaries they scored were discarded as soon as they were merged;
 measuring them is what ended them. `VERIFY_CAP` is the only constant left to check this way.
 
