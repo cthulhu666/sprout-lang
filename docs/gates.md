@@ -244,19 +244,23 @@ nothing about what it prints, and keep it small enough that the IR is readable w
 
 ## LinVec — `just linvec-smoke`
 
-`linvec_set` is pure to the checker and a C store underneath, so its soundness rests on linearity
-(docs/persistent-array-v0.md §5.3). `just test` links at `-O0` and cannot see most of what could
+`linvec_set`, `linvec_push` and `linvec_truncate` are pure to the checker and a C store underneath,
+so their soundness rests on linearity (docs/persistent-array-v0.md §5.3). `just test` links at `-O0` and cannot see most of what could
 go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
 
 - `tests/stdlib/test_linvec.spr` at `-O2`, where an optimizer could move a borrowed read past a set.
-- The same test against a copy of the stdlib root whose `linvec_set` copies through `vec_set`. Both
-  must print the same: a difference is a linearity hole seen as a wrong answer. The root is a
+- The same test against a copy of the stdlib root whose `linvec_set`, `linvec_push` and
+  `linvec_truncate` copy (`vec_set`, `vector_append`, `vec_slice`). Both must print the same: a difference is a linearity hole seen as a wrong answer. The root is a
   command-line argument, so nothing in the compiler is involved. It finds only holes the test
   reaches.
 - A set, scatter or accum out of range exits non-zero with its message.
 - Allocation counters (`SPROUT_DEBUG_ALLOC`) match between runs that differ only in the number of
   sets, so a set allocates nothing, and grow by one vector per `linvec.new`.
 - A `linvec.get` matched with a binding compiles to a worker over `vector_get_unboxed`.
+- `stdlib/linvec.sprout` and `stdlib/linheap.sprout` name none of `vector_get_direct`,
+  `vector_mutset`, `vector_push` and `vector_truncate`: the bounds-check pass counts only `!{IO}`
+  code as changing a length, which stays sound while a `LinVec`'s `Vector` never reaches an access
+  that pass rewrites (`docs/bounds-check-elimination-v0.md`, condition 4).
 
 ## In-place reuse — `just linear-reuse-smoke`
 

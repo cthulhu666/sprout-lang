@@ -3,9 +3,9 @@ import stdlib.linheap (LinHeap)
 import stdlib.linheap as linheap
 
 # `just linear-reuse-smoke` compiles this with NPUSH replaced and compares the runtime's
-# `vector` counter across NPUSH=0 and NPUSH=64 (docs/linheap-v0.md §4.2): the grows and
-# shrinks are invisible through the API. It pushes NPUSH keys, pops them all and prints
-# `<pops> <in order> <sum>`.
+# `vector` counter across NPUSH=0 and NPUSH=64 (docs/linheap-v0.md §4.2). The counter counts
+# element buffers allocated and reallocated, so it sees the growth the API hides. It pushes
+# NPUSH keys, pops them all and prints `<pops> <in order> <sum>`.
 
 fn rem(a: Int, n: Int) -> Int = a - (a / n) * n
 
@@ -15,7 +15,9 @@ fn fill(i: Int, n: Int, h: LinHeap Int) -> LinHeap Int =
 # `prev` is the last key popped; `ordered` stays true while keys do not decrease.
 fn drain(h: LinHeap Int, prev: Int, pops: Int, ordered: Bool, sum: Int) -> String =
   match linheap.pop(h) with
-  | Nothing -> `${int_to_string(pops)} ${if ordered then "ordered" else "unordered"} ${int_to_string(sum)}`
-  | Just (x, rest) -> drain(rest, x, pops + 1, ordered && x >= prev, sum + x)
+  | (Nothing, rest) ->
+      let _ = linheap.drop(rest)
+      in `${int_to_string(pops)} ${if ordered then "ordered" else "unordered"} ${int_to_string(sum)}`
+  | (Just x, rest) -> drain(rest, x, pops + 1, ordered && x >= prev, sum + x)
 
 fn main() -> Unit !{IO} = print(drain(fill(1, NPUSH, linheap.new()), -1, 0, true, 0))

@@ -167,9 +167,9 @@ Breaking for a published linear type with an untracked field. In our four repos:
     `Box raw -> Just(raw)`;
   - from an owned `b: Box`, `Box raw -> (raw, Box(raw))`.
 
-  An alias does harm only where a `Vector` is written in place: `linvec_set` in `stdlib.linvec`,
-  and `vector_mutset`, `vector_push` and `vector_truncate` in `stdlib.mutable`. All four are
-  private externs (`docs/extern-visibility-v0.md`), so another module reaches them only by
+  An alias does harm only where a `Vector` is written in place: `linvec_set`, `linvec_push` and
+  `linvec_truncate` in `stdlib.linvec`, and `vector_mutset`, `vector_push` and `vector_truncate`
+  in `stdlib.mutable`. All six are private externs (`docs/extern-visibility-v0.md`), so another module reaches them only by
   declaring one itself, which is deliberate FFI. Elsewhere the alias is harmless.
 
   Three rules were weighed:

@@ -2,26 +2,48 @@ module stdlib.linvec
 
 import stdlib.mutable
 
-# A pure vector with in-place writes (Experimental, as spec §5.8 is). A set consumes the
-# vector and returns it; linearity means no one holds the old one, so the write cannot be
-# seen. Reads borrow; `freeze` returns a `Vec` in O(1). Design:
+# A pure vector with in-place writes and growth (Experimental, as spec §5.8 is). A set, push
+# or pop consumes the vector and returns it; linearity means no one holds the old one, so the
+# change cannot be seen. Reads borrow; `freeze` returns a `Vec` in O(1). Design:
 # docs/persistent-array-v0.md §5.3.
 #
-# Trust boundary: the type is abstract, so only this module unwraps one, and `linvec_set`
-# is a C builtin whose purity rests on linearity. A raw `Vector` unwrapped here must not
-# alias: never return, capture or store one from a BORROWED `LinVec`, and never use one
-# from an OWNED `LinVec` twice, as in `(raw, LinVec(raw))`. The checker catches neither.
+# Trust boundary: the type is abstract, so only this module unwraps one, and `linvec_set`,
+# `linvec_push` and `linvec_truncate` are C builtins whose purity rests on linearity. A raw
+# `Vector` unwrapped here must not alias: never return, capture or store one from a BORROWED
+# `LinVec`, and never use one from an OWNED `LinVec` twice, as in `(raw, LinVec(raw))`. The
+# checker catches neither. A `LinVec`'s vector must never reach an access bounds-check
+# elimination rewrites, since `push` and `pop` change a length behind a pure type; the
+# argument is in stdlib/compiler/bce.sprout, above `safe_io_externs`.
 # `vec_make_filled` is declared in stdlib.mutable; the import brings it.
 
 export wrap linear LinVec a = Vector a
 
-# The builtin keeps its C name, so it is private behind `set`. Out of range traps, as
-# `mutvec_set` does.
+# The builtins keep their C names, so they are private behind `set`, `push` and `pop`. Out
+# of range traps, as `mutvec_set` does. `linvec_truncate` clears the cells it drops.
 extern fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a
+extern fn linvec_push(x: a, v: LinVec a) -> LinVec a
+extern fn linvec_truncate(n: Int, v: LinVec a) -> LinVec a
 
 export fn set(i: Int, x: a, v: LinVec a) -> LinVec a = linvec_set(i, x, v)
 
 export fn new(n: Int, x: a) -> LinVec a = LinVec(vec_make_filled(n, x))
+
+# Each call returns a fresh vector.
+export fn empty() -> LinVec a = LinVec(vector_empty())
+
+export fn from_list(xs: List a) -> LinVec a = LinVec(vector_from_list(xs))
+
+# Amortised O(1): the storage doubles when full.
+export fn push(x: a, v: LinVec a) -> LinVec a = linvec_push(x, v)
+
+# Removes the last cell and returns it with the rest. An empty `LinVec` comes back unchanged.
+# The capacity never shrinks. The cell is read before the truncate clears it.
+export fn pop(v: LinVec a) -> (Maybe a, LinVec a) =
+  let n = length(v)
+  in if n == 0 then (Nothing, v)
+  else
+    let last = get(n - 1, v)
+    in (last, linvec_truncate(n - 1, v))
 
 export fn get(i: Int, v: borrowing LinVec a) -> Maybe a =
   match v with

@@ -5,7 +5,7 @@ import stdlib.linvec as linvec
 
 # The type is abstract: only its module builds or takes one apart.
 
-fn fake(x: Int) -> LinHeap Int = Heap(1, linvec.new(4, x))
+fn fake(x: Int) -> LinHeap Int = LinHeap(linvec.new(4, x))
 #~^ ERROR
 
 fn main() -> Unit !{IO} = print("x")

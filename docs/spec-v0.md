@@ -2261,17 +2261,23 @@ caller keeps a borrowed value and releases it after either outcome.
 #### `LinVec`: a pure vector with in-place writes (Experimental)
 
 `stdlib.linvec` declares `export wrap linear LinVec a = Vector a`, abstract: only its module
-builds or takes one apart. A set consumes the vector and returns it, and linearity guarantees no
-one holds the old one, so the write cannot be observed and the signature is pure. A `LinVec` is a
-`Vector` at runtime (§5.6.1), so a set allocates nothing. They are written qualified here, as
-after `import stdlib.linvec as linvec`. `linvec.set` wraps the C builtin `linvec_set`, which keeps
-its name and is private to the module.
+builds or takes one apart. A set, push or pop consumes the vector and returns it, and linearity
+guarantees no one holds the old one, so the change cannot be observed and the signature is pure. A
+`LinVec` is a `Vector` at runtime (§5.6.1), so a set allocates nothing. They are written qualified
+here, as after `import stdlib.linvec as linvec`. `linvec.set`, `linvec.push` and `linvec.pop` wrap
+the C builtins `linvec_set`, `linvec_push` and `linvec_truncate`, which keep their names and are
+private to the module. The last two are temporary: they go when trusted Sprout can call effectful
+primitives.
 
 ```
 linvec.new(n: Int, x: a) -> LinVec a                     # n copies of x
 linvec.get(i: Int, v: borrowing LinVec a) -> Maybe a     # Nothing out of range
 linvec.set(i: Int, x: a, v: LinVec a) -> LinVec a        # traps out of range
 linvec.length(v: borrowing LinVec a) -> Int
+linvec.empty() -> LinVec a                               # a fresh vector of length 0
+linvec.from_list(xs: List a) -> LinVec a                 # a fresh vector of the list's elements
+linvec.push(x: a, v: LinVec a) -> LinVec a               # amortised O(1)
+linvec.pop(v: LinVec a) -> (Maybe a, LinVec a)           # the last element and the rest
 linvec.freeze(v: LinVec a) -> Vec a                      # O(1); the vector's life ends
 linvec.drop(v: LinVec a) -> Unit
 linvec.scatter(is: List Int, x: a, v: LinVec a) -> LinVec a
@@ -2281,6 +2287,9 @@ linvec.accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec 
 - `linvec.set` out of range, and `linvec.scatter` or `linvec.accum` with an index out of range,
   stop the program with a runtime error, as `mutvec_set` does. `linvec.get` out of range is
   `Nothing`, as `vec_get` is.
+- `linvec.push` appends, doubling the storage when it is full. `linvec.pop` removes the last
+  element and returns it with the rest; on an empty vector it returns `(Nothing, v)`, the vector
+  unchanged. The capacity never shrinks.
 - `linvec.scatter` sets `x` at each index in order; `linvec.accum` sets `f(old, y)` for each
   `(i, y)` in order, so a repeated index folds.
 - Every path must consume the vector: return it, pass it on, or end it with `linvec.freeze` or

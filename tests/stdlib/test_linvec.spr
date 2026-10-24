@@ -66,6 +66,112 @@ fn empty_len() -> Int =
       _ = linvec.drop(v)
   in n
 
+# --- growth: empty, from_list, push, pop ---
+
+fn push_range(i: Int, n: Int, v: LinVec Int) -> LinVec Int =
+  if i >= n then v else push_range(i + 1, n, linvec.push(i, v))
+
+fn ints(n: Int) -> String =
+  show(vec_from_list([i for i in 0..(n - 1)]))
+
+fn ints_from(a: Int, b: Int) -> String =
+  show(vec_from_list([i for i in a..b]))
+
+fn empty_len_is_zero() -> Int =
+  let v = linvec.empty()
+      n = linvec.length(v)
+      _ = linvec.drop(v)
+  in n
+
+fn from_list_case(xs: List Int) -> String =
+  let v = linvec.from_list(xs)
+      n = linvec.length(v)
+  in `${int_to_string(n)} ${show(linvec.freeze(v))}`
+
+# `n` pushes onto an empty LinVec: the length and the cells, in order.
+fn pushed(n: Int) -> String =
+  let v = push_range(0, n, linvec.empty())
+      len = linvec.length(v)
+  in `${int_to_string(len)} ${show(linvec.freeze(v))}`
+
+# Lengths at and around each doubling: 0, 8, 16, 32, 64.
+fn growth_boundaries() -> List String =
+  list_map(\n -> pushed(n), [0, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100])
+
+fn growth_matches() -> Bool =
+  list_map(\n -> `${int_to_string(n)} ${ints(n)}`, [0, 1, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100])
+    == growth_boundaries()
+
+# A LinVec from `new` and one from `from_list` start with their cells inline; the first push
+# past them moves the cells out of line.
+fn push_onto_new() -> String =
+  show(linvec.freeze(push_range(4, 24, linvec.new(4, -1))))
+
+fn push_onto_from_list() -> String =
+  show(linvec.freeze(push_range(3, 30, linvec.from_list([0, 1, 2]))))
+
+fn pop_all(v: LinVec Int, acc: List Int) -> List Int =
+  match linvec.pop(v) with
+  | (Nothing, rest) ->
+      let _ = linvec.drop(rest)
+      in list_reverse(acc)
+  | (Just x, rest) -> pop_all(rest, Cons(x, acc))
+
+# Pops come last cell first.
+fn pop_order(n: Int) -> String =
+  show(vec_from_list(pop_all(push_range(0, n, linvec.empty()), [])))
+
+fn pop_returns_rest() -> String =
+  match linvec.pop(push_range(0, 5, linvec.empty())) with
+  | (x, rest) ->
+      let n = linvec.length(rest)
+      in `${show_maybe(x)} ${int_to_string(n)} ${show(linvec.freeze(rest))}`
+
+fn show_maybe(m: Maybe Int) -> String =
+  match m with
+  | Just x -> int_to_string(x)
+  | Nothing -> "nothing"
+
+# Pop on an empty LinVec gives back the vector, which is still usable.
+fn pop_empty_then_push() -> String =
+  match linvec.pop(linvec.empty()) with
+  | (x, v) ->
+      let again = linvec.push(5, v)
+          n = linvec.length(again)
+      in `${show_maybe(x)} ${int_to_string(n)} ${show(linvec.freeze(again))}`
+
+fn pop_then_push() -> String =
+  match linvec.pop(push_range(0, 5, linvec.empty())) with
+  | (x, v) -> `${show_maybe(x)} ${show(linvec.freeze(linvec.push(9, v)))}`
+
+# Popping to empty and pushing again reuses the capacity that stays.
+fn drain_then_refill() -> String =
+  match linvec.pop(linvec.push(1, linvec.empty())) with
+  | (_, v) ->
+      let w = push_range(10, 40, v)
+          n = linvec.length(w)
+      in `${int_to_string(n)} ${show(linvec.freeze(w))}`
+
+# A pop clears its cell: the cell pushed over it is the new one, and the old value is gone.
+fn push_over_popped() -> String =
+  match linvec.pop(linvec.from_list([1, 2, 3])) with
+  | (_, v) -> show(linvec.freeze(linvec.push(7, v)))
+
+# Alternating push and pop across a growth boundary.
+fn churn(i: Int, v: LinVec Int) -> LinVec Int =
+  if i >= 20 then v
+  else
+    match linvec.pop(linvec.push(i + 1, linvec.push(i, v))) with
+    | (_, rest) -> churn(i + 1, rest)
+
+fn churned() -> String =
+  show(linvec.freeze(churn(0, linvec.empty())))
+
+fn push_into_frozen() -> String =
+  let frozen = linvec.freeze(push_range(0, 10, linvec.empty()))
+      changed = vec_set(0, 99, frozen)
+  in `${show(frozen)} ${show(changed)}`
+
 # --- bulk operations against a `vec_set` reference ---
 
 fn ref_scatter(is: List Int, x: Int, v: Vec Int) -> Vec Int =
@@ -269,6 +375,25 @@ fn main() -> Unit !{IO} =
       check_eq("drop consumes", drops(), true),
       check_eq("index == length is a miss; length - 1 a hit", edges(), "-1 8"),
       check_eq("length of an empty LinVec", empty_len(), 0),
+      check_eq("empty has length 0", empty_len_is_zero(), 0),
+      check_eq("from_list round trip", from_list_case([3, 1, 4, 1, 5]), "5 3,1,4,1,5"),
+      check_eq("from_list of nothing", from_list_case([]), "0 "),
+      check_eq("push keeps order and length across growth", growth_matches(), true),
+      check_eq("push of 0, 1 and 9", [pushed(0), pushed(1), pushed(9)],
+               ["0 ", "1 0", "9 0,1,2,3,4,5,6,7,8"]),
+      check_eq("push past the inline cells of new", push_onto_new(),
+               "-1,-1,-1,-1,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23"),
+      check_eq("push past the cells of from_list", push_onto_from_list(),
+               show(vec_from_list([i for i in 0..29]))),
+      check_eq("pop order is last cell first", pop_order(6), "5,4,3,2,1,0"),
+      check_eq("pop order across a growth", pop_order(40), show(vec_from_list([i for i in range_down(39, 0)]))),
+      check_eq("pop returns the last cell and the rest", pop_returns_rest(), "4 4 0,1,2,3"),
+      check_eq("pop on empty returns the vector, still usable", pop_empty_then_push(), "nothing 1 5"),
+      check_eq("pop then push", pop_then_push(), "4 0,1,2,3,9"),
+      check_eq("push after popping to empty", drain_then_refill(), `30 ${ints_from(10, 39)}`),
+      check_eq("push over a popped cell", push_over_popped(), "1,2,7"),
+      check_eq("push and pop across a growth", churned(), ints(20)),
+      check_eq("push then freeze is an ordinary Vec", push_into_frozen(), "0,1,2,3,4,5,6,7,8,9 99,1,2,3,4,5,6,7,8,9"),
       check_eq("scatter matches vec_set, repeats included",
                scatter_case([1, 3, 1, 3, 0]), show(ref_scatter([1, 3, 1, 3, 0], 9, zeros))),
       check_eq("scatter of nothing", scatter_case([]), "0,0,0,0,0"),

@@ -30,8 +30,10 @@ fn push_all(xs: List a, h: LinHeap a) -> LinHeap a where Ord a =
 
 fn drain_go(h: LinHeap a, acc: List a) -> List a where Ord a =
   match linheap.pop(h) with
-  | Nothing -> list_reverse(acc)
-  | Just (x, rest) -> drain_go(rest, Cons(x, acc))
+  | (Nothing, rest) ->
+      let _ = linheap.drop(rest)
+      in list_reverse(acc)
+  | (Just x, rest) -> drain_go(rest, Cons(x, acc))
 
 fn drain(h: LinHeap a) -> List a where Ord a = drain_go(h, [])
 
@@ -46,8 +48,10 @@ fn sizes_up(xs: List a, h: LinHeap a, acc: List Int) -> (List Int, LinHeap a) wh
 
 fn sizes_down(h: LinHeap a, acc: List Int) -> List Int where Ord a =
   match linheap.pop(h) with
-  | Nothing -> list_reverse(acc)
-  | Just (_, rest) ->
+  | (Nothing, rest) ->
+      let _ = linheap.drop(rest)
+      in list_reverse(acc)
+  | (Just _, rest) ->
       let n = linheap.size(rest)
       in sizes_down(rest, Cons(n, acc))
 
@@ -60,13 +64,29 @@ fn pop_n(p: Int, h: LinHeap a) -> LinHeap a where Ord a =
   if p <= 0 then h
   else
     match linheap.pop(h) with
-    | Nothing -> linheap.new()
-    | Just (_, rest) -> pop_n(p - 1, rest)
+    | (Nothing, rest) -> rest
+    | (Just _, rest) -> pop_n(p - 1, rest)
+
+fn show_pop(m: Maybe Int, rest: LinHeap Int) -> String =
+  let _ = linheap.drop(rest)
+  in match m with
+     | Nothing -> "nothing"
+     | Just x -> `just ${int_to_string(x)}`
 
 fn pop_empty() -> String =
   match linheap.pop(empty_int()) with
-  | Nothing -> "nothing"
-  | Just (x, rest) -> let _ = linheap.drop(rest) in `just ${int_to_string(x)}`
+  | (m, rest) -> show_pop(m, rest)
+
+# An empty heap comes back from a pop, and it still takes pushes.
+fn pop_empty_then_push() -> List Int =
+  match linheap.pop(empty_int()) with
+  | (_, rest) -> drain(linheap.push(3, linheap.push(1, linheap.push(2, rest))))
+
+# Pops past the end, refills, and drains: the storage that stays serves the new keys.
+fn drained_then_reused() -> (Int, List Int) =
+  let h = pop_n(100, push_all(gen(40, 9, []), empty_int()))
+      n = linheap.size(h)
+  in (n, drain(push_all([5, 3, 4, 1, 2], h)))
 
 fn peek_empty() -> Maybe Int =
   let h = empty_int()
@@ -79,15 +99,13 @@ fn peek_then_pop(xs: List Int) -> (Maybe Int, Maybe Int) =
   let h = push_all(xs, empty_int())
       p = linheap.peek(h)
   in match linheap.pop(h) with
-     | Nothing -> (p, Nothing)
-     | Just (x, rest) -> let _ = linheap.drop(rest) in (p, Just(x))
+     | (m, rest) -> let _ = linheap.drop(rest) in (p, m)
 
 # --- push, pop to empty, push again ---
 
 fn emptied() -> LinHeap Int =
   match linheap.pop(linheap.push(5, empty_int())) with
-  | Nothing -> empty_int()
-  | Just (_, rest) -> rest
+  | (_, rest) -> rest
 
 fn emptied_size() -> Int =
   let h = emptied()
@@ -103,8 +121,7 @@ fn emptied_peek() -> Maybe Int =
 
 fn emptied_pop() -> String =
   match linheap.pop(emptied()) with
-  | Nothing -> "nothing"
-  | Just (x, rest) -> let _ = linheap.drop(rest) in `just ${int_to_string(x)}`
+  | (m, rest) -> show_pop(m, rest)
 
 fn emptied_then_push() -> List Int =
   drain(linheap.push(9, linheap.push(7, emptied())))
@@ -191,8 +208,10 @@ fn take_k(k: Int, h: LinHeap a, acc: List a) -> List a where Ord a =
     in list_reverse(acc)
   else
     match linheap.pop(h) with
-    | Nothing -> list_reverse(acc)
-    | Just (x, rest) -> take_k(k - 1, rest, Cons(x, acc))
+    | (Nothing, rest) ->
+        let _ = linheap.drop(rest)
+        in list_reverse(acc)
+    | (Just x, rest) -> take_k(k - 1, rest, Cons(x, acc))
 
 # The `k` least of `xs`, by pushes.
 fn top_k(k: Int, xs: List a) -> List a where Ord a =
@@ -219,6 +238,8 @@ fn main() -> Unit !{IO} =
        check_eq("sizes while growing to 70 and while draining",
                 growth_sizes(70), ([i for i in 1..70], [i for i in range_down(69, 0)])),
        check_eq("pop on empty is Nothing", pop_empty(), "nothing"),
+       check_eq("pop on empty returns a heap that takes pushes", pop_empty_then_push(), [1, 2, 3]),
+       check_eq("a drained heap is reusable", drained_then_reused(), (0, [1, 2, 3, 4, 5])),
        check_eq("peek on empty is Nothing", peek_empty(), Nothing),
        check_eq("peek is the next pop", peek_then_pop([5, 2, 8, 2, 9]), (Just(2), Just(2))),
        check_eq("peek is the next pop, one key", peek_then_pop([-3]), (Just(-3), Just(-3))),

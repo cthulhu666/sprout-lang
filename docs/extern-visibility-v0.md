@@ -74,7 +74,7 @@ Non-goals:
   does not close §1's hole. It moves the hole from "import a module" to "declare the extern", which
   is deliberate FFI and visible in the source. That plays the role Rust's `unsafe` plays at an FFI
   call (§3). Rust's `unsafe` is a checked marker, though, and `extern fn` here is only a
-  declaration. Gating the declaration is the open question in BACKLOG P3 **Unsafe primitives**.
+  declaration. Gating the declaration is the open question in BACKLOG P1 **Unsafe primitives**.
 - **Qualified call sites.** The symbol stays bare at link time, and so does the call (§4.2).
 - **Selective import lists.** They keep having no effect on externs, exported or not. Naming an
   extern in one stays accepted. Making a list hide an exported extern needs a new binding path,
@@ -148,9 +148,10 @@ without breaking anything this proposal adds.
   escape (`docs/linear-publish-v0.md` §7). It was declined in PR #714 because it leaves the owned
   duplicate `(raw, Box(raw))` and `id(raw)` open, and Sprout has no `Copy` or `copy` to exempt
   harmless fields. That argument is unchanged.
-- **Representation.** Type the four mutating externs (`vector_mutset`, `vector_push`,
-  `vector_truncate`, `linvec_set`) on an opaque type that only their module can name, such as a
-  private `wrap Raw a = Vector a` in `stdlib.mutable`. Then a user's redeclaration over `Vector a`
+- **Representation.** Type the mutating externs (`vector_mutset`, `vector_push`,
+  `vector_truncate`, `linvec_set`, `linvec_push`, `linvec_truncate`) on an opaque type that only
+  their module can name, such as a private `wrap Raw a = Vector a` in `stdlib.mutable`. Then a
+  user's redeclaration over `Vector a`
   fails `extern_decl_ok`'s signature check. It loses for two reasons. The check fires only while
   `stdlib.mutable` is in the build, so dropping the import reopens the hole. And it puts a
   conversion at every `MutVec` operation for that partial gain.

@@ -1,8 +1,9 @@
 # `stdlib.linheap`: a pure binary min-heap — v0
 
 **Status — landed** (`stdlib/linheap.sprout`). Experimental, as `LinVec` is (spec §5.8). A stdlib
-module written in Sprout over `LinVec`: no builtin, no new trust boundary, so `spec-v0.md` is
-untouched.
+module written in Sprout over `LinVec`: no builtin of its own and no new trust boundary. Its
+growth comes from `linvec.push` and `linvec.pop`, which sit on two temporary builtins (§4.2);
+`spec-v0.md` §5.8 documents those.
 
 ## 1. Problem
 
@@ -53,32 +54,25 @@ API, Microsoft Learn's `PriorityQueue<TElement,TPriority>`, OCaml 5.4 `Stdlib.Pq
 ### 4.1 Representation and invariant
 
 ```sprout
-export type linear LinHeap a = | HeapEmpty | Heap Int (LinVec a)   # size, storage
+export wrap linear LinHeap a = LinVec a
 ```
 
-Exported without `(..)`, so it is abstract (spec §5.6.1; §5.8 *Publishing a linear type*).
-**Invariant: `Heap n v` has
-`1 ≤ n ≤ linvec.length(v)`, and `HeapEmpty` is the only empty heap.** A pop that removes the last
-element drops the storage and returns `HeapEmpty`. `HeapEmpty` exists because `linvec.new` needs a
-value to fill with and an empty heap has none: the first push allocates capacity 4, filled with its
-element. It is nullary, so an empty heap allocates nothing.
+Exported without `(..)`, so it is abstract, as `LinVec` is (spec §5.6.1; §5.8 *Publishing a linear
+type*). **Invariant: every cell of the `LinVec` is a key, and the keys satisfy the heap order.**
+The size is `linvec.length`. An empty heap is an empty `LinVec`, so there is no empty constructor
+and no size to keep beside the storage.
 
 ### 4.2 Growth and retention
 
-A push at `n = capacity` copies into a `LinVec` of `2 * capacity`. A pop that leaves
-`4 * n <= capacity` copies into one of `capacity / 2`, which is at least `2 * n`, so the invariant
-holds. There is no floor. Each copy drops the old storage. Both are amortised O(1): after a grow
-the heap is half full and after a shrink half full, so at least `capacity / 4` operations separate
-two copies, which pay for the O(capacity) copy.
+`linvec.push` doubles the storage when it is full, which is amortised O(1). `linvec.pop` lowers
+the length and never shrinks the storage, as linear-base's `pop` does
+(`docs/persistent-array-v0.md` §12 step 17). Capacity is at most twice the largest size the heap
+has reached. A pop clears the cell it drops, so no popped key stays reachable through a spare slot.
 
-Slots past `n` are not cleared: `LinVec` has no empty value to write. They hold copies of elements
-that were in the heap, so up to `capacity - n` popped values stay reachable until a push overwrites
-them or the storage shrinks. After every operation `capacity <= 4 * n` (the first push and a
-one-element `linheap.from_list` meet it with equality), so at most `3 * n` stale slots remain.
-
-The copying is a private helper here, not a `linvec.resize` in `stdlib.linvec`: that would extend
-the `LinVec` API in spec §5.8 for one caller. It moves there when a second structure from
-`docs/persistent-array-v0.md` §5.3 (ring buffer, hash map) needs it.
+`linvec.push` and `linvec.pop` call the builtins `linvec_push` and `linvec_truncate`. They are
+temporary: they go when unsafe primitives land. Spec §3 makes a redeclared extern keep its
+effects, and `vector_push` and `vector_truncate` are `!{IO}`, so pure Sprout cannot call them. The
+heap's API does not change then.
 
 ### 4.3 API
 
@@ -88,19 +82,20 @@ Data last (guidelines §6), called through the module as `stdlib.linvec` is:
 linheap.new() -> LinHeap a
 linheap.from_list(xs: List a) -> LinHeap a                 where Ord a   # O(n), Floyd
 linheap.push(x: a, h: LinHeap a) -> LinHeap a              where Ord a   # O(log n) amortised
-linheap.pop(h: LinHeap a) -> Maybe (a, LinHeap a)          where Ord a   # O(log n) amortised
+linheap.pop(h: LinHeap a) -> (Maybe a, LinHeap a)          where Ord a   # O(log n)
 linheap.peek(h: borrowing LinHeap a) -> Maybe a                          # O(1)
 linheap.size(h: borrowing LinHeap a) -> Int
 linheap.drop(h: LinHeap a) -> Unit
 ```
 
-`linheap.pop` on an empty heap returns `Nothing`, and the heap is gone: the `Nothing` branch has
-nothing to drop, and `linheap.new()` is free. The alternative, `(Maybe a, LinHeap a)`, keeps the
-heap but makes every `Nothing` branch drop it.
+`linheap.pop` on an empty heap returns `(Nothing, h)`: the heap comes back unchanged and the
+caller keeps it, as `linvec.pop` does. The earlier shape, `Maybe (a, LinHeap a)`, consumed an empty
+heap, which cost nothing only because `HeapEmpty` was a constructor with no fields. An empty
+`LinVec` is a vector, so the heap hands back what it was given.
 
 `linheap.from_list` is in v0 because Rust, Python, Go and OCaml document linear-time builds, and a
-top-k or a Dijkstra seeded from many sources otherwise pays O(n log n). Its capacity is the list's
-length (at least 4), so the invariant holds from the start.
+top-k or a Dijkstra seeded from many sources otherwise pays O(n log n). It builds with
+`linvec.from_list` and Floyd's `heapify`.
 
 ### 4.4 Ties
 
@@ -113,7 +108,9 @@ newest first. Which rule the A* ports share is decided in their PR, not here.
 A* on a 100×100 grid, M1, 2026-10-24: the range of µs per run over 5–15 runs in one to three
 sessions, and `closure_apply` per 100 runs. The two columns are the two tie-break rules. The
 design's row is the first; the other heap rows are a grow-only prototype starting at capacity 16.
-A* does not call `linheap.from_list`, so nothing here measures it.
+A* does not call `linheap.from_list`, so nothing here measures it. The figures are from the earlier
+storage, a private copy-on-grow from capacity 4 with a quarter shrink. The `LinVec` storage doubles
+the same way and never shrinks; it has not been re-measured.
 
 | Open set | newer first | older first | `closure_apply`, older first |
 |---|---:|---:|---:|
@@ -127,8 +124,7 @@ A* does not call `linheap.from_list`, so nothing here measures it.
 | linear sorted list (`examples/astar_linvec.sprout`) | 33–38 | 4,541–4,840 | 0 |
 | Go, committed O(n) sorted slice | not run | 1,480–1,550 | — |
 
-Shrinking costs nothing visible: 6 more `linvec.new` per run under older-first, within noise of
-the grow-only row. Go's median, 1,533, is the one in `bench/astar/README.md`.
+Go's median, 1,533, is the one in `bench/astar/README.md`.
 
 **Key type.** A derived key costs what a hand-written one does: one indirect `compare` per
 comparison, from the heap's `where Ord a`, while the derived body calls `Ord Int` directly. A tuple
@@ -163,24 +159,26 @@ a type with no instance gives the existing missing-instance error.
 - draining a heap yields what was pushed, sorted (`vec_sort`): duplicates, negatives, 200+
   elements;
 - growth across several doublings (past 16, 32, 64) with `linheap.size` checked at each, and
-  shrinking as it drains;
-- `linheap.pop` and `linheap.peek` on empty are `Nothing`; `linheap.peek` equals the next pop;
-- push, pop to empty, then `linheap.size`, `linheap.peek`, `linheap.pop` and a push again;
+  falling as it drains;
+- `linheap.pop` on empty is `(Nothing, h)` and `h` takes pushes; `linheap.peek` on empty is
+  `Nothing`; `linheap.peek` equals the next pop;
+- push, pop to empty, then `linheap.size`, `linheap.peek`, `linheap.pop` and a push again; a heap
+  drained past empty and refilled;
 - `linheap.from_list` at lengths 0, 1, 2, 7 and 13, each drained and each followed by push/pop
-  sweeps across the grow and quarter thresholds; it drains in the same order as pushing one by
+  sweeps across the growth thresholds; it drains in the same order as pushing one by
   one, with keys ordered on every field so the equality does not depend on layout;
 - a derived key type with a counter pops equal first fields in counter order;
 - keys other than `Int`: `String`, `Maybe Int`, `Double`;
 - the heap called from a `where Ord a` caller (a `top_k(k, xs)`), at `Int` and at a derived key,
   so the forwarded-dictionary path runs.
 
-Growth and shrinking are invisible through the API, so a case beside `tests/linear_reuse_smoke/`
-fills and drains a 64-element heap and checks the runtime's `vector` counter against the grows
-and shrinks that must happen. `scripts/linear_reuse_smoke.sh` compares `sprout_obj` across two
-sizes today, so it gains a mode that checks one counter against an expected value.
+Growth is invisible through the API, so a case beside `tests/linear_reuse_smoke/` fills and drains
+a 64-element heap and checks the runtime's `vector` counter, which counts element buffers
+allocated and reallocated. Growing from empty to 64 takes one allocation and three reallocations
+(capacity 8, 16, 32, 64), so the count rises by 4, and pops add none.
 
-`tests/conformance/type_error/`, after the `linvec_*` cases: `Heap`/`HeapEmpty` not constructible
-or matchable outside the module; a heap of linear elements rejected (message shaped like
+`tests/conformance/type_error/`, after the `linvec_*` cases: `LinHeap` not constructible or
+matchable outside the module; a heap of linear elements rejected (message shaped like
 `linvec_nested.err`); a heap left unconsumed fires the leak rule.
 
 ## 8. Docs

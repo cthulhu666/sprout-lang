@@ -3,15 +3,19 @@
 #
 #   -O2     tests/stdlib/test_linvec.spr links at -O0 there. It runs here at -O2 as well,
 #           so a reordering of a borrowed read and a set only the optimizer makes shows.
-#   oracle  the same test against a stdlib root whose `linvec_set` copies through
-#           `vec_set`: it must print what the in-place build prints. A difference is a
-#           linearity hole seen as a wrong answer (docs/persistent-array-v0.md §9).
+#   oracle  the same test against a stdlib root whose `linvec_set`, `linvec_push` and
+#           `linvec_truncate` copy: it must print what the in-place build prints. A
+#           difference is a linearity hole seen as a wrong answer
+#           (docs/persistent-array-v0.md §9).
 #   trap    a set, scatter or accum out of range exits nonzero with its message.
 #   alloc   a set allocates nothing and `linvec.new` one vector: the runtime's
 #           SPROUT_DEBUG_ALLOC counters match across runs that differ only in the number
 #           of sets, and grow by one vector per `linvec.new`.
 #   ir      a `linvec.get` matched with a binding compiles to a worker over
 #           `vector_get_unboxed`, so a read allocates no `Maybe` (§3.4).
+#   bce     `stdlib/linvec.sprout` and `stdlib/linheap.sprout` never name `vector_get_direct`,
+#           `vector_mutset`, `vector_push` or `vector_truncate`; why: stdlib/compiler/bce.sprout,
+#           above `safe_io_externs`.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${SPROUT_LINVEC_BIN:-$ROOT/build/compile_driver_bin_stage1}"
@@ -53,7 +57,7 @@ fi
 ORACLE="$TMPD/oracle_stdlib"
 mkdir -p "$ORACLE"
 cp -R "$STDLIB"/. "$ORACLE"/
-grep -v '^extern fn linvec_set' "$STDLIB/linvec.sprout" > "$ORACLE/linvec.sprout"
+grep -Ev '^extern fn linvec_(set|push|truncate)' "$STDLIB/linvec.sprout" > "$ORACLE/linvec.sprout"
 cat >> "$ORACLE/linvec.sprout" <<'EOF'
 
 fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a =
@@ -61,11 +65,21 @@ fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a =
   | LinVec raw ->
       match vec_set(i, x, Vec(raw)) with
       | Vec copy -> LinVec(copy)
+
+fn linvec_push(x: a, v: LinVec a) -> LinVec a =
+  match v with
+  | LinVec raw -> LinVec(vector_append(raw, x))
+
+fn linvec_truncate(n: Int, v: LinVec a) -> LinVec a =
+  match v with
+  | LinVec raw ->
+      match vec_slice(0, n, Vec(raw)) with
+      | Vec copy -> LinVec(copy)
 EOF
 if build "$TEST" "$ORACLE" "$TMPD/oracle"; then
   "$TMPD/oracle" > "$TMPD/oracle.out" 2>&1
   if cmp -s "$TMPD/real.out" "$TMPD/oracle.out"; then :; else
-    bad "test_linvec prints differently with a copying linvec_set"
+    bad "test_linvec prints differently with copying linvec_set, linvec_push and linvec_truncate"
     diff "$TMPD/real.out" "$TMPD/oracle.out" | head -10 >&2
   fi
 else
@@ -121,6 +135,14 @@ if [ -s "$ir" ]; then
 else
   bad "no IR for the alloc fixture"
 fi
+
+# --- bce: the premise behind the pure length-changing builtins ---
+# Comments are stripped first, so a mention in prose does not count.
+for f in linvec linheap; do
+  if sed 's/#.*//' "$STDLIB/$f.sprout" | grep -Eq 'vector_(get_direct|mutset|push|truncate)'; then
+    bad "$f.sprout names vector_get_direct, vector_mutset, vector_push or vector_truncate"
+  fi
+done
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "==> linvec-smoke ✓"

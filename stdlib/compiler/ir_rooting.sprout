@@ -42,6 +42,12 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #                       barrier will make this a trigger again — revisit then).
 #   linvec_set        — bounds check + plain store, returns its vector argument (the same
 #                       store as vector_mutset, behind a pure signature).
+#   linvec_push       — vector_push behind a pure signature.  Growth is plain malloc/realloc
+#                       (sprout_alloc_vector_data, sprout_realloc_vector_data) plus
+#                       sprout_vec_release_inline_tail, which edits the arena freelist;
+#                       none reaches sprout_gc_maybe_collect_threshold.  vector_push, the
+#                       same call under `!{IO}`, is not listed.
+#   linvec_truncate   — vector_truncate behind a pure signature.
 #   vector_length     — returns v->len (pure read).
 #   vector_truncate   — zeroes v->data[n..len) and lowers v->len (plain stores;
 #                       no barrier, since a zero creates no old-to-young edge).
@@ -52,6 +58,8 @@ fn is_nonallocating_read(fname: String) -> Bool =
   fname == "vector_get_direct"
   || fname == "vector_mutset"
   || fname == "linvec_set"
+  || fname == "linvec_push"
+  || fname == "linvec_truncate"
   || fname == "vector_length"
   || fname == "vector_truncate"
 
