@@ -2185,7 +2185,7 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   invariantly at unification.
 - **In the standard library.** The concrete combinators (the prelude's `range_*`, `list_*`,
   `vec_*`, `result_*`, `when_ok`, `when_error`; `stdlib.mutable`'s `mutvec_*` and
-  `mutmatrix_*`; `stdlib.linvec`'s `linvec_accum`), the
+  `mutmatrix_*`; `stdlib.linvec`'s `linvec.accum`), the
   `Foldable` methods and the generic functions over them (`fold`, `fold_while`, `any`,
   `all`, `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`) take their
   function `local`, so a lambda passed to them may read a borrowed value, comprehensions
@@ -2250,30 +2250,32 @@ caller keeps a borrowed value and releases it after either outcome.
 `stdlib.linvec` declares `export wrap linear LinVec a = Vector a`, abstract: only its module
 builds or takes one apart. A set consumes the vector and returns it, and linearity guarantees no
 one holds the old one, so the write cannot be observed and the signature is pure. A `LinVec` is a
-`Vector` at runtime (§5.6.1), so a set allocates nothing.
+`Vector` at runtime (§5.6.1), so a set allocates nothing. They are written qualified here, as
+after `import stdlib.linvec as linvec`. `linvec.set` wraps the C builtin `linvec_set`, which keeps
+its name and is private to the module.
 
 ```
-linvec_new(n: Int, x: a) -> LinVec a                     # n copies of x
-linvec_get(i: Int, v: borrowing LinVec a) -> Maybe a     # Nothing out of range
-linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a        # traps out of range
-linvec_length(v: borrowing LinVec a) -> Int
-linvec_freeze(v: LinVec a) -> Vec a                      # O(1); the vector's life ends
-linvec_drop(v: LinVec a) -> Unit
-linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a
-linvec_accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
+linvec.new(n: Int, x: a) -> LinVec a                     # n copies of x
+linvec.get(i: Int, v: borrowing LinVec a) -> Maybe a     # Nothing out of range
+linvec.set(i: Int, x: a, v: LinVec a) -> LinVec a        # traps out of range
+linvec.length(v: borrowing LinVec a) -> Int
+linvec.freeze(v: LinVec a) -> Vec a                      # O(1); the vector's life ends
+linvec.drop(v: LinVec a) -> Unit
+linvec.scatter(is: List Int, x: a, v: LinVec a) -> LinVec a
+linvec.accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a
 ```
 
-- `linvec_set` out of range, and `linvec_scatter` or `linvec_accum` with an index out of range,
-  stop the program with a runtime error, as `mutvec_set` does. `linvec_get` out of range is
+- `linvec.set` out of range, and `linvec.scatter` or `linvec.accum` with an index out of range,
+  stop the program with a runtime error, as `mutvec_set` does. `linvec.get` out of range is
   `Nothing`, as `vec_get` is.
-- `linvec_scatter` sets `x` at each index in order; `linvec_accum` sets `f(old, y)` for each
+- `linvec.scatter` sets `x` at each index in order; `linvec.accum` sets `f(old, y)` for each
   `(i, y)` in order, so a repeated index folds.
-- Every path must consume the vector: return it, pass it on, or end it with `linvec_freeze` or
-  `linvec_drop`. Otherwise the leak rule (above) fires. A set
+- Every path must consume the vector: return it, pass it on, or end it with `linvec.freeze` or
+  `linvec.drop`. Otherwise the leak rule (above) fires. A set
   inside a lambda is rejected: a lambda may not consume a linear parameter. Use explicit
   recursion or the bulk operations. A lambda may READ a `LinVec` it captures inside a
-  combinator that takes `local`: `list_fold(\ (n, c) -> … linvec_get(c, seen) …, 0, cells)`.
-- `LinVec (LinVec a)` is rejected where it is built, by the bound on `linvec_new`'s `a`.
+  combinator that takes `local`: `list_fold(\ (n, c) -> … linvec.get(c, seen) …, 0, cells)`.
+- `LinVec (LinVec a)` is rejected where it is built, by the bound on `linvec.new`'s `a`.
 
 Design and measurements: `docs/persistent-array-v0.md` §5.3.
 

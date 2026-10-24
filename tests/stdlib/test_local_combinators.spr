@@ -1,5 +1,6 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop, linvec_accum)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_each, mutvec_fold)
 
 # The prelude's concrete combinators, `Foldable`'s methods and the generic folds over them
@@ -156,28 +157,28 @@ fn mutvec_fold_case(c: borrowing File) -> Int !{IO} =
 
 # --- LinVec: a second borrowed LinVec read inside accum and fold -------------
 fn first_of(v: borrowing LinVec Int) -> Int =
-  maybe_with_default(0, linvec_get(0, v))
+  maybe_with_default(0, linvec.get(0, v))
 
 fn accum_reads_other(other: borrowing LinVec Int) -> Int =
-  let acc = linvec_accum(\ (a, b) -> a + b + first_of(other), [(0, 1), (1, 2)], linvec_new(2, 0))
-      r = maybe_with_default(0, linvec_get(0, acc)) + maybe_with_default(0, linvec_get(1, acc))
-      _ = linvec_drop(acc)
+  let acc = linvec.accum(\ (a, b) -> a + b + first_of(other), [(0, 1), (1, 2)], linvec.new(2, 0))
+      r = maybe_with_default(0, linvec.get(0, acc)) + maybe_with_default(0, linvec.get(1, acc))
+      _ = linvec.drop(acc)
   in r
 
 fn accum_case() -> Int =
-  let other = linvec_set(0, 10, linvec_new(1, 0))
+  let other = linvec.set(0, 10, linvec.new(1, 0))
       r = accum_reads_other(other)
-      _ = linvec_drop(other)
+      _ = linvec.drop(other)
   in r
 
 # One BFS step (docs/persistent-array-v0.md §3.2): count the cells not yet seen.
 fn unseen(cells: List Int, seen: borrowing LinVec Bool) -> Int =
-  list_fold(\ (n, c) -> if maybe_with_default(true, linvec_get(c, seen)) then n else n + 1, 0, cells)
+  list_fold(\ (n, c) -> if maybe_with_default(true, linvec.get(c, seen)) then n else n + 1, 0, cells)
 
 fn bfs_step_case() -> Int =
-  let seen = linvec_set(1, true, linvec_set(3, true, linvec_new(5, false)))
+  let seen = linvec.set(1, true, linvec.set(3, true, linvec.new(5, false)))
       r = unseen([0, 1, 2, 3, 4], seen)
-      _ = linvec_drop(seen)
+      _ = linvec.drop(seen)
   in r
 
 fn main() -> Unit !{IO} =
@@ -214,6 +215,6 @@ fn main() -> Unit !{IO} =
       check_eq("min_by over a Vec", on_file(4, min_by_vec), 4),
       check_eq("mutvec_each", mutvec_each_r, 9),
       check_eq("mutvec_fold", mutvec_fold_r, 9),
-      check_eq("linvec_accum reads a second LinVec", accum_case(), 23),
+      check_eq("linvec.accum reads a second LinVec", accum_case(), 23),
       check_eq("a BFS step reads the seen set", bfs_step_case(), 3)
     ])

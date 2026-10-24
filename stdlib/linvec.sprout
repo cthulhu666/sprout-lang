@@ -4,7 +4,7 @@ import stdlib.mutable
 
 # A pure vector with in-place writes (Experimental, as spec §5.8 is). A set consumes the
 # vector and returns it; linearity means no one holds the old one, so the write cannot be
-# seen. Reads borrow; `linvec_freeze` returns a `Vec` in O(1). Design:
+# seen. Reads borrow; `freeze` returns a `Vec` in O(1). Design:
 # docs/persistent-array-v0.md §5.3.
 #
 # Trust boundary: the type is abstract, so only this module unwraps one, and `linvec_set`
@@ -15,39 +15,42 @@ import stdlib.mutable
 
 export wrap linear LinVec a = Vector a
 
-# Out of range traps, as `mutvec_set` does.
-export extern fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a
+# The builtin keeps its C name, so it is private behind `set`. Out of range traps, as
+# `mutvec_set` does.
+extern fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a
 
-export fn linvec_new(n: Int, x: a) -> LinVec a = LinVec(vec_make_filled(n, x))
+export fn set(i: Int, x: a, v: LinVec a) -> LinVec a = linvec_set(i, x, v)
 
-export fn linvec_get(i: Int, v: borrowing LinVec a) -> Maybe a =
+export fn new(n: Int, x: a) -> LinVec a = LinVec(vec_make_filled(n, x))
+
+export fn get(i: Int, v: borrowing LinVec a) -> Maybe a =
   match v with
   | LinVec raw -> vector_get(raw, i)
 
-export fn linvec_length(v: borrowing LinVec a) -> Int =
+export fn length(v: borrowing LinVec a) -> Int =
   match v with
   | LinVec raw -> vector_length(raw)
 
-export fn linvec_freeze(v: LinVec a) -> Vec a =
+export fn freeze(v: LinVec a) -> Vec a =
   match v with
   | LinVec raw -> Vec(raw)
 
 # A `Vec` may be discarded, so dropping needs no builtin.
-export fn linvec_drop(v: LinVec a) -> Unit =
-  let _ = linvec_freeze(v)
+export fn drop(v: LinVec a) -> Unit =
+  let _ = freeze(v)
   in ()
 
 # Sets `x` at each index in turn; an index out of range traps.
-export fn linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a =
+export fn scatter(is: List Int, x: a, v: LinVec a) -> LinVec a =
   match is with
   | [] -> v
-  | [i | rest] -> linvec_scatter(rest, x, linvec_set(i, x, v))
+  | [i | rest] -> scatter(rest, x, linvec_set(i, x, v))
 
 # Replaces the cell at each index `i` with `f(old, y)`, left to right, so a repeated index
 # folds. An index out of range traps.
-export fn linvec_accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a =
+export fn accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a =
   match pairs with
   | [] -> v
   | [(i, y) | rest] ->
-      let Just old = linvec_get(i, v) else (let _ = linvec_drop(v) in panic("linvec_accum: index out of bounds"))
-      in linvec_accum(f, rest, linvec_set(i, f(old, y), v))
+      let Just old = get(i, v) else (let _ = drop(v) in panic("linvec.accum: index out of bounds"))
+      in accum(f, rest, linvec_set(i, f(old, y), v))

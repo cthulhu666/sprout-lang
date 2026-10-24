@@ -268,22 +268,24 @@ guarantees no one holds the old version, so the write cannot be observed, as in 
 
 ```
 export wrap linear LinVec a = Vector a     # abstract: only its module unwraps one
-linvec_new(n: Int, x: a) -> LinVec a
-linvec_get(i: Int, arr: borrowing LinVec a) -> Maybe a
-linvec_set(i: Int, x: a, arr: LinVec a) -> LinVec a
-linvec_length(arr: borrowing LinVec a) -> Int
-linvec_freeze(arr: LinVec a) -> Vec a
+linvec.new(n: Int, x: a) -> LinVec a
+linvec.get(i: Int, arr: borrowing LinVec a) -> Maybe a
+linvec.set(i: Int, x: a, arr: LinVec a) -> LinVec a
+linvec.length(arr: borrowing LinVec a) -> Int
+linvec.freeze(arr: LinVec a) -> Vec a
 ```
 
 **Representation.** A `wrap` is its inner value at runtime (spec §5.6.1), so a `LinVec` is a
 `Vector` with no box, and `wrap linear` ([linear-wrap-v0.md](linear-wrap-v0.md)) gives it the
 linear rules. Four operations are Sprout in `LinVec`'s module, over externs that exist:
-`linvec_get` and `linvec_length` unwrap the borrowed array and call `vector_get` and
-`vector_length`, and `linvec_new` wraps a fresh `vec_make_filled`. That one was `!{IO}`
+`linvec.get` and `linvec.length` unwrap the borrowed array and call `vector_get` and
+`vector_length`, and `linvec.new` wraps a fresh `vec_make_filled`. That one was `!{IO}`
 (`stdlib/mutable.sprout`) and is now pure, with `mutvec_new` keeping the `!{IO}`, as
 `vector_empty` is pure under an `!{IO}` `mutvec_empty`; building from a list instead costs ~94 ms
 per 1M elements against the fill's ~1 ms. One is a builtin: `linvec_set` writes in place and returns
 the same pointer, and an index out of range traps, as `mutvec_set` does (§12 step 13).
+An extern cannot be qualified, so it is private to the module and `linvec.set` wraps it; the
+wrapper costs nothing at `-O2`.
 
 Its type takes and returns `LinVec`, never a bare `Vector`, so no Sprout code holding a shared `Vec`
 can reach it. An `extern fn` line is trusted code, though: a module that does not import
@@ -294,13 +296,13 @@ that module is trusted code too.
 
 A read borrows, so it does not hand the array back as Clean's and `linear-base`'s do, and it
 allocates nothing when the caller matches it with a binding (§3.4). A set consumes the array and
-returns it; the builtin returns the same object, so a set allocates nothing. `linvec_freeze` ends
+returns it; the builtin returns the same object, so a set allocates nothing. `linvec.freeze` ends
 the array's life as an ordinary `Vec`, in O(1): `Vec a` is `Vec(Vector a)`
 (`stdlib/prelude.sprout`), so freezing unwraps the `Vector` and wraps it as a `Vec`, one box,
 whose constructor is in scope everywhere. `LinVec` itself cannot live in the prelude: a prelude
 constructor is in scope everywhere too, so an abstract wrap there would let any code build an
 `LinVec` around a shared `Vector` (spec §3.1). It gets its own module. A thaw from `Vec` must copy,
-since a `Vec` may be shared. A drop needs no builtin: `linvec_drop(arr) = let _ = linvec_freeze(arr)
+since a `Vec` may be shared. A drop needs no builtin: `linvec.drop(arr) = let _ = linvec.freeze(arr)
 in ()`, in Sprout, O(1), since a `Vec` may be discarded.
 
 **Prerequisites.** The purity rests on linearity being sound. Today a linear value can be used
@@ -343,8 +345,8 @@ Swift added such a bound in SE-0427, making every generic parameter `Copyable` u
   which would let LLVM merge or reorder two reads across a write. The compiler emits none today.
 - A call whose result is or contains a linear type is an allocation: no pass merges two of them
   (CSE), hoists one out of a loop (LICM) or duplicates one. Hoisting a per-iteration
-  `linvec_new(n, 0)` with a fixed `n` would make every iteration share one buffer. The rule
-  covers every call that returns a fresh buffer, linear or not: `linvec_new`'s `vec_make_filled`
+  `linvec.new(n, 0)` with a fixed `n` would make every iteration share one buffer. The rule
+  covers every call that returns a fresh buffer, linear or not: `linvec.new`'s `vec_make_filled`
   returns a plain `Vector`, and only the wrap makes it linear; `vector_empty` under
   `mutvec_empty` is the same case today.
 
@@ -364,11 +366,11 @@ step 14), and stays a BACKLOG entry.
 than once per element. They need no builtins.
 
 ```
-linvec_scatter(is: List Int, x: a, v: LinVec a) -> LinVec a          # sieve: a prime's multiples
-linvec_accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a   # histogram
+linvec.scatter(is: List Int, x: a, v: LinVec a) -> LinVec a          # sieve: a prime's multiples
+linvec.accum(f: a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a   # histogram
 ```
 
-An index out of range traps, since both call `linvec_set` (`linvec_accum` reads first and traps in
+An index out of range traps, since both call `linvec_set` (`linvec.accum` reads first and traps in
 that read).
 
 They fit the sieve and the histogram. They do not make a BFS easier: picking a level's unvisited
@@ -388,7 +390,7 @@ binds its linear fields as borrowed too" (spec §5.8), so a read can `match` a b
 | matrix, ring buffer, heap, bitset, open-addressing hash map | directly: `type linear LMatrix a = LMatrix Int Int (LinVec a)` | one wrapper allocation per write, until reuse (below) |
 | growable vector | copy into a larger `LinVec` | amortised O(1) |
 | graphs, union-find, linked lists with shared nodes | index arenas: nodes are indices | nothing collects an unreachable node; free slots are managed by hand |
-| an array of mutable arrays, `LinVec (LinVec a)` | no: `linvec_get`, `linvec_new` and `linvec_freeze` would duplicate a linear element, so `LinVec` rejects one (*Prerequisites*) | needs swap or take-and-put-back operations, and the generic-container fix |
+| an array of mutable arrays, `LinVec (LinVec a)` | no: `linvec.get`, `linvec.new` and `linvec.freeze` would duplicate a linear element, so `LinVec` rejects one (*Prerequisites*) | needs swap or take-and-put-back operations, and the generic-container fix |
 | state shared between tasks | no: one owner at a time | ownership can move to a task, not be shared |
 
 Not arrays at all: files, sockets and handles, which are linear types of their own already.
@@ -422,7 +424,7 @@ a `wrap`, not an ADT.
     a linear accumulator was not checked. Reads are fine: the combinators are `local` now, so
     a lambda may capture the array to read it (bulk operations, above).
   - Threading: every set returns the array, extra results travel in a tuple (the BFS queue),
-    and every path must end in `linvec_freeze` or `linvec_drop`, or the leak rule fires.
+    and every path must end in `linvec.freeze` or `linvec.drop`, or the leak rule fires.
   - No old versions. Backtracking copies explicitly.
   - One builtin, `linvec_set`, with a `runtime/APPROVED_BUILTINS` entry, and one language
     change, `wrap linear`. Once unsafe primitives exist (BACKLOG P3 **Unsafe primitives**),
@@ -613,7 +615,7 @@ gives old versions up; 5.2 pays a little on every operation; 5.4 pays unpredicta
 
 So 5.2 and 5.3 answer different needs: 5.3 for a loop that only ever uses the newest array, which
 is every kernel in §3.2; 5.2 for everything that needs values that can be stored, passed and
-kept. `linvec_freeze` and a `PVec` builder connect them. 5.6 covers 5.3's cases with a different
+kept. `linvec.freeze` and a `PVec` builder connect them. 5.6 covers 5.3's cases with a different
 trade (§12, step 7); one of the two ships. 5.2's transient mode could stand in for
 5.3 with O(1) conversions, at 2–20× its cost. 5.4 tries to serve both needs, and pays with the
 cliff, the retention and the version check. 5.1's build-by-rows needs neither.
@@ -647,7 +649,7 @@ value is unshared moves the ranking.
    `linvec_set`, the `ir_rooting` entry, the bulk operations, tests and `examples/sieve.sprout`.
    Out of it, as a BACKLOG entry: B1 and bounds-check elimination for `LinVec Double` writes.
    Marking the combinators `local`, so that a lambda can read the array, **landed after**
-   (`docs/local-closures-v0.md` §8); `linvec_accum` takes its `f` `local`.
+   (`docs/local-closures-v0.md` §8); `linvec.accum` takes its `f` `local`.
    Other mutable structures are linear types over it. It needs `wrap linear`
    ([linear-wrap-v0.md](linear-wrap-v0.md), landed) and one builtin, `linvec_set`; §3.2 is the measured
    case: typical programs, not our own; in our own code it removes `!{IO}` from the three cases
@@ -696,13 +698,13 @@ Where each 5.3 item lives: `tests/stdlib/test_linvec.spr` (run by `just test`),
   value (`test_linvec`), at `-O0` under `just test` and at `-O2` under `linvec-smoke`. Nothing
   else runs a test at `-O2`: `o2-codegen-smoke` only compiles.
 - Cost (5.3): a set allocates nothing (the runtime's debug counters, `SPROUT_DEBUG_ALLOC`), and a
-  `linvec_get` matched with a binding compiles to a worker over `vector_get_unboxed` (an IR
+  `linvec.get` matched with a binding compiles to a worker over `vector_get_unboxed` (an IR
   check), both in `linvec-smoke`.
 - Abstraction (5.3): a module that imports `LinVec` cannot build one from a `Vector` or unwrap one
   (`Unknown variable: LinVec`, `type_error/linvec_build_outside`).
-- Range (5.3): `linvec_set`, `linvec_scatter` and `linvec_accum` out of range trap, and
-  `linvec_new` allocates one vector (`linvec-smoke`).
-- Bulk operations (5.3): `linvec_scatter` and `linvec_accum` against a `vec_set` reference, with
+- Range (5.3): `linvec.set`, `linvec.scatter` and `linvec.accum` out of range trap, and
+  `linvec.new` allocates one vector (`linvec-smoke`).
+- Bulk operations (5.3): `linvec.scatter` and `linvec.accum` against a `vec_set` reference, with
   repeated indices (`test_linvec`). Out-of-range indices trap, so they are in the range item.
 
 ## 10. Spec and docs
@@ -711,7 +713,7 @@ Where each 5.3 item lives: `tests/stdlib/test_linvec.spr` (run by `just test`),
 while §5.8 is. `stdlib-reference.md` gets a row in *Collection costs*. `idiomatic-sprout.md`
 shows build-by-rows for DP and the chosen array for the rest, in place of a fold of `vec_set`.
 `examples/sieve.sprout` runs the `vec_set` and `MutVec` sieves and 5.3's two versions, element by
-element and with `linvec_scatter`. Landed with the type; `idiomatic-sprout.md` and
+element and with `linvec.scatter`. Landed with the type; `idiomatic-sprout.md` and
 `stdlib-reference.md` have their rows.
 
 ## 11. Open questions
@@ -721,7 +723,7 @@ element and with `linvec_scatter`. Landed with the type; `idiomatic-sprout.md` a
 - ~~Names: `LArr`, `LinArray` or `Array`.~~ `LinVec` (§12 step 14). `PVec` or `PArray` for 5.2 is
   still open.
 - Nested arrays: the shape of swap or take-and-put-back for `LinVec (LinVec a)`. Pure Borrow's
-  `updateAt` (§4) is one: `linvec_update(i: Int, f: a -> (b, a), arr: LinVec a) -> (b, LinVec a)` takes
+  `updateAt` (§4) is one: `linvec.update(i: Int, f: a -> (b, a), arr: LinVec a) -> (b, LinVec a)` takes
   the element out and puts back what `f` returns. `f` consumes a linear parameter, which waits on
   BACKLOG P2 **Higher-order linearity**.
 
@@ -800,6 +802,9 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
     branded indices (5.7) are the way to rule the trap out, filed at P2. A `Result`-returning
     write was set aside: on failure it must return the vector or drop it, and every caller pays
     for that. Consuming the vector on failure composes with `try` today if a caller needs it.
+16. **Short names** (2026-10-24). Kuba: the functions drop the `linvec_` prefix and are called
+    qualified, `linvec.set`, as `stdlib.list` is. The builtin keeps its C name, `linvec_set`,
+    private to the module behind `linvec.set`. Earlier steps use the old names.
 
 **Revisit when** any of these holds; each would reopen step 7:
 

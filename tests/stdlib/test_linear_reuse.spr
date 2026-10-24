@@ -1,6 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.string as string
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 
 # In-place reuse of a consumed linear cell (docs/linear-reuse-v0.md): values read
 # back after a reused write are right, and a later match sees the new
@@ -131,13 +132,13 @@ type linear Grid = Grid Int (LinVec Bool)
 fn is_set(i: Int, g: borrowing Grid) -> Bool =
   match g with
   | Grid _ v ->
-      match linvec_get(i, v) with
+      match linvec.get(i, v) with
       | Just b -> b
       | Nothing -> false
 
 fn grid_set(i: Int, x: Bool, g: Grid) -> Grid =
   match g with
-  | Grid n v -> Grid(n, linvec_set(i, x, v))
+  | Grid n v -> Grid(n, linvec.set(i, x, v))
 
 fn strike(j: Int, p: Int, n: Int, g: Grid) -> Grid =
   if j >= n then g else strike(j + p, p, n, grid_set(j, true, g))
@@ -154,23 +155,23 @@ fn count_unset(i: Int, n: Int, acc: Int, g: borrowing Grid) -> Int =
 fn grid_free(g: Grid) -> Int =
   match g with
   | Grid _ v ->
-      let _ = linvec_drop(v)
+      let _ = linvec.drop(v)
       in 0
 
 # A word-length histogram: some steps change constructor, and `bump` allocates
-# (a `linvec_get` result) between the match and the rebuild.
+# (a `linvec.get` result) between the match and the rebuild.
 type linear Lexer =
   | InWord Int (LinVec Int)
   | InSpace Int (LinVec Int)
 
 fn cell(k: Int, hist: borrowing LinVec Int) -> Int =
-  match linvec_get(k, hist) with
+  match linvec.get(k, hist) with
   | Just x -> x
   | Nothing -> 0
 
 fn bump(len: Int, hist: LinVec Int) -> LinVec Int =
   let k = if len > 15 then 15 else len
-  in linvec_set(k, cell(k, hist) + 1, hist)
+  in linvec.set(k, cell(k, hist) + 1, hist)
 
 fn step(c: Int, lx: Lexer) -> Lexer =
   match lx with
@@ -192,11 +193,11 @@ fn words_of_seven(lx: Lexer) -> Int =
   match lx with
   | InWord _ hist ->
       let w = cell(7, hist)
-          _ = linvec_drop(hist)
+          _ = linvec.drop(hist)
       in w
   | InSpace _ hist ->
       let w = cell(7, hist)
-          _ = linvec_drop(hist)
+          _ = linvec.drop(hist)
       in w
 
 fn main() -> Unit !{IO} =
@@ -270,11 +271,11 @@ fn main() -> Unit !{IO} =
 
     # The wrapper sieve: 303 primes below 2000.
     let n = 2000
-    let g = sieve(2, n, Grid(n, linvec_new(n, false)))
+    let g = sieve(2, n, Grid(n, linvec.new(n, false)))
     assert_eq(state, "grid sieve: primes below 2000", count_unset(2, n, 0, g), 303)
     assert_eq(state, "grid sieve: freed", grid_free(g), 0)
 
     # The lexer: 100 words of seven.
-    assert_eq(state, "lexer: words of seven", words_of_seven(run(0, 800, InSpace(0, linvec_new(16, 0)))), 100)
+    assert_eq(state, "lexer: words of seven", words_of_seven(run(0, 800, InSpace(0, linvec.new(16, 0)))), 100)
 
     summary(state)

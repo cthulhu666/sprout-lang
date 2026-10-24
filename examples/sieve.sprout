@@ -1,5 +1,6 @@
 module examples.sieve
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_freeze, linvec_scatter)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_fold)
 import stdlib.time as time
 
@@ -12,8 +13,8 @@ import stdlib.time as time
 #    buffer never leaves the function.
 # 3. A linear vector, `LinVec`, writing in place with a pure signature
 #    (docs/persistent-array-v0.md §5.3): O(n log log n) and no `!{IO}`. The vector
-#    is threaded through the recursion, and `linvec_freeze` hands it back as a `Vec`.
-# 4. The same, with `linvec_scatter` marking all the multiples of a prime in one call.
+#    is threaded through the recursion, and `linvec.freeze` hands it back as a `Vec`.
+# 4. The same, with `linvec.scatter` marking all the multiples of a prime in one call.
 #
 # Run:
 #   mise exec -- just run examples/sieve.sprout
@@ -65,37 +66,37 @@ fn timed(label: String, n: Int, run: Int -> Int !{IO}) -> Unit !{IO} =
 #
 # A set consumes the vector and returns it, so the vector is threaded through the
 # recursion rather than captured by a lambda: a lambda may not consume a linear value
-# (spec §5.8). Reads borrow it. `linvec_freeze` ends its life as an ordinary `Vec`, in
+# (spec §5.8). Reads borrow it. `linvec.freeze` ends its life as an ordinary `Vec`, in
 # O(1), so counting is shared with version 1.
 
 fn mark_all(ms: List Int, composite: LinVec Bool) -> LinVec Bool =
   match ms with
   | [] -> composite
-  | [m | rest] -> mark_all(rest, linvec_set(m, true, composite))
+  | [m | rest] -> mark_all(rest, linvec.set(m, true, composite))
 
 fn sieve_from(p: Int, n: Int, composite: LinVec Bool) -> LinVec Bool =
   if p * p > n then composite
   else
-    let Just marked = linvec_get(p, composite) else composite
+    let Just marked = linvec.get(p, composite) else composite
     in if marked then sieve_from(p + 1, n, composite)
     else sieve_from(p + 1, n, mark_all(multiples(p, n), composite))
 
 fn sieve_linvec(n: Int) -> Int =
-  count_primes(n, linvec_freeze(sieve_from(2, n, linvec_new(n + 1, false))))
+  count_primes(n, linvec.freeze(sieve_from(2, n, linvec.new(n + 1, false))))
 
 # --- 4. The same, with the bulk operation ---
 #
-# One `linvec_scatter` call marks every multiple of `p`, and `mark_all` goes away.
+# One `linvec.scatter` call marks every multiple of `p`, and `mark_all` goes away.
 
 fn sieve_from_scatter(p: Int, n: Int, composite: LinVec Bool) -> LinVec Bool =
   if p * p > n then composite
   else
-    let Just marked = linvec_get(p, composite) else composite
+    let Just marked = linvec.get(p, composite) else composite
     in if marked then sieve_from_scatter(p + 1, n, composite)
-    else sieve_from_scatter(p + 1, n, linvec_scatter(multiples(p, n), true, composite))
+    else sieve_from_scatter(p + 1, n, linvec.scatter(multiples(p, n), true, composite))
 
 fn sieve_scatter(n: Int) -> Int =
-  count_primes(n, linvec_freeze(sieve_from_scatter(2, n, linvec_new(n + 1, false))))
+  count_primes(n, linvec.freeze(sieve_from_scatter(2, n, linvec.new(n + 1, false))))
 
 fn main() -> Unit !{IO} =
   do

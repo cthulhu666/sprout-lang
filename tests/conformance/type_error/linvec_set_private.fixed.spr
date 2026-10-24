@@ -1,0 +1,11 @@
+module main
+import stdlib.linvec (LinVec)
+
+# `linvec_set_private.spr` with its error's hint applied: the builtin is declared in this
+# module, which is FFI the reader can see.
+
+extern fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a
+
+fn put(v: LinVec Int) -> LinVec Int = linvec_set(0, 1, v)
+
+fn main() -> Unit !{IO} = print("x")

@@ -7,10 +7,10 @@
 #           `vec_set`: it must print what the in-place build prints. A difference is a
 #           linearity hole seen as a wrong answer (docs/persistent-array-v0.md §9).
 #   trap    a set, scatter or accum out of range exits nonzero with its message.
-#   alloc   a set allocates nothing and `linvec_new` one vector: the runtime's
+#   alloc   a set allocates nothing and `linvec.new` one vector: the runtime's
 #           SPROUT_DEBUG_ALLOC counters match across runs that differ only in the number
-#           of sets, and grow by one vector per `linvec_new`.
-#   ir      a `linvec_get` matched with a binding compiles to a worker over
+#           of sets, and grow by one vector per `linvec.new`.
+#   ir      a `linvec.get` matched with a binding compiles to a worker over
 #           `vector_get_unboxed`, so a read allocates no `Maybe` (§3.4).
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,10 +53,10 @@ fi
 ORACLE="$TMPD/oracle_stdlib"
 mkdir -p "$ORACLE"
 cp -R "$STDLIB"/. "$ORACLE"/
-grep -v '^export extern fn linvec_set' "$STDLIB/linvec.sprout" > "$ORACLE/linvec.sprout"
+grep -v '^extern fn linvec_set' "$STDLIB/linvec.sprout" > "$ORACLE/linvec.sprout"
 cat >> "$ORACLE/linvec.sprout" <<'EOF'
 
-export fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a =
+fn linvec_set(i: Int, x: a, v: LinVec a) -> LinVec a =
   match v with
   | LinVec raw ->
       match vec_set(i, x, Vec(raw)) with
@@ -76,7 +76,7 @@ fi
 for entry in "trap_set_high|linvec_set: index out of bounds" \
              "trap_set_negative|linvec_set: index out of bounds" \
              "trap_scatter|linvec_set: index out of bounds" \
-             "trap_accum|linvec_accum: index out of bounds"; do
+             "trap_accum|linvec.accum: index out of bounds"; do
   name="${entry%%|*}"; want="${entry#*|}"
   build "$SMOKE/$name.spr" "$STDLIB" "$TMPD/$name" || { fail=1; continue; }
   "$TMPD/$name" > "$TMPD/$name.out" 2> "$TMPD/$name.err"
@@ -104,8 +104,8 @@ if measure 0 0 && measure 300000 0 && measure 0 5; then
     [ -n "$a" ] && [ "$a" = "$b" ] || bad "300000 sets changed $k: ${a:-?} -> ${b:-?}"
   done
   v0=$(field "$few" vector); v5=$(field "$news" vector)
-  [ -n "$v0" ] && [ -n "$v5" ] && [ $((v5 - v0)) -eq 5 ] || bad "5 linvec_new allocated $((v5 - v0)) vectors, not 5"
-  echo "linvec-smoke: 0 and 300000 sets both allocate $(field "$few" vector) vectors / $(field "$few" sprout_obj) objects; 5 more linvec_new add $((v5 - v0))"
+  [ -n "$v0" ] && [ -n "$v5" ] && [ $((v5 - v0)) -eq 5 ] || bad "5 linvec.new allocated $((v5 - v0)) vectors, not 5"
+  echo "linvec-smoke: 0 and 300000 sets both allocate $(field "$few" vector) vectors / $(field "$few" sprout_obj) objects; 5 more linvec.new add $((v5 - v0))"
 else
   bad "the alloc fixture did not build or run"
 fi
@@ -113,11 +113,11 @@ fi
 # --- IR: the read gets a CPR worker over the unboxed read ---
 ir="$TMPD/alloc_0_0.ll"
 if [ -s "$ir" ]; then
-  grep -q 'call i128 @stdlib.linvec.linvec_get_worker(' "$ir" \
-    || bad "no caller uses linvec_get_worker"
-  awk '/^define i128 @stdlib.linvec.linvec_get_worker\(/ {on=1} on {print} on && /^}/ {exit}' "$ir" > "$TMPD/worker.ll"
+  grep -q 'call i128 @stdlib.linvec.get_worker(' "$ir" \
+    || bad "no caller uses get_worker"
+  awk '/^define i128 @stdlib.linvec.get_worker\(/ {on=1} on {print} on && /^}/ {exit}' "$ir" > "$TMPD/worker.ll"
   grep -q 'call i128 @vector_get_unboxed(' "$TMPD/worker.ll" \
-    || bad "linvec_get_worker does not read through vector_get_unboxed"
+    || bad "get_worker does not read through vector_get_unboxed"
 else
   bad "no IR for the alloc fixture"
 fi

@@ -1,10 +1,10 @@
 module main
-import stdlib.linvec (linvec_new, linvec_scatter, linvec_length, linvec_drop)
+import stdlib.linvec as linvec
 
-# `linvec_scatter` calls `linvec_set`, so an index out of range traps.
+# `linvec.scatter` calls `linvec.set`, so an index out of range traps.
 
 fn main() -> Unit !{IO} =
-  let v = linvec_scatter([0, 1, 7], 1, linvec_new(3, 0))
-      n = linvec_length(v)
-      _ = linvec_drop(v)
+  let v = linvec.scatter([0, 1, 7], 1, linvec.new(3, 0))
+      n = linvec.length(v)
+      _ = linvec.drop(v)
   in print(int_to_string(n))

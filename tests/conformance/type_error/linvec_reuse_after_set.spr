@@ -1,11 +1,12 @@
 module main
-import stdlib.linvec (LinVec, linvec_set, linvec_freeze)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 
 # A set consumes the vector, so the old name is dead: no one can read the old version.
 
 fn both(v: LinVec Int) -> (Vec Int, Vec Int) =
-  let w = linvec_set(0, 1, v)
-  in (linvec_freeze(w), linvec_freeze(v))
+  let w = linvec.set(0, 1, v)
+  in (linvec.freeze(w), linvec.freeze(v))
 #~^ ERROR
 
 fn main() -> Unit !{IO} = print("x")

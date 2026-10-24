@@ -286,16 +286,16 @@ fn pascal(n: Int) -> Vec Int =
 - **Writes land where the data says** (a sieve, a histogram, a search), and the function is
   pure: `LinVec` (`stdlib.linvec`, Experimental). A set consumes the vector and returns it, so
   thread it through explicit recursion; a set inside a lambda is rejected. The bulk operations
-  take one call per batch, and each path returns the vector or ends it with `linvec_freeze` or
-  `linvec_drop`:
+  take one call per batch, and each path returns the vector or ends it with `linvec.freeze` or
+  `linvec.drop`:
 
 ```sprout
-import stdlib.linvec (linvec_new, linvec_accum, linvec_freeze)
+import stdlib.linvec as linvec
 
 fn histogram(buckets: Int, xs: List Int) -> Vec Int =
-  linvec_new(buckets, 0)
-  |> linvec_accum(\ (n, k) -> n + k, list_map(\x -> (x, 1), xs))
-  |> linvec_freeze
+  linvec.new(buckets, 0)
+  |> linvec.accum(\ (n, k) -> n + k, list_map(\x -> (x, 1), xs))
+  |> linvec.freeze
 ```
 
 - **`IO` is fine, or the writes sit in a lambda**: `MutVec`.
@@ -887,7 +887,7 @@ instance may keep the function; use `list_map` or `list_filter` when you need to
 
 ```sprout
 fn count_unseen(seen: borrowing LinVec Bool, n: Int, c: Int) -> Int =
-  match linvec_get(c, seen) with
+  match linvec.get(c, seen) with
   | Just b -> if b then n else n + 1
   | Nothing -> n
 

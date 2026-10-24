@@ -1,10 +1,11 @@
 module main
-import stdlib.linvec (LinVec, linvec_new)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 
 # A linear element would be duplicated by a read or a fill, so a `LinVec` of linear
 # values is rejected where it is built.
 
-fn grid() -> LinVec (LinVec Int) = linvec_new(2, linvec_new(2, 0))
+fn grid() -> LinVec (LinVec Int) = linvec.new(2, linvec.new(2, 0))
 #~^ ERROR
 
 fn main() -> Unit !{IO} = print("x")

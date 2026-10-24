@@ -1,6 +1,7 @@
 module examples.astar_linvec
 import stdlib.math.int (abs)
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 import stdlib.time as time
 
 # A* shortest-path on a 100×100 grid, as a pure function.
@@ -18,7 +19,7 @@ import stdlib.time as time
 #   g_score  — LinVec Int, len=10000, index=y*100+x, sentinel=9999999
 #   closed   — LinVec Int, len=10000, index=y*100+x (0=open, 1=closed)
 #
-# Everything is linear (Experimental, spec §5.8), so `linvec_set` writes in place
+# Everything is linear (Experimental, spec §5.8), so `linvec.set` writes in place
 # and each rebuilt list node or `State` reuses the cell it was matched from
 # (docs/linear-reuse-v0.md). An insert allocates one node; the search needs no `!{IO}`.
 #
@@ -70,7 +71,7 @@ fn open_drop(open: Open) -> Unit =
 
 # Every index comes from `cell_idx` on an in-bounds cell, so a miss is a bug.
 fn cell_at(i: Int, v: borrowing LinVec Int) -> Int =
-  let Just x = linvec_get(i, v) else panic("astar: cell index out of range")
+  let Just x = linvec.get(i, v) else panic("astar: cell index out of range")
   in x
 
 # Relax (nx, ny) if it is open floor, not closed, and `ng` beats its g_score.
@@ -81,15 +82,15 @@ fn try_relax(nx: Int, ny: Int, ng: Int, s: State) -> State =
     | State g_score closed open ->
         let i = cell_idx(nx, ny)
         in if cell_at(i, closed) == 1 || ng >= cell_at(i, g_score) then State(g_score, closed, open)
-        else State(linvec_set(i, ng, g_score), closed, open_insert(ng + heuristic(nx, ny), ng, nx, ny, open))
+        else State(linvec.set(i, ng, g_score), closed, open_insert(ng + heuristic(nx, ny), ng, nx, ny, open))
 
 # Up, down, left, right. Nested calls, not a pipe: a `_` hole cannot consume a linear value.
 fn expand_neighbors(x: Int, y: Int, ng: Int, s: State) -> State =
   try_relax(x + 1, y, ng, try_relax(x - 1, y, ng, try_relax(x, y + 1, ng, try_relax(x, y - 1, ng, s))))
 
 fn finish(result: Maybe Int, g_score: LinVec Int, closed: LinVec Int, open: Open) -> Maybe Int =
-  let _ = linvec_drop(g_score)
-      _ = linvec_drop(closed)
+  let _ = linvec.drop(g_score)
+      _ = linvec.drop(closed)
       _ = open_drop(open)
   in result
 
@@ -103,12 +104,12 @@ fn astar_loop(s: State) -> Maybe Int =
           else
             let i = cell_idx(x, y)
             in if cell_at(i, closed) == 1 then astar_loop(State(g_score, closed, rest))
-            else astar_loop(expand_neighbors(x, y, g + 1, State(g_score, linvec_set(i, 1, closed), rest)))
+            else astar_loop(expand_neighbors(x, y, g + 1, State(g_score, linvec.set(i, 1, closed), rest)))
 
 fn astar() -> Maybe Int =
-  let g_score = linvec_set(0, 0, linvec_new(10000, 9999999))
+  let g_score = linvec.set(0, 0, linvec.new(10000, 9999999))
       start = Node(heuristic(0, 0), 0, 0, 0, Empty)
-  in astar_loop(State(g_score, linvec_new(10000, 0), start))
+  in astar_loop(State(g_score, linvec.new(10000, 0), start))
 
 fn run_iters(n: Int, acc: Int) -> Int =
   if n <= 0 then acc

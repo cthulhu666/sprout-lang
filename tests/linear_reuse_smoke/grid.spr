@@ -1,5 +1,6 @@
 module main
-import stdlib.linvec (LinVec, linvec_new, linvec_get, linvec_set, linvec_drop)
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
 
 # `just linear-reuse-smoke` compiles this with NSIZE replaced and compares the runtime's
 # allocation counters across sizes: a sieve over a `LinVec` behind a linear wrapper strikes
@@ -11,13 +12,13 @@ type linear Grid = Grid Int (LinVec Bool)
 fn is_set(i: Int, g: borrowing Grid) -> Bool =
   match g with
   | Grid _ v ->
-      match linvec_get(i, v) with
+      match linvec.get(i, v) with
       | Just b -> b
       | Nothing -> false
 
 fn grid_set(i: Int, x: Bool, g: Grid) -> Grid =
   match g with
-  | Grid n v -> Grid(n, linvec_set(i, x, v))
+  | Grid n v -> Grid(n, linvec.set(i, x, v))
 
 fn strike(j: Int, p: Int, n: Int, g: Grid) -> Grid =
   if j >= n then g else strike(j + p, p, n, grid_set(j, true, g))
@@ -33,9 +34,9 @@ fn count(i: Int, n: Int, acc: Int, g: borrowing Grid) -> Int =
 
 fn main() -> Unit !{IO} =
   let n = NSIZE
-      g = sieve(2, n, Grid(n, linvec_new(n, false)))
+      g = sieve(2, n, Grid(n, linvec.new(n, false)))
       c = count(2, n, 0, g)
   in match g with
      | Grid _ v ->
-         let _ = linvec_drop(v)
+         let _ = linvec.drop(v)
          in print(int_to_string(c))

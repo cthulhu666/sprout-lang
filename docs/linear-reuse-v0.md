@@ -12,7 +12,7 @@ type linear Grid = Grid Int (LinVec Bool)
 
 fn grid_set(i: Int, x: Bool, g: Grid) -> Grid =
   match g with
-  | Grid n v -> Grid(n, linvec_set(i, x, v))
+  | Grid n v -> Grid(n, linvec.set(i, x, v))
 ```
 
 Measured on master (stage-1, `-O2`), a sieve doing one `grid_set` per strike against the same

@@ -1,10 +1,10 @@
 module main
-import stdlib.linvec (linvec_new, linvec_set, linvec_length, linvec_drop)
+import stdlib.linvec as linvec
 
-# `linvec_set` at a negative index traps.
+# `linvec.set` at a negative index traps.
 
 fn main() -> Unit !{IO} =
-  let v = linvec_set(-1, 1, linvec_new(3, 0))
-      n = linvec_length(v)
-      _ = linvec_drop(v)
+  let v = linvec.set(-1, 1, linvec.new(3, 0))
+      n = linvec.length(v)
+      _ = linvec.drop(v)
   in print(int_to_string(n))
