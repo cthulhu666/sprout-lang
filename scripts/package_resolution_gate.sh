@@ -312,6 +312,17 @@ else
   fail=1
 fi
 
+# A headerless `no_prelude` entry has module name "" but is not the prelude: its own
+# extern declaration must not export the name to another module.
+pne="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_no_prelude_entry_extern_stays_private.spr" 2>&1)"
+if echo "$pne" | grep -qF '`__priv_add` is private to'; then
+  echo "PASS extern visibility: a no_prelude entry's extern stays private"
+else
+  echo "FAIL extern visibility: a no_prelude entry's extern was exported to another module"
+  echo "$pne" | tail -3
+  fail=1
+fi
+
 for shape in own_and_exported redeclared; do
   pgo="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_$shape.spr" 2>&1)"
   if echo "$pgo" | grep -q '^OK$' && ! errors "$pgo" >/dev/null; then
