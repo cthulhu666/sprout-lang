@@ -252,11 +252,11 @@ fn cluster_cases(state: TestState) -> Unit !{IO} = do
 
 fn nochange_cases(state: TestState) -> Unit !{IO} = do
   assert_true(state, "backspace at the document start reports no change",
-              ! changed (buf.buffer_backspace(buf.buffer_home(opened("ab")))))
+              !changed(buf.buffer_backspace(buf.buffer_home(opened("ab")))))
   assert_true(state, "delete at the document end reports no change",
-              ! changed (buf.buffer_delete(opened("ab"))))
+              !changed(buf.buffer_delete(opened("ab"))))
   assert_true(state, "an empty insert reports no change",
-              ! changed (buf.buffer_insert("", opened("ab"))))
+              !changed(buf.buffer_insert("", opened("ab"))))
   assert_true(state, "backspace inside the document reports a change",
               changed(buf.buffer_backspace(opened("ab"))))
 
@@ -320,9 +320,9 @@ fn caret_cases(state: TestState) -> Unit !{IO} = do
               buf.buffer_caret(gone_to(opened("ab\ncd"), 1, 1))
                 == buf.Caret(row = 1, col = 1))
   assert_true(state, "and differ when only the row does",
-              ! (buf.Caret(row = 1, col = 2) == buf.Caret(row = 0, col = 2)))
+              !(buf.Caret(row = 1, col = 2) == buf.Caret(row = 0, col = 2)))
   assert_true(state, "and when only the column does",
-              ! (buf.Caret(row = 1, col = 1) == buf.Caret(row = 1, col = 2)))
+              !(buf.Caret(row = 1, col = 1) == buf.Caret(row = 1, col = 2)))
   # Reading order: the row decides, and the column only breaks a tie.
   assert_true(state, "an earlier row sorts first whatever the column",
               compare(buf.Caret(row = 1, col = 9),
@@ -391,19 +391,19 @@ fn undo_cases(state: TestState) -> Unit !{IO} = do
             shown(undos(typed(back(typed(opened("abc"), "x")), "y"), 3)),
             "abc @ 0:3")
   assert_true(state, "and answers Nothing rather than emptying it",
-              ! changed (buf.buffer_undo(undos(typed(back(typed(opened("abc"),
+              !changed(buf.buffer_undo(undos(typed(back(typed(opened("abc"),
                                                               "x")), "y"), 3))))
   assert_true(state, "a freshly opened buffer has nothing to undo",
-              ! changed (buf.buffer_undo(opened("hi"))))
+              !changed(buf.buffer_undo(opened("hi"))))
   assert_true(state, "a caret move on its own records nothing",
-              ! changed (buf.buffer_undo(buf.buffer_left(opened("hi")))))
+              !changed(buf.buffer_undo(buf.buffer_left(opened("hi")))))
   assert_true(state, "redo with nothing undone answers Nothing",
-              ! changed (buf.buffer_redo(typed(opened("hi"), "a"))))
+              !changed(buf.buffer_redo(typed(opened("hi"), "a"))))
   assert_eq(state, "redo replays the step and its caret",
             shown(redone(undone(typed_each(opened("hi"), ["a", "b"])))),
             "hiab @ 0:4")
   assert_true(state, "and a new edit clears the redo stack",
-              ! changed (buf.buffer_redo(typed(undone(typed_each(opened("hi"),
+              !changed(buf.buffer_redo(typed(undone(typed_each(opened("hi"),
                                                                 ["a", "b"])),
                                               "z"))))
   # A split and a join each undo to the document they came from — the two
@@ -425,7 +425,7 @@ fn undo_cases(state: TestState) -> Unit !{IO} = do
   assert_eq(state, "the step cap drops the oldest step",
             buf.buffer_row(undos(broke(opened(""), 1001), 1000)), 1)
   assert_true(state, "and there is nothing under it",
-              ! changed (buf.buffer_undo(undos(broke(opened(""), 1001), 1000))))
+              !changed(buf.buffer_undo(undos(broke(opened(""), 1001), 1000))))
 
 fn main() -> Unit !{IO} = do
   state <- new_state()

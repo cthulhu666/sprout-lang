@@ -144,7 +144,7 @@ fn bind_params(ps: List ast.Param, ss: List ast.Param, r: Ren) -> Maybe Ren =
       match ss with
       | [] -> Nothing
       | [ast.Param sn sa sm | srest] ->
-          if ! annotation_equal (pa, sa) || ! mode_equal (pm, sm) then Nothing
+          if !annotation_equal(pa, sa) || !mode_equal(pm, sm) then Nothing
           else bind_params(prest, srest, ren_bind(pn, sn, r))
 
 # Compared by OWNERSHIP, not by constructor: ModeDefault and ModeConsuming are one
@@ -502,7 +502,7 @@ export fn match_expr(pattern: ast.Expr, subject: ast.Expr, holes: List String)
 fn is_hole(name: String, holes: List String, r: Ren) -> Bool =
   let head = name_head(name)
   in if is_bound_left(head, r) then false
-     else if ! list_member (head, holes) then false
+     else if !list_member(head, holes) then false
      else if name_path(name) != "" then
        panic(`lint_pattern: hole \`${head}\` used through a field path \`${name}\` (§5.3)`)
      else true

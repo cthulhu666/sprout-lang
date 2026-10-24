@@ -1372,7 +1372,7 @@ fn module_declares_name(name: String, symbols: ModuleSymbols) -> Bool =
     || dict_member(name, sym_class_locals(symbols))
 
 fn first_unbound_name(names: List String, symbols: ModuleSymbols) -> Maybe String =
-  find(\name -> ! import_name_binds (name, symbols), names)
+  find(\name -> !import_name_binds(name, symbols), names)
 
 # A name carrying a parenthesised group reaches here because the import scanner
 # keeps the group rather than letting its `)` end the list

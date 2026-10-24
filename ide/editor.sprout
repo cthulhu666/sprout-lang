@@ -168,7 +168,7 @@ fn pane_handler(p: Pane m, d: widget.Delivery m) -> Reply m =
 # not a reason to write anything. The messages do reach the loop:
 # `focus.move_focus` blurs first and keeps what the blurred widget said.
 fn focused(p: Pane m, now: Bool) -> widget.Handled(Pane m) m =
-  if p.has_focus && ! now && leaving(p) then unprompted(shifted)
+  if p.has_focus && !now && leaving(p) then unprompted(shifted)
   else (shifted, Nil, Nil)
 where
   shifted = p with (has_focus = now)
@@ -261,7 +261,7 @@ fn offered(p: Pane m) -> widget.Handled(Pane m) m =
 # ctrl-s is never turned away for a reason they cannot see, and retrying a
 # transient failure on purpose is what that key is for.
 fn is_due(p: Pane m) -> Bool =
-  document.is_dirty(p.doc) && ! p.writing && has_target(p) && ! p.refused
+  document.is_dirty(p.doc) && !p.writing && has_target(p) && !p.refused
 
 fn has_target(p: Pane m) -> Bool =
   match document.target(p.doc) with

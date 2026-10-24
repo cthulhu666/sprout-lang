@@ -153,7 +153,7 @@ fn inside(r: geometry.Region, col: Int, row: Int) -> Bool =
 export fn screen_put(s: Screen, col: Int, row: Int, cluster: List Int,
                      st: style.Style) -> Int !{IO} =
   if col < 0 then put_left_of(s, col, row, st, cluster_width(cluster))
-  else if ! in_bounds (s, col, row) then 0
+  else if !in_bounds(s, col, row) then 0
   else put_sized(s, col, row, cluster, st, cluster_width(cluster))
 
 # A cluster off the left edge still OWNS the columns it spans, so a wide one

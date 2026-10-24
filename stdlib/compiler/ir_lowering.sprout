@@ -749,7 +749,7 @@ export fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool, has_user_main:
 # @__sprout_user_main_int (capturing the i64 result for main_ret below) when
 # main_returns_int, else @__sprout_user_main (result discarded, as before).
 fn user_main_call(has_user_main: Bool, main_returns_int: Bool) -> String =
-  if ! has_user_main then ""
+  if !has_user_main then ""
   else if main_returns_int then "  %user_main_ret = call i64 @__sprout_user_main_int()\n"
   else "  call i64 @__sprout_user_main()\n"
 
@@ -857,7 +857,7 @@ fn walk_ops_for_globals(ops: List sprout_ir.IROp, next_idx: Int,
               walk_ops_for_globals(rest, next_idx + 1, Cons(decl, parts),
                                 dict_set(raw, (gname, len), fn_table), statics)
       | sprout_ir.IRMkClosure _ code_fn arity caps ->
-          if sprout_ir.closure_is_static(caps) && ! set_member (code_fn, statics)
+          if sprout_ir.closure_is_static(caps) && !set_member(code_fn, statics)
           then walk_ops_for_globals(rest, next_idx,
                                  Cons(emit_static_closure_global(code_fn, arity), parts),
                                  fn_table, set_insert(code_fn, statics))

@@ -76,7 +76,7 @@ fn run(tokens: Vec token.Token, i: Int, st: LState) -> Result LayoutError (List 
 # One real token: reject a member on a class head line, open a pending block,
 # compare a line start with the innermost block, then apply the token's own rule.
 fn step(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> Result LayoutError LState =
-  let line_start = pos_of(t).line > st.prev_line && ! st.dangling && ! (awaited(t, st.stack))
+  let line_start = pos_of(t).line > st.prev_line && !st.dangling && !(awaited(t, st.stack))
       Nothing = head_line_member(t, line_start, st.stack) else Just kind -> Err(LayoutError(member_on_head(kind), pos_of(t)))
   in match open_pending(st, t) with
      | Opened st1 -> Ok(on_token(tokens, i, t, st1))
@@ -100,7 +100,7 @@ fn awaited(t: token.Token, stack: List Frame) -> Bool =
 # would become a top-level function.
 fn head_line_member(t: token.Token, line_start: Bool, stack: List Frame) -> Maybe BodyKind =
   match stack with
-  | [FRoot _ (DeclClassHead kind _) | _] -> if token.is_keyword_token(t, "fn") && ! line_start then Just(kind) else Nothing
+  | [FRoot _ (DeclClassHead kind _) | _] -> if token.is_keyword_token(t, "fn") && !line_start then Just(kind) else Nothing
   | _ -> Nothing
 
 fn member_on_head(kind: BodyKind) -> String =
@@ -146,7 +146,7 @@ fn open_pending(st: LState, t: token.Token) -> Opening =
          else Opened(push_block(fresh, FDo(k), pos))
      # Arms may sit on the enclosing floor: `|` cannot be read as its item.
      | OpenMatch ->
-         if k < open_threshold(st.stack) || (k == open_threshold(st.stack) && ! (is_symbol(t, "|"))) then
+         if k < open_threshold(st.stack) || (k == open_threshold(st.stack) && !(is_symbol(t, "|"))) then
            NotOpened(empty_block(fresh, pos))
          else Opened(push_block(fresh, FMatch(k), pos))
      | OpenLet ->
@@ -218,7 +218,7 @@ fn block_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, f: Fr
          else Ok(st)
      # `then` and `else` close only the matches their `if` encloses (`else_rule`).
      | FMatch c ->
-         if k < c || (k == c && ! (continues_arms(t))) then on_line(tokens, i, t, close_block(st, pos))
+         if k < c || (k == c && !(continues_arms(t))) then on_line(tokens, i, t, close_block(st, pos))
          else Ok(st)
      # An `in` line belongs to the innermost `let`, which the `in` rule closes.
      | FLet _ fl -> if token.is_keyword_token(t, "in") then Ok(st) else let_line(tokens, i, t, st, fl)
@@ -236,7 +236,7 @@ fn block_line(tokens: Vec token.Token, i: Int, t: token.Token, st: LState, f: Fr
 fn body_ends(t: token.Token, k: Int, fl: Int, stack: List Frame) -> Bool =
   if token.is_keyword_token(t, "fn") then k <= fl
   else if starts_decl(t) then true
-  else k <= fl && ! (token.is_keyword_token(t, "where") && body_where(stack))
+  else k <= fl && !(token.is_keyword_token(t, "where") && body_where(stack))
 
 fn misaligned_member(kind: BodyKind) -> String =
   match kind with
@@ -342,7 +342,7 @@ fn scan_binding(tokens: Vec token.Token, start: Int, i: Int, prev_line: Int, dep
   | Just t ->
       let line = pos_of(t).line
       in if token.is_eof_token(t) then false
-         else if depth == 0 && line > prev_line && ! (is_symbol(t, "=")) then false
+         else if depth == 0 && line > prev_line && !(is_symbol(t, "=")) then false
          else if depth == 0 && is_symbol(t, "=") then i > start
          else if is_symbol(t, "(") || is_symbol(t, "[") then scan_binding(tokens, start, i + 1, line, depth + 1)
          else if is_symbol(t, ")") || is_symbol(t, "]") then
@@ -622,7 +622,7 @@ fn close_matches(st: LState, pos: source.SourcePos) -> LState =
 # `with` after a `match` scrutinee opens the arms; `r with (f = …)` is a record
 # update and has no block.
 fn with_rule(tokens: Vec token.Token, i: Int, t: token.Token, st: LState) -> LState =
-  if record_update_at(tokens, i) || ! (scrutinee_open(st.stack)) then emit(st, t)
+  if record_update_at(tokens, i) || !(scrutinee_open(st.stack)) then emit(st, t)
   else emit(drop_top(pop_to_scrutinee(st, pos_of(t))), t) with (pending = OpenMatch)
 
 fn record_update_at(tokens: Vec token.Token, i: Int) -> Bool =

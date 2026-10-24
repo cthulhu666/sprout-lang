@@ -184,6 +184,8 @@ fn is_call_like_pp_other(prev: token.Token, pp: token.Token, next_tok: Maybe tok
         # and neither `(` takes a space. Without it the formatter emits
         # `lo(x)..hi (y)` — the same shape as the postfix-`.` case above.
         else if token.token_text(pp) == ".." then true
+        # Prefix `!`: `!f(x)` negates a call.
+        else if token.token_text(pp) == "!" then true
         else if token.token_text(pp) == ")" then true
         else if token.token_text(pp) == "]" then true
         else if token.token_text(pp) == "}" then true
@@ -251,7 +253,6 @@ fn needs_space_curr_bang(p: token.Token) -> Bool =
   if tok_is_punct(p, "(") then false
   else if tok_is_punct(p, "[") then false
   else if tok_is_punct(p, "{") then false
-  else if tok_is_punct(p, ",") then false
   else if tok_is_punct(p, "|") then false
   else if tok_is_punct(p, "!") then false
   else true
@@ -276,8 +277,8 @@ fn needs_space(prev_prev: Maybe token.Token, prev: Maybe token.Token, curr: toke
   | Nothing -> false
   | Just p ->
       if tok_is_punct(curr, "!") then needs_space_curr_bang(p)
-      else if tok_is_punct(p, "!") then
-        if tok_is_punct(curr, "{") then false else true
+      # Tight after `!` either way: prefix `!x`, or the effect annotation `!{IO}`.
+      else if tok_is_punct(p, "!") then false
       # `..` is TIGHT on both sides — `lo..hi`, `(lo)..(hi)`, `0..n` — which is
       # how every language spelling ranges this way writes them (Rust, Kotlin,
       # Ruby). Stated here rather than left to the word-like fallback because

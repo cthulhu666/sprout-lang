@@ -70,7 +70,7 @@ export fn from_env() -> OptConfig !{IO} =
     cfg
 
 export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
-  ! list_member (p, cfg.disabled)
+  !list_member(p, cfg.disabled)
 
 # For a pass that runs below `compiler.run_opt_passes`, which has already reported
 # any unknown name: reads the switch without repeating the warnings.
@@ -83,7 +83,7 @@ fn requested_names(off: Maybe String) -> List String =
   | Just raw -> list_filter(is_named, list_map(normalise, string.split(raw, ",")))
 
 fn is_named(name: String) -> Bool =
-  ! string.is_empty (name)
+  !string.is_empty(name)
 
 fn is_unrecognised(name: String) -> Bool =
   match pass_from_name(name) with
@@ -101,10 +101,10 @@ fn truthy(v: Maybe String) -> Bool =
   | Just raw -> is_truthy_word(normalise(raw))
 
 fn is_truthy_word(v: String) -> Bool =
-  ! (string.is_empty(v) || v == "0" || v == "false" || v == "off")
+  !(string.is_empty(v) || v == "0" || v == "false" || v == "off")
 
 fn is_pending(p: Pass) -> Bool =
-  ! implemented (p)
+  !implemented(p)
 
 fn warn_unimplemented(passes: List Pass) -> Unit !{IO} =
   match passes with

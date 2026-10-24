@@ -61,5 +61,5 @@ fn main() -> Unit !{IO} =
     # Duplicate routes: the first match wins.
     first_hit <- served_in(dup_routes(), "GET / HTTP/1.1\r\n\r\n")
     assert_true(state, "dispatch runs the first matching route",
-      contains(first_hit, "first") && ! contains (first_hit, "second"))
+      contains(first_hit, "first") && !contains(first_hit, "second"))
     summary(state)

@@ -94,7 +94,7 @@ fn main() -> Unit !{IO} =
     assert_true(state, "bare slot takes the class type", is_ok(c4))
 
     c5 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x) = true")
-    assert_true(state, "bare slot body mismatch rejected",! is_ok (c5))
+    assert_true(state, "bare slot body mismatch rejected", !is_ok(c5))
 
     c6 <- run_check("class Sz t\n  fn sz(x: t) -> Int\n  fn tw(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Int) -> Int = x\n  fn tw(x: Bool) -> Int = 1")
     assert_true(state, "second method signature checked", fails_with(c6, "class Sz declares"))

@@ -299,7 +299,7 @@ export fn list_fold(step: local b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
 # `list_fold`: the accumulator is queried between steps and an effectful `cond`
 # would fire an effect per element for a question about a value.
 export fn list_fold_while(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: List a) -> b =
-  if ! cond (init) then init
+  if !cond(init) then init
   else
     match xs with
     | Nil -> init
@@ -421,7 +421,7 @@ export fn vec_fold(f: local b -> a -> b, init: b, vec: Vec a) -> b =
 
 fn vec_fold_while_indexed(step: local b -> a -> b, cond: local b -> Bool, acc: b, vec: Vec a,
                           index: Int, total: Int) -> b =
-  if ! cond (acc) then acc
+  if !cond(acc) then acc
   else if index >= total then acc
   else
     match vec_get(index, vec) with
@@ -482,7 +482,7 @@ export fn vec_partition(pred: local a -> Bool, vec: Vec a) -> (Vec a, Vec a) =
 # specialised to `Vec` rather than a second hand-written index loop — the two
 # spellings cannot drift apart in behaviour or in complexity.
 export fn vec_any(pred: local a -> Bool, vec: Vec a) -> Bool =
-  vec_fold_while(\ (acc, x) -> pred(x), \acc -> ! acc, false, vec)
+  vec_fold_while(\ (acc, x) -> pred(x), \acc -> !acc, false, vec)
 
 export fn vec_all(pred: local a -> Bool, vec: Vec a) -> Bool =
   vec_fold_while(\ (acc, x) -> pred(x), \acc -> acc, true, vec)
@@ -1019,7 +1019,7 @@ export fn partition(pred: a -> Bool, xs: c a) -> (c a, c a) where Filterable c =
 # why these five are built on it rather than on `fold`. `vec_any` is this same
 # function specialised to `Vec`, not a faster one.
 export fn any(pred: local a -> Bool, xs: c a) -> Bool where Foldable c =
-  fold_while(\ (acc, x) -> if acc then acc else pred(x), \acc -> ! acc, false, xs)
+  fold_while(\ (acc, x) -> if acc then acc else pred(x), \acc -> !acc, false, xs)
 
 # O(k) up to the first element failing `pred`. True for an empty structure — the
 # vacuous case, matching every language that ships this pair.
@@ -1160,7 +1160,7 @@ instance Eq Char
 # false when either side is NaN, so `!(x == x)` holds exactly for NaN. Duplicated
 # from `stdlib.math.is_nan` rather than imported: the prelude is bundled into
 # every program and cannot import a module that imports it.
-fn double_is_nan(x: Double) -> Bool = ! (x == x)
+fn double_is_nan(x: Double) -> Bool = !(x == x)
 
 # The only primitive Eq instance that is not `left == right`, and the difference
 # is the whole design (docs/eq-ord-double-v0.md).

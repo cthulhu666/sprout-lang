@@ -78,7 +78,7 @@ fn update_user(id: Int, name: String, email: String, s: Store) -> Store =
 
 fn delete_user(id: Int, s: Store) -> Store =
   match s with
-  | Store users next -> Store(vec_filter(\u -> ! user_has_id (id, u), users), next)
+  | Store users next -> Store(vec_filter(\u -> !user_has_id(id, u), users), next)
 
 fn find_user(id: Int, s: Store) -> Maybe User =
   match s with

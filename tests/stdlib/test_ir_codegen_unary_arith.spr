@@ -23,14 +23,14 @@
 # unexpected OK = explicit fail).
 
 # Boolean negation through TUnary `!`.
-fn negate_bool(b: Bool) -> Bool = ! b
+fn negate_bool(b: Bool) -> Bool = !b
 
 # Repeated negation (catches incorrect xor mask).
-fn double_negate(b: Bool) -> Bool = ! (! b)
+fn double_negate(b: Bool) -> Bool = !(!b)
 
 # Boolean negation composed with comparison (the comparison itself emits
 # IRZextI1ToI64 to widen i1 → i64, then negation xor-flips the i64 bit).
-fn is_negative(n: Int) -> Bool = ! (n >= 0)
+fn is_negative(n: Int) -> Bool = !(n >= 0)
 
 # Integer division.
 fn div_simple(a: Int, b: Int) -> Int = a / b

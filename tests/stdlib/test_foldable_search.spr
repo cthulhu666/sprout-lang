@@ -103,13 +103,13 @@ fn main() -> Unit !{IO} =
     # --- Laws relating the family --------------------------------------------
     # all p == !any (not . p), the De Morgan pair the two share.
     check_eq("all is the De Morgan dual of any",
-      all(is_positive, ints),! any (\n -> ! is_positive (n), ints)),
+      all(is_positive, ints), !any(\n -> !is_positive(n), ints)),
     # any p == (find p != Nothing), i.e. find refines any rather than differing.
     check_eq("any agrees with find",
       any(is_even, ints), find(is_even, ints) != no_int),
     # count p == 0 exactly when nothing matches.
     check_eq("count is zero exactly when any is false",
-      count(is_negative, ints) == 0,! any (is_negative, ints)),
+      count(is_negative, ints) == 0, !any(is_negative, ints)),
 
     # --- Dictionary forwarding through constrained callers -------------------
     check_eq("forwarded any over List", has_any(is_even, ints), true),

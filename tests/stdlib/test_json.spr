@@ -116,7 +116,7 @@ fn accepts(value: json.Json) -> Bool =
 fn refused_value_is_nan(value: json.Json) -> Bool =
   match json.stringify(value) with
   | Ok _ -> false
-  | Err (json.JsonNonFinite x) -> ! (x == x)
+  | Err (json.JsonNonFinite x) -> !(x == x)
   | Err (json.JsonDecode _) -> false
 
 fn int_on_float_is_nothing(input: String) -> Bool =
@@ -300,21 +300,21 @@ fn main() -> Unit !{IO} =
     check_true("negative zero survives the full round trip", float_round_trip_bits(neg_zero())),
     check_true("a plain JsonInt is still an int", is_ok(json.parse(stringified(json.JsonInt(2))))),
     check_true("a plain JsonInt does not become a float",
-               int_on_float_is_nothing("2.5") && (! is_nothing (json.json_get_int(json.JsonInt(2))))),
+               int_on_float_is_nothing("2.5") && (!is_nothing(json.json_get_int(json.JsonInt(2))))),
 
     # --- non-finite Doubles are refused, never coerced ---
     # RFC 8259 §6 states outright that values outside the `number` grammar, "such as Infinity and
     # NaN", are not permitted, so a writer must do SOMETHING. Coercing to `null` or to a quoted
     # "NaN" would hand back a different Json constructor than went in — the same silent round-trip
     # type change that the ".0" rule above exists to prevent. Refusing says so in the type instead.
-    check_true("control: nan_d really is NaN",! (nan_d() == nan_d())),
+    check_true("control: nan_d really is NaN", !(nan_d() == nan_d())),
     check_true("control: pos_inf really is infinite", is_infinite(pos_inf())),
     check_true("control: neg_inf really is infinite", is_infinite(neg_inf())),
     # And the controls can fail — otherwise they assert nothing about these three values.
     check_false("control: a large finite double is not infinite", is_infinite(big_finite())),
     check_false("control: zero is not infinite", is_infinite(0.0)),
     check_false("control: NaN is not infinite", is_infinite(nan_d())),
-    check_false("control: an infinity is not NaN",! (pos_inf() == pos_inf())),
+    check_false("control: an infinity is not NaN", !(pos_inf() == pos_inf())),
 
     check_true("NaN is refused", refuses(json.JsonFloat(nan_d()))),
     check_true("+inf is refused", refuses(json.JsonFloat(pos_inf()))),

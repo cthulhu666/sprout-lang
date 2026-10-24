@@ -96,7 +96,7 @@ fn sample_error(text: String, digits: String, exp10: Int) -> Int =
   match parse_double(text) with
   | Nothing -> unmeasurable
   | Just x ->
-      if ! is_finite (x) || (x <= 0.0) then unmeasurable
+      if !is_finite(x) || (x <= 0.0) then unmeasurable
       else
         let (a, b) = exact_value(digits, exp10)
             (diff, unit) = error_terms(a, b, x)
@@ -108,7 +108,7 @@ fn misrounding(text: String, digits: String, exp10: Int) -> Int =
   match parse_double(text) with
   | Nothing -> unmeasurable
   | Just x ->
-      if ! is_finite (x) || (x <= 0.0) then unmeasurable
+      if !is_finite(x) || (x <= 0.0) then unmeasurable
       else
         let (a, b) = exact_value(digits, exp10)
             (diff, unit) = error_terms(a, b, x)
@@ -264,7 +264,7 @@ fn characterised(label: String, text: String, holds: Double -> Bool) -> TestCase
   | Nothing -> check_true(`${label} -> Nothing`, false)
   | Just x -> check_true(`${label} -> ${double_to_string(x)}`, holds(x))
 
-fn is_infinite(x: Double) -> Bool = ! is_finite (x)
+fn is_infinite(x: Double) -> Bool = !is_finite(x)
 
 fn is_zero(x: Double) -> Bool = double_to_bits(x) == 0
 

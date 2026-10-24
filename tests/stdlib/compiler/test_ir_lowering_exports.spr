@@ -150,7 +150,7 @@ fn main() -> Unit !{IO} =
         && string.contains(shim, "%creg_8 = call i64 @sprout_register_ctor(i64 8, ptr %cname_ptr_8, i64 0, ptr %cfkinds_ptr_8)\n  %cname_ptr_9")
         && string.ends_with(shim, "ptr %cfkinds_ptr_9)\n  ret i32 0\n}\n"))
     assert_true(state, "main_shim: no regs has no registrations",
-      ! string.contains (ir_lowering.main_shim(Nil, false, false, false), "sprout_register_ctor"))
+      !string.contains(ir_lowering.main_shim(Nil, false, false, false), "sprout_register_ctor"))
 
     assert_true(state, "lower_globals: one line per global, in order",
       ir_lowering.lower_globals(let_globals) ==

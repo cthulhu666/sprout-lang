@@ -48,7 +48,7 @@ fn main() -> Unit !{IO} =
     check_true("override sets text/html",
       contains(render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/html")),
     check_true("override drops the default text/plain",
-      ! contains (render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain")),
+      !contains(render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/plain")),
     check_eq("exactly one media type on override",
       count_from(render(with_header("content-type", "text/html", ok("<h1>hi</h1>"))), "text/", 0), 1),
 
@@ -66,7 +66,7 @@ fn main() -> Unit !{IO} =
     # the value). It is that the payload no longer STARTS A LINE: nothing may follow a CRLF except
     # a header this server chose to emit.
     check_true("a CRLF in a header value cannot start a new header line",
-      ! contains (render(with_header("x-lang", "en\r\nset-cookie: evil=1", ok("hi"))), "\r\nset-cookie")),
+      !contains(render(with_header("x-lang", "en\r\nset-cookie: evil=1", ok("hi"))), "\r\nset-cookie")),
     # The sharper half: two CRLFs would end the header block early and make the remainder a BODY
     # the attacker controls. Exactly one blank-line separator may appear in a rendered response.
     check_eq("an injected blank line cannot terminate the header block early",
@@ -78,7 +78,7 @@ fn main() -> Unit !{IO} =
     # Header NAMES go through the same wire path and the same injection: `lower_ascii` lowercases a
     # name but has never removed anything from it.
     check_true("a CRLF in a header name cannot start a new header line",
-      ! contains (render(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie")),
+      !contains(render(with_header("x-a\r\nset-cookie", "evil=1", ok("hi"))), "\r\nset-cookie")),
 
     # --- Repeatable headers ---------------------------------------------------------------------
     # `add_header` appends a line (Go `Header.Add`); `with_header` replaces every earlier line of
@@ -92,7 +92,7 @@ fn main() -> Unit !{IO} =
     check_true("headers go out in the order they were set",
       contains(render(with_header("x-a", "1", with_header("x-b", "2", ok("hi")))), "x-b: 2\r\nx-a: 1\r\n")),
     check_true("a content-type added by add_header suppresses the default",
-      ! contains (render(add_header("content-type", "text/html", ok("hi"))), "text/plain")),
+      !contains(render(add_header("content-type", "text/html", ok("hi"))), "text/plain")),
     # Framing is the server's: a caller's content-length, however added, never reaches the wire.
     check_eq("a caller's content-length is replaced by the real one",
       count_from(render(add_header("content-length", "999", add_header("content-length", "998", ok("hi")))), "content-length: ", 0), 1),
@@ -101,13 +101,13 @@ fn main() -> Unit !{IO} =
     # A transfer-encoding would override the content-length (RFC 9112 §6.3), and the body is not
     # chunked, so a client would misread it and the next response on the connection.
     check_true("a caller's transfer-encoding never reaches the wire",
-      ! contains (render(add_header("Transfer-Encoding", "chunked", ok("hi"))), "transfer-encoding")),
+      !contains(render(add_header("Transfer-Encoding", "chunked", ok("hi"))), "transfer-encoding")),
 
     # --- 204 No Content -------------------------------------------------------------------------
     # RFC 9110 §8.6: no Content-Length on a 204. §15.3.5: a 204 has no content, so a body the
     # handler passed anyway is not sent — on a persistent connection it would be the next response.
     check_true("a 204 carries no content-length",
-      ! contains (render(response(NoContent204, "")), "content-length")),
+      !contains(render(response(NoContent204, "")), "content-length")),
     check_true("a 204 sends no body, even when given one",
       string.ends_with(render(response(NoContent204, "stray")), "\r\n\r\n")),
     check_eq("a 204 gets no default content-type",
@@ -128,7 +128,7 @@ fn main() -> Unit !{IO} =
     check_eq("status_line", status_line(NotModified304), "HTTP/1.1 304 Not Modified"),
     check_eq("status_code", status_code(NoContent204), 204),
     check_eq("only 204 and 304 have no content",
-      list_map(status_code, list_filter(\s -> ! status_has_content (s), statuses_from(0))), [204, 304]),
+      list_map(status_code, list_filter(\s -> !status_has_content(s), statuses_from(0))), [204, 304]),
     # The whole message, byte for byte: status line, caller headers in order, the defaulted
     # content-type, content-length, one blank line, the body.
     check_eq("the full message, in order",

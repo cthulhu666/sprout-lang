@@ -279,7 +279,7 @@ fn scale_down_pow2(x: Double, n: Int) -> Double =
 export let nan = 0.0 / 0.0
 
 # Detect a Rule-2 NaN: NaN is the only Double not equal to itself (ordered `==`).
-export fn is_nan(x: Double) -> Bool = ! (x == x)
+export fn is_nan(x: Double) -> Bool = !(x == x)
 
 # The zero case is not redundant: `-0.0 < 0.0` is FALSE (IEEE compares the two zeros
 # equal), so a plain `if x < 0.0` returned -0.0 unchanged and abs kept the sign it exists

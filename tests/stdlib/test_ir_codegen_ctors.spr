@@ -416,7 +416,7 @@ fn main() -> Unit !{IO} =
     s3_no_make <- translated_ok_ir_contains(
       "type BigCtor = BigCtor Int Int Int\nfn mk() -> BigCtor = BigCtor(1,2,3)",
       "@sprout_make")
-    assert_true(state, "S3: no @sprout_makeN remains in emitted IR",! s3_no_make)
+    assert_true(state, "S3: no @sprout_makeN remains in emitted IR", !s3_no_make)
 
     # ---------------------------------------------------------------------------
     # S4 test: a record literal lowers through translate_record_literal, a path

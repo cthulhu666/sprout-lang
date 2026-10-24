@@ -601,7 +601,7 @@ fn header_named(name: String, pair: (String, String)) -> Bool =
   | (key, _) -> key == name
 
 fn without_header(name: String, headers: Vec (String, String)) -> Vec (String, String) =
-  vec_filter(\pair -> ! header_named (name, pair), headers)
+  vec_filter(\pair -> !header_named(name, pair), headers)
 
 # Set `name` to `value` only if the caller has not already provided it. Lets `render`
 # supply a default content-type that a handler's header overrides.
@@ -1154,7 +1154,7 @@ fn lists_close(options: String) -> Bool =
 # RFC 9112 §9.3: an HTTP/1.1 request persists unless it carries the `close` option. Persistence is
 # opt-in for HTTP/1.0 and not implemented, so a 1.0 request closes.
 fn request_keeps(req: HttpRequest) -> Bool =
-  request_version(req) == "HTTP/1.1" && ! request_closes (req)
+  request_version(req) == "HTTP/1.1" && !request_closes(req)
 
 fn request_closes(req: HttpRequest) -> Bool =
   match request_header("connection", req) with
@@ -1232,7 +1232,7 @@ fn next_request(config: ServerConfig, adm: Admission, conn: consuming TcpConnect
 # client sending only CRLFs is closed at `idle_ms` like a silent one.
 fn next_from(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
              handler: HttpRequest -> HttpServerResponse !{IO}, pending: (Bytes, Int), deadline: Int) -> Unit !{IO} =
-  if bytes.length(buf) > from && ! held_cr then
+  if bytes.length(buf) > from && !held_cr then
     do
       release(adm)
       handle_connection(config, adm, conn, handler, (buf, from))

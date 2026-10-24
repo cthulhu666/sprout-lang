@@ -117,7 +117,7 @@ fn wide_cases(state: TestState) -> Unit !{IO} = do
   still_cont <- scr.is_continuation_at(s, 3, 1)
   assert_eq(state, "the narrow character takes the cell", narrowed, "y")
   assert_eq(state, "and the stale continuation becomes a space", orphan, " ")
-  assert_true(state, "the stale continuation is no longer a continuation",! still_cont)
+  assert_true(state, "the stale continuation is no longer a continuation", !still_cont)
 
   # A wide cluster with nowhere to put its second half. xterm and tcell agree:
   # "Wide runes that are printed in the last column will be replaced with a

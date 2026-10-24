@@ -103,14 +103,8 @@ fn translate_or_msg(src: String) -> String !{IO} =
                     | (ir_prog, idx_map) ->
                         ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
 
-# Spelled as an if/else rather than `!str_starts_with(...)` on purpose: `just fmt`
-# rewrites a `!`-negated CALL to `! str_starts_with (out, "ERR: ")`, adding both a
-# space after `!` and one before `(` (BACKLOG.md, "just fmt puts a space between a
-# `!`-negated callee and its arguments", P3). Nothing else in-tree currently trips
-# that bug and this file should not become the first. Restore the `!` form once
-# is_call_like_pp_other in formatter.sprout learns about `!`.
 fn translated(out: String) -> Bool =
-  if str_starts_with(out, "ERR: ") then false else true
+  !str_starts_with(out, "ERR: ")
 
 fn has(out: String, needle: String) -> Bool =
   str_find(out, needle) != -1

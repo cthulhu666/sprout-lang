@@ -321,7 +321,7 @@ fn declining_cases(state: TestState) -> Unit !{IO} = do
 
   # Unfocused, with no ring to hand it focus: the keyboard is somebody else's.
   assert_true(state, "an unfocused view declines a key addressed to it",
-              ! hit_of (widget.deliver(view(), view_id,
+              !hit_of(widget.deliver(view(), view_id,
                                       widget.ToEvent(key(event.KDown)))))
   assert_true(state, "but claims a focus notification",
               hit_of(widget.deliver(view(), view_id, widget.ToFocus(true))))

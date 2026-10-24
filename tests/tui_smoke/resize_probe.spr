@@ -71,6 +71,6 @@ fn boot(winch: Bool, scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} =
 
 fn main() -> Unit !{IO} = do
   a <- args.parse_argv()
-  let winch = ! args.arg_flag (a, "no-winch")
+  let winch = !args.arg_flag(a, "no-winch")
   app.run(app.App(root = root(), update = update, tick_ms = 100,
                   boot = boot(winch, _, _)))

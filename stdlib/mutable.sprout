@@ -333,7 +333,7 @@ fn sort_passes(less: local a -> a -> Bool, src: Vector a, dst: Vector a, n: Int,
   else
     do
       _ <- sort_pass(less, src, dst, 0, n, w)
-      let swapped = ! in_scratch
+      let swapped = !in_scratch
       sort_passes(less, dst, src, n, w * 2, swapped)
 
 fn sort_merge_all(less: local a -> a -> Bool, raw: Vector a, n: Int) -> Unit !{IO} =

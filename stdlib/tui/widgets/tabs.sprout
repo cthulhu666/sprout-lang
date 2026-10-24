@@ -165,7 +165,7 @@ fn stepped(t: Tb m, ks: List widget.WidgetId) -> Reply m =
 # A hidden tab just goes. The shown one is blurred on its way out — a pane that
 # saves on blur gets to — and its neighbour takes its place.
 fn closed(t: Tb m, k: widget.WidgetId) -> Reply m =
-  if ! holds (t, k) then quiet(t)
+  if !holds(t, k) then quiet(t)
   else if is_shown(t, k)
   then tell(t, Just(k), false) |> then_do(_, replaced(_, k, neighbour(keys(t), k)))
   else quiet(dropped(t, k))
@@ -174,7 +174,7 @@ fn replaced(t: Tb m, k: widget.WidgetId, next: Maybe widget.WidgetId) -> Reply m
   arrive(dropped(t, k), next)
 
 fn dropped(t: Tb m, k: widget.WidgetId) -> Tb m =
-  t with (tabs = list_filter(\tb -> ! widget.id_eq (tb.key, k), t.tabs))
+  t with (tabs = list_filter(\tb -> !widget.id_eq(tb.key, k), t.tabs))
 
 # ── the widget ──────────────────────────────────────────────────────────────
 

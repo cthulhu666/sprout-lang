@@ -2275,7 +2275,7 @@ fn resolve_zero_arg_call(
   zero_arity_ok: Bool,
   pos: source.SourcePos
 ) -> CallResult =
-  if type_expects_arguments(resolved) && ! zero_arity_ok
+  if type_expects_arguments(resolved) && !zero_arity_ok
   then CallErr(pos, callee_display ++ " requires arguments but was called with none")
   else
     match unifier.unify_actual_expected(subst, eff_subst, resolved,
@@ -4116,7 +4116,7 @@ fn infer_call_args(
         # would unify exactly what infer_call_resolve unifies moments later.  Skip
         # it, so such a call threads the same substitution and the same typed
         # arguments it did before two-pass inference.
-        if ! has_lambda_slot (slots) then
+        if !has_lambda_slot(slots) then
           infer_lambda_slots(state, env, s1, es1, slots, Nil, types.EffectPure)
         else
           do
@@ -5285,8 +5285,8 @@ fn ready_try_fusion(fusions: unifier.TryFusions, operand_ty: types.Type) ->
   let Just head = concrete_type_str(operand_ty) else Nothing
       Just fusion = dict_get(head, fusions.by_head) else Nothing
       Just decl = fusions.decl else Nothing
-  in if ! set_member (fusion.pending_key, fusions.pending)
-        && all(\n -> dict_member(n, decl.scope) && ! set_member (n, fusions.pending), set_to_list(fusion.calls))
+  in if !set_member(fusion.pending_key, fusions.pending)
+        && all(\n -> dict_member(n, decl.scope) && !set_member(n, fusions.pending), set_to_list(fusion.calls))
      then Just((fusion, decl.scope)) else Nothing
 
 # A declaration's `try`s start here. A failure arm names what the instance sees,
@@ -6975,7 +6975,7 @@ fn reversed_literal_range(lo: ast.Expr, hi: ast.Expr) -> Maybe String =
 fn reversed_literal_range_call(name: String, env: Dict types.Scheme, args: List ast.Expr) -> Maybe String =
   match args with
   | [lo, hi] ->
-      if ! yields_int_range (name, env) then Nothing
+      if !yields_int_range(name, env) then Nothing
       else if name == "range_up" then
         static_empty_range(lo, hi, 1, call_form("range_up", lo, hi))
       else if name == "range_down" then
@@ -7868,7 +7868,7 @@ fn swapped_order_hint(head: String, decl_name: String, cls: String, sig_tyvars: 
 # The first type variable in `vs` that is not among the signature's type
 # variables, or Nothing when all are present.
 fn first_absent_tyvar(vs: List String, sig_tyvars: List String) -> Maybe String =
-  find(\v -> ! list_member (v, sig_tyvars), vs)
+  find(\v -> !list_member(v, sig_tyvars), vs)
 
 # A well-ordered constraint (`where <Class> <var>`) still binds nothing when its
 # type variable is not one the signature introduces — e.g. `where ToString x`
@@ -7930,7 +7930,7 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
 
 # A bound names a variable of the signature, as a class constraint does.
 fn bound_sig_error(bounds: List String, decl_name: String, sig_tyvars: List String) -> Maybe String =
-  map(bound_not_in_sig_msg(_, decl_name), find(\v -> ! list_member (v, sig_tyvars), bounds))
+  map(bound_not_in_sig_msg(_, decl_name), find(\v -> !list_member(v, sig_tyvars), bounds))
 
 fn bound_not_in_sig_msg(v: String, decl_name: String) -> String =
   "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the signature of `"
@@ -7942,7 +7942,7 @@ fn head_bound_error(bounds: List String, constraint: ast.TypeConstraint) -> Mayb
       head_vars = collect_te_vars_list(args, Nil)
   in map(\v -> "`where linear " ++ v ++ "` names `" ++ v ++ "`, which does not appear in the instance head `"
                   ++ instance_owner(constraint) ++ "`; a bound lets a variable of the head be linear",
-         find(\v -> ! list_member (v, head_vars), bounds))
+         find(\v -> !list_member(v, head_vars), bounds))
 
 fn instance_owner(constraint: ast.TypeConstraint) -> String =
   let ast.TypeConstraint cls args = constraint
@@ -8937,7 +8937,7 @@ fn instance_missing_method(constraint: ast.TypeConstraint, methods: List ast.Ins
   | ast.TypeConstraint cls type_args ->
       let defined = list_map(instance_method_name, methods)
       in
-        match find(\m -> ! list_member (m, defined), class_methods_of(cls, class_methods)) with
+        match find(\m -> !list_member(m, defined), class_methods_of(cls, class_methods)) with
         | Just missing -> Just(missing_method_msg(cls, type_args, missing))
         | Nothing -> Nothing
 
@@ -9219,7 +9219,7 @@ fn is_type_var(t: types.Type) -> Bool =
 
 fn same_written_type(a: types.Type, b: types.Type) -> Bool =
   match unifier.unify_join(dict_empty(), dict_empty(), a, b) with
-  | unifier.UnifyOk s _ -> ! unifier.has_deferred_modes (s)
+  | unifier.UnifyOk s _ -> !unifier.has_deferred_modes(s)
   | unifier.UnifyErr _ -> false
 
 # Each slot's name for messages, the return first, as the slot lists run.
@@ -9312,7 +9312,7 @@ fn apart_names(vars: List String, taken: List String, used: List String,
       match dict_get(v, acc) with
       | Just _ -> apart_names(rest, taken, used, acc)
       | Nothing ->
-          if ! list_member (v, taken) then apart_names(rest, taken, used, acc)
+          if !list_member(v, taken) then apart_names(rest, taken, used, acc)
           else
             let fresh = fresh_var_name(v, 1, list_append(taken, used))
             in apart_names(rest, Cons(fresh, taken), used, dict_set(v, ast.TypeName(fresh), acc))
@@ -9349,7 +9349,7 @@ fn sig_against_class(site: InstanceSite, name: String, inst: SigParts, cls: SigP
         | Just (subst, _) ->
             # An arrow's mode inside a parameter type must match: this runs before any
             # type is known linear, so it cannot tell where modes coincide (§6.6).
-            if unifier.has_deferred_modes(subst) || ! arrows_flow (iparams, cparams, iret, cret)
+            if unifier.has_deferred_modes(subst) || !arrows_flow(iparams, cparams, iret, cret)
             then Just(sig_mismatch_msg(site, name, inst, cls))
             else
               match renamed_head_var(subst, sig_te_vars(inst)) with
@@ -11665,9 +11665,9 @@ fn extern_decl_ok(name: String, params: List ast.Param, ret_type_maybe: Maybe as
                   env_ftv: List String, subst: Dict types.Type) -> TypedDeclResult =
   match dict_get(name, global_env_dict(env)) with
   | Just kept ->
-      if ! types.scheme_alpha_eq (kept, declared)
+      if !types.scheme_alpha_eq(kept, declared)
       then TypedDeclErr(ext_pos, extern_redeclared_message(name, kept, declared))
-      else if ! same_bounds (kept, kept_bounds, declared, bounds)
+      else if !same_bounds(kept, kept_bounds, declared, bounds)
       then TypedDeclErr(ext_pos, extern_rebounded_message(name, kept_bounds, bounds))
       else TypedDeclOk(typed_ast.TExternFnDecl(name, params, ret_type_maybe, effects_maybe), env, env_ftv, subst)
   | Nothing ->
@@ -11698,7 +11698,7 @@ fn same_bounds(kept: types.Scheme, kept_bounds: List String, declared: types.Sch
 fn bound_mismatch(from: types.Scheme, from_bounds: List String, to: types.Type,
                   to_bounds: List String) -> (Maybe String, Maybe String) =
   let renamed = renamed_vars(from, to, from_bounds)
-  in (find(\v -> ! list_member (v, to_bounds), renamed), find(\v -> ! list_member (v, renamed), to_bounds))
+  in (find(\v -> !list_member(v, to_bounds), renamed), find(\v -> !list_member(v, renamed), to_bounds))
 
 fn extern_rebounded_message(name: String, kept: List String, declared: List String) -> String =
   "extern `" ++ name ++ "` is declared more than once with different `where linear` bounds: "

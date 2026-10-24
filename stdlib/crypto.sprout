@@ -76,7 +76,7 @@ export fn base64url_decode(raw: String) -> Result Base64Error Bytes =
     Err(Base64DecodeError("invalid base64url padding"))
   else if rem == 1 then
     Err(Base64DecodeError("invalid base64url length"))
-  else if ! all_base64url (bytes.from_string(body), 0, string.byte_length(body)) then
+  else if !all_base64url(bytes.from_string(body), 0, string.byte_length(body)) then
     Err(Base64DecodeError("invalid base64url character"))
   else
     require_canonical(body, base64_decode(std ++ string.repeat("=", mod4(4 - rem))))

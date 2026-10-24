@@ -141,7 +141,7 @@ fn main() -> Unit !{IO} =
     # The law that makes partition worth having as a primitive: its two halves
     # are exactly the two filters, so a caller never needs both spellings.
     check_eq("partition's left half is filter p",
-      partition(is_even, ints), (filter(is_even, ints), filter(\n -> ! is_even (n), ints))),
+      partition(is_even, ints), (filter(is_even, ints), filter(\n -> !is_even(n), ints))),
 
     # --- Dictionary forwarding for the new methods ---------------------------
     check_eq("forwarded filter_map over List", halve_evens(ints), Cons(1, Cons(2, Nil))),

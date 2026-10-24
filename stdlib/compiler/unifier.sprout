@@ -589,14 +589,14 @@ fn upper_bound_key(v: String) -> String = "@hi:" ++ v
 # `quiet`'s pure overwrote `shout`'s IO and the annotation then saw pure.
 fn record_lower(eff_subst: Dict types.Effect, v: String,
                 e: types.Effect) -> Result String (Dict types.Effect) =
-  if ! types.effect_is_io (e) then Ok(eff_subst)
+  if !types.effect_is_io(e) then Ok(eff_subst)
   else if upper_is_pure(eff_subst, v) then Err(io_into_pure_error())
   else Ok(dict_set(v, e, dict_set(lower_bound_key(v), e, eff_subst)))
 
 # A slot permits at most `e`. Contradicts an existing IO floor.
 fn record_upper(eff_subst: Dict types.Effect, v: String,
                 e: types.Effect) -> Result String (Dict types.Effect) =
-  if ! types.effect_is_pure (e) then Ok(eff_subst)
+  if !types.effect_is_pure(e) then Ok(eff_subst)
   else if lower_is_io(eff_subst, v) then Err(io_into_pure_error())
   else Ok(dict_set(upper_bound_key(v), e, eff_subst))
 
@@ -616,7 +616,7 @@ type Freshened (..) =
 fn freshen_arrow_effects(owner: String, t: types.Type, idx: Int, flipped: Bool) -> Freshened =
   match t with
   | types.TFunc p r e o ->
-      match freshen_arrow_effects(owner, p, idx,! flipped) with
+      match freshen_arrow_effects(owner, p, idx, !flipped) with
       | Freshened p2 i1 b1 ->
           match freshen_arrow_effects(owner, r, i1, flipped) with
           | Freshened r2 i2 b2 ->
@@ -706,7 +706,7 @@ fn record_bounds(eff_subst: Dict types.Effect, bounds: List (String, types.Effec
 # The joined slot may demand at most what EVERY branch accepts, where a result
 # must permit at least what every branch performs.
 fn at_parity(role: BoundRole, flipped: Bool) -> BoundRole =
-  if ! flipped then role
+  if !flipped then role
   else
     match role with
     | AsCeiling -> AsFloor

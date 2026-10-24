@@ -70,9 +70,9 @@ fn main() -> Unit !{IO} =
     assert_true(state, "a ~ thunk b rejected when b = List a",
                 is_err(unifier.unify_join(chain, dict_empty(), tv("a"), types.TThunk(tv("b"), types.EffectPure))))
     assert_true(state, "a ~ List c accepted",
-                ! is_err (unifier.unify_join(chain, dict_empty(), tv("a"), types.TApp(tc("List"), tv("c")))))
+                !is_err(unifier.unify_join(chain, dict_empty(), tv("a"), types.TApp(tc("List"), tv("c")))))
     assert_true(state, "a ~ (Int, b) accepted when b = Bool",
-                ! is_err (unifier.unify_join(dict_set("b", tc("Bool"), dict_empty()), dict_empty(), tv("a"),
+                !is_err(unifier.unify_join(dict_set("b", tc("Bool"), dict_empty()), dict_empty(), tv("a"),
                                            types.TTuple([tc("Int"), tv("b")]))))
 
     summary(state)

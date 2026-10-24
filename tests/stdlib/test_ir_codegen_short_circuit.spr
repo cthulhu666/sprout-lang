@@ -32,7 +32,7 @@ fn mixed(a: Bool, b: Bool, c: Bool) -> Bool = a || (b && c)
 fn in_range(n: Int, lo: Int, hi: Int) -> Bool = (n >= lo) && (n <= hi)
 
 # `&&` composed with negation (PR 3's IRBoolNot).
-fn safely_positive(n: Int) -> Bool = ! (n == 0) && (n > 0)
+fn safely_positive(n: Int) -> Bool = !(n == 0) && (n > 0)
 
 # `||` returning through a CPR-eligible ctor field — combines PR 2's boxed
 # CPR routing with PR 4's short-circuit lowering.

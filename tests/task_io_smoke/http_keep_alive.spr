@@ -17,7 +17,7 @@ fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
 # A kept response: the body arrived and nothing said close.
 fn expect_kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   match read_response(conn) with
-  | Ok (head, body) -> mark(label, body == "hello" && ! says_close (head), head ++ body)
+  | Ok (head, body) -> mark(label, body == "hello" && !says_close(head), head ++ body)
   | Err e -> mark(label, false, e)
 
 # A closing response: it says close, then the server closes with nothing more.
@@ -66,7 +66,7 @@ fn head_then_get(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
     send(conn, "HEAD / HTTP/1.1\r\nHost: x\r\n\r\n")
     match read_head_reply(conn) with
-    | Ok (head, extra) -> mark("head-kept-no-body", extra == "" && ! says_close (head), head ++ extra)
+    | Ok (head, extra) -> mark("head-kept-no-body", extra == "" && !says_close(head), head ++ extra)
     | Err e -> mark("head-kept-no-body", false, e)
     send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
     expect_kept(conn, "get-after-head")

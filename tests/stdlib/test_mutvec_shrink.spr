@@ -249,9 +249,9 @@ fn insert_cases(state: TestState) -> Unit !{IO} =
     # insert — that is the append — so the first index past it is `len + 1`.
     oob <- filled(3)
     assert_true(state, "insert past the end reports false",
-                ! mutvec_insert (oob, 4, 99))
+                !mutvec_insert(oob, 4, 99))
     assert_true(state, "insert at a negative index reports false",
-                ! mutvec_insert (oob, 0 - 1, 99))
+                !mutvec_insert(oob, 0 - 1, 99))
     assert_eq(state, "a refused insert leaves the length alone", mutvec_len(oob), 3)
     untouched <- joined(oob)
     assert_eq(state, "a refused insert leaves the contents alone", untouched, "0,1,2,")
