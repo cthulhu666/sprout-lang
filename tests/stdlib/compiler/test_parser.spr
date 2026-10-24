@@ -172,11 +172,24 @@ fn first_where(src: String) -> String =
 fn decl_where(d: ast.Decl) -> String =
   match d with
   | ast.FnDecl _ _ _ _ cs bounds _ _ -> where_text(cs, bounds)
-  | ast.ExternFnDecl _ _ _ _ bounds _ -> where_text(Nil, bounds)
+  | ast.ExternFnDecl _ _ _ _ bounds _ _ -> where_text(Nil, bounds)
   | ast.TypeDecl _ _ [ast.TypeConstructor _ _ _ cs bounds | _] _ _ _ _ -> where_text(cs, bounds)
   | ast.ClassDecl _ _ [ast.ClassMethodSig _ _ _ _ cs bounds | _] _ _ -> where_text(cs, bounds)
   | ast.InstanceDecl _ ctx bounds [ast.InstanceMethodImpl _ _ _ _ cs mb _ | _] _ ->
       where_text(ctx, bounds) ++ "; " ++ where_text(cs, mb)
+  | _ -> "other"
+
+# The first declaration's extern visibility: `exported`, `private`, or `other`.
+fn first_extern_visibility(src: String) -> String =
+  let Ok toks = lexer.tokenize(src) else "lex-error"
+      Ok prog = parser.parse_program(toks) else "parse-error"
+      ast.Program([d | _]) _ = prog else "no-decl"
+  in extern_visibility_text(d)
+
+fn extern_visibility_text(d: ast.Decl) -> String =
+  match d with
+  | ast.ExternFnDecl _ _ _ _ _ ast.Exported _ -> "exported"
+  | ast.ExternFnDecl _ _ _ _ _ ast.Private _ -> "private"
   | _ -> "other"
 
 fn where_text(cs: List ast.TypeConstraint, bounds: List String) -> String =
@@ -694,6 +707,14 @@ fn main() -> Unit !{IO} =
       parse_fails("class C a where linear a\n  fn take(x: a) -> Int"))
     assert_true(state, "linear bound: a constructor's only on an exists variable",
       parse_fails("type Foo a = | Bar a where linear a"))
+
+    # `export extern fn` is exported; a bare `extern fn` is private to its module.
+    assert_eq(state, "extern visibility: export extern fn",
+      first_extern_visibility("export extern fn f(x: Int) -> Int"), "exported")
+    assert_eq(state, "extern visibility: extern fn",
+      first_extern_visibility("extern fn f(x: Int) -> Int"), "private")
+    assert_eq(state, "extern visibility: export fn is not an extern",
+      first_extern_visibility("export fn f(x: Int) -> Int = x"), "other")
 
     # Constructor vs variable patterns: the last dotted component decides.
     assert_eq(state, "pattern: bare upper is a ctor", arm_kind("Foo"), "ctor")

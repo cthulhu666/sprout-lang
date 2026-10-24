@@ -266,7 +266,7 @@ fn stored_effect_var_in_decl(d: ast.Decl) -> Maybe(source.SourcePos, String) =
   | ast.TypeDecl name _ ctors _ _ _ pos -> stored_in_ctors(name, ctors, pos)
   | ast.WrapDecl name _ inner _ _ _ pos -> stored_in_wrap(name, inner, pos)
   | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
-  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
   | ast.ClassDecl _ _ _ _ _ -> Nothing
   | ast.InstanceDecl _ _ _ _ _ -> Nothing

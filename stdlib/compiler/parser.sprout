@@ -2041,7 +2041,7 @@ fn parse_extern_fn_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (a
     (_, i7) <- expected_symbol(")", tokens, i6)
     (return_type, effects, i8) <- parse_optional_return_type(tokens, i7)
     (bounds, i9) <- parse_extern_where(tokens, i8)
-    Ok((ast.ExternFnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, bounds, cur_pos(tokens, i)), i9))
+    Ok((ast.ExternFnDecl(token.token_text(name_tok), list_reverse(params), return_type, effects, bounds, ast.Private, cur_pos(tokens, i)), i9))
 
 fn parse_optional_return_type(tokens: Vec token.Token, i: Int) -> Result ParseError (Maybe ast.TypeExpr, Maybe (List String), Int) =
   match match_symbol(tokens, i, "->") with
@@ -2307,7 +2307,18 @@ export fn submission_starts_decl(raw: String) -> Bool =
         is_decl_keyword(first)
 
 fn parse_decl(tokens: Vec token.Token, i: Int) -> Result ParseError (ast.Decl, Int) =
-  parse_decl_body(tokens, skip_export(tokens, i))
+  do
+    let j = skip_export(tokens, i)
+    (decl, i2) <- parse_decl_body(tokens, j)
+    Ok((if j == i then decl else mark_extern_exported(decl), i2))
+
+# `export` reaches the AST only on an `extern fn`; the export set of every other
+# declaration is recovered by the token scan (scan_module_surface).
+fn mark_extern_exported(d: ast.Decl) -> ast.Decl =
+  match d with
+  | ast.ExternFnDecl name params ret effects bounds _ pos ->
+      ast.ExternFnDecl(name, params, ret, effects, bounds, ast.Exported, pos)
+  | _ -> d
 
 fn skip_export(tokens: Vec token.Token, i: Int) -> Int =
   match match_keyword(tokens, i, "export") with
@@ -2444,27 +2455,45 @@ where
 # modifiers, so reacting to them at any token position is safe.
 
 export type ModuleSurface (..) =
-  # exported names; types whose constructors are exported; global (extern) names
-  | ModuleSurface (List String) (List String) (List String)
+  # exported names; types whose constructors are exported; global (extern) names;
+  # the globals written `export extern fn`
+  | ModuleSurface (List String) (List String) (List String) (List String)
 
 export fn surface_exported(s: ModuleSurface) -> List String =
   match s with
-  | ModuleSurface exported _ _ -> exported
+  | ModuleSurface exported _ _ _ -> exported
 
 export fn surface_ctor_types(s: ModuleSurface) -> List String =
   match s with
-  | ModuleSurface _ ctor_types _ -> ctor_types
+  | ModuleSurface _ ctor_types _ _ -> ctor_types
 
-# ast.ScopeGlobal names: externs. Deliberately NOT part of the export set —
-# `export` on an extern is a parsed-and-discarded no-op (spec-v0 §"Externs are
-# outside the module system") — but part of the module's surface, which is what
-# lets a completion offer them.
+# ast.ScopeGlobal names: externs. Deliberately NOT part of the export set — an
+# extern is never qualified, so `export` makes it reachable by bare name instead
+# (spec-v0 §"Externs are outside the module system"). Every extern the module
+# declares, exported or not.
 export fn surface_globals(s: ModuleSurface) -> List String =
   match s with
-  | ModuleSurface _ _ globals -> globals
+  | ModuleSurface _ _ globals _ -> globals
+
+# The globals another module may reach: those written `export extern fn`. The
+# prelude and the `no_prelude` floor export every extern, whatever they write.
+export fn surface_exported_globals(s: ModuleSurface) -> List String =
+  match s with
+  | ModuleSurface _ _ _ exported_globals -> exported_globals
 
 export fn scan_module_surface(tokens: Vec token.Token) -> ModuleSurface =
-  scan_surface_from(tokens, 0, Nil, Nil, Nil)
+  match scan_surface_from(tokens, 0, Nil, Nil, Nil) with
+  | ModuleSurface exported ctor_types globals _ ->
+      ModuleSurface(exported, ctor_types, globals, list_reverse(exported_extern_names(tokens, 0, Nil)))
+
+# The name of every `export extern fn`, in reverse source order. `export` and `extern`
+# are reserved, so an `extern` right after an `export` is that modifier and nothing else.
+fn exported_extern_names(tokens: Vec token.Token, i: Int, acc: List String) -> List String =
+  if i >= vec_length(tokens) || tok_is_eof(tok_at(tokens, i)) then acc
+  else if token.is_keyword_token(tok_at(tokens, i), "export")
+    && token.is_keyword_token(tok_at(tokens, i + 1), "extern") then
+    exported_extern_names(tokens, i + 2, extern_name_at(tokens, i + 1, acc))
+  else exported_extern_names(tokens, i + 1, acc)
 
 fn scan_surface_from(
   tokens: Vec token.Token,
@@ -2474,7 +2503,7 @@ fn scan_surface_from(
   globals: List String
 ) -> ModuleSurface =
   if i >= vec_length(tokens) || tok_is_eof(tok_at(tokens, i)) then
-    ModuleSurface(list_reverse(exported), list_reverse(ctor_types), list_reverse(globals))
+    ModuleSurface(list_reverse(exported), list_reverse(ctor_types), list_reverse(globals), Nil)
   else if token.is_keyword_token(tok_at(tokens, i), "export") then
     scan_exported_decl(tokens, i + 1, exported, ctor_types, globals)
   else if token.is_keyword_token(tok_at(tokens, i), "extern") then
@@ -2490,8 +2519,8 @@ fn scan_exported_decl(
   ctor_types: List String,
   globals: List String
 ) -> ModuleSurface =
-  # `export extern fn` — the modifier has no effect, so record nothing here and let
-  # the extern arm classify it as a global.
+  # `export extern fn` — an extern is no module name, so record nothing here and let
+  # the extern arm classify it as a global (`exported_extern_names` reads the modifier).
   if token.is_keyword_token(tok_at(tokens, j), "extern") then
     scan_surface_from(tokens, j, exported, ctor_types, globals)
   else if token.is_keyword_token(tok_at(tokens, j), "fn")

@@ -1,0 +1,7 @@
+module demo.exportlocal
+
+# `export` on an extern that writes `local` is an error: the `local` rule keeps it
+# private to this module.
+export let ping: Int = 1
+
+export extern fn __bad_export_local(run: (local(Unit -> Int)) -> Int) -> Int

@@ -1,0 +1,5 @@
+no_prelude
+import demo.privext (ping)
+
+# The floor's externs are exported implicitly in a `no_prelude` file too.
+fn main() -> Unit !{IO} = print(int_to_string(str_len("ab") + ping))

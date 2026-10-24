@@ -2,6 +2,9 @@ module main
 # vector_get_direct / vec_make_filled are externs owned by stdlib.mutable.
 import stdlib.mutable as mutable
 
+# Private to stdlib.mutable, so declared here: this fixture reads a raw Vector.
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
+
 # B1 gate coverage-gap (RepUnsupported, non-Double PRIMITIVE): a fully-applied
 # `vector_get_direct` on a `Vector Int` must stay a `call @vector_get_direct`
 # (0 `vec_get_d` ops). This is distinct from the shadowed-heap-`Double` fixture:

@@ -300,6 +300,64 @@ else
   fail=1
 fi
 
+# An extern is private to its module unless that module writes `export extern fn`
+# (docs/extern-visibility-v0.md). The `local` cases above are the special case: those
+# stay private whether or not `export` is written, and `export` on one is an error.
+pge="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_general_reached.spr" 2>&1)"
+if echo "$pge" | grep -qF '`__priv_add` is private to `demo.privext`. Mark it `export extern fn` there, or declare it in this module'; then
+  echo "PASS extern visibility: an unexported extern is private to its module"
+else
+  echo "FAIL extern visibility: expected __priv_add to be rejected as private to demo.privext"
+  echo "$pge" | tail -3
+  fail=1
+fi
+
+for shape in own_and_exported redeclared; do
+  pgo="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_private_extern_$shape.spr" 2>&1)"
+  if echo "$pgo" | grep -q '^OK$' && ! errors "$pgo" >/dev/null; then
+    echo "PASS extern visibility ($shape): accepted"
+  else
+    echo "FAIL extern visibility ($shape): a legal use of an extern was rejected"
+    errors "$pgo" | head -3
+    fail=1
+  fi
+done
+
+# Exportedness is per NAME across the build: one module's private redeclaration must
+# not hide another module's exported extern from a third. Both import orders, so the
+# private declaration is last in one bundle and first in the other.
+for order in ab ba; do
+  col="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_extern_collision_$order.spr" 2>&1)"
+  if echo "$col" | grep -q '^OK$' && ! errors "$col" >/dev/null; then
+    echo "PASS extern visibility (collision $order): a private redeclaration does not hide an exported extern"
+  else
+    echo "FAIL extern visibility (collision $order): the exported extern was hidden by a private redeclaration"
+    errors "$col" | head -3
+    fail=1
+  fi
+done
+
+# The prelude's externs and the `no_prelude` floor's are exported implicitly.
+for shape in prelude_extern_reachable no_prelude_floor_extern; do
+  pre="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_$shape.spr" 2>&1)"
+  if echo "$pre" | grep -q '^OK$' && ! errors "$pre" >/dev/null; then
+    echo "PASS extern visibility ($shape): accepted"
+  else
+    echo "FAIL extern visibility ($shape): a prelude or floor extern was rejected"
+    errors "$pre" | head -3
+    fail=1
+  fi
+done
+
+exl="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_export_extern_local.spr" 2>&1)"
+if echo "$exl" | grep -qF '`export` on extern `__bad_export_local` has no effect: its signature writes `local`, so it is reachable only from `demo.exportlocal`. Remove `export`'; then
+  echo "PASS extern visibility: \`export\` on an extern that writes \`local\` is an error"
+else
+  echo "FAIL extern visibility: expected \`export\` on a \`local\` extern to be rejected"
+  echo "$exl" | tail -3
+  fail=1
+fi
+
 # An importer's instance is not in scope in the module it imports, which is
 # checked first. Two halves: a method call, and a `try` whose instance is fusable.
 inst="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_importer_instance_not_in_import.spr" 2>&1)"

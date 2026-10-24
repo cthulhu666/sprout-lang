@@ -401,7 +401,7 @@ fn elab_decl(d: Decl) -> Decl =
   | FnDecl name params ret effs cs bounds body pos -> FnDecl(name, params, ret, effs, cs, bounds, elab_expr(body), pos)
   | LetDecl name body anno pos -> LetDecl(name, elab_expr(body), anno, pos)
   | InstanceDecl head ctx bounds methods pos -> InstanceDecl(head, ctx, bounds, list_map(elab_impl, methods), pos)
-  | ExternFnDecl _ _ _ _ _ _ -> d
+  | ExternFnDecl _ _ _ _ _ _ _ -> d
   | TypeDecl _ _ _ _ _ _ _ -> d
   | RecordDecl _ _ _ _ _ _ _ -> d
   | ClassDecl _ _ _ _ _ -> d
@@ -507,7 +507,7 @@ export type InstanceMethodImpl (..) =
 # --- Top-level declarations ---
 #
 # FnDecl name params return_type effects constraints linear_bounds body pos
-# ExternFnDecl name params return_type effects linear_bounds pos
+# ExternFnDecl name params return_type effects linear_bounds visibility pos
 # TypeDecl name type_params constructors deriving_classes multiplicity representation pos
 # RecordDecl name type_params fields deriving_classes multiplicity representation pos
 # LetDecl name body type_annotation pos
@@ -578,9 +578,16 @@ export type Representation (..) =
   | Published  # `export` + `(..)`, or the prelude — constructor and fields are public
   | Abstract  # no marker — representation is private to the declaring module
 
+# Whether an `extern fn` is reachable outside its declaring module: `export extern fn`
+# is `Exported`, a bare `extern fn` is `Private`. Spec-v0 §"Externs are outside the
+# module system"; the prelude's and the floor's externs are exported whatever they write.
+export type Visibility (..) =
+  | Exported
+  | Private
+
 export type Decl (..) =
   | FnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List TypeConstraint) (List String) Expr source.SourcePos
-  | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List String) source.SourcePos
+  | ExternFnDecl String (List Param) (Maybe TypeExpr) (Maybe (List String)) (List String) Visibility source.SourcePos
   | TypeDecl String (List String) (List TypeConstructor) (List String) Multiplicity Representation source.SourcePos
   | RecordDecl String (List String) (List RecordFieldDecl) (List String) Multiplicity Representation source.SourcePos
   | LetDecl String Expr (Maybe TypeExpr) source.SourcePos
@@ -595,7 +602,7 @@ export type Decl (..) =
 export fn decl_pos(d: Decl) -> source.SourcePos =
   match d with
   | FnDecl _ _ _ _ _ _ _ p -> p
-  | ExternFnDecl _ _ _ _ _ p -> p
+  | ExternFnDecl _ _ _ _ _ _ p -> p
   | TypeDecl _ _ _ _ _ _ p -> p
   | RecordDecl _ _ _ _ _ _ p -> p
   | LetDecl _ _ _ p -> p
@@ -633,7 +640,7 @@ export type NameScope (..) =
 export fn decl_value_scopes(d: Decl) -> List (String, NameScope) =
   match d with
   | FnDecl name _ _ _ _ _ _ _ -> [(name, ScopeModule)]
-  | ExternFnDecl name _ _ _ _ _ -> [(name, ScopeGlobal)]
+  | ExternFnDecl name _ _ _ _ _ _ -> [(name, ScopeGlobal)]
   | LetDecl name _ _ _ -> [(name, ScopeModule)]
   | TypeDecl _ _ ctors _ _ _ _ -> ctor_value_scopes(ctors)
   | ClassDecl _ _ methods _ _ -> method_value_scopes(methods)
@@ -782,7 +789,7 @@ fn expand_decl(table: Dict AliasHead, d: Decl) -> Decl =
   | InstanceDecl head ctx bounds methods pos ->
       InstanceDecl(expand_constraint(table, head), expand_constraints(table, ctx), bounds,
                    list_map(\m -> expand_impl(table, m), methods), pos)
-  | ExternFnDecl _ _ _ _ _ _ -> d
+  | ExternFnDecl _ _ _ _ _ _ _ -> d
   | TypeDecl _ _ _ _ _ _ _ -> d
   | RecordDecl _ _ _ _ _ _ _ -> d
   | LetDecl _ _ _ _ -> d

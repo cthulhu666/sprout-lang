@@ -1,0 +1,6 @@
+module demo.collide_exp
+
+# Exports `shared_add`. `demo.collide_priv` redeclares it without `export`.
+export let exp_ping: Int = 1
+
+export extern fn shared_add(a: Int, b: Int) -> Int

@@ -170,8 +170,8 @@ let inv_two512 = 1.0 / two512
 # reduction below needs to stop being 13-20x libm at the exponent extremes — without linking
 # libm. Rationale, prior-art survey and the rejected alternatives (LLVM `llvm.frexp` lowers
 # to a libm CALL; a C builtin is redundant): docs/double-bit-access-v0.md.
-extern fn double_to_bits(x: Double) -> Int
-extern fn double_from_bits(bits: Int) -> Double
+export extern fn double_to_bits(x: Double) -> Int
+export extern fn double_from_bits(bits: Int) -> Double
 
 # One unit in the binary64 exponent field, and the exponent bias.
 let exp_field_unit = 4503599627370496

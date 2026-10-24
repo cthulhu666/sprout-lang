@@ -1,0 +1,7 @@
+module demo.collide_priv
+
+# Redeclares `demo.collide_exp`'s exported extern without `export`. Exportedness is
+# decided per name across the build, so this must not hide it from a third module.
+export let priv_ping: Int = 2
+
+extern fn shared_add(a: Int, b: Int) -> Int

@@ -1023,12 +1023,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   declared-name selection rather than key-exclusion *specifically* because of it, it is the only
   in-repo case exercising that path, and `test_compiler.spr:123-142` is an explicit regression for a
   bug that has already happened.
-- [ ] `P3` **`export extern fn` is dead syntax and the tree has 8 of them** (7 in
-  `stdlib/net.sprout`, 1 in `stdlib/task.sprout`). An extern never enters a module's exported set
-  and `export` on one is a parsed-and-discarded no-op, so each reads as a visibility decision that
-  does nothing — the same defect class as the stale import names the diagnostics now reject.
-  Decide between rejecting it at parse time (loud, consistent with the import rules), deleting the
-  keyword at the 8 sites (silent, and the next author writes it again), or a lint rule.
 
 ### 6.5) OS and Process Primitives
 
@@ -1732,9 +1726,10 @@ deferral happened, not for current behaviour. Still open:
   and builtins are designed now so these can delete them without an API change. First user:
   `linvec_set`, a C builtin only because pure Sprout cannot call `vector_mutset`
   (`docs/persistent-array-v0.md` §12); also `byte-buffer-v0.md` §5.3's private creator and the
-  GC-in-Sprout of `native-sprout-runtime-v0.md` Phase 4 (raw loads and stores). Not designed:
-  the gate (a keyword, or module-private externs beyond the `local` rule), the primitive set,
-  and who may use it.
+  GC-in-Sprout of `native-sprout-runtime-v0.md` Phase 4 (raw loads and stores). Module privacy
+  is in place (`docs/extern-visibility-v0.md`); the open question is a gate on *declaring* an
+  extern. Not designed: that gate (a keyword, or a checked marker), the primitive set, and who
+  may use it.
 - [ ] `P2` **Make tight Sprout string-processing loops competitive with host builtins**, so moderate
   stdin/text workloads do not need dedicated host helpers to be practical. Investigate the native
   overhead in recursive stdlib string loops such as `string_lines` over stdin-loaded text — tail-

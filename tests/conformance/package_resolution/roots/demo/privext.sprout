@@ -1,0 +1,10 @@
+module demo.privext
+
+# One private extern and one exported, neither writing `local`. A private extern
+# is reachable only from the module that declares it.
+export let ping: Int = 1
+
+extern fn __priv_add(a: Int, b: Int) -> Int
+export extern fn exp_add(a: Int, b: Int) -> Int
+
+export fn add_own(a: Int, b: Int) -> Int = __priv_add(a, b)

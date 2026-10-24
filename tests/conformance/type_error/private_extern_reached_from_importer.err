@@ -1,0 +1,1 @@
+`vector_mutset` is private to `stdlib.mutable`. Mark it `export extern fn` there, or declare it in this module

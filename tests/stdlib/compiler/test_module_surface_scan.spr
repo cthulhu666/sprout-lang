@@ -156,6 +156,13 @@ fn main() -> Unit !{IO} =
     assert_true(state, "`export extern` does not put the name in the export set",
       has("exported_extern", exported) == false)
 
+    # The reachable subset: only an extern written `export extern fn`.
+    let exported_globals = parser.surface_exported_globals(surface)
+    assert_true(state, "an exported extern is among the exported globals",
+      has("exported_extern", exported_globals))
+    assert_true(state, "a plain extern is not among the exported globals",
+      has("plain_extern", exported_globals) == false)
+
     # --- the bundler still delegates rather than re-deriving ---
     # bundler.scan_source_info now CALLS parser.scan_module_surface, so these two
     # cannot disagree today — they pin the delegation, not two implementations.

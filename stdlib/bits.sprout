@@ -44,17 +44,17 @@ module stdlib.bits
 
 # Per-bit and/or/xor. On two's complement, bit i of the result depends only on bit i of
 # each operand, so these are exact at any width.
-extern fn bit_and(a: Int, b: Int) -> Int
-extern fn bit_or(a: Int, b: Int) -> Int
-extern fn bit_xor(a: Int, b: Int) -> Int
+export extern fn bit_and(a: Int, b: Int) -> Int
+export extern fn bit_or(a: Int, b: Int) -> Int
+export extern fn bit_xor(a: Int, b: Int) -> Int
 
 # Flip every bit: `bit_not(x) == -x - 1`. Note `bit_not(0)` is -1, not 1 — this is the
 # integer complement, NOT the boolean `!`.
-extern fn bit_not(a: Int) -> Int
+export extern fn bit_not(a: Int) -> Int
 
 # Arithmetic right shift: `floor(x / 2^n)`, filling vacated high bits with the sign bit.
 # Floor, not truncation — `bit_shr(-7, 1)` is -4, while `-7 / 2` is -3.
-extern fn bit_shr(x: Int, n: Int) -> Int
+export extern fn bit_shr(x: Int, n: Int) -> Int
 
 # --- 64-bit-scoped: respecify these if Int ever widens ---
 
@@ -66,7 +66,7 @@ extern fn bit_shr(x: Int, n: Int) -> Int
 # INT_MIN and `bit_shl(2, 63)` is 0, both total, and neither moved when `*` started trapping —
 # pinned at runtime, not just folded, in tests/stdlib/test_bits.spr. Prior art is unanimous:
 # Rust, Swift and Zig all trap `*` overflow and all let the left shift discard silently.
-extern fn bit_shl(x: Int, n: Int) -> Int
+export extern fn bit_shl(x: Int, n: Int) -> Int
 
 # Logical right shift: vacated high bits are filled with ZEROS regardless of sign, so
 # `bit_shr_zf(-8, 1)` is a large positive number. This is the one function in the set with
@@ -75,7 +75,7 @@ extern fn bit_shl(x: Int, n: Int) -> Int
 # and Python having no `>>>` operator). It cannot be dropped: extracting a field from a word
 # whose high bit may be set, or reading a negative Double's bit pattern via
 # `double_to_bits`, both require it.
-extern fn bit_shr_zf(x: Int, n: Int) -> Int
+export extern fn bit_shr_zf(x: Int, n: Int) -> Int
 
 # SHIFT COUNT DOMAIN, for all three shifts. A count of 0..63 shifts as expected. A count
 # >= 64 saturates to the limit of the mathematical definition — 0 for `bit_shl` and

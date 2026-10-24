@@ -1294,7 +1294,7 @@ fn decl_declared_type_name(d: ast.Decl) -> String =
   | ast.AliasDecl n _ _ _ -> n
   | ast.WrapDecl n _ _ _ _ _ _ -> n
   | ast.FnDecl _ _ _ _ _ _ _ _ -> ""
-  | ast.ExternFnDecl _ _ _ _ _ _ -> ""
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> ""
   | ast.LetDecl _ _ _ _ -> ""
   | ast.ClassDecl _ _ _ _ _ -> ""
   | ast.InstanceDecl _ _ _ _ _ -> ""

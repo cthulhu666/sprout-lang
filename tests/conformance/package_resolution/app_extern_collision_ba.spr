@@ -1,0 +1,10 @@
+module main
+import demo.collide_priv (priv_ping)
+import demo.collide_exp (exp_ping)
+
+# Same as app_extern_collision_ab with the imports swapped, so the private
+# redeclaration comes first in the bundle.
+
+let use_it: Int = shared_add(1, 2)
+
+fn main() -> Unit !{IO} = print("x")

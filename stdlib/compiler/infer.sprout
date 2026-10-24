@@ -5063,7 +5063,7 @@ export fn census_key(d: ast.Decl) -> Maybe String =
   | ast.ClassDecl _ _ _ _ _ -> Nothing
   | ast.AliasDecl _ _ _ _ -> Nothing
   | ast.WrapDecl _ _ _ _ _ _ _ -> Nothing
-  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
 
 # --- `try` (spec §5.9) ---
 #
@@ -5240,7 +5240,7 @@ fn checked_value_name(d: ast.Decl) -> Maybe String =
   | ast.FnDecl name _ _ _ _ _ _ _ -> Just(name)
   | ast.LetDecl name _ _ _ -> Just(name)
   # An extern's type is its signature; the rest define no value.
-  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
   | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
   | ast.RecordDecl _ _ _ _ _ _ _ -> Nothing
   | ast.ClassDecl _ _ _ _ _ -> Nothing
@@ -7506,7 +7506,7 @@ fn published_linear_type(decl: ast.Decl, env: Dict types.Scheme,
           fields = unbounded_fields(ast.record_field_type_exprs(fields), build_local_params(params, alias_env))))
       else Nothing
   | ast.FnDecl _ _ _ _ _ _ _ _ -> Nothing
-  | ast.ExternFnDecl _ _ _ _ _ _ -> Nothing
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> Nothing
   | ast.LetDecl _ _ _ _ -> Nothing
   | ast.ClassDecl _ _ _ _ _ -> Nothing
   | ast.InstanceDecl _ _ _ _ _ -> Nothing
@@ -7679,7 +7679,7 @@ fn validate_alias_uses(decls: List ast.Decl, arities: Dict Int) -> Maybe(source.
 fn alias_uses_in_decl(decl: ast.Decl, arities: Dict Int) -> Maybe String =
   match decl with
   | ast.FnDecl _ params ret _ _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
-  | ast.ExternFnDecl _ params ret _ _ _ -> alias_uses_in_sig(params, ret, arities)
+  | ast.ExternFnDecl _ params ret _ _ _ _ -> alias_uses_in_sig(params, ret, arities)
   | ast.TypeDecl _ _ ctors _ _ _ _ -> alias_uses_in_ctors(ctors, arities)
   | ast.RecordDecl _ _ fields _ _ _ _ -> alias_uses_in_fields(fields, arities)
   | ast.AliasDecl _ _ rhs _ -> alias_uses_in_te(rhs, arities)
@@ -7908,7 +7908,7 @@ fn decl_constraint_error(classes: Set, decl: ast.Decl) -> Maybe String =
   | ast.FnDecl name params ret _ constraints bounds _ _ ->
       let tvs = fn_sig_tyvars(params, ret)
       in maybe_or_else(bound_sig_error(bounds, name, tvs), validate_fn_constraints(constraints, name, classes, tvs))
-  | ast.ExternFnDecl name params ret _ bounds _ -> bound_sig_error(bounds, name, fn_sig_tyvars(params, ret))
+  | ast.ExternFnDecl name params ret _ bounds _ _ -> bound_sig_error(bounds, name, fn_sig_tyvars(params, ret))
   | ast.ClassDecl _ class_vars sigs _ _ -> find_map(sig_bound_error(class_vars, _), sigs)
   | ast.TypeDecl _ _ _ _ _ _ _ -> Nothing
   | ast.InstanceDecl constraint _ bounds _ _ -> head_bound_error(bounds, constraint)
@@ -9638,7 +9638,7 @@ fn pre_scan_fn_decls(decls: List ast.Decl, env: Dict types.Scheme, alias_env: Di
                   dict_set(types.arity_marker_key(name), arity_marker(list_length(params)),
                     register_fn_decl_scheme(name, params, ret_type_maybe, effects_maybe, constraints, alias_env, env))))),
             alias_env)
-      | ast.ExternFnDecl name params ret_type_maybe effects_maybe bounds _ ->
+      | ast.ExternFnDecl name params ret_type_maybe effects_maybe bounds _ _ ->
           pre_scan_fn_decls(rest,
             pre_scan_extern(name, params, ret_type_maybe, effects_maybe, bounds, alias_env, env),
             alias_env)
@@ -9917,7 +9917,7 @@ fn placement(item: (Int, ast.Decl)) -> Placement =
   | (_, ast.FnDecl _ _ _ _ _ _ _ _) -> InSegment
   | (_, ast.InstanceDecl _ _ _ _ _) -> InSegment
   | (_, ast.ClassDecl _ _ _ _ _) -> AtModuleStart
-  | (_, ast.ExternFnDecl _ _ _ _ _ _) -> Barrier
+  | (_, ast.ExternFnDecl _ _ _ _ _ _ _) -> Barrier
   | (_, ast.TypeDecl _ _ _ _ _ _ _) -> Barrier
   | (_, ast.RecordDecl _ _ _ _ _ _ _) -> Barrier
   | (_, ast.LetDecl _ _ _ _) -> Barrier
@@ -10521,7 +10521,7 @@ fn typecheck_decl(
       # how the group and non-group cases would drift apart unnoticed.
       TypedDeclErr(decl_pos,
         "internal: FnDecl reached typecheck_decl, so binding-group routing is broken (" ++ name ++ ")")
-  | ast.ExternFnDecl name params ret_type_maybe effects_maybe bounds ext_pos ->
+  | ast.ExternFnDecl name params ret_type_maybe effects_maybe bounds _ ext_pos ->
       # An extern has no BODY, so `fn_linear_gate` (and with it the
       # "modifier only on a linear parameter" guard) never ran on one: an FFI
       # author could write `borrowing` on a non-linear extern parameter, see it

@@ -1,0 +1,27 @@
+module main
+
+# `private_extern_reached_from_importer.spr` with its error's hint applied: the
+# extern is declared in this module, which is FFI the reader can see.
+
+import stdlib.mutable
+
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+
+wrap linear Box = Vector Int
+
+fn peek(b: borrowing Box) -> Vector Int =
+  match b with
+  | Box raw -> raw
+
+fn first(b: borrowing Box) -> Int =
+  match b with
+  | Box raw -> maybe_with_default(-1, vector_get(raw, 0))
+
+fn main() -> Unit !{IO} =
+  let b = Box(vector_from_list([1, 2, 3]))
+      raw = peek(b)
+  in do
+    vector_mutset(raw, 0, 99)
+    print(int_to_string(first(b)))
+    match b with
+    | Box _ -> ()

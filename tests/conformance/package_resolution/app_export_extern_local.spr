@@ -1,0 +1,4 @@
+module main
+import demo.exportlocal (ping)
+
+fn main() -> Unit !{IO} = print("x")

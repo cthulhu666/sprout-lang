@@ -101,7 +101,9 @@ not away from it: it makes the surface a *derived* fact with one definition.
 
 Per spec §"Externs are outside the module system", an extern is never qualified, never renamed,
 never in a module's exported set, is reachable by **bare** name wherever its declaring module is
-part of the build, and is unaffected by selective import lists.
+part of the build and writes `export extern fn` (or is the prelude), and is unaffected by selective
+import lists. (Visibility was added by `docs/extern-visibility-v0.md`; before that every extern was
+reachable.)
 
 "Part of the build" includes **transitively**, which is easy to miss and is verified: `stdlib.http`
 imports `stdlib.bytes`, so
@@ -201,8 +203,9 @@ from any module, including the prelude**: `print`, `panic` and `int_to_string` w
 
 ```sprout
 export type ModuleSurface (..) =
-  | ModuleSurface (List String) (List String) (List String)
-    # exported names; types whose constructors are exported; global (extern) names
+  | ModuleSurface (List String) (List String) (List String) (List String)
+    # exported names; types whose constructors are exported; global (extern) names;
+    # the globals written `export extern fn`
 ```
 
 A **token** scan, not a parse — callers want a module's surface far more often than its AST — but

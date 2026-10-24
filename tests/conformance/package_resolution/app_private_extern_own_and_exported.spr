@@ -1,0 +1,10 @@
+module main
+import demo.privext (add_own)
+
+# demo.privext calls its own private extern inside `add_own`, and its exported
+# extern `exp_add` is reachable here by bare name.
+
+let own: Int = add_own(1, 2)
+let exported: Int = exp_add(1, 2)
+
+fn main() -> Unit !{IO} = print("x")

@@ -43,7 +43,7 @@ export fn int(value: Int) -> Json =
 export fn string(value: String) -> Json =
   JsonString(value)
 
-extern fn json_stringify(value: Json) -> String
+export extern fn json_stringify(value: Json) -> String
 
 # ---- Pure-Sprout JSON parser (replaces the former C `json_parse` extern) ---------------------
 # Byte-cursor recursive descent, O(n): a structural peek (str_starts_with_at_byte) and a token

@@ -16,8 +16,8 @@ extern fn term_hide_cursor() -> Unit !{IO}
 extern fn term_show_cursor() -> Unit !{IO}
 extern fn term_is_interactive() -> Bool !{IO}
 extern fn term_read_key() -> String !{IO}
-extern fn term_read_line() -> Maybe String !{IO}
-extern fn term_write(text: String) -> Unit !{IO}
+export extern fn term_read_line() -> Maybe String !{IO}
+export extern fn term_write(text: String) -> Unit !{IO}
 
 export fn clear() -> Unit !{IO} =
   term_clear()

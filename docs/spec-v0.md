@@ -358,6 +358,9 @@ a function, a type, a class, or an off-floor extern such as `argv_get`,
 `vector_*`, `map_*` or `ref_*` — is an `Unknown variable` error
 from the typechecker, reported with a source position.
 
+The floor's externs are **exported**: the prelude and the floor need no `export`
+to be reachable (§"Externs are outside the module system").
+
 The floor carries no types, classes or instances, which is precisely what leaves
 the file's own `Maybe`, `Cons`/`Nil` and `class` declarations nothing to collide
 with. Two consequences follow from the same rule: `++` resolves through the
@@ -369,35 +372,50 @@ rationale for where the cut falls.
 
 ### Externs are outside the module system
 
-An `extern fn` declaration is **not a module-scoped name**. It is never
-qualified, never renamed, and never enters a module's exported set, so:
+An `extern fn` declaration is **not a qualifiable name**. It is never qualified
+and never renamed, and it never enters a module's exported set. It resolves by
+its **bare name**, like a linker symbol. What a module controls is whether other
+modules may reach it:
 
-- `export` on an `extern fn` has no effect. It parses and is discarded.
-- An extern is reachable by its **bare name** from anywhere its declaring module
-  is part of the build. Importing the module — under any alias, or selectively
-  for some unrelated name — is what puts it there.
+- An extern is **private** to its declaring module unless the declaration is
+  written `export extern fn`. A private extern may be called only from a module
+  that declares it. A reference from any other module is a compile error that
+  names the declaring module and the fix, as in
+  `vector_mutset` is private to `stdlib.mutable`. Mark it `export extern fn`
+  there, or declare it in this module.
+- Exportedness is decided per **name** across the build. An extern is exported if
+  any module that declares it writes `export extern fn`, or if the prelude or the
+  `no_prelude` floor declares it. One module's private redeclaration cannot hide
+  another module's exported extern from a third.
+- An **exported** extern is reachable by its bare name from anywhere its declaring
+  module is part of the build. Importing the module — under any alias, or
+  selectively for some unrelated name — is what puts it there.
 - A selective import list has no bearing on an extern either way. Naming one is
   accepted and does nothing; omitting one does not hide it. Given
-  `extern fn read_file` and `export fn read_text` in `stdlib.fs`, both
-  `import stdlib.fs (read_file)` and `import stdlib.fs (read_text)` compile, and
-  under either one a bare `read_file(…)` call resolves.
+  `export extern fn raw_read` and `export fn read_text` in a module `m`, both
+  `import m (raw_read)` and `import m (read_text)` compile, and under either
+  one a bare `raw_read(…)` call resolves.
 - **Exception:** an extern whose signature writes `local` anywhere — a
   parameter, or an arrow inside a parameter or return type, including through a
-  type alias or the fields of a sum type, record or `wrap` it names — is
-  reachable only
-  from the module that declares it. Its `local` is a promise the compiler cannot
-  check, kept only by that module's own callers; a reference from any other
-  module is a compile error naming the declaring module.
+  type alias or the fields of a sum type, record or `wrap` it names — stays
+  private whether or not `export` is written, and `export` on one is a compile
+  error. Its `local` is a promise the compiler cannot check, kept only by that
+  module's own callers.
 - Several modules may declare the same extern only with the **same signature**
   (types, parameter modes and effects, up to renaming of type variables);
   otherwise it is a compile error. Each module's own declaration is its own, so
-  a module that declares an extern itself may always call it.
+  a module that declares an extern itself may always call it, exported or not.
+
+Privacy does not stop a module from declaring another module's private extern
+itself, with the same signature, and calling it. That is deliberate FFI, visible
+in the source. Gating the declaration is not part of this rule.
 
 The consequence for diagnostics is worth stating plainly, because it differs from
 the rule for type names above: a missing import for an extern produces **no
 import-related error**. Nothing checks value references against the import graph,
-so the failure surfaces later and elsewhere — as `Unknown variable` from the
-typechecker, or as an undefined symbol at link time.
+so, for an exported extern, the failure surfaces later and elsewhere — as
+`Unknown variable` from the typechecker, or as an undefined symbol at link
+time.
 
 Where a builtin is declared therefore decides whether a program can reach it.
 The governing rule:
@@ -2995,7 +3013,7 @@ intrinsics: each lowers to a single machine instruction, and none **can be used 
 a first-class value** (`list_fold(bit_xor, 0, xs)` fails at link time). Being
 `extern` declarations they are also **never module-qualified** (§"Externs are
 outside the module system") — `import stdlib.bits` puts them in the build and they
-are then called by bare name.
+are then called by bare name. They are written `export extern fn`.
 
 `bit_not(x)` is `-x - 1`: it flips every bit, so `bit_not(0)` is `-1`. It is the
 integer complement, not the boolean `!`.

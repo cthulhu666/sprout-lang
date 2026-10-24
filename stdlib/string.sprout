@@ -19,7 +19,7 @@ import stdlib.unicode.utf8 as utf8
 # relocation refactor. Externs resolve by bare name wherever their module is bundled
 # (bundler.sprout:597 never registers them), so the import alone is sufficient — and a consumer
 # that forgets it gets `Unknown variable`, not a missing-import diagnostic.
-extern fn str_byte_len(s: String) -> Int
+export extern fn str_byte_len(s: String) -> Int
 # O(byte_len), whatever the offset: the bounds check reads the CSTR header rather than
 # scanning. Byte-indexed substring; cheaper than str_slice when the caller already tracks
 # byte positions (most compiler stdlib scanning loops).
@@ -27,10 +27,10 @@ extern fn str_byte_len(s: String) -> Int
 # boundaries. The runtime panics on a mid-codepoint split rather than silently emitting
 # invalid UTF-8. For codepoint-indexed slicing of arbitrary user input, use `str_slice`
 # (prelude) or `slice` below instead.
-extern fn str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String
-extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
-extern fn str_split_lines(s: String) -> List String
-extern fn split_words(s: String) -> List String
+export extern fn str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String
+export extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
+export extern fn str_split_lines(s: String) -> List String
+export extern fn split_words(s: String) -> List String
 
 export fn words(raw: String) -> List String =
   split_words(raw)
