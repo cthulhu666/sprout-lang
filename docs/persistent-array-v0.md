@@ -387,7 +387,7 @@ binds its linear fields as borrowed too" (spec §5.8), so a read can `match` a b
 
 | Structure | Over `LinVec` | Limit |
 |---|---|---|
-| matrix, ring buffer, heap, bitset, open-addressing hash map | directly: `type linear LMatrix a = LMatrix Int Int (LinVec a)` | one wrapper allocation per write, until reuse (below) |
+| matrix, ring buffer, heap (`stdlib.linheap`, [linheap-v0.md](linheap-v0.md)), bitset, open-addressing hash map | directly: `type linear LMatrix a = LMatrix Int Int (LinVec a)` | one wrapper allocation per write, until reuse (below) |
 | growable vector | copy into a larger `LinVec` | amortised O(1) |
 | graphs, union-find, linked lists with shared nodes | index arenas: nodes are indices | nothing collects an unreachable node; free slots are managed by hand |
 | an array of mutable arrays, `LinVec (LinVec a)` | no: `linvec.get`, `linvec.new` and `linvec.freeze` would duplicate a linear element, so `LinVec` rejects one (*Prerequisites*) | needs swap or take-and-put-back operations, and the generic-container fix |

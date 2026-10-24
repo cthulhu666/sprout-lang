@@ -7,6 +7,8 @@
 #           input, for the Grid sieve (one rebuild per strike, same constructor), the CSV
 #           splitter (a rebuild per byte, three constructors) and a binary search tree
 #           (an insert rebuilds a whole path; none allocates once every key is present).
+#   count   a fixture run at two sizes differs in one runtime counter by an expected amount,
+#           for what the API hides: the heap's `vector` count is its grows and shrinks.
 #   value   all programs print the answer the input has, so a reused cell holds what was
 #           written to it.
 set -uo pipefail
@@ -31,8 +33,8 @@ done
 
 field() { sed -n "s/.*\[sprout alloc\].* $2=\([0-9]*\).*/\1/p" "$1"; }
 
-# run <fixture> <placeholder> <value> <expected output>: -O2, then the run's object count in
-# $TMPD/<fixture>_<value>.objs.
+# run <fixture> <placeholder> <value> <expected output>: -O2, with the allocation report in
+# $TMPD/<fixture>_<value>.alloc.
 run() {
   local name="$1" key="$2" val="$3" want="$4" base="$TMPD/$1_$3"
   sed "s/$key/$val/g" "$SMOKE/$name.spr" > "$base.spr"
@@ -44,30 +46,38 @@ run() {
   SPROUT_DEBUG_ALLOC=1 "$base" > "$base.out" 2> "$base.alloc" \
     || { echo "linear-reuse-smoke: $name ($key=$val) exited non-zero" >&2; return 1; }
   [ "$(cat "$base.out")" = "$want" ] || bad "$name ($key=$val) printed '$(cat "$base.out")', not '$want'"
-  field "$base.alloc" sprout_obj > "$base.objs"
-  [ -s "$base.objs" ] || { echo "linear-reuse-smoke: no allocation report for $name" >&2; return 1; }
 }
 
-# compare <fixture> <placeholder> <small> <small answer> <large> <large answer>
-compare() {
+# compare_delta <fixture> <placeholder> <small> <small answer> <large> <large answer> <field> <want>
+# The large run's <field> minus the small run's must be <want>.
+compare_delta() {
   if run "$1" "$2" "$3" "$4" && run "$1" "$2" "$5" "$6"; then
     local a b
-    a=$(cat "$TMPD/$1_$3.objs"); b=$(cat "$TMPD/$1_$5.objs")
-    if [ "$a" = "$b" ]; then
-      echo "linear-reuse-smoke: $1 allocates $a objects at $2=$3 and $b at $2=$5"
+    a=$(field "$TMPD/$1_$3.alloc" "$7"); b=$(field "$TMPD/$1_$5.alloc" "$7")
+    if [ -z "$a" ] || [ -z "$b" ]; then
+      bad "$1: no '$7' field in the allocation report"
+    elif [ $((b - a)) -eq "$8" ]; then
+      echo "linear-reuse-smoke: $1 $7 grows by $((b - a)) from $2=$3 to $2=$5"
     else
-      bad "$1: $2=$3 allocates $a objects, $2=$5 allocates $b — a step allocates"
+      bad "$1: $7 is $a at $2=$3 and $b at $2=$5, a difference of $((b - a)), not $8"
     fi
   else
     fail=1
   fi
 }
 
+# compare <fixture> <placeholder> <small> <small answer> <large> <large answer>: a step
+# allocates nothing, so both sizes allocate the same number of objects.
+compare() { compare_delta "$@" sprout_obj 0; }
+
 # 168 primes below 1000, 17984 below 200000; 7 fields per CSV row.
 compare grid NSIZE 1000 168 200000 17984
 compare csv ROWS 20 140 4000 28000
 # Keys 0..99 sum to 4950.
 compare tree INSERTS 1000 4950 200000 4950
+# Keys i*37 mod 101 for i in 1..64 sum to 3230. 64 pushes allocate capacity 4, then grow to 8,
+# 16, 32 and 64 (5 vectors); draining shrinks at n = 16, 8, 4, 2, 1 (5 more).
+compare_delta linheap NPUSH 0 "0 ordered 0" 64 "64 ordered 3230" vector 10
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "==> linear-reuse-smoke ✓"

@@ -1,0 +1,117 @@
+module stdlib.linheap
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# A binary min-heap over `LinVec`, linear so pushes and pops write in place (Experimental,
+# as spec §5.8 is). The smallest element by `compare` pops first; ties pop in no fixed order.
+# Design: docs/linheap-v0.md.
+
+# `Heap n v` has 1 <= n <= linvec.length(v); `HeapEmpty` is the only empty heap.
+export type linear LinHeap a = | HeapEmpty | Heap Int (LinVec a)
+
+fn at(i: Int, v: borrowing LinVec a) -> a =
+  let Just x = linvec.get(i, v) else panic("linheap: index out of range (internal error)")
+  in x
+
+# Copies the first `n` cells of `src` into `dst`.
+fn copy_into(i: Int, n: Int, src: borrowing LinVec a, dst: LinVec a) -> LinVec a =
+  if i >= n then dst
+  else copy_into(i + 1, n, src, linvec.set(i, at(i, src), dst))
+
+# Moves the first `n` cells into a fresh `LinVec` of `cap` cells and drops `v`.
+fn resize(n: Int, cap: Int, v: LinVec a) -> LinVec a =
+  let moved = copy_into(0, n, v, linvec.new(cap, at(0, v)))
+      _ = linvec.drop(v)
+  in moved
+
+# Doubles the storage when it is full.
+fn grow(n: Int, v: LinVec a) -> LinVec a =
+  if n < linvec.length(v) then v
+  else resize(n, 2 * n, v)
+
+# Halves the storage once a quarter of it is in use.
+fn shrink(n: Int, v: LinVec a) -> LinVec a =
+  if 4 * n > linvec.length(v) then v
+  else resize(n, linvec.length(v) / 2, v)
+
+fn sift_up(i: Int, x: a, v: LinVec a) -> LinVec a where Ord a =
+  if i == 0 then linvec.set(0, x, v)
+  else
+    let p = (i - 1) / 2
+        px = at(p, v)
+    in if compare(x, px) < 0 then sift_up(p, x, linvec.set(i, px, v))
+    else linvec.set(i, x, v)
+
+# Places `x` at the first slot from `i` down where no child is smaller; `n` is the heap size.
+fn sift_down(i: Int, n: Int, x: a, v: LinVec a) -> LinVec a where Ord a =
+  let l = 2 * i + 1
+  in if l >= n then linvec.set(i, x, v)
+  else
+    let r = l + 1
+        lx = at(l, v)
+        (c, cx) =
+          if r >= n then (l, lx)
+          else
+            let rx = at(r, v)
+            in if compare(rx, lx) < 0 then (r, rx) else (l, lx)
+    in if compare(cx, x) < 0 then sift_down(c, n, x, linvec.set(i, cx, v))
+    else linvec.set(i, x, v)
+
+# Writes the list into cells `i`, `i + 1`, ...
+fn fill(i: Int, xs: List a, v: LinVec a) -> LinVec a =
+  match xs with
+  | [] -> v
+  | [x | rest] -> fill(i + 1, rest, linvec.set(i, x, v))
+
+# Floyd's build: sifts down each parent, last first.
+fn heapify(i: Int, n: Int, v: LinVec a) -> LinVec a where Ord a =
+  if i < 0 then v
+  else heapify(i - 1, n, sift_down(i, n, at(i, v), v))
+
+fn pop_last(top: a, v: LinVec a) -> Maybe(a, LinHeap a) =
+  let _ = linvec.drop(v)
+  in Just((top, HeapEmpty))
+
+export fn new() -> LinHeap a = HeapEmpty
+
+# O(n).
+export fn from_list(xs: List a) -> LinHeap a where Ord a =
+  match xs with
+  | [] -> HeapEmpty
+  | [first | _] ->
+      let n = list_length(xs)
+          cap = if n < 4 then 4 else n
+      in Heap(n, heapify(n / 2 - 1, n, fill(0, xs, linvec.new(cap, first))))
+
+# O(log n) amortised.
+export fn push(x: a, h: LinHeap a) -> LinHeap a where Ord a =
+  match h with
+  | HeapEmpty -> Heap(1, linvec.new(4, x))
+  | Heap n v -> Heap(n + 1, sift_up(n, x, grow(n, v)))
+
+# O(log n) amortised. An empty heap yields `Nothing` and is consumed.
+export fn pop(h: LinHeap a) -> Maybe(a, LinHeap a) where Ord a =
+  match h with
+  | HeapEmpty -> Nothing
+  | Heap n v ->
+      let top = at(0, v)
+      in if n == 1 then pop_last(top, v)
+      else Just((top, Heap(n - 1, shrink(n - 1, sift_down(0, n - 1, at(n - 1, v), v)))))
+
+# O(1).
+export fn peek(h: borrowing LinHeap a) -> Maybe a =
+  match h with
+  | HeapEmpty -> Nothing
+  | Heap _ v -> linvec.get(0, v)
+
+# O(1).
+export fn size(h: borrowing LinHeap a) -> Int =
+  match h with
+  | HeapEmpty -> 0
+  | Heap n _ -> n
+
+export fn drop(h: LinHeap a) -> Unit =
+  match h with
+  | HeapEmpty -> ()
+  | Heap _ v -> linvec.drop(v)

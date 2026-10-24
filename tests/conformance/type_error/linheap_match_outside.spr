@@ -1,0 +1,13 @@
+module main
+import stdlib.linheap (LinHeap)
+import stdlib.linheap as linheap
+
+# The type is abstract: a match on its constructors is rejected outside the module.
+
+fn size(h: LinHeap Int) -> Int =
+  match h with
+  | HeapEmpty -> 0
+#~^ ERROR
+  | Heap n v -> n
+
+fn main() -> Unit !{IO} = print("x")

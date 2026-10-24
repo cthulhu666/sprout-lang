@@ -1766,6 +1766,13 @@ deferral happened, not for current behaviour. Still open:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
   "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry. Proposal:
   `docs/specialisation-v0.md`.
+- [ ] `P3` **Specialise context-instance bodies, so tuple keys compare directly.** `Ord (a, b, c,
+  d, e) where Ord a, …` reaches each field through a context dictionary, and
+  `docs/specialisation-v0.md` §4 *Limits* does not copy instance bodies. A heap keyed on a 5-tuple
+  of `Int` makes ~2.5× the indirect calls of one keyed on a type that derives `Ord` (19.2M vs 7.8M
+  `closure_apply` per 100 A* runs) and runs ~2.5× slower (`docs/linheap-v0.md` §5). After
+  *Specialise generic functions at concrete types*: copying an instance at concrete context types
+  would make the tuple key as cheap as the derived one.
 - [ ] `P2` **Calls to Sprout functions root their operands, though the callee roots what it
   needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots every call's heap operands, for
   runtime builtins that allocate before reading them; for a call to a Sprout function the pushes

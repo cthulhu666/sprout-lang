@@ -1,0 +1,1 @@
+`new` takes `a` as a value it may copy or drop, and `stdlib.linvec.LinVec Int` is linear; if `new` uses its `a` exactly once, add `where linear a` to it
