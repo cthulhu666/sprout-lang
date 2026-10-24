@@ -108,9 +108,38 @@ check "a traversing raw id is rejected" "1" \
 check "a missing raw id is rejected"   "1" \
   "$(bash "$LEDGER" raw 2>&1 >/dev/null | grep -c 'run id')"
 
+# `--write` lets the script do the write: in a worktree the ledger dir sits in the
+# main checkout's `.git`, which an isolated session's file tools refuse.
+wid="write-test"
+printf '# findings\n\nline two\n  indented\n' > "$R/want.md"
+wpath=$(bash "$LEDGER" findings "$wid" --write < "$R/want.md")
+check "findings --write prints the plain path" "$(bash "$LEDGER" findings "$wid")" "$wpath"
+check "findings --write round-trips"   "0"  "$(cmp -s "$R/want.md" "$wpath"; echo $?)"
+printf '[]' > "$R/want.json"
+wraw=$(bash "$LEDGER" raw "$wid" --write < "$R/want.json")
+check "raw --write prints the plain path" "$(bash "$LEDGER" raw "$wid")" "$wraw"
+check "raw --write round-trips []"     "0"  "$(cmp -s "$R/want.json" "$wraw"; echo $?)"
+check "--write leaves no temp file"    "2"  "$(ls "${wpath%/*}" | grep -c -- "-$wid\.")"
+
+bash "$LEDGER" findings "$wid" --write < /dev/null 2> "$R/err.txt"
+check "empty stdin exits 2"            "2"  "$?"
+check "empty stdin says so"            "1"  "$(grep -c 'empty' "$R/err.txt")"
+check "empty stdin keeps the old file" "0"  "$(cmp -s "$R/want.md" "$wpath"; echo $?)"
+bash "$LEDGER" findings "fresh-empty" --write < /dev/null 2> /dev/null
+check "empty stdin creates no file"    "0"  "$(ls "${wpath%/*}" | grep -c 'fresh-empty')"
+
+printf 'x' | bash "$LEDGER" findings "../../escape" --write 2> "$R/err.txt"
+check "a traversing id with --write is rejected" "2" "$?"
+check "a traversing id writes nothing" "0"  "$(find "$R" -name 'escape*' | wc -l | tr -d ' ')"
+printf 'x' | bash "$LEDGER" findings "$wid" --bogus 2> /dev/null
+check "an unknown flag is rejected"    "2"  "$?"
+check "an unknown flag writes nothing" "0"  "$(cmp -s "$R/want.md" "$wpath"; echo $?)"
+
 # Same subdirectory rule as the rest: a session can start anywhere.
 mkdir -p sub2
 cd sub2 || exit 1
+printf 'from sub\n' | bash "$LEDGER" findings "sub-write" --write > /dev/null
+check "--write from a subdir"          "from sub" "$(cat "${wpath%/*}/findings-sub-write.md")"
 sub_path=$(bash "$LEDGER" findings "$id1")
 check "findings path from a subdir"    "1"  "$([ -n "$sub_path" ] && [ "$sub_path" = "$fpath" ] && echo 1 || echo 0)"
 sub_raw=$(bash "$LEDGER" raw "$id1")

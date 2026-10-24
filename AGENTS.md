@@ -68,10 +68,10 @@ and it records nothing, so the change is still gated once you reply. Test with
 **`/sprout-review`** — `.claude/skills/sprout-review/SKILL.md`, an ensemble diff review that also
 records the run. `/code-review` leaves nothing on disk, so nothing can say how many reviews a branch
 has had; this one opens and closes a row in `$GIT_DIR/claude-review/runs.tsv` (per-worktree,
-invisible to `git status`) and writes the findings beside it, at the path
-`review_ledger.sh findings <id>` names — a count says a review happened, the file says what it said.
-Each pass's findings, in its own words, go to `review_ledger.sh raw <id>`: the report is judged and
-grouped by the reader, so it cannot say what the passes said. Writing them down is what let
+invisible to `git status`) and writes the findings beside it, through
+`review_ledger.sh findings <id> --write` — a count says a review happened, the file says what it
+said. Each pass's findings, in its own words, go to `review_ledger.sh raw <id> --write`: the report
+is judged and grouped by the reader, so it cannot say what the passes said. Writing them down is what let
 `OVERLAP_MIN` be measured — it had been carried for three runs on recollection — and the measurement
 retired the clustering it belonged to, so the script now groups nothing and gates nothing.
 It takes an effort level like `/code-review` does — `/sprout-review [low|medium|high|xhigh|max]

@@ -46,7 +46,7 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   `docs/gates.md`, `docs/idiomatic-sprout.md`.
 
 - [ ] `P2` **The findings file records what was found, not what was done about it.**
-  `review_ledger.sh findings <id>` gives the skill a path and it writes the list there before
+  `review_ledger.sh findings <id> --write` takes the list on stdin and files it before
   reporting, so the denominator can no longer quietly shrink. What is still missing is the other
   half: which findings were fixed, which were consciously declined, and by what commit. Needs a
   disposition appended per finding as work lands, and something that notices a finding nobody ever

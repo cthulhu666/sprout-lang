@@ -10,8 +10,9 @@
 #
 #   review_ledger.sh open            record a run starting; prints the run id
 #   review_ledger.sh done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]
-#   review_ledger.sh findings <id>   print the path to write that run's findings to
-#   review_ledger.sh raw <id>        path for that run's findings as each pass worded them
+#   review_ledger.sh findings <id> [--write]   path of that run's findings file
+#   review_ledger.sh raw <id> [--write]        path for the findings as each pass worded them
+#     --write: read stdin into that file (atomically), then print the path
 #   review_ledger.sh count           completed runs on this branch
 #   review_ledger.sh show            one-line summary, for the status line
 set -uo pipefail
@@ -105,7 +106,32 @@ ledger_sibling() {
   printf '%s/%s-%s.%s\n' "$dir" "$kind" "$id" "$ext"
 }
 
-cmd_findings() { ledger_sibling findings findings md "${1:-}"; }
+# `--write` reads stdin into the sibling path. The ledger dir sits inside the main
+# checkout's `.git` in a worktree, which an isolated session's file tools refuse.
+# Temp file then `mv`, so an interrupted write leaves no half file; empty stdin is
+# an error so a failed upstream command cannot blank an earlier file.
+ledger_sibling_cmd() {
+  local what="$1" kind="$2" ext="$3" id="${4:-}" flag="${5:-}" path tmp
+  case "$flag" in
+    "" | --write) ;;
+    *) echo "review_ledger.sh ${what}: unknown argument '${flag}' (only --write)" >&2
+       return 2 ;;
+  esac
+  path=$(ledger_sibling "$what" "$kind" "$ext" "$id") || return $?
+  if [ "$flag" = --write ]; then
+    tmp=$(mktemp "${path%/*}/.tmp.XXXXXX") || return 1
+    cat > "$tmp" || { rm -f "$tmp"; return 1; }
+    if [ ! -s "$tmp" ]; then
+      rm -f "$tmp"
+      echo "review_ledger.sh ${what}: empty stdin, nothing written" >&2
+      return 2
+    fi
+    mv -f "$tmp" "$path" || { rm -f "$tmp"; return 1; }
+  fi
+  printf '%s\n' "$path"
+}
+
+cmd_findings() { ledger_sibling_cmd findings findings md "$@"; }
 
 # The findings as each pass worded them. The report next to it is judged and grouped
 # by a reader, so it cannot answer what the passes actually said: `OVERLAP_MIN` sat
@@ -113,7 +139,7 @@ cmd_findings() { ledger_sibling findings findings md "${1:-}"; }
 # summaries it scored were never written down. Writing them down is what let the
 # threshold be measured, and measuring it is what removed it. JSON, not prose — this
 # one is for replaying a decision over the raw claims, not for reading.
-cmd_raw() { ledger_sibling raw raw json "${1:-}"; }
+cmd_raw() { ledger_sibling_cmd raw raw json "$@"; }
 
 # A run counts as complete only once, however many `done` rows name it: the id
 # column is what dedupes, so a retry cannot inflate the number.
@@ -160,6 +186,6 @@ case "${1:-show}" in
   raw) shift; cmd_raw "$@" ;;
   count) cmd_count ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id>|raw <id>|count|show}" >&2
+  *) echo "usage: review_ledger.sh {open|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id> [--write]|raw <id> [--write]|count|show}" >&2
      exit 2 ;;
 esac
