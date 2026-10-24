@@ -495,9 +495,9 @@ fn test19_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
-# Tests 19b-19d: `linvec_push`, `linvec_truncate` and `vector_truncate` are NOT triggers
-# either.  Each is malloc/realloc or plain stores (no GC allocation, no collector call), so
-# %p live across the call gets no root.  `store_program` calls `callee` with `args`.
+# Tests 19b-19e: `linvec_push`, `linvec_truncate`, `vector_truncate` and `vector_push` are
+# NOT triggers either.  Each is malloc/realloc or plain stores (no GC allocation, no collector
+# call), so %p live across the call gets no root.  `store_program` calls `callee` with `args`.
 fn store_program(name: String, callee: String, args: List String) -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
     sprout_ir.IRFunction(name,
@@ -517,6 +517,9 @@ fn test19c_program() -> sprout_ir.IRProgram =
 
 fn test19d_program() -> sprout_ir.IRProgram =
   store_program("vector_truncate_nontrigger", "vector_truncate", Cons(sprout_ir.param_ssa("v"), Cons("%n", Nil)))
+
+fn test19e_program() -> sprout_ir.IRProgram =
+  store_program("vector_push_nontrigger", "vector_push", Cons(sprout_ir.param_ssa("v"), Cons("%n", Nil)))
 
 # ---------------------------------------------------------------------------
 # B2 reach extension: the rooting pass also peeks the callee name for
@@ -833,13 +836,16 @@ fn main() -> Unit !{IO} =
     check_false("T19: no push_i64_root across vector_mutset (non-allocating store)",
                  contains(lower(test19_program()), "call i64 @sprout_gc_push_i64_root")),
 
-    # --- Test 19b-19d (B2): linvec_push, linvec_truncate and vector_truncate are NON-triggers.
+    # --- Test 19b-19e (B2): linvec_push, linvec_truncate, vector_truncate, vector_push are
+    # NON-triggers.
     check_false("T19b: no push_i64_root across linvec_push (malloc growth, no GC)",
                  contains(lower(test19b_program()), "call i64 @sprout_gc_push_i64_root")),
     check_false("T19c: no push_i64_root across linvec_truncate (plain stores)",
                  contains(lower(test19c_program()), "call i64 @sprout_gc_push_i64_root")),
     check_false("T19d: no push_i64_root across vector_truncate (plain stores)",
                  contains(lower(test19d_program()), "call i64 @sprout_gc_push_i64_root")),
+    check_false("T19e: no push_i64_root across vector_push (malloc growth, no GC)",
+                 contains(lower(test19e_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 20 (B2 reach): vector_get_unboxed (IRCallUnboxed2) is a NON-trigger.
     check_false("T20: no push_i64_root across vector_get_unboxed (non-allocating unboxed read)",

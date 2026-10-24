@@ -112,10 +112,9 @@ because the backing array is plain `malloc` and invisible to an object-count-bas
 byte-blind-GC-trigger entry in `BACKLOG.md`). For a growing buffer that is the right answer anyway —
 it is live, not garbage — but a workload that only pushes will not collect on its own account.
 
-The compiler does not know any of this, so the emitted `mutvec_push` roots both operands around the
-`vector_push` call (visible in `tests/golden/ir/examples__astar.sprout.ll`). That is correct and
-costs two root pushes per append; it is also a concrete instance of what the interprocedural
-non-allocation inference in `BACKLOG.md` would remove, since `vector_push` provably cannot collect.
+`vector_push` is on the hand-written non-allocating list (`ir_rooting.is_nonallocating_read`), so
+the emitted `mutvec_push` roots nothing around it. The interprocedural non-allocation inference in
+`BACKLOG.md` would replace that list.
 
 `vector_push` is the **third** write-barrier site, joining `ref_write` and `vector_mutset`, and
 carries the same ageprof hook. The generational-GC backlog entry previously justified its closed
