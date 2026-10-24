@@ -1190,7 +1190,8 @@ fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
 # call graph (start all-false; `true` is absorbing → converges): a function may
 # trigger iff it has a LOCAL trigger (a self-triggering op, a call to an unknown
 # / non-allow-listed extern, or an indirect closure call) OR any Sprout callee
-# may trigger.
+# may trigger.  A block that calls a function that never returns contributes
+# nothing to "local trigger" or "Sprout callee" (see ops_never_return).
 #
 # SAFETY (memory-critical, inherits op_triggers_gc's scars):
 #   - Conservative default: anything not PROVEN non-triggering stays a trigger.
@@ -1198,6 +1199,13 @@ fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
 #     IRApplyClosure and every self-triggering op → true (via op_triggers_gc).
 #   - `summary[F] == false` is therefore a PROOF F cannot trigger GC, so eliding
 #     roots across a call to F is sound.
+#   - The noreturn-block exemption needs two premises: (1) the listed externs never
+#     return (is_noreturn_extern); (2) no Sprout frame resumes after a panic.  The
+#     runtime has no setjmp/longjmp, and sprout_scheduler.c fails via sprout_fail
+#     (exit(1)) or drops a task's context unresumed.  Only the atexit collect runs
+#     after, and it resumes no Sprout code.  Task-boundary panic isolation would
+#     break (2) and must remove this.  Callers' roots only: a panicking function
+#     still roots its own values, as the panic call's arguments outlive its triggers.
 #   - Validated under SPROUT_GC_STRESS=1 like every rooting change.
 
 # --- Phase 1: raw per-function extraction (fn_names-INDEPENDENT, so the streaming
@@ -1219,28 +1227,76 @@ fn calls_nonallocating_extern(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRCallUnboxed2 _ _ _ fname _ -> is_nonallocating_unboxed_read(fname)
   | _ -> false
 
-fn scan_op_raw(op: sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
-  match acc with
-  | (nc, targets) ->
-      match op_raw_callee(op) with
-      | Just g -> (nc || op_triggers_gc(op), set_insert(g, targets))
-      | Nothing -> (nc || op_triggers_gc(op), targets)
+# Externs that never return, each verified in runtime/sprout_runtime.c.  Add a name
+# only after reading its body; an unlisted one is just an unknown extern (a trigger).
+#   panic — `sprout_fail(msg)`, which is `__attribute__((noreturn))` and ends in
+#           fprintf + exit(1).  The `return 0LL` after it is dead code.
+# The IR also has two ops that lower to a noreturn call plus `unreachable`: IRPanic
+# (`@panic`) and IRAbortMatch (`@sprout_abort_match`, noreturn in C and declared so).
+# `sprout_fail` and `sprout_abort_match` are never the name of an IRCall.
+fn is_noreturn_extern(fname: String) -> Bool =
+  fname == "panic"
 
-fn scan_ops_raw(ops: List sprout_ir.IROp, acc: (Bool, Set)) -> (Bool, Set) =
+fn op_never_returns(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRPanic _ -> true
+  | sprout_ir.IRAbortMatch -> true
+  | sprout_ir.IRCall _ _ fname _ -> is_noreturn_extern(fname)
+  | _ -> false
+
+# Whether control entering a block never reaches its end.  A source `panic(...)`
+# is an IRCall in the middle of its block, with the join branch after it; a
+# straight-line block that makes the call anywhere never returns.  Judged per
+# block: not propagated to predecessors, and a Sprout fn that only panics is
+# not inferred to be noreturn.
+fn ops_never_return(ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest -> if op_never_returns(op) then true else ops_never_return(rest)
+
+# A function's raw summary.  `local`: a trigger outside the calls (a self-triggering
+# op, an indirect call) or an unknown extern call, in a block that returns.
+# `edges`: every callee, noreturn blocks included; mutual TCO reads it through
+# raw_call_graph.  `gc_callees`: callees in blocks that return; the GC summary
+# reads it.  Abstract outside this module.
+export type RawSummary = (local: Bool, edges: Set, gc_callees: Set)
+
+# `returns` is false in a noreturn block: its callees go into `edges` only.
+fn scan_op_raw(op: sprout_ir.IROp, returns: Bool, acc: RawSummary) -> RawSummary =
+  match op_raw_callee(op) with
+  | Just g ->
+      RawSummary(local = acc.local || (returns && op_triggers_gc(op)),
+                 edges = set_insert(g, acc.edges),
+                 gc_callees = if returns then set_insert(g, acc.gc_callees) else acc.gc_callees)
+  | Nothing ->
+      RawSummary(local = acc.local || (returns && op_triggers_gc(op)),
+                 edges = acc.edges, gc_callees = acc.gc_callees)
+
+fn scan_ops_raw(ops: List sprout_ir.IROp, returns: Bool, acc: RawSummary) -> RawSummary =
   match ops with
   | Nil -> acc
-  | Cons op rest -> scan_ops_raw(rest, scan_op_raw(op, acc))
+  | Cons op rest -> scan_ops_raw(rest, returns, scan_op_raw(op, returns, acc))
 
-fn scan_blocks_raw(blocks: List sprout_ir.IRBlock, acc: (Bool, Set)) -> (Bool, Set) =
+fn scan_blocks_raw(blocks: List sprout_ir.IRBlock, acc: RawSummary) -> RawSummary =
   match blocks with
   | Nil -> acc
-  | Cons b rest -> scan_blocks_raw(rest, scan_ops_raw(block_ops(b), acc))
+  | Cons (sprout_ir.IRBlock _ ops) rest ->
+      scan_blocks_raw(rest, scan_ops_raw(ops, !ops_never_return(ops), acc))
 
-# Per-function raw summary: (has-non-call-trigger, non-allow-listed call targets).
-# fn_names-independent — the streaming pre-pass calls this per translated fn.
-export fn fn_raw_summary(f: sprout_ir.IRFunction) -> (Bool, Set) =
+# Per-function raw summary.  fn_names-independent — the streaming pre-pass
+# calls this per translated fn.
+export fn fn_raw_summary(f: sprout_ir.IRFunction) -> RawSummary =
   match f with
-  | sprout_ir.IRFunction _ _ _ blocks -> scan_blocks_raw(blocks, (false, set_empty()))
+  | sprout_ir.IRFunction _ _ _ blocks ->
+      scan_blocks_raw(blocks, RawSummary(local = false, edges = set_empty(), gc_callees = set_empty()))
+
+# The call graph mutual TCO reads: every call edge, noreturn blocks included.
+export fn raw_call_graph(raw: List (String, RawSummary)) -> List (String, (Bool, Set)) =
+  list_map(raw_entry_edges, raw)
+
+fn raw_entry_edges(entry: (String, RawSummary)) -> (String, (Bool, Set)) =
+  match entry with
+  | (name, rs) -> (name, (rs.local, rs.edges))
 
 # --- Phase 2: resolve raw entries against the full name set, then fixpoint. ---
 
@@ -1261,20 +1317,20 @@ fn resolve_entry(name: String, nc: Bool, targets: Set, names: Set) -> (String, (
   match resolve_targets(set_to_list(targets), names, Nil) with
   | (has_unknown, callees) -> (name, (nc || has_unknown, callees))
 
-fn resolve_all(raw: List (String, (Bool, Set)), names: Set,
+fn resolve_all(raw: List (String, RawSummary), names: Set,
                acc: List (String, (Bool, List String))) -> List (String, (Bool, List String)) =
   match raw with
   | Nil -> list_reverse(acc)
-  | Cons (name, (nc, targets)) rest ->
-      resolve_all(rest, names, Cons(resolve_entry(name, nc, targets, names), acc))
+  | Cons (name, rs) rest ->
+      resolve_all(rest, names, Cons(resolve_entry(name, rs.local, rs.gc_callees, names), acc))
 
-fn raw_names_loop(raw: List (String, (Bool, Set)), acc: Set) -> Set =
+fn raw_names_loop(raw: List (String, RawSummary), acc: Set) -> Set =
   match raw with
   | Nil -> acc
   | Cons (name, _) rest -> raw_names_loop(rest, set_insert(name, acc))
 
 fn extract_raw_summaries(fns: List sprout_ir.IRFunction,
-                         acc: List (String, (Bool, Set))) -> List (String, (Bool, Set)) =
+                         acc: List (String, RawSummary)) -> List (String, RawSummary) =
   match fns with
   | Nil -> list_reverse(acc)
   | Cons f rest ->
@@ -1319,7 +1375,7 @@ fn fixpoint_iterate(entries: List (String, (Bool, List String)),
 # Public (streaming path): build the summary from raw per-function entries the
 # pre-pass collected one function at a time.  Names for callee resolution are the
 # raw entries' own names.
-export fn summary_from_raw(raw: List (String, (Bool, Set))) -> Dict Bool =
+export fn summary_from_raw(raw: List (String, RawSummary)) -> Dict Bool =
   match resolve_all(raw, raw_names_loop(raw, set_empty()), Nil) with
   | resolved -> fixpoint_iterate(resolved, 0, dict_empty())
 

@@ -3896,11 +3896,7 @@ entry:
 
 define i64 @__sprout_ir_eta_range_count_10(i64 %p$env$, i64 %p$a0) {
 entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
   %ret = call i64 @range_count(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %ret
 }
 

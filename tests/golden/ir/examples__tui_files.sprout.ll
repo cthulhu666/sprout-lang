@@ -12529,11 +12529,7 @@ entry:
   br i1 %t$6, label %then_1, label %else_1
 then_1:
   %t$3 = call i64 @stdlib.tui.screen.back_of(i64 %p$s)
-  %t$7 = alloca i64
-  store i64 %t$3, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$4 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$3, i64 %p$row, i64 %p$col)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 else_1:
   %t$5 = load i64, ptr @stdlib.tui.screen.blank
@@ -12650,10 +12646,10 @@ entry:
 
 define i64 @stdlib.tui.screen.repair(i64 %p$s, i64 %p$col, i64 %p$row) {
 entry:
+  %t$0 = call i64 @stdlib.tui.screen.cell_at(i64 %p$s, i64 %p$col, i64 %p$row)
   %t$2 = alloca i64
   store i64 %p$s, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @stdlib.tui.screen.cell_at(i64 %p$s, i64 %p$col, i64 %p$row)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
@@ -14017,28 +14013,17 @@ join_3:
 define i64 @stdlib.tui.screen.cell_changed(i64 %p$s, i64 %p$col, i64 %p$row) {
 entry:
   %t$0 = call i64 @stdlib.tui.screen.back_of(i64 %p$s)
+  %t$1 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$0, i64 %p$row, i64 %p$col)
+  %t$2 = call i64 @stdlib.tui.screen.front_of(i64 %p$s)
+  %t$3 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$2, i64 %p$row, i64 %p$col)
   %t$6 = alloca i64
-  store i64 %p$s, ptr %t$6
+  store i64 %t$1, ptr %t$6
   %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$8 = alloca i64
-  store i64 %t$0, ptr %t$8
+  store i64 %t$3, ptr %t$8
   %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$1 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$0, i64 %p$row, i64 %p$col)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$2 = call i64 @stdlib.tui.screen.front_of(i64 %p$s)
-  %t$11 = alloca i64
-  store i64 %t$1, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$13 = alloca i64
-  store i64 %t$2, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$3 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$2, i64 %p$row, i64 %p$col)
-  %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$16 = alloca i64
-  store i64 %t$3, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$4 = call i64 @__tc_Eq_stdlib_tui_screen_Cell_eq(i64 %t$1, i64 %t$3)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$5 = xor i64 %t$4, 1
   ret i64 %t$5
 }
@@ -14158,23 +14143,9 @@ entry:
 define i64 @stdlib.tui.screen.emit_cell$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %p$pbpad$5) {
 entry:
   %t$0 = call i64 @stdlib.tui.screen.back_of(i64 %p$s) noinline
-  %t$5 = alloca i64
-  store i64 %p$s, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$7 = alloca i64
-  store i64 %p$last, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$9 = alloca i64
-  store i64 %p$acc, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$11 = alloca i64
-  store i64 %t$0, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$1 = call i64 @stdlib.mutable.mutmatrix_at(i64 %t$0, i64 %p$row, i64 %p$col) noinline
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$2 = call i64 @stdlib.tui.screen.front_of(i64 %p$s) noinline
   %t$3 = call i64 @stdlib.mutable.mutmatrix_set(i64 %t$2, i64 %p$row, i64 %p$col, i64 %t$1) noinline
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 3)
   %t$4 = musttail call i64 @stdlib.tui.screen.emit_known$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %p$last, i64 %t$1) noinline
   ret i64 %t$4
 }

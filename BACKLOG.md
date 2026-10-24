@@ -349,6 +349,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   as it grows, 0.2% of self-compile allocation (2026-10-05). Fix: walk
   `scc.sccs_in_dependency_order` callees first, as mutual TCO Phase A now does. Phase A is linear,
   so `scripts/scc_cost_gate.sh` no longer needs its fixtures to alternate arity to dodge it.
+- [ ] `P3` **Noreturn paths in `ir_rooting` stop at the block that calls `panic`.** The may-trigger
+  summary skips such a block (`ops_never_return`) but nothing reaches further. Open: (1) a block
+  whose every successor is a noreturn block never returns either, so `br` to a panic arm
+  qualifies; (2) a Sprout fn whose every path panics is itself noreturn, so its callers' blocks
+  qualify; (3) `rewrite_ops` still roots values across triggers inside the panic block, which is
+  dead weight there but needed for the call's own arguments, so only the unused ones can go.
+  Each needs the `panic` premises re-checked, and (2) a fixpoint over the call graph.
 - [ ] `P3` **Two `@fwd:` marker lookups still walk the whole type environment.**
   `infer.forwarded_tdict_for_tyvar` (after a direct-key miss) and `resolve_via_fwd_for_prog_var`
   turn `dict_entries(env)` into a list to find `@fwd:*:<class>` markers: 2.9% and 1.0% of
@@ -597,7 +604,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   scheduler a per-task panic boundary: unwind to the spawning `with_scope`/`task_spawn` frame, mark
   the task failed, reclaim it, let siblings continue, and let a supervisor respond (500 + loud log).
   Buildable without type-system work and it de-risks the eventual `Exn`-effect unwinding.
-  **Caveats:** GC type-aware rooting must be settled on unwound frames, and a task that panics
+  **Caveats:** `ir_rooting`'s noreturn-block exemption assumes nothing resumes after a panic and
+  must go with this. GC type-aware rooting must be settled on unwound frames, and a task that panics
   mid-mutation of shared state can leave it inconsistent — the safe contract is terminate +
   notify, never resume-in-place.
 - [ ] `P2` **A bare `<-` bind of a `Result` in a `Unit`-returning function silently discards the

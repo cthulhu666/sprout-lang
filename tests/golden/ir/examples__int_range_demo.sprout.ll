@@ -574,6 +574,7 @@ entry:
   %t$0 = call i64 @__tc_ToString_String_to_string(i64 %p$label)
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
+  %t$3 = call i64 @range_count(i64 %p$route)
   %t$29 = alloca i64
   store i64 %p$route, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
@@ -583,7 +584,6 @@ entry:
   %t$33 = alloca i64
   store i64 %t$2, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
-  %t$3 = call i64 @range_count(i64 %p$route)
   %t$4 = call i64 @__tc_ToString_Int_to_string(i64 %t$3)
   %t$5 = call i64 @__tc_ToString_String_to_string(i64 %t$4)
   %t$6 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
