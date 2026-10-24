@@ -1,0 +1,9 @@
+module main
+import demo.privext (ping)
+
+# Prelude externs are exported implicitly: `vector_length` is off the floor and
+# `str_len` is on it. Neither declaration writes `export`.
+
+let n: Int = vector_length(vector_from_list([1, 2, 3])) + str_len("ab")
+
+fn main() -> Unit !{IO} = print(int_to_string(n))

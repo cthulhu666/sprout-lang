@@ -8,6 +8,7 @@ import stdlib.task (Scope, with_scope, scope_handle)
 # Rejections: tests/conformance/type_error/extern_*_redeclared_*.
 
 extern fn __task_fork(scope_id: Int, work: once local Unit -> b !{IO}) -> Int !{IO}
+extern fn __task_await(task_id: Int) -> a !{IO}
 
 fn fork_seven(s: Scope) -> Int !{IO} =
   do

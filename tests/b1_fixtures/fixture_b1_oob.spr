@@ -3,6 +3,9 @@ module main
 # that module so they resolve. The alias is deliberately unused — see stdlib/mutable.sprout.
 import stdlib.mutable as mutable
 
+# Private to stdlib.mutable, so declared here: this fixture reads a raw Vector.
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
+
 # B1 trap coverage (finding ④b): a raw out-of-bounds read on a real `Vector Double`
 # must hit the INLINE bounds-check guard (vec_double_guard: `idx uge len` -> IRPanic)
 # and abort. The b1-gate runs this and asserts a non-zero exit + the trap message.

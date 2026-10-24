@@ -1,0 +1,10 @@
+module main
+import demo.collide_exp (exp_ping)
+import demo.collide_priv (priv_ping)
+
+# demo.collide_exp exports `shared_add`; demo.collide_priv redeclares it without
+# `export`. This module declares neither and still reaches it.
+
+let use_it: Int = shared_add(1, 2)
+
+fn main() -> Unit !{IO} = print("x")

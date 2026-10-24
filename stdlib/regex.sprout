@@ -21,7 +21,7 @@ extern fn regex_is_match(pattern: String, text: String) -> Bool
 # that meant nothing here. This was also the ONLY place the C runtime constructed
 # an IntRange, and therefore the only thing keeping the type in the runtime at all
 # (docs/ranges-v0.md Appendix B).
-extern fn regex_find_match(pattern: String, text: String) -> Maybe Match
+export extern fn regex_find_match(pattern: String, text: String) -> Maybe Match
 extern fn regex_replace_all_literal(pattern: String, replacement: String, text: String) -> String
 extern fn regex_escape(raw: String) -> String
 

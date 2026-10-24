@@ -117,7 +117,7 @@ type ImportBinding =
 # fallbacks can tell a hand-written canonical name from a field chain. See
 # `guard_canonical`.
 #
-# `foreign` is the private externs declared by OTHER modules (name -> module); see
+# `foreign` is the private externs declared by OTHER modules, by name; see
 # `foreign_externs`.
 type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
                    class_locals: Dict String,
@@ -126,7 +126,11 @@ type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
                    alias_val_exports: Dict (Dict String),
                    alias_type_exports: Dict (Dict String),
                    canonical_names: Dict String, prelude: PreludeNames,
-                   foreign: Dict String)
+                   foreign: Dict PrivateExtern)
+
+# An extern a module may NOT reach unless it declares it too: the module that declares
+# it, and whether its signature writes `local` (which only changes the diagnostic).
+type PrivateExtern = (declarer: String, name: String, writes_local: Bool)
 
 # The prelude's own symbol tables, held as they are, built once per bundle beside
 # `canonical`. `bare` is built from the externs, which are in no value table.
@@ -846,7 +850,7 @@ fn add_decl_to_symbols(mod_name: String, exported: List String, ctor_types: List
   # The NAME is still recorded, in extern_names — listing an extern in an import
   # is how its module gets bundled, so the import checks must not read it as a
   # name the module does not have.
-  | ast.ExternFnDecl name _ _ _ _ _ ->
+  | ast.ExternFnDecl name _ _ _ _ _ _ ->
       add_extern_name(name, add_scoped_values(mod_name, exported, decl, acc))
 
 fn add_extern_name(name: String, acc: ModuleSymbols) -> ModuleSymbols =
@@ -964,7 +968,7 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
 
 fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                      extra_roots: List String, canonical: Dict String,
-                     prelude: PreludeNames, externs: List (String, String)) -> ResolveCtx =
+                     prelude: PreludeNames, externs: List PrivateExtern) -> ResolveCtx =
   match mod with
   | ParsedModule _ path specs _ _ _ ->
       match dict_get(path, all_symbols) with
@@ -979,20 +983,51 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
               prelude = prelude,
               foreign = foreign_externs(sym_extern_names(own_syms), externs)))
 
-# (module, name) for every extern in the bundle whose signature writes `local`
-# anywhere: a parameter mode, or one inside a parameter or return type, seen
-# through every type definition the signature names (alias, sum, record, wrap),
-# transitively. Few, built once per bundle.
-#
-# Decided on the signature as QUALIFIED, so a type name is canonical and finds its
-# definition in the table whichever module declared it. The contexts are built
-# without private externs: those only rename value names, never type names.
-fn private_externs_of(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
-                      stdlib_root: String, extra_roots: List String, canonical: Dict String,
-                      prelude: PreludeNames) -> List (String, String) =
-  list_flat_map(private_externs_in_module(_, defs, ctx_of), modules)
+# One extern declaration. `in_prelude` is the prelude or the `no_prelude` floor (module
+# ""), whose externs are exported whatever they write; `written_export` is `export
+# extern fn`. `writes_local` is decided on the signature as QUALIFIED, so a type name is
+# canonical and finds its definition in the table whichever module declared it.
+type ExternFact = (declarer: String, path: String, name: String, in_prelude: Bool,
+                   written_export: Bool, writes_local: Bool, pos: source.SourcePos)
+
+# Every extern declaration in the bundle. The contexts are built without private
+# externs: those only rename value names, never type names.
+fn extern_facts_of(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
+                   stdlib_root: String, extra_roots: List String, canonical: Dict String,
+                   prelude: PreludeNames) -> List ExternFact =
+  list_flat_map(extern_facts_in_module(_, defs, ctx_of), modules)
   where ctx_of = build_resolve_ctx(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, Nil)
         defs = type_bodies(modules, ctx_of)
+
+# The externs a module outside their declarers may not reach. Exportedness is decided
+# per NAME across the build: a name is exported if any module declaring it writes
+# `export extern fn` or is the prelude/floor, so one module's private redeclaration
+# cannot hide another's exported extern. A name whose signature writes `local` is
+# private whatever is written, because its `local` is a promise the compiler cannot
+# check (spec-v0 §Externs). Few `local` ones, built once per bundle.
+fn private_externs_of(facts: List ExternFact) -> List PrivateExtern =
+  list_filter_map(private_extern_of(set_from_list(list_filter_map(local_name_of, facts)),
+                                    set_from_list(list_filter_map(exported_name_of, facts)), _), facts)
+
+fn local_name_of(f: ExternFact) -> Maybe String =
+  if f.writes_local then Just(f.name) else Nothing
+
+fn exported_name_of(f: ExternFact) -> Maybe String =
+  if f.in_prelude || f.written_export then Just(f.name) else Nothing
+
+fn private_extern_of(locals: Set, exported: Set, f: ExternFact) -> Maybe PrivateExtern =
+  if set_member(f.name, locals) then Just(PrivateExtern(declarer = f.declarer, name = f.name, writes_local = true))
+  else if set_member(f.name, exported) then Nothing
+  else Just(PrivateExtern(declarer = f.declarer, name = f.name, writes_local = false))
+
+# `export` on an extern that writes `local` promises what the `local` rule withholds.
+fn export_local_extern_error(facts: List ExternFact) -> Maybe (String, source.SourcePos, String) =
+  find_map(export_local_error_of, facts)
+
+fn export_local_error_of(f: ExternFact) -> Maybe (String, source.SourcePos, String) =
+  if f.written_export && f.writes_local
+  then Just((f.path, f.pos, source.export_local_extern_message(f.declarer, f.name)))
+  else Nothing
 
 # Canonical type name -> the qualified type expressions of its definition: an
 # alias's right-hand side, every constructor field, every record field, or the
@@ -1013,7 +1048,7 @@ fn defines_type(d: ast.Decl) -> Bool =
   | ast.RecordDecl _ _ _ _ _ _ _ -> true
   | ast.WrapDecl _ _ _ _ _ _ _ -> true
   | ast.FnDecl _ _ _ _ _ _ _ _ -> false
-  | ast.ExternFnDecl _ _ _ _ _ _ -> false
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> false
   | ast.LetDecl _ _ _ _ -> false
   | ast.ClassDecl _ _ _ _ _ -> false
   | ast.InstanceDecl _ _ _ _ _ -> false
@@ -1025,7 +1060,7 @@ fn add_type_bodies(ctx: ResolveCtx, acc: Dict (List ast.TypeExpr), d: ast.Decl) 
   | ast.RecordDecl name _ fields _ _ _ _ -> add_type_body(ctx, name, list_map(record_field_type, fields), acc)
   | ast.WrapDecl name _ inner _ _ _ _ -> add_type_body(ctx, name, [inner], acc)
   | ast.FnDecl _ _ _ _ _ _ _ _ -> acc
-  | ast.ExternFnDecl _ _ _ _ _ _ -> acc
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> acc
   | ast.LetDecl _ _ _ _ -> acc
   | ast.ClassDecl _ _ _ _ _ -> acc
   | ast.InstanceDecl _ _ _ _ _ -> acc
@@ -1042,27 +1077,33 @@ fn record_field_type(f: ast.RecordFieldDecl) -> ast.TypeExpr =
   match f with
   | ast.RecordFieldDecl _ te -> te
 
-fn private_externs_in_module(mod: ParsedModule, defs: Dict (List ast.TypeExpr),
-                             ctx_of: ParsedModule -> ResolveCtx) -> List (String, String) =
+fn extern_facts_in_module(mod: ParsedModule, defs: Dict (List ast.TypeExpr),
+                         ctx_of: ParsedModule -> ResolveCtx) -> List ExternFact =
   match mod with
-  | ParsedModule mod_name _ _ _ _ decls ->
+  | ParsedModule mod_name path _ _ _ decls ->
       if any(is_extern_decl, decls)
-      then list_filter_map(private_extern_in(mod_name, ctx_of(mod), defs, _), decls)
+      then list_filter_map(extern_fact_in(mod_name, path, ctx_of(mod), defs, _), decls)
       else Nil
 
 fn is_extern_decl(d: ast.Decl) -> Bool =
   match d with
-  | ast.ExternFnDecl _ _ _ _ _ _ -> true
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> true
   | _ -> false
 
-fn private_extern_in(mod_name: String, ctx: ResolveCtx, defs: Dict (List ast.TypeExpr),
-                     d: ast.Decl) -> Maybe (String, String) =
+fn extern_fact_in(mod_name: String, path: String, ctx: ResolveCtx, defs: Dict (List ast.TypeExpr),
+                  d: ast.Decl) -> Maybe ExternFact =
   match d with
-  | ast.ExternFnDecl name params ret _ _ _ ->
-      if any(param_writes_local(ctx, defs, _), params) || type_writes_local(ctx, defs, ret)
-      then Just((mod_name, name))
-      else Nothing
+  | ast.ExternFnDecl name params ret _ _ visibility pos ->
+      Just(ExternFact(declarer = mod_name, path = path, name = name, in_prelude = mod_name == "",
+                      written_export = is_exported_extern(visibility),
+                      writes_local = any(param_writes_local(ctx, defs, _), params) || type_writes_local(ctx, defs, ret),
+                      pos = pos))
   | _ -> Nothing
+
+fn is_exported_extern(v: ast.Visibility) -> Bool =
+  match v with
+  | ast.Exported -> true
+  | ast.Private -> false
 
 fn param_writes_local(ctx: ResolveCtx, defs: Dict (List ast.TypeExpr), p: ast.Param) -> Bool =
   match p with
@@ -1096,15 +1137,14 @@ fn def_bodies(name: String, defs: Dict (List ast.TypeExpr)) -> List ast.TypeExpr
   | Just bodies -> bodies
   | Nothing -> Nil
 
-# The private externs a module may NOT reach: name -> declaring module. `own` is
-# every extern the module declares itself. Two declarations of a name must agree
-# (infer.extern_decl_ok), so declaring it is the module's own claim about it.
-fn foreign_externs(own: List String, externs: List (String, String)) -> Dict String =
+# The private externs a module may NOT reach, by name. `own` is every extern the module
+# declares itself. Two declarations of a name must agree (infer.extern_decl_ok), so
+# declaring it is the module's own claim about it.
+fn foreign_externs(own: List String, externs: List PrivateExtern) -> Dict PrivateExtern =
   fold(add_foreign_extern(own, _, _), dict_empty(), externs)
 
-fn add_foreign_extern(own: List String, acc: Dict String, entry: (String, String)) -> Dict String =
-  match entry with
-  | (m, n) -> if str_list_member(n, own) then acc else dict_set(n, m, acc)
+fn add_foreign_extern(own: List String, acc: Dict PrivateExtern, entry: PrivateExtern) -> Dict PrivateExtern =
+  if str_list_member(entry.name, own) then acc else dict_set(entry.name, entry, acc)
 
 # Found by path, as `prelude_type_names` does. Empty when the bundle has no
 # prelude; under `no_prelude` it is the floor.
@@ -1608,13 +1648,14 @@ fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
   | Nothing -> name
   | Just _ -> source.canonical_marker ++ name
 
-# An extern with a `local` parameter is reachable only from its declaring module
-# (spec-v0 §Externs). `foreign_externs` holds the ones declared ELSEWHERE, so an
-# own-module reference stays bare. Marked for the reason `guard_canonical` marks.
+# An extern no declaring module exports, or that writes `local`, is reachable only from
+# a module that declares it (spec-v0 §Externs). `foreign_externs` holds the ones declared
+# ELSEWHERE, so an own-module reference stays bare. Marked for the reason
+# `guard_canonical` marks.
 fn guard_private_extern(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.foreign) with
   | Nothing -> name
-  | Just module -> source.mark_private_extern(module, name)
+  | Just entry -> source.mark_private_extern(entry.declarer, name, entry.writes_local)
 
 # The head's canonical name: this module's own top-level values first, then names
 # imported unqualified.  Same two dictionaries `bare_value_name` consults, in
@@ -1902,8 +1943,8 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         mult,
         repr,
         pos)
-  | ast.ExternFnDecl name params ret_type effects bounds pos ->
-      ast.ExternFnDecl(name, qualify_param_types(ctx, params), qualify_maybe_type(ctx, ret_type), effects, bounds, pos)
+  | ast.ExternFnDecl name params ret_type effects bounds visibility pos ->
+      ast.ExternFnDecl(name, qualify_param_types(ctx, params), qualify_maybe_type(ctx, ret_type), effects, bounds, visibility, pos)
 
 fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
   match decls with
@@ -1919,19 +1960,22 @@ type QualifiedModule = (path: String, decls: List ast.Decl)
 # What every check of one bundle reads. Bundle-wide, so built once rather than
 # per module in build_resolve_ctx, which would make it quadratic in modules.
 type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, prelude: PreludeNames,
-                    externs: List (String, String), qualified: List QualifiedModule)
+                    externs: List PrivateExtern, export_local_error: Maybe (String, source.SourcePos, String),
+                    qualified: List QualifiedModule)
 
 fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleNames =
   let all_symbols = build_all_symbols(modules)
       canonical = all_canonical_names(all_symbols)
       prelude = prelude_names(all_symbols, stdlib_root)
-      externs = private_externs_of(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
+      facts = extern_facts_of(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
+      externs = private_externs_of(facts)
   in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude, externs = externs,
+                 export_local_error = export_local_extern_error(facts),
                  qualified = list_map(qualify_one(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs), modules))
 
 fn qualify_one(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                extra_roots: List String, canonical: Dict String, prelude: PreludeNames,
-               externs: List (String, String)) -> QualifiedModule =
+               externs: List PrivateExtern) -> QualifiedModule =
   let ParsedModule _ path _ _ ctor_types decls = mod
       published = PublishedTypes(in_prelude = path == prelude_path(stdlib_root), ctor_types = ctor_types)
   in QualifiedModule(path = path,
@@ -1964,7 +2008,7 @@ fn publish_if_marked(published: PublishedTypes, decl: ast.Decl) -> ast.Decl =
   | ast.WrapDecl name type_params inner deriving_classes mult _ pos ->
       ast.WrapDecl(name, type_params, inner, deriving_classes, mult, representation_of(published, name), pos)
   | ast.FnDecl _ _ _ _ _ _ _ _ -> decl
-  | ast.ExternFnDecl _ _ _ _ _ _ -> decl
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> decl
   | ast.LetDecl _ _ _ _ -> decl
   | ast.ClassDecl _ _ _ _ _ -> decl
   | ast.InstanceDecl _ _ _ _ _ -> decl
@@ -2076,7 +2120,7 @@ fn params_over_floor(params: List ast.Param) -> Bool =
 # check is written to fail closed rather than assume that stays true.
 fn is_floor_extern(d: ast.Decl) -> Bool =
   match d with
-  | ast.ExternFnDecl _ params ret _ _ _ ->
+  | ast.ExternFnDecl _ params ret _ _ _ _ ->
       params_over_floor(params) && maybe_type_over_floor(ret)
   | _ -> false
 
@@ -2091,7 +2135,7 @@ fn floor_export_names(decls: List ast.Decl) -> List String =
   | Nil -> Nil
   | Cons d rest ->
       match d with
-      | ast.ExternFnDecl name _ _ _ _ _ -> Cons(name, floor_export_names(rest))
+      | ast.ExternFnDecl name _ _ _ _ _ _ -> Cons(name, floor_export_names(rest))
       | _ -> floor_export_names(rest)
 
 # The prelude reduced to its floor: the primitive-only externs and nothing else.
@@ -2307,7 +2351,7 @@ fn unresolved_in_record_fields(fields: List ast.RecordFieldDecl, declared: Dict 
 fn decl_display_name(decl: ast.Decl) -> String =
   match decl with
   | ast.FnDecl name _ _ _ _ _ _ _ -> name
-  | ast.ExternFnDecl name _ _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ _ _ -> name
   | ast.TypeDecl name _ _ _ _ _ _ -> name
   | ast.RecordDecl name _ _ _ _ _ _ -> name
   | ast.AliasDecl name _ _ _ -> name
@@ -2324,7 +2368,7 @@ fn unresolved_in_decl(decl: ast.Decl, declared: Dict String) -> Maybe String =
       match unresolved_in_signature(params, ret, cs, declared) with
       | Just n -> Just(n)
       | Nothing -> unresolved_in_expr(body, declared)
-  | ast.ExternFnDecl _ params ret _ _ _ -> unresolved_in_signature(params, ret, Nil, declared)
+  | ast.ExternFnDecl _ params ret _ _ _ _ -> unresolved_in_signature(params, ret, Nil, declared)
   | ast.TypeDecl _ _ ctors _ _ _ _ -> unresolved_in_ctors(ctors, declared)
   | ast.RecordDecl _ _ fields _ _ _ _ -> unresolved_in_record_fields(fields, declared)
   | ast.AliasDecl _ _ rhs _ -> unresolved_in_type(rhs, declared)
@@ -2460,7 +2504,7 @@ fn first_one_ctor_clash(ctx: ResolveCtx, vocab: TypeVocab,
 # Returns the module's path with the clash, since its position is in THAT file.
 fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String, canonical: Dict String,
-                       prelude: PreludeNames, externs: List (String, String),
+                       prelude: PreludeNames, externs: List PrivateExtern,
                        vocab: TypeVocab) -> Maybe (String, source.SourcePos, String) =
   match modules with
   | Nil -> Nothing
@@ -2511,6 +2555,9 @@ fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_roo
   match validate_imports(modules, names.all_symbols, stdlib_root, extra_roots) with
   | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
   | Nothing ->
+    match names.export_local_error with
+    | Just (path, pos, err_msg) -> BundleErr(pos_for_entry(path, pos, entry_path), err_msg)
+    | Nothing ->
       match validate_qualified_decls(qualified) with
       | Just (pos, err_msg) -> BundleErr(pos, "[assert] qualify_decl: " ++ err_msg)
       | Nothing ->
@@ -2669,7 +2716,7 @@ fn decl_orig_name(decl: ast.Decl) -> String =
       | ast.TypeConstraint class_name _ -> "instance:" ++ class_name
   | ast.AliasDecl name _ _ _ -> name
   | ast.WrapDecl name _ _ _ _ _ _ -> name
-  | ast.ExternFnDecl name _ _ _ _ _ -> name
+  | ast.ExternFnDecl name _ _ _ _ _ _ -> name
 
 fn ctx_status_line(path: String, all_symbols: Dict ModuleSymbols) -> String =
   match dict_get(path, all_symbols) with
@@ -2690,7 +2737,7 @@ fn qualify_debug_lines_acc(ctx: ResolveCtx, decls: List ast.Decl, acc: List Stri
 
 fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                        canonical: Dict String, prelude: PreludeNames,
-                       externs: List (String, String)) -> List String =
+                       externs: List PrivateExtern) -> List String =
   match mod with
   | ParsedModule mod_name path _ _ _ decls ->
       Cons(module_header_line(mod_name),
@@ -2703,13 +2750,13 @@ fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdli
 # here, not inside the per-module function, or the debug dump is quadratic.
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
   dump_qualify_modules_with(modules, all_symbols, stdlib_root, canonical, prelude,
-                            private_externs_of(modules, all_symbols, stdlib_root, Nil, canonical, prelude))
+                            private_externs_of(extern_facts_of(modules, all_symbols, stdlib_root, Nil, canonical, prelude)))
   where canonical = all_canonical_names(all_symbols)
         prelude = prelude_names(all_symbols, stdlib_root)
 
 fn dump_qualify_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                              stdlib_root: String, canonical: Dict String,
-                             prelude: PreludeNames, externs: List (String, String)) -> List String =
+                             prelude: PreludeNames, externs: List PrivateExtern) -> List String =
   match modules with
   | Nil -> Nil
   | Cons mod rest ->

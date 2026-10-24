@@ -463,7 +463,7 @@ as well as `decls` does not help when two sites disagree about what the fact
 consumes it.** `ast.decl_value_scopes` / `ast.NameScope` is that definition for
 "which names does an importer see, and under what spelling"; `ScopeGlobal` is the
 extern rule from spec-v0 §"Externs are outside the module system", including its
-transitive reach. `bundler` and `module_loader` both derive their behaviour from
+transitive reach and its `export` rule. `bundler` and `module_loader` both derive their behaviour from
 it rather than asserting it, and
 `tests/stdlib/compiler/test_module_surface_agreement.spr` fails if they ever drift
 apart again. See `docs/module-surface-authority-v0.md`.

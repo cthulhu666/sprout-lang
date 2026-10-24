@@ -90,4 +90,13 @@ fn main() -> Unit !{IO} =
     assert_true(state, "bytes offers its exported fn length",
       offered("length", repl.module_public_names(bytes_src)))
 
+    # --- what an importer may reach: only `export extern fn` ---
+    mutable_src <- read_module(root, "mutable")
+    assert_true(state, "mutable's private extern is not offered to an importer",
+      offered("vector_mutset", repl.module_reachable_global_names(mutable_src)) == false)
+    assert_true(state, "mutable's exported extern is offered to an importer",
+      offered("vec_make_filled", repl.module_reachable_global_names(mutable_src)))
+    assert_true(state, "bits' externs are offered to an importer",
+      offered("bit_or", repl.module_reachable_global_names(bits)))
+
     summary(state)

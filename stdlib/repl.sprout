@@ -268,8 +268,7 @@ fn module_path(module_name: String) -> String =
 #
 # This asks the compiler instead of scanning source text. The line scan it
 # replaced accepted only lines beginning with `export `, so it could never offer
-# an `extern fn` — and since `export` on an extern is a parsed-and-discarded no-op
-# (spec-v0 §"Externs are outside the module system") nobody writes it. The result
+# an `extern fn` — and nobody wrote `export` on one then. The result
 # was that NO extern was ever a completion candidate from any module, the prelude
 # included: `print`, `panic` and `int_to_string` were all missing.
 #
@@ -342,6 +341,13 @@ export fn module_global_names(content: String) -> Vec String =
   | Err _ -> vec_empty()
   | Ok toks -> vec_from_list(parser.surface_globals(parser.scan_module_surface(toks)))
 
+# The externs an importer may call: those written `export extern fn`. An unexported
+# extern is private to its module, so offering it would offer a name the compiler rejects.
+export fn module_reachable_global_names(content: String) -> Vec String =
+  match lexer.tokenize_source(content) with
+  | Err _ -> vec_empty()
+  | Ok toks -> vec_from_list(parser.surface_exported_globals(parser.scan_module_surface(toks)))
+
 fn qualify_names(namespace: String, names: Vec String, index: Int, acc: Vec String) -> Vec String =
   match vec_get(index, names) with
   | Just name -> qualify_names(namespace, names, index + 1, vec_append(namespace ++ "." ++ name, acc))
@@ -400,7 +406,7 @@ fn append_imported_globals(names: Vec String, imports: Vec String, index: Int) -
 fn globals_of_module(module_name: String) -> Vec String !{IO} =
   match fs.read_text(module_path(module_name)) with
   | Err _ -> vec_empty()
-  | Ok content -> module_global_names(content)
+  | Ok content -> module_reachable_global_names(content)
 
 fn dotted_completion_candidates(prefix: String, imports: Vec String) -> Vec String !{IO} =
   match find_imported_namespace_ref(take_before(prefix, "."), imports, 0) with

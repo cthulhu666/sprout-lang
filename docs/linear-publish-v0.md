@@ -40,8 +40,8 @@ Non-goals:
 
 - The declaring module. It stays trusted, as `persistent-array-v0.md` §5.3 says; §7 lists the
   cheap check that narrows it.
-- `extern fn` redeclaration, which is outside the module system (spec, *Externs are outside the
-  module system*); unsafe primitives are where that closes.
+- `extern fn` redeclaration: a module may declare any extern itself (spec, *Externs*);
+  unsafe primitives are where that closes.
 - Record opacity through instances (§5.3).
 
 ## 3. Prior art
@@ -165,7 +165,10 @@ Breaking for a published linear type with an untracked field. In our four repos:
   not escape (be returned, captured or stored). `linear_check`'s escape walk (`esc_value`) is the
   place. It catches `linvec_get` returning its `Vector`. A mode on non-linear binders, the stronger
   form, was rejected: M4.6 moved modes onto function types, and it needs borrowing extern
-  parameters.
+  parameters. Its premise, that only `stdlib.linvec` and `stdlib.mutable` can write a `Vector` in
+  place, was false until `docs/extern-visibility-v0.md`: any importer of `stdlib.mutable` could
+  call `vector_mutset`. Now a module can do so only if it is one of those two or declares the
+  extern itself.
 
 ## 8. Tests
 

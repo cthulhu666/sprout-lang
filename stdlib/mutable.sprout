@@ -16,10 +16,10 @@ module stdlib.mutable
 # (`stdlib.linvec` shares `vec_make_filled`), so under the rule "an extern lives
 # in the module that owns its type" this is where they belong.
 #
-# Declaring them here does not change how callers name them: externs are invisible
-# to the module system (bundler.sprout:597 drops `ExternFnDecl`), so they resolve
-# by bare name once this module is in the bundle — which every `MutVec` user
-# already arranges by importing it.
+# Callers name an exported extern by its bare name. Only `vec_make_filled` is exported:
+# the four that mutate are private to this module, so importing it does not let a
+# caller write through a `Vector` it only borrows. A module that needs one declares
+# it itself (spec-v0 §Externs).
 #
 # Two of them STORE A VALUE: `vector_mutset` and `vector_push`. Both are candidate
 # write-barrier sites for a future generational collector, and both carry the
@@ -32,7 +32,7 @@ module stdlib.mutable
 # `vec_make_filled` is PURE: it allocates a fresh vector and changes nothing that
 # exists. `mutvec_new` keeps its `!{IO}`, since a MutVec is state; `stdlib.linvec`
 # reaches the extern by importing this module.
-extern fn vec_make_filled(n: Int, val: a) -> Vector a
+export extern fn vec_make_filled(n: Int, val: a) -> Vector a
 extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
 extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 extern fn vector_push(v: Vector a, val: a) -> Unit !{IO}

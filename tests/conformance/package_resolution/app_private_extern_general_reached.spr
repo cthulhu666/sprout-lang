@@ -1,0 +1,9 @@
+module main
+import demo.privext (ping)
+
+# An extern that does not write `local` is private too, unless its module writes
+# `export extern fn`. `__priv_add` is declared without `export` in demo.privext.
+
+let use_it: Int = __priv_add(1, 2)
+
+fn main() -> Unit !{IO} = print("x")

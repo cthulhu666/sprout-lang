@@ -74,8 +74,9 @@ Pure builtin in the prelude that nevertheless touches the terminal:
   a null vector), and they are pure too.
   Normative in spec §6; survey in `docs/effect-enforcement-v0.md` §6.
 
-`!{IO}` builtins in modules — imported explicitly, then called by bare name or
-through the module's wrapper API:
+`!{IO}` builtins in modules — private to the declaring module unless it writes
+`export extern fn` (spec §"Externs are outside the module system"); other modules
+call the wrapper API:
 
 | builtin | module | preferred call |
 |---|---|---|
@@ -88,9 +89,9 @@ through the module's wrapper API:
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
 | `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push`, `vector_truncate` | `stdlib.mutable` | the `MutVec` API; `vec_make_filled` is pure and also backs `LinVec` |
 | `linvec_set(i, x, v) -> LinVec a` | `stdlib.linvec` | the `LinVec` API; pure, writes in place, traps out of range |
-| `bytes_*` | `stdlib.bytes` | bare name |
-| `crypto_*` | `stdlib.crypto` | bare name |
-| `regex_*` | `stdlib.regex` | bare name |
+| `bytes_*` | `stdlib.bytes` | bare name for `bytes_empty`, `bytes_length`, `bytes_get`, `bytes_slice`, `bytes_from_utf8`; the rest are private (`bytes.*` API) |
+| `crypto_*` | `stdlib.crypto` | private; the `crypto.*` API |
+| `regex_*` | `stdlib.regex` | bare name for `regex_find_match`; the rest are private (`regex.*` API) |
 | `proc_run_vec`, `proc_run_stdin_vec` | `stdlib.process` | `process.proc_run(…)` |
 - **Integer ranges have no builtins.** `IntRange` is an ordinary Sprout ADT declared in
   `stdlib/prelude.sprout` (`IntRange Int Int Int`), and `a..b` lowers to a call to the prelude's

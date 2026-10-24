@@ -18,4 +18,4 @@ export type IntList (..) =
 extern fn __mk_adt_runner(n: Int) -> Runner
 extern fn __mk_rec_runner(n: Int) -> RunRec
 extern fn __mk_wrap_runner(n: Int) -> RunWrap
-extern fn __mk_list(n: Int) -> IntList
+export extern fn __mk_list(n: Int) -> IntList

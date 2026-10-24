@@ -1,0 +1,11 @@
+module main
+import demo.privext (ping)
+
+# Declaring another module's private extern here, with the same signature, is this
+# module's own claim about it, so the call is allowed.
+
+extern fn __priv_add(a: Int, b: Int) -> Int
+
+let use_it: Int = __priv_add(1, 2)
+
+fn main() -> Unit !{IO} = print("x")

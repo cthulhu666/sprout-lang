@@ -2,7 +2,7 @@ module stdlib.compiler.source
 import stdlib.string as string
 # Load-bearing despite the alias never being written: `bytes_from_utf8` / `bytes_get` below are
 # `extern fn`s owned by stdlib.bytes, and externs resolve by bare name only once their module is
-# in the bundle (bundler.sprout:597 drops ExternFnDecl, so they are never module-qualified).
+# in the bundle (an extern is never module-qualified, so it resolves by bare name).
 # Removing this import does not produce a scoping error — it produces a link failure.
 import stdlib.bytes as bytes
 
@@ -277,26 +277,40 @@ export fn canonical_name_message(marked: String) -> String =
 
 # ── Private externs ──────────────────────────────────────────────────────────
 #
-# An extern whose signature writes `local` anywhere is reachable only from
-# the module that declares it. The bundler MARKS a bare reference from any other
-# module with this prefix, on the same terms as `canonical_marker` (no error channel
-# there; a marked name resolves nowhere; `infer` raises it). Shape:
-# `@private_extern:<module>:<name>`; the prelude's module name is empty.
+# An extern is reachable only from a module that declares it, unless some declaring
+# module writes `export extern fn` (or it is the prelude's or the floor's). One whose
+# signature writes `local` stays private whatever is written. The bundler MARKS a bare
+# reference from any other module with this prefix, on the same terms as
+# `canonical_marker` (no error channel there; a marked name resolves nowhere; `infer`
+# raises it). Shape: `@private_extern:<local|plain>:<module>:<name>`; the prelude's
+# module name is empty.
 export let private_extern_marker: String = "@private_extern:"
 
-export fn mark_private_extern(module: String, name: String) -> String =
-  private_extern_marker ++ module ++ ":" ++ name
+export fn mark_private_extern(module: String, name: String, writes_local: Bool) -> String =
+  private_extern_marker ++ (if writes_local then "local" else "plain") ++ ":" ++ module ++ ":" ++ name
 
 export fn is_private_extern_marked(name: String) -> Bool =
   string.starts_with(name, private_extern_marker)
 
 export fn private_extern_message(marked: String) -> String =
-  "`" ++ name ++ "` is private to " ++ describe_declaring_module(module)
-    ++ ": an extern whose signature writes `local` is reachable only from the module that declares it, because `local` on an extern is a promise the compiler cannot check, kept only by that module's own callers (spec-v0 §Externs)"
+  if kind == "local" then
+    "`" ++ name ++ "` is private to " ++ describe_declaring_module(module)
+      ++ ": an extern whose signature writes `local` is reachable only from the module that declares it, because `local` on an extern is a promise the compiler cannot check, kept only by that module's own callers (spec-v0 §Externs)"
+  else
+    "`" ++ name ++ "` is private to " ++ describe_declaring_module(module)
+      ++ ". Mark it `export extern fn` there, or declare it in this module"
   where rest = string.drop(marked, string.length(private_extern_marker))
-        parts = string.split_once(rest, ":")
+        kind_split = string.split_once(rest, ":")
+        kind = match kind_split with | Just (k, _) -> k | Nothing -> ""
+        after_kind = match kind_split with | Just (_, r) -> r | Nothing -> rest
+        parts = string.split_once(after_kind, ":")
         module = match parts with | Just (m, _) -> m | Nothing -> ""
-        name = match parts with | Just (_, n) -> n | Nothing -> rest
+        name = match parts with | Just (_, n) -> n | Nothing -> after_kind
+
+# `export` on an extern whose signature writes `local` is an error, not a no-op.
+export fn export_local_extern_message(module: String, name: String) -> String =
+  "`export` on extern `" ++ name ++ "` has no effect: its signature writes `local`, so it is reachable only from "
+    ++ describe_declaring_module(module) ++ ". Remove `export`"
 
 fn describe_declaring_module(module: String) -> String =
   if module == "" then "the prelude" else "`" ++ module ++ "`"
