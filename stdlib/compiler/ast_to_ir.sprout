@@ -3770,18 +3770,20 @@ fn translate_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
           translate_closure_call(cap_ssa, args, params, env, idx, cur_label, cur_ops,
                                  captures)
       | Nothing ->
-          # A builtin whose lowering the call site chooses — see
-          # is_call_site_intrinsic.  Routed through one dispatcher so the
-          # eta-expansion path can reuse it for a reference in VALUE position.
-          if is_call_site_intrinsic(fname)
-          then translate_call_site_intrinsic(fname, args, params, env, idx,
-                                             cur_label, cur_ops, captures)
-          else if param_known(fname, params)
+          # A parameter named like a call-site intrinsic is a local and wins, as in
+          # value position: it is called, not lowered as the builtin.
+          if param_known(fname, params)
           then
             # Trust the typechecker: any param reached here was accepted as
             # callable at the call site, as in the captures branch above.
             translate_closure_call(sprout_ir.param_ssa(fname), args, params, env, idx,
                                    cur_label, cur_ops, captures)
+          # A builtin whose lowering the call site chooses — see
+          # is_call_site_intrinsic.  Routed through one dispatcher so the
+          # eta-expansion path can reuse it for a reference in VALUE position.
+          else if is_call_site_intrinsic(fname)
+          then translate_call_site_intrinsic(fname, args, params, env, idx,
+                                             cur_label, cur_ops, captures)
           else if set_member(fname, env.prog.let_names)
           then
             # Top-level `let` bound to a closure value: load the global slot,

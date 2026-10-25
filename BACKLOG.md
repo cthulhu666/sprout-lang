@@ -193,10 +193,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `nan < 1.0` becomes true (`docs/eq-ord-double-v0.md`).
 - [ ] `P3` **Reject a user declaration that shadows an intercepted compiler intrinsic.** A
   headerless file defining `fn to_double`/`fn print`/`fn double_to_bits` has its call sites silently
-  lowered to the intrinsic, body ignored, no error at any stage. **Sharper second form:**
-  `translate_call` consults `captures` *before* the intrinsic names but `param_known` *after*, so a
-  captured variable named `bit_and` wins while a parameter of the same name is intercepted. Fix both
-  together. `docs/bitwise-int-ops-v0.md` §8.1.
+  lowered to the intrinsic, body ignored, no error at any stage. A parameter or local with such a
+  name is not affected: it wins. `docs/bitwise-int-ops-v0.md` §8.1.
 - [ ] `P3` **Names the parser writes are captured by a module's own declaration or a local.**
   List and dict literals, list patterns and `>>`/`<<` use bare `Cons`, `Nil`, `dict_empty`,
   `dict_set`, `rcompose`, `lcompose` (spec §3.1; `own_cons_captures_list_literal.spr`). Writing
