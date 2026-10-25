@@ -3082,7 +3082,7 @@ static CtorMeta* find_ctor(long long tag) {
  * reads a linear cell's fields: ast_to_ir reuses an owned linear cell in place and may change
  * its constructor (docs/linear-reuse-v0.md §4.4). A channel or the scheduler only moves such a
  * cell. */
-static long long find_ctor_tag_by_name(const char* name) {
+static __attribute__((noinline, cold)) long long find_ctor_tag_by_name(const char* name) {
   for (long long i = 0; i < g_ctor_meta_len; i++) {
     if (strcmp(g_ctor_meta[i].name, name) == 0) return g_ctor_meta[i].tag;
   }
@@ -3181,11 +3181,10 @@ static inline long long sprout_tag_get(long long constant, long long* cache, con
    is a single field serving both display and lookup, and one lookup depends on
    the name being intact:
 
-     - find_ctor_tag_by_name is a first-wins linear scan over g_ctor_meta. Register
-       an entry file's `Just` as bare `Just` and two entries answer to that name
-       with different tags — the runtime calls this itself (env_get, the
-       stdlib.regex.Match construction), so it would silently take whichever came
-       first.
+     - The runtime reads the `sprout_tag$<name>` constant first. An entry file's
+       `Just` registered bare would emit a second `@"sprout_tag$Just"`, a loud
+       duplicate-symbol error. The name scan, find_ctor_tag_by_name, runs only on
+       the cold fallback, where it is first-wins over g_ctor_meta.
 
    Nullary interning used to be a second reason: sprout_make0 matched
    strcmp(name, "Nothing"), so a stripped entry-file `Nothing` would be handed a
