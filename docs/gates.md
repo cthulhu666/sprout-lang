@@ -304,6 +304,23 @@ the lowering, not the version number (Apple clang 17 passes): LLVM discovery ski
 fails it, `just bootstrap-from-seed` refuses one, and `just test-check-clang-cpr` tests the probe.
 CI installs clang 22 from apt.llvm.org (`scripts/ci_install_llvm.sh`).
 
+## CPR tag fold — `just cpr-tag-fold-check`
+
+Whole-program links `tests/cpr_tag_fold/reads.sprout` (a `Vec` loop and a `Bytes` loop, each
+matching `Just`/`Nothing`) to optimised IR and inspects each `@main.*` function. None may call
+`@find_ctor_tag_by_name` or touch `@g_tag_just` / `@g_tag_nothing`: an inlined `_unboxed` read
+that still carries the lazy tag lookup grows its caller past LLVM's inline threshold, and
+hot loops such as nqueens slow down.
+
+The check also fails when a fixture function still calls `@vector_get_unboxed` or
+`@bytes_get_unboxed`, or when no fixture function is found, because the tag check proves
+nothing about a read that was never inlined. `tests/c_runtime/maybe_tag_fallback.c` pins the
+other side: with no constant supplied, the reads return the registered `Just`/`Nothing` tags.
+The constants are `@sprout_tag_just` / `@sprout_tag_nothing`, emitted by
+`ir_lowering.collect_ctor_globals` ([compiler-internals.md](compiler-internals.md) §CPR extern
+ABI). The recipe runs the stage-1 binary, so an emitter change shows here only after
+`just refresh-seed`.
+
 ## Bounds-check elimination — `just bce-gate`
 
 Compiles each `tests/bce_fixtures/*.spr` twice, with the pass on and with `SPROUT_OPT_OFF=bce`,

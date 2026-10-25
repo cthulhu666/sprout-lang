@@ -147,6 +147,8 @@ declare i64 @term_read_avail(i64, i64)
 @.cfkinds.24 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.25 = private unnamed_addr constant [31 x i8] c"examples.wrap_phantom_units.Au\00"
 @.cfkinds.25 = private unnamed_addr constant [1 x i8] c"\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
