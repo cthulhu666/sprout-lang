@@ -382,7 +382,8 @@ modules may reach it:
   that declares it. A reference from any other module is a compile error that
   names the declaring module and the fix, as in
   `vector_mutset` is private to `stdlib.mutable`. Mark it `export extern fn`
-  there, or declare it in this module.
+  there, or declare it in this module. When several modules declare it privately,
+  the error names the first in bundle order, where a module's imports come before it.
 - Exportedness is decided per **name** across the build. An extern is exported if
   any module that declares it writes `export extern fn`, or if the prelude or the
   `no_prelude` floor declares it. One module's private redeclaration cannot hide
@@ -408,7 +409,7 @@ modules may reach it:
 
 Privacy does not stop a module from declaring another module's private extern
 itself, with the same signature, and calling it. That is deliberate FFI, visible
-in the source. Gating the declaration is not part of this rule.
+in the source. Gating the declaration is not part of this rule, except for `unsafe_pure` (§6).
 
 The consequence for diagnostics is worth stating plainly, because it differs from
 the rule for type names above: a missing import for an extern produces **no
@@ -2265,9 +2266,8 @@ builds or takes one apart. A set, push or pop consumes the vector and returns it
 guarantees no one holds the old one, so the change cannot be observed and the signature is pure. A
 `LinVec` is a `Vector` at runtime (§5.6.1), so a set allocates nothing. They are written qualified
 here, as after `import stdlib.linvec as linvec`. `linvec.set`, `linvec.push` and `linvec.pop` wrap
-the C builtins `linvec_set`, `linvec_push` and `linvec_truncate`, which keep their names and are
-private to the module. The last two are temporary: they go when trusted Sprout can call effectful
-primitives.
+the module's private functions `linvec_set`, `linvec_push` and `linvec_truncate`. Each calls an
+`!{IO}` writer (`vector_mutset`, `vector_push`, `vector_truncate`) inside `unsafe_pure` (§6).
 
 ```
 linvec.new(n: Int, x: a) -> LinVec a                     # n copies of x
@@ -2525,6 +2525,13 @@ Effect note for v0:
   one place the effect discipline rests on an assertion rather than a check —
   which is why the rule below is stated normatively and `runtime/APPROVED_BUILTINS`
   requires a justification per entry.
+- **`unsafe_pure` (Experimental)** is the second such place. `stdlib.unsafe` declares
+  `unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a`, which runs `action(())` and gives its result a
+  pure type. The caller asserts that, apart from a trap, the action's effects are observable only
+  through its result. It is a compiler intrinsic with no C symbol, reserved for the stdlib
+  modules the compiler lists (`stdlib.linvec`): a reference from any other module, a declaration
+  outside `stdlib.unsafe` and `export` on it are compile errors. Its argument must be a lambda
+  literal, and the name cannot be used as a value. Design: `docs/unsafe-primitives-v0.md`.
 - A builtin uses `!{IO}` when evaluating the call may interact with runtime or
   external state such as terminal IO, files, environment, network, randomness,
   or host-backed analysis services **in a way the rest of the program can

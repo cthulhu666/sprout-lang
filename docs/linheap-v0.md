@@ -69,10 +69,9 @@ the length and never shrinks the storage, as linear-base's `pop` does
 (`docs/persistent-array-v0.md` §12 step 17). Capacity is at most twice the largest size the heap
 has reached. A pop clears the cell it drops, so no popped key stays reachable through a spare slot.
 
-`linvec.push` and `linvec.pop` call the builtins `linvec_push` and `linvec_truncate`. They are
-temporary: they go when unsafe primitives land. Spec §3 makes a redeclared extern keep its
-effects, and `vector_push` and `vector_truncate` are `!{IO}`, so pure Sprout cannot call them. The
-heap's API does not change then.
+`linvec.push` and `linvec.pop` call the private functions `linvec_push` and `linvec_truncate`,
+which call `vector_push` and `vector_truncate` inside `unsafe_pure`
+([unsafe-primitives-v0.md](unsafe-primitives-v0.md)).
 
 ### 4.3 API
 

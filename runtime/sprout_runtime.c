@@ -8887,19 +8887,6 @@ long long vector_mutset(long long vec, long long index, long long value) {
   return 0;
 }
 
-/* Backs stdlib.linvec's pure in-place write: store `x` at `i` and return the SAME
- * vector.  Sound only because `LinVec` is linear, so no one holds the old version
- * (docs/persistent-array-v0.md §5.3).  Allocates nothing.  Out of range traps, as
- * vector_mutset does, and the store takes the same write-barrier hook. */
-long long linvec_set(long long i, long long x, long long vec) {
-  VectorVal* v = (VectorVal*)(uintptr_t)vec;
-  if (v == NULL) sprout_fail("linvec_set: null vector");
-  if (i < 0 || i >= v->len) sprout_fail("linvec_set: index out of bounds");
-  sprout_ap_on_store(vec, x);
-  ((struct SproutSlot*)v->data)[i].w = x;
-  return vec;
-}
-
 /* Append `value`, growing the backing array by doubling when it is full.  Backs
  * mutvec_push; amortised O(1).
  *
@@ -8983,19 +8970,6 @@ long long vector_truncate(long long vec, long long n) {
   for (long long i = n; i < v->len; i++) v->data[i] = 0;
   v->len = n;
   return 0;
-}
-
-/* Backs stdlib.linvec's pure push and truncate: vector_push / vector_truncate, returning
- * the SAME vector.  Sound only because `LinVec` is linear, so no one holds the old length
- * (docs/persistent-array-v0.md §5.3).  Neither calls the collector, as linvec_set. */
-long long linvec_push(long long x, long long vec) {
-  vector_push(vec, x);
-  return vec;
-}
-
-long long linvec_truncate(long long n, long long vec) {
-  vector_truncate(vec, n);
-  return vec;
 }
 
 long long vector_get_direct(long long vec, long long index) {

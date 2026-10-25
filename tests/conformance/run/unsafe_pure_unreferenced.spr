@@ -1,0 +1,27 @@
+module main
+
+# Importing `stdlib.unsafe` puts `unsafe_pure` in the build and is not an error. A parameter,
+# a lambda parameter and a `let` binding named `unsafe_pure` are called as the local, never
+# lowered as the intrinsic and never rejected by the gate.
+
+import stdlib.unsafe
+
+fn param(unsafe_pure: Int -> Int) -> Int = unsafe_pure(4)
+
+fn lambda_param() -> Int = (\unsafe_pure -> unsafe_pure(5))(\x -> x + 1)
+
+fn captured(unsafe_pure: Int -> Int) -> Int =
+  list_fold(\ (acc, x) -> acc + unsafe_pure(x), 0, [1, 2, 3])
+
+fn let_in() -> Int =
+  let
+    unsafe_pure = \x -> x * 10
+  in
+  unsafe_pure(7)
+
+fn main() -> Unit !{IO} =
+  do
+    print(param(\x -> x * 2))
+    print(lambda_param())
+    print(captured(\x -> x * x))
+    print(let_in())

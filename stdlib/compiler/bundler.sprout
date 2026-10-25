@@ -119,7 +119,10 @@ type ImportBinding =
 #
 # `foreign` is the private externs declared by OTHER modules, by name; see
 # `foreign_externs`.
-type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
+#
+# `module_name` is the module's header name, for the one reference rule that depends on who
+# refers (`guard_private_extern`).
+type ResolveCtx = (module_name: String, value_locals: Dict String, type_locals: Dict String,
                    class_locals: Dict String,
                    unqual_values: Dict String, unqual_types: Dict String,
                    unqual_classes: Dict String,
@@ -188,7 +191,7 @@ fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> Reso
   c with (unqual_classes = dict_set(name, canonical, c.unqual_classes))
 
 fn empty_resolve_ctx() -> ResolveCtx =
-  ResolveCtx(value_locals = dict_empty(), type_locals = dict_empty(),
+  ResolveCtx(module_name = "", value_locals = dict_empty(), type_locals = dict_empty(),
              class_locals = dict_empty(),
              unqual_values = dict_empty(), unqual_types = dict_empty(),
              unqual_classes = dict_empty(), alias_val_exports = dict_empty(),
@@ -970,12 +973,13 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
                      extra_roots: List String, canonical: Dict String,
                      prelude: PreludeNames, externs: List PrivateExtern) -> ResolveCtx =
   match mod with
-  | ParsedModule _ path specs _ _ _ ->
+  | ParsedModule mod_name path specs _ _ _ ->
       match dict_get(path, all_symbols) with
       | Nothing -> empty_resolve_ctx()
       | Just own_syms ->
           apply_imports_to_ctx(specs, all_symbols, stdlib_root, extra_roots,
             empty_resolve_ctx() with (
+              module_name = mod_name,
               value_locals = sym_value_locals(own_syms),
               type_locals = sym_type_locals(own_syms),
               class_locals = sym_class_locals(own_syms),
@@ -1020,6 +1024,18 @@ fn private_extern_of(locals: Set, exported: Set, f: ExternFact) -> Maybe Private
   if set_member(f.name, locals) then Just(PrivateExtern(declarer = f.declarer, name = f.name, writes_local = true))
   else if set_member(f.name, exported) then Nothing
   else Just(PrivateExtern(declarer = f.declarer, name = f.name, writes_local = false))
+
+# Declaration rule for `unsafe_pure` (docs/unsafe-primitives-v0.md §4.2, rule 2). Without it a
+# module could declare its own copy, since an extern is known by its name alone. Checked
+# before the `local` rule so that `export` on it reports its own message.
+fn unsafe_pure_decl_error(facts: List ExternFact) -> Maybe (String, source.SourcePos, String) =
+  find_map(unsafe_pure_decl_error_of, facts)
+
+fn unsafe_pure_decl_error_of(f: ExternFact) -> Maybe (String, source.SourcePos, String) =
+  if f.name != source.unsafe_pure_name then Nothing
+  else if f.declarer != source.unsafe_pure_declarer then Just((f.path, f.pos, source.unsafe_pure_declaration_message))
+  else if f.written_export then Just((f.path, f.pos, source.unsafe_pure_export_message))
+  else Nothing
 
 # `export` on an extern that writes `local` promises what the `local` rule withholds.
 fn export_local_extern_error(facts: List ExternFact) -> Maybe (String, source.SourcePos, String) =
@@ -1140,12 +1156,14 @@ fn def_bodies(name: String, defs: Dict (List ast.TypeExpr)) -> List ast.TypeExpr
 
 # The private externs a module may NOT reach, by name. `own` is every extern the module
 # declares itself. Two declarations of a name must agree (infer.extern_decl_ok), so
-# declaring it is the module's own claim about it.
+# declaring it is the module's own claim about it. When several modules declare a name, the
+# first declarer is the one an error names.
 fn foreign_externs(own: List String, externs: List PrivateExtern) -> Dict PrivateExtern =
   fold(add_foreign_extern(own, _, _), dict_empty(), externs)
 
 fn add_foreign_extern(own: List String, acc: Dict PrivateExtern, entry: PrivateExtern) -> Dict PrivateExtern =
-  if str_list_member(entry.name, own) then acc else dict_set(entry.name, entry, acc)
+  if str_list_member(entry.name, own) || dict_member(entry.name, acc) then acc
+  else dict_set(entry.name, entry, acc)
 
 # Found by path, as `prelude_type_names` does. Empty when the bundle has no
 # prelude; under `no_prelude` it is the floor.
@@ -1653,10 +1671,16 @@ fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
 # a module that declares it (spec-v0 §Externs). `foreign_externs` holds the ones declared
 # ELSEWHERE, so an own-module reference stays bare. Marked for the reason
 # `guard_canonical` marks.
+#
+# `unsafe_pure` is the exception: a module on `source.unsafe_pure_users` reaches it, and
+# nothing else does (docs/unsafe-primitives-v0.md §4.2, rule 1).
 fn guard_private_extern(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.foreign) with
   | Nothing -> name
-  | Just entry -> source.mark_private_extern(entry.declarer, name, entry.writes_local)
+  | Just entry ->
+      if name == source.unsafe_pure_name && str_list_member(ctx.module_name, source.unsafe_pure_users)
+      then name
+      else source.mark_private_extern(entry.declarer, name, entry.writes_local)
 
 # The head's canonical name: this module's own top-level values first, then names
 # imported unqualified.  Same two dictionaries `bare_value_name` consults, in
@@ -1961,7 +1985,7 @@ type QualifiedModule = (path: String, decls: List ast.Decl)
 # What every check of one bundle reads. Bundle-wide, so built once rather than
 # per module in build_resolve_ctx, which would make it quadratic in modules.
 type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, prelude: PreludeNames,
-                    externs: List PrivateExtern, export_local_error: Maybe (String, source.SourcePos, String),
+                    externs: List PrivateExtern, extern_decl_error: Maybe (String, source.SourcePos, String),
                     qualified: List QualifiedModule)
 
 fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleNames =
@@ -1971,7 +1995,7 @@ fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: Li
       facts = extern_facts_of(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
       externs = private_externs_of(facts)
   in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude, externs = externs,
-                 export_local_error = export_local_extern_error(facts),
+                 extern_decl_error = maybe_or_else(unsafe_pure_decl_error(facts), export_local_extern_error(facts)),
                  qualified = list_map(qualify_one(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs), modules))
 
 fn qualify_one(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
@@ -2556,7 +2580,7 @@ fn make_bundle_or_err(modules: List ParsedModule, entry_path: String, stdlib_roo
   match validate_imports(modules, names.all_symbols, stdlib_root, extra_roots) with
   | Just issue -> BundleErr(issue_pos_for_entry(issue, entry_path), issue_message(issue))
   | Nothing ->
-    match names.export_local_error with
+    match names.extern_decl_error with
     | Just (path, pos, err_msg) -> BundleErr(pos_for_entry(path, pos, entry_path), err_msg)
     | Nothing ->
       match validate_qualified_decls(qualified) with

@@ -1,0 +1,15 @@
+module main
+import stdlib.linvec
+
+# `private_extern_two_declarers.spr` with its error's hint applied: the extern is declared in
+# this module, which is FFI the reader can see.
+
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+
+wrap linear Box = Vector Int
+
+fn poke(b: borrowing Box) -> Unit !{IO} =
+  match b with
+  | Box raw -> vector_mutset(raw, 0, 99)
+
+fn main() -> Unit !{IO} = print("x")

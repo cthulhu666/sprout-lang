@@ -21,6 +21,12 @@
 # declared exactly once, in the module that owns it. Consumers reach it by
 # importing that module, which is sufficient because externs resolve by bare
 # name once their module is in the bundle.
+#
+# One exception: stdlib/linvec.sprout redeclares `vector_mutset`, `vector_push` and
+# `vector_truncate` with stdlib/mutable.sprout's exact signatures. Both are private,
+# and linvec needs its own so a caller who imports `stdlib.mutable` still cannot write
+# through a borrowed `Vector` (docs/unsafe-primitives-v0.md §4.3). Allowed only as that
+# one identical pair.
 
 set -euo pipefail
 
@@ -38,9 +44,14 @@ decls=$(find stdlib -name '*.sprout' -print0 \
   | sort)
 
 report=$(printf '%s\n' "$decls" | awk -F'\t' '
-  { n = $1; count[n]++; if (!(n in seen)) { seen[n] = 1; order[++k] = n }
+  BEGIN { allowed["vector_mutset"] = 1; allowed["vector_push"] = 1; allowed["vector_truncate"] = 1 }
+  { n = $1; count[n]++; if (!(n in seen)) { seen[n] = 1; order[++k] = n; first_sig[n] = $3 }
+    split($2, loc, ":")
+    if ($3 != first_sig[n]) differs[n] = 1
+    if (loc[1] != "stdlib/mutable.sprout" && loc[1] != "stdlib/linvec.sprout") elsewhere[n] = 1
     detail[n] = detail[n] sprintf("      %s\n          %s\n", $2, $3) }
   END { for (i = 1; i <= k; i++) { n = order[i]
+          if ((n in allowed) && count[n] == 2 && !(n in differs) && !(n in elsewhere)) continue
           if (count[n] > 1) printf "  %s  (%d declarations)\n%s\n", n, count[n], detail[n] } }
 ')
 

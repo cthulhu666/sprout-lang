@@ -292,8 +292,33 @@ export fn mark_private_extern(module: String, name: String, writes_local: Bool) 
 export fn is_private_extern_marked(name: String) -> Bool =
   string.starts_with(name, private_extern_marker)
 
+# `unsafe_pure` (stdlib/unsafe.sprout, docs/unsafe-primitives-v0.md §4): a listed module may
+# reference it, only `stdlib.unsafe` may declare it, and a call must pass a lambda literal.
+export let unsafe_pure_name: String = "unsafe_pure"
+
+# The modules that may reference `unsafe_pure`, by module name. Adding one is a reviewed edit.
+export let unsafe_pure_users: List String = ["stdlib.linvec"]
+
+export let unsafe_pure_reserved_message: String =
+  "`unsafe_pure` is reserved for selected stdlib modules"
+
+export let unsafe_pure_declarer: String = "stdlib.unsafe"
+
+export let unsafe_pure_declaration_message: String =
+  "`unsafe_pure` may be declared only in `" ++ unsafe_pure_declarer ++ "`"
+
+export let unsafe_pure_export_message: String =
+  "`unsafe_pure` cannot be exported. Remove `export`"
+
+export let unsafe_pure_argument_message: String =
+  "`unsafe_pure` takes a lambda literal, as in `unsafe_pure(\\_ -> body)`"
+
+export let unsafe_pure_value_message: String =
+  "`unsafe_pure` cannot be used as a value: call it with a lambda literal"
+
 export fn private_extern_message(marked: String) -> String =
-  if kind == "local" then
+  if name == unsafe_pure_name then unsafe_pure_reserved_message
+  else if kind == "local" then
     "`" ++ name ++ "` is private to " ++ describe_declaring_module(module)
       ++ ": an extern whose signature writes `local` is reachable only from the module that declares it, because `local` on an extern is a promise the compiler cannot check, kept only by that module's own callers (spec-v0 §Externs)"
   else

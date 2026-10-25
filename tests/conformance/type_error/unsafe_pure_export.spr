@@ -1,0 +1,9 @@
+module stdlib.unsafe
+
+# Only the declaration in `stdlib.unsafe` is allowed, and it is never exported. This entry
+# file takes that module's name, as any file may, to reach the export rule.
+
+export extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

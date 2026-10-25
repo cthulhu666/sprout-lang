@@ -1611,6 +1611,9 @@ fn infer_var(
   match dict_get(name, env) with
   | Nothing -> InferErr(pos, unresolved_name_message("Unknown variable: ", name, env))
   | Just scheme ->
+      # A bare `unsafe_pure` has no lambda literal to lower in place (§4.1).
+      if is_declared_unsafe_pure(name, env) then InferErr(pos, source.unsafe_pure_value_message)
+      else
       match value_ref_eta(name, scheme, pos, env) with
       # Re-enter inference on the synthesized lambda, the same way the dotted-name case above
       # re-enters on a field chain.  The call inside it is an ordinary call, so it routes through
@@ -2127,13 +2130,31 @@ fn infer_call_var(
         match call_arity_error_for(name, list_length(args), env) with
         | Just msg -> InferErr(cpos, msg)
         | Nothing ->
-            # This slot was a hardcoded `types.EffectPure` until 2026-08-16, and it
-            # is the single reason effect inference produced no signal: every named
-            # call is routed through here, so every callee looked pure and
-            # merge_effects only ever merged pure with pure.
-            infer_call_inner(state, env, subst, eff_subst, callee,
-              typed_ast.TVar(name, t, cpos), call_effect_of(scheme, t, list_length(args)),
-              prog_to_fresh, args, pos)
+            match unsafe_pure_argument_error(name, args, env) with
+            | Just msg -> InferErr(cpos, msg)
+            | Nothing ->
+                # This slot was a hardcoded `types.EffectPure` until 2026-08-16, and it
+                # is the single reason effect inference produced no signal: every named
+                # call is routed through here, so every callee looked pure and
+                # merge_effects only ever merged pure with pure.
+                infer_call_inner(state, env, subst, eff_subst, callee,
+                  typed_ast.TVar(name, t, cpos), call_effect_of(scheme, t, list_length(args)),
+                  prog_to_fresh, args, pos)
+
+# `unsafe_pure` is an intrinsic that lowers its lambda in place (docs/unsafe-primitives-v0.md
+# §4.1), so its one argument must be a lambda literal. The arity marker is present only while
+# the name is the declared extern: a local of that name drops it (bind_local_scheme) and is
+# called like any local.
+fn unsafe_pure_argument_error(name: String, args: List ast.Expr, env: Dict types.Scheme) -> Maybe String =
+  if !is_declared_unsafe_pure(name, env) then Nothing
+  else
+    match args with
+    | [ast.LambdaExpr _ _ _] -> Nothing
+    | [_] -> Just(source.unsafe_pure_argument_message)
+    | _ -> Nothing
+
+fn is_declared_unsafe_pure(name: String, env: Dict types.Scheme) -> Bool =
+  name == source.unsafe_pure_name && dict_member(types.arity_marker_key(name), env)
 
 # The effect a SATURATED call performs: the merge of every arrow the call
 # consumes. Calls are always saturated (§5.3 — never a partial application), so

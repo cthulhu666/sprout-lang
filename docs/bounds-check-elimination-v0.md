@@ -145,10 +145,12 @@ What qualifies, all on Sprout IR after type inference:
    reading `i`).
 4. Nothing in the body can change an accessed vector's length. Only `vector_push` and
    `vector_truncate` do, and both are `!{IO}`; the pure `vector_set` and `vector_append` copy.
-   The pure `linvec.push` and `linvec.pop` also change a length, and sit outside the rule: a
+   The pure `linvec.push` and `linvec.pop` also change a length, behind `unsafe_pure`
+   ([unsafe-primitives-v0.md](unsafe-primitives-v0.md)), and sit outside the rule: a
    `LinVec`'s `Vector` is fresh, never reaches an access the pass rewrites, and `freeze` gives
-   an immutable `Vec`. `just linvec-smoke` pins that `stdlib.linvec` and `stdlib.linheap` call
-   none of the four vector externs.
+   an immutable `Vec`. `just linvec-smoke` pins that the pass versions no loop in a
+   `stdlib.linvec.*` or `stdlib.linheap.*` declaration (`SPROUT_TRACE_BCE=1`). Versioning over
+   `LinVec` writes would break the premise and must first teach the summary to see `unsafe_pure`.
    So the body may make pure calls, accessor calls, and calls to functions that are
    length-preserving by the same rule. A pure comparator qualifies: an effect type is the proof.
    `Bytes` never changes length, so byte reads need only 2 and 3.
@@ -243,7 +245,8 @@ as it was. `SPROUT_OPT_OFF=bce` turns the pass off; `SPROUT_TRACE_BCE=1` prints 
   short safe list (`vector_get_direct`, `vector_mutset`, refs, `print`, `vec_make_filled`), and a
   call through a function value that is not pure, make a function unsafe. `vector_push` and
   `vector_truncate` are IO externs, so a loop that pushes is kept. `linvec_push` and
-  `linvec_truncate` are pure and are not counted: item 4 of the conditions says why that is sound.
+  `linvec_truncate` are pure by type and are not counted: item 4 of the conditions says why that
+  is sound.
 
 **The entry test** is a conjunction: each vector is non-null, each atom (a parameter) is in
 `[-2^31, 2^31]`, then `lo >= 0` and `hi < len(v)` for every access's range. It differs from the

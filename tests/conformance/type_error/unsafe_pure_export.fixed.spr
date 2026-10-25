@@ -1,0 +1,7 @@
+module stdlib.unsafe
+
+# `unsafe_pure_export.spr` with `export` removed.
+
+extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a
+
+fn main() -> Unit !{IO} = print("x")
