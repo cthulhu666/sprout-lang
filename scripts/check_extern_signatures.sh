@@ -26,7 +26,7 @@
 # `vector_truncate` with stdlib/mutable.sprout's exact signatures. Both are private,
 # and linvec needs its own so a caller who imports `stdlib.mutable` still cannot write
 # through a borrowed `Vector` (docs/unsafe-primitives-v0.md §4.3). Allowed only as that
-# one identical pair.
+# one identical pair: exactly one declaration in each of those two files.
 
 set -euo pipefail
 
@@ -48,10 +48,12 @@ report=$(printf '%s\n' "$decls" | awk -F'\t' '
   { n = $1; count[n]++; if (!(n in seen)) { seen[n] = 1; order[++k] = n; first_sig[n] = $3 }
     split($2, loc, ":")
     if ($3 != first_sig[n]) differs[n] = 1
-    if (loc[1] != "stdlib/mutable.sprout" && loc[1] != "stdlib/linvec.sprout") elsewhere[n] = 1
+    if (loc[1] == "stdlib/mutable.sprout") inmut[n]++
+    else if (loc[1] == "stdlib/linvec.sprout") inlin[n]++
+    else elsewhere[n] = 1
     detail[n] = detail[n] sprintf("      %s\n          %s\n", $2, $3) }
   END { for (i = 1; i <= k; i++) { n = order[i]
-          if ((n in allowed) && count[n] == 2 && !(n in differs) && !(n in elsewhere)) continue
+          if ((n in allowed) && count[n] == 2 && inmut[n] == 1 && inlin[n] == 1 && !(n in differs) && !(n in elsewhere)) continue
           if (count[n] > 1) printf "  %s  (%d declarations)\n%s\n", n, count[n], detail[n] } }
 ')
 

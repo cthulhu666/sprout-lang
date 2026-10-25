@@ -2127,19 +2127,17 @@ fn infer_call_var(
       do
         (t, prog_to_fresh) <- unifier.instantiate_with_vars(state, scheme)
         park_bound_obligations(state, env, name, scheme, prog_to_fresh, cpos)
-        match call_arity_error_for(name, list_length(args), env) with
+        match maybe_or_else(call_arity_error_for(name, list_length(args), env),
+                            unsafe_pure_argument_error(name, args, env)) with
         | Just msg -> InferErr(cpos, msg)
         | Nothing ->
-            match unsafe_pure_argument_error(name, args, env) with
-            | Just msg -> InferErr(cpos, msg)
-            | Nothing ->
-                # This slot was a hardcoded `types.EffectPure` until 2026-08-16, and it
-                # is the single reason effect inference produced no signal: every named
-                # call is routed through here, so every callee looked pure and
-                # merge_effects only ever merged pure with pure.
-                infer_call_inner(state, env, subst, eff_subst, callee,
-                  typed_ast.TVar(name, t, cpos), call_effect_of(scheme, t, list_length(args)),
-                  prog_to_fresh, args, pos)
+            # This slot was a hardcoded `types.EffectPure` until 2026-08-16, and it
+            # is the single reason effect inference produced no signal: every named
+            # call is routed through here, so every callee looked pure and
+            # merge_effects only ever merged pure with pure.
+            infer_call_inner(state, env, subst, eff_subst, callee,
+              typed_ast.TVar(name, t, cpos), call_effect_of(scheme, t, list_length(args)),
+              prog_to_fresh, args, pos)
 
 # `unsafe_pure` is an intrinsic that lowers its lambda in place (docs/unsafe-primitives-v0.md
 # §4.1), so its one argument must be a lambda literal. The arity marker is present only while

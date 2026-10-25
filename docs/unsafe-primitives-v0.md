@@ -119,9 +119,9 @@ it (§4.2).
 (first entry: `stdlib.linvec`). Two bundler rules enforce it, both by module name:
 
 1. **Reference.** `guard_private_extern` already marks a reference to a private extern from a
-   module that does not declare it, and `infer` reports the mark. It leaves a reference to
-   `unsafe_pure` unmarked when the referring module is listed; it reads the module's name from
-   `ResolveCtx.module_name`. From any other module the reference is marked, and the error is `` `unsafe_pure` is reserved for selected stdlib modules ``.
+   module that does not declare it, and `infer` reports the mark. `build_resolve_ctx` decides it once per
+   module: a listed module has `unsafe_pure` among its own externs (`own_externs_of`), so it is
+   left out of `ResolveCtx.foreign` and its references stay unmarked. From any other module the reference is marked, and the error is `` `unsafe_pure` is reserved for selected stdlib modules ``.
 2. **Declaration.** Only `stdlib.unsafe` may declare `unsafe_pure`, and `export` on it is an error.
    Rule 1 alone is bypassed by a module declaring its own copy, since an extern is identified by
    its name, not its module. The export ban is stated here rather than left to spec §3's `local`
