@@ -65,8 +65,15 @@ fn has(out: String, needle: String) -> Bool =
   str_find(out, needle) != -1
 
 # The text of `define i64 @<name>(...) { ... }`, or "" when no such function exists.
-fn body_of(out: String, name: String) -> String =
-  let start = str_find(out, "define i64 @" ++ name ++ "(")
+fn body_of(out: String, name: String) -> String = define_block(out, "define i64 @" ++ name ++ "(")
+
+# The text of `define i128 @<name>_worker(...) { ... }`, or "" when no such worker exists.
+fn worker_body_of(out: String, name: String) -> String =
+  define_block(out, "define i128 @" ++ name ++ "_worker(")
+
+# The `define` block starting at `header`, up to its closing brace.
+fn define_block(out: String, header: String) -> String =
+  let start = str_find(out, header)
   in
     if start == -1 then ""
     else
@@ -192,6 +199,40 @@ fn scrutinee_src() -> String =
     ++ "  | Just x -> x\n"
     ++ "  | Nothing -> 0\n"
 
+# 9. Mutual tail recursion: `h` and `g` both have workers (`probe` matches `h`, `via_arg` is an
+# argument site for `g`), and neither worker may chain into the other.
+fn mutual_workers_src() -> String =
+  maybe_decl
+    ++ "fn h(n: Int) -> Maybe Int =\n  if n == 0 then Just(0) else g(n - 1)\n\n"
+    ++ "fn g(n: Int) -> Maybe Int =\n  if n == 0 then Nothing else h(n - 1)\n\n"
+    ++ "fn use(m: Maybe Int) -> Int =\n  match m with\n  | Just x -> x\n  | Nothing -> 7\n\n"
+    ++ "fn via_arg(n: Int) -> Int =\n  use(g(n))\n\n"
+    ++ "fn probe(n: Int) -> Int =\n  match h(n) with\n  | Just x -> x\n  | Nothing -> 7\n"
+
+# 9b. A chain outside any group still chains: `a` is not recursive, `b` is not in its group.
+fn chain_src() -> String =
+  maybe_decl ++ get_decl
+    ++ "fn b(n: Int) -> Maybe Int =\n  get(n, 1)\n\n"
+    ++ "fn a(n: Int) -> Maybe Int =\n  b(n)\n\n"
+    ++ "fn probe_a(n: Int) -> Int =\n  match a(n) with\n  | Just x -> x\n  | Nothing -> 0\n\n"
+    ++ "fn probe_b(n: Int) -> Int =\n  match b(n) with\n  | Just x -> x\n  | Nothing -> 0\n"
+
+# 10. A user fn `check_argw` beside a consumer `check`: the site is not routed.
+fn argw_collision_src() -> String =
+  maybe_decl
+    ++ "fn p(i: Int) -> Maybe Int =\n  if i < 0 then Nothing else Just(i)\n\n"
+    ++ "fn check(m: Maybe Int) -> Int =\n  match m with\n  | Just x -> x\n  | Nothing -> 0\n\n"
+    ++ "fn check_argw(n: Int) -> Int =\n  n + 1\n\n"
+    ++ "fn caller(i: Int) -> Int =\n  check(p(i))\n"
+
+# 10b. A user fn `p_worker` beside the producer `p`: the site is not routed.
+fn worker_collision_src() -> String =
+  maybe_decl
+    ++ "fn p(i: Int) -> Maybe Int =\n  if i < 0 then Nothing else Just(i)\n\n"
+    ++ "fn check(m: Maybe Int) -> Int =\n  match m with\n  | Just x -> x\n  | Nothing -> 0\n\n"
+    ++ "fn p_worker(n: Int) -> Int =\n  n + 1\n\n"
+    ++ "fn caller(i: Int) -> Int =\n  check(p(i))\n"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -309,5 +350,40 @@ fn main() -> Unit !{IO} =
     assert_true(state, "8: get stays a boxed call", calls_boxed(sc, "get"))
     assert_false(state, "8: no get_worker call", calls_worker(sc, "get"))
     assert_false(state, "8: no or_else_argw call", has(sc, "or_else_argw"))
+
+    # --- 9. A worker never chains into its own recursive group -----------------
+    r9 <- translate_or_msg(mutual_workers_src())
+    assert_true(state, "9: fixture translates", translated(r9))
+    hw <- worker_body_of(r9, "h")
+    gw <- worker_body_of(r9, "g")
+    assert_true(state, "9: h has a result worker", hw != "")
+    assert_true(state, "9: g has a result worker", gw != "")
+    assert_false(state, "9: h_worker does not call g_worker", calls_worker(hw, "g"))
+    assert_false(state, "9: g_worker does not call h_worker", calls_worker(gw, "h"))
+    assert_true(state, "9: h_worker reaches g through the boxed fn", calls_boxed(hw, "g"))
+    assert_true(state, "9: g_worker reaches h through the boxed fn", calls_boxed(gw, "h"))
+
+    r9b <- translate_or_msg(chain_src())
+    assert_true(state, "9b: fixture translates", translated(r9b))
+    aw <- worker_body_of(r9b, "a")
+    assert_true(state, "9b: a has a result worker", aw != "")
+    assert_true(state, "9b: a_worker still chains to b_worker", calls_worker(aw, "b"))
+
+    # --- 10. A name collision makes the site a non-site, not an error ----------
+    r10 <- translate_or_msg(argw_collision_src())
+    assert_true(state, "10: check_argw collision translates", translated(r10))
+    c10 <- body_of(r10, "caller")
+    assert_true(state, "10: caller has a body", c10 != "")
+    assert_true(state, "10: caller calls boxed check", calls_boxed(c10, "check"))
+    assert_true(state, "10: caller calls boxed p", calls_boxed(c10, "p"))
+    assert_false(state, "10: no p_worker is emitted", has(r10, "define i128 @p_worker("))
+
+    r10b <- translate_or_msg(worker_collision_src())
+    assert_true(state, "10b: p_worker collision translates", translated(r10b))
+    c10b <- body_of(r10b, "caller")
+    assert_true(state, "10b: caller has a body", c10b != "")
+    assert_true(state, "10b: caller calls boxed check", calls_boxed(c10b, "check"))
+    assert_true(state, "10b: caller calls boxed p", calls_boxed(c10b, "p"))
+    assert_false(state, "10b: no check_argw is emitted", has(r10b, "define i64 @check_argw("))
 
     summary(state)

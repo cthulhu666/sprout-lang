@@ -1,8 +1,8 @@
 module main
 import stdlib.test (TestState, new_state, assert_eq, summary)
 
-# Behaviour guards for argument CPR (docs/arg-cpr-v0.md §7, cases 9 and 10): passing a
-# `Maybe`-returning call straight to a consumer must not change any result. Case 9
+# Behaviour guards for argument CPR (docs/arg-cpr-v0.md §7, cases 11 to 13): passing a
+# `Maybe`-returning call straight to a consumer must not change any result. Case 11
 # is meant to run under SPROUT_GC_STRESS=1 too.
 
 # Allocates `n` fresh strings; forces collections under stress.
@@ -40,19 +40,53 @@ fn count(n: Int, m: Maybe Int) -> Int =
 fn run_count(start: Int) -> Int =
   count(0, step(start))
 
+# Mutual tail recursion between two fns that both have result workers. `h` and `g` each get
+# one (a `match` on `h`, an argument site on `g`), and the tail calls must still loop.
+fn h(n: Int) -> Maybe Int = if n == 0 then Just(0) else g(n - 1)
+
+fn g(n: Int) -> Maybe Int = if n == 0 then Nothing else h(n - 1)
+
+fn h_deep(n: Int) -> Int =
+  match h(n) with
+  | Just x -> x
+  | Nothing -> 7
+
+# The same shape with the pair entered through a `match` scrutinee only.
+fn h2(n: Int) -> Maybe Int = if n == 0 then Just(0) else g2(n - 1)
+
+fn g2(n: Int) -> Maybe Int = if n == 0 then Nothing else h2(n - 1)
+
+fn h2_deep(n: Int) -> Int =
+  match h2(n) with
+  | Just x -> x
+  | Nothing -> 7
+
+fn g2_deep(n: Int) -> Int =
+  match g2(n) with
+  | Just x -> x
+  | Nothing -> 7
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    # 9. Heap payload held across an allocating later argument.
-    assert_eq(state, "9: Just payload joined with tail", labelled(7), "n7" ++ burn(40, "") ++ "7")
-    assert_eq(state, "9: Nothing yields only the tail", labelled(-1), burn(40, "") ++ "-1")
+    # 11. Heap payload held across an allocating later argument.
+    assert_eq(state, "11: Just payload joined with tail", labelled(7), "n7" ++ burn(40, "") ++ "7")
+    assert_eq(state, "11: Nothing yields only the tail", labelled(-1), burn(40, "") ++ "-1")
     # "n<i>" + 40 x's + "<i>": 1 + len(i) + 40 + len(i), summed for i = 0..9 and 10..99.
-    assert_eq(state, "9: lengths over single digits", labelled_len(9, 0), 10 * 43)
-    assert_eq(state, "9: lengths over two digits", labelled_len(99, 0), 10 * 43 + 90 * 45)
+    assert_eq(state, "11: lengths over single digits", labelled_len(9, 0), 10 * 43)
+    assert_eq(state, "11: lengths over two digits", labelled_len(99, 0), 10 * 43 + 90 * 45)
 
-    # 10. Depth 1,000,000 through a self-recursive consumer.
-    assert_eq(state, "10: count reaches depth 1000000", run_count(0), 1000000)
-    assert_eq(state, "10: count from 999990 counts the tail", run_count(999990), 10)
+    # 12. Depth 1,000,000 through a self-recursive consumer.
+    assert_eq(state, "12: count reaches depth 1000000", run_count(0), 1000000)
+    assert_eq(state, "12: count from 999990 counts the tail", run_count(999990), 10)
+
+    # 13. Mutual tail recursion between workers runs at depth 3,000,000.
+    assert_eq(state, "13: argument site feeds g", maybe_with_default(7, g(3)), 0)
+    assert_eq(state, "13: h even depth ends in Just", h_deep(3000000), 0)
+    assert_eq(state, "13: h odd depth ends in Nothing", h_deep(3000001), 7)
+    assert_eq(state, "13: match entry, g2 odd depth", g2_deep(3), 0)
+    assert_eq(state, "13: match entry, h2 even depth", h2_deep(3000000), 0)
+    assert_eq(state, "13: match entry, g2 even depth", g2_deep(3000000), 7)
 
     summary(state)
