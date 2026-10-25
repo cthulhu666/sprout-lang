@@ -62,6 +62,19 @@ fn object_count(raw: String) -> Int =
 fn escaped_literal(k: Int) -> (String, String) =
   ("\"" ++ grow("a\\n", k) ++ "\"", grow("a\n", k))
 
+# 2^k surrogate pairs `\ud83d\ude00` (U+1F600), which take the `\u` path of the escape step.
+fn pair_literal(k: Int) -> (String, String) =
+  ("\"" ++ grow("\\ud83d\\ude00", k) ++ "\"", grow("😀", k))
+
+# 2^k valid escapes, then `\x`: the failure at the end of a long run must still reach the caller.
+fn bad_tail_literal(k: Int) -> String =
+  "\"" ++ grow("\\n", k) ++ "\\x\""
+
+fn rejects(raw: String) -> Bool =
+  match json.parse(raw) with
+  | Ok _ -> false
+  | Err _ -> true
+
 fn decodes(case: (String, String)) -> Bool =
   match case with
   | (raw, expected) ->
@@ -75,9 +88,11 @@ fn main() -> Unit !{IO} =
     # 64x more input: linear ~64x, quadratic ~4000x. CI runs this under SPROUT_GC_HDRCHECK=1, where
     # `str_byte_len` is O(n), so the parser must not read it per byte (docs/gates.md §ratio arms).
     assert_scales(state, "string escapes", decodes, escaped_literal(9), escaped_literal(15), 400)
-    # The string decoder's escape step called back into the run loop instead of looping, so 2^15
-    # escapes (64 KiB) overflowed the stack.
+    # The escape step and the run loop tail-call each other, and the run loop also calls itself:
+    # when that cycle was not compiled as a loop, 2^15 escapes (64 KiB) overflowed the stack.
     assert_true(state, "a string of 2^17 escapes parses", decodes(escaped_literal(17)))
+    assert_true(state, "a string of 2^17 surrogate pairs parses", decodes(pair_literal(17)))
+    assert_true(state, "a bad escape after 2^17 good ones is rejected", rejects(bad_tail_literal(17)))
     assert_true(state, "a 2^19-element array parses in order", array_count(array_text(many)) == many)
     assert_true(state, "a 2^19-member object parses in order", object_count(object_text(many)) == many)
     assert_true(state, "array_from_list keeps 2^19 elements in order",

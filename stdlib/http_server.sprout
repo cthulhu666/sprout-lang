@@ -1175,8 +1175,8 @@ fn handler_closes(resp: HttpServerResponse) -> Bool =
 #
 # THE LOOP — handle_connection, respond, write_kept, next_request, next_from, idle_wait.
 # Two invariants hold across it; check both before changing any of them:
-# A. Every call from one to the next is a tail call, and none calls itself: a call that is not a tail
-#    call keeps a frame per request, and the task's GC root pool runs out after a few thousand.
+# A. Every call from one to the next is a tail call: a call that is not a tail call keeps a frame per
+#    request, and the task's GC root pool runs out after a few thousand.
 # B. A place taken by `reserve` is given back exactly once: by `write_kept` when the write fails, by
 #    `next_from` when the next request starts, or by `idle_wait` when the wait ends without one.
 fn handle_connection(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
