@@ -52,6 +52,11 @@ if "$TMP_DIR/ctor_meta_capacity" > "$TMP_DIR/ctor_meta_capacity.out" 2> "$TMP_DI
 fi
 grep -q "constructor metadata table full" "$TMP_DIR/ctor_meta_capacity.err"
 
+echo "==> c runtime: _unboxed reads fall back to the registered Just/Nothing tags"
+compile maybe_tag_fallback.c "$TMP_DIR/maybe_tag_fallback" -O0 -g
+"$TMP_DIR/maybe_tag_fallback" > "$TMP_DIR/maybe_tag_fallback.out"
+test "$(cat "$TMP_DIR/maybe_tag_fallback.out")" = "maybe-tag-fallback"
+
 echo "==> c runtime: process grow buffer keeps old pointer on realloc failure"
 grep -q 'char\* grown = (char\*)realloc' "$ROOT/runtime/sprout_runtime.c"
 if grep -q 'b->data = (char\*)realloc' "$ROOT/runtime/sprout_runtime.c"; then

@@ -125,6 +125,8 @@ declare i64 @ref_write(i64, i64)
 @.cfkinds.18 = private unnamed_addr constant [2 x i8] c"i\00"
 @.cname.19 = private unnamed_addr constant [37 x i8] c"examples.existential_shapes.Drawable\00"
 @.cfkinds.19 = private unnamed_addr constant [4 x i8] c"_pp\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807

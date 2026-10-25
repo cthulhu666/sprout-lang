@@ -156,6 +156,8 @@ declare i64 @wall_time_micros()
 @.cfkinds.16 = private unnamed_addr constant [2 x i8] c"p\00"
 @.cname.17 = private unnamed_addr constant [25 x i8] c"stdlib.mutable.MutMatrix\00"
 @.cfkinds.17 = private unnamed_addr constant [4 x i8] c"iip\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807

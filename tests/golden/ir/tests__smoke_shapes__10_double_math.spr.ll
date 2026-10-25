@@ -145,6 +145,8 @@ declare i64 @double_from_bits(i64)
 @.cfkinds.14 = private unnamed_addr constant [2 x i8] c"_\00"
 @.cname.15 = private unnamed_addr constant [6 x i8] c"Break\00"
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"_\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807

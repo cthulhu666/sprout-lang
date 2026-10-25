@@ -6443,11 +6443,19 @@ long long split_words(const char* s) {
 static long long g_tag_just    = -1;
 static long long g_tag_nothing = -1;
 
+/* The emitted module defines the strong `sprout_tag_*` constants, so a whole-program link
+ * folds the tags into every inlined read. -1 covers a module without them: the committed
+ * seed before a reseed, the C runtime tests, a `no_prelude` program. */
+__attribute__((weak)) const long long sprout_tag_just = -1;
+__attribute__((weak)) const long long sprout_tag_nothing = -1;
+
 static long long cached_tag_just(void) {
+  if (sprout_tag_just >= 0) return sprout_tag_just;
   if (g_tag_just < 0) g_tag_just = find_ctor_tag_by_name("Just");
   return g_tag_just;
 }
 static long long cached_tag_nothing(void) {
+  if (sprout_tag_nothing >= 0) return sprout_tag_nothing;
   if (g_tag_nothing < 0) g_tag_nothing = find_ctor_tag_by_name("Nothing");
   return g_tag_nothing;
 }

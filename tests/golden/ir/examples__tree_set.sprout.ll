@@ -141,6 +141,8 @@ declare i64 @split_words(i64)
 @.cfkinds.17 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.18 = private unnamed_addr constant [23 x i8] c"examples.tree_set.Node\00"
 @.cfkinds.18 = private unnamed_addr constant [4 x i8] c"pip\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807

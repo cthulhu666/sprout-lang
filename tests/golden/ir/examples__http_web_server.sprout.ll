@@ -1026,6 +1026,8 @@ declare i64 @fs_rename(i64, i64)
 @.cfkinds.138 = private unnamed_addr constant [4 x i8] c"iss\00"
 @.cname.139 = private unnamed_addr constant [31 x i8] c"examples.http_web_server.Store\00"
 @.cfkinds.139 = private unnamed_addr constant [3 x i8] c"pi\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807

@@ -167,6 +167,8 @@ declare i64 @json_stringify(i64)
 @.cfkinds.30 = private unnamed_addr constant [3 x i8] c"pp\00"
 @.cname.31 = private unnamed_addr constant [27 x i8] c"stdlib.json.JsonObjectStep\00"
 @.cfkinds.31 = private unnamed_addr constant [4 x i8] c"spp\00"
+@sprout_tag_nothing = constant i64 0
+@sprout_tag_just = constant i64 1
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807

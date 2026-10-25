@@ -268,6 +268,20 @@ tuple CPR) return `i128` too, since `IRCallUnboxed2` calls both kinds.
 clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so neither
 form matches the declare. Nothing builds the runtime for Windows yet; see `BACKLOG.md`.
 
+**The `Just` / `Nothing` tags are a compiler-to-runtime symbol pair.**
+`ir_lowering.collect_ctor_globals` emits `@sprout_tag_just` / `@sprout_tag_nothing` as
+external `constant i64` for the bare-named ctors: the prelude's, or a `no_prelude` entry's
+own (other modules' ctors are qualified, `main.Just`). The runtime defines both **weak**
+`const long long = -1`; `cached_tag_just` / `cached_tag_nothing` return the value when it is
+`>= 0`, else fall back to `find_ctor_tag_by_name`. Under whole-program linking the strong
+definition wins and LLVM folds the tag, so an inlined `_unboxed` read carries no lookup —
+which would otherwise push its caller past the inline threshold. The `-1` default covers a
+module without the symbols: the committed seed before a reseed, `tests/c_runtime`, a program
+with no `Just`. Two emitted modules linked together would define them twice; nothing does.
+These are the runtime's first weak symbols: Mach-O and ELF prefer a strong definition, COFF
+differs, and Windows x64 has no CPR externs (above). `just cpr-tag-fold-check` pins it
+([gates.md](gates.md)).
+
 **There is no width-3 extern, and no lowering for one.** Clang returns a 24-byte
 struct through a hidden `sret` pointer, so a `{ i64, i64, i64 }` extern declared
 the direct way links, verifies and returns garbage. Adding a width-3 extern means
