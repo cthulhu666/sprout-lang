@@ -619,9 +619,12 @@ fn witness_slot_count(exist_constraints: List ast.TypeConstraint,
 # The program-wide translation inputs: the constructor table, top-level and
 # let-bound names, arities, the lambda-name counter and the lifted-lambda
 # next-idx map. Built once per program.
+# `argw` maps a consumer fn to the index of the parameter its `_argw` worker unboxes;
+# `groups` maps a fn in a recursive group to that group's members (docs/arg-cpr-v0.md).
 export type ProgEnv (..) = (ctors: Dict sprout_ir.CtorInfo, top_level: Set, let_names: Set,
                             fn_arities: Dict FnInfo, lambda_ctr_ref: Ref Int,
-                            lifted_idx_ref: Ref (Dict Int), adt_index: Dict (List (Int, Int)))
+                            lifted_idx_ref: Ref (Dict Int), adt_index: Dict (List (Int, Int)),
+                            argw: Dict Int, groups: Dict Set)
 
 export fn new_prog_env(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo) -> ProgEnv !{IO} =
   do
@@ -632,7 +635,8 @@ export fn new_prog_env(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.Ct
             let_names = build_top_level_let_names(decls),
             fn_arities = build_fn_arities(decls, adt_index),
             lambda_ctr_ref = lambda_ctr_ref, lifted_idx_ref = lifted_idx_ref,
-            adt_index = adt_index)
+            adt_index = adt_index, argw = build_argw_index(decls, ctors),
+            groups = build_recursive_groups(decls))
 
 # The same tables with fresh refs, for a pass that re-runs translation without
 # disturbing another pass's lambda names and indices.
@@ -645,8 +649,9 @@ export fn with_fresh_refs(penv: ProgEnv) -> ProgEnv !{IO} =
 # What every translator reads while one function is lowered: the program env,
 # that function's lifted-lambda accumulator, and its reuse state (below).
 # `owned` is the SSA names of its owned parameters, the only cells a match may reuse.
+# `group` is the source fn's recursive group: a call into it is never argument-routed.
 type TxEnv = (prog: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction),
-              reuse_ref: Ref ReuseState, owned: Set)
+              reuse_ref: Ref ReuseState, owned: Set, group: Set)
 
 # In-place reuse of a consumed linear cell (docs/linear-reuse-v0.md §4.2).
 # A token is the cell an arm matched: its SSA name, type, constructor, tag and physical
@@ -659,16 +664,17 @@ type ReuseTok = (ssa: String, ty: String, tag: Int, arity: Int, taken: Bool)
 type ReuseFrame = (base: List ReuseTok, acc: List ReuseTok)
 type ReuseState = (stack: List ReuseTok, frames: List ReuseFrame)
 
-fn new_tx_env(penv: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction), owned: Set) -> TxEnv !{IO} =
+fn new_tx_env(penv: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction), owned: Set,
+              group: Set) -> TxEnv !{IO} =
   do
     reuse_ref <- ref_new(ReuseState(stack = Nil, frames = Nil))
-    TxEnv(prog = penv, lifted_ref = lifted_ref, reuse_ref = reuse_ref, owned = owned)
+    TxEnv(prog = penv, lifted_ref = lifted_ref, reuse_ref = reuse_ref, owned = owned, group = group)
 
 # A closure body's env: its own reuse state and no owned parameters. The body may run 0..n
 # times and its parameters can share `%p$name` with the enclosing function's, so none of the
 # enclosing function's cells is reusable inside it.
 fn closure_tx_env(env: TxEnv) -> TxEnv !{IO} =
-  new_tx_env(env.prog, env.lifted_ref, set_empty())
+  new_tx_env(env.prog, env.lifted_ref, set_empty(), env.group)
 
 # The env for an inlined lambda body. A `borrowing` parameter is bound to the lender's SSA,
 # which may be an owned parameter's, so that SSA is not reusable inside the body. The reuse
@@ -2706,6 +2712,123 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
       arm_blocks, phi_incoming, fresh_join_label(base),
       fresh_name(base + 1), idx_after)
 
+# --- Argument CPR (docs/arg-cpr-v0.md) ----------------------------------------
+# In `f(a, g(x), b)`, when `f` only matches the parameter `g(x)` fills, `g` is called unboxed
+# and its (tag, payload) go to `@f_argw`, so the `Maybe` is never built.
+
+# The parameter of a fn that `@<fn>_argw` unboxes: the body is `match p with arms`, every arm
+# is a simple width-2 pattern with a constructor among them, and `p` is in no arm body.
+fn argw_param_index(params: List ast.Param, body: typed_ast.TypedExpr,
+                    ctors: Dict sprout_ir.CtorInfo) -> Maybe Int =
+  let typed_ast.TMatch(typed_ast.TVar p _ _) arms _ _ = body else Nothing
+      Just k = param_position(p, ast.param_names(params), 0) else Nothing
+  in
+    if all_arms_simple_width2(arms, ctors) && arms_have_ctor_anchor(arms) && !arms_mention(p, arms)
+    then Just(k) else Nothing
+
+fn param_position(name: String, names: List String, i: Int) -> Maybe Int =
+  match names with
+  | [] -> Nothing
+  | [n | rest] -> if n == name then Just(i) else param_position(name, rest, i + 1)
+
+fn arms_mention(name: String, arms: List typed_ast.TypedMatchBranch) -> Bool =
+  any(\b -> set_member(name, compute_free_vars(typed_ast.branch_body(b), set_empty())), arms)
+
+# fn name -> parameter index of its argument worker, for each fn that has one.
+fn build_argw_index(decls: List typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo) -> Dict Int =
+  list_fold(\ (acc, d) -> add_argw_entry(d, ctors, acc), dict_empty(), decls)
+
+fn add_argw_entry(d: typed_ast.TypedDecl, ctors: Dict sprout_ir.CtorInfo, acc: Dict Int) -> Dict Int =
+  let typed_ast.TFnDecl name params _ _ _ body = d else acc
+      Just k = argw_param_index(params, body, ctors) else acc
+  in dict_set_absent(name, k, acc)
+
+# fn name -> its recursive group: the strongly connected component of the typed-AST call
+# graph, an edge for a mention in any position. Tail-only edges would miss `1 + f(..)`.
+fn build_recursive_groups(decls: List typed_ast.TypedDecl) -> Dict Set =
+  scc.sccs_in_dependency_order(order, list_fold(\ (acc, d) -> add_call_edges(d, fnset, acc), dict_empty(), decls))
+  |> list_fold(\ (acc, members) -> index_group(members, set_from_list(members), acc), dict_empty())
+where
+  order = pb_fn_order(decls)
+  fnset = set_from_list(order)
+
+fn add_call_edges(d: typed_ast.TypedDecl, fnset: Set, acc: Dict Set) -> Dict Set =
+  let typed_ast.TFnDecl name _ _ _ _ body = d else acc
+  in dict_set_absent(name, mentioned_fns(body, fnset, set_empty()), acc)
+
+fn mentioned_fns(e: typed_ast.TypedExpr, fnset: Set, acc: Set) -> Set =
+  match e with
+  | typed_ast.TVar name _ _ -> if set_member(name, fnset) then set_insert(name, acc) else acc
+  | _ -> list_fold(\ (a, c) -> mentioned_fns(c, fnset, a), acc, typed_ast.children(e))
+
+fn index_group(members: List String, group: Set, acc: Dict Set) -> Dict Set =
+  list_fold(\ (a, m) -> dict_set(m, group, a), acc, members)
+
+fn group_of(name: String, penv: ProgEnv) -> Set =
+  maybe_with_default(set_empty(), dict_get(name, penv.groups))
+
+# `g` fills parameter `k` of the call `f(..)`, and `g(..)` can arrive as (tag, payload).
+type ArgwSite = (k: Int, producer: String, pargs: List typed_ast.TypedExpr)
+
+# Shape only, shadow-free: collection asks this, and the router adds the shadow and group
+# rules (the split worker_callee_routable documents), so a routed call names only emitted symbols.
+fn argw_shape(fname: String, args: List typed_ast.TypedExpr, penv: ProgEnv) -> Maybe ArgwSite =
+  let Just k = dict_get(fname, penv.argw) else Nothing
+      Just info = dict_get(fname, penv.fn_arities) else Nothing
+      [arg | _] = list.drop(k, args) else Nothing
+      typed_ast.TCall(typed_ast.TVar g _ _) pargs gty _ = arg else Nothing
+  in
+    if info.arity == list_length(args) && producer_unboxable(g, gty, penv)
+    then Just(ArgwSite(k = k, producer = g, pargs = pargs))
+    else Nothing
+
+# A Tier-1 `_unboxed` extern, or a top-level fn whose result worker can be lowered.
+fn producer_unboxable(g: String, gty: types.Type, penv: ProgEnv) -> Bool =
+  match unboxed_maybe_extern_name(g) with
+  | Just _ -> is_maybe_type(gty) && dict_member("Just", penv.ctors) && dict_member("Nothing", penv.ctors)
+  | Nothing -> set_member(g, penv.top_level) && cpr_result_known(g, penv.fn_arities)
+
+fn producer_target(g: String) -> String =
+  maybe_with_default(g ++ "_worker", unboxed_maybe_extern_name(g))
+
+# The site, once `f` and `g` are unshadowed and `f` is outside the caller's recursive group:
+# a call to `@f_argw` is not a call to `f`, so routing a group member would break its loop.
+fn argw_target(fname: String, args: List typed_ast.TypedExpr, params: List String,
+               captures: Dict String, env: TxEnv) -> Maybe ArgwSite =
+  match argw_shape(fname, args, env.prog) with
+  | Just site ->
+      if !set_member(fname, env.group)
+         && !callee_name_shadowed(fname, params, captures, env.prog)
+         && !callee_name_shadowed(site.producer, params, captures, env.prog)
+      then Just(site) else Nothing
+  | Nothing -> Nothing
+
+# Arguments before `k`, then `g`'s arguments and its unboxed call, then the arguments after
+# `k`: the boxed call's left-to-right order, with the producer call in `k`'s place.
+fn translate_argw_call(fname: String, site: ArgwSite, args: List typed_ast.TypedExpr,
+                       call_ty: types.Type, params: List String, env: TxEnv, idx: Int,
+                       cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
+                       captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
+  match list.split_at(site.k, args) with
+  | (before, [_ | after]) ->
+      do
+        (b1, l1, o1, before_names, idx1) <-
+          translate_args(before, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
+        (b2, l2, o2, producer_names, idx2) <-
+          translate_args(site.pargs, params, env, idx1, l1, o1, b1, Nil, captures)
+        let tag_ssa = fresh_name(idx2)
+        let val_ssa = fresh_name(idx2 + 1)
+        let unboxed_call = sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown,
+                                                    producer_target(site.producer), producer_names)
+        (b3, l3, o3, after_names, idx3) <-
+          translate_args(after, params, env, idx2 + 2, l2, list_builder_add(unboxed_call, o2), b2, Nil, captures)
+        let result = fresh_name(idx3)
+        let call = sprout_ir.IRCall(result, ret_irtype(call_ty), fname ++ "_argw",
+                                    list_append(before_names, Cons(tag_ssa, Cons(val_ssa, after_names))))
+        Ok((b3, l3, list_builder_add(call, o3), result, idx3 + 1))
+  | _ -> Err("ast_to_ir: argument worker site has no argument at its position (internal error)")
+
 # --- Tuple-CPR (docs/scalar-replacement-v0.md, Stage 1) ---------------------
 # `match f(args) with | (a, b) -> body` over a top-level fn returning a 2-tuple of non-heap scalars
 # unboxes to `@f_worker` returning `i128`, so the tuple never touches the heap. All-scalar
@@ -4064,27 +4187,32 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
   | Just kind -> translate_string_builtin(kind, fname, args, params, env, idx,
                                           cur_label, cur_ops, captures)
   | Nothing ->
-      # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
-      # All IR values are i64 — String-returning user fns are i64 just like Int.
-      # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
-      do
-        r <- translate_args(args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-        match r with
-        | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-            # B1: inline Vector element access. try_vector_intrinsic recognizes the
-            # op (by name), gates on full application (an under-applied call falls
-            # through to translate_general_call, which rejects it — inference should
-            # already have) and on the element representation; Nothing = general path.
-            match try_bce_intrinsic(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                    arg_cur_ops, arg_names, idx1) with
-            | Just r -> r
-            | Nothing ->
-                match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
-                                           arg_cur_ops, arg_names, idx1, env.prog.fn_arities) with
+      match argw_target(fname, args, params, captures, env) with
+      | Just site ->
+          translate_argw_call(fname, site, args, call_ty, params, env, idx, cur_label, cur_ops,
+                              captures)
+      | Nothing ->
+          # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
+          # All IR values are i64 — String-returning user fns are i64 just like Int.
+          # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
+          do
+            r <- translate_args(args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
+            match r with
+            | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+                # B1: inline Vector element access. try_vector_intrinsic recognizes the
+                # op (by name), gates on full application (an under-applied call falls
+                # through to translate_general_call, which rejects it — inference should
+                # already have) and on the element representation; Nothing = general path.
+                match try_bce_intrinsic(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                        arg_cur_ops, arg_names, idx1) with
                 | Just r -> r
                 | Nothing ->
-                    translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                           arg_cur_ops, arg_names, idx1, env.prog.fn_arities)
+                    match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
+                                               arg_cur_ops, arg_names, idx1, env.prog.fn_arities) with
+                    | Just r -> r
+                    | Nothing ->
+                        translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                               arg_cur_ops, arg_names, idx1, env.prog.fn_arities)
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
@@ -5509,7 +5637,7 @@ fn translate_user_fn(name: String, params: List ast.Param, body: typed_ast.Typed
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
-    env <- new_tx_env(penv, lifted_ref, owned_param_ssas(params))
+    env <- new_tx_env(penv, lifted_ref, owned_param_ssas(params), group_of(name, penv))
     (blocks, next_idx) <- translate_body(body, pnames, env, 0, dict_empty())
     lifted <- ref_read(lifted_ref)
     # TCO: rewrite self-tail-recursion into an alloca-slot loop before
@@ -5937,7 +6065,7 @@ export fn synthesize_init_globals_fn(runtime_lets: List (source.GlobalName, type
     Result String (sprout_ir.IRFunction, List sprout_ir.IRFunction, Int) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
-    env <- new_tx_env(penv, lifted_ref, set_empty())
+    env <- new_tx_env(penv, lifted_ref, set_empty(), set_empty())
     pair <-
       synthesize_init_body_loop(runtime_lets, env, "entry", list_builder_empty, Nil, 0)
     match pair with
@@ -6662,7 +6790,7 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
     Result String (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction) !{IO} =
   do
     lifted_ref <- ref_new(Nil)
-    env <- new_tx_env(penv, lifted_ref, set_empty())
+    env <- new_tx_env(penv, lifted_ref, set_empty(), group_of(self_name, penv))
     (blocks, next_idx) <-
       translate_tail_unboxed(body, ast.param_names(params), env, 0, "entry",
                              list_builder_empty, dict_empty(), result_adt_ctors, worker_set, self_name)
@@ -6674,12 +6802,47 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
 
 # What the worker passes (pre-pass and emit) both need, built once per compile:
 # the matched callees, the fn/extern decls by name and the ADT ctor index.
-export type WorkerPlan (..) = (callees: Set, decls: Dict typed_ast.TypedDecl,
+export type WorkerPlan (..) = (callees: Set, argw: Set, decls: Dict typed_ast.TypedDecl,
                                adt_index: Dict (List (Int, Int)))
 
+# `callees` holds every producer an argument site unboxes as well as every matched callee;
+# `argw` holds the consumers that need an `@<fn>_argw`.
 export fn worker_plan(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> WorkerPlan =
-  WorkerPlan(callees = collect_worker_callees(decls, penv),
-             decls = build_worker_decls(decls), adt_index = penv.adt_index)
+  match collect_argw_sites(decls, penv) with
+  | (producers, consumers) ->
+      WorkerPlan(callees = set_union(collect_worker_callees(decls, penv), producers),
+                 argw = consumers, decls = build_worker_decls(decls), adt_index = penv.adt_index)
+
+# (producers needing `@g_worker`, consumers needing `@f_argw`) over every call that has the
+# argument shape. Shadow-free like the other scans: over-collecting is harmless.
+fn collect_argw_sites(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> (Set, Set) =
+  list_fold(\ (acc, d) -> collect_argw_decl(d, penv, acc), (set_empty(), set_empty()), decls)
+
+fn collect_argw_decl(d: typed_ast.TypedDecl, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
+  match d with
+  | typed_ast.TFnDecl _ _ _ _ _ body -> collect_argw_expr(body, penv, acc)
+  | typed_ast.TLetDecl _ body -> collect_argw_expr(body, penv, acc)
+  | typed_ast.TInstanceDecl _ _ methods ->
+      list_fold(\ (a, m) -> collect_argw_method(m, penv, a), acc, methods)
+  | _ -> acc
+
+fn collect_argw_method(m: typed_ast.TypedInstanceMethod, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
+  match m with
+  | typed_ast.TypedInstanceMethod _ _ _ _ _ body -> collect_argw_expr(body, penv, acc)
+
+fn collect_argw_expr(e: typed_ast.TypedExpr, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
+  list_fold(\ (a, c) -> collect_argw_expr(c, penv, a), collect_argw_call(e, penv, acc),
+            typed_ast.children(e))
+
+fn collect_argw_call(e: typed_ast.TypedExpr, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
+  let typed_ast.TCall(typed_ast.TVar f _ _) args _ _ = e else acc
+      Just site = argw_shape(f, args, penv) else acc
+  in
+    match acc with
+    | (producers, consumers) ->
+        (if is_just(unboxed_maybe_extern_name(site.producer)) then producers
+         else set_insert(site.producer, producers),
+         set_insert(f, consumers))
 
 # Fn and extern decls by name, first declaration wins. Entry `main` is left out:
 # it is never routed to a worker. Built once; worker_source_for reads it per name.
@@ -6752,25 +6915,96 @@ export fn emit_worker_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
         wres <- emit_worker_fn(name ++ "_worker", name, params, body, radt, penv, plan.callees)
         Ok(Just(wres))
 
+# `@<name>_argw`: `name`'s parameters with the matched one split into (tag, payload), its arms
+# lowered over them as `match g(..) with` is, returning the boxed result `name` does. The
+# group is `name`'s own, so a self-call from an arm reaches the boxed `name`, which loops.
+fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.TypedExpr,
+                penv: ProgEnv) ->
+    Result String (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction) !{IO} =
+  let typed_ast.TMatch _ arms match_ty _ = body
+      else Err("ast_to_ir: argument worker for '" ++ name ++ "' needs a match body (internal error)")
+      (before, [matched | after]) = list.split_at(k, params)
+      else Err("ast_to_ir: argument worker for '" ++ name ++ "' has no parameter " ++ int_to_string(k)
+               ++ " (internal error)")
+  in
+    do
+      let others = list_append(before, after)
+      let tag_name = ast.param_name(matched) ++ "$tag"
+      let val_name = ast.param_name(matched) ++ "$val"
+      lifted_ref <- ref_new(Nil)
+      env <- new_tx_env(penv, lifted_ref, owned_param_ssas(others), group_of(name, penv))
+      reuse_frame_push(env)
+      (arm_blocks, phi_incoming, idx_after) <-
+        translate_unboxed_maybe_arms(arms, 0, 0, fresh_join_label(0), match_ty,
+                                     sprout_ir.param_ssa(val_name), sprout_ir.param_ssa(tag_name),
+                                     ast.param_names(others), env, 2, Nil, Nil, dict_empty())
+      reuse_frame_pop(env)
+      (blocks, join_lbl, join_ops, result, next_idx) <-
+        finish_match(match_ty, Nil,
+                     sprout_ir.IRBlock("entry", [sprout_ir.IRBr(fresh_arm_label(0, 0))]),
+                     arm_blocks, phi_incoming, fresh_join_label(0), fresh_name(1), idx_after)
+      lifted <- ref_read(lifted_ref)
+      Ok((sprout_ir.IRFunction(name ++ "_argw",
+            list_append(ast_params_to_irtype_pairs(before),
+              Cons((tag_name, sprout_ir.IRTScalar), Cons((val_name, sprout_ir.IRTUnknown),
+                ast_params_to_irtype_pairs(after)))),
+            llvm_ret_type(match_ty),
+            list_append(blocks,
+              [sprout_ir.IRBlock(join_lbl,
+                 list_builder_build(list_builder_add(sprout_ir.IRRet(result), join_ops)))])),
+          next_idx, list_reverse(lifted)))
+
+# Emit `@<name>_argw`, or Nothing when `name` has no argument worker (an over-collected site
+# naming a shadowed fn). Shares the symbol namespace with user fns, as `_worker` does.
+fn emit_argw_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
+    Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
+  if set_member(name ++ "_argw", penv.top_level)
+  then Err("ast_to_ir: argument worker name '" ++ name ++ "_argw' collides with an existing top-level definition")
+  else
+    let Just k = dict_get(name, penv.argw) else Ok(Nothing)
+        Just d = dict_get(name, plan.decls) else Ok(Nothing)
+        typed_ast.TFnDecl _ params _ _ _ body = d else Ok(Nothing)
+    in
+      do
+        res <- emit_argw_fn(name, k, params, body, penv)
+        Ok(Just(res))
+
+# One worker to emit: a result worker `@<name>_worker` or an argument worker `@<name>_argw`.
+export type WorkerJob (..) =
+  | ResultWorker String
+  | ArgWorker String
+
+# The plan's workers in a fixed order; the alloc-summary pre-pass and the emit pass must
+# walk the same one, since lifted-lambda names come from a shared counter.
+export fn worker_jobs(plan: WorkerPlan) -> List WorkerJob =
+  list_append(list_map(\n -> ResultWorker(n), set_to_list(plan.callees)),
+              list_map(\n -> ArgWorker(n), set_to_list(plan.argw)))
+
+export fn emit_worker_job(job: WorkerJob, plan: WorkerPlan, penv: ProgEnv) ->
+    Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
+  match job with
+  | ResultWorker name -> emit_worker_for(name, plan, penv)
+  | ArgWorker name -> emit_argw_for(name, plan, penv)
+
 # Batch worker emission for translate_program (the non-streaming path used by the
 # IR-shape tests): append every worker to `fns0`, merge next-idx into `idx_map0`.
 fn tier2_augment_fns(decls: List typed_ast.TypedDecl, penv: ProgEnv,
                      fns0: List sprout_ir.IRFunction, idx_map0: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
-  emit_all_workers(set_to_list(plan.callees), plan, penv, fns0, idx_map0)
+  emit_all_workers(worker_jobs(plan), plan, penv, fns0, idx_map0)
   where plan = worker_plan(decls, penv)
 
-fn emit_all_workers(names: List String, plan: WorkerPlan, penv: ProgEnv,
+fn emit_all_workers(jobs: List WorkerJob, plan: WorkerPlan, penv: ProgEnv,
                     acc_fns: List sprout_ir.IRFunction, acc_idx: Dict Int) ->
     Result String (List sprout_ir.IRFunction, Dict Int) !{IO} =
-  match names with
+  match jobs with
   | Nil -> Ok((acc_fns, acc_idx))
-  | Cons name rest ->
+  | Cons job rest ->
       do
-        maybe_w <- emit_worker_for(name, plan, penv)
+        maybe_w <- emit_worker_job(job, plan, penv)
         match maybe_w with
         | Nothing -> emit_all_workers(rest, plan, penv, acc_fns, acc_idx)
         | Just (wfn, wnext, wlifted) ->
             emit_all_workers(rest, plan, penv,
                              Cons(wfn, list_append(wlifted, acc_fns)),
-                             dict_set(name ++ "_worker", wnext, acc_idx))
+                             dict_set(sprout_ir.ir_fn_name(wfn), wnext, acc_idx))

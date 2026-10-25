@@ -617,6 +617,7 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.488 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2012, column 52)\00" }
 @.str.489 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"GET\00" }
 @.str.490 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.491 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1945, column 58)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -2514,16 +2515,19 @@ entry:
 
 define i64 @vec_singleton(i64 %p$value) {
 entry:
-  %t$2 = alloca i64
-  store i64 %p$value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vec_empty()
-  %t$4 = alloca i64
-  store i64 %t$0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @vec_append(i64 %p$value, i64 %t$0)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$1
+  %t$3 = alloca i64
+  store i64 %p$value, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$0$st = call i128 @vec_empty_worker()
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$5 = alloca i64
+  store i64 %t$1, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$2 = call i64 @vec_append_argw(i64 %p$value, i64 %t$0, i64 %t$1)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$2
 }
 
 define i64 @vec_prepend(i64 %p$value, i64 %p$vec) {
@@ -11748,35 +11752,38 @@ body_1_3:
   %t$10 = add i64 0, 45
   %t$11 = icmp eq i64 %t$2, %t$10
   %t$12 = zext i1 %t$11 to i64
-  %t$24 = trunc i64 %t$12 to i1
-  br i1 %t$24, label %then_13, label %else_13
+  %t$25 = trunc i64 %t$12 to i1
+  br i1 %t$25, label %then_13, label %else_13
 then_13:
   %t$15 = add i64 0, 1
   %t$16 = add i64 0, 0
   %t$17 = add i64 0, 0
-  %t$25 = alloca i64
-  store i64 %p$s, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$26 = alloca i64
+  store i64 %p$s, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$18 = call i64 @accum_digits(i64 %p$s, i64 %t$15, i64 %t$16, i64 %t$17)
-  %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_13
 else_13:
   %t$19 = add i64 0, 0
   %t$20 = add i64 0, 0
   %t$21 = add i64 0, 0
-  %t$28 = alloca i64
-  store i64 %p$s, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
-  %t$22 = call i64 @accum_digits(i64 %p$s, i64 %t$19, i64 %t$20, i64 %t$21)
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$31 = alloca i64
-  store i64 %t$22, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$23 = call i64 @positive_from_neg_magnitude(i64 %t$22)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$29 = alloca i64
+  store i64 %p$s, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$22$st = call i128 @accum_digits_worker(i64 %p$s, i64 %t$19, i64 %t$20, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
+  %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$32 = alloca i64
+  store i64 %t$23, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$24 = call i64 @positive_from_neg_magnitude_argw(i64 %t$22, i64 %t$23)
+  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_13
 join_13:
-  %t$14 = phi i64 [%t$18, %then_13], [%t$23, %else_13]
+  %t$14 = phi i64 [%t$18, %then_13], [%t$24, %else_13]
   br label %join_3
 arm_2_3:
   call void @sprout_abort_match()
@@ -24703,14 +24710,14 @@ entry:
 
 define i64 @examples.sentry_api.decode_issue_array(i64 %p$items) {
 entry:
-  %t$16 = alloca i64
-  store i64 %p$items, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$17 = alloca i64
+  store i64 %p$items, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$0$st = call i128 @stdlib.json.json_array_next_worker(i64 %p$items)
   %t$0 = trunc i128 %t$0$st to i64
   %t$0$hi = lshr i128 %t$0$st, 64
   %t$1 = trunc i128 %t$0$hi to i64
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 0
@@ -24728,28 +24735,31 @@ body_1_2:
 arm_0_9:
   %t$11 = call i64 @sprout_field(i64 %t$1, i64 0)
   %t$12 = call i64 @sprout_field(i64 %t$1, i64 1)
-  %t$19 = alloca i64
-  store i64 %t$11, ptr %t$19
-  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$21 = alloca i64
-  store i64 %t$12, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$20 = alloca i64
+  store i64 %t$11, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$22 = alloca i64
+  store i64 %t$12, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$13 = call i64 @examples.sentry_api.issue_summary_from_json(i64 %t$11)
-  %t$23 = alloca i64
-  store i64 %t$13, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$14 = call i64 @examples.sentry_api.decode_issue_array(i64 %t$12)
-  %t$25 = alloca i64
-  store i64 %t$14, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$15 = call i64 @vec_prepend(i64 %t$13, i64 %t$14)
-  %t$27 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$24 = alloca i64
+  store i64 %t$13, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$14$st = call i128 @examples.sentry_api.decode_issue_array_worker(i64 %t$12)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
+  %t$26 = alloca i64
+  store i64 %t$15, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$16 = call i64 @vec_prepend_argw(i64 %t$13, i64 %t$14, i64 %t$15)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 4)
   br label %join_9
 arm_1_9:
   call void @sprout_abort_match()
   unreachable
 join_9:
-  %t$10 = phi i64 [%t$15, %arm_0_9]
+  %t$10 = phi i64 [%t$16, %arm_0_9]
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()
@@ -30441,6 +30451,130 @@ entry:
   ret i128 %t$3$r
 }
 
+define i128 @examples.sentry_api.decode_issue_array_worker(i64 %p$items) {
+entry:
+  %t$22 = alloca i64
+  store i64 %p$items, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$0$st = call i128 @stdlib.json.json_array_next_worker(i64 %p$items)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 0
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  %t$6 = call i64 @vec_empty()
+  br label %join_2
+arm_1_2:
+  %t$7 = add i64 0, 1
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_2, label %arm_2_2
+body_1_2:
+  br label %arm_0_9
+arm_0_9:
+  %t$11 = call i64 @sprout_field(i64 %t$1, i64 0)
+  %t$12 = call i64 @sprout_field(i64 %t$1, i64 1)
+  %t$25 = alloca i64
+  store i64 %t$11, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$27 = alloca i64
+  store i64 %t$12, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$13 = call i64 @examples.sentry_api.issue_summary_from_json(i64 %t$11)
+  %t$29 = alloca i64
+  store i64 %t$13, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$14$st = call i128 @examples.sentry_api.decode_issue_array_worker(i64 %t$12)
+  %t$14 = trunc i128 %t$14$st to i64
+  %t$14$hi = lshr i128 %t$14$st, 64
+  %t$15 = trunc i128 %t$14$hi to i64
+  %t$31 = alloca i64
+  store i64 %t$15, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$16 = call i64 @vec_prepend_argw(i64 %t$13, i64 %t$14, i64 %t$15)
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 4)
+  br label %join_9
+arm_1_9:
+  call void @sprout_abort_match()
+  unreachable
+join_9:
+  %t$10 = phi i64 [%t$16, %arm_0_9]
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$6, %body_0_2], [%t$10, %join_9]
+  %t$17 = call i64 @sprout_tag(i64 %t$3)
+  %t$18 = add i64 0, 10
+  %t$19 = icmp eq i64 %t$17, %t$18
+  br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
+wrepack_hit_18:
+  %t$20 = call i64 @sprout_field(i64 %t$3, i64 0)
+  %t$21$lo = zext i64 %t$17 to i128
+  %t$21$hw = zext i64 %t$20 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
+wrepack_next_18:
+  call void @sprout_abort_match()
+  unreachable
+}
+
+define i128 @examples.sentry_api.sentry_decode_issue_summaries_worker(i64 %p$value) {
+entry:
+  %t$15 = alloca i64
+  store i64 %p$value, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$0$st = call i128 @stdlib.json.json_get_array_worker(i64 %p$value)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 1
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  %t$18 = alloca i64
+  store i64 %t$1, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$6 = call i64 @examples.sentry_api.decode_issue_array(i64 %t$1)
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_2
+arm_1_2:
+  %t$7 = add i64 0, 0
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_2, label %arm_2_2
+body_1_2:
+  %t$9 = call i64 @vec_empty()
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$6, %body_0_2], [%t$9, %body_1_2]
+  %t$10 = call i64 @sprout_tag(i64 %t$3)
+  %t$11 = add i64 0, 10
+  %t$12 = icmp eq i64 %t$10, %t$11
+  br i1 %t$12, label %wrepack_hit_11, label %wrepack_next_11
+wrepack_hit_11:
+  %t$13 = call i64 @sprout_field(i64 %t$3, i64 0)
+  %t$14$lo = zext i64 %t$10 to i128
+  %t$14$hw = zext i64 %t$13 to i128
+  %t$14$hi = shl i128 %t$14$hw, 64
+  %t$14$r = or i128 %t$14$hi, %t$14$lo
+  ret i128 %t$14$r
+wrepack_next_11:
+  call void @sprout_abort_match()
+  unreachable
+}
+
 define i128 @examples.sentry_api.sentry_issue_detail_json_worker(i64 %p$issue_id, i64 %p$token, i64 %p$timeout_ms) {
 entry:
   %t$21 = alloca i64
@@ -30953,63 +31087,66 @@ body_1_3:
   %t$10 = add i64 0, 45
   %t$11 = icmp eq i64 %t$2, %t$10
   %t$12 = zext i1 %t$11 to i64
-  %t$24 = trunc i64 %t$12 to i1
-  br i1 %t$24, label %then_13, label %else_13
+  %t$25 = trunc i64 %t$12 to i1
+  br i1 %t$25, label %then_13, label %else_13
 then_13:
   %t$15 = add i64 0, 1
   %t$16 = add i64 0, 0
   %t$17 = add i64 0, 0
-  %t$34 = alloca i64
-  store i64 %p$s, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$35 = alloca i64
+  store i64 %p$s, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$18 = call i64 @accum_digits(i64 %p$s, i64 %t$15, i64 %t$16, i64 %t$17)
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_13
 else_13:
   %t$19 = add i64 0, 0
   %t$20 = add i64 0, 0
   %t$21 = add i64 0, 0
-  %t$37 = alloca i64
-  store i64 %p$s, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$22 = call i64 @accum_digits(i64 %p$s, i64 %t$19, i64 %t$20, i64 %t$21)
-  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$40 = alloca i64
-  store i64 %t$22, ptr %t$40
-  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
-  %t$23 = call i64 @positive_from_neg_magnitude(i64 %t$22)
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$38 = alloca i64
+  store i64 %p$s, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$22$st = call i128 @accum_digits_worker(i64 %p$s, i64 %t$19, i64 %t$20, i64 %t$21)
+  %t$22 = trunc i128 %t$22$st to i64
+  %t$22$hi = lshr i128 %t$22$st, 64
+  %t$23 = trunc i128 %t$22$hi to i64
+  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$41 = alloca i64
+  store i64 %t$23, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$24 = call i64 @positive_from_neg_magnitude_argw(i64 %t$22, i64 %t$23)
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_13
 join_13:
-  %t$14 = phi i64 [%t$18, %then_13], [%t$23, %else_13]
+  %t$14 = phi i64 [%t$18, %then_13], [%t$24, %else_13]
   br label %join_3
 arm_2_3:
   call void @sprout_abort_match()
   unreachable
 join_3:
   %t$4 = phi i64 [%t$7, %body_0_3], [%t$14, %join_13]
-  %t$25 = call i64 @sprout_tag(i64 %t$4)
-  %t$26 = add i64 0, 0
-  %t$27 = icmp eq i64 %t$25, %t$26
-  br i1 %t$27, label %wrepack_hit_26, label %wrepack_next_26
-wrepack_hit_26:
-  %t$29$lo = zext i64 %t$25 to i128
-  %t$29$hw = zext i64 0 to i128
-  %t$29$hi = shl i128 %t$29$hw, 64
-  %t$29$r = or i128 %t$29$hi, %t$29$lo
-  ret i128 %t$29$r
-wrepack_next_26:
-  %t$30 = add i64 0, 1
-  %t$31 = icmp eq i64 %t$25, %t$30
-  br i1 %t$31, label %wrepack_hit_30, label %wrepack_next_30
-wrepack_hit_30:
-  %t$32 = call i64 @sprout_field(i64 %t$4, i64 0)
-  %t$33$lo = zext i64 %t$25 to i128
-  %t$33$hw = zext i64 %t$32 to i128
-  %t$33$hi = shl i128 %t$33$hw, 64
-  %t$33$r = or i128 %t$33$hi, %t$33$lo
-  ret i128 %t$33$r
-wrepack_next_30:
+  %t$26 = call i64 @sprout_tag(i64 %t$4)
+  %t$27 = add i64 0, 0
+  %t$28 = icmp eq i64 %t$26, %t$27
+  br i1 %t$28, label %wrepack_hit_27, label %wrepack_next_27
+wrepack_hit_27:
+  %t$30$lo = zext i64 %t$26 to i128
+  %t$30$hw = zext i64 0 to i128
+  %t$30$hi = shl i128 %t$30$hw, 64
+  %t$30$r = or i128 %t$30$hi, %t$30$lo
+  ret i128 %t$30$r
+wrepack_next_27:
+  %t$31 = add i64 0, 1
+  %t$32 = icmp eq i64 %t$26, %t$31
+  br i1 %t$32, label %wrepack_hit_31, label %wrepack_next_31
+wrepack_hit_31:
+  %t$33 = call i64 @sprout_field(i64 %t$4, i64 0)
+  %t$34$lo = zext i64 %t$26 to i128
+  %t$34$hw = zext i64 %t$33 to i128
+  %t$34$hi = shl i128 %t$34$hw, 64
+  %t$34$r = or i128 %t$34$hi, %t$34$lo
+  ret i128 %t$34$r
+wrepack_next_31:
   call void @sprout_abort_match()
   unreachable
 }
@@ -31694,6 +31831,16 @@ wrepack_next_16:
   unreachable
 }
 
+define i128 @vec_empty_worker() {
+entry:
+  %t$0 = call i64 @vector_empty()
+  %t$1$lo = zext i64 10 to i128
+  %t$1$hw = zext i64 %t$0 to i128
+  %t$1$hi = shl i128 %t$1$hw, 64
+  %t$1$r = or i128 %t$1$hi, %t$1$lo
+  ret i128 %t$1$r
+}
+
 define i128 @vec_get_worker(i64 %p$index, i64 %p$vec) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$vec, i64 0)
@@ -31706,6 +31853,154 @@ entry:
   %t$3$hi = shl i128 %t$3$hw, 64
   %t$3$r = or i128 %t$3$hi, %t$3$lo
   ret i128 %t$3$r
+}
+
+define i64 @positive_from_neg_magnitude_argw(i64 %p$m$tag, i64 %p$m$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 0
+  %t$3 = icmp eq i64 %p$m$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$4 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_0
+arm_1_0:
+  %t$5 = add i64 0, 1
+  %t$6 = icmp eq i64 %p$m$tag, %t$5
+  br i1 %t$6, label %body_1_0, label %arm_2_0
+body_1_0:
+  %t$7 = call i64 @min_int()
+  %t$8 = icmp eq i64 %p$m$val, %t$7
+  %t$9 = zext i1 %t$8 to i64
+  %t$18 = trunc i64 %t$9 to i1
+  br i1 %t$18, label %then_10, label %else_10
+then_10:
+  %t$12 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  br label %join_10
+else_10:
+  %t$13 = add i64 0, 0
+  %t$14$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$13, i64 %p$m$val)
+  %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
+  %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
+  br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
+ovfpanic_14:
+  %t$15 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.491, i64 0, i32 1, i64 0
+  %t$16 = ptrtoint ptr %t$15 to i64
+  call i64 @panic(i64 %t$16)
+  unreachable
+ovfok_14:
+  %t$17 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$17$ptr = inttoptr i64 %t$17 to ptr
+  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
+  store i64 %t$14, ptr %t$17$f0
+  br label %join_10
+join_10:
+  %t$11 = phi i64 [%t$12, %then_10], [%t$17, %ovfok_14]
+  br label %join_0
+arm_2_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0], [%t$11, %join_10]
+  ret i64 %t$1
+}
+
+define i64 @vec_append_argw(i64 %p$value, i64 %p$vec$tag, i64 %p$vec$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 10
+  %t$3 = icmp eq i64 %p$vec$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$6 = alloca i64
+  store i64 %p$vec$val, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$8 = alloca i64
+  store i64 %p$value, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$4 = call i64 @vector_append(i64 %p$vec$val, i64 %p$value)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$11 = alloca i64
+  store i64 %t$4, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$5 = call i64 @sprout_alloc_obj(i64 10, i64 1)
+  %t$5$ptr = inttoptr i64 %t$5 to ptr
+  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
+  store i64 %t$4, ptr %t$5$f0
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$5, %body_0_0]
+  ret i64 %t$1
+}
+
+define i64 @vec_get_argw(i64 %p$index, i64 %p$vec$tag, i64 %p$vec$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 10
+  %t$3 = icmp eq i64 %p$vec$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$5 = alloca i64
+  store i64 %p$vec$val, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$4 = call i64 @vector_get(i64 %p$vec$val, i64 %p$index)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
+}
+
+define i64 @vec_prepend_argw(i64 %p$value, i64 %p$vec$tag, i64 %p$vec$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 10
+  %t$3 = icmp eq i64 %p$vec$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$8 = alloca i64
+  store i64 %p$vec$val, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$10 = alloca i64
+  store i64 %p$value, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$4 = call i64 @vector_empty()
+  %t$12 = alloca i64
+  store i64 %t$4, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$5 = call i64 @vector_append(i64 %t$4, i64 %p$value)
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$15 = alloca i64
+  store i64 %t$5, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$6 = call i64 @vector_concat(i64 %t$5, i64 %p$vec$val)
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$18 = alloca i64
+  store i64 %t$6, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
+  %t$7 = call i64 @sprout_alloc_obj(i64 10, i64 1)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$6, ptr %t$7$f0
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$7, %body_0_0]
+  ret i64 %t$1
 }
 
 define void @__sprout_init_globals() {

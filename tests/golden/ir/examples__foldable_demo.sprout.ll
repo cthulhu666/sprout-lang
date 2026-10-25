@@ -820,25 +820,31 @@ entry:
   %t$0 = load i64, ptr @examples.foldable_demo.list_sample
   %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_1, i64 8) to i64
   %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_2, i64 8) to i64
-  %t$3 = call i64 @examples.foldable_demo.list_to_vec(i64 %t$0, i64 %t$1, i64 %t$2)
-  %t$4 = call i64 @vec_length(i64 %t$3)
-  %t$5 = load i64, ptr @examples.foldable_demo.vec_sample
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_3, i64 8) to i64
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_4, i64 8) to i64
-  %t$8 = call i64 @examples.foldable_demo.vec_to_vec(i64 %t$5, i64 %t$6, i64 %t$7)
-  %t$9 = call i64 @vec_length(i64 %t$8)
-  %t$10$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$4, i64 %t$9)
-  %t$10 = extractvalue { i64, i1 } %t$10$agg, 0
-  %t$10$ovf = extractvalue { i64, i1 } %t$10$agg, 1
-  br i1 %t$10$ovf, label %ovfpanic_10, label %ovfok_10
-ovfpanic_10:
-  %t$11 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
-  %t$12 = ptrtoint ptr %t$11 to i64
-  call i64 @panic(i64 %t$12)
+  %t$3$st = call i128 @examples.foldable_demo.list_to_vec_worker(i64 %t$0, i64 %t$1, i64 %t$2)
+  %t$3 = trunc i128 %t$3$st to i64
+  %t$3$hi = lshr i128 %t$3$st, 64
+  %t$4 = trunc i128 %t$3$hi to i64
+  %t$5 = call i64 @vec_length_argw(i64 %t$3, i64 %t$4)
+  %t$6 = load i64, ptr @examples.foldable_demo.vec_sample
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_3, i64 8) to i64
+  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_4, i64 8) to i64
+  %t$9$st = call i128 @examples.foldable_demo.vec_to_vec_worker(i64 %t$6, i64 %t$7, i64 %t$8)
+  %t$9 = trunc i128 %t$9$st to i64
+  %t$9$hi = lshr i128 %t$9$st, 64
+  %t$10 = trunc i128 %t$9$hi to i64
+  %t$11 = call i64 @vec_length_argw(i64 %t$9, i64 %t$10)
+  %t$12$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$5, i64 %t$11)
+  %t$12 = extractvalue { i64, i1 } %t$12$agg, 0
+  %t$12$ovf = extractvalue { i64, i1 } %t$12$agg, 1
+  br i1 %t$12$ovf, label %ovfpanic_12, label %ovfok_12
+ovfpanic_12:
+  %t$13 = getelementptr inbounds { i64, [38 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$14 = ptrtoint ptr %t$13 to i64
+  call i64 @panic(i64 %t$14)
   unreachable
-ovfok_10:
-  %t$13 = call i64 @print_value(i64 %t$10)
-  ret i64 %t$13
+ovfok_12:
+  %t$15 = call i64 @print_value(i64 %t$12)
+  ret i64 %t$15
 }
 
 define i64 @__cm_Foldable_fold_values(i64 %p$step, i64 %p$init, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
@@ -920,6 +926,64 @@ entry:
   ret i64 %t$0
 }
 
+define i128 @examples.foldable_demo.list_to_vec_worker(i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
+entry:
+  %t$6 = alloca i64
+  store i64 %p$xs, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$8 = alloca i64
+  store i64 %p$__tc_Foldable_0_fold_while_values, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$10 = alloca i64
+  store i64 %p$__tc_Foldable_0_fold_values, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$0 = call i64 @foldable_to_vec(i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$1 = call i64 @sprout_tag(i64 %t$0)
+  %t$2 = add i64 0, 10
+  %t$3 = icmp eq i64 %t$1, %t$2
+  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
+wrepack_hit_2:
+  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
+wrepack_next_2:
+  call void @sprout_abort_match()
+  unreachable
+}
+
+define i128 @examples.foldable_demo.vec_to_vec_worker(i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
+entry:
+  %t$6 = alloca i64
+  store i64 %p$xs, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$8 = alloca i64
+  store i64 %p$__tc_Foldable_0_fold_while_values, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$10 = alloca i64
+  store i64 %p$__tc_Foldable_0_fold_values, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$0 = call i64 @foldable_to_vec(i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$1 = call i64 @sprout_tag(i64 %t$0)
+  %t$2 = add i64 0, 10
+  %t$3 = icmp eq i64 %t$1, %t$2
+  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
+wrepack_hit_2:
+  %t$4 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
+wrepack_next_2:
+  call void @sprout_abort_match()
+  unreachable
+}
+
 define i128 @vec_get_worker(i64 %p$index, i64 %p$vec) {
 entry:
   %t$0 = call i64 @sprout_field(i64 %p$vec, i64 0)
@@ -932,6 +996,24 @@ entry:
   %t$3$hi = shl i128 %t$3$hw, 64
   %t$3$r = or i128 %t$3$hi, %t$3$lo
   ret i128 %t$3$r
+}
+
+define i64 @vec_length_argw(i64 %p$vec$tag, i64 %p$vec$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 10
+  %t$3 = icmp eq i64 %p$vec$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$4 = call i64 @vector_length(i64 %p$vec$val)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0]
+  ret i64 %t$1
 }
 
 define void @__sprout_init_globals() {

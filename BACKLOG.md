@@ -292,15 +292,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   pay one allocation per call; derived `Eq` paid it too (#627: 30 → 16 ns/op once removed). Fix:
   when the scrutinee is a literal tuple and every arm is a tuple pattern or `_`, bind the elements
   directly and build no tuple.
-- [ ] `P2` **The CPR peephole unboxes a `Maybe` that a `match` consumes, and any wrapper that
-  returns one, but not one passed as an argument — so an escaping `Maybe` costs 12–90x.**
-  `match vec_get(i, v) with` lowers to a two-word `@vec_get_worker` and allocates nothing, and
-  the workers compose through a user-defined wrapper; `maybe_with_default(0, vec_get(i, v))`
-  builds the `Just` and costs **+17.5 ns/read** at every size and **+110–135 ns/read** with 100k
-  live — the size dependence is collection cost, not allocation
-  (`bench/results-2026-09-28-vec-box-tax.md`, harness `bench/vec_box/`). Extending it through a
-  known non-escaping combinator, of which `maybe_with_default` is essentially the whole
-  population, removes the gap and the hand-taught rule in `docs/idiomatic-sprout.md`.
 - [ ] `P2` **A literal inside a `Maybe` pattern loses CPR, so every read allocates.**
   `ast_to_ir.is_simple_width2_arm` admits only a variable or `_` under the constructor, so
   `match mutvec_get(c, p) with | Just false -> …` builds a `Just` per call, while `| Just b -> …`
@@ -336,6 +327,16 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (`docs/persistent-array-v0.md` §5.7). Every `Maybe`-returning lambda passed to a combinator
   pays this. Fix candidates: specialise a combinator at a known lambda argument, or inline small
   combinators before the CPR router runs.
+- [ ] `P3` **Argument CPR reaches only calls `translate_direct_call` lowers.** A consumer call as a
+  `match` scrutinee (`match maybe_or_else(vec_get(i, v), fb) with`), in a worker's tail chain, or
+  as a routed producer's argument goes through `translate_args`, so its argument is boxed; and
+  `collect_argw_sites` still emits an `@f_argw` for such a site, which nothing calls. Fix: a
+  worker unboxed on both sides, `@f_argw_worker`. `docs/arg-cpr-v0.md` §2.
+- [ ] `P3` **A recursive consumer's own loop boxes its argument.** In
+  `count(n, m) = match m with | Just x -> count(n + 1, step(x)) | …` the self-call stays a call to
+  the boxed `count`, so each iteration builds a `Just`: routing it to `@count_argw` would hide the
+  loop from `tco_rewrite`, which keys on the callee's name. Only calls from outside the group
+  route. Fix: self-TCO on `@f_argw`, then route the group's own calls. `docs/arg-cpr-v0.md` §2.
 - [ ] `P3` **Phase B / Tier-2 CPR: `emit_repack_one` emits width-2 only.** A match-routed cycle
   member returning a ≥2-field-ctor ADT would drop fields. Unreachable today (worker routing is
   gated on max-ctor-arity ≤ 1), so latent. Widening needs `{tag, f0, f1}` and a `{i64,i64,i64}`
@@ -1126,15 +1127,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   The rest of that doc is design-level or too fuzzy for a reliable syntactic check. **Also open:**
   autocorrect (needs an AST-aware rewriter; today's formatter is a line-based text transform) and
   the config file, designed in `docs/lint-rules-v0.md` §8.
-- [ ] `P3` **Nothing lints the pessimised spelling: an eliminator applied to a call.**
-  `maybe_with_default(0, dict_get(k, d))` boxes a wrapper the `match` form keeps unboxed — 70–90x at
-  100k live (`bench/results-2026-09-28-vec-box-tax.md`). `hand-rolled-combinator` stopped suggesting
-  it (`docs/lint-rules-v0.md` §7.4), but nothing flags the sites already written that way: 35
-  single-line `maybe_with_default`/`result_with_default` calls over a call argument, 12 outside
-  `tests/` (`cse_census.sprout:115`, `tui/buffer.sprout:234`/`:248`, `tui/text.sprout:97`,
-  `ide/document.sprout:42`, `examples/aoc_2025_day_5.sprout:20`, 4 more). Two caveats: a syntactic
-  check cannot tell a top-level callee from a closure call, and `bench/vec_box/` uses the shape on
-  purpose, so suppression ships first. Moot if the CPR-reach `P2` above lands — decide that first.
+- [ ] `P3` **`hand-rolled-combinator` still declines every combinator over a call.** Guard 4
+  (`docs/lint-rules-v0.md` §7) was right while a call's `Maybe` was boxed to reach any combinator.
+  Since argument CPR (`docs/arg-cpr-v0.md`), `maybe_with_default`, `result_with_default`, `is_just`
+  and `result_from_maybe` over a top-level call build no wrapper (bench/vec_box: 2.1 ns against
+  1.9 for the `match`), so the rule can suggest them there. `map`, `and_then` and a lambda's
+  result still box. A syntactic check cannot tell a top-level callee from a closure call, so the
+  widened rule needs the local-binding environment §7 already describes.
 - [ ] `P3` **A nested `match` on a `Cons`-bound tail is not linted.** `match xs with | Cons h t ->
   match t with …` is what `[a, b | rest]` exists to flatten, and neither `list-shape-pattern` (which
   needs a chain ending in a literal `Nil`) nor `list-prefix-pattern` (a wildcard tail) covers it.

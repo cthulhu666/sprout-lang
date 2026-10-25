@@ -1,0 +1,58 @@
+module main
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# Behaviour guards for argument CPR (docs/arg-cpr-v0.md §7, cases 9 and 10): passing a
+# `Maybe`-returning call straight to a consumer must not change any result. Case 9
+# is meant to run under SPROUT_GC_STRESS=1 too.
+
+# Allocates `n` fresh strings; forces collections under stress.
+fn burn(n: Int, acc: String) -> String =
+  if n <= 0 then acc
+  else burn(n - 1, acc ++ "x")
+
+# Producer with a heap payload.
+fn name_of(i: Int) -> Maybe String =
+  if i < 0 then Nothing else Just("n" ++ int_to_string(i))
+
+# Consumer: only matches `m`. The later argument is evaluated after the producer
+# call, so the payload must stay rooted while it allocates.
+fn join_tail(m: Maybe String, tail: String) -> String =
+  match m with
+  | Just s -> s ++ tail
+  | Nothing -> tail
+
+fn labelled(i: Int) -> String =
+  join_tail(name_of(i), burn(40, "") ++ int_to_string(i))
+
+fn labelled_len(i: Int, acc: Int) -> Int =
+  if i < 0 then acc
+  else labelled_len(i - 1, acc + str_len(labelled(i)))
+
+# A self-recursive consumer entered from a helper and recursing with a call argument.
+fn step(x: Int) -> Maybe Int =
+  if x >= 1000000 then Nothing else Just(x + 1)
+
+fn count(n: Int, m: Maybe Int) -> Int =
+  match m with
+  | Just x -> count(n + 1, step(x))
+  | Nothing -> n
+
+fn run_count(start: Int) -> Int =
+  count(0, step(start))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # 9. Heap payload held across an allocating later argument.
+    assert_eq(state, "9: Just payload joined with tail", labelled(7), "n7" ++ burn(40, "") ++ "7")
+    assert_eq(state, "9: Nothing yields only the tail", labelled(-1), burn(40, "") ++ "-1")
+    # "n<i>" + 40 x's + "<i>": 1 + len(i) + 40 + len(i), summed for i = 0..9 and 10..99.
+    assert_eq(state, "9: lengths over single digits", labelled_len(9, 0), 10 * 43)
+    assert_eq(state, "9: lengths over two digits", labelled_len(99, 0), 10 * 43 + 90 * 45)
+
+    # 10. Depth 1,000,000 through a self-recursive consumer.
+    assert_eq(state, "10: count reaches depth 1000000", run_count(0), 1000000)
+    assert_eq(state, "10: count from 999990 counts the tail", run_count(999990), 10)
+
+    summary(state)

@@ -8,25 +8,20 @@ import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.typed_ast as typed_ast
 
-# Why `stdlib.bytes.get_or` is spelled as a `match` and must stay that way.
+# A byte read stays unboxed both when matched directly and when handed to a helper that only
+# matches it (argument CPR, docs/arg-cpr-v0.md).
 #
-# `bytes_get` is on ast_to_ir.unboxed_maybe_extern_name, but the peephole only fires on a DIRECT
-# `match <extern>(..)` with simple arms. Hand the `Maybe Int` to any real function first — as
-# `maybe_with_default(fallback, get(value, index))` does — and the call falls back to the boxed
-# `sprout_make1(find_ctor_tag_by_name("Just"), ..)`, one heap allocation per byte read.
+# A boxed read is one heap allocation per byte, `sprout_make1(find_ctor_tag_by_name("Just"), ..)`.
+# `instance Eq Bytes` reads whole buffers through `get_or`, so 40 compares of two equal 1 MiB
+# values went 1.96s -> 0.13s user when the read stopped allocating.
 #
-# That cost was invisible while `matches_at` only ever scanned a 1-4 byte delimiter for `find`.
-# `instance Eq Bytes` reuses the same loop over whole buffers, which made it ~15x: 40 compares of
-# two equal 1 MiB values went 1.96s -> 0.13s user when the read stopped allocating.
-#
-# This file pins the RULE, in both directions. The real `get_or` body is pinned separately by the
-# golden IR corpus (tests/golden/ir/), which carries its emitted call site.
+# The real `get_or` body is pinned separately by the golden IR corpus (tests/golden/ir/).
 
 let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
 
 let bytes_get_decl = "extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int\n\n"
 
-# The shape to avoid: the Maybe reaches a real function, so the peephole cannot fire.
+# The Maybe goes to a helper that only matches it, so the read reaches `@with_default_argw`.
 # `with_default` stands in for the prelude's `maybe_with_default`, which is out of scope here —
 # checker.typecheck_typed runs with an EMPTY environment, so the fixture declares what it uses.
 fn probe_via_helper() -> String =
@@ -79,15 +74,17 @@ fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
-    # The regression: consuming the Maybe through a helper loses the peephole.
+    # Through a helper that only matches it, the read reaches the unboxed extern.
     helper <- translate_or_msg(probe_via_helper())
     assert_true(state, "helper fixture translates", translated(helper))
-    assert_true(state, "a helper-consumed Maybe lowers to the BOXED call",
-                has(helper, "call i64 @bytes_get("))
+    assert_false(state, "a helper-consumed Maybe emits no boxed call",
+                 has(helper, "call i64 @bytes_get("))
     # Asserted on the CALL, not on the bare name: ir_lowering emits the `declare` for all eight
     # allow-listed names unconditionally, so `bytes_get_unboxed` is present either way.
-    assert_false(state, "a helper-consumed Maybe never reaches CPR",
-                 has(helper, "call i128 @bytes_get_unboxed"))
+    assert_true(state, "a helper-consumed Maybe reaches CPR",
+                has(helper, "call i128 @bytes_get_unboxed"))
+    assert_true(state, "a helper-consumed Maybe goes to the argument worker",
+                has(helper, "@with_default_argw("))
 
     # The fix: a direct match with simple arms reaches the unboxed read.
     direct <- translate_or_msg(probe_via_match())

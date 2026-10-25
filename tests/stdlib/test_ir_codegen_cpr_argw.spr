@@ -1,0 +1,313 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# IR shape of argument CPR (docs/arg-cpr-v0.md §4, §7): a call passed straight to a
+# consumer that only matches that parameter lowers to `<g>_worker` + `<f>_argw`
+# instead of building the `Just`.
+#
+# Like test_ir_codegen_cpr_maybe_externs.spr, the harness typechecks WITHOUT the
+# prelude, so every fixture declares its own `Maybe`/`Result`, consumer and producer.
+# Assertions are scoped to one function's `define` block (`body_of`): the producer,
+# the consumer and its `_argw` all sit in the same module and would otherwise match.
+#
+# Symbols: the producer's result worker is `@<g>_worker` (called as `call i128`), the
+# argument worker is `@<f>_argw`, and a boxed call is `call i64 @<name>(`.
+
+let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+
+let result_decl = "type Result e a =\n  | Err e\n  | Ok a\n\n"
+
+# Producers. `get` is CPR-eligible (every tail is a ctor of a width-2 ADT).
+let get_decl = "fn get(i: Int, v: Int) -> Maybe Int =\n  if i < 0 then Nothing else Just(i + v)\n\n"
+
+let fetch_decl =
+  "fn fetch(i: Int, v: Int) -> Result String Int =\n"
+    ++ "  if i < 0 then Err(\"neg\") else Ok(i + v)\n\n"
+
+let with_default_decl =
+  "fn with_default(fb: Int, m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just x -> x\n"
+    ++ "  | Nothing -> fb\n\n"
+
+# Returns the emitted IR, or a string starting "ERR: ". Not a `Result`, so a fixture
+# that fails to translate fails loudly instead of reading as a clean absence.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn translated(out: String) -> Bool =
+  !str_starts_with(out, "ERR: ")
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+# The text of `define i64 @<name>(...) { ... }`, or "" when no such function exists.
+fn body_of(out: String, name: String) -> String =
+  let start = str_find(out, "define i64 @" ++ name ++ "(")
+  in
+    if start == -1 then ""
+    else
+      let rest = str_slice(out, start, str_len(out) - start)
+          stop = str_find(rest, "\n}")
+      in if stop == -1 then rest else str_slice(rest, 0, stop)
+
+fn calls_boxed(body: String, name: String) -> Bool =
+  has(body, "call i64 @" ++ name ++ "(")
+
+fn calls_worker(body: String, producer: String) -> Bool =
+  has(body, "call i128 @" ++ producer ++ "_worker(")
+
+# --- Fixtures ---------------------------------------------------------------
+
+# 1. Routable: non-tail and tail position.
+fn routed_src() -> String =
+  maybe_decl ++ get_decl ++ with_default_decl
+    ++ "fn non_tail(i: Int, v: Int) -> Int =\n"
+    ++ "  with_default(0, get(i, v)) + 1\n\n"
+    ++ "fn in_tail(i: Int, v: Int) -> Int =\n"
+    ++ "  with_default(0, get(i, v))\n\n"
+    ++ probe_get()
+
+# A `match get(..)` elsewhere gives `get` its result worker today. Fixtures with
+# this probe fail on routing alone; `routed_alone_src` (no probe) also needs the
+# collection pass to add `get` to the worker set.
+fn probe_get() -> String =
+  "fn probe(i: Int) -> Int =\n"
+    ++ "  match get(i, 1) with\n"
+    ++ "  | Just x -> x\n"
+    ++ "  | Nothing -> 0\n"
+
+fn routed_alone_src() -> String =
+  maybe_decl ++ get_decl ++ with_default_decl
+    ++ "fn alone(i: Int, v: Int) -> Int =\n"
+    ++ "  with_default(0, get(i, v)) + 1\n"
+
+# 2. Held value: nothing routes, so no argument worker may exist at all.
+fn held_src() -> String =
+  maybe_decl ++ get_decl ++ with_default_decl
+    ++ "fn held(m: Maybe Int) -> Int =\n"
+    ++ "  with_default(0, m)\n"
+
+# 3. Consumer over a user two-ctor, one-field type.
+fn result_src() -> String =
+  result_decl ++ fetch_decl
+    ++ "fn ok_or(fb: Int, r: Result String Int) -> Int =\n"
+    ++ "  match r with\n"
+    ++ "  | Ok x -> x\n"
+    ++ "  | Err _ -> fb\n\n"
+    ++ "fn use_result(i: Int, v: Int) -> Int =\n"
+    ++ "  ok_or(0, fetch(i, v)) + 1\n\n"
+    ++ "fn probe(i: Int) -> Int =\n"
+    ++ "  match fetch(i, 1) with\n"
+    ++ "  | Ok x -> x\n"
+    ++ "  | Err _ -> 0\n"
+
+# 4. The matched parameter also occurs in an arm body: it escapes, so no `_argw`.
+fn escapes_src() -> String =
+  maybe_decl ++ get_decl
+    ++ "fn tag_of(m: Maybe Int) -> Int = 7\n\n"
+    ++ "fn keep(fb: Int, m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just x -> x\n"
+    ++ "  | Nothing -> fb + tag_of(m)\n\n"
+    ++ "fn caller(i: Int, v: Int) -> Int =\n"
+    ++ "  keep(0, get(i, v)) + 1\n"
+
+# 5. A parameter, and a let binding, named like the consumer. A routed call elsewhere
+# in the module keeps the consumer's `_argw` alive once routing exists.
+fn shadow_src() -> String =
+  maybe_decl ++ get_decl ++ with_default_decl
+    ++ "fn routed(i: Int, v: Int) -> Int =\n"
+    ++ "  with_default(0, get(i, v)) + 1\n\n"
+    ++ "fn shadow_param(with_default: Int -> Maybe Int -> Int, i: Int, v: Int) -> Int =\n"
+    ++ "  with_default(0, get(i, v)) + 1\n\n"
+    ++ "fn shadow_let(i: Int, v: Int) -> Int =\n"
+    ++ "  let with_default = \\(fb: Int, m: Maybe Int) -> fb\n"
+    ++ "  in with_default(0, get(i, v)) + 1\n"
+
+# 6. Partial application is not a full-arity call.
+fn partial_src() -> String =
+  maybe_decl ++ get_decl ++ with_default_decl
+    ++ "fn routed(i: Int, v: Int) -> Int =\n"
+    ++ "  with_default(0, get(i, v)) + 1\n\n"
+    ++ "fn partial() -> Maybe Int -> Int =\n"
+    ++ "  with_default(0, _)\n"
+
+# 7. Calls from inside the consumer's own recursive group. The self-call is
+# non-tail (`1 + ...`) so it stays a real call; `entry` is the outside caller.
+fn self_rec_src() -> String =
+  maybe_decl ++ get_decl
+    ++ "fn depth(m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just x -> 1 + depth(get(x - 1, 0))\n"
+    ++ "  | Nothing -> 0\n\n"
+    ++ "fn entry(i: Int) -> Int =\n"
+    ++ "  depth(get(i, 0))\n"
+
+fn mutual_src() -> String =
+  maybe_decl ++ get_decl
+    ++ "fn ping(m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just x -> 1 + pong(get(x - 1, 0))\n"
+    ++ "  | Nothing -> 0\n\n"
+    ++ "fn pong(m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just x -> 1 + ping(get(x - 1, 1))\n"
+    ++ "  | Nothing -> 0\n\n"
+    ++ "fn entry(i: Int) -> Int =\n"
+    ++ "  ping(get(i, 0))\n"
+
+# 8. Scrutinee position: `or_else` returns a Maybe and the call is matched.
+fn scrutinee_src() -> String =
+  maybe_decl ++ get_decl
+    ++ "fn or_else(m: Maybe Int, fb: Maybe Int) -> Maybe Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just x -> Just(x)\n"
+    ++ "  | Nothing -> fb\n\n"
+    ++ "fn scrut(i: Int, v: Int, fb: Maybe Int) -> Int =\n"
+    ++ "  match or_else(get(i, v), fb) with\n"
+    ++ "  | Just x -> x\n"
+    ++ "  | Nothing -> 0\n"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # --- 1. Routed call: worker + `_argw`, no boxed `get` ----------------------
+    r1 <- translate_or_msg(routed_src())
+    assert_true(state, "1: fixture translates", translated(r1))
+    nt <- body_of(r1, "non_tail")
+    it <- body_of(r1, "in_tail")
+    assert_true(state, "1: non-tail caller has a body", nt != "")
+    assert_true(state, "1: tail caller has a body", it != "")
+    assert_true(state, "1: producer has a result worker", has(r1, "define i128 @get_worker("))
+    assert_true(state, "1: non-tail caller calls get_worker", calls_worker(nt, "get"))
+    assert_true(state, "1: non-tail caller calls with_default_argw",
+                calls_boxed(nt, "with_default_argw"))
+    assert_false(state, "1: non-tail caller has no boxed get", calls_boxed(nt, "get"))
+    assert_false(state, "1: non-tail caller does not call boxed with_default",
+                 calls_boxed(nt, "with_default"))
+    assert_true(state, "1: tail caller calls get_worker", calls_worker(it, "get"))
+    assert_true(state, "1: tail caller calls with_default_argw",
+                calls_boxed(it, "with_default_argw"))
+    assert_false(state, "1: tail caller has no boxed get", calls_boxed(it, "get"))
+
+    # 1b: no other match consumes `get`, so the collection pass must add it.
+    r1b <- translate_or_msg(routed_alone_src())
+    assert_true(state, "1b: fixture translates", translated(r1b))
+    al <- body_of(r1b, "alone")
+    assert_true(state, "1b: caller calls get_worker", calls_worker(al, "get"))
+    assert_true(state, "1b: caller calls with_default_argw",
+                calls_boxed(al, "with_default_argw"))
+
+    # --- 2. Mirror: a held value calls the boxed consumer ----------------------
+    r2 <- translate_or_msg(held_src())
+    assert_true(state, "2: fixture translates", translated(r2))
+    hd <- body_of(r2, "held")
+    assert_true(state, "2: held calls boxed with_default", calls_boxed(hd, "with_default"))
+    assert_false(state, "2: no with_default_argw anywhere in the module",
+                 has(r2, "with_default_argw"))
+
+    # --- 3. Consumer over a user Result ----------------------------------------
+    r3 <- translate_or_msg(result_src())
+    assert_true(state, "3: fixture translates", translated(r3))
+    ur <- body_of(r3, "use_result")
+    assert_true(state, "3: producer has a result worker", has(r3, "define i128 @fetch_worker("))
+    assert_true(state, "3: caller calls fetch_worker", calls_worker(ur, "fetch"))
+    assert_true(state, "3: caller calls ok_or_argw", calls_boxed(ur, "ok_or_argw"))
+    assert_false(state, "3: caller has no boxed fetch", calls_boxed(ur, "fetch"))
+
+    # --- 4. The matched parameter escapes into an arm body ---------------------
+    r4 <- translate_or_msg(escapes_src())
+    assert_true(state, "4: fixture translates", translated(r4))
+    cl <- body_of(r4, "caller")
+    assert_false(state, "4: no keep_argw anywhere", has(r4, "keep_argw"))
+    assert_true(state, "4: call stays boxed keep", calls_boxed(cl, "keep"))
+    assert_true(state, "4: argument stays a boxed get", calls_boxed(cl, "get"))
+
+    # --- 5. A parameter or let named like the consumer stays a closure call ----
+    r5 <- translate_or_msg(shadow_src())
+    assert_true(state, "5: fixture translates", translated(r5))
+    sp <- body_of(r5, "shadow_param")
+    sl <- body_of(r5, "shadow_let")
+    assert_true(state, "5: shadow_param has a body", sp != "")
+    assert_true(state, "5: shadow_let has a body", sl != "")
+    assert_false(state, "5: shadow_param does not call with_default_argw",
+                 has(sp, "with_default_argw"))
+    assert_false(state, "5: shadow_param does not call with_default",
+                 calls_boxed(sp, "with_default"))
+    assert_false(state, "5: shadow_param has no get_worker call", calls_worker(sp, "get"))
+    assert_true(state, "5: shadow_param keeps a boxed get", calls_boxed(sp, "get"))
+    assert_false(state, "5: shadow_let does not call with_default_argw",
+                 has(sl, "with_default_argw"))
+    assert_false(state, "5: shadow_let does not call with_default",
+                 calls_boxed(sl, "with_default"))
+    assert_false(state, "5: shadow_let has no get_worker call", calls_worker(sl, "get"))
+    assert_true(state, "5: shadow_let keeps a boxed get", calls_boxed(sl, "get"))
+
+    # --- 6. Partial application is not routed ----------------------------------
+    r6 <- translate_or_msg(partial_src())
+    assert_true(state, "6: fixture translates", translated(r6))
+    pa <- body_of(r6, "partial")
+    assert_false(state, "6: partial application does not mention with_default_argw",
+                 has(pa, "with_default_argw"))
+
+    # --- 7. Calls from inside the consumer's recursive group stay boxed --------
+    r7 <- translate_or_msg(self_rec_src())
+    assert_true(state, "7a: fixture translates", translated(r7))
+    dp <- body_of(r7, "depth")
+    assert_true(state, "7a: depth has a body", dp != "")
+    assert_false(state, "7a: depth does not call depth_argw", has(dp, "depth_argw"))
+    assert_true(state, "7a: depth calls itself boxed", calls_boxed(dp, "depth"))
+    assert_true(state, "7a: depth's argument stays a boxed get", calls_boxed(dp, "get"))
+    # The group rule only matters if an outside call does route; pins that `entry`
+    # still does.
+    assert_true(state, "7a (outside caller routes): entry calls depth_argw",
+                calls_boxed(body_of(r7, "entry"), "depth_argw"))
+
+    r7m <- translate_or_msg(mutual_src())
+    assert_true(state, "7b: fixture translates", translated(r7m))
+    pg <- body_of(r7m, "ping")
+    po <- body_of(r7m, "pong")
+    assert_true(state, "7b: ping has a body", pg != "")
+    assert_true(state, "7b: pong has a body", po != "")
+    assert_false(state, "7b: ping does not call pong_argw", has(pg, "pong_argw"))
+    assert_true(state, "7b: ping calls boxed pong", calls_boxed(pg, "pong"))
+    assert_false(state, "7b: pong does not call ping_argw", has(po, "ping_argw"))
+    assert_true(state, "7b: pong calls boxed ping", calls_boxed(po, "ping"))
+    assert_true(state, "7b (outside caller routes): entry calls ping_argw",
+                calls_boxed(body_of(r7m, "entry"), "ping_argw"))
+
+    # --- 8. Scrutinee position stays boxed (documented non-goal) ---------------
+    r8 <- translate_or_msg(scrutinee_src())
+    assert_true(state, "8: fixture translates", translated(r8))
+    sc <- body_of(r8, "scrut")
+    assert_true(state, "8: scrut has a body", sc != "")
+    assert_true(state, "8: get stays a boxed call", calls_boxed(sc, "get"))
+    assert_false(state, "8: no get_worker call", calls_worker(sc, "get"))
+    assert_false(state, "8: no or_else_argw call", has(sc, "or_else_argw"))
+
+    summary(state)

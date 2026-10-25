@@ -98,6 +98,9 @@ declare i64 @term_read_avail(i64, i64)
 @.str.9 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"a logged-out session cannot reach read_secret\0A\00" }
 @.str.10 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c", then \00" }
 @.str.11 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"login refused\00" }
+@.str.12 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"hunter2\00" }
+@.str.13 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c", then \00" }
+@.str.14 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"login refused\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -306,92 +309,88 @@ define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 42
   %t$1 = call i64 @examples.wrap_session_states.open_session(i64 %t$0)
-  %t$28 = alloca i64
-  store i64 %t$1, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$29 = alloca i64
+  store i64 %t$1, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$2 = call i64 @examples.wrap_session_states.describe(i64 %t$1)
   %t$3 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
-  %t$30 = alloca i64
-  store i64 %t$2, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
-  %t$32 = alloca i64
-  store i64 %t$4, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$31 = alloca i64
+  store i64 %t$2, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$33 = alloca i64
+  store i64 %t$4, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$5 = call i64 @__tc_Semigroup_String_append(i64 %t$2, i64 %t$4)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$35 = alloca i64
-  store i64 %t$5, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$36 = alloca i64
+  store i64 %t$5, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$6 = call i64 @term_write(i64 %t$5)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$7 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
-  %t$38 = alloca i64
-  store i64 %t$8, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$39 = alloca i64
+  store i64 %t$8, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$9 = call i64 @examples.wrap_session_states.log_in(i64 %t$1, i64 %t$8)
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$41 = alloca i64
-  store i64 %t$9, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$41 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$42 = alloca i64
+  store i64 %t$9, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
   %t$10 = call i64 @examples.wrap_session_states.attempt(i64 %t$9)
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.6, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
-  %t$44 = alloca i64
-  store i64 %t$10, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$46 = alloca i64
-  store i64 %t$12, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
+  %t$45 = alloca i64
+  store i64 %t$10, ptr %t$45
+  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
+  %t$47 = alloca i64
+  store i64 %t$12, ptr %t$47
+  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
   %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$12)
-  %t$48 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$49 = alloca i64
-  store i64 %t$13, ptr %t$49
-  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
+  %t$49 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$50 = alloca i64
+  store i64 %t$13, ptr %t$50
+  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
   %t$14 = call i64 @term_write(i64 %t$13)
-  %t$51 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$15 = add i64 0, 7
   %t$16 = call i64 @examples.wrap_session_states.open_session(i64 %t$15)
   %t$17 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
   %t$18 = ptrtoint ptr %t$17 to i64
-  %t$52 = alloca i64
-  store i64 %t$16, ptr %t$52
-  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
-  %t$54 = alloca i64
-  store i64 %t$18, ptr %t$54
-  %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
-  %t$19 = call i64 @examples.wrap_session_states.log_in(i64 %t$16, i64 %t$18)
-  %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$57 = alloca i64
-  store i64 %t$19, ptr %t$57
-  %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
-  %t$20 = call i64 @examples.wrap_session_states.attempt(i64 %t$19)
-  %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$21 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
-  %t$22 = ptrtoint ptr %t$21 to i64
-  %t$60 = alloca i64
-  store i64 %t$20, ptr %t$60
-  %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
-  %t$62 = alloca i64
-  store i64 %t$22, ptr %t$62
-  %t$63 = call i64 @sprout_gc_push_i64_root(ptr %t$62)
-  %t$23 = call i64 @__tc_Semigroup_String_append(i64 %t$20, i64 %t$22)
-  %t$64 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$65 = alloca i64
-  store i64 %t$23, ptr %t$65
-  %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
-  %t$24 = call i64 @term_write(i64 %t$23)
-  %t$67 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$25 = getelementptr inbounds { i64, [47 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
-  %t$26 = ptrtoint ptr %t$25 to i64
-  %t$68 = alloca i64
-  store i64 %t$26, ptr %t$68
-  %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
-  %t$27 = call i64 @term_write(i64 %t$26)
-  %t$70 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$27
+  %t$19$st = call i128 @examples.wrap_session_states.log_in_worker(i64 %t$16, i64 %t$18)
+  %t$19 = trunc i128 %t$19$st to i64
+  %t$19$hi = lshr i128 %t$19$st, 64
+  %t$20 = trunc i128 %t$19$hi to i64
+  %t$53 = alloca i64
+  store i64 %t$20, ptr %t$53
+  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
+  %t$21 = call i64 @examples.wrap_session_states.attempt_argw(i64 %t$19, i64 %t$20)
+  %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$22 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
+  %t$23 = ptrtoint ptr %t$22 to i64
+  %t$56 = alloca i64
+  store i64 %t$21, ptr %t$56
+  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
+  %t$58 = alloca i64
+  store i64 %t$23, ptr %t$58
+  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
+  %t$24 = call i64 @__tc_Semigroup_String_append(i64 %t$21, i64 %t$23)
+  %t$60 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$61 = alloca i64
+  store i64 %t$24, ptr %t$61
+  %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
+  %t$25 = call i64 @term_write(i64 %t$24)
+  %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$26 = getelementptr inbounds { i64, [47 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
+  %t$27 = ptrtoint ptr %t$26 to i64
+  %t$64 = alloca i64
+  store i64 %t$27, ptr %t$64
+  %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
+  %t$28 = call i64 @term_write(i64 %t$27)
+  %t$66 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$28
 }
 
 define i64 @examples.wrap_session_states.attempt(i64 %p$s) {
@@ -464,6 +463,84 @@ entry:
 define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
   ret i64 %p$value
+}
+
+define i128 @examples.wrap_session_states.log_in_worker(i64 %p$s, i64 %p$password) {
+entry:
+  %t$0 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
+  %t$1 = ptrtoint ptr %t$0 to i64
+  %t$2$lptr = inttoptr i64 %p$password to ptr
+  %t$2$rptr = inttoptr i64 %t$1 to ptr
+  %t$2$i1 = call i1 @str_eq(ptr %t$2$lptr, ptr %t$2$rptr)
+  %t$2 = zext i1 %t$2$i1 to i64
+  %t$3 = trunc i64 %t$2 to i1
+  br i1 %t$3, label %then_3, label %else_3
+then_3:
+  %t$4 = call i64 @examples.wrap_session_states.session_id(i64 %p$s)
+  %t$5$lo = zext i64 1 to i128
+  %t$5$hw = zext i64 %t$4 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
+else_3:
+  %t$6$lo = zext i64 0 to i128
+  %t$6$hw = zext i64 0 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
+}
+
+define i64 @examples.wrap_session_states.attempt_argw(i64 %p$s$tag, i64 %p$s$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 1
+  %t$3 = icmp eq i64 %p$s$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$15 = alloca i64
+  store i64 %p$s$val, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$4 = call i64 @examples.wrap_session_states.read_secret(i64 %p$s$val)
+  %t$5 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
+  %t$6 = ptrtoint ptr %t$5 to i64
+  %t$17 = alloca i64
+  store i64 %t$4, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$19 = alloca i64
+  store i64 %t$6, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$7 = call i64 @__tc_Semigroup_String_append(i64 %t$4, i64 %t$6)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$8 = call i64 @examples.wrap_session_states.log_out(i64 %p$s$val)
+  %t$22 = alloca i64
+  store i64 %t$7, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$24 = alloca i64
+  store i64 %t$8, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$9 = call i64 @examples.wrap_session_states.describe(i64 %t$8)
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$27 = alloca i64
+  store i64 %t$9, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$9)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
+  br label %join_0
+arm_1_0:
+  %t$11 = add i64 0, 0
+  %t$12 = icmp eq i64 %p$s$tag, %t$11
+  br i1 %t$12, label %body_1_0, label %arm_2_0
+body_1_0:
+  %t$13 = getelementptr inbounds { i64, [14 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
+  %t$14 = ptrtoint ptr %t$13 to i64
+  br label %join_0
+arm_2_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$10, %body_0_0], [%t$14, %body_1_0]
+  ret i64 %t$1
 }
 
 define void @__sprout_init_globals() {

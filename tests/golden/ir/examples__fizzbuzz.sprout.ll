@@ -558,22 +558,25 @@ entry:
 
 define i64 @$entry.divisible(i64 %p$n, i64 %p$d) {
 entry:
-  %t$0 = call i64 @stdlib.math.int.mod(i64 %p$n, i64 %p$d)
-  %t$1 = add i64 0, 0
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$2 = call i64 @sprout_alloc_obj(i64 1, i64 1)
-  %t$2$ptr = inttoptr i64 %t$2 to ptr
-  %t$2$f0 = getelementptr i64, ptr %t$2$ptr, i64 0
-  store i64 %t$1, ptr %t$2$f0
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_0, i64 8) to i64
-  %t$7 = alloca i64
-  store i64 %t$2, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$4 = call i64 @__tc_Eq_Maybe_a_eq(i64 %t$0, i64 %t$2, i64 %t$3)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$4
+  %t$0$st = call i128 @stdlib.math.int.mod_worker(i64 %p$n, i64 %p$d)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  %t$2 = add i64 0, 0
+  %t$6 = alloca i64
+  store i64 %t$1, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %t$3 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$3$ptr = inttoptr i64 %t$3 to ptr
+  %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
+  store i64 %t$2, ptr %t$3$f0
+  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_0, i64 8) to i64
+  %t$8 = alloca i64
+  store i64 %t$3, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$5 = call i64 @__tc_Eq_Maybe_a_eq_argw(i64 %t$0, i64 %t$1, i64 %t$3, i64 %t$4)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$5
 }
 
 define i64 @$entry.fizzbuzz(i64 %p$n) {
@@ -774,6 +777,104 @@ define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
   %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
+}
+
+define i128 @stdlib.math.int.mod_worker(i64 %p$value, i64 %p$modulus) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = icmp sle i64 %p$modulus, %t$0
+  %t$2 = zext i1 %t$1 to i64
+  %t$3 = trunc i64 %t$2 to i1
+  br i1 %t$3, label %then_3, label %else_3
+then_3:
+  %t$4$lo = zext i64 0 to i128
+  %t$4$hw = zext i64 0 to i128
+  %t$4$hi = shl i128 %t$4$hw, 64
+  %t$4$r = or i128 %t$4$hi, %t$4$lo
+  ret i128 %t$4$r
+else_3:
+  %t$5 = call i64 @stdlib.math.int.euclidean_remainder(i64 %p$value, i64 %p$modulus)
+  %t$6$lo = zext i64 1 to i128
+  %t$6$hw = zext i64 %t$5 to i128
+  %t$6$hi = shl i128 %t$6$hw, 64
+  %t$6$r = or i128 %t$6$hi, %t$6$lo
+  ret i128 %t$6$r
+}
+
+define i64 @__tc_Eq_Maybe_a_eq_argw(i64 %p$left$tag, i64 %p$left$val, i64 %p$right, i64 %p$__tc_Eq_0_eq) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 0
+  %t$3 = icmp eq i64 %p$left$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$4 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_5
+arm_0_5:
+  %t$7 = add i64 0, 0
+  %t$8 = icmp eq i64 %t$4, %t$7
+  br i1 %t$8, label %body_0_5, label %arm_1_5
+body_0_5:
+  %t$9 = add i64 0, 1
+  br label %join_5
+arm_1_5:
+  %t$10 = add i64 0, 1
+  %t$11 = icmp eq i64 %t$4, %t$10
+  br i1 %t$11, label %body_1_5, label %arm_2_5
+body_1_5:
+  %t$12 = add i64 0, 0
+  br label %join_5
+arm_2_5:
+  call void @sprout_abort_match()
+  unreachable
+join_5:
+  %t$6 = phi i64 [%t$9, %body_0_5], [%t$12, %body_1_5]
+  br label %join_0
+arm_1_0:
+  %t$13 = add i64 0, 1
+  %t$14 = icmp eq i64 %p$left$tag, %t$13
+  br i1 %t$14, label %body_1_0, label %arm_2_0
+body_1_0:
+  %t$15 = call i64 @sprout_tag(i64 %p$right)
+  br label %arm_0_16
+arm_0_16:
+  %t$18 = add i64 0, 0
+  %t$19 = icmp eq i64 %t$15, %t$18
+  br i1 %t$19, label %body_0_16, label %arm_1_16
+body_0_16:
+  %t$20 = add i64 0, 0
+  br label %join_16
+arm_1_16:
+  %t$21 = add i64 0, 1
+  %t$22 = icmp eq i64 %t$15, %t$21
+  br i1 %t$22, label %body_1_16, label %arm_2_16
+body_1_16:
+  %t$23 = call i64 @sprout_field(i64 %p$right, i64 0)
+  %t$25 = alloca i64
+  store i64 %p$left$val, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
+  %t$27 = alloca i64
+  store i64 %p$__tc_Eq_0_eq, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$29 = alloca i64
+  store i64 %t$23, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$24 = call i64 @__cm_Eq_eq(i64 %p$left$val, i64 %t$23, i64 %p$__tc_Eq_0_eq)
+  %t$31 = call i64 @sprout_gc_pop_roots(i64 3)
+  br label %join_16
+arm_2_16:
+  call void @sprout_abort_match()
+  unreachable
+join_16:
+  %t$17 = phi i64 [%t$20, %body_0_16], [%t$24, %body_1_16]
+  br label %join_0
+arm_2_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$6, %join_5], [%t$17, %join_16]
+  ret i64 %t$1
 }
 
 define void @__sprout_init_globals() {

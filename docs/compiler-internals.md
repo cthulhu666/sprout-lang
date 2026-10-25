@@ -192,7 +192,8 @@ ctor tag args` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
   straight line, which only loses reuse.
 - **A closure gets a fresh state and no owned parameters** (`closure_tx_env`). Its parameters
   resolve to the same `%p$name` as the enclosing function's, and it may run 0..n times. CPR
-  workers and the global-init body also build their `TxEnv` with no owned parameters.
+  result workers and the global-init body also build their `TxEnv` with no owned parameters; an
+  argument worker keeps its fn's other owned parameters (§Argument CPR).
 - **An inlined immediately-applied lambda is not a closure.** `translate_call` beta-reduces it
   (`let`, `where`, `|>`), binding a `borrowing` parameter to the lender's SSA, so `inline_tx_env`
   drops that SSA from `owned` for the body. The reuse state is shared; the body runs once.
@@ -315,6 +316,26 @@ extern-CPR path above — these workers are **Sprout-defined and Sprout-called**
   exhaustive `compute_free_vars`): `x` may escape nowhere but the one
   consuming scrutinee. A `sra_rest_plain` guard bars a Maybe/Result do-bind in the continuation
   (those reset the SRA map), confining the change to `translate_do`.
+
+## Argument CPR (`_argw` workers)
+
+Design: [arg-cpr-v0.md](arg-cpr-v0.md). `f(a, g(x))`, where `f`'s body is `match p_k with` simple
+width-2 arms and `p_k` occurs in no arm, lowers to `IRCallUnboxed2` for `g` and a call to
+`@f_argw`, which takes `p_k` as `(p_k$tag, IRTScalar)` and `(p_k$val, IRTUnknown)`.
+
+- **Two layers, as result workers have.** `argw_shape` (shape only, full arity) feeds collection
+  (`collect_argw_sites` adds `g` to the result-worker set and `f` to `WorkerPlan.argw`);
+  `argw_target` adds the shadow checks for `f` and `g` and the group rule. Translation ⊆
+  collection, so a routed call names only emitted symbols.
+- **Recursive groups.** `ProgEnv.groups` is the SCC of the typed-AST call graph, an edge for a
+  mention in any position (`build_recursive_groups`); `TxEnv.group` is the calling fn's. A call
+  into the caller's own group is never routed, since `tco_rewrite` and mutual TCO find a loop by
+  the callee's name. `@f_argw` and `@f_worker` carry `f`'s group.
+- **Owned parameters.** `@f_argw` keeps `owned_param_ssas` of `f`'s other parameters: they arrive
+  as they would to `f`, so in-place reuse still fires on them.
+- **Emission order.** `worker_jobs(plan)` lists result workers, then argument workers. The
+  alloc-summary pre-pass and the emit pass walk that one list, since lifted-lambda names come from
+  a shared counter.
 
 ## Concrete-instance devirtualization
 
