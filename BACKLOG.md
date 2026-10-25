@@ -404,12 +404,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the enum with no `default:` arms, add `-Werror=switch` to the runtime clang lines. Converts silent
   wrong-dispatch after a new heap kind into a build break.
   `docs/gc-phase2-retro-handoff-2026-07-05.md` §1.
-- [ ] `P3` **Compiler-inferred non-allocation (Koka-style) instead of a hardcoded list.**
-  `is_nonallocating_read` is an unchecked assertion; manual annotation is explicitly not what is
-  wanted. Target: interprocedural non-allocation inference as a fixpoint over the call graph. **Do
-  first, ships alone:** a CI/DoD checker for the irreducible leaf C-extern facts (each tagged
-  extern's body invokes no `sprout_make*`/`sprout_alloc*`/`sprout_gc_maybe_collect_threshold`),
-  which the inference bottoms out on. Rejected: `@noalloc` annotations, return-type shape, `!{IO}`.
+- [ ] `P3` **Runtime-function facts are hand-written, unchecked name lists.**
+  `is_nonallocating_read`, `is_nonallocating_unboxed_read`, `is_noreturn_extern`,
+  `unboxed_maybe_extern_name`, `safe_io_externs` and five `op_triggers_gc` arms are claims about C
+  bodies that nothing checks, and short: rooting trusts 13 runtime functions where 45 cannot
+  trigger GC. Trusting the rest measured ~10% on `json.parse`, nothing on the compiler. Plan: one
+  hand-edited facts module, and a check that derives the facts from the runtime's LLVM IR and
+  fails on any entry the C does not support, per platform. Rejected: generating the module.
+  `docs/runtime-facts-v0.md`.
 - [ ] `P3` **GC hardening follow-ups from the phase-2 review.** HDRCHECK per-kind layout checks —
   the kind-independent region-walk validation landed 2026-09-26 (boundaries must agree with the
   slotmap) and VECTOR got an aux-vs-`->data` check with it, leaving 7 of 10 kinds with none;
@@ -599,9 +601,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the task failed, reclaim it, let siblings continue, and let a supervisor respond (500 + loud log).
   Buildable without type-system work and it de-risks the eventual `Exn`-effect unwinding.
   **Caveats:** `ir_rooting`'s noreturn-block exemption assumes nothing resumes after a panic and
-  must go with this. GC type-aware rooting must be settled on unwound frames, and a task that panics
-  mid-mutation of shared state can leave it inconsistent — the safe contract is terminate +
-  notify, never resume-in-place.
+  must go with this, as must the `never_returns` facts (`docs/runtime-facts-v0.md` §8). GC
+  type-aware rooting must be settled on unwound frames, and a task that panics mid-mutation of
+  shared state can leave it inconsistent — the safe contract is terminate + notify, never
+  resume-in-place.
 - [ ] `P2` **A bare `<-` bind of a `Result` in a `Unit`-returning function silently discards the
   `Err`.** Defensible do-notation semantics, but it converts a newly-recoverable API into a silently
   swallowing one and is invisible at the call site. **Designed, awaiting a call on severity:**
