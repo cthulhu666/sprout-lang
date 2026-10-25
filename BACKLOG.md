@@ -1578,7 +1578,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 - [ ] `P3` **Remove the dead C `json_parse` tree-parser.** Extract the shared low-level helpers
   (`sprout_json_skip_ws`/`_parse_string`/`_parse_hex4`) still used by the by-key extractor, then
   delete `json_parse`/`_value`/`_array`/`_object`/`_number`/`_ok_result`/`_err_result`/`_reverse_*`
-  and drop `json_parse` from `APPROVED_BUILTINS`.
+  and drop `json_parse` from `APPROVED_BUILTINS` and the `stdlib$json$*` ctors from
+  `SPROUT_RUNTIME_CTORS`.
 - [ ] `P3` **`deriving (Enum)` breadth** — `values`/`enum_values`, optionally
   `succ`/`pred`/`min_bound`/`max_bound`. `values : List a` is the most-requested (Java `values()`,
   Kotlin `entries`, C# `Enum.GetValues`, Scala 3 `values`) and rides the same return-type-dispatch
@@ -2470,10 +2471,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `getcontext` → `populate_signal_stack_context` (`sigprocmask`, `getrlimit`, `sigaltstack`), then
   `setcontext` (`sigprocmask`). 10.7% of server CPU on keep-alive `/health` (`sample`, M3 Pro).
   Linux glibc not measured. A switch that saves only callee-saved registers would drop all four.
-- [ ] `P2` **`find_ctor_tag_by_name` is a linear `strcmp` scan**, called each time C builds a
-  `Cons`, `Nil`, `Ok` or `Err` (`string_concat_many`, `bytes_to_utf8`, the net builtins). 3.8–4.9%
-  of keep-alive `/health` CPU through `http_server`. The tags are fixed after registration, so a
-  per-name cache would make it O(1).
 - [ ] `P3` **`http_server` costs ~4 µs/request more than a hand-written keep-alive loop** (17.2 vs
   13.3 µs server CPU on `/health`, after header rendering stopped allocating). What is left is
   request parsing and the GC it drives; no single function stands out.

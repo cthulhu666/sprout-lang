@@ -60,6 +60,9 @@ declare i64 @str_starts_with(i64, i64)
 @.cfkinds.1 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.2 = private unnamed_addr constant [5 x i8] c"Blue\00"
 @.cfkinds.2 = private unnamed_addr constant [1 x i8] c"\00"
+@"sprout_tag$Red" = constant i64 0
+@"sprout_tag$Green" = constant i64 1
+@"sprout_tag$Blue" = constant i64 2
 
 define i64 @color_code(i64 %p$c) {
 entry:

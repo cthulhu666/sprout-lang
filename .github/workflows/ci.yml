@@ -360,10 +360,11 @@ jobs:
         # aarch64 lowers it to `[2 x i64]`, so only this runner sees that mismatch.
         run: just cpr-declare-check
 
-      - name: CPR tag fold on arm64
-        # An inlined `_unboxed` read must see `Just`/`Nothing` as constants after whole-program
-        # linking; the check also fails when the read is not inlined at all.
-        run: just cpr-tag-fold-check
+      - name: Constructor tag fold on arm64
+        # A ctor tag the runtime names must be a constant after whole-program linking, in an
+        # inlined `_unboxed` read and in the runtime's own builders; only the cold fallback
+        # may look a tag up by name.
+        run: just ctor-tag-fold-check
 
       - name: Task/IO smoke (kqueue backend)
         # The same battery the Linux job's ci-fast-gates runs, on the OTHER poller. Covers the

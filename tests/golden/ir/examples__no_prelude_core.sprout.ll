@@ -82,8 +82,11 @@ declare i64 @str_starts_with(i64, i64)
 @.cfkinds.3 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.4 = private unnamed_addr constant [8 x i8] c"Setting\00"
 @.cfkinds.4 = private unnamed_addr constant [3 x i8] c"ss\00"
-@sprout_tag_nothing = constant i64 0
-@sprout_tag_just = constant i64 1
+@"sprout_tag$Nothing" = constant i64 0
+@"sprout_tag$Just" = constant i64 1
+@"sprout_tag$Cons" = constant i64 2
+@"sprout_tag$Nil" = constant i64 3
+@"sprout_tag$Setting" = constant i64 4
 @source = global i64 zeroinitializer
 
 define i64 @reverse_onto(i64 %p$xs$in, i64 %p$acc$in) {

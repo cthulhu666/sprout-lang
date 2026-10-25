@@ -198,7 +198,8 @@ ctor tag args` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
   (`let`, `where`, `|>`), binding a `borrowing` parameter to the lender's SSA, so `inline_tx_env`
   drops that SSA from `owned` for the body. The reuse state is shared; the body runs once.
 - **The runtime never builds or reads a linear constructor**, so a reused cell's tag is
-  invisible to it: no `find_ctor_tag_by_name` call site names one (SYNC comment there).
+  invisible to it: no `SPROUT_RUNTIME_CTORS` entry names one (SYNC comment at
+  `find_ctor_tag_by_name`).
 
 ### Bounds-check elimination — `stdlib/compiler/bce.sprout`
 
@@ -268,18 +269,23 @@ tuple CPR) return `i128` too, since `IRCallUnboxed2` calls both kinds.
 clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so neither
 form matches the declare. Nothing builds the runtime for Windows yet; see `BACKLOG.md`.
 
-**The `Just` / `Nothing` tags are a compiler-to-runtime symbol pair.**
-`ir_lowering.collect_ctor_globals` emits `@sprout_tag_just` / `@sprout_tag_nothing` as
-external `constant i64` for the bare-named ctors: the prelude's, or a `no_prelude` entry's
-own (other modules' ctors are qualified, `main.Just`). The runtime defines both **weak**
-`const long long = -1`; `cached_tag_just` / `cached_tag_nothing` return the value when it is
-`>= 0`, else fall back to `find_ctor_tag_by_name`. Under whole-program linking the strong
-definition wins and LLVM folds the tag, so an inlined `_unboxed` read carries no lookup —
-which would otherwise push its caller past the inline threshold. The `-1` default covers a
-module without the symbols: the committed seed before a reseed, `tests/c_runtime`, a program
-with no `Just`. Two emitted modules linked together would define them twice; nothing does.
+**Constructor tags are a compiler-to-runtime symbol family.**
+`ir_lowering.collect_ctor_globals` emits `@"sprout_tag$<name>" = constant i64 <tag>` for every
+registered ctor, the name's `.` spelled `$` and the symbol quoted and escaped like `.cname`
+(`sprout_tag$Just`, `sprout_tag$stdlib$chan$Got`). A name holds `$` only as the first char of
+the entry module `$entry`, so the mapping cannot collide (`$entry.Just` →
+`sprout_tag$$entry$Just`). The runtime names
+the ctors it builds in one list, `SPROUT_RUNTIME_CTORS`, and defines each symbol **weak**
+`const long long = -1`. `SPROUT_TAG(sym)` returns the constant when it is `>= 0`; else it
+caches the answer of `sprout_ctor_tag_lookup`, the cold fallback and the only caller of
+`find_ctor_tag_by_name`. A ctor missing from the list is an undeclared identifier at its use.
+Under whole-program linking the strong definition wins and LLVM folds the tag, so an inlined
+`_unboxed` read or a runtime ctor builder carries no lookup, which would otherwise push its
+caller past the inline threshold. The `-1` default covers a module without the symbols: the
+committed seed before a reseed, `tests/c_runtime`, a program that does not link the ctor's
+module. Two emitted modules linked together would define them twice; nothing does.
 These are the runtime's first weak symbols: Mach-O and ELF prefer a strong definition, COFF
-differs, and Windows x64 has no CPR externs (above). `just cpr-tag-fold-check` pins it
+differs, and Windows x64 has no CPR externs (above). `just ctor-tag-fold-check` pins it
 ([gates.md](gates.md)).
 
 **There is no width-3 extern, and no lowering for one.** Clang returns a 24-byte
