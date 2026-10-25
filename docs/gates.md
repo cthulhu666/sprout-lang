@@ -307,7 +307,7 @@ CI installs clang 22 from apt.llvm.org (`scripts/ci_install_llvm.sh`).
 ## Constructor tag fold — `just ctor-tag-fold-check`
 
 Whole-program links `tests/ctor_tag_fold/reads.sprout` (a `Vec` loop, a `Bytes` loop and a
-channel send/recv loop) to optimised IR and checks three things:
+channel send/recv loop) to optimised IR and checks four things:
 
 - Each `@main.*` function calls neither `@find_ctor_tag_by_name` nor `@sprout_ctor_tag_lookup`
   and reads no tag-cache global (any `sprout_tag_cache` name).
@@ -317,9 +317,12 @@ channel send/recv loop) to optimised IR and checks three things:
   function is found, because it proves nothing about a read that was never inlined.
 - Only `@sprout_ctor_tag_lookup` calls `@find_ctor_tag_by_name`. Any other caller scans the
   constructor table by name on every call; the report names each function, capped at 15.
-- `@sprout_chan_make_got`, a runtime function building a constructor the program registers
-  (`stdlib.chan.Got`), has no lookup call and no cache reference. The check fails when that
-  function is missing from the linked IR.
+- `@sprout_chan_make_got` (builds `stdlib.chan.Got`) and `@string_concat_many` (reads `Cons` and
+  `Nil`), runtime functions using constructors every program registers, have no lookup call and
+  no cache reference. The check fails when either is missing from the linked IR.
+  `find_ctor_tag_by_name` is `noinline, cold`, so a stray caller stays a visible call.
+- Every `@"sprout_tag$..."` name in the fixture IR and in `bootstrap/compile_driver.ll` keeps `$`
+  to the `.` separator and a leading `$entry$`; `$$` elsewhere would let two names collide.
 
 `tests/c_runtime/ctor_tag_fallback.c` pins the other side: with no constant supplied, the
 runtime returns the registered tags. The constants are emitted by

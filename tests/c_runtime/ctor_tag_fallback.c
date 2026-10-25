@@ -65,7 +65,13 @@ int main(void) {
   bad |= check("bytes hit", bytes_get_unboxed(bytes, 1), 8, 'B');
   bad |= check("bytes miss", bytes_get_unboxed(bytes, 2), 7, 0);
 
-  char path[] = "/tmp/sprout_tag_fallback_XXXXXX";
+  const char* tmpdir = getenv("TMPDIR");
+  if (tmpdir == NULL || tmpdir[0] == '\0') tmpdir = "/tmp";
+  char path[1024];
+  if (snprintf(path, sizeof path, "%s/sprout_tag_fallback_XXXXXX", tmpdir) >= (int)sizeof path) {
+    fprintf(stderr, "TMPDIR too long\n");
+    return 1;
+  }
   int fd = mkstemp(path);
   if (fd < 0) {
     perror("mkstemp");

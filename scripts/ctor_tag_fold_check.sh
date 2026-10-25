@@ -5,29 +5,52 @@
 #      @find_ctor_tag_by_name nor @sprout_ctor_tag_lookup and reads no tag-cache global; it also
 #      fails if a read was NOT inlined, since the check would then prove nothing.
 #   b. only @sprout_ctor_tag_lookup calls @find_ctor_tag_by_name.
-#   c. @sprout_chan_make_got, which builds a ctor the program registers, folds its tag too.
+#   c. each runtime builder in FOLD_BUILDERS builds a ctor every program registers; its tag
+#      folds too.
+# `--names <file.ll>` instead checks the `@"sprout_tag$..."` definitions in one IR file: `$` may
+# appear only as the `.` separator or a leading `$entry$`, never `$$`.
 # See docs/gates.md §Constructor tag fold.
 #
 # usage: ctor_tag_fold_check.sh <emitted.ll>
+#        ctor_tag_fold_check.sh --names <file.ll>
 set -euo pipefail
 
+if [ "${1:-}" = "--names" ] && [ "$#" -eq 2 ]; then
+  bad="$(perl -ne '
+    next unless /^@"sprout_tag\$([^"]*)"/;
+    $orig = $n = $1;
+    $n =~ s/^\$entry\$//;
+    print "$orig\n" if $n =~ /^\$|\$\$/;
+  ' "$2" | sort -u)"
+  if [ -n "$bad" ]; then
+    while IFS= read -r sym; do
+      echo "ctor-tag-fold-check: @\"sprout_tag\$$sym\" has a misplaced \$ in $2" >&2
+    done <<< "$bad"
+    exit 1
+  fi
+  echo "ctor-tag-fold-check: tag names in $2 keep \$ to the separator"
+  exit 0
+fi
 if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <emitted.ll>" >&2
+  echo "usage: $0 <emitted.ll> | --names <file.ll>" >&2
   exit 2
 fi
 LL="$1"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAX_LISTED=15
+FOLD_BUILDERS="sprout_chan_make_got string_concat_many"
 
 TMPD="$(mktemp -d "${TMPDIR:-/tmp}/sprout_tagfold_XXXXXX")"
 trap 'rm -rf "$TMPD"' EXIT
 
+bash "$0" --names "$LL"
 bash "$ROOT/scripts/link_whole_program.sh" "$LL" "$TMPD/opt.ll" -S -emit-llvm
 
 # One line per finding: "<check>|<fn>|<what>". The fixture's functions are the `@main.*`
 # defines, `@main` itself excluded. Cache globals: the old @g_tag_* pair and any
 # `sprout_tag_cache` name.
-perl -ne '
+FOLD_BUILDERS="$FOLD_BUILDERS" perl -ne '
+  BEGIN { %want = map { $_ => 1 } split / /, $ENV{FOLD_BUILDERS}; }
   if (/^define\b.*?@("?)([^"(\s]+)\1\(/) {
     $fn = $2; $fixture = $fn =~ /^main\./; $seen{$fn} = 1; $nfix++ if $fixture; next;
   }
@@ -42,13 +65,13 @@ perl -ne '
   }
   print "b|$fn|find_ctor_tag_by_name\n"
     if $fn ne "sprout_ctor_tag_lookup" && /call\b.*\@find_ctor_tag_by_name\b/;
-  if ($fn eq "sprout_chan_make_got") {
+  if ($want{$fn}) {
     print "c|$fn|$call\n" if $call ne "";
     print "c|$fn|$cache\n" if defined $cache;
   }
   END {
     print "COUNT|" . ($nfix + 0) . "|\n";
-    print "NOGOT|\n" unless $seen{"sprout_chan_make_got"};
+    print "NOGOT|$_|\n" for grep { !$seen{$_} } sort keys %want;
   }
 ' "$TMPD/opt.ll" > "$TMPD/findings"
 
@@ -58,7 +81,9 @@ if [ "${nfn:-0}" -eq 0 ]; then
   exit 1
 fi
 if grep -q '^NOGOT|' "$TMPD/findings"; then
-  echo "ctor-tag-fold-check: no @sprout_chan_make_got in the linked IR; the pattern is stale" >&2
+  sed -n 's/^NOGOT|\(.*\)|$/\1/p' "$TMPD/findings" | while IFS= read -r missing; do
+    echo "ctor-tag-fold-check: no @$missing in the linked IR; the pattern is stale" >&2
+  done
   exit 1
 fi
 
@@ -78,9 +103,10 @@ while IFS="|" read -r check fn what; do
 done < <(sort -u "$TMPD/findings")
 
 # Check b: every other caller of the cold lookup, one per line, capped.
-nb="$(grep -c '^b|' "$TMPD/findings" || true)"
+grep '^b|' "$TMPD/findings" | sort -u > "$TMPD/b_unique" || true
+nb="$(wc -l < "$TMPD/b_unique" | tr -d ' ')"
 if (( nb > 0 )); then
-  grep '^b|' "$TMPD/findings" | sort -u | head -n "$MAX_LISTED" | while IFS="|" read -r _ fn _; do
+  head -n "$MAX_LISTED" "$TMPD/b_unique" | while IFS="|" read -r _ fn _; do
     echo "ctor-tag-fold-check: $fn calls @find_ctor_tag_by_name; only @sprout_ctor_tag_lookup may" >&2
   done
   (( nb > MAX_LISTED )) && echo "ctor-tag-fold-check: ... and $((nb - MAX_LISTED)) more" >&2

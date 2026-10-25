@@ -1400,6 +1400,7 @@ ctor-tag-fold-check: bootstrap-from-seed
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
     tests/ctor_tag_fold/reads.sprout > "$TMPD/reads.ll"
   bash scripts/ctor_tag_fold_check.sh "$TMPD/reads.ll"
+  bash scripts/ctor_tag_fold_check.sh --names bootstrap/compile_driver.ll
 
 # Optimized-codegen smoke.  Each tests/codegen_o2/*.spr must emit IR that survives
 # `clang -O2`.  Nothing else checks this: `just test` links test IR with no -O flag,
