@@ -299,13 +299,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   is 29–48 ms, so most of it is the count-blind trigger rescanning the live array. `Just false`
   is how a sieve over `LinVec` reads (`docs/persistent-array-v0.md` §3.4). Fix: bind the field to a
   fresh variable in the worker arm and test the literal after.
-- [ ] `P3` **Phase B mutual-TCO: a member that is both self-tail-recursive and in a heterogeneous
-  mutual cycle keeps its mutual edge as a plain call.** `mutual_tco_rewrite_fn` skips any fn
-  carrying an `IRTcoEntry`. No miscompile, but the mutual edge builds a native frame per
-  iteration, so a long input overflows the stack: `json`'s string decoder died at 2^15 escapes
-  until it was rewritten as one self-recursive loop. `docs/mutual-tco-phase-b-v0.md` §5a. Hit again
-  by `http_server`'s keep-alive loop: ~2,700 requests on one connection exhausted the root pool,
-  and by a two-function grid BFS at 1M cells (`docs/persistent-array-v0.md` §3.2).
 - [ ] `P3` **A captureless method closure is heap-allocated at every call, so `where Eq a` costs.**
   Passing a known instance's method, e.g. `list_member(name, scope)` at `Eq String`, emits
   `sprout_alloc_closure` for `@__sprout_ir_eta___tc_Eq_String_eq_*` each call, though it captures

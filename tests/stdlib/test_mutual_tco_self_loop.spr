@@ -1,0 +1,53 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.task (Scope, Task, with_scope, task_fork, task_await)
+import stdlib.math.int (is_even)
+
+# A function that is BOTH self-tail-recursive and in a mutual tail cycle must run
+# the mutual edge as `musttail` too (docs/mutual-tco-v0.md, phase-b §5a). Without
+# it the self edge loops but every round trip through the partner grows the stack.
+#   - same-arity pair (Phase A):     pa <-> pb, depth 10,000,000 at -O0
+#   - heterogeneous pair (Phase B):  ping/3 <-> pong/2, depth 10,000,000 at -O0
+#   - heap-carrying hetero pair in a green task: hp allocates and keeps `acc` live
+#     past the allocation (so it has root ops), N well past the 16384-slot pool.
+
+fn pa(i: Int, n: Int) -> Int =
+  if i >= n then i
+  else if is_even(i) then pa(i + 1, n)
+  else pb(i + 1, n)
+
+fn pb(i: Int, n: Int) -> Int =
+  if i >= n then i
+  else pa(i + 1, n)
+
+fn ping(i: Int, n: Int, skip: Int) -> Int =
+  if i >= n then i
+  else if skip > 0 then ping(i + 1, n, skip - 1)
+  else pong(i + 1, n)
+
+fn pong(i: Int, n: Int) -> Int =
+  if i >= n then i
+  else ping(i + 1, n, 2)
+
+fn hp(n: Int, acc: List Int) -> Int =
+  if n <= 0 then list_length(acc)
+  else if is_even(n) then hp(n - 1, Cons(n, acc))
+  else hq(n, acc, Cons(n, acc))
+
+fn hq(n: Int, acc: List Int, acc2: List Int) -> Int =
+  hp(n - 1, acc2)
+
+fn drive() -> Bool = hp(40000, Nil) >= 0
+
+fn run_on_green(s: Scope) -> Bool !{IO} =
+  do
+    t <- task_fork(s, \_ -> drive())
+    task_await(t)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "same-arity self+mutual pair, depth 10M", pa(0, 10000000) >= 10000000, true)
+    assert_eq(state, "hetero-arity self+mutual pair, depth 10M", ping(0, 10000000, 0) >= 10000000, true)
+    ok <- with_scope(\s -> run_on_green(s))
+    assert_eq(state, "heap-carrying hetero self+mutual pair (N=40000) in a green task", ok, true)
+    summary(state)

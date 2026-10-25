@@ -4065,7 +4065,7 @@ else_2:
   %t$41 = alloca i64
   store i64 %p$payload, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$5 = call i64 @tcp_write_some(i64 %p$handle, i64 %p$payload, i64 %p$offset)
+  %t$5 = call i64 @tcp_write_some(i64 %p$handle, i64 %p$payload, i64 %p$offset) noinline
   %t$6 = call i64 @sprout_tag(i64 %t$5)
   %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_7
@@ -4118,32 +4118,29 @@ body_1_7:
   %t$28 = icmp eq i64 %t$26, %t$27
   br i1 %t$28, label %ntest_25, label %arm_2_7
 ntest_25:
-  %t$44 = alloca i64
-  store i64 %p$payload, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$29 = call i64 @stdlib.net.write_all_by_wait(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total)
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_7
+  call void @llvm.stackrestore(ptr %t$40)
+  %t$29 = musttail call i64 @stdlib.net.write_all_by_wait(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total) noinline
+  ret i64 %t$29
 arm_2_7:
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$6, %t$30
   br i1 %t$31, label %body_2_7, label %arm_3_7
 body_2_7:
   %t$32 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$47 = alloca i64
-  store i64 %t$32, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$44 = alloca i64
+  store i64 %t$32, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
   %t$33 = call i64 @sprout_alloc_obj(i64 8, i64 1)
   %t$33$ptr = inttoptr i64 %t$33 to ptr
   %t$33$f0 = getelementptr i64, ptr %t$33$ptr, i64 0
   store i64 %t$32, ptr %t$33$f0
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_7
 arm_3_7:
   call void @sprout_abort_match()
   unreachable
 join_7:
-  %t$8 = phi i64 [%t$16, %join_15], [%t$29, %ntest_25], [%t$33, %body_2_7]
+  %t$8 = phi i64 [%t$16, %join_15], [%t$33, %body_2_7]
   br label %join_2
 join_2:
   %t$3 = phi i64 [%t$4, %then_2], [%t$8, %join_7]

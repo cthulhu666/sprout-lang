@@ -1,0 +1,31 @@
+# A heterogeneous-arity mutual tail cycle whose member also calls itself twice:
+# once in tail position (a TCO back-edge) and once not.
+#
+# `walk/2` and `visit/1` tail-call each other, so Phase B pads them to
+# `walk$u`/`visit$u`. `walk$u` is self-TCO'd, so its edge to `visit$u` is a
+# `musttail` after the loop's `stackrestore`. The non-tail `walk(l, acc)` keeps
+# calling the trampoline `walk`, not `walk$u`, so `walk$u` has no direct self-call
+# for tailcallelim to turn into an accumulator loop between the `musttail` and its
+# `ret` (illegal, fatal at -O2).
+#
+# Only -O2 runs that pass, and `just test` links test IR at -O0, so this file is
+# the gate that sees it.
+
+type Tree (..) =
+  | Leaf
+  | Node Tree Tree
+  | Wrap (List Tree)
+
+fn walk(t: Tree, acc: Int) -> Int =
+  match t with
+  | Leaf -> acc
+  | Node l r -> walk(r, walk(l, acc) + 1)
+  | Wrap xs -> visit(xs)
+
+fn visit(xs: List Tree) -> Int =
+  match xs with
+  | [] -> 0
+  | [x | rest] -> walk(Node(x, Wrap(rest)), 0)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(walk(Node (Leaf, Wrap([Leaf, Node (Leaf, Leaf)])), 0)))

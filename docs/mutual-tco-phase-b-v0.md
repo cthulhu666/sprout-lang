@@ -196,9 +196,12 @@ Consequences (updated):
   under `SPROUT_GC_STRESS=1` with it) + the unit assertions in `tests/stdlib/compiler/test_phase_b.spr`.
 - **Still deferred:** width-3 ADT returns (≥2-field ctor → sret) as *worker* results — needs
   `emit_repack_one` extension, not just a gate change; currently unreachable (unrouted), so latent.
-- **Tail-self-recursive AND mutually-tail-recursive member.** `mutual_tco_rewrite_fn` skips any
-  function carrying an `IRTcoEntry` (self-TCO'd), so such a member's *mutual* edge stays a plain
-  call — unfixed in v0 (no miscompile; the self edge still self-TCO's).
+- **Tail-self-recursive AND mutually-tail-recursive member.** Handled: `mutual_tco_rewrite_fn`
+  rewrites a self-TCO'd member's mutual edge too, the `IRTailCall` carrying the loop's `sp_save`.
+  A member with a surviving non-tail self-call is still skipped (`mutual_has_self_call`).
+  Coverage: `tests/stdlib/test_mutual_tco_self_loop.spr`,
+  `tests/stdlib/test_ir_codegen_mutual_self_loop.spr`, `tests/codegen_o2/musttail_self_loop_*.spr`,
+  `tests/codegen_o2/musttail_phase_b_self_calls.spr`.
 - **Mixed call sites.** Only internal *tail-cycle* calls are retargeted to `$u`; non-tail and
   external calls keep hitting the trampoline (scoped to the detected tail edges).
 - **Non-`i64` returns.** Out of scope, as Phase A.

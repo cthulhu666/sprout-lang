@@ -4947,7 +4947,7 @@ else_2:
   %t$41 = alloca i64
   store i64 %p$payload, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$5 = call i64 @tcp_write_some(i64 %p$handle, i64 %p$payload, i64 %p$offset)
+  %t$5 = call i64 @tcp_write_some(i64 %p$handle, i64 %p$payload, i64 %p$offset) noinline
   %t$6 = call i64 @sprout_tag(i64 %t$5)
   %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_7
@@ -5000,32 +5000,29 @@ body_1_7:
   %t$28 = icmp eq i64 %t$26, %t$27
   br i1 %t$28, label %ntest_25, label %arm_2_7
 ntest_25:
-  %t$44 = alloca i64
-  store i64 %p$payload, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$29 = call i64 @stdlib.net.write_all_by_wait(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total)
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_7
+  call void @llvm.stackrestore(ptr %t$40)
+  %t$29 = musttail call i64 @stdlib.net.write_all_by_wait(i64 %p$handle, i64 %p$payload, i64 %p$deadline_us, i64 %p$offset, i64 %p$total) noinline
+  ret i64 %t$29
 arm_2_7:
   %t$30 = add i64 0, 8
   %t$31 = icmp eq i64 %t$6, %t$30
   br i1 %t$31, label %body_2_7, label %arm_3_7
 body_2_7:
   %t$32 = call i64 @sprout_field(i64 %t$5, i64 0)
-  %t$47 = alloca i64
-  store i64 %t$32, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$44 = alloca i64
+  store i64 %t$32, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
   %t$33 = call i64 @sprout_alloc_obj(i64 8, i64 1)
   %t$33$ptr = inttoptr i64 %t$33 to ptr
   %t$33$f0 = getelementptr i64, ptr %t$33$ptr, i64 0
   store i64 %t$32, ptr %t$33$f0
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_7
 arm_3_7:
   call void @sprout_abort_match()
   unreachable
 join_7:
-  %t$8 = phi i64 [%t$16, %join_15], [%t$29, %ntest_25], [%t$33, %body_2_7]
+  %t$8 = phi i64 [%t$16, %join_15], [%t$33, %body_2_7]
   br label %join_2
 join_2:
   %t$3 = phi i64 [%t$4, %then_2], [%t$8, %join_7]
@@ -7131,7 +7128,7 @@ then_2:
   %t$63 = alloca i64
   store i64 %p$input, ptr %t$63
   %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
-  %t$4 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts)
+  %t$4 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts) noinline
   %t$65 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$66 = alloca i64
   store i64 %t$4, ptr %t$66
@@ -7143,7 +7140,7 @@ then_2:
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 else_2:
-  %t$6$st = call i128 @stdlib.bytes.get_worker(i64 %p$input, i64 %p$index)
+  %t$6$st = call i128 @stdlib.bytes.get_worker(i64 %p$input, i64 %p$index) noinline
   %t$6 = trunc i128 %t$6$st to i64
   %t$6$hi = lshr i128 %t$6$st, 64
   %t$7 = trunc i128 %t$6$hi to i64
@@ -7159,7 +7156,7 @@ body_0_8:
   %t$71 = alloca i64
   store i64 %p$input, ptr %t$71
   %t$72 = call i64 @sprout_gc_push_i64_root(ptr %t$71)
-  %t$12 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts)
+  %t$12 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts) noinline
   %t$73 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$74 = alloca i64
   store i64 %t$12, ptr %t$74
@@ -7187,14 +7184,12 @@ then_19:
   %t$79 = alloca i64
   store i64 %p$input, ptr %t$79
   %t$80 = call i64 @sprout_gc_push_i64_root(ptr %t$79)
-  %t$21 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts)
+  %t$21 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts) noinline
   %t$22 = add i64 0, 0
-  %t$81 = alloca i64
-  store i64 %t$21, ptr %t$81
-  %t$82 = call i64 @sprout_gc_push_i64_root(ptr %t$81)
-  %t$23 = call i64 @stdlib.url.decode_escape$u(i64 %p$input, i64 %p$index, i64 %p$total, i64 %p$plus_space, i64 %t$21, i64 %t$22)
-  %t$83 = call i64 @sprout_gc_pop_roots(i64 3)
-  br label %join_19
+  %t$81 = call i64 @sprout_gc_pop_roots(i64 2)
+  call void @llvm.stackrestore(ptr %t$60)
+  %t$23 = musttail call i64 @stdlib.url.decode_escape$u(i64 %p$input, i64 %p$index, i64 %p$total, i64 %p$plus_space, i64 %t$21, i64 %t$22) noinline
+  ret i64 %t$23
 else_19:
   %t$30 = trunc i64 %p$plus_space to i1
   br i1 %t$30, label %then_24, label %else_24
@@ -7234,28 +7229,28 @@ ovfpanic_38:
   unreachable
 ovfok_38:
   %t$41 = add i64 0, 32
+  %t$82 = alloca i64
+  store i64 %p$parts, ptr %t$82
+  %t$83 = call i64 @sprout_gc_push_i64_root(ptr %t$82)
   %t$84 = alloca i64
-  store i64 %p$parts, ptr %t$84
+  store i64 %p$input, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
+  %t$42 = call i64 @stdlib.bytes.builder_byte(i64 %t$41) noinline
   %t$86 = alloca i64
-  store i64 %p$input, ptr %t$86
+  store i64 %t$42, ptr %t$86
   %t$87 = call i64 @sprout_gc_push_i64_root(ptr %t$86)
-  %t$42 = call i64 @stdlib.bytes.builder_byte(i64 %t$41)
+  %t$43 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts) noinline
   %t$88 = alloca i64
-  store i64 %t$42, ptr %t$88
+  store i64 %t$43, ptr %t$88
   %t$89 = call i64 @sprout_gc_push_i64_root(ptr %t$88)
-  %t$43 = call i64 @stdlib.url.with_run(i64 %p$input, i64 %p$run, i64 %p$index, i64 %p$parts)
-  %t$90 = alloca i64
-  store i64 %t$43, ptr %t$90
-  %t$91 = call i64 @sprout_gc_push_i64_root(ptr %t$90)
   %t$44 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$44$ptr = inttoptr i64 %t$44 to ptr
   %t$44$f0 = getelementptr i64, ptr %t$44$ptr, i64 0
   store i64 %t$42, ptr %t$44$f0
   %t$44$f1 = getelementptr i64, ptr %t$44$ptr, i64 1
   store i64 %t$43, ptr %t$44$f1
-  %t$92 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$93 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$90 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$91 = call i64 @sprout_gc_pop_roots(i64 2)
   store i64 %p$input, ptr %t$54
   store i64 %t$34, ptr %t$55
   store i64 %p$total, ptr %t$56
@@ -7284,14 +7279,11 @@ ovfok_47:
   store i64 %p$parts, ptr %t$59
   call void @llvm.stackrestore(ptr %t$60)
   br label %tco_loop
-join_19:
-  %t$20 = phi i64 [%t$23, %then_19]
-  br label %join_8
 arm_2_8:
   call void @sprout_abort_match()
   unreachable
 join_8:
-  %t$9 = phi i64 [%t$13, %body_0_8], [%t$20, %join_19]
+  %t$9 = phi i64 [%t$13, %body_0_8]
   br label %join_2
 join_2:
   %t$3 = phi i64 [%t$5, %then_2], [%t$9, %join_8]
