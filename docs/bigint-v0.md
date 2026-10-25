@@ -122,7 +122,7 @@ working program depends on.
 Rooting is the cost that gets named first. It is not the worst one.
 
 1. **The C runtime boxes raw `Int`s throughout.** `bytes_get` in
-   `runtime/sprout_runtime.c` is representative: `sprout_make1(find_ctor_tag_by_name("Just"), (long
+   `runtime/sprout_runtime.c` is representative: `sprout_make1(SPROUT_TAG(Just), (long
    long)value->data[index])` — a raw C integer stored straight into a heap object. There are
    **170** exported `long long` functions and **73** stdlib `extern fn` signatures mentioning
    `Int`. The compiler can insert untagging at extern call sites, because it knows the

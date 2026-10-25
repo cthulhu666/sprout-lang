@@ -21,7 +21,7 @@ import stdlib.compiler.typed_ast as typed_ast
 #   2. its arm cannot name it again: linear_reuse_arm_names_scrutinee, linear_alias_match
 #   3. no closure captured it: lambda_capture_still_rejected, borrow_capture_in_lambda
 #   4. the runtime never builds or reads a linear constructor: the SYNC comment at
-#      `find_ctor_tag_by_name` in runtime/sprout_runtime.c
+#      `SPROUT_RUNTIME_CTORS` in runtime/sprout_runtime.c
 
 fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
   if pos == -1 then acc

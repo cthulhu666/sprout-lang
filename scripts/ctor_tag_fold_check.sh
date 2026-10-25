@@ -47,8 +47,7 @@ bash "$0" --names "$LL"
 bash "$ROOT/scripts/link_whole_program.sh" "$LL" "$TMPD/opt.ll" -S -emit-llvm
 
 # One line per finding: "<check>|<fn>|<what>". The fixture's functions are the `@main.*`
-# defines, `@main` itself excluded. Cache globals: the old @g_tag_* pair and any
-# `sprout_tag_cache` name.
+# defines, `@main` itself excluded. Cache globals: any `sprout_tag_cache` name.
 FOLD_BUILDERS="$FOLD_BUILDERS" perl -ne '
   BEGIN { %want = map { $_ => 1 } split / /, $ENV{FOLD_BUILDERS}; }
   if (/^define\b.*?@("?)([^"(\s]+)\1\(/) {
@@ -57,14 +56,14 @@ FOLD_BUILDERS="$FOLD_BUILDERS" perl -ne '
   if (/^\}/) { $fn = ""; $fixture = 0; next; }
   next unless $fn ne "";
   $call = /call\b.*\@(find_ctor_tag_by_name|sprout_ctor_tag_lookup)\b/ ? $1 : "";
-  ($cache) = /\@"?(g_tag_just|g_tag_nothing|[\w.\$-]*sprout_tag_cache[\w.\$-]*)/;
+  ($cache) = /\@"?([\w.\$-]*sprout_tag_cache[\w.\$-]*)/;
   if ($fixture) {
     print "a|$fn|$call\n" if $call ne "";
     print "a|$fn|$cache\n" if defined $cache;
     print "a|$fn|VACUOUS:$1\n" if /call\b.*\@(vector_get_unboxed|bytes_get_unboxed)\b/;
   }
   print "b|$fn|find_ctor_tag_by_name\n"
-    if $fn ne "sprout_ctor_tag_lookup" && /call\b.*\@find_ctor_tag_by_name\b/;
+    if $fn !~ /^sprout_ctor_tag_lookup(\.|$)/ && /call\b.*\@find_ctor_tag_by_name\b/;
   if ($want{$fn}) {
     print "c|$fn|$call\n" if $call ne "";
     print "c|$fn|$cache\n" if defined $cache;
