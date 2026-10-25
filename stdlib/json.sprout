@@ -182,32 +182,36 @@ fn plain_end(s: String, len: Int, i: Int) -> Int =
   else if str_starts_with_at_byte(s, i, "\"") || str_starts_with_at_byte(s, i, "\\") then i
   else plain_end(s, len, i + 1)
 
-# The escape steps return their decoded piece and the next index rather than calling back into the
-# run loop: a call cycle between functions is not turned into a loop, so 2^15 escapes overflowed
-# the stack.
-fn p_unicode(s: String, i: Int) -> Maybe (String, Int) =
+fn p_unicode(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
   let cp = hex4(s, i)
   in if cp < 0 then Nothing
      else if (cp >= 55296) && (cp <= 56319) then
        if str_starts_with_at_byte(s, i + 4, "\\u") then
          let lo = hex4(s, i + 6)
          in if (lo >= 56320) && (lo <= 57343)
-            then Just((char_to_str(65536 + ((cp - 55296) * 1024) + (lo - 56320)), i + 10))
+            then p_string_run(s, len, i + 10,
+                              Cons(char_to_str(65536 + ((cp - 55296) * 1024) + (lo - 56320)), parts))
             else Nothing
        else Nothing
      else if (cp >= 56320) && (cp <= 57343) then Nothing
-     else Just((char_to_str(cp), i + 4))
+     else p_string_run(s, len, i + 4, Cons(char_to_str(cp), parts))
 
-fn p_escape(s: String, i: Int) -> Maybe (String, Int) =
-  if str_starts_with_at_byte(s, i, "\"") then Just(("\"", i + 1))
-  else if str_starts_with_at_byte(s, i, "\\") then Just(("\\", i + 1))
-  else if str_starts_with_at_byte(s, i, "/") then Just(("/", i + 1))
-  else if str_starts_with_at_byte(s, i, "n") then Just(("\n", i + 1))
-  else if str_starts_with_at_byte(s, i, "t") then Just(("\t", i + 1))
-  else if str_starts_with_at_byte(s, i, "r") then Just(("\r", i + 1))
-  else if str_starts_with_at_byte(s, i, "b") then Just((char_to_str(8), i + 1))
-  else if str_starts_with_at_byte(s, i, "f") then Just((char_to_str(12), i + 1))
-  else if str_starts_with_at_byte(s, i, "u") then p_unicode(s, i + 1)
+fn p_escape(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
+  if str_starts_with_at_byte(s, i, "u") then p_unicode(s, len, i + 1, parts)
+  else
+    let Just piece = escape_char(s, i) else Nothing
+    in p_string_run(s, len, i + 1, Cons(piece, parts))
+
+# The decoded text of a one-character escape whose letter is at `i`.
+fn escape_char(s: String, i: Int) -> Maybe String =
+  if str_starts_with_at_byte(s, i, "\"") then Just("\"")
+  else if str_starts_with_at_byte(s, i, "\\") then Just("\\")
+  else if str_starts_with_at_byte(s, i, "/") then Just("/")
+  else if str_starts_with_at_byte(s, i, "n") then Just("\n")
+  else if str_starts_with_at_byte(s, i, "t") then Just("\t")
+  else if str_starts_with_at_byte(s, i, "r") then Just("\r")
+  else if str_starts_with_at_byte(s, i, "b") then Just(char_to_str(8))
+  else if str_starts_with_at_byte(s, i, "f") then Just(char_to_str(12))
   else Nothing
 
 # i points into the string body (after the opening quote). Returns (decoded, indexAfterCloseQuote).
@@ -216,10 +220,7 @@ fn p_escape(s: String, i: Int) -> Maybe (String, Int) =
 fn p_string_run(s: String, len: Int, i: Int, parts: List String) -> Maybe (String, Int) =
   if i >= len then Nothing
   else if str_starts_with_at_byte(s, i, "\"") then Just((string_concat_many(list_reverse(parts)), i + 1))
-  else if str_starts_with_at_byte(s, i, "\\") then
-    match p_escape(s, i + 1) with
-    | Nothing -> Nothing
-    | Just (piece, j) -> p_string_run(s, len, j, Cons(piece, parts))
+  else if str_starts_with_at_byte(s, i, "\\") then p_escape(s, len, i + 1, parts)
   else
     let j = plain_end(s, len, i)
     in p_string_run(s, len, j, Cons(str_slice_bytes(s, i, j - i), parts))
