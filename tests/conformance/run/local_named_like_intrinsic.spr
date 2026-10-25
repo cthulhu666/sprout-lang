@@ -1,0 +1,88 @@
+module main
+
+# A local binding named like a call-site intrinsic (`bit_*`, `to_double`, `double_to_bits`,
+# `double_from_bits`) is called, not lowered as the intrinsic. Each shape below once compiled
+# the call to a single instruction and never called the local. The control lines keep the real
+# intrinsics working. (`print`/`eprint` are renamed by the bundler, so they are not a case.)
+
+import stdlib.bits
+
+# Function parameter.
+fn param_xor(bit_xor: Int -> Int -> Int) -> Int = bit_xor(6, 3)
+
+# Lambda parameter.
+fn lambda_param() -> Int = (\bit_or -> bit_or(6, 3))(\ (a, b) -> a - b)
+
+# Parameter captured by a nested lambda.
+fn captured(bit_shl: Int -> Int -> Int) -> Int =
+  list_fold(\ (acc, x) -> acc + bit_shl(x, 1), 0, [1, 2, 3])
+
+# do-block `let`.
+fn do_let() -> Int !{IO} =
+  do
+    let bit_and = \ (a, b) -> a * b
+    bit_and(6, 3)
+
+# `let..in` and `where`.
+fn let_in() -> Int =
+  let
+    bit_shr = \ (a, b) -> a + b
+  in
+  bit_shr(6, 3)
+
+fn where_bound() -> Int =
+  bit_shr_zf(6, 3)
+  where bit_shr_zf = \ (a, b) -> a * 100 + b
+
+# Single-argument and the Double family.
+fn param_not(bit_not: Int -> Int) -> Int = bit_not(5)
+
+fn param_to_double(to_double: Int -> Int) -> Int = to_double(4)
+
+fn param_to_bits(double_to_bits: Double -> Int) -> Int = double_to_bits(1.5)
+
+fn param_from_bits(double_from_bits: Int -> Int) -> Int = double_from_bits(9)
+
+# A parameter named like an intrinsic, called from a closure in a fold.
+fn forwarded(bit_xor: Int -> Int -> Int) -> Int =
+  list_fold(\ (acc, x) -> bit_xor(acc, x), 0, [1, 2, 3])
+
+# Tail position, a match scrutinee, a lambda parameter applied inside a list_map, and a
+# pattern-bound name.
+fn tail(bit_xor: Int -> Int -> Int, n: Int, acc: Int) -> Int =
+  if n == 0 then acc else tail(bit_xor, n - 1, bit_xor(acc, n))
+
+fn scrut(bit_and: Int -> Int -> Int) -> Int =
+  match bit_and(6, 3) with
+  | 18 -> 1
+  | _ -> 0
+
+fn in_map(fs: List (Int -> Int -> Int)) -> List Int =
+  list_map(\bit_xor -> bit_xor(6, 3), fs)
+
+fn pattern_bound(p: (Int -> Int -> Int, Int)) -> Int =
+  match p with
+  | (bit_or, y) -> bit_or(y, 3)
+
+fn main() -> Unit !{IO} =
+  do
+    print(param_xor(\ (a, b) -> a + b))
+    print(lambda_param())
+    print(captured(\ (a, b) -> a * 10 + b))
+    r <- do_let()
+    print(r)
+    print(let_in())
+    print(where_bound())
+    print(param_not(\a -> a * 2))
+    print(param_to_double(\a -> a + 1))
+    print(param_to_bits(\d -> 77))
+    print(param_from_bits(\n -> n + 1))
+    print(forwarded(\ (a, b) -> a * 2 + b))
+    print(tail(\ (a, b) -> a + b, 4, 0))
+    print(scrut(\ (a, b) -> a * b))
+    print(in_map([\ (a, b) -> a - b]))
+    print(pattern_bound((\ (a, b) -> a * b, 4)))
+    # Control: the real intrinsics still lower.
+    print(bit_xor(6, 3))
+    print(bit_not(5))
+    print(to_string(to_double(4) + 0.5))

@@ -488,9 +488,10 @@ and adding seven short names widens its surface. Established by code trace:
    is canonicalized. Extern names therefore live in a **global flat namespace**. (This is
    why `tests/stdlib/test_double_bits.spr:42` calls `double_to_bits` bare despite
    importing `stdlib.math` under an alias.)
-2. `ast_to_ir.translate_call:4842-4853` matches the **bare** `fname` against the
-   intrinsic list *before* consulting captures' siblings, `params`, `let_names`, or the
-   top level.
+2. `ast_to_ir.translate_call` matches the **bare** `fname` against the intrinsic list
+   *before* consulting `let_names` or the top level. A capture or a parameter of the same
+   name is checked first and wins (it was a parameter that lost until `params` moved ahead
+   of the intrinsic check).
 3. `bundler.qualified_name:157-161` returns the **bare** name when the module name is
    empty, and `bundler.scan_source_info:268-283` leaves it empty for any file with no
    `module` line — the shape of every `.spr` test and most single-file programs.
