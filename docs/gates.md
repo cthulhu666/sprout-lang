@@ -304,19 +304,25 @@ the lowering, not the version number (Apple clang 17 passes): LLVM discovery ski
 fails it, `just bootstrap-from-seed` refuses one, and `just test-check-clang-cpr` tests the probe.
 CI installs clang 22 from apt.llvm.org (`scripts/ci_install_llvm.sh`).
 
-## CPR tag fold — `just cpr-tag-fold-check`
+## Constructor tag fold — `just ctor-tag-fold-check`
 
-Whole-program links `tests/cpr_tag_fold/reads.sprout` (a `Vec` loop and a `Bytes` loop, each
-matching `Just`/`Nothing`) to optimised IR and inspects each `@main.*` function. None may call
-`@find_ctor_tag_by_name` or touch `@g_tag_just` / `@g_tag_nothing`: an inlined `_unboxed` read
-that still carries the lazy tag lookup grows its caller past LLVM's inline threshold, and
-hot loops such as nqueens slow down.
+Whole-program links `tests/ctor_tag_fold/reads.sprout` (a `Vec` loop, a `Bytes` loop and a
+channel send/recv loop) to optimised IR and checks three things:
 
-The check also fails when a fixture function still calls `@vector_get_unboxed` or
-`@bytes_get_unboxed`, or when no fixture function is found, because the tag check proves
-nothing about a read that was never inlined. `tests/c_runtime/maybe_tag_fallback.c` pins the
-other side: with no constant supplied, the reads return the registered `Just`/`Nothing` tags.
-The constants are `@sprout_tag_just` / `@sprout_tag_nothing`, emitted by
+- Each `@main.*` function calls neither `@find_ctor_tag_by_name` nor `@sprout_ctor_tag_lookup`
+  and reads no tag-cache global (any `sprout_tag_cache` name).
+  An inlined `_unboxed` read that still carries the lazy tag lookup grows its caller past
+  LLVM's inline threshold, and hot loops such as nqueens slow down. The check also fails when a
+  fixture function still calls `@vector_get_unboxed` or `@bytes_get_unboxed`, or when no fixture
+  function is found, because it proves nothing about a read that was never inlined.
+- Only `@sprout_ctor_tag_lookup` calls `@find_ctor_tag_by_name`. Any other caller scans the
+  constructor table by name on every call; the report names each function, capped at 15.
+- `@sprout_chan_make_got`, a runtime function building a constructor the program registers
+  (`stdlib.chan.Got`), has no lookup call and no cache reference. The check fails when that
+  function is missing from the linked IR.
+
+`tests/c_runtime/ctor_tag_fallback.c` pins the other side: with no constant supplied, the
+runtime returns the registered tags. The constants are emitted by
 `ir_lowering.collect_ctor_globals` ([compiler-internals.md](compiler-internals.md) §CPR extern
 ABI). The recipe runs the stage-1 binary, so an emitter change shows here only after
 `just refresh-seed`.

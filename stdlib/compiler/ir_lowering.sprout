@@ -667,20 +667,16 @@ fn i64_params_loop(remaining: Int, acc: String) -> String =
 
 export fn collect_ctor_globals(regs: List sprout_ir.CtorReg) -> String =
   string_concat_many(list_map(emit_ctor_globals, regs))
-    ++ string_concat_many(list_map(emit_maybe_tag_global, regs))
+    ++ string_concat_many(list_map(emit_tag_global, regs))
 
-# The bare `Just` / `Nothing` tags as strong constants. The runtime's CPR `_unboxed` reads
-# load them, so a whole-program link folds the tags into the caller. Bare means the prelude's
-# (or a `no_prelude` entry's own, which the runtime's name lookup would also find first);
-# other modules' ctors are qualified (`main.Just`).
-fn emit_maybe_tag_global(reg: sprout_ir.CtorReg) -> String =
+# Every ctor's tag as a strong constant `@sprout_tag$<name>`, `.` spelled `$`. A name holds `$`
+# only as the leading char of `source.entry_module_name`, so the mapping cannot collide. The
+# runtime reads the ones it names; a whole-program link folds them (docs/compiler-internals.md).
+fn emit_tag_global(reg: sprout_ir.CtorReg) -> String =
   match reg with
-  | sprout_ir.CtorReg "Just" tag _ _ -> maybe_tag_global("sprout_tag_just", tag)
-  | sprout_ir.CtorReg "Nothing" tag _ _ -> maybe_tag_global("sprout_tag_nothing", tag)
-  | _ -> ""
-
-fn maybe_tag_global(symbol: String, tag: Int) -> String =
-  "@" ++ symbol ++ " = constant i64 " ++ int_to_string(tag) ++ "\n"
+  | sprout_ir.CtorReg name tag _ _ ->
+      "@\"sprout_tag$" ++ encode_str_for_ir(string.replace_all(".", "$", name))
+        ++ "\" = constant i64 " ++ int_to_string(tag) ++ "\n"
 
 fn emit_ctor_globals(reg: sprout_ir.CtorReg) -> String =
   match reg with

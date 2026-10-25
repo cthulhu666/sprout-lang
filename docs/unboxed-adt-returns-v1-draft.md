@@ -37,8 +37,8 @@ skip heap allocation entirely:
 ```c
 SproutUnboxed2 vector_get_unboxed(long long vec_h, long long index) {
   // ... bounds check ...
-  if (out_of_bounds) return (SproutUnboxed2){ cached_tag_nothing(), 0 };
-  return (SproutUnboxed2){ cached_tag_just(), data[index] };
+  if (out_of_bounds) return (SproutUnboxed2){ SPROUT_TAG(Nothing), 0 };
+  return (SproutUnboxed2){ SPROUT_TAG(Just), data[index] };
 }
 ```
 

@@ -1,0 +1,41 @@
+module main
+import stdlib.bytes as bytes
+import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.task (Scope, with_scope)
+
+# Fixture for scripts/ctor_tag_fold_check.sh: each loop matches a constructor the runtime
+# also names. The Vec and Bytes loops lower to `_unboxed` reads; the channel loop makes the
+# program register `stdlib.chan.Got`, which `sprout_chan_make_got` builds. Each loop is its
+# own top-level fn so the check can inspect its optimised body.
+
+fn sum_vec(xs: Vec Int, i: Int, acc: Int) -> Int =
+  match vec_get(i, xs) with
+  | Just x -> sum_vec(xs, i + 1, acc + x)
+  | Nothing -> acc
+
+fn sum_bytes(b: Bytes, i: Int, acc: Int) -> Int =
+  match bytes.get(b, i) with
+  | Just x -> sum_bytes(b, i + 1, acc + x)
+  | Nothing -> acc
+
+fn ping(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then
+    acc
+  else
+    do
+      chan_send(ch, n)
+      match chan_recv(ch) with
+      | Got v -> ping(ch, n - 1, acc + v)
+      | Closed -> acc
+
+fn ping_scoped(s: Scope) -> Int !{IO} =
+  do
+    ch <- chan_new(s, 1)
+    ping(ch, 1000, 0)
+
+fn main() -> Unit !{IO} =
+  let xs = range_to_vec(0..1000) in
+  let b = bytes.from_string("the quick brown fox") in
+  do
+    total <- with_scope(\s -> ping_scoped(s))
+    print(sum_vec(xs, 0, 0) + sum_bytes(b, 0, 0) + total)

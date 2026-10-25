@@ -1389,17 +1389,17 @@ cpr-declare-check: bootstrap-from-seed
     tests/smoke_shapes/01_noparam.spr > "$TMPD/shape.ll"
   bash scripts/cpr_declare_check.sh "$TMPD/shape.ll" runtime/sprout_runtime.c
 
-# Under whole-program linking an inlined CPR read must see `Just`/`Nothing` as constant
-# tags, with no lazy tag lookup left in the caller.
+# Under whole-program linking a ctor tag the runtime names must be a constant, not a
+# lazy name lookup: in an inlined CPR read, and in the runtime's own ctor builders.
 [group('smoke')]
-cpr-tag-fold-check: bootstrap-from-seed
+ctor-tag-fold-check: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_tagfold_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
-    tests/cpr_tag_fold/reads.sprout > "$TMPD/reads.ll"
-  bash scripts/cpr_tag_fold_check.sh "$TMPD/reads.ll"
+    tests/ctor_tag_fold/reads.sprout > "$TMPD/reads.ll"
+  bash scripts/ctor_tag_fold_check.sh "$TMPD/reads.ll"
 
 # Optimized-codegen smoke.  Each tests/codegen_o2/*.spr must emit IR that survives
 # `clang -O2`.  Nothing else checks this: `just test` links test IR with no -O flag,
@@ -3904,7 +3904,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "linvec-smoke|linvec-smoke"
     "linear-reuse-smoke|linear-reuse-smoke"
     "cpr-declare-check|cpr-declare-check"
-    "cpr-tag-fold-check|cpr-tag-fold-check"
+    "ctor-tag-fold-check|ctor-tag-fold-check"
     "opt-harness-check|opt-harness-check"
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
@@ -4190,7 +4190,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check cpr-tag-fold-check backlog-shape linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

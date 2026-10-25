@@ -140,7 +140,15 @@ fn main() -> Unit !{IO} =
         ++ "@.cname.8 = private unnamed_addr constant [5 x i8] c\"Ba\\22r\\00\"\n"
         ++ "@.cfkinds.8 = private unnamed_addr constant [1 x i8] c\"\\00\"\n"
         ++ "@.cname.9 = private unnamed_addr constant [4 x i8] c\"Baz\\00\"\n"
-        ++ "@.cfkinds.9 = private unnamed_addr constant [2 x i8] c\"s\\00\"\n")
+        ++ "@.cfkinds.9 = private unnamed_addr constant [2 x i8] c\"s\\00\"\n"
+        ++ "@\"sprout_tag$Foo\" = constant i64 7\n"
+        ++ "@\"sprout_tag$Ba\\22r\" = constant i64 8\n"
+        ++ "@\"sprout_tag$Baz\" = constant i64 9\n")
+    assert_true(state, "ctor tag constant spells a qualified name's dots as $",
+      ir_lowering.collect_ctor_globals([sprout_ir.CtorReg("stdlib.chan.Got", 3, 1, "i")]) ==
+        "@.cname.3 = private unnamed_addr constant [16 x i8] c\"stdlib.chan.Got\\00\"\n"
+        ++ "@.cfkinds.3 = private unnamed_addr constant [2 x i8] c\"i\\00\"\n"
+        ++ "@\"sprout_tag$stdlib$chan$Got\" = constant i64 3\n")
     assert_true(state, "ctor globals: no regs is empty",
       ir_lowering.collect_ctor_globals(Nil) == "")
 
