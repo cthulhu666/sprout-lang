@@ -11,7 +11,7 @@ import stdlib.compiler.typed_ast as typed_ast
 # A byte read stays unboxed both when matched directly and when handed to a helper that only
 # matches it (argument CPR, docs/arg-cpr-v0.md).
 #
-# A boxed read is one heap allocation per byte, `sprout_make1(find_ctor_tag_by_name("Just"), ..)`.
+# A boxed read is one heap allocation per byte, `sprout_make1(SPROUT_TAG(Just), ..)`.
 # `instance Eq Bytes` reads whole buffers through `get_or`, so 40 compares of two equal 1 MiB
 # values went 1.96s -> 0.13s user when the read stopped allocating.
 #

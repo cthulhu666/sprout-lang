@@ -3078,10 +3078,6 @@ static CtorMeta* find_ctor(long long tag) {
   return NULL;
 }
 
-/* No SPROUT_RUNTIME_CTORS entry may name a constructor of a linear type, and the runtime never
- * reads a linear cell's fields: ast_to_ir reuses an owned linear cell in place and may change
- * its constructor (docs/linear-reuse-v0.md §4.4). A channel or the scheduler only moves such a
- * cell. */
 static __attribute__((noinline, cold)) long long find_ctor_tag_by_name(const char* name) {
   for (long long i = 0; i < g_ctor_meta_len; i++) {
     if (strcmp(g_ctor_meta[i].name, name) == 0) return g_ctor_meta[i].tag;
@@ -3100,11 +3096,15 @@ static __attribute__((noinline, cold)) long long find_ctor_tag_by_name(const cha
   return -1;
 }
 
-/* Every constructor the runtime names. A name missing here is a compile error at its
- * SPROUT_TAG use. The emitted module defines a strong `sprout_tag$<name>` constant per
- * constructor (`.` spelled `$`), so a whole-program link folds each tag; the weak -1 covers
- * a module without them (the seed before a reseed, the C runtime tests, a program that
- * does not link the ctor's module). */
+/* Every constructor the runtime names. SYNC: no entry may name a constructor of a linear type,
+ * and the runtime never reads a linear cell's fields: ast_to_ir reuses an owned linear cell in
+ * place and may change its constructor (docs/linear-reuse-v0.md §4.4). A channel or the
+ * scheduler only moves such a cell.
+ *
+ * A name missing here is a compile error at its SPROUT_TAG use. The emitted module defines a
+ * strong `sprout_tag$<name>` constant per constructor (`.` spelled `$`), so a whole-program
+ * link folds each tag; the weak -1 covers a module without them (the seed before a reseed,
+ * the C runtime tests, a program that does not link the ctor's module). */
 #define SPROUT_RUNTIME_CTORS(X) \
   X(Just) X(Nothing) X(Ok) X(Err) X(Vec) X(Nil) X(Cons) \
   X(stdlib$bytes$Utf8DecodeError) \
@@ -3131,31 +3131,29 @@ static __attribute__((noinline, cold)) long long find_ctor_tag_by_name(const cha
   X(stdlib$terminal$TermIdle) X(stdlib$terminal$TermResized) X(stdlib$terminal$TermSize)
 
 #define SPROUT_TAG_DECL(sym) \
-  __attribute__((weak)) const long long sprout_tag$##sym = -1; \
+  __attribute__((weak, visibility("hidden"))) const long long sprout_tag$##sym = -1; \
   static long long sprout_tag_cache$##sym = -1;
 SPROUT_RUNTIME_CTORS(SPROUT_TAG_DECL)
 #undef SPROUT_TAG_DECL
 
-/* The only caller of find_ctor_tag_by_name. `sym` is the `$`-spelled constant suffix. */
+/* The only caller of find_ctor_tag_by_name. `sym` is the `$`-spelled constant suffix. Caches
+ * the answer in `*cache` (a racing store writes the same value). */
 __attribute__((noinline, cold))
-static long long sprout_ctor_tag_lookup(const char* sym) {
+static long long sprout_ctor_tag_lookup(long long* cache, const char* sym) {
+  long long tag = __atomic_load_n(cache, __ATOMIC_RELAXED);
+  if (tag >= 0) return tag;
   char name[96];
   size_t n = strlen(sym);
   if (n >= sizeof(name)) sprout_fail("sprout_ctor_tag_lookup: constructor name too long");
   for (size_t i = 0; i <= n; i++) name[i] = sym[i] == '$' ? '.' : sym[i];
-  return find_ctor_tag_by_name(name);
+  tag = find_ctor_tag_by_name(name);
+  __atomic_store_n(cache, tag, __ATOMIC_RELAXED);
+  return tag;
 }
 
-/* The constant when the link defines it; else a cached lookup (a racing store writes the
- * same value). */
+/* The constant when the link defines it; else the cold cached lookup. */
 static inline long long sprout_tag_get(long long constant, long long* cache, const char* sym) {
-  if (constant >= 0) return constant;
-  long long tag = __atomic_load_n(cache, __ATOMIC_RELAXED);
-  if (tag < 0) {
-    tag = sprout_ctor_tag_lookup(sym);
-    __atomic_store_n(cache, tag, __ATOMIC_RELAXED);
-  }
-  return tag;
+  return constant >= 0 ? constant : sprout_ctor_tag_lookup(cache, sym);
 }
 #define SPROUT_TAG(sym) sprout_tag_get(sprout_tag$##sym, &sprout_tag_cache$##sym, #sym)
 

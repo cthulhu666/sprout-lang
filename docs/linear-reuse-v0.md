@@ -228,10 +228,10 @@ A cell is reused only if nothing else can reach it. Each premise below is today'
 3. No closure captured it before the match: capture of a linear binding is rejected (M4.2), and a
    move into a one-shot closure consumes it. Existing.
 4. The runtime never constructs a linear constructor, and never reads its fields. No
-   `find_ctor_tag_by_name` call site names a linear constructor, and a `SYNC` comment there will
-   record the premise. The runtime does hold linear cells: `__chan_send` (`stdlib/chan.sprout`)
-   hands one to the scheduler until `__chan_recv`. That is a move, after which the sender cannot
-   name it.
+   `SPROUT_RUNTIME_CTORS` entry (`runtime/sprout_runtime.c`) names a linear constructor, and a
+   `SYNC` comment there records the premise. The runtime does hold linear cells: `__chan_send`
+   (`stdlib/chan.sprout`) hands one to the scheduler until `__chan_recv`. That is a move, after
+   which the sender cannot name it.
 
 The known hole in `linear_check` (BACKLOG P3 *a field unwrapped from a borrowed linear value*)
 concerns the inner value of a `wrap`, not the cell of a boxed linear ADT. The wildcard leak

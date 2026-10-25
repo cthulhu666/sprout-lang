@@ -275,7 +275,7 @@ registered ctor, the name's `.` spelled `$` and the symbol quoted and escaped li
 (`sprout_tag$Just`, `sprout_tag$stdlib$chan$Got`). A name holds `$` only as the first char of
 the entry module `$entry`, so the mapping cannot collide (`$entry.Just` →
 `sprout_tag$$entry$Just`). The runtime names
-the ctors it builds in one list, `SPROUT_RUNTIME_CTORS`, and defines each symbol **weak**
+the ctors it builds in one list, `SPROUT_RUNTIME_CTORS`, and defines each symbol **weak, hidden**
 `const long long = -1`. `SPROUT_TAG(sym)` returns the constant when it is `>= 0`; else it
 caches the answer of `sprout_ctor_tag_lookup`, the cold fallback and the only caller of
 `find_ctor_tag_by_name`. A ctor missing from the list is an undeclared identifier at its use.
