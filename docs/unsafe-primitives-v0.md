@@ -100,11 +100,10 @@ make it free and greppable:
 Both are type rules in `infer`, not lowering checks, so `--phase check`, `just check` and the IDE
 report them.
 
-A local binding named `unsafe_pure` must be called as the local, never lowered as the intrinsic.
-Today `translate_call` tests `is_call_site_intrinsic` before parameters, so a parameter named
-`bit_xor` is compiled as the `xor` instruction; for `unsafe_pure` that would let any user dismiss
-`IO` through a parameter, with no declaration. The fix lands separately, before this design, with
-its own regression test; §7 adds an `unsafe_pure` case.
+A local binding named `unsafe_pure` is called as the local, never lowered as the intrinsic:
+`translate_call` checks captures and parameters before `is_call_site_intrinsic`
+(`tests/conformance/run/local_named_like_intrinsic.spr`). Otherwise any user could dismiss `IO`
+through a parameter, with no declaration. §7 adds an `unsafe_pure` case.
 
 `local` on `action` lets the lambda capture a borrowed value, as at any `local` parameter
 (spec "Non-escaping closure parameters"). linvec does not need it today. The gate does not rest on
@@ -258,7 +257,6 @@ for linvec users changes (the `declare` lines and the calls).
 
 ## 9. Implementation
 
-0. Before this design: a local named like an intrinsic is called, not lowered as it (§4.1).
 1. Failing tests for the gate and the two shape rules.
 2. `stdlib/unsafe.sprout`; the intrinsic: the shape rules in `infer`, a module name in
    `ResolveCtx`, the bundler's reference and declaration rules, lowering through the IIFE path.
