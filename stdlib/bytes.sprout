@@ -35,9 +35,9 @@ export fn length(value: Bytes) -> Int =
 export fn get(value: Bytes, index: Int) -> Maybe Int =
   bytes_get(value, index)
 
-# O(1), and allocation-free: the byte at `index`, or `fallback` when it is out of range. Matched
-# directly so `bytes_get` reaches its CPR peephole; handing the `Maybe Int` to a function instead —
-# `maybe_with_default(fallback, ...)` — boxes one per byte read, ~15x on a whole-buffer scan.
+# O(1), and allocation-free: the byte at `index`, or `fallback` when it is out of range.
+# `get` lowers to `bytes_get_unboxed` here, so no `Maybe` is built; passing it to a function that
+# only matches it, such as `maybe_with_default`, builds none either.
 # Pinned by tests/stdlib/test_bytes_byte_at_unboxed.spr.
 export fn get_or(value: Bytes, index: Int, fallback: Int) -> Int =
   match get(value, index) with

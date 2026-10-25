@@ -150,7 +150,8 @@ scrutinee. Two composable routes, both already proposed elsewhere:
 - Land the **accessor inliner** (`docs/accessor-inliner-design-2026-07-11.md`) so a trivial wrapper
   like `tile_kind_of` inlines and its `from_ordinal` `Maybe` becomes intra-function (→ Stage 3), and
 - extend routing to recognize a CPR-eligible call in argument position feeding a consumer that
-  immediately projects it. Mirrors GHC's *nested* CPR.
+  immediately projects it. Mirrors GHC's *nested* CPR. **Landed** for a consumer whose body
+  matches the parameter: [arg-cpr-v0.md](arg-cpr-v0.md).
 
 ### Stage 3 — intra-function scalar replacement (direction, separate approval)
 

@@ -137,8 +137,8 @@ prelude's `Propagate` class — one method, `branch`, splitting a value into
 prelude combinators are shorter than a two-arm `match`:
 
 ```sprout
-# unwrap-or-default, on a wrapper you already hold — NOT on a call, see below:
-maybe_with_default(dflt, cached)             # vs. match … | Just v -> v | Nothing -> dflt
+# unwrap-or-default:
+maybe_with_default(dflt, dict_get(key, d))   # vs. match … | Just v -> v | Nothing -> dflt
 
 # transform the payload (Functor `map`):
 map(trim, dict_get(key, d))                  # Maybe String -> Maybe String
@@ -158,14 +158,18 @@ count(is_err, results)                       # vs. a match whose arms are true/f
 
 `is_just`/`is_nothing`/`is_ok`/`is_err` answer yes/no and nothing more. Testing
 `is_just(m)` and then unwrapping `m` asks twice; `match` once. A key's presence
-in a `Dict` is `dict_member`, not `is_just(dict_get(…))`, which boxes the result
-(below).
+in a `Dict` is `dict_member`, which says what you mean.
 
 `map` and `and_then` work over any `Functor`/`Monad` — `Maybe`, `Result`, and
 `List` — so the same two names cover every container; `Result` adds
 `result_map_error`/`result_with_default`. Still `match` directly when you branch
-on the shape instead of threading the payload onward, and whenever the wrapper
-came straight from a call (see "Match the producing call directly").
+on the shape instead of threading the payload onward.
+
+**Cost.** `maybe_with_default`, `result_with_default`, `is_just` and
+`result_from_maybe` only match their argument, so a call passed straight to one
+builds no wrapper ([arg-cpr-v0.md](arg-cpr-v0.md)). `map` and `and_then` are
+class methods: a call passed to one is boxed. So is a `Maybe` returned by a
+lambda. In a hot loop over those, match the producing call (below).
 
 `result_from_maybe` and `guard` are what let a whole parse be one `do` block:
 every step answers `Result`, so the binds thread and the first failure names
@@ -187,32 +191,26 @@ traverse(parse_int, ["1", "x"])         # Nothing
 sequence([Ok(1), Err("e"), Err("f")])   # Err("e") — the first failure
 ```
 
-**Eliminating a wrapper a call just produced? Match the call instead.**
-`maybe_with_default`/`result_with_default` are real calls, so the wrapper must be
-boxed to reach them, whereas a `match` on the call *in place* takes the callee's
-unboxed `{ tag, field }` worker and allocates nothing. One `Just` costs
-**+17.5 ns/read, rising to 110–135 ns with 100k live — 70–90x** — because
-per-read allocation is flat but collection cost scales with the live set
-(`bench/results-2026-09-28-vec-box-tax.md`). It is why `stdlib.bytes.get_or`
-matches instead of calling `maybe_with_default` — 15x faster on a whole-buffer
-scan — and why `mutvec_at` exists beside `mutvec_get`.
+**Where the wrapper is still built.** A `match` on a call *in place* takes the
+callee's unboxed `{ tag, field }` worker and allocates nothing. So does passing
+the call straight to a top-level function whose body only matches that
+parameter — the eliminators above, or your own: the callee gets an argument
+worker ([arg-cpr-v0.md](arg-cpr-v0.md)). The wrapper is built when the
+`Maybe` goes to `map` or `and_then` (class methods), to a closure or a
+parameter, into a variable first, or to a recursive function from inside its
+own loop. One `Just` costs **+17.5 ns/read, rising to 110–135 ns with 100k
+live — 70–90x** — because per-read allocation is flat but collection cost
+scales with the live set (`bench/results-2026-09-28-vec-box-tax.md`). It is why
+`mutvec_at` exists beside `mutvec_get`.
 
-What decides it is **argument position**, not how hot the code is and not how far
-the call is from the accessor. Returning a wrapper keeps it unboxed through a layer
-that ends in a constructor, an `if`, or a call to a function some `match` also
-scrutinises — and handing it to a call puts the box back. Nor is this
-builtins-only: the worker exists for **any top-level function** whose result is a
-concrete ADT with at most one field per constructor, user-defined ones included
-(`ast_to_ir.cpr_result_known`). It declines a polymorphic `Maybe a` result, and a
-call through a closure or a parameter has no worker to take. A worker whose body
-ends in a multi-arm `match` still boxes each arm, then unpacks it.
-
-Nor is it limited to the eliminators. `map`, `and_then` and `result_from_maybe`
-must box their input to receive it as well, so matching the producing call beats
-them too: `result_from_maybe("missing", dict_get(k, d))` emits a boxed
-`@dict_get` and four GC roots where the `match` takes `@dict_get_worker` and one.
-`map` adds two `sprout_alloc_closure` on top, being a class method. The
-eliminators are only the starkest case, going from one allocation to none.
+Returning a wrapper keeps it unboxed through a layer that ends in a constructor,
+an `if`, or a call to a function some `match` also scrutinises. Nor is this
+builtins-only: the worker exists for **any top-level function** whose result is
+an ADT with at most one field per constructor, user-defined ones and `Maybe a`
+included (`ast_to_ir.cpr_result_known`). A result that is a bare type variable
+has none, and a call through a closure or a parameter has no worker to take. A
+worker whose body ends in a multi-arm `match` still boxes each arm, then unpacks
+it.
 
 ## Transform collections with combinators, not index loops
 
@@ -493,9 +491,10 @@ match find(key) with
 | Nothing -> fallback()
 ```
 
-This is also the cheaper shape, not merely the tidier one: matching the call in
-place takes its unboxed worker, while passing it to `maybe_with_default` boxes
-the wrapper first. See "Reach for a combinator on a single `Maybe`/`Result`".
+Matching the call in place takes its unboxed worker and builds no wrapper. So
+does passing it to `maybe_with_default` and the other combinators that only
+match; passing it to `map` or `and_then` does not. See "Reach for a combinator
+on a single `Maybe`/`Result`".
 
 ## Pick the accessor that matches what you know
 

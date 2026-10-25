@@ -112,5 +112,6 @@ a mechanism and a table behind it rather than one anecdote.
 
 For the compiler: extending the peephole through a *known, non-escaping* combinator —
 `maybe_with_default` is the whole population that matters — would remove the gap without
-the caller having to know any of this. Filed in `BACKLOG.md` under Codegen: TCO, CPR and
-scalar replacement.
+the caller having to know any of this. **Landed 2026-10-25** as argument CPR
+(`docs/arg-cpr-v0.md`): `escaped` now reads 2.1–2.3 ns at every size, 100k included, against
+`in_place`'s 1.9.

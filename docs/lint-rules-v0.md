@@ -476,7 +476,7 @@ only a syntactic check for the callee finds it.
    reach it, while a `match` on the producing call takes its unboxed worker. What decides it is
    **argument position**, not heat and not whether the callee is a builtin: the worker exists for
    any top-level fn with a concrete ADT result and composes through user-defined wrappers
-   (`ast_to_ir.cpr_result_known`; it declines a polymorphic `Maybe a`). Measured at
+   (`ast_to_ir.cpr_result_known`; it declines only a bare type-variable result). Measured at
    **+17.5 ns/read, rising to 110–135 ns with 100k live — 70–90x**
    (`bench/results-2026-09-28-vec-box-tax.md`). The carve-out is far wider than the "hot loop"
    `docs/idiomatic-sprout.md` used to describe: **every** combinator over a call scrutinee is a
@@ -490,8 +490,13 @@ only a syntactic check for the callee finds it.
    an immediate, never boxed, so a computed condition costs nothing (checked in IR). Measured
    effect: 165 findings to 25, 99 files to 23. For a wrapper already in hand the two spellings are
    cost-equivalent — `sprout_tag`+`sprout_field` against one call, neither allocating nor rooting,
-   and `-O2` inlines the call away entirely. `BACKLOG.md`'s P2 to extend the peephole through a
-   known non-escaping combinator would retire the restriction and let the rule widen again.
+   and `-O2` inlines the call away entirely.
+
+   **Argument CPR ([arg-cpr-v0.md](arg-cpr-v0.md)) removes most of the cost.** A call passed
+   straight to `maybe_with_default`, `result_with_default`, `is_just` or `result_from_maybe` now
+   builds no wrapper: `bench/vec_box`'s `escaped` read went from 22 to 2.1 ns, against 1.9 for the
+   `match`. `map`, `and_then` and a lambda's result still box. The guard is unchanged; widening the
+   rule to the combinators that route is open in `BACKLOG.md`.
 5. **Guards 2 and 3 cannot be done on the AST.** `ast_findings` parses
    `source.strip_headers(src)`, so the imports are gone before the AST
    exists. Both guards must read `header_lines`, the same text-level view

@@ -133,15 +133,16 @@ fn stream_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
                         | Err msg -> Err(msg)
                         | Ok s2 -> stream_decls(rest, penv, s2)
 
-# Tier-2 CPR: stream an unboxed i128 worker for each matched callee,
-# AFTER all boxed decls (so an escaping use resolves to the boxed original).
+# Tier-2 CPR: stream an unboxed i128 worker for each matched callee, and an
+# `_argw` worker for each argument consumer, AFTER all boxed decls (so an escaping
+# use resolves to the boxed original).
 # Each worker is rooted + lowered through emit_one_fn like any other fn.
-fn stream_workers(names: List String, plan: ast_to_ir.WorkerPlan,
+fn stream_workers(jobs: List ast_to_ir.WorkerJob, plan: ast_to_ir.WorkerPlan,
                   penv: ast_to_ir.ProgEnv, state: StreamState) -> Result String StreamState !{IO} =
-  match names with
+  match jobs with
   | Nil -> Ok(state)
-  | Cons name rest ->
-      match ast_to_ir.emit_worker_for(name, plan, penv) with
+  | Cons job rest ->
+      match ast_to_ir.emit_worker_job(job, plan, penv) with
       | Err msg -> Err(msg)
       | Ok maybe_w ->
           match maybe_w with
@@ -199,13 +200,13 @@ fn summarize_decls(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv,
               | (f, _idx, lifted) ->
                   summarize_decls(rest, penv, summarize_lifted_then_fn(lifted, f, acc))
 
-fn summarize_workers(names: List String, plan: ast_to_ir.WorkerPlan, penv: ast_to_ir.ProgEnv,
+fn summarize_workers(jobs: List ast_to_ir.WorkerJob, plan: ast_to_ir.WorkerPlan, penv: ast_to_ir.ProgEnv,
                      acc: List (String, ir_rooting.RawSummary)) ->
     Result String (List (String, ir_rooting.RawSummary)) !{IO} =
-  match names with
+  match jobs with
   | Nil -> Ok(acc)
-  | Cons name rest ->
-      match ast_to_ir.emit_worker_for(name, plan, penv) with
+  | Cons job rest ->
+      match ast_to_ir.emit_worker_job(job, plan, penv) with
       | Err msg -> Err(msg)
       | Ok maybe_w ->
           match maybe_w with
@@ -234,7 +235,7 @@ fn build_alloc_summary(decls: List typed_ast.TypedDecl, emit_penv: ast_to_ir.Pro
     match summarize_decls(decls, penv, Nil) with
     | Err msg -> Err(msg)
     | Ok after_decls ->
-        match summarize_workers(set_to_list(plan.callees), plan, penv, after_decls) with
+        match summarize_workers(ast_to_ir.worker_jobs(plan), plan, penv, after_decls) with
         | Err msg -> Err(msg)
         | Ok after_workers -> summarize_init_tail(runtime_lets, penv, after_workers, ret_i64)
 
@@ -349,7 +350,7 @@ fn compile_reachable(prog: typed_ast.TypedProgram) ->
                       match stream_decls(decls, penv, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
-                        match stream_workers(set_to_list(plan.callees), plan, penv, after_decls) with
+                        match stream_workers(ast_to_ir.worker_jobs(plan), plan, penv, after_decls) with
                         | Err msg -> Err(msg)
                         | Ok after_workers ->
                           match after_workers with

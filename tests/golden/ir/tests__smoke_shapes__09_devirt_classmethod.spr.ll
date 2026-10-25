@@ -150,10 +150,13 @@ join_2:
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 2
-  %t$1 = call i64 @main.color_of(i64 %t$0)
-  %t$2 = call i64 @__tc_Enum_main_Color_ordinal(i64 %t$1)
-  %t$3 = call i64 @print_value(i64 %t$2)
-  ret i64 %t$3
+  %t$1$st = call i128 @main.color_of_worker(i64 %t$0)
+  %t$1 = trunc i128 %t$1$st to i64
+  %t$1$hi = lshr i128 %t$1$st, 64
+  %t$2 = trunc i128 %t$1$hi to i64
+  %t$3 = call i64 @__tc_Enum_main_Color_ordinal_argw(i64 %t$1, i64 %t$2)
+  %t$4 = call i64 @print_value(i64 %t$3)
+  ret i64 %t$4
 }
 
 define i64 @__tc_Enum_main_Color_ordinal(i64 %p$v) {
@@ -301,6 +304,98 @@ else_15:
   %t$18$hi = shl i128 %t$18$hw, 64
   %t$18$r = or i128 %t$18$hi, %t$18$lo
   ret i128 %t$18$r
+}
+
+define i128 @main.color_of_worker(i64 %p$tag) {
+entry:
+  %t$0$st = call i128 @__tc_Enum_main_Color_from_ordinal_worker(i64 %p$tag)
+  %t$0 = trunc i128 %t$0$st to i64
+  %t$0$hi = lshr i128 %t$0$st, 64
+  %t$1 = trunc i128 %t$0$hi to i64
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = add i64 0, 1
+  %t$5 = icmp eq i64 %t$0, %t$4
+  br i1 %t$5, label %body_0_2, label %arm_1_2
+body_0_2:
+  br label %join_2
+arm_1_2:
+  %t$6 = add i64 0, 0
+  %t$7 = icmp eq i64 %t$0, %t$6
+  br i1 %t$7, label %body_1_2, label %arm_2_2
+body_1_2:
+  %t$8 = call i64 @sprout_alloc_obj(i64 16, i64 0)
+  br label %join_2
+arm_2_2:
+  call void @sprout_abort_match()
+  unreachable
+join_2:
+  %t$3 = phi i64 [%t$1, %body_0_2], [%t$8, %body_1_2]
+  %t$9 = call i64 @sprout_tag(i64 %t$3)
+  %t$10 = add i64 0, 16
+  %t$11 = icmp eq i64 %t$9, %t$10
+  br i1 %t$11, label %wrepack_hit_10, label %wrepack_next_10
+wrepack_hit_10:
+  %t$13$lo = zext i64 %t$9 to i128
+  %t$13$hw = zext i64 0 to i128
+  %t$13$hi = shl i128 %t$13$hw, 64
+  %t$13$r = or i128 %t$13$hi, %t$13$lo
+  ret i128 %t$13$r
+wrepack_next_10:
+  %t$14 = add i64 0, 17
+  %t$15 = icmp eq i64 %t$9, %t$14
+  br i1 %t$15, label %wrepack_hit_14, label %wrepack_next_14
+wrepack_hit_14:
+  %t$17$lo = zext i64 %t$9 to i128
+  %t$17$hw = zext i64 0 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
+wrepack_next_14:
+  %t$18 = add i64 0, 18
+  %t$19 = icmp eq i64 %t$9, %t$18
+  br i1 %t$19, label %wrepack_hit_18, label %wrepack_next_18
+wrepack_hit_18:
+  %t$21$lo = zext i64 %t$9 to i128
+  %t$21$hw = zext i64 0 to i128
+  %t$21$hi = shl i128 %t$21$hw, 64
+  %t$21$r = or i128 %t$21$hi, %t$21$lo
+  ret i128 %t$21$r
+wrepack_next_18:
+  call void @sprout_abort_match()
+  unreachable
+}
+
+define i64 @__tc_Enum_main_Color_ordinal_argw(i64 %p$v$tag, i64 %p$v$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 16
+  %t$3 = icmp eq i64 %p$v$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$4 = add i64 0, 0
+  br label %join_0
+arm_1_0:
+  %t$5 = add i64 0, 17
+  %t$6 = icmp eq i64 %p$v$tag, %t$5
+  br i1 %t$6, label %body_1_0, label %arm_2_0
+body_1_0:
+  %t$7 = add i64 0, 1
+  br label %join_0
+arm_2_0:
+  %t$8 = add i64 0, 18
+  %t$9 = icmp eq i64 %p$v$tag, %t$8
+  br i1 %t$9, label %body_2_0, label %arm_3_0
+body_2_0:
+  %t$10 = add i64 0, 2
+  br label %join_0
+arm_3_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0], [%t$7, %body_1_0], [%t$10, %body_2_0]
+  ret i64 %t$1
 }
 
 define void @__sprout_init_globals() {
