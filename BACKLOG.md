@@ -332,6 +332,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `lexer.tokenize_source_worker` (golden `11_compiler_bundle`), where it costs nothing, since
   `tokenize`'s own arms box too. Fix: add tail-call targets of workerized fns to the set, to a
   fixed point. Docs claim the workers compose; that holds only when the callee is matched.
+- [ ] `P3` **A `Maybe` returned by a lambda is boxed: CPR does not reach a closure call.**
+  `list_filter_map(\n -> bvec_index(n, len), ns)` allocates a `Just` per element, where direct
+  recursion over `match bvec_index(n, len)` allocates none: BFS w = 1,000 runs 415 against 335 ms
+  (`docs/persistent-array-v0.md` §5.7). Every `Maybe`-returning lambda passed to a combinator
+  pays this. Fix candidates: specialise a combinator at a known lambda argument, or inline small
+  combinators before the CPR router runs.
 - [ ] `P3` **Phase B / Tier-2 CPR: `emit_repack_one` emits width-2 only.** A match-routed cycle
   member returning a ≥2-field-ctor ADT would drop fields. Unreachable today (worker routing is
   gated on max-ctor-arity ≤ 1), so latent. Widening needs `{tag, f0, f1}` and a `{i64,i64,i64}`
@@ -2434,8 +2440,10 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 - [ ] `P2` **Branded indices for `LinVec`, so a write cannot be out of range.** Today
   `linvec.set`, `linvec.scatter` and `linvec.accum` trap on a bad index. An existential brand
   `s` on `Len s`, `Idx s` and `BVec s a`, with `Idx s` made only by a check against `Len s`,
-  makes every write total in plain Sprout: no compiler change, prototype run. Open: the cost of
-  re-checking index arithmetic in BFS and LCS. `docs/persistent-array-v0.md` §5.7.
+  makes every write total in plain Sprout: no compiler change, prototype run. Measured on BFS and
+  LCS: no cost when checked at use. Open: the module itself, which waits for unsafe primitives so
+  `linvec_set`'s check can go; `BVec` must expose no operation that changes the length.
+  `docs/persistent-array-v0.md` §5.7.
 - [ ] `P3` **`LinVec Double` writes do not inline.** `ast_to_ir.recognize_vector_op` and
   `bce.direct_shape` key on `vector_mutset` by name, so `linvec_set` on a `Vector Double` stays a
   call with its bounds check, where a `MutVec Double` write inlines (B1) and loses the check (BCE).

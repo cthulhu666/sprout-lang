@@ -584,9 +584,10 @@ are paid for with exactly that. 5.3 is also cheaper, and its prerequisite is sha
 ### 5.7 Types: branded indices (a layer over 5.3)
 
 Not an alternative to 5.3. It replaces 5.3's out-of-range trap (§12 step 13) with a check the
-compiler places. A `LinVec` never changes length, so an index checked once is in range for that
-vector's whole life. A brand ties the two together: an existential gives each length a type `s`
-no other length has, and abstract wraps make `Idx s` constructible only by the check.
+compiler places. A brand ties an index to a length: an existential gives each length a type `s`
+no other length has, and abstract wraps make `Idx s` constructible only by the check. An index
+checked once stays in range only while the length does not change; see *The length is fixed*
+below.
 
 ```sprout
 export wrap Len s = Int
@@ -609,11 +610,41 @@ mismatch), an index checked against another length (existential escape) and `Idx
 exported). The indices are checked before the vector exists, so a failure has no vector to drop.
 
 - Index arithmetic (`i + 1`, BFS neighbours, LCS's `i - 1`) leaves the brand: each result is
-  checked again. A `bvec_indices(len) -> List (Idx s)` covers whole-range loops. Measure on
-  §3.2's BFS and LCS before pricing it.
+  checked again.
 - The brand appears in every helper's signature (`Len s`, `BVec s a`).
 - `linvec_set`'s own check stays until unsafe primitives exist; under the brand it cannot fire.
-- Unsound over `MutVec`: `mutvec_push` changes the length.
+
+**The length is fixed.** `linvec.push` and `linvec.pop` change a `LinVec`'s length, so `BVec`
+must expose neither, nor any other operation that changes the length. After a `pop`, an `Idx s`
+checked against the old length can be out of range. After a `push`, old indices stay in range
+but `Len s` is short of the real length. The same rule makes the brand unsound over `MutVec`,
+whose `mutvec_push` changes the length.
+
+**Measured** (2026-10-24; macOS arm64, `-O2`, ms, best of 5). BFS: w = 1,000 with
+`SPROUT_GC_THRESHOLD=50000000`, walls placed by a hash, 750,001 cells reached. LCS: n = 2,000.
+The harness is a scratch port of §3.2's kernels and the prototype, not in the repo.
+
+| form | BFS | LCS |
+|---|---:|---:|
+| `LinVec`, raw `Int` | 287 | 31 |
+| `MutVec` (`IO`) | 282 | 41 |
+| `BVec`, checked at use: raw `Int` frontier, one `bvec_index` before the read | 281 | |
+| `BVec`, every index checked: BFS neighbours via `list_filter_map`, LCS's four cells | 415 | 37 |
+| the same, BFS neighbours by direct recursion over a `match` | 335 | |
+| `BVec`, LCS over `bvec_indices(len)`, neighbours through `idx_offset` | | 183 |
+
+- Checked where the raw form already tests the bound, the brand costs nothing.
+- BFS's 415 is not the check. `bvec_index`'s `Maybe` is returned by a lambda, and CPR does not
+  reach a closure call, so each neighbour allocates a `Just` (BACKLOG P3 **A `Maybe` returned by
+  a lambda is boxed**). Direct recursion removes the box (335); checking at use, after the wall
+  test, removes the rest.
+- LCS's 37 was 94 while a `panic` arm made its function "may trigger GC", so callers rooted
+  around every `bvec_get` (`docs/compiler-internals.md`, `op_triggers_gc`). `bvec_get_or`, with a
+  fallback in place of the `panic` arm, runs in 33.
+- `bvec_indices` builds the range as a list, 4 million cells here. A whole-range loop wants a
+  fold over the range.
+- Without `linvec_set`'s bounds check, `LinVec` runs 32 against 31 on LCS and 282 against 282 on
+  BFS. The brand buys totality, not speed.
 
 Prior art: Rust's `indexing` crate ("The container and its indices and ranges are 'branded'
 with a lifetime parameter 'id"); Haskell's `justified-containers` ("type-checked proofs of key
