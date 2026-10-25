@@ -3033,8 +3033,9 @@ bit_shr_zf(x: Int, n: Int) -> Int   # logical right shift (zero-fill)
 ```
 
 Like `print`, `to_double` and the two functions above, these are compiler
-intrinsics: each lowers to a single machine instruction, and none **can be used as
-a first-class value** (`list_fold(bit_xor, 0, xs)` fails at link time). Being
+intrinsics: each lowers to a single machine instruction. They may be passed as
+values (`list_fold(bit_xor, 0, xs)`); the compiler builds a wrapper that lowers the
+instruction, as for the two functions above. Being
 `extern` declarations they are also **never module-qualified** (§"Externs are
 outside the module system") — `import stdlib.bits` puts them in the build and they
 are then called by bare name. They are written `export extern fn`.
