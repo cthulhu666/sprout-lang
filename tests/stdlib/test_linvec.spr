@@ -260,7 +260,7 @@ fn bump_mut(counts: MutVec Int, b: Int) -> Unit !{IO} =
 # --- BFS over a w x w grid, one cell in four a wall ---
 
 fn is_wall(w: Int, c: Int) -> Bool =
-  c != 0 && imod(c * 37 + (c / w) * 11, 4) == 0
+  c != 0 && imod(c * 2654435761, 65536) / 16384 == 0
 
 fn around(w: Int, c: Int) -> List Int =
   let x = imod(c, w)
@@ -407,7 +407,7 @@ fn main() -> Unit !{IO} =
       check_eq("histogram by accum matches MutVec", hist_accum(20000, 97), hist_ref),
       check_eq("sparse histogram matches MutVec", hist_loop(5000, 5000), hist_big_ref),
       check_eq("BFS matches MutVec", bfs_linvec(40), bfs_ref),
-      check_eq("BFS reaches more than the corner", bfs_linvec(40) > 1, true),
+      check_eq("BFS reaches over half the grid", bfs_linvec(40) > 800, true),
       check_eq("LCS matches MutVec", lcs_linvec(40), lcs_ref),
       check_eq("LCS is not trivial", lcs_linvec(40) > 0, true)
     ])
