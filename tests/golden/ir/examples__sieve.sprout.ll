@@ -79,9 +79,7 @@ declare i64 @vector_mutset(i64, i64, i64)
 declare i64 @vector_get_direct(i64, i64)
 declare i64 @vector_push(i64, i64)
 declare i64 @vector_truncate(i64, i64)
-declare i64 @linvec_set(i64, i64, i64)
-declare i64 @linvec_push(i64, i64)
-declare i64 @linvec_truncate(i64, i64)
+declare i64 @unsafe_pure(i64)
 declare i64 @time_now_micros()
 declare i64 @wall_time_micros()
 @.str.0 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 135, column 43)\00" }
@@ -917,9 +915,24 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @stdlib.linvec.linvec_set(i64 %p$i, i64 %p$x, i64 %p$v) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 0
+  %t$3 = call i64 @vector_mutset(i64 %p$v, i64 %p$i, i64 %p$x)
+  br label %join_0
+arm_1_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%p$v, %arm_0_0]
+  ret i64 %t$1
+}
+
 define i64 @stdlib.linvec.set(i64 %p$i, i64 %p$x, i64 %p$v) {
 entry:
-  %t$0 = call i64 @linvec_set(i64 %p$i, i64 %p$x, i64 %p$v)
+  %t$0 = call i64 @stdlib.linvec.linvec_set(i64 %p$i, i64 %p$x, i64 %p$v)
   ret i64 %t$0
 }
 
@@ -1000,7 +1013,7 @@ arm_1_1:
 body_1_1:
   %t$7 = call i64 @sprout_field(i64 %p$is, i64 0)
   %t$8 = call i64 @sprout_field(i64 %p$is, i64 1)
-  %t$9 = call i64 @linvec_set(i64 %t$7, i64 %p$x, i64 %p$v)
+  %t$9 = call i64 @stdlib.linvec.linvec_set(i64 %t$7, i64 %p$x, i64 %p$v)
   store i64 %t$8, ptr %t$11
   store i64 %p$x, ptr %t$12
   store i64 %t$9, ptr %t$13
