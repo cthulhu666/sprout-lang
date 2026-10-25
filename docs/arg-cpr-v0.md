@@ -80,7 +80,9 @@ payload stays rooted while later arguments are evaluated. No rooting rule change
   `k`, the call passes exactly `f`'s arity (so `maybe_with_default(0)` is refused), argument `k`
   is a direct call `g(b…)`, and `g` is a Tier-1 `_unboxed` extern or passes `cpr_result_known`.
   Collection uses it to add `g` to the result-worker set and `(f, k)` to the argument-worker set.
-  It over-collects, which is harmless.
+  It over-collects, which is harmless. A site whose `@f_argw` is already a top-level definition,
+  or whose Tier-2 `@g_worker` is, is not a site: both layers drop it and the call stays boxed.
+  The site records how `g` arrives, as an extern's `_unboxed` symbol or as `@g_worker`.
 - The router uses `argw_shape`, and also requires that neither `f` nor `g` is shadowed by a
   parameter, capture, `let` or constructor (`callee_name_shadowed`), and the group rule below. A
   parameter named `maybe_with_default` holding a closure then stays an `IRApplyClosure`.
@@ -96,9 +98,13 @@ name, and a call to `f_argw` is not a call to `f`, so routing would turn a loop 
 - The group comes from the typed-AST call graph (`scc.sprout`, as mutual-TCO Phase B's
   `pb_hetero_sccs` builds it), not from the IR's: the IR graph is built after translation, and
   routing renames the edges it would read.
+- The result-worker tail chain obeys the same rule. A worker never chains a tail call into a
+  worker of its own group: `@h_worker` and `@g_worker` of a mutual pair would recurse into each
+  other, and the stack grows. The call stays boxed, and the boxed fns loop.
 
-**Naming.** `@f_argw` shares the symbol namespace, as `@f_worker` does; `emit_worker_for`'s
-collision guard covers it too.
+**Naming.** `@f_argw` shares the symbol namespace, as `@f_worker` does. A colliding site is not
+routed (above), so no guard fires for it; `emit_worker_for`'s `_worker` guard still covers a
+matched callee.
 
 ## 5. Prior art
 
@@ -137,11 +143,17 @@ fixture declares its own consumer and producer. Golden IR covers the prelude's.
 7. Self- and mutual recursion: a call to `f` from inside `f`'s group stays boxed, and the group's
    TCO is unchanged.
 8. Scrutinee position, pinning the non-goal: `match or_else(get(i, v), fb) with` stays boxed.
+9. Mutual tail recursion: the result workers of a pair `h` <-> `g` do not call each other, and a
+   chain outside any group (`a` tail-calling `b`) still does.
+10. A user fn named `check_argw`, or `p_worker`, beside `check(p(i))`: the program translates and
+    the call stays boxed.
 
 Behaviour, `tests/stdlib/`:
-9. A `Maybe String` payload, with a later argument that allocates, under `SPROUT_GC_STRESS=1`.
-10. A self-recursive consumer, entered through a routed call and recursing with a call argument,
+11. A `Maybe String` payload, with a later argument that allocates, under `SPROUT_GC_STRESS=1`.
+12. A self-recursive consumer, entered through a routed call and recursing with a call argument,
     runs at depth 1,000,000.
+13. Mutual tail recursion between two fns that both have result workers runs at depth 3,000,000,
+    entered through an argument site and through a `match`.
 
 Also: `test_bytes_byte_at_unboxed.spr` pinned the old rule (a `Maybe` handed to a helper is
 boxed) and now pins the new one, for a Tier-1 extern producer.

@@ -204,7 +204,8 @@ scales with the live set (`bench/results-2026-09-28-vec-box-tax.md`). It is why
 `mutvec_at` exists beside `mutvec_get`.
 
 Returning a wrapper keeps it unboxed through a layer that ends in a constructor,
-an `if`, or a call to a function some `match` also scrutinises. Nor is this
+an `if`, or a call to a function some `match` also scrutinises, unless that
+function is in the caller's own recursive group. Nor is this
 builtins-only: the worker exists for **any top-level function** whose result is
 an ADT with at most one field per constructor, user-defined ones and `Maybe a`
 included (`ast_to_ir.cpr_result_known`). A result that is a bare type variable

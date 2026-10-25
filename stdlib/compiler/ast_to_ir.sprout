@@ -2553,6 +2553,11 @@ fn tier2_worker_shape(name: String, arms: List typed_ast.TypedMatchBranch,
   && all_arms_simple_width2(arms, ctors)
   && arms_have_ctor_anchor(arms)
 
+# A `Maybe` result a Tier-1 `_unboxed` extern can return as (tag, payload): the type is `Maybe`
+# and the program defines both constructors.
+fn maybe_unboxable(ty: types.Type, penv: ProgEnv) -> Bool =
+  is_maybe_type(ty) && dict_member("Just", penv.ctors) && dict_member("Nothing", penv.ctors)
+
 fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
                               arms: List typed_ast.TypedMatchBranch,
                               params: List String, captures: Dict String,
@@ -2566,8 +2571,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
     match unboxed_maybe_extern_name(name) with
     | Just ufn ->
         # Tier-1: direct Maybe-returning C extern with a runtime `_unboxed`.
-        if is_maybe_type(call_ty) && all_arms_simple_maybe(arms)
-           && dict_member("Just", penv.ctors) && dict_member("Nothing", penv.ctors)
+        if maybe_unboxable(call_ty, penv) && all_arms_simple_maybe(arms)
            && !callee_name_shadowed(name, params, captures, penv)
         then Just((ufn, args))
         else Nothing
@@ -2699,16 +2703,28 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
     let tag_ssa = fresh_name(idx1)
     let val_ssa = fresh_name(idx1 + 1)
     let call_ops = list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, ufn, arg_names), arg_cur_ops)
-    let base = idx1 + 2
+    translate_unboxed_maybe_dispatch(tag_ssa, val_ssa, idx1 + 2, arg_blocks, arg_cur_lbl, call_ops,
+                                     arms, match_ty, params, env, captures)
+
+# Seal the scrutinee block `scrut_lbl` (it holds the (tag, payload) in `tag_ssa`, `val_ssa`), dispatch
+# the arms and join them. Shared by the call-site match and `@f_argw`, whose tag and payload are
+# parameters.
+fn translate_unboxed_maybe_dispatch(tag_ssa: String, val_ssa: String, base: Int,
+                                    pre_blocks: List sprout_ir.IRBlock, scrut_lbl: String,
+                                    scrut_ops: ListBuilder sprout_ir.IROp,
+                                    arms: List typed_ast.TypedMatchBranch, match_ty: types.Type,
+                                    params: List String, env: TxEnv, captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
+  do
     reuse_frame_push(env)
     (arm_blocks, phi_incoming, idx_after) <-
       translate_unboxed_maybe_arms(arms, 0, base, fresh_join_label(base), match_ty,
                                    val_ssa, tag_ssa, params, env, base + 2, Nil, Nil,
                                    captures)
     reuse_frame_pop(env)
-    finish_match(match_ty, arg_blocks,
-      sprout_ir.IRBlock(arg_cur_lbl,
-        list_builder_build(list_builder_add(sprout_ir.IRBr(fresh_arm_label(0, base)), call_ops))),
+    finish_match(match_ty, pre_blocks,
+      sprout_ir.IRBlock(scrut_lbl,
+        list_builder_build(list_builder_add(sprout_ir.IRBr(fresh_arm_label(0, base)), scrut_ops))),
       arm_blocks, phi_incoming, fresh_join_label(base),
       fresh_name(base + 1), idx_after)
 
@@ -2721,15 +2737,10 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
 fn argw_param_index(params: List ast.Param, body: typed_ast.TypedExpr,
                     ctors: Dict sprout_ir.CtorInfo) -> Maybe Int =
   let typed_ast.TMatch(typed_ast.TVar p _ _) arms _ _ = body else Nothing
-      Just k = param_position(p, ast.param_names(params), 0) else Nothing
+      Just k = field_index(ast.param_names(params), p, 0) else Nothing
   in
     if all_arms_simple_width2(arms, ctors) && arms_have_ctor_anchor(arms) && !arms_mention(p, arms)
     then Just(k) else Nothing
-
-fn param_position(name: String, names: List String, i: Int) -> Maybe Int =
-  match names with
-  | [] -> Nothing
-  | [n | rest] -> if n == name then Just(i) else param_position(name, rest, i + 1)
 
 fn arms_mention(name: String, arms: List typed_ast.TypedMatchBranch) -> Bool =
   any(\b -> set_member(name, compute_free_vars(typed_ast.branch_body(b), set_empty())), arms)
@@ -2767,29 +2778,51 @@ fn index_group(members: List String, group: Set, acc: Dict Set) -> Dict Set =
 fn group_of(name: String, penv: ProgEnv) -> Set =
   maybe_with_default(set_empty(), dict_get(name, penv.groups))
 
+# How `g(..)` arrives as (tag, payload): a Tier-1 extern's `_unboxed` symbol, or the result
+# worker `@g_worker` of a top-level Sprout fn.
+type ArgwProducer =
+  | ExternProducer String
+  | WorkerProducer
+
 # `g` fills parameter `k` of the call `f(..)`, and `g(..)` can arrive as (tag, payload).
-type ArgwSite = (k: Int, producer: String, pargs: List typed_ast.TypedExpr)
+type ArgwSite = (k: Int, producer: String, kind: ArgwProducer, pargs: List typed_ast.TypedExpr)
 
 # Shape only, shadow-free: collection asks this, and the router adds the shadow and group
 # rules (the split worker_callee_routable documents), so a routed call names only emitted symbols.
+# A site whose `@f_argw` or `@g_worker` is already a top-level name is not a site: it stays boxed.
 fn argw_shape(fname: String, args: List typed_ast.TypedExpr, penv: ProgEnv) -> Maybe ArgwSite =
   let Just k = dict_get(fname, penv.argw) else Nothing
       Just info = dict_get(fname, penv.fn_arities) else Nothing
       [arg | _] = list.drop(k, args) else Nothing
       typed_ast.TCall(typed_ast.TVar g _ _) pargs gty _ = arg else Nothing
+      Just kind = argw_producer(g, gty, penv) else Nothing
   in
-    if info.arity == list_length(args) && producer_unboxable(g, gty, penv)
-    then Just(ArgwSite(k = k, producer = g, pargs = pargs))
+    if info.arity == list_length(args) && !set_member(fname ++ "_argw", penv.top_level)
+    then Just(ArgwSite(k = k, producer = g, kind = kind, pargs = pargs))
     else Nothing
 
-# A Tier-1 `_unboxed` extern, or a top-level fn whose result worker can be lowered.
-fn producer_unboxable(g: String, gty: types.Type, penv: ProgEnv) -> Bool =
+# A Tier-1 `_unboxed` extern, or a top-level fn whose result worker can be lowered and named.
+fn argw_producer(g: String, gty: types.Type, penv: ProgEnv) -> Maybe ArgwProducer =
   match unboxed_maybe_extern_name(g) with
-  | Just _ -> is_maybe_type(gty) && dict_member("Just", penv.ctors) && dict_member("Nothing", penv.ctors)
-  | Nothing -> set_member(g, penv.top_level) && cpr_result_known(g, penv.fn_arities)
+  | Just ufn -> if maybe_unboxable(gty, penv) then Just(ExternProducer(ufn)) else Nothing
+  | Nothing ->
+      if set_member(g, penv.top_level) && cpr_result_known(g, penv.fn_arities)
+         && !set_member(g ++ "_worker", penv.top_level)
+      then Just(WorkerProducer) else Nothing
 
-fn producer_target(g: String) -> String =
-  maybe_with_default(g ++ "_worker", unboxed_maybe_extern_name(g))
+# The unboxed callee of the producer call: the extern's `_unboxed` or `@g_worker`.
+fn argw_producer_symbol(site: ArgwSite) -> String =
+  match site.kind with
+  | ExternProducer ufn -> ufn
+  | WorkerProducer -> site.producer ++ "_worker"
+
+# The same shadow rules the other routers apply: an extern producer is unshadowed, a worker
+# producer passes `worker_callee_routable`.
+fn argw_producer_routable(site: ArgwSite, params: List String, captures: Dict String,
+                          penv: ProgEnv) -> Bool =
+  match site.kind with
+  | ExternProducer _ -> !callee_name_shadowed(site.producer, params, captures, penv)
+  | WorkerProducer -> worker_callee_routable(site.producer, params, captures, penv)
 
 # The site, once `f` and `g` are unshadowed and `f` is outside the caller's recursive group:
 # a call to `@f_argw` is not a call to `f`, so routing a group member would break its loop.
@@ -2799,7 +2832,7 @@ fn argw_target(fname: String, args: List typed_ast.TypedExpr, params: List Strin
   | Just site ->
       if !set_member(fname, env.group)
          && !callee_name_shadowed(fname, params, captures, env.prog)
-         && !callee_name_shadowed(site.producer, params, captures, env.prog)
+         && argw_producer_routable(site, params, captures, env.prog)
       then Just(site) else Nothing
   | Nothing -> Nothing
 
@@ -2820,7 +2853,7 @@ fn translate_argw_call(fname: String, site: ArgwSite, args: List typed_ast.Typed
         let tag_ssa = fresh_name(idx2)
         let val_ssa = fresh_name(idx2 + 1)
         let unboxed_call = sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown,
-                                                    producer_target(site.producer), producer_names)
+                                                    argw_producer_symbol(site), producer_names)
         (b3, l3, o3, after_names, idx3) <-
           translate_args(after, params, env, idx2 + 2, l2, list_builder_add(unboxed_call, o2), b2, Nil, captures)
         let result = fresh_name(idx3)
@@ -6437,8 +6470,9 @@ fn ctor_tag_if(name: String, want_arity: Int, params: List String, captures: Dic
 
 # Translate `body` so every tail position returns the i128 worker value.
 # `worker_set` = fns that have an emitted worker (chain tail-calls to them);
-# `self_name` = the fn being emitted (self-recursive tail-calls stay boxed via the
-# catch-all to keep TCO, rather than chaining un-TCO'd into @self_worker).
+# `self_name` = the fn being emitted. A tail call into the worker's own recursive group
+# (self or mutual) stays boxed via the catch-all, which keeps TCO: chaining would nest
+# `@h_worker` and `@g_worker` calls with no tail call between them.
 fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
                           env: TxEnv, idx: Int,
                           cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
@@ -6485,10 +6519,11 @@ fn translate_tail_unboxed(body: typed_ast.TypedExpr, params: List String,
                   then translate_tail_chain(ufn, args, params, env, idx, cur_label, cur_ops, captures, 2)
                   else translate_tail_catchall(body, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors)
               | Nothing ->
-                  # Worker-chain: a tail-call to another fn that has a worker (not
-                  # self — self stays boxed for TCO) chains to its @<name>_worker,
-                  # so the whole call chain returns { tag, val } with no box.
+                  # Worker-chain: a tail-call to a fn outside this worker's recursive group
+                  # that has a worker chains to its @<name>_worker, so the whole call chain
+                  # returns { tag, val } with no box.
                   if set_member(name, worker_set) && name != self_name
+                     && !set_member(name, env.group)
                      && !callee_name_shadowed(name, params, captures, env.prog)
                   then translate_tail_chain(name ++ "_worker", args, params, env, idx, cur_label, cur_ops, captures, chain_width(body))
                   else translate_tail_catchall(body, params, env, idx, cur_label, cur_ops, captures, result_adt_ctors)
@@ -6800,13 +6835,12 @@ fn emit_worker_fn(worker_name: String, self_name: String, params: List ast.Param
           worker_ret_ty(body), blocks),
         next_idx, list_reverse(lifted)))
 
-# What the worker passes (pre-pass and emit) both need, built once per compile:
-# the matched callees, the fn/extern decls by name and the ADT ctor index.
+# What the worker passes (pre-pass and emit) both need, built once per compile: `callees` are the
+# matched callees plus the producers of argument sites, `argw` the consumers that get an
+# `@<fn>_argw`, `decls` the fn/extern decls by name, `adt_index` the ADT ctor index.
 export type WorkerPlan (..) = (callees: Set, argw: Set, decls: Dict typed_ast.TypedDecl,
                                adt_index: Dict (List (Int, Int)))
 
-# `callees` holds every producer an argument site unboxes as well as every matched callee;
-# `argw` holds the consumers that need an `@<fn>_argw`.
 export fn worker_plan(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> WorkerPlan =
   match collect_argw_sites(decls, penv) with
   | (producers, consumers) ->
@@ -6840,8 +6874,9 @@ fn collect_argw_call(e: typed_ast.TypedExpr, penv: ProgEnv, acc: (Set, Set)) -> 
   in
     match acc with
     | (producers, consumers) ->
-        (if is_just(unboxed_maybe_extern_name(site.producer)) then producers
-         else set_insert(site.producer, producers),
+        (match site.kind with
+         | ExternProducer _ -> producers
+         | WorkerProducer -> set_insert(site.producer, producers),
          set_insert(f, consumers))
 
 # Fn and extern decls by name, first declaration wins. Entry `main` is left out:
@@ -6933,16 +6968,10 @@ fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.Ty
       let val_name = ast.param_name(matched) ++ "$val"
       lifted_ref <- ref_new(Nil)
       env <- new_tx_env(penv, lifted_ref, owned_param_ssas(others), group_of(name, penv))
-      reuse_frame_push(env)
-      (arm_blocks, phi_incoming, idx_after) <-
-        translate_unboxed_maybe_arms(arms, 0, 0, fresh_join_label(0), match_ty,
-                                     sprout_ir.param_ssa(val_name), sprout_ir.param_ssa(tag_name),
-                                     ast.param_names(others), env, 2, Nil, Nil, dict_empty())
-      reuse_frame_pop(env)
       (blocks, join_lbl, join_ops, result, next_idx) <-
-        finish_match(match_ty, Nil,
-                     sprout_ir.IRBlock("entry", [sprout_ir.IRBr(fresh_arm_label(0, 0))]),
-                     arm_blocks, phi_incoming, fresh_join_label(0), fresh_name(1), idx_after)
+        translate_unboxed_maybe_dispatch(sprout_ir.param_ssa(tag_name), sprout_ir.param_ssa(val_name), 0,
+                                         Nil, "entry", list_builder_empty, arms, match_ty,
+                                         ast.param_names(others), env, dict_empty())
       lifted <- ref_read(lifted_ref)
       Ok((sprout_ir.IRFunction(name ++ "_argw",
             list_append(ast_params_to_irtype_pairs(before),
@@ -6955,19 +6984,16 @@ fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.Ty
           next_idx, list_reverse(lifted)))
 
 # Emit `@<name>_argw`, or Nothing when `name` has no argument worker (an over-collected site
-# naming a shadowed fn). Shares the symbol namespace with user fns, as `_worker` does.
+# naming a shadowed fn). `argw_shape` drops a site whose `_argw` name is taken, so none collides.
 fn emit_argw_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
-  if set_member(name ++ "_argw", penv.top_level)
-  then Err("ast_to_ir: argument worker name '" ++ name ++ "_argw' collides with an existing top-level definition")
-  else
-    let Just k = dict_get(name, penv.argw) else Ok(Nothing)
-        Just d = dict_get(name, plan.decls) else Ok(Nothing)
-        typed_ast.TFnDecl _ params _ _ _ body = d else Ok(Nothing)
-    in
-      do
-        res <- emit_argw_fn(name, k, params, body, penv)
-        Ok(Just(res))
+  let Just k = dict_get(name, penv.argw) else Ok(Nothing)
+      Just d = dict_get(name, plan.decls) else Ok(Nothing)
+      typed_ast.TFnDecl _ params _ _ _ body = d else Ok(Nothing)
+  in
+    do
+      res <- emit_argw_fn(name, k, params, body, penv)
+      Ok(Just(res))
 
 # One worker to emit: a result worker `@<name>_worker` or an argument worker `@<name>_argw`.
 export type WorkerJob (..) =

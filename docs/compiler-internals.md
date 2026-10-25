@@ -330,7 +330,11 @@ width-2 arms and `p_k` occurs in no arm, lowers to `IRCallUnboxed2` for `g` and 
 - **Recursive groups.** `ProgEnv.groups` is the SCC of the typed-AST call graph, an edge for a
   mention in any position (`build_recursive_groups`); `TxEnv.group` is the calling fn's. A call
   into the caller's own group is never routed, since `tco_rewrite` and mutual TCO find a loop by
-  the callee's name. `@f_argw` and `@f_worker` carry `f`'s group.
+  the callee's name. `@f_argw` and `@f_worker` carry `f`'s group. The result-worker tail chain
+  (`translate_tail_unboxed`) follows the same rule: a worker never chains into its own group, so a
+  mutual pair of workers does not recurse into each other.
+- **Name collisions.** A site whose `@f_argw` or Tier-2 `@g_worker` is a top-level name is not a
+  site (`argw_shape`): collection and the router both drop it, and the call stays boxed.
 - **Owned parameters.** `@f_argw` keeps `owned_param_ssas` of `f`'s other parameters: they arrive
   as they would to `f`, so in-place reuse still fires on them.
 - **Emission order.** `worker_jobs(plan)` lists result workers, then argument workers. The
