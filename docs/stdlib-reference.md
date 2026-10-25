@@ -530,15 +530,15 @@ A pure vector with in-place writes (in `stdlib/linvec.sprout`; Experimental, as 
 - `linvec.new(n, x) -> LinVec a` — n copies of `x`
 - `linvec.get(i, v: borrowing LinVec a) -> Maybe a` — `Nothing` out of range
 - `linvec.set(i, x, v) -> LinVec a` — O(1), in place, returns the same vector; traps out of range
-  (wraps the private `linvec_set`)
+  (wraps the private `linvec_set`, which writes through `unsafe_pure`)
 - `linvec.length(v: borrowing LinVec a) -> Int`
 - `linvec.empty() -> LinVec a` — a fresh vector of length 0
 - `linvec.from_list(xs) -> LinVec a` — a fresh vector of the list's elements
 - `linvec.push(x, v) -> LinVec a` — amortised O(1); the storage doubles when full
-  (wraps the private `linvec_push`)
+  (wraps the private `linvec_push`, which writes through `unsafe_pure`)
 - `linvec.pop(v) -> (Maybe a, LinVec a)` — the last element and the rest; `(Nothing, v)` on an
   empty vector, which stays usable. The capacity never shrinks
-  (calls the private `linvec_truncate`)
+  (calls the private `linvec_truncate`, which writes through `unsafe_pure`)
 - `linvec.freeze(v) -> Vec a` — O(1); the vector's life ends
 - `linvec.drop(v) -> Unit`
 - `linvec.scatter(is, x, v) -> LinVec a` — sets `x` at each index; out of range traps

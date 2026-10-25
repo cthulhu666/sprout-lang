@@ -3460,7 +3460,7 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
 export fn is_call_site_intrinsic(fname: String) -> Bool =
   fname == "print" || fname == "eprint" || fname == "to_double"
     || fname == "double_to_bits" || fname == "double_from_bits"
-    || fname == "unsafe_pure"
+    || fname == source.unsafe_pure_name
     || is_bits_intrinsic(fname)
 
 # Lower one saturated call to a call-site-directed intrinsic.  The order mirrors
@@ -3479,7 +3479,7 @@ fn translate_call_site_intrinsic(fname: String, args: List typed_ast.TypedExpr,
   else if fname == "double_to_bits" || fname == "double_from_bits"
   then translate_double_bits_call(fname, args, params, env, idx,
                                   cur_label, cur_ops, captures)
-  else if fname == "unsafe_pure"
+  else if fname == source.unsafe_pure_name
   then translate_unsafe_pure_call(args, params, env, idx, cur_label, cur_ops, captures)
   else translate_bits_call(fname, args, params, env, idx,
                            cur_label, cur_ops, captures)
@@ -3492,12 +3492,11 @@ fn translate_unsafe_pure_call(args: List typed_ast.TypedExpr,
                               cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                               captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match args with
-  | [typed_ast.TLambda lparams lbody lam_ty lam_pos] ->
-      translate_call(typed_ast.TLambda(lparams, lbody, lam_ty, lam_pos),
-                     [typed_ast.TUnit(types.TConst(types.type_id("Unit")), lam_pos)],
-                     typed_ast.typed_expr_type(lbody), params, env, idx, cur_label, cur_ops, captures)
-  | _ -> Err("ast_to_ir: unsafe_pure expects a lambda literal")
+  let not_lambda = Err("ast_to_ir: unsafe_pure expects a lambda literal")
+      [lam] = args else not_lambda
+      typed_ast.TLambda _ lbody _ lam_pos = lam else not_lambda
+  in translate_call(lam, [typed_ast.TUnit(types.TConst(types.type_id("Unit")), lam_pos)],
+                    typed_ast.typed_expr_type(lbody), params, env, idx, cur_label, cur_ops, captures)
 
 # Translate a TCall node.
 #

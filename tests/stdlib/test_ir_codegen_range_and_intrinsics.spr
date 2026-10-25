@@ -147,4 +147,16 @@ fn main() -> Unit !{IO} =
     t2j <- str_find(trivial_ir, "declare i64 @analysis_complete_in_state") != -1
     assert_true(state, "T2j: ir_header declares @analysis_complete_in_state", t2j)
 
+    # ---------------------------------------------------------------------------
+    # T3: `unsafe_pure(\_ -> body)` in non-tail position lowers as the applied
+    # lambda: no closure, no call to `@unsafe_pure`. No bundler here, so the
+    # reserved-module gate does not apply.
+    let t3_src = "extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a\n\nfn twice(n: Int) -> Int =\n  let m = unsafe_pure(\\_ -> n + n)\n  in m + 1\n"
+    t3a <- translated_ok_contains(t3_src, "define i64 @twice")
+    assert_true(state, "T3a: unsafe_pure in a let binding compiles", t3a)
+    t3b <- translated_ok_contains(t3_src, "call i64 @sprout_alloc_closure")
+    assert_false(state, "T3b: unsafe_pure builds no closure", t3b)
+    t3c <- translated_ok_contains(t3_src, "call i64 @unsafe_pure")
+    assert_false(state, "T3c: unsafe_pure is not called", t3c)
+
     summary(state)

@@ -119,7 +119,6 @@ type ImportBinding =
 #
 # `foreign` is the private externs declared by OTHER modules, by name; see
 # `foreign_externs`.
-#
 type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
                    class_locals: Dict String,
                    unqual_values: Dict String, unqual_types: Dict String,
