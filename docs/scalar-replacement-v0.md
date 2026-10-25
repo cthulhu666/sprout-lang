@@ -235,7 +235,7 @@ no alloc/loads; boxed `@main.swap_pair` wrapper retained.
    `IRCallUnboxed2(slot0, slot1, IRTUnknown, worker, arg_names)`; bind `p0←slot0`, `p1←slot1` into
    captures (mirror `bind_just_arg` :3213); translate `body` in that scope. Single block — **no tag
    test, no phi, no abort arm** (simpler than `translate_unboxed_maybe_match` :3340).
-3. **Worker set** — extend `collect_worker_callees` (:6554) / add a `tuple_worker_shape` sibling to
+3. **Worker set** — extend `scan_workers` / add a `tuple_worker_shape` sibling to
    `tier2_worker_shape` (:3176): a top-level fn whose result type is a 2-tuple and whose tail bottoms
    in tuple literals qualifies. Keeps the emission scan a shadow-free superset of the router.
 4. **Worker body** — add a `typed_ast.TTuple [e0,e1] _ _` case to `translate_tail_unboxed` (beside the
@@ -295,7 +295,7 @@ N per-field phis (`build_tuple_phis`), and fn producers (`river_rgb`/`biome_rgb`
 width-w workers. Two consumers share one **shadow-free** eligibility oracle `sra_core_eligible`:
 worker-collection (`collect_wc_sra_producers`, emits the producer workers) and `translate_do` (fires
 the rewrite once `worker_callee_routable` holds for every producer, which adds the shadow check and
-the `cpr_result_known` filter `collect_worker_callees` applies → translation ⊆ collection, so a
+the `cpr_result_known` filter `scan_workers` applies → translation ⊆ collection, so a
 called worker is always emitted; a producer with a type-variable result, such as `range_fold`, keeps
 the let boxed). Producer lowering is `translate_tuple_scalars` (tuple literal / width-w worker call
 / `if`-with-N-phi). Soundness rests on a **default-deny** escape/linearity check (`sra_escape_ok`,
@@ -334,7 +334,7 @@ that `build_fn_arities` computes per fn from the same oracle the emitter uses
 (`adt_ctors_of_type` non-empty, or `scalar_tuple_width` present). The four routers — Tier-2 ADT,
 tuple, do-bind and do-block SRA — all ask it through one helper, `worker_callee_routable`; the
 do-block SRA router once checked only shadowing and called workers that were never emitted (#631).
-`collect_worker_callees` applies the same filter to the collected set (it must agree, because
+`scan_workers` applies the same filter to the collected set (it must agree, because
 `translate_tail_chain` chains worker-to-worker through that set). The
 `translate_tail_catchall` fallback now hard-errors instead of assuming "no ctor list ⇒ tuple", so a
 future convention gap is a compile error rather than silent mis-lowering.

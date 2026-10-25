@@ -164,7 +164,7 @@ The loud failure that would have caught this was repurposed into Tuple-CPR's sil
 The Tier-2 router (`unboxed_maybe_match_target`, `ast_to_ir.sprout:3375`) decides to call
 `@<name>_worker` from **the call site alone**: the callee is top-level, is not shadowed, and the
 match arms are all simple width-2 ctor-anchored patterns (`tier2_worker_shape`). It never consults the
-callee's *declared* result type. `collect_worker_callees` scans on the same shape core — so the two
+callee's *declared* result type. `scan_workers` scans on the same shape core — so the two
 sides agree on *whether* to workerize (the C1-divergence guard holds) and still disagree on the
 *convention*, which nothing checks.
 
@@ -197,7 +197,7 @@ allocation, not in-bounds slack. That makes this a memory-safety defect as well 
 
 ### Suggested fix direction (not implemented — needs approval per `AGENTS.md` §Collaboration 5)
 
-1. **Gate workerization on a concrete result type.** Both `collect_worker_callees` and the Tier-2
+1. **Gate workerization on a concrete result type.** Both `scan_workers` and the Tier-2
    router must decline a callee whose *declared* result type does not resolve to a concrete, indexed
    ADT. The router has no access to `decls` today, so the natural shape is a precomputed
    eligible-callee set threaded to both — the same shared-oracle pattern the file already uses to keep
@@ -249,7 +249,7 @@ routed and its worker is never emitted. Four sites had to agree — the fourth i
 | Tier-2 ADT router | `unboxed_maybe_match_target` | the reported shape |
 | tuple router | `unboxed_tuple_match_target` | a generic callee instantiated at a tuple |
 | do-bind router | `do_bind_unbox_target` | `x <- f(…)`; this one had **no** shape check at all, only `set_member(name, top_level)` |
-| emission scan | `collect_worker_callees` | `translate_tail_chain` chains worker-to-worker through this set, so an un-gated entry here reintroduces the same mismatch on the chain path |
+| emission scan | `scan_workers` | `translate_tail_chain` chains worker-to-worker through this set, so an un-gated entry here reintroduces the same mismatch on the chain path |
 
 The flag rides on the name-keyed dict that was already threaded everywhere: `fn_arities` widens from
 `Dict Int` to `Dict FnInfo` (`arity` + `cpr_result`), computed once in `build_fn_arities` from the

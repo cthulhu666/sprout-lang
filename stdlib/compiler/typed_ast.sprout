@@ -305,6 +305,19 @@ export fn field_value(f: TypedRecordField) -> TypedExpr =
   match f with
   | TypedRecordField _ value -> value
 
+# The bodies of a decl: a fn body, a let value, or each instance method's body.
+export fn decl_bodies(d: TypedDecl) -> List TypedExpr =
+  match d with
+  | TFnDecl _ _ _ _ _ body -> [body]
+  | TExternFnDecl _ _ _ _ -> []
+  | TLetDecl _ value -> [value]
+  | TInstanceDecl _ _ methods -> list_map(method_body, methods)
+  | TPassThrough _ -> []
+
+export fn method_body(m: TypedInstanceMethod) -> TypedExpr =
+  match m with
+  | TypedInstanceMethod _ _ _ _ _ body -> body
+
 # What lowering, resolve and ast_to_ir read off the ClassDecls, keyed by the class
 # name as declared: methods and direct superclasses in declaration order, and the
 # first type parameter. Witness-slot layout needs all three passes to agree.

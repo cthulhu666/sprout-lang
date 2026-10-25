@@ -323,8 +323,11 @@ Design: [arg-cpr-v0.md](arg-cpr-v0.md). `f(a, g(x))`, where `f`'s body is `match
 width-2 arms and `p_k` occurs in no arm, lowers to `IRCallUnboxed2` for `g` and a call to
 `@f_argw`, which takes `p_k` as `(p_k$tag, IRTScalar)` and `(p_k$val, IRTUnknown)`.
 
+- **One collection pass.** `scan_workers` walks every body once (`typed_ast.decl_bodies`, then
+  `typed_ast.children`), running the node checks for matched callees, do-binds, SRA producers and
+  argument sites. `matched` is filtered by `cpr_result_known` at the end.
 - **Two layers, as result workers have.** `argw_shape` (shape only, full arity) feeds collection
-  (`collect_argw_sites` adds `g` to the result-worker set and `f` to `WorkerPlan.argw`);
+  (`scan_workers` adds `g` to the result-worker set and `f` to `WorkerPlan.argw`);
   `argw_target` adds the shadow checks for `f` and `g` and the group rule. Translation ⊆
   collection, so a routed call names only emitted symbols.
 - **Recursive groups.** `ProgEnv.groups` is the SCC of the typed-AST call graph, an edge for a

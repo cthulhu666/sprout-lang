@@ -1418,7 +1418,7 @@ fn prelude_ctor_tag(name: String, ctors: Dict sprout_ir.CtorInfo) -> Int =
 # The unbox target (`@f_worker` for a top-level fn, `@f_unboxed` for a
 # Maybe/Result C extern) a `pat <- f(..)` do-bind routes to, or Nothing (boxed).
 # Local, like translate_match's router — the worker is guaranteed to exist because
-# collect_worker_callees scans do-binds (collect_wc_do_bind_callee).
+# scan_workers scans do-binds (collect_wc_do_bind_callee).
 fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
                         penv: ProgEnv) ->
     Maybe String =
@@ -2533,7 +2533,7 @@ fn callee_name_shadowed(name: String, params: List String, captures: Dict String
   || dict_member(name, penv.ctors)
 
 # A direct call to `name` may route to `@<name>_worker`: an unshadowed top-level fn whose declared
-# result is lowerable. The last is the filter collect_worker_callees applies, so the worker exists.
+# result is lowerable. The last is the filter scan_workers applies, so the worker exists.
 # Every worker router asks this; one that skips the representation check calls an un-emitted symbol.
 fn worker_callee_routable(name: String, params: List String, captures: Dict String,
                           penv: ProgEnv) -> Bool =
@@ -2545,7 +2545,7 @@ fn worker_callee_routable(name: String, params: List String, captures: Dict Stri
 # Shared Tier-2 SHAPE core (shadow-free): `name` is a non-extern callee whose
 # match arms are all simple width-2 patterns anchored by a real ctor.  The single
 # authority used by BOTH the call-site router (which further requires not-shadowed)
-# and the emission scan (collect_worker_callees, which stays shadow-free — a
+# and the emission scan (scan_workers, which stays shadow-free — a
 # superset, so it can never fail to emit a worker the router routes to).
 fn tier2_worker_shape(name: String, arms: List typed_ast.TypedMatchBranch,
                       ctors: Dict sprout_ir.CtorInfo) -> Bool =
@@ -2578,7 +2578,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
     | Nothing ->
         # Tier-2: direct call to a top-level Sprout fn returning a width-2
         # ADT — routes to the emitted `@<name>_worker` (guaranteed to exist
-        # because collect_worker_callees scans on the same shape core).
+        # because scan_workers scans on the same shape core).
         #
         # The arms describe the value at THIS call site; `cpr_result_known`
         # describes the callee's declared result, which is what fixes the
@@ -2828,13 +2828,12 @@ fn argw_producer_routable(site: ArgwSite, params: List String, captures: Dict St
 # a call to `@f_argw` is not a call to `f`, so routing a group member would break its loop.
 fn argw_target(fname: String, args: List typed_ast.TypedExpr, params: List String,
                captures: Dict String, env: TxEnv) -> Maybe ArgwSite =
-  match argw_shape(fname, args, env.prog) with
-  | Just site ->
-      if !set_member(fname, env.group)
-         && !callee_name_shadowed(fname, params, captures, env.prog)
-         && argw_producer_routable(site, params, captures, env.prog)
-      then Just(site) else Nothing
-  | Nothing -> Nothing
+  let Just site = argw_shape(fname, args, env.prog) else Nothing
+  in
+    if !set_member(fname, env.group)
+       && !callee_name_shadowed(fname, params, captures, env.prog)
+       && argw_producer_routable(site, params, captures, env.prog)
+    then Just(site) else Nothing
 
 # Arguments before `k`, then `g`'s arguments and its unboxed call, then the arguments after
 # `k`: the boxed call's left-to-right order, with the producer call in `k`'s place.
@@ -4225,27 +4224,36 @@ fn translate_direct_call(fname: String, args: List typed_ast.TypedExpr,
           translate_argw_call(fname, site, args, call_ty, params, env, idx, cur_label, cur_ops,
                               captures)
       | Nothing ->
-          # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
-          # All IR values are i64 — String-returning user fns are i64 just like Int.
-          # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
-          do
-            r <- translate_args(args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-            match r with
-            | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
-                # B1: inline Vector element access. try_vector_intrinsic recognizes the
-                # op (by name), gates on full application (an under-applied call falls
-                # through to translate_general_call, which rejects it — inference should
-                # already have) and on the element representation; Nothing = general path.
-                match try_bce_intrinsic(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                        arg_cur_ops, arg_names, idx1) with
-                | Just r -> r
-                | Nothing ->
-                    match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
-                                               arg_cur_ops, arg_names, idx1, env.prog.fn_arities) with
-                    | Just r -> r
-                    | Nothing ->
-                        translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
-                                               arg_cur_ops, arg_names, idx1, env.prog.fn_arities)
+          translate_plain_direct_call(fname, args, call_ty, params, env, idx, cur_label,
+                                      cur_ops, captures)
+
+fn translate_plain_direct_call(fname: String, args: List typed_ast.TypedExpr,
+                               call_ty: types.Type, params: List String,
+                               env: TxEnv, idx: Int,
+                               cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
+                               captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
+  # FIX R4#3: removed the is_string_type(call_ty) rejection that was here.
+  # All IR values are i64 — String-returning user fns are i64 just like Int.
+  # The check was a placeholder from PR 1.5 that blocked capturing-IIFE-returning-String.
+  do
+    r <- translate_args(args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
+    match r with
+    | (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) ->
+        # B1: inline Vector element access. try_vector_intrinsic recognizes the
+        # op (by name), gates on full application (an under-applied call falls
+        # through to translate_general_call, which rejects it — inference should
+        # already have) and on the element representation; Nothing = general path.
+        match try_bce_intrinsic(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                arg_cur_ops, arg_names, idx1) with
+        | Just r -> r
+        | Nothing ->
+            match try_vector_intrinsic(fname, args, arg_blocks, arg_cur_lbl,
+                                       arg_cur_ops, arg_names, idx1, env.prog.fn_arities) with
+            | Just r -> r
+            | Nothing ->
+                translate_general_call(fname, call_ty, arg_blocks, arg_cur_lbl,
+                                       arg_cur_ops, arg_names, idx1, env.prog.fn_arities)
 
 fn translate_string_builtin(kind: StringBuiltin, fname: String,
                             args: List typed_ast.TypedExpr,
@@ -6292,78 +6300,7 @@ fn adt_ctors_of_typeexpr(mte: Maybe ast.TypeExpr,
   in cs
 
 # ---------------------------------------------------------------------------
-# Emission scan: the shadow-free superset of what the router routes.
-
-export fn collect_worker_callees(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> Set =
-  # The scan itself stays shape-only (a shadow-free superset of the router), and
-  # the representation gate is applied once to the result. Filtering here rather
-  # than at each insertion point keeps the ~12 collect_wc_* walkers untouched;
-  # the predicate depends only on the callee name, so the two are equivalent.
-  #
-  # This must match the routers exactly. Emitting a worker the routers decline
-  # would be dead code, but `translate_tail_chain` also chains to any name in
-  # this set — so an un-gated entry here would reintroduce the ABI mismatch on
-  # the worker-to-worker path.
-  keep_cpr_eligible(set_to_list(collect_wc_decls(decls, penv.top_level, penv.ctors, set_empty())),
-                    penv.fn_arities, set_empty())
-
-fn keep_cpr_eligible(names: List String, fn_arities: Dict FnInfo, acc: Set) -> Set =
-  match names with
-  | Nil -> acc
-  | Cons n rest ->
-      keep_cpr_eligible(rest, fn_arities,
-                        if cpr_result_known(n, fn_arities) then set_insert(n, acc) else acc)
-
-fn collect_wc_decls(decls: List typed_ast.TypedDecl, top_level: Set,
-                    ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match decls with
-  | Nil -> acc
-  | Cons d rest ->
-      collect_wc_decls(rest, top_level, ctors, collect_wc_decl(d, top_level, ctors, acc))
-
-fn collect_wc_decl(d: typed_ast.TypedDecl, top_level: Set,
-                   ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match d with
-  | typed_ast.TFnDecl _ _ _ _ _ body -> collect_wc_expr(body, top_level, ctors, acc)
-  | typed_ast.TLetDecl _ body -> collect_wc_expr(body, top_level, ctors, acc)
-  | typed_ast.TInstanceDecl _ _ methods -> collect_wc_methods(methods, top_level, ctors, acc)
-  | _ -> acc
-
-fn collect_wc_methods(methods: List typed_ast.TypedInstanceMethod, top_level: Set,
-                      ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match methods with
-  | Nil -> acc
-  | Cons m rest ->
-      match m with
-      | typed_ast.TypedInstanceMethod _ _ _ _ _ body ->
-          collect_wc_methods(rest, top_level, ctors, collect_wc_expr(body, top_level, ctors, acc))
-
-fn collect_wc_expr(e: typed_ast.TypedExpr, top_level: Set,
-                   ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match e with
-  | typed_ast.TMatch scrut arms _ _ ->
-      collect_wc_branches(arms, top_level, ctors,
-        collect_wc_expr(scrut, top_level, ctors,
-          collect_wc_scrutinee(scrut, arms, top_level, ctors, acc)))
-  | typed_ast.TCall callee args _ _ ->
-      collect_wc_exprs(args, top_level, ctors, collect_wc_expr(callee, top_level, ctors, acc))
-  | typed_ast.TIf c t el _ _ ->
-      collect_wc_expr(el, top_level, ctors,
-        collect_wc_expr(t, top_level, ctors,
-          collect_wc_expr(c, top_level, ctors, acc)))
-  | typed_ast.TTuple es _ _ -> collect_wc_exprs(es, top_level, ctors, acc)
-  | typed_ast.TLambda _ body _ _ -> collect_wc_expr(body, top_level, ctors, acc)
-  | typed_ast.TBinary _ l r _ _ ->
-      collect_wc_expr(r, top_level, ctors, collect_wc_expr(l, top_level, ctors, acc))
-  | typed_ast.TUnary _ x _ _ -> collect_wc_expr(x, top_level, ctors, acc)
-  | typed_ast.TRange a b _ _ ->
-      collect_wc_expr(b, top_level, ctors, collect_wc_expr(a, top_level, ctors, acc))
-  | typed_ast.TDo steps _ _ -> collect_wc_dosteps(steps, top_level, ctors, acc)
-  | typed_ast.TRecord _ fields _ _ -> collect_wc_fields(fields, top_level, ctors, acc)
-  | typed_ast.TGetField x _ _ _ -> collect_wc_expr(x, top_level, ctors, acc)
-  | typed_ast.TRecordUpdate base fields _ _ ->
-      collect_wc_fields(fields, top_level, ctors, collect_wc_expr(base, top_level, ctors, acc))
-  | _ -> acc
+# Emission scan node checks (`scan_node`): shadow-free supersets of what the routers route.
 
 fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                         top_level: Set, ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
@@ -6379,42 +6316,6 @@ fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMa
           else acc
       | _ -> acc
   | _ -> acc
-
-fn collect_wc_branches(arms: List typed_ast.TypedMatchBranch, top_level: Set,
-                       ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match arms with
-  | Nil -> acc
-  | Cons b rest ->
-      match b with
-      | typed_ast.TypedMatchBranch _ body ->
-          collect_wc_branches(rest, top_level, ctors, collect_wc_expr(body, top_level, ctors, acc))
-
-fn collect_wc_exprs(es: List typed_ast.TypedExpr, top_level: Set,
-                    ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match es with
-  | Nil -> acc
-  | Cons e rest -> collect_wc_exprs(rest, top_level, ctors, collect_wc_expr(e, top_level, ctors, acc))
-
-fn collect_wc_dosteps(steps: List typed_ast.TypedDoStep, top_level: Set,
-                      ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match steps with
-  | Nil -> acc
-  | Cons step rest ->
-      collect_wc_dosteps(rest, top_level, ctors,
-        match step with
-        # A `pat <- f(..)` do-bind on a Maybe/Result-returning direct call to a
-        # top-level fn routes to @f_worker (Piece 3), so f needs a worker.
-        | typed_ast.TDoBindStep _ e mode ->
-            collect_wc_expr(e, top_level, ctors, collect_wc_do_bind_callee(e, mode, top_level, acc))
-        # An SRA-eligible `let name = e` (C2) makes e's tuple producers (river_rgb/biome_rgb-style)
-        # into width-w workers even though they are never a match scrutinee. Shadow-free superset:
-        # collection consults the SAME oracle translate_do uses, so a producer worker is emitted for
-        # exactly the lets that fire (translation adds worker_callee_routable, whose
-        # cpr_result_known check is the filter collect_worker_callees applies → translation ⊆
-        # collection).
-        | typed_ast.TDoLetStep name e ->
-            collect_wc_expr(e, top_level, ctors, collect_wc_sra_producers(name, e, rest, top_level, acc))
-        | typed_ast.TDoExprStep e -> collect_wc_expr(e, top_level, ctors, acc))
 
 # Add the SRA producer callees of an eligible `let name = e` to the worker set (shadow-free).
 fn collect_wc_sra_producers(name: String, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
@@ -6442,15 +6343,6 @@ fn collect_wc_do_bind_callee(e: typed_ast.TypedExpr, mode: typed_ast.BindMode, t
   match do_bind_worker_callee(e, mode, top_level) with
   | Just name -> set_insert(name, acc)
   | Nothing -> acc
-
-fn collect_wc_fields(fields: List typed_ast.TypedRecordField, top_level: Set,
-                     ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
-  match fields with
-  | Nil -> acc
-  | Cons f rest ->
-      match f with
-      | typed_ast.TypedRecordField _ e ->
-          collect_wc_fields(rest, top_level, ctors, collect_wc_expr(e, top_level, ctors, acc))
 
 # ---------------------------------------------------------------------------
 # Tail-unboxed translation of a worker body.
@@ -6842,42 +6734,74 @@ export type WorkerPlan (..) = (callees: Set, argw: Set, decls: Dict typed_ast.Ty
                                adt_index: Dict (List (Int, Int)))
 
 export fn worker_plan(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> WorkerPlan =
-  match collect_argw_sites(decls, penv) with
-  | (producers, consumers) ->
-      WorkerPlan(callees = set_union(collect_worker_callees(decls, penv), producers),
-                 argw = consumers, decls = build_worker_decls(decls), adt_index = penv.adt_index)
+  let scan = scan_workers(decls, penv)
+  in WorkerPlan(callees = set_union(scan.matched, scan.producers), argw = scan.consumers,
+                decls = build_worker_decls(decls), adt_index = penv.adt_index)
 
-# (producers needing `@g_worker`, consumers needing `@f_argw`) over every call that has the
-# argument shape. Shadow-free like the other scans: over-collecting is harmless.
-fn collect_argw_sites(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> (Set, Set) =
-  list_fold(\ (acc, d) -> collect_argw_decl(d, penv, acc), (set_empty(), set_empty()), decls)
+# What one pass over every body finds, all shadow-free supersets of what the routers route
+# (translation ⊆ collection): `matched` callees whose result is taken apart in place, `producers`
+# needing `@g_worker` and `consumers` needing `@f_argw` at argument sites.
+type WorkerScan = (matched: Set, producers: Set, consumers: Set)
 
-fn collect_argw_decl(d: typed_ast.TypedDecl, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
-  match d with
-  | typed_ast.TFnDecl _ _ _ _ _ body -> collect_argw_expr(body, penv, acc)
-  | typed_ast.TLetDecl _ body -> collect_argw_expr(body, penv, acc)
-  | typed_ast.TInstanceDecl _ _ methods ->
-      list_fold(\ (a, m) -> collect_argw_method(m, penv, a), acc, methods)
+# `matched` is filtered by the representation gate once, at the end. The scan itself stays
+# shape-only; the predicate depends only on the callee name, so the two are equivalent. It must
+# match the routers exactly: `translate_tail_chain` chains to any name in the worker set, so an
+# un-gated entry would reintroduce the ABI mismatch on the worker-to-worker path.
+fn scan_workers(decls: List typed_ast.TypedDecl, penv: ProgEnv) -> WorkerScan =
+  let scan = list_fold(\ (acc, e) -> scan_expr(e, penv, acc),
+                       WorkerScan(matched = set_empty(), producers = set_empty(),
+                                  consumers = set_empty()),
+                       list_flat_map(typed_ast.decl_bodies, decls))
+  in scan with (matched = keep_cpr_eligible(set_to_list(scan.matched), penv.fn_arities, set_empty()))
+
+fn keep_cpr_eligible(names: List String, fn_arities: Dict FnInfo, acc: Set) -> Set =
+  match names with
+  | Nil -> acc
+  | Cons n rest ->
+      keep_cpr_eligible(rest, fn_arities,
+                        if cpr_result_known(n, fn_arities) then set_insert(n, acc) else acc)
+
+fn scan_expr(e: typed_ast.TypedExpr, penv: ProgEnv, acc: WorkerScan) -> WorkerScan =
+  list_fold(\ (a, c) -> scan_expr(c, penv, a), scan_node(e, penv, acc), typed_ast.children(e))
+
+# The checks that look at `e` itself; `scan_expr` recurses over its children.
+fn scan_node(e: typed_ast.TypedExpr, penv: ProgEnv, acc: WorkerScan) -> WorkerScan =
+  match e with
+  | typed_ast.TMatch scrut arms _ _ ->
+      acc with (matched = collect_wc_scrutinee(scrut, arms, penv.top_level, penv.ctors, acc.matched))
+  | typed_ast.TDo steps _ _ -> scan_do_steps(steps, penv, acc)
+  | typed_ast.TCall _ _ _ _ -> scan_argw_call(e, penv, acc)
   | _ -> acc
 
-fn collect_argw_method(m: typed_ast.TypedInstanceMethod, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
-  match m with
-  | typed_ast.TypedInstanceMethod _ _ _ _ _ body -> collect_argw_expr(body, penv, acc)
+fn scan_do_steps(steps: List typed_ast.TypedDoStep, penv: ProgEnv, acc: WorkerScan) -> WorkerScan =
+  match steps with
+  | Nil -> acc
+  | Cons step rest -> scan_do_steps(rest, penv, scan_do_step(step, rest, penv, acc))
 
-fn collect_argw_expr(e: typed_ast.TypedExpr, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
-  list_fold(\ (a, c) -> collect_argw_expr(c, penv, a), collect_argw_call(e, penv, acc),
-            typed_ast.children(e))
+fn scan_do_step(step: typed_ast.TypedDoStep, rest: List typed_ast.TypedDoStep, penv: ProgEnv,
+                acc: WorkerScan) -> WorkerScan =
+  match step with
+  # A `pat <- f(..)` do-bind on a Maybe/Result-returning direct call to a top-level fn routes to
+  # @f_worker (Piece 3), so f needs a worker.
+  | typed_ast.TDoBindStep _ e mode ->
+      acc with (matched = collect_wc_do_bind_callee(e, mode, penv.top_level, acc.matched))
+  # An SRA-eligible `let name = e` (C2) makes e's tuple producers (river_rgb/biome_rgb-style)
+  # into width-w workers even though they are never a match scrutinee. Collection consults the
+  # SAME oracle translate_do uses, so a producer worker is emitted for exactly the lets that fire
+  # (translation adds worker_callee_routable, whose cpr_result_known check is the filter
+  # applied to `matched` → translation ⊆ collection).
+  | typed_ast.TDoLetStep name e ->
+      acc with (matched = collect_wc_sra_producers(name, e, rest, penv.top_level, acc.matched))
+  | typed_ast.TDoExprStep _ -> acc
 
-fn collect_argw_call(e: typed_ast.TypedExpr, penv: ProgEnv, acc: (Set, Set)) -> (Set, Set) =
+fn scan_argw_call(e: typed_ast.TypedExpr, penv: ProgEnv, acc: WorkerScan) -> WorkerScan =
   let typed_ast.TCall(typed_ast.TVar f _ _) args _ _ = e else acc
       Just site = argw_shape(f, args, penv) else acc
   in
-    match acc with
-    | (producers, consumers) ->
-        (match site.kind with
-         | ExternProducer _ -> producers
-         | WorkerProducer -> set_insert(site.producer, producers),
-         set_insert(f, consumers))
+    acc with (producers = (match site.kind with
+                           | ExternProducer _ -> acc.producers
+                           | WorkerProducer -> set_insert(site.producer, acc.producers)),
+              consumers = set_insert(f, acc.consumers))
 
 # Fn and extern decls by name, first declaration wins. Entry `main` is left out:
 # it is never routed to a worker. Built once; worker_source_for reads it per name.
@@ -6932,9 +6856,9 @@ fn synth_param_vars(params: List ast.Param) -> List typed_ast.TypedExpr =
 
 # Emit the worker (+ its lifted lambdas) for one matched callee `name`, or
 # Nothing when `name` is not a top-level fn/extern (a let/ctor over-collected by
-# the shadow-free scan).  Exported: the active streaming pipeline (ir_pipeline)
-# calls this per-name so each worker is rooted+lowered like any other fn.
-export fn emit_worker_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
+# the shadow-free scan).  Reached through `emit_worker_job`, which ir_pipeline calls per job
+# so each worker is rooted+lowered like any other fn.
+fn emit_worker_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
     Result String (Maybe(sprout_ir.IRFunction, Int, List sprout_ir.IRFunction)) !{IO} =
   # Guard: `@<name>_worker` shares the LLVM symbol namespace with user fns.  If a
   # top-level fn is literally named `<name>_worker`, both emit `define @<name>_worker`

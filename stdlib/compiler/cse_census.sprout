@@ -86,19 +86,7 @@ fn add_entry_count(entry: (String, Int), acc: Dict Int) -> Dict Int =
 
 fn body_list(prog: typed_ast.TypedProgram) -> List typed_ast.TypedExpr =
   match prog with
-  | typed_ast.TypedProgram decls -> list_flat_map(decl_bodies, decls)
-
-fn decl_bodies(d: typed_ast.TypedDecl) -> List typed_ast.TypedExpr =
-  match d with
-  | typed_ast.TFnDecl _ _ _ _ _ body -> [body]
-  | typed_ast.TExternFnDecl _ _ _ _ -> []
-  | typed_ast.TLetDecl _ value -> [value]
-  | typed_ast.TInstanceDecl _ _ methods -> list_map(method_body, methods)
-  | typed_ast.TPassThrough _ -> []
-
-fn method_body(m: typed_ast.TypedInstanceMethod) -> typed_ast.TypedExpr =
-  match m with
-  | typed_ast.TypedInstanceMethod _ _ _ _ _ body -> body
+  | typed_ast.TypedProgram decls -> list_flat_map(typed_ast.decl_bodies, decls)
 
 fn body_keys(body: typed_ast.TypedExpr) -> Dict Int =
   collect(body, dict_empty())

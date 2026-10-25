@@ -315,7 +315,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   commit the same patch recovered nothing, and on master as is it gains nothing, so the win is
   unstable. Fix: emit captureless closures as static constants, as string literals are.
 - [ ] `P3` **The CPR worker set is not closed over tail calls, so a wrapper's worker can box.**
-  `collect_worker_callees` admits only callees some `match` scrutinises. A wrapper whose tail
+  `scan_workers` admits only callees some `match` scrutinises. A wrapper whose tail
   calls a function nothing else matches gets a worker, but `translate_tail_chain` finds no callee
   worker and falls to `translate_tail_catchall`: box, then repack. Seen in
   `lexer.tokenize_source_worker` (golden `11_compiler_bundle`), where it costs nothing, since
@@ -330,7 +330,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 - [ ] `P3` **Argument CPR reaches only calls `translate_direct_call` lowers.** A consumer call as a
   `match` scrutinee (`match maybe_or_else(vec_get(i, v), fb) with`), in a worker's tail chain, or
   as a routed producer's argument goes through `translate_args`, so its argument is boxed; and
-  `collect_argw_sites` still emits an `@f_argw` for such a site, which nothing calls. Fix: a
+  `scan_workers` still emits an `@f_argw` for such a site, which nothing calls. Fix: a
   worker unboxed on both sides, `@f_argw_worker`. `docs/arg-cpr-v0.md` §2.
 - [ ] `P3` **A recursive consumer's own loop boxes its argument.** In
   `count(n, m) = match m with | Just x -> count(n + 1, step(x)) | …` the self-call stays a call to
