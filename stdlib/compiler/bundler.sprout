@@ -120,9 +120,7 @@ type ImportBinding =
 # `foreign` is the private externs declared by OTHER modules, by name; see
 # `foreign_externs`.
 #
-# `module_name` is the module's header name, for the one reference rule that depends on who
-# refers (`guard_private_extern`).
-type ResolveCtx = (module_name: String, value_locals: Dict String, type_locals: Dict String,
+type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
                    class_locals: Dict String,
                    unqual_values: Dict String, unqual_types: Dict String,
                    unqual_classes: Dict String,
@@ -191,7 +189,7 @@ fn ctx_with_unqual_class(c: ResolveCtx, name: String, canonical: String) -> Reso
   c with (unqual_classes = dict_set(name, canonical, c.unqual_classes))
 
 fn empty_resolve_ctx() -> ResolveCtx =
-  ResolveCtx(module_name = "", value_locals = dict_empty(), type_locals = dict_empty(),
+  ResolveCtx(value_locals = dict_empty(), type_locals = dict_empty(),
              class_locals = dict_empty(),
              unqual_values = dict_empty(), unqual_types = dict_empty(),
              unqual_classes = dict_empty(), alias_val_exports = dict_empty(),
@@ -979,13 +977,12 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
       | Just own_syms ->
           apply_imports_to_ctx(specs, all_symbols, stdlib_root, extra_roots,
             empty_resolve_ctx() with (
-              module_name = mod_name,
               value_locals = sym_value_locals(own_syms),
               type_locals = sym_type_locals(own_syms),
               class_locals = sym_class_locals(own_syms),
               canonical_names = canonical,
               prelude = prelude,
-              foreign = foreign_externs(sym_extern_names(own_syms), externs)))
+              foreign = foreign_externs(own_externs_of(mod_name, sym_extern_names(own_syms)), externs)))
 
 # One extern declaration. `in_prelude` is the prelude or the `no_prelude` floor, found by
 # path, since a headerless `no_prelude` entry also has module ""; their externs are
@@ -1153,6 +1150,12 @@ fn def_bodies(name: String, defs: Dict (List ast.TypeExpr)) -> List ast.TypeExpr
   match dict_get(name, defs) with
   | Just bodies -> bodies
   | Nothing -> Nil
+
+# The externs `mod_name` may reach as its own: those it declares, plus `unsafe_pure` when it
+# is on `source.unsafe_pure_users` (docs/unsafe-primitives-v0.md §4.2, rule 1).
+fn own_externs_of(mod_name: String, declared: List String) -> List String =
+  if str_list_member(mod_name, source.unsafe_pure_users) then Cons(source.unsafe_pure_name, declared)
+  else declared
 
 # The private externs a module may NOT reach, by name. `own` is every extern the module
 # declares itself. Two declarations of a name must agree (infer.extern_decl_ok), so
@@ -1672,15 +1675,11 @@ fn guard_canonical(ctx: ResolveCtx, name: String) -> String =
 # ELSEWHERE, so an own-module reference stays bare. Marked for the reason
 # `guard_canonical` marks.
 #
-# `unsafe_pure` is the exception: a module on `source.unsafe_pure_users` reaches it, and
-# nothing else does (docs/unsafe-primitives-v0.md §4.2, rule 1).
+# The `unsafe_pure` exemption is decided per module, in `own_externs_of`.
 fn guard_private_extern(ctx: ResolveCtx, name: String) -> String =
   match dict_get(name, ctx.foreign) with
   | Nothing -> name
-  | Just entry ->
-      if name == source.unsafe_pure_name && str_list_member(ctx.module_name, source.unsafe_pure_users)
-      then name
-      else source.mark_private_extern(entry.declarer, name, entry.writes_local)
+  | Just entry -> source.mark_private_extern(entry.declarer, name, entry.writes_local)
 
 # The head's canonical name: this module's own top-level values first, then names
 # imported unqualified.  Same two dictionaries `bare_value_name` consults, in
