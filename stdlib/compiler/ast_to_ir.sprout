@@ -5081,8 +5081,8 @@ fn maybe_tco(name: String, f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir
 # each same-prototype cycle partner (computed in ir_pipeline from the call graph).
 # Runs PRE-rooting (like self-TCO): once a tail call is an IRTailCall (not a GC
 # trigger that exposes its heap args), ir_rooting emits no accumulating root.
-# Phase A: SKIP functions that are ALSO self-TCO'd (blocks already restructured);
-# scram's hi_loop/hi_step are not self-recursive so they are covered.
+# A function that is ALSO self-TCO'd is rewritten too: its IRTailCall carries the
+# loop's stack save, restored before the jump (the root allocas of the iteration).
 # ===========================================================================
 
 # True iff the function still calls ITSELF, which means non-tail: self-TCO turns
@@ -5142,16 +5142,25 @@ fn mutual_untag(tagged: List (String, (String, List String, String, String))) ->
   | Cons (_g, hit) rest -> Cons(hit, mutual_untag(rest))
 
 # Rewrite a hit-predecessor block: drop the IRCall + its terminator, append the
-# IRTailCall (musttail; ret).  sp_save is "" — Phase A skips self-TCO'd fns, so
-# there is never an enclosing loop stack to restore.
-fn mutual_rewrite_block(b: sprout_ir.IRBlock, by_pred: Dict (String, List String, String)) ->
+# IRTailCall (musttail; ret).  sp_save is the self-TCO loop's stack save ("" when
+# the fn has no loop): the tail call frees the iteration's root allocas first.
+fn mutual_rewrite_block(b: sprout_ir.IRBlock, by_pred: Dict (String, List String, String), sp: String) ->
     sprout_ir.IRBlock =
   match dict_get(tco_block_label(b), by_pred) with
   | Nothing -> b
   | Just (g, args, call_result) ->
       sprout_ir.IRBlock(tco_block_label(b),
         list_append(tco_filter_call_and_term(tco_block_ops(b), call_result),
-                    Cons(sprout_ir.IRTailCall(call_result, g, args, ""), Nil)))
+                    Cons(sprout_ir.IRTailCall(call_result, g, args, sp), Nil)))
+
+# The stack-save name of f's self-TCO loop, or "" when it has none.
+fn mutual_entry_sp(blocks: List sprout_ir.IRBlock) -> String =
+  maybe_with_default("", find_map(\b -> find_map(tco_entry_sp, tco_block_ops(b)), blocks))
+
+fn tco_entry_sp(op: sprout_ir.IROp) -> Maybe String =
+  match op with
+  | sprout_ir.IRTcoEntry _ sp -> Just(sp)
+  | _ -> Nothing
 
 # pred label -> (callee, args, call_result) of its first hit.
 fn mutual_hits_by_pred(tagged: List (String, (String, List String, String, String)),
@@ -5168,16 +5177,19 @@ fn mutual_assemble(blocks: List sprout_ir.IRBlock,
                    tagged: List (String, (String, List String, String, String))) ->
     List sprout_ir.IRBlock =
   tco_prune_dead_blocks(
-    tco_fix_all_phis(list_map(\b -> mutual_rewrite_block(b, by_pred), blocks), mutual_untag(tagged)))
-  where by_pred = mutual_hits_by_pred(tagged, dict_empty())
+    tco_fix_all_phis(list_map(\b -> mutual_rewrite_block(b, by_pred, sp), blocks), mutual_untag(tagged)))
+where
+  by_pred = mutual_hits_by_pred(tagged, dict_empty())
+  sp = mutual_entry_sp(blocks)
 
 # Rewrite f's eligible mutual tail calls to IRTailCall.  No-op unless ret is i64,
-# f is not self-TCO'd, and at least one eligible tail call survives the guards.
+# f has no non-tail self-call, and at least one eligible tail call survives the
+# guards.  A self-TCO'd f is rewritten too: its tail calls restore the loop's stack.
 export fn mutual_tco_rewrite_fn(f: sprout_ir.IRFunction, targets: List (String, Int)) ->
     sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      if ret_ty == "i64" && !sprout_ir.blocks_have_op(sprout_ir.is_tco_entry, blocks) && !mutual_has_self_call(name, blocks)
+      if ret_ty == "i64" && !mutual_has_self_call(name, blocks)
       then mutual_finish_rewrite(name, params, ret_ty, blocks, mutual_collect_hits(targets, blocks), f)
       else f
 

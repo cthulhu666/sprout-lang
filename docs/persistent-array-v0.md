@@ -154,7 +154,8 @@ Three more results from the same runs:
 - **All four kernels only touch the newest version.** None reads an old one, so persistence
   buys them nothing, and the version check and history of a persistent array are pure cost.
 - **The BFS is one self-recursive function.** Written as two, a visit step and a queue step, it
-  ran out of GC roots at w = 1,000 (BACKLOG P3 **Phase B mutual-TCO**).
+  ran out of GC roots at w = 1,000 (the self-TCO'd member's mutual edge was a plain call; fixed,
+  `docs/mutual-tco-phase-b-v0.md` §5a).
 
 ### 3.3 Memory
 

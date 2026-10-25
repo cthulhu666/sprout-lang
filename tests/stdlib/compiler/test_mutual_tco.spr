@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
 
@@ -117,6 +118,157 @@ fn ops_phi_count(ops: List sprout_ir.IROp) -> Int =
       | sprout_ir.IRPhi _ _ inc -> list_length(inc)
       | _ -> ops_phi_count(rest)
 
+# Pre-TCO IR for a function with a self-tail-call and a partner tail-call:
+#   s(x, y) = if x <= 0 then y
+#             else if x == 1 then s(x - 1, y)      -- selfb
+#             else b(x - 1, y)                      -- partnerb
+fn make_self_loop_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.s",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%t0", 0),
+      Cons(sprout_ir.IRICmp("%t1", "sle", sprout_ir.param_ssa("x"), "%t0"),
+      Cons(sprout_ir.IRCondBr("%t1", "thenb", "midb"), Nil)))),
+    Cons(sprout_ir.IRBlock("thenb",
+      Cons(sprout_ir.IRBr("joinb"), Nil)),
+    Cons(sprout_ir.IRBlock("midb",
+      Cons(sprout_ir.IRConst("%one", 1),
+      Cons(sprout_ir.IRICmp("%t2", "eq", sprout_ir.param_ssa("x"), "%one"),
+      Cons(sprout_ir.IRCondBr("%t2", "selfb", "partnerb"), Nil)))),
+    Cons(sprout_ir.IRBlock("selfb",
+      Cons(sprout_ir.IRISub("%xs", sprout_ir.param_ssa("x"), "%one"),
+      Cons(sprout_ir.IRCall("%rs", sprout_ir.IRTHeap, "main.s", Cons("%xs", Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRBr("joinb"), Nil)))),
+    Cons(sprout_ir.IRBlock("partnerb",
+      Cons(sprout_ir.IRISub("%xp", sprout_ir.param_ssa("x"), "%one"),
+      Cons(sprout_ir.IRCall("%rp", sprout_ir.IRTHeap, "main.b", Cons("%xp", Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRBr("joinb"), Nil)))),
+    Cons(sprout_ir.IRBlock("joinb",
+      Cons(sprout_ir.IRPhi("%m", "i64",
+             Cons((sprout_ir.param_ssa("y"), "thenb"), Cons(("%rs", "selfb"), Cons(("%rp", "partnerb"), Nil)))),
+      Cons(sprout_ir.IRRet("%m"), Nil))),
+    Nil)))))))
+
+# make_self_loop_fn whose partner edge first calls an unknown fn (a GC trigger)
+# while the heap param `y` is still needed: `y` is rooted across `main.mk`.
+fn make_rooted_self_loop_fn() -> sprout_ir.IRFunction =
+  match make_self_loop_fn() with
+  | sprout_ir.IRFunction name params ret blocks ->
+      sprout_ir.IRFunction(name, params, ret, list_map(alloc_in_partner, blocks))
+
+fn alloc_in_partner(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
+  match b with
+  | sprout_ir.IRBlock "partnerb" _ ->
+      sprout_ir.IRBlock("partnerb",
+        Cons(sprout_ir.IRConst("%one2", 1),
+        Cons(sprout_ir.IRISub("%xp", sprout_ir.param_ssa("x"), "%one2"),
+        Cons(sprout_ir.IRCall("%h", sprout_ir.IRTHeap, "main.mk", Cons("%xp", Nil)),
+        Cons(sprout_ir.IRCall("%rp", sprout_ir.IRTHeap, "main.b", Cons("%h", Cons(sprout_ir.param_ssa("y"), Nil))),
+        Cons(sprout_ir.IRBr("joinb"), Nil))))))
+  | _ -> b
+
+# Pre-TCO IR with NO base case: every path tail-calls, so the join phi holds only
+# the two tail-call results:
+#   n(x, y) = if x > 0 then n(x - 1, y) else b(x, y)
+fn make_no_base_fn() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("main.n",
+    Cons(("x", sprout_ir.IRTScalar), Cons(("y", sprout_ir.IRTHeap), Nil)),
+    "i64",
+    Cons(sprout_ir.IRBlock("entry",
+      Cons(sprout_ir.IRConst("%t0", 0),
+      Cons(sprout_ir.IRICmp("%t1", "sgt", sprout_ir.param_ssa("x"), "%t0"),
+      Cons(sprout_ir.IRCondBr("%t1", "selfb", "partnerb"), Nil)))),
+    Cons(sprout_ir.IRBlock("selfb",
+      Cons(sprout_ir.IRConst("%one", 1),
+      Cons(sprout_ir.IRISub("%xs", sprout_ir.param_ssa("x"), "%one"),
+      Cons(sprout_ir.IRCall("%rs", sprout_ir.IRTHeap, "main.n", Cons("%xs", Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRBr("joinb"), Nil))))),
+    Cons(sprout_ir.IRBlock("partnerb",
+      Cons(sprout_ir.IRCall("%rp", sprout_ir.IRTHeap, "main.b", Cons(sprout_ir.param_ssa("x"), Cons(sprout_ir.param_ssa("y"), Nil))),
+      Cons(sprout_ir.IRBr("joinb"), Nil))),
+    Cons(sprout_ir.IRBlock("joinb",
+      Cons(sprout_ir.IRPhi("%m", "i64", Cons(("%rs", "selfb"), Cons(("%rp", "partnerb"), Nil))),
+      Cons(sprout_ir.IRRet("%m"), Nil))),
+    Nil)))))
+
+# Self-TCO, then mutual-TCO, as the pipeline orders them (both pre-rooting).
+fn self_then_mutual(f: sprout_ir.IRFunction) -> sprout_ir.IRFunction =
+  match ast_to_ir.tco_rewrite(f, 700) with
+  | (tco_f, _) -> ast_to_ir.mutual_tco_rewrite_fn(tco_f, Cons(("main.b", 2), Nil))
+
+fn self_then_mutual_rooted(f: sprout_ir.IRFunction) -> sprout_ir.IRFunction =
+  ir_rooting.rewrite_one_fn_with_summary(
+    self_then_mutual(f), dict_from_list([(sprout_ir.ir_fn_name(f), 800)]), dict_empty())
+
+fn lower_rooted(f: sprout_ir.IRFunction, next_idx: Int) -> String =
+  ir_lowering.lower_fn_with_table(
+    ir_rooting.rewrite_one_fn_with_summary(f, dict_from_list([(sprout_ir.ir_fn_name(f), next_idx)]), dict_empty()),
+    dict_empty())
+
+# Lines `a` then `b` appear on consecutive lines of the lowered text.
+fn adjacent_lines(lines: List String, a: String, b: String) -> Bool =
+  match lines with
+  | [l1 | rest] ->
+      match rest with
+      | [l2 | _] ->
+          if str_find(l1, a) != -1 && str_find(l2, b) != -1 then true
+          else adjacent_lines(rest, a, b)
+      | [] -> false
+  | [] -> false
+
+fn count_substr(haystack: String, needle: String) -> Int =
+  match string.find(haystack, needle) with
+  | Nothing -> 0
+  | Just pos -> 1 + count_substr(string.drop(haystack, pos + string.length(needle)), needle)
+
+# Root-stack depth on reaching the first line that contains `stop`: each push is
+# +1, each `pop_roots(i64 N)` is -N.
+fn root_depth_before(lines: List String, stop: String, depth: Int) -> Int =
+  match lines with
+  | Nil -> -1000
+  | Cons l rest ->
+      if str_find(l, stop) != -1 then depth
+      else if str_find(l, "@sprout_gc_push_i64_root") != -1 then root_depth_before(rest, stop, depth + 1)
+      else root_depth_before(rest, stop, depth - pop_count(l))
+
+fn pop_count(line: String) -> Int =
+  match string.find(line, "@sprout_gc_pop_roots(i64 ") with
+  | Nothing -> 0
+  | Just pos ->
+      let tail = string.drop(line, pos + string.length("@sprout_gc_pop_roots(i64 "))
+      in
+        match string.find(tail, ")") with
+        | Nothing -> 0
+        | Just stop ->
+            match parse_int(string.take(tail, stop)) with
+            | Nothing -> 0
+            | Just n -> n
+
+fn is_terminator(op: sprout_ir.IROp) -> Bool =
+  match op with
+  | sprout_ir.IRBr _ -> true
+  | sprout_ir.IRCondBr _ _ _ -> true
+  | sprout_ir.IRRet _ -> true
+  | sprout_ir.IRTcoBack _ _ _ -> true
+  | sprout_ir.IRTailCall _ _ _ _ -> true
+  | _ -> false
+
+fn ends_terminated(ops: List sprout_ir.IROp) -> Bool =
+  match ops with
+  | Nil -> false
+  | Cons op rest ->
+      match rest with
+      | Nil -> is_terminator(op)
+      | _ -> ends_terminated(rest)
+
+fn all_blocks_terminated(blocks: List sprout_ir.IRBlock) -> Bool =
+  match blocks with
+  | Nil -> true
+  | Cons b rest ->
+      match b with
+      | sprout_ir.IRBlock _ ops -> ends_terminated(ops) && all_blocks_terminated(rest)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -140,11 +292,72 @@ fn main() -> Unit !{IO} =
     assert_true(state, "arity mismatch: plain call retained",
       string.contains(bir, "call i64 @main.b"))
 
-    # 3. Self-TCO'd function → skipped in Phase A.
+    # 3. Self-TCO'd function → its mutual edge is a musttail too, after the loop's
+    # stackrestore (the sp is the IRTcoEntry's).
     let stc = ast_to_ir.mutual_tco_rewrite_fn(make_self_tco_fn(), Cons(("main.b", 2), Nil))
     let sir = ir_lowering.lower_fn_with_table(stc, dict_empty())
-    assert_true(state, "self-TCO'd fn: mutual edge skipped (no musttail)",
-      string.contains(sir, "musttail") == false)
+    let slines = string.split(sir, "\n")
+    assert_true(state, "self-TCO'd fn: mutual edge is musttail",
+      string.contains(sir, "musttail call i64 @main.b"))
+    assert_true(state, "self-TCO'd fn: stackrestore(sp) immediately before the musttail",
+      adjacent_lines(slines, "call void @llvm.stackrestore(ptr %sp)", "musttail call i64 @main.b"))
+    assert_true(state, "self-TCO'd fn: ret immediately after the musttail",
+      adjacent_lines(slines, "musttail call i64 @main.b", "ret i64 %r"))
+    assert_true(state, "self-TCO'd fn: plain call to partner is gone",
+      string.contains(sir, "%r = call i64 @main.b") == false)
+
+    # 3a. Same fn through rooting: no IRRoot, so the stack save/restore pair is
+    # cleared from the entry, the back-edge and the tail call alike.
+    let sir_rooted = lower_rooted(stc, 600)
+    assert_true(state, "self-TCO'd fn, no roots: still musttail",
+      string.contains(sir_rooted, "musttail call i64 @main.b"))
+    assert_true(state, "self-TCO'd fn, no roots: no stackrestore left",
+      string.contains(sir_rooted, "stackrestore") == false)
+    assert_true(state, "self-TCO'd fn, no roots: no stacksave left",
+      string.contains(sir_rooted, "stacksave") == false)
+
+    # 3a'. A self loop with a base case, a self edge and a partner edge, run the
+    # way the pipeline does: self-TCO, then mutual-TCO, then rooting.
+    let loop_fn = self_then_mutual(make_self_loop_fn())
+    let loop_ir = ir_lowering.lower_fn_with_table(loop_fn, dict_empty())
+    let loop_lines = string.split(loop_ir, "\n")
+    assert_true(state, "self loop + partner: partner edge is musttail",
+      string.contains(loop_ir, "musttail call i64 @main.b"))
+    assert_true(state, "self loop + partner: stackrestore(sp) immediately before the musttail",
+      adjacent_lines(loop_lines, "call void @llvm.stackrestore(ptr", "musttail call i64 @main.b"))
+    assert_true(state, "self loop + partner: one stacksave, a restore on the back-edge and one on the tail call",
+      count_substr(loop_ir, "@llvm.stacksave") == 1 && count_substr(loop_ir, "@llvm.stackrestore") == 2)
+    assert_true(state, "self loop + partner: back-edge kept",
+      string.contains(loop_ir, "br label %tco_loop"))
+    assert_true(state, "self loop + partner: join phi keeps only the base-case incoming",
+      phi_incoming_count(fn_blocks(loop_fn), "joinb") == 1)
+
+    # 3a''. Premise: the root stack is empty at the tail call.  stackrestore frees
+    # the root allocas, so a root still pushed there would leave a dangling slot.
+    let rooted_fn = self_then_mutual_rooted(make_rooted_self_loop_fn())
+    let rooted_ir = ir_lowering.lower_fn_with_table(rooted_fn, dict_empty())
+    let rooted_lines = string.split(rooted_ir, "\n")
+    assert_true(state, "rooted self loop: the heap param is rooted across the alloc",
+      string.contains(rooted_ir, "@sprout_gc_push_i64_root"))
+    assert_true(state, "rooted self loop: stackrestore kept (the fn has roots)",
+      adjacent_lines(rooted_lines, "call void @llvm.stackrestore(ptr", "musttail call i64 @main.b"))
+    assert_true(state, "rooted self loop: no root pushed at the musttail (pushes - pops == 0)",
+      root_depth_before(rooted_lines, "musttail call i64 @main.b", 0) == 0)
+
+    # 3a'''. No base case: both successors of the entry branch leave the function,
+    # so the ret-feeding join loses every incoming and must go.
+    let nb = self_then_mutual(make_no_base_fn())
+    let nb_ir = ir_lowering.lower_fn_with_table(nb, dict_empty())
+    assert_true(state, "no base case: partner edge is musttail",
+      string.contains(nb_ir, "musttail call i64 @main.b"))
+    assert_true(state, "no base case: self edge is a back-edge",
+      string.contains(nb_ir, "br label %tco_loop"))
+    assert_true(state, "no base case: emptied join block is gone (no phi, no reference)",
+      string.contains(nb_ir, "joinb") == false && string.contains(nb_ir, " phi ") == false)
+    assert_true(state, "no base case: every block ends in a terminator",
+      all_blocks_terminated(fn_blocks(nb)))
+    assert_true(state, "no base case: ends in IRTcoBack or musttail only (no ret of a phi)",
+      string.contains(nb_ir, "ret i64 %m") == false)
 
     # 3b. Non-tail self-call → skipped (tailcallelim would break the musttail).
     let slf = ast_to_ir.mutual_tco_rewrite_fn(make_self_calling_fn(), Cons(("main.b", 2), Nil))

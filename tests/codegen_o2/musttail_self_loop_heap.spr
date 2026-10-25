@@ -1,0 +1,22 @@
+# A self-tail-recursive function that is also in a heterogeneous mutual tail cycle,
+# and roots a heap value across an allocation.
+#
+# `hp` self-loops (a TCO back-edge) and tail-calls `hq`; the arities differ, so
+# Phase B pads them to `hp$u`/`hq$u` and the partner edge becomes a `musttail`
+# emitted after the loop's `stackrestore`. Because `hp$u` has root allocas the
+# stack save/restore pair stays, so the `stackrestore` sits right before the
+# `musttail call` and its `ret`.
+#
+# Only -O2 optimises across that shape, and `just test` links test IR at -O0, so
+# this file is the gate that sees it.
+
+fn hp(n: Int, acc: List Int) -> Int =
+  if n <= 0 then list_length(acc)
+  else if n > 50 then hp(n - 1, Cons(n, acc))
+  else hq(n, acc, Cons(n, acc))
+
+fn hq(n: Int, acc: List Int, acc2: List Int) -> Int =
+  hp(n - 1, acc2)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(hp(100, Nil)))

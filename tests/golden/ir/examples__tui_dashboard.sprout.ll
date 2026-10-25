@@ -11820,7 +11820,7 @@ tco_loop:
   %p$acc = load i64, ptr %t$23
   %p$pbpad$4 = load i64, ptr %t$24
   %p$pbpad$5 = load i64, ptr %t$25
-  %t$0 = call i64 @stdlib.tui.screen.screen_cols(i64 %p$s)
+  %t$0 = call i64 @stdlib.tui.screen.screen_cols(i64 %p$s) noinline
   %t$1 = icmp sge i64 %p$col, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$19 = trunc i64 %t$2 to i1
@@ -11834,22 +11834,16 @@ else_3:
   %t$29 = alloca i64
   store i64 %p$acc, ptr %t$29
   %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$5 = call i64 @stdlib.tui.screen.cell_changed(i64 %p$s, i64 %p$col, i64 %p$row)
+  %t$5 = call i64 @stdlib.tui.screen.cell_changed(i64 %p$s, i64 %p$col, i64 %p$row) noinline
   %t$18 = trunc i64 %t$5 to i1
   %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$18, label %then_6, label %else_6
 then_6:
   %t$8 = add i64 0, 0
   %t$9 = add i64 0, 0
-  %t$32 = alloca i64
-  store i64 %p$s, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
-  %t$34 = alloca i64
-  store i64 %p$acc, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$10 = call i64 @stdlib.tui.screen.start_run$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %t$8, i64 %t$9)
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %join_6
+  call void @llvm.stackrestore(ptr %t$26)
+  %t$10 = musttail call i64 @stdlib.tui.screen.start_run$u(i64 %p$s, i64 %p$row, i64 %p$col, i64 %p$acc, i64 %t$8, i64 %t$9) noinline
+  ret i64 %t$10
 else_6:
   %t$11 = add i64 0, 1
   %t$12$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$col, i64 %t$11)
@@ -11872,11 +11866,8 @@ ovfok_12:
   store i64 %t$16, ptr %t$25
   call void @llvm.stackrestore(ptr %t$26)
   br label %tco_loop
-join_6:
-  %t$7 = phi i64 [%t$10, %then_6]
-  br label %join_3
 join_3:
-  %t$4 = phi i64 [%p$acc, %then_3], [%t$7, %join_6]
+  %t$4 = phi i64 [%p$acc, %then_3]
   ret i64 %t$4
 }
 

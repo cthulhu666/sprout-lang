@@ -1,0 +1,85 @@
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.string as string
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.typed_ast as typed_ast
+
+# IR shape of a function that is both self-tail-recursive and in a heterogeneous
+# mutual tail cycle (docs/mutual-tco-phase-b-v0.md §5a):
+#   hp/2 <-> hq/3, hp self-recurses and roots its heap param across an allocation.
+# Phase B pads them to hp$u/hq$u; hp$u is self-TCO'd, so its partner edge must be
+# `stackrestore` + `musttail`, not a plain call.
+#
+# Like test_ir_codegen_cpr_argw.spr, the harness typechecks WITHOUT the prelude, so
+# the fixture declares its own list type. It runs the production streaming
+# pipeline, which is where Phase B and the mutual-TCO rewrite live.
+
+fn compile_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ir_pipeline.compile_program_streaming(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: " ++ msg
+                | Ok ir -> ir
+
+# The `define` block starting at `header`, up to its closing brace; "" when absent.
+fn define_block(out: String, header: String) -> String =
+  let start = str_find(out, header)
+  in
+    if start == -1 then ""
+    else
+      let rest = str_slice(out, start, str_len(out) - start)
+          stop = str_find(rest, "\n}")
+      in if stop == -1 then rest else str_slice(rest, 0, stop)
+
+# Line `a` is immediately followed by line `b`.
+fn adjacent_lines(lines: List String, a: String, b: String) -> Bool =
+  match lines with
+  | [l1 | rest] ->
+      match rest with
+      | [l2 | _] ->
+          if has(l1, a) && has(l2, b) then true
+          else adjacent_lines(rest, a, b)
+      | [] -> false
+  | [] -> false
+
+fn has(out: String, needle: String) -> Bool = str_find(out, needle) != -1
+
+fn heap_src() -> String =
+  "type L =\n  | N\n  | C Int L\n\n"
+    ++ "fn hp(n: Int, acc: L) -> Int =\n"
+    ++ "  if n <= 0 then 0\n"
+    ++ "  else if n > 50 then hp(n - 1, C(n, acc))\n"
+    ++ "  else hq(n, acc, C(n, acc))\n\n"
+    ++ "fn hq(n: Int, acc: L, acc2: L) -> Int =\n"
+    ++ "  hp(n - 1, acc2)\n"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    out <- compile_or_msg(heap_src())
+    let hp = define_block(out, "define i64 @hp$u(")
+    let lines = string.split(hp, "\n")
+    assert_true(state, "fixture compiles", !str_starts_with(out, "ERR: "))
+    assert_true(state, "hp$u is emitted as the self-TCO'd member", has(hp, "br label %tco_loop"))
+    assert_true(state, "hp$u roots its heap param across the allocation",
+      has(hp, "@sprout_gc_push_i64_root"))
+    assert_true(state, "hp$u keeps a stack save for its root allocas", has(hp, "@llvm.stacksave"))
+    assert_true(state, "hp$u: partner edge is musttail to hq$u", has(hp, "musttail call i64 @hq$u("))
+    assert_true(state, "hp$u: stackrestore immediately before the musttail",
+      adjacent_lines(lines, "call void @llvm.stackrestore(ptr", "musttail call i64 @hq$u("))
+    assert_true(state, "hp$u: ret immediately after the musttail",
+      adjacent_lines(lines, "musttail call i64 @hq$u(", "ret i64"))
+    assert_true(state, "hp$u: no plain call to hq$u remains", !has(hp, "= call i64 @hq$u("))
+    summary(state)

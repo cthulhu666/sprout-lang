@@ -1,0 +1,30 @@
+# A same-arity mutual tail cycle whose member is self-TCO'd AND still calls itself
+# non-tail.
+#
+# `f` tail-calls itself (a TCO back-edge), tail-calls `g`, and recurses into itself
+# non-tail. The direct self-call is what tailcallelim turns into an accumulator
+# loop, putting the accumulate between a `musttail` and its `ret`, which is illegal
+# and fatal at -O2. So `f`'s edge to `g` must stay a plain call even though `f` is
+# self-TCO'd; `g`'s edge to `f` is a `musttail`.
+#
+# Only -O2 runs that pass, and `just test` links test IR at -O0, so this file is
+# the gate that sees it.
+
+type Tree (..) =
+  | Leaf
+  | Pair Tree Tree
+  | Nest (List Tree)
+
+fn f(t: Tree, acc: Int) -> Int =
+  match t with
+  | Leaf -> acc
+  | Pair a b -> f(b, f(a, acc) + 1)
+  | Nest xs -> g(xs, acc)
+
+fn g(xs: List Tree, acc: Int) -> Int =
+  match xs with
+  | [] -> acc
+  | [x | rest] -> f(Pair(x, Nest(rest)), acc)
+
+fn main() -> Unit !{IO} =
+  print(int_to_string(f(Pair (Leaf, Nest([Leaf, Pair (Leaf, Leaf)])), 0)))

@@ -157,7 +157,8 @@ Two guards, because the function can become self-recursive two different ways:
 
 1. **We emitted the self-call.** `mutual_tco_rewrite_fn` skips a function that still calls
    itself (`mutual_has_self_call`). Any surviving self-call is non-tail — self-TCO already
-   turned the tail ones into `IRTcoBack`, and functions it restructured are skipped anyway.
+   turned the tail ones into `IRTcoBack`. A self-TCO'd function with no surviving self-call is
+   rewritten like any other, its `IRTailCall` carrying the loop's `sp_save` (§4b).
    Cost: 4 edges in the compiler's own seed, carrier → callee —
    `types.type_to_string_aux → types.thunk_to_string`,
    `infer.te_type_names_list → infer.te_type_names`,
@@ -254,7 +255,9 @@ In `tco_rewrite` (which already walks tail calls per function): a tail call on a
 **identical prototype**) → rewrite the `IRCall`+`IRRet` (or `IRCall`+phi-to-`IRRet`) into an
 `IRTailCall`, reusing the same phi-tracing/tail-safety machinery the self case uses. `sp_save` is set only when the enclosing function is *also*
 self-TCO'd (has a `tco_loop` with a live `stacksave`), so its per-iteration root allocas are
-freed before the jump — mirroring the retired backend.
+freed before the jump — mirroring the retired backend. Rooting empties it, like the loop's own
+`sp_save`, in a function it gives no `IRRoot`; the root stack is empty at the jump, since
+`IRTailCall` uses its args only up to the call and the pops precede it.
 
 ### 4c. Rooting classification (`ir_rooting`) — parallels `IRTcoBack`
 
