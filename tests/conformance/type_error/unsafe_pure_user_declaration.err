@@ -1,0 +1,1 @@
+`unsafe_pure` may be declared only in `stdlib.unsafe`

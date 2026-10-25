@@ -74,7 +74,8 @@ Non-goals:
   does not close §1's hole. It moves the hole from "import a module" to "declare the extern", which
   is deliberate FFI and visible in the source. That plays the role Rust's `unsafe` plays at an FFI
   call (§3). Rust's `unsafe` is a checked marker, though, and `extern fn` here is only a
-  declaration. Gating the declaration is the open question in BACKLOG P1 **Unsafe primitives**.
+  declaration. Gating the declaration is the open question in BACKLOG P3 **User externs can
+  declare a C function pure**.
 - **Qualified call sites.** The symbol stays bare at link time, and so does the call (§4.2).
 - **Selective import lists.** They keep having no effect on externs, exported or not. Naming an
   extern in one stays accepted. Making a list hide an exported extern needs a new binding path,
@@ -149,7 +150,7 @@ without breaking anything this proposal adds.
   duplicate `(raw, Box(raw))` and `id(raw)` open, and Sprout has no `Copy` or `copy` to exempt
   harmless fields. That argument is unchanged.
 - **Representation.** Type the mutating externs (`vector_mutset`, `vector_push`,
-  `vector_truncate`, `linvec_set`, `linvec_push`, `linvec_truncate`) on an opaque type that only
+  `vector_truncate`) on an opaque type that only
   their module can name, such as a private `wrap Raw a = Vector a` in `stdlib.mutable`. Then a
   user's redeclaration over `Vector a`
   fails `extern_decl_ok`'s signature check. It loses for two reasons. The check fires only while
@@ -238,5 +239,5 @@ lands. A call that breaks gets §4.4's diagnostic, which names the module and th
   declared stays. The `no_prelude` floor text says floor externs are exported.
 - `docs/linear-publish-v0.md` §7 and PR #714: the deferral's premise becomes the claim in §1's last
   paragraph, and the text says so.
-- BACKLOG: the P3 **`export extern fn` is dead syntax** entry closes. The **Unsafe primitives**
-  entry gains a line: module privacy is in place, and the open question is a gate on *declaring*.
+- BACKLOG: the P3 **`export extern fn` is dead syntax** entry closes. The open question, a gate on
+  *declaring*, is now P3 **User externs can declare a C function pure**.

@@ -244,23 +244,31 @@ nothing about what it prints, and keep it small enough that the IR is readable w
 
 ## LinVec — `just linvec-smoke`
 
-`linvec_set`, `linvec_push` and `linvec_truncate` are pure to the checker and a C store underneath,
-so their soundness rests on linearity (docs/persistent-array-v0.md §5.3). `just test` links at `-O0` and cannot see most of what could
+`linvec_set`, `linvec_push` and `linvec_truncate` are pure to the checker and a C write underneath,
+behind `unsafe_pure`, so their soundness rests on linearity (docs/persistent-array-v0.md §5.3,
+docs/unsafe-primitives-v0.md). `just test` links at `-O0` and cannot see most of what could
 go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
 
 - `tests/stdlib/test_linvec.spr` at `-O2`, where an optimizer could move a borrowed read past a set.
-- The same test against a copy of the stdlib root whose `linvec_set`, `linvec_push` and
-  `linvec_truncate` copy (`vec_set`, `vector_append`, `vec_slice`). Both must print the same: a difference is a linearity hole seen as a wrong answer. The root is a
-  command-line argument, so nothing in the compiler is involved. It finds only holes the test
-  reaches.
-- A set, scatter or accum out of range exits non-zero with its message.
+- The same test against a copy of the stdlib root where the region of `linvec.sprout` between
+  `# oracle-begin` and `# oracle-end` (`linvec_set`, `linvec_push` and `linvec_truncate`) copies
+  (`vec_set`, `vector_append`, `vec_slice`). Both must print the same: a difference is a linearity
+  hole seen as a wrong answer. The root is a command-line argument, so nothing in the compiler is
+  involved. It finds only holes the test reaches.
+- A set, scatter or accum out of range exits non-zero with its message (`vector_mutset: index out
+  of bounds` for a set).
 - Allocation counters (`SPROUT_DEBUG_ALLOC`) match between runs that differ only in the number of
   sets, so a set allocates nothing, and grow by one vector per `linvec.new`.
-- A `linvec.get` matched with a binding compiles to a worker over `vector_get_unboxed`.
-- `stdlib/linvec.sprout` and `stdlib/linheap.sprout` name none of `vector_get_direct`,
-  `vector_mutset`, `vector_push` and `vector_truncate`: the bounds-check pass counts only `!{IO}`
-  code as changing a length, which stays sound while a `LinVec`'s `Vector` never reaches an access
-  that pass rewrites (`docs/bounds-check-elimination-v0.md`, condition 4).
+- A `linvec.get` matched with a binding compiles to a worker over `vector_get_unboxed`, and
+  `linvec_set` calls `vector_mutset` and builds no closure.
+- The two shape rules of `unsafe_pure` (a lambda literal; no use as a value), in a copy of the
+  stdlib root with a case appended to `linvec.sprout`, since a user module cannot get past the
+  reference gate.
+- Bounds-check elimination (`SPROUT_TRACE_BCE=1`) versions no loop in a `stdlib.linvec.*` or
+  `stdlib.linheap.*` declaration: the pass counts only `!{IO}` code as changing a length, which
+  stays sound while a `LinVec`'s `Vector` never reaches an access that pass rewrites
+  (`docs/bounds-check-elimination-v0.md`, condition 4). This checks their own loops, not the
+  alias premise, which rests on linearity and the abstract type.
 
 ## In-place reuse — `just linear-reuse-smoke`
 

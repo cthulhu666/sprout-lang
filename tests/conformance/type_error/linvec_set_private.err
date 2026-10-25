@@ -1,1 +1,1 @@
-`linvec_set` is private to `stdlib.linvec`. Mark it `export extern fn` there, or declare it in this module
+Unknown variable: linvec_set in function main.put

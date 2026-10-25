@@ -1,0 +1,11 @@
+module main
+
+# A module may not declare its own `unsafe_pure`: an extern is known by its name alone, so a
+# private copy would skip the check on references.
+
+extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a
+#~^ ERROR
+
+fn quiet(x: Int) -> Int = unsafe_pure(\_ -> x)
+
+fn main() -> Unit !{IO} = print(int_to_string(quiet(1)))

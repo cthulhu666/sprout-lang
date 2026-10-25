@@ -88,8 +88,6 @@ call the wrapper API:
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
 | `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push`, `vector_truncate` | `stdlib.mutable` | the `MutVec` API; `vec_make_filled` is pure and also backs `LinVec` |
-| `linvec_set(i, x, v) -> LinVec a` | `stdlib.linvec` | private; `linvec.set` wraps it. Pure, writes in place, traps out of range |
-| `linvec_push(x, v) -> LinVec a`, `linvec_truncate(n, v) -> LinVec a` | `stdlib.linvec` | private; `linvec.push` and `linvec.pop` use them. Pure, change the length in place. Temporary: they go when unsafe primitives land |
 | `bytes_*` | `stdlib.bytes` | bare name for `bytes_empty`, `bytes_length`, `bytes_get`, `bytes_slice`, `bytes_from_utf8`; the rest are private (`bytes.*` API) |
 | `crypto_*` | `stdlib.crypto` | private; the `crypto.*` API |
 | `regex_*` | `stdlib.regex` | bare name for `regex_find_match`; the rest are private (`regex.*` API) |
@@ -245,6 +243,13 @@ panics, and a negative *literal* count is a compile error.
 - `vector_concat(a: Vector x, b: Vector x) -> Vector x`
 - `map_nth_key(m: Map a, index: Int) -> Maybe String`
 - `map_nth_value(m: Map a, index: Int) -> Maybe a`
+
+**`unsafe_pure`.** `stdlib.unsafe` declares a compiler intrinsic with no runtime symbol and no
+`APPROVED_BUILTINS` entry (see [unsafe-primitives-v0.md](./unsafe-primitives-v0.md)):
+
+- `unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a` — runs `action(())` and gives
+  its result a pure type. Private to `stdlib.unsafe`; reserved for the stdlib modules the compiler
+  lists (`stdlib.linvec`). The argument must be a lambda literal, and the name cannot be a value.
 
 Effect notes:
 

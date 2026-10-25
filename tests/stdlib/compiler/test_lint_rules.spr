@@ -551,6 +551,20 @@ let multiline_placeholder_partial =
   "                 2, _),\n" ++
   "           xs)\n"
 
+# `unsafe_pure` requires a lambda literal (infer rejects a name), so the rule's
+# advice cannot apply there: exempt. The control passes the same lambda elsewhere.
+let multiline_unsafe_pure_lambda =
+  "fn bump(raw: Int) -> Int =\n" ++
+  "  unsafe_pure(\\_ -> do\n" ++
+  "      poke(raw)\n" ++
+  "      raw)\n"
+
+let multiline_do_lambda_other_callee =
+  "fn bump(raw: Int) -> Int =\n" ++
+  "  run_it(\\_ -> do\n" ++
+  "      poke(raw)\n" ++
+  "      raw)\n"
+
 # Two of them in one call are two findings, not one per call.
 let two_multiline_lambdas =
   "fn both(xs: List Int, ys: List Int) -> Int =\n" ++
@@ -1013,6 +1027,11 @@ fn main() -> Unit !{IO} =
       count_by_rule(lint_rules.lint_ast(multiline_lambda_in_where), "multi-line-lambda-arg"), 0)
     assert_eq(state, "wrapped `_` placeholder partial: no finding",
       count_by_rule(lint_rules.lint_ast(multiline_placeholder_partial), "multi-line-lambda-arg"), 0)
+
+    assert_eq(state, "multi-line do lambda passed to unsafe_pure: no finding",
+      count_by_rule(lint_rules.lint_ast(multiline_unsafe_pure_lambda), "multi-line-lambda-arg"), 0)
+    assert_eq(state, "same multi-line do lambda passed to another callee: one finding",
+      count_by_rule(lint_rules.lint_ast(multiline_do_lambda_other_callee), "multi-line-lambda-arg"), 1)
 
     assert_eq(state, "two multi-line lambdas in one call: two findings",
       count_by_rule(lint_rules.lint_ast(two_multiline_lambdas), "multi-line-lambda-arg"), 2)

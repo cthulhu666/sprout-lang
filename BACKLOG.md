@@ -1722,16 +1722,13 @@ deferral happened, not for current behaviour. Still open:
   the sort pair, self-compile, nqueens, `gc_roots` and `http_log_middleware`, but not the
   `uncharted-suns` galaxy frame, which lives in another repo. Per-candidate Phase 3 port benches
   wait for Phase 2. Plan: `docs/native-sprout-runtime-v0.md`.
-- [ ] `P1` **Unsafe primitives: trusted Sprout in place of C.** Wanted (Kuba, 2026-10-22). Deletes
-  the builtins `linvec_set`, `linvec_push` and `linvec_truncate` (Sprout over `vector_mutset`,
-  `vector_push`, `vector_truncate`); the last two are temporary for this reason: spec §3 makes a
-  redeclared extern keep its `!{IO}`, so pure Sprout cannot call them. An erased effect must stay
-  visible to the optimiser: the three rules of `docs/persistent-array-v0.md` §5.3, extended with
-  "or change a length", and the bounds-check pass's premise (`stdlib/compiler/bce.sprout`).
-  Other users: `byte-buffer-v0.md` §5.3's private creator and `native-sprout-runtime-v0.md`
-  Phase 4 (raw loads and stores). Module privacy is in place (`docs/extern-visibility-v0.md`).
-  Open: the gate on *declaring* an extern (a keyword, or a checked marker), the primitive set,
-  and who may use it.
+- [ ] `P3` **User externs can declare a C function pure.** Declaring an extern is unchecked trust:
+  a module may state any signature when the canonical declaration is not in its build. A user file
+  that declared `vector_mutset` returning `Unit` had its call deleted by DLE. `unsafe_pure` is
+  gated by module name (`docs/unsafe-primitives-v0.md` §4.2); this older hole is unchanged. User
+  code declares externs for real (uncharted-suns `loam/gfx.sprout`, sprout-sqlite's FFI), so a gate
+  must tell FFI from a false signature: a checked marker, or an effect floor for user externs.
+  Open: which, and what happens to the declarations that exist.
 - [ ] `P2` **Make tight Sprout string-processing loops competitive with host builtins**, so moderate
   stdin/text workloads do not need dedicated host helpers to be practical. Investigate the native
   overhead in recursive stdlib string loops such as `string_lines` over stdin-loaded text — tail-
@@ -2439,14 +2436,15 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   `linvec.set`, `linvec.scatter` and `linvec.accum` trap on a bad index. An existential brand
   `s` on `Len s`, `Idx s` and `BVec s a`, with `Idx s` made only by a check against `Len s`,
   makes every write total in plain Sprout: no compiler change, prototype run. Measured on BFS and
-  LCS: no cost when checked at use. Open: the module itself, which waits for unsafe primitives so
-  `linvec_set`'s check can go; `BVec` must expose no operation that changes the length.
+  LCS: no cost when checked at use. Open: the module itself; `BVec` must expose no operation
+  that changes the length.
   `docs/persistent-array-v0.md` §5.7.
 - [ ] `P3` **`LinVec Double` writes do not inline.** `ast_to_ir.recognize_vector_op` and
-  `bce.direct_shape` key on `vector_mutset` by name, so `linvec_set` on a `Vector Double` stays a
-  call with its bounds check, where a `MutVec Double` write inlines (B1) and loses the check (BCE).
-  Add `linvec_set` to both; it returns its vector, so the inline form must too. Measure first: the
-  sieve and BFS run within 1.2-1.6x of `MutVec` without it. `docs/persistent-array-v0.md` §5.3.
+  `bce.direct_shape` key on `vector_mutset` over a static `Vector Double`. `linvec_set` calls it on
+  a polymorphic `raw` inside `unsafe_pure`, so a `LinVec Double` write stays a call with its bounds
+  check, where a `MutVec Double` write inlines (B1) and loses the check (BCE). Measure first: the
+  sieve and BFS run within 1.2-1.6x of `MutVec` without it. Versioning over `LinVec` writes breaks
+  BCE's premise (`bce.sprout`, above `safe_io_externs`). `docs/persistent-array-v0.md` §5.3.
 - [ ] `P3` **A persistent trie array, `PVec`.** `LinVec` has no old versions, so storing, sharing
   or branching on an array needs a 32-way trie in plain Sprout: no builtin, 3-21x slower than a
   Baker array on the kernels, fully persistent. `docs/persistent-array-v0.md` §5.2 and §7 step 2.

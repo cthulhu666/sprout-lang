@@ -530,15 +530,15 @@ A pure vector with in-place writes (in `stdlib/linvec.sprout`; Experimental, as 
 - `linvec.new(n, x) -> LinVec a` — n copies of `x`
 - `linvec.get(i, v: borrowing LinVec a) -> Maybe a` — `Nothing` out of range
 - `linvec.set(i, x, v) -> LinVec a` — O(1), in place, returns the same vector; traps out of range
-  (wraps the builtin `linvec_set`, which is private)
+  (wraps the private `linvec_set`)
 - `linvec.length(v: borrowing LinVec a) -> Int`
 - `linvec.empty() -> LinVec a` — a fresh vector of length 0
 - `linvec.from_list(xs) -> LinVec a` — a fresh vector of the list's elements
 - `linvec.push(x, v) -> LinVec a` — amortised O(1); the storage doubles when full
-  (wraps the temporary builtin `linvec_push`, which is private)
+  (wraps the private `linvec_push`)
 - `linvec.pop(v) -> (Maybe a, LinVec a)` — the last element and the rest; `(Nothing, v)` on an
   empty vector, which stays usable. The capacity never shrinks
-  (calls the temporary builtin `linvec_truncate`, which is private)
+  (calls the private `linvec_truncate`)
 - `linvec.freeze(v) -> Vec a` — O(1); the vector's life ends
 - `linvec.drop(v) -> Unit`
 - `linvec.scatter(is, x, v) -> LinVec a` — sets `x` at each index; out of range traps
@@ -813,6 +813,17 @@ interchangeable:
   epoch. Use for timestamps and civil-time rendering. **Not monotonic**: NTP
   steps can move it backwards, so never subtract two of these to measure a
   duration.
+
+## stdlib.unsafe
+
+`stdlib/unsafe.sprout` declares one compiler intrinsic, `unsafe_pure`. It is reserved for the
+stdlib modules the compiler lists, so user code cannot call it. Design:
+[unsafe-primitives-v0.md](unsafe-primitives-v0.md); spec: §6.
+
+- `unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a` — runs `action(())` and gives its
+  result a pure type. The caller proves that, apart from a trap, the action's effects are observable
+  only through its result. The argument must be a lambda literal, and the name cannot be used as a
+  value
 
 ## stdlib.url
 

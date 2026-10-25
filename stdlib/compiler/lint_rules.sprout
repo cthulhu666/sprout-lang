@@ -174,7 +174,7 @@ fn walk_expr(written: Set, free_fns: Set, bound: List String, e: ast.Expr) -> Li
         list_append(walk_expr(written, free_fns, bound, cond),
                     list_append(walk_expr(written, free_fns, bound, then_), walk_expr(written, free_fns, bound, else_))))
   | ast.CallExpr callee args _ ->
-      list_append(multi_line_lambda_findings(args),
+      list_append(multi_line_lambda_call_findings(callee, args),
                   list_append(walk_expr(written, free_fns, bound, callee), walk_exprs(written, free_fns, bound, args)))
   | ast.TupleExpr elems _ -> walk_exprs(written, free_fns, bound, elems)
   | ast.BinaryExpr _ left right _ ->
@@ -575,6 +575,9 @@ fn chain_terminates_in_wildcard(pat: ast.Pattern) -> Bool =
 # as LambdaExpr. They cannot trip the rule: a hole binds to its innermost
 # enclosing CALL, so a synthesized lambda's body is that call, never control
 # flow.
+#
+# The arguments of an `unsafe_pure` call are exempt: it takes a lambda literal
+# and rejects a name (source.unsafe_pure_argument_message), so there is nothing to lift to.
 
 let multi_line_lambda_message: String =
   "multi-line lambda argument — lift the body into a named fn and pass the name, closing over locals with a `_` placeholder (docs/idiomatic-sprout.md)"
@@ -671,6 +674,11 @@ fn max_line_comprehension_gens(gens: List ast.ComprehensionGen) -> Int =
 fn max_line_comprehension_gen(g: ast.ComprehensionGen) -> Int =
   match g with
   | ast.ComprehensionGen _ src guards -> larger(max_line(src), max_line_exprs(guards))
+
+fn multi_line_lambda_call_findings(callee: ast.Expr, args: List ast.Expr) -> List LintFinding =
+  match callee with
+  | ast.VarExpr name _ -> if name == source.unsafe_pure_name then Nil else multi_line_lambda_findings(args)
+  | _ -> multi_line_lambda_findings(args)
 
 # One finding per offending argument, so a call passing two multi-line lambdas
 # reports both — each is a separate lift.

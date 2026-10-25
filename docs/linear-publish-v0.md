@@ -41,7 +41,7 @@ Non-goals:
 - The declaring module. It stays trusted, as `persistent-array-v0.md` §5.3 says; §7 lists the
   cheap check that narrows it.
 - `extern fn` redeclaration: a module may declare any extern itself (spec, *Externs*);
-  unsafe primitives are where that closes.
+  BACKLOG P3 **User externs can declare a C function pure** is where that closes.
 - Record opacity through instances (§5.3).
 
 ## 3. Prior art
@@ -167,10 +167,11 @@ Breaking for a published linear type with an untracked field. In our four repos:
     `Box raw -> Just(raw)`;
   - from an owned `b: Box`, `Box raw -> (raw, Box(raw))`.
 
-  An alias does harm only where a `Vector` is written in place: `linvec_set`, `linvec_push` and
-  `linvec_truncate` in `stdlib.linvec`, and `vector_mutset`, `vector_push` and `vector_truncate`
-  in `stdlib.mutable`. All six are private externs (`docs/extern-visibility-v0.md`), so another module reaches them only by
-  declaring one itself, which is deliberate FFI. Elsewhere the alias is harmless.
+  An alias does harm only where a `Vector` is written in place: `vector_mutset`, `vector_push` and
+  `vector_truncate`, declared in `stdlib.mutable` and again in `stdlib.linvec`, where the
+  `LinVec` writes call them inside `unsafe_pure`. They are private externs
+  (`docs/extern-visibility-v0.md`), so another module reaches them only by declaring one itself,
+  which is deliberate FFI. Elsewhere the alias is harmless.
 
   Three rules were weighed:
   - A rule on borrowed binders alone, in `linear_check`'s escape walk (`esc_value`), would catch

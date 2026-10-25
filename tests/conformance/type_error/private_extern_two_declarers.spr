@@ -1,0 +1,14 @@
+module main
+import stdlib.linvec
+
+# `stdlib.mutable` and `stdlib.linvec` both declare `vector_mutset` privately. The error names
+# the module that declared it first, `stdlib.mutable`, though only `stdlib.linvec` is imported.
+
+wrap linear Box = Vector Int
+
+fn poke(b: borrowing Box) -> Unit !{IO} =
+  match b with
+  | Box raw -> vector_mutset(raw, 0, 99)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

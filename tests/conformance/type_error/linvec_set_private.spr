@@ -1,8 +1,8 @@
 module main
 import stdlib.linvec (LinVec)
 
-# `linvec_set` is the C builtin's name. `stdlib.linvec` keeps it private and exports
-# `linvec.set`, so the bare name is not reachable from an importer.
+# `linvec_set` is a private helper in `stdlib.linvec`, which exports `linvec.set`. An
+# importer cannot name the helper.
 
 fn put(v: LinVec Int) -> LinVec Int = linvec_set(0, 1, v)
 #~^ ERROR

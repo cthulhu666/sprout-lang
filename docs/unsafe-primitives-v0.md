@@ -1,7 +1,6 @@
 # Unsafe primitives v0: `unsafe_pure`
 
-Status: **design, awaiting approval.** Experimental once landed (stdlib-internal; spec §6 note).
-BACKLOG P1 "Unsafe primitives: trusted Sprout in place of C".
+Status: **implemented.** Experimental (stdlib-internal; spec §6 note).
 
 ## 1. Problem
 
@@ -29,7 +28,7 @@ deleted, so whatever hides an effect must return the thing it changed.
 Goals:
 - Delete `linvec_set`, `linvec_push` and `linvec_truncate` with no change to linvec's API.
 - One generic primitive, usable only in modules the compiler lists, never in user code.
-- No closure, no allocation: a `linvec` write is one call to the C writer (`just linvec-smoke`).
+- No closure, no allocation: `set` calls `linvec_set`, which calls the C writer (`just linvec-smoke`).
 - The optimiser stays sound, with the rules it must keep written down.
 
 Non-goals:
@@ -78,7 +77,7 @@ does not carry over: Sprout's `IO` has no handlers and carries no exception effe
 ### 4.1 The primitive
 
 ```sprout
-extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a
+extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a
 ```
 
 Runs `action(())` and gives its result a pure type. Contract, which the caller proves: **apart from
@@ -109,19 +108,20 @@ through a parameter, with no declaration. §7 adds an `unsafe_pure` case.
 (spec "Non-escaping closure parameters"). linvec does not need it today. The gate does not rest on
 it (§4.2).
 
+`where linear a` lets the result be linear, as a `LinVec` is: the action's result is returned once.
+
 `IO` is the only effect label, so it is the only one dismissed.
 
 ### 4.2 The gate
 
 `stdlib/unsafe.sprout` declares `unsafe_pure` once, private, with the contract as its comment.
-`UNSAFE_PURE_USERS`, a hand-written list of module names in compiler source, says who may call it
+`source.unsafe_pure_users`, a hand-written list of module names in compiler source, says who may call it
 (first entry: `stdlib.linvec`). Two bundler rules enforce it, both by module name:
 
 1. **Reference.** `guard_private_extern` already marks a reference to a private extern from a
    module that does not declare it, and `infer` reports the mark. It leaves a reference to
-   `unsafe_pure` unmarked when the referring module is listed. `ResolveCtx` carries no module name
-   today; it gains one. From any other module the reference
-   is marked, and the error is `` `unsafe_pure` is reserved for selected stdlib modules ``.
+   `unsafe_pure` unmarked when the referring module is listed; it reads the module's name from
+   `ResolveCtx.module_name`. From any other module the reference is marked, and the error is `` `unsafe_pure` is reserved for selected stdlib modules ``.
 2. **Declaration.** Only `stdlib.unsafe` may declare `unsafe_pure`, and `export` on it is an error.
    Rule 1 alone is bypassed by a module declaring its own copy, since an extern is identified by
    its name, not its module. The export ban is stated here rather than left to spec §3's `local`
@@ -150,7 +150,8 @@ linvec declares its writers itself, private, with `stdlib.mutable`'s signatures.
 identical redeclaration and `infer.extern_decl_ok` checks it; linvec imports `stdlib.mutable`, so
 both are always in the build. `scripts/check_extern_signatures.sh` gets an exception for these
 three symbols in `stdlib/linvec.sprout`. `stdlib.mutable` keeps them private, so importing it still
-does not let a caller write through a borrowed `Vector`.
+does not let a caller write through a borrowed `Vector`. Both modules declare the names, so
+`bundler.add_foreign_extern` keeps the first declarer, `stdlib.mutable`, and an error names it.
 
 The three writes stay private helpers with today's names, between `# oracle-begin` and
 `# oracle-end` markers, and `set`, `push`, `pop`, `scatter` and `accum` keep calling them:
@@ -164,8 +165,8 @@ extern fn vector_truncate(v: Vector a, n: Int) -> Unit !{IO}
 
 # oracle-begin
 fn linvec_push(x: a, v: LinVec a) -> LinVec a =
-  match v with
-  | LinVec raw -> unsafe_pure(\_ -> do
+  let LinVec(raw) = v
+  in unsafe_pure(\_ -> do
       vector_push(raw, x)
       LinVec(raw))
 # oracle-end
@@ -237,8 +238,9 @@ for linvec users changes (the `declare` lines and the calls).
 - `test_linvec.spr` and `test_linheap.spr` unchanged, passing.
 - `just linvec-smoke`:
   - the alloc check, unchanged (a set allocates nothing);
-  - an IR check that `@stdlib.linvec.set` calls `@vector_mutset` and builds no closure;
-  - the oracle deletes the marked region and appends the copying helpers;
+  - an IR check that `@stdlib.linvec.set` calls `linvec_set`, which calls `@vector_mutset` and
+    builds no closure (the Sprout IR is not inlined before LLVM);
+  - the oracle replaces the marked region with the copying helpers;
   - the trap expectations move to the `vector_mutset` message;
   - the BCE check of §4.4.
 - `test_ir_rooting.spr`: drop T19b and T19c.
@@ -251,7 +253,7 @@ for linvec users changes (the `declare` lines and the calls).
   modules, and is the second place the effect discipline rests on an assertion. Experimental.
 - persistent-array-v0 §5.3 and §12 step 17: the builtins are gone; rule 4.
 - bounds-check-elimination-v0, builtins-reference, stdlib-reference (`stdlib.unsafe`),
-  APPROVED_BUILTINS, gates.md.
+  APPROVED_BUILTINS, gates.md. `repl.stdlib_module_completion_names` gains `unsafe`.
 - BACKLOG: delete "Unsafe primitives". File "user externs can declare a C function pure"
   (§2 non-goal) if no entry covers it.
 

@@ -1,0 +1,7 @@
+module stdlib.unsafe
+
+# Runs `action(())` and gives its result a pure type. A compiler intrinsic, reserved for the
+# stdlib modules in `source.unsafe_pure_users` (docs/unsafe-primitives-v0.md). The argument must
+# be a lambda literal, and no closure is built. The caller proves the contract: apart from a
+# trap, the action's effects are observable only through its result.
+extern fn unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a

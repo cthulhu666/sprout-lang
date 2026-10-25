@@ -2,7 +2,7 @@
 
 **Status:** 5.3 landed 2026-10-22 as `LinVec`, core only (§12 step 14); Experimental, as spec §5.8
 is. The rest is a proposal. Comes from [byte-buffer-v0.md](byte-buffer-v0.md) §5.4, *Beyond append*.
-5.3 is a `wrap linear` over `Vector` with three builtins, two of them temporary (§12 steps 12 and 17).
+5.3 is a `wrap linear` over `Vector` whose writes are Sprout over `unsafe_pure` (§12 steps 12 and 17).
 
 ## 1. Problem
 
@@ -287,23 +287,25 @@ linear rules. Four operations are Sprout in `LinVec`'s module, over externs that
 (`stdlib/mutable.sprout`) and is now pure, with `mutvec_new` keeping the `!{IO}`, as
 `vector_empty` is pure under an `!{IO}` `mutvec_empty`; building from a list instead costs ~94 ms
 per 1M elements against the fill's ~1 ms. `linvec.empty` and `linvec.from_list` wrap a fresh
-`vector_empty` and `vector_from_list` the same way. Three are builtins: `linvec_set` writes in place
-and returns the same pointer, and an index out of range traps, as `mutvec_set` does (§12 step 13);
-`linvec_push` and `linvec_truncate` call `vector_push` and `vector_truncate` and return the same
-pointer. The last two are temporary (§12 step 17). An extern cannot be qualified, so each is private
-to the module and wrapped (`linvec.set`, `linvec.push`; `linvec.pop` calls `linvec_truncate`); the
-wrapper costs nothing at `-O2`.
+`vector_empty` and `vector_from_list` the same way. The three writes are private Sprout functions
+in the module, `linvec_set`, `linvec_push` and `linvec_truncate`. Each unwraps the array, calls
+`vector_mutset`, `vector_push` or `vector_truncate` inside `unsafe_pure`
+([unsafe-primitives-v0.md](unsafe-primitives-v0.md)), and returns the same `Vector` re-wrapped. An
+index out of range traps in `vector_mutset`, as `mutvec_set` does (§12 step 13). The module
+redeclares the three writers privately, so importing `stdlib.mutable` does not let a caller write
+through a borrowed `Vector`. `linvec.set` and `linvec.push` call the helpers, and `linvec.pop` calls
+`linvec_truncate`; a set is one call to the C writer, with no closure and no allocation.
 
 Its type takes and returns `LinVec`, never a bare `Vector`, so no Sprout code holding a shared `Vec`
 can reach it. An `extern fn` line is trusted code, though: a module that does not import
-`LinVec`'s may declare `linvec_set` (or `linvec_push`) over `Vector` itself, as any module may declare `vector_mutset`
-pure today (spec, *Externs are outside the module system*). And inside `LinVec`'s module,
-unwrapping a borrowed array binds the `Vector` untracked, so returning it would alias the array:
-that module is trusted code too.
+`LinVec`'s may declare its own pure `linvec_set` over `Vector`, as any module may declare
+`vector_mutset` pure today (spec, *Externs are outside the module system*). And inside `LinVec`'s
+module, unwrapping a borrowed array binds the `Vector` untracked, so returning it would alias the
+array: that module is trusted code too.
 
 A read borrows, so it does not hand the array back as Clean's and `linear-base`'s do, and it
 allocates nothing when the caller matches it with a binding (§3.4). A set consumes the array and
-returns it; the builtin returns the same object, so a set allocates nothing. `linvec.freeze` ends
+returns it; the write returns the same object, so a set allocates nothing. `linvec.freeze` ends
 the array's life as an ordinary `Vec`, in O(1): `Vec a` is `Vec(Vector a)`
 (`stdlib/prelude.sprout`), so freezing unwraps the `Vector` and wraps it as a `Vec`, one box,
 whose constructor is in scope everywhere. `LinVec` itself cannot live in the prelude: a prelude
@@ -343,7 +345,7 @@ three, a linearity bound on type variables at instantiation and at packing
 ([linearity-bound-v0.md](linearity-bound-v0.md)). M4.2 made polymorphism over linear types a non-goal;
 Swift added such a bound in SE-0427, making every generic parameter `Copyable` unless it opts out.
 
-**Invariants.** Three rules that make `linvec_set`, `linvec_push` and `linvec_truncate` safe to
+**Invariants.** Four rules that make `linvec_set`, `linvec_push` and `linvec_truncate` safe to
 call pure, for any later pass to keep. Read "write" below as "write or change a length":
 
 - No pass moves a call that borrows a linear value across the call that consumes it. Today no
@@ -358,23 +360,26 @@ call pure, for any later pass to keep. Read "write" below as "write or change a 
   `linvec.empty()`, which takes no argument at all. The rule covers every call that returns a
   fresh buffer, linear or not: `linvec.new`'s `vec_make_filled` returns a plain `Vector`, and
   only the wrap makes it linear; `vector_empty` under `mutvec_empty` is the same case today.
+- No pass changes how many times an `unsafe_pure` action runs, or its order relative to other
+  calls on the same value. Dead-code elimination may delete a call whose result is unused: by the
+  contract nothing else saw it. Copying code is allowed when each run still runs each action once,
+  as bounds-check elimination's `$fast` clones do. No pass moves, merges or repeats a call today;
+  a pass that does must test this.
 
-`linvec_set`, `linvec_push` and in-place reuse below, are also write-barrier sites for a
-generational collector, as `vector_mutset` is ([gc-generational-v0.md](gc-generational-v0.md) §7);
-`linvec_push` reaches the hook through `vector_push`.
+The writes are also write-barrier sites for a generational collector, as `vector_mutset` is
+([gc-generational-v0.md](gc-generational-v0.md) §7): they reach the hook through the C writers.
 
-**Compiler tables.** Three key on `vector_mutset` by name, and `linvec_set` joins each, since a
-`MutVec` loop would otherwise beat a `LinVec` one: `ir_rooting.is_nonallocating_read`, or every
-live pointer is rooted around each write (landed; `vector_push`, `linvec_push` and
-`linvec_truncate` are listed too: `vector_push` reaches only malloc and realloc, never the
-collector); the barrier sites of gc-generational-v0.md §7, with the `sprout_ap_on_store` call
-`vector_mutset` makes (landed, in `linvec_set`'s C body, and `linvec_push` through
-`vector_push`); and
-B1's `ast_to_ir.recognize_vector_op` with `bce.direct_shape`, so a `LinVec Double` write inlines
-and loses its bounds check as a `MutVec` one does. The third is out of the first landing (§12
-step 14), and stays a BACKLOG entry. Bounds-check elimination keeps its length rule (only
-`!{IO}` externs change one, `docs/bounds-check-elimination-v0.md`) and stays sound: a `LinVec`'s
-`Vector` is fresh and never reaches an access that pass rewrites, which `just linvec-smoke` pins.
+**Compiler tables.** Three key on `vector_mutset` by name: `ir_rooting.is_nonallocating_read`,
+or every live pointer is rooted around each write (landed; `vector_push` and `vector_truncate`
+are listed too: `vector_push` reaches only malloc and realloc, never the collector); the barrier
+sites of gc-generational-v0.md §7, with the `sprout_ap_on_store` call `vector_mutset` makes
+(landed); and B1's `ast_to_ir.recognize_vector_op` with `bce.direct_shape`, so a `LinVec Double`
+write inlines and loses its bounds check as a `MutVec` one does. The third is out of the first
+landing (§12 step 14), and stays a BACKLOG entry: a `LinVec` write now calls `vector_mutset`
+inside `unsafe_pure`, and `recognize_vector_op` needs a static `Vector Double`, which linvec's
+polymorphic `raw` never is. Bounds-check elimination keeps its length rule (only `!{IO}` externs
+change one, `docs/bounds-check-elimination-v0.md`) and stays sound: a `LinVec`'s `Vector` is fresh
+and never reaches an access that pass rewrites, which `just linvec-smoke` pins.
 
 **Bulk operations**, in Sprout over `linvec_set`, as Futhark's `scatter` and `reduce_by_index`
 (§4): one call consumes the array and returns it, so a loop threads it once per batch rather
@@ -441,10 +446,9 @@ a `wrap`, not an ADT.
   - Threading: every set returns the array, extra results travel in a tuple (the BFS queue),
     and every path must end in `linvec.freeze` or `linvec.drop`, or the leak rule fires.
   - No old versions. Backtracking copies explicitly.
-  - Builtins with `runtime/APPROVED_BUILTINS` entries (`linvec_set`, and the temporary
-    `linvec_push` and `linvec_truncate`, §12 step 17), and one language change, `wrap linear`.
-    Once unsafe primitives exist (BACKLOG P1 **Unsafe primitives**), each is Sprout over
-    `vector_mutset`, `vector_push` or `vector_truncate` and the builtin goes (§12 step 12).
+  - One language change, `wrap linear`, and one compiler intrinsic, `unsafe_pure`, reserved for
+    stdlib modules ([unsafe-primitives-v0.md](unsafe-primitives-v0.md)). The writes were C builtins
+    until it landed (§12 steps 12 and 17).
 
 ### 5.4 Runtime: a Baker array in C
 
@@ -612,7 +616,8 @@ exported). The indices are checked before the vector exists, so a failure has no
 - Index arithmetic (`i + 1`, BFS neighbours, LCS's `i - 1`) leaves the brand: each result is
   checked again.
 - The brand appears in every helper's signature (`Len s`, `BVec s a`).
-- `linvec_set`'s own check stays until unsafe primitives exist; under the brand it cannot fire.
+- `linvec_set` has no check of its own: `vector_mutset` traps on the same indices. Under the brand
+  the trap cannot fire.
 
 **The length is fixed.** `linvec.push` and `linvec.pop` change a `LinVec`'s length, so `BVec`
 must expose neither, nor any other operation that changes the length. After a `pop`, an `Idx s`
@@ -643,7 +648,7 @@ The harness is a scratch port of §3.2's kernels and the prototype, not in the r
   fallback in place of the `panic` arm, runs in 33.
 - `bvec_indices` builds the range as a list, 4 million cells here. A whole-range loop wants a
   fold over the range.
-- Without `linvec_set`'s bounds check, `LinVec` runs 32 against 31 on LCS and 282 against 282 on
+- Without `linvec_set`'s own bounds check, `LinVec` runs 32 against 31 on LCS and 282 against 282 on
   BFS. The brand buys totality, not speed.
 
 Prior art: Rust's `indexing` crate ("The container and its indices and ranges are 'branded'
@@ -715,7 +720,7 @@ value is unshared moves the ranking.
 | Semantics | new opaque type, pure operations | new abstract linear type, pure operations | the same as 5.2, plus a performance cliff on far-apart versions |
 | Types | none | uses §5.8 linearity; Experimental | none |
 | Errors | none new | linear errors (reuse, leak, a set inside a lambda, the array captured by a lambda at a non-`local` parameter), and the bound's error for a linear element type | none new |
-| Runtime | none | three builtins, two temporary (§12 step 17) | four builtins; 4-word version nodes, no new heap kind |
+| Runtime | none | none: the writes call existing C functions through `unsafe_pure` | four builtins; 4-word version nodes, no new heap kind |
 | Migration | additive | additive | additive |
 
 A read out of range gives `Nothing`, as `vec_get` does, in all three. A 5.3 set out of range
@@ -737,7 +742,8 @@ Where each 5.3 item lives: `tests/stdlib/test_linvec.spr` (run by `just test`),
   not `LinVec`'s. `LinVec` adds `LinVec (LinVec Int)` (`type_error/linvec_nested`).
 - §3.2's four kernels as executable tests, checked against a `MutVec` reference (`test_linvec`).
 - Value semantics as an oracle (5.3): `linvec-smoke` runs `test_linvec` against a copy of the
-  stdlib root whose `linvec_set`, `linvec_push` and `linvec_truncate` copy, in plain Sprout. Both builds must print
+  stdlib root whose `linvec_set`, `linvec_push` and `linvec_truncate` copy, in plain Sprout (the
+  region of `linvec.sprout` between `# oracle-begin` and `# oracle-end`). Both builds must print
   the same; a difference is a linearity hole seen as a wrong answer. It finds only holes a test
   reaches, so it adds to the per-hole rejection tests above. The method is Pure Borrow's argument
   for purity (§4).
@@ -827,8 +833,8 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
     Five opaque builtins became `wrap linear LinVec a = Vector a` and one builtin: a `wrap` is
     the raw inner value at runtime, so four operations are Sprout over existing externs, and
     only the in-place write needs C. A direct-read builtin was measured out (§3.4).
-    Goal "no new syntax" gave way to it. Once unsafe primitives exist, `linvec_set` is Sprout over
-    `vector_mutset` and the builtin goes (step 17 adds two more).
+    Goal "no new syntax" gave way to it. `linvec_set` is Sprout over `vector_mutset` since
+    `unsafe_pure` landed, and the builtin is gone (step 17 added two more, gone the same way).
 13. **Review** (2026-10-22). `linvec_new` over a list cost ~94 ms per 1M elements, so it uses
     `vec_make_filled`, made pure: no new builtin. Kuba: an out-of-range `linvec_set` traps rather
     than returning the array unchanged as `vec_set` does. An off-by-one fails where it happens,
@@ -853,11 +859,11 @@ Decided 2026-10-19 with Kuba, one question at a time. Each step, and what moved 
     qualified, `linvec.set`, as `stdlib.list` is. The builtin keeps its C name, `linvec_set`,
     private to the module behind `linvec.set`. Earlier steps use the old names.
 17. **Growth: push and pop** (2026-10-24). Kuba: `LinVec` grows, and `stdlib.linheap` stops
-    re-implementing growth. Two builtins, `linvec_push` and `linvec_truncate`, are temporary: spec
+    re-implementing growth. Two builtins, `linvec_push` and `linvec_truncate`, were temporary: spec
     §3 (*Externs are outside the module system*) makes a redeclared extern keep its effects, and
     `vector_push` and `vector_truncate` are `!{IO}` in `stdlib/mutable.sprout`, so pure Sprout
-    cannot call them. They go when unsafe primitives land (BACKLOG P1 **Unsafe primitives**),
-    which also deletes `linvec_set`. Capacity never shrinks: linear-base's `pop :: Vector a %1 ->
+    could not call them. `unsafe_pure` removed them, and `linvec_set` with them
+    ([unsafe-primitives-v0.md](unsafe-primitives-v0.md)). Capacity never shrinks: linear-base's `pop :: Vector a %1 ->
     (Ur (Maybe a), Vector a)` "will never shrink the vector" (`Data.Vector.Mutable.Linear`,
     linear-base 0.8.1), and `push` there grows it when full. `linvec.pop` has that shape, with
     `Maybe a` for `Ur (Maybe a)` since `a` is never linear here, and an empty vector comes back

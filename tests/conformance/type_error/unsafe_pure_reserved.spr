@@ -1,0 +1,11 @@
+module main
+
+# `stdlib.unsafe` is importable, and `unsafe_pure` is then in the build, but a reference is
+# accepted only from a module the compiler lists. Importing the module is not the gate.
+
+import stdlib.unsafe
+
+fn quiet(x: Int) -> Int = unsafe_pure(\_ -> x)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(quiet(1)))
