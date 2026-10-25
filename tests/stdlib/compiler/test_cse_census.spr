@@ -128,5 +128,12 @@ fn main() -> Unit !{IO} =
     check_eq("region keys: two arms are NOT listed",
              list_length(cse_census.region_duplicate_keys(program(repeated_across_branches()))), 0),
     check_eq("region keys: scrutinee and arm are listed",
-             list_length(cse_census.region_duplicate_keys(program(repeated_scrutinee_and_arm()))), 1)
+             list_length(cse_census.region_duplicate_keys(program(repeated_scrutinee_and_arm()))), 1),
+
+    # decl_bodies: one body per fn or let, none for an extern.
+    check_eq("decl_bodies: a fn has one body", list_length(typed_ast.decl_bodies(decl("g", lit(1)))), 1),
+    check_eq("decl_bodies: a let has one body",
+             list_length(typed_ast.decl_bodies(typed_ast.TLetDecl("v", lit(1)))), 1),
+    check_eq("decl_bodies: an extern has none",
+             list_length(typed_ast.decl_bodies(typed_ast.TExternFnDecl("e", [], Nothing, Nothing))), 0)
   ])

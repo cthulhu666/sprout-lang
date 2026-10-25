@@ -79,7 +79,8 @@ payload stays rooted while later arguments are evaluated. No rooting rule change
 - `argw_shape(call) -> Maybe (f, k, g)`, shape only: `f` is top-level with an argument worker for
   `k`, the call passes exactly `f`'s arity (so `maybe_with_default(0)` is refused), argument `k`
   is a direct call `g(b…)`, and `g` is a Tier-1 `_unboxed` extern or passes `cpr_result_known`.
-  Collection uses it to add `g` to the result-worker set and `(f, k)` to the argument-worker set.
+  Collection (`scan_workers`, the same pass that finds matched callees) uses it to add `g` to the
+  result-worker set and `(f, k)` to the argument-worker set.
   It over-collects, which is harmless. A site whose `@f_argw` is already a top-level definition,
   or whose Tier-2 `@g_worker` is, is not a site: both layers drop it and the call stays boxed.
   The site records how `g` arrives, as an extern's `_unboxed` symbol or as `@g_worker`.
