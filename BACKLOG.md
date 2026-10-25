@@ -276,10 +276,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Codegen: TCO, CPR and scalar replacement**
 
-- [ ] `P2` **Lift the i64-only TCO restriction.** `ast_to_ir.sprout:6427` gates TCO on
-  `ret_ty == "i64"`, so a `Bool`- or tuple-returning self-tail-recursive function builds one native
-  frame per call and overflows at depth. Extend the return-type predicate to `i1` and small structs,
-  add the back-edge store coercions, add deep-recursion regressions for both shapes.
 - [ ] `P2` **Scalar-replacement follow-ups.** Tuple-CPR and intra-function SRA landed;
   `docs/scalar-replacement-v0.md` Appendix B. Two separable extensions remain: **SRA beyond
   do-blocks** (extend to pure `let..in` and across a Maybe/Result do-bind, threading the SRA map
