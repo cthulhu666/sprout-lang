@@ -213,7 +213,7 @@ fn quoted_var_list(vars: List String) -> String =
 fn effect_gap_message(first: unifier.EffectReport, rest: List unifier.EffectReport) -> String =
   "`" ++ unifier.effect_report_name(first) ++ "` performs IO but is declared pure"
     ++ " — add `!{IO}` after its return type (spec-v0.md §7 rule 8)"
-    ++ effect_gap_others(rest)
+    ++ more_in_program(unifier.effect_report_name, rest)
 
 # Spec-v0.md §5.2. The name is the one the user wrote: the report holds the
 # bundler's `main.x` / `$entry.x`. The first line carries the phrase the
@@ -222,24 +222,18 @@ fn let_impure_message(first: unifier.EffectReport, rest: List unifier.EffectRepo
   "top-level `let " ++ let_source_name(first) ++ "` performs IO when its module loads,"
     ++ " but top-level bindings must be pure (spec-v0.md §5.2)"
     ++ " — move the call into `main` or a function"
-    ++ let_impure_others(rest)
+    ++ more_in_program(let_source_name, rest)
 
 fn let_source_name(r: unifier.EffectReport) -> String =
   string.after_last_dot(unifier.effect_report_name(r))
 
-fn let_impure_others(rest: List unifier.EffectReport) -> String =
+# The offenders after the first, one per line, as `name_of` spells them.
+fn more_in_program(name_of: unifier.EffectReport -> String, rest: List unifier.EffectReport) -> String =
   match rest with
   | Nil -> ""
   | _ ->
       "\n  " ++ int_to_string(list_length(rest)) ++ " more in this program:"
-        ++ list_fold(\ (acc, r) -> acc ++ "\n    " ++ let_source_name(r), "", rest)
-
-fn effect_gap_others(rest: List unifier.EffectReport) -> String =
-  match rest with
-  | Nil -> ""
-  | _ ->
-      "\n  " ++ int_to_string(list_length(rest)) ++ " more in this program:"
-        ++ list_fold(\ (acc, r) -> acc ++ "\n    " ++ unifier.effect_report_name(r), "", rest)
+        ++ list_fold(\ (acc, r) -> acc ++ "\n    " ++ name_of(r), "", rest)
 
 # ---------------------------------------------------------------------------
 # Stored effect variables — spec-v0.md §7 rule 9

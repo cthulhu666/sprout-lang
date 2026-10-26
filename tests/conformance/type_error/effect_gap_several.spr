@@ -1,0 +1,14 @@
+module main
+
+# spec-v0.md §7 rule 8: every under-declared function is reported at once. The
+# first is the error; the rest are listed after it.
+
+fn first_quiet() -> Unit = print("a")
+#~^ ERROR
+
+fn second_quiet() -> Unit = print("b")
+
+fn main() -> Unit !{IO} =
+  do
+    first_quiet()
+    second_quiet()

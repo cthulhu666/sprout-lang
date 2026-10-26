@@ -1,0 +1,16 @@
+module main
+
+# spec-v0.md §5.2: every impure top-level `let` is reported at once. The first
+# is the error; the rest are listed by the name the user wrote.
+
+fn loud() -> Int !{IO} =
+  do
+    print("side effect")
+    1
+
+let first_loud = loud()
+#~^ ERROR
+
+let second_loud = loud()
+
+fn main() -> Unit !{IO} = print(int_to_string(first_loud + second_loud))

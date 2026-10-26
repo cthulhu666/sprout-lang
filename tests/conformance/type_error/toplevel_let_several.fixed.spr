@@ -1,0 +1,14 @@
+module main
+
+# toplevel_let_several.spr with the hint applied: both calls move into `main`.
+
+fn loud() -> Int !{IO} =
+  do
+    print("side effect")
+    1
+
+fn main() -> Unit !{IO} =
+  do
+    first_loud <- loud()
+    second_loud <- loud()
+    print(int_to_string(first_loud + second_loud))
