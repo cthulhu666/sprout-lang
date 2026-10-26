@@ -1,0 +1,12 @@
+module main
+
+# effect_gap_several.spr with the hint applied to both functions.
+
+fn first_quiet() -> Unit !{IO} = print("a")
+
+fn second_quiet() -> Unit !{IO} = print("b")
+
+fn main() -> Unit !{IO} =
+  do
+    first_quiet()
+    second_quiet()
