@@ -2277,13 +2277,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   perft, so it is workload-dependent and unmeasured elsewhere. Not a candidate for the
   416-binary test path — a binary that runs once cannot repay any extra link.
   `docs/cross-tu-inlining-v0.md` §5.2.
-- [ ] `P2` **Whole-program linking keeps every Sprout function external.** So LLVM's
-  single-caller bonus never applies, and a small helper inlines only under the plain 225
-  threshold. `examples/nqueens.sprout`'s `is_free` (three `vec_get_or` reads) sits at cost 220,
-  5 under it: one more op in a helper like it and its loop caller pays a call per iteration
-  again. Internalizing everything but `@main` in `scripts/link_whole_program.sh` would remove
-  that cliff for single-caller helpers; unmeasured. Visibility already proved load-bearing for
-  one runtime global (`docs/cross-tu-inlining-v0.md` §7).
 - [ ] `P2` **Inline `Bytes` reads the way B1 inlines `Vector Double`.** `bytes_get_unboxed` is a
   C call per byte. B1 (`IRVecGetD`) covers only `Vector Double`, because generic wrappers erase
   other element types; `Bytes` holds only bytes, so no specialisation is needed. Hand-inlined

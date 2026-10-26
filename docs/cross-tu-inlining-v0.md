@@ -212,6 +212,44 @@ The inlining still fires at that size — the game goes 39 139 → 883 root-push
 That also sharpens what a future default must not be: any `--link` mode (§`BACKLOG.md` decision)
 that turns this on unconditionally would make a large program's build unusable.
 
+### 5.5 Internalizing the merged module (measured 2026-10-26, rejected)
+
+Every Sprout function stays external in the merged module, so LLVM's bonus for the last call to
+an internal function never applies, and a helper inlines only under the plain 225 threshold.
+`examples/nqueens.sprout`'s `is_free` sits at cost 220. The fix tried was `opt
+-passes=internalize -internalize-public-api-list=main` on the merged module before `clang -O2`.
+macOS arm64, 7–15 interleaved rounds, medians:
+
+- **The cliff goes.** With a fourth `vec_get_or` in `is_free`, the current link stops inlining it
+  (cost 285); internalized, it inlines (cost −14 715).
+- **Run time is mixed.** nqueens, astar, `bench/gc_roots`, `bench/unboxed_read` and the compiler
+  itself (compiling `infer.sprout`, output byte-identical) move within ±1.5%.
+  `bench/math_transcendental`'s `sqrt_wide` goes −22%; its exp, ln and log10 go +14 to +22%;
+  `bench/dispatch` +4 to +7%. Internalizing only Sprout's symbols, every runtime export kept
+  external, gives the same swings.
+- **Link time and size improve.** A small program links in ~300 ms, not ~770 ms, and is
+  73–92 KB, not 250–290 KB: dead runtime code goes. The compiler links in 19.0 s, not 20.5 s, and
+  is 5.75 MB, not 6.68 MB.
+
+The exp regression is in how top-level lets are emitted. `eval_const_expr_ir`
+(`stdlib/compiler/ast_to_ir.sprout`) makes only Int, Bool and Unit literals constants. A Double
+literal such as `let ln2 = 0.693…` is a zeroinit global that `__sprout_init_globals` stores once.
+Once it is internal, `-O2` sees a global that only ever holds 0 or one value and shrinks it to an
+`i1` flag (`@stdlib.math.ln2 = internal unnamed_addr global i1 false`), so every read becomes a
+load, a compare and an `fcsel`. Hand-emitting the bench's 14 Double-literal lets as `private
+constant i64 bitcast (double … to i64)` cut exp's regression from +19% to +5%. ln and log10
+stayed +9 to +12%.
+
+On the current link those constants are slower, not faster: ln +9%, ln_wide +11%, log10 +10%,
+exp +2 to 3%, cbrt −4%. With the constants visible, arm64 codegen turns `ln_reduce`'s
+predictable branches into `fcsel`/`csel` that compute both arms. It builds each constant with
+`mov` + 3×`movk` + `fmov` instead of `adrp` + `ldr`, and inlines `ln_reduce_norm` at both call
+sites (cost 205 and 210, where one sat at exactly 225). x86 is unmeasured.
+
+A let computed at run time has no sound "written once" marker. `!invariant.load` requires the same
+value wherever the memory is dereferenceable, which the startup store breaks, and a read inlined
+into `main` could then move above it.
+
 ## 6. The runtime's own codegen survives the strip
 
 Stripping per-function features does not downgrade the runtime's own code. Runtime compiled
