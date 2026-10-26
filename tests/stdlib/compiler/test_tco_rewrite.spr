@@ -21,8 +21,10 @@ fn make_loop_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRICmp("%t$1", "sle", sprout_ir.param_ssa("n"), "%t$0"),
       Cons(sprout_ir.IRCondBr("%t$1", "then_3", "else_3"), Nil)))),
     Cons(sprout_ir.IRBlock("then_3",
+      Cons(sprout_ir.IRStrFromInt("%t$11", sprout_ir.param_ssa("n")),
       Cons(sprout_ir.IRCall("%t$5", sprout_ir.IRTScalar, "str_len", Cons(sprout_ir.param_ssa("s"), Nil)),
-      Cons(sprout_ir.IRBr("join_3"), Nil))),
+      Cons(sprout_ir.IRCall("%t$12", sprout_ir.IRTScalar, "str_len", Cons("%t$11", Nil)),
+      Cons(sprout_ir.IRBr("join_3"), Nil))))),
     Cons(sprout_ir.IRBlock("else_3",
       Cons(sprout_ir.IRConst("%t$6", 1),
       Cons(sprout_ir.IRISub("%t$7", sprout_ir.param_ssa("n"), "%t$6"),
@@ -273,9 +275,13 @@ fn main() -> Unit !{IO} =
             string.contains(ir, "[%t$9, %else_3]") == false)
           assert_true(state, "phi keeps the base arm as its only incoming",
             string.contains(ir, "%t$4 = phi i64 [%t$5, %then_3]"))
-          # Under an empty summary str_len is a GC trigger, so rooting pushes s around it.
+          # Under an empty summary str_len is a GC trigger. The carried heap param `s` lives in a
+          # slot of the frame (docs/frame-slot-rooting-v0.md); `%t$11`, live across the first
+          # str_len and defined in the same block, is the block-local root that needs the stack reset.
           let kir = lower_rooted(rewritten, next_idx)
-          assert_true(state, "rooted loop pushes a root", string.contains(kir, "@sprout_gc_push_i64_root"))
+          assert_true(state, "rooted loop keeps its heap param in the frame",
+            string.contains(kir, "@sprout_gc_push_scan_root"))
+          assert_true(state, "rooted loop pushes a block-local root", string.contains(kir, "@sprout_gc_push_i64_root"))
           assert_true(state, "rooted loop keeps its stacksave", string.contains(kir, "@llvm.stacksave()"))
           assert_true(state, "rooted loop keeps its stackrestore", string.contains(kir, "@llvm.stackrestore"))
           summary(state)

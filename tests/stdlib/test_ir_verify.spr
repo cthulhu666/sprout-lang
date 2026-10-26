@@ -1,0 +1,393 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_verify as ir_verify
+
+# ---------------------------------------------------------------------------
+# Tests for the post-rooting root verifier (ir_verify.verify_rooting).
+#
+# Each case hand-builds an ALREADY ROOTED function (explicit IRRoot/IRUnroot) and
+# asserts on the violations.  The last group runs ir_rooting.insert_roots and
+# requires the verifier to accept what the pass emits.  An empty summary makes
+# every direct call a trigger.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+fn mentions(violations: List String, needle: String) -> Bool =
+  list_member(true, list_map(\v -> contains(v, needle), violations))
+
+fn check_fn(f: sprout_ir.IRFunction) -> List String =
+  ir_verify.verify_rooting(f, dict_empty())
+
+fn fn_of(params: List (String, sprout_ir.IRType), blocks: List sprout_ir.IRBlock)
+    -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("f", params, "i64", blocks)
+
+fn str(r: String) -> sprout_ir.IROp =
+  sprout_ir.IRStrConst(r, r ++ "_raw", "s")
+
+fn concat(r: String, a: String, b: String) -> sprout_ir.IROp =
+  sprout_ir.IRStrConcat(r, a, b)
+
+fn root(v: String) -> sprout_ir.IROp =
+  sprout_ir.IRRoot("%slot_" ++ v, v, "%d_" ++ v)
+
+fn unroot(n: Int) -> sprout_ir.IROp =
+  sprout_ir.IRUnroot(n, "%u" ++ int_to_string(n))
+
+fn when(cond: Bool, ops: List sprout_ir.IROp) -> List sprout_ir.IROp =
+  if cond then ops else Nil
+
+fn seq(parts: List (List sprout_ir.IROp)) -> List sprout_ir.IROp =
+  list_flat_map(\p -> p, parts)
+
+fn blk(label: String, ops: List sprout_ir.IROp) -> sprout_ir.IRBlock =
+  sprout_ir.IRBlock(label, ops)
+
+# ---------------------------------------------------------------------------
+# Diamond: %a is defined in entry and must be rooted across the concat in `then`.
+# `with_roots` false drops the IRRoot/IRUnroot pair.  `unroot_early` pops before
+# the trigger instead of after it.
+
+fn diamond(with_roots: Bool, unroot_early: Bool) -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", [str("%a"), sprout_ir.IRConst("%c", 1),
+                  sprout_ir.IRCondBr("%c", "then", "else")]),
+    blk("then", seq([
+      [str("%b")],
+      when(with_roots, [root("%a")]),
+      when(with_roots && unroot_early, [unroot(1)]),
+      [concat("%r", "%b", "%b")],
+      when(with_roots && !unroot_early, [unroot(1)]),
+      [concat("%x", "%a", "%r"), sprout_ir.IRBr("join")]])),
+    blk("else", [str("%y"), sprout_ir.IRBr("join")]),
+    blk("join", [sprout_ir.IRPhi("%p", "i64", [("%x", "then"), ("%y", "else")]),
+                 sprout_ir.IRRet("%p")])
+  ])
+
+# ---------------------------------------------------------------------------
+# A trigger's own heap operand, dead afterwards: %a feeds an IRMakeCtor.
+
+fn ctor_operand(rooted: Bool) -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", seq([
+      [str("%a")],
+      when(rooted, [root("%a")]),
+      [sprout_ir.IRMakeCtor("%r", "Box", 0, ["%a"])],
+      when(rooted, [unroot(1)]),
+      [sprout_ir.IRRet("%r")]]))
+  ])
+
+# ---------------------------------------------------------------------------
+# Phi: %x is used only by the phi in `join`, so it is live at the end of `then`
+# and across the concat there.
+
+fn phi_operand(rooted: Bool) -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", [sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "then", "else")]),
+    blk("then", seq([
+      [str("%x"), str("%t")],
+      when(rooted, [root("%x")]),
+      [concat("%t2", "%t", "%t")],
+      when(rooted, [unroot(1)]),
+      [sprout_ir.IRBr("join")]])),
+    blk("else", [str("%y"), sprout_ir.IRBr("join")]),
+    blk("join", [sprout_ir.IRPhi("%p", "i64", [("%x", "then"), ("%y", "else")]),
+                 sprout_ir.IRRet("%p")])
+  ])
+
+# ---------------------------------------------------------------------------
+# TCO loop.  The header `tco_loop` reloads %p$x from its slot.  With `capture`,
+# %k (defined in entry) is also used inside the loop, so it is live into the
+# header and across the back-edge.
+
+fn tco_loop(capture: Bool) -> sprout_ir.IRFunction =
+  fn_of([("x", sprout_ir.IRTHeap)], [
+    blk("entry", seq([
+      when(capture, [str("%k")]),
+      [sprout_ir.IRTcoEntry([("%slot_x", "i64", sprout_ir.param_ssa("x"))], "%sp"),
+       sprout_ir.IRBr("tco_loop")]])),
+    blk("tco_loop", [sprout_ir.IRTcoLoad("%x", "i64", "%slot_x", sprout_ir.IRTHeap),
+                     sprout_ir.IRConst("%c", 1),
+                     sprout_ir.IRCondBr("%c", "body", "done")]),
+    blk("body", seq([
+      when(capture, [str("%s"), root("%x"), concat("%t", "%s", "%s"), unroot(1),
+                     concat("%n", "%x", "%k")]),
+      [sprout_ir.IRTcoBack([("%slot_x", "i64", if capture then "%n" else "%x")],
+                           "%sp", "tco_loop")]])),
+    blk("done", [sprout_ir.IRRet("%x")])
+  ])
+
+# ---------------------------------------------------------------------------
+# Block ends: %a is rooted and never popped.
+
+fn leaked_root(term: sprout_ir.IROp) -> sprout_ir.IRFunction =
+  fn_of(Nil, [blk("entry", [str("%a"), str("%m"), root("%a"), term])])
+
+# ---------------------------------------------------------------------------
+# Frame slots.  The frame is %fr: IRFrameEnter registers it, a heap value that lives into a
+# later block owns a slot (IRFrameStore right after its definition), and every exit's
+# IRUnroot count includes the frame.
+
+fn enter(slots: Int) -> sprout_ir.IROp =
+  sprout_ir.IRFrameEnter("%fr", slots, "%fr_d")
+
+fn fstore(index: Int, v: String) -> sprout_ir.IROp =
+  sprout_ir.IRFrameStore("%fr", index, v)
+
+fn fslot(slot: String, index: Int, init: String) -> sprout_ir.IROp =
+  sprout_ir.IRFrameSlot(slot, "%fr", index, init)
+
+fn fclear(start: Int, count: Int) -> sprout_ir.IROp =
+  sprout_ir.IRFrameClear("%clr" ++ int_to_string(start), "%fr", start, count)
+
+# The diamond again, with %a in slot 0 of the frame instead of a block-local root.
+# `late` stores %a after a trigger; `store_in_then` stores it in the wrong block;
+# `no_pop` leaves the frame registered at the ret; `early_pop` pops it in `then`.
+fn framed_diamond(late: Bool, store_in_then: Bool, no_pop: Bool, early_pop: Bool)
+    -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", seq([
+      [enter(1), str("%a")],
+      when(late, [str("%t0"), concat("%t1", "%t0", "%t0")]),
+      when(!store_in_then, [fstore(0, "%a")]),
+      [sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "then", "else")]])),
+    blk("then", seq([
+      when(store_in_then, [fstore(0, "%a")]),
+      [str("%b"), concat("%r", "%b", "%b"), concat("%x", "%a", "%r")],
+      when(early_pop, [unroot(1)]),
+      [sprout_ir.IRBr("join")]])),
+    blk("else", [str("%y"), sprout_ir.IRBr("join")]),
+    blk("join", seq([
+      [sprout_ir.IRPhi("%p", "i64", [("%x", "then"), ("%y", "else")])],
+      when(!no_pop, [unroot(1)]),
+      [sprout_ir.IRRet("%p")]]))
+  ])
+
+fn framed_ok() -> sprout_ir.IRFunction = framed_diamond(false, false, false, false)
+
+# A trigger runs before the frame is registered.
+fn trigger_before_enter() -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", [str("%t0"), concat("%t1", "%t0", "%t0"), enter(1), str("%a"), fstore(0, "%a"),
+                  sprout_ir.IRBr("next")]),
+    blk("next", [unroot(1), sprout_ir.IRRet("%a")])
+  ])
+
+# Two values in one slot, and one value in two slots; a slot past the end of the frame.
+fn slot_misuse(second_index: Int, second_value: String) -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", [enter(2), str("%a"), fstore(0, "%a"), str("%b"), fstore(second_index, second_value),
+                  sprout_ir.IRBr("next")]),
+    blk("next", [str("%s"), concat("%t", "%s", "%s"), concat("%u", "%a", "%b"),
+                 unroot(1), sprout_ir.IRRet("%u")])
+  ])
+
+# A frame op with no IRFrameEnter anywhere.
+fn frame_without_enter() -> sprout_ir.IRFunction =
+  fn_of(Nil, [blk("entry", [str("%a"), fstore(0, "%a"), sprout_ir.IRRet("%a")])])
+
+# A self-TCO loop whose parameter slot is frame slot 0, %w in slot 1.  The body's triggers keep
+# %x (covered by slot 0) and %w (slot 1) live; `fclear(1, 1)` zeroes only %w's slot.
+fn framed_tco(clear_start: Int, clear_count: Int, w_slot: Int) -> sprout_ir.IRFunction =
+  fn_of([("x$in", sprout_ir.IRTHeap)], [
+    blk("entry", [enter(2), fslot("%slot_x", 0, sprout_ir.param_ssa("x$in")),
+                  sprout_ir.IRTcoEntry([], "%sp"), sprout_ir.IRBr("tco_loop")]),
+    blk("tco_loop", [sprout_ir.IRTcoLoad("%x", "i64", "%slot_x", sprout_ir.IRTHeap),
+                     sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "body", "done")]),
+    blk("body", [str("%w"), fstore(w_slot, "%w"), str("%s"), concat("%t", "%s", "%s"),
+                 concat("%n", "%x", "%w"), fclear(clear_start, clear_count),
+                 sprout_ir.IRTcoBack([("%slot_x", "i64", "%n")], "%sp", "tco_loop")]),
+    blk("done", [unroot(1), sprout_ir.IRRet("%x")])
+  ])
+
+# A frame function whose second exit is a panic block: no pop needed there.
+fn framed_with_panic() -> sprout_ir.IRFunction =
+  fn_of(Nil, [
+    blk("entry", [enter(1), str("%a"), fstore(0, "%a"), sprout_ir.IRConst("%c", 1),
+                  sprout_ir.IRCondBr("%c", "ok", "bad")]),
+    blk("ok", [str("%b"), concat("%r", "%b", "%b"), concat("%x", "%a", "%r"),
+               unroot(1), sprout_ir.IRRet("%x")]),
+    blk("bad", [sprout_ir.IRPanic("%a")])
+  ])
+
+# Three triggers in one block (ops 3, 5, 6 rooted; 2, 3, 4 bare).  %a is live across the first
+# two; the third uses it as an operand, which a concat does not expose.
+fn three_triggers(rooted_first: Bool) -> sprout_ir.IRFunction =
+  fn_of(Nil, [blk("entry", seq([
+    [str("%a"), str("%b")],
+    when(rooted_first, [root("%a")]),
+    [concat("%t1", "%b", "%b")],
+    when(rooted_first, [unroot(1)]),
+    [concat("%t2", "%t1", "%t1"), concat("%r", "%a", "%t2"), sprout_ir.IRRet("%r")]]))])
+
+# ---------------------------------------------------------------------------
+# Programs run through the pass.
+
+fn two_live() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("two_live", Nil, "i64", [
+    blk("entry", [str("%ab"), str("%c1"), str("%c2"), concat("%cd", "%c1", "%c2"),
+                  concat("%r", "%ab", "%cd"), sprout_ir.IRRet("%r")])])
+
+fn phi_heap() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("phi_heap", [("cond", sprout_ir.IRTHeap)], "i64", [
+    blk("entry", [sprout_ir.IRCondBr(sprout_ir.param_ssa("cond"), "then", "else")]),
+    blk("then", [str("%xt"), sprout_ir.IRBr("join")]),
+    blk("else", [str("%ye"), sprout_ir.IRBr("join")]),
+    blk("join", [sprout_ir.IRPhi("%phi", "i64", [("%xt", "then"), ("%ye", "else")]),
+                 str("%z1"), str("%z2"), concat("%zw", "%z1", "%z2"),
+                 concat("%r", "%phi", "%zw"), sprout_ir.IRRet("%r")])])
+
+fn heap_param() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("heap_param", [("s", sprout_ir.IRTHeap)], "i64", [
+    blk("entry", [sprout_ir.IRConst("%z0", 0),
+                  sprout_ir.IRCall("%r0", sprout_ir.IRTUnknown, "bar", [sprout_ir.param_ssa("s")]),
+                  sprout_ir.IRMakeCtor("%ctor", "T3", 0,
+                                       [sprout_ir.param_ssa("s"), "%z0", "%z0"]),
+                  sprout_ir.IRRet("%ctor")])])
+
+fn ctor_operand_unrooted() -> sprout_ir.IRFunction = ctor_operand(false)
+
+fn phi_across_trigger() -> sprout_ir.IRFunction = phi_operand(false)
+
+fn tco_with_triggers() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("tco_trigger", [("x", sprout_ir.IRTHeap)], "i64", [
+    blk("entry", [sprout_ir.IRTcoEntry([("%slot_x", "i64", sprout_ir.param_ssa("x"))], "%sp"),
+                  sprout_ir.IRBr("tco_loop")]),
+    blk("tco_loop", [sprout_ir.IRTcoLoad("%x", "i64", "%slot_x", sprout_ir.IRTHeap),
+                     sprout_ir.IRConst("%c", 1),
+                     sprout_ir.IRCondBr("%c", "body", "done")]),
+    blk("body", [str("%s"), concat("%t", "%s", "%s"), concat("%n", "%x", "%t"),
+                 sprout_ir.IRTcoBack([("%slot_x", "i64", "%n")], "%sp", "tco_loop")]),
+    blk("done", [sprout_ir.IRRet("%x")])])
+
+fn ret_void_multi() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("ret_void_multi", Nil, "void", [
+    blk("entry", [str("%a"), sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "left", "right")]),
+    blk("left", [str("%z1"), concat("%z", "%z1", "%z1"), sprout_ir.IRStoreGlobal("g", "%a"),
+                 sprout_ir.IRRetVoid]),
+    blk("right", [sprout_ir.IRStoreGlobal("g", "%a"), sprout_ir.IRRetVoid])])
+
+fn panic_arm() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("panic_arm", Nil, "i64", [
+    blk("entry", [str("%a"), sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "ok", "bad")]),
+    blk("ok", [str("%b"), concat("%r", "%b", "%b"), concat("%x", "%a", "%r"), sprout_ir.IRRet("%x")]),
+    blk("bad", [sprout_ir.IRPanic("%a")])])
+
+fn mutual_tail() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("mutual_tail", Nil, "i64", [
+    blk("entry", [str("%a"), sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "go", "done")]),
+    blk("go", [str("%s"), concat("%t", "%s", "%s"),
+               sprout_ir.IRTailCall("%tc", "other", ["%a"], "")]),
+    blk("done", [sprout_ir.IRRet("%a")])])
+
+# A TCO loop with the carried %x, a header-defined %w that lives into every later block, and
+# triggers in two of them.
+fn tco_carry() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("tco_carry", [("x$in", sprout_ir.IRTHeap)], "i64", [
+    blk("entry", [sprout_ir.IRTcoEntry([("%slot_x", "i64", sprout_ir.param_ssa("x$in"))], "%sp"),
+                  sprout_ir.IRBr("tco_loop")]),
+    blk("tco_loop", [sprout_ir.IRTcoLoad("%x", "i64", "%slot_x", sprout_ir.IRTHeap), str("%w"),
+                     sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "a0", "done")]),
+    blk("a0", [str("%u"), concat("%v", "%u", "%u"), sprout_ir.IRBr("a1")]),
+    blk("a1", [str("%m"), concat("%mv", "%m", "%m"), concat("%n", "%x", "%w"),
+               sprout_ir.IRTcoBack([("%slot_x", "i64", "%n")], "%sp", "tco_loop")]),
+    blk("done", [sprout_ir.IRRet("%x")])])
+
+fn rooted_by_pass(f: sprout_ir.IRFunction) -> List String =
+  match ir_rooting.insert_roots(sprout_ir.IRProgram([f], Nil, Nil, Nil), dict_empty()) with
+  | sprout_ir.IRProgram fns _ _ _ ->
+      list_flat_map(\g -> ir_verify.verify_rooting(g, dict_empty()), fns)
+
+fn main() -> Unit !{IO} =
+  run_suite("ir_verify", [
+    check_eq("rooted diamond with a phi is clean", check_fn(diamond(true, false)), Nil),
+
+    check_true("an unrooted heap value live across a trigger is reported",
+               mentions(check_fn(diamond(false, false)), "%a")),
+    check_true("the report names the function, block and op index",
+               mentions(check_fn(diamond(false, false)), "f block then op 1")),
+
+    check_true("a root popped before the trigger it must cover is reported",
+               mentions(check_fn(diamond(true, true)), "%a")),
+
+    check_eq("a rooted operand of an exposing trigger is clean",
+             check_fn(ctor_operand(true)), Nil),
+    check_true("an unrooted operand of an exposing trigger is reported",
+               mentions(check_fn(ctor_operand(false)), "%a")),
+
+    check_eq("a phi operand rooted across the predecessor's trigger is clean",
+             check_fn(phi_operand(true)), Nil),
+    check_true("a value used only by a successor's phi must be rooted in the predecessor",
+               mentions(check_fn(phi_operand(false)), "%x")),
+
+    check_eq("a TCO loop that carries nothing in SSA is clean", check_fn(tco_loop(false)), Nil),
+    check_true("an SSA value live into the TCO loop header is reported",
+               mentions(check_fn(tco_loop(true)), "tco_loop")),
+    check_true("liveness follows the back-edge: %k is live across the body's trigger",
+               mentions(check_fn(tco_loop(true)), "block body")),
+
+    check_true("a root still pushed at a ret is reported",
+               mentions(check_fn(leaked_root(sprout_ir.IRRet("%a"))), "block end")),
+    check_eq("a root still pushed at a panic exit is fine",
+             check_fn(leaked_root(sprout_ir.IRPanic("%m"))), Nil),
+    check_eq("a root still pushed at an abort-match exit is fine",
+             check_fn(leaked_root(sprout_ir.IRAbortMatch)), Nil),
+    check_eq("a root still pushed in a block that calls panic is fine",
+             check_fn(fn_of(Nil, [blk("entry", [str("%a"), str("%m"), root("%a"), root("%m"),
+                                                sprout_ir.IRCall("%p", sprout_ir.IRTScalar, "panic", ["%m"]),
+                                                sprout_ir.IRRetVoid])])), Nil),
+    check_true("a later trigger in the same block is checked after an earlier one passes",
+               mentions(check_fn(three_triggers(true)), "op 5")),
+    check_eq("the trigger that %a's root covers is not reported",
+             mentions(check_fn(three_triggers(true)), "op 3"), false),
+    check_eq("each uncovered trigger in a block is reported once",
+             list_length(check_fn(three_triggers(false))), 2),
+    check_true("popping more roots than are pushed is reported",
+               mentions(check_fn(fn_of(Nil, [blk("entry", [unroot(1), sprout_ir.IRRetVoid])])),
+                        "pops 1")),
+
+    check_eq("a framed diamond is clean", check_fn(framed_ok()), Nil),
+    check_true("a value stored in its slot only after a trigger is reported",
+               mentions(check_fn(framed_diamond(true, false, false, false)), "stored in its frame slot")),
+    check_true("a value never stored in the block that defines it is reported",
+               mentions(check_fn(framed_diamond(false, true, false, false)),
+                        "never stored in its frame slot")),
+    check_true("a trigger before IRFrameEnter is reported",
+               mentions(check_fn(trigger_before_enter()), "frame is not registered")),
+    check_true("an exit that leaves the frame registered is reported",
+               mentions(check_fn(framed_diamond(false, false, true, false)), "does not pop the frame")),
+    check_true("a frame popped before a non-exit terminator is reported",
+               mentions(check_fn(framed_diamond(false, false, false, true)), "frame popped")),
+    check_eq("two values in two slots are clean", check_fn(slot_misuse(1, "%b")), Nil),
+    check_true("a slot with two owners is reported",
+               mentions(check_fn(slot_misuse(0, "%b")), "two owners")),
+    check_true("a value in two slots is reported",
+               mentions(check_fn(slot_misuse(1, "%a")), "two frame slots")),
+    check_true("a slot past the end of the frame is reported",
+               mentions(check_fn(slot_misuse(2, "%b")), "outside the frame")),
+    check_true("a frame op without IRFrameEnter is reported",
+               mentions(check_fn(frame_without_enter()), "without IRFrameEnter")),
+    check_eq("a panic block needs no frame pop", check_fn(framed_with_panic()), Nil),
+    check_eq("a framed TCO loop that clears only the slots after the TCO slots is clean",
+             check_fn(framed_tco(1, 1, 1)), Nil),
+    check_true("a back-edge clear covering a TCO slot is reported",
+               mentions(check_fn(framed_tco(0, 2, 1)), "covers TCO slot")),
+    check_true("an owner in a TCO slot's index is reported",
+               mentions(check_fn(framed_tco(1, 1, 0)), "two owners")),
+
+    check_eq("insert_roots output: IRRetVoid in a multi-block function", rooted_by_pass(ret_void_multi()), Nil),
+    check_eq("insert_roots output: a panic arm", rooted_by_pass(panic_arm()), Nil),
+    check_eq("insert_roots output: a mutual tail call", rooted_by_pass(mutual_tail()), Nil),
+    check_eq("insert_roots output: TCO loop with a frame value", rooted_by_pass(tco_carry()), Nil),
+    check_eq("insert_roots output: two values live across a concat", rooted_by_pass(two_live()), Nil),
+    check_eq("insert_roots output: phi of heap values", rooted_by_pass(phi_heap()), Nil),
+    check_eq("insert_roots output: heap param across a call", rooted_by_pass(heap_param()), Nil),
+    check_eq("insert_roots output: ctor operand dead after the make",
+             rooted_by_pass(ctor_operand_unrooted()), Nil),
+    check_eq("insert_roots output: phi operand across the predecessor's trigger",
+             rooted_by_pass(phi_across_trigger()), Nil),
+    check_eq("insert_roots output: TCO loop with triggers", rooted_by_pass(tco_with_triggers()), Nil),
+    check_eq("insert_roots output: the unrooted diamond", rooted_by_pass(diamond(false, false)), Nil)
+  ])

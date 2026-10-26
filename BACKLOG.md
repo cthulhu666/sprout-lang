@@ -1761,6 +1761,12 @@ deferral happened, not for current behaviour. Still open:
   rule needs a written GC-safety argument first, since a missing root corrupts the heap.
   Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
   The root also keeps a persistent array's whole history alive: `docs/persistent-array-v0.md` §3.
+- [ ] `P3` **A missing frame pop has no executable oracle.** `ir_rooting` pops the frame at every
+  exit; a miss leaves a scan root pointing into a green stack that `sprout_ctx_destroy` freed.
+  Deleting every exit pop leaves `tests/stdlib/test_frame_slot_rooting.spr` green, plain and under
+  `SPROUT_GC_STRESS=1`: the freed stack stays mapped, and a stale word is looked up and ignored.
+  Only `ir_verify` (`just verify-roots`) and the unit counts catch it. A run-time check needs
+  AddressSanitizer on a built program, or a task stack the runtime unmaps on destroy.
 - [ ] `P3` **LLVM does not inline the sort pair's `insert` into `insertion`.** The Int merge
   sort is 1.26× C at n=440, against Phase 2's 1.2× aim, and the insertion phase over 16-element
   blocks carries most of it. `insert` costs 325 against a threshold of 225, so each element pays
@@ -2116,16 +2122,14 @@ classification-completeness or sub-op alloc-ordering bugs, never the "forgot to 
 correctly-classified value" class that linearity catches for free. The rooting invariant stays
 enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
 
-- [ ] `P2` **IR classification-consistency verifier (the M5 "Option 2").** A greenfield
-  `stdlib/compiler/ir_verify.sprout` wired into `compile_program_streaming` after
-  `ir_rooting.insert_roots`, run as a CI/debug gate. **Not linear types** — it targets the same
-  bug class via classification *consistency*, the safety-critical half for GC rooting being coverage
-  rather than no-reuse. **Family 1:** for every heap-producing op whose kind derives from a type,
-  re-derive the expected kind from an independent structural source (`type_kind` for `IRCall`
-  returns, `field_kinds` for `IRGetField`/`IRLoadEnvSlot`/`IRGetTupleField`) and assert the two
-  agree, treating `IRTUnknown` as either-acceptable so there are no false positives; this catches
-  the historical `IRCall`-wrong-kind shape without touching the translator. **Family 2, deferred:**
-  re-verify the post-rooting IR, needing an independent liveness derivation or it is circular.
+- [ ] `P2` **IR classification-consistency verifier (the M5 "Option 2"), Family 1.** For every
+  heap-producing op whose kind derives from a type, re-derive the expected kind from an
+  independent structural source (`type_kind` for `IRCall` returns, `field_kinds` for
+  `IRGetField`/`IRLoadEnvSlot`/`IRGetTupleField`) and assert the two agree, treating `IRTUnknown`
+  as either-acceptable so there are no false positives; this catches the historical
+  `IRCall`-wrong-kind shape without touching the translator. Goes in `ir_verify.sprout` beside
+  `verify_rooting`, the post-rooting root check that already exists (`docs/gates.md` §Root
+  verifier). **Not linear types.**
 
 ### Native REPL & Analysis Service
 
@@ -2399,15 +2403,6 @@ enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
   whether a frame was dropped. Needs a per-phase timer inside `sprout_gc_collect` (mark / sweep
   pass 1 / pass 2 / region release) and a quiet machine; the per-cycle `elapsed_us` already logged
   is the aggregate and cannot be decomposed after the fact.
-- [ ] `P2` **Skip re-pushing already-rooted function parameters.** The rooting pass roots every
-  heap-typed value live across a trigger, with no notion that one already owns a slot in the same
-  frame — the recursive `queens(…)` re-roots three vectors it already holds. The fix belongs in
-  `stdlib/compiler/ir_rooting.sprout`'s liveness dataflow; the `emit_args_with_roots` this entry
-  used to name died with `codegen.sprout` and survives only in `docs/archive/`. **Worth ~20% of the
-  whole-program-linked nqueens binary** — measured 2026-09-25 by neutralising all rooting (208 →
-  165 ms at N=12, GC off both sides). An earlier correction here claimed the win was confined to
-  separately-linked builds because the helpers inline away: wrong, inlining removes the call, not
-  the alloca, the store and the shadow-stack bump.
 - [ ] `P2` **nqueens allocates one `Vec` wrapper per `vec_set` — 16.7M per N=12 run**, which is its
   whole object-allocation count. Measured while landing nullary interning, which moved nqueens by 7
   objects and so disproved this entry's predecessor: it blamed `true`/`false` literals, but `Bool`

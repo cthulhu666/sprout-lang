@@ -1,0 +1,49 @@
+# Cost fixture for the push-count arm of `just rooting-cost-gate` -- see
+# scripts/rooting_cost_gate.sh.
+#
+# One self-tail-recursive function over a chain of 24 `if` expressions, the shape of
+# a long `do` of `if`s in a loop body. `acc` and `tag` are heap values carried through
+# every block, and each `a<k>` is a heap value that lives into the next `if`'s blocks.
+# Rooted block by block, every block with a trigger pushed every value live in it, so the
+# pushes grew with blocks x live values.
+#
+# Hand count under frame-slot rooting (docs/frame-slot-rooting-v0.md): `acc` and `tag`
+# are TCO slots 0 and 1 of the frame, and `tag` is live across every later `++`, so the
+# frame exists. No `a<k>` is live across a trigger: it is an operand of the next stage's
+# `++` and dead after it, so it takes no slot. That `++` is a call, which exposes its
+# operands, so `a0`..`a22` are each pushed once, in the one block that appends them
+# (`a23` is only used in the block that defines it); `i` is a scalar. Exactly one
+# sprout_gc_push_scan_root call and 23 sprout_gc_push_i64_root calls, however many
+# blocks each stage has; with N stages the count is N - 1.
+fn stages(acc: String, tag: String, i: Int) -> String =
+  if i == 0 then acc ++ tag
+  else
+    let
+      a0 = if i > 0 then acc ++ tag else acc
+      a1 = if i > 1 then a0 ++ tag else a0
+      a2 = if i > 2 then a1 ++ tag else a1
+      a3 = if i > 3 then a2 ++ tag else a2
+      a4 = if i > 4 then a3 ++ tag else a3
+      a5 = if i > 5 then a4 ++ tag else a4
+      a6 = if i > 6 then a5 ++ tag else a5
+      a7 = if i > 7 then a6 ++ tag else a6
+      a8 = if i > 8 then a7 ++ tag else a7
+      a9 = if i > 9 then a8 ++ tag else a8
+      a10 = if i > 10 then a9 ++ tag else a9
+      a11 = if i > 11 then a10 ++ tag else a10
+      a12 = if i > 12 then a11 ++ tag else a11
+      a13 = if i > 13 then a12 ++ tag else a12
+      a14 = if i > 14 then a13 ++ tag else a13
+      a15 = if i > 15 then a14 ++ tag else a14
+      a16 = if i > 16 then a15 ++ tag else a15
+      a17 = if i > 17 then a16 ++ tag else a16
+      a18 = if i > 18 then a17 ++ tag else a17
+      a19 = if i > 19 then a18 ++ tag else a18
+      a20 = if i > 20 then a19 ++ tag else a19
+      a21 = if i > 21 then a20 ++ tag else a20
+      a22 = if i > 22 then a21 ++ tag else a21
+      a23 = if i > 23 then a22 ++ tag else a22
+    in stages(a23, tag, i - 1)
+
+fn main() -> Unit !{IO} =
+  print(stages("", "x", 3))

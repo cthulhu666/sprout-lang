@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -486,18 +488,19 @@ join_3:
 
 define i64 @stdlib.string.trim(i64 %p$raw) {
 entry:
-  %t$29 = alloca i64
-  store i64 %p$raw, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$29 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$29, i8 0, i64 8, i1 false)
+  %t$30 = call i64 @sprout_gc_push_scan_root(ptr %t$29, i64 8)
+  %t$31 = alloca i64
+  store i64 %p$raw, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
   %t$0 = call i64 @stdlib.bytes.from_string(i64 %p$raw)
-  %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$29$0 = getelementptr i64, ptr %t$29, i64 0
+  store i64 %t$0, ptr %t$29$0
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_1
 arm_0_1:
-  %t$32 = alloca i64
-  store i64 %t$0, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$3 = call i64 @stdlib.bytes.length(i64 %t$0)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_4
 arm_0_4:
   %t$6 = add i64 0, 0
@@ -538,11 +541,7 @@ ovfpanic_24:
   call i64 @panic(i64 %t$26)
   unreachable
 ovfok_24:
-  %t$35 = alloca i64
-  store i64 %t$0, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$27 = call i64 @stdlib.string.byte_range_string(i64 %t$0, i64 %t$7, i64 %t$24)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_19
 join_19:
   %t$20 = phi i64 [%t$22, %then_19], [%t$27, %ovfok_24]
@@ -570,6 +569,7 @@ arm_1_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%t$5, %join_4]
+  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 

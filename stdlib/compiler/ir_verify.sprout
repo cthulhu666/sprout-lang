@@ -1,0 +1,515 @@
+module stdlib.compiler.ir_verify
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.string as string
+
+# Post-rooting verifier: every heap value live across a GC trigger must be rooted
+# there, on the block's root stack or in the function's frame.  Liveness is
+# recomputed here as a fixpoint over the CFG.
+# Known limit of independence: per-op uses, defs, successors, trigger and heap
+# classification come from ir_rooting, so a misclassification there passes.
+#
+# The frame (docs/frame-slot-rooting-v0.md) is the bottom entry of the root stack: the
+# entry block's IRFrameEnter pushes it, every other block starts with it, a non-exit
+# block ends with exactly it, and an exit's pop removes it.  While it is registered:
+#  - a value that owns a slot (the IRFrameStore'd values) is rooted, once its store
+#    has run -- the store must follow the definition before any trigger;
+#  - the result of an IRTcoLoad from a frame-backed TCO slot is rooted by that slot.
+# Each slot has one owner, and a back-edge's IRFrameClear never covers a TCO slot.
+
+# One block, indexed once for the dataflow: upward-exposed uses, defs, successors
+# and the (value, predecessor) pairs of its phis.
+type BlockInfo = (label: String, ops: List sprout_ir.IROp, uses: Set, defs: Set,
+                  succs: List String, phi_pairs: List (String, String))
+
+# A trigger and the heap values that must be rooted across it.
+type Need = (index: Int, op: sprout_ir.IROp, values: List String)
+
+# Forward walk of one block: root stack (head = top), push count per value, the
+# triggers still ahead, the slot owners defined here whose store has not run yet,
+# and the violations found (newest first).
+type Walk = (stack: List String, held: Dict Int, needs: List Need, unstored: Set,
+             found: List String)
+
+# What a function's ops say about its frame: its name ("" when there is none), its
+# slot owners (value -> index), the covered loads of frame-backed TCO slots, the
+# parameters among the owners, and the violations that need no walk.
+type FrameFacts = (name: String, owners: Dict Int, covered: Set, param_owners: Set,
+                   found: List String)
+
+# Where a violation is reported.
+type Site = (fn_name: String, block: String)
+
+fn at(site: Site, index: Int, text: String) -> String =
+  `fn ${site.fn_name} block ${site.block} op ${int_to_string(index)}: ${text}`
+
+# ---------------------------------------------------------------------------
+# Liveness: backward dataflow over the whole CFG, iterated to a fixpoint.
+#
+# A phi operand is a use at the end of its predecessor, so it joins the live-out of
+# that edge only; the phi result is a def of its own block and is never live-in.
+
+# Operands that are not SSA values (immediates such as `0` or `-1`) are not uses.
+fn is_ssa(name: String) -> Bool =
+  string.starts_with(name, "%")
+
+fn ssa_uses(op: sprout_ir.IROp) -> List String =
+  list_filter(is_ssa, ir_rooting.op_uses(op))
+
+# Every name an op defines.  ir_rooting.op_def names one per op; the rest are
+# scalars (tags, the overflow flag) that would otherwise read as live-in.
+fn defs_of(op: sprout_ir.IROp) -> List String =
+  match op with
+  | sprout_ir.IRCheckedArith r _ _ _ -> [r, r ++ "$agg", r ++ "$ovf"]
+  | sprout_ir.IRCallUnboxed2 tag val _ _ _ -> [tag, val]
+  | sprout_ir.IRCallUnboxed3 s0 s1 s2 _ _ _ -> [s0, s1, s2]
+  | _ -> maybe_to_list(ir_rooting.op_def(op))
+
+fn maybe_to_list(m: Maybe String) -> List String =
+  match m with
+  | Just x -> [x]
+  | Nothing -> Nil
+
+fn add_use_unless_defined(defs: Set, uses: Set, name: String) -> Set =
+  if set_member(name, defs) then uses else set_insert(name, uses)
+
+fn add_defs(op: sprout_ir.IROp, defs: Set) -> Set =
+  list_fold(\ (acc, d) -> set_insert(d, acc), defs, defs_of(op))
+
+fn upward_exposed(ops: List sprout_ir.IROp, uses: Set, defs: Set) -> (Set, Set) =
+  match ops with
+  | Nil -> (uses, defs)
+  | Cons op rest ->
+      upward_exposed(rest,
+                     list_fold(\ (acc, u) -> add_use_unless_defined(defs, acc, u),
+                               uses, ssa_uses(op)),
+                     add_defs(op, defs))
+
+fn phi_pairs_of(ops: List sprout_ir.IROp, acc: List (String, String)) -> List (String, String) =
+  match ops with
+  | Nil -> acc
+  | Cons (sprout_ir.IRPhi _ _ pairs) rest ->
+      phi_pairs_of(rest, list_append(list_filter(\p -> is_ssa(pair_value(p)), pairs), acc))
+  | Cons _ rest -> phi_pairs_of(rest, acc)
+
+fn pair_value(pair: (String, String)) -> String =
+  match pair with
+  | (v, _) -> v
+
+fn terminator_successors(ops: List sprout_ir.IROp) -> List String =
+  match list_reverse(ops) with
+  | Nil -> Nil
+  | [term | _] -> ir_rooting.op_successors(term)
+
+fn block_info(b: sprout_ir.IRBlock) -> BlockInfo =
+  match b with
+  | sprout_ir.IRBlock label ops ->
+      match upward_exposed(ops, set_empty(), set_empty()) with
+      | (uses, defs) ->
+          BlockInfo(label = label, ops = ops, uses = uses, defs = defs,
+                    succs = terminator_successors(ops), phi_pairs = phi_pairs_of(ops, Nil))
+
+fn live_in_of(label: String, live_in: Dict Set) -> Set =
+  match dict_get(label, live_in) with
+  | Just s -> s
+  | Nothing -> set_empty()
+
+# What is live at the end of `pred` along its edge into `s`: s's live-in plus the
+# operands s's phis take from `pred`.
+fn edge_live(pred: String, s: BlockInfo, live_in: Dict Set) -> Set =
+  list_fold(\ (acc, p) -> phi_operand_from(pred, p, acc),
+            live_in_of(s.label, live_in), s.phi_pairs)
+
+fn phi_operand_from(pred: String, pair: (String, String), acc: Set) -> Set =
+  match pair with
+  | (v, from) -> if from == pred then set_insert(v, acc) else acc
+
+fn live_out_of(b: BlockInfo, infos: Dict BlockInfo, live_in: Dict Set) -> Set =
+  list_fold(\ (acc, succ) -> add_edge_live(b.label, succ, infos, live_in, acc),
+            set_empty(), b.succs)
+
+fn add_edge_live(pred: String, succ: String, infos: Dict BlockInfo,
+                 live_in: Dict Set, acc: Set) -> Set =
+  match dict_get(succ, infos) with
+  | Just s -> set_union(acc, edge_live(pred, s, live_in))
+  | Nothing -> acc
+
+# Live-in only grows from the empty start, so a size change is the change test.
+fn live_in_round(rev: List BlockInfo, infos: Dict BlockInfo, live_in: Dict Set,
+                 changed: Bool) -> (Dict Set, Bool) =
+  match rev with
+  | Nil -> (live_in, changed)
+  | Cons b rest ->
+      let grown = set_union(b.uses, set_diff(live_out_of(b, infos, live_in), b.defs))
+      in live_in_round(rest, infos, dict_set(b.label, grown, live_in),
+                       changed || set_size(grown) != set_size(live_in_of(b.label, live_in)))
+
+fn live_in_fixpoint(rev: List BlockInfo, infos: Dict BlockInfo, live_in: Dict Set) -> Dict Set =
+  match live_in_round(rev, infos, live_in, false) with
+  | (next, changed) -> if changed then live_in_fixpoint(rev, infos, next) else next
+
+# ---------------------------------------------------------------------------
+# Needs: walk a block backwards from its live-out; at each trigger the heap values
+# live after it, minus its own result, plus its operands when it exposes them.
+
+fn without_def(op: sprout_ir.IROp, live: Set) -> Set =
+  list_fold(\ (acc, d) -> set_remove(d, acc), live, defs_of(op))
+
+fn live_before(op: sprout_ir.IROp, live: Set) -> Set =
+  list_fold(\ (acc, u) -> set_insert(u, acc), without_def(op, live), ssa_uses(op))
+
+fn required_at(op: sprout_ir.IROp, live: Set, heap: Set) -> List String =
+  let exposed = if ir_rooting.op_exposes_operands(op) then ssa_uses(op) else Nil
+  in list_filter(\v -> set_member(v, heap),
+                 set_to_list(set_union(without_def(op, live), set_from_list(exposed))))
+
+fn block_needs(rev_ops: List sprout_ir.IROp, index: Int, live: Set, heap: Set,
+               summary: Dict Bool, acc: List Need) -> List Need =
+  match rev_ops with
+  | Nil -> acc
+  | Cons op rest ->
+      block_needs(rest, index - 1, live_before(op, live), heap, summary,
+                  if ir_rooting.op_triggers_gc_summary(op, summary)
+                  then Cons(Need(index = index, op = op, values = required_at(op, live, heap)), acc)
+                  else acc)
+
+# ---------------------------------------------------------------------------
+# Root stack: walk the block forward from its entry stack: empty for the entry block,
+# the frame alone for any other block of a function with a frame.
+
+fn walk_with(w: Walk, stack: List String, held: Dict Int) -> Walk =
+  w with (stack = stack, held = held)
+
+fn walk_flag(w: Walk, message: String) -> Walk =
+  w with (found = Cons(message, w.found))
+
+fn walk_unstored(w: Walk, unstored: Set) -> Walk =
+  w with (unstored = unstored)
+
+fn frame_registered(facts: FrameFacts, w: Walk) -> Bool =
+  dict_member(facts.name, w.held)
+
+fn start_walk(facts: FrameFacts, entry: Bool, needs: List Need) -> Walk =
+  if facts.name == ""
+  then Walk(stack = Nil, held = dict_empty(), needs = needs, unstored = set_empty(), found = Nil)
+  else if entry
+  then Walk(stack = Nil, held = dict_empty(), needs = needs, unstored = facts.param_owners,
+            found = Nil)
+  else Walk(stack = [facts.name], held = dict_set(facts.name, 1, dict_empty()), needs = needs,
+            unstored = set_empty(), found = Nil)
+
+fn bump(name: String, delta: Int, held: Dict Int) -> Dict Int =
+  let count = maybe_with_default(0, dict_get(name, held)) + delta
+  in if count <= 0 then dict_remove(name, held) else dict_set(name, count, held)
+
+fn pop_roots(n: Int, w: Walk) -> Walk =
+  match w.stack with
+  | Cons v rest -> if n <= 0 then w else pop_roots(n - 1, walk_with(w, rest, bump(v, -1, w.held)))
+  | Nil -> w
+
+fn pop_checked(site: Site, index: Int, n: Int, w: Walk) -> Walk =
+  let depth = list_length(w.stack)
+  in if n > depth
+     then pop_roots(n, walk_flag(w, at(site, index, `IRUnroot pops ${int_to_string(n)} but only ${int_to_string(depth)} are pushed`)))
+     else pop_roots(n, w)
+
+fn apply_root_op(site: Site, index: Int, op: sprout_ir.IROp, w: Walk) -> Walk =
+  match op with
+  | sprout_ir.IRRoot _ v _ -> walk_with(w, Cons(v, w.stack), bump(v, 1, w.held))
+  | sprout_ir.IRFrameEnter frame _ _ -> walk_with(w, Cons(frame, w.stack), bump(frame, 1, w.held))
+  | sprout_ir.IRUnroot n _ -> pop_checked(site, index, n, w)
+  | _ -> w
+
+# A value is rooted by the frame once its store has run: it owns a slot, or it is
+# the load of a frame-backed TCO slot.
+fn frame_roots(facts: FrameFacts, w: Walk, v: String) -> Bool =
+  frame_registered(facts, w) && !set_member(v, w.unstored)
+    && (dict_member(v, facts.owners) || set_member(v, facts.covered))
+
+fn flag_unrooted(site: Site, index: Int, op: sprout_ir.IROp, facts: FrameFacts, w: Walk,
+                 v: String) -> Walk =
+  if dict_member(v, w.held) || frame_roots(facts, w, v) then w
+  else walk_flag(w, at(site, index,
+    v ++ " is live across [" ++ string.trim(sprout_ir.print_op(op)) ++ "] but not rooted"))
+
+fn flag_unstored(site: Site, index: Int, w: Walk, v: String) -> Walk =
+  walk_flag(w, at(site, index, v ++ " is defined but not yet stored in its frame slot"))
+
+# At a trigger the frame must be registered, and every slot owner defined so far must
+# have its store behind it: the trigger's own result is added after this check.
+fn check_frame_at_trigger(site: Site, index: Int, facts: FrameFacts, w: Walk) -> Walk =
+  let registered = if facts.name == "" || frame_registered(facts, w) then w
+                   else walk_flag(w, at(site, index,
+                     "trigger while the frame is not registered (before IRFrameEnter, or after a pop)"))
+  in list_fold(\ (acc, v) -> flag_unstored(site, index, acc, v), registered,
+               set_to_list(w.unstored))
+
+fn check_need(site: Site, index: Int, facts: FrameFacts, w: Walk) -> Walk =
+  match w.needs with
+  | Nil -> w
+  | Cons need rest ->
+      if need.index != index then w
+      else
+        let checked = check_frame_at_trigger(site, index, facts, w)
+        in list_fold(\ (acc, v) -> flag_unrooted(site, index, need.op, facts, acc, v),
+                     checked with (needs = rest),
+                     need.values)
+
+# A slot owner defined here is unstored until its IRFrameStore; what it defines joins
+# the set after the op's own checks.
+fn track_stores(op: sprout_ir.IROp, facts: FrameFacts, w: Walk) -> Walk =
+  match op with
+  | sprout_ir.IRFrameStore _ _ v -> walk_unstored(w, set_remove(v, w.unstored))
+  | _ -> walk_unstored(w, list_fold(mark_unstored(facts, _, _), w.unstored, defs_of(op)))
+
+fn mark_unstored(facts: FrameFacts, unstored: Set, defined: String) -> Set =
+  if dict_member(defined, facts.owners) then set_insert(defined, unstored) else unstored
+
+fn flag_never_stored(site: Site, index: Int, w: Walk, v: String) -> Walk =
+  walk_flag(w, at(site, index, v ++ " is defined in this block but never stored in its frame slot"))
+
+# The terminator is the last op.  Without a frame the stack must be empty before it; with
+# one, an exit must have popped it too and any other terminator leaves exactly it.  A
+# block that never reaches its end (`IRPanic`, `IRAbortMatch`, a `panic` call) is exempt.
+fn check_stack_at_end(site: Site, index: Int, exit: Bool, facts: FrameFacts, w: Walk) -> Walk =
+  let depth = list_length(w.stack)
+      framed = frame_registered(facts, w)
+  in if exit || facts.name == ""
+     then (if depth == 0 then w
+           else if framed
+           then walk_flag(w, at(site, index, `exit does not pop the frame (${int_to_string(depth)} roots still pushed)`))
+           else walk_flag(w, at(site, index, `block ends with ${int_to_string(depth)} roots still pushed`)))
+     else (if !framed
+           then walk_flag(w, at(site, index, "frame popped before a non-exit terminator"))
+           else if depth == 1 then w
+           else walk_flag(w, at(site, index, `block ends with ${int_to_string(depth - 1)} roots still pushed`)))
+
+fn check_block_end(site: Site, index: Int, noreturn: Bool, exit: Bool, facts: FrameFacts,
+                   w: Walk) -> Walk =
+  if noreturn then w
+  else list_fold(\ (acc, v) -> flag_never_stored(site, index, acc, v),
+                 check_stack_at_end(site, index, exit, facts, w), set_to_list(w.unstored))
+
+fn walk_ops(ops: List sprout_ir.IROp, index: Int, site: Site, noreturn: Bool, facts: FrameFacts,
+            w: Walk) -> Walk =
+  match ops with
+  | Nil -> w
+  | Cons op rest ->
+      let ended = check_end_if_last(op, rest, site, index, noreturn, facts, w)
+          rooted = apply_root_op(site, index, op, ended)
+      in walk_ops(rest, index + 1, site, noreturn, facts,
+                  track_stores(op, facts, check_need(site, index, facts, rooted)))
+
+fn check_end_if_last(op: sprout_ir.IROp, rest: List sprout_ir.IROp, site: Site, index: Int,
+                     noreturn: Bool, facts: FrameFacts, w: Walk) -> Walk =
+  match rest with
+  | Nil -> check_block_end(site, index, noreturn, ir_rooting.op_successors(op) == Nil, facts, w)
+  | _ -> w
+
+fn check_block(fn_name: String, b: BlockInfo, entry: Bool, infos: Dict BlockInfo,
+               live_in: Dict Set, heap: Set, summary: Dict Bool, facts: FrameFacts) -> List String =
+  let needs = block_needs(list_reverse(b.ops), list_length(b.ops) - 1,
+                          live_out_of(b, infos, live_in), heap, summary, Nil)
+      walked = walk_ops(b.ops, 0, Site(fn_name = fn_name, block = b.label),
+                        ir_rooting.ops_never_return(b.ops), facts,
+                        start_walk(facts, entry, needs))
+  in list_reverse(walked.found)
+
+# ---------------------------------------------------------------------------
+# Frame facts: the parts of the frame rules that need no walk.
+
+type OwnerScan = (by_index: Dict String, by_value: Dict Int, found: List String)
+
+fn frame_enters(b: sprout_ir.IRBlock) -> List (String, String, Int) =
+  match b with
+  | sprout_ir.IRBlock label ops -> list_filter_map(\op -> enter_of(label, op), ops)
+
+fn enter_of(label: String, op: sprout_ir.IROp) -> Maybe (String, String, Int) =
+  match op with
+  | sprout_ir.IRFrameEnter name n _ -> Just((label, name, n))
+  | _ -> Nothing
+
+fn store_of(op: sprout_ir.IROp) -> Maybe (Int, String) =
+  match op with
+  | sprout_ir.IRFrameStore _ i v -> Just((i, v))
+  | _ -> Nothing
+
+fn slot_of(op: sprout_ir.IROp) -> Maybe (Int, String) =
+  match op with
+  | sprout_ir.IRFrameSlot slot _ i _ -> Just((i, slot))
+  | _ -> Nothing
+
+fn clear_of(op: sprout_ir.IROp) -> Maybe (Int, Int) =
+  match op with
+  | sprout_ir.IRFrameClear _ _ start count -> Just((start, count))
+  | _ -> Nothing
+
+fn tco_load_of(op: sprout_ir.IROp) -> Maybe (String, String) =
+  match op with
+  | sprout_ir.IRTcoLoad loaded _ slot _ -> Just((loaded, slot))
+  | _ -> Nothing
+
+fn owner_clash(by_index: Dict String, i: Int, who: String) -> Maybe String =
+  match dict_get(int_to_string(i), by_index) with
+  | Just other -> if other != who then Just(other) else Nothing
+  | Nothing -> Nothing
+
+fn value_clash(by_value: Dict Int, who: String, i: Int) -> Bool =
+  match dict_get(who, by_value) with
+  | Just j -> j != i
+  | Nothing -> false
+
+# One slot, one owner; one value, one slot.  A frame-backed TCO slot is an owner (by its
+# slot name), so a value stored at its index clashes with it.
+fn scan_owner(fn_name: String, acc: OwnerScan, entry: (Int, String)) -> OwnerScan =
+  match entry with
+  | (i, who) ->
+      OwnerScan(by_index = dict_set(int_to_string(i), who, acc.by_index),
+                by_value = dict_set(who, i, acc.by_value),
+                found = list_append(owner_messages(fn_name, acc, i, who), acc.found))
+
+fn owner_messages(fn_name: String, acc: OwnerScan, i: Int, who: String) -> List String =
+  list_append(
+    match owner_clash(acc.by_index, i, who) with
+    | Just other -> [`fn ${fn_name}: frame slot ${int_to_string(i)} has two owners: ${other} and ${who}`]
+    | Nothing -> Nil,
+    if value_clash(acc.by_value, who, i)
+    then [`fn ${fn_name}: ${who} is stored in two frame slots`]
+    else Nil)
+
+fn outside(fn_name: String, size: Int, i: Int) -> List String =
+  if i < 0 || i >= size
+  then [`fn ${fn_name}: frame slot ${int_to_string(i)} is outside the frame of ${int_to_string(size)} slots`]
+  else Nil
+
+fn clear_covers(fn_name: String, start: Int, count: Int, i: Int) -> List String =
+  if i >= start && i < start + count
+  then [`fn ${fn_name}: IRFrameClear covers TCO slot ${int_to_string(i)}`]
+  else Nil
+
+fn clear_violations(fn_name: String, size: Int, tco_indices: List Int, clear: (Int, Int)) -> List String =
+  match clear with
+  | (start, count) ->
+      list_append(
+        if start < 0 || start + count > size
+        then [`fn ${fn_name}: IRFrameClear of ${int_to_string(count)} slots from ${int_to_string(start)} is outside the frame of ${int_to_string(size)} slots`]
+        else Nil,
+        list_flat_map(clear_covers(fn_name, start, count, _), tco_indices))
+
+fn first_of_pair(p: (Int, String)) -> Int =
+  match p with
+  | (a, _) -> a
+
+fn frame_facts(fn_name: String, params: List (String, sprout_ir.IRType),
+               blocks: List sprout_ir.IRBlock) -> FrameFacts =
+  let ops = all_ops(blocks)
+      enters = list_flat_map(frame_enters, blocks)
+      stores = list_filter_map(store_of, ops)
+      slots = list_filter_map(slot_of, ops)
+      clears = list_filter_map(clear_of, ops)
+      loads = list_filter_map(tco_load_of, ops)
+  in match enters with
+     | Nil ->
+         FrameFacts(name = "", owners = dict_empty(), covered = set_empty(),
+                    param_owners = set_empty(),
+                    found = if list_length(stores) + list_length(slots) + list_length(clears) == 0
+                            then Nil
+                            else [`fn ${fn_name}: frame op without IRFrameEnter`])
+     | Cons (label, name, size) more ->
+         frame_facts_of(fn_name, params, blocks, name, size, label, list_length(more),
+                        stores, slots, clears, loads)
+
+fn frame_facts_of(fn_name: String, params: List (String, sprout_ir.IRType),
+                  blocks: List sprout_ir.IRBlock, name: String, size: Int, label: String,
+                  extra_enters: Int, stores: List (Int, String), slots: List (Int, String),
+                  clears: List (Int, Int), loads: List (String, String)) -> FrameFacts =
+  let scan = list_fold(\ (acc, e) -> scan_owner(fn_name, acc, e),
+                       OwnerScan(by_index = dict_empty(), by_value = dict_empty(), found = Nil),
+                       list_append(slots, stores))
+      tco_indices = list_map(first_of_pair, slots)
+      slot_names = set_from_list(list_map(second_of_pair, slots))
+      owners = list_fold(\ (d, s) -> dict_set(second_of_pair(s), first_of_pair(s), d),
+                         dict_empty(), stores)
+  in FrameFacts(
+       name = name,
+       owners = owners,
+       covered = set_from_list(list_filter_map(\l -> covered_load(slot_names, l), loads)),
+       param_owners = set_from_list(list_filter(\v -> dict_member(v, owners),
+                                                list_map(param_ssa_of, params))),
+       found = list_flat_map(\x -> x, [
+         if extra_enters > 0 then [`fn ${fn_name}: more than one IRFrameEnter`] else Nil,
+         if label != entry_label(blocks) then [`fn ${fn_name}: IRFrameEnter outside the entry block`] else Nil,
+         list_flat_map(\i -> outside(fn_name, size, i), list_map(first_of_pair, list_append(slots, stores))),
+         list_flat_map(\c -> clear_violations(fn_name, size, tco_indices, c), clears),
+         list_reverse(scan.found)]))
+
+fn second_of_pair(p: (Int, String)) -> String =
+  match p with
+  | (_, b) -> b
+
+fn covered_load(slot_names: Set, load: (String, String)) -> Maybe String =
+  match load with
+  | (loaded, slot) -> if set_member(slot, slot_names) then Just(loaded) else Nothing
+
+fn param_ssa_of(p: (String, sprout_ir.IRType)) -> String =
+  match p with
+  | (name, _) -> sprout_ir.param_ssa(name)
+
+fn entry_label(blocks: List sprout_ir.IRBlock) -> String =
+  match blocks with
+  | [sprout_ir.IRBlock label _ | _] -> label
+  | [] -> ""
+
+# ---------------------------------------------------------------------------
+# TCO: the header reloads every parameter from its slot, and the back-edge frees the
+# iteration's root allocas, so nothing but the slots may be live into the header.
+
+fn tco_slot_names(op: sprout_ir.IROp) -> List String =
+  match op with
+  | sprout_ir.IRTcoEntry slots _ -> list_map(first_of_three, slots)
+  | sprout_ir.IRTcoBack stores _ _ -> list_map(first_of_three, stores)
+  | _ -> Nil
+
+fn first_of_three(t: (String, String, String)) -> String =
+  match t with
+  | (a, _, _) -> a
+
+fn tco_header(op: sprout_ir.IROp) -> List String =
+  match op with
+  | sprout_ir.IRTcoBack _ _ header -> [header]
+  | _ -> Nil
+
+fn all_ops(blocks: List sprout_ir.IRBlock) -> List sprout_ir.IROp =
+  list_flat_map(\b -> match b with | sprout_ir.IRBlock _ ops -> ops, blocks)
+
+fn header_violations(fn_name: String, slots: Set, live_in: Dict Set, header: String) -> List String =
+  list_map(\v -> `fn ${fn_name}: ${v} is live into TCO loop header ${header}`,
+           set_to_list(set_diff(live_in_of(header, live_in), slots)))
+
+fn tco_violations(fn_name: String, blocks: List sprout_ir.IRBlock, live_in: Dict Set) -> List String =
+  let ops = all_ops(blocks)
+      slots = set_from_list(list_flat_map(tco_slot_names, ops))
+  in list_flat_map(\h -> header_violations(fn_name, slots, live_in, h),
+                   set_to_list(set_from_list(list_flat_map(tco_header, ops))))
+
+# ---------------------------------------------------------------------------
+
+# Violations in one rooted function, one line each; Nil when it is clean.
+# `summary` is the may-trigger-GC map the rooting pass ran with.
+export fn verify_rooting(f: sprout_ir.IRFunction, summary: Dict Bool) -> List String =
+  match f with
+  | sprout_ir.IRFunction name params _ blocks ->
+      let infos_list = list_map(block_info, blocks)
+          infos = list_fold(\ (d, b) -> dict_set(b.label, b, d), dict_empty(), infos_list)
+          live_in = live_in_fixpoint(list_reverse(infos_list), infos, dict_empty())
+          heap = set_union(ir_rooting.params_heap_origin(params),
+                           ir_rooting.compute_heap_origin(blocks))
+          facts = frame_facts(name, params, blocks)
+          entry = entry_label(blocks)
+      in list_append(
+           facts.found,
+           list_append(
+             list_flat_map(\b -> check_block(name, b, b.label == entry, infos, live_in, heap,
+                                             summary, facts),
+                           infos_list),
+             tco_violations(name, blocks, live_in)))

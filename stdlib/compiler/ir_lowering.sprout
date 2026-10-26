@@ -133,6 +133,15 @@ fn vec_elem_addr_ir(r: String, v: String, i: String) -> String =
   "  " ++ r ++ "$data = load ptr, ptr " ++ r ++ "$dp\n" ++
   "  " ++ r ++ "$ep = getelementptr i64, ptr " ++ r ++ "$data, i64 " ++ i
 
+# Zero `bytes` bytes at `ptr`.
+fn lower_memset(ptr: String, bytes: Int) -> String =
+  "  call void @llvm.memset.p0.i64(ptr " ++ ptr ++ ", i8 0, i64 " ++ int_to_string(bytes) ++ ", i1 false)"
+
+# The address of slot `i`: one getelementptr per IRFrameStore, named from the frame so
+# that two stores never collide.
+fn frame_slot_ptr(frame: String, i: Int) -> String =
+  frame ++ "$" ++ int_to_string(i)
+
 fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), call_attr: String) -> String =
   match op with
   | sprout_ir.IRConst name n -> "  " ++ name ++ " = add i64 0, " ++ int_to_string(n)
@@ -415,6 +424,25 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ result ++ " = musttail call i64 @" ++ callee ++ "(" ++ lower_call_args(args) ++ ")"
         ++ call_attr ++ "\n" ++
       "  ret i64 " ++ result
+  # Frame slots: one zeroed alloca registered as a single scan root (8 bytes a slot).
+  | sprout_ir.IRFrameEnter frame n discard ->
+      "  " ++ frame ++ " = alloca [" ++ int_to_string(n) ++ " x i64]\n" ++
+      lower_memset(frame, 8 * n) ++ "\n" ++
+      "  " ++ discard ++ " = call i64 @sprout_gc_push_scan_root(ptr " ++ frame ++ ", i64 " ++
+        int_to_string(8 * n) ++ ")"
+  | sprout_ir.IRFrameStore frame i v ->
+      "  " ++ frame_slot_ptr(frame, i) ++ " = getelementptr i64, ptr " ++ frame ++ ", i64 " ++
+        int_to_string(i) ++ "\n" ++
+      "  store i64 " ++ v ++ ", ptr " ++ frame_slot_ptr(frame, i)
+  # A TCO parameter slot that lives in the frame: the slot name is the slot's address.
+  | sprout_ir.IRFrameSlot slot frame i init ->
+      "  " ++ slot ++ " = getelementptr i64, ptr " ++ frame ++ ", i64 " ++ int_to_string(i) ++ "\n" ++
+      "  store i64 " ++ init ++ ", ptr " ++ slot
+  | sprout_ir.IRFrameClear scratch frame start count ->
+      if start == 0 then lower_memset(frame, 8 * count)
+      else
+        "  " ++ scratch ++ " = getelementptr i64, ptr " ++ frame ++ ", i64 " ++ int_to_string(start) ++ "\n" ++
+        lower_memset(scratch, 8 * count)
 
 # Parts accumulate reversed and join in ONE pass.  Right-nested `++` allocates a
 # string as long as the whole remaining text at every step, so emitting one block
@@ -560,6 +588,9 @@ let runtime_declares: List RuntimeDeclare =
    decl("i64", "char_to_string", "i64"),
    decl("i64", "sprout_gc_push_i64_root", "ptr"),
    decl("i64", "sprout_gc_pop_roots", "i64"),
+   # A function's frame of GC root slots: one scan root, zeroed by the intrinsic.
+   decl("i64", "sprout_gc_push_scan_root", "ptr, i64"),
+   decl("void", "llvm.memset.p0.i64", "ptr, i8, i64, i1"),
    decl("i64", "sprout_gc_register_i64_root", "ptr"),
    decl("i64", "sprout_alloc_closure", "i64, i64"),
    # Arity guard on every closure-value application; aborts on a mismatch rather

@@ -1,0 +1,124 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
+
+# Frame-slot rooting (docs/frame-slot-rooting-v0.md): a function whose heap values live
+# into a later block registers ONE frame of root slots at entry and pops it at every
+# exit. Each function below has such values (defined before an `if`, used in its arms
+# and after it), plus a trigger between the definition and the use. Run under
+# SPROUT_GC_STRESS=1 (just test-stress), a value not in its slot is swept while live.
+
+fn repeat_str(s: String, n: Int) -> String =
+  if n <= 0 then "" else s ++ repeat_str(s, n - 1)
+
+# Allocation COUNT has to outrun the collector's threshold (4096 objects), not bytes.
+fn churn(n: Int, acc: String) -> String =
+  if n == 0 then acc else churn(n - 1, acc ++ "x")
+
+# %a and %b are defined in the entry block and live into both arms.
+fn framed(tag: String, flag: Bool) -> String =
+  let a = tag ++ "-a"
+      b = tag ++ "-b"
+  in if flag then (a ++ "|" ++ b) ++ a else (b ++ "|" ++ a) ++ b
+
+# A frame function run as an awaited task: the frame is pushed on the task's own root
+# context and must be popped before the task finishes, or the next collection marks a
+# context whose stack was freed.
+fn awaited(s: Scope) -> String !{IO} =
+  do
+    t <- task_fork(s, \_ -> framed("x", true))
+    task_await(t)
+
+fn awaited_then_churn(s: Scope) -> Int !{IO} =
+  do
+    t <- task_fork(s, \_ -> framed("y", false))
+    got <- task_await(t)
+    let noise = churn(5000, "")
+    str_len(noise) + str_len(got)
+
+fn recv_int(ch: Chan Int) -> Int !{IO} =
+  match chan_recv(ch) with
+  | Got v -> v
+  | Closed -> 0
+
+# Parks at chan_recv with a and b held in the frame, then uses both in an `if`.
+fn parker(ch: Chan Int, log: Ref String, tag: String, big: Bool) -> Unit !{IO} =
+  do
+    let a = repeat_str(tag, 3)
+    let b = repeat_str(tag, 2)
+    got <- recv_int(ch)
+    let c = if big then a ++ b else b ++ a
+    ref_write(log, ref_read(log) ++ c ++ a ++ b ++ int_to_string(got))
+
+# Runs while both parkers are blocked and drives the collector past its threshold.
+fn churner(burned: Ref Int) -> Unit !{IO} =
+  do
+    ref_write(burned, str_len(churn(5000, "")))
+    task_yield()
+    ref_write(burned, ref_read(burned) + str_len(churn(5000, "")))
+
+fn run_parkers(s: Scope, log: Ref String, burned: Ref Int) -> Unit !{IO} =
+  do
+    ch <- chan_new(s, 2)
+    task_spawn(s, \_ -> parker(ch, log, "A", true))
+    task_spawn(s, \_ -> parker(ch, log, "B", false))
+    task_spawn(s, \_ -> churner(burned))
+    task_yield()
+    chan_send(ch, 1)
+    chan_send(ch, 2)
+
+# Non-tail recursion with a heap temporary per level, live across the recursive call and
+# into the `if` arms: each activation holds its own frame until it returns.
+fn deep(xs: List Int, tag: String) -> Int =
+  match xs with
+  | Nil -> 0
+  | Cons x rest ->
+      let t = int_to_string(x) ++ tag
+      in if x > 2500 then str_len(t) + deep(rest, tag) + str_len(t)
+         else str_len(t) + deep(rest, tag)
+
+fn deep_ref(xs: List Int, tag: String, acc: Int) -> Int =
+  match xs with
+  | Nil -> acc
+  | Cons x rest ->
+      let n = str_len(int_to_string(x) ++ tag)
+      in deep_ref(rest, tag, acc + (if x > 2500 then 2 * n else n))
+
+fn up_to(n: Int, acc: List Int) -> List Int =
+  if n == 0 then acc else up_to(n - 1, Cons(n, acc))
+
+# A self-TCO loop: `keep` rides the loop in a TCO slot of the frame, `a` is a frame
+# value of one iteration (cleared at the back-edge).
+fn loop3(i: Int, acc: String, keep: String) -> String =
+  if i == 0 then acc ++ keep
+  else
+    let a = acc ++ "a"
+    in if i > 5 then loop3(i - 1, a ++ keep, keep) else loop3(i - 1, a, keep)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_eq(state, "framed, flag true", framed("p", true), "p-a|p-bp-a")
+    assert_eq(state, "framed, flag false", framed("q", false), "q-b|q-aq-b")
+
+    r1 <- with_scope(\s -> awaited(s))
+    assert_eq(state, "a frame function in an awaited task", r1, "x-a|x-bx-a")
+    r2 <- with_scope(\s -> awaited_then_churn(s))
+    assert_eq(state, "collections after the awaited task is gone", r2, 5000 + 10)
+
+    log <- ref_new("")
+    burned <- ref_new(0)
+    with_scope(\s -> run_parkers(s, log, burned))
+    # Asserted, not assumed: the churn must really have outrun the threshold.
+    assert_eq(state, "the churner allocated past the GC threshold", ref_read(burned), 10000)
+    final <- ref_read(log)
+    assert_eq(state, "both parkers finished", str_len(final), 22)
+    assert_true(state, "A's frame values survived the park",
+                str_find(final, "AAAAAAAAAA") != -1)
+    assert_true(state, "B's frame values survived the park",
+                str_find(final, "BBBBBBBBBB") != -1)
+
+    assert_eq(state, "deep non-tail recursion with a heap temporary per level",
+              deep(up_to(5000, Nil), "!"), deep_ref(up_to(5000, Nil), "!", 0))
+    assert_eq(state, "TCO loop over a frame", loop3(10, "", "K"), "aKaKaKaKaKaaaaaK")
+    summary(state)

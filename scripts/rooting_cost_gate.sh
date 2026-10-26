@@ -361,6 +361,66 @@ if [ "$clo_growth" -gt "$MAX_CLOSURE_GROWTH_PCT" ]; then
   over=1
 fi
 
+# PUSH COUNT, the only arm here that reads what the pass EMITS instead of what it costs to
+# run. Frame-slot rooting (docs/frame-slot-rooting-v0.md) exists to make pushes
+# O(rooted values) instead of O(blocks x live values); every arm above is one long block, where
+# the two are the same number, so none of them sees a return of the per-block re-push.
+#
+# The fixture is one self-tail-recursive function over a chain of 24 `if`s (127 blocks, 25
+# appends). The hand count is in the fixture: `tag` is live across the appends, so there is
+# exactly one sprout_gc_push_scan_root call, and each stage's carried value is dead after its
+# append, so it takes no slot and is pushed once, in the block that appends it: 23
+# sprout_gc_push_i64_root calls, one per stage but the last. Rooted block by block the same
+# function pushed 50 (2026-10-26, the compiler before frame slots).
+#
+# The ceiling is the count itself, not a budget with headroom: a push beyond one per stage is a
+# value that was rooted again in a block it only passes through. Floors, for the reason the arms
+# above give theirs: a fixture that stops having blocks or triggers passes any ceiling.
+FRAME_CHAIN="$ROOT/tests/cost/rooting_frame_chain.sprout"
+FRAME_CHAIN_FN='define i64 @$entry.stages('
+EXPECTED_FRAME_PUSHES=1
+MAX_FRAME_CHAIN_I64_PUSHES=23
+MIN_FRAME_CHAIN_BLOCKS=100
+MIN_FRAME_CHAIN_APPENDS=24
+
+chain_ll=$(mktemp /tmp/sprout_rooting_cost_chain_XXXXXX)
+chain_fn=$(mktemp /tmp/sprout_rooting_cost_chainfn_XXXXXX)
+trap 'rm -f "$err_small" "$err_large" "$err_huge" "$chain_ll" "$chain_fn"' EXIT
+if ! "$BIN" --emit-ir "$STDLIB" "$FRAME_CHAIN" > "$chain_ll" 2> "$err_small"; then
+  echo "FAIL: compiling $FRAME_CHAIN exited non-zero" >&2
+  cat "$err_small" >&2
+  exit 1
+fi
+# The fixture's function only: the prelude and runtime glue push roots of their own.
+awk -v pre="$FRAME_CHAIN_FN" 'index($0, pre) == 1 {p = 1} p {print} p && /^}/ {exit}' "$chain_ll" > "$chain_fn"
+chain_scan=$(grep -c 'call i64 @sprout_gc_push_scan_root' "$chain_fn")
+chain_i64=$(grep -c 'call i64 @sprout_gc_push_i64_root' "$chain_fn")
+chain_blocks=$(grep -c '^[A-Za-z0-9_.$]*:$' "$chain_fn")
+chain_appends=$(grep -c '@__tc_Semigroup_String_append' "$chain_fn")
+echo "==> frame chain: ${chain_scan} frame push, ${chain_i64} block-local pushes over ${chain_blocks} blocks and ${chain_appends} appends"
+
+if [ "$chain_blocks" -lt "$MIN_FRAME_CHAIN_BLOCKS" ] || [ "$chain_appends" -lt "$MIN_FRAME_CHAIN_APPENDS" ]; then
+  echo "FAIL: the frame-chain fixture has $chain_blocks blocks and $chain_appends appends in" >&2
+  echo "      $FRAME_CHAIN_FN, below the floors of $MIN_FRAME_CHAIN_BLOCKS / $MIN_FRAME_CHAIN_APPENDS. It is no longer a long" >&2
+  echo "      chain of blocks with triggers (or the function was not found), so the push count" >&2
+  echo "      below guards nothing. Check the fixture before lowering a floor." >&2
+  exit 1
+fi
+push_failed=0
+if [ "$chain_scan" -ne "$EXPECTED_FRAME_PUSHES" ]; then
+  echo "FAIL: $chain_scan sprout_gc_push_scan_root calls in the frame-chain function; expected" >&2
+  echo "      $EXPECTED_FRAME_PUSHES (one frame, registered at entry)." >&2
+  push_failed=1
+fi
+if [ "$chain_i64" -gt "$MAX_FRAME_CHAIN_I64_PUSHES" ]; then
+  echo "FAIL: $chain_i64 sprout_gc_push_i64_root calls in the frame-chain function; the ceiling is" >&2
+  echo "      $MAX_FRAME_CHAIN_I64_PUSHES (one per stage). A value that lives across a trigger in a later block, or a" >&2
+  echo "      carried TCO parameter, is being rooted block by block again instead of through its" >&2
+  echo "      frame slot (ir_rooting.plan_frame / update_scope)." >&2
+  push_failed=1
+fi
+[ "$push_failed" -eq 0 ] || exit 1
+
 if [ "$over" -ne 0 ]; then
   echo "      Per-op cost in a single block grew. If it now rises with block size," >&2
   echo "      compiling a generated vector suite will OOM rather than fail visibly." >&2
