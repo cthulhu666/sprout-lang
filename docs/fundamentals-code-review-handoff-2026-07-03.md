@@ -287,11 +287,8 @@ operator — negate with `== false`.
   generalizes to `forall a. MutVec (List a)`; Int written, String read; accepted.
 - **Location:** `LetDecl` at `infer.sprout:2955-2967` — `unifier.generalize` on ANY
   expression; the initializer's effect is also discarded (`InferOk typed_expr s1 _ _`),
-  silently violating the top-level-purity rule. **Still true after W6 (verified
-  2026-08-16): `let boom = print("at load time")` type-checks, binding `main.boom : Unit`.**
-  W6 enforced the `fn` and instance-method boundaries and left this one; it is the only
-  W6 sub-item still open, and it lands here rather than there because the same line also
-  carries the value restriction.
+  silently violating the top-level-purity rule. **Closed 2026-10-26:** the initializer's
+  effect is recorded and rejected in the effect post-pass (spec §5.2).
 - **Fix sketch:** syntactic value restriction — generalize only syntactic values
   (lambdas, literals, variables, constructors/tuples of values); monomorphic otherwise.
 - **Blast-radius check:** stdlib/compiler may rely on generalizing non-value lets
@@ -418,13 +415,8 @@ unifier T7; `tests/conformance/run/` is orphaned). Fixtures under
 > negatives `type_error/effect_pure_instance_method_does_io`, `effect_two_variables{,_instance,_uncombined}`,
 > `effect_mixed_row`, `effect_var_merged_with_io`.
 >
-> **Still open — top-level `let` initializer purity** (the "same campaign" bullet below).
-> Spec §6 states it normatively — "Because top-level `let` bindings must be pure, imported
-> modules do not perform effectful initialization merely by being loaded" — and it is
-> *not* checked: `let boom = print("at load time")` type-checks clean, binding
-> `main.boom : Unit`. `LetDecl` still discards its initializer's effect. Tracked in
-> `BACKLOG.md`; it needs a design call rather than a patch, because it meets W3's value
-> restriction at the same line.
+> **Closed 2026-10-26 — top-level `let` initializer purity** (the "same campaign" bullet
+> below). Enforced in the effect post-pass; see spec §5.2.
 
 - **Evidence (2026-07-03, both now rejected):** probe `sr_effect` (pure-declared fn calling
   `print`) → checker OK, env shows `main.sneaky : Int -> Int`. Probe `sr_mainpoly`

@@ -1,0 +1,5 @@
+module main
+
+# toplevel_let_print.spr with the hint applied: the call moves into `main`.
+
+fn main() -> Unit !{IO} = print("at load time")

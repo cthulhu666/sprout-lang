@@ -1,0 +1,16 @@
+module main
+
+# toplevel_let_annotated_io.spr with the hint applied: the call moves into a
+# function, which carries the annotation as its return type.
+
+fn loud() -> Int !{IO} =
+  do
+    print("side effect")
+    1
+
+fn n() -> Int !{IO} = loud()
+
+fn main() -> Unit !{IO} =
+  do
+    v <- n()
+    print(int_to_string(v))

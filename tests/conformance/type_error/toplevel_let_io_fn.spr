@@ -1,0 +1,14 @@
+module main
+
+# spec-v0.md §5.2: the IO comes from a user `!{IO}` function called in the
+# initializer, not from a builtin.
+
+fn loud() -> Int !{IO} =
+  do
+    print("side effect")
+    1
+
+let x = loud()
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(x))

@@ -183,6 +183,7 @@ fn effect_report_line(r: unifier.EffectReport) -> String =
 # needs the report to enumerate exactly what will fail to compile.
 #
 #   GAP  rule 8 — the body performs IO under a pure signature
+#   LET  spec §5.2 — a top-level `let` initializer is not pure
 #   ROW  rule 9 — the signature names more than one effect variable, or writes a
 #                 multi-label row
 #
@@ -198,6 +199,7 @@ fn effect_report_line(r: unifier.EffectReport) -> String =
 # was inferred".
 fn effect_report_verdict(r: unifier.EffectReport) -> String =
   if effect_report_is_gap(r) then "GAP"
+  else if unifier.effect_report_is_impure_let(r) then "LET"
   else if unifier.effect_report_is_multi_var(r) then "ROW"
   else "ok"
 
@@ -227,7 +229,8 @@ fn print_effect_summary(reports: List unifier.EffectReport) -> Unit !{IO} =
   print("effect-summary: " ++ int_to_string(list_length(reports)) ++ " declarations, "
     ++ int_to_string(count(effect_report_is_gap, reports)) ++ " gaps (declared pure, inferred !{IO}), "
     ++ int_to_string(count(unifier.effect_report_is_multi_var, reports)) ++ " singleton-rule violations, "
-    ++ int_to_string(count(effect_report_is_var, reports)) ++ " unresolved effect vars")
+    ++ int_to_string(count(effect_report_is_var, reports)) ++ " unresolved effect vars, "
+    ++ int_to_string(count(unifier.effect_report_is_impure_let, reports)) ++ " impure top-level lets")
 
 # ---------------------------------------------------------------------------
 # Phase: bind-census — the sites the `try` migration changes or rejects

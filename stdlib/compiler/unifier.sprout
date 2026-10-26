@@ -63,29 +63,46 @@ export type ParkedBind (..) = ParkedBind types.Type source.SourcePos
 # only the top-level effect (blind to a variable written on a parameter's arrow),
 # and the inferred field describes what the body did, which is not what rule 9
 # governs. The scheme is the declaration, so it is what rule 9 reads.
+#
+# A top-level `let` initializer is the other boundary (spec §5.2): it has no
+# signature, so `LetEffectReport` carries only the effect the initializer
+# performs, resolved. Rules 8 and 9 read declarations, so neither fires on it;
+# `effect_report_is_impure_let` is its own rejection.
 export type EffectReport (..) =
   | EffectReport String types.Effect types.Effect source.SourcePos types.Scheme
   # EffectReport fn_name  declared  inferred  pos  declared_scheme
+  | LetEffectReport String types.Effect source.SourcePos
+  # LetEffectReport let_name  inferred  pos
 
 export fn effect_report_name(r: EffectReport) -> String =
   match r with
   | EffectReport n _ _ _ _ -> n
+  | LetEffectReport n _ _ -> n
 
+# A let declares nothing, so it reads as pure.
 export fn effect_report_declared(r: EffectReport) -> types.Effect =
   match r with
   | EffectReport _ d _ _ _ -> d
+  | LetEffectReport _ _ _ -> types.EffectPure
 
 export fn effect_report_inferred(r: EffectReport) -> types.Effect =
   match r with
   | EffectReport _ _ i _ _ -> i
+  | LetEffectReport _ i _ -> i
 
 export fn effect_report_pos(r: EffectReport) -> source.SourcePos =
   match r with
   | EffectReport _ _ _ p _ -> p
+  | LetEffectReport _ _ p -> p
 
-export fn effect_report_decl_scheme(r: EffectReport) -> types.Scheme =
+# "This top-level `let` initializer is not pure." The SINGLE definition, read by
+# `--phase effects` (verdict LET) and `checker` (to reject). Anything but a
+# resolved pure effect counts: an initializer that still holds an effect
+# variable after substitution is not known to be pure.
+export fn effect_report_is_impure_let(r: EffectReport) -> Bool =
   match r with
-  | EffectReport _ _ _ _ s -> s
+  | LetEffectReport _ eff _ -> !types.effect_is_pure(eff)
+  | EffectReport _ _ _ _ _ -> false
 
 # "This declaration under-declares its effect." The SINGLE definition, used by
 # both consumers: `--phase effects` to label a line GAP, and `checker` to reject.
@@ -100,9 +117,12 @@ export fn effect_report_decl_scheme(r: EffectReport) -> types.Scheme =
 # An unresolved effect VARIABLE is not a gap either — the checker accepts when it
 # does not know, which is the only safe direction for a conservatism knob.
 export fn effect_report_is_gap(r: EffectReport) -> Bool =
-  match (effect_report_declared(r), effect_report_inferred(r)) with
-  | (types.EffectPure, types.EffectIO) -> true
-  | _ -> false
+  match r with
+  | LetEffectReport _ _ _ -> false
+  | EffectReport _ _ _ _ _ ->
+      match (effect_report_declared(r), effect_report_inferred(r)) with
+      | (types.EffectPure, types.EffectIO) -> true
+      | _ -> false
 
 # "This signature is not a singleton effect variable." The second rejection, for
 # spec §7 rule 9. The SINGLE definition, read by both `--phase effects` (to label
@@ -143,16 +163,24 @@ export fn effect_report_is_multi_var(r: EffectReport) -> Bool =
 # freshened `$e0`. Every arrow is scanned, not just the top-level effect, because
 # a variable written on a parameter (`list_each`'s `f: a -> Unit !{e}`) is the
 # common case and never appears at the top level of anything else.
+#
+# A top-level `let` has no signature, so it names none and rule 9 never applies.
 export fn effect_report_effect_vars(r: EffectReport) -> List String =
-  types.scheme_effect_vars(effect_report_decl_scheme(r))
+  match r with
+  | EffectReport _ _ _ _ s -> types.scheme_effect_vars(s)
+  | LetEffectReport _ _ _ -> Nil
 
 export fn effect_report_has_row(r: EffectReport) -> Bool =
-  types.scheme_has_multi_label_row(effect_report_decl_scheme(r))
+  match r with
+  | EffectReport _ _ _ _ s -> types.scheme_has_multi_label_row(s)
+  | LetEffectReport _ _ _ -> false
 
 # The labels of the written row, for the diagnostic. `Nil` when the signature
 # writes none, in which case the rejection came from the variable count instead.
 export fn effect_report_row_labels(r: EffectReport) -> List String =
-  types.scheme_row_labels(effect_report_decl_scheme(r))
+  match r with
+  | EffectReport _ _ _ _ s -> types.scheme_row_labels(s)
+  | LetEffectReport _ _ _ -> Nil
 
 # What a unification returns: BOTH substitutions, or a message.
 #

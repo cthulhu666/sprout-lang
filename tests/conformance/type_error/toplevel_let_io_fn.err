@@ -1,0 +1,1 @@
+top-level `let x` performs IO when its module loads, but top-level bindings must be pure (spec-v0.md §5.2) — move the call into `main` or a function

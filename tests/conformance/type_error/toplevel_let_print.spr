@@ -1,0 +1,9 @@
+module main
+
+# spec-v0.md §5.2: a top-level `let` initializer must be pure. `print` runs
+# when the module loads, so the binding is rejected.
+
+let boom = print("at load time")
+#~^ ERROR
+
+fn main() -> Unit !{IO} = ()

@@ -1,0 +1,14 @@
+module main
+
+# spec-v0.md §5.2: an annotation does not change the rule. The effect is that
+# of the initializer, not of the annotated type.
+
+fn loud() -> Int !{IO} =
+  do
+    print("side effect")
+    1
+
+let n: Int = loud()
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(int_to_string(n))

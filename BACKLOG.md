@@ -35,12 +35,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   in `docs/effect-polymorphism-policy-v0.md` admits `!{e}` where the contract pins order and
   multiplicity — true of `step` (left fold), false of `cond` (law lets an instance re-ask it).
   13 signatures, zero measured breakage; lands after effect subsumption.
-- [ ] `P2` **Top-level `let` initializers are not checked for purity.** Spec §6 states the rule
-  normatively and nothing checks it — `let boom = print("x")` type-checks. `LetDecl` discards the
-  initializer's inferred effect and `--phase effects` does not enumerate top-level `let`s, so the
-  first step is extending the census, not writing the check (215 top-level `let`s in tree). Couples
-  to the value restriction at the same line (`docs/fundamentals-code-review-handoff-2026-07-03.md`
-  §W3/§W6).
 - [ ] `P3` **A trailing effect annotation on a non-arrow type is discarded** — `Int !{IO}` has no
   effect slot. §7 rule 9 now records that it carries no meaning; rejecting it outright would be
   more honest. The unknown-label check already reaches this position (`Int !{NOPE}` is rejected),
