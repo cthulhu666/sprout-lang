@@ -325,15 +325,12 @@ Sources: [Koka `std/core`](https://koka-lang.github.io/koka/doc/std_core.html) �
 > `tests/conformance/type_error/effect_pure_body_does_io`, so the ordering problem it
 > describes never bit). Only env write-back remains from this list.
 >
-> One gap this doc never covered, added here so the "what is not done" heading is not
-> misleading: **top-level `let` initializers are not checked for purity.** Spec §6 requires
-> it ("Because top-level `let` bindings must be pure, imported modules do not perform
-> effectful initialization merely by being loaded") and `let boom = print("at load time")`
-> type-checks clean. §11's post-pass covers the `fn` and instance-method boundaries;
-> `LetDecl` still discards its initializer's effect, and `--phase effects` does not
-> enumerate top-level `let`s at all, so the census cannot size it either. Tracked in
-> `BACKLOG.md`; it needs a design call, because the same line also carries the value
-> restriction. Original snapshot follows.
+> One gap this doc never covered, now closed: **top-level `let` initializers** are checked
+> for purity (spec §5.2, §6). `LetDecl` records a `unifier.LetEffectReport` with the
+> initializer's resolved effect, and §11's post-pass rejects a non-pure one after rule 8's
+> gaps and before rule 9, so `let boom = print("at load time")` is an error. `--phase effects`
+> prints it as `LET` and counts it in the summary. A value-restriction error still wins,
+> as any type error does. Original snapshot follows.
 
 Two of the four items here were done on 2026-08-16; see §9. What remains:
 
@@ -671,8 +668,8 @@ is the conformance fixture written to demonstrate the bug.
 
 ### 12.4 The report gains a third verdict
 
-`--phase effects` now prints `GAP` (rule 8), `ROW` (rule 9) or `ok`, and the summary counts rows
-separately. Adding the rejection without adding the verdict would have printed `ok` for a declaration
+`--phase effects` now prints `GAP` (rule 8), `ROW` (rule 9), `LET` (a non-pure top-level `let`,
+spec §5.2) or `ok`, and the summary counts rows and impure lets separately. Adding the rejection without adding the verdict would have printed `ok` for a declaration
 the checker rejects — exactly the report-disagrees-with-checker failure §11.1 exists to prevent.
 
 The diagnostic names the *count*, not the variables: the inferred row holds freshened names (`$e0`,

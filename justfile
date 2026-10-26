@@ -1658,6 +1658,16 @@ effect-report-smoke: bootstrap-from-seed
       | grep -E 'two_hofs' >&2 || echo "  (no line at all)" >&2
     failed=$((failed + 1))
   fi
+  # `LET` (spec §5.2) likewise: canaries.spr cannot hold an impure top-level
+  # `let`, since the rejected program would stop reporting.
+  LETFIX=tests/conformance/type_error/toplevel_let_print.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$LETFIX" 2>&1 \
+       | grep -qE '^effect LET .*boom'; then
+    echo "effect-report-smoke: no LET verdict for the impure top-level let fixture" >&2
+    "{{build_dir}}/compile_driver_bin_stage1" --phase effects "{{stdlib_root}}" "$LETFIX" 2>&1 \
+      | grep -E 'boom' >&2 || echo "  (no line at all)" >&2
+    failed=$((failed + 1))
+  fi
   if ! grep -qE "^effect-summary: [0-9]+ declarations, [0-9]+ gaps" "$TMPD/out"; then
     echo "effect-report-smoke: no effect-summary line in output:" >&2
     cat "$TMPD/out" >&2

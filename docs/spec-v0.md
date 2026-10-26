@@ -579,8 +579,10 @@ let answer = 42
 ```
 
 Bindings are immutable.
-At top level, `let` initializers must be pure. (**Not yet enforced** — see the note in
-§6; an effectful top-level `let` is accepted today.)
+At top level, `let` initializers must be pure, and this is enforced: `let boom = print("x")`
+is rejected with ``top-level `let boom` performs IO when its module loads, but top-level
+bindings must be pure``. Binding a function that performs IO is pure — the effect stays on
+its arrow and fires when it is called (`let shout = \s -> print(s)`).
 
 **Type annotation (experimental).** A top-level `let` binding may carry an
 optional type annotation between the name and `=`:
@@ -2578,13 +2580,10 @@ Effect note for v0:
 - Because top-level `let` bindings must be pure, imported modules do not perform
   effectful initialization merely by being loaded.
 
-> **Not yet enforced (2026-08-16).** The top-level-`let` purity rule above is normative
-> but unchecked: `let boom = print("at load time")` type-checks, binding
-> `main.boom : Unit`. The §7 enforcement note below covers `fn` and instance-method
-> bodies; a `let` initializer's inferred effect is still discarded. Tracked in
-> `BACKLOG.md`. Do not read this bullet as a guarantee the compiler currently makes —
-> it is what v0 intends, and until the check lands an effectful top-level `let` is
-> accepted.
+> **Enforced.** A top-level `let` whose initializer's resolved effect is not pure is a
+> compile error, reported with the §7 rule 8 post-pass: `let boom = print("at load time")`
+> is rejected, and so is `let x = loud()` for a user `!{IO}` function. An unresolved
+> effect variable counts as not pure. `--phase effects` prints such a `let` as `LET`.
 
 ## 7. Typing Rules (High Level)
 
@@ -2820,10 +2819,8 @@ Effect note for v0:
 > > rigidity mechanism at all (the type-variable analogue, `unifier.fresh_skolem`, does
 > > exist). `docs/effect-subsumption-v0.md` §8 costs both.
 > >
-> > And one that §5.2 prohibits normatively without any check enforcing it: **a top-level
-> > `let` initializer.** `let seeded = shout(41)` runs IO at startup. `--phase effects`
-> > does not enumerate top-level `let`s, so the census does not see it either; it couples
-> > to the value restriction and is tracked in `BACKLOG.md`.
+> > **Closed 2026-10-26:** a top-level `let` initializer is checked for purity (§5.2).
+> > `let seeded = shout(41)` is a compile error, and `--phase effects` enumerates it.
 > >
 > > **Closed 2026-09-09:** an instance method could declare an effect its class signature
 > > does not, so callers dispatching through the class inherited the class's weaker claim.

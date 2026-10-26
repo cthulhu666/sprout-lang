@@ -141,15 +141,22 @@ fn enforce_effects(result: typed_ast.TypedResult, reports: List unifier.EffectRe
           typed_ast.TypedErr(unifier.effect_report_pos(first),
             effect_gap_message(first, rest))
       | Nil ->
-          # Rule 8 first, rule 9 second. A declaration that both under-declares
-          # and needs two variables is more usefully reported as the former: the
-          # missing `!{IO}` is a fact about what the code does, while the extra
-          # variable is a fact about how its signature is written.
-          match effect_multi_vars(reports) with
-          | Nil -> result
-          | [first | _] ->
+          # Rule 8 first, top-level `let` purity (spec §5.2) second, rule 9
+          # last. A declaration that both under-declares and needs two variables
+          # is more usefully reported as the former: the missing `!{IO}` is a
+          # fact about what the code does, while the extra variable is a fact
+          # about how its signature is written. A `let` that runs IO at load time
+          # is likewise a fact about behaviour, so it outranks signature shape.
+          match effect_impure_lets(reports) with
+          | Cons first rest ->
               typed_ast.TypedErr(unifier.effect_report_pos(first),
-                effect_multi_var_message(first))
+                let_impure_message(first, rest))
+          | Nil ->
+              match effect_multi_vars(reports) with
+              | Nil -> result
+              | [first | _] ->
+                  typed_ast.TypedErr(unifier.effect_report_pos(first),
+                    effect_multi_var_message(first))
 
 # Order is source order, so each list reports its FIRST offending declaration
 # rather than an arbitrary one.
@@ -165,6 +172,9 @@ fn effect_gaps(reports: List unifier.EffectReport) -> List unifier.EffectReport 
 
 fn effect_multi_vars(reports: List unifier.EffectReport) -> List unifier.EffectReport =
   list_filter(unifier.effect_report_is_multi_var, reports)
+
+fn effect_impure_lets(reports: List unifier.EffectReport) -> List unifier.EffectReport =
+  list_filter(unifier.effect_report_is_impure_let, reports)
 
 # Two causes, two messages. Both are rule-9 rejections, but the fix differs and a
 # single wording could only fit one of them.
@@ -204,6 +214,25 @@ fn effect_gap_message(first: unifier.EffectReport, rest: List unifier.EffectRepo
   "`" ++ unifier.effect_report_name(first) ++ "` performs IO but is declared pure"
     ++ " — add `!{IO}` after its return type (spec-v0.md §7 rule 8)"
     ++ effect_gap_others(rest)
+
+# Spec-v0.md §5.2. The name is the one the user wrote: the report holds the
+# bundler's `main.x` / `$entry.x`. The first line carries the phrase the
+# conformance fixtures pin.
+fn let_impure_message(first: unifier.EffectReport, rest: List unifier.EffectReport) -> String =
+  "top-level `let " ++ let_source_name(first) ++ "` performs IO when its module loads,"
+    ++ " but top-level bindings must be pure (spec-v0.md §5.2)"
+    ++ " — move the call into `main` or a function"
+    ++ let_impure_others(rest)
+
+fn let_source_name(r: unifier.EffectReport) -> String =
+  string.after_last_dot(unifier.effect_report_name(r))
+
+fn let_impure_others(rest: List unifier.EffectReport) -> String =
+  match rest with
+  | Nil -> ""
+  | _ ->
+      "\n  " ++ int_to_string(list_length(rest)) ++ " more in this program:"
+        ++ list_fold(\ (acc, r) -> acc ++ "\n    " ++ let_source_name(r), "", rest)
 
 fn effect_gap_others(rest: List unifier.EffectReport) -> String =
   match rest with

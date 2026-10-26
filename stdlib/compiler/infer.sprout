@@ -10578,6 +10578,11 @@ fn typecheck_decl(
                 # AFTER the annotation unify, which may be the only thing that
                 # determines a deferred field access's receiver.
                 do
+                  # Spec §5.2: the initializer's effect, resolved with the
+                  # annotation unify's substitution. Recorded for every top-level
+                  # `let`; `checker.enforce_effects` rejects a non-pure one.
+                  _ <- unifier.record_effect_report(state,
+                         unifier.LetEffectReport(name, unifier.apply_effect_subst(es1a, rhs_eff), let_pos))
                   f <- finish_field_obligations(state, global_env_dict(env), s1a, typed_expr0)
                   match f with
                   | FinishErr fpos fmsg -> TypedDeclErr(fpos, fmsg)

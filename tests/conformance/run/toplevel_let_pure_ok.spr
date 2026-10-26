@@ -1,0 +1,30 @@
+module main
+
+# The ACCEPT side of spec-v0.md §5.2: a top-level `let` initializer must be
+# pure, and these are.
+#
+# The first two bind a function that performs IO when CALLED (`emit` and not
+# `print` for the second: `print` is an intrinsic with no first-class form). Building the
+# value runs nothing, so the effect stays on the arrow (`String -> Unit !{IO}`)
+# and the initializer is pure. The third calls an effect-polymorphic function
+# with a pure callback, which resolves `!{e}` to pure. The rejecting twins are
+# tests/conformance/type_error/toplevel_let_*.spr.
+
+let shout = \ (s: String) -> print(s)
+
+fn emit(s: String) -> Unit !{IO} = print(s)
+
+let p = emit
+
+fn apply(f: a -> b !{e}, x: a) -> b !{e} = f(x)
+
+let ys = list_map(\x -> x + 1, [1, 2])
+
+let z = apply(\x -> x * 2, 21)
+
+fn main() -> Unit !{IO} =
+  do
+    shout("shout")
+    p("p")
+    print(int_to_string(list_length(ys)))
+    print(int_to_string(z))

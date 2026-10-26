@@ -1,0 +1,13 @@
+module main
+
+# toplevel_let_io_fn.spr with the hint applied: the call moves into `main`.
+
+fn loud() -> Int !{IO} =
+  do
+    print("side effect")
+    1
+
+fn main() -> Unit !{IO} =
+  do
+    x <- loud()
+    print(int_to_string(x))
