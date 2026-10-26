@@ -206,6 +206,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   scope), and is a normative spec change (`print(true)` flips `1` → `"true"`). Needs its own
   design doc. Decision: do it, or formally bless the intrinsic + surgical-rewrite split as
   permanent.
+- [ ] `P3` **An unannotated top-level `let p = print` type-checks but cannot be compiled.**
+  `print(val: a)` picks its lowering per call from the argument type. As a syntactic value the
+  `let` generalizes to `forall a. a -> Unit !{IO}`, so the eta-wrapper `ast_to_ir` builds for an
+  intrinsic used as a value sees a type variable and fails late: "'print' cannot be used as a
+  first-class value". An annotated `let`, a local `let` and `list_each(print, xs)` all work. Fix:
+  reject it in the checker with the annotation as the hint, or lower it per use site. Disappears
+  if `print` dispatches through `ToString` (entry above).
 - [ ] `P2` **Overloaded literals: replace both hand-written coercions with one class + a defaulting
   rule.** `StringTemplate → String` and `List`-literal → `Vec` are two hardcoded branches of a
   pre-inference pass (`desugar_ctx.sprout`, 619 lines), so a third literal target (`Set`, `Bytes`,
