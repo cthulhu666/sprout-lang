@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -516,15 +518,17 @@ else_3:
 
 define i64 @examples.wrap_session_states.attempt_argw(i64 %p$s$tag, i64 %p$s$val) {
 entry:
+  %t$15 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$15, i8 0, i64 8, i1 false)
+  %t$16 = call i64 @sprout_gc_push_scan_root(ptr %t$15, i64 8)
+  %t$15$0 = getelementptr i64, ptr %t$15, i64 0
+  store i64 %p$s$val, ptr %t$15$0
   br label %arm_0_0
 arm_0_0:
   %t$2 = add i64 0, 1
   %t$3 = icmp eq i64 %p$s$tag, %t$2
   br i1 %t$3, label %body_0_0, label %arm_1_0
 body_0_0:
-  %t$15 = alloca i64
-  store i64 %p$s$val, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$4 = call i64 @examples.wrap_session_states.read_secret(i64 %p$s$val)
   %t$5 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
@@ -549,7 +553,7 @@ body_0_0:
   store i64 %t$9, ptr %t$27
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$9)
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_0
 arm_1_0:
   %t$11 = add i64 0, 0
@@ -564,6 +568,7 @@ arm_2_0:
   unreachable
 join_0:
   %t$1 = phi i64 [%t$10, %body_0_0], [%t$14, %body_1_0]
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 

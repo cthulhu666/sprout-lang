@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -251,6 +253,11 @@ join_0:
 
 define i64 @__tc_ToString_Tuple_a_b_to_string(i64 %p$t, i64 %p$__tc_ToString_0_to_string, i64 %p$__tc_ToString_1_to_string) {
 entry:
+  %t$16 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$16, i8 0, i64 8, i1 false)
+  %t$17 = call i64 @sprout_gc_push_scan_root(ptr %t$16, i64 8)
+  %t$16$0 = getelementptr i64, ptr %t$16, i64 0
+  store i64 %p$__tc_ToString_1_to_string, ptr %t$16$0
   br label %arm_0_0
 arm_0_0:
   %t$2$ptr = inttoptr i64 %p$t to ptr
@@ -261,9 +268,6 @@ arm_0_0:
   %t$3 = load i64, ptr %t$3$gep
   %t$4 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
-  %t$16 = alloca i64
-  store i64 %p$__tc_ToString_1_to_string, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
   %t$18 = alloca i64
   store i64 %p$__tc_ToString_0_to_string, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
@@ -300,7 +304,7 @@ arm_0_0:
   store i64 %t$11, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$12 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$11)
-  %t$38 = call i64 @sprout_gc_pop_roots(i64 6)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 5)
   %t$13 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
   %t$39 = alloca i64
@@ -317,6 +321,7 @@ arm_1_0:
   unreachable
 join_0:
   %t$1 = phi i64 [%t$15, %arm_0_0]
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 

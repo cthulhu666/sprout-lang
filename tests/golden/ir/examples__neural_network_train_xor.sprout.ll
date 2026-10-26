@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -1039,9 +1041,12 @@ entry:
 
 define i64 @examples.neural_network_train_xor.train_verbose(i64 %p$w$in, i64 %p$g$in, i64 %p$lr$in, i64 %p$epoch$in, i64 %p$total$in, i64 %p$band$in) {
 entry:
-  %t$13 = alloca i64
+  %t$20 = alloca [2 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$20, i8 0, i64 16, i1 false)
+  %t$21 = call i64 @sprout_gc_push_scan_root(ptr %t$20, i64 16)
+  %t$13 = getelementptr i64, ptr %t$20, i64 0
   store i64 %p$w$in, ptr %t$13
-  %t$14 = alloca i64
+  %t$14 = getelementptr i64, ptr %t$20, i64 1
   store i64 %p$g$in, ptr %t$14
   %t$15 = alloca i64
   store i64 %p$lr$in, ptr %t$15
@@ -1051,7 +1056,6 @@ entry:
   store i64 %p$total$in, ptr %t$17
   %t$18 = alloca i64
   store i64 %p$band$in, ptr %t$18
-  %t$19 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
   %p$w = load i64, ptr %t$13
@@ -1068,19 +1072,12 @@ then_2:
   %t$4 = add i64 0, 0
   br label %join_2
 else_2:
-  %t$20 = alloca i64
-  store i64 %p$w, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %p$g, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$5 = call i64 @examples.neural_network_train_xor.report_loss(i64 %p$w, i64 %p$epoch, i64 %p$band)
   %t$6 = call i64 @examples.neural_network_train_xor.train_epoch(i64 %p$w, i64 %p$g, i64 %p$lr)
   %t$7 = add i64 0, 1
   %t$8$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$epoch, i64 %t$7)
   %t$8 = extractvalue { i64, i1 } %t$8$agg, 0
   %t$8$ovf = extractvalue { i64, i1 } %t$8$agg, 1
-  %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
   br i1 %t$8$ovf, label %ovfpanic_8, label %ovfok_8
 ovfpanic_8:
   %t$9 = getelementptr inbounds { i64, [40 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
@@ -1094,10 +1091,10 @@ ovfok_8:
   store i64 %t$8, ptr %t$16
   store i64 %p$total, ptr %t$17
   store i64 %p$band, ptr %t$18
-  call void @llvm.stackrestore(ptr %t$19)
   br label %tco_loop
 join_2:
   %t$3 = phi i64 [%t$4, %then_2]
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 

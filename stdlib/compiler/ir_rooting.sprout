@@ -4,17 +4,24 @@ import stdlib.compiler.sprout_ir as sprout_ir
 # ---------------------------------------------------------------------------
 # IR rooting pass (Milestone 2, PR 2.2 — Model C plan).
 #
-# Inserts IRRoot/IRUnroot ops around GC-triggering ops to keep heap-typed
-# values alive across runtime allocation calls.  Operates as a separate
-# post-translation pass over IRProgram; pure-functional (no Refs).
+# Inserts IRRoot/IRUnroot ops around GC-triggering ops, and a per-function frame
+# of slots, to keep heap-typed values alive across runtime allocation calls.
+# Operates as a separate post-translation pass over IRProgram; pure-functional
+# (no Refs).
 #
 # Algorithm summary:
 #   For each function:
 #     1. Forward-scan blocks to compute heap_origin (Set of heap-typed defs).
 #     2. Backward dataflow per function: per-block use/def, live_in/live_out.
-#        CFG is a DAG through M2 (no loops); single reverse-topo pass.
-#        Phi successors contribute only the operand from the right predecessor.
-#     3. Forward rewrite per block:
+#        The CFG is a DAG apart from a self-TCO loop's one back-edge (IRTcoBack),
+#        whose header reloads every parameter from its slot, so no SSA value spans
+#        it; one reverse pass is sound.  Phi successors contribute only the operand
+#        from the right predecessor.
+#     3. Frame (plan_frame): a heap value live into a non-entry block AND live across
+#        some trigger owns a slot in one array, registered once at entry and popped by
+#        every exit; it is stored right after its definition and never pushed
+#        block-locally.  No such value: no frame.  Docs: docs/frame-slot-rooting-v0.md.
+#     4. Forward rewrite per block, for the values no slot covers:
 #        - Index the block once (BlockLive: live_out + last-use per name), then
 #          ASK whether a name is live after op i.  Never a set per op.
 #        - For trigger ops, compute live_across (heap-typed values defined
@@ -200,6 +207,11 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRPhi _ _ _ -> false
   | sprout_ir.IRRoot _ _ _ -> false
   | sprout_ir.IRUnroot _ _ -> false
+  # Frame ops: a memset, stores, and the scan-root push (a pool bump, no allocation).
+  | sprout_ir.IRFrameEnter _ _ _ -> false
+  | sprout_ir.IRFrameStore _ _ _ -> false
+  | sprout_ir.IRFrameSlot _ _ _ _ -> false
+  | sprout_ir.IRFrameClear _ _ _ _ -> false
 
 # Returns Just <result-name> if op directly produces a heap value (excluding
 # IRPhi, whose heap-ness depends on operand membership in heap_origin and is
@@ -299,7 +311,8 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRTruncI64ToI1 _ _ -> Nothing
   # A TCO param re-load produces a heap value iff the param's kind is heap; the
   # loaded value then enters heap_origin and is rooted where live across triggers
-  # (the slot is NOT a GC root — the liveness pass covers the loaded value).
+  # (an alloca slot is NOT a GC root, so the liveness pass covers the loaded value; a slot
+  # in the frame is one, and its loaded value then needs no root of its own).
   | sprout_ir.IRTcoLoad loaded _ _ kind ->
       match kind with
       | sprout_ir.IRTScalar -> Nothing
@@ -358,11 +371,15 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRPhi _ _ _ -> Nothing
   | sprout_ir.IRRoot _ _ _ -> Nothing
   | sprout_ir.IRUnroot _ _ -> Nothing
+  | sprout_ir.IRFrameEnter _ _ _ -> Nothing
+  | sprout_ir.IRFrameStore _ _ _ -> Nothing
+  | sprout_ir.IRFrameSlot _ _ _ _ -> Nothing
+  | sprout_ir.IRFrameClear _ _ _ _ -> Nothing
 
 # ---------------------------------------------------------------------------
 # CFG helpers
 
-fn op_successors(op: sprout_ir.IROp) -> List String =
+export fn op_successors(op: sprout_ir.IROp) -> List String =
   match op with
   | sprout_ir.IRBr lbl -> Cons(lbl, Nil)
   | sprout_ir.IRCondBr _ t e -> [t, e]
@@ -424,7 +441,7 @@ fn tco_back_uses(stores: List (String, String, String)) -> List String =
   | Nil -> Nil
   | Cons (slot, _, newv) rest -> Cons(newv, Cons(slot, tco_back_uses(rest)))
 
-fn op_uses(op: sprout_ir.IROp) -> List String =
+export fn op_uses(op: sprout_ir.IROp) -> List String =
   match op with
   | sprout_ir.IRConst _ _ -> Nil
   | sprout_ir.IRRet name -> Cons(name, Nil)
@@ -516,8 +533,14 @@ fn op_uses(op: sprout_ir.IROp) -> List String =
   # IRTailCall uses its argument values (they must be live TO the call); the
   # callee roots them on entry, so they need no root ACROSS the tail call.
   | sprout_ir.IRTailCall _ _ args _ -> args
+  # The frame is memory, not an SSA value: only the stored value and the incoming parameter
+  # are uses.
+  | sprout_ir.IRFrameEnter _ _ _ -> Nil
+  | sprout_ir.IRFrameStore _ _ v -> Cons(v, Nil)
+  | sprout_ir.IRFrameSlot _ _ _ init -> Cons(init, Nil)
+  | sprout_ir.IRFrameClear _ _ _ _ -> Nil
 
-fn op_def(op: sprout_ir.IROp) -> Maybe String =
+export fn op_def(op: sprout_ir.IROp) -> Maybe String =
   match op with
   | sprout_ir.IRConst r _ -> Just(r)
   | sprout_ir.IRIAdd r _ _ -> Just(r)
@@ -767,8 +790,227 @@ fn compute_heap_origin_loop(blocks: List sprout_ir.IRBlock, acc: Set) -> Set =
   | Cons b rest ->
       compute_heap_origin_loop(rest, scan_block_for_heap(block_ops(b), acc))
 
-fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> Set =
+export fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> Set =
   compute_heap_origin_loop(blocks, set_empty())
+
+# ---------------------------------------------------------------------------
+# Frame slots (docs/frame-slot-rooting-v0.md).
+#
+# A heap value that lives into a non-entry block and is live across some trigger owns a slot
+# in one per-function array, registered once as a scan root.  It is stored right after its
+# definition and never pushed block by block, so a long chain of blocks stops re-rooting what
+# crosses them.  A value that lives into a later block but is dead at every trigger stays
+# block-local: a slot would cost a store and a frame for nothing.
+#
+# The heap parameters of a self-TCO loop keep their IRTcoEntry/IRTcoBack slots in the first
+# frame indices; their IRTcoLoad results are covered by those slots and get none of their own.
+#
+#   name, discard  the frame, and the result of its push call (fresh temps)
+#   size, tco_n    slots in all, and how many of them lead as TCO parameter slots
+#   slots          frame value -> index (indices tco_n ..)
+#   tco_slots      TCO slot name -> index (0 .. tco_n)
+#   in_frame       the frame values and the covered loads: never pushed block-locally
+type Frame = (name: String, discard: String, size: Int, tco_n: Int,
+              slots: Dict Int, tco_slots: Dict Int, in_frame: Set)
+
+fn no_frame() -> Frame =
+  Frame(name = "", discard = "", size = 0, tco_n = 0, slots = dict_empty(),
+        tco_slots = dict_empty(), in_frame = set_empty())
+
+fn has_frame(fr: Frame) -> Bool = fr.size > 0
+
+# (slot, loaded) of a heap-kinded IRTcoLoad.
+fn tco_heap_load(op: sprout_ir.IROp) -> Maybe (String, String) =
+  match op with
+  | sprout_ir.IRTcoLoad loaded _ slot kind ->
+      match kind with
+      | sprout_ir.IRTScalar -> Nothing
+      | _ -> Just((slot, loaded))
+  | _ -> Nothing
+
+fn tco_slot_of(pair: (String, String)) -> String =
+  match pair with
+  | (slot, _) -> slot
+
+fn tco_loaded_of(pair: (String, String)) -> String =
+  match pair with
+  | (_, loaded) -> loaded
+
+fn add_heap_members(live: Set, heap_origin: Set, acc: Set) -> Set =
+  list_fold(\ (s, x) -> if set_member(x, heap_origin) then set_insert(x, s) else s,
+            acc, set_to_list(live))
+
+# Heap values live into some block other than the entry.
+fn cross_block_values(non_entry: List sprout_ir.IRBlock, live_in_map: Dict Set,
+                      heap_origin: Set) -> Set =
+  list_fold(\ (acc, b) -> add_heap_members(lookup_live(block_label(b), live_in_map),
+                                           heap_origin, acc),
+            set_empty(), non_entry)
+
+fn param_value(p: (String, sprout_ir.IRType)) -> String =
+  match p with
+  | (name, _) -> sprout_ir.param_ssa(name)
+
+fn frame_def(op: sprout_ir.IROp, wanted: Set) -> Maybe String =
+  match op_def(op) with
+  | Just r -> if set_member(r, wanted) then Just(r) else Nothing
+  | Nothing -> Nothing
+
+fn index_values(vs: List String, i: Int, acc: Dict Int) -> Dict Int =
+  match vs with
+  | Nil -> acc
+  | Cons v rest -> index_values(rest, i + 1, dict_set(v, i, acc))
+
+# Candidates that exist at a trigger and are live after it.  `pend` holds the candidates seen
+# since the last trigger (live-in ones first); each is tested at the first trigger after it
+# exists, since liveness only shrinks along a block.  The trigger's own result is added after.
+fn trigger_scan(ops: List sprout_ir.IROp, i: Int, bl: BlockLive, candidates: Set,
+                summary: Dict Bool, pend: List String, acc: Set) -> Set =
+  match ops with
+  | Nil -> acc
+  | Cons op rest ->
+      let at_trigger = op_triggers_gc_summary(op, summary)
+          acc1 = if at_trigger
+                 then list_fold(\ (a, v) -> if live_after_at(v, i, bl) then set_insert(v, a) else a,
+                                acc, pend)
+                 else acc
+          seen = if at_trigger then Nil else pend
+      in trigger_scan(rest, i + 1, bl, candidates, summary, add_candidate_def(op, candidates, seen),
+                      acc1)
+
+fn add_candidate_def(op: sprout_ir.IROp, candidates: Set, pend: List String) -> List String =
+  match op_def(op) with
+  | Just r -> if set_member(r, candidates) then Cons(r, pend) else pend
+  | Nothing -> pend
+
+fn block_across_trigger(b: sprout_ir.IRBlock, bl: BlockLive, live_in_map: Dict Set,
+                        candidates: Set, summary: Dict Bool, acc: Set) -> Set =
+  match b with
+  | sprout_ir.IRBlock lbl ops ->
+      if !any(\op -> op_triggers_gc_summary(op, summary), ops) then acc
+      else trigger_scan(ops, 0, bl, candidates, summary,
+                        intersect_to_list(lookup_live(lbl, live_in_map), candidates, set_empty()),
+                        acc)
+
+# The candidates live across some trigger of the function.  `lives` is each block's index,
+# in block order.
+fn across_trigger(blocks: List sprout_ir.IRBlock, lives: List BlockLive, live_in_map: Dict Set,
+                  candidates: Set, summary: Dict Bool, acc: Set) -> Set =
+  match blocks with
+  | Nil -> acc
+  | Cons b bs ->
+      match lives with
+      | Nil -> acc
+      | Cons bl ls ->
+          across_trigger(bs, ls, live_in_map, candidates, summary,
+                         block_across_trigger(b, bl, live_in_map, candidates, summary, acc))
+
+# The frame of a function: none when it has a single block (every value then stays in the
+# entry block), or when no heap value that lives into a later block, and no loaded TCO
+# parameter, is live across a trigger.  Else one slot per such value.
+fn plan_frame(params: List (String, sprout_ir.IRType), blocks: List sprout_ir.IRBlock,
+              lives: List BlockLive, live_in_map: Dict Set, heap_origin: Set,
+              summary: Dict Bool, start_idx: Int) -> Frame =
+  match blocks with
+  | Cons _ (Cons b rest) ->
+      let ops = list_flat_map(block_ops, blocks)
+          tco = list_filter_map(tco_heap_load, ops)
+          covered = set_from_list(list_map(tco_loaded_of, tco))
+          candidates = set_union(cross_block_values(Cons(b, rest), live_in_map, heap_origin), covered)
+      in if set_size(candidates) == 0 || !any(\op -> op_triggers_gc_summary(op, summary), ops)
+         then no_frame()
+         else build_frame(params, ops, tco, covered,
+                          across_trigger(blocks, lives, live_in_map, candidates, summary,
+                                         set_empty()),
+                          start_idx)
+  | _ -> no_frame()
+
+# TCO slots first (all of them, once any value needs the frame), then the other values in
+# definition order.  Only a value a definition was found for is excluded from block-local
+# rooting, so one this misses is still rooted there rather than lost.
+fn build_frame(params: List (String, sprout_ir.IRType), ops: List sprout_ir.IROp,
+               tco: List (String, String), covered: Set, crossing: Set,
+               start_idx: Int) -> Frame =
+  let wanted = set_diff(crossing, covered)
+      values = list_append(list_filter(\v -> set_member(v, wanted), list_map(param_value, params)),
+                           list_filter_map(\op -> frame_def(op, wanted), ops))
+      tco_n = list_length(tco)
+  in if set_size(crossing) == 0 || tco_n + list_length(values) == 0
+     then no_frame()
+     else Frame(name = sprout_ir.temp_ssa(start_idx),
+                discard = sprout_ir.temp_ssa(start_idx + 1),
+                size = tco_n + list_length(values),
+                tco_n = tco_n,
+                slots = index_values(values, tco_n, dict_empty()),
+                tco_slots = index_values(list_map(tco_slot_of, tco), 0, dict_empty()),
+                in_frame = set_union(set_from_list(values), covered))
+
+fn push_all(ops: List sprout_ir.IROp, acc: List sprout_ir.IROp) -> List sprout_ir.IROp =
+  list_fold(\ (a, o) -> Cons(o, a), acc, ops)
+
+fn value_store(fr: Frame, v: String) -> List sprout_ir.IROp =
+  match dict_get(v, fr.slots) with
+  | Just i -> [sprout_ir.IRFrameStore(fr.name, i, v)]
+  | Nothing -> Nil
+
+fn def_store(fr: Frame, op: sprout_ir.IROp) -> List sprout_ir.IROp =
+  match op_def(op) with
+  | Just v -> value_store(fr, v)
+  | Nothing -> Nil
+
+fn is_frame_slot(fr: Frame, s: (String, String, String)) -> Bool =
+  match s with
+  | (slot, _, _) -> dict_member(slot, fr.tco_slots)
+
+fn frame_slot_op(fr: Frame, s: (String, String, String)) -> Maybe sprout_ir.IROp =
+  match s with
+  | (slot, _, in_name) ->
+      match dict_get(slot, fr.tco_slots) with
+      | Just i -> Just(sprout_ir.IRFrameSlot(slot, fr.name, i, in_name))
+      | Nothing -> Nothing
+
+# IRTcoEntry minus its frame-backed slots, which the IRFrameSlot ops define and initialise.
+fn tco_entry_ops(fr: Frame, slots: List (String, String, String), sp: String)
+    -> List sprout_ir.IROp =
+  list_append(list_filter_map(\s -> frame_slot_op(fr, s), slots),
+              [sprout_ir.IRTcoEntry(list_filter(\s -> !is_frame_slot(fr, s), slots), sp)])
+
+# Store each slot owner right after its definition.  A phi's store waits for the end of the
+# block's phi group (`late`, newest first): phis must lead the block.
+fn add_frame_stores(ops: List sprout_ir.IROp, fr: Frame, late: List sprout_ir.IROp,
+                    acc: List sprout_ir.IROp) -> List sprout_ir.IROp =
+  match ops with
+  | Nil -> list_reverse(list_append(late, acc))
+  | Cons op rest ->
+      match op with
+      | sprout_ir.IRPhi r _ _ ->
+          add_frame_stores(rest, fr, list_append(value_store(fr, r), late), Cons(op, acc))
+      | sprout_ir.IRTcoEntry slots sp ->
+          add_frame_stores(rest, fr, Nil,
+                           push_all(tco_entry_ops(fr, slots, sp), list_append(late, acc)))
+      | _ ->
+          add_frame_stores(rest, fr, Nil,
+                           push_all(def_store(fr, op), Cons(op, list_append(late, acc))))
+
+# The entry block opens with the frame, then the stores of its parameters.
+fn frame_prologue(params: List (String, sprout_ir.IRType), fr: Frame) -> List sprout_ir.IROp =
+  Cons(sprout_ir.IRFrameEnter(fr.name, fr.size, fr.discard),
+       list_flat_map(\p -> value_store(fr, param_value(p)), params))
+
+fn frame_block(b: sprout_ir.IRBlock, fr: Frame, prologue: List sprout_ir.IROp) -> sprout_ir.IRBlock =
+  match b with
+  | sprout_ir.IRBlock lbl ops ->
+      sprout_ir.IRBlock(lbl, list_append(prologue, add_frame_stores(ops, fr, Nil, Nil)))
+
+fn add_frame(blocks: List sprout_ir.IRBlock, params: List (String, sprout_ir.IRType),
+             fr: Frame) -> List sprout_ir.IRBlock =
+  if !has_frame(fr) then blocks
+  else
+    match blocks with
+    | Nil -> Nil
+    | Cons entry rest ->
+        Cons(frame_block(entry, fr, frame_prologue(params, fr)),
+             list_map(\b -> frame_block(b, fr, Nil), rest))
 
 # ---------------------------------------------------------------------------
 # Forward rewrite — insert IRRoot/IRUnroot around trigger ops.
@@ -805,7 +1047,7 @@ fn live_across(pending_rev: List String, i: Int, bl: BlockLive) -> List String =
 # We can't cheaply know which callees alloc-before-store, so root the operands of
 # ALL calls — matching the summary's "a callee not proven pure may allocate" default.
 # Purely additive (only adds roots; can never cause a UAF, at worst over-retains).
-fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
+export fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   match op with
   | sprout_ir.IRMakeCtor _ _ _ _ -> true
   | sprout_ir.IRMkClosure _ _ _ _ -> true
@@ -910,6 +1152,10 @@ fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   # IRTailCall does not trigger GC (see op_triggers_gc), so it exposes nothing:
   # its args are passed by value and rooted by the callee, never rooted here.
   | sprout_ir.IRTailCall _ _ _ _ -> false
+  | sprout_ir.IRFrameEnter _ _ _ -> false
+  | sprout_ir.IRFrameStore _ _ _ -> false
+  | sprout_ir.IRFrameSlot _ _ _ _ -> false
+  | sprout_ir.IRFrameClear _ _ _ _ -> false
 
 # Set of an op's operand names.  O(uses).
 fn op_operand_set(op: sprout_ir.IROp) -> Set =
@@ -1022,39 +1268,56 @@ fn process_op(op: sprout_ir.IROp, i: Int, bl: BlockLive, pending: List String,
   else (Cons(op, acc), rooted, idx, pending)
 
 # Pop all remaining roots BEFORE the terminator — emitting them after a terminator
-# would be invalid IR (nothing executes past a terminator).
-fn emit_block_end_pop(rooted: List String, idx: Int,
+# would be invalid IR (nothing executes past a terminator).  `n` counts the block's
+# own roots plus, at an exit of a function with a frame, the frame.
+fn emit_block_end_pop(n: Int, idx: Int,
                       acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
-  match rooted with
-  | Nil -> (acc, idx)
-  | _ ->
-      match unroot_op(list_length(rooted), idx) with
-      | (op_unroot, idx1) -> (Cons(op_unroot, acc), idx1)
+  if n == 0 then (acc, idx)
+  else
+    match unroot_op(n, idx) with
+    | (op_unroot, idx1) -> (Cons(op_unroot, acc), idx1)
+
+# Before an IRTcoBack: zero the frame values, which are all dead there.  The TCO slots
+# stay: they hold the next iteration's input.  A frame of only TCO slots has nothing to clear.
+fn emit_back_edge_clear(term_op: sprout_ir.IROp, fr: Frame, idx: Int,
+                        acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
+  match term_op with
+  | sprout_ir.IRTcoBack _ _ _ ->
+      if fr.size > fr.tco_n
+      then (Cons(sprout_ir.IRFrameClear(sprout_ir.temp_ssa(idx), fr.name, fr.tco_n,
+                                        fr.size - fr.tco_n), acc), idx + 1)
+      else (acc, idx)
+  | _ -> (acc, idx)
 
 fn finish_block(term_op: sprout_ir.IROp, rooted: List String, idx: Int,
-                acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
-  match emit_block_end_pop(rooted, idx, acc) with
-  | (acc1, idx1) -> (list_reverse(Cons(term_op, acc1)), idx1)
+                acc: List sprout_ir.IROp, fr: Frame, exit_pop: Int)
+    -> (List sprout_ir.IROp, Int) =
+  match emit_block_end_pop(list_length(rooted) + exit_pop, idx, acc) with
+  | (acc1, idx1) ->
+      match emit_back_edge_clear(term_op, fr, idx1, acc1) with
+      | (acc2, idx2) -> (list_reverse(Cons(term_op, acc2)), idx2)
 
 # Add op's heap def to pending (reverse-def order). No dedup: every name added
 # here is an LLVM local defined once per function, and `opt --passes=verify`
 # rejects a second def; nor can a seeded (live-in) name be defined in its own
-# block, which would be a use before its def.
-fn update_scope(op: sprout_ir.IROp, heap_origin: Set,
+# block, which would be a use before its def.  A value of the frame is never
+# pending: its slot roots it.
+fn update_scope(op: sprout_ir.IROp, heap_origin: Set, in_frame: Set,
                 ord: List String) -> List String =
   match op_produces_simple_heap(op) with
-  | Just r -> Cons(r, ord)
+  | Just r -> if set_member(r, in_frame) then ord else Cons(r, ord)
   | Nothing ->
       match op with
       | sprout_ir.IRPhi r _ _ ->
-          if set_member(r, heap_origin)
+          if set_member(r, heap_origin) && !set_member(r, in_frame)
           then Cons(r, ord)
           else ord
       | _ -> ord
 
 # `i` is the op's position in the block, the index `bl.last_use` is keyed on.
 # `rooted` is the persistent root stack (head = top), empty at block entry.  The
-# last op in a block is its terminator: pop all remaining roots before it.
+# last op in a block is its terminator: pop all remaining roots before it, and at an
+# exit (`exit_pop` = 1) the frame too.
 # `pending` empties at each trigger BEFORE the trigger's own def is added: that
 # def is live across no earlier trigger, and must be seen at the next one.
 fn rewrite_ops(ops: List sprout_ir.IROp,
@@ -1065,69 +1328,97 @@ fn rewrite_ops(ops: List sprout_ir.IROp,
                rooted: List String,
                idx: Int,
                summary: Dict Bool,
+               fr: Frame,
+               exit_pop: Int,
                acc: List sprout_ir.IROp) -> (List sprout_ir.IROp, Int) =
   match ops with
   | Nil -> (list_reverse(acc), idx)
   | Cons op rest ->
       match rest with
-      | Nil -> finish_block(op, rooted, idx, acc)
+      | Nil -> finish_block(op, rooted, idx, acc, fr, exit_pop)
       | _ ->
           match process_op(op, i, bl, pending, rooted, idx, summary, acc) with
           | (acc1, rooted1, idx1, pending1) ->
               rewrite_ops(rest, i + 1, bl, heap_origin,
-                          update_scope(op, heap_origin, pending1),
-                          rooted1, idx1, summary, acc1)
+                          update_scope(op, heap_origin, fr.in_frame, pending1),
+                          rooted1, idx1, summary, fr, exit_pop, acc1)
 
 # Names arrive unique (from a Set), so the seed needs no dedup; reversed into
 # pending's reverse-def order.
 fn seed_pending(names: List String) -> List String =
   list_reverse(names)
 
-# Filter a Set down to those names also present in `keep`, returning a List.
-# Used to seed pending from (live_in ∩ heap_origin) at block entry.
-fn intersect_to_list(s: Set, keep: Set) -> List String =
-  list_fold(\ (acc, x) -> if set_member(x, keep) then Cons(x, acc) else acc,
+# Filter a Set down to those names present in `keep` and absent from `skip`, returning a
+# List.  Used to seed pending from (live_in ∩ heap_origin) minus the frame's values.
+fn intersect_to_list(s: Set, keep: Set, skip: Set) -> List String =
+  list_fold(\ (acc, x) -> if set_member(x, keep) && !set_member(x, skip) then Cons(x, acc) else acc,
             Nil, set_to_list(s))
 
+# 1 if the frame must be popped before this block's terminator: the block leaves the
+# function (no in-function successor) and does not end in a call that never returns.
+fn exit_pop_of(ops: List sprout_ir.IROp, fr: Frame) -> Int =
+  if !has_frame(fr) then 0
+  else
+    match last_op(ops) with
+    | Nothing -> 0
+    | Just term ->
+        if op_successors(term) == Nil && !ops_never_return(ops) then 1 else 0
+
 fn rewrite_block_full(b: sprout_ir.IRBlock,
+                      bl: BlockLive,
                       live_in_map: Dict Set,
                       heap_origin: Set,
-                      all_blocks: List sprout_ir.IRBlock,
                       idx: Int,
-                      summary: Dict Bool) -> (sprout_ir.IRBlock, Int) =
+                      summary: Dict Bool,
+                      fr: Frame) -> (sprout_ir.IRBlock, Int) =
   match b with
   | sprout_ir.IRBlock lbl ops ->
       match rewrite_ops(ops,
                         0,
-                        block_live_of(ops, compute_live_out(b, all_blocks, live_in_map)),
+                        bl,
                         heap_origin,
-                        seed_pending(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin)),
+                        seed_pending(intersect_to_list(lookup_live(lbl, live_in_map), heap_origin,
+                                                       fr.in_frame)),
                         Nil,
-                        idx, summary, Nil) with
+                        idx, summary, fr, exit_pop_of(ops, fr), Nil) with
       | (new_ops, idx_out) -> (sprout_ir.IRBlock(lbl, new_ops), idx_out)
 
 fn rewrite_fn_blocks(blocks: List sprout_ir.IRBlock,
+                     lives: List BlockLive,
                      live_in_map: Dict Set,
                      heap_origin: Set,
-                     all_blocks: List sprout_ir.IRBlock,
                      idx: Int,
                      summary: Dict Bool,
+                     fr: Frame,
                      acc: List sprout_ir.IRBlock) -> List sprout_ir.IRBlock =
   match blocks with
   | Nil -> list_reverse(acc)
   | Cons b rest ->
-      match rewrite_block_full(b, live_in_map, heap_origin, all_blocks, idx, summary) with
-      | (b1, idx1) ->
-          rewrite_fn_blocks(rest, live_in_map, heap_origin, all_blocks, idx1, summary, Cons(b1, acc))
+      match lives with
+      | Nil -> list_reverse(acc)
+      | Cons bl ls ->
+          match rewrite_block_full(b, bl, live_in_map, heap_origin, idx, summary, fr) with
+          | (b1, idx1) ->
+              rewrite_fn_blocks(rest, ls, live_in_map, heap_origin, idx1, summary, fr,
+                                Cons(b1, acc))
 
+# Plan the frame, rewrite every block's block-local roots around it, then add the frame's
+# own ops.  The frame's two temps come first, so the blocks' start after them.  Each block's
+# BlockLive is built once here and read by both the frame plan and the rewrite.
 fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, summary: Dict Bool) -> sprout_ir.IRFunction =
   match f with
   | sprout_ir.IRFunction name params ret_ty blocks ->
-      sprout_ir.IRFunction(name, params, ret_ty,
-        drop_unused_stack_resets(
-          rewrite_fn_blocks(blocks, compute_liveness(blocks),
-                            set_union(params_heap_origin(params), compute_heap_origin(blocks)),
-                            blocks, start_idx, summary, Nil)))
+      let live_in_map = compute_liveness(blocks)
+          lives = list_map(\b -> block_live_of(block_ops(b), compute_live_out(b, blocks, live_in_map)),
+                           blocks)
+          heap_origin = set_union(params_heap_origin(params), compute_heap_origin(blocks))
+          fr = plan_frame(params, blocks, lives, live_in_map, heap_origin, summary, start_idx)
+          first_idx = if has_frame(fr) then start_idx + 2 else start_idx
+      in sprout_ir.IRFunction(name, params, ret_ty,
+           drop_unused_stack_resets(
+             add_frame(rewrite_fn_blocks(blocks, lives, live_in_map, heap_origin, first_idx,
+                                         summary, fr, Nil),
+                       params, fr)))
 
 # A TCO loop saves and restores the stack only to free the root slots (`IRRoot`
 # allocas) an iteration adds. Without any, the pair goes: LLVM treats
@@ -1171,7 +1462,7 @@ fn params_heap_origin_loop(params: List (String, sprout_ir.IRType), acc: Set) ->
       | sprout_ir.IRTScalar -> params_heap_origin_loop(rest, acc)
       | _ -> params_heap_origin_loop(rest, set_insert(sprout_ir.param_ssa(p), acc))
 
-fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
+export fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
   params_heap_origin_loop(params, set_empty())
 
 # ---------------------------------------------------------------------------
@@ -1242,7 +1533,7 @@ fn op_never_returns(op: sprout_ir.IROp) -> Bool =
 # straight-line block that makes the call anywhere never returns.  Judged per
 # block: not propagated to predecessors, and a Sprout fn that only panics is
 # not inferred to be noreturn.
-fn ops_never_return(ops: List sprout_ir.IROp) -> Bool =
+export fn ops_never_return(ops: List sprout_ir.IROp) -> Bool =
   match ops with
   | Nil -> false
   | Cons op rest -> if op_never_returns(op) then true else ops_never_return(rest)
@@ -1380,7 +1671,7 @@ export fn compute_alloc_summary(fns: List sprout_ir.IRFunction) -> Dict Bool =
 # (summary lookup false) is a non-trigger; an unknown callee (absent from the
 # summary) is conservatively a trigger.  An allow-listed extern read and every
 # non-call op go to op_triggers_gc.
-fn op_triggers_gc_summary(op: sprout_ir.IROp, summary: Dict Bool) -> Bool =
+export fn op_triggers_gc_summary(op: sprout_ir.IROp, summary: Dict Bool) -> Bool =
   match op_raw_callee(op) with
   | Just g -> match dict_get(g, summary) with | Just b -> b | Nothing -> true
   | Nothing -> op_triggers_gc(op)

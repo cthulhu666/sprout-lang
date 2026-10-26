@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -245,17 +247,19 @@ entry:
 
 define i64 @stdlib.process.proc_stdout_or(i64 %p$r, i64 %p$fallback) {
 entry:
-  %t$8 = alloca i64
-  store i64 %p$r, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$8 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$8, i8 0, i64 8, i1 false)
+  %t$9 = call i64 @sprout_gc_push_scan_root(ptr %t$8, i64 8)
+  %t$8$0 = getelementptr i64, ptr %t$8, i64 0
+  store i64 %p$fallback, ptr %t$8$0
   %t$10 = alloca i64
-  store i64 %p$fallback, ptr %t$10
+  store i64 %p$r, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$0$st = call i128 @stdlib.process.proc_stdout_text_worker(i64 %p$r)
   %t$0 = trunc i128 %t$0$st to i64
   %t$0$hi = lshr i128 %t$0$st, 64
   %t$1 = trunc i128 %t$0$hi to i64
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
   %t$4 = add i64 0, 7
@@ -274,6 +278,7 @@ arm_2_2:
   unreachable
 join_2:
   %t$3 = phi i64 [%t$1, %body_0_2], [%p$fallback, %body_1_2]
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 

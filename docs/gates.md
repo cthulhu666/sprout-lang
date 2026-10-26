@@ -42,6 +42,23 @@ already exists in the old one* (verified 60/60), paired with a behavioural diffe
 compiles **and runs** each corpus file under both compilers and compares stdout and exit status.
 State which check you actually ran.
 
+### A change to rooting itself: diff with the rooting stripped
+
+A change that rewrites rooting rewrites nearly every function's roots, so no diff of the goldens
+can be read, and "the property to check" is that **nothing else moved**. `scripts/golden_ir_root_strip.sh
+<old.ll> <new.ll>` strips the rooting from both sides — the push, pop and scan-push calls, every
+`alloca i64`, the frame's `alloca`, `getelementptr`s and memsets, the stores into any of them,
+`llvm.stacksave`/`stackrestore`, and the `declare`s of all of these — renumbers `%t$N` by first
+appearance per function, and prints the unified diff of what is left (exit 1 if any). Run it over
+every `tests/golden/ir` file: old = the committed snapshot, new = the output of `just
+ir-golden-snapshot` (copy the old ones out first). The residual must be empty. If it is not, read
+it; do not regenerate. Frame-slot rooting (2026-10-26) was empty over all 75 goldens and over a
+512k-line self-compile of the compiler, and the script reports a one-constant change in a copy
+of the new module as a 9.8k-line residual, so it is not blind.
+
+It does not see the stores into TCO slots or a missing slot store, which it strips with the rest:
+`just verify-roots` is the check for those.
+
 ### A new example is a golden-corpus change
 
 `scripts/ir_golden_diff.sh:103` walks `examples/*.sprout` **and** `tests/smoke_shapes/*.spr`, so the
@@ -629,6 +646,28 @@ between them reversed the list back and forth. A `wrap` makes the compiler enfor
 asked for — and the whole conversion is verified by emitting byte-identical IR for all 73 compilable
 fixtures under `examples/`, `tests/smoke_shapes/` and `tests/cost/`.
 
+### The push-count arm reads what the pass emits
+
+Every arm above prices the compiler, on one block, where "pushes per block" and "pushes per
+function" are the same number. None could see
+[frame-slot-rooting-v0.md](frame-slot-rooting-v0.md)'s subject: a heap value that lives across many
+blocks was pushed again in each block that held a trigger, so the emitted pushes grew with blocks ×
+live values while compile cost stayed flat.
+
+`tests/cost/rooting_frame_chain.sprout` is one self-tail-recursive function over a chain of 24
+`if`s — 127 blocks, 25 `++` — with two carried heap parameters and a heap value live into each
+next `if`. The gate compiles it, cuts out that function's `define`, and counts calls to the two
+push functions. The ceiling is the count derived by hand in the fixture's header, not a budget:
+**exactly one** `sprout_gc_push_scan_root` (the frame, which `tag` earns by being live across every
+later `++`) and **23** `sprout_gc_push_i64_root`, one per stage but the last. Each stage's carried
+value is dead after its `++`, so it takes no slot, and the `++` call exposes its operands, so the
+stage pushes it once, in the one block that appends it. A push beyond that is a value rooted again
+in a block it only passes through. The pre-frame compiler pushed **50** in this function
+(2026-10-26, run through this gate: it fails the scan-root check and the ceiling). Floors on blocks
+(100) and appends (24) keep the fixture from going vacuous.
+
+It reads the emitted IR of a stage-2 compile, like the arms above, so it needs no reseed first.
+
 ## Compiling many functions — `just scc-cost-gate`
 
 The rooting gate's fixtures are one function, so it cannot see a cost that grows with the number of
@@ -658,6 +697,46 @@ red here means Phase B or something new, not the known debt.
 
 `ci-fast-gates` runs it in one `just` call with `rooting-cost-gate`: both depend on `build-stage2`,
 which always relinks, and two parallel entries would write the same binary at once.
+
+## Root verifier — `just verify-roots`
+
+`ir_verify.verify_rooting` checks one rooted `IRFunction`; `SPROUT_VERIFY_ROOTS=1` makes
+`ir_pipeline` run it on every function right after `ir_rooting`, print each violation to stderr
+(`fn`, block, op index, value) and fail the compile. Unset, it costs one env lookup per function.
+The recipe compiles every `tests/smoke_shapes/*.spr`, every example and the compiler itself with
+the variable set, on stage-2 so the verifier is the working tree's.
+
+**Checks.** Liveness is recomputed here as a fixpoint over the whole CFG, so it holds with the
+`IRTcoBack` back-edge; a phi operand is a use at the end of its predecessor. Then, per block: at
+every GC trigger each heap value live after it (not its own result), and each heap operand of an
+operand-exposing op, is rooted; `IRUnroot n` never pops more than is pushed; no SSA value is live
+into a TCO loop header (the slots are not SSA values).
+
+**Frame rules** ([frame-slot-rooting-v0.md](frame-slot-rooting-v0.md)). The frame is the bottom
+entry of the root stack. The entry block starts with an empty stack and `IRFrameEnter` pushes the
+frame; every other block of a function with a frame starts with the frame alone. A value is rooted
+at a trigger if it is on the stack, **or** the frame is registered and the value either owns a slot
+(some `IRFrameStore` names it) or is the `IRTcoLoad` result of a frame-backed TCO slot
+(`IRFrameSlot`). Violations, one line each:
+
+- a trigger while the frame is not registered (before `IRFrameEnter`, or after a pop);
+- a slot owner defined and not stored before the next trigger, or never stored in its block;
+- the terminator: a non-exit block must end with exactly the frame, an exit must have popped it
+  (the exits are the blocks whose last op has no in-function successor, minus blocks that never
+  return); without a frame the stack must be empty at either, as before;
+- a slot with two owners (two values, a value and a TCO slot), a value in two slots, a slot
+  outside the frame, a back-edge `IRFrameClear` covering a TCO slot or running past the frame;
+- frame ops without an `IRFrameEnter`, a second `IRFrameEnter`, or one outside the entry block.
+
+A block that never returns (`ir_rooting.ops_never_return`) is exempt from the terminator rules.
+
+**Does not check.** What counts as a trigger, a heap value, a use or a def comes from `ir_rooting`
+(`op_triggers_gc_summary`, `compute_heap_origin`, `op_uses`, `op_def`), so a wrong classification
+there passes: that is the Family 1 verifier in BACKLOG. Operands without a `%` (immediates such as
+`0` or `-1`) are not uses. It does not look at the C runtime, and does not require a pop on a path
+that never returns.
+
+`ci-fast-gates` runs it in its `compile-cost` entry, which already builds stage-2.
 
 ## Object-age instrument — `just gc-ageprof-check`
 

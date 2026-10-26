@@ -566,6 +566,12 @@ bce-gate: bootstrap-from-seed
 ir-golden-diff: bootstrap-from-seed
   bash scripts/ir_golden_diff.sh
 
+# Diff two emitted modules with the GC rooting stripped from both: the check for a change that
+# rewrites rooting everywhere (docs/gates.md §Golden IR). Exit 1 and the residual if any.
+[group('dev')]
+golden-root-strip old new:
+  bash scripts/golden_ir_root_strip.sh {{quote(old)}} {{quote(new)}}
+
 # Regenerate tests/golden/ir/ from the CURRENT compiler.  Run only after reading
 # the `just ir-golden-diff` output and confirming every change is intended.
 [group('dev')]
@@ -3316,7 +3322,9 @@ test-stress: bootstrap-from-seed
   # header comment has the measured table; HDRCHECK is what names all four.
   # test_linear_reuse: a reused linear cell must stay rooted across an allocating call between
   # the match and the rebuild; `tock` is entered by a tail call, so only its own token roots it.
-  STRESS_FILES="tests/stdlib/test_linear_reuse.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_cpr_argw_behaviour.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
+  # test_frame_slot_rooting: frame slots (docs/frame-slot-rooting-v0.md) under an awaited task, a task
+  # parked with its frame values while another allocates, deep recursion and a TCO loop.
+  STRESS_FILES="tests/stdlib/test_frame_slot_rooting.spr tests/stdlib/test_linear_reuse.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_cpr_argw_behaviour.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
@@ -3888,9 +3896,9 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "task-io-smoke|task-io-smoke"
     "conformance-run|test-conformance-run"
     "ir-golden-diff|ir-golden-diff"
-    # One invocation for both: each rebuilds stage-2, and two parallel entries would
+    # One invocation for all three: each rebuilds stage-2, and two parallel entries would
     # write the same binary at once. `just` runs a shared dependency once per call.
-    "compile-cost|rooting-cost-gate scc-cost-gate"
+    "compile-cost|rooting-cost-gate scc-cost-gate verify-roots"
     # Added when Assertion D landed: both had names that CLAIM verification while nothing
     # ran them. c-runtime-test's ten C-level assertions were unrunnable for however long it
     # took someone to try (the runtime split into sprout_scheduler.c/sprout_poll.c broke its
@@ -4164,6 +4172,31 @@ scc-cost-gate: bootstrap-from-seed build-stage2
   SPROUT_SCC_COST_BIN="{{build_dir}}/compile_driver_bin_stage2" \
   SPROUT_SCC_COST_STDLIB="{{stdlib_root}}" bash scripts/scc_cost_gate.sh
 
+# Post-rooting root verifier (stdlib/compiler/ir_verify.sprout): with
+# SPROUT_VERIFY_ROOTS=1 the compiler checks every rooted function and fails on a
+# violation. Runs over the smoke shapes, the examples and the compiler itself.
+# Stage-2 so the verifier is the working tree's, not the seed's.
+[group('smoke')]
+verify-roots: bootstrap-from-seed build-stage2
+  #!/usr/bin/env bash
+  set -uo pipefail
+  BIN="{{build_dir}}/compile_driver_bin_stage2"
+  TMPD=$(mktemp -d /tmp/sprout_vroots_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  JOBS=$(bash scripts/test_jobs.sh)
+  start=$SECONDS
+  srcs=(tests/smoke_shapes/*.spr examples/*.sprout examples/*/*.sprout "{{driver}}")
+  printf '%s\n' "${srcs[@]}" | SPROUT_VERIFY_ROOTS=1 xargs -P "$JOBS" -I{} bash -c '
+    f="$1"; out="$2/$(echo "$f" | tr "/" "_").err"
+    if ! "$3" --emit-ir "$4" --package-root "$5" "$f" > /dev/null 2> "$out"; then
+      { echo "==> $f"; cat "$out"; } >> "$2/failed.txt"
+    fi' _ {} "$TMPD" "$BIN" "{{stdlib_root}}" "{{justfile_directory()}}"
+  if [[ -s "$TMPD/failed.txt" ]]; then
+    cat "$TMPD/failed.txt" >&2
+    echo "verify-roots: FAILED ($((SECONDS - start))s)" >&2; exit 1
+  fi
+  echo "==> verify-roots ✓ ${#srcs[@]} sources in $((SECONDS - start))s"
+
 # ── Aggregate Gates ───────────────────────────────────────────────────────────
 #
 # One-shot verification batteries so the pre-commit ritual is a single command
@@ -4191,7 +4224,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

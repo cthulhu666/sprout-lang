@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -160,12 +162,16 @@ declare i64 @ref_write(i64, i64)
 
 define i64 @list_fold_go(i64 %p$step$in, i64 %p$init$in, i64 %p$xs$in) {
 entry:
-  %t$11 = alloca i64
+  %t$15 = alloca [3 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$15, i8 0, i64 24, i1 false)
+  %t$16 = call i64 @sprout_gc_push_scan_root(ptr %t$15, i64 24)
+  %t$11 = getelementptr i64, ptr %t$15, i64 0
   store i64 %p$step$in, ptr %t$11
-  %t$12 = alloca i64
+  %t$12 = getelementptr i64, ptr %t$15, i64 1
   store i64 %p$init$in, ptr %t$12
-  %t$13 = alloca i64
+  %t$13 = getelementptr i64, ptr %t$15, i64 2
   store i64 %p$xs$in, ptr %t$13
+
   %t$14 = call ptr @llvm.stacksave()
   br label %tco_loop
 tco_loop:
@@ -187,9 +193,6 @@ arm_1_1:
 body_1_1:
   %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
   %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
-  %t$15 = alloca i64
-  store i64 %p$step, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
   %t$17 = alloca i64
   store i64 %t$8, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -197,7 +200,7 @@ body_1_1:
   %t$9$env_ptr = inttoptr i64 %p$step to ptr
   %t$9$code = load ptr, ptr %t$9$env_ptr
   %t$9 = call i64 (i64, i64, i64) %t$9$code(i64 %p$step, i64 %p$init, i64 %t$7)
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   store i64 %p$step, ptr %t$11
   store i64 %t$9, ptr %t$12
   store i64 %t$8, ptr %t$13
@@ -208,6 +211,7 @@ arm_2_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%p$init, %body_0_1]
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 

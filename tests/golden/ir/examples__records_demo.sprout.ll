@@ -8,6 +8,8 @@ declare i64 @int_to_string(i64)
 declare i64 @char_to_string(i64)
 declare i64 @sprout_gc_push_i64_root(ptr)
 declare i64 @sprout_gc_pop_roots(i64)
+declare i64 @sprout_gc_push_scan_root(ptr, i64)
+declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
@@ -209,7 +211,12 @@ entry:
 
 define i64 @examples.records_demo.relax_read_budget(i64 %p$s) {
 entry:
+  %t$12 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$12, i8 0, i64 8, i1 false)
+  %t$13 = call i64 @sprout_gc_push_scan_root(ptr %t$12, i64 8)
   %t$0 = call i64 @sprout_field(i64 %p$s, i64 0)
+  %t$12$0 = getelementptr i64, ptr %t$12, i64 0
+  store i64 %t$0, ptr %t$12$0
   %t$1 = call i64 @sprout_field(i64 %p$s, i64 1)
   %t$2 = call i64 @sprout_field(i64 %p$s, i64 2)
   %t$3 = call i64 @sprout_field(i64 %t$2, i64 0)
@@ -226,9 +233,6 @@ ovfpanic_7:
   call i64 @panic(i64 %t$9)
   unreachable
 ovfok_7:
-  %t$12 = alloca i64
-  store i64 %t$0, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$10 = call i64 @sprout_alloc_obj(i64 16, i64 2)
   %t$10$ptr = inttoptr i64 %t$10 to ptr
   %t$10$f0 = getelementptr i64, ptr %t$10$ptr, i64 0
@@ -246,7 +250,8 @@ ovfok_7:
   store i64 %t$1, ptr %t$11$f1
   %t$11$f2 = getelementptr i64, ptr %t$11$ptr, i64 2
   store i64 %t$10, ptr %t$11$f2
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$11
 }
 

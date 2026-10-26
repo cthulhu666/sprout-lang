@@ -98,8 +98,8 @@ Because objects never move, the address of a live heap object is **stable for th
 
 Implications for codegen / IR design:
 
-- The "push the alloca holding an `i64` heap-address; never reload" pattern (used by `IRRoot` in `stdlib/compiler/ir_rooting.sprout`) is correct: the `i64` stored at the alloca remains a valid heap pointer for the entire function lifetime.
-- If GC ever becomes moving (copying, compacting, generational), every root push must be paired with a re-load *after* its trigger op, and every heap-typed SSA use after a trigger must source from the reload — a sweeping rewrite affecting `ast_to_ir.sprout`, `ir_lowering.sprout`, and `ir_rooting.sprout`. This is not currently planned.
+- The "push the alloca holding an `i64` heap-address; never reload" pattern (used by `IRRoot` in `stdlib/compiler/ir_rooting.sprout`) is correct: the `i64` stored at the alloca remains a valid heap pointer for the entire function lifetime. A frame slot (`IRFrameStore`, below) is the same pattern: written once per definition, never reloaded.
+- If GC ever becomes moving (copying, compacting, generational), every root push and every frame slot must be paired with a re-load *after* its trigger op, and every heap-typed SSA use after a trigger must source from the reload — a sweeping rewrite affecting `ast_to_ir.sprout`, `ir_lowering.sprout`, and `ir_rooting.sprout`. This is not currently planned.
 
 ### Region arena and address→region lookup
 
@@ -140,6 +140,7 @@ from classifying which SSA values are heap:
 - `op_triggers_gc` — which non-call ops are GC-safe points (allocations, closure calls, etc.). Direct calls are classified by callee: `op_raw_callee` drops the allow-listed non-allocating externs, and `op_triggers_gc_summary` looks the rest up in the may-trigger-GC summary. The summary skips every IR block that calls a function that never returns (`panic`, `IRPanic`, `IRAbortMatch`; `ir_rooting.is_noreturn_extern`): its triggers and callees cannot affect a caller, so a `panic` arm no longer makes its function "may trigger". Per block only — a trigger on a returning path still counts. A raw entry carries two callee sets, so `raw_call_graph` hands mutual TCO every call edge, panic blocks included. This relies on nothing resuming after a panic; task-boundary panic isolation would have to remove it.
 - `op_produces_simple_heap` — which op *results* are heap values that must be tracked. Scalars (`Int`/`Bool`/`Char`/`Double`, via `type_kind.type_is_non_heap_scalar`) are excluded; an `IRCall` result is rooted unless its carried return `IRType` is `IRTScalar`.
 - `compute_heap_origin` / `roots_across` — track the heap-origin set and compute, for each op, the values that must be rooted across it (live-after ∪ heap operands the op exposes). It scans only `pending`, the heap values defined since the last trigger (or seeded at block entry): one passed over at a trigger is dead for the rest of the block, and one pushed is still rooted or was popped dead.
+- `plan_frame` — the values that cross blocks and a trigger. A heap value live into a non-entry block and live across some trigger owns a slot in one per-function array, registered once as a scan root at entry (`IRFrameEnter`: `alloca [n x i64]`, a memset, one `sprout_gc_push_scan_root`) and popped by every exit's `IRUnroot` count; the value is stored (`IRFrameStore`) right after its definition and never pushed block by block. Everything else is block-local, rooted as before. No such value, or a single block, means no frame. Design, premises and numbers: [frame-slot-rooting-v0.md](frame-slot-rooting-v0.md).
 
 **Per-op liveness is a query, not a set.** `BlockLive` indexes a block once — its
 live-out plus the last op index using each name — and `live_after_at` answers "live
@@ -149,6 +150,24 @@ ahead is the one case the index would answer differently. Materialising a set pe
 instead cost one persistent tree per op, all alive at once, and `roots_across`
 returning the whole live set for a later subtraction cost a list cell per live value
 per trigger. On a 13k-op function both were quadratic.
+
+**Frame slots, in the rewrite.** A frame value is stored right after its definition (a phi's after
+the block's phi group) and is excluded from `pending` (`update_scope`, `seed_pending`), so
+`roots_across` never returns it. The block-end pop stays where it was and counts the frame at an
+exit: a block whose last op has no in-function successor and that does not end in a call that never
+returns. A self-TCO loop keeps its heap parameter slots in the frame's first indices: `IRFrameSlot`
+defines the slot name as a `getelementptr` into the frame where `IRTcoEntry` would `alloca`, and
+initialises it from the incoming parameter, so `IRTcoLoad`/`IRTcoBack` are untouched and the loaded
+values are rooted by the slot. Before each `IRTcoBack` an `IRFrameClear` zeroes the indices after
+those slots (a frame of only TCO slots clears nothing), since every other frame value is dead there.
+A stale slot costs retention, not safety: the collector looks every word up with
+`sprout_heap_lookup`, so a zero or dead word is ignored or kept alive, never misread.
+
+**Checker.** `SPROUT_VERIFY_ROOTS=1` (`just verify-roots`) runs `ir_verify.verify_rooting` on every
+rooted function: it recomputes liveness over the whole CFG, then requires each heap value live
+across a trigger to be rooted (on the block's root stack, or in the frame once stored), the stack
+to be empty at block ends (the frame alone, at a non-exit block), and no SSA value to be live into
+a TCO loop header. Details and limits: [gates.md](gates.md) §Root verifier.
 
 **Why it matters:** rooting every `Int`-returning expression emits pointless
 `alloca i64; store; sprout_gc_push_i64_root; …; sprout_gc_pop_roots(1)`. Profiling

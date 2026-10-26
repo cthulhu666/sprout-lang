@@ -150,8 +150,9 @@ fn make_self_loop_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRRet("%m"), Nil))),
     Nil)))))))
 
-# make_self_loop_fn whose partner edge first calls an unknown fn (a GC trigger)
-# while the heap param `y` is still needed: `y` is rooted across `main.mk`.
+# make_self_loop_fn whose partner edge calls an unknown fn (a GC trigger) twice: the first
+# result `%h` is rooted across the second call, a block-local root that needs the stack reset.
+# The heap param `y` is a TCO slot of the frame.
 fn make_rooted_self_loop_fn() -> sprout_ir.IRFunction =
   match make_self_loop_fn() with
   | sprout_ir.IRFunction name params ret blocks ->
@@ -164,8 +165,9 @@ fn alloc_in_partner(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
         Cons(sprout_ir.IRConst("%one2", 1),
         Cons(sprout_ir.IRISub("%xp", sprout_ir.param_ssa("x"), "%one2"),
         Cons(sprout_ir.IRCall("%h", sprout_ir.IRTHeap, "main.mk", Cons("%xp", Nil)),
+        Cons(sprout_ir.IRCall("%g", sprout_ir.IRTHeap, "main.mk", Cons("%xp", Nil)),
         Cons(sprout_ir.IRCall("%rp", sprout_ir.IRTHeap, "main.b", Cons("%h", Cons(sprout_ir.param_ssa("y"), Nil))),
-        Cons(sprout_ir.IRBr("joinb"), Nil))))))
+        Cons(sprout_ir.IRBr("joinb"), Nil)))))))
   | _ -> b
 
 # Pre-TCO IR with NO base case: every path tail-calls, so the join phi holds only
@@ -229,7 +231,8 @@ fn root_depth_before(lines: List String, stop: String, depth: Int) -> Int =
   | Nil -> -1000
   | Cons l rest ->
       if str_find(l, stop) != -1 then depth
-      else if str_find(l, "@sprout_gc_push_i64_root") != -1 then root_depth_before(rest, stop, depth + 1)
+      else if str_find(l, "@sprout_gc_push_i64_root") != -1 || str_find(l, "@sprout_gc_push_scan_root") != -1
+      then root_depth_before(rest, stop, depth + 1)
       else root_depth_before(rest, stop, depth - pop_count(l))
 
 fn pop_count(line: String) -> Int =
@@ -337,7 +340,9 @@ fn main() -> Unit !{IO} =
     let rooted_fn = self_then_mutual_rooted(make_rooted_self_loop_fn())
     let rooted_ir = ir_lowering.lower_fn_with_table(rooted_fn, dict_empty())
     let rooted_lines = string.split(rooted_ir, "\n")
-    assert_true(state, "rooted self loop: the heap param is rooted across the alloc",
+    assert_true(state, "rooted self loop: the heap param is in the frame",
+      string.contains(rooted_ir, "@sprout_gc_push_scan_root"))
+    assert_true(state, "rooted self loop: a block-local value is rooted across the second alloc",
       string.contains(rooted_ir, "@sprout_gc_push_i64_root"))
     assert_true(state, "rooted self loop: stackrestore kept (the fn has roots)",
       adjacent_lines(rooted_lines, "call void @llvm.stackrestore(ptr", "musttail call i64 @main.b"))

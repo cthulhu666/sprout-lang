@@ -1,6 +1,7 @@
 module stdlib.compiler.ir_pipeline
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_verify as ir_verify
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.typed_ast as typed_ast
@@ -45,11 +46,12 @@ import stdlib.env as env
 # alloc_summary (may-trigger-GC map; constant, set once at init from the pre-pass),
 # mutual_eligible (fname -> [(callee, arity)] same-prototype cycle edges; constant,
 # from the same pre-pass — drives the mutual-TCO musttail rewrite in emit_one_fn),
-# static_closures (code fns whose static closure global is already emitted, program-wide).
+# static_closures (code fns whose static closure global is already emitted, program-wide),
+# roots_failed (true once SPROUT_VERIFY_ROOTS found a violation).
 # All accumulator lists are in reverse emission order; reversed at assembly.
 # O(1) prepend per fn; single list_reverse + string_concat_many at the end.
 type StreamState (..) =
-  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool Bool (Dict Bool) (Dict (List (String, Int))) Set
+  StreamState Int (Ref (List String)) (Ref (List String)) Set Bool Bool (Dict Bool) (Dict (List (String, Int))) Set (Ref Bool)
 
 fn pair_first(p: (a, b)) -> a = match p with | (x, _) -> x
 fn pair_second(p: (a, b)) -> b = match p with | (_, y) -> y
@@ -60,20 +62,45 @@ fn pair_second(p: (a, b)) -> b = match p with | (_, y) -> y
 fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
                state: StreamState) -> Result String StreamState !{IO} =
   match state with
-  | StreamState next_idx str_acc bodies_acc defined has_user_main main_returns_int summary eligible static_closures ->
+  | StreamState next_idx str_acc bodies_acc defined has_user_main main_returns_int summary eligible static_closures roots_failed ->
       # Mutual-TCO runs PRE-rooting (like self-TCO): once an eligible cross-function
       # tail call is an IRTailCall, ir_rooting emits no accumulating root for it.
-      emit_one_fn_rooted(ir_rooting.rewrite_one_fn_with_summary(
-                           ast_to_ir.mutual_tco_rewrite_fn(f, ast_to_ir.mutual_eligible_for(sprout_ir.ir_fn_name(f), eligible)),
-                           idx_map, summary),
-                         next_idx, str_acc, bodies_acc, defined, has_user_main, main_returns_int, summary, eligible, static_closures)
+      let rooted = ir_rooting.rewrite_one_fn_with_summary(
+                     ast_to_ir.mutual_tco_rewrite_fn(f, ast_to_ir.mutual_eligible_for(sprout_ir.ir_fn_name(f), eligible)),
+                     idx_map, summary)
+      in do
+           verify_roots_if_enabled(rooted, summary, roots_failed)
+           emit_one_fn_rooted(rooted, next_idx, str_acc, bodies_acc, defined, has_user_main,
+                              main_returns_int, summary, eligible, static_closures, roots_failed)
+
+# SPROUT_VERIFY_ROOTS=1: check the rooted function (ir_verify), print each violation
+# to stderr and mark the compile failed.  Unset: one env lookup, nothing else.
+fn verify_roots_if_enabled(rooted: sprout_ir.IRFunction, summary: Dict Bool,
+                           failed: Ref Bool) -> Unit !{IO} =
+  match env.get("SPROUT_VERIFY_ROOTS") with
+  | Just "1" ->
+      match ir_verify.verify_rooting(rooted, summary) with
+      | Nil -> ()
+      | violations ->
+          do
+            _ <- list_each(trace_line, violations)
+            ref_write(failed, true)
+  | _ -> ()
+
+# The violations were printed as found; the compile still fails at the end.
+fn fail_if_roots_unverified(failed: Ref Bool, built: Result String String) ->
+    Result String String !{IO} =
+  do
+    failed_any <- ref_read(failed)
+    if failed_any then Err("SPROUT_VERIFY_ROOTS: rooting violations, listed above") else built
 
 # Helper: emit a pre-rooted IRFunction.  Separated so we name the rooted fn
 # once and pass it to both walk_blocks_for_globals and lower_fn_with_table.
 fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
                       str_acc: Ref (List String), bodies_acc: Ref (List String),
                       defined: Set, has_user_main: Bool, main_returns_int: Bool, summary: Dict Bool,
-                      eligible: Dict (List (String, Int)), static_closures: Set) ->
+                      eligible: Dict (List (String, Int)), static_closures: Set,
+                      roots_failed: Ref Bool) ->
     Result String StreamState !{IO} =
   match rooted with
   | sprout_ir.IRFunction fname _ _ rblocks ->
@@ -89,7 +116,7 @@ fn emit_one_fn_rooted(rooted: sprout_ir.IRFunction, next_idx: Int,
             let new_defined = set_insert(fname, defined)
             let new_has_user_main = has_user_main || (fname == "__sprout_user_main") || (fname == "__sprout_user_main_int")
             let new_main_returns_int = main_returns_int || (fname == "__sprout_user_main_int")
-            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main, new_main_returns_int, summary, eligible, static_closures2))
+            Ok(StreamState(next_idx2, str_acc, bodies_acc, new_defined, new_has_user_main, new_main_returns_int, summary, eligible, static_closures2, roots_failed))
 
 # Emit all lifted lambdas (in list order) then the main fn for one decl.
 # lifted list is [lambda0, lambda1, ..., lambdaN]; emit in that order then f.
@@ -344,9 +371,10 @@ fn compile_reachable(prog: typed_ast.TypedProgram) ->
                       summaries <- alloc_summary_or_empty(decls, penv, plan, ret_i64, runtime_lets)
                       str_acc_ref <- ref_new(Nil)
                       bodies_acc_ref <- ref_new(Nil)
+                      roots_failed <- ref_new(false)
                       let alloc_summary = pair_first(summaries)
                       let mutual_eligible = pair_second(summaries)
-                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false, false, alloc_summary, mutual_eligible, set_empty())
+                      let init_state = StreamState(0, str_acc_ref, bodies_acc_ref, set_empty(), false, false, alloc_summary, mutual_eligible, set_empty(), roots_failed)
                       match stream_decls(decls, penv, init_state) with
                       | Err msg -> Err(msg)
                       | Ok after_decls ->
@@ -354,12 +382,13 @@ fn compile_reachable(prog: typed_ast.TypedProgram) ->
                         | Err msg -> Err(msg)
                         | Ok after_workers ->
                           match after_workers with
-                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main main_returns_int summary2 eligible2 static_closures2 ->
+                          | StreamState next_idx2 str_acc bodies_acc defined has_user_main main_returns_int summary2 eligible2 static_closures2 _ ->
                               # Emit init fn last if there are runtime lets.
                               match runtime_lets with
                               | Nil ->
-                                  assemble_result(str_acc, bodies_acc, defined, has_user_main, main_returns_int,
-                                                  let_globals, ctor_regs, externs)
+                                  fail_if_roots_unverified(roots_failed,
+                                    assemble_result(str_acc, bodies_acc, defined, has_user_main, main_returns_int,
+                                                    let_globals, ctor_regs, externs))
                               | _ ->
                                   match ast_to_ir.synthesize_init_globals_fn(runtime_lets, penv) with
                                   | Err msg -> Err(msg)
@@ -376,13 +405,14 @@ fn compile_reachable(prog: typed_ast.TypedProgram) ->
                                         let init_idx_map = dict_set("__sprout_init_globals", init_idx, lifted_idx)
                                         match emit_lifted_then_fn(init_lifted, init_fn, init_idx_map,
                                                           StreamState(next_idx2, str_acc, bodies_acc,
-                                                                      defined, has_user_main, main_returns_int, summary2, eligible2, static_closures2)) with
+                                                                      defined, has_user_main, main_returns_int, summary2, eligible2, static_closures2, roots_failed)) with
                                         | Err msg -> Err(msg)
                                         | Ok final_state ->
                                             match final_state with
-                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 main_returns_int2 _ _ _ ->
-                                                assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2, main_returns_int2,
-                                                                let_globals, ctor_regs, externs)
+                                            | StreamState _ str_acc2 bodies_acc2 defined2 has_user_main2 main_returns_int2 _ _ _ _ ->
+                                                fail_if_roots_unverified(roots_failed,
+                                                  assemble_result(str_acc2, bodies_acc2, defined2, has_user_main2, main_returns_int2,
+                                                                  let_globals, ctor_regs, externs))
 
 # Assemble the final LLVM IR text from accumulators.
 # Mirrors lower_program_body exactly; `defined_names` is the batch path's set of
