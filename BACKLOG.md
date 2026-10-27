@@ -371,6 +371,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   case still emits `IRTUnknown` because `bind_tuple_items` has no element-type info. Needs threading
   the scrutinee tuple's types from `translate_match`. Type-reclassification, ~0.2%-class win — do
   only if a measured hot path shows over-rooting.
+- [ ] `P3` **Two `IRTScalar` witnesses are free constants, checked by no one in `type_kind`.**
+  `type_kind.tuple_slot` is safe only because `ast_to_ir.scalar_tuple_width` checked every slot
+  first; a new unboxing path can use it without that check. Fix: `type_kind` takes the field types
+  and returns the witness, and `scalar_tuple_width` carries it to `emit_tuple_worker_call`,
+  `translate_unboxed_tuple_match` and `translate_tail_tuple_repack`. `type_kind.unit_result`
+  (`print_value`'s result) rests on Unit's runtime representation, not a type rule, which counts
+  Unit as heap; it belongs with the runtime-facts module (`docs/runtime-facts-v0.md`).
+  `ctor_tag` has no premise and stays a constant.
 - [ ] `P3` **Named `RuntimeLet` record for the runtime-let representation.** `classify_let_decls_ir`
   returns an anonymous positional pair. Blocked on records maturing in compiler code. Broader
   follow-on: adopt `GlobalName` at the other global-name sites so the wrap/unwrap seam shrinks.
@@ -1165,6 +1173,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `just test` runner sets the variable, so the trap is specific to fast iteration, which is exactly
   when a green is trusted. Fix: set it in `_test-file`, or make the guard fail loudly. A skip that
   reports success is the worst of the three options.
+- [ ] `P3` **`just test-file` cannot compile a test that imports `testsupport.*`.** `_test-file`
+  runs `--emit-ir` without `--package-root`, so the import does not resolve and the file fails to
+  compile; `just test` passes it. Seven IR suites now import `testsupport.ir_fixtures` (e.g.
+  `tests/stdlib/test_ir_rooting.spr`), so none of them runs through `test-file`. Fix: pass
+  `--package-root "{{justfile_directory()}}"` there as the other emit-ir recipes do, and drop the
+  caveat from AGENTS.md §How to run tests.
 - [ ] `P2` **Robust suite pass/fail signalling + stdout flush.** The runner derives exit status by
   grepping stdout for `^SUITE FAILED`, which couples the machine gate to a human string, false-trips
   on a fixture printing it as data, and blocks golden-stdout tests from sharing the stream. Replace
