@@ -286,12 +286,14 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   through `translate_do_bind_*` instead of resetting it); **heap-field tuples**
   (`IRCallUnboxed{2,3}` slots holding heap values must be rooted at the call site, and `op_heap_def`
   must report multiple slots).
-- [ ] `P3` **`match (a, b) with` allocates the tuple it matches.** `translate_match` lowers a
+- [ ] `P2` **`match (a, b) with` allocates the tuple it matches.** `translate_match` lowers a
   literal tuple scrutinee through `TTuple` → `IRMakeTuple` → `sprout_alloc_tuple_blob`, then takes
   it apart. ~60 hand-written sites in `stdlib/`, `ide/` and `examples/` (e.g. `unifier.sprout`)
-  pay one allocation per call; derived `Eq` paid it too (#627: 30 → 16 ns/op once removed). Fix:
-  when the scrutinee is a literal tuple and every arm is a tuple pattern or `_`, bind the elements
-  directly and build no tuple.
+  pay one allocation per call; derived `Eq` paid it too (#627: 30 → 16 ns/op once removed), and a
+  sort comparison written this way ran ~30% slower (`bench/results-2026-10-27-list-sort.md`). The
+  list toolkit's `Zip List` instance is this shape (`docs/list-toolkit-v0.md` §9). Fix: when the
+  scrutinee is a literal tuple and every arm is a tuple pattern or `_`, bind the elements directly
+  and build no tuple.
 - [ ] `P2` **A literal inside a `Maybe` pattern loses CPR, so every read allocates.**
   `ast_to_ir.is_simple_width2_arm` admits only a variable or `_` under the constructor, so
   `match mutvec_get(c, p) with | Just false -> …` builds a `Just` per call, while `| Just b -> …`
