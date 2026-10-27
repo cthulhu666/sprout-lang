@@ -142,6 +142,16 @@ from classifying which SSA values are heap:
 - `compute_heap_origin` / `roots_across` — track the heap-origin set and compute, for each op, the values that must be rooted across it (live-after ∪ heap operands the op exposes). It scans only `pending`, the heap values defined since the last trigger (or seeded at block entry): one passed over at a trigger is dead for the rest of the block, and one pushed is still rooted or was popped dead.
 - `plan_frame` — the values that cross blocks and a trigger. A heap value live into a non-entry block and live across some trigger owns a slot in one per-function array, registered once as a scan root at entry (`IRFrameEnter`: `alloca [n x i64]`, a memset, one `sprout_gc_push_scan_root`) and popped by every exit's `IRUnroot` count; the value is stored (`IRFrameStore`) right after its definition and never pushed block by block. Everything else is block-local, rooted as before. No such value, or a single block, means no frame. Design, premises and numbers: [frame-slot-rooting-v0.md](frame-slot-rooting-v0.md).
 
+**`IRTScalar` takes a witness.** A heap value tagged `IRTScalar` is never rooted, so a wrong tag is a
+use-after-free. `IRTScalar` therefore carries a `type_kind.ScalarWhy`, exported without `(..)`: its
+constructors are private to `stdlib/compiler/type_kind.sprout`, which is the only place that can
+build one. A type-derived tag comes from `scalar_of_type` / `scalar_of_type_expr`; a field-code tag
+from `scalar_of_field_code`; the structural cases (`literal_tested`, `tuple_slot`, `unit_result`,
+`ctor_tag`) are exported constants. To add a reason, add a constructor and its constant or function in
+`type_kind` and state the invariant that makes the value non-heap in the comment above it. Tests
+that hand-build IR mint through `scalar_of_type_expr`; there is no test-only minting function.
+`tests/conformance/type_error/scalar_witness_*.spr` pin the rejections.
+
 **Per-op liveness is a query, not a set.** `BlockLive` indexes a block once — its
 live-out plus the last op index using each name — and `live_after_at` answers "live
 after op *i*?" from that. It is exact only for a name defined at or before *i*, which

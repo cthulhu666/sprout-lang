@@ -18,6 +18,7 @@ module stdlib.compiler.field_kinds
 
 import stdlib.compiler.ast as ast
 import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.type_kind as type_kind
 import stdlib.string as string
 
 # --- Private helpers ---
@@ -31,11 +32,16 @@ fn char_is_uppercase(ch: Char) -> Bool =
 # O(1) modulo string traversal in helpers. Primitives match their canonical name
 # exactly: a module's own `type Bool` is `<module>.Bool`, a heap ADT.
 export fn ctor_field_kind(te: ast.TypeExpr) -> String =
+  match type_kind.scalar_field_code(te) with
+  | Just code -> code
+  | Nothing -> ctor_field_kind_heap(te)
+
+# Fields with no scalar code.  A `Double` field encodes "p" here although type_kind
+# calls Double a scalar (see type_kind.scalar_field_code).
+fn ctor_field_kind_heap(te: ast.TypeExpr) -> String =
   match te with
   | ast.TypeName name ->
-      if name == "Int" || name == "Char" then "i"
-      else if name == "Bool" then "b"
-      else if name == "String" then "s"
+      if name == "String" then "s"
       else
         match str_char_at(string.after_last_dot(name), 0) with
         | Nothing -> "_"
@@ -62,9 +68,9 @@ export fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
 #   '_'          → IRTUnknown (type-variable; treated as heap by rooting)
 #   anything else→ IRTUnknown (defensive fallback)
 export fn field_kind_char_to_irtype(ch: Char) -> sprout_ir.IRType =
-  if ch == 'i' || ch == 'b' then sprout_ir.IRTScalar
-  else if ch == 's' || ch == 'p' then sprout_ir.IRTHeap
-  else sprout_ir.IRTUnknown
+  match type_kind.scalar_of_field_code(ch) with
+  | Just why -> sprout_ir.IRTScalar(why)
+  | Nothing -> if ch == 's' || ch == 'p' then sprout_ir.IRTHeap else sprout_ir.IRTUnknown
 
 # Look up the field kind IRType at index i in the field-kinds-string.
 # In correct compiler operation `i` is always in range (fks length is one

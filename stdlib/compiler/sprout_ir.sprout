@@ -1,5 +1,7 @@
 module stdlib.compiler.sprout_ir
 
+import stdlib.compiler.type_kind as type_kind
+
 # ---------------------------------------------------------------------------
 # Sprout-IR — typed intermediate representation.
 # ---------------------------------------------------------------------------
@@ -75,23 +77,20 @@ module stdlib.compiler.sprout_ir
 # ---------------------------------------------------------------------------
 #
 # Sprout-IR is a typed IR; this is the minimal-viable type system needed by
-# the rooting pass.  Three nullary tags:
+# the rooting pass.  Three tags:
 #
 #   IRTHeap     — known heap pointer (String, ADT handle, closure, tuple).
 #                 Must be rooted across GC triggers.
 #   IRTScalar   — known non-heap scalar (Int, Bool, Char codepoint).
-#                 Never a heap pointer; safe to skip rooting.
+#                 Never a heap pointer; safe to skip rooting.  Carries a
+#                 type_kind.ScalarWhy: a heap value tagged scalar is never
+#                 rooted, so only type_kind can build the witness.
 #   IRTUnknown  — type unknown to the IR builder (TVar, polymorphic position,
 #                 unresolved annotation).  Treated AS IF heap by the rooting
 #                 pass (conservative — over-rooting is correctness-safe).
-#
-# All three tags are nullary so they CPR-unbox to a single i64 in the runtime
-# representation; pattern-matching them lowers to a single `icmp` (vs `str_eq`
-# for the previous string-based kind convention).  See runtime/sprout_runtime.c
-# `sprout_make0` singleton cache for the per-tag pointer reuse.
 export type IRType (..) =
   | IRTHeap
-  | IRTScalar
+  | IRTScalar type_kind.ScalarWhy
   | IRTUnknown
 
 export type IROp (..) =
@@ -751,7 +750,7 @@ fn print_call_args(args: List String) -> String =
 export fn print_ir_type(t: IRType) -> String =
   match t with
   | IRTHeap -> "heap"
-  | IRTScalar -> "scalar"
+  | IRTScalar _ -> "scalar"
   | IRTUnknown -> "unknown"
 
 export fn print_op(op: IROp) -> String =

@@ -351,6 +351,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   qualify; (3) `rewrite_ops` still roots values across triggers inside the panic block, which is
   dead weight there but needed for the call's own arguments, so only the unused ones can go.
   Each needs the `panic` premises re-checked, and (2) a fixpoint over the call graph.
+- [ ] `P3` **A `Double` constructor field is rooted though it holds raw bits.** `type_kind` calls
+  `Double` a scalar, but `type_kind.scalar_field_code` gives it no code, so its field encodes `"p"`
+  and every `IRGetField` of it is rooted. Safe (the GC ignores a non-address root), only wasted
+  pushes. Fix: a scalar code for `Double`; it changes the ctor metadata strings, so golden IR moves
+  and `sprout_debug_adt` must decode the new byte.
 - [ ] `P3` **Two `@fwd:` marker lookups still walk the whole type environment.**
   `infer.forwarded_tdict_for_tyvar` (after a direct-key miss) and `resolve_via_fwd_for_prog_var`
   turn `dict_entries(env)` into a list to find `@fwd:*:<class>` markers: 2.9% and 1.0% of
@@ -2111,26 +2116,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   it, and nothing consumes it. The wording sends a reader looking for a typo.
   `linear_check.leak_msg` has one message for both; when the binder was borrowed, say "borrowed but
   never consumed".
-
-### Linear-typed Sprout-IR (Model C Milestone 5) — DEFERRED (2026-08-07)
-
-M5 (make the IR's heap types linear so GC rooting is a type-checker theorem) is **deferred**. Full
-analysis and rationale: `docs/linear-ir-m5-feasibility-2026-08-07.md`. Short version: M5 as planned
-is not executable against the IR that was actually built — there is no `Heap τ`/`Rooted τ` type,
-only a coarse `IRType` tag plus the `ir_rooting` dataflow pass, and the M4 checker is over
-`TypedExpr`, not `IROp`. A replay of the four historical GC-UAF bugs found they are all
-classification-completeness or sub-op alloc-ordering bugs, never the "forgot to root a
-correctly-classified value" class that linearity catches for free. The rooting invariant stays
-enforced by `ir_rooting` plus its exhaustive no-catch-all op classification.
-
-- [ ] `P2` **IR classification-consistency verifier (the M5 "Option 2"), Family 1.** For every
-  heap-producing op whose kind derives from a type, re-derive the expected kind from an
-  independent structural source (`type_kind` for `IRCall` returns, `field_kinds` for
-  `IRGetField`/`IRLoadEnvSlot`/`IRGetTupleField`) and assert the two agree, treating `IRTUnknown`
-  as either-acceptable so there are no false positives; this catches the historical
-  `IRCall`-wrong-kind shape without touching the translator. Goes in `ir_verify.sprout` beside
-  `verify_rooting`, the post-rooting root check that already exists (`docs/gates.md` §Root
-  verifier). **Not linear types.**
 
 ### Native REPL & Analysis Service
 

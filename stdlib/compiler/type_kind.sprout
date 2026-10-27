@@ -12,12 +12,41 @@ module stdlib.compiler.type_kind
 #     IRLoadEnvSlot, and IRGetField with kind=IRTScalar so ir_rooting's
 #     params_heap_origin / op_produces_simple_heap skip them.
 #
+# This module is also the only place a `ScalarWhy` can be built, and
+# `sprout_ir.IRTScalar` needs one.  A heap value tagged IRTScalar is never rooted
+# (use-after-free), so every scalar claim names its reason here.
+#
 # Prior to centralisation the predicate lived only in codegen.sprout; the
 # IR path conservatively over-rooted every param.  See BACKLOG.md:367 for
 # the bug this module exists to fix structurally.
 
 import stdlib.compiler.ast as ast
 import stdlib.compiler.types as types
+
+# --- Scalar witness ---
+
+# Why an IR value is a non-heap scalar.  Exported without `(..)`: the constructors
+# are private, so the minting functions below are the only way to get one.
+export type ScalarWhy =
+  | ByType
+  | FieldCode
+  | LiteralTested
+  | TupleSlot
+  | UnitResult
+  | CtorTag
+
+# A tuple element matched against an Int or Bool literal pattern.
+export let literal_tested: ScalarWhy = LiteralTested
+
+# A slot of an unboxed tuple worker result: scalar_tuple_width admits only
+# tuples whose every field passes type_is_non_heap_scalar.
+export let tuple_slot: ScalarWhy = TupleSlot
+
+# The result of a call that returns Unit (print_value).
+export let unit_result: ScalarWhy = UnitResult
+
+# A constructor tag word (the `_argw` wrapper's tag parameter).
+export let ctor_tag: ScalarWhy = CtorTag
 
 # --- Private helper ---
 
@@ -26,23 +55,48 @@ import stdlib.compiler.types as types
 fn is_scalar_name(name: String) -> Bool =
   name == "Int" || name == "Bool" || name == "Char" || name == "Double"
 
-# --- Public predicate ---
+# --- Public predicates ---
 
-# Returns true when an ast.TypeExpr annotation declares a known non-heap
+# Just a witness when an ast.TypeExpr annotation declares a known non-heap
 # scalar (Int, Bool, Char, Double).  Everything else — String, ADTs, tuples, closures,
 # Unit, and TVars/polymorphic positions, which may resolve to heap objects at
-# runtime — returns false and is rooted conservatively.
-export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
+# runtime — is Nothing and is rooted conservatively.
+export fn scalar_of_type_expr(te: ast.TypeExpr) -> Maybe ScalarWhy =
   match te with
-  | ast.TypeName name -> is_scalar_name(name)
-  | _ -> false
+  | ast.TypeName name -> if is_scalar_name(name) then Just(ByType) else Nothing
+  | _ -> Nothing
 
 # Same predicate over an inferred `types.Type` (used by ast_to_ir to classify a
 # call's return type for IRCall rooting).  The concrete scalar constants
-# Int/Bool/Char are non-heap; everything else — String, ADTs, tuples, closures,
-# Unit, and TVars/polymorphic positions — is treated as heap and rooted
+# Int/Bool/Char/Double are non-heap; everything else — String, ADTs, tuples,
+# closures, Unit, and TVars/polymorphic positions — is treated as heap and rooted
 # conservatively, matching the TypeExpr predicate.
-export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
+export fn scalar_of_type(t: types.Type) -> Maybe ScalarWhy =
   match t with
-  | types.TConst name -> is_scalar_name(types.type_id_name(name))
-  | _ -> false
+  | types.TConst name -> if is_scalar_name(types.type_id_name(name)) then Just(ByType) else Nothing
+  | _ -> Nothing
+
+export fn type_expr_is_non_heap_scalar(te: ast.TypeExpr) -> Bool =
+  is_just(scalar_of_type_expr(te))
+
+export fn type_is_non_heap_scalar(t: types.Type) -> Bool =
+  is_just(scalar_of_type(t))
+
+# --- Constructor field codes ---
+
+# The ctor-field-kinds byte for a scalar field type: "i" for Int and Char (a Char
+# is an immediate codepoint), "b" for Bool, Nothing otherwise.  Double is a scalar
+# too but has no code yet: its field encodes "p" and is rooted needlessly, which is
+# safe because the GC ignores a root that is not a heap address.  Encoder:
+# field_kinds.ctor_field_kind; decoder: scalar_of_field_code.
+export fn scalar_field_code(te: ast.TypeExpr) -> Maybe String =
+  match te with
+  | ast.TypeName name ->
+      if name == "Int" || name == "Char" then Just("i")
+      else if name == "Bool" then Just("b")
+      else Nothing
+  | _ -> Nothing
+
+# Inverse of scalar_field_code: Just a witness for the scalar codes 'i' and 'b'.
+export fn scalar_of_field_code(ch: Char) -> Maybe ScalarWhy =
+  if ch == 'i' || ch == 'b' then Just(FieldCode) else Nothing

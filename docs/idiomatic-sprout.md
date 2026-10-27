@@ -602,7 +602,7 @@ group order twice on every signature verification.
 
 `lint/nullary-const-fn` reports this shape, but only on a **pure**, non-linear `fn`
 other than `main` whose body is a syntactic value: a top-level `let` initializer must
-be pure (spec §5.2, not yet enforced), and outside that set a `let` is monomorphic.
+be pure (spec §5.2), and outside that set a `let` is monomorphic.
 So it does **not** flag the costly case above — a body that is a call. Spot that one
 yourself.
 

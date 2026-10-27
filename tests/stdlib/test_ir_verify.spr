@@ -2,6 +2,14 @@ import stdlib.test (check_eq, check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_verify as ir_verify
+import stdlib.compiler.ast as ast
+import stdlib.compiler.type_kind as type_kind
+
+# A scalar kind, minted through type_kind as the compiler does.
+fn scalar() -> sprout_ir.IRType =
+  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
+  | Just why -> sprout_ir.IRTScalar(why)
+  | Nothing -> panic("type_kind rejects Int")
 
 # ---------------------------------------------------------------------------
 # Tests for the post-rooting root verifier (ir_verify.verify_rooting).
@@ -336,7 +344,7 @@ fn main() -> Unit !{IO} =
              check_fn(leaked_root(sprout_ir.IRAbortMatch)), Nil),
     check_eq("a root still pushed in a block that calls panic is fine",
              check_fn(fn_of(Nil, [blk("entry", [str("%a"), str("%m"), root("%a"), root("%m"),
-                                                sprout_ir.IRCall("%p", sprout_ir.IRTScalar, "panic", ["%m"]),
+                                                sprout_ir.IRCall("%p", scalar(), "panic", ["%m"]),
                                                 sprout_ir.IRRetVoid])])), Nil),
     check_true("a later trigger in the same block is checked after an earlier one passes",
                mentions(check_fn(three_triggers(true)), "op 5")),

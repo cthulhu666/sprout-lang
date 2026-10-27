@@ -1,0 +1,10 @@
+module main
+import stdlib.compiler.sprout_ir as sprout_ir
+
+# `IRTScalar` carries a `type_kind.ScalarWhy`, so a caller cannot tag a value as a
+# non-heap scalar without going through `stdlib.compiler.type_kind`.
+
+let forged: sprout_ir.IRType = sprout_ir.IRTScalar
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")

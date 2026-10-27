@@ -1,0 +1,11 @@
+module main
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.type_kind as type_kind
+
+# `ScalarWhy` is exported without `(..)`: its constructors stay private to
+# `stdlib.compiler.type_kind`, so a caller cannot forge the witness.
+
+let forged: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.ByType)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print("x")
