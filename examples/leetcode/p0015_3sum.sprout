@@ -1,0 +1,41 @@
+module examples.leetcode.p0015_3sum
+
+# 15 3Sum: sort, fix the smallest element, then walk two pointers inward. O(n^2).
+fn three_sum(nums: Vec Int) -> List (List Int) =
+  list_reverse(triples(0, vec_sort(nums), []))
+
+fn triples(i: Int, h: Vec Int, acc: List (List Int)) -> List (List Int) =
+  let a = at(i, h)
+  in if i >= vec_length(h) - 2 || a > 0 then acc
+     else if i > 0 && a == at(i - 1, h) then triples(i + 1, h, acc)
+     else triples(i + 1, h, pairs(a, i + 1, vec_length(h) - 1, h, acc))
+
+fn pairs(a: Int, l: Int, r: Int, h: Vec Int, acc: List (List Int)) -> List (List Int) =
+  if l >= r then acc
+  else
+    let x = at(l, h)
+        y = at(r, h)
+        s = a + x + y
+    in if s < 0 then pairs(a, l + 1, r, h, acc)
+       else if s > 0 then pairs(a, l, r - 1, h, acc)
+       else pairs(a, skip_fwd(l + 1, r, x, h), skip_back(r - 1, l, y, h), h, Cons([a, x, y], acc))
+
+# Move `i` past every cell equal to `v`, stopping at `stop`.
+fn skip_fwd(i: Int, stop: Int, v: Int, h: Vec Int) -> Int =
+  if i < stop && at(i, h) == v then skip_fwd(i + 1, stop, v, h) else i
+
+fn skip_back(i: Int, stop: Int, v: Int, h: Vec Int) -> Int =
+  if i > stop && at(i, h) == v then skip_back(i - 1, stop, v, h) else i
+
+fn at(i: Int, h: Vec Int) -> Int = vec_get_or(i, 0, h)
+
+fn check(name: String, got: List (List Int), want: List (List Int)) -> Unit !{IO} =
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", three_sum([-1, 0, 1, 2, -1, -4]), [[-1, -1, 2], [-1, 0, 1]])
+    check("ex2", three_sum([0, 1, 1]), [])
+    check("ex3", three_sum([0, 0, 0]), [[0, 0, 0]])
+    check("dups", three_sum([-2, 0, 0, 2, 2]), [[-2, 0, 2]])
+    check("four zeros", three_sum([0, 0, 0, 0]), [[0, 0, 0]])

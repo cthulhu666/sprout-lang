@@ -1,0 +1,31 @@
+module examples.leetcode.p0560_subarray_sum_equals_k
+import stdlib.math.int (is_even)
+
+# 560 Subarray Sum Equals K: subarray (j, i] sums to k iff prefix[j] == prefix[i] - k, so
+# count the prefix sums seen so far. Dict keys are Strings, so each sum is keyed by its text.
+fn subarray_sum(nums: Vec Int, k: Int) -> Int =
+  let (_, _, total) = vec_fold(step(k, _, _), (0, bump(0, dict_empty()), 0), nums)
+  in total
+
+# State: (running prefix sum, count of each prefix sum so far, answer).
+fn step(k: Int, state: (Int, Dict Int, Int), x: Int) -> (Int, Dict Int, Int) =
+  let (sum, counts, total) = state
+      sum2 = sum + x
+  in (sum2, bump(sum2, counts), total + seen(sum2 - k, counts))
+
+fn seen(sum: Int, counts: Dict Int) -> Int =
+  maybe_with_default(0, dict_get(int_to_string(sum), counts))
+
+fn bump(sum: Int, counts: Dict Int) -> Dict Int =
+  dict_set(int_to_string(sum), seen(sum, counts) + 1, counts)
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+# "big" is 19999 values alternating -1, 1, -1, ...
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", subarray_sum([1, 1, 1], 2), 2)
+    check("ex2", subarray_sum([1, 2, 3], 3), 2)
+    check("neg", subarray_sum([1, -1, 0], 0), 3)
+    check("big", subarray_sum([(if is_even(i) then 1 else -1) for i in 1..20000], 0), 100000000)

@@ -1,0 +1,38 @@
+module examples.leetcode.p0322_coin_change
+import stdlib.math.int (min)
+import stdlib.linvec as linvec
+import stdlib.linvec (LinVec)
+
+# 322 Coin Change: dp[a] = fewest coins summing to a, with `unreachable` for "none".
+# dp[a] reads dp[a - c] for every coin c, so the table cannot be built row by row:
+# each entry is pushed onto a LinVec as it is computed.
+fn coin_change(coins: List Int, amount: Int) -> Int =
+  let unreachable = amount + 1
+      table = linvec.freeze(fill(coins, 1, amount, unreachable, linvec.from_list([0])))
+      n = vec_get_or(amount, unreachable, table)
+  in if n >= unreachable then -1 else n
+
+fn fill(coins: List Int, a: Int, amount: Int, unreachable: Int, dp: LinVec Int) -> LinVec Int =
+  if a > amount then dp
+  else
+    let n = fewest_at(coins, a, unreachable, dp)
+    in fill(coins, a + 1, amount, unreachable, linvec.push(n, dp))
+
+fn fewest_at(coins: List Int, a: Int, unreachable: Int, dp: borrowing LinVec Int) -> Int =
+  list_fold(via_coin(dp, a, _, _), unreachable, coins)
+
+fn via_coin(dp: borrowing LinVec Int, a: Int, best: Int, c: Int) -> Int =
+  match linvec.get(a - c, dp) with
+  | Just d -> min(best, d + 1)
+  | Nothing -> best
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", coin_change([1, 2, 5], 11), 3)
+    check("ex2", coin_change([2], 3), -1)
+    check("ex3", coin_change([1], 0), 0)
+    check("big", coin_change([186, 419, 83, 408], 6249), 20)
+    check("max", coin_change([2147483647, 1], 10000), 10000)

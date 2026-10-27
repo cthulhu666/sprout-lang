@@ -1,0 +1,19 @@
+module examples.leetcode.p0198_house_robber
+import stdlib.math.int (max)
+
+# 198 House Robber: the fold carries (best up to two houses back, best up to the previous house).
+fn rob(nums: Vec Int) -> Int =
+  let (_, best) = vec_fold(step, (0, 0), nums)
+  in best
+
+fn step(acc: (Int, Int), money: Int) -> (Int, Int) =
+  let (skip, prev) = acc
+  in (prev, max(prev, skip + money))
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", rob([1, 2, 3, 1]), 4)
+    check("ex2", rob([2, 7, 9, 3, 1]), 12)

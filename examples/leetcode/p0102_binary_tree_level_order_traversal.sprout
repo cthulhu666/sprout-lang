@@ -1,0 +1,57 @@
+module examples.leetcode.p0102_binary_tree_level_order_traversal
+
+# 102 Binary Tree Level Order Traversal: BFS one whole level at a time.
+type Tree =
+  | Empty
+  | Node Tree Int Tree
+
+fn level_order(root: Tree) -> List (List Int) =
+  levels(list_filter(is_node, [root]))
+
+fn levels(frontier: List Tree) -> List (List Int) =
+  match frontier with
+  | [] -> []
+  | _ -> Cons(list_filter_map(value_of, frontier), levels(list_flat_map(kids, frontier)))
+
+fn kids(t: Tree) -> List Tree =
+  match t with
+  | Empty -> []
+  | Node l _ r -> list_filter(is_node, [l, r])
+
+fn is_node(t: Tree) -> Bool =
+  match t with
+  | Empty -> false
+  | Node _ _ _ -> true
+
+fn value_of(t: Tree) -> Maybe Int =
+  match t with
+  | Empty -> Nothing
+  | Node _ v _ -> Just(v)
+
+# Test input: LeetCode writes a tree as [3, 9, 20, null, null, 15, 7]. The j-th non-null
+# slot has its children at slots 2j + 1 and 2j + 2, and `before[p]` counts the non-null
+# slots ahead of p.
+fn from_level_order(xs: List (Maybe Int)) -> Tree =
+  let (_, rev_before) = list_fold(count_step, (0, []), xs)
+  in build(vec_from_list(xs), vec_from_list(list_reverse(rev_before)), 0)
+
+fn count_step(acc: (Int, List Int), slot: Maybe Int) -> (Int, List Int) =
+  let (n, seen) = acc
+  in (if is_just(slot) then n + 1 else n, Cons(n, seen))
+
+fn build(slots: Vec (Maybe Int), before: Vec Int, p: Int) -> Tree =
+  match vec_get_or(p, Nothing, slots) with
+  | Nothing -> Empty
+  | Just v ->
+      let j = vec_get_or(p, 0, before)
+      in Node(build(slots, before, 2 * j + 1), v, build(slots, before, 2 * j + 2))
+
+fn check(name: String, slots: List (Maybe Int), want: List (List Int)) -> Unit !{IO} =
+  let got = level_order(from_level_order(slots))
+  in print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", [Just(3), Just(9), Just(20), Nothing, Nothing, Just(15), Just(7)], [[3], [9, 20], [15, 7]])
+    check("ex2", [Just(1)], [[1]])
+    check("ex3", [], [])

@@ -1,0 +1,23 @@
+module examples.leetcode.p0338_counting_bits
+import stdlib.bits
+import stdlib.linvec as linvec
+
+# 338 Counting Bits: ans[i] = ans[i >> 1] + (i & 1), O(n).
+# Each entry reads an earlier one, so the table is threaded through a LinVec.
+fn count_bits(n: Int) -> Vec Int =
+  fill(1, n, linvec.from_list([0])) |> linvec.freeze
+
+fn fill(i: Int, n: Int, v: linvec.LinVec Int) -> linvec.LinVec Int =
+  if i > n then v
+  else
+    let prev = maybe_with_default(0, linvec.get(bit_shr(i, 1), v))
+    in fill(i + 1, n, linvec.push(prev + bit_and(i, 1), v))
+
+fn check(name: String, got: Vec Int, want: Vec Int) -> Unit !{IO} =
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", count_bits(2), [0, 1, 1])
+    check("ex2", count_bits(5), [0, 1, 1, 2, 1, 2])
+    check("n=0", count_bits(0), [0])

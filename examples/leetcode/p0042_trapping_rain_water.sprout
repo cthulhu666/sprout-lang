@@ -1,0 +1,26 @@
+module examples.leetcode.p0042_trapping_rain_water
+import stdlib.math.int (max)
+
+# 42 Trapping Rain Water: two pointers, O(n) time, O(1) extra space.
+# The side with the lower wall is bounded by its own running max.
+fn trap(h: Vec Int) -> Int =
+  trap_go(0, vec_length(h) - 1, 0, 0, 0, h)
+
+fn trap_go(l: Int, r: Int, lmax: Int, rmax: Int, water: Int, h: Vec Int) -> Int =
+  if l >= r then water
+  else
+    let hl = vec_get_or(l, 0, h)
+        hr = vec_get_or(r, 0, h)
+        lmax2 = max(lmax, hl)
+        rmax2 = max(rmax, hr)
+    in if hl < hr then trap_go(l + 1, r, lmax2, rmax, water + lmax2 - hl, h)
+       else trap_go(l, r - 1, lmax, rmax2, water + rmax2 - hr, h)
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", trap([0, 1, 0, 2, 1, 0, 1, 3, 2, 1, 2, 1]), 6)
+    check("ex2", trap([4, 2, 0, 3, 2, 5]), 9)
+    check("single", trap([5]), 0)

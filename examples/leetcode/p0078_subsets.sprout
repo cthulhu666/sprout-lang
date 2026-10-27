@@ -1,0 +1,23 @@
+module examples.leetcode.p0078_subsets
+
+# 78 Subsets: the power set of a list of distinct ints. Every subset either leaves out
+# the head or adds it.
+fn subsets(xs: List Int) -> List (List Int) =
+  match xs with
+  | [] -> [[]]
+  | [x | rest] -> let without = subsets(rest) in list_append(without, [Cons(x, s) for s in without])
+
+fn sorted(xs: List a) -> List a where Ord a =
+  vec_from_list(xs) |> vec_sort |> vec_to_list
+
+# Any order is allowed, so sort both sides before comparing.
+fn canonical(xss: List (List Int)) -> List (List Int) =
+  sorted(list_map(sorted, xss))
+
+fn check(name: String, got: List (List Int), want: List (List Int)) -> Unit !{IO} =
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if canonical(got) == canonical(want) then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", subsets([1, 2, 3]), [[], [1], [2], [1, 2], [3], [1, 3], [2, 3], [1, 2, 3]])
+    check("ex2", subsets([0]), [[], [0]])

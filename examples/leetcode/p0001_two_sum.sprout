@@ -1,0 +1,24 @@
+module examples.leetcode.p0001_two_sum
+
+# 1 Two Sum: one pass, remembering each value's index; look up the complement.
+# Dict keys are Strings, so Int keys go through int_to_string.
+fn two_sum(nums: List Int, target: Int) -> List Int =
+  scan(nums, 0, target, dict_empty())
+
+fn scan(nums: List Int, i: Int, target: Int, seen: Dict Int) -> List Int =
+  match nums with
+  | [] -> []
+  | [x | rest] ->
+      match dict_get(int_to_string(target - x), seen) with
+      | Just j -> [j, i]
+      | Nothing -> scan(rest, i + 1, target, dict_set(int_to_string(x), i, seen))
+
+fn check(nums: List Int, target: Int, want: List Int) -> Unit !{IO} =
+  let got = two_sum(nums, target)
+  in print(`two_sum(${to_string(nums)}, ${target}): got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check([2, 7, 11, 15], 9, [0, 1])
+    check([3, 2, 4], 6, [1, 2])
+    check([3, 3], 6, [0, 1])
