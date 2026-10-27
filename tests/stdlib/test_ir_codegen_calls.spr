@@ -2,6 +2,14 @@ import stdlib.test (check_true, run_suite)
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.ir_lowering as ir_lowering
 import testsupport.ir_verify (clang_verifies_ir)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.type_kind as type_kind
+
+# A scalar kind, minted through type_kind as the compiler does.
+fn scalar() -> sprout_ir.IRType =
+  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
+  | Just why -> sprout_ir.IRTScalar(why)
+  | Nothing -> panic("type_kind rejects Int")
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 1, PR 1.5: direct calls + recursion (IRCall).
@@ -53,7 +61,7 @@ fn fact_program() -> sprout_ir.IRProgram =
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t6", 1),
         Cons(sprout_ir.IRISub("%t7", sprout_ir.param_ssa("n"), "%t6"),
-        Cons(sprout_ir.IRCall("%t8", sprout_ir.IRTScalar, "fact", Cons("%t7", Nil)),
+        Cons(sprout_ir.IRCall("%t8", scalar(), "fact", Cons("%t7", Nil)),
         Cons(sprout_ir.IRIMul("%t9", sprout_ir.param_ssa("n"), "%t8"),
         Cons(sprout_ir.IRBr("join_4"), Nil)))))),
       Cons(sprout_ir.IRBlock("join_4", Cons(
@@ -96,10 +104,10 @@ fn fib_program() -> sprout_ir.IRProgram =
       Cons(sprout_ir.IRBlock("else_3", Cons(
         sprout_ir.IRConst("%t5", 1),
         Cons(sprout_ir.IRISub("%t6", sprout_ir.param_ssa("n"), "%t5"),
-        Cons(sprout_ir.IRCall("%t7", sprout_ir.IRTScalar, "fib", Cons("%t6", Nil)),
+        Cons(sprout_ir.IRCall("%t7", scalar(), "fib", Cons("%t6", Nil)),
         Cons(sprout_ir.IRConst("%t8", 2),
         Cons(sprout_ir.IRISub("%t9", sprout_ir.param_ssa("n"), "%t8"),
-        Cons(sprout_ir.IRCall("%t10", sprout_ir.IRTScalar, "fib", Cons("%t9", Nil)),
+        Cons(sprout_ir.IRCall("%t10", scalar(), "fib", Cons("%t9", Nil)),
         Cons(sprout_ir.IRIAdd("%t11", "%t7", "%t10"),
         Cons(sprout_ir.IRBr("join_4"), Nil))))))))),
       Cons(sprout_ir.IRBlock("join_4", Cons(
@@ -122,8 +130,8 @@ fn twice_and_add4_program() -> sprout_ir.IRProgram =
       Nil)),
     Cons(sprout_ir.IRFunction("add4", Cons(("n", sprout_ir.IRTHeap), Nil), "i64", Cons(
       sprout_ir.IRBlock("entry", Cons(
-        sprout_ir.IRCall("%t0", sprout_ir.IRTScalar, "twice", Cons(sprout_ir.param_ssa("n"), Nil)),
-        Cons(sprout_ir.IRCall("%t1", sprout_ir.IRTScalar, "twice", Cons(sprout_ir.param_ssa("n"), Nil)),
+        sprout_ir.IRCall("%t0", scalar(), "twice", Cons(sprout_ir.param_ssa("n"), Nil)),
+        Cons(sprout_ir.IRCall("%t1", scalar(), "twice", Cons(sprout_ir.param_ssa("n"), Nil)),
         Cons(sprout_ir.IRIAdd("%t2", "%t0", "%t1"),
         Cons(sprout_ir.IRRet("%t2"), Nil))))),
       Nil)),

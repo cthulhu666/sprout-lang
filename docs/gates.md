@@ -732,7 +732,8 @@ A block that never returns (`ir_rooting.ops_never_return`) is exempt from the te
 
 **Does not check.** What counts as a trigger, a heap value, a use or a def comes from `ir_rooting`
 (`op_triggers_gc_summary`, `compute_heap_origin`, `op_uses`, `op_def`), so a wrong classification
-there passes: that is the Family 1 verifier in BACKLOG. Operands without a `%` (immediates such as
+there passes. `IRTScalar` needs a `type_kind` witness ([compiler-internals.md](compiler-internals.md)),
+which limits who can claim a value is scalar, not whether the claim is right. Operands without a `%` (immediates such as
 `0` or `-1`) are not uses. It does not look at the C runtime, and does not require a pop on a path
 that never returns.
 

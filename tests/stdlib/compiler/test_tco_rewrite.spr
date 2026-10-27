@@ -5,6 +5,14 @@ import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
+import stdlib.compiler.ast as ast
+import stdlib.compiler.type_kind as type_kind
+
+# A scalar kind, minted through type_kind as the compiler does.
+fn scalar() -> sprout_ir.IRType =
+  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
+  | Just why -> sprout_ir.IRTScalar(why)
+  | Nothing -> panic("type_kind rejects Int")
 
 # Pre-rooting IR for:
 #   loop(n, s) = if n <= 0 then str_len(s) else loop(n - 1, int_to_string(n))
@@ -14,7 +22,7 @@ import stdlib.string as string
 # IRTcoBack back-edge in the former else block.
 fn make_loop_fn() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("main.loop",
-    Cons(("n", sprout_ir.IRTScalar), Cons(("s", sprout_ir.IRTHeap), Nil)),
+    Cons(("n", scalar()), Cons(("s", sprout_ir.IRTHeap), Nil)),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%t$0", 0),
@@ -22,14 +30,14 @@ fn make_loop_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRCondBr("%t$1", "then_3", "else_3"), Nil)))),
     Cons(sprout_ir.IRBlock("then_3",
       Cons(sprout_ir.IRStrFromInt("%t$11", sprout_ir.param_ssa("n")),
-      Cons(sprout_ir.IRCall("%t$5", sprout_ir.IRTScalar, "str_len", Cons(sprout_ir.param_ssa("s"), Nil)),
-      Cons(sprout_ir.IRCall("%t$12", sprout_ir.IRTScalar, "str_len", Cons("%t$11", Nil)),
+      Cons(sprout_ir.IRCall("%t$5", scalar(), "str_len", Cons(sprout_ir.param_ssa("s"), Nil)),
+      Cons(sprout_ir.IRCall("%t$12", scalar(), "str_len", Cons("%t$11", Nil)),
       Cons(sprout_ir.IRBr("join_3"), Nil))))),
     Cons(sprout_ir.IRBlock("else_3",
       Cons(sprout_ir.IRConst("%t$6", 1),
       Cons(sprout_ir.IRISub("%t$7", sprout_ir.param_ssa("n"), "%t$6"),
       Cons(sprout_ir.IRStrFromInt("%t$8", sprout_ir.param_ssa("n")),
-      Cons(sprout_ir.IRCall("%t$9", sprout_ir.IRTScalar, "main.loop", Cons("%t$7", Cons("%t$8", Nil))),
+      Cons(sprout_ir.IRCall("%t$9", scalar(), "main.loop", Cons("%t$7", Cons("%t$8", Nil))),
       Cons(sprout_ir.IRBr("join_3"), Nil)))))),
     Cons(sprout_ir.IRBlock("join_3",
       Cons(sprout_ir.IRPhi("%t$4", "i64", Cons(("%t$5", "then_3"), Cons(("%t$9", "else_3"), Nil))),
@@ -49,7 +57,7 @@ fn lower_rooted(f: sprout_ir.IRFunction, next_idx: Int) -> String =
 # ret. tco_rewrite must trace phi -> phi -> ret and still catch it.
 fn make_nested_fn() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("main.g",
-    Cons(("n", sprout_ir.IRTScalar), Nil),
+    Cons(("n", scalar()), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%c1", 1),
@@ -63,7 +71,7 @@ fn make_nested_fn() -> sprout_ir.IRFunction =
     Cons(sprout_ir.IRBlock("else2",
       Cons(sprout_ir.IRConst("%one", 1),
       Cons(sprout_ir.IRISub("%x", sprout_ir.param_ssa("n"), "%one"),
-      Cons(sprout_ir.IRCall("%rx", sprout_ir.IRTScalar, "main.g", Cons("%x", Nil)),
+      Cons(sprout_ir.IRCall("%rx", scalar(), "main.g", Cons("%x", Nil)),
       Cons(sprout_ir.IRBr("join2"), Nil))))),
     Cons(sprout_ir.IRBlock("join2",
       Cons(sprout_ir.IRPhi("%m2", "i64", Cons(("%base2", "then2"), Cons(("%rx", "else2"), Nil))),
@@ -100,7 +108,7 @@ fn add_same_pair(b: sprout_ir.IRBlock) -> sprout_ir.IRBlock =
 # parent phi — the cascade this test exercises directly.
 fn make_single_arm_fn() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("main.h",
-    Cons(("n", sprout_ir.IRTScalar), Nil),
+    Cons(("n", scalar()), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%c1", 1),
@@ -112,7 +120,7 @@ fn make_single_arm_fn() -> sprout_ir.IRFunction =
       Cons(sprout_ir.IRISub("%x", sprout_ir.param_ssa("n"), "%one"),
       Cons(sprout_ir.IRBr("arm_0"), Nil)))),
     Cons(sprout_ir.IRBlock("arm_0",
-      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.h", Cons("%x", Nil)),
+      Cons(sprout_ir.IRCall("%r", scalar(), "main.h", Cons("%x", Nil)),
       Cons(sprout_ir.IRBr("join_inner"), Nil))),
     Cons(sprout_ir.IRBlock("join_inner",
       Cons(sprout_ir.IRPhi("%mi", "i64", Cons(("%r", "arm_0"), Nil)),
@@ -128,7 +136,7 @@ fn make_single_arm_fn() -> sprout_ir.IRFunction =
 # DOES contain a self-call that is then filtered out as non-tail).
 fn make_no_self_call_fn() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("main.inc",
-    Cons(("n", sprout_ir.IRTScalar), Nil),
+    Cons(("n", scalar()), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%one", 1),
@@ -145,7 +153,7 @@ fn make_no_self_call_fn() -> sprout_ir.IRFunction =
 # such a call as a normal IRCall.
 fn make_non_tail_fn() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("main.g",
-    Cons(("n", sprout_ir.IRTScalar), Nil),
+    Cons(("n", scalar()), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%c", 1),
@@ -155,7 +163,7 @@ fn make_non_tail_fn() -> sprout_ir.IRFunction =
     Cons(sprout_ir.IRBlock("else1",
       Cons(sprout_ir.IRConst("%one", 1),
       Cons(sprout_ir.IRISub("%x", sprout_ir.param_ssa("n"), "%one"),
-      Cons(sprout_ir.IRCall("%r", sprout_ir.IRTScalar, "main.g", Cons("%x", Nil)),
+      Cons(sprout_ir.IRCall("%r", scalar(), "main.g", Cons("%x", Nil)),
       Cons(sprout_ir.IRIAdd("%w", "%r", "%r"),
       Cons(sprout_ir.IRBr("join1"), Nil)))))),
     Cons(sprout_ir.IRBlock("join1",
@@ -168,7 +176,7 @@ fn make_non_tail_fn() -> sprout_ir.IRFunction =
 fn wide_arm(i: Int) -> sprout_ir.IRBlock =
   sprout_ir.IRBlock("arm_" ++ int_to_string(i),
     Cons(sprout_ir.IRConst("%x_" ++ int_to_string(i), i),
-    Cons(sprout_ir.IRCall("%r_" ++ int_to_string(i), sprout_ir.IRTScalar, "main.wide",
+    Cons(sprout_ir.IRCall("%r_" ++ int_to_string(i), scalar(), "main.wide",
            Cons("%x_" ++ int_to_string(i), Nil)),
     if i == 2
     then Cons(sprout_ir.IRIAdd("%w", "%r_2", "%r_2"), Cons(sprout_ir.IRBr("join"), Nil))
@@ -179,7 +187,7 @@ fn wide_incoming(i: Int) -> (String, String) =
 
 fn make_wide_fn() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("main.wide",
-    Cons(("n", sprout_ir.IRTScalar), Nil),
+    Cons(("n", scalar()), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
       Cons(sprout_ir.IRConst("%c", 1), Cons(sprout_ir.IRCondBr("%c", "arm_0", "base"), Nil))),

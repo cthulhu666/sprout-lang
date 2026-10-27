@@ -252,6 +252,12 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
       build_lifted_captures_go(rest, base_idx, i + 1,
         dict_set(v, sprout_ir.temp_ssa(base_idx + i), acc))
 
+# IRTScalar when type_kind vouches for the type, else `other`.
+fn scalar_or(why: Maybe type_kind.ScalarWhy, other: sprout_ir.IRType) -> sprout_ir.IRType =
+  match why with
+  | Just w -> sprout_ir.IRTScalar(w)
+  | Nothing -> other
+
 # Determine the IRLoadEnvSlot kind for a single captured variable:
 #   IRTScalar  — a non-heap scalar per type_kind (no GC root needed)
 #   IRTHeap    — everything else with a known type
@@ -260,10 +266,7 @@ fn build_lifted_captures_go(frees: List String, base_idx: Int,
 fn capture_kind(v: String, body: typed_ast.TypedExpr) -> sprout_ir.IRType =
   match find_capture_type(body, v) with
   | Nothing -> sprout_ir.IRTUnknown
-  | Just t ->
-      if type_kind.type_is_non_heap_scalar(t)
-      then sprout_ir.IRTScalar
-      else sprout_ir.IRTHeap
+  | Just t -> scalar_or(type_kind.scalar_of_type(t), sprout_ir.IRTHeap)
 
 # Build a parallel list of kinds for each name in `frees`, given the lambda body.
 # O(n * m) where n = frees length, m = body size.
@@ -279,10 +282,7 @@ fn build_capture_kinds(frees: List String, body: typed_ast.TypedExpr) -> List sp
 # safe (over-roots) while preserving the "we didn't have type info" signal.
 fn ann_to_irtype(ann: Maybe ast.TypeExpr) -> sprout_ir.IRType =
   match ann with
-  | Just te ->
-      if type_kind.type_expr_is_non_heap_scalar(te)
-      then sprout_ir.IRTScalar
-      else sprout_ir.IRTHeap
+  | Just te -> scalar_or(type_kind.scalar_of_type_expr(te), sprout_ir.IRTHeap)
   | Nothing -> sprout_ir.IRTUnknown
 
 # IRFunction's params field: each param's name with its annotation's IR type.
@@ -857,9 +857,7 @@ fn llvm_ret_type(t: types.Type) -> String =
 # ir_rooting roots only heap-returning call results.  Scalars (Int/Bool/Char)
 # are IRTScalar (never rooted); everything else is conservatively heap.
 fn ret_irtype(t: types.Type) -> sprout_ir.IRType =
-  if type_kind.type_is_non_heap_scalar(t)
-  then sprout_ir.IRTScalar
-  else sprout_ir.IRTUnknown
+  scalar_or(type_kind.scalar_of_type(t), sprout_ir.IRTUnknown)
 
 # Arity recorded for a closure the apply-site check must wave through.
 #
@@ -2193,13 +2191,13 @@ type FieldSource =
   | CtorFields String
   | TupleFields
 
-# Fetch sub-value `i` of `scrut` into `dst`. A tuple element tested against an
-# Int or Bool literal is read as a scalar; a ctor field has its declared kind.
-fn fetch_field(src: FieldSource, dst: String, scrut: String, i: Int, scalar: Bool) -> sprout_ir.IROp =
+# Fetch sub-value `i` of `scrut` into `dst`. A ctor field has its declared kind; a
+# tuple element has `tuple_kind` (IRTScalar when tested against an Int or Bool literal).
+fn fetch_field(src: FieldSource, dst: String, scrut: String, i: Int,
+               tuple_kind: sprout_ir.IRType) -> sprout_ir.IROp =
   match src with
   | CtorFields fks -> sprout_ir.IRGetField(dst, scrut, i, fk.fk_at(fks, i))
-  | TupleFields ->
-      sprout_ir.IRGetTupleField(dst, scrut, i, if scalar then sprout_ir.IRTScalar else sprout_ir.IRTUnknown)
+  | TupleFields -> sprout_ir.IRGetTupleField(dst, scrut, i, tuple_kind)
 
 fn source_noun(src: FieldSource) -> String =
   match src with
@@ -2339,8 +2337,9 @@ fn bind_pattern_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: Stri
   | ast.UnitPattern _ ->
       Err("ast_to_ir: nested UnitPattern in " ++ source_noun(src) ++ " match not yet supported")
   where field_ssa = fresh_name(idx)
-        fetched = fetch_field(src, field_ssa, scrut_name, field_idx, false)
-        scalar_fetched = fetch_field(src, field_ssa, scrut_name, field_idx, true)
+        fetched = fetch_field(src, field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown)
+        scalar_fetched = fetch_field(src, field_ssa, scrut_name, field_idx,
+                                     sprout_ir.IRTScalar(type_kind.literal_tested))
         hit_lbl = fresh_nested_test_label(idx)
 
 # A literal sub-pattern: seal the open block with `fetch`, then `test_ops`
@@ -3068,7 +3067,7 @@ fn emit_tuple_worker_call(worker: String, anames: List String, width: Int,
                           idx1: Int) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, List String, Int) =
   do
-    call <- call_unboxed(slots, sprout_ir.IRTScalar, worker, anames)
+    call <- call_unboxed(slots, sprout_ir.IRTScalar(type_kind.tuple_slot), worker, anames)
     Ok((ablocks, albl, list_builder_add(call, aops), slots, idx1 + w))
   where w = if width == 3 then 3 else 2
         slots = fresh_name_run(idx1, w)
@@ -3710,7 +3709,7 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
                   list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1), "print_str", a_name), acur_ops),
                   fresh_name(idx1), idx1 + 1))
         else Ok((ablocks, acur_lbl,
-                  list_builder_add(sprout_ir.IRCall(fresh_name(idx1), sprout_ir.IRTScalar, "print_value", Cons(a_name, Nil)), acur_ops),
+                  list_builder_add(sprout_ir.IRCall(fresh_name(idx1), sprout_ir.IRTScalar(type_kind.unit_result), "print_value", Cons(a_name, Nil)), acur_ops),
                   fresh_name(idx1), idx1 + 1))
 
 # `to_double(n)` — compiler intrinsic (no runtime symbol).  Translate the single
@@ -6009,9 +6008,7 @@ fn build_intrinsic_eta_params(names: List String,
                               tys: List types.Type) -> List (String, sprout_ir.IRType) =
   match (names, tys) with
   | (Cons n rest_n, Cons t rest_t) ->
-      Cons((n, if type_kind.type_is_non_heap_scalar(t)
-               then sprout_ir.IRTScalar
-               else sprout_ir.IRTHeap),
+      Cons((n, scalar_or(type_kind.scalar_of_type(t), sprout_ir.IRTHeap)),
            build_intrinsic_eta_params(rest_n, rest_t))
   | _ -> Nil
 
@@ -6557,7 +6554,7 @@ fn tuple_field_fetches(box_ssa: String, slots: List String, i: Int) -> List spro
   match slots with
   | Nil -> Nil
   | Cons slot rest ->
-      Cons(sprout_ir.IRGetTupleField(slot, box_ssa, i, sprout_ir.IRTScalar),
+      Cons(sprout_ir.IRGetTupleField(slot, box_ssa, i, sprout_ir.IRTScalar(type_kind.tuple_slot)),
            tuple_field_fetches(box_ssa, rest, i + 1))
 
 # Repack a NON-literal tuple tail (a match/var/call returning a 2-tuple, e.g. unwrapping a
@@ -6911,7 +6908,7 @@ fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.Ty
       lifted <- ref_read(lifted_ref)
       Ok((sprout_ir.IRFunction(name ++ "_argw",
             list_append(ast_params_to_irtype_pairs(before),
-              Cons((tag_name, sprout_ir.IRTScalar), Cons((val_name, sprout_ir.IRTUnknown),
+              Cons((tag_name, sprout_ir.IRTScalar(type_kind.ctor_tag)), Cons((val_name, sprout_ir.IRTUnknown),
                 ast_params_to_irtype_pairs(after)))),
             llvm_ret_type(match_ty),
             list_append(blocks,

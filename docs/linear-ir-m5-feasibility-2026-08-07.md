@@ -9,11 +9,16 @@ presents the gap, the evidence, three options, and a recommendation.
 **Decision (Kuba, 2026-08-07): defer M5.** Neither full linear-IR (Option 1) nor the verifier
 (Option 2) is scheduled now. The rooting invariant remains enforced by the dataflow pass
 (`ir_rooting.sprout`) plus the exhaustive, no-catch-all op-classification discipline already in
-place (§4). The classification-consistency **verifier (Option 2, family 1) is filed as a possible
-next task** in `BACKLOG.md` (see the "Linear types / GC-rooting IR" follow-ups). The key finding
-below — that the historically-real GC-UAF bugs are classification-completeness (A) and sub-op
-alloc-ordering (B), *not* the forgot-to-root-a-known-value (C) that linearity catches for free —
-is the durable rationale for that deferral.
+place (§4). The key finding below — that the historically-real GC-UAF bugs are
+classification-completeness (A) and sub-op alloc-ordering (B), *not* the forgot-to-root-a-known-value
+(C) that linearity catches for free — is the durable rationale for that deferral.
+
+**Update (2026-10-27): the Option 2 verifier was dropped for a witness.** A fifth bug, `673ea770`,
+was class (A) inside `type_kind` itself: a module's own `type Bool` was classed as the primitive.
+A verifier using `type_kind` as its oracle would have compared it with itself, and `ast_to_ir`
+already classifies through `type_kind`. Instead `IRTScalar` carries a `type_kind.ScalarWhy` only
+`type_kind` can build, so every scalar claim goes through one module and names its reason
+(`compiler-internals.md`, "`IRTScalar` takes a witness"). The tally is now (A) 3, (B) 2, (C) 0.
 
 ## 1. Problem statement
 

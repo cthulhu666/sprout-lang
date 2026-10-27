@@ -3,6 +3,14 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
+import stdlib.compiler.ast as ast
+import stdlib.compiler.type_kind as type_kind
+
+# A scalar kind, minted through type_kind as the compiler does.
+fn scalar() -> sprout_ir.IRType =
+  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
+  | Just why -> sprout_ir.IRTScalar(why)
+  | Nothing -> panic("type_kind rejects Int")
 
 # Tests for the lower_fn_with_table export added in the streaming-codegen prep.
 # lower_fn_with_table(f, fn_table) must produce the same LLVM IR fragment as
@@ -23,13 +31,13 @@ let make_trivial_fn =
 fn make_tco_fn(sp: String) -> sprout_ir.IRFunction =
   sprout_ir.IRFunction(
     "tco_fn",
-    Cons(("p$in", sprout_ir.IRTScalar), Nil),
+    Cons(("p$in", scalar()), Nil),
     "i64",
     Cons(sprout_ir.IRBlock("entry",
            Cons(sprout_ir.IRTcoEntry(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p$in")), Nil), sp),
            Cons(sprout_ir.IRBr("tco_loop"), Nil))),
     Cons(sprout_ir.IRBlock("tco_loop",
-           Cons(sprout_ir.IRTcoLoad(sprout_ir.param_ssa("p"), "i64", "%p.slot", sprout_ir.IRTScalar),
+           Cons(sprout_ir.IRTcoLoad(sprout_ir.param_ssa("p"), "i64", "%p.slot", scalar()),
            Cons(sprout_ir.IRTcoBack(Cons(("%p.slot", "i64", sprout_ir.param_ssa("p")), Nil), sp, "tco_loop"), Nil))),
     Nil)))
 
