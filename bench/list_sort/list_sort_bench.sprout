@@ -1,0 +1,154 @@
+module main
+
+# docs/list-toolkit-v0.md §4.6.1: is an undecorated list merge sort faster than
+# today's `vec_sort`, which sorts (key, index, value) triples? One variant per
+# process, so peak RSS (`/usr/bin/time -l`) belongs to that variant alone.
+#
+# usage: list_sort_bench <variant> <n> <reps>
+#   vec_list   List input, today's path: vec_from_list |> vec_sort |> vec_to_list
+#   usort_list List input, the undecorated prototype
+#   vec        Vec input, vec_sort
+#   usort_vec  Vec input, vec_from_list(usort(vec_to_list(v)))
+#   vec_by     Vec input, vec_sort_by(negate)
+#   dsort_by   Vec input, sort_by through the shared merge: decorated, one compare
+#   dsort_lean dsort_by without the two order-keeping reversals the index makes moot
+
+import stdlib.time as time
+
+# Remainder for a non-negative `a`.
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+# The LCG bench/native_runtime/sort_bench.sprout uses: values in [0, 65536).
+fn fill(i: Int, n: Int, x: Int, acc: List Int) -> List Int =
+  if i >= n then acc
+  else
+    let next = rem(x * 1103515245 + 12345, 2147483648)
+    in fill(i + 1, n, next, Cons(rem(next / 65536, 65536), acc))
+
+# --- the prototype: one merge, the comparison a parameter ---
+
+fn rev_onto(xs: List a, acc: List a) -> List a =
+  match xs with
+  | [] -> acc
+  | [x | rest] -> rev_onto(rest, Cons(x, acc))
+
+# A tie takes the left run: `right` wins only when strictly less.
+fn merge_runs(less: local a -> a -> Bool, left: List a, right: List a, acc: List a) -> List a =
+  match left with
+  | [] -> rev_onto(acc, right)
+  | [l | lrest] ->
+      match right with
+      | [] -> rev_onto(acc, left)
+      | [r | rrest] ->
+          if less(r, l) then merge_runs(less, left, rrest, Cons(r, acc))
+          else merge_runs(less, lrest, right, Cons(l, acc))
+
+# Merges runs 1+2, 3+4, … keeping run order, so an earlier run is always the left one.
+fn merge_pass(less: local a -> a -> Bool, runs: List (List a), acc: List (List a)) -> List (List a) =
+  match runs with
+  | [] -> rev_onto(acc, [])
+  | [a] -> rev_onto(acc, [a])
+  | [a, b | rest] -> merge_pass(less, rest, Cons(merge_runs(less, a, b, []), acc))
+
+fn merge_all(less: local a -> a -> Bool, runs: List (List a)) -> List a =
+  match runs with
+  | [] -> []
+  | [only] -> only
+  | _ -> merge_all(less, merge_pass(less, runs, []))
+
+# Singleton runs in input order: built reversed, then reversed once.
+fn to_runs(xs: List a, acc: List (List a)) -> List (List a) =
+  match xs with
+  | [] -> rev_onto(acc, [])
+  | [x | rest] -> to_runs(rest, Cons([x], acc))
+
+fn usort(xs: List a) -> List a where Ord a =
+  merge_all(\ (x, y) -> compare(x, y) < 0, to_runs(xs, []))
+
+# sort_by on the shared merge: decorate with the key once, compare keys with one
+# `compare` call, and fall back to the index only on a tie.
+fn decorated_less(l: (k, Int, a), r: (k, Int, a)) -> Bool where Ord k =
+  let (lk, li, _) = l
+      (rk, ri, _) = r
+      by_key = compare(lk, rk)
+  in if by_key == 0 then li < ri else by_key < 0
+
+fn decorate(f: local a -> k, xs: List a, i: Int, acc: List (k, Int, a)) -> List(k, Int, a) =
+  match xs with
+  | [] -> rev_onto(acc, [])
+  | [x | rest] -> decorate(f, rest, i + 1, Cons((f(x), i, x), acc))
+
+fn strip(xs: List (k, Int, a), acc: List a) -> List a =
+  match xs with
+  | [] -> rev_onto(acc, [])
+  | [(_, _, x) | rest] -> strip(rest, Cons(x, acc))
+
+fn dsort_by(f: local a -> k, xs: List a) -> List a where Ord k =
+  strip(merge_all(decorated_less, to_runs(decorate(f, xs, 0, []), [])), [])
+
+# The index breaks every tie, so neither the decorated list nor the runs need to
+# be in input order; today's `vec_sort_by` relies on the same fact.
+fn decorate_rev(f: local a -> k, xs: List a, i: Int, acc: List (k, Int, a)) -> List(k, Int, a) =
+  match xs with
+  | [] -> acc
+  | [x | rest] -> decorate_rev(f, rest, i + 1, Cons((f(x), i, x), acc))
+
+fn to_runs_rev(xs: List a, acc: List (List a)) -> List (List a) =
+  match xs with
+  | [] -> acc
+  | [x | rest] -> to_runs_rev(rest, Cons([x], acc))
+
+fn dsort_lean(f: local a -> k, xs: List a) -> List a where Ord k =
+  strip(merge_all(decorated_less, to_runs_rev(decorate_rev(f, xs, 0, []), [])), [])
+
+# --- harness ---
+
+fn checksum(xs: List Int, prev: Int, acc: Int) -> Int =
+  match xs with
+  | [] -> acc
+  | [x | rest] ->
+      if x < prev then panic("not sorted")
+      else checksum(rest, x, rem(acc * 31 + x, 1000000007))
+
+fn neg_checksum(xs: List Int, prev: Int, acc: Int) -> Int =
+  match xs with
+  | [] -> acc
+  | [x | rest] ->
+      if x > prev then panic("not sorted by negate")
+      else neg_checksum(rest, x, rem(acc * 31 + x, 1000000007))
+
+fn sort_once(variant: String, xs: List Int, v: Vec Int) -> List Int =
+  if variant == "vec_list" then vec_to_list(vec_sort(vec_from_list(xs)))
+  else if variant == "usort_list" then usort(xs)
+  else if variant == "vec" then vec_to_list(vec_sort(v))
+  else if variant == "usort_vec" then vec_to_list(vec_from_list(usort(vec_to_list(v))))
+  else if variant == "vec_by" then vec_to_list(vec_sort_by(negate, v))
+  else if variant == "dsort_by" then vec_to_list(vec_from_list(dsort_by(negate, vec_to_list(v))))
+  else if variant == "dsort_lean" then vec_to_list(vec_from_list(dsort_lean(negate, vec_to_list(v))))
+  else panic(`unknown variant ${variant}`)
+
+fn reps_loop(variant: String, xs: List Int, v: Vec Int, r: Int, last: List Int) -> List Int =
+  if r <= 0 then last
+  else reps_loop(variant, xs, v, r - 1, sort_once(variant, xs, v))
+
+fn run(variant: String, n: Int, reps: Int) -> Unit !{IO} =
+  do
+    let xs = fill(0, n, 42, [])
+    let v = vec_from_list(xs)
+    t0 <- time.now_micros()
+    let out = reps_loop(variant, xs, v, reps, [])
+    t1 <- time.now_micros()
+    let by = variant == "vec_by" || variant == "dsort_by" || variant == "dsort_lean"
+    let sum = if by then neg_checksum(out, 65536, 0) else checksum(out, 0, 0)
+    let ns_x10 = (t1 - t0) * 10000 / (n * reps)
+    print(`${variant} n=${n} reps=${reps} ns_per_elem=${ns_x10 / 10}.${rem(ns_x10, 10)} checksum=${sum}`)
+
+let usage = "usage: list_sort_bench <variant> <n> <reps>"
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let [variant, n_text, reps_text] = args else print(usage)
+    let (Just n, Just reps) = (parse_int(n_text), parse_int(reps_text)) else print(usage)
+    run(variant, n, reps)

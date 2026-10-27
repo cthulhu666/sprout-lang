@@ -3,8 +3,8 @@
 Status: **proposal**. Nothing here is implemented. Approved so far: the `Zip` class, truncating
 to the shorter input (§4.2);
 generic `min`/`max` in the prelude, no `abs_diff` (§4.7); `map_adjacent` in `stdlib.list` (§4.4);
-a `Sort` class with `sort`/`sort_by` (§4.6); the shared undecorated merge, gated on a
-measurement (§4.6.1); `enumerate` deferred (§4.3). Open: retiring `vec_sort`/`vec_sort_by` (§4.6.2).
+a `Sort` class with `sort`/`sort_by` (§4.6); the undecorated merge for `sort`, measured
+faster (§4.6.1); `enumerate` deferred (§4.3). Open: retiring `vec_sort`/`vec_sort_by` (§4.6.2).
 
 ## 1. Problem
 
@@ -225,10 +225,17 @@ goes, item 2).
 
 The `Vec` instance converts to a list, sorts, and converts back, as `vec_sort` does now.
 
-**Measurement first.** Before the merge is changed, a prototype of the undecorated sort is timed
-against today's `vec_sort` on `List` and `Vec` input, at 1k and 1M random Ints, for time and peak
-memory. The shared merge lands only if the undecorated sort is faster. If it is not, today's merge
-stays: `sort_values` is `sort_by_values(\x -> x, …)` in both instances, and nothing gets faster.
+**Measured** (`bench/results-2026-10-27-list-sort.md`, 1k and 1M random Ints). The undecorated
+sort beats today's `vec_sort` on both instances: on `List` by 19% at 1k and 25–29% at 1M, with
+16–19% less peak memory; on `Vec` by 11–13% at 1k and about 22% at 1M, peak memory unchanged.
+So `sort_values` takes the undecorated merge in both instances.
+
+`sort_by` gains nothing from the change. Through the shared merge it ties today's `vec_sort_by`
+at 1k (590 against 585 ns per element); at 1M the noise (load 5.5–8.9) is larger than the gap. The
+implementation step re-measures `sort_by` on the shared merge against today's, under low load,
+and keeps today's decorated merge for `sort_by` if the shared one is slower. The `Vec` instance's
+`sort_by_values` keeps reading the `Vec` directly, as `vec_sort_by_collect` does: converting it
+to a list first cost the prototype ~90 MB of peak memory at 1M.
 
 #### 4.6.2 Retiring `vec_sort` and `vec_sort_by` (option, not decided)
 
@@ -336,9 +343,9 @@ Step 1 greps them, as `docs/non-empty-v0.md` §7 did.
 1. `Zip` with the `List` and `Vec` instances, `zip_with`, `zip`, `min`, `max`;
    `stdlib.list.map_adjacent`. Measure `max` against `imath.max` in a DP loop. Reseed; read the
    golden IR diff (§6 renames).
-2. Measure the undecorated sort prototype against `vec_sort` (§4.6.1). Then `Sort` with the
-   `List` and `Vec` instances, `sort`, `sort_by`, and the shared merge if the measurement says
-   so.
+2. `Sort` with the `List` and `Vec` instances, `sort`, `sort_by`, the undecorated merge
+   (§4.6.1, measured). Re-measure `sort_by` on the shared merge under low load
+   (`bench/list_sort/bench.sh`) before it replaces today's.
 3. After `NonEmpty`: `scanl`, the `NonEmpty` `Zip` instance.
 4. Migrate the LeetCode examples (§7).
 5. If §4.6.2 is taken: move the `vec_sort`/`vec_sort_by` callers to `sort`/`sort_by`, reseed,
