@@ -1,5 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
 import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
 import stdlib.compiler.types as types
 import stdlib.compiler.field_kinds as field_kinds
 import stdlib.compiler.type_kind as type_kind
@@ -13,6 +14,10 @@ fn field_kind(name: String) -> String = field_kinds.ctor_field_kind(ast.TypeName
 fn expr_scalar(name: String) -> Bool = type_kind.type_expr_is_non_heap_scalar(ast.TypeName(name))
 
 fn type_scalar(name: String) -> Bool = type_kind.type_is_non_heap_scalar(types.TConst(types.type_id(name)))
+
+let pos: source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+
+fn literal_scalar(p: ast.Pattern) -> Bool = is_just(type_kind.scalar_of_literal_pattern(p))
 
 fn main() -> Unit !{IO} =
   do
@@ -34,4 +39,8 @@ fn main() -> Unit !{IO} =
     assert_true(state, "prelude Char type", type_scalar("Char"))
     assert_false(state, "shadowed Bool type", type_scalar("$entry.Bool"))
     assert_false(state, "shadowed Int type", type_scalar("main.Int"))
+    assert_true(state, "Int literal pattern", literal_scalar(ast.IntPattern(3, pos)))
+    assert_true(state, "Bool literal pattern", literal_scalar(ast.BoolPattern(true, pos)))
+    assert_false(state, "String literal pattern", literal_scalar(ast.StringPattern("x", pos)))
+    assert_false(state, "variable pattern", literal_scalar(ast.VarPattern("x", pos)))
     summary(state)

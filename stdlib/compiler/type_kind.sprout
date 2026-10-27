@@ -35,8 +35,13 @@ export type ScalarWhy =
   | UnitResult
   | CtorTag
 
-# A tuple element matched against an Int or Bool literal pattern.
-export let literal_tested: ScalarWhy = LiteralTested
+# Just a witness when `p` is an Int or Bool literal pattern: the element it tests is
+# compared as an i64, so it is a scalar. Nothing for any other pattern.
+export fn scalar_of_literal_pattern(p: ast.Pattern) -> Maybe ScalarWhy =
+  match p with
+  | ast.IntPattern _ _ -> Just(LiteralTested)
+  | ast.BoolPattern _ _ -> Just(LiteralTested)
+  | _ -> Nothing
 
 # A slot of an unboxed tuple worker result: scalar_tuple_width admits only
 # tuples whose every field passes type_is_non_heap_scalar.
