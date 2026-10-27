@@ -55,6 +55,8 @@ fn main() -> Unit !{IO} =
     # --- Bool through the floor: str_starts_with returns one
     if str_starts_with("prelude", "pre") then print("str_starts_with=true")
     else print("str_starts_with=false")
+    # --- the monomorphic String sink
+    print_str("print_str=ok")
     # --- the other IO sink
     eprint("eprint reached stderr")
     print("floor=complete")

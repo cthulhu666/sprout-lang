@@ -13,6 +13,9 @@
 1
 Cons(3, Nil)
 12
+8
+104
 5
 -6
 4.5
+print_str still writes

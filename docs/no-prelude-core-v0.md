@@ -88,7 +88,8 @@ the lowerer's untouched. The two were never the same set.
 
 > Since 2026-10-12 `Set` wraps `Map Unit`: the five `native_set_*` externs are gone
 > and `map_keys` joined the map family. Below, 40, 31 and 25 are 36, 27 and 21
-> today; 9 and 15 are unchanged. The counts are left as measured.
+> today; 9 is unchanged. The floor's 15 is 16 since `print_str` joined it. Counts
+> not edited below are left as measured.
 
 Those sets overlap on 9 names and disagree on 31. Measured on `0e1e6fd2`, in a
 `no_prelude` file:
@@ -281,10 +282,10 @@ Sources: [Rust Reference — Preludes](https://doc.rust-lang.org/reference/names
 ### 4.1 The floor — this is the decision
 
 **The floor is the subset of the prelude's `extern fn` block whose signatures
-mention no prelude-defined type.** 15 of the 40:
+mention no prelude-defined type.** 15 of the 40 (16 since `print_str`):
 
 ```
-print  eprint  panic
+print  eprint  print_str  panic
 int_to_string  double_to_string  char_to_string  char_to_str
 char_from_codepoint  to_double
 str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
@@ -306,7 +307,7 @@ type variables — nothing else. The remaining 25 mention `Maybe`, `List`,
 one.** Three properties fall out of it, and the third is what makes the change
 affordable:
 
-1. **It is type-closed.** A floor of these 15 needs no type declarations at all,
+1. **It is type-closed.** A floor of these 16 needs no type declarations at all,
    so the floor is exactly a list of `extern fn`s — no ADTs, no classes, no
    instances, no ordering constraints against the entry module's own decls.
 2. **It covers what works today.** 8 of the 9 names in §1's first row are in it.
@@ -337,7 +338,7 @@ else … Cons(prelude_mod, name_entry_module(plain_mods, entry_path))
 ```
 
 The `skip` arm becomes "prepend the floor" rather than "prepend nothing": the
-prelude's `ParsedModule` filtered to the 15 `ExternFnDecl`s, with the entry left
+prelude's `ParsedModule` filtered to the 16 `ExternFnDecl`s, with the entry left
 bare (per §4.1 property 3 — the floor introduces no namespace to keep the entry
 out of). Sketch, not final:
 
@@ -349,7 +350,7 @@ else … as today
 Then, **and only then**, the four `load_prelude_pairs` calls that feed an
 already-bundled program can go: `compiler.sprout:339` (`compile_full`), `:417`
 (`compile_phase_effects`), `:435` (`check_bundled`), `:510`
-(`compile_phase_check_with_cache`). The floor supplies the 15 schemes as ordinary
+(`compile_phase_check_with_cache`). The floor supplies the 16 schemes as ordinary
 bundled declarations, so no seeding is needed for them, and every other prelude
 name is correctly absent. That is an 11-line removal plus a decl filter — and it
 continues `bd90e4b5`'s direction (types come from `extern fn` declarations)
@@ -402,7 +403,7 @@ No grammar change. `no_prelude` keeps its spelling and its whole-line match rule
 
 The directive's meaning becomes normative: **`no_prelude` suppresses the standard
 library, not the language's runtime interface.** A file that opts out still has
-the 15 core operations; it does not have `Maybe`, `List`, `Vec`, `Dict`, `Set`,
+the 16 core operations; it does not have `Maybe`, `List`, `Vec`, `Dict`, `Set`,
 `Ref`, the typeclasses, the instances, or any prelude-defined function.
 
 The entry module of a `no_prelude` file stays **bare** (unqualified), unchanged
@@ -414,7 +415,7 @@ None to the type system proper: no new forms, no inference change, no new
 constraint. The change is to which declarations are in scope.
 
 One interaction is a genuine tension in this design, not a detail — see §11.1.
-The floor's 15 names become declared in a `no_prelude` file, so a file defining
+The floor's 16 names become declared in a `no_prelude` file, so a file defining
 its own `str_len` collides where before it did not. Measured on `0e1e6fd2`: in a
 **normal** file, `fn str_len(s: String) -> Int = 99` type-checks fine and the
 environment carries both `str_len : String -> Int` (the prelude's) and
@@ -508,7 +509,7 @@ specification instead of a description.
 
 | fixture | pins |
 |---|---|
-| `run/no_prelude_floor.spr` + `.out` | the matrix — calls all 15 floor names from a `no_prelude` file and runs |
+| `run/no_prelude_floor.spr` + `.out` | the matrix — calls all 16 floor names from a `no_prelude` file and runs |
 | `type_error/no_prelude_calls_prelude_fn` | a prelude *function* is rejected at check (the reported defect; written first, confirmed to report `OK`/exit 0 on `0e1e6fd2`) |
 | `type_error/no_prelude_excludes_vector` | the narrow cut — `vector_*` is out even though `Vector` is a builtin type |
 | `type_error/no_prelude_excludes_argv` | the one deliberate capability removal cannot be undone by accident |

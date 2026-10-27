@@ -344,10 +344,10 @@ to be shadowed, and staying bare is what makes the two limits above go away.
 The opt-out is whole-file. Selective hiding (`hiding(null)`) is not provided.
 
 What a `no_prelude` file *does* receive is the **floor**: the prelude `extern fn`
-declarations whose signatures mention only primitive types. Those 15 names are
+declarations whose signatures mention only primitive types. Those 16 names are
 
 ```
-print  eprint  panic
+print  eprint  print_str  panic
 int_to_string  double_to_string  char_to_string  char_to_str
 char_from_codepoint  to_double
 str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
@@ -3043,8 +3043,9 @@ instruction, as for the two functions above. Being
 `extern` declarations they are also **never module-qualified** (§"Externs are
 outside the module system") — `import stdlib.bits` puts them in the build and they
 are then called by bare name. They are written `export extern fn`. A parameter or
-local binding with one of these names (or `print`, `to_double`, `double_to_bits`,
-`double_from_bits`) is an ordinary binding: a call through it calls the bound function.
+local binding with one of these names (or `print`, `print_str`, `to_double`,
+`double_to_bits`, `double_from_bits`) is an ordinary binding: a call through it calls the bound
+function.
 
 `bit_not(x)` is `-x - 1`: it flips every bit, so `bit_not(0)` is `-1`. It is the
 integer complement, not the boolean `!`.

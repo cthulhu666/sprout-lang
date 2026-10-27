@@ -64,6 +64,16 @@ fn pattern_bound(p: (Int -> Int -> Int, Int)) -> Int =
   match p with
   | (bit_or, y) -> bit_or(y, 3)
 
+# `print_str` is an intrinsic too: a parameter and a let-bound lambda of that name are
+# called, not lowered as a write to stdout.
+fn param_print_str(print_str: String -> Int) -> Int = print_str("four")
+
+fn let_print_str() -> Int =
+  let
+    print_str = \s -> str_len(s) + 100
+  in
+  print_str("four")
+
 fn main() -> Unit !{IO} =
   do
     print(param_xor(\ (a, b) -> a + b))
@@ -82,7 +92,10 @@ fn main() -> Unit !{IO} =
     print(scrut(\ (a, b) -> a * b))
     print(in_map([\ (a, b) -> a - b]))
     print(pattern_bound((\ (a, b) -> a * b, 4)))
+    print(param_print_str(\s -> str_len(s) * 2))
+    print(let_print_str())
     # Control: the real intrinsics still lower.
     print(bit_xor(6, 3))
     print(bit_not(5))
     print(to_string(to_double(4) + 0.5))
+    print_str("print_str still writes")
