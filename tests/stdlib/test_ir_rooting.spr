@@ -4,14 +4,7 @@ import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ast_to_ir as ast_to_ir
 import testsupport.ir_verify (clang_verifies_ir)
-import stdlib.compiler.ast as ast
-import stdlib.compiler.type_kind as type_kind
-
-# A scalar kind, minted through type_kind as the compiler does.
-fn scalar() -> sprout_ir.IRType =
-  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
-  | Just why -> sprout_ir.IRTScalar(why)
-  | Nothing -> panic("type_kind rejects Int")
+import testsupport.ir_fixtures (scalar)
 
 # ---------------------------------------------------------------------------
 # Tests for Milestone 2, PR 2.2: dataflow rooting pass.

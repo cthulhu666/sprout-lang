@@ -3,14 +3,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
-import stdlib.compiler.ast as ast
-import stdlib.compiler.type_kind as type_kind
-
-# A scalar kind, minted through type_kind as the compiler does.
-fn scalar() -> sprout_ir.IRType =
-  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
-  | Just why -> sprout_ir.IRTScalar(why)
-  | Nothing -> panic("type_kind rejects Int")
+import testsupport.ir_fixtures (scalar)
 
 # Tests for the lower_fn_with_table export added in the streaming-codegen prep.
 # lower_fn_with_table(f, fn_table) must produce the same LLVM IR fragment as

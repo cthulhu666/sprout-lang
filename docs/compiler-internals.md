@@ -149,7 +149,8 @@ build one. A type-derived tag comes from `scalar_of_type` / `scalar_of_type_expr
 from `scalar_of_field_code`; the structural cases (`literal_tested`, `tuple_slot`, `unit_result`,
 `ctor_tag`) are exported constants. To add a reason, add a constructor and its constant or function in
 `type_kind` and state the invariant that makes the value non-heap in the comment above it. Tests
-that hand-build IR mint through `scalar_of_type_expr`; there is no test-only minting function.
+that hand-build IR use `testsupport.ir_fixtures.scalar`, which mints through `scalar_of_type_expr`;
+`type_kind` has no test-only minting function.
 `tests/conformance/type_error/scalar_witness_*.spr` pin the rejections.
 
 **Per-op liveness is a query, not a set.** `BlockLive` indexes a block once — its
