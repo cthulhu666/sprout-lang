@@ -202,8 +202,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   check order, so it is its own change with its own golden diff.
 - [ ] `P2` **Make compiled `print` dispatch through `ToString`, replacing the erased renderer.**
   `print` lowers by static type, so a `Char` reaching it through a type variable prints its
-  codepoint: `show_it(x: a) = print(x)` on `'z'` prints `122`. Specialisation substitutes types,
-  so it would change that output; `docs/specialisation-v0.md` §2 waits on this. The redesign
+  codepoint: `show_it(x: a) = print(x)` on `'z'` prints `122`; a `String` prints its address.
+  `print(1.5)` prints the raw bits even at a concrete type, and fields print the same way at any
+  type: `print(Just('z'))` is `Just(122)`. Specialisation substitutes types, so it would change
+  output; `docs/specialisation-v0.md` §2 waits on this. Decided: `where ToString a`. The redesign
   regresses the importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs
   an instance in scope), and is a normative spec change (`print(true)` flips `1` → `"true"`).
   Needs its own design doc.
