@@ -258,6 +258,12 @@ fn scalar_or(why: Maybe type_kind.ScalarWhy, other: sprout_ir.IRType) -> sprout_
   | Just w -> sprout_ir.IRTScalar(w)
   | Nothing -> other
 
+# Fixed-witness kinds, built once.
+let literal_tested_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.literal_tested)
+let tuple_slot_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.tuple_slot)
+let unit_result_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.unit_result)
+let ctor_tag_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.ctor_tag)
+
 # Determine the IRLoadEnvSlot kind for a single captured variable:
 #   IRTScalar  — a non-heap scalar per type_kind (no GC root needed)
 #   IRTHeap    — everything else with a known type
@@ -2339,7 +2345,7 @@ fn bind_pattern_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: Stri
   where field_ssa = fresh_name(idx)
         fetched = fetch_field(src, field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown)
         scalar_fetched = fetch_field(src, field_ssa, scrut_name, field_idx,
-                                     sprout_ir.IRTScalar(type_kind.literal_tested))
+                                     literal_tested_kind)
         hit_lbl = fresh_nested_test_label(idx)
 
 # A literal sub-pattern: seal the open block with `fetch`, then `test_ops`
@@ -3067,7 +3073,7 @@ fn emit_tuple_worker_call(worker: String, anames: List String, width: Int,
                           idx1: Int) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, List String, Int) =
   do
-    call <- call_unboxed(slots, sprout_ir.IRTScalar(type_kind.tuple_slot), worker, anames)
+    call <- call_unboxed(slots, tuple_slot_kind, worker, anames)
     Ok((ablocks, albl, list_builder_add(call, aops), slots, idx1 + w))
   where w = if width == 3 then 3 else 2
         slots = fresh_name_run(idx1, w)
@@ -3709,7 +3715,7 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
                   list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1), "print_str", a_name), acur_ops),
                   fresh_name(idx1), idx1 + 1))
         else Ok((ablocks, acur_lbl,
-                  list_builder_add(sprout_ir.IRCall(fresh_name(idx1), sprout_ir.IRTScalar(type_kind.unit_result), "print_value", Cons(a_name, Nil)), acur_ops),
+                  list_builder_add(sprout_ir.IRCall(fresh_name(idx1), unit_result_kind, "print_value", Cons(a_name, Nil)), acur_ops),
                   fresh_name(idx1), idx1 + 1))
 
 # `to_double(n)` — compiler intrinsic (no runtime symbol).  Translate the single
@@ -6554,7 +6560,7 @@ fn tuple_field_fetches(box_ssa: String, slots: List String, i: Int) -> List spro
   match slots with
   | Nil -> Nil
   | Cons slot rest ->
-      Cons(sprout_ir.IRGetTupleField(slot, box_ssa, i, sprout_ir.IRTScalar(type_kind.tuple_slot)),
+      Cons(sprout_ir.IRGetTupleField(slot, box_ssa, i, tuple_slot_kind),
            tuple_field_fetches(box_ssa, rest, i + 1))
 
 # Repack a NON-literal tuple tail (a match/var/call returning a 2-tuple, e.g. unwrapping a
@@ -6908,7 +6914,7 @@ fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.Ty
       lifted <- ref_read(lifted_ref)
       Ok((sprout_ir.IRFunction(name ++ "_argw",
             list_append(ast_params_to_irtype_pairs(before),
-              Cons((tag_name, sprout_ir.IRTScalar(type_kind.ctor_tag)), Cons((val_name, sprout_ir.IRTUnknown),
+              Cons((tag_name, ctor_tag_kind), Cons((val_name, sprout_ir.IRTUnknown),
                 ast_params_to_irtype_pairs(after)))),
             llvm_ret_type(match_ty),
             list_append(blocks,

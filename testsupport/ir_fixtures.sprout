@@ -1,0 +1,14 @@
+module testsupport.ir_fixtures
+
+# Shared IR fixtures for the IR test suites.
+# Lives under `testsupport.` so the minting helper stays out of `stdlib/`.
+
+import stdlib.compiler.ast as ast
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.type_kind as type_kind
+
+# A scalar kind, minted through type_kind as the compiler does.
+export fn scalar() -> sprout_ir.IRType =
+  match type_kind.scalar_of_type_expr(ast.TypeName("Int")) with
+  | Just why -> sprout_ir.IRTScalar(why)
+  | Nothing -> panic("type_kind rejects Int")
