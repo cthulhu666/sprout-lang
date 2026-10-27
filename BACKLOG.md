@@ -200,12 +200,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   have shadowed the prelude if registered earlier. Methods are now canonical
   (`docs/qualified-class-methods-v0.md` §7, stage 2), so that reason is gone. Moving it changes
   check order, so it is its own change with its own golden diff.
-- [ ] `P3` **Reassess the `print` design** — should compiled `print` dispatch through `ToString`
-  everywhere, instead of the type-erased runtime renderer? The full redesign regresses the
-  importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs an instance in
-  scope), and is a normative spec change (`print(true)` flips `1` → `"true"`). Needs its own
-  design doc. Decision: do it, or formally bless the intrinsic + surgical-rewrite split as
-  permanent.
+- [ ] `P2` **Make compiled `print` dispatch through `ToString`, replacing the erased renderer.**
+  `print` lowers by static type, so a `Char` reaching it through a type variable prints its
+  codepoint: `show_it(x: a) = print(x)` on `'z'` prints `122`. Specialisation substitutes types,
+  so it would change that output; `docs/specialisation-v0.md` §2 waits on this. The redesign
+  regresses the importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs
+  an instance in scope), and is a normative spec change (`print(true)` flips `1` → `"true"`).
+  Needs its own design doc.
 - [ ] `P3` **An unannotated top-level `let p = print` type-checks but cannot be compiled.**
   `print(val: a)` picks its lowering per call from the argument type. As a syntactic value the
   `let` generalizes to `forall a. a -> Unit !{IO}`, so the eta-wrapper `ast_to_ir` builds for an
@@ -1766,7 +1767,7 @@ deferral happened, not for current behaviour. Still open:
   `Int` reach a primitive sort under its own name. Numbers:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
   "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry. Proposal:
-  `docs/specialisation-v0.md`.
+  `docs/specialisation-v0.md`, blocked on "Make compiled `print` dispatch through `ToString`".
 - [ ] `P3` **Specialise context-instance bodies, so tuple keys compare directly.** `Ord (a, b, c,
   d, e) where Ord a, …` reaches each field through a context dictionary, and
   `docs/specialisation-v0.md` §4 *Limits* does not copy instance bodies. A heap keyed on a 5-tuple
