@@ -259,7 +259,6 @@ fn scalar_or(why: Maybe type_kind.ScalarWhy, other: sprout_ir.IRType) -> sprout_
   | Nothing -> other
 
 # Fixed-witness kinds, built once.
-let literal_tested_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.literal_tested)
 let tuple_slot_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.tuple_slot)
 let unit_result_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.unit_result)
 let ctor_tag_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.ctor_tag)
@@ -2345,7 +2344,8 @@ fn bind_pattern_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: Stri
   where field_ssa = fresh_name(idx)
         fetched = fetch_field(src, field_ssa, scrut_name, field_idx, sprout_ir.IRTUnknown)
         scalar_fetched = fetch_field(src, field_ssa, scrut_name, field_idx,
-                                     literal_tested_kind)
+                                     scalar_or(type_kind.scalar_of_literal_pattern(pat),
+                                               sprout_ir.IRTUnknown))
         hit_lbl = fresh_nested_test_label(idx)
 
 # A literal sub-pattern: seal the open block with `fetch`, then `test_ops`
