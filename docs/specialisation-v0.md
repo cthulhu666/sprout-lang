@@ -19,6 +19,19 @@ hidden parameter, not `EvInstance`.
 Second, smaller cost: a parameter written as `a` is rooted as a heap value (`ann_to_irtype` in
 `ast_to_ir.sprout`), so an `Int` passed through `a` is over-rooted.
 
+Erasure costs on two more axes, which this pass does not target:
+
+- **Representation.** A generic body cannot tell a `Double` from a heap pointer. B1's inline
+  vector access fires only where `Vector Double` is written in the source, so not through
+  `mutvec_at` (`docs/phase-d-numeric-fastpath-design-2026-07-11.md` §B1, *Reachability*), and a
+  `LinVec Double` write stays a call (`BACKLOG.md`, "`LinVec Double` writes do not inline"). A
+  generational write barrier must fire only on pointer stores (`docs/gc-generational-v0.md` §6),
+  but a store of an `a` cannot be classed, so inside a generic body every store would pay it.
+- **Function values.** A combinator calls an unknown closure, so a `Maybe` that a lambda returns
+  is boxed (`BACKLOG.md`, "A `Maybe` returned by a lambda is boxed").
+
+M0 (§7) counts all three, so the choice of lever follows the numbers.
+
 ## 2. Goals and non-goals
 
 **Goals**
@@ -31,9 +44,9 @@ Second, smaller cost: a parameter written as `a` is rooted as a heap value (`ann
    (`opt_config.sprout`, `just bench-opt`).
 
 **Non-goals**
-- **Monomorphisation.** No copies made only to fix a type. A copy exists only to remove a
-  dictionary. `docs/accessor-inliner-design-2026-07-11.md` rules out per-type copying, and this
-  keeps that line. See §5 for why the line matters.
+- **Monomorphisation.** No copies made only to fix a type or a representation in v0. A copy
+  exists only to remove a dictionary. `docs/accessor-inliner-design-2026-07-11.md` rules out
+  per-type copying, and this keeps that line. See §5 for why the line matters.
 - **A new IR tier or a general optimiser.** The pass is `TypedExpr` → `TypedExpr`. DLE and CSE
   measured nil on real code (`docs/opt-passes-v0.md`), so nothing beyond this one pass is proposed.
 - **New syntax.** No `SPECIALIZE`-style annotation in v0; see §9.
@@ -50,11 +63,17 @@ Every row was checked against the source named.
 | **GHC** | one copy, dictionaries as arguments | `-fspecialise` (on at `-O`): "Specialise each type-class-overloaded function defined in this module for the types at which it is called in this module"; also the `SPECIALIZE` pragma, which makes "a copy of an overloaded function with specific class dictionary arguments" and a rule redirecting calls to it | GHC User's Guide, *Optimisation*; *Pragmas* §SPECIALIZE |
 | **Swift** | one copy, taking "a table of function pointers and a box containing `T`" | the optimiser specialises a call when the concrete type is known, but "can only perform specialization if the definition of the generic declaration is visible in the current Module" | `swift/docs/OptimizationTips.rst` |
 | **Rust** | none | monomorphisation: the compiler "looks at all the places where generic code is called and generates code for the concrete types the generic code is called with" | *The Rust Book* §10.1 |
+| **.NET CLR** | one copy per set of compatible instantiations | the JIT makes a copy per set. Instantiations are compatible if their compilation "gives rise to identical code and other execution structures (e.g. field layout and GC tables)": all reference types share one copy, each primitive type gets its own (on x86, "at least"), and structs share when they have "the same pattern of traced pointers" | Kennedy and Syme, *Design and Implementation of Generics for the .NET Common Language Runtime*, §4.1 |
+| **MLton** | none | the whole-program `Monomorphise` pass "eliminates polymorphic values and datatype declarations by duplicating them for each type at which they are used". It terminates because SML has no polymorphic recursion | MLton guide, *Monomorphise* |
 
-**Where they differ.** Rust must copy, because generic values differ in size. GHC and Swift share
-Sprout's one-representation-for-all design and copy only as an optimisation, keeping the generic
-version. Sprout belongs with GHC and Swift. The visibility limit both of them have (GHC needs
-`INLINABLE` across modules; Swift needs the definition in the module) does not bite Sprout:
+**Where they differ.** Rust must copy, because generic values differ in size. MLton copies the
+same way, by a whole-program pass, which works only because SML lacks polymorphic recursion. GHC
+and Swift share Sprout's one-representation-for-all design and copy only as an optimisation,
+keeping the generic version. The CLR copies by representation, not by type: code is shared exactly
+where it would be identical. The same section notes that a static scheme cannot specialise
+polymorphic recursion; the CLR copes because it specialises lazily, at run time. Sprout belongs
+with GHC and Swift. The visibility limit those two have (GHC needs `INLINABLE` across modules;
+Swift needs the definition in the module) does not bite Sprout:
 `bundler.bundle_file` loads the entry file and all imports into one program, so every body is
 visible. The precompiled-modules draft keeps that true, since it serialises each module's parsed
 AST (`docs/iface-precompiled-modules-v1-draft.md` §What gets serialized, item 2).
@@ -131,6 +150,16 @@ recursion for a function with a complete, constraint-free signature, which can c
 ever-larger type. Removing dictionaries is where the measured 2× is; the rooting gain inside
 copies is a side effect, not the target.
 
+Copying by representation is a third line. Every Sprout value fills the same 64-bit slot, and an
+unconstrained generic body only passes and stores a value of type `a`. So a copy at a concrete
+type should change the code only through each type variable's class: heap or scalar (rooting,
+CPR's scalar paths) and `Double` (B1's inline access). The follow-up must check that claim against
+every type-directed decision in `ast_to_ir`. Copies keyed by a class per type variable
+(heap, `Double`, other scalar) have a finite key space, so they terminate under polymorphic
+recursion. This is the CLR's compatibility rule (§3) applied at compile time. It would reach the
+representation axis of §1 without monomorphising. It is not part of v0: M0 counts what it would
+reach and cost, and a follow-up decides.
+
 ## 6. Relation to the native-runtime plan
 
 `docs/native-sprout-runtime-v0.md` lists specialisation in Phase 2. Its exit is the
@@ -142,15 +171,33 @@ through `Ord`/`Eq`.
 
 ## 7. Plan
 
-- **M0 — measure first, change nothing.** A census pass (like `cse_census.sprout`) that counts:
-  - calls to constrained functions with fully concrete evidence, and distinct (function, evidence)
-    keys;
-  - separately, the calls devirtualisation cannot finish: methods with their own constraint, and
-    calls into context instances;
-  - the node growth copies would add (`typed_ast.node_count`).
+- **M0 — measure first, change nothing.** A census pass (like `cse_census.sprout`) with one count
+  per axis of §1:
+  - **Dictionaries:** calls to constrained functions with fully concrete evidence, and distinct
+    (function, evidence) keys. Separately, the calls devirtualisation cannot finish: methods with
+    their own constraint, and calls into context instances.
+  - **Representation:** calls to unconstrained generic top-level functions where some type
+    variable is instantiated to a non-heap scalar (`type_kind.type_is_non_heap_scalar`), and of
+    those, to `Double`. Distinct keys counted two ways: (function, class per type variable), as
+    §5's representation copies would make, and (function, concrete types), as monomorphisation
+    would. Functions that call themselves at another type are counted apart, since
+    monomorphisation cannot copy them.
+  - **Function values:** calls that pass a lambda or a top-level function name for a parameter of
+    function type, and distinct (function, argument) pairs.
+  - **Growth:** the node growth (`typed_ast.node_count`) each set of copies would add.
 
-  Run it over the bench corpus, the examples and the compiler. Go / no-go on those numbers. A small
-  count means most of the gain is in a few places, and an annotation (§9) is the better tool.
+  Run it over the bench corpus, the examples and the compiler. Go / no-go per axis:
+  - **Dictionaries:** a small count means most of the gain is in a few places, and an annotation
+    (§9) is the better tool.
+  - **Representation:** few keys, in a handful of accessors, point to inlining those
+    (`docs/accessor-inliner-design-2026-07-11.md`). Many keys with bounded growth point to
+    representation copies. Type keys far above class keys mean monomorphisation pays many copies
+    for the same rooting and B1 gain; what it adds is a per-type layout (`Vec3` as three `f64`s),
+    which needs its own case.
+  - **Function values:** a count dominated by a few prelude combinators points to inlining those
+    before the CPR router runs.
+
+  The counts show reach, not time. Each lever still needs its own A/B before it lands.
 - **M1 — the pass, behind a switch.** Add `Spec` to `opt_config.Pass`; `SPROUT_OPT_OFF=spec`
   disables it. A/B with `just bench-opt spec` and with `bench/native_runtime/bench.sh`. Target:
   generic `mutvec_sort` near the Int-specialised row. Gates: self-compile time within its noise
@@ -164,6 +211,9 @@ through `Ord`/`Eq`.
 
 ## 8. Tests
 
+- M0: a census fixture with known counts on each axis: a call at concrete evidence, an
+  unconstrained function instantiated at `Int` and at `Double`, a function that calls itself at
+  another type, and a combinator given a lambda.
 - An opt-harness fixture (`tests/opt_harness/`): a generic sort at `Int` emits a direct call to the
   `Ord Int` instance in the copy, with no dictionary parameter and an `Int` parameter unrooted.
 - The generic version dropped when every call is specialised, and kept when a generic caller
