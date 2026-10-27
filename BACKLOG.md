@@ -500,6 +500,21 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the rest of the module sees is not something a user can know. That check covers `fn`, `let`
   and class-method names only; extend it to type, alias and class declarations, each in its own
   namespace.
+- [ ] `P2` **A private prelude function is callable from user code.** `list_length` is declared
+  without `export` in the prelude, yet `list_length([1, 2, 3])` compiles in a user module. Spec
+  §Imports rejects listing an unexported name, so the prelude skips the export rule every other
+  module obeys, and each private helper is public API by accident. Found by the LeetCode survey
+  (`docs/leetcode-survey-2026-10-27.md` §3).
+- [ ] `P2` **`match u with | () -> …` fails with no source location.** `ast_to_ir` returns
+  "UnitPattern in match not yet supported" with no position, against guideline §5, so the user
+  has nothing to search for. Either lower a unit pattern (it always matches) or reject it in the
+  checker with a located error.
+- [ ] `P3` **No `instance Ord Char`, though `<` accepts `Char`.** The spec lets the comparison
+  operators take `Char`, but the prelude's `Ord` instances skip it, so `vec_sort` on a `Vec Char`
+  does not compile. Sorting a word's letters goes through codepoints instead. Add the instance.
+- [ ] `P3` **No total Int remainder.** There is no `%`, and `stdlib.math.int.mod` returns
+  `Maybe`, so `i - (i / m) * m` is the idiom (LeetCode survey: 3 solutions plus every test-data
+  generator). Decide between an operator, behaving as `/` does at zero, and a total named function.
 
 ### 2) Networking and HTTP Client
 
@@ -984,12 +999,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   exemplar.** Four in-tree sites pay for the gap: two panics in `infer.build_comp_level` and
   `infer.comp_fold_name` (a comprehension always has ≥1 generator, so `ComprehensionExpr` should
   carry one), and two dead arms in `tui.text.cluster_width`/`cluster_is`, whose own comment says
-  "each a non-empty list of codepoints". uncharted-suns pays two more panics (`game/sim.sprout:348`
-  and `:370`, the slot and zone rosters) plus `grimward.gear.slot_of`, pinned by `test_gear.spr`
-  rather than by the type. Scope it as `NE a (List a)` with total accessors — the cons shape
-  enforces itself, a `NonEmptyVec` would need representation opacity — shipped for ordinary modules
-  (spec §5.6.4) but NOT for the prelude, where this type would live (§6), and without the total
-  `head`/`minimum` the arms go but the `Maybe`s stay. Ergonomics gate on `[a, b | tail]` above.
+  "each a non-empty list of codepoints". uncharted-suns pays two more panics (`game.sim.slot0` and
+  `game.sim.zone0`, the slot and zone rosters) plus `grimward.gear.slot_of`, pinned by
+  `test_gear.spr` rather than by the type. Design: `docs/non-empty-v0.md` (proposal); the list
+  toolkit's `scanl`/`group_by` signatures wait on it.
 - [ ] `P3` **Primitive sort builtins for `Int`/`Double` vectors — needs approval first.** A C radix
   sort runs at ~2 ns/element against `mutvec_sort`'s ~190 and `vec_sort`'s ~970 (n=440). Safe for
   the collector, and it gives a fast pure `vec_sort` (copy, sort, return). Open: how generic code
@@ -1005,6 +1018,25 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   sorts every light in range, then takes `keep`, per chunk and per mesh every frame. A
   `take_smallest_by(k, key, xs)`-style helper keeps k items in O(n log k). Grep the spec for the
   name first. `docs/laziness-v0.md` §5.3.
+- [ ] `P2` **List toolkit: `zip_with`, `zip`, `map_adjacent`, `enumerate`, `scanl`, `list_sort`.**
+  With a two-argument `max`/`min` (naming open) and `abs_diff`, the most frequent gaps in the survey
+  (`docs/leetcode-survey-2026-10-27.md` §2). Design pending: generic over `Foldable` only where no
+  container loses a fast path, one loop per container otherwise, built on `zip_with` (measured
+  free). `scanl`/`group_by` return `NonEmpty` (`docs/non-empty-v0.md` §9). Overlaps the
+  collection-combinators §7(c) and min-max §2(b) entries above.
+- [ ] `P2` **`Dict`/`Set` take only `String` keys.** They sit on runtime externs
+  (`map_get(m, key: String)`), so Int keys cost an `int_to_string` per access and `dict_entries`
+  orders `"10"` before `"9"`; 6 of 31 survey problems paid for it. A pure-Sprout
+  `Map k v where Ord k` needs no builtin; measure it against the C map first. The counting helpers
+  (`dict_update`, `dict_get_or`, `frequencies`, `group_by`) belong with it.
+- [ ] `P3` **No trapping `Vec` index read.** Index-heavy code writes `vec_get_or(i, 0, v)` with a
+  meaningless fallback (7 of 31 survey problems). `mutvec_at` traps on a bad index; a `vec_at`
+  would mirror it. Needs a ruling against guideline §2: is an out-of-range index our bug or caller
+  input?
+- [ ] `P3` **No fast pure table whose entries read earlier entries.** Coin Change's DP built by a
+  `vec_append` fold is quadratic (4.7 s at 1e5); only `LinVec` with explicit recursion is fast,
+  and `range_fold` has no `where linear b`, so it cannot drive one. Options: add the bound to
+  `range_fold`, or a `vec_build(n, f)` builder.
 
 ### 6) Modules and Packaging
 
@@ -1459,6 +1491,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   which the original `| Just x -> …` arm does not — so it only wins for point-free arms passing
   a static function pointer. The win-set after that filter is ~4 sites, not worth a compiler reseed.
   **Do not convert capturing-lambda arms, and never on hot paths.**
+- [ ] `P3` **`to_string` does not quote strings inside a container.** `to_string(["", "a"])`
+  prints `[, a]` and `to_string([[""]])` prints `[[]]`, so distinct values print alike.
+  `ToString String` is the identity and `ToString (List a)` joins its elements' `to_string`; a
+  container needs a quoting form for string elements. Found by the LeetCode survey.
 
 ### 7.6) Editor integration — LSP server and the JetBrains plugin
 
@@ -2124,9 +2160,8 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   which is the habit that would let a real decode regression through.
 - [ ] `P3` **Prelude has no `head` / safe list-destructure.** No `List a -> Maybe a` exists at all,
   so every "look at the first element without committing to a non-empty list" site open-codes the
-  match. Add `head`, and consider `tail`/`uncons` alongside it. The prelude is bundled into the
-  compiler, so any change forces a full reseed — check the wider tree for open-coded instances
-  before settling the name.
+  match. Proposed resolution: no `List` `head` at all — `head`/`tail`/`last` exist only, total,
+  on `NonEmpty`, and a list uses `let [x | rest] = xs else …` (`docs/non-empty-v0.md` §4.2).
 - [ ] `P3` **`&`/`&mut` (shared-XOR-mutable) split.** v0 ships borrow-vs-consume only; the
   read-vs-write refinement is a later increment. `docs/linear-borrowing-v0.md` §2, §13.
 - [ ] `P3` **Linear-bound error names a module function unqualified.** `linvec.new(2, linvec.new(2,
