@@ -1,0 +1,15 @@
+module main
+
+# A linear value with a `ToString` instance can be printed: `print` takes `where linear a`
+# and uses its argument once.
+
+type linear Token = Token Int
+
+instance ToString Token
+  fn to_string(t: Token) -> String = match t with | Token n -> "token " ++ int_to_string(n)
+
+fn main() -> Unit !{IO} =
+  do
+    print(Token(7))
+    let t = Token(8)
+    print(t)

@@ -91,6 +91,18 @@ fn main() -> Unit !{IO} =
           assert_true(state, "cached eval Fails on an unresolved name", is_ir_fail(c_bad))
           assert_true(state, "a failed eval does not poison the cache", ir_text(c1) == ir_text(c_after_bad))
 
+          # An evaluated value of a user type prints through its hand-written `ToString`
+          # instance: the instance is reachable from the eval program only when the print
+          # path calls it, so its string literal is in the IR for `Red` and absent for `1`.
+          let color_src = "type Color = | Red | Green\n\ninstance ToString Color\n  fn to_string(c: Color) -> String = match c with\n    | Red -> \"zzredzz\"\n    | Green -> \"zzgreenzz\"\n"
+          let color_path = "/tmp/sprout_eval_color.sprout"
+          q_red <- compiler.compile_question_ir(color_src, color_path, "Red", compiler.PrintValue, root, Nil, cache)
+          q_int <- compiler.compile_question_ir(color_src, color_path, "1", compiler.PrintValue, root, Nil, cache)
+          assert_true(state, "an evaluated user value prints through its ToString instance",
+            str_find(ir_text(q_red), "zzredzz") != -1)
+          assert_true(state, "an eval that does not use the instance does not emit it",
+            ir_has_define(q_int) && str_find(ir_text(q_int), "zzredzz") == -1)
+
           # An import edited on disk between two compiles through one LoadEnv is re-read:
           # a memo hit needs the same source text, so eval never sees a stale module.
           let pkg_root = "/tmp/sprout_test_memo_pkg"

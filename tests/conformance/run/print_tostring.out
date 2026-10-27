@@ -1,0 +1,22 @@
+true
+true
+1.5
+1.5
+z
+z
+hi
+hi
+[1, 2]
+[1, 2]
+[1, 2]
+[1, 2]
+Just(z)
+Just(z)
+Err(boom)
+Err(boom)
+Trio(q, str, 0.5)
+Trio(q, str, 0.5)
+red
+red
+Just(green)
+Just(green)

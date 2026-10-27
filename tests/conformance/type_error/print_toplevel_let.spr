@@ -1,0 +1,9 @@
+module main
+
+# An unannotated top-level `let p = print` leaves the `ToString` instance open, and a
+# top-level binding holds a single value.
+
+let p = print
+#~^ ERROR
+
+fn main() -> Unit !{IO} = p(1)

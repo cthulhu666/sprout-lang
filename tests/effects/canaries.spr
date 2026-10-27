@@ -47,14 +47,15 @@ fn calls_shout(s: String) -> Unit = shout(s)
 fn each_lambda(xs: List String) -> Unit = list_each(\x -> print(x), xs)
 
 # --- Must be flagged: the effect enters through a NAMED function argument. ---
-# This was the known blind spot until effect unification landed. Passing `print`
+# This was the known blind spot until effect unification landed. Passing `eprint`
 # by name rather than wrapping it in a lambda routes around infer_lambda
-# entirely: the reference is just a value. It is caught now only because
+# entirely: the reference is just a value. `eprint` stays an extern, so no
+# eta-wrapper (`value_ref_eta`) hides the reference. It is caught now only because
 # `unify_applied`'s TFunc arm unifies the arrows' effect fields, binding
 # `list_each`'s `!{e}` to IO. This is THE canary for that channel — if it stops
 # flagging, effect unification has been disconnected, and `each_lambda` above
 # will keep passing on the over-approximation alone and hide it.
-fn each_named(xs: List String) -> Unit = list_each(print, xs)
+fn each_named(xs: List String) -> Unit = list_each(eprint, xs)
 
 # --- Must NOT be flagged: a pure callback through the same HOF. ---
 # `list_each`'s `!{e}` must be FRESHENED at each instantiation. If it is not,

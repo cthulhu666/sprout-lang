@@ -1,0 +1,15 @@
+module main
+
+# `print` consumes a linear value, so using it again afterwards is rejected.
+
+type linear Token = Token Int
+
+instance ToString Token
+  fn to_string(t: Token) -> String = match t with | Token n -> "token " ++ int_to_string(n)
+
+fn main() -> Unit !{IO} =
+  do
+    let t = Token(1)
+    print(t)
+    print(t)
+#~^ ERROR

@@ -1,0 +1,42 @@
+module main
+
+# `print(x)` writes `to_string(x)` at every call site. Each value is printed at its concrete
+# type and again through a `where ToString a` function; the two lines agree. `Red` shows that
+# a hand-written instance is used.
+
+type Trio deriving (ToString) = Trio Char String Double
+
+type Color = | Red | Green
+
+instance ToString Color
+  fn to_string(c: Color) -> String =
+    match c with
+    | Red -> "red"
+    | Green -> "green"
+
+fn show_it(x: a) -> Unit !{IO} where ToString a = print(x)
+
+fn main() -> Unit !{IO} =
+  do
+    print(true)
+    show_it(true)
+    print(1.5)
+    show_it(1.5)
+    print('z')
+    show_it('z')
+    print("hi")
+    show_it("hi")
+    print([1, 2])
+    show_it([1, 2])
+    print(vec_from_list([1, 2]))
+    show_it(vec_from_list([1, 2]))
+    print(Just('z'))
+    show_it(Just('z'))
+    print(Err("boom"))
+    show_it(Err("boom"))
+    print(Trio('q', "str", 0.5))
+    show_it(Trio('q', "str", 0.5))
+    print(Red)
+    show_it(Red)
+    print(Just (Green))
+    show_it(Just (Green))

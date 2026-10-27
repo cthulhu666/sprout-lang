@@ -1,0 +1,12 @@
+module main
+
+# `print` passed by name under a type variable: `list_each(print, xs)` inside a
+# `where ToString a` function prints each element through the caller's dictionary.
+
+fn print_all(xs: List a) -> Unit !{IO} where ToString a = list_each(print, xs)
+
+fn main() -> Unit !{IO} =
+  do
+    print_all([1, 2, 3])
+    print_all(["alpha", "beta"])
+    print_all(['x', 'y'])
