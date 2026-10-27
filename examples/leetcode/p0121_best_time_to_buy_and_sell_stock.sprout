@@ -1,0 +1,20 @@
+module examples.leetcode.p0121_best_time_to_buy_and_sell_stock
+import stdlib.math.int (max, min)
+
+# 121 Best Time to Buy and Sell Stock: one pass carrying (lowest price so far, best profit so far).
+fn max_profit(prices: Vec Int) -> Int =
+  let Just first = vec_get(0, prices) else 0
+      (_, best) = vec_fold(step, (first, 0), prices)
+  in best
+
+fn step(acc: (Int, Int), price: Int) -> (Int, Int) =
+  let (low, best) = acc
+  in (min(low, price), max(best, price - low))
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", max_profit([7, 1, 5, 3, 6, 4]), 5)
+    check("ex2", max_profit([7, 6, 4, 3, 1]), 0)

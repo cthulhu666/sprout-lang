@@ -1,0 +1,15 @@
+module examples.leetcode.p0136_single_number
+import stdlib.bits
+
+# 136 Single Number: XOR of everything cancels the pairs.
+fn single_number(nums: Vec Int) -> Int =
+  vec_fold(bit_xor, 0, nums)
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", single_number([2, 2, 1]), 1)
+    check("ex2", single_number([4, 1, 2, 1, 2]), 4)
+    check("ex3", single_number([1]), 1)

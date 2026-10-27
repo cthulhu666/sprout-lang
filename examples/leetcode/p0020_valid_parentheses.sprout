@@ -1,0 +1,37 @@
+module examples.leetcode.p0020_valid_parentheses
+import stdlib.string (string_chars)
+
+# 20 Valid Parentheses: a List is the stack. Push an opener with Cons, pop it when
+# its closer arrives.
+fn is_valid(s: String) -> Bool =
+  balanced(vec_to_list(string_chars(s)), [])
+
+fn balanced(cs: List Char, stack: List Char) -> Bool =
+  match cs with
+  | [] -> stack == []
+  | [c | rest] ->
+      match opener_of(c) with
+      | Nothing -> balanced(rest, Cons(c, stack))
+      | Just open ->
+          match stack with
+          | [top | below] -> if top == open then balanced(rest, below) else false
+          | [] -> false
+
+fn opener_of(c: Char) -> Maybe Char =
+  match c with
+  | ')' -> Just('(')
+  | ']' -> Just('[')
+  | '}' -> Just('{')
+  | _ -> Nothing
+
+fn check(s: String, want: Bool) -> Unit !{IO} =
+  let got = is_valid(s)
+  in print(`is_valid("${s}"): got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("()", true)
+    check("()[]{}", true)
+    check("(]", false)
+    check("([])", true)
+    check("([)]", false)

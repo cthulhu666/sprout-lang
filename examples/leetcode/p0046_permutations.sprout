@@ -1,0 +1,22 @@
+module examples.leetcode.p0046_permutations
+
+# 46 Permutations: pick each element as the head, then permute the rest. The elements
+# are distinct, so "the rest" is a filter.
+fn permutations(xs: List Int) -> List (List Int) =
+  match xs with
+  | [] -> [[]]
+  | _ -> [Cons(x, p) for x in xs, p in permutations(list_filter(\y -> y != x, xs))]
+
+# Any order is allowed, so sort both sides before comparing.
+fn sorted(xss: List (List Int)) -> List (List Int) =
+  vec_from_list(xss) |> vec_sort |> vec_to_list
+
+fn check(name: String, got: List (List Int), want: List (List Int)) -> Unit !{IO} =
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if sorted(got) == sorted(want) then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", permutations([1, 2, 3]), [[1, 2, 3], [1, 3, 2], [2, 1, 3], [2, 3, 1], [3, 1, 2], [3, 2, 1]])
+    check("ex2", permutations([0, 1]), [[0, 1], [1, 0]])
+    check("ex3", permutations([1]), [[1]])
+    print(`count for 6 elements: ${list_length(permutations([1, 2, 3, 4, 5, 6]))} want 720`)

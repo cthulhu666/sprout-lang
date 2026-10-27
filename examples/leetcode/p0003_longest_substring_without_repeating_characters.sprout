@@ -1,0 +1,30 @@
+module examples.leetcode.p0003_longest_substring_without_repeating_characters
+import stdlib.string (string_chars)
+import stdlib.math.int (max)
+
+# 3 Longest Substring Without Repeating Characters: sliding window. `start` jumps
+# past the previous occurrence of the current char.
+fn length_of_longest_substring(s: String) -> Int =
+  let (_, best, _) = fold_indexed(step, (0, 0, dict_empty()), string_chars(s))
+  in best
+
+# State: (window start, best length, last index per char). Dict keys are Strings,
+# so each Char is rendered with to_string.
+fn step(st: (Int, Int, Dict Int), i: Int, c: Char) -> (Int, Int, Dict Int) =
+  let (start, best, last) = st
+      key = to_string(c)
+      start2 = match dict_get(key, last) with
+        | Just j -> max(start, j + 1)
+        | Nothing -> start
+  in (start2, max(best, i - start2 + 1), dict_set(key, i, last))
+
+fn check(s: String, want: Int) -> Unit !{IO} =
+  let got = length_of_longest_substring(s)
+  in print(`length_of_longest_substring("${s}"): got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("abcabcbb", 3)
+    check("bbbbb", 1)
+    check("pwwkew", 3)
+    check("", 0)

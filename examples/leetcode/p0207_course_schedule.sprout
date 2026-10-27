@@ -1,0 +1,42 @@
+module examples.leetcode.p0207_course_schedule
+import stdlib.linvec as linvec
+import stdlib.linvec (LinVec)
+
+# 207 Course Schedule: Kahn's algorithm. An edge (a, b) means b -> a. Adjacency lists
+# (Vec (List Int)) and in-degrees (LinVec Int) are each built by one bulk `accum`.
+fn can_finish(n: Int, prereqs: List (Int, Int)) -> Bool =
+  let deg = indegrees(n, prereqs)
+      ready = [i for i in 0..(n - 1) if is_zero(deg, i)]
+  in drain(adjacency(n, prereqs), ready, 0, deg) == n
+
+fn adjacency(n: Int, edges: List (Int, Int)) -> Vec (List Int) =
+  linvec.new(n, [])
+  |> linvec.accum(\ (outs, a) -> Cons(a, outs), [(b, a) for (a, b) in edges])
+  |> linvec.freeze
+
+fn indegrees(n: Int, edges: List (Int, Int)) -> LinVec Int =
+  linvec.new(n, 0)
+  |> linvec.accum(\ (d, k) -> d + k, [(a, 1) for (a, _) in edges])
+
+# Ready = in-degree 0. Taking `u` lowers each successor by one; those that reach zero
+# become ready. Edges are unique, so no successor repeats within `outs`.
+fn drain(adj: Vec (List Int), ready: List Int, done: Int, deg: LinVec Int) -> Int =
+  match ready with
+  | [] -> let _ = linvec.drop(deg) in done
+  | [u | rest] ->
+      let outs = vec_get_or(u, [], adj)
+          deg2 = linvec.accum(\ (d, k) -> d - k, list_map(\v -> (v, 1), outs), deg)
+      in drain(adj, list_append(list_filter(is_zero(deg2, _), outs), rest), done + 1, deg2)
+
+fn is_zero(deg: borrowing LinVec Int, v: Int) -> Bool =
+  linvec.get(v, deg) == Just(0)
+
+fn check(name: String, got: Bool, want: Bool) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", can_finish(2, [(1, 0)]), true)
+    check("ex2", can_finish(2, [(1, 0), (0, 1)]), false)
+    check("diamond", can_finish(4, [(1, 0), (2, 0), (3, 1), (3, 2)]), true)
+    check("tail-cycle", can_finish(4, [(1, 0), (2, 1), (3, 2), (1, 3)]), false)

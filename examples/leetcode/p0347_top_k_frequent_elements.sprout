@@ -1,0 +1,30 @@
+module examples.leetcode.p0347_top_k_frequent_elements
+import stdlib.linvec as linvec
+import stdlib.list (take)
+
+# 347 Top K Frequent Elements: count, then bucket sort by count in O(n). Bucket c
+# holds the elements seen c times; read the buckets from the top.
+fn top_k_frequent(nums: List Int, k: Int) -> List Int =
+  let counts = vec_to_list(dict_values(list_fold(bump, dict_empty(), nums)))
+      buckets = linvec.new(list_length(nums) + 1, [])
+        |> linvec.accum(\ (b, x) -> Cons(x, b), [(n, x) for (x, n) in counts])
+        |> linvec.freeze
+  in take(k, list_flat_map(\b -> b, vec_to_list(vec_reverse(buckets))))
+
+# Dict keys are Strings, so the table maps int_to_string(x) -> (x, count). Keeping
+# x in the value avoids parsing the key back.
+fn bump(d: Dict (Int, Int), x: Int) -> Dict (Int, Int) =
+  let key = int_to_string(x)
+      (_, n) = maybe_with_default((x, 0), dict_get(key, d))
+  in dict_set(key, (x, n + 1), d)
+
+# Order within a count is free, so sort before comparing.
+fn check(nums: List Int, k: Int, want: List Int) -> Unit !{IO} =
+  let got = vec_from_list(top_k_frequent(nums, k)) |> vec_sort |> vec_to_list
+  in print(`top_k_frequent(${to_string(nums)}, ${k}): got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check([1, 1, 1, 2, 2, 3], 2, [1, 2])
+    check([1], 1, [1])
+    check([1, 2, 1, 2, 1, 2, 3, 1, 3, 2], 2, [1, 2])

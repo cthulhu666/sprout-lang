@@ -1,0 +1,38 @@
+module examples.leetcode.p0238_product_of_array_except_self
+import stdlib.list (take)
+
+# 238 Product of Array Except Self: answer[i] = (product left of i) * (product right of i),
+# both read off a running-product scan.
+fn product_except_self(nums: List Int) -> List Int =
+  zip_with(mul, before, after)
+where
+  n = list_length(nums)
+  before = take(n, scanl(mul, 1, nums))
+  after = list_reverse(take(n, scanl(mul, 1, list_reverse(nums))))
+
+fn mul(a: Int, b: Int) -> Int = a * b
+
+# scanl(f, init, [x0, x1, ..]) = [init, f(init, x0), f(f(init, x0), x1), ..]
+fn scanl(f: b -> a -> b, init: b, xs: List a) -> List b =
+  scanl_go(f, init, xs, [init])
+
+fn scanl_go(f: b -> a -> b, acc: b, xs: List a, out: List b) -> List b =
+  match xs with
+  | [] -> list_reverse(out)
+  | [x | rest] -> let next = f(acc, x) in scanl_go(f, next, rest, Cons(next, out))
+
+fn zip_with(f: a -> b -> c, xs: List a, ys: List b) -> List c =
+  zip_with_go(f, xs, ys, [])
+
+fn zip_with_go(f: a -> b -> c, xs: List a, ys: List b, out: List c) -> List c =
+  match (xs, ys) with
+  | ([x | xrest], [y | yrest]) -> zip_with_go(f, xrest, yrest, Cons(f(x, y), out))
+  | _ -> list_reverse(out)
+
+fn check(name: String, got: List Int, want: List Int) -> Unit !{IO} =
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", product_except_self([1, 2, 3, 4]), [24, 12, 8, 6])
+    check("ex2", product_except_self([-1, 1, 0, -3, 3]), [0, 0, 9, 0, 0])

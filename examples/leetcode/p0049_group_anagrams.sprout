@@ -1,0 +1,33 @@
+module examples.leetcode.p0049_group_anagrams
+import stdlib.unicode.utf8 (codepoints, from_codepoints)
+
+# 49 Group Anagrams: group words by their sorted codepoints.
+fn group_anagrams(strs: List String) -> List (List String) =
+  let groups = list_fold(add_word, dict_empty(), strs)
+  in [list_reverse(ws) for (_, ws) in vec_to_list(dict_entries(groups))]
+
+# Vec Char cannot be sorted (no `Ord Char`), so the key sorts codepoints.
+fn anagram_key(s: String) -> String =
+  from_codepoints(sorted(codepoints(s)))
+
+fn add_word(groups: Dict (List String), w: String) -> Dict (List String) =
+  let k = anagram_key(w)
+  in dict_set(k, Cons(w, maybe_with_default([], dict_get(k, groups))), groups)
+
+fn sorted(xs: List a) -> List a where Ord a =
+  vec_from_list(xs) |> vec_sort |> vec_to_list
+
+# Group and member order are free, so sort both sides before comparing.
+fn canonical(gs: List (List String)) -> List (List String) =
+  sorted(list_map(sorted, gs))
+
+fn check(strs: List String, want: List (List String)) -> Unit !{IO} =
+  let got = canonical(group_anagrams(strs))
+      expected = canonical(want)
+  in print(`group_anagrams(${to_string(strs)}): got ${to_string(got)} want ${to_string(expected)} ${if got == expected then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check(["eat", "tea", "tan", "ate", "nat", "bat"], [["bat"], ["nat", "tan"], ["ate", "eat", "tea"]])
+    check([""], [[""]])
+    check(["a"], [["a"]])

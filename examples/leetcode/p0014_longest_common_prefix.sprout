@@ -1,0 +1,22 @@
+module examples.leetcode.p0014_longest_common_prefix
+import stdlib.unicode.utf8 (codepoints, from_codepoints)
+
+# 14 Longest Common Prefix: fold the pairwise common prefix of codepoint lists.
+fn longest_common_prefix(strs: List String) -> String =
+  match list_map(codepoints, strs) with
+  | [] -> ""
+  | [first | rest] -> from_codepoints(list_fold(common_prefix, first, rest))
+
+fn common_prefix(a: List Int, b: List Int) -> List Int =
+  match (a, b) with
+  | ([x | xs], [y | ys]) -> if x == y then Cons(x, common_prefix(xs, ys)) else []
+  | _ -> []
+
+fn check(strs: List String, want: String) -> Unit !{IO} =
+  let got = longest_common_prefix(strs)
+  in print(`longest_common_prefix(${to_string(strs)}): got "${got}" want "${want}" ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check(["flower", "flow", "flight"], "fl")
+    check(["dog", "racecar", "car"], "")

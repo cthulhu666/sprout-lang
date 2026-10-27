@@ -1,0 +1,21 @@
+module examples.leetcode.p3110_score_of_a_string
+import stdlib.unicode.utf8 (codepoints)
+import stdlib.math.int (abs)
+
+# 3110 Score of a String: sum of |a - b| over adjacent codepoints, walking the list pairwise.
+fn score_of_a_string(s: String) -> Int =
+  pair_sum(codepoints(s), 0)
+
+fn pair_sum(cs: List Int, acc: Int) -> Int =
+  match cs with
+  | [a, b | rest] -> pair_sum(Cons(b, rest), acc + abs(a - b))
+  | _ -> acc
+
+fn check(s: String, want: Int) -> Unit !{IO} =
+  let got = score_of_a_string(s)
+  in print(`score_of_a_string("${s}"): got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("hello", 13)
+    check("zaz", 50)

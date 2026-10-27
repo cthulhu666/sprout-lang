@@ -1,0 +1,32 @@
+module examples.leetcode.p0067_add_binary
+import stdlib.string as string
+
+# 67 Add Binary: walk both digit lists from the least significant end with a carry.
+# Consing each result digit leaves the output most significant first.
+fn add_binary(a: String, b: String) -> String =
+  string.join("", add_digits(reversed_digits(a), reversed_digits(b), 0, []))
+
+fn add_digits(xs: List Int, ys: List Int, carry: Int, acc: List String) -> List String =
+  match (xs, ys) with
+  | ([], []) -> if carry == 0 then acc else Cons("1", acc)
+  | ([x | xr], []) -> step(x, 0, xr, [], carry, acc)
+  | ([], [y | yr]) -> step(0, y, [], yr, carry, acc)
+  | ([x | xr], [y | yr]) -> step(x, y, xr, yr, carry, acc)
+
+fn step(x: Int, y: Int, xr: List Int, yr: List Int, carry: Int, acc: List String) -> List String =
+  let s = x + y + carry
+  in add_digits(xr, yr, s / 2, Cons(int_to_string(s - 2 * (s / 2)), acc))
+
+fn reversed_digits(s: String) -> List Int =
+  string.string_digits(s) |> vec_to_list |> list_reverse
+
+fn check(a: String, b: String, want: String) -> Unit !{IO} =
+  let got = add_binary(a, b)
+  in print(`add_binary("${a}", "${b}"): got "${got}" want "${want}" ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("11", "1", "100")
+    check("1010", "1011", "10101")
+    check("0", "0", "0")
+    check("1111", "1", "10000")

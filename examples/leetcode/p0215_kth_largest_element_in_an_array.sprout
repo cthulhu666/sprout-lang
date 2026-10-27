@@ -1,0 +1,35 @@
+module examples.leetcode.p0215_kth_largest_element_in_an_array
+import stdlib.linheap as heap
+
+# 215 Kth Largest Element in an Array, O(n log k): a min-heap holds the k largest so
+# far, so its root is the kth largest.
+fn kth_largest(nums: List Int, k: Int) -> Int =
+  let h = keep_k(nums, k, heap.new())
+      top = heap.peek(h)
+      _ = heap.drop(h)
+  in maybe_with_default(0, top)
+
+fn keep_k(xs: List Int, k: Int, h: heap.LinHeap Int) -> heap.LinHeap Int =
+  match xs with
+  | [] -> h
+  | [x | rest] ->
+      let h1 = heap.push(x, h)
+      in if heap.size(h1) > k then keep_k(rest, k, evict(h1)) else keep_k(rest, k, h1)
+
+fn evict(h: heap.LinHeap Int) -> heap.LinHeap Int =
+  let (_, rest) = heap.pop(h)
+  in rest
+
+# The sorting version, O(n log n).
+fn kth_largest_sorted(nums: Vec Int, k: Int) -> Int =
+  vec_get_or(vec_length(nums) - k, 0, vec_sort(nums))
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1 heap", kth_largest([3, 2, 1, 5, 6, 4], 2), 5)
+    check("ex2 heap", kth_largest([3, 2, 3, 1, 2, 4, 5, 5, 6], 4), 4)
+    check("ex1 sort", kth_largest_sorted([3, 2, 1, 5, 6, 4], 2), 5)
+    check("ex2 sort", kth_largest_sorted([3, 2, 3, 1, 2, 4, 5, 5, 6], 4), 4)

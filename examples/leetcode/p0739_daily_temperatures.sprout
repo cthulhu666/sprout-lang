@@ -1,0 +1,32 @@
+module examples.leetcode.p0739_daily_temperatures
+
+# 739 Daily Temperatures: monotonic stack of indices, scanning right to left.
+fn daily_temperatures(temps: Vec Int) -> List Int =
+  let (_, answer) = range_fold(step(temps, _, _), ([], []), range_down(vec_length(temps) - 1, 0))
+  in answer
+
+# State: (stack of warmer-day candidates, answers so far). Consing each answer while
+# walking right to left leaves them in day order.
+fn step(temps: Vec Int, state: (List Int, List Int), i: Int) -> (List Int, List Int) =
+  let (stack, acc) = state
+      kept = pop_not_warmer(temps, vec_get_or(i, 0, temps), stack)
+  in (Cons(i, kept), Cons(wait_of(i, kept), acc))
+
+fn pop_not_warmer(temps: Vec Int, t: Int, stack: List Int) -> List Int =
+  match stack with
+  | [] -> []
+  | [j | rest] -> if vec_get_or(j, 0, temps) <= t then pop_not_warmer(temps, t, rest) else stack
+
+fn wait_of(i: Int, stack: List Int) -> Int =
+  match stack with
+  | [] -> 0
+  | [j | _] -> j - i
+
+fn check(name: String, got: List Int, want: List Int) -> Unit !{IO} =
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", daily_temperatures([73, 74, 75, 71, 69, 72, 76, 73]), [1, 1, 4, 2, 1, 1, 0, 0])
+    check("ex2", daily_temperatures([30, 40, 50, 60]), [1, 1, 1, 0])
+    check("ex3", daily_temperatures([30, 60, 90]), [1, 1, 0])

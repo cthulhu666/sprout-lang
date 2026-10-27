@@ -1,0 +1,30 @@
+module examples.leetcode.p0300_longest_increasing_subsequence
+import stdlib.linvec as linvec
+
+# 300 Longest Increasing Subsequence, O(n log n): tails[i] is the smallest tail of an
+# increasing subsequence of length i + 1. Each number replaces the first tail >= it.
+fn length_of_lis(nums: List Int) -> Int =
+  list_fold(place, linvec.empty(), nums) |> linvec.freeze |> vec_length
+
+fn place(tails: linvec.LinVec Int, x: Int) -> linvec.LinVec Int =
+  let n = linvec.length(tails)
+      i = lower_bound(0, n, x, tails)
+  in if i == n then linvec.push(x, tails) else linvec.set(i, x, tails)
+
+# First index in [lo, hi) whose element is >= x, or hi if none. `tails` is sorted.
+fn lower_bound(lo: Int, hi: Int, x: Int, tails: borrowing linvec.LinVec Int) -> Int =
+  if lo >= hi then lo
+  else
+    let mid = lo + (hi - lo) / 2
+    in match linvec.get(mid, tails) with
+       | Just m -> if m < x then lower_bound(mid + 1, hi, x, tails) else lower_bound(lo, mid, x, tails)
+       | Nothing -> lo
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", length_of_lis([10, 9, 2, 5, 3, 7, 101, 18]), 4)
+    check("ex2", length_of_lis([0, 1, 0, 3, 2, 3]), 4)
+    check("ex3", length_of_lis([7, 7, 7, 7, 7, 7, 7]), 1)

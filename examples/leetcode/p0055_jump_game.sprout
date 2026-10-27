@@ -1,0 +1,19 @@
+module examples.leetcode.p0055_jump_game
+import stdlib.math.int (max)
+
+# 55 Jump Game: greedy. `reach` is the farthest index reachable so far. Once an index lies
+# beyond `reach` it stays beyond, so the fold just carries on.
+fn can_jump(nums: Vec Int) -> Bool =
+  fold_indexed(step, 0, nums) >= vec_length(nums) - 1
+
+fn step(reach: Int, i: Int, jump: Int) -> Int =
+  if i > reach then reach else max(reach, i + jump)
+
+fn check(name: String, got: Bool, want: Bool) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", can_jump([2, 3, 1, 1, 4]), true)
+    check("ex2", can_jump([3, 2, 1, 0, 4]), false)
+    check("one", can_jump([0]), true)

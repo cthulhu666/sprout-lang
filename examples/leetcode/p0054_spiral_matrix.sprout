@@ -1,0 +1,56 @@
+module examples.leetcode.p0054_spiral_matrix
+
+# 54 Spiral Matrix, two ways. A: peel the top row, then rotate the rest counter-clockwise
+# (O(m*n*min(m,n)): every peel re-transposes what is left). B: walk the matrix ring by ring (O(m*n)).
+fn spiral_a(m: List (List Int)) -> List Int =
+  match m with
+  | [] -> []
+  | [top | rest] -> list_append(top, spiral_a(list_reverse(transpose(rest))))
+
+fn spiral_b(m: Vec (Vec Int)) -> List Int =
+  ring(m, 0, vec_length(m) - 1, 0, vec_length(vec_get_or(0, vec_empty(), m)) - 1)
+
+fn ring(m: Vec (Vec Int), top: Int, bottom: Int, left: Int, right: Int) -> List Int =
+  if top > bottom || left > right then []
+  else
+    mconcat([
+      [at(m, top, c) for c in left..right],
+      [at(m, r, right) for r in (top + 1)..bottom],
+      if top < bottom then [at(m, bottom, c) for c in range_down(right - 1, left)] else [],
+      if left < right then [at(m, r, left) for r in range_down(bottom - 1, top + 1)] else [],
+      ring(m, top + 1, bottom - 1, left + 1, right - 1)
+    ])
+
+fn at(m: Vec (Vec Int), r: Int, c: Int) -> Int =
+  vec_get_or(c, 0, vec_get_or(r, vec_empty(), m))
+
+# Rows become columns. Ragged rows are fine: a row that has run out is skipped.
+fn transpose(rows: List (List a)) -> List (List a) =
+  match list_filter_map(head_opt, rows) with
+  | [] -> []
+  | heads -> Cons(heads, transpose(list_map(tail_or_nil, rows)))
+
+fn head_opt(xs: List a) -> Maybe a =
+  match xs with
+  | [] -> Nothing
+  | [x | _] -> Just(x)
+
+fn tail_or_nil(xs: List a) -> List a =
+  match xs with
+  | [] -> []
+  | [_ | rest] -> rest
+
+fn to_vv(m: List (List Int)) -> Vec (Vec Int) =
+  vec_from_list(list_map(vec_from_list, m))
+
+fn check(name: String, m: List (List Int), want: List Int) -> Unit !{IO} =
+  let a = spiral_a(m)
+      b = spiral_b(to_vv(m))
+  in print(`${name}: A=${to_string(a)} B=${to_string(b)} want ${to_string(want)} ${if a == want && b == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", [[1, 2, 3], [4, 5, 6], [7, 8, 9]], [1, 2, 3, 6, 9, 8, 7, 4, 5])
+    check("ex2", [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]], [1, 2, 3, 4, 8, 12, 11, 10, 9, 5, 6, 7])
+    check("1col", [[1], [2], [3]], [1, 2, 3])
+    check("1row", [[1, 2, 3]], [1, 2, 3])

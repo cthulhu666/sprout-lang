@@ -1,0 +1,20 @@
+module examples.leetcode.p0070_climbing_stairs
+
+# 70 Climbing Stairs: ways(n) = ways(n - 1) + ways(n - 2); the fold carries the last two.
+fn climb_stairs(n: Int) -> Int =
+  let (ways, _) = range_fold(step, (1, 1), 1..n)
+  in ways
+
+fn step(acc: (Int, Int), _: Int) -> (Int, Int) =
+  let (a, b) = acc
+  in (b, a + b)
+
+fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
+  print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)
+
+fn main() -> Unit !{IO} =
+  do
+    check("ex1", climb_stairs(2), 2)
+    check("ex2", climb_stairs(3), 3)
+    check("n=45", climb_stairs(45), 1836311903)
+    check("n=1", climb_stairs(1), 1)
