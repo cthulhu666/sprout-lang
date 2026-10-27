@@ -1,7 +1,8 @@
 # `print` through `ToString` — v0
 
-**Status — proposal, not approved.** Changes the normative spec: `print`'s type, its output for
-`Bool`, `List`, `Vec` and any type with a hand-written instance, and the `no_prelude` floor.
+**Status — approved; in progress (§10 step 2 landed).** Changes the normative spec: `print`'s
+type, its output for `Bool`, `List`, `Vec` and any type with a hand-written instance, and the
+`no_prelude` floor.
 
 ## 1. Problem
 

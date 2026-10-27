@@ -9,4 +9,5 @@ char_to_string=z
 char_to_str=A
 char_from_codepoint=B
 str_starts_with=true
+print_str=ok
 floor=complete

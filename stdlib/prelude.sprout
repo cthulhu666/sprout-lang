@@ -1825,6 +1825,8 @@ instance ToString (a, b, c, d, e) where linear a, linear b, linear c, linear d, 
 # I/O
 extern fn print(val: a) -> Unit !{IO}
 extern fn eprint(val: String) -> Unit !{IO}
+# Monomorphic String sink; lowers through IRPrintStr like eprint.
+extern fn print_str(s: String) -> Unit !{IO}
 # Filesystem primitives are NOT declared here. `read_file` / `write_file` live in stdlib.fs, which
 # must be imported explicitly; callers use `fs.read_text` / `fs.write_text`. Reading and writing
 # files is not something a program should be able to reach by accident — the same reasoning already

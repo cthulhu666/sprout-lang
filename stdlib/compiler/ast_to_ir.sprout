@@ -3611,14 +3611,16 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
           phi_name, idx))
 
 # The builtins whose lowering is chosen at the CALL SITE rather than by a symbol.
-# `print`/`eprint` pick @print_str or @print_value from the argument's type;
+# `print` picks @print_str or @print_value from the argument's type; `eprint` and
+# `print_str` take a String and always lower to IRPrintStr, whose runtime symbol takes
+# `ptr` where a plain call passes i64;
 # `to_double` and the Double bit accessors are single LLVM instructions; each
-# bits operation is one integer instruction.  None has a symbol in the runtime,
-# so a plain `call @<name>` would not resolve — which is why a reference in
+# bits operation is one integer instruction.  So a plain `call @<name>` would not
+# resolve or would not verify — which is why a reference in
 # VALUE position routes through here too (synthesize_intrinsic_eta_closure), except
 # `unsafe_pure`, which infer rejects as a value.
 export fn is_call_site_intrinsic(fname: String) -> Bool =
-  fname == "print" || fname == "eprint" || fname == "to_double"
+  fname == "print" || fname == "eprint" || fname == "print_str" || fname == "to_double"
     || fname == "double_to_bits" || fname == "double_from_bits"
     || fname == source.unsafe_pure_name
     || is_bits_intrinsic(fname)
@@ -3630,7 +3632,7 @@ fn translate_call_site_intrinsic(fname: String, args: List typed_ast.TypedExpr,
                                  cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                                  captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  if fname == "print" || fname == "eprint"
+  if fname == "print" || fname == "eprint" || fname == "print_str"
   then translate_print_call(fname, args, params, env, idx,
                             cur_label, cur_ops, captures)
   else if fname == "to_double"
@@ -3678,11 +3680,11 @@ fn translate_unsafe_pure_call(args: List typed_ast.TypedExpr,
 # (the TCall node's own inferred type), mapped via llvm_ret_type, which
 # returns "i64" for every type post /code-review fix #2 (Bool flows as
 # i64 too — 0 or 1 encoded in an i64 register).
-# print / eprint dispatch by argument type, mirroring direct codegen's
-# emit_print_call / emit_eprint_call (codegen.sprout ~2474):
+# print / eprint / print_str; `print` dispatches by argument type:
 #   eprint(_)        -> IRPrintStr "eprint_str"  (always String)
+#   print_str(_)     -> IRPrintStr "print_str"   (always String)
 #   print(String)    -> IRPrintStr "print_str"   (i64 handle coerced to ptr in lowering)
-#   print(Char)      -> IRPrintStr "print_str"   (Char is a String pointer at runtime)
+#   print(Char)      -> IRCall @char_to_string, then IRPrintStr "print_str"
 #   print(Int/Bool)  -> IRCall @print_value(i64)  (value already i64-uniform)
 # There is no @print symbol in the runtime; a generic call would fail to link.
 fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
@@ -3703,6 +3705,10 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
         if fname == "eprint"
         then Ok((ablocks, acur_lbl,
                   list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1), "eprint_str", a_name), acur_ops),
+                  fresh_name(idx1), idx1 + 1))
+        else if fname == "print_str"
+        then Ok((ablocks, acur_lbl,
+                  list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1), "print_str", a_name), acur_ops),
                   fresh_name(idx1), idx1 + 1))
         else if is_char_type(typed_ast.typed_expr_type(arg))
         then  # A Char is an i64 codepoint; encode to a String before printing.
