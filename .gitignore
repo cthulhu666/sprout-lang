@@ -19,6 +19,7 @@ bench/*/gc_roots_bench
 bench/*/vec_box_bench
 bench/*/wrapper_probe
 bench/native_runtime/bin/
+bench/list_sort/bin/
 
 # Host-side tool cache for the container-backed Linux gate (`just linux-smoke`):
 # the pinned static-musl `just` binary it runs inside the container. Fetched and
