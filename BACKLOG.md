@@ -2010,6 +2010,12 @@ deferral happened, not for current behaviour. Still open:
   would need hoisting. Note `row_dot_go` is a reduction and cannot SIMD-reassociate without
   perturbing the golden training output — only the independent-write kernels can vectorize
   bit-identically. `docs/phase-d-numeric-fastpath-design-2026-07-11.md` §B3.
+- [ ] `P3` **Dense `Vector Double` loops get neither SIMD nor Polly, even after BCE.** In a
+  `$fast` clone the vectorizer stops on the overflow-check early exit, then on "cannot identify
+  array bounds"; Polly rejects every region on `IntToPtr`, because a vector handle is an `i64`
+  cast at each use. Next: hand-apply a header-load hoist with TBAA, a hoisted cast, and `ptr`-
+  and `double`-typed IR to `mm_j$fast`, and time each against C. `docs/llvm-value-types-v0.md`,
+  `bench/llvm_remarks/remarks.sh`.
 
 ### Linear types (Model C Milestone 4) follow-ups
 

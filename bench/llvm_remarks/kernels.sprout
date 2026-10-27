@@ -1,0 +1,65 @@
+module main
+# vector_get_direct and vector_mutset are externs owned by stdlib.mutable; the import bundles it.
+import stdlib.mutable (vec_make_filled)
+
+# Private to stdlib.mutable, so declared here: these kernels read and write a raw Vector.
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
+
+# Dense `Vector Double` loops, for reading what LLVM's loop vectorizer and Polly say about
+# them. docs/llvm-value-types-v0.md.
+
+# y[i] += a * x[i]
+fn axpy_go(y: Vector Double, x: Vector Double, a: Double, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      yi <- vector_get_direct(y, i)
+      xi <- vector_get_direct(x, i)
+      _ <- vector_mutset(y, i, yi + a * xi)
+      axpy_go(y, x, a, i + 1, n)
+
+# c[ci + j] += aik * b[bk + j]
+fn mm_j(c: Vector Double, b: Vector Double, aik: Double, ci: Int, bk: Int, j: Int, n: Int) -> Unit !{IO} =
+  if j >= n then ()
+  else
+    do
+      cv <- vector_get_direct(c, ci + j)
+      bv <- vector_get_direct(b, bk + j)
+      _ <- vector_mutset(c, ci + j, cv + aik * bv)
+      mm_j(c, b, aik, ci, bk, j + 1, n)
+
+fn mm_k(c: Vector Double, a: Vector Double, b: Vector Double, i: Int, k: Int, n: Int) -> Unit !{IO} =
+  if k >= n then ()
+  else
+    do
+      aik <- vector_get_direct(a, i * n + k)
+      _ <- mm_j(c, b, aik, i * n, k * n, 0, n)
+      mm_k(c, a, b, i, k + 1, n)
+
+fn mm_i(c: Vector Double, a: Vector Double, b: Vector Double, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mm_k(c, a, b, i, 0, n)
+      mm_i(c, a, b, i + 1, n)
+
+fn sum_go(v: Vector Double, i: Int, n: Int, acc: Double) -> Double !{IO} =
+  if i >= n then acc
+  else
+    do
+      x <- vector_get_direct(v, i)
+      sum_go(v, i + 1, n, acc + x)
+
+fn main() -> Unit !{IO} =
+  do
+    let n = 256
+    let a = vec_make_filled(n * n, 1.5)
+    let b = vec_make_filled(n * n, 0.5)
+    let c = vec_make_filled(n * n, 0.0)
+    _ <- mm_i(c, a, b, 0, n)
+    let y = vec_make_filled(n, 1.0)
+    _ <- axpy_go(y, b, 2.0, 0, n)
+    s <- sum_go(c, 0, n * n, 0.0)
+    t <- sum_go(y, 0, n, 0.0)
+    print(double_to_string(s + t))
