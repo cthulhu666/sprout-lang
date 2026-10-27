@@ -2,7 +2,7 @@
 
 31 LeetCode problems were solved in Sprout with the stdlib as it stands at `2e96dc69`, and every
 point where the stdlib or the language forced a workaround was recorded. This file is the record of
-what they found. Design follow-ups: `docs/non-empty-v0.md`; the list toolkit is not yet written.
+what they found. Design follow-ups: `docs/non-empty-v0.md`, `docs/list-toolkit-v0.md`.
 
 ## 1. Method
 

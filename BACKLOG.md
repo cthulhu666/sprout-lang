@@ -1018,12 +1018,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   sorts every light in range, then takes `keep`, per chunk and per mesh every frame. A
   `take_smallest_by(k, key, xs)`-style helper keeps k items in O(n log k). Grep the spec for the
   name first. `docs/laziness-v0.md` §5.3.
-- [ ] `P2` **List toolkit: `zip_with`, `zip`, `map_adjacent`, `enumerate`, `scanl`, `list_sort`.**
-  With a two-argument `max`/`min` (naming open) and `abs_diff`, the most frequent gaps in the survey
-  (`docs/leetcode-survey-2026-10-27.md` §2). Design pending: generic over `Foldable` only where no
-  container loses a fast path, one loop per container otherwise, built on `zip_with` (measured
-  free). `scanl`/`group_by` return `NonEmpty` (`docs/non-empty-v0.md` §9). Overlaps the
-  collection-combinators §7(c) and min-max §2(b) entries above.
+- [ ] `P2` **List toolkit: `zip_with`, `zip`, `map_adjacent`, `scanl`, `sort`.**
+  With a two-argument `max`/`min`, the most frequent gaps in the survey
+  (`docs/leetcode-survey-2026-10-27.md` §2). Design: `docs/list-toolkit-v0.md` (proposal) —
+  `Zip` and `Sort` classes; `scanl` waits on `NonEmpty`; `enumerate` deferred to laziness.
+  Overlaps the collection-combinators §7(c) and min-max §2(b) entries above.
 - [ ] `P2` **`Dict`/`Set` take only `String` keys.** They sit on runtime externs
   (`map_get(m, key: String)`), so Int keys cost an `int_to_string` per access and `dict_entries`
   orders `"10"` before `"9"`; 6 of 31 survey problems paid for it. A pure-Sprout

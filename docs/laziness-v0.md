@@ -179,3 +179,6 @@ Found on the way, not about laziness:
   §6.4 shape 2 first.
 - A cache that is truly compute-once with no key: revisit §6.3, starting from OCaml's
   concurrency behaviour.
+
+`enumerate` waits on this decision: a strict one would fix its result to `List` before a lazy type
+could claim it (`docs/list-toolkit-v0.md` §4.3).
