@@ -367,6 +367,14 @@ extern-CPR path above — these workers are **Sprout-defined and Sprout-called**
   exhaustive `compute_free_vars`): `x` may escape nowhere but the one
   consuming scrutinee. A `sra_rest_plain` guard bars a Maybe/Result do-bind in the continuation
   (those reset the SRA map), confining the change to `translate_do`.
+- **Tuple-literal split.** `match (e1, …, en) with`, where every arm is a tuple pattern or `_`,
+  builds no tuple (`split_tuple_items`): the elements are evaluated left to right and the arms
+  bind them directly (`FieldSource.SplitFields`). `let`/`where`/do-`let` over a literal lower to
+  this match too. The scrutinee name is a placeholder no op defines; `TxEnv.split` keys the
+  elements by it, so a nested tuple match in an arm reads its own scrutinee. An arm binding the
+  whole tuple (`| t ->`) keeps the boxed path, and so does an inner literal (`((a, b), c)`).
+  A binder bound straight to an owned parameter is that parameter's SSA, so a nested match
+  may reuse its cell.
 
 ## Argument CPR (`_argw` workers)
 

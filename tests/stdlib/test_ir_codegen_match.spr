@@ -526,4 +526,50 @@ fn main() -> Unit !{IO} =
           assert_true(state, "T-match-11: Bool-capturing lambda IR passes clang verifier",
                       clang_ok_11)
 
+    # T-match-12..14: a match on a tuple literal binds the elements directly and
+    # builds no tuple, for `match` and for the `let` that lowers to one.
+    let src_split = "fn pick(x: Int, y: Int) -> Int = match (x, y) with | (0, b) -> b | (a, _) -> a"
+    match translate_source(src_split) with
+    | Err msg_12 ->
+        do
+          terminal.write("T-match-12 translate_source failed: " ++ msg_12 ++ "\n")
+          assert_true(state, "T-match-12: tuple-literal match compiles", false)
+    | Ok ir_split ->
+        do
+          assert_true(state, "T-match-12: tuple-literal match compiles",
+                      contains(ir_split, "define i64 @pick"))
+          assert_false(state, "T-match-12: tuple-literal match builds no tuple",
+                       contains(ir_split, "call i64 @sprout_alloc_tuple_blob"))
+          clang_ok_12 <- clang_verifies_ir(ir_split)
+          assert_true(state, "T-match-12: lowered IR passes clang verifier", clang_ok_12)
+
+    let src_let_split = "fn sum2(x: Int, y: Int) -> Int =\n  let (a, b) = (x, y)\n  in a + b"
+    match translate_source(src_let_split) with
+    | Err msg_13 ->
+        do
+          terminal.write("T-match-13 translate_source failed: " ++ msg_13 ++ "\n")
+          assert_true(state, "T-match-13: tuple-literal let compiles", false)
+    | Ok ir_let_split ->
+        do
+          assert_true(state, "T-match-13: tuple-literal let compiles",
+                      contains(ir_let_split, "define i64 @sum2"))
+          assert_false(state, "T-match-13: tuple-literal let builds no tuple",
+                       contains(ir_let_split, "call i64 @sprout_alloc_tuple_blob"))
+          clang_ok_13 <- clang_verifies_ir(ir_let_split)
+          assert_true(state, "T-match-13: lowered IR passes clang verifier", clang_ok_13)
+
+    # T-match-14: control. An arm binding the whole tuple still needs it built.
+    let src_whole = "fn keep(x: Int, y: Int) -> (Int, Int) = match (x, y) with | (0, b) -> (b, b) | t -> t"
+    match translate_source(src_whole) with
+    | Err msg_14 ->
+        do
+          terminal.write("T-match-14 translate_source failed: " ++ msg_14 ++ "\n")
+          assert_true(state, "T-match-14: whole-tuple arm compiles", false)
+    | Ok ir_whole ->
+        do
+          assert_true(state, "T-match-14: whole-tuple arm builds the tuple",
+                      contains(ir_whole, "call i64 @sprout_alloc_tuple_blob"))
+          clang_ok_14 <- clang_verifies_ir(ir_whole)
+          assert_true(state, "T-match-14: lowered IR passes clang verifier", clang_ok_14)
+
     summary(state)

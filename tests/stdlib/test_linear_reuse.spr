@@ -64,6 +64,15 @@ fn refill(b: Bag) -> Bag =
   | Open n xs -> Shut(n + 1, pile(5, xs))
   | Shut n xs -> Open(n + 1, pile(5, xs))
 
+# A tuple-literal match binds `c` to the owned parameter itself, so the nested match
+# reuses that cell; `pile` allocates before the rebuild.
+fn refill_by(b: Bag, k: Int) -> Bag =
+  match (b, k) with
+  | (c, n) ->
+      match c with
+      | Open m xs -> Shut(m + n, pile(5, xs))
+      | Shut m xs -> Open(m + n, pile(5, xs))
+
 fn refill_n(i: Int, b: Bag) -> Bag =
   if i == 0 then b else refill_n(i - 1, refill(b))
 
@@ -266,6 +275,13 @@ fn main() -> Unit !{IO} =
           assert_eq(state, "refill: ends on Open", is_open, true)
           assert_eq(state, "refill: counted", n, 4)
           assert_eq(state, "refill: lists built across the reuse", len, 20)
+
+    match read_bag(refill_by(refill_by(Open(0, Nil), 2), 3)) with
+    | (is_open, n, len) ->
+        do
+          assert_eq(state, "refill through a tuple match: ends on Open", is_open, true)
+          assert_eq(state, "refill through a tuple match: counted", n, 5)
+          assert_eq(state, "refill through a tuple match: lists built", len, 10)
 
     assert_eq(state, "tail-called cell: lists built across the reuse", tick(4, 0), 20)
 
