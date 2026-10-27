@@ -2,7 +2,8 @@ module main
 
 # `print_str(s: String) -> Unit !{IO}` writes `s` and a newline to stdout. It is monomorphic,
 # so it lowers the same way at a call site and as a first-class value; `list_each(print_str, …)`
-# is the value-position case (docs/print-dispatch-v0.md §4.2).
+# is the value-position case (docs/print-dispatch-v0.md §4.2). `eprint` shares its lowering
+# and differs only in the symbol, chosen per call: its line must stay out of this stdout golden.
 
 fn print_all(xs: List String) -> Unit !{IO} = list_each(print_str, xs)
 
@@ -12,4 +13,6 @@ fn main() -> Unit !{IO} =
     print_str("")
     print_all(["a", "b"])
     print_str(str_concat("joined=", "ok"))
+    eprint("to stderr")
+    print_str("after eprint")
     print(`done ${int_to_string(1)}`)

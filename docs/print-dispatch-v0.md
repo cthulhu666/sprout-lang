@@ -312,11 +312,11 @@ declaration, and needs a rule for which instance wins when the user also writes 
    tree passes a constrained function as a value under a type variable, so §2's "can be passed
    as a value" rests on it. It must fail today with "'print' cannot be used as a first-class
    value".
-2. **`print_str` only.** Declare `extern fn print_str` in the prelude and add it to
-   `is_call_site_intrinsic` and `translate_print_call`, lowering to `IRPrintStr`. Reseed. The
-   committed seed treats `print_str` as an ordinary extern and would emit
+2. ~~**`print_str` only.** Declare `extern fn print_str` in the prelude and add it to
+   `is_call_site_intrinsic` and `translate_print_call`, lowering to `IRPrintStr`. Reseed.~~
+   Landed. The seed before it treated `print_str` as an ordinary extern and would have emitted
    `call @print_str(i64)` against `declare @print_str(ptr)`, which `opt --passes=verify` rejects.
-   So the seed must know the new lowering before the prelude calls it.
+   So the seed had to know the new lowering before the prelude calls it.
 3. Prelude and floor (§4.1–4.2), compiler (§4.3), the files and tests in §7, expected
    outputs read and updated, the missing-instance hint. `print`'s type and its lowering land
    together. Reseed, `just test`, golden IR, `just compile-examples-stage1`, downstream suites.
