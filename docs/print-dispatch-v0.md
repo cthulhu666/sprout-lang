@@ -120,8 +120,9 @@ claimed as a gain of this design.
 `print_str(s: String) -> Unit !{IO}` replaces `print` in the `no_prelude` floor (spec §3.1). It is
 the existing runtime symbol `print_str`, already in `runtime/APPROVED_BUILTINS`; no runtime
 function is added. It lowers through the existing `IRPrintStr` op, as `eprint` does today, because
-the C function takes `const char*` while a plain extern call passes `i64`. It is
-monomorphic, so no type-directed lowering remains. No file in the four repositories uses the name.
+the compiler declares the symbol with a `ptr` parameter while a plain extern call passes `i64`. It
+is monomorphic, so no type-directed lowering remains. No file in the four repositories uses the
+name. Step 5 (§10) drops that declare and makes it a plain extern.
 
 ### 4.3 What the compiler loses
 
@@ -325,6 +326,20 @@ declaration, and needs a rule for which instance wins when the user also writes 
    that is expected, not a broken fixed point.
 4. Remove the runtime renderer once nothing emits `print_value` (§4.3), with
    `tests/c_runtime/read_file_error_print.c` (§7). Separate, small.
+5. **Plain externs for the String sinks.** `print_str` and `eprint` are call-site intrinsics
+   because the compiler declares `print_str` and `eprint_str` with a `ptr` parameter
+   (`runtime_declares`) and casts at each call (`IRPrintStr`). Ten other externs whose C takes
+   `const char*`, among them `env_get`, `tcp_write` and `regex_is_match`, are plain externs
+   declared `i64`. Make `print_str` one, and change its C parameter to `long long` so the
+   declare matches the define. Bind the prelude's `eprint` to the runtime's unused
+   `long long eprint(long long)`, and rewrite its `runtime/APPROVED_BUILTINS` line, which calls
+   it a bridge. After step 3 only these two reach `translate_print_call`, so it goes, with
+   `IRPrintStr` and its `ir_rooting` arms, the `ptr` declares, the `extern_skip_names` entries,
+   `eprint_str`, and the print names in `is_call_site_intrinsic` and spec §8.1.2. Add both to
+   `is_nonallocating_read`: an unknown extern is a GC trigger (`op_triggers_gc_summary`), so
+   without it every print becomes a rooting point. Run time is otherwise unchanged. One reseed;
+   for one iteration the old seed's `declare @print_str(ptr)` meets a `long long` define, the
+   same register on x86-64 and arm64, as for the ten above.
 
 On landing, these `BACKLOG.md` entries are deleted: "Make compiled `print` dispatch through
 `ToString`", "`print` writes a string literal inside an ADT as a number" and "An unannotated
