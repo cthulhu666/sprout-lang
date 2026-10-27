@@ -1,0 +1,8 @@
+module main
+
+# `print` needs `ToString`, so a function that prints a value of its own type variable
+# declares `where ToString a`.
+
+fn show_it(x: a) -> Unit !{IO} where ToString a = print(x)
+
+fn main() -> Unit !{IO} = show_it(1)

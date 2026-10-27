@@ -1,0 +1,14 @@
+no_prelude
+
+# `print_str` is the `no_prelude` floor's stdout sink. It is called directly and passed by
+# name to a local higher-order function.
+
+fn twice(f: String -> Unit !{IO}, s: String) -> Unit !{IO} =
+  do
+    f(s)
+    f(s)
+
+fn main() -> Unit !{IO} =
+  do
+    print_str("direct")
+    twice(print_str, "by name")

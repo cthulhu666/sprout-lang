@@ -1,0 +1,8 @@
+module main
+
+# `print` on a program-declared type with no `ToString` instance is rejected, and the
+# message says how to get one.
+
+type Answers deriving (ToString) = | Yes | No
+
+fn main() -> Unit !{IO} = print(Yes)

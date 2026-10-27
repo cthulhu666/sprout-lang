@@ -1,0 +1,6 @@
+module main
+
+# A function has no `ToString` instance, so it cannot be printed.
+
+fn main() -> Unit !{IO} = print(\x -> x + 1)
+#~^ ERROR

@@ -1,0 +1,6 @@
+no_prelude
+
+# The `no_prelude` floor offers `print_str`, not `print`.
+
+fn main() -> Unit !{IO} = print("x")
+#~^ ERROR

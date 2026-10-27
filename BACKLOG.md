@@ -1113,9 +1113,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `labeller_for(1)(2)` are untouched — discriminated by probe, so the trigger is the leading
   identifier's CASE, not the type or literalness. Cosmetic, but it is inconsistent output from the
   tool `fmt-check` gates on. Acceptance: `f()(X)` and `f()(x)` format identically.
-- [ ] `P3` **Formatter inconsistency on nested constructor spacing.** `Just(Just(x))` sometimes gets
-  an inner space and sometimes not, within one file — possibly column-budget driven. Needs a
-  fixture with multiple `Just(Just(x))` at different indentation depths.
+- [ ] `P3` **Formatter inconsistency on nested constructor spacing.** A constructor call whose
+  argument starts with an uppercase identifier gains a space when it is itself a call argument:
+  `b(Just(Green))` becomes `b(Just (Green))`, while a bare `Just(Green)` and `b(Just('z'))` are
+  untouched. Not column-driven. Likely the same trigger as the chained-application entry above.
 - [ ] `P2` **Lint suppression, then wire `lint` into CI.** Three things that must ship together,
   since green-but-unenforced returns to red. **(a) The pragma**, direction chosen 2026-08-12: a
   same-line trailing `# lint: allow(<rule>)` with the rule name mandatory — Rust requires it while
