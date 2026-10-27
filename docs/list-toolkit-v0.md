@@ -351,9 +351,8 @@ Step 1 greps them, as `docs/non-empty-v0.md` §7 did.
 5. If §4.6.2 is taken: move the `vec_sort`/`vec_sort_by` callers to `sort`/`sort_by`, reseed,
    then drop the two exports.
 
-Until BACKLOG "`match (a, b) with` allocates the tuple it matches" is fixed, the instances use
-nested `match`, not `match (xs, ys) with`: the tuple form allocates per call, and cost a sort
-comparison ~30% (`bench/results-2026-10-27-list-sort.md`). `decorated_key_lt` already does this.
+The instances may write `match (xs, ys) with`: a match on a tuple literal builds no tuple
+(`docs/compiler-internals.md` §Tuple-CPR, tuple-literal split).
 
 ## 10. Tests
 

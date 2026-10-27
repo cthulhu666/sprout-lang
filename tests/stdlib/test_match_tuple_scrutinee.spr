@@ -1,0 +1,145 @@
+import stdlib.test (check_eq, run_suite)
+
+# `match (a, b) with` over a tuple literal binds each arm's fields straight to the
+# element values, with no tuple built (docs/compiler-internals.md §Tuple-CPR).
+# These cases pin behaviour across arm shapes, nesting and the `let` forms that
+# lower to a match; test_ir_codegen_match.spr pins the missing allocation.
+
+# Literal, binder and wildcard fields; the first arm can fall through.
+fn pick(x: Int, y: Int) -> Int =
+  match (x, y) with
+  | (0, b) -> b
+  | (a, 0) -> a * 10
+  | _ -> -1
+
+# Constructor patterns inside the tuple, over heap elements.
+fn both(a: Maybe String, b: Maybe String) -> String =
+  match (a, b) with
+  | (Just x, Just y) -> x ++ y
+  | (Just x, Nothing) -> x
+  | (Nothing, Just y) -> y
+  | (Nothing, Nothing) -> "-"
+
+# A nested tuple-literal match in an arm body: the inner split must not read the
+# outer one's elements.
+fn swap_digits(x: Int, y: Int) -> Int =
+  match (x, y) with
+  | (a, b) ->
+      match (b, a) with
+      | (c, d) -> c * 10 + d
+
+# A nested match on a tuple VALUE in an arm body must read that value's fields.
+fn nest_value(x: Int, y: Int, p: (Int, Int)) -> Int =
+  match (x, y) with
+  | (a, b) ->
+      match p with
+      | (c, d) -> a * 1000 + b * 100 + c * 10 + d
+
+# A nested tuple pattern reads the fields of a tuple-valued element, and an inner
+# tuple literal is still built and read back.
+fn nest_pattern(p: (Int, Int), x: Int) -> Int =
+  match (p, x) with
+  | ((a, b), c) -> a * 100 + b * 10 + c
+
+fn inner_literal(x: Int, y: Int, z: Int) -> Int =
+  match ((x, y), z) with
+  | ((a, b), c) -> a * 100 + b * 10 + c
+
+# A comprehension in an arm captures the bound fields and destructures tuples of
+# its own.
+fn comprehension_in_arm(x: Int, y: Int) -> List Int =
+  match (x, y) with
+  | (a, b) -> [a * c + b * d for (c, d) in [(1, 0), (0, 1)]]
+
+# Element expressions are calls; each runs once.
+fn sq(n: Int) -> Int = n * n
+
+fn of_calls(x: Int, y: Int) -> Int =
+  match (sq(x), sq(y)) with
+  | (a, b) -> a - b
+
+# Double and closure elements keep their own representation.
+fn doubles(x: Double, y: Double) -> Double =
+  match (x * 2.0, y) with
+  | (a, b) -> a + b
+
+fn apply_pair(n: Int) -> Int =
+  match (\k -> k + n, n * 2) with
+  | (f, m) -> f(m)
+
+# A three-wide tuple with a wildcard in the middle.
+fn outer(x: Int, y: Int, z: Int) -> Int =
+  match (x, y, z) with
+  | (a, _, c) -> a + c
+
+# The `let` forms all lower to a match on the literal.
+fn let_in(x: Int, y: Int) -> Int =
+  let (a, b) = (x, y)
+  in a - b
+
+fn let_where(x: Int, y: Int) -> Int = a - b
+  where (a, b) = (y, x)
+
+fn let_else(x: Int, m: Maybe Int) -> Int =
+  let (a, Just b) = (x, m) else -1
+  in a + b
+
+fn let_do(x: String, y: String) -> String !{IO} =
+  do
+    let (a, b) = (x, y)
+    b ++ a
+
+# Fresh heap elements, held only by the match, stay live across allocation in
+# the arm. Run under SPROUT_GC_STRESS=1 by `just test-stress`.
+fn burn(n: Int, acc: String) -> String =
+  if n <= 0 then acc else burn(n - 1, acc ++ "x")
+
+fn held(a: String, b: String) -> String =
+  match (a ++ "!", b ++ "?") with
+  | (s, t) ->
+      let junk = burn(40, "")
+      in s ++ t ++ to_string(str_len(junk))
+
+# Effectful elements run once each, left to right.
+fn tick(r: Ref (List Int), n: Int) -> Int !{IO} =
+  do
+    ref_write(r, Cons(n, ref_read(r)))
+    n
+
+fn effect_order() -> List Int !{IO} =
+  do
+    r <- ref_new(Nil)
+    s <- match (tick(r, 1), tick(r, 2)) with
+         | (a, b) -> a + b
+    log <- ref_read(r)
+    Cons(s, list_reverse(log))
+
+fn main() -> Unit !{IO} =
+  do
+    from_do <- let_do("x", "y")
+    order <- effect_order()
+    run_suite("match_tuple_scrutinee", [
+      check_eq("literal arm", pick(0, 7), 7),
+      check_eq("fall through to binder arm", pick(3, 0), 30),
+      check_eq("fall through to wildcard", pick(3, 4), -1),
+      check_eq("ctor fields: both", both(Just("a"), Just("b")), "ab"),
+      check_eq("ctor fields: left", both(Just("a"), Nothing), "a"),
+      check_eq("ctor fields: right", both(Nothing, Just("b")), "b"),
+      check_eq("ctor fields: none", both(Nothing, Nothing), "-"),
+      check_eq("nested literal match", swap_digits(1, 2), 21),
+      check_eq("nested value match", nest_value(1, 2, (3, 4)), 1234),
+      check_eq("nested tuple pattern", nest_pattern((1, 2), 3), 123),
+      check_eq("inner tuple literal", inner_literal(4, 5, 6), 456),
+      check_eq("comprehension in arm", comprehension_in_arm(3, 4), [3, 4]),
+      check_eq("call elements", of_calls(5, 3), 16),
+      check_eq("Double elements", doubles(1.25, 0.5), 3.0),
+      check_eq("closure element", apply_pair(5), 15),
+      check_eq("three wide", outer(1, 2, 3), 4),
+      check_eq("let in", let_in(9, 4), 5),
+      check_eq("where", let_where(9, 4), -5),
+      check_eq("let else: match", let_else(1, Just(2)), 3),
+      check_eq("let else: refute", let_else(1, Nothing), -1),
+      check_eq("do let", from_do, "yx"),
+      check_eq("heap elements live across allocation", held("a", "b"), "a!b?40"),
+      check_eq("effects once, left to right", order, [3, 1, 2])
+    ])

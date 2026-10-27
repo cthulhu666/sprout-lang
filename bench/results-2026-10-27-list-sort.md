@@ -60,5 +60,5 @@ spreads under 8%: medians `vec_list` 590 / 1321, `usort_list` 475 / 992, `vec` 5
 - Checksums agree across all variants of a key, so every variant sorts.
 - A trap found while tidying the bench: writing the comparison as `match (l, r) with
   | ((lk, li, _), (rk, ri, _)) -> …` made `dsort_lean` ~30% slower at 1k (≈780 against ≈600 ns
-  per element), consistent with a tuple built per comparison. The bench uses a `let` group; a merge
-  comparison must not match on a tuple it builds.
+  per element), consistent with a tuple built per comparison. The bench uses a `let` group. Since
+  the tuple-literal split (#754) that `match` builds no tuple.
