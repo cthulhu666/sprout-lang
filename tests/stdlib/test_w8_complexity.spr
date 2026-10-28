@@ -2,7 +2,8 @@ import stdlib.test (check_eq, run_suite)
 
 # Regression tests for W8 O(n²) → O(n) rewrites in prelude.sprout.
 # Each test asserts that the new implementation produces the same output as the
-# expected result on sample data.  Covers P3, P4, P5, P6, and P10 algorithm changes.
+# expected result on sample data.  Covers P4, P5, P6, and P10 algorithm changes;
+# P3, the sort, left the prelude for `stdlib.sort` (tests/stdlib/test_sort.spr).
 
 let empty_int_list: List Int = []
 fn empty_int_vec() -> Vec Int = vec_empty()
@@ -60,24 +61,6 @@ fn main() -> Unit !{IO} =
     check_eq("vec_slice zero count empty",
       vec_slice(0, 0, foldable_to_vec([1, 2, 3])),
       foldable_to_vec([])),
-
-    # --- P3: vec_sort_by ---
-    # vec_sort (the identity-key wrapper) is intentionally NOT tested here: it hits
-    # a pre-existing dict-resolution bug (its forwarded `Ord a` resolves to the
-    # `Ord (Vec a)` instance), which is unrelated to this O(n) rewrite. P3 rewrote
-    # vec_sort_by, which is correct; the same sort is exercised through it below.
-    check_eq("vec_sort_by ascending",
-      vec_sort_by(\x -> x, foldable_to_vec([3, 1, 2])),
-      foldable_to_vec([1, 2, 3])),
-    check_eq("vec_sort_by descending key",
-      vec_sort_by(\x -> 0 - x, foldable_to_vec([1, 2, 3])),
-      foldable_to_vec([3, 2, 1])),
-    check_eq("vec_sort_by preserves all elements",
-      vec_sort_by(\x -> x, foldable_to_vec([5, 3, 1, 4, 2])),
-      foldable_to_vec([1, 2, 3, 4, 5])),
-    check_eq("vec_sort_by singleton",
-      vec_sort_by(\x -> x, foldable_to_vec([42])),
-      foldable_to_vec([42])),
 
     # --- P4: instance ToString (List a) ---
     check_eq("to_string list empty",

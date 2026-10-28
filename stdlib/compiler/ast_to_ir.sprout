@@ -10,6 +10,7 @@ import stdlib.compiler.scc as scc
 import stdlib.compiler.bce as bce
 import stdlib.string as string
 import stdlib.list as list
+import stdlib.sort (sort_by)
 
 # ---------------------------------------------------------------------------
 # Op accumulators are `ListBuilder IROp`, never `List IROp`.
@@ -5637,12 +5638,10 @@ fn pb_index_of(name: String, index: Dict Int) -> Int =
 fn pb_in_decl_order(index: Dict Int, sccs: List (List String)) -> List (List String) =
   sccs
   |> list_map(pb_by_index(index, _))
-  |> vec_from_list
-  |> vec_sort_by(pb_first_index(index, _))
-  |> vec_to_list
+  |> sort_by(pb_first_index(index, _))
 
 fn pb_by_index(index: Dict Int, members: List String) -> List String =
-  vec_to_list(vec_sort_by(pb_index_of(_, index), vec_from_list(members)))
+  sort_by(pb_index_of(_, index), members)
 
 fn pb_first_index(index: Dict Int, members: List String) -> Int =
   match members with

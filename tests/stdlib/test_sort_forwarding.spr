@@ -1,0 +1,28 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.sort (sort)
+
+# Regression test for the dict-resolution soundness bug (BACKLOG §1), found in the
+# prelude's old `vec_sort(vec) = vec_sort_by(\v -> v, vec)`: the forwarded `Ord a`
+# was mis-resolved to the parametric `instance Ord (Vec a)`, so sorting `Vec Int`
+# compared the Int keys via `Ord Vec` → `vec_length` dereferenced an integer →
+# SIGSEGV. `sort` forwards its `Ord a` into the `Sort` method the same way.
+# Before the fix, every assertion here crashes (exit 139) rather than failing.
+
+fn main() -> Unit !{IO} =
+  run_suite("sort_forwarding", [
+    check_eq("sort ascending",
+      sort(foldable_to_vec([5, 3, 1, 4, 2])),
+      foldable_to_vec([1, 2, 3, 4, 5])),
+    check_eq("sort already sorted",
+      sort(foldable_to_vec([1, 2, 3])),
+      foldable_to_vec([1, 2, 3])),
+    check_eq("sort singleton",
+      sort(foldable_to_vec([42])),
+      foldable_to_vec([42])),
+    check_eq("sort empty",
+      sort(vec_empty()),
+      foldable_to_vec([])),
+    check_eq("sort to_string",
+      to_string(sort(foldable_to_vec([3, 1, 2]))),
+      "[1, 2, 3]")
+  ])

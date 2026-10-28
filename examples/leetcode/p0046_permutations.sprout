@@ -1,4 +1,5 @@
 module examples.leetcode.p0046_permutations
+import stdlib.sort (sort)
 
 # 46 Permutations: pick each element as the head, then permute the rest. The elements
 # are distinct, so "the rest" is a filter.
@@ -9,7 +10,7 @@ fn permutations(xs: List Int) -> List (List Int) =
 
 # Any order is allowed, so sort both sides before comparing.
 fn sorted(xss: List (List Int)) -> List (List Int) =
-  vec_from_list(xss) |> vec_sort |> vec_to_list
+  sort(xss)
 
 fn check(name: String, got: List (List Int), want: List (List Int)) -> Unit !{IO} =
   print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if sorted(got) == sorted(want) then "OK" else "FAIL"}`)

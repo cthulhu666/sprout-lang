@@ -12,6 +12,7 @@ import stdlib.fs.path as path
 import stdlib.tui.widget as widget
 import stdlib.tui.widgets.tree as tr
 import ide.document as document
+import stdlib.sort (sort_by)
 
 # The root is the working directory, which is where the IDE was started.
 # `path.join` rather than `"/"` by hand — the separator is `fs.path`'s.
@@ -39,7 +40,7 @@ export fn nodes_of(es: List (String, fs.Entry)) -> List tr.Node =
 # Directories first, then by name. The expandable rows are the ones a reader
 # navigates through, so grouping them is what makes Right and Left useful.
 fn sorted(es: List (String, fs.Entry)) -> List (String, fs.Entry) =
-  vec_to_list(vec_sort_by(ranked, vec_from_list(es)))
+  sort_by(ranked, es)
 
 fn ranked(e: (String, fs.Entry)) -> (Int, String) =
   let (name, info) = e

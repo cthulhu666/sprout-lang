@@ -71,7 +71,7 @@ fn inner_multiplicity(counter: MutVec Int, xs: List Int, ys: List Int) -> List (
 # --- 3. Stack safety (§5): the elaboration is a fold, tail-recursive
 # throughout (`list_fold_go`/`range_fold_go`/`list_reverse_go` in
 # `stdlib/prelude.sprout`), so it must run in O(1) stack. 100_000 is the size
-# `tests/stdlib/test_vec_sort_stacksafe.spr` uses for the same reason: the
+# `tests/stdlib/test_sort_stacksafe.spr` uses for the same reason: the
 # runtime's GC root pool is a fixed 131072 slots, and a non-tail-recursive
 # O(n)-deep implementation exhausts it well before 100k, aborting with
 # `sprout_gc_push_root: GC root pool exhausted` before any assertion runs. A

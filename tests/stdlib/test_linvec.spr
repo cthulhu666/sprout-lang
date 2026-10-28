@@ -48,6 +48,15 @@ fn freeze_is_a_vec() -> String =
       changed = vec_set(1, 8, frozen)
   in `${show(frozen)} ${show(changed)}`
 
+let no_ints: List Int = []
+
+# `from_vec` copies: a write to the copy leaves the source alone.
+fn from_vec_copies() -> String =
+  let source = vec_from_list([1, 2, 3])
+      copy = linvec.freeze(linvec.set(0, 9, linvec.from_vec(source)))
+      empty = linvec.freeze(linvec.from_vec(vec_from_list(no_ints)))
+  in `${show(copy)} ${show(source)} ${to_string(vec_length(empty))}`
+
 fn drops() -> Bool =
   let _ = linvec.drop(linvec.set(0, 1, linvec.new(2, 0)))
   in true
@@ -372,6 +381,7 @@ fn main() -> Unit !{IO} =
       check_eq("new, set, get, length, freeze", basic(), "4 7 -1 -1 0,0,7,0"),
       check_eq("a read before a set sees the old value", read_then_set(), "5 99 0,99,0"),
       check_eq("a frozen LinVec is an ordinary Vec", freeze_is_a_vec(), "4,1 4,8"),
+      check_eq("from_vec copies", from_vec_copies(), "9,2,3 1,2,3 0"),
       check_eq("drop consumes", drops(), true),
       check_eq("index == length is a miss; length - 1 a hit", edges(), "-1 8"),
       check_eq("length of an empty LinVec", empty_len(), 0),

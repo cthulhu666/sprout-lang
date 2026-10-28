@@ -1,4 +1,5 @@
 module examples.vec_basics
+import stdlib.sort (sort, sort_by)
 
 # `Vec a` is Sprout's indexed sequence type: a packed array with O(1) random
 # access, in contrast to the singly-linked `List a`. This example tours the core
@@ -52,10 +53,10 @@ fn main() -> Unit !{IO} =
     print("highest:       " ++ to_string(vec_fold(max_of, 0, s)))
 
     # --- Sorting -------------------------------------------------------------
-    # `vec_sort` needs `Ord`; the literal argument is coerced to `Vec` first.
-    print("sorted asc:    " ++ to_string(vec_sort([88, 72, 95, 61, 88, 45, 79])))
-    # `vec_sort_by` sorts on a key — here the negated value, for descending order.
-    print("sorted desc:   " ++ to_string(vec_sort_by(\n -> -n, s)))
+    # `sort` needs `Ord` and keeps the container: a `Vec` in, a `Vec` out.
+    print("sorted asc:    " ++ to_string(sort(s)))
+    # `sort_by` sorts on a key — here the negated value, for descending order.
+    print("sorted desc:   " ++ to_string(sort_by(\n -> -n, s)))
 
     # --- Reverse and slice ---------------------------------------------------
     print("reversed:      " ++ to_string(vec_reverse(s)))

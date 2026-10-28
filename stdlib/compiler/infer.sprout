@@ -11885,9 +11885,10 @@ fn letdecl_linear_gate(name: String, s1: Dict types.Type, typed_expr: typed_ast.
 #
 # The test is per-BINDING, not per-variable: it asks whether a dictionary is ambiguous given
 # everything this binding generalizes, and attributes it to no particular variable. Asking it
-# about one variable in isolation reads false — `merge_runs`'s `where Ord k` over
-# `List (k, Int, a)` mentions the payload `a` too. A caller that needs per-variable attribution
-# wants uncovered_dict_subject, which derives the subject from the callee's own constraint.
+# about one variable in isolation reads false — a `where Ord k` over `List (k, Int, a)` mentions
+# the payload `a` too (tests/stdlib/test_constraint_over_payload.spr). A caller that needs
+# per-variable attribution wants uncovered_dict_subject, which derives the subject from the
+# callee's own constraint.
 fn first_ambiguous_dict_class(e: typed_ast.TypedExpr, subst: Dict types.Type,
                               quantified: List String) -> Maybe String =
   match e with
@@ -12173,7 +12174,7 @@ fn list_common(xs: List String, ys: List String) -> List String =
 # Distinct from first_ambiguous_dict_class, which asks whether a dictionary is ambiguous given
 # everything a binding generalizes and attributes it to no particular variable. Here the variable
 # IS the question, so the subject has to be derived rather than guessed at from the call's shape:
-# `merge_runs`'s `where Ord k` over `List (k, Int, a)` mentions the payload `a`, and `fold`'s
+# a `where Ord k` over `List (k, Int, a)` mentions the payload `a`, and `fold`'s
 # `where Foldable f` sits behind an `init: b` that is the first variable-typed argument. Both read
 # as uncovered under any positional rule and neither is.
 #

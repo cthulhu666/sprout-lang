@@ -1,6 +1,7 @@
 module examples.leetcode.p0347_top_k_frequent_elements
 import stdlib.linvec as linvec
 import stdlib.list (take)
+import stdlib.sort (sort)
 
 # 347 Top K Frequent Elements: count, then bucket sort by count in O(n). Bucket c
 # holds the elements seen c times; read the buckets from the top.
@@ -20,7 +21,7 @@ fn bump(d: Dict (Int, Int), x: Int) -> Dict (Int, Int) =
 
 # Order within a count is free, so sort before comparing.
 fn check(nums: List Int, k: Int, want: List Int) -> Unit !{IO} =
-  let got = vec_from_list(top_k_frequent(nums, k)) |> vec_sort |> vec_to_list
+  let got = sort(top_k_frequent(nums, k))
   in print(`top_k_frequent(${to_string(nums)}, ${k}): got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
 
 fn main() -> Unit !{IO} =

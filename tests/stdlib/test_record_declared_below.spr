@@ -1,13 +1,12 @@
 import stdlib.test (check_eq, run_suite)
+import stdlib.sort (sort_by)
 
 # Every function here sits above the record it uses. A record's fields are in
 # scope throughout the module, like its type name (spec §7).
 
 # The sort key's type comes from the field alone, and `Ord` dispatches on it.
 fn sorted_names(rows: List Row) -> List String =
-  vec_from_list(rows)
-    |> vec_sort_by(\l -> l.index)
-    |> vec_to_list
+  sort_by(\l -> l.index, rows)
     |> list_map(\r -> r.name)
 
 # Nothing but the field's declared type says which `ToString` instance this is.

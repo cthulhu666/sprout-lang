@@ -1,9 +1,9 @@
 # List toolkit — zip, adjacent pairs, scan, sort, min/max
 
 Status: **step 1 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`, `list.map_adjacent`.
-Approved, not yet built: a `Sort` class with `sort`/`sort_by` (§4.6); the undecorated merge for
-`sort`, measured faster (§4.6.1); `scanl` (§4.5). `enumerate` deferred (§4.3). Open: retiring
-`vec_sort`/`vec_sort_by` (§4.6.2).
+Approved, not yet built: a `Sort` class with `sort`/`sort_by` in a new `stdlib.sort`, sorting in
+place over `LinVec` (§4.6, §4.6.1); retiring `vec_sort`/`vec_sort_by` (§4.6.2); `scanl` (§4.5).
+`enumerate` deferred (§4.3).
 
 ## 1. Problem
 
@@ -31,6 +31,8 @@ Goals:
 - `map_adjacent`, `scanl`, and a two-argument `min`/`max`.
 - Every function total; none slower than the loop it replaces.
 - Generic only where no container loses its fast path (§4.1).
+- **Sorting is fast.** Callers sort in hot loops (a game scheduler, `docs/sorting-v0.md`), so
+  `sort` is measured against `mutvec_sort`, not against today's `vec_sort`.
 
 Non-goals (v0):
 - `group_by`. The survey's callers want keyed grouping into a map (`p0049`), which belongs with the
@@ -41,7 +43,8 @@ Non-goals (v0):
 - `abs_diff` (§4.7).
 - `enumerate`, until Sprout has a lazy sequence type or decides not to (§4.3).
 - A `Vec` `map_adjacent`. `Vec` callers index instead; add it when a caller asks.
-- Faster sorting beyond what §4.6.1 gets for free. `docs/sorting-v0.md` owns that.
+- Generic `Ord` dispatch, about 2× on every sort, and primitive sort builtins.
+  `docs/sorting-v0.md` owns both (options A and C).
 - Moving other `vec_*` functions out of the prelude's exports. See §4.6.2's last paragraph.
 
 ## 3. Prior art
@@ -94,8 +97,8 @@ The rule `docs/collection-combinators-v0.md` §3 set, applied to the new names:
 | `zip_with` | `(a -> b -> c) -> f a -> f b -> f c where Zip f` | prelude |
 | `zip` | `f a -> f b -> f (a, b) where Zip f` | prelude |
 | `scanl` | `(b -> a -> b) -> b -> f a -> NonEmpty b where Foldable f` | prelude, after `NonEmpty` |
-| `sort` | `f a -> f a where Sort f, Ord a` | prelude |
-| `sort_by` | `(a -> k) -> f a -> f a where Sort f, Ord k` | prelude |
+| `sort` | `f a -> f a where Sort f, Ord a` | `stdlib.sort` (§4.6) |
+| `sort_by` | `(a -> k) -> f a -> f a where Sort f, Ord k` | `stdlib.sort` (§4.6) |
 | `min`, `max` | `a -> a -> a where Ord a` | prelude |
 | `map_adjacent` | `(a -> a -> b) -> List a -> List b` | `stdlib.list` |
 
@@ -189,6 +192,8 @@ one cell. The last step reverses and splits off the head into `NonEmpty`.
 ### 4.6 `Sort`, `sort`, `sort_by`
 
 ```sprout
+module stdlib.sort
+
 export class Sort f
   fn sort_values(xs: f a) -> f a where Ord a
   fn sort_by_values(key: local a -> k, xs: f a) -> f a where Ord k
@@ -200,66 +205,122 @@ export fn sort_by(key: local a -> k, xs: f a) -> f a where Sort f, Ord k =
   sort_by_values(key, xs)
 ```
 
-- **Semantics**: stable, ascending, O(n log n), recursion depth O(log n). `sort_by` calls `key`
-  once per element, as Haskell's `sortOn` and Rust's `sort_by_cached_key` do (§3).
-- **Two methods, not one.** `sort` as `sort_by(\x -> x, …)` would decorate every element, the
-  cost §4.6.1 removes. Same reasoning as `Foldable`'s two methods. The constraint sits on the
+- **Semantics**: stable, ascending, O(n log n), constant stack (every loop is a tail call).
+  `sort_by` calls `key` once per element, as Haskell's `sortOn` and Rust's
+  `sort_by_cached_key` do (§3).
+- **Two methods, not one.** `sort` as `sort_by(\x -> x, …)` would pair every element with itself,
+  doubling the array. Same reasoning as `Foldable`'s two methods. The constraint sits on the
   method, as `Traversable`'s `Applicative` does: `f` alone picks the instance.
 - **Instances**: `List` and `Vec`; `NonEmpty` after `docs/non-empty-v0.md` lands. `MutVec` is not
   one: its sort works in place, has an effect and returns `Unit`, so `mutvec_sort` stays apart.
-  `LinVec` fits the method's shape (consume, return sorted, in place behind `unsafe_pure` as
-  `linvec.set` is) but is deferred with its `Zip` instance (§4.2).
-- **Prior art**: none of the six languages has a sort class. Each has one sort per module or type
-  (`Data.List.sort`, OCaml's `List.sort`/`Array.sort`, Rust's slice method). Sprout has no methods
-  and no overloading; a class is how it gives one name to several containers, as for `map`,
-  `filter` and `zip_with`.
+  `LinVec` fits the method's shape but is deferred with its `Zip` instance (§4.2).
+- **Not in the prelude.** The fast sort writes in place (§4.6.1), and the prelude cannot reach
+  in-place writes without exceptions to three rules (§4.6.3). Nothing in the prelude sorts.
+  Haskell's `Prelude` exports no `sort`, `sortBy` or `sortOn` either (`import Data.List`); OCaml's
+  is `List.sort`. A class still gives one name to several containers, as for `map` and `zip_with`.
 
-#### 4.6.1 One merge, undecorated where it can be
+How six languages sort an immutable collection (each checked in its source or reference docs):
 
-Today `vec_sort` is `vec_sort_by(\v -> v, …)`. It builds an `(a, Int, a)` triple per element and
-a strip pass, and `decorated_key_lt` compares keys through `ord_lt` and then `ord_gt`: up to two
-`compare` calls per comparison. The survey measured it on 1M Ints at 1.8 s and 519 MB.
+| language | how |
+|---|---|
+| Haskell `Data.List.sortBy` | merge sort over cons lists (`sequences`, `merge_all`), no array |
+| Haskell `Data.Vector.modify` | an `ST` action on a pure vector: "performed in place if it is safe to do so", else on a copy |
+| OCaml `List.stable_sort` | merge sort over lists, "constant heap space … and logarithmic stack space" |
+| F# `List.sortWith` | `List.toArray` → `Array.stableSortInPlaceWith` → `List.ofArray` |
+| Scala 2.13 `SeqOps.sorted` | `copyToArray` → `java.util.Arrays.sort` → rebuild |
+| Clojure `sort` | `to-array` → `java.util.Arrays/sort` → `seq`; "Guaranteed to be stable" |
+| Elm `List.sortWith` | `_List_toArray` → JS `Array.prototype.sort` → `_List_fromArray` |
 
-The proposal: `sort_values` does not decorate. A merge keeps stability without the index when it
-seeds the runs in input order, merges adjacent runs left with right, and takes from the left run
-on a tie. The merge helpers (`merge_runs`, `merge_pass`, `merge_all`, `to_runs`) take the
-comparison as a parameter, as `mutvec_sort_with` does in `stdlib.mutable`, so the decorated
-`sort_by_values` and the undecorated `sort_values` share one merge. The undecorated comparison
-calls `compare` directly: `ord_lt` costs ~40% in a sort (`docs/sorting-v0.md` §Where the time
-goes, item 2).
+Copy into a fresh array, sort it in place, hand back an immutable result: four of the six. Those
+four do it unchecked, in impure languages. `Data.Vector.modify` is the checked form, through
+`ST`'s rank-2 type. §4.6.1 is the checked form through linearity, which Sprout already has.
 
-The `Vec` instance converts to a list, sorts, and converts back, as `vec_sort` does now.
+#### 4.6.1 In place, over `LinVec`
 
-**Measured** (`bench/results-2026-10-27-list-sort.md`, 1k and 1M random Ints). The undecorated
-sort beats today's `vec_sort` on both instances: on `List` by 19% at 1k and 25–29% at 1M, with
-16–19% less peak memory; on `Vec` by 11–13% at 1k and about 22% at 1M, peak memory unchanged.
-So `sort_values` takes the undecorated merge in both instances.
+The algorithm is `mutvec_sort`'s: insertion sort on 16-element blocks, then bottom-up merge
+passes into one scratch array. A tie takes the left run, so the sort is stable with no index.
+The arrays are `LinVec`s, private to `stdlib.sort`:
 
-`sort_by` gains nothing from the change. Through the shared merge it ties today's `vec_sort_by`
-at 1k (590 against 585 ns per element); at 1M the noise (load 5.5–8.9) is larger than the gap. The
-implementation step re-measures `sort_by` on the shared merge against today's, under low load,
-and keeps today's decorated merge for `sort_by` if the shared one is slower. The `Vec` instance's
-`sort_by_values` keeps reading the `Vec` directly, as `vec_sort_by_collect` does: converting it
-to a list first cost the prototype ~90 MB of peak memory at 1M.
+- **`List`**: `linvec.from_list(xs)`, sort, `freeze`, `vec_to_list`.
+- **`Vec`**: `linvec.from_vec(v)` — new, a copy (§4.6.4) — sort, `freeze`.
+- **`sort_by`**: a `LinVec` of `(key(x), x)` pairs, written directly from the input; the merge
+  compares keys only; the keys are stripped into the result.
+- The comparison calls `compare` directly: `ord_lt` costs ~40% in a sort
+  (`docs/sorting-v0.md` §Where the time goes, item 2).
+- The merge passes swap the two arrays. At the end the one holding the result is frozen and the
+  other dropped, so there is no copy back, which `mutvec_sort` has to do.
 
-#### 4.6.2 Retiring `vec_sort` and `vec_sort_by` (option, not decided)
+**Why it is safe.** Linearity checks it: a `LinVec` has one owner, so no one sees it while it is
+written, and `freeze` ends the writes. `stdlib.sort` calls no `unsafe_pure` and declares no
+writer. The trusted code stays `linvec`'s three writers (`docs/unsafe-primitives-v0.md` §4.3).
 
-With `sort` and `sort_by` working on `Vec`, the prelude exports two names for each operation. The
-option: move every caller to the generic names, then drop `export` from `vec_sort` and
-`vec_sort_by`. Their code stays, as the `Vec` instance's helpers; an instance in another module
-would be compiled only into programs that import it, so `sort(v)` would stop working without an
-import.
+**Measured** (prototype, 2026-10-28; random Ints in [0, 65536); median of 5 interleaved rounds,
+load ~4; ns per element, and peak RSS at 1M including the ~88 MB input):
 
-- **Callers**: 41 calls in 22 files outside the prelude. Four are in the compiler
-  (`ast_to_ir` ×2, `bind_census`, `analysis_service_driver`), so the move needs a reseed.
-- **Un-exporting hides nothing yet.** A private prelude function is still callable from user code
-  (BACKLOG, "A private prelude function is callable from user code"). The callers must move
-  before that is fixed, or the fix breaks them.
-- **Downstream** repos are not checked.
+| | 1k | 1M | 1M MB |
+|---|---:|---:|---:|
+| today's `vec_sort` | 560 | 1256 | 563 |
+| the undecorated list merge this section first proposed ¹ | 457 | 952 | 478 |
+| raw writes behind `unsafe_pure` (§4.6.3), `List` input | 94 | 154 | 88 |
+| **`LinVec`, `List` input** | **83** | **140** | **88** |
+| raw writes, `Vec` input | 93 | 147 | 88 |
+| `LinVec`, `Vec` input, through a list ² | 95 | 179 | 118 |
+| today's `vec_sort_by` | 562 | 1276 | 564 |
+| raw writes, `sort_by` | 166 | 455 | 126 |
+| `LinVec`, `sort_by`, pairs through a list ² | 248 | 735 | 284 |
+
+¹ First measured in `bench/results-2026-10-27-list-sort.md`. This row is from the first of two
+runs that day, the rest from the second. ² The prototype had no `linvec.from_vec` and built the
+pairs as a list; the implementation writes both directly.
+
+The module, through `bench/list_sort` (`bench/results-2026-10-28-stdlib-sort.md`, load 6–9):
+`sort` 82 / 137 ns at 1k / 1M on either input, 88 MB; `sort_by` 156 / 469 ns, 126 MB. The direct
+writes close both ² rows to the raw ones. Against `vec_sort`, 6.8× at 1k and 9.1× at 1M; against
+`vec_sort_by`, 3.6× and 2.7×.
+
+#### 4.6.2 Retiring `vec_sort` and `vec_sort_by` (decided)
+
+Every caller moves to `sort`/`sort_by` with `import stdlib.sort`, and the two leave the prelude
+with their helpers (`vec_sort_by_collect`, `decorated_key_lt`, `merge_runs`, `merge_pass`,
+`merge_all`, `to_runs`). Nothing else in the prelude calls them. Two names for one operation
+would remain otherwise, and the prelude's one would be the 8× slower.
+
+- **Callers in this repo**: the compiler (`ast_to_ir` ×2, `bind_census`,
+  `analysis_service_driver`), `ide/filetree`, examples, benches and tests. The compiler's move
+  needs a reseed and makes its own sorts faster.
+- **Downstream**: uncharted-suns, 15 uses in 11 files, migrated in a commit there that lands with
+  this change. repbit, repbit-cards, sprout-postgres and sprout-sqlite are not checked.
 
 The same reasoning covers every `vec_*` that duplicates a generic function (`vec_map`,
 `vec_filter`, `vec_fold`, `vec_any`, …), and a `stdlib.vec` module for the `Vec`-only operations
 (`vec_get`, `vec_length`, …, used in 165 files). That is a separate change, not this toolkit's.
+
+#### 4.6.3 Rejected
+
+- **The undecorated list merge** (this section's first plan): 1.2–1.3× over `vec_sort`, against
+  8× for an in-place sort. Haskell and OCaml merge lists; their collectors are built for
+  short-lived cons cells, and Sprout's per-element cost says its allocator is not there yet.
+- **Raw writes behind `unsafe_pure`, in the prelude.** As fast, but each part bends a rule. The
+  prelude would join `source.unsafe_pure_users`. Its module name is `""`, which every headerless
+  entry file shares, so the gate would have to match it by path. It cannot `import stdlib.unsafe`
+  (it is parsed with no imports), so the bundler would load that module unasked, or the gate's
+  rule 1 would be rebuilt off extern privacy. And every prelude extern is exported
+  (`bundler.exported_name_of`), so declaring `vector_mutset` there would put an in-place write
+  on any `Vec` one call away from every module. Nothing would check that the array is fresh.
+- **Raw writes behind `unsafe_pure`, in `stdlib.sort`.** The designed way to add an
+  `unsafe_pure` user, with none of the prelude's exceptions. No faster than `LinVec`, and the
+  freshness of the array is then a reviewer's job, not the checker's.
+- **Option E of `docs/sorting-v0.md`** (local mutation in pure code, `ST`-style): linearity
+  already gives it for this case.
+
+#### 4.6.4 `linvec.from_vec`
+
+`export fn from_vec(v: Vec a) -> LinVec a`: a fresh copy, so the result has one owner however
+many hold `v`. One `memcpy` (`vector_concat(raw, vector_empty())`), no new builtin. It sits in
+`stdlib.linvec`, inside the trust boundary that already unwraps vectors.
+
+`mutvec_sort` keeps its own copy of the algorithm: a `MutVec`'s array is shared by design, so it
+cannot be a `LinVec`. Two implementations of one merge, each about 80 lines.
 
 ### 4.7 `min`, `max`
 
@@ -300,48 +361,65 @@ an unsigned type that cannot overflow; Sprout has no unsigned `Int`, and `a - b`
 - **Function, `stdlib.list` only**: no prelude change, so no reseed and no binder renames (§6).
   But the most-used names need an import, and `scanl` and `min`/`max` are not `List`-specific.
 - **Representation** (this design): `Zip` and `Sort` classes for the container-keeping case,
-  `Foldable` for fixed results.
+  `Foldable` for fixed results. For sorting, the representation also changes underneath: a
+  `LinVec` in place of a list of runs (§4.6.1).
 
 ## 6. Impact
 
 - **Syntax**: none.
-- **Semantics**: two classes, `Zip` and `Sort`, each with `List` and `Vec` instances; `zip_with`,
-  `zip`, `sort`, `sort_by`, `scanl`, `min`, `max` in the prelude; `map_adjacent` in
-  `stdlib.list`.
+- **Semantics**: `Zip` with `List` and `Vec` instances, and `zip_with`, `zip`, `scanl`, `min`,
+  `max` in the prelude; `map_adjacent` in `stdlib.list`. A new module `stdlib.sort`: `Sort` with
+  `List` and `Vec` instances, `sort`, `sort_by`. `linvec.from_vec`. `vec_sort` and `vec_sort_by`
+  leave the prelude.
 - **Type system**: none.
 - **Errors**: none new. A `List` and a `Vec` passed to one `zip` fail to unify, with the existing
-  `List`/`Vec` hint.
+  `List`/`Vec` hint. A call to `vec_sort` becomes an unknown name.
 - **Generated code**: unused prelude code is dropped. The bundler renames every local binder that
   shares a prelude value's name (`bundler.local_name`, `docs/prelude-name-identity-v0.md` §5),
   and parameter names reach IR. In `stdlib/`, `min` is a binder in `stdlib/log.sprout` and `max`
   in `stdlib/terminal.sprout`; the compiler has none of the new names outside comments. Golden IR
-  that includes those modules moves by name. No binder in the tree is named `sort` or `sort_by`.
-  The shared merge (§4.6.1) changes `vec_sort_by`'s IR for real.
+  that includes those modules moves by name. `sort` and `sort_by` are not prelude names, so they
+  rename nothing. The compiler's four sorts move to `stdlib.sort`, so its IR changes for real,
+  and so does every golden program that sorted.
+- **Trust**: no new `unsafe_pure` user, no new extern. `just linvec-smoke`'s BCE check, which
+  covers `stdlib.linvec.*` and `stdlib.linheap.*`, adds `stdlib.sort.*`.
 
 ## 7. Compatibility and migration
 
-Every name is new. Existing definitions with these names shadow the prelude inside their file:
+Every name except the two retired ones is new. Existing definitions with these names shadow the
+prelude inside their file:
 
 - `fn zip_with` and `fn scanl` in `examples/leetcode/p0238_…`; migrate it to the prelude ones.
 - `fn min`/`fn max` in `stdlib/math/int.sprout`: unchanged; qualified uses read `imath.max`.
 
 `p0046`, `p0049`, `p0078` and `p0347` replace their `sorted` round trip with `sort`; `p3110` uses
-`list.map_adjacent`. `vec_sort` and `vec_sort_by` keep working; §4.6.2 is the option to retire
-them.
+`list.map_adjacent`.
+
+**`vec_sort(v)` → `sort(v)`, `vec_sort_by(f, v)` → `sort_by(f, v)`**, each file adding
+`import stdlib.sort (sort, sort_by)` as it needs. The result type is unchanged. A `List` caller
+that went through `Vec` drops the round trip: `vec_to_list(vec_sort(vec_from_list(xs)))` is
+`sort(xs)`.
 
 Downstream, step 1 found none of the step-1 names defined or bound in repbit, repbit-cards,
 sprout-postgres, sprout-sqlite or uncharted-suns. uncharted-suns imports `stdlib.math.int`'s
-`min`/`max` selectively, which keeps them; all 369 of its entry files type-check.
+`min`/`max` selectively, which keeps them; all 369 of its entry files type-check. Step 2 migrates
+its 15 `vec_sort`/`vec_sort_by` uses (§4.6.2).
 
 ## 8. Spec and docs
 
-- `docs/spec-v0.md`: the prelude section gains `Zip`, `Sort`, their instances and the prelude
-  functions.
-- `docs/stdlib-reference.md`: `stdlib.list.map_adjacent`.
+- `docs/spec-v0.md`: the prelude section gains `Zip`, its instances and the prelude functions.
+  The `Double` ordering and `min_by`/`max_by` paragraphs, which state their laws through
+  `vec_sort` and `vec_sort_by`, restate them through `sort` and `sort_by`.
+- `docs/stdlib-reference.md`: `stdlib.list.map_adjacent`; a `stdlib.sort` section; `vec_sort`
+  and `vec_sort_by` removed; `linvec.from_vec`; the `mutvec_sort` paragraph's comparison moves
+  to `sort`.
 - `docs/idiomatic-sprout.md`: `zip_with` and `scanl` in place of index loops.
+- `docs/sorting-v0.md`: the pure sort is in place now (§4.6.1); its "reworking `vec_sort`'s list
+  sort" item is done.
 - `BACKLOG.md`: on landing, delete "List toolkit"; delete (b) of "Deferred non-goals from
   `docs/min-max-combinators-v0.md` §2" and the `zip` part of (c) in the collection-combinators
-  entry.
+  entry. Step 2 deletes "`vec_sort` sorts lists of `(key, index, value)` tuples", and renames
+  `vec_sort` in the `Ord Char` and primitive-sort entries.
 - Status: the same as the rest of spec §8.5, which documents the prelude's classes.
 
 ## 9. Implementation steps
@@ -349,13 +427,12 @@ sprout-postgres, sprout-sqlite or uncharted-suns. uncharted-suns imports `stdlib
 1. ~~`Zip` with the `List` and `Vec` instances, `zip_with`, `zip`, `min`, `max`;
    `stdlib.list.map_adjacent`. Measure `max` against `imath.max` in a DP loop.~~ Landed;
    `max` measured (§4.7).
-2. `Sort` with the `List` and `Vec` instances, `sort`, `sort_by`, the undecorated merge
-   (§4.6.1, measured). Re-measure `sort_by` on the shared merge under low load
-   (`bench/list_sort/bench.sh`) before it replaces today's.
+2. `stdlib.sort`: `Sort` with the `List` and `Vec` instances, `sort`, `sort_by`, in place over
+   `LinVec` (§4.6.1); `linvec.from_vec` (§4.6.4). Move every caller, delete `vec_sort` and
+   `vec_sort_by` from the prelude (§4.6.2), reseed. Measured through `bench/list_sort/bench.sh`
+   (§4.6.1). Migrate uncharted-suns in a matching commit.
 3. After `NonEmpty`: `scanl`, the `NonEmpty` `Zip` instance.
 4. Migrate the LeetCode examples (§7).
-5. If §4.6.2 is taken: move the `vec_sort`/`vec_sort_by` callers to `sort`/`sort_by`, reseed,
-   then drop the two exports.
 
 The instances may write `match (xs, ys) with`: a match on a tuple literal builds no tuple
 (`docs/compiler-internals.md` §Tuple-CPR, tuple-literal split).
@@ -366,12 +443,19 @@ The instances may write `match (xs, ys) with`: a match on a tuple literal builds
 - `zip_with` and `zip` on `List` and `Vec`: equal lengths, either side shorter, either side empty;
   `g` not called past the shorter length; dictionary forwarding through a `where Zip f` caller.
 - `list.map_adjacent` on 0, 1, 2 and many elements.
-- `sort` on `List` and `Vec`: empty, one, sorted, reversed, duplicates; stability of `sort_by`
-  on a key with ties, and of `sort` under a key-only `Ord`; agreement with `vec_sort`; 200k
-  elements (recursion depth); `sort_by` calls `key` once per element.
 - `min`/`max` on `Int`, `String`, tuples; on a tie under a key-only `Ord`, `min` returns the first
   argument and `max` the second.
 - `scanl` (step 3): empty input gives `NonEmpty(init, [])`; order is left to right.
+
+`tests/stdlib/test_sort.spr`:
+- `sort` and `sort_by` on `List` and `Vec`: empty, one, sorted, reversed, all equal, duplicates.
+- Lengths around the block and pass boundaries — 15, 16, 17, 31, 32, 33, 64, 65, 100 — so the
+  result ends in either array, and the last run is short.
+- Agreement with `mutvec_sort` on random input; stability of `sort_by` on a key with ties and of
+  `sort` under a key-only `Ord`, both across merge boundaries.
+- The input `Vec` is unchanged after `sort` and `sort_by` (`from_vec` copies).
+- 200k elements (stack depth); dictionary forwarding through a `where Sort f` caller.
+- `linvec.from_vec` (in the linvec suite): a write to the copy leaves the source alone.
 
 Failure tests (`tests/conformance/type_error/`): `zip` of a `List` and a `Vec`; `zip` of a
 `MutVec` and `sort` of one (no instance); `max('a', 'b')` while there is no `Ord Char`; and

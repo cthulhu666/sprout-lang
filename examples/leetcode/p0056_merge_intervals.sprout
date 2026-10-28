@@ -1,12 +1,11 @@
 module examples.leetcode.p0056_merge_intervals
 import stdlib.math.int (max)
+import stdlib.sort (sort)
 
 # 56 Merge Intervals: sort by start, then fold, extending the last merged interval
 # whenever the next one starts inside it. O(n log n).
 fn merge(intervals: List (Int, Int)) -> List (Int, Int) =
-  vec_from_list(intervals)
-  |> vec_sort
-  |> vec_to_list
+  sort(intervals)
   |> list_fold(absorb, [])
   |> list_reverse
 

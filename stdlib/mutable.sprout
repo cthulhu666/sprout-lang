@@ -352,14 +352,14 @@ fn mutvec_sort_with(less: local a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
     if n <= sort_block then () else sort_merge_all(less, mutvec_raw(v), n)
 
 # Ascending, in place and stable, in O(n log n) comparisons. Allocates a comparator
-# closure per call, plus an n-slot scratch vector when n > 16. The fast path for a
-# hot loop: `vec_sort` builds lists and costs several times more per element.
+# closure per call, plus an n-slot scratch vector when n > 16. `stdlib.sort` runs the
+# same merge over a `LinVec` copy, for a `Vec` or `List`.
 export fn mutvec_sort(v: MutVec a) -> Unit !{IO} where Ord a =
   mutvec_sort_with(\ (x, y) -> compare(x, y) < 0, v)
 
-# As `mutvec_sort`, ordered by `f`. Unlike `vec_sort_by`, which computes each key
-# once, this calls `f` twice per comparison; when `f` is costly, sort (key, value)
-# pairs instead.
+# As `mutvec_sort`, ordered by `f`. Unlike `stdlib.sort`'s `sort_by`, which computes
+# each key once, this calls `f` twice per comparison; when `f` is costly, sort
+# (key, value) pairs instead.
 export fn mutvec_sort_by(f: local a -> k, v: MutVec a) -> Unit !{IO} where Ord k =
   mutvec_sort_with(\ (x, y) -> compare(f(x), f(y)) < 0, v)
 

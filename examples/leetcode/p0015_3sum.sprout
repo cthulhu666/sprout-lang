@@ -1,8 +1,9 @@
 module examples.leetcode.p0015_3sum
+import stdlib.sort (sort)
 
 # 15 3Sum: sort, fix the smallest element, then walk two pointers inward. O(n^2).
 fn three_sum(nums: Vec Int) -> List (List Int) =
-  list_reverse(triples(0, vec_sort(nums), []))
+  list_reverse(triples(0, sort(nums), []))
 
 fn triples(i: Int, h: Vec Int, acc: List (List Int)) -> List (List Int) =
   let a = at(i, h)

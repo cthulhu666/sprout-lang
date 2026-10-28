@@ -1,0 +1,55 @@
+import stdlib.test (check_eq, run_suite)
+
+# A constraint on one variable over a type that mentions another: `where Ord k` over
+# `List (k, Int, a)`. The ambiguity checks in infer.sprout (first_ambiguous_dict_class,
+# uncovered_dict_subject) must not read `Ord k` as hanging on the payload `a`. The prelude's
+# old decorated merge sort had this shape and was the only code exercising it; it left with
+# `vec_sort` (docs/list-toolkit-v0.md §4.6.2), so the shape is kept here.
+
+fn key_lt(left: (k, Int, a), right: (k, Int, a)) -> Bool where Ord k =
+  let (lk, li, _) = left
+      (rk, ri, _) = right
+      by_key = compare(lk, rk)
+  in if by_key == 0 then li < ri else by_key < 0
+
+fn merge_runs(left: List (k, Int, a), right: List (k, Int, a), acc: List (k, Int, a)) -> List(k, Int, a) where Ord k =
+  match left with
+  | [] -> list_reverse_onto(acc, right)
+  | [l | lrest] ->
+      match right with
+      | [] -> list_reverse_onto(acc, left)
+      | [r | rrest] ->
+          if key_lt(r, l) then merge_runs(left, rrest, Cons(r, acc))
+          else merge_runs(lrest, right, Cons(l, acc))
+
+fn list_reverse_onto(xs: List a, acc: List a) -> List a =
+  match xs with
+  | [] -> acc
+  | [x | rest] -> list_reverse_onto(rest, Cons(x, acc))
+
+fn merge_pass(runs: List (List(k, Int, a)), acc: List (List(k, Int, a))) -> List (List(k, Int, a)) where Ord k =
+  match runs with
+  | [a, b | rest] -> merge_pass(rest, Cons(merge_runs(a, b, []), acc))
+  | _ -> list_reverse_onto(acc, runs)
+
+fn merge_all(runs: List (List(k, Int, a))) -> List(k, Int, a) where Ord k =
+  match runs with
+  | [] -> []
+  | [only] -> only
+  | _ -> merge_all(merge_pass(runs, []))
+
+# Generalised over the payload: the `Ord k` dictionary comes from the caller's key type.
+fn sort_decorated(xs: List (k, Int, a)) -> List(k, Int, a) where Ord k =
+  merge_all(list_map(\x -> [x], xs))
+
+fn payloads(xs: List (Int, Int, String)) -> List String =
+  list_map(\t -> let (_, _, p) = t in p, xs)
+
+fn main() -> Unit !{IO} =
+  let by_key = sort_decorated([(2, 0, "b"), (1, 1, "a"), (2, 2, "c"), (0, 3, "z")])
+      # A let-bound lambda over the payload while `Ord Int` is fixed by the keys.
+      tag = \p -> sort_decorated([(3, 0, p), (1, 1, p)])
+  in run_suite("constraint_over_payload", [
+    check_eq("sorted by key, ties by index", payloads(by_key), ["z", "a", "b", "c"]),
+    check_eq("payload through a lambda", list_map(\t -> let (k, _, _) = t in k, tag("q")), [1, 3])
+  ])

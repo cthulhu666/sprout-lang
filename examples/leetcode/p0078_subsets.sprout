@@ -1,4 +1,5 @@
 module examples.leetcode.p0078_subsets
+import stdlib.sort (sort)
 
 # 78 Subsets: the power set of a list of distinct ints. Every subset either leaves out
 # the head or adds it.
@@ -8,7 +9,7 @@ fn subsets(xs: List Int) -> List (List Int) =
   | [x | rest] -> let without = subsets(rest) in list_append(without, [Cons(x, s) for s in without])
 
 fn sorted(xs: List a) -> List a where Ord a =
-  vec_from_list(xs) |> vec_sort |> vec_to_list
+  sort(xs)
 
 # Any order is allowed, so sort both sides before comparing.
 fn canonical(xss: List (List Int)) -> List (List Int) =

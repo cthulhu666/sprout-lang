@@ -10,6 +10,7 @@ import stdlib.compiler.source as source
 import stdlib.compiler.types as types
 import stdlib.compiler.infer as infer
 import stdlib.compiler.unifier as unifier
+import stdlib.sort (sort)
 import stdlib.string as string
 import stdlib.process as process
 import stdlib.terminal as terminal
@@ -388,7 +389,7 @@ fn collect_matches(decls: List ast.Decl, query_te: ast.TypeExpr, alias_env: Dict
       | _ -> collect_matches(rest, query_te, alias_env, acc)
 
 fn sort_strings(xs: List String) -> List String =
-  vec_to_list(vec_sort(vec_from_list(xs)))
+  sort(xs)
 
 fn parse_query_type(query: String) -> Result String ast.TypeExpr =
   match lexer.tokenize(query) with

@@ -14,11 +14,12 @@ module examples.wrap_sorted_vec
 # so the discipline is that only `sort_of` and `merge` use it.
 
 import stdlib.terminal (term_write)
+import stdlib.sort (sort)
 
 wrap Sorted a = Vec a
 
 # One of the two entry points; `merge` is the other.
-fn sort_of(xs: Vec a) -> Sorted a where Ord a = Sorted(vec_sort(xs))
+fn sort_of(xs: Vec a) -> Sorted a where Ord a = Sorted(sort(xs))
 
 fn as_vec(s: Sorted a) -> Vec a =
   match s with

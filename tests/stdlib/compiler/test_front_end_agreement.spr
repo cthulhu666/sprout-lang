@@ -24,7 +24,7 @@ import stdlib.env as env
 # path, so the editor showed a red error on correct code.
 #
 # Root cause: `desugar_ctx.build_fn_sig_index` computes Vec context by scanning the decls
-# of the program being checked. The bundler concatenates the prelude in, so `vec_sort`'s
+# of the program being checked. The bundler concatenates the prelude in, so `vec_reverse`'s
 # parameter reads as `Vec` and the list literal is wrapped in `vec_from_list`. The env path
 # receives the prelude as SCHEMES and never as decls, so the pass runs against an empty
 # vocabulary and inserts nothing. Same shape as the `where ToString a` REPL bug: a

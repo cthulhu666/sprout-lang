@@ -1,0 +1,31 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.sort (sort)
+
+# Regression: a sort must not have a recursion-depth ceiling. The prelude's old
+# top-down `vec_sort` recursed O(n) deep and exhausted the fixed 131072-slot GC
+# root pool, so any sort above ~50-60k aborted with `sprout_gc_push_root: GC root
+# pool exhausted` (exit 1) BEFORE reaching any assertion. This file drives a 100k
+# sort plus edges.
+
+# Tail-recursive non-decreasing check over a Vec Int (no O(n) stack growth).
+fn is_sorted_go(v: Vec Int, i: Int, n: Int) -> Bool =
+  if i + 1 >= n then true
+  else if vec_get_or(i, 0, v) <= vec_get_or(i + 1, 0, v) then is_sorted_go(v, i + 1, n)
+  else false
+
+fn main() -> Unit !{IO} =
+  let big = sort(vec_from_list(list_reverse(range_to_list(0..99999))))
+  in run_suite("sort_stacksafe", [
+    # --- large sort: the stack-safety gate (crashes on the old code) ---
+    check_eq("100k length preserved", vec_length(big), 100000),
+    check_eq("100k first element", vec_get_or(0, -1, big), 0),
+    check_eq("100k last element", vec_get_or(99999, -1, big), 99999),
+    check_true("100k fully non-decreasing", is_sorted_go(big, 0, 100000)),
+
+    # --- edge cases ---
+    check_eq("empty sorts to empty", sort(vec_empty()), vec_empty()),
+    check_eq("singleton", sort(foldable_to_vec([42])), foldable_to_vec([42])),
+    check_eq("all equal", sort(foldable_to_vec([7, 7, 7, 7])), foldable_to_vec([7, 7, 7, 7])),
+    check_eq("already sorted", sort(foldable_to_vec([1, 2, 3, 4, 5])), foldable_to_vec([1, 2, 3, 4, 5])),
+    check_eq("reverse sorted", sort(foldable_to_vec([5, 4, 3, 2, 1])), foldable_to_vec([1, 2, 3, 4, 5]))
+  ])
