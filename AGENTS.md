@@ -153,8 +153,8 @@ Coding agents keep a private auto-memory outside the repo. It is a cache of **no
 For any non-trivial language change, present: the problem statement; goals and non-goals; a
 prior-art survey; a high-level implementation overview for approval **before editing**; the syntax
 and semantics impact, type-system impact and error-message impact; compatibility and migration
-notes; tests added or updated; and the spec/docs update, with normative vs experimental status made
-explicit.
+notes; tests added or updated; and the spec/docs update. A feature the spec does not specify is not part of v0, so say
+whether the change is specified there.
 
 **Making a partial function total, or an operation trapping** — say what each caller's existing
 failure branch *meant*, not that it still compiles. A `Nothing` that was unreachable now arrives,

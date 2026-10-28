@@ -1,6 +1,6 @@
 # Monad class + Maybe combinators — Design (v0)
 
-**Status:** Experimental (alongside spec §8.5). Landed 2026-07-27.
+**Status:** landed 2026-07-27. Normative text: spec §8.5.
 
 ## 1. Problem
 
@@ -83,7 +83,7 @@ codebase-wide sweep confirmed `and_then`/`or_else`/`flat_map`/`with_default`/
 ## 7. Spec/docs
 
 `docs/spec-v0.md` §8.5 gains a `Monad` subsection and a combinator-free-fn table,
-and records the `Alternative`-deferred rationale. Status: Experimental.
+and records the `Alternative`-deferred rationale.
 
 ## 8. Follow-ups (deferred)
 

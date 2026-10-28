@@ -1,12 +1,12 @@
 # Sequencing Sugar v1 Draft
 
-This document is a draft design for ergonomic sequencing sugar in Sprout v1.
+This document is the design for ergonomic sequencing sugar. The `do` block it
+describes is implemented and specified (spec §5.2.1a, §5.2.2, §5.9, §6 rule 11).
 
-It is not part of normative v0. Its purpose is to define an experimental `do`
-surface that removes deeply nested `match` expressions when sequencing
-container-like computations such as `Maybe` and `Result`, and now also supports
-narrow mixed `IO` plus inner `Maybe`/`Result` flows as the intended near-term
-sequencing model. That narrow shape is the preferred story for multi-step `IO`
+Its purpose is to define a `do` surface that removes deeply nested `match`
+expressions when sequencing container-like computations such as `Maybe` and
+`Result`, and now also supports narrow mixed `IO` plus inner `Maybe`/`Result`
+flows as the intended near-term sequencing model. That narrow shape is the preferred story for multi-step `IO`
 and mixed failure-aware code at this stage, while broader Haskell-style
 sequencing remains deferred until later experience justifies it.
 
@@ -97,7 +97,7 @@ The implementation does not yet support:
 Recommended interpretation:
 
 1. The current `Maybe`/`Result` plus narrow mixed-`IO` behavior is the intended
-   experimental design at this stage, not just parser groundwork.
+   design, not just parser groundwork.
 2. A mixed block is for short-circuiting through an inner `Maybe`/`Result`
    while still performing `IO`.
 3. Code that needs the whole `Maybe`/`Result` value should use explicit
@@ -250,18 +250,17 @@ Current high-value diagnostics should identify:
 
 ## 10. Compatibility and Status
 
-This feature is additive and experimental.
+This feature is additive.
 
 Compatibility notes:
 
 1. Existing nested-`match` code remains valid.
 2. Existing combinator helpers remain valid.
-3. Mixed `IO` plus inner `Maybe`/`Result` sequencing is experimental, but it is
-   currently the intended near-term sequencing story rather than a placeholder
-   for immediate generalization. It is the preferred shape for multi-step `IO`
-   and mixed failure-aware flows in current docs and examples.
-4. The feature is implemented in the prototype, but it is not yet normative
-   v0.
+3. Mixed `IO` plus inner `Maybe`/`Result` sequencing is the intended near-term
+   sequencing story rather than a placeholder for immediate generalization. It is
+   the preferred shape for multi-step `IO` and mixed failure-aware flows in current
+   docs and examples.
+4. The feature is implemented and specified (spec §5.2.1a, §5.2.2, §5.9, §6 rule 11).
 
 ## 11. Follow-Up Directions
 

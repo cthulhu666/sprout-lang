@@ -56,8 +56,7 @@ Based on the current implementation and docs:
 
 - Core normative v0 includes HM-style typing, ADTs, tuples, strict evaluation,
   and pattern matching.
-- The implementation already includes modules and typeclasses as experimental
-  extensions.
+- The implementation already includes modules and typeclasses.
 - The runtime already exposes:
   - HTTP request support
   - TCP networking

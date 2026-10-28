@@ -1,16 +1,11 @@
 # Int Ranges v1 Draft
 
-This document is a draft design for Sprout v1 integer ranges.
-
-It is not part of normative v0. Its purpose is to define a compact, typed range
-surface for integer intervals and integer-sequence workflows after the v0 core
-is stabilized.
+This document is the design for Sprout integer ranges. Its purpose is to define a
+compact, typed range surface for integer intervals and integer-sequence workflows.
 
 Current implementation status:
 
-- The initial slice in this draft is now implemented experimentally in the
-  prototype.
-- `IntRange` remains outside normative v0.
+- The initial slice in this draft is implemented, and spec §8.3 is normative for it.
 - The implemented slice includes inclusive `a..b` syntax, ascending and
   descending unit-step semantics, distinct `IntRange` values, and the helper
   surface described below.
@@ -19,8 +14,7 @@ Current implementation status:
   annotated in place). A backwards range is now empty and direction is carried in
   the value via `range_up` / `range_down`. Read `ranges-v0.md` first where the two
   disagree; everything else in this draft still stands.
-- Remaining work is mainly contract and diagnostics polish rather than basic
-  parser, typechecker, interpreter, or native-backend support.
+- Open work (range patterns, half-open forms, diagnostics) is in `BACKLOG.md`.
 
 ## 1. Problem Statement
 

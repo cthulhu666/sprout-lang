@@ -1,7 +1,7 @@
 # `try` and `Propagate` — propagation through a class (v0)
 
 Status: **step 1 implemented** (2026-10-09): `ControlFlow`, `Propagate`, `try`, its reserved
-shapes and known-instance fusion, experimental in spec §5.9.1. Step 1a's `--phase bind-census`
+shapes and known-instance fusion (spec §5.9.1). Step 1a's `--phase bind-census`
 landed; steps 2–5 (§8) are open. Drafted 2026-10-05.
 
 ## 1. Problem
@@ -628,7 +628,7 @@ Raised by the 2026-10-06 review; all must be decided before step 1:
 
 ## 11. Spec and docs impact
 
-- Spec §5.9: replaced by `try`, experimental at step 1 and normative at step 3. Its "discard form"
+- Spec §5.9: replaced by `try` (§5.9.1). Its "discard form"
   (a bare fallible statement continues) becomes `ignore(e)`.
 - Spec §5.8, *Discarded result*: extended to values with a `Propagate` instance (step 3).
 - `try` becomes a hard keyword. No identifier `try` exists in the four repos (strings and comments

@@ -1,7 +1,7 @@
 # In-place reuse of a consumed linear cell (v0)
 
-**Status:** implemented, 2026-10-23 (struck items in §6 and §7 are done). Experimental, as spec
-§5.8 is. No normative spec change: reuse is not observable.
+**Status:** implemented, 2026-10-23 (struck items in §6 and §7 are done).
+No normative spec change: reuse is not observable.
 
 ## 1. Problem
 

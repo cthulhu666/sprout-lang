@@ -258,7 +258,7 @@ example canary. Non-trivial but well-bounded.
   **N2** (`Double` + `Real`, blocked on "C runtime float support"), **N4**
   (`Float` f32). Status: draft, no implementation.
 - [`spec-v0.md`](spec-v0.md) §8 — normative for the **`stdlib.math.int`** surface.
-  `Double` arithmetic has since landed as an experimental extension, and `stdlib.math`
+  `Double` (spec §4.1) has since landed, and `stdlib.math`
   is now the `Double` layer; the modules are split by numeric type because Sprout has
   no overloading. (This entry previously read "the `stdlib.math` surface is Int-only",
   which was true when written.)

@@ -52,9 +52,7 @@ restrictive.
 - **NG1. Replacing or removing typeclasses.** Not on the table, and the reason is mechanical, not
   sentimental: the prelude exports twelve classes (`prelude.sprout:506-840`), `deriving` is built on
   them (spec §8.6), the self-hosted compiler uses them, and the dictionary ABI is frozen into
-  `bootstrap/compile_driver.ll` and `tests/golden/ir`. `spec-v0.md:7` marks typeclasses *wholesale*
-  as an experimental extension, so the label does not narrow the blast radius — the mechanical facts
-  above are the reason, not the status line.
+  `bootstrap/compile_driver.ll` and `tests/golden/ir`. Spec §8.5 makes them normative.
 - **NG2. Module functors / first-class modules.** Open audit item #13. Complementary to classes, not
   a substitute — see `haskell-lessons-learned.md` #13 and
   `module-qualified-type-identity-design-2026-07-10.md`.
@@ -390,7 +388,7 @@ instance are no longer both accepted.
 ## 8. Spec and docs updates
 
 - `spec-v0.md` §8.5: the orphan rule becomes **normative** when P1 lands. Named instances land
-  **experimental**, consistent with §8.5's current status for the instance surface.
+  in §8.5 with it.
 - `spec-v0.md` §8.5: the freeze as a short "what is deliberately absent" subsection, so the position
   is recorded where instance rules are specified rather than only in this doc.
 - `spec-v0.md` §5.6.4: the paragraph ending "needs an orphan-instance rule, which v0 does not have"

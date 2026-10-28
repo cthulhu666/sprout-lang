@@ -6,10 +6,9 @@ A statically typed, functional-first programming language aimed at strong safety
 with beginner-friendly ergonomics. The compiler is **self-hosted** — written in
 Sprout, it compiles itself and emits native binaries via LLVM IR + clang.
 
-> **Status: v0 — experimental.** The self-hosting milestone is reached, but
-> syntax and semantics of non-core features may still change.
-> [`docs/spec-v0.md`](./docs/spec-v0.md) is the normative core; everything else is
-> an implementation feature or experimental extension.
+> **Status: v0.** The compiler is self-hosting.
+> [`docs/spec-v0.md`](./docs/spec-v0.md) is normative; a feature it does not
+> specify may still change.
 
 ## A taste
 
@@ -70,16 +69,18 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
   hover) and an interactive REPL (`just build-sproutd && just repl`); a JetBrains
   plugin lives in [`editors/intellij`](./editors/intellij).
 
-**Experimental slices** (implemented, not yet normative v0): the module system,
-typeclasses, records (`type User = (name: String)` — parametric, with `p.x` access
-and `p with (name = …)` update), integer ranges (`a..b`),
+**Also in the spec:** modules, records (`type User = (name: String)` — parametric,
+with `p.x` access and `p with (name = …)` update), integer ranges (`a..b`),
 list comprehensions (`[e for x in xs if p]`, over `List` and `IntRange`),
-`Char`/Unicode text, `stdlib.regex`, `do` notation for `Maybe`/`Result`/`IO`,
+`do` notation for `Maybe`/`Result`/`IO`, `try`, template literals,
 existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
 sugar — trait objects / heterogeneous collections), linear types with
-`consuming`/`borrowing`/`once`/`local` parameter modes, growable `MutVec` (`mutvec_push`),
-green-task concurrency with channels and a recv-only `select`, and
-`#@unstable`/`#@wip`-style declaration annotations. See the design drafts below.
+`consuming`/`borrowing`/`once`/`local` parameter modes, and `deriving`.
+
+**Implemented, not yet in the spec:** `Char`/Unicode text, `stdlib.regex`, growable
+`MutVec` (`mutvec_push`), green-task concurrency with channels and a recv-only
+`select`, and `#@unstable`/`#@wip`-style declaration annotations. See the design
+drafts below.
 
 `class` and `instance` bodies use the layout (indentation) form; the brace form still
 parses but is deprecated and reported by the linter as `deprecated-brace-body`.

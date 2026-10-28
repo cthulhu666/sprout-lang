@@ -1,7 +1,7 @@
 # A pure array with cheap index writes (v0, 2026-10-19)
 
-**Status:** 5.3 landed 2026-10-22 as `LinVec`, core only (§12 step 14); Experimental, as spec §5.8
-is. The rest is a proposal. Comes from [byte-buffer-v0.md](byte-buffer-v0.md) §5.4, *Beyond append*.
+**Status:** 5.3 landed 2026-10-22 as `LinVec`, core only (§12 step 14).
+The rest is a proposal. Comes from [byte-buffer-v0.md](byte-buffer-v0.md) §5.4, *Beyond append*.
 5.3 is a `wrap linear` over `Vector` whose writes are Sprout over `unsafe_pure` (§12 steps 12 and 17).
 
 ## 1. Problem
@@ -437,7 +437,6 @@ a `wrap`, not an ADT.
 - **For:** within 1.2–1.6× of `MutVec` on the sieve and BFS (§3.2), with a pure signature. No
   slow case, no history to retain, no reroot writes into old objects.
 - **Against:**
-  - Linear types are Experimental (spec §5.8), and the type inherits that.
   - No lambdas: "a lambda may take a linear parameter iff it borrows it" (spec §5.8), so a set
     inside `list_fold` or `fold_indexed` is rejected and the loop must be explicit recursion.
     `owners` and meadow's folds would need rewriting. BACKLOG P2 **Higher-order linearity**
@@ -719,7 +718,7 @@ value is unshared moves the ranking.
 |---|---|---|---|
 | Syntax | none | `wrap linear` | none |
 | Semantics | new opaque type, pure operations | new abstract linear type, pure operations | the same as 5.2, plus a performance cliff on far-apart versions |
-| Types | none | uses §5.8 linearity; Experimental | none |
+| Types | none | uses §5.8 linearity | none |
 | Errors | none new | linear errors (reuse, leak, a set inside a lambda, the array captured by a lambda at a non-`local` parameter), and the bound's error for a linear element type | none new |
 | Runtime | none | none: the writes call existing C functions through `unsafe_pure` | four builtins; 4-word version nodes, no new heap kind |
 | Migration | additive | additive | additive |
@@ -763,8 +762,8 @@ Where each 5.3 item lives: `tests/stdlib/test_linvec.spr` (run by `just test`),
 
 ## 10. Spec and docs
 
-`spec-v0.md` gains the type and its operations, normative when they land; for 5.3, Experimental
-while §5.8 is. `stdlib-reference.md` gets a row in *Collection costs*. `idiomatic-sprout.md`
+`spec-v0.md` gains the type and its operations, normative when they land.
+`stdlib-reference.md` gets a row in *Collection costs*. `idiomatic-sprout.md`
 shows build-by-rows for DP and the chosen array for the rest, in place of a fold of `vec_set`.
 `examples/sieve.sprout` runs the `vec_set` and `MutVec` sieves and 5.3's two versions, element by
 element and with `linvec.scatter`. Landed with the type; `idiomatic-sprout.md` and

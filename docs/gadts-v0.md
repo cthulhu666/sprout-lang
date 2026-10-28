@@ -173,7 +173,7 @@ strictly smaller, self-contained feature. So:
   novel mechanism (skolem + escape check) with zero runtime change. Shipped with
   the nominal-skolem representation of §7 (a rigid `TConst`, not a marked
   `TVar`), so the escape check is a diagnostic rather than soundness code. Spec
-  §5.6 (experimental).
+  §5.6.
 - **Stage 0b — constrained existentials via `any C`. ✅ IMPLEMENTED (2026-07-30;
   multi-method + superclass generalization 2026-07-31).** A field `(any ToString)`
   desugars to a fresh existential var + a `ToString` constraint; constructing
@@ -205,8 +205,7 @@ strictly smaller, self-contained feature. So:
   construction site with the standard "No instance" diagnostic (§8). **Known gap:**
   an *ambiguous* existential construction whose element type is undetermined
   (`Bag([])` — an empty container) currently surfaces as an opaque ctor-arity
-  mismatch rather than a located "ambiguous existential" error (BACKLOG). Spec §5.6
-  (experimental).
+  mismatch rather than a located "ambiguous existential" error (BACKLOG). Spec §5.6.
 - **Stage 1 — index refinement (full GADTs).** Deferred behind the
   local-annotations gate; needs the OutsideIn-style local-equality solver and
   constraint-aware exhaustiveness. **XL, out of scope for v0/v1.**
