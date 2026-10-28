@@ -16,4 +16,4 @@ fn add_lines(p: (Line, Line)) -> Int =
   match p with
   | (Line x, Line y) -> x + y
 
-fn main() -> Unit !{IO} = print(add_lines((Line(2), Line(3))))
+fn main() -> Unit !{IO} = print_str(int_to_string(add_lines((Line(2), Line(3)))))

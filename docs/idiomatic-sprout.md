@@ -251,7 +251,7 @@ Reach for `range_each` only when you genuinely need the index — a numeric loop
 writing into a `MutVec` by position:
 
 ```sprout
-range_each(\i -> print(to_string(i * i)), 1..n)
+range_each(\i -> print(i * i), 1..n)
 ```
 
 Indexed writes are for when you know the size. When you *don't* — the count is

@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -66,8 +65,10 @@ entry:
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @val()
-  %t$1 = call i64 @print_value(i64 %t$0)
-  ret i64 %t$1
+  %t$1 = call i64 @int_to_string(i64 %t$0)
+  %t$2$ptr = inttoptr i64 %t$1 to ptr
+  %t$2 = call i64 @print_str(ptr %t$2$ptr)
+  ret i64 %t$2
 }
 
 define i32 @main(i32 %argc, ptr %argv) {

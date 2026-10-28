@@ -13,7 +13,7 @@ type Range =
 type Half =
   | Half Int Int
 
-type Answers =
+type Answers deriving (ToString) =
   | Answers Int Int
 
 fn modn(n: Int, m: Int) -> Int =

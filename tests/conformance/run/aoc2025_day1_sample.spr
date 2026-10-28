@@ -6,7 +6,7 @@ type Rot =
   | L Int
   | R Int
 
-type Answers =
+type Answers deriving (ToString) =
   | Answers Int Int
 
 fn mod100(n: Int) -> Int =

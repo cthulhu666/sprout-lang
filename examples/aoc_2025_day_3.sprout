@@ -6,7 +6,7 @@ import stdlib.fs as fs
 # For each bank line, pick digits in order to maximize the resulting number.
 # part1 uses 2 picks; part2 uses 12 picks.
 
-export type Answers (..) =
+export type Answers (..) deriving (ToString) =
   | Answers Int Int
 
 # The greedy scan's state. `kept` is a scratch buffer whose first `size` entries

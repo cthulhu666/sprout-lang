@@ -307,12 +307,10 @@ export type IROp (..) =
   # (which currently accepts only Int/Char); the is_string_type routing arm here is a
   # forward-compatibility hook for when that restriction is lifted.
   | IRStrCompare String String String String
-  # IRPrintStr <result> <callee> <arg>  — print a String/Char to stdout/stderr.
-  # <callee> is "print_str" (stdout) or "eprint_str" (stderr); both take a
-  # `const char*` in the C runtime, so lowering coerces the i64-uniform String
-  # handle to ptr (inttoptr) before the call.  Mirrors direct codegen's
-  # emit_print_call / emit_eprint_call (codegen.sprout ~2474).  Int/Bool prints
-  # do NOT use this op — they route through a plain IRCall to @print_value(i64).
+  # IRPrintStr <result> <callee> <arg>  — write a String to stdout/stderr.
+  # Serves `print_str` ("print_str", stdout) and `eprint` ("eprint_str", stderr).
+  # Both take a `const char*` in the C runtime, so lowering coerces the i64-uniform
+  # String handle to ptr (inttoptr) before the call.
   | IRPrintStr String String String
   # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
   | IRStrFromInt String String

@@ -88,8 +88,11 @@ the lowerer's untouched. The two were never the same set.
 
 > Since 2026-10-12 `Set` wraps `Map Unit`: the five `native_set_*` externs are gone
 > and `map_keys` joined the map family. Below, 40, 31 and 25 are 36, 27 and 21
-> today; 9 is unchanged. The floor's 15 is 16 since `print_str` joined it. Counts
-> not edited below are left as measured.
+> today; 9 is unchanged. The floor's 15 is 16 since `print_str` joined it, and 15
+> again since `print` left it: `print` is a prelude function over `ToString`
+> ([print-dispatch-v0.md](print-dispatch-v0.md)), so a preludeless file writes a line
+> with `print_str`. Below, "the floor name `print`" reads `print_str`. Counts not
+> edited below are left as measured.
 
 Those sets overlap on 9 names and disagree on 31. Measured on `0e1e6fd2`, in a
 `no_prelude` file:
@@ -285,7 +288,7 @@ Sources: [Rust Reference — Preludes](https://doc.rust-lang.org/reference/names
 mention no prelude-defined type.** 15 of the 40 (16 since `print_str`):
 
 ```
-print  eprint  print_str  panic
+print  eprint  print_str  panic    (`print` is no longer on the floor)
 int_to_string  double_to_string  char_to_string  char_to_str
 char_from_codepoint  to_double
 str_concat  str_len  str_slice  str_find  str_starts_with  str_compare

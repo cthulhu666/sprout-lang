@@ -260,7 +260,6 @@ fn scalar_or(why: Maybe type_kind.ScalarWhy, other: sprout_ir.IRType) -> sprout_
 
 # Fixed-witness kinds, built once.
 let tuple_slot_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.tuple_slot)
-let unit_result_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.unit_result)
 let ctor_tag_kind: sprout_ir.IRType = sprout_ir.IRTScalar(type_kind.ctor_tag)
 
 # Determine the IRLoadEnvSlot kind for a single captured variable:
@@ -938,8 +937,7 @@ fn translate_expr(expr: typed_ast.TypedExpr, params: List String,
                           fresh_name(idx), idx + 1))
                 else
                   # M3 PR 6: top-level fn reference (eta-expansion).
-                  # Mirrors codegen.sprout:1894-1903 — synthesize a wrapper
-                  # IRFunction that takes Sprout's closure ABI signature
+                  # Synthesize a wrapper IRFunction that takes Sprout's closure ABI signature
                   # (i64 env + N user args) and forwards to the original fn,
                   # then emit IRMkClosure to package the wrapper as a value.
                   match dict_get(name, env.prog.fn_arities) with
@@ -3663,16 +3661,15 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
           phi_name, idx))
 
 # The builtins whose lowering is chosen at the CALL SITE rather than by a symbol.
-# `print` picks @print_str or @print_value from the argument's type; `eprint` and
-# `print_str` take a String and always lower to IRPrintStr, whose runtime symbol takes
-# `ptr` where a plain call passes i64;
+# `eprint` and `print_str` take a String and lower to IRPrintStr, whose runtime
+# symbol takes `ptr` where a plain call passes i64;
 # `to_double` and the Double bit accessors are single LLVM instructions; each
 # bits operation is one integer instruction.  So a plain `call @<name>` would not
 # resolve or would not verify — which is why a reference in
 # VALUE position routes through here too (synthesize_intrinsic_eta_closure), except
 # `unsafe_pure`, which infer rejects as a value.
 export fn is_call_site_intrinsic(fname: String) -> Bool =
-  fname == "print" || fname == "eprint" || fname == "print_str" || fname == "to_double"
+  fname == "eprint" || fname == "print_str" || fname == "to_double"
     || fname == "double_to_bits" || fname == "double_from_bits"
     || fname == source.unsafe_pure_name
     || is_bits_intrinsic(fname)
@@ -3684,7 +3681,7 @@ fn translate_call_site_intrinsic(fname: String, args: List typed_ast.TypedExpr,
                                  cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                                  captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  if fname == "print" || fname == "eprint" || fname == "print_str"
+  if fname == "eprint" || fname == "print_str"
   then translate_print_call(fname, args, params, env, idx,
                             cur_label, cur_ops, captures)
   else if fname == "to_double"
@@ -3732,13 +3729,10 @@ fn translate_unsafe_pure_call(args: List typed_ast.TypedExpr,
 # (the TCall node's own inferred type), mapped via llvm_ret_type, which
 # returns "i64" for every type post /code-review fix #2 (Bool flows as
 # i64 too — 0 or 1 encoded in an i64 register).
-# print / eprint / print_str; `print` dispatches by argument type:
-#   eprint(_)        -> IRPrintStr "eprint_str"  (always String)
-#   print_str(_)     -> IRPrintStr "print_str"   (always String)
-#   print(String)    -> IRPrintStr "print_str"   (i64 handle coerced to ptr in lowering)
-#   print(Char)      -> IRCall @char_to_string, then IRPrintStr "print_str"
-#   print(Int/Bool)  -> IRCall @print_value(i64)  (value already i64-uniform)
-# There is no @print symbol in the runtime; a generic call would fail to link.
+# eprint / print_str: both take a String and lower to IRPrintStr, whose runtime
+# symbol takes `ptr` (the i64 handle is coerced in lowering).
+#   eprint(_)     -> IRPrintStr "eprint_str"
+#   print_str(_)  -> IRPrintStr "print_str"
 fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
                         params: List String, env: TxEnv, idx: Int,
                         cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
@@ -3746,7 +3740,7 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   match args with
   | Nil ->
-      # print() with no args — emit the unit sentinel 0 (mirrors emit_print_call Nil).
+      # No arguments yields the unit sentinel 0.
       Ok((Nil, cur_label,
            list_builder_add(sprout_ir.IRConst(fresh_name(idx), 0), cur_ops),
            fresh_name(idx), idx + 1))
@@ -3754,26 +3748,15 @@ fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
       do
         (ablocks, acur_lbl, acur_ops, a_name, idx1) <-
           translate_expr(arg, params, env, idx, cur_label, cur_ops, captures)
-        if is_char_type(typed_ast.typed_expr_type(arg))
-        then  # A Char is an i64 codepoint; encode to a String before printing.
-             Ok((ablocks, acur_lbl,
-                  list_builder_extend([sprout_ir.IRCall(fresh_name(idx1), sprout_ir.IRTHeap, "char_to_string", Cons(a_name, Nil)),
-                     sprout_ir.IRPrintStr(fresh_name(idx1 + 1), "print_str", fresh_name(idx1))], acur_ops),
-                  fresh_name(idx1 + 1), idx1 + 2))
-        else if fname == "eprint" || fname == "print_str"
-                || is_string_type(typed_ast.typed_expr_type(arg))
-        then Ok((ablocks, acur_lbl,
-                  list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1),
-                                     if fname == "eprint" then "eprint_str" else "print_str", a_name),
-                                   acur_ops),
-                  fresh_name(idx1), idx1 + 1))
-        else Ok((ablocks, acur_lbl,
-                  list_builder_add(sprout_ir.IRCall(fresh_name(idx1), unit_result_kind, "print_value", Cons(a_name, Nil)), acur_ops),
-                  fresh_name(idx1), idx1 + 1))
+        Ok((ablocks, acur_lbl,
+             list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1),
+                                if fname == "eprint" then "eprint_str" else "print_str", a_name),
+                              acur_ops),
+             fresh_name(idx1), idx1 + 1))
 
 # `to_double(n)` — compiler intrinsic (no runtime symbol).  Translate the single
 # Int arg, then emit IRSIToF (sitofp) to convert it to the equal Double value.
-# Mirrors the print interception: recognized by name in translate_call.
+# Recognized by name in translate_call.
 fn translate_to_double_call(args: List typed_ast.TypedExpr,
                             params: List String, env: TxEnv, idx: Int,
                             cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
@@ -5984,7 +5967,7 @@ export fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String,
 # A call-site-directed intrinsic referenced as a VALUE.  There is no symbol to
 # forward to (see is_call_site_intrinsic), so the wrapper body cannot be the
 # generic `call @<name>` synthesize_eta_wrapper emits — that name resolves
-# nowhere, and the two halves of the family fail at different stages: @print has
+# nowhere, and the two halves of the family fail at different stages: @eprint has
 # its `declare` suppressed and is rejected by `opt`, while @to_double and the
 # bits family are declared and fail only at LINK.
 #
@@ -5992,8 +5975,8 @@ export fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String,
 # over synthetic parameters a0..a(N-1): translate_expr resolves each
 # `TVar "ai"` through the param path to `%ai`, so the intrinsic sees argument
 # expressions carrying the types this particular reference was instantiated at.
-# One wrapper is minted per use-site, so `list_each(print, strs)` and
-# `list_each(print, ints)` in the same program get different bodies.
+# One wrapper is minted per use-site, so `list_map(to_double, xs)` and a second
+# reference at another instantiation get separate bodies.
 #
 # Block assembly mirrors the lambda-lifting site: a body is not always one
 # block, since a shift by a non-literal count emits a guard CFG.
@@ -6034,8 +6017,8 @@ fn synthesize_intrinsic_eta_closure(name: String, arity: Int, var_ty: types.Type
 # Peel `remaining` argument types off a function type.  Answers Nothing if the
 # type is not that many arrows deep, or if any argument type is still a type
 # variable — the unresolved case must NOT reach a wrapper body, because the
-# intrinsics choose their lowering from it and would choose silently: `print`
-# would fall through to its Int arm and print a String's pointer as a number.
+# intrinsics choose their lowering from it and would choose silently: a bits
+# operation would be lowered at the wrong operand width.
 fn intrinsic_arg_types(t: types.Type, remaining: Int, acc: List types.Type) -> Maybe (List types.Type) =
   if remaining <= 0 then Just(list_reverse(acc))
   else

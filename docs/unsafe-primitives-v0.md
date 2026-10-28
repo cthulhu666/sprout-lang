@@ -84,7 +84,7 @@ Runs `action(())` and gives its result a pure type. Contract, which the caller p
 a trap, the action's effects are observable only through its result.** In linvec the result is the
 `LinVec` whose vector the action wrote, and linearity means no one else holds that vector.
 
-It is a compiler intrinsic with no C symbol, like `print` and the `stdlib.bits` operations: the
+It is a compiler intrinsic with no C symbol, like `to_double` and the `stdlib.bits` operations: the
 compiler replaces each call with inline code (`ast_to_ir.is_call_site_intrinsic`). Two restrictions
 make it free and greppable:
 

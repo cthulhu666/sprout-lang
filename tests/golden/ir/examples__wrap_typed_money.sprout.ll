@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -86,9 +85,13 @@ declare i64 @ref_write(i64, i64)
 @.str.7 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"transfer \00" }
 @.str.8 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c" from \00" }
 @.str.9 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" to \00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
 @.str.10 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"alice balance before: \00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.11 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"alice balance after:  \00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.str.12 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"bob receives:         \00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_3 }
 @.str.13 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"#\00" }
 @.str.14 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"$\00" }
 @.str.15 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
@@ -148,6 +151,21 @@ declare i64 @ref_write(i64, i64)
 @pow10_exact_max = private constant i64 22
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+
+define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$1$ptr = inttoptr i64 %t$0 to ptr
+  %t$1 = call i64 @print_str(ptr %t$1$ptr)
+  ret i64 %t$1
+}
 
 define i64 @examples.wrap_typed_money.cents_fraction(i64 %p$total) {
 entry:
@@ -349,6 +367,30 @@ entry:
   ret i64 %t$13
 }
 
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_0(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_3(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 1001
@@ -356,59 +398,84 @@ entry:
   %t$2 = add i64 0, 5000
   %t$3 = add i64 0, 1299
   %t$4 = call i64 @examples.wrap_typed_money.describe_transfer(i64 %t$0, i64 %t$1, i64 %t$3)
-  %t$5$ptr = inttoptr i64 %t$4 to ptr
-  %t$5 = call i64 @print_str(ptr %t$5$ptr)
-  %t$6 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
-  %t$7 = ptrtoint ptr %t$6 to i64
-  %t$24 = alloca i64
-  store i64 %t$7, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$8 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %t$2)
-  %t$26 = alloca i64
-  store i64 %t$8, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$9 = call i64 @__tc_Semigroup_String_append(i64 %t$7, i64 %t$8)
-  %t$28 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$10$ptr = inttoptr i64 %t$9 to ptr
-  %t$10 = call i64 @print_str(ptr %t$10$ptr)
-  %t$11 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
-  %t$12 = ptrtoint ptr %t$11 to i64
-  %t$13 = call i64 @examples.wrap_typed_money.cents_sub(i64 %t$2, i64 %t$3)
-  %t$29 = alloca i64
-  store i64 %t$12, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
+  %t$28 = alloca i64
+  store i64 %t$4, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$6 = call i64 @print(i64 %t$4, i64 %t$5)
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$7 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
+  %t$8 = ptrtoint ptr %t$7 to i64
   %t$31 = alloca i64
-  store i64 %t$13, ptr %t$31
+  store i64 %t$8, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$14 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %t$13)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$34 = alloca i64
-  store i64 %t$14, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
-  %t$15 = call i64 @__tc_Semigroup_String_append(i64 %t$12, i64 %t$14)
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$16$ptr = inttoptr i64 %t$15 to ptr
-  %t$16 = call i64 @print_str(ptr %t$16$ptr)
-  %t$17 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
-  %t$18 = ptrtoint ptr %t$17 to i64
-  %t$19 = add i64 0, 0
-  %t$20 = call i64 @examples.wrap_typed_money.cents_add(i64 %t$19, i64 %t$3)
-  %t$37 = alloca i64
-  store i64 %t$18, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
+  %t$9 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %t$2)
+  %t$33 = alloca i64
+  store i64 %t$9, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$8, i64 %t$9)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$11 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$36 = alloca i64
+  store i64 %t$10, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$12 = call i64 @print(i64 %t$10, i64 %t$11)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$13 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.11, i64 0, i32 1, i64 0
+  %t$14 = ptrtoint ptr %t$13 to i64
+  %t$15 = call i64 @examples.wrap_typed_money.cents_sub(i64 %t$2, i64 %t$3)
   %t$39 = alloca i64
-  store i64 %t$20, ptr %t$39
+  store i64 %t$14, ptr %t$39
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
-  %t$21 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %t$20)
-  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$42 = alloca i64
-  store i64 %t$21, ptr %t$42
-  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
-  %t$22 = call i64 @__tc_Semigroup_String_append(i64 %t$18, i64 %t$21)
-  %t$44 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$23$ptr = inttoptr i64 %t$22 to ptr
-  %t$23 = call i64 @print_str(ptr %t$23$ptr)
-  ret i64 %t$23
+  %t$41 = alloca i64
+  store i64 %t$15, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$16 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %t$15)
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$44 = alloca i64
+  store i64 %t$16, ptr %t$44
+  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$17 = call i64 @__tc_Semigroup_String_append(i64 %t$14, i64 %t$16)
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$18 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$47 = alloca i64
+  store i64 %t$17, ptr %t$47
+  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$19 = call i64 @print(i64 %t$17, i64 %t$18)
+  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$20 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
+  %t$21 = ptrtoint ptr %t$20 to i64
+  %t$22 = add i64 0, 0
+  %t$23 = call i64 @examples.wrap_typed_money.cents_add(i64 %t$22, i64 %t$3)
+  %t$50 = alloca i64
+  store i64 %t$21, ptr %t$50
+  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
+  %t$52 = alloca i64
+  store i64 %t$23, ptr %t$52
+  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
+  %t$24 = call i64 @__tc_ToString_examples_wrap_typed_money_Cents_to_string(i64 %t$23)
+  %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$55 = alloca i64
+  store i64 %t$24, ptr %t$55
+  %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
+  %t$25 = call i64 @__tc_Semigroup_String_append(i64 %t$21, i64 %t$24)
+  %t$57 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$26 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
+  %t$58 = alloca i64
+  store i64 %t$25, ptr %t$58
+  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
+  %t$27 = call i64 @print(i64 %t$25, i64 %t$26)
+  %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$27
+}
+
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
+  ret i64 %t$0
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
@@ -421,6 +488,11 @@ define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
   %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
+}
+
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
+entry:
+  ret i64 %p$value
 }
 
 define i64 @__tc_ToString_examples_wrap_typed_money_AccountId_to_string(i64 %p$id) {

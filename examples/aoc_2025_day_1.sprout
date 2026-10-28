@@ -15,7 +15,7 @@ type Rot =
 # The state one fold carries: where the dial sits, and both running counts.
 type Turn = (dial: Int, hits: Int, passes: Int)
 
-type Answers =
+type Answers deriving (ToString) =
   | Answers Int Int
 
 let sample_rotations =

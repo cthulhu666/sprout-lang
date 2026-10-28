@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -118,6 +117,7 @@ declare i64 @split_words(i64)
 @.str.16 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 22, column 5)\00" }
 @__sprout_sclo.__sprout_ir_eta_examples.collections_demo.half_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_examples.collections_demo.half_4 }
 @.str.17 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in + (line 23, column 5)\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_5 }
 @.str.18 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"second\00" }
 @.str.19 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"first\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
@@ -1240,6 +1240,21 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$1$ptr = inttoptr i64 %t$0 to ptr
+  %t$1 = call i64 @print_str(ptr %t$1$ptr)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.string.length(i64 %p$raw) {
 entry:
   %t$1 = alloca i64
@@ -1405,6 +1420,16 @@ entry:
   ret i64 %ret
 }
 
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_5(i64 %p$env$, i64 %p$a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 0
@@ -1422,16 +1447,16 @@ ovfok_2:
   %t$5 = add i64 0, 1
   %t$6 = add i64 0, 2
   %t$7 = call i64 @examples.collections_demo.sample_vec()
-  %t$44 = alloca i64
-  store i64 %t$7, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$45 = alloca i64
+  store i64 %t$7, ptr %t$45
+  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
   %t$8 = call i64 @vec_slice(i64 %t$5, i64 %t$6, i64 %t$7)
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$47 = alloca i64
-  store i64 %t$8, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$48 = alloca i64
+  store i64 %t$8, ptr %t$48
+  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
   %t$9 = call i64 @vec_reverse(i64 %t$8)
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = call i64 @vec_get_or(i64 %t$0, i64 %t$2, i64 %t$9)
   %t$11 = add i64 0, 0
   %t$12 = add i64 0, 100
@@ -1447,23 +1472,23 @@ ovfpanic_13:
 ovfok_13:
   %t$16 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
-  %t$50 = alloca i64
-  store i64 %t$17, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
+  %t$51 = alloca i64
+  store i64 %t$17, ptr %t$51
+  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
   %t$18 = call i64 @examples.collections_demo.sample_dict()
-  %t$52 = alloca i64
-  store i64 %t$18, ptr %t$52
-  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
+  %t$53 = alloca i64
+  store i64 %t$18, ptr %t$53
+  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
   %t$19$st = call i128 @dict_remove_worker(i64 %t$17, i64 %t$18)
   %t$19 = trunc i128 %t$19$st to i64
   %t$19$hi = lshr i128 %t$19$st, 64
   %t$20 = trunc i128 %t$19$hi to i64
-  %t$54 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$55 = alloca i64
-  store i64 %t$20, ptr %t$55
-  %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
+  %t$55 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$56 = alloca i64
+  store i64 %t$20, ptr %t$56
+  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
   %t$21 = call i64 @dict_values_argw(i64 %t$19, i64 %t$20)
-  %t$57 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$22 = call i64 @vec_get_or(i64 %t$11, i64 %t$13, i64 %t$21)
   %t$23$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$10, i64 %t$22)
   %t$23 = extractvalue { i64, i1 } %t$23$agg, 0
@@ -1478,24 +1503,24 @@ ovfok_23:
   %t$26 = add i64 0, 1
   %t$27 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.15, i64 0, i32 1, i64 0
   %t$28 = ptrtoint ptr %t$27 to i64
-  %t$58 = alloca i64
-  store i64 %t$28, ptr %t$58
-  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
+  %t$59 = alloca i64
+  store i64 %t$28, ptr %t$59
+  %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
   %t$29$st = call i128 @examples.collections_demo.sample_dict_worker()
   %t$29 = trunc i128 %t$29$st to i64
   %t$29$hi = lshr i128 %t$29$st, 64
   %t$30 = trunc i128 %t$29$hi to i64
-  %t$60 = alloca i64
-  store i64 %t$30, ptr %t$60
-  %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
+  %t$61 = alloca i64
+  store i64 %t$30, ptr %t$61
+  %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
   %t$31 = call i64 @dict_keys_argw(i64 %t$29, i64 %t$30)
-  %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$32 = call i64 @vec_get_or(i64 %t$26, i64 %t$28, i64 %t$31)
-  %t$63 = alloca i64
-  store i64 %t$32, ptr %t$63
-  %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
+  %t$64 = alloca i64
+  store i64 %t$32, ptr %t$64
+  %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
   %t$33 = call i64 @stdlib.string.length(i64 %t$32)
-  %t$65 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$66 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$34$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$23, i64 %t$33)
   %t$34 = extractvalue { i64, i1 } %t$34$agg, 0
   %t$34$ovf = extractvalue { i64, i1 } %t$34$agg, 1
@@ -1508,11 +1533,11 @@ ovfpanic_34:
 ovfok_34:
   %t$37 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.collections_demo.half_4, i64 8) to i64
   %t$38 = call i64 @examples.collections_demo.sample_vec()
-  %t$66 = alloca i64
-  store i64 %t$38, ptr %t$66
-  %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
+  %t$67 = alloca i64
+  store i64 %t$38, ptr %t$67
+  %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
   %t$39 = call i64 @vec_sum_by(i64 %t$37, i64 %t$38)
-  %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$69 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$40$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$34, i64 %t$39)
   %t$40 = extractvalue { i64, i1 } %t$40$agg, 0
   %t$40$ovf = extractvalue { i64, i1 } %t$40$agg, 1
@@ -1523,8 +1548,18 @@ ovfpanic_40:
   call i64 @panic(i64 %t$42)
   unreachable
 ovfok_40:
-  %t$43 = call i64 @print_value(i64 %t$40)
-  ret i64 %t$43
+  %t$43 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5, i64 8) to i64
+  %t$44 = call i64 @print(i64 %t$40, i64 %t$43)
+  ret i64 %t$44
+}
+
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
+  ret i64 %t$0
 }
 
 define i64 @__cm_Foldable_fold_values(i64 %p$step, i64 %p$init, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
@@ -1533,6 +1568,12 @@ entry:
   %t$0$env_ptr = inttoptr i64 %p$__tc_Foldable_0_fold_values to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
   %t$0 = call i64 (i64, i64, i64, i64) %t$0$code(i64 %p$__tc_Foldable_0_fold_values, i64 %p$step, i64 %p$init, i64 %p$xs)
+  ret i64 %t$0
+}
+
+define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
+entry:
+  %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
 }
 

@@ -4,8 +4,8 @@ beta
 2
 x
 y
-1
-0
+true
+false
 xor       7
 and       136
 or        7

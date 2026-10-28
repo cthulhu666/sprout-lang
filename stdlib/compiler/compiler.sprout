@@ -637,7 +637,7 @@ fn eval_main(how: EvalMain, question: ast.Expr) -> ast.Decl =
 fn eval_main_body(how: EvalMain, question: ast.Expr, pos: source.SourcePos) -> ast.Expr =
   match how with
   | RunAction -> question
-  | PrintValue -> ast.CallExpr(ast.VarExpr("print", pos), [ast.CallExpr(ast.VarExpr("to_string", pos), [question], pos)], pos)
+  | PrintValue -> ast.CallExpr(ast.VarExpr("print", pos), [question], pos)
 
 fn emit_ir(lowered: typed_ast.TypedResult) -> IrFullResult !{IO} =
   match lowered with

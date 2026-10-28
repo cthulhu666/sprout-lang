@@ -40,23 +40,23 @@ fn unreachable_abort(msg: String) -> Int = panic(msg)
 fn main() -> Unit !{IO} =
   do
     # --- strings
-    print(str_concat("str_concat=", "ok"))
-    print(str_concat("str_len=", describe_len("abcde")))
-    print(str_concat("str_slice=", str_slice("abcdef", 1, 4)))
-    print(str_concat("str_find=", int_to_string(str_find("hayneedle", "needle"))))
-    print(str_concat("str_compare=", int_to_string(str_compare("a", "a"))))
+    print_str(str_concat("str_concat=", "ok"))
+    print_str(str_concat("str_len=", describe_len("abcde")))
+    print_str(str_concat("str_slice=", str_slice("abcdef", 1, 4)))
+    print_str(str_concat("str_find=", int_to_string(str_find("hayneedle", "needle"))))
+    print_str(str_concat("str_compare=", int_to_string(str_compare("a", "a"))))
     # --- numbers
-    print(str_concat("int_to_string=", int_to_string(-7)))
-    print(str_concat("to_double=", double_to_string(to_double(3))))
+    print_str(str_concat("int_to_string=", int_to_string(-7)))
+    print_str(str_concat("to_double=", double_to_string(to_double(3))))
     # --- chars
-    print(str_concat("char_to_string=", char_to_string('z')))
-    print(str_concat("char_to_str=", char_to_str(65)))
-    print(str_concat("char_from_codepoint=", char_to_string(char_from_codepoint(66))))
+    print_str(str_concat("char_to_string=", char_to_string('z')))
+    print_str(str_concat("char_to_str=", char_to_str(65)))
+    print_str(str_concat("char_from_codepoint=", char_to_string(char_from_codepoint(66))))
     # --- Bool through the floor: str_starts_with returns one
-    if str_starts_with("prelude", "pre") then print("str_starts_with=true")
-    else print("str_starts_with=false")
+    if str_starts_with("prelude", "pre") then print_str("str_starts_with=true")
+    else print_str("str_starts_with=false")
     # --- the monomorphic String sink
     print_str("print_str=ok")
     # --- the other IO sink
     eprint("eprint reached stderr")
-    print("floor=complete")
+    print_str("floor=complete")

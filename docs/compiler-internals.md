@@ -147,7 +147,7 @@ use-after-free. `IRTScalar` therefore carries a `type_kind.ScalarWhy`, exported 
 constructors are private to `stdlib/compiler/type_kind.sprout`, which is the only place that can
 build one. A type-derived tag comes from `scalar_of_type` / `scalar_of_type_expr`; a field-code tag
 from `scalar_of_field_code`; a literal-tested tuple element from `scalar_of_literal_pattern`. The
-other structural cases (`tuple_slot`, `unit_result`, `ctor_tag`) are exported constants, so their
+other structural cases (`tuple_slot`, `ctor_tag`) are exported constants, so their
 premise is checked by the caller, not by `type_kind`. To add a reason, add a constructor and its constant or function in
 `type_kind` and state the invariant that makes the value non-heap in the comment above it. Tests
 that hand-build IR use `testsupport.ir_fixtures.scalar`, which mints through `scalar_of_type_expr`;

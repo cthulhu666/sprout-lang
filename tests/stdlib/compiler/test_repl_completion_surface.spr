@@ -13,7 +13,7 @@ import stdlib.string as string
 # beginning with `export `. An `extern fn` line never does — and per spec-v0
 # §"Externs are outside the module system" writing `export` on one is a
 # parsed-and-discarded no-op, so no author writes it. Consequence: NO extern was
-# ever offered, from any module including the prelude, so `print`, `panic`,
+# ever offered, from any module including the prelude, so `eprint`, `panic`,
 # `int_to_string` and 40 more were missing while every ordinary function was there.
 #
 # `stdlib.bits` made it total rather than partial: the module is nothing but
@@ -50,7 +50,8 @@ fn main() -> Unit !{IO} =
     let prelude_globals = repl.module_global_names(prelude)
 
     # --- the regression: prelude externs are offered ---
-    assert_true(state, "prelude extern `print` is offered", offered("print", prelude_globals))
+    assert_true(state, "prelude extern `eprint` is offered", offered("eprint", prelude_globals))
+    assert_true(state, "prelude extern `print_str` is offered", offered("print_str", prelude_globals))
     assert_true(state, "prelude extern `panic` is offered", offered("panic", prelude_globals))
     assert_true(state, "prelude extern `int_to_string` is offered",
       offered("int_to_string", prelude_globals))
@@ -58,6 +59,8 @@ fn main() -> Unit !{IO} =
     # --- and ordinary exports did not stop being offered ---
     assert_true(state, "an ordinary exported fn is still offered",
       offered("list_map", prelude_public))
+    # `print` is an exported prelude fn over ToString, not an extern.
+    assert_true(state, "exported fn `print` is offered", offered("print", prelude_public))
 
     # --- constructors of an exported type are still offered ---
     # The line scan collected these from `| Ctor` lines. Losing them while fixing
@@ -72,7 +75,7 @@ fn main() -> Unit !{IO} =
 
     # An extern is never in the module-scoped set, because it is never `alias.`-spelled.
     assert_true(state, "an extern is not offered as a qualifiable name",
-      offered("print", prelude_public) == false)
+      offered("eprint", prelude_public) == false)
 
     # --- stdlib.bits: a module that is ENTIRELY externs ---
     bits <- read_module(root, "bits")

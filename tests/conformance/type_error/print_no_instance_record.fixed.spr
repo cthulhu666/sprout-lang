@@ -1,0 +1,7 @@
+module main
+
+# A program-declared record with no `ToString` instance gets the same `deriving` hint.
+
+type Point = (x: Int, y: Int) deriving (ToString)
+
+fn main() -> Unit !{IO} = print(Point(x = 1, y = 2))
