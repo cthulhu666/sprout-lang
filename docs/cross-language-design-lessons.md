@@ -33,7 +33,7 @@ Verified against the current spec, compiler, prelude, and tests (2026-07). Verdi
 | 7 | `do` hard-wired to Monad | ✅ | Structural over IO/Maybe/Result, not a Monad dictionary; `spec-v0.md` §5.2, §8.5 |
 | 8 | Record namespace pollution | ✅ | Per-record field scoping; `spec-v0.md` §5.6, `records-v0.md:186` |
 | 9 | Monomorphism restriction | ⚠️ | Avoids Haskell's MR, but *does* use the ML value restriction — a special case; `infer.sprout` `is_syntactic_value` (W3/F-VALRESTR) |
-| 10 | Extension proliferation | ✅ | One spec, no pragmas; soft "experimental extension" split only |
+| 10 | Extension proliferation | ✅ | One spec, no pragmas, no extension split |
 | 11 | Numeric hierarchy | 🕗 | Zero classes today; `numeric-types-v1-draft.md` is a sound draft |
 | 12 | Invisible dispatch | 🕗 | No call-site selection syntax; annotation-driven; `spec-v0.md` §8.5 (ambiguity rule). Proposal: `typeclass-policy-v0.md` §5.2 |
 | 13 | First-class modules | 🕗 | Namespace-only; functors deferred; `module-qualified-type-identity-design-2026-07-10.md:164-168` |

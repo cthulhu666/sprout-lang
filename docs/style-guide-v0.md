@@ -349,7 +349,6 @@ Rules:
 
 - Prefer explicit, idiomatic naming over clever brevity.
 - Prefer small examples with one teaching goal.
-- Keep experimental features labeled when the surrounding docs do so.
 - Do not let examples silently imply language guarantees that are not yet
   normative.
 - In examples meant for beginners, choose clarity over maximal concision.

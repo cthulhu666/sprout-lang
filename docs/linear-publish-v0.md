@@ -1,7 +1,7 @@
 # Publishing a linear type's constructor (v0, 2026-10-22)
 
-**Status:** implemented 2026-10-22; rule and plan chosen the same day (Kuba). Experimental, as
-spec §5.8 is, which states the rule (*Publishing a linear type*).
+**Status:** implemented 2026-10-22; rule and plan chosen the same day (Kuba).
+Spec §5.8 states the rule (*Publishing a linear type*).
 Follows [linear-wrap-v0.md](linear-wrap-v0.md); blocks the linear array
 ([persistent-array-v0.md](persistent-array-v0.md) §5.3).
 

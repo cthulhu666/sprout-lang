@@ -293,7 +293,7 @@ fn pascal(n: Int) -> Vec Int =
 ```
 
 - **Writes land where the data says** (a sieve, a histogram, a search), and the function is
-  pure: `LinVec` (`stdlib.linvec`, Experimental). A set consumes the vector and returns it, so
+  pure: `LinVec` (`stdlib.linvec`). A set consumes the vector and returns it, so
   thread it through explicit recursion; a set inside a lambda is rejected. The bulk operations
   take one call per batch, and each path returns the vector or ends it with `linvec.freeze` or
   `linvec.drop`:
@@ -808,7 +808,7 @@ type Widget = | exists s. Widget (View s)                    # `exists s` hides 
 Reach for this only when the types genuinely differ, cannot be restructured into
 per-type columns (struct-of-arrays), and the set is open to new instances. See
 `examples/existential_render.sprout` and `examples/existential_widget.sprout`.
-(Experimental — spec §5.6, design in `docs/gadts-v0.md`.)
+(Spec §5.6, design in `docs/gadts-v0.md`.)
 
 ## Keep effects at the edges
 

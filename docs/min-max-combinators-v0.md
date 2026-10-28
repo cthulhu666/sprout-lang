@@ -322,8 +322,7 @@ implementation. New file `tests/stdlib/test_min_max.spr`:
   tower and its derived free functions, but mentions `Foldable` only in passing
   (`:2345`). This change adds a short **`Foldable`-derived combinators**
   subsection covering the four new functions — their signatures, the `Maybe`
-  return, and the tie-breaking rule with the stable-sort law. Status:
-  **Experimental**, matching the rest of §8.5.
+  return, and the tie-breaking rule with the stable-sort law.
 - This document is the rationale record and is non-normative.
 - `README.md` and `docs/idiomatic-sprout.md` list no prelude functions today, so
   neither needs a change. (`vec_sort_by` is likewise undocumented in both — not

@@ -1,6 +1,6 @@
 # `stdlib.linheap`: a pure binary min-heap — v0
 
-**Status — landed** (`stdlib/linheap.sprout`). Experimental, as `LinVec` is (spec §5.8). A stdlib
+**Status — landed** (`stdlib/linheap.sprout`). A stdlib
 module written in Sprout over `LinVec`: no builtin of its own and no new trust boundary. Its
 growth comes from `linvec.push` and `linvec.pop`, which sit on two temporary builtins (§4.2);
 `spec-v0.md` §5.8 documents those.

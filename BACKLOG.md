@@ -109,12 +109,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Bindings, patterns and surface syntax**
 
-- [ ] `P2` **`try` + `Propagate`: migrate off the fallible `<-`.** `try` landed (spec §5.9.1,
-  experimental). Open: a phase that lists propagating binds (step 1a), codemod A adding `try` in
+- [ ] `P2` **`try` + `Propagate`: migrate off the fallible `<-`.** `try` landed (spec §5.9.1).
+  Open: a phase that lists propagating binds (step 1a), codemod A adding `try` in
   all four repos, the flip that makes `<-` effect-only with the discard rule, codemod B, and `let`
   purity (steps 2–5 of `docs/try-propagate-v0.md` §8).
 - [~] `P2` **Binding-level type annotations `let x : T = e`.** Phase 1 (top-level `let`) landed
-  2026-07-30. `docs/binding-annotations-v0.md`; spec §5.2 (experimental).
+  2026-07-30. `docs/binding-annotations-v0.md`; spec §5.2.
   - [ ] `P2` **Phase 2 — `let…in` and `where` annotations.** Those bindings are desugared and
     have no dedicated AST node to hang an annotation on, so it is materially more invasive than the
     `LetDecl` field. Specify separately (`docs/binding-annotations-v0.md` §5).
@@ -158,7 +158,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `where Convert a b` with `b` unbound by the `exists` prefix is accepted. Latent, since
   multi-parameter classes are unsupported, but the validator's stated contract is not upheld. Fix:
   validate every `TypeName` argument. Stages 0a and 0b are complete; analysis, staging and prior art
-  are in `docs/gadts-v0.md` (non-normative), spec §5.6 (experimental).
+  are in `docs/gadts-v0.md` (non-normative), spec §5.6.
 - [ ] `P4` **Existentials — extend constraint-head class validation to instance/class positions.**
   A variable-first `where a ToString` is rejected on a `FnDecl`; the same swap on an `InstanceDecl`
   context-constraint or a `ClassDecl` superclass silently drops the constraint.
@@ -1814,10 +1814,9 @@ deferral happened, not for current behaviour. Still open:
 
 ### V1 roadmap candidates
 
-- [ ] `P2` **Finalize the integer-ranges v1 contract.** The implemented scope is `IntRange`, `a..b`
-  inclusive syntax, ascending/descending unit step, and the `range*` helper surface. Remaining: the
-  normative contract, sharper diagnostics, and a decision on whether range patterns or half-open
-  forms should exist at all.
+- [ ] `P2` **Integer ranges: range patterns, half-open forms, diagnostics.** Spec §8.3 is the
+  contract for `IntRange`, `a..b` and the `range*` helpers. Open: whether range patterns or
+  half-open forms should exist at all, and sharper diagnostics.
 - [ ] `P2` **Records — unknown field access and missing-field construction bypass the
   typechecker.** `c.nope` and a record literal with fields omitted are rejected only at `ast_to_ir`,
   **with no source position**, and preceded by a misleading
@@ -1986,12 +1985,17 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P3` **`gate-audit` does not catch orphaned `.sprout` executables.** Its assertion B guards
   orphaned `scripts/*.sh` only. Seven unreferenced compiler drivers accumulated unnoticed until a
   review deleted them (2026-10-09).
-- [ ] `P3` **No scientific-notation Double literal in the lexer.** `1.5e3` is a parse error, as is
-  any integer part above 2^63. So 2^64 / 2^512 / 2^-512 are **not writable as literals at all**,
-  which is why `stdlib/math.sprout`'s power-of-two ladder is built from module-level `let`s and
-  `sq()` calls — a forced shape, not a style choice. Adding `e`/`E` exponents would let the ladder
-  be literals. Decide hex-float (`0x1.8p3`) at the same time; it is the only exact-and-readable
-  spelling for a power of two. **Read the item below before assuming the const path is a speedup.**
+- [ ] `P3` **An out-of-range `Double` literal fails in clang, not in the checker.** A literal above
+  the largest `Double` (`1` and 400 zeros, then `.0`), or nonzero below the smallest subnormal,
+  passes the front end into the IR text; clang then stops with `floating-point constant overflowed
+  type` (or `underflowed`) at an IR line, with no Sprout position. Spec §4.1 rejects such a
+  literal at compile time; the check belongs in the parser or checker, at the literal's line:col.
+- [ ] `P3` **No scientific-notation Double literal in the lexer.** `1.5e3` is a parse error, so a
+  large or tiny power of two is writable only as a long digit run, which is why
+  `stdlib/math.sprout`'s power-of-two ladder is built from module-level `let`s and `sq()` calls.
+  Adding `e`/`E` exponents would let the ladder be literals. Decide hex-float (`0x1.8p3`) at the
+  same time; it is the only exact-and-readable spelling for a power of two. **Read the item below
+  before assuming the const path is a speedup.**
 - [ ] `P3` **Do NOT re-attempt const-folding Double-literal globals as a performance fix —
   measured, reverted 2026-08-06.** The mechanism is real (a module-level `let` is a *mutable* global
   whose address escapes to the root registrar, so LLVM cannot fold it), and routing `TFloat`
@@ -2681,10 +2685,6 @@ acting.
   `int_max` and `int_min` from `stdlib.math.int`, have the private `min_int()` and the prelude's
   `int_is_min` use them, and note in the spec that the negative bound is spelled `0 - int_max - 1`
   until the lexer accepts the literal.
-- [ ] `P3` **Document `Double` normatively in `spec-v0.md`.** It landed 2026-07-06 but the spec only
-  acknowledges it as an experimental extension plus a `ToString` row — there is no normative
-  section defining literals, the concrete-only same-type arithmetic rule (no implicit `Int`/`Double`
-  coercion), comparison, or `to_double`. Add one once the type graduates from experimental.
 - [~] `P2` **`instance Eq Double` / `instance Ord Double` in the prelude.** *(The originally filed
   silent-no-op `assert_eq` is GONE — the same program is now rejected at compile time with a
   located `No instance of Eq for Double`, most likely by the superclass/unresolved-dict work that

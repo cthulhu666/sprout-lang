@@ -1,6 +1,6 @@
 # Filterable — container-preserving generic `filter` (v0)
 
-Status: **experimental**. Normative text: `docs/spec-v0.md` §8.5
+Status: **implemented**. Normative text: `docs/spec-v0.md` §8.5
 ("`Filterable` class and generic `filter`").
 
 ## 1. Problem

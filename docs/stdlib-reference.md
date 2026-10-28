@@ -74,7 +74,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `Result e a` with helpers:
   - `after(effect, value)` sequences `effect` and returns `value` as a small
     compatibility convenience for single-step `IO`
-  - experimental `do` blocks for `Maybe`/`Result`, `IO`, and mixed `IO` plus inner `Maybe`/`Result` sequencing, for example:
+  - `do` blocks for `Maybe`/`Result`, `IO`, and mixed `IO` plus inner `Maybe`/`Result` sequencing, for example:
     `do ... x <- mx ... y <- my ... Just((x, y))`
     The intended current model is intentionally narrow: mixed `IO` blocks use
     `<-` to unwrap an inner `Maybe`/`Result` and short-circuit on failure; code
@@ -507,7 +507,7 @@ A pure, immutable 3-vector (in `stdlib/linalg/vec3.sprout`). `Vec3` is a record 
 
 ## stdlib.linheap
 
-A pure binary min-heap over `LinVec` (in `stdlib/linheap.sprout`; Experimental, as `LinVec` is).
+A pure binary min-heap over `LinVec` (in `stdlib/linheap.sprout`).
 Design: [linheap-v0.md](linheap-v0.md).
 
 - `LinHeap a` abstract linear type; elements must not be linear
@@ -526,7 +526,7 @@ type that derives `Ord`, not a tuple: a 5-tuple key runs ~2.5× slower ([linheap
 
 ## stdlib.linvec
 
-A pure vector with in-place writes (in `stdlib/linvec.sprout`; Experimental, as spec §5.8 is;
+A pure vector with in-place writes (in `stdlib/linvec.sprout`;
 `import stdlib.linvec as linvec`). Spec: §5.8 *`LinVec`*; design: [persistent-array-v0.md](persistent-array-v0.md) §5.3.
 
 - `LinVec a` abstract linear type; only the functions below build or take one apart
@@ -602,8 +602,7 @@ Integer math semantics:
 - `+`, `-`, `*` and unary negation **panic** on overflow with a source-located message rather than wrapping (spec §8.4); `abs`, `pow`, `gcd` and `lcm` panic on the inputs whose results do not fit, rather than returning a silently wrong one
 - `BigInt` (`stdlib.math.bigint`, `docs/bigint-v0.md`) is the escape hatch for values that do not fit 64 bits
 
-Double math (`stdlib.math`) — all pure Sprout, **no C builtins**; `Double` is an
-experimental extension rather than normative v0:
+Double math (`stdlib.math`) — all pure Sprout, **no C builtins** (`Double`: spec §4.1):
 
 - `pi -> Double`, `nan -> Double`, `is_nan(x) -> Bool`
 - `abs(x) -> Double`, `clamp(x, lo, hi) -> Double`, `lerp(a, b, t) -> Double`
@@ -865,7 +864,7 @@ Quick reference for the main collection types in the prelude and `stdlib`, with 
 | `bytes.Builder` | `bytes.builder_append` | O(chunks\_left + chunks\_right) | Concatenates chunk tables without flattening the bytes themselves; the final `bytes.builder_build` is O(total\_bytes). The right tool for protocol packet assembly and other "many small fragments, one final blob" patterns. A loop that appends one builder per step is O(k²) in the chunk count; collect the parts in a list and join them with `bytes.builder_concat` (O(k log k)). |
 | `Dict v` | `++` (Semigroup instance) | O(m · log(n + m)) | Persistent: each of `right`'s m entries is folded into `left` via `dict_set`, which is O(log n) copy-on-write on the balanced AVL map (path copy, not a full-array copy). For very large merges, folding into a freshly built dict avoids re-walking the growing left. |
 | `MutVec a` (`stdlib.mutable`) | `mutvec_push` (one element) | amortised O(1) | **Mutable and in place**, unlike every other row here. Start from `mutvec_empty()` when the size is discovered at runtime; capacity doubles from 8 as it fills. See below. |
-| `LinVec a` (`stdlib.linvec`, Experimental) | `linvec.set` (one element, by index) | O(1) | **Linear and in place, with a pure signature.** A set consumes the vector and returns it, so there is no old version to read and nothing is copied or allocated. Reads borrow; each path returns the vector or ends it with `linvec.freeze` (O(1), gives a `Vec`) or `linvec.drop`. A set out of range traps. A set inside a lambda is rejected: thread the vector through recursion, or use `linvec.scatter` / `linvec.accum`. |
+| `LinVec a` (`stdlib.linvec`) | `linvec.set` (one element, by index) | O(1) | **Linear and in place, with a pure signature.** A set consumes the vector and returns it, so there is no old version to read and nothing is copied or allocated. Reads borrow; each path returns the vector or ends it with `linvec.freeze` (O(1), gives a `Vec`) or `linvec.drop`. A set out of range traps. A set inside a lambda is rejected: thread the vector through recursion, or use `linvec.scatter` / `linvec.accum`. |
 
 ### Growing a `MutVec`
 

@@ -2,14 +2,9 @@
 
 This is the normative v0 specification for Sprout core.
 
-It is the source of truth for the stable v0 language surface described here.
-Repository features that are implemented but not specified in this document
-(for example, modules and typeclasses) are experimental extensions and are not
-part of normative v0 until they are specified here or in another normative
-spec document.
-
-The current implementation also includes experimental `do` notation for
-sequencing `Maybe` and `Result`, but that surface is not part of normative v0.
+It is the source of truth for the v0 language surface described here. A feature
+that is implemented but not specified in this document is not part of v0 until it
+is specified here or in another normative spec document.
 
 ## 1. Scope
 
@@ -20,11 +15,13 @@ Sprout v0 is a statically typed, functional-first language with:
 - Immutable bindings by default.
 - Algebraic data types and pattern matching.
 - Strict evaluation with deterministic order.
+- Modules and imports (§3).
+- Typeclasses (§8.5) and derived instances (§8.6).
+- Linear types (§5.8).
 
 Out of scope for v0:
 
-- Typeclasses/traits.
-- Modules/package system.
+- A package system.
 - Laziness by default.
 - Classes/object inheritance.
 
@@ -450,11 +447,9 @@ Built-in types:
 - `String`
 - `Unit`
 
-`Int` is a machine word integer; `Double` is an IEEE 754 double-precision float.
-`Double` has literal syntax (`3.14`), a `ToString` instance (`to_string`/
-`double_to_string`), and arithmetic; `to_double` converts an `Int` to a `Double`.
-A `String` value is always valid UTF-8 and contains no NUL byte. Builtins that
-construct a `String` from raw external bytes (e.g. `read_file`) validate the
+`Int` is a machine word integer; `Double` is an IEEE 754 double-precision float
+(§4.1). A `String` value is always valid UTF-8 and contains no NUL byte. Builtins
+that construct a `String` from raw external bytes (e.g. `read_file`) validate the
 input and report malformed content through their error channel rather than
 producing an invalid `String`.
 
@@ -504,6 +499,37 @@ Type inference:
 - Ordinary function parameters and returns may be inferred.
 - Explicit annotations are still allowed wherever they improve readability or diagnostics.
 - Recursive declarations should infer when constraints are sufficient, but annotations may still be required in difficult or ambiguous cases.
+
+### 4.1 `Double`
+
+`Double` is IEEE 754 binary64.
+
+- **Literals.** A decimal digit run, `.`, and a decimal digit run: `3.14`, `0.5`,
+  `100.0`. Both runs are required, so `.5` and `5.` are not `Double` literals. There
+  is no exponent form (`1.5e3`), no hexadecimal form and no digit separator. A
+  literal denotes the `Double` nearest its decimal value. It carries no sign: `-1.5`
+  is negation (§5.3b) applied to `1.5`. A literal too large for `Double`, or nonzero
+  but too small to be represented, is rejected at compile time.
+- **Arithmetic.** `+` `-` `*` `/` take two operands of one type, `Int` or `Double`,
+  and give that type. On `Double` they are the IEEE 754 operations, rounded to
+  nearest, and never panic: overflow gives `±inf`, and `0.0 / 0.0` gives NaN. There
+  is no `%` operator.
+- **No implicit conversion.** `1 + 1.5` is a type error. `to_double : Int -> Double`
+  converts to the nearest `Double`; `stdlib.math.to_int : Double -> Maybe Int`
+  truncates toward zero and gives `Nothing` for NaN or a value outside `Int`.
+- **Defaulting.** An operand whose type nothing else fixes is `Int`: `fn twice(x) =
+  x + x` has type `Int -> Int`, so `twice(1.5)` is a type error. Annotate the
+  parameter to get `Double`.
+- **Comparison.** The operators `==` `!=` `<` `<=` `>` `>=` are the IEEE 754 ordered
+  comparisons, false whenever an operand is NaN. The `Eq` and `Ord` instances give a
+  total order instead, with NaN equal to itself and above every number (§8.5, *`Eq`
+  and `Ord` on `Double`*).
+- **Text.** `to_string` gives a decimal of 15 to 17 significant digits that reads
+  back to the same value (§8.5, *`ToString` instances*). `parse_double : String ->
+  Maybe Double` is correctly rounded up to 15 significant digits and at most 5 ULP
+  off beyond that, so it is not an exact inverse of `to_string`.
+- **Math.** `stdlib.math` holds the functions on `Double`; an out-of-domain argument
+  gives NaN or `±inf` (§8.2).
 
 ## 5. Declarations and Expressions
 
@@ -584,8 +610,8 @@ is rejected with ``top-level `let boom` performs IO when its module loads, but t
 bindings must be pure``. Binding a function that performs IO is pure — the effect stays on
 its arrow and fires when it is called (`let shout = \s -> print(s)`).
 
-**Type annotation (experimental).** A top-level `let` binding may carry an
-optional type annotation between the name and `=`:
+**Type annotation.** A top-level `let` binding may carry an optional type annotation
+between the name and `=`:
 
 ```sprout
 let answer : Int = 42
@@ -785,7 +811,7 @@ that closes an enclosing bracket, so a `do` block may be a call argument.
 there, with any pattern and with or without an `else` (§5.2.2), binds names nothing
 can read and leaves the block with no value; it is an error.
 
-### 5.2.2 Refutable binds in `do` blocks *(experimental)*
+### 5.2.2 Refutable binds in `do` blocks
 
 Inside a `do` block, both the effectful bind (`<pattern> <- <e>`) and the pure
 local bind (`let <pattern> = <e>`) may carry a refutable pattern with an `else`,
@@ -1134,7 +1160,7 @@ after its own type (`type Box = | Box Int`), a type with several constructors
 only in another module (`JsonArray` after `import stdlib.json as json`) are all
 unaffected.
 
-#### Existential constructors (experimental — Stage 0a)
+#### Existential constructors
 
 A constructor may bind an **existential** type variable with a constructor-level
 `exists` prefix. The variable scopes over the constructor's fields but is
@@ -1184,10 +1210,9 @@ unify through the one shared declaration.
 **Runtime.** Zero cost — the same tagged representation as an ordinary
 constructor; the hidden type is erased.
 
-**Constrained existentials via `any C` (experimental — Stage 0b).** A
-constructor field written `(any C)` hides a value of any type that has an instance
-of the class `C`, and makes that instance available on the unpacked
-value:
+**Constrained existentials via `any C`.** A constructor field written `(any C)`
+hides a value of any type that has an instance of the class `C`, and makes that
+instance available on the unpacked value:
 
 ```sprout
 type Shown = | Shown (any ToString)     # ≡ hides a value with a ToString instance
@@ -1237,13 +1262,10 @@ stored as hidden constructor fields (traced by the GC); a method call on the
 unpacked value forwards them. No new runtime mechanism — the existing
 dictionary-passing path is redirected into the heap value.
 
-**Status (experimental).** Stage 0a (unconstrained), Stage 0b (`any C` and the
-explicit `exists … where` prefix, including multi-method / superclass classes and
-a hidden var nested in a compound field) are implemented. An *ambiguous*
-existential construction whose type is undetermined (e.g. `Bag([])` — an empty
-container) is currently reported as an opaque constructor-arity mismatch rather
-than a located "ambiguous" error. Full GADTs (index refinement) are out of scope.
-Design and staging: `docs/gadts-v0.md`.
+**Known gaps.** An *ambiguous* existential construction whose type is undetermined
+(e.g. `Bag([])` — an empty container) is reported as an opaque constructor-arity
+mismatch rather than a located "ambiguous" error. Full GADTs (index refinement)
+are out of scope. Design and staging: `docs/gadts-v0.md`.
 
 ### 5.6.1 `wrap` declaration
 
@@ -1327,7 +1349,7 @@ Where the compiler can identify the declaring module it adds a note naming
 it and this marker, so the case stays distinguishable from a misspelling;
 the note is advisory and withheld when that module cannot be confirmed.
 
-**Linear wraps (Experimental).** `wrap linear Name params = T` declares a wrap
+**Linear wraps.** `wrap linear Name params = T` declares a wrap
 that is also a linear type (§5.8): its representation is `T`'s, unchanged, and
 its values follow every §5.8 rule a linear ADT does. The marker sits between
 `wrap` and the name, as on `type linear`.
@@ -1602,12 +1624,9 @@ field list has (§5.6); exceeding it is a compile error naming the record. The
 limit is the width of the runtime object header's field-count byte, not a design
 rule; it is far above any practical record.
 
-### 5.7 Template literals (Experimental)
+### 5.7 Template literals
 
-> **Experimental** — not part of normative v0 until Phase 5 of the string
-> interpolation roadmap lands and the full test gate passes.  Full design
-> rationale and the phased implementation plan live in
-> `docs/string-interpolation-v1.md`.
+Design rationale: `docs/string-interpolation-v1.md`.
 
 Grammar:
 
@@ -1673,16 +1692,12 @@ still builds cons cells first. A zero-intermediate lowering is deferred.
 Rationale and prior art: `docs/coercions-and-literals-v1-draft.md` (Case A);
 the comprehension extension is D8 of `docs/list-comprehensions-v0.md`.
 
-### 5.8 Linear types (Experimental)
+### 5.8 Linear types
 
-> **Experimental** — not part of normative v0. Syntax stabilized in Milestone 4.1;
-> consume-exactly-once enforcement in Milestone 4.2; borrowing in Milestone 4.5;
-> parameter ownership moved into the function type in Milestone 4.6; one-shot
-> (`once`) closure parameters in Milestone 4.4a.
-> Design rationale and the deferred items live in
-> `docs/linear-types-m4-scoping-2026-08-01.md`,
-> `docs/linear-types-m4.2-enforcement-2026-08-06.md`,
-> `docs/linear-borrowing-v0.md` and `docs/one-shot-closures-v0.md`.
+Design rationale and the deferred items live in
+`docs/linear-types-m4-scoping-2026-08-01.md`,
+`docs/linear-types-m4.2-enforcement-2026-08-06.md`,
+`docs/linear-borrowing-v0.md` and `docs/one-shot-closures-v0.md`.
 
 A type declaration may carry the contextual modifier `linear`, written between
 `type` and the type name (mirroring `type alias`), or between `wrap` and the
@@ -2262,7 +2277,7 @@ caller keeps a borrowed value and releases it after either outcome.
   the case that motivated that (`Chan a`) is a phantom parameter, which containment
   now declines to descend on its own. See `docs/linearity-virality-v0.md`.
 
-#### `LinVec`: a pure vector with in-place writes (Experimental)
+#### `LinVec`: a pure vector with in-place writes
 
 `stdlib.linvec` declares `export wrap linear LinVec a = Vector a`, abstract: only its module
 builds or takes one apart. A set, push or pop consumes the vector and returns it, and linearity
@@ -2358,7 +2373,7 @@ Effects are orthogonal. `!{IO}` describes *what a step may do*, not whether the 
 can exit early, so an `!{IO}` block containing a fallible bind still short-circuits
 and its later steps are still conditional (see §5.8's consume rule).
 
-### 5.9.1 `try` *(experimental)*
+### 5.9.1 `try`
 
 `try e` passes a failure on and gives the success. It replaces the fallible `<-`
 once the migration in `docs/try-propagate-v0.md` §8 completes; until then both work.
@@ -2425,7 +2440,7 @@ declared after it without a dependency, or in a binding group with it, they are
 not, and `try` calls `branch`. The instance itself is in scope anywhere in its
 module, and in a module that imports it.
 
-### 5.10 List comprehensions (Experimental)
+### 5.10 List comprehensions
 
 ```
 comprehension ::= '[' expr 'for' generator { ',' generator } ']'
@@ -2485,9 +2500,8 @@ a comprehension over any source runs in constant stack space:
 The accumulator is a compiler-generated binder that cannot capture, or be
 captured by, any user name.
 
-*Experimental:* settled as above. A `let` qualifier, `Vec` sources and parallel
-(zip) generators are deliberately absent; see
-`docs/list-comprehensions-v0.md` for the rationale and open questions.
+A `let` qualifier, `Vec` sources and parallel (zip) generators are deliberately
+absent; see `docs/list-comprehensions-v0.md` for the rationale and open questions.
 
 ## 6. Evaluation Semantics (Strict)
 
@@ -2510,6 +2524,7 @@ captured by, any user name.
      overflow, with a source-located message naming the operator; see §8.4. `Int`
      never silently yields a wrong value. `BigInt` (`docs/bigint-v0.md`) is the
      escape hatch for values that do not fit in 64 bits.
+   - `Double` operators never panic; they give IEEE 754 results (§4.1).
 6. Short-circuiting:
 - `a && b`: evaluate `b` only if `a` is `true`.
 - `a || b`: evaluate `b` only if `a` is `false`.
@@ -2517,6 +2532,10 @@ captured by, any user name.
 8. `match`: evaluate scrutinee once, then patterns in order, evaluate first matching branch.
 9. Constructors and tuples evaluate fields left-to-right before construction.
 10. Top-level declarations evaluate in source order.
+11. `do` block: statements evaluate top to bottom, and a `let` or `<-` binding is in
+    scope for the statements below it. The block's value is its last statement's,
+    unless a fallible bind (§5.9), a failing `try` (§5.9.1) or a refutable binding's
+    `else` (§5.2.2) ends it first.
 
 Effect note for v0:
 
@@ -2528,7 +2547,7 @@ Effect note for v0:
   one place the effect discipline rests on an assertion rather than a check —
   which is why the rule below is stated normatively and `runtime/APPROVED_BUILTINS`
   requires a justification per entry.
-- **`unsafe_pure` (Experimental)** is the second such place. `stdlib.unsafe` declares
+- **`unsafe_pure`** is the second such place. `stdlib.unsafe` declares
   `unsafe_pure(action: local Unit -> a !{IO}) -> a where linear a`, which runs `action(())` and gives its result a
   pure type. The caller asserts that, apart from a trap, the action's effects are observable only
   through its result. It is a compiler intrinsic with no C symbol, reserved for the stdlib
@@ -2934,10 +2953,9 @@ use plain unprefixed names:
 
 - **`stdlib.math.int`** — the normative integer math module. Its exports and
   semantics are specified below.
-- **`stdlib.math`** — the `Double` (real-valued) layer. `Double` itself is an
-  experimental extension rather than part of the normative v0 core (see §8.6), so
-  that module's surface is documented in `docs/stdlib-reference.md` and
-  `docs/math-transcendental-v0.md` rather than fixed here.
+- **`stdlib.math`** — the `Double` (§4.1) layer. Its surface is documented in
+  `docs/stdlib-reference.md` and `docs/math-transcendental-v0.md` rather than fixed
+  here.
 
 Sprout has no overloading, so a single name cannot serve both types. The split is
 what lets `abs`, `clamp` and `pow` mean the obvious thing in each module instead of
@@ -2986,12 +3004,10 @@ Semantics:
 - `abs`, `pow`, `gcd`, and `lcm` panic rather than return a silently wrong result once
   computation leaves the representable range, per the trapping rule above.
 - The presence of `pow` and `mod` in `stdlib.math.int` does not imply implicit
-  numeric coercions or fractional arithmetic for `Int`. A separate `Double`
-  type with floating-point arithmetic has since landed as an experimental
-  extension; `Int` and `Double` never implicitly coerce — conversion is
-  explicit (`to_double`).
+  numeric coercions or fractional arithmetic for `Int`. Fractional arithmetic is
+  the separate `Double` type (§4.1); `Int` and `Double` never implicitly coerce.
 
-### 8.1.1 Double bit access (Experimental)
+### 8.1.1 Double bit access
 
 Two functions in `stdlib.math` expose the raw IEEE 754 binary64 encoding of a
 `Double`. They are not in the prelude: reinterpreting a `Double`'s bits is a
@@ -3018,10 +3034,10 @@ reference lowers the operation itself rather than calling one. A reference whose
 argument type is still a type variable — inside a function generic in that type — is
 therefore rejected at compile time.
 
-Status: experimental. Rationale, the prior-art survey, and the rejected
-alternatives are in `docs/double-bit-access-v0.md`.
+Rationale, the prior-art survey, and the rejected alternatives are in
+`docs/double-bit-access-v0.md`.
 
-### 8.1.2 Bitwise integer operations (Experimental)
+### 8.1.2 Bitwise integer operations
 
 `stdlib.bits` provides bitwise operations on `Int`. They are **functions, not
 operators**: `>>` and `<<` are function composition (§5), and `&`, `^` and `~` are
@@ -3070,8 +3086,8 @@ arbitrary-precision (§8.4; `docs/bigint-v0.md` §4). See
 `rotate`, `popcount` and similar are **not** provided: they are ordinary functions
 composed from the above.
 
-Status: experimental. Rationale, the prior-art survey and the rejected
-operator spellings are in `docs/bitwise-int-ops-v0.md`.
+Rationale, the prior-art survey and the rejected operator spellings are in
+`docs/bitwise-int-ops-v0.md`.
 
 ### 8.2 Partiality
 
@@ -3083,7 +3099,7 @@ the prior-art survey behind them are in `docs/math-partiality-v0.md`; Rule 1's
 `Maybe`-returning signatures are a standing commitment and will not be narrowed to
 total functions.
 
-### 8.3 Integer ranges (Experimental)
+### 8.3 Integer ranges
 
 `IntRange` denotes an **inclusive interval walked in a fixed direction**. The direction
 is part of the value, not inferred from which bound is larger. Design rationale and prior
@@ -3159,11 +3175,10 @@ the ordinary spelling of a half-open `[0, n)` walk.
 **Step.** `range_step` reports `+1` or `-1`. No other step is constructible in this
 version; arbitrary steps are deferred (`docs/ranges-v0.md` §4).
 
-## 8.5 Standard Prelude Typeclass Instances (Experimental)
+## 8.5 Standard Prelude Typeclass Instances
 
 The following typeclass instances are provided by `stdlib/prelude.sprout` and are
-automatically available without an explicit import.  They are experimental in v0
-(consistent with the module/typeclass extension status noted in §1).
+automatically available without an explicit import.
 
 **Declaration syntax.**  A `class` or `instance` declaration is a head followed
 by a body of `fn` members.  The body takes one of two forms.
@@ -3912,7 +3927,7 @@ there is no value denoting "unordered".  The same split exists in Java
 (`==` vs `Double.compareTo`) and Julia (`<` vs `isless`).  Rationale and the
 prior-art survey: `docs/eq-ord-double-v0.md`.
 
-### `Foldable`-derived extreme selection (Experimental)
+### `Foldable`-derived extreme selection
 
 ```
 min_by(f: a -> k, xs: c a) -> Maybe a   where Foldable c, Ord k
@@ -3972,7 +3987,7 @@ incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
 > and **on `Double` the two orderings differ at NaN** — see *`Eq` and `Ord` on
 > `Double`* above.
 
-### `Traversable` class, `traverse` and `sequence` (Experimental)
+### `Traversable` class, `traverse` and `sequence`
 
 ```
 class Traversable t
@@ -4011,7 +4026,7 @@ whose order is deliberately unpinned (`docs/effect-polymorphism-policy-v0.md`
 §5).  O(n) in elements, plus the applicative's own per-step cost, at O(1)
 recursion depth for every instance.
 
-### `Propagate` class and `ControlFlow` (Experimental)
+### `Propagate` class and `ControlFlow`
 
 ```
 type ControlFlow r a = Continue a | Break r
@@ -4031,7 +4046,7 @@ has `Eq` and `ToString` when `r` and `a` do.
 `try` (§5.9.1) is written through `branch`, and at a known instance whose `branch` is
 one `match` it uses that `match` directly.
 
-### `Filterable` class and generic `filter` (Experimental)
+### `Filterable` class and generic `filter`
 
 ```
 class Filterable f
@@ -4085,7 +4100,7 @@ element, breaking the once-per-element guarantee `min_by`/`max_by` document.
 The concrete per-container forms are `list_filter_map`/`vec_filter_map` and
 `list_partition`/`vec_partition`.
 
-### `Zip` class, `zip_with` and `zip` (Experimental)
+### `Zip` class, `zip_with` and `zip`
 
 ```
 class Zip f
@@ -4108,7 +4123,7 @@ result keeps the inputs' container.  `stdlib.list.map_adjacent(g, xs)` is
 `zip_with(g, xs, drop(1, xs))`: `g` on each element and its successor.
 Design: `docs/list-toolkit-v0.md` §4.2.
 
-### `Foldable`-derived search and test combinators (Experimental)
+### `Foldable`-derived search and test combinators
 
 ```
 any(pred: a -> Bool, xs: c a)      -> Bool     where Foldable c
@@ -4147,7 +4162,7 @@ fold-derived version would be O(n) even on `Vec`, where `vec_length` is O(1).
 Providing them at the right complexity requires `Foldable` class methods with
 per-instance overrides, as Haskell does (see `BACKLOG.md`).
 
-### `fold_while` — the short-circuiting fold (Experimental)
+### `fold_while` — the short-circuiting fold
 
 ```
 fold_while(step: b -> a -> b, cond: b -> Bool, init: b, xs: f a) -> b  where Foldable f
@@ -4197,7 +4212,7 @@ provides per-type combinators covering the axes no class does:
 | `guard(condition, err)` | `Ok(())` when `condition`, else `Err(err)` — a precondition a `do` can bind. Unrelated to a comprehension guard (§5.10), which is syntax |
 | `result_map`, `result_map_error`, `result_and_then`, `result_with_default`, `result_pipe*` | the `Result` family (see prelude) |
 
-## 8.6 Automatic Instance Derivation (`deriving`) (Experimental)
+## 8.6 Automatic Instance Derivation (`deriving`)
 
 An ADT `type` declaration may carry a `deriving (...)` clause between the
 optional `(..)` constructor-export marker and the `=` sign.  Records (§5.6.3)

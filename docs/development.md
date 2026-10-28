@@ -247,10 +247,9 @@ handshake/read/write debug lines to stderr.
 
 The native server (`stdlib.http_server` / `stdlib.net`) spawns each accepted connection as a fire-and-forget green task (Layer-0 concurrency), so a slow connection does not block others — handlers interleave at their socket-I/O park points on a single OS thread. `serve_n`'s `max_connections` bounds the number of connections *accepted*; its enclosing `with_scope` joins all spawned handlers before returning.
 
-## Modules (experimental)
+## Modules
 
-The prototype supports file-based modules with top-of-file headers. This module
-system is not yet part of normative v0; treat it as implementation status.
+Sprout has file-based modules with top-of-file headers (spec §3).
 
 Sprout supports:
 
@@ -322,7 +321,7 @@ Example classification:
 - `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
-- `examples/string_templates.sprout` is a runnable experimental string-template demo showing templates in both `String` contexts (`string_concat_many` instead of `++` chains) and `StringTemplate` contexts (structured parts passed to a sink).
+- `examples/string_templates.sprout` is a runnable string-template demo showing templates in both `String` contexts (`string_concat_many` instead of `++` chains) and `StringTemplate` contexts (structured parts passed to a sink).
 
 The stdlib prelude is included automatically when a stdlib root is provided; `just check` and `just run` always include it.
 
@@ -347,5 +346,5 @@ For programs that take program arguments (`argv_get`), use `just compile-native`
   `SENTRY_ORG=your-org SENTRY_PROJECT=your-project SENTRY_TOKEN=token /tmp/sentry_issue_browser`
   Interactive terminals use arrow keys or `j`/`k` to move, `Enter` to open details, `r` to refresh, and `q` to quit. Non-interactive runs fall back to the plain issue list.
 - Collections helper demo: `mise exec -- just run examples/collections_demo.sprout`
-- Typeclass collections demo (experimental surface area, not normative v0):
+- Typeclass collections demo:
   `mise exec -- just run examples/typeclass_functor_foldable_demo.sprout`

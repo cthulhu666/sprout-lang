@@ -1,6 +1,6 @@
 # A linear `wrap` (v0, 2026-10-22)
 
-**Status:** landed 2026-10-22, Experimental as spec §5.8 is (spec §5.6.1 *Linear wraps*).
+**Status:** landed 2026-10-22 (spec §5.6.1 *Linear wraps*).
 Comes from [persistent-array-v0.md](persistent-array-v0.md) §12 step 12.
 
 ## 1. Problem

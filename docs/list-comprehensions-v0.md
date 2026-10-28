@@ -1,6 +1,6 @@
 # List comprehensions — design (v0)
 
-Status: **landed** (2026-09-05), experimental. Decisions D1–D7 below are settled
+Status: **landed** (2026-09-05). Decisions D1–D7 below are settled
 with the user and implemented. Normative surface: spec §5.10.
 
 Supersedes the scope V1 Roadmap Candidate 1 in `BACKLOG.md` originally set

@@ -1,6 +1,6 @@
 # Unsafe primitives v0: `unsafe_pure`
 
-Status: **implemented.** Experimental (stdlib-internal; spec §6 note).
+Status: **implemented.** Stdlib-internal (spec §6).
 
 ## 1. Problem
 

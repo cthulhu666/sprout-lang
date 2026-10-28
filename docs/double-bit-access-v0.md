@@ -1,6 +1,6 @@
 # Double bit access (v0)
 
-**Status:** experimental. Normative surface is `docs/spec-v0.md` §8; this document
+**Status:** implemented. Normative surface is `docs/spec-v0.md` §8; this document
 holds the rationale.
 
 ## 1. Problem statement

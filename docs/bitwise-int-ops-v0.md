@@ -1,6 +1,6 @@
 # Bitwise integer operations (v0)
 
-**Status:** implemented, experimental. `docs/spec-v0.md` §8.1.2 is normative for the
+**Status:** implemented. `docs/spec-v0.md` §8.1.2 is normative for the
 surface; this document holds the rationale, the prior-art survey, and the two semantics
 decisions (§5.2, §5.3) with the alternatives that lost.
 

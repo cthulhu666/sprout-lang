@@ -1,6 +1,6 @@
 # String Interpolation v1 — Design Doc
 
-Status: **Experimental** — not normative until Phase 5 lands.
+Status: **implemented.** Normative text: `docs/spec-v0.md` §5.7.
 
 ---
 
@@ -166,7 +166,6 @@ coercion site, both of which are comprehensible and auditable.
 
 ## References
 
-- `docs/spec-v0.md` — normative spec (template literals added as experimental
-  in Phase 1 spec patch)
+- `docs/spec-v0.md` — normative spec (§5.7)
 - `stdlib/compiler/codegen.sprout` — primary motivation; current `++` chains
 - `stdlib/compiler/ast.sprout` — defines `StringTemplateExpr` and `TemplateExprPart`

@@ -1,6 +1,6 @@
 # Collection combinators — the Foldable/Filterable split (v0)
 
-Status: **experimental**. Normative text: `docs/spec-v0.md` §8.5. Companion to
+Status: **implemented**. Normative text: `docs/spec-v0.md` §8.5. Companion to
 `docs/filterable-v0.md`, which introduced the `Filterable` class this extends.
 
 ## 1. Problem
