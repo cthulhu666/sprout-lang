@@ -1,9 +1,9 @@
 # List toolkit — zip, adjacent pairs, scan, sort, min/max
 
-Status: **step 1 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`, `list.map_adjacent`.
-Approved, not yet built: a `Sort` class with `sort`/`sort_by` in a new `stdlib.sort`, sorting in
-place over `LinVec` (§4.6, §4.6.1); retiring `vec_sort`/`vec_sort_by` (§4.6.2); `scanl` (§4.5).
-`enumerate` deferred (§4.3).
+Status: **steps 1 and 2 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`,
+`list.map_adjacent`; a `Sort` class with `sort`/`sort_by` in `stdlib.sort`, sorting in place over
+`LinVec` (§4.6.1), and `vec_sort`/`vec_sort_by` retired (§4.6.2). Approved, not yet built: `scanl`
+(§4.5). `enumerate` deferred (§4.3).
 
 ## 1. Problem
 
@@ -243,8 +243,8 @@ The arrays are `LinVec`s, private to `stdlib.sort`:
 
 - **`List`**: `linvec.from_list(xs)`, sort, `freeze`, `vec_to_list`.
 - **`Vec`**: `linvec.from_vec(v)` — new, a copy (§4.6.4) — sort, `freeze`.
-- **`sort_by`**: a `LinVec` of `(key(x), x)` pairs, written directly from the input; the merge
-  compares keys only; the keys are stripped into the result.
+- **`sort_by`**: a `LinVec` of `(key(x), x)` pairs — written straight from a `Vec`, through a
+  `list_map` for a `List`; the merge compares keys only; the keys are stripped into the result.
 - The comparison calls `compare` directly: `ord_lt` costs ~40% in a sort
   (`docs/sorting-v0.md` §Where the time goes, item 2).
 - The merge passes swap the two arrays. At the end the one holding the result is frozen and the
@@ -402,8 +402,8 @@ that went through `Vec` drops the round trip: `vec_to_list(vec_sort(vec_from_lis
 
 Downstream, step 1 found none of the step-1 names defined or bound in repbit, repbit-cards,
 sprout-postgres, sprout-sqlite or uncharted-suns. uncharted-suns imports `stdlib.math.int`'s
-`min`/`max` selectively, which keeps them; all 369 of its entry files type-check. Step 2 migrates
-its 15 `vec_sort`/`vec_sort_by` uses (§4.6.2).
+`min`/`max` selectively, which keeps them; all 369 of its entry files type-check. Step 2 migrated
+its 15 `vec_sort`/`vec_sort_by` uses (§4.6.2; uncharted-suns #479).
 
 ## 8. Spec and docs
 
@@ -418,7 +418,7 @@ its 15 `vec_sort`/`vec_sort_by` uses (§4.6.2).
   sort" item is done.
 - `BACKLOG.md`: on landing, delete "List toolkit"; delete (b) of "Deferred non-goals from
   `docs/min-max-combinators-v0.md` §2" and the `zip` part of (c) in the collection-combinators
-  entry. Step 2 deletes "`vec_sort` sorts lists of `(key, index, value)` tuples", and renames
+  entry. Step 2 deleted "`vec_sort` sorts lists of `(key, index, value)` tuples", and renamed
   `vec_sort` in the `Ord Char` and primitive-sort entries.
 - Status: the same as the rest of spec §8.5, which documents the prelude's classes.
 
@@ -427,10 +427,10 @@ its 15 `vec_sort`/`vec_sort_by` uses (§4.6.2).
 1. ~~`Zip` with the `List` and `Vec` instances, `zip_with`, `zip`, `min`, `max`;
    `stdlib.list.map_adjacent`. Measure `max` against `imath.max` in a DP loop.~~ Landed;
    `max` measured (§4.7).
-2. `stdlib.sort`: `Sort` with the `List` and `Vec` instances, `sort`, `sort_by`, in place over
+2. ~~`stdlib.sort`: `Sort` with the `List` and `Vec` instances, `sort`, `sort_by`, in place over
    `LinVec` (§4.6.1); `linvec.from_vec` (§4.6.4). Move every caller, delete `vec_sort` and
    `vec_sort_by` from the prelude (§4.6.2), reseed. Measured through `bench/list_sort/bench.sh`
-   (§4.6.1). Migrate uncharted-suns in a matching commit.
+   (§4.6.1). Migrate uncharted-suns in a matching commit.~~ Landed; uncharted-suns #479.
 3. After `NonEmpty`: `scanl`, the `NonEmpty` `Zip` instance.
 4. Migrate the LeetCode examples (§7).
 
