@@ -94,7 +94,6 @@ declare i64 @ref_write(i64, i64)
 @.str.14 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"outbound starts at \00" }
 @.str.15 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.16 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"return starts at \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.str.17 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"empty shift\00" }
 @.str.18 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 48, column 46)\00" }
 @.str.19 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"backwards down\00" }
@@ -748,12 +747,6 @@ entry:
   ret i64 %t$29
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$58 = alloca [1 x i64]
@@ -888,7 +881,7 @@ entry:
   %t$104 = call i64 @sprout_gc_push_i64_root(ptr %t$103)
   %t$39 = call i64 @__tc_Semigroup_String_append(i64 %t$26, i64 %t$38)
   %t$105 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$40 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$40 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
   %t$106 = alloca i64
   store i64 %t$39, ptr %t$106
   %t$107 = call i64 @sprout_gc_push_i64_root(ptr %t$106)

@@ -110,7 +110,6 @@ declare i64 @split_words(i64)
 @.str.12 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"|no_vowels=\00" }
 @.str.13 = private unnamed_addr constant { i64, [51 x i8] } { i64 819210, [51 x i8] c"usage: sprout run examples/text_demo.sprout <text>\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -886,12 +885,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 0
@@ -924,7 +917,7 @@ body_1_3:
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$13 = call i64 @examples.text_demo.summarize(i64 %t$2)
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$22 = alloca i64
   store i64 %t$13, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)

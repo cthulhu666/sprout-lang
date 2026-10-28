@@ -1,6 +1,6 @@
 # `print` through `ToString` — v0
 
-**Status — approved; in progress (§10 step 2 landed).** Changes the normative spec: `print`'s
+**Status — approved; in progress (§10 steps 1–3 landed).** Changes the normative spec: `print`'s
 type, its output for `Bool`, `List`, `Vec` and any type with a hand-written instance, and the
 `no_prelude` floor.
 
@@ -126,16 +126,18 @@ name. Step 5 (§10) drops that declare and makes it a plain extern.
 
 ### 4.3 What the compiler loses
 
-- `infer_print_call` and its tuple rewrite (`infer.sprout`).
-- The `print` arms of `is_call_site_intrinsic` and `translate_print_call` (`ast_to_ir.sprout`);
-  the `eprint` arm stays, and `print_str` joins it.
-- `"print"` in the no-runtime-symbol set and the `print_value` declare (`ir_lowering.sprout`).
-- `"print"` and `"print_value"` in the effectful-call list in `bce.sprout`.
-- The `IRPrintStr` comment in `sprout_ir.sprout`, which routes Int/Bool to `print_value`.
+- ~~`infer_print_call` and its tuple rewrite (`infer.sprout`).~~
+- ~~The `print` arms of `is_call_site_intrinsic` and `translate_print_call` (`ast_to_ir.sprout`);
+  the `eprint` arm stays, and `print_str` joins it.~~
+- ~~`"print"` in the no-runtime-symbol set and the `print_value` declare (`ir_lowering.sprout`).~~
+- ~~`"print"` and `"print_value"` in the effectful-call list in `bce.sprout`.~~
+- ~~The `IRPrintStr` comment in `sprout_ir.sprout`, which routes Int/Bool to `print_value`.~~
 - `print_value`, `print_value_part` and `print_inline_value` in the runtime, once nothing emits
-  them, with their `APPROVED_BUILTINS` lines.
-- The REPL's `print(to_string(question))` (`eval_main_body`, `compiler.sprout`) becomes
-  `print(question)`.
+  them, with their `APPROVED_BUILTINS` lines. §10 step 4.
+- ~~The REPL's `print(to_string(question))` (`eval_main_body`, `compiler.sprout`) becomes
+  `print(question)`.~~
+
+All but the runtime item landed in §10 step 3.
 
 `print` in value position moves from `synthesize_intrinsic_eta_closure` to the ordinary path for a
 constrained function used as a value. Under a type variable that path captures the dictionary:
@@ -268,9 +270,9 @@ in function main`. For a type declared in the program it should add "add `derivi
   called `printf` directly, so one string allocation. Every call, `print("literal")` included,
   also makes one indirect `to_string` call through the dictionary, where today a `String` is one
   direct `@print_str`. Measured in the golden IR: `print` roots its two arguments around that
-  call, the caller roots the value around the call to `print`, and each call site gets its own
-  eta wrapper for the instance method (`examples__hello`). The 75 snapshots gain 7776 lines and
-  lose 3956.
+  call, and the caller roots the value around the call to `print` (`examples__hello`). Each
+  instance method passed as a dictionary gets one eta wrapper per program, shared by every call
+  site. The 75 snapshots gain 7725 lines and lose 6711.
 
 ## 8. Spec and docs
 

@@ -107,16 +107,11 @@ declare i64 @env_get(i64)
 @.str.8 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"do:io-maybe\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
 @.str.9 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"reading SPROUT_NAME\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.10 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"SPROUT_NAME\00" }
 @.str.11 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"io-do:name=\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.str.12 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"io-do:name=anonymous\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_3 }
 @.str.13 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"do:io-maybe\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_4 }
 @.str.14 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"reading SPROUT_NAME\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_5 }
 @.str.15 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"SPROUT_NAME\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -609,12 +604,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @examples.io_do_demo.configured_name() {
 entry:
   %t$0 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
@@ -627,7 +616,7 @@ entry:
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = getelementptr inbounds { i64, [20 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$22 = alloca i64
   store i64 %t$5, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
@@ -665,18 +654,6 @@ do_done_12:
   ret i64 %t$18
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_3(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0$st = call i128 @examples.io_do_demo.configured_name_worker()
@@ -699,7 +676,7 @@ body_0_2:
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$8 = call i64 @stdlib.string.concat(i64 %t$7, i64 %t$1)
   %t$21 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$22 = alloca i64
   store i64 %t$8, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
@@ -713,7 +690,7 @@ arm_1_2:
 body_1_2:
   %t$13 = getelementptr inbounds { i64, [21 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
-  %t$15 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
+  %t$15 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$25 = alloca i64
   store i64 %t$14, ptr %t$25
   %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
@@ -742,23 +719,11 @@ entry:
   ret i64 %p$value
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_4(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_5(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i128 @examples.io_do_demo.configured_name_worker() {
 entry:
   %t$0 = getelementptr inbounds { i64, [12 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_4, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$28 = alloca i64
   store i64 %t$1, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
@@ -766,7 +731,7 @@ entry:
   %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = getelementptr inbounds { i64, [20 x i8] }, ptr @.str.14, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_5, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$31 = alloca i64
   store i64 %t$5, ptr %t$31
   %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)

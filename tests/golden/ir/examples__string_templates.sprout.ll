@@ -97,11 +97,8 @@ declare i64 @ref_write(i64, i64)
 @.str.18 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"3\00" }
 @.str.19 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Hello, \00" }
 @.str.20 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c" ! \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.21 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"template status: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.str.22 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"concat equivalent: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_3 }
 @.str.23 = private unnamed_addr constant { i64, [31 x i8] } { i64 491530, [31 x i8] c"buffered line: %tmp = add i64 \00" }
 @.str.24 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.25 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 50, column 70)\00" }
@@ -1080,24 +1077,6 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_3(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$63 = alloca [3 x i64]
@@ -1178,7 +1157,7 @@ entry:
   %t$90 = call i64 @sprout_gc_push_i64_root(ptr %t$89)
   %t$21 = call i64 @string_concat_many(i64 %t$20)
   %t$91 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$22 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$22 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$92 = alloca i64
   store i64 %t$21, ptr %t$92
   %t$93 = call i64 @sprout_gc_push_i64_root(ptr %t$92)
@@ -1219,7 +1198,7 @@ entry:
   %t$106 = call i64 @sprout_gc_push_i64_root(ptr %t$105)
   %t$30 = call i64 @string_concat_many(i64 %t$29)
   %t$107 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$31 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$31 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$108 = alloca i64
   store i64 %t$30, ptr %t$108
   %t$109 = call i64 @sprout_gc_push_i64_root(ptr %t$108)
@@ -1260,7 +1239,7 @@ entry:
   %t$122 = call i64 @sprout_gc_push_i64_root(ptr %t$121)
   %t$39 = call i64 @string_concat_many(i64 %t$38)
   %t$123 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$40 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
+  %t$40 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$124 = alloca i64
   store i64 %t$39, ptr %t$124
   %t$125 = call i64 @sprout_gc_push_i64_root(ptr %t$124)

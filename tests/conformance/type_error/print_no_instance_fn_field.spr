@@ -1,0 +1,9 @@
+module main
+
+# A program type with a function-typed field cannot derive `ToString`, so the message
+# names the missing instance and gives no `deriving` hint.
+
+type Handler = Handler(Int -> Int)
+
+fn main() -> Unit !{IO} = print(Handler(\x -> x))
+#~^ ERROR

@@ -3586,8 +3586,10 @@ instance declaration.  `Unit` has none either.
 writes `to_string(x)` and a newline.  A user type prints only through a `ToString` instance,
 written or `deriving (ToString)` (§8.6).  A function value, `Unit`, and a 6-tuple or larger
 have no instance, so printing one is a compile error.  The missing-instance error for a
-program-declared type names the fix: `No instance of ToString for Answers in function main`,
-with the hint ``add `deriving (ToString)` to `Answers` ``.
+program-declared type with no function-typed field names the fix.  In a headerless file it
+reads `No instance of ToString for Answers in function main`, with the hint
+``add `deriving (ToString)` to `Answers` ``; under `module main` the type and function are
+qualified (`main.Answers`, `main.main`).
 
 **A constructor renders under its source-form name, never a module-qualified
 one.**  A ctor declared in `module main` renders `Apple(3)`, not `main.Apple(3)`,

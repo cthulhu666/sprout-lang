@@ -458,6 +458,14 @@ fn parse_derivable_class(name: String) -> Maybe DerivableClass =
   else if name == "Enum" then Just(DcEnum)
   else Nothing
 
+# True for a class a missing-instance error can tell the user to derive. Enum is
+# derivable only on nullary ADTs, so it is no general fix and is left out.
+export fn hint_derivable(class_name: String) -> Bool =
+  match parse_derivable_class(class_name) with
+  | Just DcEnum -> false
+  | Just _ -> true
+  | Nothing -> false
+
 # Given a parsed class and TypeDecl fields, synthesize the corresponding
 # InstanceDecl. Ord now supports all ADT shapes (nullary and field-bearing)
 # via lexicographic chained compare.

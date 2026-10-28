@@ -81,9 +81,8 @@ declare i64 @ref_write(i64, i64)
 @__sprout_sclo.__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values_0 }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_1 }
 @__sprout_sclo.__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values_2 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_3 }
-@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_4 }
-@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_5 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_5 }
+@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_3 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_3 }
+@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -390,16 +389,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_3(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 3
@@ -510,7 +499,7 @@ entry:
   %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
   %t$23 = call i64 @examples.typeclass_collections_demo.sum_any(i64 %t$21, i64 %t$22)
   %t$61 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
+  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
   %t$25 = call i64 @print(i64 %t$23, i64 %t$24)
   ret i64 %t$25
 }
@@ -539,7 +528,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_4(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_3(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @examples.typeclass_collections_demo.add(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
@@ -550,7 +539,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_4, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_3, i64 8) to i64
   %t$4 = add i64 0, 0
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6
@@ -566,7 +555,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_5(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @examples.typeclass_collections_demo.add_flag(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
@@ -577,7 +566,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_5, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4, i64 8) to i64
   %t$4 = add i64 0, 0
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6
