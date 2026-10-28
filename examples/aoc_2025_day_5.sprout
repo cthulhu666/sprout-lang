@@ -6,7 +6,7 @@ import stdlib.fs as fs
 # part1 counts how many available ingredient IDs are fresh.
 # part2 counts how many total ingredient IDs are covered by the fresh ranges.
 
-export type Answers (..) =
+export type Answers (..) deriving (ToString) =
   | Answers Int Int
 
 export type Database (..) = (ranges: Vec IntRange, ids: Vec Int)

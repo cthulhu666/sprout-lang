@@ -170,7 +170,7 @@ directions for every bit pattern, including every NaN payload (nothing is
 canonicalised) and both zeros. Neither is a numeric conversion — `double_to_bits(1.0)`
 is `4607182418800017408`, not `1`. `to_double` remains the numeric bridge.
 
-Like `print` and `to_double`, both are compiler intrinsics with no runtime symbol.
+Like `to_double`, both are compiler intrinsics with no runtime symbol.
 
 > **Amended 2026-09-06.** This paragraph originally said they could not be used as
 > first-class values, `map(double_to_bits, xs)` failing at link. They can now: the

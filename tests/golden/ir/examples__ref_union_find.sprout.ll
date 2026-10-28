@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -77,6 +76,12 @@ declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 22, column 25)\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_0 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_1 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_2 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_3 }
+@.str.1 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
+@.str.2 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -192,6 +197,21 @@ arm_1_0:
   unreachable
 join_0:
   %t$1 = phi i64 [%t$3, %arm_0_0]
+  ret i64 %t$1
+}
+
+define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$1$ptr = inttoptr i64 %t$0 to ptr
+  %t$1 = call i64 @print_str(ptr %t$1$ptr)
   ret i64 %t$1
 }
 
@@ -360,21 +380,45 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_0(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_1(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_2(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_3(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 6
   %t$1 = add i64 0, 0
   %t$2 = call i64 @vec_empty()
-  %t$35 = alloca i64
-  store i64 %t$2, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$39 = alloca i64
+  store i64 %t$2, ptr %t$39
+  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$3 = call i64 @examples.ref_union_find.make_parents(i64 %t$0, i64 %t$1, i64 %t$2)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$4 = add i64 0, 0
   %t$5 = add i64 0, 1
-  %t$38 = alloca i64
-  store i64 %t$3, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$42 = alloca i64
+  store i64 %t$3, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
   %t$6 = call i64 @examples.ref_union_find.union(i64 %t$3, i64 %t$4, i64 %t$5)
   %t$7 = add i64 0, 2
   %t$8 = add i64 0, 3
@@ -394,18 +438,48 @@ entry:
   %t$22 = add i64 0, 4
   %t$23 = add i64 0, 5
   %t$24 = call i64 @examples.ref_union_find.connected(i64 %t$3, i64 %t$22, i64 %t$23)
-  %t$25 = call i64 @print_value(i64 %t$18)
-  %t$26 = call i64 @print_value(i64 %t$21)
-  %t$27 = call i64 @print_value(i64 %t$24)
-  %t$28 = add i64 0, 0
-  %t$29 = call i64 @examples.ref_union_find.find(i64 %t$3, i64 %t$28)
-  %t$30 = add i64 0, 3
-  %t$31 = call i64 @examples.ref_union_find.find(i64 %t$3, i64 %t$30)
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = icmp eq i64 %t$29, %t$31
-  %t$33 = zext i1 %t$32 to i64
-  %t$34 = call i64 @print_value(i64 %t$33)
-  ret i64 %t$34
+  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0, i64 8) to i64
+  %t$26 = call i64 @print(i64 %t$18, i64 %t$25)
+  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_1, i64 8) to i64
+  %t$28 = call i64 @print(i64 %t$21, i64 %t$27)
+  %t$29 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_2, i64 8) to i64
+  %t$30 = call i64 @print(i64 %t$24, i64 %t$29)
+  %t$31 = add i64 0, 0
+  %t$32 = call i64 @examples.ref_union_find.find(i64 %t$3, i64 %t$31)
+  %t$33 = add i64 0, 3
+  %t$34 = call i64 @examples.ref_union_find.find(i64 %t$3, i64 %t$33)
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$35 = icmp eq i64 %t$32, %t$34
+  %t$36 = zext i1 %t$35 to i64
+  %t$37 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_3, i64 8) to i64
+  %t$38 = call i64 @print(i64 %t$36, i64 %t$37)
+  ret i64 %t$38
+}
+
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
+  ret i64 %t$0
+}
+
+define i64 @__tc_ToString_Bool_to_string(i64 %p$value) {
+entry:
+  %t$6 = trunc i64 %p$value to i1
+  br i1 %t$6, label %then_0, label %else_0
+then_0:
+  %t$2 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  br label %join_0
+else_0:
+  %t$4 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
+  %t$5 = ptrtoint ptr %t$4 to i64
+  br label %join_0
+join_0:
+  %t$1 = phi i64 [%t$3, %then_0], [%t$5, %else_0]
+  ret i64 %t$1
 }
 
 define i128 @vec_get_worker(i64 %p$index, i64 %p$vec) {

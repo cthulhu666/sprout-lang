@@ -1716,13 +1716,6 @@ fn infer_if_join(
 
 # --- Call ---
 
-# True for tuple types `(a, b, …)`.  Used to route `print` of a tuple through
-# its `ToString` instance (see infer_print_call).
-fn is_tuple_type(t: types.Type) -> Bool =
-  match t with
-  | types.TTuple _ -> true
-  | _ -> false
-
 fn infer_call(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -1734,26 +1727,23 @@ fn infer_call(
 ) -> InferResult !{IO} =
   match callee with
   | ast.VarExpr name cpos ->
-      if name == "print" then
-        infer_print_call(state, env, subst, eff_subst, callee, cpos, args, pos)
-      else
-        # A statically-empty range_up/range_down, rejected before the call is
-        # otherwise inferred.  Same rule as the `a..b` literal form; see
-        # reversed_literal_range.  Fires only on a name that RESOLVES to a range
-        # constructor with two literal bounds, so it costs one arity check on
-        # every other call.
-        match reversed_literal_range_call(name, env, args) with
-        | Just message -> InferErr(pos, message)
-        | Nothing ->
-            # `v.render(x)` — a call whose callee is a record field access on an
-            # in-scope value, not a bare/module-qualified function name. Rewrite the
-            # dotted callee to a GetFieldExpr chain and infer it as a general (higher-
-            # order) callee, mirroring infer_var_or_field's head-first dot rule (a local
-            # value wins over a same-named module). A module-qualified callee (head not
-            # in scope) falls through to infer_call_var unchanged.
-            match dotted_field_callee(name, env, cpos) with
-            | Just field_callee -> infer_call_general(state, env, subst, eff_subst, field_callee, args, pos)
-            | Nothing -> infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
+      # A statically-empty range_up/range_down, rejected before the call is
+      # otherwise inferred.  Same rule as the `a..b` literal form; see
+      # reversed_literal_range.  Fires only on a name that RESOLVES to a range
+      # constructor with two literal bounds, so it costs one arity check on
+      # every other call.
+      match reversed_literal_range_call(name, env, args) with
+      | Just message -> InferErr(pos, message)
+      | Nothing ->
+          # `v.render(x)` — a call whose callee is a record field access on an
+          # in-scope value, not a bare/module-qualified function name. Rewrite the
+          # dotted callee to a GetFieldExpr chain and infer it as a general (higher-
+          # order) callee, mirroring infer_var_or_field's head-first dot rule (a local
+          # value wins over a same-named module). A module-qualified callee (head not
+          # in scope) falls through to infer_call_var unchanged.
+          match dotted_field_callee(name, env, cpos) with
+          | Just field_callee -> infer_call_general(state, env, subst, eff_subst, field_callee, args, pos)
+          | Nothing -> infer_call_var(state, env, subst, eff_subst, callee, name, cpos, args, pos)
   | _ -> infer_call_general(state, env, subst, eff_subst, callee, args, pos)
 
 # If `name` is a dotted access whose head is an in-scope value (not a module),
@@ -2204,46 +2194,6 @@ fn consumed_arrows_effect(t: types.Type, argc: Int) -> types.Effect =
     | types.TApp _ _ -> types.EffectPure
     | types.TTuple _ -> types.EffectPure
 
-# `print` is a type-erased runtime renderer, so it cannot recover per-element
-# types of a tuple (a Bool prints as 1, a static-String element as its raw
-# pointer).  When the single argument is a tuple, rewrite `print(t)` to
-# `print(to_string(t))` so the tuple's `ToString` instance renders each element
-# via its own instance.  Inference then resolves the (possibly nested) element
-# dictionaries for free.  Non-tuple arguments keep the intrinsic `print` path
-# (so `print(Int)`/`print(String)` need no prelude — importless-safe).
-#
-# The argument is inferred once here only to read its type; that result is
-# discarded (evidence lives in the returned AST), and the rewritten call
-# re-infers it normally. The census is paused for the peek so its sites are
-# listed once.
-fn infer_print_call(
-  state: unifier.InferState,
-  env: Dict types.Scheme,
-  subst: Dict types.Type,
-  eff_subst: Dict types.Effect,
-  callee: ast.Expr,
-  cpos: source.SourcePos,
-  args: List ast.Expr,
-  pos: source.SourcePos
-) -> InferResult !{IO} =
-  match args with
-  | [single] ->
-      do
-        recording <- unifier.census_pause(state)
-        pr <- infer_expr(state, env, subst, eff_subst, single)
-        unifier.census_resume(state, recording)
-        match pr with
-        | InferErr _ _ ->
-            infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
-        | InferOk targ s_peek _ _ ->
-            if is_tuple_type(unifier.apply_subst(s_peek, typed_ast.typed_expr_type(targ))) then
-              infer_call_var(state, env, subst, eff_subst, callee, "print", cpos,
-                [ast.CallExpr(ast.VarExpr("to_string", cpos), [single], pos)], pos)
-            else
-              infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
-  | _ ->
-      infer_call_var(state, env, subst, eff_subst, callee, "print", cpos, args, pos)
-
 fn infer_call_inner(
   state: unifier.InferState,
   env: Dict types.Scheme,
@@ -2494,7 +2444,7 @@ fn check_instance_for_marker(
                 resolve_skolem_given(cname, head_str, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
               else
                 let Just _ = dict_get(types.inst_marker_key(cname, head_str), env)
-                      else InferErr(pos, "No instance of " ++ cname ++ " for " ++ head_str)
+                      else InferErr(pos, no_instance_message(cname, head_str))
                 in
                   InferOk(
                     concrete_dispatch_call(env, s3, typed_callee, typed_args, ret_t, pos, cname, cv_ty),
@@ -3780,7 +3730,7 @@ fn inject_constrained_fn_dicts_via_field(
                       # forwarded) or a skolem (re-pack, forwarded) still skips — that
                       # is the legitimate no-dict-here case, unchanged.
                       match concrete_unsatisfiable_head(class_name, head_token, name, prog_to_fresh, s3, env) with
-                      | Just head_str -> InferErr(pos, "No instance of " ++ class_name ++ " for " ++ head_str)
+                      | Just head_str -> InferErr(pos, no_instance_message(class_name, head_str))
                       | Nothing ->
                           inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
                   | Just tdict ->
@@ -3795,6 +3745,17 @@ fn concrete_unsatisfiable_head(class_name: String, head_token: String, name: Str
   match dict_get(decode_constraint_var(head_token, name, env), prog_to_fresh) with
   | Just fresh_t -> concrete_missing_inst(class_name, unifier.apply_subst(s3, fresh_t), env)
   | Nothing -> Nothing
+
+# The missing-instance headline. A type the program declares can derive Eq, Ord and
+# ToString, so a second line names the fix. A program type is module-qualified
+# (`$entry.` for a headerless entry file); prelude and builtin names are bare and
+# stdlib's are `stdlib.`-prefixed, so those cannot be edited and get no hint.
+fn no_instance_message(class_name: String, head_str: String) -> String =
+  "No instance of " ++ class_name ++ " for " ++ head_str ++ hint
+  where hint = if (class_name == "ToString" || class_name == "Eq" || class_name == "Ord")
+                  && string.contains(head_str, ".") && !str_starts_with(head_str, "stdlib.")
+               then "\n  hint: add `deriving (" ++ class_name ++ ")` to `" ++ string.after_last_dot(head_str) ++ "`"
+               else ""
 
 fn concrete_missing_inst(class_name: String, t: types.Type, env: Dict types.Scheme) -> Maybe String =
   match concrete_type_str(t) with

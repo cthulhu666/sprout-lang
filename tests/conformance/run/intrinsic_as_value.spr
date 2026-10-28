@@ -1,11 +1,15 @@
 module main
 
 # Every builtin whose lowering is directed by the CALL SITE has no symbol of its own to forward
-# to: `print`/`eprint` choose @print_str or @print_value from the argument's type, `to_double`
-# and the bits family lower to a single LLVM instruction. Passing one as a first-class value
-# used to emit a wrapper calling a name that does not exist, and the two halves of the family
-# failed at different stages — @print has its `declare` suppressed so `opt` rejected it, while
-# @to_double and the bits family were declared and failed only at LINK.
+# to: `eprint` and `print_str` lower to @eprint_str / @print_str through a ptr coercion,
+# `to_double` and the bits family lower to a single LLVM instruction. Passing one as a
+# first-class value used to emit a wrapper calling a name that does not exist, and the two
+# halves of the family failed at different stages — a suppressed `declare` made `opt` reject the
+# wrapper, while @to_double and the bits family were declared and failed only at LINK.
+#
+# `print` is not one of them: it is an ordinary prelude function over ToString, so it takes the
+# plain constrained-function path as a value. It stays below as the control that each argument
+# type renders through its instance (`Bool` as `true`/`false`, not 1/0).
 #
 # This fixture lives in conformance/run rather than tests/stdlib because this is the only corpus
 # that links and executes; an IR-only or grep-only gate cannot see either failure.
@@ -13,7 +17,7 @@ module main
 import stdlib.bits
 import stdlib.math
 
-# --- print dispatches on the argument type, so each type is a separate wrapper body ---
+# --- print as a value, one wrapper per argument type ---
 fn print_strings() -> Unit !{IO} = list_each(print, ["alpha", "beta"])
 
 fn print_ints() -> Unit !{IO} = list_each(print, [1, 2])

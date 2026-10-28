@@ -365,7 +365,7 @@ document's examples.
 > at all. They can now: `list_fold(bit_xor, 0, xs)` works. The paragraph below records what
 > changed and what is still refused.
 
-Like `print`, `to_double` and `double_to_bits`, these are compiler intrinsics with no
+Like `to_double` and `double_to_bits`, these are compiler intrinsics with no
 runtime symbol, so a first-class reference cannot be a wrapper that *calls* one. The
 wrapper instead lowers the operation itself, using the same call-site dispatch a direct
 call gets, and is minted per use-site with the argument types already resolved. What that

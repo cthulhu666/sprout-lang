@@ -1,6 +1,6 @@
 # Specialising constrained functions at known instances — v0
 
-**Status — proposal, not approved; blocked on the `print` redesign (§2, *Prerequisite*).**
+**Status — proposal, not approved. Its prerequisite, the `print` redesign, has landed (§2).**
 Non-normative. An optimisation only: no syntax, typing-rule, evaluation-order or diagnostic
 change, so `spec-v0.md` is untouched.
 
@@ -56,17 +56,12 @@ M0 (§7) counts all three, so the choice of lever follows the numbers.
   makes it possible; it is a follow-up.
 - **The native-runtime Phase 2 exit.** See §6.
 
-**Prerequisite: `print` must not depend on the static type.** `translate_print_call`
-(`ast_to_ir.sprout`) picks the lowering from the argument's static type: `print_str` for a
-`String`, `char_to_string` then `print_str` for a `Char`, otherwise the erased renderer
-`print_value`. So a `Char` reaching `print` through a type variable prints its codepoint: given
-`fn show_it(x: a) -> Unit !{IO} = print(x)`, `print('z')` prints `z` and `show_it('z')` prints
-`122`, with or without a `where` clause. A copy substitutes concrete types (§4, step 2), so it
-would print `z` where the generic version prints `122`. Output would then depend on which callers
-were specialised, and §8's on/off test fails. The fix is the `print` redesign (`BACKLOG.md`,
-"Make compiled `print` dispatch through `ToString`"): with that, a generic body that prints
-needs the constraint, and every copy prints what the generic version prints. This pass waits
-for it.
+**Prerequisite, met: `print` does not depend on the static type.** A copy substitutes concrete
+types (§4, step 2). While `print` chose its lowering from the argument's static type, a `Char`
+reaching it through a type variable printed its codepoint, so a specialised copy printed `z`
+where the generic version printed `122`, and §8's on/off test failed. `print` is now a prelude
+function over `ToString` (`docs/print-dispatch-v0.md`): a generic body that prints needs the
+constraint, and every copy prints what the generic version prints.
 
 **Obligation: every other type-directed choice must agree with its instance.** `ast_to_ir` also
 picks primitives by exact type: `is_string_type`, `is_bool_type`, `is_int_or_char_type` and

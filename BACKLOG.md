@@ -186,9 +186,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   today. **Hard constraint:** any `Ord` fallback must keep the `Double` short-circuit, or
   `nan < 1.0` becomes true (`docs/eq-ord-double-v0.md`).
 - [ ] `P3` **Reject a user declaration that shadows an intercepted compiler intrinsic.** A
-  headerless file defining `fn to_double`/`fn print`/`fn double_to_bits` has its call sites silently
-  lowered to the intrinsic, body ignored, no error at any stage. A parameter or local with such a
-  name is not affected: it wins. `docs/bitwise-int-ops-v0.md` §8.1.
+  headerless file defining `fn to_double`/`fn print_str`/`fn double_to_bits` has its call sites
+  silently lowered to the intrinsic, body ignored, no error at any stage. A parameter or local with
+  such a name is not affected: it wins. `docs/bitwise-int-ops-v0.md` §8.1.
 - [ ] `P3` **Names the parser writes are captured by a module's own declaration or a local.**
   List and dict literals, list patterns and `>>`/`<<` use bare `Cons`, `Nil`, `dict_empty`,
   `dict_set`, `rcompose`, `lcompose` (spec §3.1; `own_cons_captures_list_literal.spr`). Writing
@@ -200,22 +200,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   have shadowed the prelude if registered earlier. Methods are now canonical
   (`docs/qualified-class-methods-v0.md` §7, stage 2), so that reason is gone. Moving it changes
   check order, so it is its own change with its own golden diff.
-- [ ] `P2` **Make compiled `print` dispatch through `ToString`, replacing the erased renderer.**
-  `print` lowers by static type, so a `Char` reaching it through a type variable prints its
-  codepoint: `show_it(x: a) = print(x)` on `'z'` prints `122`; a `String` prints its address.
-  `print(1.5)` prints the raw bits even at a concrete type, and fields print the same way at any
-  type: `print(Just('z'))` is `Just(122)`. Specialisation substitutes types, so it would change
-  output; `docs/specialisation-v0.md` §2 waits on this. Decided: `where ToString a`. The redesign
-  regresses the importless loud-fail, risks bootstrap (every `print` in `stdlib/compiler/` needs
-  an instance in scope), and is a normative spec change (`print(true)` flips `1` → `"true"`).
-  Needs its own design doc.
-- [ ] `P3` **An unannotated top-level `let p = print` type-checks but cannot be compiled.**
-  `print(val: a)` picks its lowering per call from the argument type. As a syntactic value the
-  `let` generalizes to `forall a. a -> Unit !{IO}`, so the eta-wrapper `ast_to_ir` builds for an
-  intrinsic used as a value sees a type variable and fails late: "'print' cannot be used as a
-  first-class value". An annotated `let`, a local `let` and `list_each(print, xs)` all work. Fix:
-  reject it in the checker with the annotation as the hint, or lower it per use site. Disappears
-  if `print` dispatches through `ToString` (entry above).
 - [ ] `P2` **Overloaded literals: replace both hand-written coercions with one class + a defaulting
   rule.** `StringTemplate → String` and `List`-literal → `Vec` are two hardcoded branches of a
   pre-inference pass (`desugar_ctx.sprout`, 619 lines), so a third literal target (`Set`, `Bytes`,
@@ -368,14 +352,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   case still emits `IRTUnknown` because `bind_tuple_items` has no element-type info. Needs threading
   the scrutinee tuple's types from `translate_match`. Type-reclassification, ~0.2%-class win — do
   only if a measured hot path shows over-rooting.
-- [ ] `P3` **Two `IRTScalar` witnesses are free constants, checked by no one in `type_kind`.**
+- [ ] `P3` **`IRTScalar` witness `tuple_slot` is a free constant, unchecked in `type_kind`.**
   `type_kind.tuple_slot` is safe only because `ast_to_ir.scalar_tuple_width` checked every slot
   first; a new unboxing path can use it without that check. Fix: `type_kind` takes the field types
   and returns the witness, and `scalar_tuple_width` carries it to `emit_tuple_worker_call`,
-  `translate_unboxed_tuple_match` and `translate_tail_tuple_repack`. `type_kind.unit_result`
-  (`print_value`'s result) rests on Unit's runtime representation, not a type rule, which counts
-  Unit as heap; it belongs with the runtime-facts module (`docs/runtime-facts-v0.md`).
-  `ctor_tag` has no premise and stays a constant.
+  `translate_unboxed_tuple_match` and `translate_tail_tuple_repack`. `ctor_tag` has no premise and
+  stays a constant.
 - [ ] `P3` **Named `RuntimeLet` record for the runtime-let representation.** `classify_let_decls_ir`
   returns an anonymous positional pair. Blocked on records maturing in compiler code. Broader
   follow-on: adopt `GlobalName` at the other global-name sites so the wrap/unwrap seam shrinks.
@@ -435,12 +417,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Strings and data representation**
 
-- [ ] `P2` **`print` writes a string literal inside an ADT as a number.** `print(Err("boom"))`
-  prints `Err(4373942584)`, while `print(Just(int_to_string(42) ++ "x"))` prints `Just(42x)`.
-  `print_inline_value` in `runtime/sprout_runtime.c` renders a word as text only when
-  `sprout_heap_lookup` finds a `CSTR` block; a literal lives in the data segment, so it falls
-  through to `%lld`. A bare `print("s")` is fine: the compiler picks `print_str` from the type.
-  The literal-header entry above would make literals recognisable at runtime.
 - [ ] `P3` **Embedded-NUL string semantics.** `String` silently truncates at the first interior NUL
   (e.g. binary-ish `proc_run` output). Decide at spec level: keep "no interior NULs" and enforce
   loudly at ingestion boundaries, or move to length-delimited semantics.
@@ -1799,7 +1775,7 @@ deferral happened, not for current behaviour. Still open:
   `Int` reach a primitive sort under its own name. Numbers:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
   "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry. Proposal:
-  `docs/specialisation-v0.md`, blocked on "Make compiled `print` dispatch through `ToString`".
+  `docs/specialisation-v0.md`.
 - [ ] `P3` **Specialise context-instance bodies, so tuple keys compare directly.** `Ord (a, b, c,
   d, e) where Ord a, …` reaches each field through a context dictionary, and
   `docs/specialisation-v0.md` §4 *Limits* does not copy instance bodies. A heap keyed on a 5-tuple
@@ -2601,7 +2577,7 @@ acting.
   `@to_double`, `@double_to_bits`, `@double_from_bits` and the seven `@bit_*`. Nothing calls them
   any more and LLVM does not require an unreferenced declare to resolve, so this is inert today.
   **It is worth closing because it is the mechanism that made the eta bug expensive to find:**
-  `print`/`eprint` are on `is_hardcoded_intrinsic`'s list so their declare is suppressed and a
+  `eprint` is on `is_hardcoded_intrinsic`'s list so its declare is suppressed and a
   dangling reference is caught by `opt --passes=verify`, which every IR gate runs; the other ten
   keep the declare, LLVM believes the promise, and the lie survives to the **linker**, which only
   `run-example-canary` (5 files) and `test-conformance-run` reach. Adding the ten to

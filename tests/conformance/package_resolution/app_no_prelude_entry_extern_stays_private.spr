@@ -5,4 +5,4 @@ import demo.privcall (call_priv)
 # The entry's own declaration must not export the name to demo.privcall.
 extern fn __priv_add(a: Int, b: Int) -> Int
 
-fn main() -> Unit !{IO} = print(int_to_string(call_priv + ping))
+fn main() -> Unit !{IO} = print_str(int_to_string(call_priv + ping))

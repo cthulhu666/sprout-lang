@@ -1285,7 +1285,6 @@ instance ToString IntRange
   # Includes the step. Without it an ascending range and the EMPTY descending range
   # over the same bounds stringify identically — `range_up(1, 5)` has five elements
   # and `range_down(1, 5)` has none, and direction is the only thing that says which.
-  # This also matches what `print` now renders, since an IntRange is an ordinary ADT.
   fn to_string(value: IntRange) -> String =
     "IntRange(" ++ int_to_string(range_start(value)) ++ ", " ++ int_to_string(range_end(value))
       ++ ", " ++ int_to_string(range_step(value)) ++ ")"
@@ -1823,10 +1822,14 @@ instance ToString (a, b, c, d, e) where linear a, linear b, linear c, linear d, 
 # ---------------------------------------------------------------------------
 
 # I/O
-extern fn print(val: a) -> Unit !{IO}
 extern fn eprint(val: String) -> Unit !{IO}
 # Monomorphic String sink; lowers through IRPrintStr like eprint.
 extern fn print_str(s: String) -> Unit !{IO}
+
+# Writes `to_string(value)` and a newline to stdout. O(n) in the rendered length.
+export fn print(value: a) -> Unit !{IO} where linear a, ToString a =
+  print_str(to_string(value))
+
 # Filesystem primitives are NOT declared here. `read_file` / `write_file` live in stdlib.fs, which
 # must be imported explicitly; callers use `fs.read_text` / `fs.write_text`. Reading and writing
 # files is not something a program should be able to reach by accident — the same reasoning already
@@ -2205,10 +2208,7 @@ extern fn char_from_codepoint(cp: Int) -> Char
 
 # Compiler intrinsic: intercepted in ast_to_ir/codegen and lowered to an inline
 # `sitofp` (an Int value to the equal Double value), NOT a runtime call — there
-# is no @to_double symbol.  The extern decl exists only to give it a type, the
-# same way `print` is declared-but-intercepted.  Like `print`, and for the same
-# reason, it cannot be used as a first-class value (e.g. `map(to_double, xs)`):
-# that references the undefined @to_double and fails to link (loud, not silent).
+# is no @to_double symbol.  The extern decl exists only to give it a type.
 extern fn to_double(n: Int) -> Double
 
 # Raw IEEE 754 binary64 bit access is NOT declared here. `double_to_bits` /

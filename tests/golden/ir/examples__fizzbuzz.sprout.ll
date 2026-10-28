@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -87,8 +86,9 @@ declare i64 @ref_write(i64, i64)
 @.str.7 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"FizzBuzz\00" }
 @.str.8 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Fizz\00" }
 @.str.9 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"Buzz\00" }
-@__sprout_sclo.__sprout_ir_eta_print_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_print_1 }
-@__sprout_sclo.__sprout_ir_lambda_2 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_2 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
+@__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
+@__sprout_sclo.__sprout_ir_lambda_3 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_3 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -466,6 +466,21 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$1$ptr = inttoptr i64 %t$0 to ptr
+  %t$1 = call i64 @print_str(ptr %t$1$ptr)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.math.int.trunc_remainder(i64 %p$value, i64 %p$divisor) {
 entry:
   %t$0 = icmp eq i64 %p$divisor, 0
@@ -639,14 +654,24 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta_print_1(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
 entry:
-  %t$0$ptr = inttoptr i64 %p$a0 to ptr
-  %t$0 = call i64 @print_str(ptr %t$0$ptr)
-  ret i64 %t$0
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
 }
 
-define i64 @__sprout_ir_lambda_2(i64 %p$env$, i64 %p$__cmp_acc16_20_0, i64 %p$i) {
+define i64 @__sprout_ir_lambda_1(i64 %p$env$, i64 %p$__eta_x0) {
+entry:
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$2 = alloca i64
+  store i64 %p$__eta_x0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @print(i64 %p$__eta_x0, i64 %t$0)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
+define i64 @__sprout_ir_lambda_3(i64 %p$env$, i64 %p$__cmp_acc16_20_0, i64 %p$i) {
 entry:
   %t$2 = alloca i64
   store i64 %p$i, ptr %t$2
@@ -670,8 +695,8 @@ entry:
 
 define i64 @__sprout_user_main() {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_print_1, i64 8) to i64
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_2, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_1, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_3, i64 8) to i64
   %t$2 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$3 = add i64 0, 1
   %t$4 = add i64 0, 15
@@ -703,6 +728,15 @@ entry:
   %t$0$env_ptr = inttoptr i64 %p$__tc_Eq_0_eq to ptr
   %t$0$code = load ptr, ptr %t$0$env_ptr
   %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %p$__tc_Eq_0_eq, i64 %p$left, i64 %p$right)
+  ret i64 %t$0
+}
+
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
   ret i64 %t$0
 }
 
@@ -795,6 +829,11 @@ define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
   %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
+}
+
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
+entry:
+  ret i64 %p$value
 }
 
 define i128 @stdlib.math.int.mod_worker(i64 %p$value, i64 %p$modulus) {

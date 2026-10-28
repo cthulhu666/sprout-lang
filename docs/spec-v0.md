@@ -270,7 +270,7 @@ declarations are qualified like any other module's and may freely **shadow**
 prelude names:
 
 ```sprout
-type Maybe a =                       # shadows the prelude's Maybe
+type Maybe a deriving (ToString) =   # shadows the prelude's Maybe
   | Nothing
   | Just a
 
@@ -344,10 +344,10 @@ to be shadowed, and staying bare is what makes the two limits above go away.
 The opt-out is whole-file. Selective hiding (`hiding(null)`) is not provided.
 
 What a `no_prelude` file *does* receive is the **floor**: the prelude `extern fn`
-declarations whose signatures mention only primitive types. Those 16 names are
+declarations whose signatures mention only primitive types. Those 15 names are
 
 ```
-print  eprint  print_str  panic
+eprint  print_str  panic
 int_to_string  double_to_string  char_to_string  char_to_str
 char_from_codepoint  to_double
 str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
@@ -3009,7 +3009,7 @@ including both zeros — bit access is the only way to distinguish `-0.0` from `
 since IEEE compares them equal — and every NaN payload, which is never
 canonicalised.
 
-Like `print` and `to_double`, both are compiler intrinsics rather than runtime
+Like `to_double`, both are compiler intrinsics rather than runtime
 functions. They may be passed to a higher-order function (`map(double_to_bits, xs)`),
 but only where the argument types are known at the reference: an intrinsic has no
 symbol of its own, so the wrapper the compiler synthesises for a first-class
@@ -3036,14 +3036,14 @@ bit_shr(x: Int, n: Int) -> Int      # arithmetic right shift (sign-filling)
 bit_shr_zf(x: Int, n: Int) -> Int   # logical right shift (zero-fill)
 ```
 
-Like `print`, `to_double` and the two functions above, these are compiler
+Like `to_double` and the two functions above, these are compiler
 intrinsics: each lowers to a single machine instruction. They may be passed as
 values (`list_fold(bit_xor, 0, xs)`); the compiler builds a wrapper that lowers the
 instruction, as for the two functions above. Being
 `extern` declarations they are also **never module-qualified** (§"Externs are
 outside the module system") — `import stdlib.bits` puts them in the build and they
 are then called by bare name. They are written `export extern fn`. A parameter or
-local binding with one of these names (or `print`, `print_str`, `to_double`,
+local binding with one of these names (or `print_str`, `to_double`,
 `double_to_bits`, `double_from_bits`) is an ordinary binding: a call through it calls the bound
 function.
 
@@ -3104,9 +3104,8 @@ Three consequences follow from it being an ordinary type, and all three are norm
    is negative and `+1` otherwise — so every operation sees a legal direction regardless
    of what was stored. An out-of-range step is normalized, never honoured and never an
    error.
-3. It **prints like an ADT**: `print(1..4)` writes `IntRange(1, 4, 1)`. It formerly wrote
-   `1..4`, which was a special case in the runtime's printer for the opaque
-   representation.
+3. It **prints like an ADT**: `print(1..4)` writes `IntRange(1, 4, 1)`, the text of its
+   `ToString` instance.
 
 Programs SHOULD read the fields through `range_start` / `range_end` / `range_step` rather
 than by pattern match, because only `range_step` applies the normalization in (2).
@@ -3571,19 +3570,31 @@ instead.  As above, a variable the declaration does not generalize is unaffected
 | `(a, b, c, d)` | `"(s_a, …, s_d)"` — requires `ToString` on all four element types |
 | `(a, b, c, d, e)` | `"(s_a, …, s_e)"` — requires `ToString` on all five element types |
 | `List a` | `"[s_0, s_1, …]"` — requires `ToString a` |
-| `Maybe a` | `"Nothing"` or `"Just s"` — requires `ToString a` |
+| `Maybe a` | `"Nothing"` or `"Just(s)"` — requires `ToString a` |
+| `Char` | the character as a one-character `String` |
+| `Result e a` | `"Ok(s)"` or `"Err(s)"` — requires `ToString e`, `ToString a` |
+| `Vec a` | `"[s_0, s_1, …]"` — requires `ToString a` |
+| `Dict v` | `"{k_0: s_0, k_1: s_1, …}"` — requires `ToString v` |
+| `Set` | `"{e_0, e_1, …}"` over the set's `String` elements, unquoted |
+| `IntRange` | `"IntRange(start, end, step)"` |
 
 Tuple instances format nested tuples recursively.  A 6-tuple or larger has no
 `ToString` instance in the current prelude; adding one requires an explicit
-instance declaration.
+instance declaration.  `Unit` has none either.
+
+`print : a -> Unit !{IO} where linear a, ToString a` is an ordinary prelude function: it
+writes `to_string(x)` and a newline.  A user type prints only through a `ToString` instance,
+written or `deriving (ToString)` (§8.6).  A function value, `Unit`, and a 6-tuple or larger
+have no instance, so printing one is a compile error.  The missing-instance error for a
+program-declared type names the fix: `No instance of ToString for Answers in function main`,
+with the hint ``add `deriving (ToString)` to `Answers` ``.
 
 **A constructor renders under its source-form name, never a module-qualified
 one.**  A ctor declared in `module main` renders `Apple(3)`, not `main.Apple(3)`,
 and this holds for every module — a named one, a headerless entry file (§3.1), and
-the prelude alike.  The rule applies to both surfaces that render a constructor:
-the runtime rendering used by `print`, and the string a derived `ToString`
-produces (§8.6).  Nesting is uniform, so an inner value renders bare too:
-`Crate(Apple(1))`.
+the prelude alike.  The one surface that renders a constructor is the `ToString`
+instance, written or derived (§8.6); `print` writes its text.  Nesting is uniform, so an
+inner value renders bare too: `Crate(Apple(1))`.
 
 The consequence to be aware of is that two modules' same-named constructors
 render identically.  That is deliberate — the qualified name exists to

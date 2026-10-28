@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -89,7 +88,10 @@ declare i64 @ref_write(i64, i64)
 @.str.10 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"result:\00" }
 @.str.11 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"result:\00" }
 @.str.12 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"do:maybe-result\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.13 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 42, column 39)\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.str.14 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.15 = private unnamed_addr constant { i64, [37 x i8] } { i64 589834, [37 x i8] c"Int overflow in / (line 9, column 9)\00" }
 @.str.16 = private unnamed_addr constant { i64, [38 x i8] } { i64 606218, [38 x i8] c"Int overflow in * (line 9, column 14)\00" }
@@ -156,6 +158,21 @@ declare i64 @ref_write(i64, i64)
 @pow10_exact_max = private constant i64 22
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+
+define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$1$ptr = inttoptr i64 %t$0 to ptr
+  %t$1 = call i64 @print_str(ptr %t$1$ptr)
+  ret i64 %t$1
+}
 
 define i64 @examples.do_notation_demo.half_if_even(i64 %p$x) {
 entry:
@@ -459,49 +476,88 @@ join_1:
   ret i64 %t$2
 }
 
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_0(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = getelementptr inbounds { i64, [16 x i8] }, ptr @.str.12, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$2$ptr = inttoptr i64 %t$1 to ptr
-  %t$2 = call i64 @print_str(ptr %t$2$ptr)
-  %t$3 = add i64 0, 8
-  %t$4 = add i64 0, 10
-  %t$5$st = call i128 @examples.do_notation_demo.maybe_sum_worker(i64 %t$3, i64 %t$4)
-  %t$5 = trunc i128 %t$5$st to i64
-  %t$5$hi = lshr i128 %t$5$st, 64
-  %t$6 = trunc i128 %t$5$hi to i64
-  %t$18 = alloca i64
-  store i64 %t$6, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$7 = call i64 @examples.do_notation_demo.render_maybe_argw(i64 %t$5, i64 %t$6)
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$8$ptr = inttoptr i64 %t$7 to ptr
-  %t$8 = call i64 @print_str(ptr %t$8$ptr)
-  %t$9 = add i64 0, 4
-  %t$10 = add i64 0, 1
-  %t$11$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$10)
-  %t$11 = extractvalue { i64, i1 } %t$11$agg, 0
-  %t$11$ovf = extractvalue { i64, i1 } %t$11$agg, 1
-  br i1 %t$11$ovf, label %ovfpanic_11, label %ovfok_11
-ovfpanic_11:
-  %t$12 = getelementptr inbounds { i64, [45 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
-  %t$13 = ptrtoint ptr %t$12 to i64
-  call i64 @panic(i64 %t$13)
-  unreachable
-ovfok_11:
-  %t$14$st = call i128 @examples.do_notation_demo.result_sum_worker(i64 %t$9, i64 %t$11)
-  %t$14 = trunc i128 %t$14$st to i64
-  %t$14$hi = lshr i128 %t$14$st, 64
-  %t$15 = trunc i128 %t$14$hi to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$21 = alloca i64
-  store i64 %t$15, ptr %t$21
+  store i64 %t$1, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$16 = call i64 @examples.do_notation_demo.render_result_argw(i64 %t$14, i64 %t$15)
+  %t$3 = call i64 @print(i64 %t$1, i64 %t$2)
   %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$17$ptr = inttoptr i64 %t$16 to ptr
-  %t$17 = call i64 @print_str(ptr %t$17$ptr)
-  ret i64 %t$17
+  %t$4 = add i64 0, 8
+  %t$5 = add i64 0, 10
+  %t$6$st = call i128 @examples.do_notation_demo.maybe_sum_worker(i64 %t$4, i64 %t$5)
+  %t$6 = trunc i128 %t$6$st to i64
+  %t$6$hi = lshr i128 %t$6$st, 64
+  %t$7 = trunc i128 %t$6$hi to i64
+  %t$24 = alloca i64
+  store i64 %t$7, ptr %t$24
+  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
+  %t$8 = call i64 @examples.do_notation_demo.render_maybe_argw(i64 %t$6, i64 %t$7)
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$27 = alloca i64
+  store i64 %t$8, ptr %t$27
+  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$10 = call i64 @print(i64 %t$8, i64 %t$9)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$11 = add i64 0, 4
+  %t$12 = add i64 0, 1
+  %t$13$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 0, i64 %t$12)
+  %t$13 = extractvalue { i64, i1 } %t$13$agg, 0
+  %t$13$ovf = extractvalue { i64, i1 } %t$13$agg, 1
+  br i1 %t$13$ovf, label %ovfpanic_13, label %ovfok_13
+ovfpanic_13:
+  %t$14 = getelementptr inbounds { i64, [45 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
+  %t$15 = ptrtoint ptr %t$14 to i64
+  call i64 @panic(i64 %t$15)
+  unreachable
+ovfok_13:
+  %t$16$st = call i128 @examples.do_notation_demo.result_sum_worker(i64 %t$11, i64 %t$13)
+  %t$16 = trunc i128 %t$16$st to i64
+  %t$16$hi = lshr i128 %t$16$st, 64
+  %t$17 = trunc i128 %t$16$hi to i64
+  %t$30 = alloca i64
+  store i64 %t$17, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$18 = call i64 @examples.do_notation_demo.render_result_argw(i64 %t$16, i64 %t$17)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$19 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$33 = alloca i64
+  store i64 %t$18, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$20 = call i64 @print(i64 %t$18, i64 %t$19)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$20
+}
+
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
+  ret i64 %t$0
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
@@ -514,6 +570,11 @@ define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
   %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
+}
+
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
+entry:
+  ret i64 %p$value
 }
 
 define i128 @examples.do_notation_demo.half_if_even_worker(i64 %p$x) {

@@ -10,4 +10,4 @@ fn color_code(c: Color) -> Int =
   | Red -> 0
   | Green -> 1
   | Blue -> 2
-fn main() -> Unit !{IO} = print(color_code(Red))
+fn main() -> Unit !{IO} = print_str(int_to_string(color_code(Red)))

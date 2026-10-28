@@ -34,7 +34,6 @@ declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
 declare i64 @print_str(ptr)
-declare i64 @print_value(i64)
 declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
@@ -99,9 +98,15 @@ declare i64 @vector_truncate(i64, i64)
 @.str.15 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 144, column 37)\00" }
 @.str.16 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"epoch \00" }
 @.str.17 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"  mse \00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
 @.str.18 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 159, column 25)\00" }
 @.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 159, column 25)\00" }
 @.str.20 = private unnamed_addr constant { i64, [34 x i8] } { i64 540682, [34 x i8] c"XOR predictions (expect 0 1 1 0):\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_2 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_3 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_4 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_5 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -164,6 +169,21 @@ declare i64 @vector_truncate(i64, i64)
 @pow10_finite_max = private constant i64 308
 @stdlib.mutable.sort_block = private constant i64 16
 @examples.neural_network_train_xor.idx_b2 = private constant i64 8
+
+define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$1$ptr = inttoptr i64 %t$0 to ptr
+  %t$1 = call i64 @print_str(ptr %t$1$ptr)
+  ret i64 %t$1
+}
 
 define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:
@@ -1098,55 +1118,65 @@ join_2:
   ret i64 %t$3
 }
 
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_0(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
 define i64 @examples.neural_network_train_xor.report_loss(i64 %p$w, i64 %p$epoch, i64 %p$band) {
 entry:
   %t$0 = call i64 @examples.neural_network_train_xor.mod_int(i64 %p$epoch, i64 %p$band)
   %t$1 = add i64 0, 0
   %t$2 = icmp eq i64 %t$0, %t$1
   %t$3 = zext i1 %t$2 to i64
-  %t$19 = trunc i64 %t$3 to i1
-  br i1 %t$19, label %then_4, label %else_4
+  %t$20 = trunc i64 %t$3 to i1
+  br i1 %t$20, label %then_4, label %else_4
 then_4:
   %t$6 = call i64 @examples.neural_network_train_xor.mse(i64 %p$w)
   %t$7 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
-  %t$20 = alloca i64
-  store i64 %t$8, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$21 = alloca i64
+  store i64 %t$8, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
   %t$9 = call i64 @__tc_ToString_Int_to_string(i64 %p$epoch)
-  %t$22 = alloca i64
-  store i64 %t$9, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
+  %t$23 = alloca i64
+  store i64 %t$9, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$10 = call i64 @__tc_Semigroup_String_append(i64 %t$8, i64 %t$9)
-  %t$24 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$11 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.17, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
-  %t$25 = alloca i64
-  store i64 %t$10, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$27 = alloca i64
-  store i64 %t$12, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
+  %t$26 = alloca i64
+  store i64 %t$10, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$28 = alloca i64
+  store i64 %t$12, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$13 = call i64 @__tc_Semigroup_String_append(i64 %t$10, i64 %t$12)
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$30 = alloca i64
-  store i64 %t$13, ptr %t$30
-  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$31 = alloca i64
+  store i64 %t$13, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
   %t$14 = call i64 @__tc_ToString_Double_to_string(i64 %t$6)
-  %t$32 = alloca i64
-  store i64 %t$14, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$33 = alloca i64
+  store i64 %t$14, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$15 = call i64 @__tc_Semigroup_String_append(i64 %t$13, i64 %t$14)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$16$ptr = inttoptr i64 %t$15 to ptr
-  %t$16 = call i64 @print_str(ptr %t$16$ptr)
-  %t$17 = add i64 0, 0
-  br label %join_4
-else_4:
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$16 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
+  %t$36 = alloca i64
+  store i64 %t$15, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$17 = call i64 @print(i64 %t$15, i64 %t$16)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = add i64 0, 0
   br label %join_4
+else_4:
+  %t$19 = add i64 0, 0
+  br label %join_4
 join_4:
-  %t$5 = phi i64 [%t$17, %then_4], [%t$18, %else_4]
+  %t$5 = phi i64 [%t$18, %then_4], [%t$19, %else_4]
   ret i64 %t$5
 }
 
@@ -1336,6 +1366,52 @@ join_4:
   ret i64 %t$5
 }
 
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
+entry:
+  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_2(i64 %p$env$, i64 %p$a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_3(i64 %p$env$, i64 %p$a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_4(i64 %p$env$, i64 %p$a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_5(i64 %p$env$, i64 %p$a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 9
@@ -1343,9 +1419,9 @@ entry:
   %t$2 = call i64 @stdlib.mutable.mutvec_new(i64 %t$0, i64 %t$1)
   %t$3 = add i64 0, 9
   %t$4 = bitcast double 0.0 to i64
-  %t$33 = alloca i64
-  store i64 %t$2, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$38 = alloca i64
+  store i64 %t$2, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$5 = call i64 @stdlib.mutable.mutvec_new(i64 %t$3, i64 %t$4)
   %t$6 = add i64 0, 0
   %t$7 = add i64 0, 12345
@@ -1354,33 +1430,50 @@ entry:
   %t$10 = add i64 0, 0
   %t$11 = add i64 0, 5000
   %t$12 = add i64 0, 1000
-  %t$35 = alloca i64
-  store i64 %t$5, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$40 = alloca i64
+  store i64 %t$5, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
   %t$13 = call i64 @examples.neural_network_train_xor.train_verbose(i64 %t$2, i64 %t$5, i64 %t$9, i64 %t$10, i64 %t$11, i64 %t$12)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$14 = getelementptr inbounds { i64, [34 x i8] }, ptr @.str.20, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
-  %t$16$ptr = inttoptr i64 %t$15 to ptr
-  %t$16 = call i64 @print_str(ptr %t$16$ptr)
-  %t$17 = bitcast double 0.0 to i64
+  %t$16 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$43 = alloca i64
+  store i64 %t$15, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$17 = call i64 @print(i64 %t$15, i64 %t$16)
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$18 = bitcast double 0.0 to i64
-  %t$19 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$17, i64 %t$18)
-  %t$20 = call i64 @print_value(i64 %t$19)
-  %t$21 = bitcast double 0.0 to i64
-  %t$22 = bitcast double 1.0 to i64
-  %t$23 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$21, i64 %t$22)
-  %t$24 = call i64 @print_value(i64 %t$23)
-  %t$25 = bitcast double 1.0 to i64
-  %t$26 = bitcast double 0.0 to i64
-  %t$27 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$25, i64 %t$26)
-  %t$28 = call i64 @print_value(i64 %t$27)
-  %t$29 = bitcast double 1.0 to i64
-  %t$30 = bitcast double 1.0 to i64
-  %t$31 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$29, i64 %t$30)
-  %t$32 = call i64 @print_value(i64 %t$31)
-  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$32
+  %t$19 = bitcast double 0.0 to i64
+  %t$20 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$18, i64 %t$19)
+  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_2, i64 8) to i64
+  %t$22 = call i64 @print(i64 %t$20, i64 %t$21)
+  %t$23 = bitcast double 0.0 to i64
+  %t$24 = bitcast double 1.0 to i64
+  %t$25 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$23, i64 %t$24)
+  %t$26 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
+  %t$27 = call i64 @print(i64 %t$25, i64 %t$26)
+  %t$28 = bitcast double 1.0 to i64
+  %t$29 = bitcast double 0.0 to i64
+  %t$30 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$28, i64 %t$29)
+  %t$31 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_4, i64 8) to i64
+  %t$32 = call i64 @print(i64 %t$30, i64 %t$31)
+  %t$33 = bitcast double 1.0 to i64
+  %t$34 = bitcast double 1.0 to i64
+  %t$35 = call i64 @examples.neural_network_train_xor.predict(i64 %t$2, i64 %t$33, i64 %t$34)
+  %t$36 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5, i64 8) to i64
+  %t$37 = call i64 @print(i64 %t$35, i64 %t$36)
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$37
+}
+
+define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+entry:
+  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
+  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
+  %t$0$code = load ptr, ptr %t$0$env_ptr
+  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
+  ret i64 %t$0
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {
@@ -1399,6 +1492,11 @@ define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
 entry:
   %t$0 = call i64 @int_to_string(i64 %p$value)
   ret i64 %t$0
+}
+
+define i64 @__tc_ToString_String_to_string(i64 %p$value) {
+entry:
+  ret i64 %p$value
 }
 
 define void @__sprout_init_globals() {

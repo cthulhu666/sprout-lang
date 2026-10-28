@@ -3,7 +3,8 @@ module main
 # A local binding named like a call-site intrinsic (`bit_*`, `to_double`, `double_to_bits`,
 # `double_from_bits`) is called, not lowered as the intrinsic. Each shape below once compiled
 # the call to a single instruction and never called the local. The control lines keep the real
-# intrinsics working. (`print`/`eprint` are renamed by the bundler, so they are not a case.)
+# intrinsics working. (`print` is an ordinary prelude function, so it is not a case;
+# `print_str` is covered near the end.)
 
 import stdlib.bits
 

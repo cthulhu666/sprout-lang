@@ -1,4 +1,4 @@
-type Maybe a =
+type Maybe a deriving (ToString) =
   | Just a
   | Nothing
 

@@ -267,7 +267,10 @@ in function main`. For a type declared in the program it should add "add `derivi
 - Cost per call: `print(n)` builds `int_to_string(n)` before writing it, where `print_value`
   called `printf` directly, so one string allocation. Every call, `print("literal")` included,
   also makes one indirect `to_string` call through the dictionary, where today a `String` is one
-  direct `@print_str`.
+  direct `@print_str`. Measured in the golden IR: `print` roots its two arguments around that
+  call, the caller roots the value around the call to `print`, and each call site gets its own
+  eta wrapper for the instance method (`examples__hello`). The 75 snapshots gain 7776 lines and
+  lose 3956.
 
 ## 8. Spec and docs
 
@@ -309,21 +312,21 @@ declaration, and needs a rule for which instance wins when the user also writes 
 
 ## 10. Plan
 
-1. Tests first (§11), committed failing. The first is the value-position test: no test in the
+1. ~~Tests first (§11), committed failing. The first is the value-position test: no test in the
    tree passes a constrained function as a value under a type variable, so §2's "can be passed
    as a value" rests on it. It must fail today with "'print' cannot be used as a first-class
-   value".
+   value".~~ Landed.
 2. ~~**`print_str` only.** Declare `extern fn print_str` in the prelude and add it to
    `is_call_site_intrinsic` and `translate_print_call`, lowering to `IRPrintStr`. Reseed.~~
    Landed. The seed before it treated `print_str` as an ordinary extern and would have emitted
    `call @print_str(i64)` against `declare @print_str(ptr)`, which `opt --passes=verify` rejects.
    So the seed had to know the new lowering before the prelude calls it.
-3. Prelude and floor (§4.1–4.2), compiler (§4.3), the files and tests in §7, expected
+3. ~~Prelude and floor (§4.1–4.2), compiler (§4.3), the files and tests in §7, expected
    outputs read and updated, the missing-instance hint. `print`'s type and its lowering land
    together. Reseed, `just test`, golden IR, `just compile-examples-stage1`, downstream suites.
    The step-2 seed still lowers `print` by name, ahead of the prelude function, so its stage 2
    differs from the stage 3 it builds. `refresh-seed` needs two iterations here (measured, §5);
-   that is expected, not a broken fixed point.
+   that is expected, not a broken fixed point.~~ Landed.
 4. Remove the runtime renderer once nothing emits `print_value` (§4.3), with
    `tests/c_runtime/read_file_error_print.c` (§7). Separate, small.
 5. **Plain externs for the String sinks.** `print_str` and `eprint` are call-site intrinsics

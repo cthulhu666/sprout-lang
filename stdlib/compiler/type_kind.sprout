@@ -32,7 +32,6 @@ export type ScalarWhy =
   | FieldCode
   | LiteralTested
   | TupleSlot
-  | UnitResult
   | CtorTag
 
 # Just a witness when `p` is an Int or Bool literal pattern: the element it tests is
@@ -46,9 +45,6 @@ export fn scalar_of_literal_pattern(p: ast.Pattern) -> Maybe ScalarWhy =
 # A slot of an unboxed tuple worker result: scalar_tuple_width admits only
 # tuples whose every field passes type_is_non_heap_scalar.
 export let tuple_slot: ScalarWhy = TupleSlot
-
-# The result of a call that returns Unit (print_value).
-export let unit_result: ScalarWhy = UnitResult
 
 # A constructor tag word (the `_argw` wrapper's tag parameter).
 export let ctor_tag: ScalarWhy = CtorTag

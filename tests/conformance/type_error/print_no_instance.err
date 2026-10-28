@@ -1,1 +1,1 @@
-add `deriving (ToString)` to `Answers`
+hint: add `deriving (ToString)` to `Answers`

@@ -9,7 +9,7 @@ module examples.aoc_2025_day_2
 #
 # Sample answers: Answers(1227775554, 4174379265).
 
-type Answers =
+type Answers deriving (ToString) =
   | Answers Int Int
 
 fn sample_ranges() -> List IntRange =

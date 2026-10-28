@@ -3,7 +3,7 @@ no_prelude
 # `no_prelude` leaves only the floor: the 15 prelude externs whose signatures
 # mention primitive types only (docs/no-prelude-core-v0.md §4.1).
 #
-#   print  eprint  panic  int_to_string  double_to_string  char_to_string
+#   print_str  eprint  panic  int_to_string  double_to_string  char_to_string
 #   char_to_str  char_from_codepoint  to_double  str_concat  str_len
 #   str_slice  str_find  str_starts_with  str_compare
 #
@@ -87,15 +87,15 @@ fn print_all(settings: List Setting) -> Unit !{IO} =
   | Nil -> ()
   | Cons setting rest ->
       do
-        print(show(setting))
+        print_str(show(setting))
         print_all(rest)
 
 let source = "host=localhost;port=8080;mode=strict"
 
 fn main() -> Unit !{IO} = do
-  print("settings:")
+  print_str("settings:")
   print_all(settings)
-  print(describe(endpoint(settings)))
-  print(describe(endpoint(Cons (Setting("host", "localhost"), Nil))))
+  print_str(describe(endpoint(settings)))
+  print_str(describe(endpoint(Cons (Setting("host", "localhost"), Nil))))
 where
   settings = parse_onto(split(source, ";"), Nil)

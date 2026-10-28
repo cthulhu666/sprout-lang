@@ -5,4 +5,4 @@ no_prelude
 # declared here, not in demo.tokbar, so demo.tokbar's constructor `Token` is legal.
 type Token = | Tok Int
 
-fn main() -> Unit !{IO} = print(int_to_string(bar_value))
+fn main() -> Unit !{IO} = print_str(int_to_string(bar_value))

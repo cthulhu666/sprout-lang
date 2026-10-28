@@ -50,7 +50,7 @@ Non-goals:
   and `is_bits_intrinsic` say what the compiler expands inline, not what a C body does. §7 leaves
   them for a separate change.
 - Names the compiler emits or keys on for other reasons: `ast_to_ir` emitting calls to
-  `char_to_string`, `print_value` and `list_append`, `infer`'s `print` checks,
+  `char_to_string` and `list_append`,
   `ir_lowering.extern_skip_names`, BCE's pseudo-callees.
 - `runtime/APPROVED_BUILTINS` and `scripts/check_extern_signatures.sh`.
 - A `no_prelude` file whose top-level name matches a runtime symbol. Its define is bare, so the
@@ -282,9 +282,9 @@ C function. Only the link's `duplicate symbol` error stops that, and `--emit-ir`
 the IDE never link. Each consumer already holds the program's function names (`summary`,
 `tables.fn_names`) and checks them first.
 
-`bce` sees Sprout names. `print` has no C symbol. `eprint` has one, a bridge for old codegen that
+`bce` sees Sprout names. `eprint` has a C symbol, a bridge for old codegen that
 nothing emitted today calls (the seed and the golden IR have no `@eprint(`). `ast_to_ir` lowers
-both to `print_str`, `print_value` and `eprint_str`, and `note_callee_kind` maps each name to
+`eprint` and `print_str` to `eprint_str` and `print_str`, and `note_callee_kind` maps each name to
 those symbols before the lookup, through one function beside that lowering, so a loop that prints
 stays versioned.
 
@@ -359,7 +359,7 @@ Each stage is one PR, and each moves its lists into the module unchanged before 
 
 `recognize_vector_op` (`VecOp`), `recognize_string_builtin` (`StringBuiltin`),
 `is_call_site_intrinsic` and `is_bits_intrinsic` are the remaining name lists. They decide what
-`ast_to_ir` expands inline (`print`, `to_double`, the bits ops, `unsafe_pure`, the B1 vector
+`ast_to_ir` expands inline (`print_str`, `eprint`, `to_double`, the bits ops, `unsafe_pure`, the B1 vector
 accesses), which is a compiler choice, not a fact about C. Folding them into one `Intrinsic` ADT
 and one parse would leave one place for those names too. That is a separate design, and so is
 inlining more runtime calls as IR ops (`vector_length` as a guard plus `IRVecLenD`).

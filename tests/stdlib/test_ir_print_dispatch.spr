@@ -1,21 +1,49 @@
-# Verifies that print() dispatches by argument type in the typed-IR path.
-#
-# Before this change: --use-ir-codegen emitted `call i64 @print(i64 %x)` for
-# every print, but @print is not defined in the runtime, so any program calling
-# print FAILED TO LINK (Undefined symbols: _print).
-#
-# After: print(String/Char) lowers to @print_str(ptr) (via IRPrintStr) and
-# print(Int/Bool) lowers to @print_value(i64) (via a plain IRCall), mirroring
-# direct codegen's emit_print_call. Both runtime functions exist, so the program
-# links and runs.
-#
-# This file is run two ways in verification: via --emit-ir (direct codegen) and
-# via --use-ir-codegen; their stdout must be byte-identical. Under `just test`
-# it runs via direct codegen and must complete without crashing.
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.env as env
+import stdlib.string as string
+
+# The String sinks lower to their own runtime symbols, and no program emits the structural
+# renderer `@print_value`. `print_str` and `eprint` are call-site intrinsics
+# (IRPrintStr: @print_str / @eprint_str, with a ptr coercion); `print` is a prelude function
+# that renders through ToString and writes with `print_str`, so it adds no symbol of its own.
+
+fn emitted_ir(path: String, root: String) -> String !{IO} =
+  match compiler.compile_full_ir(source.FilePath(path), source.StdlibRoot(root)) with
+  | compiler.IrFullOk ir -> ir
+  | compiler.IrFullFail _ -> ""
+
+fn compile_source(name: String, text: String, root: String) -> String !{IO} =
+  do
+    let path = "/tmp/sprout_test_ir_print_dispatch_" ++ name ++ ".sprout"
+    fs.write_text(path, text)
+    emitted_ir(path, root)
 
 fn main() -> Unit !{IO} =
   do
-    print("hello")  # String  -> @print_str
-    print(42)  # Int     -> @print_value
-    print(true)  # Bool    -> @print_value
-    print('z')  # Char    -> @print_str
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just root ->
+        do
+          sinks <- compile_source("sinks",
+            "fn main() -> Unit !{IO} =\n  do\n    print_str(\"out\")\n    eprint(\"err\")\n", root)
+          assert_true(state, "print_str/eprint program compiles", string.contains(sinks, "define "))
+          assert_true(state, "print_str lowers to @print_str(ptr",
+            string.contains(sinks, "call i64 @print_str(ptr"))
+          assert_true(state, "eprint lowers to @eprint_str(ptr",
+            string.contains(sinks, "call i64 @eprint_str(ptr"))
+          assert_true(state, "no @print_value in the String sinks' IR",
+            !string.contains(sinks, "@print_value"))
+
+          printed <- compile_source("printed",
+            "fn main() -> Unit !{IO} =\n  do\n    print(\"hello\")\n    print(42)\n    print(true)\n    print('z')\n", root)
+          assert_true(state, "print over String/Int/Bool/Char compiles", string.contains(printed, "define "))
+          assert_true(state, "print writes through @print_str(ptr",
+            string.contains(printed, "call i64 @print_str(ptr"))
+          assert_true(state, "no @print_value in the IR of print over String/Int/Bool/Char",
+            !string.contains(printed, "@print_value"))
+    summary(state)
