@@ -12,6 +12,12 @@ fn pick(x: Int, y: Int) -> Int =
   | (a, 0) -> a * 10
   | _ -> -1
 
+# A String literal field compares the element's own value.
+fn greet(name: String, n: Int) -> Int =
+  match (name, n) with
+  | ("hi", k) -> k
+  | (_, k) -> -k
+
 # Constructor patterns inside the tuple, over heap elements.
 fn both(a: Maybe String, b: Maybe String) -> String =
   match (a, b) with
@@ -114,10 +120,20 @@ fn effect_order() -> List Int !{IO} =
     log <- ref_read(r)
     Cons(s, list_reverse(log))
 
+# A `_`-only match still runs every element.
+fn effect_wildcard() -> List Int !{IO} =
+  do
+    r <- ref_new(Nil)
+    s <- match (tick(r, 1), tick(r, 2)) with
+         | _ -> 0
+    log <- ref_read(r)
+    Cons(s, list_reverse(log))
+
 fn main() -> Unit !{IO} =
   do
     from_do <- let_do("x", "y")
     order <- effect_order()
+    wild <- effect_wildcard()
     run_suite("match_tuple_scrutinee", [
       check_eq("literal arm", pick(0, 7), 7),
       check_eq("fall through to binder arm", pick(3, 0), 30),
@@ -141,5 +157,8 @@ fn main() -> Unit !{IO} =
       check_eq("let else: refute", let_else(1, Nothing), -1),
       check_eq("do let", from_do, "yx"),
       check_eq("heap elements live across allocation", held("a", "b"), "a!b?40"),
-      check_eq("effects once, left to right", order, [3, 1, 2])
+      check_eq("effects once, left to right", order, [3, 1, 2]),
+      check_eq("wildcard arm still runs elements", wild, [0, 1, 2]),
+      check_eq("String literal field: hit", greet("hi", 3), 3),
+      check_eq("String literal field: miss", greet("yo", 3), -3)
     ])
