@@ -1,0 +1,58 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.source as source
+import stdlib.string as string
+import stdlib.fs as fs
+import stdlib.env as env
+
+# The missing-instance message hints `deriving (C)` only for a program type that can
+# derive C. A type with a function-typed field cannot: the derived method would need an
+# instance for the function type, which never exists. The conformance corpus only checks
+# that a message CONTAINS text, so the absence of the hint is asserted here.
+
+fn first_msg(r: compiler.FullResult) -> String =
+  match r with
+  | compiler.FullOk _ _ -> ""
+  | compiler.FullFail diags ->
+      match diags with
+      | Nil -> ""
+      | [compiler.DiagError _ msg | _] -> msg
+      | [compiler.DiagWarning _ msg | _] -> msg
+
+# `print` of a value of a program type declared by `decl`, whose constructor is `ctor`.
+fn print_diag(decl: String, ctor_expr: String, stdlib_root: String) -> String !{IO} =
+  do
+    let path = "/tmp/sprout_no_instance_hint_fixture.spr"
+    fs.write_text(path, "module main\n\n" ++ decl ++ "\n\nfn main() -> Unit !{IO} = print(" ++ ctor_expr ++ ")\n")
+    r <- compiler.compile_full(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    first_msg(r)
+
+fn check_hint(state: TestState, label: String, msg: String) -> Unit !{IO} =
+  do
+    assert_true(state, label ++ ": rejects with the missing instance", string.contains(msg, "No instance of ToString for"))
+    assert_true(state, label ++ ": hints deriving", string.contains(msg, "hint: add `deriving (ToString)`"))
+
+fn check_no_hint(state: TestState, label: String, msg: String) -> Unit !{IO} =
+  do
+    assert_true(state, label ++ ": rejects with the missing instance", string.contains(msg, "No instance of ToString for"))
+    assert_true(state, label ++ ": gives no deriving hint", !string.contains(msg, "hint:"))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match env.get("SPROUT_STDLIB_ROOT") with
+    | Nothing -> ()
+    | Just root ->
+        do
+          m_enum <- print_diag("type Answers = | Yes | No", "Yes", root)
+          check_hint(state, "enum", m_enum)
+          m_fields <- print_diag("type Box = Box Int", "Box(1)", root)
+          check_hint(state, "int field", m_fields)
+          m_fn <- print_diag("type Handler = Handler (Int -> Int)", "Handler(\\x -> x)", root)
+          check_no_hint(state, "function field", m_fn)
+          m_tuple <- print_diag("type Pair = Pair (Int, Int -> Int)", "Pair((1, \\x -> x))", root)
+          check_no_hint(state, "function inside a tuple field", m_tuple)
+          m_app <- print_diag("type Slot = Slot (Maybe (Int -> Int))", "Slot(Nothing)", root)
+          check_no_hint(state, "function inside a type application", m_app)
+    summary(state)

@@ -19,7 +19,6 @@ import stdlib.string as string
 # Asserted here rather than only in tests/conformance/run/intrinsic_as_value.spr because
 # that fixture can show the program works, not WHICH lowering each wrapper took, and it
 # cannot reach the rejection at all (a rejected program emits no stdout to compare).
-# `print` is no longer one of these: it is a prelude function over ToString.
 
 fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
@@ -55,10 +54,12 @@ fn lower_all(d: typed_ast.TypedDecl) -> Result String String !{IO} =
   do
     ctr <- ref_new(0)
     lidx <- ref_new(dict_empty())
+    etas <- ref_new(dict_empty())
     match ast_to_ir.translate_decl_with_idx(d, ast_to_ir.ProgEnv(
             ctors = dict_empty(), top_level = set_empty(), let_names = set_empty(),
             fn_arities = intrinsic_arities(), lambda_ctr_ref = ctr, lifted_idx_ref = lidx,
-            adt_index = dict_empty(), argw = dict_empty(), groups = dict_empty())) with
+            adt_index = dict_empty(), argw = dict_empty(), groups = dict_empty(),
+            eta_wrappers_ref = etas)) with
     | Err msg -> Err(msg)
     | Ok maybe ->
         match maybe with

@@ -253,17 +253,15 @@ declare i64 @__chan_select(i64)
 @.str.107 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 165, column 53)\00" }
 @.str.108 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
 @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.has_bare_terminator_8 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.has_bare_terminator_8 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_9 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_9 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_10 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_10 }
 @.str.109 = private unnamed_addr constant { i64, [33 x i8] } { i64 524298, [33 x i8] c"malformed header line terminator\00" }
 @.str.110 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
 @.str.111 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_11 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.parse_header_pair_11 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_9 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.parse_header_pair_9 }
 @.str.112 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_12 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Monad_Maybe_flat_map_12 }
-@__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_13 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_Applicative_Maybe_pure_13 }
-@__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_14 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Applicative_Maybe_map2_14 }
-@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_15 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_15 }
+@__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_10 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Monad_Maybe_flat_map_10 }
+@__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_11 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_Applicative_Maybe_pure_11 }
+@__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_12 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Applicative_Maybe_map2_12 }
+@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_13 }
 @.str.113 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 215, column 71)\00" }
 @.str.114 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"invalid header line\00" }
 @.str.115 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 220, column 45)\00" }
@@ -314,9 +312,9 @@ declare i64 @__chan_select(i64)
 @.str.160 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"content-type\00" }
 @.str.161 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"text/plain\00" }
 @.str.162 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"set-cookie\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.push_header_18 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_stdlib.http_server.push_header_18 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.push_header_16 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_stdlib.http_server.push_header_16 }
 @.str.163 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
-@__sprout_sclo.__sprout_ir_lambda_19 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_19 }
+@__sprout_sclo.__sprout_ir_lambda_17 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_17 }
 @.str.164 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
 @.str.165 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c";\00" }
 @.str.166 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
@@ -328,20 +326,14 @@ declare i64 @__chan_select(i64)
 @.str.172 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"Max-Age=\00" }
 @.str.173 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"SameSite=\00" }
 @.str.174 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"; \00" }
-@__sprout_sclo.__sprout_ir_lambda_20 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_20 }
+@__sprout_sclo.__sprout_ir_lambda_18 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_18 }
 @.str.175 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"=\00" }
+@__sprout_sclo.__sprout_ir_lambda_19 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_19 }
+@__sprout_sclo.__sprout_ir_lambda_20 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_20 }
 @__sprout_sclo.__sprout_ir_lambda_21 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_21 }
-@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_22 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_22 }
-@__sprout_sclo.__sprout_ir_lambda_23 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_23 }
-@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_24 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_24 }
-@__sprout_sclo.__sprout_ir_lambda_25 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_25 }
-@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_26 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_26 }
 @.str.176 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"HttpOnly\00" }
 @.str.177 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"Secure\00" }
-@__sprout_sclo.__sprout_ir_lambda_27 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_27 }
-@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_28 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_28 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_29 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_29 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_30 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_30 }
+@__sprout_sclo.__sprout_ir_lambda_22 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_22 }
 @.str.178 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.179 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1063, column 45)\00" }
 @.str.180 = private unnamed_addr constant { i64, [16 x i8] } { i64 245770, [16 x i8] c"request timeout\00" }
@@ -353,14 +345,12 @@ declare i64 @__chan_select(i64)
 @.str.186 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1126, column 25)\00" }
 @.str.187 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1148, column 24)\00" }
 @.str.188 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"close\00" }
-@__sprout_sclo.__sprout_ir_lambda_31 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_31 }
+@__sprout_sclo.__sprout_ir_lambda_23 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_23 }
 @.str.189 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c",\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_32 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_32 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_33 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_33 }
 @.str.190 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"HTTP/1.1\00" }
 @.str.191 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"connection\00" }
 @.str.192 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"connection\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.closes_connection_34 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.closes_connection_34 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.closes_connection_24 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.closes_connection_24 }
 @.str.193 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"connection\00" }
 @.str.194 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"close\00" }
 @.str.195 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1244, column 39)\00" }
@@ -376,7 +366,7 @@ declare i64 @__chan_select(i64)
 @.str.205 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"X-Sprout-Path\00" }
 @.str.206 = private unnamed_addr constant { i64, [26 x i8] } { i64 409610, [26 x i8] c"<body is not valid UTF-8>\00" }
 @.str.207 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"cannot listen on 8081: \00" }
-@__sprout_sclo.__sprout_ir_eta_examples.http_echo_server.handle_37 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_examples.http_echo_server.handle_37 }
+@__sprout_sclo.__sprout_ir_eta_examples.http_echo_server.handle_27 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_examples.http_echo_server.handle_27 }
 @.str.208 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
 @.str.209 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
 @.str.210 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
@@ -385,21 +375,13 @@ declare i64 @__chan_select(i64)
 @.str.213 = private unnamed_addr constant { i64, [36 x i8] } { i64 573450, [36 x i8] c"request headers are not valid UTF-8\00" }
 @.str.214 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 461, column 38)\00" }
 @.str.215 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"transfer-encoding\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_38 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.parse_header_pair_38 }
 @.str.216 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_39 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Monad_Maybe_flat_map_39 }
-@__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_40 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_Applicative_Maybe_pure_40 }
-@__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_41 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Applicative_Maybe_map2_41 }
-@__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_42 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Functor_Maybe_fmap_42 }
 @.str.217 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 567, column 74)\00" }
 @.str.218 = private unnamed_addr constant { i64, [32 x i8] } { i64 507914, [32 x i8] c"missing request line terminator\00" }
 @.str.219 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 313, column 72)\00" }
 @.str.220 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 313, column 88)\00" }
 @.str.221 = private unnamed_addr constant { i64, [21 x i8] } { i64 327690, [21 x i8] c"invalid request line\00" }
 @.str.222 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http_server.has_bare_terminator_43 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http_server.has_bare_terminator_43 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_44 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_44 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_45 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_45 }
 @.str.223 = private unnamed_addr constant { i64, [33 x i8] } { i64 524298, [33 x i8] c"malformed header line terminator\00" }
 @.str.224 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1063, column 45)\00" }
 @.str.225 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"127.0.0.1\00" }
@@ -5948,41 +5930,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_9(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_10(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
 define i64 @stdlib.http_server.split_header_lines(i64 %p$raw) {
 entry:
   %t$18 = alloca [1 x i64]
@@ -6003,8 +5950,8 @@ entry:
   br label %arm_0_3
 arm_0_3:
   %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.has_bare_terminator_8, i64 8) to i64
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_9, i64 8) to i64
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_10, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$8 = call i64 @any(i64 %t$5, i64 %t$2, i64 %t$6, i64 %t$7)
   %t$17 = trunc i64 %t$8 to i1
   br i1 %t$17, label %then_9, label %else_9
@@ -6152,7 +6099,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_stdlib.http_server.parse_header_pair_11(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.http_server.parse_header_pair_9(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -6162,7 +6109,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Monad_Maybe_flat_map_12(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta___tc_Monad_Maybe_flat_map_10(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -6175,7 +6122,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Applicative_Maybe_pure_13(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_Applicative_Maybe_pure_11(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -6185,7 +6132,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Applicative_Maybe_map2_14(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
+define i64 @__sprout_ir_eta___tc_Applicative_Maybe_map2_12(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a2, ptr %t$0
@@ -6201,7 +6148,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_15(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_13(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -6216,7 +6163,7 @@ entry:
 
 define i64 @stdlib.http_server.parse_header_line(i64 %p$raw) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_11, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_9, i64 8) to i64
   %t$1 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.112, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$9 = alloca i64
@@ -6227,10 +6174,10 @@ entry:
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$3 = call i64 @stdlib.string.split_once(i64 %p$raw, i64 %t$2)
   %t$13 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_12, i64 8) to i64
-  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_13, i64 8) to i64
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_14, i64 8) to i64
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_15, i64 8) to i64
+  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_10, i64 8) to i64
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_11, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_12, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13, i64 8) to i64
   %t$14 = alloca i64
   store i64 %t$3, ptr %t$14
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
@@ -8627,7 +8574,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_16(i64 %p$env$, i64 %p$pair) {
+define i64 @__sprout_ir_lambda_14(i64 %p$env$, i64 %p$pair) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8647,7 +8594,7 @@ entry:
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_16, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_14, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$name, ptr %t$0$raw$slot$1
   %t$6 = alloca i64
@@ -8658,7 +8605,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$pair) {
+define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$pair) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -8680,7 +8627,7 @@ entry:
   store i64 %p$headers, ptr %t$7$2
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_17, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_15, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$name, ptr %t$0$raw$slot$1
   %t$9 = alloca i64
@@ -8803,7 +8750,7 @@ join_6:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_eta_stdlib.http_server.push_header_18(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_stdlib.http_server.push_header_16(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -8816,7 +8763,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$acc, i64 %p$c) {
+define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$acc, i64 %p$c) {
 entry:
   %t$0 = getelementptr inbounds { i64, [11 x i8] }, ptr @.str.162, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -8855,7 +8802,7 @@ entry:
   %t$19 = call i64 @sprout_gc_push_scan_root(ptr %t$18, i64 8)
   %t$18$0 = getelementptr i64, ptr %t$18, i64 0
   store i64 %p$cookies, ptr %t$18$0
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.push_header_18, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.push_header_16, i64 8) to i64
   %t$1 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.163, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$20 = alloca i64
@@ -8895,7 +8842,7 @@ entry:
   %t$34 = call i64 @sprout_gc_pop_roots(i64 3)
   br label %arm_0_7
 arm_0_7:
-  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_19, i64 8) to i64
+  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_17, i64 8) to i64
   %t$35 = alloca i64
   store i64 %t$6, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
@@ -9224,12 +9171,12 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_20(i64 %p$env$, i64 %p$attr) {
+define i64 @__sprout_ir_lambda_18(i64 %p$env$, i64 %p$attr) {
 entry:
   ret i64 %p$attr
 }
 
-define i64 @__sprout_ir_lambda_21(i64 %p$env$, i64 %p$p) {
+define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$p) {
 entry:
   %t$0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.170, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -9273,20 +9220,7 @@ entry:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_22(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a1, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %ret = call i64 @__tc_Functor_Maybe_fmap(i64 %p$a0, i64 %p$a1)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$d) {
+define i64 @__sprout_ir_lambda_20(i64 %p$env$, i64 %p$d) {
 entry:
   %t$0 = getelementptr inbounds { i64, [8 x i8] }, ptr @.str.171, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -9330,20 +9264,7 @@ entry:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_24(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a1, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %ret = call i64 @__tc_Functor_Maybe_fmap(i64 %p$a0, i64 %p$a1)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_lambda_25(i64 %p$env$, i64 %p$n) {
+define i64 @__sprout_ir_lambda_21(i64 %p$env$, i64 %p$n) {
 entry:
   %t$0 = getelementptr inbounds { i64, [9 x i8] }, ptr @.str.172, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -9384,20 +9305,7 @@ entry:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_26(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a1, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %ret = call i64 @__tc_Functor_Maybe_fmap(i64 %p$a0, i64 %p$a1)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_lambda_27(i64 %p$env$, i64 %p$s) {
+define i64 @__sprout_ir_lambda_22(i64 %p$env$, i64 %p$s) {
 entry:
   %t$0 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.173, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -9438,54 +9346,6 @@ entry:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_28(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a1, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %ret = call i64 @__tc_Functor_Maybe_fmap(i64 %p$a0, i64 %p$a1)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_29(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_30(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
 define i64 @stdlib.http_server.set_cookie_text(i64 %p$c) {
 entry:
   %t$61 = alloca [7 x i64]
@@ -9497,7 +9357,7 @@ entry:
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$61$1 = getelementptr i64, ptr %t$61, i64 1
   store i64 %t$1, ptr %t$61$1
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_20, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_18, i64 8) to i64
   %t$3 = call i64 @sprout_field(i64 %p$c, i64 0)
   %t$4 = call i64 @stdlib.http_server.cookie_name_text(i64 %t$3)
   %t$5 = call i64 @__tc_ToString_String_to_string(i64 %t$4)
@@ -9561,9 +9421,9 @@ entry:
   %t$61$2 = getelementptr i64, ptr %t$61, i64 2
   store i64 %t$16, ptr %t$61$2
   %t$83 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_21, i64 8) to i64
+  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_19, i64 8) to i64
   %t$18 = call i64 @sprout_field(i64 %p$c, i64 3)
-  %t$19 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_22, i64 8) to i64
+  %t$19 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13, i64 8) to i64
   %t$84 = alloca i64
   store i64 %t$18, ptr %t$84
   %t$85 = call i64 @sprout_gc_push_i64_root(ptr %t$84)
@@ -9571,9 +9431,9 @@ entry:
   %t$61$3 = getelementptr i64, ptr %t$61, i64 3
   store i64 %t$20, ptr %t$61$3
   %t$86 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_23, i64 8) to i64
+  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_20, i64 8) to i64
   %t$22 = call i64 @sprout_field(i64 %p$c, i64 4)
-  %t$23 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_24, i64 8) to i64
+  %t$23 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13, i64 8) to i64
   %t$87 = alloca i64
   store i64 %t$22, ptr %t$87
   %t$88 = call i64 @sprout_gc_push_i64_root(ptr %t$87)
@@ -9581,9 +9441,9 @@ entry:
   %t$61$4 = getelementptr i64, ptr %t$61, i64 4
   store i64 %t$24, ptr %t$61$4
   %t$89 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_25, i64 8) to i64
+  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_21, i64 8) to i64
   %t$26 = call i64 @sprout_field(i64 %p$c, i64 2)
-  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_26, i64 8) to i64
+  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13, i64 8) to i64
   %t$90 = alloca i64
   store i64 %t$26, ptr %t$90
   %t$91 = call i64 @sprout_gc_push_i64_root(ptr %t$90)
@@ -9633,9 +9493,9 @@ else_38:
   br label %join_38
 join_38:
   %t$39 = phi i64 [%t$42, %then_38], [%t$43, %else_38]
-  %t$45 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_27, i64 8) to i64
+  %t$45 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_22, i64 8) to i64
   %t$46 = call i64 @sprout_field(i64 %p$c, i64 6)
-  %t$47 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_28, i64 8) to i64
+  %t$47 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13, i64 8) to i64
   %t$99 = alloca i64
   store i64 %t$39, ptr %t$99
   %t$100 = call i64 @sprout_gc_push_i64_root(ptr %t$99)
@@ -9723,8 +9583,8 @@ join_38:
   %t$128 = call i64 @sprout_gc_push_i64_root(ptr %t$127)
   %t$57 = call i64 @list_filter_map(i64 %t$2, i64 %t$56)
   %t$129 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$58 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_29, i64 8) to i64
-  %t$59 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_30, i64 8) to i64
+  %t$58 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$59 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$130 = alloca i64
   store i64 %t$57, ptr %t$130
   %t$131 = call i64 @sprout_gc_push_i64_root(ptr %t$130)
@@ -10276,7 +10136,7 @@ ovfok_1:
   ret i64 %t$4
 }
 
-define i64 @__sprout_ir_lambda_31(i64 %p$env$, i64 %p$opt) {
+define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$opt) {
 entry:
   %t$5 = alloca i64
   store i64 %p$opt, ptr %t$5
@@ -10297,44 +10157,9 @@ entry:
   ret i64 %t$4
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_32(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_33(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
 define i64 @stdlib.http_server.lists_close(i64 %p$options) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_31, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_23, i64 8) to i64
   %t$1 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.189, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$7 = alloca i64
@@ -10345,8 +10170,8 @@ entry:
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$3 = call i64 @stdlib.string.split(i64 %p$options, i64 %t$2)
   %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_32, i64 8) to i64
-  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_33, i64 8) to i64
+  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$12 = alloca i64
   store i64 %t$3, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
@@ -10463,7 +10288,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_stdlib.http_server.closes_connection_34(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.http_server.closes_connection_24(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -10478,7 +10303,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2 = call i64 @sprout_field(i64 %p$resp, i64 1)
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.closes_connection_34, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.closes_connection_24, i64 8) to i64
   %t$5 = alloca i64
   store i64 %t$2, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
@@ -11303,7 +11128,7 @@ entry:
   ret i64 %t$8
 }
 
-define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$_$0) {
+define i64 @__sprout_ir_lambda_25(i64 %p$env$, i64 %p$_$0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -11398,7 +11223,7 @@ arm_0_8:
 body_0_8:
   %t$12 = call i64 @sprout_alloc_closure(i64 40, i64 1)
   %t$12$raw = inttoptr i64 %t$12 to ptr
-  store ptr @__sprout_ir_lambda_35, ptr %t$12$raw
+  store ptr @__sprout_ir_lambda_25, ptr %t$12$raw
   %t$12$raw$slot$1 = getelementptr i64, ptr %t$12$raw, i64 1
   store i64 %p$adm, ptr %t$12$raw$slot$1
   %t$12$raw$slot$2 = getelementptr i64, ptr %t$12$raw, i64 2
@@ -11470,7 +11295,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$s) {
+define i64 @__sprout_ir_lambda_26(i64 %p$env$, i64 %p$s) {
 entry:
   %t$11 = alloca [4 x i64]
   call void @llvm.memset.p0.i64(ptr %t$11, i8 0, i64 32, i1 false)
@@ -11544,7 +11369,7 @@ entry:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$2 = call i64 @sprout_alloc_closure(i64 40, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_36, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_26, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %p$config, ptr %t$2$raw$slot$1
   %t$2$raw$slot$2 = getelementptr i64, ptr %t$2$raw, i64 2
@@ -11623,7 +11448,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta_examples.http_echo_server.handle_37(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_examples.http_echo_server.handle_27(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -11693,7 +11518,7 @@ arm_1_3:
   %t$17 = icmp eq i64 %t$1, %t$16
   br i1 %t$17, label %body_1_3, label %arm_2_3
 body_1_3:
-  %t$18 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.http_echo_server.handle_37, i64 8) to i64
+  %t$18 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.http_echo_server.handle_27, i64 8) to i64
   %t$36 = alloca i64
   store i64 %t$2, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
@@ -12911,71 +12736,9 @@ wrepack_next_18:
   unreachable
 }
 
-define i64 @__sprout_ir_eta_stdlib.http_server.parse_header_pair_38(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @stdlib.http_server.parse_header_pair(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Monad_Maybe_flat_map_39(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a1, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %ret = call i64 @__tc_Monad_Maybe_flat_map(i64 %p$a0, i64 %p$a1)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Applicative_Maybe_pure_40(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_Applicative_Maybe_pure(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Applicative_Maybe_map2_41(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Applicative_Maybe_map2(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Functor_Maybe_fmap_42(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a1, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %ret = call i64 @__tc_Functor_Maybe_fmap(i64 %p$a0, i64 %p$a1)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %ret
-}
-
 define i128 @stdlib.http_server.parse_header_line_worker(i64 %p$raw) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_38, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.parse_header_pair_9, i64 8) to i64
   %t$1 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.216, i64 0, i32 1, i64 0
   %t$2 = ptrtoint ptr %t$1 to i64
   %t$18 = alloca i64
@@ -12986,10 +12749,10 @@ entry:
   %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
   %t$3 = call i64 @stdlib.string.split_once(i64 %p$raw, i64 %t$2)
   %t$22 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_39, i64 8) to i64
-  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_40, i64 8) to i64
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_41, i64 8) to i64
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_42, i64 8) to i64
+  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Monad_Maybe_flat_map_10, i64 8) to i64
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_pure_11, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Applicative_Maybe_map2_12, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Functor_Maybe_fmap_13, i64 8) to i64
   %t$23 = alloca i64
   store i64 %t$3, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
@@ -13489,51 +13252,6 @@ wrepack_next_6:
   unreachable
 }
 
-define i64 @__sprout_ir_eta_stdlib.http_server.has_bare_terminator_43(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @stdlib.http_server.has_bare_terminator(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_44(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_45(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
 define i128 @stdlib.http_server.split_header_lines_worker(i64 %p$raw) {
 entry:
   %t$27 = alloca [1 x i64]
@@ -13553,9 +13271,9 @@ entry:
   %t$33 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %arm_0_3
 arm_0_3:
-  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.has_bare_terminator_43, i64 8) to i64
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_44, i64 8) to i64
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_45, i64 8) to i64
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_server.has_bare_terminator_8, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$8 = call i64 @any(i64 %t$5, i64 %t$2, i64 %t$6, i64 %t$7)
   %t$17 = trunc i64 %t$8 to i1
   br i1 %t$17, label %then_9, label %else_9
@@ -13627,7 +13345,7 @@ wrepack_next_23:
   unreachable
 }
 
-define i64 @__sprout_ir_lambda_46(i64 %p$env$, i64 %p$pair) {
+define i64 @__sprout_ir_lambda_28(i64 %p$env$, i64 %p$pair) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -13649,7 +13367,7 @@ entry:
   store i64 %p$headers, ptr %t$15$2
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_46, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_28, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$name, ptr %t$0$raw$slot$1
   %t$17 = alloca i64
@@ -13704,7 +13422,7 @@ wrepack_next_11:
   unreachable
 }
 
-define i64 @__sprout_ir_lambda_47(i64 %p$env$, i64 %p$pair) {
+define i64 @__sprout_ir_lambda_29(i64 %p$env$, i64 %p$pair) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -13724,7 +13442,7 @@ entry:
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_47, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_29, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$name, ptr %t$0$raw$slot$1
   %t$11 = alloca i64

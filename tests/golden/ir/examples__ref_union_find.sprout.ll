@@ -77,9 +77,6 @@ declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 22, column 25)\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_0 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_1 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_2 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_3 }
 @.str.1 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
 @.str.2 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
@@ -386,24 +383,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_3(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 6
@@ -440,9 +419,9 @@ entry:
   %t$24 = call i64 @examples.ref_union_find.connected(i64 %t$3, i64 %t$22, i64 %t$23)
   %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0, i64 8) to i64
   %t$26 = call i64 @print(i64 %t$18, i64 %t$25)
-  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_1, i64 8) to i64
+  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0, i64 8) to i64
   %t$28 = call i64 @print(i64 %t$21, i64 %t$27)
-  %t$29 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_2, i64 8) to i64
+  %t$29 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0, i64 8) to i64
   %t$30 = call i64 @print(i64 %t$24, i64 %t$29)
   %t$31 = add i64 0, 0
   %t$32 = call i64 @examples.ref_union_find.find(i64 %t$3, i64 %t$31)
@@ -451,7 +430,7 @@ entry:
   %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$35 = icmp eq i64 %t$32, %t$34
   %t$36 = zext i1 %t$35 to i64
-  %t$37 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_3, i64 8) to i64
+  %t$37 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_0, i64 8) to i64
   %t$38 = call i64 @print(i64 %t$36, i64 %t$37)
   ret i64 %t$38
 }

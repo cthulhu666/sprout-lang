@@ -103,31 +103,18 @@ declare i64 @term_read_avail(i64, i64)
 @.str.12 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"absent\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_1 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_1 }
 @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_2 }
-@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_3 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_4 }
-@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_5 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_5 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_6 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_6 }
 @.str.13 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"primes    : \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_7 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_7 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_3 }
 @.str.14 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.15 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"merged    : \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_8 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_8 }
 @.str.16 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.17 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"smallest  : \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_9 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_9 }
 @.str.18 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.19 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"largest   : \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_10 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_10 }
 @.str.20 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.21 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 6: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_11 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_11 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_12 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_12 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_13 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_13 }
 @.str.22 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.23 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 9: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_14 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_14 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_15 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_15 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_16 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_16 }
 @.str.24 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.25 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1294, column 26)\00" }
 @.str.26 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
@@ -1899,103 +1886,13 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Ord_Int_compare_3(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_4(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Ord_Int_compare_5(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_6(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_7(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_3(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
   %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_8(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_9(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_10(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Ord_Int_compare_11(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_12(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_13(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Ord_Int_compare_14(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_15(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_16(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
 }
 
@@ -2100,15 +1997,15 @@ entry:
   %t$153 = call i64 @sprout_gc_push_i64_root(ptr %t$152)
   %t$20 = call i64 @vec_from_list(i64 %t$19)
   %t$154 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3, i64 8) to i64
-  %t$22 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
+  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_1, i64 8) to i64
+  %t$22 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2, i64 8) to i64
   %t$155 = alloca i64
   store i64 %t$20, ptr %t$155
   %t$156 = call i64 @sprout_gc_push_i64_root(ptr %t$155)
   %t$23 = call i64 @examples.wrap_sorted_vec.sort_of(i64 %t$20, i64 %t$21, i64 %t$22)
   %t$157 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_5, i64 8) to i64
-  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_6, i64 8) to i64
+  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_1, i64 8) to i64
+  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2, i64 8) to i64
   %t$158 = alloca i64
   store i64 %t$23, ptr %t$158
   %t$159 = call i64 @sprout_gc_push_i64_root(ptr %t$158)
@@ -2128,7 +2025,7 @@ entry:
   %t$166 = call i64 @sprout_gc_push_i64_root(ptr %t$165)
   %t$30 = call i64 @vec_to_list(i64 %t$29)
   %t$167 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$31 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_7, i64 8) to i64
+  %t$31 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
   %t$168 = alloca i64
   store i64 %t$30, ptr %t$168
   %t$169 = call i64 @sprout_gc_push_i64_root(ptr %t$168)
@@ -2195,7 +2092,7 @@ entry:
   %t$193 = call i64 @sprout_gc_push_i64_root(ptr %t$192)
   %t$45 = call i64 @vec_to_list(i64 %t$44)
   %t$194 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$46 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_8, i64 8) to i64
+  %t$46 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
   %t$195 = alloca i64
   store i64 %t$45, ptr %t$195
   %t$196 = call i64 @sprout_gc_push_i64_root(ptr %t$195)
@@ -2257,7 +2154,7 @@ entry:
   %t$59 = trunc i128 %t$59$st to i64
   %t$59$hi = lshr i128 %t$59$st, 64
   %t$60 = trunc i128 %t$59$hi to i64
-  %t$61 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_9, i64 8) to i64
+  %t$61 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
   %t$217 = alloca i64
   store i64 %t$58, ptr %t$217
   %t$218 = call i64 @sprout_gc_push_i64_root(ptr %t$217)
@@ -2325,7 +2222,7 @@ entry:
   %t$74 = trunc i128 %t$74$st to i64
   %t$74$hi = lshr i128 %t$74$st, 64
   %t$75 = trunc i128 %t$74$hi to i64
-  %t$76 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_10, i64 8) to i64
+  %t$76 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
   %t$243 = alloca i64
   store i64 %t$75, ptr %t$243
   %t$244 = call i64 @sprout_gc_push_i64_root(ptr %t$243)
@@ -2384,9 +2281,9 @@ entry:
   %t$87 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.21, i64 0, i32 1, i64 0
   %t$88 = ptrtoint ptr %t$87 to i64
   %t$89 = add i64 0, 6
-  %t$90 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_11, i64 8) to i64
-  %t$91 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_12, i64 8) to i64
-  %t$92 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_13, i64 8) to i64
+  %t$90 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_1, i64 8) to i64
+  %t$91 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2, i64 8) to i64
+  %t$92 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2, i64 8) to i64
   %t$265 = alloca i64
   store i64 %t$88, ptr %t$265
   %t$266 = call i64 @sprout_gc_push_i64_root(ptr %t$265)
@@ -2452,9 +2349,9 @@ entry:
   %t$105 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
   %t$106 = ptrtoint ptr %t$105 to i64
   %t$107 = add i64 0, 9
-  %t$108 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_14, i64 8) to i64
-  %t$109 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_15, i64 8) to i64
-  %t$110 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_16, i64 8) to i64
+  %t$108 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_1, i64 8) to i64
+  %t$109 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2, i64 8) to i64
+  %t$110 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_2, i64 8) to i64
   %t$289 = alloca i64
   store i64 %t$106, ptr %t$289
   %t$290 = call i64 @sprout_gc_push_i64_root(ptr %t$289)
@@ -2663,7 +2560,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$v) {
+define i64 @__sprout_ir_lambda_4(i64 %p$env$, i64 %p$v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -2694,7 +2591,7 @@ entry:
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$2 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_17, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_4, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %p$__tc_ToString_0_to_string, ptr %t$2$raw$slot$1
   %t$15 = alloca i64

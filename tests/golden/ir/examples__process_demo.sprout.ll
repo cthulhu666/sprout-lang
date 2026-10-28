@@ -99,7 +99,6 @@ declare i64 @proc_run_stdin_vec(i64, i64)
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
 @.str.4 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"  stdout: \00" }
 @.str.5 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"<not valid UTF-8>\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.6 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"uname\00" }
 @.str.7 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"-s\00" }
 @.str.8 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"uname -s\00" }
@@ -354,12 +353,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @examples.process_demo.show_result(i64 %p$label, i64 %p$r) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
@@ -428,7 +421,7 @@ entry:
   %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
   %t$19 = call i64 @__tc_Semigroup_String_append(i64 %t$15, i64 %t$18)
   %t$54 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$20 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$20 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$55 = alloca i64
   store i64 %t$19, ptr %t$55
   %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)

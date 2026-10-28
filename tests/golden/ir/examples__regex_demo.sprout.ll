@@ -117,7 +117,6 @@ declare i64 @split_words(i64)
 @.str.14 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"unsupported pattern: \00" }
 @.str.15 = private unnamed_addr constant { i64, [52 x i8] } { i64 835594, [52 x i8] c"usage: sprout run examples/regex_demo.sprout <text>\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.16 = private unnamed_addr constant { i64, [28 x i8] } { i64 442378, [28 x i8] c"unsupported regex feature: \00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -685,12 +684,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 0
@@ -723,7 +716,7 @@ body_1_3:
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$13 = call i64 @examples.regex_demo.summarize(i64 %t$2)
   %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
   %t$22 = alloca i64
   store i64 %t$13, ptr %t$22
   %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)

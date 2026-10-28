@@ -7,6 +7,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.linear_check as linear_check
 import stdlib.compiler.scc as scc
+import stdlib.compiler.deriving as deriving
 import stdlib.string as string
 import stdlib.env as env
 
@@ -2444,7 +2445,7 @@ fn check_instance_for_marker(
                 resolve_skolem_given(cname, head_str, typed_callee, typed_args, env, ret_t, s3, es3, call_eff, pos)
               else
                 let Just _ = dict_get(types.inst_marker_key(cname, head_str), env)
-                      else InferErr(pos, no_instance_message(cname, head_str))
+                      else InferErr(pos, no_instance_message(cname, head_str, env))
                 in
                   InferOk(
                     concrete_dispatch_call(env, s3, typed_callee, typed_args, ret_t, pos, cname, cv_ty),
@@ -3730,7 +3731,7 @@ fn inject_constrained_fn_dicts_via_field(
                       # forwarded) or a skolem (re-pack, forwarded) still skips — that
                       # is the legitimate no-dict-here case, unchanged.
                       match concrete_unsatisfiable_head(class_name, head_token, name, prog_to_fresh, s3, env) with
-                      | Just head_str -> InferErr(pos, no_instance_message(class_name, head_str))
+                      | Just head_str -> InferErr(pos, no_instance_message(class_name, head_str, env))
                       | Nothing ->
                           inject_constrained_fn_dicts_via_field(name, rest, prog_to_fresh, env, typed_callee, typed_args, subst, ret_t, s3, es3, call_eff, pos)
                   | Just tdict ->
@@ -3746,16 +3747,34 @@ fn concrete_unsatisfiable_head(class_name: String, head_token: String, name: Str
   | Just fresh_t -> concrete_missing_inst(class_name, unifier.apply_subst(s3, fresh_t), env)
   | Nothing -> Nothing
 
-# The missing-instance headline. A type the program declares can derive Eq, Ord and
-# ToString, so a second line names the fix. A program type is module-qualified
-# (`$entry.` for a headerless entry file); prelude and builtin names are bare and
-# stdlib's are `stdlib.`-prefixed, so those cannot be edited and get no hint.
-fn no_instance_message(class_name: String, head_str: String) -> String =
+# The missing-instance headline. A program type can derive a class from
+# `deriving.hint_derivable` unless a field holds a function, so a second line
+# names the fix. A program type is module-qualified (`$entry.` for a headerless
+# entry file); prelude and builtin names are bare and stdlib's are
+# `stdlib.`-prefixed, so those cannot be edited and get no hint.
+fn no_instance_message(class_name: String, head_str: String, env: Dict types.Scheme) -> String =
   "No instance of " ++ class_name ++ " for " ++ head_str ++ hint
-  where hint = if (class_name == "ToString" || class_name == "Eq" || class_name == "Ord")
+  where hint = if deriving.hint_derivable(class_name)
                   && string.contains(head_str, ".") && !str_starts_with(head_str, "stdlib.")
+                  && !stores_function(head_str, env)
                then "\n  hint: add `deriving (" ++ class_name ++ ")` to `" ++ string.after_last_dot(head_str) ++ "`"
                else ""
+
+# A declared field type is, or contains inside a tuple or type application, a
+# function type. No class has an instance for one, so the type cannot derive.
+fn stores_function(tname: String, env: Dict types.Scheme) -> Bool =
+  match dict_get(stored_fields_marker(tname), env) with
+  | Just marker -> type_has_function(types.scheme_type(marker))
+  | Nothing -> false
+
+fn type_has_function(t: types.Type) -> Bool =
+  match t with
+  | types.TFunc _ _ _ _ -> true
+  | types.TThunk _ _ -> true
+  | types.TApp base arg -> type_has_function(base) || type_has_function(arg)
+  | types.TTuple items -> any(type_has_function, items)
+  | types.TVar _ -> false
+  | types.TConst _ -> false
 
 fn concrete_missing_inst(class_name: String, t: types.Type, env: Dict types.Scheme) -> Maybe String =
   match concrete_type_str(t) with

@@ -1,0 +1,93 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+# A top-level fn used as a value gets an eta wrapper, a non-capturing forwarder that
+# adapts it to the closure ABI. Its body depends only on the target's name and arity, so
+# every reference to one target shares one wrapper (and so one static closure constant)
+# rather than minting an identical copy per reference site.
+
+fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
+fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
+fn int_fn_t() -> types.Type = types.TFunc(int_t(), int_t(), types.EffectPure, types.OwnConsume)
+
+fn param(name: String) -> ast.Param = ast.Param(name, Nothing, ast.ModeDefault)
+
+# fn inc(n) = n + 1
+fn inc_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("inc", Cons(param("n"), Nil), Nothing, Nothing, Nil,
+    typed_ast.TBinary("+", typed_ast.TVar("n", int_t(), no_pos()), typed_ast.TInt(1, int_t(), no_pos()),
+      int_t(), no_pos()))
+
+# fn <name>() = inc          -- `inc` in value position
+fn refs_inc(name: String) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Nil, Nothing, Nothing, Nil, typed_ast.TVar("inc", int_fn_t(), no_pos()))
+
+# fn <name>(n) = \x -> inc   -- the reference sits in a lifted lambda body
+fn refs_inc_in_lambda(name: String) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl(name, Cons(param("n"), Nil), Nothing, Nothing, Nil,
+    typed_ast.TLambda(Cons(param("x"), Nil), typed_ast.TVar("inc", int_fn_t(), no_pos()),
+      types.TFunc(int_t(), int_fn_t(), types.EffectPure, types.OwnConsume), no_pos()))
+
+fn count_of(text: String, needle: String) -> Int = list_length(string.split(text, needle)) - 1
+
+# Lowered text of a decl's lifted fns followed by the fn itself, plus the lifted names.
+fn lower_decl(d: typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv) -> Result String (String, List String) !{IO} =
+  match ast_to_ir.translate_decl_with_idx(d, penv) with
+  | Err msg -> Err(msg)
+  | Ok maybe ->
+      match maybe with
+      | Nothing -> Err("expected a translated fn")
+      | Just (f, _idx, lifted) ->
+          Ok((list_fold(\ (acc, g) -> acc ++ ir_lowering.lower_fn_with_table(g, dict_empty()), "", lifted)
+                ++ ir_lowering.lower_fn_with_table(f, dict_empty()),
+              list_map(sprout_ir.ir_fn_name, lifted)))
+
+fn lower_all(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgEnv) ->
+    Result String (List (String, List String)) !{IO} =
+  match decls with
+  | Nil -> Ok(Nil)
+  | Cons d rest ->
+      match lower_decl(d, penv) with
+      | Err msg -> Err(msg)
+      | Ok one ->
+          match lower_all(rest, penv) with
+          | Err msg -> Err(msg)
+          | Ok more -> Ok(Cons(one, more))
+
+fn text_of(one: (String, List String)) -> String =
+  match one with | (t, _names) -> t
+
+fn lifted_names_of(one: (String, List String)) -> List String =
+  match one with | (_t, names) -> names
+
+fn check_shared(state: TestState, per_decl: List (String, List String)) -> Unit !{IO} =
+  do
+    let all_text = list_fold(\ (acc, one) -> acc ++ text_of(one), "", per_decl)
+    assert_true(state, "exactly one eta wrapper is defined for `inc` across three references",
+      count_of(all_text, "define i64 @__sprout_ir_eta_inc_") == 1)
+    # Every reference points at that wrapper, including one inside a lambda body.
+    let wrappers = list_filter(\n -> string.starts_with(n, "__sprout_ir_eta_inc_"),
+                               list_fold(\ (acc, one) -> list_append(acc, lifted_names_of(one)), Nil, per_decl))
+    match wrappers with
+    | [w] ->
+        assert_true(state, "three references reach the one wrapper's static closure",
+          count_of(all_text, "@__sprout_sclo." ++ w) == 3)
+    | _ -> assert_true(state, "one wrapper name in the lifted fns", false)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let decls = [inc_decl(), refs_inc("a"), refs_inc("b"), refs_inc_in_lambda("c")]
+    penv <- ast_to_ir.new_prog_env(decls, dict_empty())
+    match lower_all(decls, penv) with
+    | Err msg -> assert_true(state, "lowered (got Err: " ++ msg ++ ")", false)
+    | Ok per_decl -> check_shared(state, per_decl)
+    summary(state)

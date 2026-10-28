@@ -90,9 +90,7 @@ declare i64 @ref_write(i64, i64)
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_0 }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.12 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"not a number: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.str.13 = private unnamed_addr constant { i64, [52 x i8] } { i64 835594, [52 x i8] c"usage: sprout run examples/result_demo.sprout <int>\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_3 }
 @.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
 @.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
 @.str.16 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
@@ -725,18 +723,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_3(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$34 = alloca [1 x i64]
@@ -812,7 +798,7 @@ arm_1_9:
   %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
   %t$27 = call i64 @__tc_Semigroup_String_append(i64 %t$26, i64 %t$2)
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$28 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$28 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
   %t$48 = alloca i64
   store i64 %t$27, ptr %t$48
   %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
@@ -828,7 +814,7 @@ join_9:
 arm_1_3:
   %t$30 = getelementptr inbounds { i64, [52 x i8] }, ptr @.str.13, i64 0, i32 1, i64 0
   %t$31 = ptrtoint ptr %t$30 to i64
-  %t$32 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
+  %t$32 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
   %t$51 = alloca i64
   store i64 %t$31, ptr %t$51
   %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)

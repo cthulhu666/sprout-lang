@@ -282,7 +282,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ "$i1 = icmp " ++ pred ++ " i64 " ++ r ++ "$cmp, 0\n" ++
       "  " ++ r ++ " = zext i1 " ++ r ++ "$i1 to i64"
   | sprout_ir.IRPrintStr r callee arg ->
-      # print_str / eprint_str take `const char*`; coerce the i64 String/Char
+      # print_str / eprint_str take `const char*`; coerce the i64 String
       # handle to ptr (inttoptr) before the call.
       "  " ++ r ++ "$ptr = inttoptr i64 " ++ arg ++ " to ptr\n" ++
       "  " ++ r ++ " = call i64 @" ++ callee ++ "(ptr " ++ r ++ "$ptr)"
@@ -902,8 +902,8 @@ fn walk_ops_for_globals(ops: List sprout_ir.IROp, next_idx: Int,
           else walk_ops_for_globals(rest, next_idx, parts, fn_table, statics)
       | _ -> walk_ops_for_globals(rest, next_idx, parts, fn_table, statics)
 
-# The static constant behind an IRMkClosure with no captures. A code function is
-# minted per reference site, so one name is one closure.
+# The static constant behind an IRMkClosure with no captures. One code function is
+# one closure, so the constant is keyed by its name.
 fn static_closure_global(code_fn: String) -> String = "@__sprout_sclo." ++ code_fn
 
 # Emit it as a CLOSURE block, { header, code pointer }: the same layout a heap env has,

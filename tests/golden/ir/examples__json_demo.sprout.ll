@@ -105,7 +105,6 @@ declare i64 @json_stringify(i64)
 @__sprout_sclo.__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0 }
 @.str.6 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"refused: \00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_2 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -1113,12 +1112,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @examples.json_demo.payload()
@@ -1139,7 +1132,7 @@ entry:
   %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$5 = call i64 @examples.json_demo.render(i64 %t$4)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_2, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
   %t$17 = alloca i64
   store i64 %t$5, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)

@@ -194,11 +194,7 @@ declare i64 @fs_rename(i64, i64)
 @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_8 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_values_8 }
 @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_9 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_9 }
 @.str.57 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0A\0A\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_10 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_values_10 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_11 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_11 }
 @.str.58 = private unnamed_addr constant { i64, [19 x i8] } { i64 294922, [19 x i8] c"module app.session\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_12 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_values_12 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_13 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_13 }
 @.str.59 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.60 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"import\00" }
 @.str.61 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"declaration\00" }
@@ -393,9 +389,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.250 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"start of block\00" }
 @.str.251 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"new line\00" }
 @.str.252 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"end of block\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_14 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_14 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_15 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_15 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_16 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_16 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_10 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_10 }
 @.str.253 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.254 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"IO\00" }
 @.str.255 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 71, column 49)\00" }
@@ -569,7 +563,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.423 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"Unexpected `\00" }
 @.str.424 = private unnamed_addr constant { i64, [31 x i8] } { i64 491530, [31 x i8] c"` after the last match arm at \00" }
 @.str.425 = private unnamed_addr constant { i64, [50 x i8] } { i64 802826, [50 x i8] c" — a match is no operand; put it in parentheses\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_17 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_17 }
+@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_11 }
 @.str.426 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1033, column 61)\00" }
 @.str.427 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.428 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Unexpected token after a match arm at \00" }
@@ -737,12 +731,8 @@ declare i64 @fs_rename(i64, i64)
 @.str.590 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.591 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"constructor name\00" }
 @.str.592 = private unnamed_addr constant { i64, [88 x i8] } { i64 1425418, [88 x i8] c"a constructor `where` constraint must apply a class to a single `exists`-bound variable\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_18 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_18 }
 @.str.593 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"constructor `where` constraint references `\00" }
 @.str.594 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"`, which is not bound by an `exists` prefix\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_20 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_20 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_21 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_21 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_22 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_22 }
 @.str.595 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"constructor `where linear \00" }
 @.str.596 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"` names `\00" }
 @.str.597 = private unnamed_addr constant { i64, [77 x i8] } { i64 1245194, [77 x i8] c"`, which is not bound by an `exists` prefix: a data parameter takes no bound\00" }
@@ -780,8 +770,8 @@ declare i64 @fs_rename(i64, i64)
 @.str.629 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
 @.str.630 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.631 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"where\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_23 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.parser.where_class_23 }
-@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_24 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.parser.where_bound_24 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_13 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.parser.where_class_13 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_14 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.parser.where_bound_14 }
 @.str.632 = private unnamed_addr constant { i64, [115 x i8] } { i64 1867786, [115 x i8] c"an `extern fn` takes only `where linear` bounds: it has no dictionary parameter to pass a class constraint through\00" }
 @.str.633 = private unnamed_addr constant { i64, [116 x i8] } { i64 1884170, [116 x i8] c"a class's own type variable takes no `linear` bound: an instance at a linear type is concrete code, checked as such\00" }
 @.str.634 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"where\00" }
@@ -883,10 +873,9 @@ declare i64 @fs_rename(i64, i64)
 @.str.730 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.731 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2559, column 81)\00" }
 @.str.732 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 10, column 89)\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_25 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ident_continue_25 }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_26 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ident_continue_26 }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_digit_27 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ascii_digit_27 }
-@__sprout_sclo.__sprout_ir_lambda_28 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_28 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_15 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ident_continue_15 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_digit_16 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ascii_digit_16 }
+@__sprout_sclo.__sprout_ir_lambda_17 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_17 }
 @.str.733 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"export\00" }
 @.str.734 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.735 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"let\00" }
@@ -927,7 +916,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.770 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"}\00" }
 @.str.771 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 203, column 54)\00" }
 @.str.772 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 206, column 52)\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_29 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ascii_whitespace_29 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_18 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ascii_whitespace_18 }
 @.str.773 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"Unterminated template literal\00" }
 @.str.774 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"`\00" }
 @.str.775 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"Unterminated template literal\00" }
@@ -954,16 +943,15 @@ declare i64 @fs_rename(i64, i64)
 @.str.796 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"|>\00" }
 @.str.797 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"++\00" }
 @.str.798 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"..\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_30 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_30 }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_31 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_31 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_19 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_19 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_20 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_20 }
 @.str.799 = private unnamed_addr constant { i64, [28 x i8] } { i64 442378, [28 x i8] c"Unterminated string literal\00" }
 @.str.800 = private unnamed_addr constant { i64, [26 x i8] } { i64 409610, [26 x i8] c"Unterminated char literal\00" }
 @.str.801 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"Unterminated template literal\00" }
 @.str.802 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"`\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_32 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_ascii_whitespace_32 }
 @.str.803 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.804 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_33 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_33 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_21 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_21 }
 @.str.805 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
 @.str.806 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 64, column 30)\00" }
 @.str.807 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
@@ -990,7 +978,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.828 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 106, column 36)\00" }
 @.str.829 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 106, column 73)\00" }
 @.str.830 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
-@__sprout_sclo.__sprout_ir_lambda_35 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_35 }
+@__sprout_sclo.__sprout_ir_lambda_23 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_23 }
 @.str.831 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.832 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 119, column 111)\00" }
 @.str.833 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
@@ -1036,7 +1024,6 @@ declare i64 @fs_rename(i64, i64)
 @.str.873 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.874 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"/\00" }
 @.str.875 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c".sprout\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_37 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_37 }
 @.str.876 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 353, column 56)\00" }
 @.str.877 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
 @.str.878 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c" as \00" }
@@ -1172,16 +1159,14 @@ declare i64 @fs_rename(i64, i64)
 @.str.1008 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Sprout REPL. Use :help for commands.\0D\0A\00" }
 @.str.1009 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.1010 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_38 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_38 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_25 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_25 }
 @.str.1011 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
 @.str.1012 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
 @.str.1013 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
-@__sprout_sclo.__sprout_ir_lambda_40 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_40 }
+@__sprout_sclo.__sprout_ir_lambda_27 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_27 }
 @.str.1014 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.1015 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
 @.str.1016 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 74, column 35)\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_41 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_hex_digit_41 }
-@__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_42 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.string.is_binary_digit_42 }
 @.str.1017 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.1018 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"<-\00" }
 @.str.1019 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"==\00" }
@@ -1312,8 +1297,6 @@ declare i64 @fs_rename(i64, i64)
 @.str.1144 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"->\00" }
 @.str.1145 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
 @.str.1146 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"where\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_43 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.parser.where_class_43 }
-@__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_44 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.parser.where_bound_44 }
 @.str.1147 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"where\00" }
 @.str.1148 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"parameter name\00" }
 @.str.1149 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"(\00" }
@@ -1384,14 +1367,10 @@ declare i64 @fs_rename(i64, i64)
 @.str.1214 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0X\00" }
 @.str.1215 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0b\00" }
 @.str.1216 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"0B\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_46 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_46 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_47 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_47 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_48 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_48 }
 @.str.1217 = private unnamed_addr constant { i64, [27 x i8] } { i64 425994, [27 x i8] c"constructor `where linear \00" }
 @.str.1218 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"` names `\00" }
 @.str.1219 = private unnamed_addr constant { i64, [77 x i8] } { i64 1245194, [77 x i8] c"`, which is not bound by an `exists` prefix: a data parameter takes no bound\00" }
 @.str.1220 = private unnamed_addr constant { i64, [88 x i8] } { i64 1425418, [88 x i8] c"a constructor `where` constraint must apply a class to a single `exists`-bound variable\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_49 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_String_eq_49 }
 @.str.1221 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"constructor `where` constraint references `\00" }
 @.str.1222 = private unnamed_addr constant { i64, [44 x i8] } { i64 704522, [44 x i8] c"`, which is not bound by an `exists` prefix\00" }
 @.str.1223 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"declaration\00" }
@@ -6416,76 +6395,6 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_Vec_fold_values_10(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_Vec_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_11(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_Vec_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_Vec_fold_values_12(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_Vec_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_13(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_Vec_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
 define i64 @stdlib.compiler.session_source(i64 %p$session) {
 entry:
   br label %arm_0_0
@@ -6514,8 +6423,8 @@ arm_0_0:
   %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$11 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.57, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
-  %t$13 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_10, i64 8) to i64
-  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_11, i64 8) to i64
+  %t$13 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_8, i64 8) to i64
+  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_9, i64 8) to i64
   %t$35 = alloca i64
   store i64 %t$10, ptr %t$35
   %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
@@ -6551,8 +6460,8 @@ arm_0_0:
   %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
   %t$22 = call i64 @stdlib.compiler.append_nonempty_chunk(i64 %t$10, i64 %t$21)
   %t$52 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$23 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_12, i64 8) to i64
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_13, i64 8) to i64
+  %t$23 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_values_8, i64 8) to i64
+  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_Vec_fold_while_values_9, i64 8) to i64
   %t$53 = alloca i64
   store i64 %t$22, ptr %t$53
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
@@ -17332,48 +17241,13 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_14(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_10(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
   %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
   %ret = call i64 @stdlib.compiler.ast.pattern_irrefutable(i64 %p$a0)
   %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_15(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_16(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
   ret i64 %ret
 }
 
@@ -17408,9 +17282,9 @@ arm_3_1:
   br i1 %t$13, label %body_3_1, label %arm_4_1
 body_3_1:
   %t$14 = call i64 @sprout_field(i64 %p$p, i64 0)
-  %t$15 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_14, i64 8) to i64
-  %t$16 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_15, i64 8) to i64
-  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_16, i64 8) to i64
+  %t$15 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.ast.pattern_irrefutable_10, i64 8) to i64
+  %t$16 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$34 = alloca i64
   store i64 %t$14, ptr %t$34
   %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
@@ -29175,7 +29049,7 @@ do_done_4:
   ret i64 %t$92
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_17(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta___tc_Eq_String_eq_11(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @__tc_Eq_String_eq(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
@@ -29195,7 +29069,7 @@ arm_0_2:
 body_0_2:
   %t$6 = call i64 @stdlib.compiler.token.token_text(i64 %p$t)
   %t$7 = load i64, ptr @stdlib.compiler.parser.infix_symbols
-  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_17, i64 8) to i64
+  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11, i64 8) to i64
   %t$11 = alloca i64
   store i64 %t$6, ptr %t$11
   %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
@@ -39548,12 +39422,6 @@ do_done_2:
   ret i64 %t$64
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_18(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_String_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
 define i64 @stdlib.compiler.parser.validate_ctor_where(i64 %p$exist_vars$in, i64 %p$where_cons$in, i64 %p$tokens$in, i64 %p$i$in) {
 entry:
   %t$47 = alloca [5 x i64]
@@ -39642,7 +39510,7 @@ arm_1_13:
   %t$23 = icmp eq i64 %t$11, %t$22
   br i1 %t$23, label %body_1_13, label %arm_2_13
 body_1_13:
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_18, i64 8) to i64
+  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11, i64 8) to i64
   %t$25 = call i64 @list_member(i64 %t$12, i64 %p$exist_vars, i64 %t$24)
   %t$41 = trunc i64 %t$25 to i1
   br i1 %t$41, label %then_26, label %else_26
@@ -39743,18 +39611,12 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_20(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_String_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_lambda_19(i64 %p$env$, i64 %p$v) {
+define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_20, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11, i64 8) to i64
   %t$4 = alloca i64
   store i64 %p$v, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
@@ -39765,41 +39627,6 @@ entry:
   %t$8 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$3 = xor i64 %t$2, 1
   ret i64 %t$3
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_21(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_22(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
 }
 
 define i64 @stdlib.compiler.parser.validate_ctor_bounds(i64 %p$exist_vars, i64 %p$bounds, i64 %p$tokens, i64 %p$i) {
@@ -39817,11 +39644,11 @@ entry:
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_19, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_12, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$exist_vars, ptr %t$0$raw$slot$1
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_21, i64 8) to i64
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_22, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$32 = alloca i64
   store i64 %t$0, ptr %t$32
   %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
@@ -42646,7 +42473,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_stdlib.compiler.parser.where_class_23(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.compiler.parser.where_class_13(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -42656,7 +42483,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_stdlib.compiler.parser.where_bound_24(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.compiler.parser.where_bound_14(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -42761,12 +42588,12 @@ do_cont_19:
   store i64 %t$24, ptr %t$56
   %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
   %t$25 = call i64 @list_reverse(i64 %t$23)
-  %t$26 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_23, i64 8) to i64
+  %t$26 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_13, i64 8) to i64
   %t$58 = alloca i64
   store i64 %t$25, ptr %t$58
   %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
   %t$27 = call i64 @list_filter_map(i64 %t$26, i64 %t$25)
-  %t$28 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_24, i64 8) to i64
+  %t$28 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_14, i64 8) to i64
   %t$60 = alloca i64
   store i64 %t$27, ptr %t$60
   %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
@@ -48471,7 +48298,7 @@ ovfok_3:
   ret i64 %t$6
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_ident_continue_25(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_ident_continue_15(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.string.is_ident_continue(i64 %p$a0)
   ret i64 %ret
@@ -48479,7 +48306,7 @@ entry:
 
 define i64 @stdlib.compiler.lexer.scan_ident_end(i64 %p$cursor) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_25, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_15, i64 8) to i64
   %t$3 = alloca i64
   store i64 %p$cursor, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
@@ -48491,12 +48318,6 @@ entry:
   %t$2 = call i64 @stdlib.compiler.lexer.scan_ident_dotted(i64 %t$1)
   %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
-}
-
-define i64 @__sprout_ir_eta_stdlib.string.is_ident_continue_26(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @stdlib.string.is_ident_continue(i64 %p$a0)
-  ret i64 %ret
 }
 
 define i64 @stdlib.compiler.lexer.scan_ident_dotted(i64 %p$run_end$in) {
@@ -48547,7 +48368,7 @@ else_14:
 then_17:
   br label %join_17
 else_17:
-  %t$19 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_26, i64 8) to i64
+  %t$19 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ident_continue_15, i64 8) to i64
   %t$20 = call i64 @stdlib.compiler.source.take_while(i64 %t$10, i64 %t$19)
   %t$28 = getelementptr i64, ptr %t$26, i64 1
   call void @llvm.memset.p0.i64(ptr %t$28, i8 0, i64 8, i1 false)
@@ -48603,7 +48424,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_ascii_digit_27(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_ascii_digit_16(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.string.is_ascii_digit(i64 %p$a0)
   ret i64 %ret
@@ -48611,7 +48432,7 @@ entry:
 
 define i64 @stdlib.compiler.lexer.scan_int_end(i64 %p$cursor) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_digit_27, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_digit_16, i64 8) to i64
   %t$2 = alloca i64
   store i64 %p$cursor, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
@@ -48620,7 +48441,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_28(i64 %p$env$, i64 %p$ch) {
+define i64 @__sprout_ir_lambda_17(i64 %p$env$, i64 %p$ch) {
 entry:
   %t$0 = add i64 0, 10
   %t$1 = icmp ne i64 %p$ch, %t$0
@@ -48630,7 +48451,7 @@ entry:
 
 define i64 @stdlib.compiler.lexer.skip_comment(i64 %p$raw, i64 %p$cursor) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_28, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_17, i64 8) to i64
   %t$2 = alloca i64
   store i64 %p$cursor, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
@@ -50081,7 +49902,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_ascii_whitespace_29(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_ascii_whitespace_18(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.string.is_ascii_whitespace(i64 %p$a0)
   ret i64 %ret
@@ -50323,7 +50144,7 @@ else_60:
   %t$96 = trunc i64 %t$64 to i1
   br i1 %t$96, label %then_65, label %else_65
 then_65:
-  %t$67 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_29, i64 8) to i64
+  %t$67 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_18, i64 8) to i64
   %t$68 = call i64 @stdlib.compiler.source.take_while(i64 %t$14, i64 %t$67) noinline
   %t$69 = add i64 0, 0
   %t$146 = getelementptr i64, ptr %t$107, i64 5
@@ -51942,13 +51763,13 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_30(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_19(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.string.is_hex_digit(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_31(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_20(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.string.is_binary_digit(i64 %p$a0)
   ret i64 %ret
@@ -52035,7 +51856,7 @@ join_33:
   %t$60 = trunc i64 %t$34 to i1
   br i1 %t$60, label %then_40, label %else_40
 then_40:
-  %t$42 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_30, i64 8) to i64
+  %t$42 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_19, i64 8) to i64
   %t$68 = alloca i64
   store i64 %t$29, ptr %t$68
   %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
@@ -52061,7 +51882,7 @@ join_47:
   %t$59 = trunc i64 %t$48 to i1
   br i1 %t$59, label %then_54, label %else_54
 then_54:
-  %t$56 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_31, i64 8) to i64
+  %t$56 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_20, i64 8) to i64
   %t$71 = alloca i64
   store i64 %t$29, ptr %t$71
   %t$72 = call i64 @sprout_gc_push_i64_root(ptr %t$71)
@@ -52695,12 +52516,6 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_ascii_whitespace_32(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @stdlib.string.is_ascii_whitespace(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @stdlib.compiler.lexer.tokenize_from$u(i64 %p$raw$in, i64 %p$cursor$in, i64 %p$acc$in, i64 %p$pbpad$3$in) {
 entry:
   %t$61 = alloca [4 x i64]
@@ -52783,7 +52598,7 @@ else_18:
   %t$54 = trunc i64 %t$22 to i1
   br i1 %t$54, label %then_23, label %else_23
 then_23:
-  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_32, i64 8) to i64
+  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_ascii_whitespace_18, i64 8) to i64
   %t$73 = alloca i64
   store i64 %t$14, ptr %t$73
   %t$74 = call i64 @sprout_gc_push_i64_root(ptr %t$73)
@@ -53233,7 +53048,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_33(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_21(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
   ret i64 %ret
@@ -53269,7 +53084,7 @@ arm_1_1:
   %t$10 = icmp eq i64 %t$0, %t$9
   br i1 %t$10, label %body_1_1, label %arm_2_1
 body_1_1:
-  %t$11 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_33, i64 8) to i64
+  %t$11 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_21, i64 8) to i64
   %t$21 = alloca i64
   store i64 %p$text, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
@@ -53316,7 +53131,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_34(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_22(i64 %p$env$, i64 %p$__sprout_ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -53342,7 +53157,7 @@ entry:
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_34, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_22, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$prompt, ptr %t$0$raw$slot$1
   %t$7 = alloca i64
@@ -53968,7 +53783,7 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$line) {
+define i64 @__sprout_ir_lambda_23(i64 %p$env$, i64 %p$line) {
 entry:
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.830, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
@@ -53990,7 +53805,7 @@ entry:
 
 define i64 @stdlib.repl.render_interactive_match_lines(i64 %p$matches) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_35, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_23, i64 8) to i64
   %t$3 = alloca i64
   store i64 %p$matches, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
@@ -54286,7 +54101,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$n) {
+define i64 @__sprout_ir_lambda_24(i64 %p$env$, i64 %p$n) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -54325,7 +54140,7 @@ arm_0_1:
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$3 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$3$raw = inttoptr i64 %t$3 to ptr
-  store ptr @__sprout_ir_lambda_36, ptr %t$3$raw
+  store ptr @__sprout_ir_lambda_24, ptr %t$3$raw
   %t$3$raw$slot$1 = getelementptr i64, ptr %t$3$raw, i64 1
   store i64 %t$0, ptr %t$3$raw$slot$1
   %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -55743,12 +55558,6 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_37(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_String_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
 define i64 @stdlib.repl.ctor_names_of_decl(i64 %p$d, i64 %p$exported, i64 %p$acc) {
 entry:
   %t$14 = alloca [2 x i64]
@@ -55766,7 +55575,7 @@ arm_0_1:
   br i1 %t$4, label %body_0_1, label %arm_1_1
 body_0_1:
   %t$5 = call i64 @sprout_field(i64 %p$d, i64 0)
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_37, i64 8) to i64
+  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11, i64 8) to i64
   %t$16 = alloca i64
   store i64 %p$exported, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
@@ -60142,7 +59951,7 @@ entry:
   ret i64 %t$4
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_38(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_25(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -60165,7 +59974,7 @@ then_4:
   br label %join_4
 else_4:
   %t$7 = call i64 @main.origin_line()
-  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_38, i64 8) to i64
+  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_25, i64 8) to i64
   %t$9 = call i64 @print(i64 %t$7, i64 %t$8)
   br label %join_4
 join_4:
@@ -60539,7 +60348,7 @@ wrepack_next_6:
   unreachable
 }
 
-define i64 @__sprout_ir_lambda_39(i64 %p$env$, i64 %p$acc, i64 %p$x) {
+define i64 @__sprout_ir_lambda_26(i64 %p$env$, i64 %p$acc, i64 %p$x) {
 entry:
   %t$6 = alloca [2 x i64]
   call void @llvm.memset.p0.i64(ptr %t$6, i8 0, i64 16, i1 false)
@@ -60571,7 +60380,7 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_40(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_lambda_27(i64 %p$env$, i64 %p$acc) {
 entry:
   %t$0 = call i64 @sprout_tag(i64 %p$acc)
   br label %arm_0_1
@@ -60613,10 +60422,10 @@ entry:
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_39, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_26, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_40, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_27, i64 8) to i64
   %t$21 = alloca i64
   store i64 %t$0, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
@@ -62267,18 +62076,6 @@ wrepack_next_40:
   unreachable
 }
 
-define i64 @__sprout_ir_eta_stdlib.string.is_hex_digit_41(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @stdlib.string.is_hex_digit(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta_stdlib.string.is_binary_digit_42(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @stdlib.string.is_binary_digit(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i128 @stdlib.compiler.lexer.scan_radix_end_worker(i64 %p$cursor) {
 entry:
   %t$71 = alloca i64
@@ -62360,7 +62157,7 @@ join_33:
   %t$60 = trunc i64 %t$34 to i1
   br i1 %t$60, label %then_40, label %else_40
 then_40:
-  %t$42 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_41, i64 8) to i64
+  %t$42 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_hex_digit_19, i64 8) to i64
   %t$77 = alloca i64
   store i64 %t$29, ptr %t$77
   %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
@@ -62386,7 +62183,7 @@ join_47:
   %t$59 = trunc i64 %t$48 to i1
   br i1 %t$59, label %then_54, label %else_54
 then_54:
-  %t$56 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_42, i64 8) to i64
+  %t$56 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.string.is_binary_digit_20, i64 8) to i64
   %t$80 = alloca i64
   store i64 %t$29, ptr %t$80
   %t$81 = call i64 @sprout_gc_push_i64_root(ptr %t$80)
@@ -73928,26 +73725,6 @@ wrepack_next_32:
   unreachable
 }
 
-define i64 @__sprout_ir_eta_stdlib.compiler.parser.where_class_43(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @stdlib.compiler.parser.where_class(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta_stdlib.compiler.parser.where_bound_44(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @stdlib.compiler.parser.where_bound(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
 define i128 @stdlib.compiler.parser.parse_optional_where_worker(i64 %p$tokens, i64 %p$i) {
 entry:
   %t$42 = alloca [1 x i64]
@@ -74043,12 +73820,12 @@ do_cont_19:
   store i64 %t$24, ptr %t$65
   %t$66 = call i64 @sprout_gc_push_i64_root(ptr %t$65)
   %t$25 = call i64 @list_reverse(i64 %t$23)
-  %t$26 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_43, i64 8) to i64
+  %t$26 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_class_13, i64 8) to i64
   %t$67 = alloca i64
   store i64 %t$25, ptr %t$67
   %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
   %t$27 = call i64 @list_filter_map(i64 %t$26, i64 %t$25)
-  %t$28 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_44, i64 8) to i64
+  %t$28 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.parser.where_bound_14, i64 8) to i64
   %t$69 = alloca i64
   store i64 %t$27, ptr %t$69
   %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
@@ -78518,18 +78295,12 @@ else_34:
   ret i128 %t$48$r
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_46(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_String_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_lambda_45(i64 %p$env$, i64 %p$v) {
+define i64 @__sprout_ir_lambda_28(i64 %p$env$, i64 %p$v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_46, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11, i64 8) to i64
   %t$4 = alloca i64
   store i64 %p$v, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
@@ -78540,41 +78311,6 @@ entry:
   %t$8 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$3 = xor i64 %t$2, 1
   ret i64 %t$3
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_47(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_Foldable_List_fold_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_48(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_Foldable_List_fold_while_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
 }
 
 define i128 @stdlib.compiler.parser.validate_ctor_bounds_worker(i64 %p$exist_vars, i64 %p$bounds, i64 %p$tokens, i64 %p$i) {
@@ -78592,11 +78328,11 @@ entry:
   %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_45, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_28, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$exist_vars, ptr %t$0$raw$slot$1
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_47, i64 8) to i64
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_48, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_6, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_7, i64 8) to i64
   %t$41 = alloca i64
   store i64 %t$0, ptr %t$41
   %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
@@ -78713,12 +78449,6 @@ wrepack_next_31:
   unreachable
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_String_eq_49(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_String_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
 define i128 @stdlib.compiler.parser.validate_ctor_where_worker(i64 %p$exist_vars, i64 %p$where_cons, i64 %p$tokens, i64 %p$i) {
 entry:
   %t$51 = alloca [4 x i64]
@@ -78796,7 +78526,7 @@ arm_1_13:
   %t$23 = icmp eq i64 %t$11, %t$22
   br i1 %t$23, label %body_1_13, label %arm_2_13
 body_1_13:
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_49, i64 8) to i64
+  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_String_eq_11, i64 8) to i64
   %t$25 = call i64 @list_member(i64 %t$12, i64 %p$exist_vars, i64 %t$24)
   %t$41 = trunc i64 %t$25 to i1
   br i1 %t$41, label %then_26, label %else_26

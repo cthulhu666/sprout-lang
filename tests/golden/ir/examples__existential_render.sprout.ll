@@ -82,9 +82,8 @@ declare i64 @ref_write(i64, i64)
 @.str.2 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c" deg C\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_2 }
 @.str.3 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"ready\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_3 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_4 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_5 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_3 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_4 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -377,19 +376,13 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_3(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_4(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_Bool_to_string_3(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @__tc_ToString_Bool_to_string(i64 %p$a0)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_5(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_4(i64 %p$env$, i64 %p$a0) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a0, ptr %t$0
@@ -416,7 +409,7 @@ entry:
   store i64 %t$3, ptr %t$4$f1
   %t$5 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
   %t$21 = alloca i64
   store i64 %t$4, ptr %t$21
   %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
@@ -431,7 +424,7 @@ entry:
   store i64 %t$7, ptr %t$8$f1
   %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9 = add i64 0, 1
-  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_4, i64 8) to i64
+  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_3, i64 8) to i64
   %t$26 = alloca i64
   store i64 %t$8, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
@@ -449,7 +442,7 @@ entry:
   %t$13$ptr = inttoptr i64 %t$13 to ptr
   %t$13$f0 = getelementptr i64, ptr %t$13$ptr, i64 0
   store i64 %t$12, ptr %t$13$f0
-  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_5, i64 8) to i64
+  %t$14 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_existential_render_Temp_to_string_4, i64 8) to i64
   %t$30 = alloca i64
   store i64 %t$13, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)

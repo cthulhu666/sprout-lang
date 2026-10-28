@@ -81,8 +81,7 @@ declare i64 @ref_write(i64, i64)
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Bool_to_string_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Bool_to_string_2 }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_3 }
 @__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_4 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_5 }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_4 }
 @__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
 @.str.3 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"true\00" }
 @.str.4 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"false\00" }
@@ -292,17 +291,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_4(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_5(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta___tc_ToString_String_to_string_4(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
   ret i64 %ret
@@ -311,8 +300,8 @@ entry:
 define i64 @__sprout_ir_lambda_0(i64 %p$env$, i64 %p$__lp_0) {
 entry:
   %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_1, i64 8) to i64
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_4, i64 8) to i64
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_5, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_3, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_4, i64 8) to i64
   %t$4 = alloca i64
   store i64 %p$__lp_0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
