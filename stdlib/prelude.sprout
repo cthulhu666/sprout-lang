@@ -1608,12 +1608,10 @@ instance Filterable Vec
   fn partition_values(pred: a -> Bool, xs: Vec a) -> (Vec a, Vec a) =
     vec_partition(pred, xs)
 
-# Each `vec_get` is matched in place so it takes the unboxed worker; matching the pair
-# of calls would box a `Just` per read.
 fn vec_zip_with(g: local a -> b -> c, xs: Vec a, ys: Vec b, index: Int, acc: List c) -> Vec c =
-  let Just x = vec_get(index, xs) else vec_from_list(list_reverse(acc))
-      Just y = vec_get(index, ys) else vec_from_list(list_reverse(acc))
-  in vec_zip_with(g, xs, ys, index + 1, Cons(g(x, y), acc))
+  match (vec_get(index, xs), vec_get(index, ys)) with
+  | (Just x, Just y) -> vec_zip_with(g, xs, ys, index + 1, Cons(g(x, y), acc))
+  | _ -> vec_from_list(list_reverse(acc))
 
 instance Zip Vec
   fn zip_with_values(g: local a -> b -> c, xs: Vec a, ys: Vec b) -> Vec c =

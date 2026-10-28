@@ -106,6 +106,38 @@ fn held(a: String, b: String) -> String =
       let junk = burn(40, "")
       in s ++ t ++ to_string(str_len(junk))
 
+# Elements whose column a single `match` would unbox take the unboxed call: the
+# first payload stays live while the second call and the arm allocate.
+fn tagged(s: String) -> Maybe String = if s == "" then Nothing else Just(s ++ "!")
+
+fn unboxed_pair(a: String, b: String) -> String =
+  match (tagged(a), tagged(b)) with
+  | (Just s, Just t) ->
+      let junk = burn(40, "")
+      in s ++ t ++ to_string(str_len(junk))
+  | (Just s, Nothing) -> s
+  | (Nothing, Just t) -> t
+  | _ -> "-"
+
+fn vec_pair(xs: Vec String, i: Int, j: Int) -> String =
+  match (vec_get(i, xs), vec_get(j, xs)) with
+  | (Just a, Just b) -> a ++ b
+  | (Just a, _) -> a
+  | _ -> "-"
+
+# A Tier-1 extern pair: each element takes the extern's `_unboxed` variant.
+fn first_chars(s: String, t: String) -> String =
+  match (str_char_at(s, 0), str_char_at(t, 0)) with
+  | (Just a, Just b) -> char_to_string(a) ++ char_to_string(b)
+  | (Just a, Nothing) -> char_to_string(a)
+  | _ -> "-"
+
+# The second column binds the whole Maybe, so only the first element is unboxed.
+fn mixed_columns(a: String, b: String) -> String =
+  match (tagged(a), tagged(b)) with
+  | (Just s, m) -> s ++ maybe_with_default("-", m)
+  | (Nothing, _) -> "none"
+
 # Effectful elements run once each, left to right.
 fn tick(r: Ref (List Int), n: Int) -> Int !{IO} =
   do
@@ -117,6 +149,20 @@ fn effect_order() -> List Int !{IO} =
     r <- ref_new(Nil)
     s <- match (tick(r, 1), tick(r, 2)) with
          | (a, b) -> a + b
+    log <- ref_read(r)
+    Cons(s, list_reverse(log))
+
+fn tick_m(r: Ref (List Int), n: Int) -> Maybe Int !{IO} =
+  do
+    ref_write(r, Cons(n, ref_read(r)))
+    if n > 1 then Just(n) else Nothing
+
+fn effect_order_unboxed() -> List Int !{IO} =
+  do
+    r <- ref_new(Nil)
+    s <- match (tick_m(r, 1), tick_m(r, 2)) with
+         | (Nothing, Just b) -> b
+         | _ -> 0
     log <- ref_read(r)
     Cons(s, list_reverse(log))
 
@@ -134,7 +180,23 @@ fn main() -> Unit !{IO} =
     from_do <- let_do("x", "y")
     order <- effect_order()
     wild <- effect_wildcard()
+    order_unboxed <- effect_order_unboxed()
+    let words = vec_from_list(["a", "b"])
     run_suite("match_tuple_scrutinee", [
+      check_eq("unboxed: both", unboxed_pair("a", "b"), "a!b!40"),
+      check_eq("unboxed: left", unboxed_pair("a", ""), "a!"),
+      check_eq("unboxed: right", unboxed_pair("", "b"), "b!"),
+      check_eq("unboxed: none", unboxed_pair("", ""), "-"),
+      check_eq("vec_get pair: both", vec_pair(words, 0, 1), "ab"),
+      check_eq("vec_get pair: left", vec_pair(words, 1, 5), "b"),
+      check_eq("vec_get pair: none", vec_pair(words, 5, 0), "-"),
+      check_eq("extern pair: both", first_chars("xy", "zw"), "xz"),
+      check_eq("extern pair: left", first_chars("xy", ""), "x"),
+      check_eq("extern pair: none", first_chars("", "zw"), "-"),
+      check_eq("mixed columns: boxed hit", mixed_columns("a", "b"), "a!b!"),
+      check_eq("mixed columns: boxed miss", mixed_columns("a", ""), "a!-"),
+      check_eq("mixed columns: unboxed miss", mixed_columns("", "b"), "none"),
+      check_eq("unboxed effects once, left to right", order_unboxed, [2, 1, 2]),
       check_eq("literal arm", pick(0, 7), 7),
       check_eq("fall through to binder arm", pick(3, 0), 30),
       check_eq("fall through to wildcard", pick(3, 4), -1),

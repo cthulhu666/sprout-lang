@@ -664,7 +664,13 @@ export fn with_fresh_refs(penv: ProgEnv) -> ProgEnv !{IO} =
 # element values (translate_match); a tuple arm over that name binds the elements.
 type TxEnv = (prog: ProgEnv, lifted_ref: Ref (List sprout_ir.IRFunction),
               reuse_ref: Ref ReuseState, owned: Set, group: Set,
-              split: Maybe (String, Vector String))
+              split: Maybe (String, Vector SplitElem))
+
+# A sub-value a pattern binds: its value, or, for a tuple-literal match element whose
+# column of sub-patterns a single `match` would unbox, the (tag, payload) of the call.
+type SplitElem =
+  | BoxedElem String
+  | UnboxedElem String String
 
 # In-place reuse of a consumed linear cell (docs/linear-reuse-v0.md §4.2).
 # A token is the cell an arm matched: its SSA name, type, constructor, tag and physical
@@ -1499,17 +1505,11 @@ fn translate_do_bind_unboxed(kind: ShortCircuit, pat: ast.Pattern, target: Strin
                              captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
-    (ablocks, albl, aops, anames, aidx) <-
-      translate_args(eargs, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-    let tag_ssa = fresh_name(aidx)
-    let val_ssa = fresh_name(aidx + 1)
-    let eidx = aidx + 2
+    (ablocks, albl, call_ops, tag_ssa, val_ssa, eidx) <-
+      emit_unboxed_call(target, eargs, params, env, idx, cur_label, cur_ops, captures)
     let tag = prelude_ctor_tag(short_ctor(kind), env.prog.ctors)
     finish_do_short_circuit(pat, rest, ablocks,
-                            short_circuit_test(albl,
-                              list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown,
-                                                                        target, anames), aops),
-                              Nil, tag_ssa, tag, eidx, eidx),
+                            short_circuit_test(albl, call_ops, Nil, tag_ssa, tag, eidx, eidx),
                             [sprout_ir.IRMakeCtor(fresh_name(eidx + 3), short_ctor(kind), tag,
                                                   rebuilt_payload(kind, val_ssa))],
                             fresh_name(eidx + 3), Nil, val_ssa, eidx + 4, eidx, params, env, captures)
@@ -2199,7 +2199,7 @@ fn is_sole_ctor_match(arms: List typed_ast.TypedMatchBranch,
 type FieldSource =
   | CtorFields String
   | TupleFields
-  | SplitFields (Vector String)
+  | SplitFields (Vector SplitElem)
 
 # Fetch sub-value `i` of `scrut` into `dst`. A ctor field has its declared kind; a
 # tuple element has `tuple_kind` (IRTScalar when tested against an Int or Bool literal).
@@ -2255,25 +2255,60 @@ fn bind_pattern_fields(pats: List ast.Pattern, scrut_name: String, src: FieldSou
   match pats with
   | Nil -> Ok((list_reverse(acc_extra), cur_lbl, cur_ops, acc_captures, idx))
   | Cons pat rest ->
-      let field_ssa = try field_ssa_of(src, idx, field_idx)
-      in bind_pattern_field(pat, rest, scrut_name, src, field_ssa, idx, field_idx, cur_ops,
-                            acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
+      let field = try field_of(src, idx, field_idx)
+      in
+        match field with
+        | BoxedElem field_ssa ->
+            bind_pattern_field(pat, rest, scrut_name, src, field_ssa, idx, field_idx, cur_ops,
+                               acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
+        | UnboxedElem tag_ssa val_ssa ->
+            bind_unboxed_field(pat, rest, scrut_name, src, tag_ssa, val_ssa, idx, field_idx,
+                               cur_ops, acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
 
-# The SSA name sub-value `field_idx` lives in: a fresh name to fetch into, or a split
-# element's own value. Past the source's width is an internal error.
-fn field_ssa_of(src: FieldSource, idx: Int, field_idx: Int) -> Result String String =
+# A sub-pattern over an unboxed split element. Its column passed the width-2 arm check, so
+# it is `_` or a constructor whose one argument, if any, is a variable or `_`: the tag is
+# tested directly and the argument binds the payload, as in translate_unboxed_maybe_match.
+fn bind_unboxed_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: String,
+                      src: FieldSource, tag_ssa: String, val_ssa: String, idx: Int,
+                      field_idx: Int, cur_ops: ListBuilder sprout_ir.IROp,
+                      acc_captures: Dict String, cur_lbl: String, miss_lbl: String,
+                      ctors: Dict sprout_ir.CtorInfo, acc_extra: List sprout_ir.IRBlock) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, Dict String, Int) =
+  match pat with
+  | ast.WildcardPattern _ ->
+      bind_pattern_fields(rest, scrut_name, src, idx, field_idx + 1, cur_ops, acc_captures,
+                          cur_lbl, miss_lbl, ctors, acc_extra)
+  | ast.ConstructorPattern ctor args _ ->
+      let Just entry = dict_get(ctor, ctors)
+          else Err("ast_to_ir: unknown constructor '" ++ ctor ++ "' in nested tuple pattern")
+          captures = bind_just_arg(args, val_ssa, acc_captures)
+      in
+        if entry.sole
+        then bind_pattern_fields(rest, scrut_name, src, idx, field_idx + 1, cur_ops, captures,
+                                 cur_lbl, miss_lbl, ctors, acc_extra)
+        else
+          bind_after_test(Nil, eq_const_ops(tag_ssa, entry.tag, idx), fresh_name(idx + 1),
+                          idx + 2, rest, scrut_name, src, field_idx, cur_ops, captures, cur_lbl,
+                          fresh_nested_test_label(idx), miss_lbl, ctors, acc_extra)
+  | _ ->
+      Err("ast_to_ir: internal compiler bug: an unboxed tuple element's sub-pattern is neither "
+          ++ "`_` nor a constructor")
+
+# Sub-value `field_idx`: a fresh name to fetch it into, or a split element as translated.
+# Past the source's width is an internal error.
+fn field_of(src: FieldSource, idx: Int, field_idx: Int) -> Result String SplitElem =
   match src with
   | CtorFields fks ->
       if field_idx >= str_len(fks)
       then Err("ast_to_ir: internal compiler bug: bind_pattern_fields field_idx=" ++
                int_to_string(field_idx) ++ " exceeds fks length " ++
                int_to_string(str_len(fks)) ++ " (expected one byte per ctor arg)")
-      else Ok(fresh_name(idx))
-  | TupleFields -> Ok(fresh_name(idx))
+      else Ok(BoxedElem(fresh_name(idx)))
+  | TupleFields -> Ok(BoxedElem(fresh_name(idx)))
   | SplitFields elems ->
       let Just elem = vector_get(elems, field_idx)
           else Err("ast_to_ir: internal compiler bug: bind_pattern_fields field_idx=" ++
-                   int_to_string(field_idx) ++ " exceeds the tuple literal's width " ++
+                   int_to_string(field_idx) ++ " is past the tuple literal's width " ++
                    int_to_string(vector_length(elems)))
       in Ok(elem)
 
@@ -2366,9 +2401,9 @@ fn bind_pattern_field(pat: ast.Pattern, rest: List ast.Pattern, scrut_name: Stri
                                                sprout_ir.IRTUnknown))
         hit_lbl = fresh_nested_test_label(idx)
 
-# A literal sub-pattern: seal the open block with `fetch`, then `test_ops`
-# (leaving the i1 `cmp`), then walk `rest` from `hit_lbl`, with names from
-# `next_idx` on.
+# A tested sub-pattern (a literal, or an unboxed element's tag): seal the open
+# block with `fetch`, then `test_ops` (leaving the i1 `cmp`), then walk `rest`
+# from `hit_lbl`, with names from `next_idx` on.
 fn bind_after_test(fetch: List sprout_ir.IROp, test_ops: List sprout_ir.IROp, cmp: String, next_idx: Int,
                    rest: List ast.Pattern, scrut_name: String, src: FieldSource, field_idx: Int,
                    cur_ops: ListBuilder sprout_ir.IROp,
@@ -2727,13 +2762,26 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
                                  captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
-    (arg_blocks, arg_cur_lbl, arg_cur_ops, arg_names, idx1) <-
+    (arg_blocks, arg_cur_lbl, call_ops, tag_ssa, val_ssa, base) <-
+      emit_unboxed_call(ufn, call_args, params, env, idx, cur_label, cur_ops, captures)
+    translate_unboxed_maybe_dispatch(tag_ssa, val_ssa, base, arg_blocks, arg_cur_lbl, call_ops,
+                                     arms, match_ty, params, env, captures)
+
+# Translate `call_args`, then call `ufn` unboxed into a fresh (tag, payload) pair. Returns
+# (blocks, open label, open ops, tag, payload, next idx).
+fn emit_unboxed_call(ufn: String, call_args: List typed_ast.TypedExpr, params: List String,
+                     env: TxEnv, idx: Int, cur_label: String,
+                     cur_ops: ListBuilder sprout_ir.IROp, captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, String, Int) !{IO} =
+  do
+    (blocks, lbl, ops, arg_names, idx1) <-
       translate_args(call_args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
     let tag_ssa = fresh_name(idx1)
     let val_ssa = fresh_name(idx1 + 1)
-    let call_ops = list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, ufn, arg_names), arg_cur_ops)
-    translate_unboxed_maybe_dispatch(tag_ssa, val_ssa, idx1 + 2, arg_blocks, arg_cur_lbl, call_ops,
-                                     arms, match_ty, params, env, captures)
+    Ok((blocks, lbl,
+        list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, ufn,
+                                                  arg_names), ops),
+        tag_ssa, val_ssa, idx1 + 2))
 
 # Seal the scrutinee block `scrut_lbl` (it holds the (tag, payload) in `tag_ssa`, `val_ssa`), dispatch
 # the arms and join them. Shared by the call-site match and `@f_argw`, whose tag and payload are
@@ -3270,7 +3318,8 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
           # is built. The scrutinee name is a placeholder no op defines or reads.
           do
             (s_blocks, s_cur_lbl, s_ops, elems, idx1) <-
-              translate_args(items, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
+              translate_split_elems(items, 0, arms, params, env, idx, cur_label, cur_ops,
+                                    list_builder_empty, Nil, captures)
             # One name for both: tuple_source finds the elements only by this key.
             let placeholder = fresh_name(idx1)
             translate_match_after_scrut(arms, match_ty, params,
@@ -3296,6 +3345,53 @@ fn splittable_arm(arm: typed_ast.TypedMatchBranch) -> Bool =
   | typed_ast.TypedMatchBranch (ast.TuplePattern _ _) _ -> true
   | typed_ast.TypedMatchBranch (ast.WildcardPattern _) _ -> true
   | _ -> false
+
+# Column `col` of a split match: each arm's sub-pattern for that element (a `_` arm stays
+# `_`) with the arm's body, so the single-match unbox check can judge the element alone.
+fn split_column(arms: List typed_ast.TypedMatchBranch, col: Int) -> List typed_ast.TypedMatchBranch =
+  map(split_cell(_, col), arms)
+
+fn split_cell(arm: typed_ast.TypedMatchBranch, col: Int) -> typed_ast.TypedMatchBranch =
+  let typed_ast.TypedMatchBranch(ast.TuplePattern pats _) body = arm else arm
+      [pat | _] = list.drop(col, pats) else arm
+  in typed_ast.TypedMatchBranch(pat, body)
+
+# A split match's elements, left to right. One whose column a single `match` would unbox is
+# called unboxed, so no box is built for the arms to take apart; the rest are translated
+# as usual. collect_wc_split mirrors this for worker emission.
+fn translate_split_elems(items: List typed_ast.TypedExpr, col: Int,
+                         arms: List typed_ast.TypedMatchBranch, params: List String,
+                         env: TxEnv, idx: Int, cur_label: String,
+                         cur_ops: ListBuilder sprout_ir.IROp,
+                         acc_blocks: ListBuilder sprout_ir.IRBlock, acc_elems: List SplitElem,
+                         captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, List SplitElem, Int) !{IO} =
+  match items with
+  | Nil -> Ok((list_builder_build(acc_blocks), cur_label, cur_ops, list_reverse(acc_elems), idx))
+  | Cons item rest ->
+      do
+        (blocks, lbl, ops, elem, idx1) <-
+          translate_split_elem(item, split_column(arms, col), params, env, idx, cur_label,
+                               cur_ops, captures)
+        translate_split_elems(rest, col + 1, arms, params, env, idx1, lbl, ops,
+                              list_builder_extend(blocks, acc_blocks), Cons(elem, acc_elems),
+                              captures)
+
+fn translate_split_elem(item: typed_ast.TypedExpr, column: List typed_ast.TypedMatchBranch,
+                        params: List String, env: TxEnv, idx: Int, cur_label: String,
+                        cur_ops: ListBuilder sprout_ir.IROp, captures: Dict String) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, SplitElem, Int) !{IO} =
+  match unboxed_maybe_match_target(item, column, params, captures, env.prog) with
+  | Just (ufn, call_args) ->
+      do
+        (blocks, lbl, ops, tag_ssa, val_ssa, idx1) <-
+          emit_unboxed_call(ufn, call_args, params, env, idx, cur_label, cur_ops, captures)
+        Ok((blocks, lbl, ops, UnboxedElem(tag_ssa, val_ssa), idx1))
+  | Nothing ->
+      do
+        (blocks, lbl, ops, name, idx1) <-
+          translate_expr(item, params, env, idx, cur_label, cur_ops, captures)
+        Ok((blocks, lbl, ops, BoxedElem(name), idx1))
 
 # Continues after the scrutinee is translated.
 # Emits IRGetTag if needed, seals the scrutinee block, then dispatches arms.
@@ -6385,6 +6481,29 @@ fn collect_wc_scrutinee(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMa
       | _ -> acc
   | _ -> acc
 
+# A split match's elements, each with its own column (translate_split_elems): a direct call
+# whose column has the Tier-2 shape needs a worker.
+fn collect_wc_split(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
+                    top_level: Set, ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
+  let Just items = split_tuple_items(scrut, arms) else acc
+  in collect_wc_split_elems(items, 0, arms, top_level, ctors, acc)
+
+fn collect_wc_split_elems(items: List typed_ast.TypedExpr, col: Int,
+                          arms: List typed_ast.TypedMatchBranch, top_level: Set,
+                          ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
+  match items with
+  | Nil -> acc
+  | Cons item rest ->
+      collect_wc_split_elems(rest, col + 1, arms, top_level, ctors,
+                             collect_wc_split_elem(item, split_column(arms, col), top_level,
+                                                   ctors, acc))
+
+fn collect_wc_split_elem(item: typed_ast.TypedExpr, column: List typed_ast.TypedMatchBranch,
+                         top_level: Set, ctors: Dict sprout_ir.CtorInfo, acc: Set) -> Set =
+  let typed_ast.TCall(typed_ast.TVar name _ _) _ _ _ = item else acc
+  in if set_member(name, top_level) && tier2_worker_shape(name, column, ctors)
+     then set_insert(name, acc) else acc
+
 # Add the SRA producer callees of an eligible `let name = e` to the worker set (shadow-free).
 fn collect_wc_sra_producers(name: String, e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
                             top_level: Set, acc: Set) -> Set =
@@ -6836,7 +6955,8 @@ fn scan_expr(e: typed_ast.TypedExpr, penv: ProgEnv, acc: WorkerScan) -> WorkerSc
 fn scan_node(e: typed_ast.TypedExpr, penv: ProgEnv, acc: WorkerScan) -> WorkerScan =
   match e with
   | typed_ast.TMatch scrut arms _ _ ->
-      acc with (matched = collect_wc_scrutinee(scrut, arms, penv.top_level, penv.ctors, acc.matched))
+      acc with (matched = collect_wc_split(scrut, arms, penv.top_level, penv.ctors,
+                            collect_wc_scrutinee(scrut, arms, penv.top_level, penv.ctors, acc.matched)))
   | typed_ast.TDo steps _ _ -> scan_do_steps(steps, penv, acc)
   | typed_ast.TCall _ _ _ _ -> scan_argw_call(e, penv, acc)
   | _ -> acc
