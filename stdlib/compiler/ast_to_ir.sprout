@@ -2256,26 +2256,27 @@ fn bind_pattern_fields(pats: List ast.Pattern, scrut_name: String, src: FieldSou
   match pats with
   | Nil -> Ok((list_reverse(acc_extra), cur_lbl, cur_ops, acc_captures, idx))
   | Cons pat rest ->
-      match src with
-      | CtorFields fks ->
-          if field_idx >= str_len(fks)
-          then Err("ast_to_ir: internal compiler bug: bind_pattern_fields field_idx=" ++
-                   int_to_string(field_idx) ++ " exceeds fks length " ++
-                   int_to_string(str_len(fks)) ++ " (expected one byte per ctor arg)")
-          else bind_pattern_field(pat, rest, scrut_name, src, fresh_name(idx), idx, field_idx,
-                                  cur_ops, acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
-      | TupleFields ->
-          bind_pattern_field(pat, rest, scrut_name, src, fresh_name(idx), idx, field_idx, cur_ops,
-                             acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
-      | SplitFields elems ->
-          match vector_get(elems, field_idx) with
-          | Just elem ->
-              bind_pattern_field(pat, rest, scrut_name, src, elem, idx, field_idx, cur_ops,
-                                 acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
-          | Nothing ->
-              Err("ast_to_ir: internal compiler bug: bind_pattern_fields field_idx=" ++
-                  int_to_string(field_idx) ++ " exceeds the tuple literal's width " ++
-                  int_to_string(vector_length(elems)))
+      let field_ssa = try field_ssa_of(src, idx, field_idx)
+      in bind_pattern_field(pat, rest, scrut_name, src, field_ssa, idx, field_idx, cur_ops,
+                            acc_captures, cur_lbl, miss_lbl, ctors, acc_extra)
+
+# The SSA name sub-value `field_idx` lives in: a fresh name to fetch into, or a split
+# element's own value. Past the source's width is an internal error.
+fn field_ssa_of(src: FieldSource, idx: Int, field_idx: Int) -> Result String String =
+  match src with
+  | CtorFields fks ->
+      if field_idx >= str_len(fks)
+      then Err("ast_to_ir: internal compiler bug: bind_pattern_fields field_idx=" ++
+               int_to_string(field_idx) ++ " exceeds fks length " ++
+               int_to_string(str_len(fks)) ++ " (expected one byte per ctor arg)")
+      else Ok(fresh_name(idx))
+  | TupleFields -> Ok(fresh_name(idx))
+  | SplitFields elems ->
+      let Just elem = vector_get(elems, field_idx)
+          else Err("ast_to_ir: internal compiler bug: bind_pattern_fields field_idx=" ++
+                   int_to_string(field_idx) ++ " exceeds the tuple literal's width " ++
+                   int_to_string(vector_length(elems)))
+      in Ok(elem)
 
 # One step of bind_pattern_fields: sub-pattern `pat` at `field_idx`, then `rest`.
 # The sub-value is `field_ssa`: fetched into it from `scrut_name`, or already there
@@ -3271,11 +3272,11 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
           do
             (s_blocks, s_cur_lbl, s_ops, elems, idx1) <-
               translate_args(items, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
+            # One name for both: tuple_source finds the elements only by this key.
+            let placeholder = fresh_name(idx1)
             translate_match_after_scrut(arms, match_ty, params,
-                                        env with (split = Just((fresh_name(idx1),
-                                                                vector_from_list(elems)))),
-                                        s_blocks, s_cur_lbl, s_ops, fresh_name(idx1), idx1 + 1,
-                                        captures)
+                                        env with (split = Just((placeholder, vector_from_list(elems)))),
+                                        s_blocks, s_cur_lbl, s_ops, placeholder, idx1 + 1, captures)
       | Nothing ->
       do
         (s_blocks, s_cur_lbl, s_ops, s_name, idx1) <-
