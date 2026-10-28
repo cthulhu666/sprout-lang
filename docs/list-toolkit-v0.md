@@ -1,6 +1,6 @@
 # List toolkit — zip, adjacent pairs, scan, sort, min/max
 
-Status: **steps 1 and 2 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`,
+Status: **steps 1, 2 and 4 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`,
 `list.map_adjacent`; a `Sort` class with `sort`/`sort_by` in `stdlib.sort`, sorting in place over
 `LinVec` (§4.6.1), and `vec_sort`/`vec_sort_by` retired (§4.6.2). Approved, not yet built: `scanl`
 (§4.5). `enumerate` deferred (§4.3).
@@ -389,11 +389,14 @@ an unsigned type that cannot overflow; Sprout has no unsigned `Int`, and `a - b`
 Every name except the two retired ones is new. Existing definitions with these names shadow the
 prelude inside their file:
 
-- `fn zip_with` and `fn scanl` in `examples/leetcode/p0238_…`; migrate it to the prelude ones.
+- `fn zip_with` and `fn scanl` in `examples/leetcode/p0238_…`: `zip_with` is the prelude's now;
+  `scanl` stays until step 3.
 - `fn min`/`fn max` in `stdlib/math/int.sprout`: unchanged; qualified uses read `imath.max`.
 
 `p0046`, `p0049`, `p0078` and `p0347` replace their `sorted` round trip with `sort`; `p3110` uses
-`list.map_adjacent`.
+`list.map_adjacent`; `p0054` uses `list.drop`. Hand-written walks stay where a combinator would
+cost more: `p0014` stops at the first mismatch, which `zip` cannot; `p0013` adds the last element
+alone; the hot `Int` loops keep `imath.min`/`max` (§4.7).
 
 **`vec_sort(v)` → `sort(v)`, `vec_sort_by(f, v)` → `sort_by(f, v)`**, each file adding
 `import stdlib.sort (sort, sort_by)` as it needs. The result type is unchanged. A `List` caller
@@ -432,7 +435,7 @@ its 15 `vec_sort`/`vec_sort_by` uses (§4.6.2; uncharted-suns #479).
    `vec_sort_by` from the prelude (§4.6.2), reseed. Measured through `bench/list_sort/bench.sh`
    (§4.6.1). Migrate uncharted-suns in a matching commit.~~ Landed; uncharted-suns #479.
 3. After `NonEmpty`: `scanl`, the `NonEmpty` `Zip` instance.
-4. Migrate the LeetCode examples (§7).
+4. ~~Migrate the LeetCode examples (§7).~~ Landed.
 
 The instances may write `match (xs, ys) with`: a match on a tuple literal builds no tuple
 (`docs/compiler-internals.md` §Tuple-CPR, tuple-literal split).

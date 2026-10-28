@@ -9,11 +9,8 @@ fn permutations(xs: List Int) -> List (List Int) =
   | _ -> [Cons(x, p) for x in xs, p in permutations(list_filter(\y -> y != x, xs))]
 
 # Any order is allowed, so sort both sides before comparing.
-fn sorted(xss: List (List Int)) -> List (List Int) =
-  sort(xss)
-
 fn check(name: String, got: List (List Int), want: List (List Int)) -> Unit !{IO} =
-  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if sorted(got) == sorted(want) then "OK" else "FAIL"}`)
+  print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if sort(got) == sort(want) then "OK" else "FAIL"}`)
 
 fn main() -> Unit !{IO} =
   do

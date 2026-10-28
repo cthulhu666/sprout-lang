@@ -1,4 +1,5 @@
 module examples.leetcode.p0054_spiral_matrix
+import stdlib.list (drop)
 
 # 54 Spiral Matrix, two ways. A: peel the top row, then rotate the rest counter-clockwise
 # (O(m*n*min(m,n)): every peel re-transposes what is left). B: walk the matrix ring by ring (O(m*n)).
@@ -28,17 +29,12 @@ fn at(m: Vec (Vec Int), r: Int, c: Int) -> Int =
 fn transpose(rows: List (List a)) -> List (List a) =
   match list_filter_map(head_opt, rows) with
   | [] -> []
-  | heads -> Cons(heads, transpose(list_map(tail_or_nil, rows)))
+  | heads -> Cons(heads, transpose(list_map(drop(1, _), rows)))
 
 fn head_opt(xs: List a) -> Maybe a =
   match xs with
   | [] -> Nothing
   | [x | _] -> Just(x)
-
-fn tail_or_nil(xs: List a) -> List a =
-  match xs with
-  | [] -> []
-  | [_ | rest] -> rest
 
 fn to_vv(m: List (List Int)) -> Vec (Vec Int) =
   vec_from_list(list_map(vec_from_list, m))

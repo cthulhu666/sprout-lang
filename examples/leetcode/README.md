@@ -8,7 +8,7 @@ to the expected value. Run one with `mise exec -- just run examples/leetcode/p00
 
 | # | Title | Tags | File |
 |---|---|---|---|
-| 3110 | Score of a String | string, pairwise | [p3110_score_of_a_string.sprout](p3110_score_of_a_string.sprout) |
+| 3110 | Score of a String | string, `map_adjacent` | [p3110_score_of_a_string.sprout](p3110_score_of_a_string.sprout) |
 | 1 | Two Sum | hash table | [p0001_two_sum.sprout](p0001_two_sum.sprout) |
 | 49 | Group Anagrams | hash table, sorting | [p0049_group_anagrams.sprout](p0049_group_anagrams.sprout) |
 | 3 | Longest Substring Without Repeating Characters | sliding window, hash table | [p0003_longest_substring_without_repeating_characters.sprout](p0003_longest_substring_without_repeating_characters.sprout) |
