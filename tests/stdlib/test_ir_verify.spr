@@ -41,7 +41,7 @@ fn when(cond: Bool, ops: List sprout_ir.IROp) -> List sprout_ir.IROp =
   if cond then ops else Nil
 
 fn seq(parts: List (List sprout_ir.IROp)) -> List sprout_ir.IROp =
-  list_flat_map(\p -> p, parts)
+  list_flat_map(identity, parts)
 
 fn blk(label: String, ops: List sprout_ir.IROp) -> sprout_ir.IRBlock =
   sprout_ir.IRBlock(label, ops)

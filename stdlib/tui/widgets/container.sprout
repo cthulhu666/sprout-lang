@@ -213,7 +213,7 @@ type Grid m = (cols: List layout.Dimension, rows: List layout.Dimension,
                kids: List (widget.Widget m))
 
 fn grid_regions(g: Grid m, r: geometry.Region) -> List geometry.Region =
-  list_flat_map(\band -> band, layout.grid(r, g.cols, g.rows))
+  list_flat_map(identity, layout.grid(r, g.cols, g.rows))
 
 fn grid_on_event(g: Grid m,
                  ev: event.Event) -> widget.Handled(Grid m) m =

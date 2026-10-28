@@ -796,7 +796,7 @@ fn set_cookie_text(c: SetCookie) -> String =
     if c.secure then Just("Secure") else Nothing,
     map(\s -> `SameSite=${same_site_text(s)}`, c.same_site)
   ]
-    |> list_filter_map(\attr -> attr)
+    |> list_filter_map(identity)
     |> string.join("; ")
 
 # --- Routing ---------------------------------------------------------------

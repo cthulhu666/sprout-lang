@@ -1,0 +1,82 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.linvec as linvec
+
+# `identity`, and the Functor, Filterable and Monoid instances on Dict.
+# Each instance walks the entries by index, so keys must come through unchanged.
+
+fn double(x: Int) -> Int = x * 2
+fn inc(x: Int) -> Int = x + 1
+fn is_even(n: Int) -> Bool = n - (n / 2) * 2 == 0
+fn always(n: Int) -> Bool = true
+fn never(n: Int) -> Bool = false
+fn half_if_even(n: Int) -> Maybe Int =
+  if n - (n / 2) * 2 == 0 then Just(n / 2) else Nothing
+
+# Type anchors: an empty dict leaves the value type free.
+fn no_ints() -> Dict Int = dict_empty()
+let no_dicts: List (Dict Int) = Nil
+
+fn mixed() -> Dict Int = {a: 1, b: 2, c: 3, d: 4}
+fn maybes() -> Dict (Maybe Int) = {a: Just (1), b: Nothing, c: Just (3)}
+
+# Passes the Monoid dictionary rather than devirtualizing it.
+fn join_dicts(xs: List t) -> t where Monoid t = concat_all(xs)
+
+fn keep_evens(xs: c Int) -> c Int where Filterable c = filter(is_even, xs)
+fn double_all(xs: c Int) -> c Int where Functor c = map(double, xs)
+
+fn main() -> Unit !{IO} =
+  let d = mixed()
+  in run_suite("dict_instances", [
+    check_eq("identity Int", identity(3), 3),
+    check_eq("identity String", identity("s"), "s"),
+    check_eq("identity List", identity([1, 2]), [1, 2]),
+    check_eq("identity Maybe", identity(Just(1)), Just(1)),
+    check_eq("identity Dict", identity(d), d),
+    check_eq("identity linear", linvec.freeze(identity(linvec.new(2, 7))), vec_from_list([7, 7])),
+
+    # Functor
+    check_eq("fmap values", fmap(double, d), {a: 2, b: 4, c: 6, d: 8}),
+    check_eq("map generic", map(inc, d), {a: 2, b: 3, c: 4, d: 5}),
+    check_eq("fmap keeps keys", dict_keys(fmap(double, d)), dict_keys(d)),
+    check_eq("fmap changes the value type",
+      map(\n -> n > 2, d), {a: false, b: false, c: true, d: true}),
+    check_eq("fmap empty", dict_entries(fmap(double, no_ints())), dict_entries(no_ints())),
+    check_eq("functor identity law", map(identity, d), d),
+    check_eq("functor composition law",
+      map(double, map(inc, d)), map(\x -> double(inc(x)), d)),
+
+    # Filterable
+    check_eq("filter empty", filter(is_even, no_ints()), no_ints()),
+    check_eq("filter keep all", filter(always, d), d),
+    check_eq("filter keep none", filter(never, d), no_ints()),
+    check_eq("filter mixed keeps key with value", filter(is_even, d), {b: 2, d: 4}),
+    check_eq("filter_map empty", dict_entries(filter_map(half_if_even, no_ints())), dict_entries(no_ints())),
+    check_eq("filter_map mixed", filter_map(half_if_even, d), {b: 1, d: 2}),
+    check_eq("filter_map identity over Maybe values",
+      filter_map(identity, maybes()), {a: 1, c: 3}),
+    check_eq("partition mixed", partition(is_even, d), ({b: 2, d: 4}, {a: 1, c: 3})),
+    check_eq("partition empty", partition(is_even, no_ints()), (no_ints(), no_ints())),
+    check_eq("partition all left", partition(always, d), (d, no_ints())),
+    check_eq("partition all right", partition(never, d), (no_ints(), d)),
+    check_eq("partition sides are disjoint and complete",
+      (match partition(is_even, d) with
+       | (l, r) -> dict_keys(l ++ r) == dict_keys(d)
+                   && vec_length(dict_keys(l)) + vec_length(dict_keys(r)) == 4),
+      true),
+
+    # Forwarded dictionaries
+    check_eq("filter through a Filterable dictionary", keep_evens(d), {b: 2, d: 4}),
+    check_eq("map through a Functor dictionary", double_all(d), {a: 2, b: 4, c: 6, d: 8}),
+
+    # Monoid
+    check_eq("monoid left identity", dict_empty() ++ d, d),
+    check_eq("monoid right identity", d ++ dict_empty(), d),
+    check_eq("empty() is dict_empty", dict_entries(empty()), dict_entries(no_ints())),
+    check_eq("concat_all empty list", concat_all(no_dicts), no_ints()),
+    check_eq("concat_all disjoint", concat_all([{a: 1}, {b: 2}, {c: 3}]), {a: 1, b: 2, c: 3}),
+    check_eq("concat_all later dict wins",
+      concat_all([{a: 1, b: 2}, {b: 20}, {b: 200, c: 3}]), {a: 1, b: 200, c: 3}),
+    check_eq("mconcat over a List of dicts", mconcat([{a: 1}, {a: 2}]), {a: 2}),
+    check_eq("generic where Monoid t", join_dicts([{a: 1}, {b: 2}]), {a: 1, b: 2})
+  ])

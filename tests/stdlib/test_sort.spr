@@ -15,7 +15,7 @@ fn reference_by(key: local a -> k, xs: List a) -> List a where Ord k =
   fold(\ (acc, x) -> insert_by(key, x, acc), [], xs)
 
 fn reference(xs: List a) -> List a where Ord a =
-  reference_by(\x -> x, xs)
+  reference_by(identity, xs)
 
 # A pseudo-random Int in [0, m).
 fn small(i: Int, m: Int) -> Int =

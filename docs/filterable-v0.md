@@ -30,8 +30,8 @@ Non-goals:
 
 - `filter_map` and `partition` (§7).
 - An effectful predicate (§6).
-- `Dict`/`Set` instances — neither has a `Functor` or `Foldable` instance
-  today, so filtering them is a wider question than this change.
+- `Dict`/`Set` instances — neither had a `Functor` or `Foldable` instance then (`Dict` has
+  `Functor` and `Filterable` now), so filtering them was a wider question than this change.
 
 ## 3. Why not `Foldable`
 
@@ -127,7 +127,7 @@ and the per-slot verdicts.
   for why each is a method rather than a derivation (a derived `filter` would
   allocate a `Maybe` per surviving element; a two-pass `partition` would apply
   the caller's predicate twice per element).
-- `Dict`/`Set` instances, gated on those types getting `Functor`/`Foldable`.
+- `Set` instance. (`Dict` has `Functor` and `Filterable`, over values.)
 - An effectful predicate (§6).
 
 Recorded in `BACKLOG.md`.

@@ -158,9 +158,8 @@ Semantics:
   `fold_values`'s `step`, which removes the obstacle but does not by itself make
   an effectful key legal — `min_by` would have to annotate its own key
   parameter, a separate call.)
-- `minimum`/`maximum` are defined as `min_by(\value -> value, xs)` /
-  `max_by(\value -> value, xs)`, mirroring how `vec_sort` is defined over
-  `vec_sort_by`.
+- `minimum`/`maximum` are defined as `min_by(identity, xs)` /
+  `max_by(identity, xs)`, mirroring how `sort` sits beside `sort_by`.
 
 Implementation sketch (two private step helpers keep the lambdas shallow):
 

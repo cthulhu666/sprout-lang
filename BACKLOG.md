@@ -959,9 +959,9 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   Sprout cannot soften with default bodies (`parse_class_body` collects signatures only), so both
   become mandatory for every future instance. Note `list_length` is private, so List has no public
   length and `count(\_ -> true, xs)` is the O(n) stand-in. (c) `position`/`index_of`
-  (List-shaped, not `Foldable`-derivable). (d) `Dict`/`Set` instances, gated on
-  those types getting `Functor`/`Foldable`. (e) An effectful predicate (`a -> Bool !{e}`) needs
-  `Filterable` to state `pred`'s call order, not B2 (`docs/effect-polymorphism-policy-v0.md`).
+  (List-shaped, not `Foldable`-derivable). (d) a `Set` `Filterable`, gated on `Set` getting
+  `Functor`/`Foldable` (`Dict` has `Filterable`). (e) An effectful predicate (`a -> Bool !{e}`)
+  needs `Filterable` to state `pred`'s call order, not B2 (`docs/effect-polymorphism-policy-v0.md`).
 - [ ] `P3` **No `NonEmpty a`, though `docs/guidelines.md` §3 names it as the illegal-states
   exemplar.** Four in-tree sites pay for the gap: two panics in `infer.build_comp_level` and
   `infer.comp_fold_name` (a comprehension always has ≥1 generator, so `ComprehensionExpr` should

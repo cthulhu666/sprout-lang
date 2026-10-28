@@ -436,7 +436,7 @@ fn frame_facts_of(fn_name: String, params: List (String, sprout_ir.IRType),
        covered = set_from_list(list_filter_map(\l -> covered_load(slot_names, l), loads)),
        param_owners = set_from_list(list_filter(\v -> dict_member(v, owners),
                                                 list_map(param_ssa_of, params))),
-       found = list_flat_map(\x -> x, [
+       found = list_flat_map(identity, [
          if extra_enters > 0 then [`fn ${fn_name}: more than one IRFrameEnter`] else Nil,
          if label != entry_label(blocks) then [`fn ${fn_name}: IRFrameEnter outside the entry block`] else Nil,
          list_flat_map(\i -> outside(fn_name, size, i), list_map(first_of_pair, list_append(slots, stores))),

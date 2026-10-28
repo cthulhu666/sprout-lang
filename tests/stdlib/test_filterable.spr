@@ -118,7 +118,7 @@ fn main() -> Unit !{IO} =
     # An always-Just function makes filter_map exactly map, which is the law
     # tying it to the Functor instance rather than leaving it a separate idea.
     check_eq("filter_map with an always-Just f is map",
-      filter_map(just_self, ints), map(\n -> n, ints)),
+      filter_map(just_self, ints), map(identity, ints)),
     # filter p == filter_map (\x -> if p x then Just x else Nothing): the
     # derivation PureScript and witherable make their class primitive.
     check_eq("filter is the Just/Nothing case of filter_map",

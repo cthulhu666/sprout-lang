@@ -493,7 +493,7 @@ where
 
 # After the last declaration, with the program's substitution.
 export fn census_finish(state: InferState, subst: Dict types.Type) -> Unit !{IO} =
-  census_update(state, \r -> r with (done = list_map(bind_census.map_piece(apply_subst(subst, _), \e -> e, _), r.done)))
+  census_update(state, \r -> r with (done = list_map(bind_census.map_piece(apply_subst(subst, _), identity, _), r.done)))
 
 export fn census_pieces(state: InferState) -> List bind_census.Piece !{IO} =
   do
