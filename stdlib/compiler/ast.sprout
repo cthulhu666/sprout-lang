@@ -784,7 +784,7 @@ let alias_expand_fuel: Int = 100
 
 # A bundle's modules as one declaration list, in order.
 export fn flatten_modules(modules: List (List Decl)) -> List Decl =
-  list_flat_map(\decls -> decls, modules)
+  list_flat_map(identity, modules)
 
 # Each module's declarations, with every module's aliases expanded.
 export fn expand_alias_constraints(modules: List (List Decl)) -> List (List Decl) =

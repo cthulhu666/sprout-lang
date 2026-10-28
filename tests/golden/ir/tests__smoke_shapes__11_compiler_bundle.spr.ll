@@ -138,15 +138,15 @@ declare i64 @fs_rename(i64, i64)
 @.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 534, column 47)\00" }
 @.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 538, column 39)\00" }
 @.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 637, column 45)\00" }
-@__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
+@__sprout_sclo.__sprout_ir_eta_identity_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_identity_1 }
 @__sprout_sclo.__sprout_ir_lambda_3 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_3 }
-@.str.9 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1870, column 10)\00" }
+@.str.9 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1932, column 10)\00" }
 @.str.10 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.11 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1875, column 39)\00" }
-@.str.12 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1897, column 33)\00" }
-@.str.13 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1897, column 43)\00" }
-@.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1897, column 49)\00" }
-@.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1905, column 58)\00" }
+@.str.11 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1937, column 39)\00" }
+@.str.12 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1959, column 33)\00" }
+@.str.13 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1959, column 43)\00" }
+@.str.14 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1959, column 49)\00" }
+@.str.15 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1967, column 58)\00" }
 @.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
 @.str.17 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.18 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 64, column 18)\00" }
@@ -1160,9 +1160,9 @@ declare i64 @fs_rename(i64, i64)
 @.str.1009 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.1010 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_25 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_25 }
-@.str.1011 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1897, column 33)\00" }
-@.str.1012 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1897, column 43)\00" }
-@.str.1013 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1897, column 49)\00" }
+@.str.1011 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1959, column 33)\00" }
+@.str.1012 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1959, column 43)\00" }
+@.str.1013 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1959, column 49)\00" }
 @__sprout_sclo.__sprout_ir_lambda_27 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_27 }
 @.str.1014 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"fn\00" }
 @.str.1015 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"|\00" }
@@ -1392,7 +1392,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.1239 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789abcdef\00" }
 @.str.1240 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789ABCDEF\00" }
 @.str.1241 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 325, column 55)\00" }
-@.str.1242 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1905, column 58)\00" }
+@.str.1242 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1967, column 58)\00" }
 @.str.1243 = private unnamed_addr constant { i64, [18 x i8] } { i64 278538, [18 x i8] c"No instances for \00" }
 @.str.1244 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"Instances for \00" }
 @.str.1245 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
@@ -3372,9 +3372,10 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_1(i64 %p$env$, i64 %p$acc) {
+define i64 @__sprout_ir_eta_identity_1(i64 %p$env$, i64 %p$a0) {
 entry:
-  ret i64 %p$acc
+  %ret = call i64 @identity(i64 %p$a0)
+  ret i64 %ret
 }
 
 define i64 @all(i64 %p$pred, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values) {
@@ -3396,7 +3397,7 @@ entry:
   store ptr @__sprout_ir_lambda_0, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$pred, ptr %t$0$raw$slot$1
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_1, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_identity_1, i64 8) to i64
   %t$2 = add i64 0, 1
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
@@ -3494,6 +3495,11 @@ entry:
   %t$3 = call i64 @fold_while(i64 %t$0, i64 %t$1, i64 %t$2, i64 %p$xs, i64 %p$__tc_Foldable_0_fold_values, i64 %p$__tc_Foldable_0_fold_while_values)
   %t$16 = call i64 @sprout_gc_pop_roots(i64 6)
   ret i64 %t$3
+}
+
+define i64 @identity(i64 %p$x) {
+entry:
+  ret i64 %p$x
 }
 
 define i64 @guard(i64 %p$condition, i64 %p$err) {

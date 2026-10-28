@@ -3,7 +3,7 @@ import stdlib.test (check_eq, check_true, check_false, run_suite)
 # Law-oriented conformance tests for Functor, Semigroup, and Monoid instances.
 #
 # Functor laws:
-#   Identity:    map(\x -> x, xs) == xs
+#   Identity:    map(identity, xs) == xs
 #   Composition: map(f, map(g, xs)) == map(\x -> f(g(x)), xs)
 #
 # Semigroup law:
@@ -67,9 +67,9 @@ fn main() -> Unit !{IO} =
     # nil_int gives a concrete List Int so Eq (List Int) resolves.
     # -----------------------------------------------------------------------
 
-    check_eq("functor list identity empty", map(\x -> x, li_empty), li_empty),
-    check_eq("functor list identity single", map(\x -> x, li_single), li_single),
-    check_eq("functor list identity multi", map(\x -> x, li_multi), li_multi),
+    check_eq("functor list identity empty", map(identity, li_empty), li_empty),
+    check_eq("functor list identity single", map(identity, li_single), li_single),
+    check_eq("functor list identity multi", map(identity, li_multi), li_multi),
 
     # -----------------------------------------------------------------------
     # Functor List — composition law (f = double, g = inc)
@@ -92,9 +92,9 @@ fn main() -> Unit !{IO} =
     # no_int gives a concrete Maybe Int so Eq (Maybe Int) resolves.
     # -----------------------------------------------------------------------
 
-    check_eq("functor maybe identity nothing", map(\x -> x, m_nothing), m_nothing),
-    check_eq("functor maybe identity just 7", map(\x -> x, m_just_1), m_just_1),
-    check_eq("functor maybe identity just 100", map(\x -> x, m_just_2), m_just_2),
+    check_eq("functor maybe identity nothing", map(identity, m_nothing), m_nothing),
+    check_eq("functor maybe identity just 7", map(identity, m_just_1), m_just_1),
+    check_eq("functor maybe identity just 100", map(identity, m_just_2), m_just_2),
 
     # -----------------------------------------------------------------------
     # Functor Maybe — composition law (f = double, g = inc)

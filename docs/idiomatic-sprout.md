@@ -423,7 +423,7 @@ Three places to *not* reach for one:
 
 ```sprout
 [x for Just x in maybes]                              # rejected: `Just x` can fail
-list_filter_map(\m -> m, maybes)                      # the idiom — drops Nothing
+list_filter_map(identity, maybes)                     # the idiom — drops Nothing
 ```
 
 ## Accumulate with `ListBuilder` only when a fold cannot say it

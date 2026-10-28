@@ -13,16 +13,16 @@ fn main() -> Unit !{IO} =
     # -----------------------------------------------------------------------
 
     check_eq("rcompose basic", rcompose(double, inc)(3), 7),
-    check_eq("rcompose identity left", rcompose(\x -> x, double)(5), 10),
-    check_eq("rcompose identity right", rcompose(double, \x -> x)(5), 10),
+    check_eq("rcompose identity left", rcompose(identity, double)(5), 10),
+    check_eq("rcompose identity right", rcompose(double, identity)(5), 10),
 
     # -----------------------------------------------------------------------
     # lcompose: f << g applies g first, then f
     # -----------------------------------------------------------------------
 
     check_eq("lcompose basic", lcompose(inc, double)(3), 7),
-    check_eq("lcompose identity left", lcompose(\x -> x, double)(5), 10),
-    check_eq("lcompose identity right", lcompose(double, \x -> x)(5), 10),
+    check_eq("lcompose identity left", lcompose(identity, double)(5), 10),
+    check_eq("lcompose identity right", lcompose(double, identity)(5), 10),
 
     # -----------------------------------------------------------------------
     # >> operator desugars to rcompose

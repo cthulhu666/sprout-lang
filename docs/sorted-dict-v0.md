@@ -90,6 +90,8 @@ the runtime the order depends only on the key set, never on insertion history (Â
   path, and a sorted print keeps every test that prints a dict stable when the representation or
   hash changes.
 - `Semigroup` as today, for both.
+- `Functor`, `Filterable` and `Monoid` on `Dict` are order-independent and have landed;
+  `Foldable` and `Traversable` wait for this doc's order decision.
 - `json.object_from_dict` sorts too, so JSON output stays byte-identical to today's.
 
 **Literals.** `{foo: 1, "bar": 2}` still builds a `Dict`; the spec builds literals from the bare

@@ -20,7 +20,7 @@ fn main() -> Unit !{IO} =
     check_false("vec eq differs (element)", v == foldable_to_vec([10, 20, 99, 40])),
     check_false("vec eq differs (length)", v == foldable_to_vec([10, 20, 30])),
 
-    check_eq("vec_sum_by identity", vec_sum_by(\x -> x, v), 100),
+    check_eq("vec_sum_by identity", vec_sum_by(identity, v), 100),
     check_eq("vec_sum_by halved", vec_sum_by(\x -> x / 10, v), 10),
 
     check_eq("dict eq self", d, d),
@@ -35,10 +35,10 @@ fn main() -> Unit !{IO} =
       foldable_to_vec(["alpha", "beta", "gamma"])),
     check_eq("dict_keys after remove", dict_keys(d2), foldable_to_vec(["alpha", "gamma"])),
     check_eq("dict_keys of empty", vec_length(dict_keys(dict_remove("alpha", {alpha: 1}))), 0),
-    check_eq("dict_values sum", vec_sum_by(\x -> x, vals), 6),
+    check_eq("dict_values sum", vec_sum_by(identity, vals), 6),
 
     check_eq("dict_remove reduces count", vec_sum_by(\_ -> 1, vals2), 2),
-    check_eq("dict_remove reduces sum", vec_sum_by(\x -> x, vals2), 4),
+    check_eq("dict_remove reduces sum", vec_sum_by(identity, vals2), 4),
 
     # dict_get: hit returns Just, miss returns Nothing
     check_eq("dict_get hit", dict_get("alpha", d), Just(1)),
@@ -66,5 +66,5 @@ fn main() -> Unit !{IO} =
     check_eq("vec ++ concat order", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([4, 5]), foldable_to_vec([1, 2, 3, 4, 5])),
     check_eq("vec ++ empty left identity", foldable_to_vec([]) ++ foldable_to_vec([1, 2, 3]), foldable_to_vec([1, 2, 3])),
     check_eq("vec ++ empty right identity", foldable_to_vec([1, 2, 3]) ++ foldable_to_vec([]), foldable_to_vec([1, 2, 3])),
-    check_eq("vec ++ sum", vec_sum_by(\x -> x, foldable_to_vec([1, 2]) ++ foldable_to_vec([3, 4])), 10)
+    check_eq("vec ++ sum", vec_sum_by(identity, foldable_to_vec([1, 2]) ++ foldable_to_vec([3, 4])), 10)
   ])

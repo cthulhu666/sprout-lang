@@ -1069,6 +1069,9 @@ Composition operators desugar to `rcompose` and `lcompose` from the prelude:
 
 They associate to the right, so `f >> g >> h` means `\x -> h(g(f(x)))`.
 `rcompose` and `lcompose` are first-class functions and can be passed as values.
+So is the prelude's `identity(x: a) -> a where linear a`, which returns its argument,
+linear or not. `map(identity, xs)` is `xs`, `filter_map(identity, xs)` drops the
+`Nothing`s and `traverse(identity, xs)` is `sequence(xs)`.
 
 The pipe operator is a binary operator that threads a value into the final
 argument position of the expression on its right:
@@ -4063,7 +4066,8 @@ partition(pred: a -> Bool, xs: c a)  -> (c a, c a)  where Filterable c
 
 `filter` keeps the elements satisfying `pred`, in their original order, and
 returns **the same container kind it was given** — filtering a `Vec` yields a
-`Vec`, not a `List`.  Instances: `List` and `Vec`, the same pair as `Foldable`.
+`Vec`, not a `List`.  Instances: `List`, `Vec` and `Dict`.  On a `Dict` the predicate
+tests values only; a kept entry keeps its key.
 
 That return position is why this is its own class rather than a `Foldable`
 derivation.  `Foldable.fold_values` only tears a container down; a fold-derived
@@ -4101,6 +4105,14 @@ element, breaking the once-per-element guarantee `min_by`/`max_by` document.
 
 The concrete per-container forms are `list_filter_map`/`vec_filter_map` and
 `list_partition`/`vec_partition`.
+
+### `Dict` instances
+
+`Dict` has `Functor`, `Filterable` and `Monoid` instances, none of which depends on key
+order.  `fmap` maps the values and leaves the keys alone.  `Filterable` is described
+above.  `empty()` is `dict_empty()`, and `concat_all` folds the list with `++`, so a
+later dict wins on a shared key (the `Semigroup` is right-biased).  Each walks the entries
+by index: O(n log n).  `Foldable`, `Traversable`, `Zip` and `Sort` have no `Dict` instance.
 
 ### `Zip` class, `zip_with` and `zip`
 

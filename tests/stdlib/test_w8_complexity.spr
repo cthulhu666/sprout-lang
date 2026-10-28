@@ -18,7 +18,7 @@ fn main() -> Unit !{IO} =
       vec_map(\x -> x * 2, foldable_to_vec([1, 2, 3])),
       foldable_to_vec([2, 4, 6])),
     check_eq("vec_map order preserved",
-      vec_map(\x -> x, foldable_to_vec([3, 1, 2])),
+      vec_map(identity, foldable_to_vec([3, 1, 2])),
       foldable_to_vec([3, 1, 2])),
 
     # --- P10: vec_filter ---

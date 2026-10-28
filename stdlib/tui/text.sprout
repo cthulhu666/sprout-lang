@@ -49,7 +49,7 @@ fn cluster_is(cluster: List Int, cp: Int) -> Bool =
 # clusters — a caret between codepoints can split one, and its column would
 # then be uncomputable. Design: docs/tui-input-v0.md §4.1.
 export fn from_clusters(cs: List (List Int)) -> String =
-  utf8.from_codepoints(list_flat_map(\c -> c, cs))
+  utf8.from_codepoints(list_flat_map(identity, cs))
 
 # ── Measurement ─────────────────────────────────────────────────────────────
 

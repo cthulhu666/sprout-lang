@@ -10,7 +10,7 @@ fn top_k_frequent(nums: List Int, k: Int) -> List Int =
       buckets = linvec.new(list_length(nums) + 1, [])
         |> linvec.accum(\ (b, x) -> Cons(x, b), [(n, x) for (x, n) in counts])
         |> linvec.freeze
-  in take(k, list_flat_map(\b -> b, vec_to_list(vec_reverse(buckets))))
+  in take(k, list_flat_map(identity, vec_to_list(vec_reverse(buckets))))
 
 # Dict keys are Strings, so the table maps int_to_string(x) -> (x, count). Keeping
 # x in the value avoids parsing the key back.

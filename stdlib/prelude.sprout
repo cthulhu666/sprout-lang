@@ -485,7 +485,7 @@ export fn vec_any(pred: local a -> Bool, vec: Vec a) -> Bool =
   vec_fold_while(\ (acc, x) -> pred(x), \acc -> !acc, false, vec)
 
 export fn vec_all(pred: local a -> Bool, vec: Vec a) -> Bool =
-  vec_fold_while(\ (acc, x) -> pred(x), \acc -> acc, true, vec)
+  vec_fold_while(\ (acc, x) -> pred(x), identity, true, vec)
 
 fn vec_count_indexed(pred: local a -> Bool, vec: Vec a, index: Int, total: Int, acc: Int) -> Int =
   if index >= total then acc
@@ -888,7 +888,7 @@ export fn traverse(g: a -> f b, xs: t a) -> f(t b) where Traversable t, Applicat
   traverse_values(g, xs)
 
 export fn sequence(xs: t (f a)) -> f(t a) where Traversable t, Applicative f =
-  traverse_values(\x -> x, xs)
+  traverse_values(identity, xs)
 
 export fn map(f: a -> b, xs: c a) -> c b where Functor c =
   fmap(f, xs)
@@ -951,7 +951,7 @@ export fn any(pred: local a -> Bool, xs: c a) -> Bool where Foldable c =
 # O(k) up to the first element failing `pred`. True for an empty structure — the
 # vacuous case, matching every language that ships this pair.
 export fn all(pred: local a -> Bool, xs: c a) -> Bool where Foldable c =
-  fold_while(\ (acc, x) -> if acc then pred(x) else acc, \acc -> acc, true, xs)
+  fold_while(\ (acc, x) -> if acc then pred(x) else acc, identity, true, xs)
 
 # O(k) up to the match: the FIRST element satisfying `pred`, or `Nothing`. Total
 # — an empty structure yields `Nothing`, never a panic.
@@ -1027,12 +1027,12 @@ export fn max_by(f: local a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
 # `min_by`, mirroring how `sort` sits beside `sort_by`. On `Double` this is
 # `compare`'s order, not `<`'s: NaN is above every number.
 export fn minimum(xs: c a) -> Maybe a where Foldable c, Ord a =
-  min_by(\value -> value, xs)
+  min_by(identity, xs)
 
 # O(n): the greatest element, or `Nothing` when empty. Same `Double` order as
 # `minimum`.
 export fn maximum(xs: c a) -> Maybe a where Foldable c, Ord a =
-  max_by(\value -> value, xs)
+  max_by(identity, xs)
 
 # The lesser of two; on a tie `x` (and `max` gives `y`), so `(min(x, y), max(x, y))`
 # holds both inputs. Dispatches through `Ord`, so a hot `Int` loop wants `imath.min`
@@ -1349,7 +1349,7 @@ instance Monoid String
 
 instance Monoid (List a)
   fn empty() -> List a = Nil
-  fn concat_all(xs: List (List a)) -> List a = list_flat_map(\x -> x, xs)
+  fn concat_all(xs: List (List a)) -> List a = list_flat_map(identity, xs)
 
 instance Functor List
   fn fmap(f: a -> b, xs: List a) -> List b =
@@ -1557,6 +1557,65 @@ instance Semigroup (Dict v)
     match right with
     | Dict raw -> dict_append_entries(left, raw, 0, map_size(raw))
 
+# O(n log n) for the three instances below: each walks the entries by index (an
+# O(log n) order-statistic read apiece) and rebuilds a dict with `dict_set`. Keys never
+# change and no instance looks at one, so the result is independent of key order.
+fn dict_map_from(f: a -> b, raw: Map a, index: Int, total: Int, acc: Dict b) -> Dict b =
+  if index >= total then acc
+  else
+    let Just key = map_nth_key(raw, index) else acc
+        Just value = map_nth_value(raw, index) else acc
+    in dict_map_from(f, raw, index + 1, total, dict_set(key, f(value), acc))
+
+# Maps the values, keys unchanged.
+instance Functor Dict
+  fn fmap(f: a -> b, xs: Dict a) -> Dict b =
+    match xs with
+    | Dict raw -> dict_map_from(f, raw, 0, map_size(raw), dict_empty())
+
+fn dict_filter_from(pred: a -> Bool, raw: Map a, index: Int, total: Int, acc: Dict a) -> Dict a =
+  if index >= total then acc
+  else
+    let Just key = map_nth_key(raw, index) else acc
+        Just value = map_nth_value(raw, index) else acc
+    in if pred(value) then dict_filter_from(pred, raw, index + 1, total, dict_set(key, value, acc))
+       else dict_filter_from(pred, raw, index + 1, total, acc)
+
+fn dict_filter_map_from(f: a -> Maybe b, raw: Map a, index: Int, total: Int, acc: Dict b) -> Dict b =
+  if index >= total then acc
+  else
+    let Just key = map_nth_key(raw, index) else acc
+        Just value = map_nth_value(raw, index) else acc
+    in match f(value) with
+       | Just kept -> dict_filter_map_from(f, raw, index + 1, total, dict_set(key, kept, acc))
+       | Nothing -> dict_filter_map_from(f, raw, index + 1, total, acc)
+
+fn dict_partition_from(pred: a -> Bool, raw: Map a, index: Int, total: Int, yes: Dict a, no: Dict a) -> (Dict a, Dict a) =
+  if index >= total then (yes, no)
+  else
+    let Just key = map_nth_key(raw, index) else (yes, no)
+        Just value = map_nth_value(raw, index) else (yes, no)
+    in if pred(value) then dict_partition_from(pred, raw, index + 1, total, dict_set(key, value, yes), no)
+       else dict_partition_from(pred, raw, index + 1, total, yes, dict_set(key, value, no))
+
+# Tests values only; a kept entry keeps its key.
+instance Filterable Dict
+  fn filter_values(pred: a -> Bool, xs: Dict a) -> Dict a =
+    match xs with
+    | Dict raw -> dict_filter_from(pred, raw, 0, map_size(raw), dict_empty())
+  fn filter_map_values(f: a -> Maybe b, xs: Dict a) -> Dict b =
+    match xs with
+    | Dict raw -> dict_filter_map_from(f, raw, 0, map_size(raw), dict_empty())
+  fn partition_values(pred: a -> Bool, xs: Dict a) -> (Dict a, Dict a) =
+    match xs with
+    | Dict raw -> dict_partition_from(pred, raw, 0, map_size(raw), dict_empty(), dict_empty())
+
+# No bulk primitive, so it folds over `++`: a later dict wins on a shared key.
+instance Monoid (Dict v)
+  fn empty() -> Dict v = dict_empty()
+  fn concat_all(xs: List (Dict v)) -> Dict v =
+    list_fold(\ (acc, d) -> acc ++ d, dict_empty(), xs)
+
 # O(n): the elements in fold order.
 fn foldable_to_list(xs: f a) -> List a where Foldable f =
   list_reverse_go(fold(\ (acc, x) -> Cons(x, acc), Nil, xs), Nil)
@@ -1578,6 +1637,9 @@ fn dict_from_list_loop(pairs: List (String, v), acc: Dict v) -> Dict v =
 # The |> operator desugars via the parser, not through this function.
 export fn pipe_apply(f: a -> b, value: a) -> b =
   f(value)
+
+# The value unchanged: the function to pass to `map`, `filter_map` or `traverse`.  O(1)
+export fn identity(x: a) -> a where linear a = x
 
 # f >> g desugars to rcompose(f, g): apply f first, then g.  O(1)
 export fn rcompose(f: a -> b, g: b -> c) =

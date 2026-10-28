@@ -9260,7 +9260,7 @@ fn seeded_type(sub: Dict ast.TypeExpr, own_effs: List String, cte: ast.TypeExpr)
 fn written_effect_vars(params: List ast.Param, ret: Maybe ast.TypeExpr,
                        effs: Maybe (List String)) -> List String =
   list_fold(\ (acc, te) -> te_effect_vars(te, acc), effect_label_vars(effs, Nil),
-            list_filter_map(\t -> t, Cons(ret, list_map(param_type_expr, params))))
+            list_filter_map(identity, Cons(ret, list_map(param_type_expr, params))))
 
 fn te_effect_vars(te: ast.TypeExpr, acc: List String) -> List String =
   match te with

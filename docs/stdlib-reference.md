@@ -17,7 +17,7 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   `Result` holds; O(1), no `Eq` needed. To use the payload too, `match` instead
 - `map(fn, list) -> List`
 - `fold(fn, init, list) -> value`
-- `filter(predicate, xs) -> c a` (`where Filterable c` — `List` or `Vec`, container preserved)
+- `filter(predicate, xs) -> c a` (`where Filterable c` — `List`, `Vec` or `Dict`, container preserved; a `Dict` is tested on values, keys kept)
 - `filter_map(f, xs) -> c b` (`where Filterable c` — drop and transform in one pass)
 - `partition(predicate, xs) -> (c a, c a)` (`where Filterable c` — matches, then non-matches)
 - `any(predicate, xs) -> Bool` / `all(predicate, xs) -> Bool` (`where Foldable c`)
@@ -27,6 +27,8 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `zip_with(g, xs, ys) -> f c` / `zip(xs, ys) -> f (a, b)` (`where Zip f` — `List` or `Vec`,
   both inputs the same container; as long as the shorter)
 - `min(x, y)` / `max(x, y)` (`where Ord a`; on a tie `min` returns `x`, `max` returns `y`)
+- `identity(x: a) -> a` (`where linear a`) — `x` unchanged; `filter_map(identity, xs)` drops
+  the `Nothing`s, `traverse(identity, xs)` is `sequence(xs)`
 - `list_filter(predicate, list) -> List`, `list_filter_map`, `list_partition`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
@@ -61,13 +63,13 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `dict_entries_with_prefix(prefix, dict) -> Vec (String, v)` — the entries whose key starts
     with `prefix`, in key order; O((log n + k) log n) for k matches
   - dict literals: `{foo: 1, "bar": 2}`, `{}`
-- `Show t`, `Ord t`, `Semigroup t`, `Functor f`, and `Foldable f`
+- `Show t`, `Ord t`, `Semigroup t`, `Monoid t`, `Functor f`, `Filterable f` and `Foldable f`
 - `to_string(x)` is the default `Show` operation
 - `map(f, xs)` is the default `Functor` operation
 - `fold(step, init, xs)` is the default `Foldable` operation
 - `fmap(f, xs)` remains available as an alias for the underlying `Functor` method
 - `foldable_to_vec(xs: f a) -> Vec a` where `Foldable f`
-- prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v`
+- prelude instances are currently provided for `String`, `List a`, `Vec a`, and `Dict v` (`Dict` has `Functor`, `Filterable`, `Monoid` and `Semigroup`, not `Foldable`)
 - `left ++ right` works in the default REPL for strings and lists
 - `Result e a` with helpers:
   - `after(effect, value)` sequences `effect` and returns `value` as a small
