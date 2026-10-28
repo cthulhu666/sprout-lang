@@ -247,6 +247,16 @@ fn greet(name: String) -> Unit !{IO} = do
 list_each(greet, names)
 ```
 
+Two collections walked in step are `zip_with`, not a shared index; each element
+and its successor are `list.map_adjacent`:
+
+```sprout
+import stdlib.list as list
+...
+let diffs   = zip_with(\ (a, b) -> b - a, before, after)   # as long as the shorter
+let changes = list.map_adjacent(\ (a, b) -> b - a, readings)
+```
+
 Reach for `range_each` only when you genuinely need the index — a numeric loop, or
 writing into a `MutVec` by position:
 

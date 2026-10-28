@@ -947,6 +947,12 @@ export class Monad m where Applicative m
 export class Traversable t
   fn traverse_values(g: a -> f b, xs: t a) -> f(t b) where Applicative f
 
+# Combines two containers of one kind position by position. An instance returns a
+# result as long as the shorter input and calls `g` once per result element, left
+# to right.
+export class Zip f
+  fn zip_with_values(g: local a -> b -> c, xs: f a, ys: f b) -> f c
+
 export type ControlFlow r a deriving (Eq, ToString) =
   | Continue a
   | Break r
@@ -986,6 +992,13 @@ export fn fold(step: local b -> a -> b, init: b, xs: f a) -> b where Foldable f 
 # non-linear instance re-checks it between substructures.
 export fn fold_while(step: local b -> a -> b, cond: local b -> Bool, init: b, xs: f a) -> b where Foldable f =
   fold_while_values(step, cond, init, xs)
+
+# O(min(n, m)); see `Zip`.
+export fn zip_with(g: local a -> b -> c, xs: f a, ys: f b) -> f c where Zip f =
+  zip_with_values(g, xs, ys)
+
+export fn zip(xs: f a, ys: f b) -> f(a, b) where Zip f =
+  zip_with(ap_pair, xs, ys)
 
 # O(n) per instance: keep the elements satisfying `pred`, in order, in the same
 # container kind that came in. `pred` is pure because the class fixes no order
@@ -1097,17 +1110,25 @@ export fn max_by(f: local a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
   keyed_value(fold(\ (best, x) -> max_by_step(f, best, x), Nothing, xs))
 
 # O(n): the least element, or `Nothing` when empty — the identity-key case of
-# `min_by`, mirroring how `vec_sort` sits on `vec_sort_by`. `Ord` covers Int,
-# Bool, String, tuples, Maybe, List, Result and Vec but NOT Double: the
-# comparison operators and the `Ord` class are separate orderings in Sprout, and
-# `Int` is the only type in both (docs/min-max-combinators-v0.md §8).
+# `min_by`, mirroring how `vec_sort` sits on `vec_sort_by`. On `Double` this is
+# `compare`'s order, not `<`'s: NaN is above every number.
 export fn minimum(xs: c a) -> Maybe a where Foldable c, Ord a =
   min_by(\value -> value, xs)
 
-# O(n): the greatest element, or `Nothing` when empty. Same `Ord`-vs-operator
-# caveat as `minimum`.
+# O(n): the greatest element, or `Nothing` when empty. Same `Double` order as
+# `minimum`.
 export fn maximum(xs: c a) -> Maybe a where Foldable c, Ord a =
   max_by(\value -> value, xs)
+
+# The lesser of two; on a tie `x` (and `max` gives `y`), so `(min(x, y), max(x, y))`
+# holds both inputs. Dispatches through `Ord`, so a hot `Int` loop wants `imath.min`
+# (`max` measured ~10× slower than `imath.max`).
+export fn min(x: a, y: a) -> a where Ord a =
+  if compare(y, x) < 0 then y else x
+
+# The greater of two; on a tie, `y` (see `min`).
+export fn max(x: a, y: a) -> a where Ord a =
+  if compare(y, x) >= 0 then y else x
 
 # O(total size) for String and List: collects the elements, then joins them
 # with the instance's `concat_all`.
@@ -1119,9 +1140,9 @@ export fn mconcat(xs: f a) -> a where Foldable f, Monoid a =
 export fn concat_map(f: a -> t, xs: c a) -> t where Functor c, Foldable c, Monoid t =
   mconcat(map(f, xs))
 
-# Internal pairing combiner for the map3..map5 derivations below: without currying,
-# an n-ary lift is built by threading arguments through `map2` as tuples and
-# destructuring them in the final combiner.
+# Internal pairing combiner, used by `zip` and by the map3..map5 derivations below:
+# without currying, an n-ary lift is built by threading arguments through `map2` as
+# tuples and destructuring them in the final combiner.
 fn ap_pair(x: a, y: b) -> (a, b) = (x, y)
 
 # map3..map5: lift a 3-, 4-, or 5-argument function over an Applicative, derived from
@@ -1449,9 +1470,20 @@ instance Filterable List
   fn partition_values(pred: a -> Bool, xs: List a) -> (List a, List a) =
     list_partition(pred, xs)
 
+# O(min(n, m)), constant stack: a reversed accumulator, reversed once.
+fn list_zip_with(g: local a -> b -> c, xs: List a, ys: List b, acc: List c) -> List c =
+  match (xs, ys) with
+  | ([x | xr], [y | yr]) -> list_zip_with(g, xr, yr, Cons(g(x, y), acc))
+  | _ -> list_reverse(acc)
+
+instance Zip List
+  fn zip_with_values(g: local a -> b -> c, xs: List a, ys: List b) -> List c =
+    list_zip_with(g, xs, ys, Nil)
+
 # O(n·m): the cartesian ("list monad") product — for each x in xs, combine it with
-# every y in ys. This is the instance consistent with a List monad; the pairwise
-# ("zip") behaviour is a separate ZipList newtype, deferred. Delegates to
+# every y in ys. This is the instance consistent with a List monad. Pairwise
+# combination is `zip_with` (class `Zip`); a pairwise Applicative would be a separate
+# ZipList newtype, deferred. Delegates to
 # list_flat_map, which carries the accumulator: recursing here put the call in an
 # argument to list_append, so depth equalled |xs|.
 fn map2_list(g: a -> b -> c, xs: List a, ys: List b) -> List c =
@@ -1575,6 +1607,17 @@ instance Filterable Vec
     vec_filter_map(f, xs)
   fn partition_values(pred: a -> Bool, xs: Vec a) -> (Vec a, Vec a) =
     vec_partition(pred, xs)
+
+# Each `vec_get` is matched in place so it takes the unboxed worker; matching the pair
+# of calls would box a `Just` per read.
+fn vec_zip_with(g: local a -> b -> c, xs: Vec a, ys: Vec b, index: Int, acc: List c) -> Vec c =
+  let Just x = vec_get(index, xs) else vec_from_list(list_reverse(acc))
+      Just y = vec_get(index, ys) else vec_from_list(list_reverse(acc))
+  in vec_zip_with(g, xs, ys, index + 1, Cons(g(x, y), acc))
+
+instance Zip Vec
+  fn zip_with_values(g: local a -> b -> c, xs: Vec a, ys: Vec b) -> Vec c =
+    vec_zip_with(g, xs, ys, 0, Nil)
 
 # O(n+m): one fresh backing array, both element blocks copied in a single pass
 # via the vector_concat builtin (no intermediate cons cells).

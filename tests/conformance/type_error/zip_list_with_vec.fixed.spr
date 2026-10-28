@@ -1,0 +1,8 @@
+module main
+
+# `zip` keeps its inputs' container (`Zip f`), so both must be the same one.
+
+fn pairs(xs: List Int, ys: Vec Int) -> List (Int, Int) =
+  zip(xs, vec_to_list(ys))
+
+fn main() -> Unit !{IO} = print(pairs([1, 2], [3, 4]))

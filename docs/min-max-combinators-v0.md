@@ -54,9 +54,8 @@ end of the sorted result, or writes the fold.
 
 **Non-goals**
 
-- A two-argument generic `min(x, y) / max(x, y) where Ord a`. `stdlib.math.int`
-  already has `Int`-specific `min`/`max`/`clamp`; generalising those is a
-  separate call with its own naming collision to resolve (see §7).
+- A two-argument generic `min(x, y) / max(x, y) where Ord a`. Since landed by
+  `docs/list-toolkit-v0.md` §4.7; `stdlib.math.int`'s stay `Int`-only.
 - Comparator-taking variants (`min_with` / `max_with`, mirroring Elm's
   `sortWith`). The stdlib has no `sort_with` either; if comparator-taking
   combinators are ever wanted, they should arrive as a set, not one-off.
@@ -329,9 +328,9 @@ implementation. New file `tests/stdlib/test_min_max.spr`:
 - `README.md` and `docs/idiomatic-sprout.md` list no prelude functions today, so
   neither needs a change. (`vec_sort_by` is likewise undocumented in both — not
   a gap this change is taking on.)
-- No `BACKLOG.md` entry is removed. If D2's non-goals are wanted later
-  (`min_with`/`max_with`, generic two-argument `min`/`max`), they are added
-  there as follow-ups when this lands.
+- No `BACKLOG.md` entry is removed. If D2's remaining non-goal is wanted later
+  (`min_with`/`max_with`), it is added there as a follow-up when this lands. The
+  generic two-argument `min`/`max` has since landed (§2).
 
 ## 12. Definition-of-Done notes specific to this change
 

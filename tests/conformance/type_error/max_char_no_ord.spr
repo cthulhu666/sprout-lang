@@ -1,0 +1,7 @@
+module main
+
+# The generic `max` needs `Ord`, and `Char` has no `Ord` instance yet.
+
+fn main() -> Unit !{IO} =
+  print(max('a', 'b'))
+#~^ ERROR

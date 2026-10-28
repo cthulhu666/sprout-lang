@@ -949,20 +949,17 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   avoid the collision. Every in-tree `upto` result is consumed immediately by
   `range_fold`/`range_each`, so the combinator pair covers all real usage and an exclusive-range
   *constructor* is the weaker option.
-- [ ] `P3` **Deferred non-goals from `docs/min-max-combinators-v0.md` §2**, both waiting on a
-  caller. (a) Comparator-taking `min_with`/`max_with` — there is no `sort_with` either, so
-  comparator forms should arrive as a set. (b) A generic two-argument `min`/`max` over `Ord` —
-  `stdlib.math.int` already has `Int`-specific ones, so this is a naming-collision question first (a
-  prelude-global `min` would be shadowed by `import stdlib.math.int (min)`, and shadowing a prelude
-  name misdirects the error).
+- [ ] `P3` **Deferred non-goal from `docs/min-max-combinators-v0.md` §2**, waiting on a caller:
+  comparator-taking `min_with`/`max_with` — there is no `sort_with` either, so comparator forms
+  should arrive as a set.
 - [ ] `P3` **Deferred non-goals from `docs/collection-combinators-v0.md` §7 and
   `docs/filterable-v0.md` §7.** (a) `length`/`is_empty` over `Foldable` — a fold-derived version
   is O(n) *even on `Vec`*, so free functions would put two spellings of one question at different
   complexities in one prelude; doing it right needs class methods with per-instance overrides, which
   Sprout cannot soften with default bodies (`parse_class_body` collects signatures only), so both
   become mandatory for every future instance. Note `list_length` is private, so List has no public
-  length and `count(\_ -> true, xs)` is the O(n) stand-in. (c) `position`/`index_of`, and
-  `take`/`drop`/`zip` (List-shaped, not `Foldable`-derivable). (d) `Dict`/`Set` instances, gated on
+  length and `count(\_ -> true, xs)` is the O(n) stand-in. (c) `position`/`index_of`
+  (List-shaped, not `Foldable`-derivable). (d) `Dict`/`Set` instances, gated on
   those types getting `Functor`/`Foldable`. (e) An effectful predicate (`a -> Bool !{e}`) needs
   `Filterable` to state `pred`'s call order, not B2 (`docs/effect-polymorphism-policy-v0.md`).
 - [ ] `P3` **No `NonEmpty a`, though `docs/guidelines.md` §3 names it as the illegal-states
@@ -988,11 +985,10 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   sorts every light in range, then takes `keep`, per chunk and per mesh every frame. A
   `take_smallest_by(k, key, xs)`-style helper keeps k items in O(n log k). Grep the spec for the
   name first. `docs/laziness-v0.md` §5.3.
-- [ ] `P2` **List toolkit: `zip_with`, `zip`, `map_adjacent`, `scanl`, `sort`.**
-  With a two-argument `max`/`min`, the most frequent gaps in the survey
-  (`docs/leetcode-survey-2026-10-27.md` §2). Design: `docs/list-toolkit-v0.md` (proposal) —
-  `Zip` and `Sort` classes; `scanl` waits on `NonEmpty`; `enumerate` deferred to laziness.
-  Overlaps the collection-combinators §7(c) and min-max §2(b) entries above.
+- [ ] `P2` **List toolkit, rest: `sort`/`sort_by`, `scanl`, LeetCode migration.**
+  Frequent gaps in the survey (`docs/leetcode-survey-2026-10-27.md` §2). Design:
+  `docs/list-toolkit-v0.md` §9 steps 2–5 — the `Sort` class; `scanl` waits on `NonEmpty`;
+  retiring `vec_sort` is open (§4.6.2). `enumerate` deferred to laziness.
 - [ ] `P2` **`Dict`/`Set` take only `String` keys.** They sit on runtime externs
   (`map_get(m, key: String)`), so Int keys cost an `int_to_string` per access and `dict_entries`
   orders `"10"` before `"9"`; 6 of 31 survey problems paid for it. A pure-Sprout

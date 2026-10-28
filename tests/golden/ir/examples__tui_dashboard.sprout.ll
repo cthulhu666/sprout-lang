@@ -133,13 +133,13 @@ declare i64 @vector_truncate(i64, i64)
 @.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 55, column 47)\00" }
 @.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 653, column 45)\00" }
 @__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_1 }
-@.str.3 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1915, column 10)\00" }
+@.str.3 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1958, column 10)\00" }
 @.str.4 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.5 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1920, column 39)\00" }
-@.str.6 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
-@.str.7 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
-@.str.8 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
-@.str.9 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1950, column 58)\00" }
+@.str.5 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1963, column 39)\00" }
+@.str.6 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1985, column 33)\00" }
+@.str.7 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1985, column 43)\00" }
+@.str.8 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 49)\00" }
+@.str.9 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1993, column 58)\00" }
 @.str.10 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 63, column 42)\00" }
 @.str.11 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 180, column 31)\00" }
 @.str.12 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 180, column 40)\00" }
@@ -490,10 +490,10 @@ declare i64 @vector_truncate(i64, i64)
 @.str.297 = private unnamed_addr constant { i64, [11 x i8] } { i64 163850, [11 x i8] c"Sprout TUI\00" }
 @__sprout_sclo.__sprout_ir_eta_main.update_88 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_main.update_88 }
 @__sprout_sclo.__sprout_ir_eta_stdlib.tui.app.no_boot_89 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_stdlib.tui.app.no_boot_89 }
-@.str.298 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1294, column 26)\00" }
-@.str.299 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1942, column 33)\00" }
-@.str.300 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1942, column 43)\00" }
-@.str.301 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1942, column 49)\00" }
+@.str.298 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1315, column 26)\00" }
+@.str.299 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1985, column 33)\00" }
+@.str.300 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1985, column 43)\00" }
+@.str.301 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 49)\00" }
 @__sprout_sclo.__sprout_ir_lambda_90 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_90 }
 @.str.302 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 194, column 51)\00" }
 @.str.303 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 211, column 51)\00" }
@@ -503,7 +503,7 @@ declare i64 @vector_truncate(i64, i64)
 @.str.307 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"m\00" }
 @.str.308 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"n\00" }
 @.str.309 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 38)\00" }
-@.str.310 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1950, column 58)\00" }
+@.str.310 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1993, column 58)\00" }
 @.str.311 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 259, column 58)\00" }
 @.str.312 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 259, column 64)\00" }
 @.str.313 = private unnamed_addr constant { i64, [63 x i8] } { i64 1015818, [63 x i8] c"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\00" }
@@ -3016,9 +3016,9 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @stdlib.terminal.read_avail(i64 %p$max, i64 %p$timeout_ms) {
+define i64 @stdlib.terminal.read_avail(i64 %p$$l_max, i64 %p$timeout_ms) {
 entry:
-  %t$0 = call i64 @term_read_avail(i64 %p$max, i64 %p$timeout_ms)
+  %t$0 = call i64 @term_read_avail(i64 %p$$l_max, i64 %p$timeout_ms)
   ret i64 %t$0
 }
 

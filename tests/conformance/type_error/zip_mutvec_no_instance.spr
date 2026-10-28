@@ -1,0 +1,12 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new)
+
+# `MutVec` reads are effectful and class methods are pure, so it has no `Zip`.
+
+fn main() -> Unit !{IO} =
+  do
+    a <- mutvec_new(2, 0)
+    b <- mutvec_new(2, 1)
+    let _ = zip(a, b)
+#~^ ERROR
+    print("unreachable")
