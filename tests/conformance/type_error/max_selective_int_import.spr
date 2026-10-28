@@ -1,0 +1,8 @@
+module main
+import stdlib.math.int (max)
+
+# A selective import beats the prelude's generic `max`: this one is `Int`-only.
+
+fn main() -> Unit !{IO} =
+  print(max("a", "b"))
+#~^ ERROR

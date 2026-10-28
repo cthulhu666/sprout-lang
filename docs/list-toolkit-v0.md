@@ -1,10 +1,9 @@
 # List toolkit — zip, adjacent pairs, scan, sort, min/max
 
-Status: **proposal**. Nothing here is implemented. Approved so far: the `Zip` class, truncating
-to the shorter input (§4.2);
-generic `min`/`max` in the prelude, no `abs_diff` (§4.7); `map_adjacent` in `stdlib.list` (§4.4);
-a `Sort` class with `sort`/`sort_by` (§4.6); the undecorated merge for `sort`, measured
-faster (§4.6.1); `enumerate` deferred (§4.3). Open: retiring `vec_sort`/`vec_sort_by` (§4.6.2).
+Status: **step 1 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`, `list.map_adjacent`.
+Approved, not yet built: a `Sort` class with `sort`/`sort_by` (§4.6); the undecorated merge for
+`sort`, measured faster (§4.6.1); `scanl` (§4.5). `enumerate` deferred (§4.3). Open: retiring
+`vec_sort`/`vec_sort_by` (§4.6.2).
 
 ## 1. Problem
 
@@ -125,6 +124,10 @@ The method name stays out of the global namespace, as `fmap`/`map` and `filter_v
   reads both by index up to the shorter length and builds the result as `vec_map` does, through
   one list and `vec_from_list`. `NonEmpty` (after `docs/non-empty-v0.md` lands): head with head,
   then the tails with the `List` instance, so the result is non-empty, as §9 there asks.
+- **Not instances**: `MutVec`, whose reads are `!{IO}` while the method is pure, as for
+  `Functor` and `Foldable`; it has `mutvec_zip_fold`. `LinVec` is deferred: spec §5.8 allows an
+  instance at a linear type, but `LinVec` is in no class yet and nothing has exercised a linear
+  instance of a constructor class. Its uses (sieves, DP tables) write by index and do not zip.
 - **Why a class, not `Foldable`**: a fold walks one structure. Walking two in step means turning
   one into a list first, and the result could only be one fixed container. `Zip` is the same
   answer `Filterable` gave for `filter`.
@@ -204,6 +207,8 @@ export fn sort_by(key: local a -> k, xs: f a) -> f a where Sort f, Ord k =
   method, as `Traversable`'s `Applicative` does: `f` alone picks the instance.
 - **Instances**: `List` and `Vec`; `NonEmpty` after `docs/non-empty-v0.md` lands. `MutVec` is not
   one: its sort works in place, has an effect and returns `Unit`, so `mutvec_sort` stays apart.
+  `LinVec` fits the method's shape (consume, return sorted, in place behind `unsafe_pure` as
+  `linvec.set` is) but is deferred with its `Zip` instance (§4.2).
 - **Prior art**: none of the six languages has a sort class. Each has one sort per module or type
   (`Data.List.sort`, OCaml's `List.sort`/`Array.sort`, Rust's slice method). Sprout has no methods
   and no overloading; a class is how it gives one name to several containers, as for `map`,
@@ -272,10 +277,10 @@ calls distinct values equal. `imath.max` returns `x` on a tie, but equal `Int`s 
 apart, so a file that drops `import stdlib.math.int (max)` gets the same answers.
 
 Costs, stated before approval:
-- **Dispatch.** A `where Ord a` function calls `compare` through a dictionary; there is no
-  specialisation (`docs/specialisation-v0.md`, blocked). `imath.max` is a direct `>=`. The gap
-  on `max` itself is unmeasured; step 1 measures a DP loop both ways. A hot `Int` loop can keep
-  `imath.max`.
+- **Dispatch.** A `where Ord a` function calls `compare` through a dictionary and roots its
+  type-variable arguments; there is no specialisation (`docs/specialisation-v0.md`, blocked).
+  `imath.max` is a direct `>=`. Measured in Kadane's loop: ~10× slower, ~6.5 ns more per call
+  (`bench/results-2026-10-28-min-max.md`). A hot `Int` loop keeps `imath.max`.
 - **`Char`**: no `Ord Char` yet, so `max('a', 'b')` does not compile though `'a' < 'b'` does
   (BACKLOG, "No `instance Ord Char`").
 - **Shadowing**: the 9 files that `import stdlib.math.int (max)` or `(min)` keep working; a
@@ -324,8 +329,9 @@ Every name is new. Existing definitions with these names shadow the prelude insi
 `list.map_adjacent`. `vec_sort` and `vec_sort_by` keep working; §4.6.2 is the option to retire
 them.
 
-The downstream repos (uncharted-suns, repbit, sprout-postgres) are not yet checked for these names.
-Step 1 greps them, as `docs/non-empty-v0.md` §7 did.
+Downstream, step 1 found none of the step-1 names defined or bound in repbit, repbit-cards,
+sprout-postgres, sprout-sqlite or uncharted-suns. uncharted-suns imports `stdlib.math.int`'s
+`min`/`max` selectively, which keeps them; all 369 of its entry files type-check.
 
 ## 8. Spec and docs
 
@@ -336,13 +342,13 @@ Step 1 greps them, as `docs/non-empty-v0.md` §7 did.
 - `BACKLOG.md`: on landing, delete "List toolkit"; delete (b) of "Deferred non-goals from
   `docs/min-max-combinators-v0.md` §2" and the `zip` part of (c) in the collection-combinators
   entry.
-- Status: normative on landing, as the prelude's other functions are.
+- Status: the same as the rest of spec §8.5, which documents the prelude's classes.
 
 ## 9. Implementation steps
 
-1. `Zip` with the `List` and `Vec` instances, `zip_with`, `zip`, `min`, `max`;
-   `stdlib.list.map_adjacent`. Measure `max` against `imath.max` in a DP loop. Reseed; read the
-   golden IR diff (§6 renames).
+1. ~~`Zip` with the `List` and `Vec` instances, `zip_with`, `zip`, `min`, `max`;
+   `stdlib.list.map_adjacent`. Measure `max` against `imath.max` in a DP loop.~~ Landed;
+   `max` measured (§4.7).
 2. `Sort` with the `List` and `Vec` instances, `sort`, `sort_by`, the undecorated merge
    (§4.6.1, measured). Re-measure `sort_by` on the shared merge under low load
    (`bench/list_sort/bench.sh`) before it replaces today's.
@@ -365,8 +371,9 @@ The instances may write `match (xs, ys) with`: a match on a tuple literal builds
   elements (recursion depth); `sort_by` calls `key` once per element.
 - `min`/`max` on `Int`, `String`, tuples; on a tie under a key-only `Ord`, `min` returns the first
   argument and `max` the second.
-- A file that selectively imports `stdlib.math.int (max)` still gets the `Int` one.
 - `scanl` (step 3): empty input gives `NonEmpty(init, [])`; order is left to right.
 
-Failure tests: `zip` of a `List` and a `Vec`; `sort` of a `MutVec` (no instance);
-`max('a', 'b')` is rejected while there is no `Ord Char`.
+Failure tests (`tests/conformance/type_error/`): `zip` of a `List` and a `Vec`; `zip` of a
+`MutVec` and `sort` of one (no instance); `max('a', 'b')` while there is no `Ord Char`; and
+`max("a", "b")` under `import stdlib.math.int (max)`, which shows the selective import still
+gives the `Int` one.

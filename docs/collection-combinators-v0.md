@@ -149,7 +149,8 @@ inherent rather than a limitation.
   wrong complexity. Note `list_length` is currently **private**, so List still
   has no public length; `count(\_ -> true, xs)` is the O(n) stand-in.
 - `position` / `index_of`, and `take`/`drop`/`zip` (List-shaped, not derivable
-  from `Foldable`).
+  from `Foldable`). Since landed: `take`/`drop` in `stdlib.list`, and `zip` as the
+  `Zip` class (`docs/list-toolkit-v0.md` §4.2).
 - An effectful predicate — **not** the `class Each` blocker, as this line said until 2026-09-08.
   Blocked on `Filterable` stating what order `pred` runs in; an effect needs one to mean anything.
   See `docs/effect-polymorphism-policy-v0.md`.

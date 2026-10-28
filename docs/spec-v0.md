@@ -2201,15 +2201,16 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   invariantly at unification.
 - **In the standard library.** The concrete combinators (the prelude's `range_*`, `list_*`,
   `vec_*`, `result_*`, `when_ok`, `when_error`; `stdlib.mutable`'s `mutvec_*` and
-  `mutmatrix_*`; `stdlib.linvec`'s `linvec.accum`), the
+  `mutmatrix_*`; `stdlib.linvec`'s `linvec.accum`; `stdlib.list`'s `map_adjacent`), the
   `Foldable` methods and the generic functions over them (`fold`, `fold_while`, `any`,
-  `all`, `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`) take their
-  function `local`, so a lambda passed to them may read a borrowed value, comprehensions
-  included. `Functor`, `Filterable`, `Applicative`, `Monad` and `Traversable`, and `map`,
-  `filter`, `filter_map`, `partition`, `map2`..`map5`, `and_then`, `traverse`,
-  `concat_map`, do not: an instance for a function-shaped type (a parser, state or reader
-  monad, a lazy functor) keeps the function, and `local` in the class would forbid it. A
-  `Foldable` returns the final accumulator, so it has no use for keeping `step`. A `_` hole
+  `all`, `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`), and `Zip`'s
+  method with `zip_with`, take their function `local`, so a lambda passed to them may read a
+  borrowed value, comprehensions included. `Functor`, `Filterable`, `Applicative`, `Monad`
+  and `Traversable`, and `map`, `filter`, `filter_map`, `partition`, `map2`..`map5`,
+  `and_then`, `traverse`, `concat_map`, do not: an instance for a function-shaped type (a
+  parser, state or reader monad, a lazy functor) keeps the function, and `local` in the class
+  would forbid it. A `Foldable` returns the final accumulator, so it has no use for keeping
+  `step`; a `Zip` instance applies `g` while it builds the result, so neither does it. A `_` hole
   inside the function argument (`list_fold(step(c, _, _), 0, xs)`) is a lambda at the `local`
   slot and lends; a `_` for the data argument (`xs |> list_each(f, _)`) is an ordinary lambda
   around the whole call and does not, so use the direct call there. Because `local` is part of
@@ -3822,8 +3823,9 @@ return, or unifying context).  A fully polymorphic `pure(x)` cannot be dispatche
 
 Error-*accumulating* semantics (collect all failures rather than short-circuit)
 need a distinct `Validation` type, since a type admits only one `Applicative`
-instance; it is deferred (tracked in `BACKLOG.md`).  The pairwise "zip" behaviour
-for `List` is likewise a separate future `ZipList` newtype.
+instance; it is deferred (tracked in `BACKLOG.md`).  Pairwise combination is
+`zip_with` (*`Zip` class, `zip_with` and `zip`* below); a pairwise `Applicative`
+for `List` would likewise be a separate `ZipList` newtype, deferred.
 
 `map3`, `map4`, and `map5` are free functions (`where Applicative f`) that lift 3-,
 4-, and 5-argument functions:
@@ -3944,6 +3946,20 @@ max_by(f, xs) == vec_get(n - 1, vec_sort_by(f, foldable_to_vec(xs)))
 Both identities are checked in `tests/stdlib/test_min_max.spr`.  The rule
 matches Haskell's documented leftmost/rightmost choice and Rust's
 `min`/`max_by_key`.
+
+The two-argument forms follow the same rule:
+
+```
+min(x: a, y: a) -> a   where Ord a
+max(x: a, y: a) -> a   where Ord a
+```
+
+On a tie `min` returns `x` and `max` returns `y`, so `(min(x, y), max(x, y))`
+never holds one input twice, as in Haskell and Rust.  `stdlib.math.int`'s
+`min`/`max` stay `Int`-only; a selective `import stdlib.math.int (max)` shadows
+the prelude's within that file.  The generic forms call `compare` through the
+`Ord` dictionary, so a hot `Int` loop is faster with `stdlib.math.int`'s
+(`bench/results-2026-10-28-min-max.md`).
 
 The key function is applied exactly once per element; the fold carries the
 incumbent's key alongside it.  It is necessarily **pure** — `Foldable`'s
@@ -4068,6 +4084,29 @@ element, breaking the once-per-element guarantee `min_by`/`max_by` document.
 
 The concrete per-container forms are `list_filter_map`/`vec_filter_map` and
 `list_partition`/`vec_partition`.
+
+### `Zip` class, `zip_with` and `zip` (Experimental)
+
+```
+class Zip f
+  fn zip_with_values(g: local a -> b -> c, xs: f a, ys: f b) -> f c
+
+zip_with(g: local a -> b -> c, xs: f a, ys: f b) -> f c        where Zip f
+zip(xs: f a, ys: f b)                            -> f (a, b)   where Zip f
+```
+
+`zip_with` applies `g` to the elements at each position of two containers of the
+same kind and returns that kind.  The result is as long as the **shorter**
+input; the longer one's extra elements are dropped and never reach `g`.  `g`
+runs left to right, once per result element.  `zip` is `zip_with` building
+pairs.  Instances: `List` and `Vec`.  `MutVec` has none: its reads are
+effectful and the method is pure.  A `List` and a `Vec` passed to one call fail
+to unify; convert one with `vec_to_list` or `vec_from_list`.
+
+It is a class, not a `Foldable` derivation, for `Filterable`'s reason: the
+result keeps the inputs' container.  `stdlib.list.map_adjacent(g, xs)` is
+`zip_with(g, xs, drop(1, xs))`: `g` on each element and its successor.
+Design: `docs/list-toolkit-v0.md` §4.2.
 
 ### `Foldable`-derived search and test combinators (Experimental)
 

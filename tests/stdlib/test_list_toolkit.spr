@@ -1,0 +1,71 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.list as list
+import stdlib.math as math
+
+# The list toolkit (docs/list-toolkit-v0.md): `Zip` with `zip_with`/`zip`, generic
+# `min`/`max`, and `list.map_adjacent`.
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+# Generic over the container: the `Zip` dictionary is forwarded.
+fn add_pairs(xs: f Int, ys: f Int) -> f Int where Zip f = zip_with(add, xs, ys)
+
+fn vec(xs: List Int) -> Vec Int = vec_from_list(xs)
+
+# A past-the-end call would divide by zero and trap.
+fn div(a: Int, b: Int) -> Int = a / b
+
+# Ordered by the key alone, so equal keys tell `min` and `max` apart by the label.
+type Keyed = Keyed Int String
+
+instance Eq Keyed
+  fn eq(left: Keyed, right: Keyed) -> Bool =
+    let Keyed l _ = left
+        Keyed r _ = right
+    in l == r
+
+instance Ord Keyed
+  fn compare(left: Keyed, right: Keyed) -> Int =
+    let Keyed l _ = left
+        Keyed r _ = right
+    in compare(l, r)
+
+fn label(k: Keyed) -> String =
+  let Keyed _ s = k
+  in s
+
+fn main() -> Unit !{IO} =
+  run_suite("list_toolkit", [
+    check_eq("zip_with List: equal lengths", zip_with(add, [1, 2, 3], [10, 20, 30]), [11, 22, 33]),
+    check_eq("zip_with List: left shorter", zip_with(add, [1], [10, 20]), [11]),
+    check_eq("zip_with List: right shorter", zip_with(add, [1, 2], [10]), [11]),
+    check_eq("zip_with List: left empty", zip_with(add, [], [10]), []),
+    check_eq("zip_with List: right empty", zip_with(add, [1], []), []),
+    check_eq("zip_with List: truncates to the shorter input", zip_with(div, [6, 8], [3, 4, 0]), [2, 2]),
+    check_eq("zip List", zip([1, 2], ["a", "b", "c"]), [(1, "a"), (2, "b")]),
+    check_eq("zip_with Vec: equal lengths", zip_with(add, vec([1, 2]), vec([10, 20])), vec([11, 22])),
+    check_eq("zip_with Vec: left shorter", zip_with(add, vec([1]), vec([10, 20])), vec([11])),
+    check_eq("zip_with Vec: right shorter", zip_with(add, vec([1, 2]), vec([10])), vec([11])),
+    check_eq("zip_with Vec: empty", zip_with(add, vec([]), vec([10])), vec([])),
+    check_eq("zip_with Vec: truncates to the shorter input", zip_with(div, vec([6, 8]), vec([3, 4, 0])), vec([2, 2])),
+    check_eq("zip Vec", zip(vec([1, 2]), vec_from_list(["a"])), vec_from_list([(1, "a")])),
+    check_eq("zip_with Vec: heap elements, right longer",
+             zip_with(\ (a, b) -> a ++ b, vec_from_list(["a", "b"]), vec_from_list(["x", "y", "z"])),
+             vec_from_list(["ax", "by"])),
+    check_eq("generic Zip caller: List", add_pairs([1, 2], [3, 4]), [4, 6]),
+    check_eq("generic Zip caller: Vec", add_pairs(vec([1, 2]), vec([3, 4])), vec([4, 6])),
+    check_eq("map_adjacent: empty", list.map_adjacent(\ (a, b) -> b - a, []), []),
+    check_eq("map_adjacent: one", list.map_adjacent(\ (a, b) -> b - a, [5]), []),
+    check_eq("map_adjacent: two", list.map_adjacent(\ (a, b) -> b - a, [1, 4]), [3]),
+    check_eq("map_adjacent: many", list.map_adjacent(\ (a, b) -> b - a, [1, 4, 2, 7]), [3, -2, 5]),
+    check_eq("min Int", min(3, 5), 3),
+    check_eq("max Int", max(3, 5), 5),
+    check_eq("min String", min("b", "ab"), "ab"),
+    check_eq("max String", max("b", "ab"), "b"),
+    check_eq("min tuple", min((1, "z"), (1, "a")), (1, "a")),
+    check_eq("max tuple", max((2, "a"), (1, "z")), (2, "a")),
+    check_eq("max on Double follows compare: NaN is greatest", math.is_nan(max(1.0, math.nan)), true),
+    check_eq("min on Double follows compare: NaN is greatest", min(math.nan, 1.0), 1.0),
+    check_eq("min on a tie returns the first", label(min(Keyed(1, "x"), Keyed(1, "y"))), "x"),
+    check_eq("max on a tie returns the second", label(max(Keyed(1, "x"), Keyed(1, "y"))), "y")
+  ])

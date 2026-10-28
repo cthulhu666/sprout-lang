@@ -24,6 +24,9 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
 - `find(predicate, xs) -> Maybe a` / `find_map(f, xs) -> Maybe b` (`where Foldable c`)
 - `count(predicate, xs) -> Int` (`where Foldable c`)
 - `member(x, xs) -> Bool` (`where Foldable c, Eq a`)
+- `zip_with(g, xs, ys) -> f c` / `zip(xs, ys) -> f (a, b)` (`where Zip f` — `List` or `Vec`,
+  both inputs the same container; as long as the shorter)
+- `min(x, y)` / `max(x, y)` (`where Ord a`; on a tie `min` returns `x`, `max` returns `y`)
 - `list_filter(predicate, list) -> List`, `list_filter_map`, `list_partition`
 - `split_ints(s: String) -> List Int`
 - `Vec a` plus foundational helpers:
@@ -557,6 +560,8 @@ fails. All run in constant stack; `take_last` and `drop_last` count the list fir
 - `take_while(pred, xs)` / `drop_while(pred, xs)` — the leading run where `pred` holds / the rest
 - `span(pred, xs)` — `(take_while(pred, xs), drop_while(pred, xs))` in one walk; unlike
   `partition`, it stops at the first element that fails `pred`
+- `map_adjacent(g, xs)` — `g` on each element and its successor, left to right; n − 1 results,
+  none for fewer than two elements. `zip(xs, drop(1, xs))` gives the pairs instead
 
 There is no index lookup on `List`. A loop that needs the index is `fold_indexed`; a position
 kept as state wants a `Vec`.
@@ -575,8 +580,9 @@ Integer math (`stdlib.math.int`) — this does not add `Float`, `Decimal`, or fi
 integer types to v0:
 
 - `abs(x) -> Int`
-- `min(x, y) -> Int`
-- `max(x, y) -> Int`
+- `min(x, y) -> Int` / `max(x, y) -> Int` — `Int`-only; the prelude's `min`/`max` are the
+  generic `Ord` forms. These are the faster ones in a hot loop
+  (`bench/results-2026-10-28-min-max.md`)
 - `clamp(x, lo, hi) -> Int`
 - `sign(x) -> Int`
 - `pow(base, exp) -> Maybe Int`

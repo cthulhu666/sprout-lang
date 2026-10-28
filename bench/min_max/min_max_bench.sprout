@@ -1,0 +1,76 @@
+module main
+
+# docs/list-toolkit-v0.md §4.7: the prelude's generic `max` (`compare` through an
+# `Ord` dictionary) against `imath.max` (a direct `>=`) in a DP loop, Kadane's
+# maximum subarray sum: two `max` calls per element.
+#
+# usage: min_max_bench <variant> <n> <reps>
+#   generic  the prelude's `max`
+#   int      `imath.max`
+#   inline   `if a >= b then a else b`, written out
+
+import stdlib.time as time
+import stdlib.math.int as imath
+
+# Remainder for a non-negative `a`.
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+# The LCG bench/list_sort uses. Its values lie in [0, 32768); shifted to
+# [-16384, 16384) so a running sum both rises and falls.
+fn fill(i: Int, n: Int, x: Int, acc: List Int) -> List Int =
+  if i >= n then acc
+  else
+    let next = rem(x * 1103515245 + 12345, 2147483648)
+    in fill(i + 1, n, next, Cons(rem(next / 65536, 65536) - 16384, acc))
+
+fn inline_max(a: Int, b: Int) -> Int = if a >= b then a else b
+
+fn kadane_generic(xs: List Int, cur: Int, best: Int) -> Int =
+  match xs with
+  | [] -> best
+  | [x | rest] ->
+      let c = max(x, cur + x)
+      in kadane_generic(rest, c, max(best, c))
+
+fn kadane_int(xs: List Int, cur: Int, best: Int) -> Int =
+  match xs with
+  | [] -> best
+  | [x | rest] ->
+      let c = imath.max(x, cur + x)
+      in kadane_int(rest, c, imath.max(best, c))
+
+fn kadane_inline(xs: List Int, cur: Int, best: Int) -> Int =
+  match xs with
+  | [] -> best
+  | [x | rest] ->
+      let c = inline_max(x, cur + x)
+      in kadane_inline(rest, c, inline_max(best, c))
+
+fn kadane(variant: String, xs: List Int) -> Int =
+  if variant == "generic" then kadane_generic(xs, 0, 0)
+  else if variant == "int" then kadane_int(xs, 0, 0)
+  else if variant == "inline" then kadane_inline(xs, 0, 0)
+  else panic(`unknown variant ${variant}`)
+
+fn reps_loop(variant: String, xs: List Int, r: Int, acc: Int) -> Int =
+  if r <= 0 then acc
+  else reps_loop(variant, xs, r - 1, rem(acc + kadane(variant, xs), 1000000007))
+
+fn run(variant: String, n: Int, reps: Int) -> Unit !{IO} =
+  do
+    let xs = fill(0, n, 42, [])
+    t0 <- time.now_micros()
+    let sum = reps_loop(variant, xs, reps, 0)
+    t1 <- time.now_micros()
+    let ns_x10 = (t1 - t0) * 10000 / (n * reps)
+    print(`${variant} n=${n} reps=${reps} ns_per_elem=${ns_x10 / 10}.${rem(ns_x10, 10)} checksum=${sum}`)
+
+let usage = "usage: min_max_bench <variant> <n> <reps>"
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    let [variant, n_text, reps_text] = args else print(usage)
+    let (Just n, Just reps) = (parse_int(n_text), parse_int(reps_text)) else print(usage)
+    run(variant, n, reps)

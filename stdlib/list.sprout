@@ -64,3 +64,8 @@ export fn drop_while(pred: a -> Bool, xs: List a) -> List a =
 # `partition`, it stops at the first element that fails `pred`.
 export fn span(pred: a -> Bool, xs: List a) -> (List a, List a) =
   span_go(pred, xs, [])
+
+# O(n): `g` on each element and its successor, left to right. Empty for fewer than two
+# elements.
+export fn map_adjacent(g: local a -> a -> b, xs: List a) -> List b =
+  zip_with(g, xs, drop(1, xs))
