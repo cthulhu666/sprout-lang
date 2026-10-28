@@ -374,7 +374,11 @@ extern-CPR path above — these workers are **Sprout-defined and Sprout-called**
   elements by it, so a nested tuple match in an arm reads its own scrutinee. An arm binding the
   whole tuple (`| t ->`) keeps the boxed path, and so does an inner literal (`((a, b), c)`).
   A binder bound straight to an owned parameter is that parameter's SSA, so a nested match
-  may reuse its cell.
+  may reuse its cell. An element whose column of sub-patterns a single `match` would unbox
+  (`split_column`, judged by `unboxed_maybe_match_target`) is called unboxed, `@f_worker` or
+  an extern's `_unboxed`: its arms test the tag and bind the payload with no box
+  (`SplitElem.UnboxedElem`), so `match (vec_get(i, xs), vec_get(i, ys))` allocates nothing.
+  `collect_wc_split` puts the same columns through the emission scan, so the worker exists.
 
 ## Argument CPR (`_argw` workers)
 

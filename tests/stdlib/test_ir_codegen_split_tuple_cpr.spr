@@ -1,0 +1,107 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+
+# A tuple-literal match builds no tuple (the split). Each element whose column of
+# sub-patterns a single `match` would unbox takes the same unboxed call: `@f_worker`
+# for a top-level fn, `@<extern>_unboxed` for a Tier-1 extern. Without it, every
+# element allocates the `Just` that the arm then takes apart.
+
+let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+
+let pick_decl = "fn pick(n: Int) -> Maybe Int = if n > 0 then Just(n) else Nothing\n\n"
+
+# Both columns are simple: each sub-pattern is a ctor with a var or `_`, or `_`.
+let both_simple =
+  maybe_decl ++ pick_decl
+    ++ "fn probe(a: Int, b: Int) -> Int =\n"
+    ++ "  match (pick(a), pick(b)) with\n"
+    ++ "  | (Just x, Just y) -> x + y\n"
+    ++ "  | (Just x, Nothing) -> x\n"
+    ++ "  | _ -> 0\n"
+
+# The second column binds the whole Maybe (`m`), which needs the box: only the
+# first element is unboxed.
+let second_binds_whole =
+  maybe_decl ++ pick_decl
+    ++ "fn width(m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just _ -> 1\n"
+    ++ "  | Nothing -> 0\n\n"
+    ++ "fn probe(a: Int, b: Int) -> Int =\n"
+    ++ "  match (pick(a), pick(b)) with\n"
+    ++ "  | (Just x, m) -> x + width(m)\n"
+    ++ "  | (Nothing, _) -> 0\n"
+
+# A Tier-1 extern in a column takes its `_unboxed` variant.
+let extern_column =
+  maybe_decl
+    ++ "extern fn str_char_at(s: String, i: Int) -> Maybe Int\n\n"
+    ++ "fn probe(s: String, t: String) -> Int =\n"
+    ++ "  match (str_char_at(s, 0), str_char_at(t, 0)) with\n"
+    ++ "  | (Just a, Just b) -> a + b\n"
+    ++ "  | _ -> 0\n"
+
+# Returns the emitted IR, or a string starting "ERR: ", so a fixture that does not
+# translate fails loudly instead of making an absence assertion pass vacuously.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn translated(out: String) -> Bool =
+  !str_starts_with(out, "ERR: ")
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+fn count(out: String, needle: String) -> Int =
+  count_from(out, needle, 0, 0)
+
+fn count_from(out: String, needle: String, from: Int, acc: Int) -> Int =
+  let at = str_find(str_slice(out, from, str_len(out)), needle)
+  in if at == -1 then acc else count_from(out, needle, from + at + str_len(needle), acc + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    both <- translate_or_msg(both_simple)
+    assert_true(state, "both-simple fixture translates", translated(both))
+    assert_true(state, "both elements call @pick_worker unboxed",
+                count(both, "call i128 @pick_worker(") == 2)
+    assert_false(state, "no boxed @pick call", has(both, "call i64 @pick("))
+
+    second <- translate_or_msg(second_binds_whole)
+    assert_true(state, "second-binds-whole fixture translates", translated(second))
+    assert_true(state, "the simple first column is unboxed",
+                count(second, "call i128 @pick_worker(") == 1)
+    assert_true(state, "the column binding the whole Maybe stays boxed",
+                count(second, "call i64 @pick(") == 1)
+
+    ext <- translate_or_msg(extern_column)
+    assert_true(state, "extern fixture translates", translated(ext))
+    assert_true(state, "both extern elements take the _unboxed variant",
+                count(ext, "call i128 @str_char_at_unboxed(") == 2)
+
+    summary(state)
