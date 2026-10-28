@@ -8,12 +8,9 @@ fn subsets(xs: List Int) -> List (List Int) =
   | [] -> [[]]
   | [x | rest] -> let without = subsets(rest) in list_append(without, [Cons(x, s) for s in without])
 
-fn sorted(xs: List a) -> List a where Ord a =
-  sort(xs)
-
 # Any order is allowed, so sort both sides before comparing.
 fn canonical(xss: List (List Int)) -> List (List Int) =
-  sorted(list_map(sorted, xss))
+  sort(list_map(sort, xss))
 
 fn check(name: String, got: List (List Int), want: List (List Int)) -> Unit !{IO} =
   print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if canonical(got) == canonical(want) then "OK" else "FAIL"}`)

@@ -21,14 +21,6 @@ fn scanl_go(f: b -> a -> b, acc: b, xs: List a, out: List b) -> List b =
   | [] -> list_reverse(out)
   | [x | rest] -> let next = f(acc, x) in scanl_go(f, next, rest, Cons(next, out))
 
-fn zip_with(f: a -> b -> c, xs: List a, ys: List b) -> List c =
-  zip_with_go(f, xs, ys, [])
-
-fn zip_with_go(f: a -> b -> c, xs: List a, ys: List b, out: List c) -> List c =
-  match (xs, ys) with
-  | ([x | xrest], [y | yrest]) -> zip_with_go(f, xrest, yrest, Cons(f(x, y), out))
-  | _ -> list_reverse(out)
-
 fn check(name: String, got: List Int, want: List Int) -> Unit !{IO} =
   print(`${name}: got ${to_string(got)} want ${to_string(want)} ${if got == want then "OK" else "FAIL"}`)
 
