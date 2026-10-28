@@ -28,6 +28,7 @@ import stdlib.tui.geometry as g
 import stdlib.tui.screen as scr
 import stdlib.tui.style as sty
 import stdlib.tui.widget as widget
+import stdlib.sort (sort_by)
 import stdlib.tui.widgets.container as ct
 import stdlib.tui.widgets.focus as focus
 import stdlib.tui.widgets.text as txt
@@ -73,7 +74,7 @@ fn nodes_of(es: List (String, fs.Entry)) -> List tr.Node =
 # it", and this is that caller. Directories first, then by name: the
 # expandable rows are the ones a reader navigates through.
 fn sorted(es: List (String, fs.Entry)) -> List (String, fs.Entry) =
-  vec_to_list(vec_sort_by(ranked, vec_from_list(es)))
+  sort_by(ranked, es)
 
 fn ranked(e: (String, fs.Entry)) -> (Int, String) =
   match e with

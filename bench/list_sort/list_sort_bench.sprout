@@ -1,19 +1,20 @@
 module main
 
-# docs/list-toolkit-v0.md §4.6.1: is an undecorated list merge sort faster than
-# today's `vec_sort`, which sorts (key, index, value) triples? One variant per
-# process, so peak RSS (`/usr/bin/time -l`) belongs to that variant alone.
+# docs/list-toolkit-v0.md §4.6.1: `stdlib.sort`, in place over `LinVec`, against
+# the list merge sorts it replaced. One variant per process, so peak RSS
+# (`/usr/bin/time -l`) belongs to that variant alone.
 #
 # usage: list_sort_bench <variant> <n> <reps>
-#   vec_list   List input, today's path: vec_from_list |> vec_sort |> vec_to_list
-#   usort_list List input, the undecorated prototype
-#   vec        Vec input, vec_sort
+#   sort_list  List input, `sort`
+#   sort_vec   Vec input, `sort`
+#   sort_by    Vec input, `sort_by(negate)`
+#   usort_list List input, the undecorated list merge (rejected, §4.6.3)
 #   usort_vec  Vec input, vec_from_list(usort(vec_to_list(v)))
-#   vec_by     Vec input, vec_sort_by(negate)
-#   dsort_by   Vec input, sort_by through the shared merge: decorated, one compare
+#   dsort_by   Vec input, sort_by through that merge: decorated, one compare
 #   dsort_lean dsort_by without the two order-keeping reversals the index makes moot
 
 import stdlib.time as time
+import stdlib.sort (sort, sort_by)
 
 # Remainder for a non-negative `a`.
 fn rem(a: Int, m: Int) -> Int =
@@ -88,7 +89,7 @@ fn dsort_by(f: local a -> k, xs: List a) -> List a where Ord k =
   strip(merge_all(decorated_less, to_runs(decorate(f, xs, 0, []), [])), [])
 
 # The index breaks every tie, so neither the decorated list nor the runs need to
-# be in input order; today's `vec_sort_by` relies on the same fact.
+# be in input order; the prelude's old `vec_sort_by` relied on the same fact.
 fn decorate_rev(f: local a -> k, xs: List a, i: Int, acc: List (k, Int, a)) -> List(k, Int, a) =
   match xs with
   | [] -> acc
@@ -119,11 +120,11 @@ fn neg_checksum(xs: List Int, prev: Int, acc: Int) -> Int =
       else neg_checksum(rest, x, rem(acc * 31 + x, 1000000007))
 
 fn sort_once(variant: String, xs: List Int, v: Vec Int) -> List Int =
-  if variant == "vec_list" then vec_to_list(vec_sort(vec_from_list(xs)))
+  if variant == "sort_list" then sort(xs)
   else if variant == "usort_list" then usort(xs)
-  else if variant == "vec" then vec_to_list(vec_sort(v))
+  else if variant == "sort_vec" then vec_to_list(sort(v))
   else if variant == "usort_vec" then vec_to_list(vec_from_list(usort(vec_to_list(v))))
-  else if variant == "vec_by" then vec_to_list(vec_sort_by(negate, v))
+  else if variant == "sort_by" then vec_to_list(sort_by(negate, v))
   else if variant == "dsort_by" then vec_to_list(vec_from_list(dsort_by(negate, vec_to_list(v))))
   else if variant == "dsort_lean" then vec_to_list(vec_from_list(dsort_lean(negate, vec_to_list(v))))
   else panic(`unknown variant ${variant}`)
@@ -139,7 +140,7 @@ fn run(variant: String, n: Int, reps: Int) -> Unit !{IO} =
     t0 <- time.now_micros()
     let out = reps_loop(variant, xs, v, reps, [])
     t1 <- time.now_micros()
-    let by = variant == "vec_by" || variant == "dsort_by" || variant == "dsort_lean"
+    let by = variant == "sort_by" || variant == "dsort_by" || variant == "dsort_lean"
     let sum = if by then neg_checksum(out, 65536, 0) else checksum(out, 0, 0)
     let ns_x10 = (t1 - t0) * 10000 / (n * reps)
     print(`${variant} n=${n} reps=${reps} ns_per_elem=${ns_x10 / 10}.${rem(ns_x10, 10)} checksum=${sum}`)

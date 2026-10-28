@@ -1,0 +1,157 @@
+module stdlib.sort
+
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# Stable ascending sorts that keep the container (docs/list-toolkit-v0.md §4.6). Each copies its
+# input into a fresh `LinVec`, sorts it in place and freezes it. Linearity, not review, is what
+# keeps the writes unseen: this module calls no `unsafe_pure` and declares no writer.
+
+export class Sort f
+  fn sort_values(xs: f a) -> f a where Ord a
+  fn sort_by_values(key: local a -> k, xs: f a) -> f a where Ord k
+
+# Ascending and stable, in O(n log n) comparisons and constant stack.
+export fn sort(xs: f a) -> f a where Sort f, Ord a =
+  sort_values(xs)
+
+# As `sort`, ordered by `key`, which is called once per element.
+export fn sort_by(key: local a -> k, xs: f a) -> f a where Sort f, Ord k =
+  sort_by_values(key, xs)
+
+instance Sort List
+  fn sort_values(xs: List a) -> List a where Ord a =
+    vec_to_list(linvec.freeze(sorted(linvec.from_list(xs))))
+
+  fn sort_by_values(key: local a -> k, xs: List a) -> List a where Ord k =
+    values_to_list(sort_with(key_less, linvec.from_list(list_map(\x -> (key(x), x), xs))))
+
+instance Sort Vec
+  fn sort_values(xs: Vec a) -> Vec a where Ord a =
+    linvec.freeze(sorted(linvec.from_vec(xs)))
+
+  fn sort_by_values(key: local a -> k, xs: Vec a) -> Vec a where Ord k =
+    let n = vec_length(xs)
+    in if n == 0 then xs
+    else
+      let x = at(0, xs)
+          first = (key(x), x)
+          pairs = sort_with(key_less, vec_pairs(key, xs, 1, n, linvec.new(n, first)))
+      in linvec.freeze(values(pairs, 0, n, linvec.new(n, x)))
+
+# --- in place: insertion sort on blocks, then bottom-up merge passes between two arrays ---
+
+let block = 16
+
+fn min_int(a: Int, b: Int) -> Int =
+  if a < b then a else b
+
+fn at(i: Int, v: Vec a) -> a =
+  let Just x = vec_get(i, v) else panic("stdlib.sort: index out of range (internal error)")
+  in x
+
+fn read(i: Int, v: borrowing LinVec a) -> a =
+  let Just x = linvec.get(i, v) else panic("stdlib.sort: index out of range (internal error)")
+  in x
+
+# Calls `compare` directly: `ord_lt` costs about 40% of a sort (docs/sorting-v0.md).
+fn sorted(v: LinVec a) -> LinVec a where Ord a =
+  sort_with(\ (x, y) -> compare(x, y) < 0, v)
+
+fn key_less(l: (k, a), r: (k, a)) -> Bool where Ord k =
+  let (lk, _) = l
+      (rk, _) = r
+  in compare(lk, rk) < 0
+
+# Slides `x` down from slot `j` past every element greater than it, stopping at `lo`. An
+# element moves ahead of another only when strictly less, so equal ones keep their order.
+fn insert(less: local a -> a -> Bool, x: a, j: Int, lo: Int, v: LinVec a) -> LinVec a =
+  if j <= lo then linvec.set(j, x, v)
+  else
+    let prev = read(j - 1, v)
+    in if less(x, prev) then insert(less, x, j - 1, lo, linvec.set(j, prev, v))
+    else linvec.set(j, x, v)
+
+fn insertion(less: local a -> a -> Bool, i: Int, lo: Int, hi: Int, v: LinVec a) -> LinVec a =
+  if i >= hi then v
+  else
+    let x = read(i, v)
+    in insertion(less, i + 1, lo, hi, insert(less, x, i, lo, v))
+
+fn blocks(less: local a -> a -> Bool, lo: Int, n: Int, v: LinVec a) -> LinVec a =
+  if lo >= n then v
+  else blocks(less, lo + block, n, insertion(less, lo + 1, lo, min_int(lo + block, n), v))
+
+fn copy(src: borrowing LinVec a, i: Int, stop: Int, k: Int, dst: LinVec a) -> LinVec a =
+  if i >= stop then dst
+  else copy(src, i + 1, stop, k + 1, linvec.set(k, read(i, src), dst))
+
+# Merges `src[i, mid)` and `src[j, hi)` into `dst` from `k`. A tie takes the left run.
+# One store and one tail call, the choice in their arguments: LLVM makes selects of
+# that. Two arms that each store and recurse stay a branch, which random input
+# mispredicts about half the time (docs/native-sprout-runtime-v0.md §Phase 2).
+fn merge(less: local a -> a -> Bool, src: borrowing LinVec a, i: Int, mid: Int, j: Int, hi: Int,
+         k: Int, dst: LinVec a) -> LinVec a =
+  if i >= mid then copy(src, j, hi, k, dst)
+  else if j >= hi then copy(src, i, mid, k, dst)
+  else
+    let x = read(i, src)
+        y = read(j, src)
+        right = less(y, x)
+    in merge(less, src, if right then i else i + 1, mid, if right then j + 1 else j, hi, k + 1,
+             linvec.set(k, if right then y else x, dst))
+
+fn pass(less: local a -> a -> Bool, src: borrowing LinVec a, lo: Int, n: Int, w: Int,
+        dst: LinVec a) -> LinVec a =
+  if lo >= n then dst
+  else
+    let mid = min_int(lo + w, n)
+        hi = min_int(lo + 2 * w, n)
+    in pass(less, src, hi, n, w, merge(less, src, lo, mid, mid, hi, lo, dst))
+
+# Each pass merges runs of width `w` from `src` into `dst`, then the two swap. The array
+# holding the result is returned and the other dropped, so nothing is copied back.
+fn passes(less: local a -> a -> Bool, n: Int, w: Int, src: LinVec a, dst: LinVec a) -> LinVec a =
+  if w >= n then
+    let _ = linvec.drop(dst)
+    in src
+  else
+    let merged = pass(less, src, 0, n, w, dst)
+    in passes(less, n, w * 2, merged, src)
+
+fn sort_with(less: local a -> a -> Bool, v: LinVec a) -> LinVec a =
+  let n = linvec.length(v)
+      runs = blocks(less, 0, n, v)
+  in if n <= block then runs
+  else
+    let fill = read(0, runs)
+    in passes(less, n, block, runs, linvec.new(n, fill))
+
+# --- sort_by: (key, value) pairs, each key computed once ---
+
+fn vec_pairs(key: local a -> k, xs: Vec a, i: Int, n: Int, v: LinVec (k, a)) -> LinVec(k, a) =
+  if i >= n then v
+  else
+    let x = at(i, xs)
+    in vec_pairs(key, xs, i + 1, n, linvec.set(i, (key(x), x), v))
+
+fn values(pairs: LinVec (k, a), i: Int, n: Int, out: LinVec a) -> LinVec a =
+  if i >= n then
+    let _ = linvec.drop(pairs)
+    in out
+  else
+    let (_, x) = read(i, pairs)
+    in values(pairs, i + 1, n, linvec.set(i, x, out))
+
+# Built from the last pair back, so no reverse is needed.
+fn values_to_list(pairs: LinVec (k, a)) -> List a =
+  let n = linvec.length(pairs)
+  in values_onto(pairs, n - 1, [])
+
+fn values_onto(pairs: LinVec (k, a), i: Int, acc: List a) -> List a =
+  if i < 0 then
+    let _ = linvec.drop(pairs)
+    in acc
+  else
+    let (_, x) = read(i, pairs)
+    in values_onto(pairs, i - 1, Cons(x, acc))

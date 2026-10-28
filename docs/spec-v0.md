@@ -2218,9 +2218,10 @@ export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} = …
   `vec_*`, `result_*`, `when_ok`, `when_error`; `stdlib.mutable`'s `mutvec_*` and
   `mutmatrix_*`; `stdlib.linvec`'s `linvec.accum`; `stdlib.list`'s `map_adjacent`), the
   `Foldable` methods and the generic functions over them (`fold`, `fold_while`, `any`,
-  `all`, `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`), and `Zip`'s
-  method with `zip_with`, take their function `local`, so a lambda passed to them may read a
-  borrowed value, comprehensions included. `Functor`, `Filterable`, `Applicative`, `Monad`
+  `all`, `find`, `find_map`, `count`, `fold_indexed`, `min_by`, `max_by`), `Zip`'s
+  method with `zip_with`, and `stdlib.sort`'s `Sort` method with `sort_by`, take their
+  function `local`, so a lambda passed to them may read a borrowed value, comprehensions
+  included. `Functor`, `Filterable`, `Applicative`, `Monad`
   and `Traversable`, and `map`, `filter`, `filter_map`, `partition`, `map2`..`map5`,
   `and_then`, `traverse`, `concat_map`, do not: an instance for a function-shaped type (a
   parser, state or reader monad, a lazy functor) keeps the function, and `local` in the class
@@ -2294,6 +2295,7 @@ linvec.set(i: Int, x: a, v: LinVec a) -> LinVec a        # traps out of range
 linvec.length(v: borrowing LinVec a) -> Int
 linvec.empty() -> LinVec a                               # a fresh vector of length 0
 linvec.from_list(xs: List a) -> LinVec a                 # a fresh vector of the list's elements
+linvec.from_vec(v: Vec a) -> LinVec a                    # a fresh copy; `v` is unchanged
 linvec.push(x: a, v: LinVec a) -> LinVec a               # amortised O(1)
 linvec.pop(v: LinVec a) -> (Maybe a, LinVec a)           # the last element and the rest
 linvec.freeze(v: LinVec a) -> Vec a                      # O(1); the vector's life ends
@@ -3906,7 +3908,7 @@ The two orderings are reached by different syntax and never by each other:
   do **not** dispatch through `Eq` or `Ord`.
 - The **class methods** `eq` and `compare` define a **total** order, which is
   what `deriving`, `member`, `minimum`, `maximum`, `min_by`, `max_by`,
-  `vec_sort` and `Dict` keys use.
+  `sort` (`stdlib.sort`) and `Dict` keys use.
 
 The class agrees with the operator on every pair the operator orders, and fills
 in only the case IEEE leaves open:
@@ -3918,7 +3920,7 @@ in only the case IEEE leaves open:
 | `nan`, `nan` | `==` is `false` | `eq` is `true`, `compare` is `0` |
 | `nan`, any number or `inf` | all comparisons `false` | `compare` is `1` |
 
-So NaN equals itself and sorts **above** every number, `inf` included; `vec_sort`
+So NaN equals itself and sorts **above** every number, `inf` included; `sort`
 places NaN last, and `minimum` over a list containing NaN returns a real number
 while `maximum` returns NaN.
 
@@ -3939,9 +3941,9 @@ maximum(xs: c a)           -> Maybe a   where Foldable c, Ord a
 `min_by`/`max_by` select the element whose **derived key** is least/greatest —
 argmin and argmax.  They return the *element*, never the key.  `minimum` and
 `maximum` are the identity-key cases, standing to `min_by`/`max_by` as
-`vec_sort` stands to `vec_sort_by`.
+`sort` stands to `sort_by`.
 
-`_by` takes a **key function**, not a comparator, matching `vec_sort_by` and
+`_by` takes a **key function**, not a comparator, matching `sort_by` and
 `vec_sum_by`.  Sprout ships no comparator-taking form of any of the four.
 
 All four are **total**: an empty structure yields `Nothing`, never a panic
@@ -3950,12 +3952,12 @@ All four are **total**: an empty structure yields `Nothing`, never a panic
 
 **Tie-breaking is specified, not incidental.**  `min_by` keeps the **first**
 element attaining the least key; `max_by` keeps the **last** attaining the
-greatest.  Because `vec_sort_by` is a stable sort, this makes the two exactly
+greatest.  Because `sort_by` is a stable sort, this makes the two exactly
 the ends of the sorted order — for non-empty `xs`:
 
 ```
-min_by(f, xs) == vec_get(0, vec_sort_by(f, foldable_to_vec(xs)))
-max_by(f, xs) == vec_get(n - 1, vec_sort_by(f, foldable_to_vec(xs)))
+min_by(f, xs) == vec_get(0, sort_by(f, foldable_to_vec(xs)))
+max_by(f, xs) == vec_get(n - 1, sort_by(f, foldable_to_vec(xs)))
 ```
 
 Both identities are checked in `tests/stdlib/test_min_max.spr`.  The rule

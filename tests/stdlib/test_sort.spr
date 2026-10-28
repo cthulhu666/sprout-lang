@@ -1,0 +1,133 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.sort (Sort, sort, sort_by)
+import stdlib.rng (rng_hash2)
+
+# `stdlib.sort` (docs/list-toolkit-v0.md §4.6). The reference is a list insertion sort that
+# puts each element after every one not greater than it, so it is stable; agreeing with it on
+# inputs with repeated keys checks the order of equal elements, not only sortedness.
+
+fn insert_by(key: local a -> k, x: a, sorted: List a) -> List a where Ord k =
+  match sorted with
+  | [] -> [x]
+  | [y | rest] -> if compare(key(x), key(y)) < 0 then Cons(x, sorted) else Cons(y, insert_by(key, x, rest))
+
+fn reference_by(key: local a -> k, xs: List a) -> List a where Ord k =
+  fold(\ (acc, x) -> insert_by(key, x, acc), [], xs)
+
+fn reference(xs: List a) -> List a where Ord a =
+  reference_by(\x -> x, xs)
+
+# A pseudo-random Int in [0, m).
+fn small(i: Int, m: Int) -> Int =
+  let h = rng_hash2(i, 11, 5) in h - (h / m) * m
+
+fn ints(n: Int, m: Int) -> List Int =
+  list_map(\i -> small(i, m), range_to_list(0..n - 1))
+
+# (key, id) pairs: keys repeat, ids record the input order.
+fn keyed(n: Int, m: Int) -> List (Int, Int) =
+  list_map(\i -> (small(i, m), i), range_to_list(0..n - 1))
+
+fn first(p: (Int, Int)) -> Int =
+  let (k, _) = p
+  in k
+
+# Allocates on every key, so collections run while the pairs are built.
+fn key_text(p: (Int, Int)) -> String = to_string(first(p))
+
+# Ordered by the key alone: `sort` itself must keep equal keys in input order.
+type Keyed = Keyed Int Int
+
+instance Eq Keyed
+  fn eq(left: Keyed, right: Keyed) -> Bool =
+    let Keyed l _ = left
+        Keyed r _ = right
+    in l == r
+
+instance Ord Keyed
+  fn compare(left: Keyed, right: Keyed) -> Int =
+    let Keyed l _ = left
+        Keyed r _ = right
+    in compare(l, r)
+
+fn ids(xs: List Keyed) -> List Int =
+  list_map(\k -> let Keyed _ id = k in id, xs)
+
+fn keyeds(n: Int) -> List Keyed =
+  list_map(\i -> Keyed(small(i, 4), i), range_to_list(0..n - 1))
+
+fn maybe_at(i: Int) -> Maybe Int =
+  if small(i, 5) == 0 then Nothing else Just(small(i, 100))
+
+# Nothing first, so it is the scratch array's fill.
+fn maybes(n: Int) -> List (Maybe Int) =
+  Cons(Nothing, list_map(maybe_at, range_to_list(1..n - 1)))
+
+fn is_sorted(xs: List Int) -> Bool =
+  match xs with
+  | [a, b | rest] -> a <= b && is_sorted(Cons(b, rest))
+  | _ -> true
+
+# Through a `where Sort f` caller: the dictionary is forwarded, not resolved at the call.
+fn sort_twice(xs: f a) -> f a where Sort f, Ord a =
+  sort(sort(xs))
+
+# 16-element blocks, then passes that double the run width and swap two arrays: these lengths
+# end on either array, with a short last run, a full one, and one block alone.
+let lengths: List Int = [2, 15, 16, 17, 31, 32, 33, 64, 65, 100, 257, 1001]
+
+let no_ints: List Int = []
+
+fn list_case(n: Int) -> Bool =
+  sort(ints(n, 50)) == reference(ints(n, 50))
+
+fn vec_case(n: Int) -> Bool =
+  vec_to_list(sort(vec_from_list(ints(n, 50)))) == reference(ints(n, 50))
+
+fn list_stable_case(n: Int) -> Bool =
+  sort_by(first, keyed(n, 4)) == reference_by(first, keyed(n, 4))
+
+fn vec_stable_case(n: Int) -> Bool =
+  vec_to_list(sort_by(first, vec_from_list(keyed(n, 4)))) == reference_by(first, keyed(n, 4))
+
+fn key_only_case(n: Int) -> Bool =
+  ids(sort(keyeds(n))) == ids(reference(keyeds(n)))
+
+fn all_lengths(check: local Int -> Bool) -> List Int =
+  list_filter(\n -> !check(n), lengths)
+
+# `sort` copies a `Vec`: the input reads the same afterwards.
+fn input_kept() -> (List Int, List Int) =
+  let v = vec_from_list([3, 1, 2])
+      sorted = sort(v)
+      by = sort_by(\x -> 0 - x, v)
+  in (vec_to_list(v), list_append(vec_to_list(sorted), vec_to_list(by)))
+
+fn main() -> Unit !{IO} =
+  run_suite("sort", [
+    check_eq("List: empty", sort(no_ints), []),
+    check_eq("List: one", sort([7]), [7]),
+    check_eq("List: sorted", sort([1, 2, 3, 4]), [1, 2, 3, 4]),
+    check_eq("List: reversed", sort([4, 3, 2, 1]), [1, 2, 3, 4]),
+    check_eq("List: all equal", sort([5, 5, 5]), [5, 5, 5]),
+    check_eq("List: duplicates", sort([3, 1, 3, 2, 1]), [1, 1, 2, 3, 3]),
+    check_eq("List: strings", sort(["pear", "apple", "fig"]), ["apple", "fig", "pear"]),
+    check_eq("Vec: empty", vec_to_list(sort(vec_from_list(no_ints))), []),
+    check_eq("Vec: one", vec_to_list(sort(vec_from_list([7]))), [7]),
+    check_eq("Vec: duplicates", vec_to_list(sort(vec_from_list([3, 1, 3, 2, 1]))), [1, 1, 2, 3, 3]),
+    check_eq("sort_by List: descending", sort_by(\x -> 0 - x, [1, 3, 2]), [3, 2, 1]),
+    check_eq("sort_by Vec: descending", vec_to_list(sort_by(\x -> 0 - x, vec_from_list([1, 3, 2]))), [3, 2, 1]),
+    check_eq("sort_by List: empty", sort_by(first, []), []),
+    check_eq("List: lengths agree with the reference", all_lengths(list_case), []),
+    check_eq("Vec: lengths agree with the reference", all_lengths(vec_case), []),
+    check_eq("sort_by List: stable at every length", all_lengths(list_stable_case), []),
+    check_eq("sort_by Vec: stable at every length", all_lengths(vec_stable_case), []),
+    check_eq("sort: stable under a key-only Ord", all_lengths(key_only_case), []),
+    check_eq("sort_by: an allocating key", sort_by(key_text, keyed(300, 7)), reference_by(key_text, keyed(300, 7))),
+    check_eq("Maybe: Nothing first", sort(maybes(100)), reference(maybes(100))),
+    check_eq("Vec input is unchanged", input_kept(), ([3, 1, 2], [1, 2, 3, 3, 2, 1])),
+    check_eq("forwarded through `where Sort f`: List", sort_twice([2, 3, 1]), [1, 2, 3]),
+    check_eq("forwarded through `where Sort f`: Vec", vec_to_list(sort_twice(vec_from_list([2, 3, 1]))), [1, 2, 3]),
+    check_eq("200k elements", is_sorted(sort(ints(200000, 1000))), true),
+    check_eq("200k elements, sort_by", count(\_ -> true, sort_by(first, keyed(200000, 1000))), 200000)
+  ])

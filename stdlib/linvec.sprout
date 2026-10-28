@@ -3,10 +3,9 @@ module stdlib.linvec
 import stdlib.mutable
 import stdlib.unsafe
 
-# A pure vector with in-place writes and growth (Experimental, as spec §5.8 is). A set, push
-# or pop consumes the vector and returns it; linearity means no one holds the old one, so the
-# change cannot be seen. Reads borrow; `freeze` returns a `Vec` in O(1). Design:
-# docs/persistent-array-v0.md §5.3.
+# A pure vector with in-place writes and growth. A set, push or pop consumes the vector and
+# returns it; linearity means no one holds the old one, so the change cannot be seen. Reads
+# borrow; `freeze` returns a `Vec` in O(1). Design: docs/persistent-array-v0.md §5.3.
 #
 # Trust boundary: the type is abstract, so only this module unwraps one, and `linvec_set`,
 # `linvec_push` and `linvec_truncate` hide an `!{IO}` write behind `unsafe_pure`, whose
@@ -57,6 +56,11 @@ export fn new(n: Int, x: a) -> LinVec a = LinVec(vec_make_filled(n, x))
 export fn empty() -> LinVec a = LinVec(vector_empty())
 
 export fn from_list(xs: List a) -> LinVec a = LinVec(vector_from_list(xs))
+
+# A copy, so the result has one owner however many hold `v`. One `memcpy`.
+export fn from_vec(v: Vec a) -> LinVec a =
+  let Vec(raw) = v
+  in LinVec(vector_concat(raw, vector_empty()))
 
 # Amortised O(1): the storage doubles when full.
 export fn push(x: a, v: LinVec a) -> LinVec a = linvec_push(x, v)

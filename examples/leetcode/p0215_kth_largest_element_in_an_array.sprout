@@ -1,5 +1,6 @@
 module examples.leetcode.p0215_kth_largest_element_in_an_array
 import stdlib.linheap as heap
+import stdlib.sort (sort)
 
 # 215 Kth Largest Element in an Array, O(n log k): a min-heap holds the k largest so
 # far, so its root is the kth largest.
@@ -22,7 +23,7 @@ fn evict(h: heap.LinHeap Int) -> heap.LinHeap Int =
 
 # The sorting version, O(n log n).
 fn kth_largest_sorted(nums: Vec Int, k: Int) -> Int =
-  vec_get_or(vec_length(nums) - k, 0, vec_sort(nums))
+  vec_get_or(vec_length(nums) - k, 0, sort(nums))
 
 fn check(name: String, got: Int, want: Int) -> Unit !{IO} =
   print(`${name}: got ${got} want ${want} ${if got == want then "OK" else "FAIL"}`)

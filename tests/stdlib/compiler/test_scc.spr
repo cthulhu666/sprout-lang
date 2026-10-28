@@ -2,6 +2,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.scc as scc
 import stdlib.string as string
+import stdlib.sort (sort)
 
 # Strongly connected components (stdlib/compiler/scc.sprout).
 
@@ -18,7 +19,7 @@ fn add_member(s: Set, name: String) -> Set = set_insert(name, s)
 fn render(comps: List (List String)) -> String = string.join(" ", list_map(render_comp, comps))
 
 fn render_comp(members: List String) -> String =
-  "[" ++ string.join(",", vec_to_list(vec_sort(vec_from_list(members)))) ++ "]"
+  "[" ++ string.join(",", sort(members)) ++ "]"
 
 fn sccs(nodes: List String, edges: List (String, List String)) -> String =
   render(scc.sccs_in_dependency_order(nodes, graph_of(edges)))

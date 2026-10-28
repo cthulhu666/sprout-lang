@@ -4,6 +4,7 @@ import stdlib.compiler.source as source
 import stdlib.compiler.ast as ast
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.string as string
+import stdlib.sort (sort_by)
 
 # `--phase bind-census` (docs/try-propagate-v0.md §8 step 1a): every `<-`, every
 # fallible statement a block discards, and every `let` the migration must change,
@@ -121,9 +122,7 @@ export fn census_lines(path: String, pieces: List Piece) -> List String =
   let (joining, lone) = list_partition(joins, pieces)
   in list_append(list_filter_map(lone_line(path, _), lone),
                  list_filter_map(joined_line(path, _), vec_to_list(dict_values(group(joining)))))
-       |> vec_from_list
-       |> vec_sort_by(\l -> l.index)
-       |> vec_to_list
+       |> sort_by(\l -> l.index)
        |> list_map(\l -> l.text)
 
 fn line(path: String, kind: String, pos: source.SourcePos, cols: List String) -> Line =

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# docs/list-toolkit-v0.md §4.6.1: today's decorated sort against the undecorated
-# prototype. Every variant runs ROUNDS times, interleaved, at n=1k and n=1M; the
+# docs/list-toolkit-v0.md §4.6.1: `stdlib.sort` against the list merge sorts it
+# replaced. Every variant runs ROUNDS times, interleaved, at n=1k and n=1M; the
 # 1M runs also record peak RSS (`/usr/bin/time -l`, macOS). Prints min, median and
 # spread per row, as bench/native_runtime/bench.sh does.
 #
@@ -18,7 +18,7 @@ mkdir -p "$BIN"
 cd "$REPO"
 mise exec -- just compile-native "$DIR/list_sort_bench.sprout" "$BIN/list_sort_bench" > /dev/null 2>&1
 
-VARIANTS="vec_list usort_list vec usort_vec vec_by dsort_by dsort_lean"
+VARIANTS="sort_list usort_list sort_vec usort_vec sort_by dsort_by dsort_lean"
 
 for r in $(seq 1 "$ROUNDS"); do
   echo "==> round $r/$ROUNDS" >&2

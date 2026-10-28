@@ -1,4 +1,5 @@
 import stdlib.test (check_eq, run_suite)
+import stdlib.sort (sort_by)
 
 # Tests for the Foldable-generic extreme-selection combinators — `minimum`,
 # `maximum`, `min_by`, `max_by` (docs/min-max-combinators-v0.md).
@@ -8,7 +9,7 @@ import stdlib.test (check_eq, run_suite)
 #
 #   - `min_by`/`max_by` return the ELEMENT, not the key (argmin, not min);
 #   - ties: `min_by` keeps the FIRST minimum, `max_by` keeps the LAST maximum;
-#   - which is exactly what makes the pair the two ends of `vec_sort_by`'s
+#   - which is exactly what makes the pair the two ends of `sort_by`'s
 #     stable order — pinned below as a law, not just as two examples.
 #
 # Both `Foldable` instances are covered: a `where Foldable c` signature that
@@ -50,7 +51,7 @@ fn main() -> Unit !{IO} =
                Cons(Person(name = "min-late", age = 1),
                Cons(Person(name = "max-early", age = 9),
                Cons(Person(name = "max-last", age = 9), Nil)))))
-      sorted_by_age = vec_sort_by(age_of, vec_from_list(people))
+      sorted_by_age = sort_by(age_of, vec_from_list(people))
   in run_suite("min_max", [
     # --- Empty: total, never a panic -----------------------------------------
     check_eq("minimum of empty list", minimum(nil_int), no_int),

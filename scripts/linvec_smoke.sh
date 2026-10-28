@@ -19,8 +19,8 @@
 #   shape   `unsafe_pure` takes a lambda literal and cannot be a value. A user module cannot
 #           reach either rule past the reference gate, so each case is appended to a copy
 #           of linvec.sprout, a module the compiler lists.
-#   bce     bounds-check elimination versions no loop in a `stdlib.linvec.*` or
-#           `stdlib.linheap.*` declaration; why: stdlib/compiler/bce.sprout, above
+#   bce     bounds-check elimination versions no loop in a `stdlib.linvec.*`,
+#           `stdlib.linheap.*` or `stdlib.sort.*` declaration; why: stdlib/compiler/bce.sprout, above
 #           `safe_io_externs`.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -188,15 +188,15 @@ shape_case value 'fn shape_value(xs: List (Unit -> Int !{IO})) -> List Int = lis
   'cannot be used as a value'
 
 # --- bce: the premise behind the pure length-changing writes ---
-# No loop of a LinVec or LinHeap declaration is versioned. That checks their own loops, not
-# the alias premise, which rests on linearity and the abstract type (bce.sprout, above
-# `safe_io_externs`). Both tests are traced, so both modules are in the program.
-for t in test_linvec test_linheap; do
+# No loop of a LinVec, LinHeap or LinVec-sorting declaration is versioned. That checks their
+# own loops, not the alias premise, which rests on linearity and the abstract type
+# (bce.sprout, above `safe_io_externs`). Each test is traced, so each module is in the program.
+for t in test_linvec test_linheap test_sort; do
   SPROUT_TRACE_BCE=1 "$BIN" --emit-ir "$STDLIB" --package-root "$ROOT" "$ROOT/tests/stdlib/$t.spr" \
     > /dev/null 2> "$TMPD/bce_$t.err" || { bad "bce trace: emit-IR failed for $t"; continue; }
-  if grep -Eq '^\[bce\] versioned stdlib\.(linvec|linheap)\.' "$TMPD/bce_$t.err"; then
-    bad "bce versions a loop in stdlib.linvec or stdlib.linheap ($t)"
-    grep -E '^\[bce\] versioned stdlib\.(linvec|linheap)\.' "$TMPD/bce_$t.err" >&2
+  if grep -Eq '^\[bce\] versioned stdlib\.(linvec|linheap|sort)\.' "$TMPD/bce_$t.err"; then
+    bad "bce versions a loop in stdlib.linvec, stdlib.linheap or stdlib.sort ($t)"
+    grep -E '^\[bce\] versioned stdlib\.(linvec|linheap|sort)\.' "$TMPD/bce_$t.err" >&2
   fi
 done
 # The trace must be live: test_linvec alone reports loops, so an empty one means no trace.

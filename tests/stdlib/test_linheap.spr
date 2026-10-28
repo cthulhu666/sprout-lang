@@ -2,6 +2,7 @@ import stdlib.test (check_eq, run_suite)
 import stdlib.list
 import stdlib.linheap (LinHeap)
 import stdlib.linheap as linheap
+import stdlib.sort (sort)
 
 # `stdlib.linheap` (docs/linheap-v0.md §7). The linear rejections are in
 # tests/conformance/type_error/linheap_*; the vector counts are `just linear-reuse-smoke`.
@@ -17,7 +18,7 @@ fn gen(n: Int, seed: Int, acc: List Int) -> List Int =
     in gen(n - 1, s, Cons(rem(s / 65536, 200) - 100, acc))
 
 fn sorted(xs: List a) -> List a where Ord a =
-  vec_to_list(vec_sort(vec_from_list(xs)))
+  sort(xs)
 
 fn empty_int() -> LinHeap Int = linheap.new()
 

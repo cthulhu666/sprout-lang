@@ -3,9 +3,8 @@ module stdlib.linheap
 import stdlib.linvec (LinVec)
 import stdlib.linvec as linvec
 
-# A binary min-heap over `LinVec`, linear so pushes and pops write in place (Experimental,
-# as spec §5.8 is). The smallest element by `compare` pops first; ties pop in no fixed order.
-# Design: docs/linheap-v0.md.
+# A binary min-heap over `LinVec`, linear so pushes and pops write in place. The smallest
+# element by `compare` pops first; ties pop in no fixed order. Design: docs/linheap-v0.md.
 
 # The heap is the whole `LinVec`: its length is the size. The type is abstract, as `LinVec` is.
 export wrap linear LinHeap a = LinVec a

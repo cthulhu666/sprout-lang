@@ -49,8 +49,6 @@ Standard library (Sprout source in `stdlib/prelude.sprout`):
   - `vec_reverse(vec)`
   - `vec_sum(vec)`
   - `vec_sum_by(f, vec)`
-  - `vec_sort(vec)` where `Ord a` (initial built-in coverage: `Int`, `Bool`, `String`)
-  - `vec_sort_by(key, vec)` where `Ord key`; for an in-place sort, see `mutvec_sort` below
 - `Dict v` plus foundational helpers:
   - `dict_empty()`
   - `dict_get(key, dict) -> Maybe v`
@@ -537,6 +535,7 @@ A pure vector with in-place writes (in `stdlib/linvec.sprout`;
 - `linvec.length(v: borrowing LinVec a) -> Int`
 - `linvec.empty() -> LinVec a` — a fresh vector of length 0
 - `linvec.from_list(xs) -> LinVec a` — a fresh vector of the list's elements
+- `linvec.from_vec(v) -> LinVec a` — a fresh copy of `v`, one `memcpy`; `v` is unchanged
 - `linvec.push(x, v) -> LinVec a` — amortised O(1); the storage doubles when full
   (wraps the private `linvec_push`, which writes through `unsafe_pure`)
 - `linvec.pop(v) -> (Maybe a, LinVec a)` — the last element and the rest; `(Nothing, v)` on an
@@ -565,6 +564,20 @@ fails. All run in constant stack; `take_last` and `drop_last` count the list fir
 
 There is no index lookup on `List`. A loop that needs the index is `fold_indexed`; a position
 kept as state wants a `Vec`.
+
+## stdlib.sort
+
+Sorting that keeps the container (in `stdlib/sort.sprout`; `import stdlib.sort (sort, sort_by)`).
+Design: [list-toolkit-v0.md](list-toolkit-v0.md) §4.6.
+
+- `Sort f` — the class; instances for `List` and `Vec`
+- `sort(xs)` where `Sort f, Ord a` — ascending and stable; `List` in, `List` out, `Vec` in,
+  `Vec` out. O(n log n) comparisons, constant stack
+- `sort_by(key, xs)` where `Sort f, Ord k` — ordered by `key`, called once per element
+
+Each copies its input into a fresh `LinVec`, sorts it in place and freezes it, so the input is
+unchanged. About 8× faster than the list merge sort the prelude's `vec_sort` used, which it
+replaces. For a `MutVec` already in hand, `mutvec_sort` sorts it where it is.
 
 ## stdlib.math and stdlib.math.int
 
@@ -889,7 +902,7 @@ Three things to know:
 
 ### Sorting a `MutVec`
 
-`mutvec_sort(v)` (where `Ord a`) and `mutvec_sort_by(f, v)` (where `Ord k`) sort ascending, in place and stable. Each makes O(n log n) comparisons and allocates a comparator closure per call, plus one n-slot scratch vector when n > 16. On Ints they run about 5× faster than `vec_sort`, which builds lists. `mutvec_sort_by` calls `f` twice per comparison, where `vec_sort_by` computes each key once; for a costly key, sort `(key, value)` pairs. Measurements and the faster options not taken yet: [sorting-v0.md](sorting-v0.md).
+`mutvec_sort(v)` (where `Ord a`) and `mutvec_sort_by(f, v)` (where `Ord k`) sort ascending, in place and stable. Each makes O(n log n) comparisons and allocates a comparator closure per call, plus one n-slot scratch vector when n > 16. `stdlib.sort`'s `sort` runs the same merge on a copy. `mutvec_sort_by` calls `f` twice per comparison, where `sort_by` computes each key once; for a costly key, sort `(key, value)` pairs. Measurements and the faster options not taken yet: [sorting-v0.md](sorting-v0.md).
 
 If you find yourself repeatedly appending small fragments to a `String`, reach for `bytes.Builder` (collect fragments as `Bytes`, finalize once) or the `string_concat_many` builtin (one allocation for an arbitrary list of `String`s). String interpolation with `` `pre${x}post` `` desugars to `string_concat_many` automatically.
 

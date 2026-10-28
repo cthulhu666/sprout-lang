@@ -1932,7 +1932,7 @@ diagnostic-stream-smoke: bootstrap-from-seed
   echo "==> diagnostic-stream-smoke ✓ (errors on stderr, nonzero exit, stdout artifact-only, check-iface never silently OK, unknown phase rejected)"
 
 # Dispatch-trace guard.  SPROUT_TRACE_DISPATCH=1 must emit a `[dispatch] ...` line
-# per constrained call site, and a projection sort (`vec_sort_by` with key type !=
+# per constrained call site, and a projection sort (`sort_by` with key type !=
 # element type) must resolve through the PRECISE branch (`path=precise-just -> Ord
 # Int`) — the invariant the df36c0d canonicalize-markers fix established. Also
 # asserts the flag is zero-output when unset (gating works). Regression for the
@@ -1965,7 +1965,7 @@ trace-dispatch-smoke: bootstrap-from-seed
 # Dict-passing verifier guard.  The dispatch verifier (retro item 1, phase 1) is
 # default-fatal: it must ACCEPT legitimate code (no false positive) AND be ACTIVE
 # (verified>=1 on a real constrained call — a silent no-op is a regression). The
-# projection sort exercises `vec_sort_by ... where Ord k`. Regression for the
+# projection sort exercises `sort_by ... where Ord k`. Regression for the
 # BACKLOG "Dispatch Soundness & Diagnostics" item 1. See docs/debugging.md.
 [group('smoke')]
 verify-dispatch-smoke: bootstrap-from-seed

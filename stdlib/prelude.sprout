@@ -578,22 +578,6 @@ export fn ord_gt(x: a, y: a) -> Bool where Ord a =
 export fn ord_gte(x: a, y: a) -> Bool where Ord a =
   compare(x, y) >= 0
 
-fn vec_sort_by_collect(f: local a -> k, vec: Vec a, index: Int, total: Int, acc: List (k, Int, a)) -> List(k, Int, a) =
-  if index >= total then acc
-  else
-    match vec_get(index, vec) with
-    | Nothing -> acc
-    | Just value -> vec_sort_by_collect(f, vec, index + 1, total, Cons((f(value), index, value), acc))
-
-fn decorated_key_lt(left: (k, Int, a), right: (k, Int, a)) -> Bool where Ord k =
-  match left with
-  | (left_key, left_index, _) ->
-      match right with
-      | (right_key, right_index, _) ->
-          if ord_lt(left_key, right_key) then true
-          else if ord_gt(left_key, right_key) then false
-          else left_index < right_index
-
 fn list_reverse_go(xs: List a, acc: List a) -> List a where linear a =
   match xs with
   | Nil -> acc
@@ -655,79 +639,9 @@ fn list_length_go(xs: List a, acc: Int) -> Int =
 fn list_length(xs: List a) -> Int =
   list_length_go(xs, 0)
 
-# Bottom-up (iterative) stable merge sort over decorated (key, index, value)
-# tuples. Every helper is tail-recursive or O(log n)-deep, so recursion never
-# grows with n — unlike a top-down merge, whose O(n)-deep merge/flatten exhausted
-# the GC root pool above ~50k. Stability is guaranteed by decorated_key_lt's
-# (key, index) total order, so the order in which runs are paired is irrelevant.
-
-# Merge two sorted runs into one, tail-recursively: push the chosen element onto
-# `acc` (built reversed), then flush the remaining run with one list_reverse_go
-# (= reverse(acc) ++ rest). Tie goes to the left run (stable, though the index
-# tiebreak already makes ties impossible).
-fn merge_runs(left: List (k, Int, a), right: List (k, Int, a), acc: List (k, Int, a)) -> List(k, Int, a) where Ord k =
-  match left with
-  | Nil -> list_reverse_go(acc, right)
-  | Cons left_item left_rest ->
-      match right with
-      | Nil -> list_reverse_go(acc, left)
-      | Cons right_item right_rest ->
-          if decorated_key_lt(right_item, left_item) then merge_runs(left, right_rest, Cons(right_item, acc))
-          else merge_runs(left_rest, right, Cons(left_item, acc))
-
-# One pass: merge adjacent pairs across the run list, tail-recursively. An odd
-# trailing run is carried forward unmerged.
-fn merge_pass(runs: List (List(k, Int, a)), acc: List (List(k, Int, a))) -> List (List(k, Int, a)) where Ord k =
-  match runs with
-  | Nil -> list_reverse_go(acc, Nil)
-  | Cons a rest ->
-      match rest with
-      | Nil -> list_reverse_go(acc, Cons(a, Nil))
-      | Cons b rest2 -> merge_pass(rest2, Cons(merge_runs(a, b, Nil), acc))
-
-# Repeat passes until a single run remains. Depth is O(log n) — one frame per pass.
-fn merge_all(runs: List (List(k, Int, a))) -> List(k, Int, a) where Ord k =
-  match runs with
-  | Nil -> Nil
-  | Cons only rest ->
-      match rest with
-      | Nil -> only
-      | _ -> merge_all(merge_pass(runs, Nil))
-
-# Seed: one singleton (already-sorted) run per element, tail-recursively. Run
-# order need not match the input (see stability note above).
-fn to_runs(xs: List (k, Int, a), acc: List (List(k, Int, a))) -> List (List(k, Int, a)) =
-  match xs with
-  | Nil -> acc
-  | Cons x rest -> to_runs(rest, Cons (Cons(x, Nil), acc))
-
 # O(n): one pass over the list plus one native allocation/copy into the vector.
 export fn vec_from_list(xs: List a) -> Vec a =
   Vec(vector_from_list(xs))
-
-# Tail-recursive: strip values into `acc` (reversed); the caller reverses once.
-fn decorated_values_go(xs: List (k, Int, a), acc: List a) -> List a =
-  match xs with
-  | Nil -> acc
-  | Cons entry rest ->
-      match entry with
-      | (_, _, value) -> decorated_values_go(rest, Cons(value, acc))
-
-# O(n log n): bottom-up stable merge sort. Decoration/collect, run-seeding,
-# value-flatten and vec_from_list are each a single O(n) pass; no per-node
-# length/take/drop. Recursion depth is O(log n) at most, so it has no size ceiling
-# (the old top-down merge exhausted the GC root pool above ~50k). The collect pass
-# emits the decorated tuples in reverse index order, which is fine: merge_all sorts
-# by the (key, index) total order regardless of input arrangement.
-export fn vec_sort_by(f: local a -> k, vec: Vec a) -> Vec a where Ord k =
-  vec_from_list(
-    list_reverse(
-      decorated_values_go(
-        merge_all(to_runs(vec_sort_by_collect(f, vec, 0, vec_length(vec), Nil), Nil)),
-        Nil)))
-
-export fn vec_sort(vec: Vec a) -> Vec a where Ord a =
-  vec_sort_by(\value -> value, vec)
 
 export fn dict_empty() -> Dict v =
   Dict(map_empty())
@@ -1100,7 +1014,7 @@ fn keyed_value(best: Maybe (k, a)) -> Maybe a =
 # O(n), applying `f` exactly once per element: the element whose key is least,
 # or `Nothing` when empty. Returns the ELEMENT, not the key. A tie keeps the
 # FIRST such element; `max_by` keeps the last, which makes the two exactly the
-# ends of `vec_sort_by`'s stable order.
+# ends of `stdlib.sort`'s stable `sort_by` order.
 export fn min_by(f: local a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
   keyed_value(fold(\ (best, x) -> min_by_step(f, best, x), Nothing, xs))
 
@@ -1110,7 +1024,7 @@ export fn max_by(f: local a -> k, xs: c a) -> Maybe a where Foldable c, Ord k =
   keyed_value(fold(\ (best, x) -> max_by_step(f, best, x), Nothing, xs))
 
 # O(n): the least element, or `Nothing` when empty — the identity-key case of
-# `min_by`, mirroring how `vec_sort` sits on `vec_sort_by`. On `Double` this is
+# `min_by`, mirroring how `sort` sits beside `sort_by`. On `Double` this is
 # `compare`'s order, not `<`'s: NaN is above every number.
 export fn minimum(xs: c a) -> Maybe a where Foldable c, Ord a =
   min_by(\value -> value, xs)
@@ -1190,7 +1104,7 @@ fn double_is_nan(x: Double) -> Bool = !(x == x)
 # and `<` OPERATORS are lowered straight to IEEE `fcmp` by the typechecker
 # (`infer.check_eq` short-circuits on `is_primitive_eq_type`, which lists Double;
 # `check_compare` has no class fallback) and never reach this instance. What
-# reaches it is the CLASS: `deriving`, `member`, `minimum`, `vec_sort`, Dict keys.
+# reaches it is the CLASS: `deriving`, `member`, `minimum`, `sort`, Dict keys.
 #
 # So the operators keep IEEE semantics and the class gets a TOTAL order, because
 # `compare : Int` has no third answer to return for an unordered pair. That is
@@ -1331,7 +1245,7 @@ instance Ord String
 # place it there, against OCaml's `Float.compare`, which places it below. The
 # practical reason to follow Java: `minimum` is the more common query, and this
 # keeps it returning a real number when one NaN contaminates the input rather
-# than returning the contamination. It also means `vec_sort` puts NaN last.
+# than returning the contamination. It also means `sort` puts NaN last.
 #
 # The final `else` is reached only when neither `<`, `>`, nor `==` held, which
 # for Double means at least one side is NaN.

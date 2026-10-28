@@ -1,5 +1,6 @@
 module examples.leetcode.p0049_group_anagrams
 import stdlib.unicode.utf8 (codepoints, from_codepoints)
+import stdlib.sort (sort)
 
 # 49 Group Anagrams: group words by their sorted codepoints.
 fn group_anagrams(strs: List String) -> List (List String) =
@@ -15,7 +16,7 @@ fn add_word(groups: Dict (List String), w: String) -> Dict (List String) =
   in dict_set(k, Cons(w, maybe_with_default([], dict_get(k, groups))), groups)
 
 fn sorted(xs: List a) -> List a where Ord a =
-  vec_from_list(xs) |> vec_sort |> vec_to_list
+  sort(xs)
 
 # Group and member order are free, so sort both sides before comparing.
 fn canonical(gs: List (List String)) -> List (List String) =

@@ -1,5 +1,6 @@
 import stdlib.test (check_eq, check_true, check_false, run_suite)
 import stdlib.math (is_nan)
+import stdlib.sort (sort)
 
 # `Eq Double` / `Ord Double` (docs/eq-ord-double-v0.md).
 #
@@ -82,7 +83,7 @@ fn derived_compare() -> Int =
 
 fn sorted_labels() -> String =
   string_concat_many(list_map(\v -> if is_nan(v) then "N" else double_to_string(v),
-    vec_to_list(vec_sort(vec_from_list([2.0, nan(), 1.0])))))
+    sort([2.0, nan(), 1.0])))
 
 fn main() -> Unit !{IO} =
   run_suite("double_ord", [
@@ -116,5 +117,5 @@ fn main() -> Unit !{IO} =
     check_eq("derived compare orders by the Double field", derived_compare(), -1),
 
     # Sorting
-    check_eq("vec_sort places nan last", sorted_labels(), "1.02.0N")
+    check_eq("sort places nan last", sorted_labels(), "1.02.0N")
   ])

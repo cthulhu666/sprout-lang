@@ -480,7 +480,7 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   has nothing to search for. Either lower a unit pattern (it always matches) or reject it in the
   checker with a located error.
 - [ ] `P3` **No `instance Ord Char`, though `<` accepts `Char`.** The spec lets the comparison
-  operators take `Char`, but the prelude's `Ord` instances skip it, so `vec_sort` on a `Vec Char`
+  operators take `Char`, but the prelude's `Ord` instances skip it, so `sort` on a `Vec Char`
   does not compile. Sorting a word's letters goes through codepoints instead. Add the instance.
 - [ ] `P3` **No total Int remainder.** There is no `%`, and `stdlib.math.int.mod` returns
   `Maybe`, so `i - (i / m) * m` is the idiom (LeetCode survey: 3 solutions plus every test-data
@@ -971,24 +971,18 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `test_gear.spr` rather than by the type. Design: `docs/non-empty-v0.md` (proposal); the list
   toolkit's `scanl`/`group_by` signatures wait on it.
 - [ ] `P3` **Primitive sort builtins for `Int`/`Double` vectors — needs approval first.** A C radix
-  sort runs at ~2 ns/element against `mutvec_sort`'s ~190 and `vec_sort`'s ~970 (n=440). Safe for
-  the collector, and it gives a fast pure `vec_sort` (copy, sort, return). Open: how generic code
+  sort runs at ~2 ns/element against `mutvec_sort`'s ~190 (n=440). Safe for the collector, and
+  `stdlib.sort` could call it on its copy. Open: how generic code
   reaches it — separate `_ints` names, or specialisation. Deferred until a caller needs it
   (`docs/sorting-v0.md` §Options).
-- [ ] `P3` **`vec_sort` sorts lists of `(key, index, value)` tuples**, ~n·(log2 n + 3) allocations.
-  Cheaper with the same contract: drop the index (adjacent runs merged in input order, ties to the
-  left, are already stable — but `vec_sort_by`'s comments say run order is irrelevant; rewrite them
-  and add a duplicate-key test at odd run counts first), store no key for `vec_sort`, seed runs from
-  ascending stretches, and call `compare`, not `ord_lt`. Measure; random input gains little from
-  natural runs. Numbers: `docs/sorting-v0.md`.
 - [ ] `P3` **Top-k selection without a full sort.** uncharted's `loam/lights.sprout` `reaching`
   sorts every light in range, then takes `keep`, per chunk and per mesh every frame. A
   `take_smallest_by(k, key, xs)`-style helper keeps k items in O(n log k). Grep the spec for the
   name first. `docs/laziness-v0.md` §5.3.
-- [ ] `P2` **List toolkit, rest: `sort`/`sort_by`, `scanl`, LeetCode migration.**
+- [ ] `P2` **List toolkit, rest: `scanl`, LeetCode migration.**
   Frequent gaps in the survey (`docs/leetcode-survey-2026-10-27.md` §2). Design:
-  `docs/list-toolkit-v0.md` §9 steps 2–5 — the `Sort` class; `scanl` waits on `NonEmpty`;
-  retiring `vec_sort` is open (§4.6.2). `enumerate` deferred to laziness.
+  `docs/list-toolkit-v0.md` §9 steps 3–4; `scanl` waits on `NonEmpty`. `enumerate` deferred to
+  laziness.
 - [ ] `P2` **`Dict`/`Set` take only `String` keys.** They sit on runtime externs
   (`map_get(m, key: String)`), so Int keys cost an `int_to_string` per access and `dict_entries`
   orders `"10"` before `"9"`; 6 of 31 survey problems paid for it. A pure-Sprout
@@ -1767,7 +1761,7 @@ deferral happened, not for current behaviour. Still open:
   filed in §2.
 - [ ] `P2` **Specialise generic functions at concrete types.** A `where Ord a` function takes the
   `Ord` and `Eq` dictionaries and makes an indirect `compare` per comparison, so `mutvec_sort` on
-  `Int` runs ~2× slower than a hand-specialised copy. Specialisation would also let `vec_sort` at
+  `Int` runs ~2× slower than a hand-specialised copy. Specialisation would also let `sort` at
   `Int` reach a primitive sort under its own name. Numbers:
   `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
   "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry. Proposal:

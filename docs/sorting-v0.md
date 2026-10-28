@@ -1,7 +1,9 @@
 # Sorting v0
 
-Status: `mutvec_sort` / `mutvec_sort_by` landed (#629). Everything faster is deferred; the
-options and what each needs are below, so the next round starts from numbers, not from scratch.
+Status: `mutvec_sort` / `mutvec_sort_by` landed (#629). The pure sort now runs the same merge in
+place: `stdlib.sort` sorts a `LinVec` copy (`docs/list-toolkit-v0.md` §4.6.1), which gives
+option E for sorting without new language design, and the prelude's `vec_sort` is gone.
+Everything faster is deferred; the options and what each needs are below.
 
 ## Problem
 
@@ -76,11 +78,12 @@ Ship the in-place sort in Sprout now; revisit the rest when a caller needs more.
 - `mutvec_sort(v)` / `mutvec_sort_by(f, v)` in `stdlib.mutable`: stable, ascending, in place.
   Insertion sort on 16-element blocks, then bottom-up merge passes between the vector and one
   n-slot scratch buffer, allocated only when n > 16.
-- `mutvec_sort_by` calls `f` twice per comparison, unlike `vec_sort_by`, which computes each key
-  once. Computing keys once would allocate n pairs, the cost the in-place sort exists to avoid.
+- `mutvec_sort_by` calls `f` twice per comparison, unlike `stdlib.sort`'s `sort_by`, which
+  computes each key once. Computing keys once would allocate n pairs, the cost the in-place sort exists to avoid.
 - Stability: an element moves ahead of another only when strictly less, in both the insertion
   and the merge, so equal elements keep their input order.
-  `tests/stdlib/test_mutvec_sort.spr` checks it against `vec_sort_by` with repeated keys.
+  `tests/stdlib/test_mutvec_sort.spr` checks it against `sort_by` with repeated keys.
 
-Deferred, each a `BACKLOG.md` entry: specialisation (A), profiling the Sprout-vs-C gap (B), the
-primitive sort builtins (C), and reworking `vec_sort`'s list sort.
+Deferred, each a `BACKLOG.md` entry: specialisation (A), profiling the Sprout-vs-C gap (B) and
+the primitive sort builtins (C). Reworking `vec_sort`'s list sort is done: `stdlib.sort`
+replaced it.

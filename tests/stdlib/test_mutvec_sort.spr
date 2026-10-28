@@ -1,8 +1,9 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.mutable (MutVec, mutvec_empty, mutvec_push, mutvec_fold, mutvec_sort, mutvec_sort_by)
 import stdlib.rng (rng_hash2)
+import stdlib.sort (sort, sort_by)
 
-# `vec_sort` and `vec_sort_by` are stable, so agreeing with them on inputs that
+# `sort` and `sort_by` are stable, so agreeing with them on inputs that
 # carry equal keys checks the order of equal elements, not only that the output
 # is sorted.
 
@@ -62,7 +63,7 @@ fn sorted_by_text(xs: List (Int, Int)) -> List (Int, Int) !{IO} =
 
 fn check_ints(state: TestState, n: Int, m: Int) -> Unit !{IO} =
   assert_eq(state, `mutvec_sort n=${to_string(n)} m=${to_string(m)}`, sorted(ints(n, m)),
-    vec_to_list(vec_sort(vec_from_list(ints(n, m)))))
+    sort(ints(n, m)))
 
 fn maybe_at(i: Int) -> Maybe Int =
   if small(i, 5) == 0 then Nothing else Just(small(i, 100))
@@ -74,7 +75,7 @@ fn maybes(n: Int) -> List (Maybe Int) =
 # 16-element blocks: n = 3, 17, 33, 65, 257, 1001 merge 1, 2, 3, 5, 17, 63 runs.
 fn check_stable(state: TestState, n: Int) -> Unit !{IO} =
   assert_eq(state, `mutvec_sort_by stable n=${to_string(n)}`, sorted_by_key(keyed(n, 4)),
-    vec_to_list(vec_sort_by(first, vec_from_list(keyed(n, 4)))))
+    sort_by(first, keyed(n, 4)))
 
 fn main() -> Unit !{IO} =
   do
@@ -84,14 +85,14 @@ fn main() -> Unit !{IO} =
     _ <- list_each(\n -> check_stable(state, n), [3, 17, 33, 65, 257, 1001])
     # A key that reverses the order: descending by key, equal keys still in input order.
     _ <- assert_eq(state, "mutvec_sort_by descending key", sorted_by_descending(keyed(200, 4)),
-      vec_to_list(vec_sort_by(descending, vec_from_list(keyed(200, 4)))))
+      sort_by(descending, keyed(200, 4)))
     _ <- assert_eq(state, "mutvec_sort_by allocating key", sorted_by_text(keyed(2001, 40)),
-      vec_to_list(vec_sort_by(key_text, vec_from_list(keyed(2001, 40)))))
+      sort_by(key_text, keyed(2001, 40)))
     _ <- assert_eq(state, "already sorted", sorted(range_to_list(0..99)), range_to_list(0..99))
     _ <- assert_eq(state, "reversed", sorted(list_reverse(range_to_list(0..99))), range_to_list(0..99))
     _ <- assert_eq(state, "strings", sorted(["pear", "fig", "apple", "fig"]), ["apple", "fig", "fig", "pear"])
     # A `<-` on a Maybe unwraps it; the element reads must not, Nothing included.
     _ <- assert_eq(state, "maybes", sorted([Just(3), Nothing, Just(1)]), [Nothing, Just(1), Just(3)])
     _ <- assert_eq(state, "maybes through the merge", sorted(maybes(41)),
-      vec_to_list(vec_sort(vec_from_list(maybes(41)))))
+      sort(maybes(41)))
     summary(state)
