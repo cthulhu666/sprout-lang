@@ -95,6 +95,3 @@ runtime/sprout_runtime.c:vector_empty:1
 runtime/sprout_runtime.c:vector_from_list:1
 runtime/sprout_runtime.c:vector_set:2
 runtime/sprout_runtime.c:write_file:4
-runtime/sprout_scheduler.c:__chan_new:1
-runtime/sprout_scheduler.c:__scope_open:1
-runtime/sprout_scheduler.c:__task_fork:1
