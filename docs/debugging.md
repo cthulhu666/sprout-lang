@@ -202,12 +202,12 @@ so a resident dictionary's mark cost is its entry count at ~100 ns apiece. A cen
 `map` that is *flat cycle to cycle* is resident data, not churn; one that climbs and resets is a
 shape bug. Same field, opposite diagnosis.
 
-**`intern` is not in the census's universe, which is why it has its own line.** Dict keys are
-interned into a permanent malloc'd table outside the arena, so they are invisible to every count
-above — to `cstr` in particular. Before this line existed, the galaxy client's census read
-`cstr=111(9.2KB)` while the program held 75,640 Dict keys
-([gc-generational-v0.md](gc-generational-v0.md) §13.6). Growth across cycles is the tell that a
-program is interning keys it *computes* (see `BACKLOG.md`); a flat number is a boot-time load.
+**`intern` is not in the census's universe, which is why it has its own line.** Interned strings
+(env, argv, terminal key tokens) live in a permanent malloc'd table outside the arena, so they are
+invisible to every count above — to `cstr` in particular. Dict and Set keys are ordinary heap
+strings and are counted in `cstr`; they used to be interned too, which is why the galaxy client's
+census read `cstr=111(9.2KB)` while the program held 75,640 Dict keys
+([gc-generational-v0.md](gc-generational-v0.md) §13.6). A flat number is a boot-time load.
 
 ## `just llvm-where <ll_file> <line>` — map an error line to its Sprout function
 

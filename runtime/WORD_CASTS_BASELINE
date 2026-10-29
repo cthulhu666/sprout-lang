@@ -65,7 +65,7 @@ runtime/sprout_runtime.c:sprout_analysis_ok_symbol_locations_from_response:5
 runtime/sprout_runtime.c:sprout_analysis_ok_vec_string_result:1
 runtime/sprout_runtime.c:sprout_err_string_result:1
 runtime/sprout_runtime.c:sprout_gc_sweep:1
-runtime/sprout_runtime.c:sprout_heap_child_value_payload:1
+runtime/sprout_runtime.c:sprout_heap_child_value_payload:2
 runtime/sprout_runtime.c:sprout_json_encode_string_array_from_vec_handle:1
 runtime/sprout_runtime.c:sprout_json_extract_string_array:2
 runtime/sprout_runtime.c:sprout_make_proc_result:2

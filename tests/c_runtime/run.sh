@@ -300,7 +300,7 @@ for sel in intern distinct arity weak; do
   done
 done
 
-echo "==> c runtime: the intern table is reported, and counts DISTINCT keys"
+echo "==> c runtime: the intern table is reported, and map keys do not grow it"
 # The only account of a permanent, off-arena allocation. See the file header for
 # why the assertion is a DIFFERENCE between two runs rather than an absolute.
 compile intern_table_report.c "$TMP_DIR/intern_table_report" -O0 -g
@@ -327,20 +327,19 @@ r=$(intern_of repeated)
   cat "$TMP_DIR/intern_distinct.err" >&2
   exit 1
 }
-# 2000 computed keys against one reused key: the gap is the 1999 the repeated run
-# does not add. Bounded both ways — a count of INSERTIONS would put the gap at 0.
+# 2000 computed keys against one reused key: the table must not grow with the
+# keys, so the gap stays near 0, not near 1999.
 gap=$(( d - r ))
-if [ "$gap" -lt 1900 ] || [ "$gap" -gt 2100 ]; then
+if [ "$gap" -gt 50 ]; then
   echo "  intern= grew by $gap between 2000 distinct keys and one repeated key" >&2
-  echo "  (distinct=$d repeated=$r); expected ~1999. It is not counting distinct keys." >&2
+  echo "  (distinct=$d repeated=$r); expected ~0. map_set is still interning its keys." >&2
   exit 1
 fi
-# Removing 2000 keys the map does not hold must intern none of them: at most the
-# repeated run's one key, so the excess over it stays near 0, not near 2000.
+# Removing 2000 keys the map does not hold must not grow it either.
 x=$(intern_of remove)
 if [ -z "$x" ] || [ $(( x - r )) -gt 50 ]; then
   echo "  removing 2000 absent keys grew intern= to $x (repeated=$r); expected ~$r." >&2
-  echo "  map_remove interns a key it then fails to find, a permanent leak per key." >&2
+  echo "  map_remove is still interning its keys." >&2
   exit 1
 fi
 # The census reports the table too, on its own line and labelled off-heap, so a
@@ -393,5 +392,26 @@ sw_aborts dup_slice_null "sprout_str_dup_slice: null input"
 sw_aborts adopt_null "sprout_str_adopt: null input"
 sw_aborts register_arena "sprout_str_register: arena String"
 sw_prints old_wrappers old-wrappers-ok
+
+echo "==> c runtime: a map key held only by the map survives collection"
+# Every allocation collects (SPROUT_GC_STRESS=1, set by the case itself); the
+# sanitizer build also catches a key read after it was freed.
+MKS="$TMP_DIR/map_key_survival"
+if ! compile map_key_survival.c "$MKS" -O1 -g -fsanitize=address,undefined; then
+  echo "  sanitizer build unavailable; using unsanitized fallback"
+  compile map_key_survival.c "$MKS" -O0 -g
+fi
+for lineage in 0 1; do
+  SPROUT_GC_LINEAGE="$lineage" ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
+    "$MKS" > "$TMP_DIR/mks.out" 2> "$TMP_DIR/mks.err" || {
+    echo "  map key survival failed (SPROUT_GC_LINEAGE=$lineage):" >&2
+    cat "$TMP_DIR/mks.out" "$TMP_DIR/mks.err" >&2
+    exit 1
+  }
+  grep -q "^map-key-survival$" "$TMP_DIR/mks.out" || {
+    echo "  map key survival did not run to completion (SPROUT_GC_LINEAGE=$lineage)" >&2
+    exit 1
+  }
+done
 
 echo "==> c runtime tests passed"

@@ -9,9 +9,7 @@ The rest is a proposal. Comes from [byte-buffer-v0.md](byte-buffer-v0.md) §5.4,
 The only pure way to write at an index is `vec_set`, which copies the whole vector: 1 µs at
 1,000 elements, 80 µs at 100,000 (§3.1). A loop of k writes over n elements costs O(n·k).
 `MutVec` writes in place, but every operation is `!{IO}`, and Sprout cannot hide `IO` behind a
-pure signature. There is no other pure structure to fall back on: `Dict` takes only `String` keys,
-and keeps every key it was given for the life of the process (BACKLOG P2 **A `Dict` key is
-interned permanently**).
+pure signature. There is no other pure structure to fall back on: `Dict` takes only `String` keys.
 
 **Typical programs.** Sieves, graph searches, histograms and DP tables are what people write
 first in a general-purpose language, and each writes to an array by index. §3.2 measures four:

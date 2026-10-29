@@ -35,7 +35,6 @@ Non-goals:
 - Defeating deliberate bypasses (`memcpy` into a word, union punning, arithmetic that moves an
   address into a non-address integer type). The threat is an accidental cast, which is what
   d9bcd11c was.
-- The permanent interning of Dict keys (`BACKLOG.md`: "A `Dict` key is interned permanently").
 
 ## 3. Prior art
 
