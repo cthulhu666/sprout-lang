@@ -61,18 +61,9 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
 - [ ] `P2` **The cleanup track's value is unmeasured.** The ledger's tenth column says how many
   cleanups survived their skeptic, and the findings file their DO/SKIP, but not how many get acted
   on, or whether four one-angle passes at `xhigh` find more than one four-angle pass. Count fixed vs
-  declined over a few runs (needs the disposition entry above) — that also calibrates
-  `WORTH_THRESHOLD = 3`, chosen, not measured. Then decide whether `CLEANUP_LADDER` earns its upper
-  rung, or the track its two agents at all.
-
-- [ ] `P2` **Worth scores collapse to 2 or 3, so the 1-5 scale is a yes/no at the threshold.** Over
-  20 runs (2026-10-10..13) the skeptic scored 114 confirmed cleanups 1×1, 64×2, 47×3, 2×4, 0×5.
-  Likely causes: the cleanup pass is diff-scoped, so no HIGH cleanup has ever been proposed; the
-  skeptic scores size, not kind (44 of 64 twos say "small"; duplication removal, a 4 by anchor,
-  got 2s); the prompt nets gain against cost, and every compiler edit costs a reseed; and it sees
-  the reviewer's severity (LOW mostly → 2, n=16). Try: separate gain and cost scores combined by
-  the script, hide severity, one worked example per anchor — or a plain DO/SKIP. Judge any change
-  against the disposition data the entry above asks for.
+  declined over a few runs (needs the disposition entry above) — that also calibrates the skip
+  rate per reason (`scope`, `cost`, `risk`, `taste`), not yet measured. Then decide whether
+  `CLEANUP_LADDER` earns its upper rung, or the track its two agents at all.
 
 - [ ] `P2` **Doc and comment drift is ~20% of findings, and no angle asks for it.** Of 67 raw
   findings over 11 runs, about 14 were stale comments, spec prose, PR-body claims or diagnostic

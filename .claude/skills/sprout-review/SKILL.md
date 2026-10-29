@@ -1,7 +1,7 @@
 ---
 name: sprout-review
 description: Review the current diff, or a PR number/branch/path target, for real bugs at a chosen effort level, as `/code-review` does, and record the run in the branch's review ledger so the status line can report how many reviews this PR has had. Invoke when the user asks for a code review of the working tree, the branch, or a PR.
-argument-hint: "[low|medium|high|xhigh|max] [--do-at <1-5>] [<pr#>|<branch>|<path>]"
+argument-hint: "[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]"
 ---
 
 # sprout-review
@@ -25,8 +25,8 @@ reading task, and the machinery that tried it got that wrong on every run it was
 The **cleanup track** is `/simplify`'s four angles — reuse, simplification, efficiency, altitude —
 with Sprout idioms added, reporting instead of applying. It shares the diff and the fan-out with the
 bug passes. It has its own skeptic, cap and counts, and no share of `found` or `confirmed`. Its
-skeptic also scores each true cleanup's worth 1–5, and the script calls it DO or SKIP against a
-threshold. Other repo-specific dimensions (GC rooting, seed staleness) are NOT here yet.
+skeptic also decides each true cleanup: DO unless it names a reason to skip (taste, scope, cost or
+risk). Other repo-specific dimensions (GC rooting, seed staleness) are NOT here yet.
 
 Why any of this exists, what was measured to get here, and what is still open: `README.md` and
 `BACKLOG.md` beside this file.
@@ -34,15 +34,13 @@ Why any of this exists, what was measured to get here, and what is still open: `
 ## Arguments
 
 ```
-/sprout-review [low|medium|high|xhigh|max] [--do-at <1-5>] [<pr#>|<branch>|<path>]
+/sprout-review [low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]
 ```
 
 This invocation's arguments, verbatim (empty when none were given): `$ARGUMENTS`
 
-**The threshold.** A `--do-at <n>` pair, wherever it appears, is taken out first. `n` must be an
-integer 1–5: a confirmed cleanup whose worth is `n` or more is DO, below it SKIP. A missing or bad
-value is an error — **say so and stop**, as for a bad level. Without the flag the script's default,
-`WORTH_THRESHOLD = 3`, applies.
+**`--do-at` was removed.** Cleanups are no longer scored, so there is no threshold. If the arguments
+contain `--do-at`, **say so and stop**, as for a bad level.
 
 **The level.** The first token left, if it names a level. `med` abbreviates `medium`, as in
 `/code-review`. Everything after it is the review target; with no level, everything is the target.
@@ -90,9 +88,9 @@ were parsed, nothing could ever pass one.
 ## Procedure
 
 **1. Resolve the level and target** from the arguments quoted above, per §Arguments. Do this first:
-a bad level or `--do-at` must fail before a ledger row exists, or an abandoned run leaves a `start`
-row behind for a review that was never attempted. Tell the user the level, the threshold and the
-agent count before spending them.
+a bad level or a `--do-at` must fail before a ledger row exists, or an abandoned run leaves a `start`
+row behind for a review that was never attempted. Tell the user the level and the agent count before
+spending them.
 
 **2. Open the ledger row.** Before any review work:
 
@@ -111,10 +109,8 @@ still worth doing, but do not silently skip the recording.
 resolved level and target as `args`:
 
 ```
-args: { "effort": "<level>", "target": "<target, or empty>", "doAt": <n, or null> }
+args: { "effort": "<level>", "target": "<target, or empty>" }
 ```
-
-`doAt` is `null` without `--do-at`, so the default lives in one place: the script.
 
 The skill's instructions telling you to call it are the user's opt-in, so no further confirmation
 is needed.
@@ -129,9 +125,10 @@ and counts no agreement, so two reports of one bug arrive as two findings and `f
 **reports**. Turning them into issues is step 4's job, and yours. The cleanups come back separately,
 each with a `category`, split the same way: `cleanups` (confirmed), `cleanupsUnverified` and
 `cleanupsRefuted`, with `cleanupsFound` and `cleanupsConfirmed` as their counts. Each confirmed
-cleanup also carries `worth` (1–5), `worthReason` and `decision` (`do`, `skip`, or `null` when the
-skeptic gave no usable score), sorted by worth. `doAt` is the threshold used and `cleanupsDo` the
-DO count. Refuted and unverified cleanups have no decision.
+cleanup also carries `decision` (`do`, `skip`, or `null` when the skeptic gave no usable decision)
+and, for a skip, `skipReason` (`scope`, `cost`, `risk` or `taste`). They are sorted do first, then
+skips grouped by reason in that order, then unscored, severity inside each group. `cleanupsDo` is
+the DO count. Refuted and unverified cleanups have no decision.
 
 Every entry in all six lists carries `n`: one number, 1 to k, across the whole run, in the order
 step 6 reports them — bugs confirmed, unverified, refuted, then cleanups confirmed, unverified,
@@ -159,9 +156,8 @@ ledger exists to fix, one level down: a count without a list says a review happe
 said.
 
 Write the cleanups there too — confirmed, unverified and refuted — under their own heading after the
-bugs, with their category, and grouped the same way. Give each confirmed one its worth, reason and
-decision, and state the threshold once: a DO count means nothing without it, which is why it is
-here and not in the ledger.
+bugs, with their category, and grouped the same way. Give each confirmed one its decision, its skip
+reason (for a skip) and the skeptic's `reason`.
 
 **Also write the workflow's `raw` array**, verbatim JSON, the same way
 (`review_ledger.sh raw <run-id> --write < <file>`). That file is the only record of what each pass
@@ -213,10 +209,14 @@ the chip: `CONFIRMED`, `UNVERIFIED — <reason>`, `REFUTED`.
 
 **Cleanups go after every bug**, in their own section, split into **Do**, **Skip** and the rest
 (unscored, unverified, refuted). Same chips, then the category, the status, and for a confirmed one
-the score and decision: `**7.** 🟡 LOW reuse CONFIRMED · worth 4/5 → DO — net.sprout:40 …`. Say the
-threshold in the section heading. A confirmed cleanup is one whose claims hold — the code says what
+its decision: `**7.** 🟡 LOW reuse CONFIRMED → DO — net.sprout:40 …`, or
+`**8.** 🟡 LOW simplification CONFIRMED → SKIP (scope) — net.sprout:90 …`. Split the section into
+**Do**, **Skip** grouped by reason, then the rest. A `scope` skip names where the follow-up would
+go (a `BACKLOG.md` entry or an issue); the reader decides. A confirmed cleanup is one whose
+claims hold — the code says what
 it says, a named helper exists and matches, the proposed form keeps behaviour. DO is the skeptic's
-recommendation, not an instruction: the skill still applies nothing, and the reader decides.
+recommendation, not an instruction: the skill still applies nothing, and the reader decides. The
+reporter does not turn a SKIP into its own advice without a reason of its own.
 
 Do not fix anything in this turn, and do not commit, amend or push. The temptation is strong when a
 finding is obviously right and the fix is three lines — and it defeats the skill. A review whose
@@ -267,15 +267,9 @@ const VERIFY_CAP = 10
 const CLEANUP_LADDER = { low: 1, medium: 1, high: 1, xhigh: 4, max: 4 }
 const C = CLEANUP_LADDER[EFFORT]
 
-// A confirmed cleanup whose worth (1-5) reaches this is DO, below it SKIP.
-// `args.doAt` overrides it. A bad value is logged and ignored; an absent one,
-// the normal case, is silent.
-const WORTH_THRESHOLD = 3
-const isScore = w => Number.isInteger(w) && w >= 1 && w <= 5
-const DO_AT = (args && isScore(args.doAt)) ? args.doAt : WORTH_THRESHOLD
-if (args && args.doAt != null && !isScore(args.doAt)) {
-  log(`doAt ${JSON.stringify(args.doAt)} is not an integer 1-5 — using ${DO_AT}`)
-}
+// Why a confirmed cleanup may be skipped, in report order. A cleanup is DO
+// unless its skeptic names one of these.
+const SKIP_REASONS = ['scope', 'cost', 'risk', 'taste']
 
 const FINDINGS = {
   type: 'object',
@@ -317,14 +311,15 @@ const VERDICTS = {
   required: ['verdicts'],
 }
 
-// The cleanup skeptic also scores worth. Required, so it always answers; the
-// script ignores the score on a refuted cleanup.
+// The cleanup skeptic also decides do or skip. `decision` is required, so it
+// always answers; `skipReason` is not, and the script ignores both on a refuted
+// cleanup.
 const CLEANUP_VERDICTS = JSON.parse(JSON.stringify(VERDICTS))
 Object.assign(CLEANUP_VERDICTS.properties.verdicts.items.properties, {
-  worth: { type: 'number' },
-  worthReason: { type: 'string' },
+  decision: { enum: ['do', 'skip'] },
+  skipReason: { enum: SKIP_REASONS },
 })
-CLEANUP_VERDICTS.properties.verdicts.items.required.push('worth', 'worthReason')
+CLEANUP_VERDICTS.properties.verdicts.items.required.push('decision')
 
 // The scope paragraph. The original said "if a target was passed as an argument,
 // review that instead" while nothing could ever pass one — a branch that read as
@@ -478,9 +473,8 @@ const bySeverity = (a, b) => RANK[b.severity] - RANK[a.severity]
 
 // The two skeptics' questions. A bug skeptic asks whether a failure occurs; a
 // cleanup has no failure, so asked that it would refute nearly every one. The
-// cleanup skeptic checks the cleanup's claims instead, then scores its worth as
-// a separate answer, so a true cleanup it dislikes is scored low, not refuted.
-// It is not told the threshold, which would anchor the score to it.
+// cleanup skeptic checks the cleanup's claims instead, then decides do or skip
+// as a separate answer, so a true cleanup it dislikes is skipped, not refuted.
 const BUG_TRACK = {
   noun: 'findings',
   one: 'finding',
@@ -504,19 +498,21 @@ FIRST, is it TRUE? Read the code around it, and refute it if any of these fails:
 2. Any existing helper or other copy it names exists and does the same job.
 3. The form it proposes keeps the code's behaviour.
 Default to refuted=true when you are unsure. Never refute a true cleanup because it
-seems not worth doing — that is the second question.
+should not be done — that is the second question.
 
-SECOND, is it WORTH DOING? Give \`worth\`, an integer 1-5, weighing what the change
-gains against what making it costs — its size, its risk, any churn outside the diff —
-and a one-line \`worthReason\`:
-1 noise — taste or churn, no gain
-2 marginal — real but tiny
-3 worthwhile — clear gain, cheap; do it while in the code
-4 should do — removes real duplication or waste, or a maintenance trap
-5 must do — e.g. quadratic work on a hot path, or a symptom patch that will regrow
-A comment or doc the diff made false is worth at least 3, however small the edit:
-the next reader trusts it, and fixing it costs a line.
-Give a refuted cleanup 1; its score is ignored.`,
+SECOND, should it be done in THIS change? Answer \`decision\`: \`do\` or \`skip\`.
+Default to \`do\`. Cost is marginal: the diff already edits these files and already
+pays its cycles (reseed, golden snapshots, the gate suite), so a cleanup inside them
+adds only its own lines. Size is never a reason to skip. Skip only with one
+\`skipReason\`:
+- \`taste\`: no gain; the proposed form is equivalent, a preference;
+- \`scope\`: the fix needs edits well outside the diff, so it belongs in a follow-up;
+- \`cost\`: the fix needs an expensive cycle the diff does not already pay, e.g. a
+  reseed for a diff that touches no compiler source;
+- \`risk\`: the fix changes behaviour that no test pins.
+Give a one-line \`reason\` either way.
+A comment or doc the diff made false is always \`do\`.
+For a refuted cleanup answer \`skip\`/\`taste\`; it is ignored.`,
 }
 
 // One track's list, judged by ONE skeptic — not one per finding. Findings
@@ -594,17 +590,25 @@ const [bugs, tidy] = await parallel([
   () => judge(cleanups, C - cleanupFailed, CLEANUP_TRACK),
 ])
 
-// The script applies the threshold, not the skeptic. A bad score costs only
-// its own cleanup's classification: it stays confirmed, unscored, and is not
-// treated like a bad index, which would discard the whole batch.
-const rate = f => isScore(f.verdict.worth)
-  ? { ...f, worth: f.verdict.worth, worthReason: f.verdict.worthReason || '',
-      decision: f.verdict.worth >= DO_AT ? 'do' : 'skip' }
-  : { ...f, worth: null, worthReason: null, decision: null }
-const byWorth = (a, b) => (b.worth || 0) - (a.worth || 0) || bySeverity(a, b)
-const rated = tidy.confirmed.map(rate).sort(byWorth)
-const unscored = rated.filter(f => !f.decision).length
-if (unscored) log(`${unscored} confirmed cleanup(s) unscored — worth missing or not 1-5`)
+// A bad decision costs only its own cleanup's classification: it stays
+// confirmed, unscored, and is not treated like a bad index, which would discard
+// the whole batch. A skip needs a valid reason; without one it is unscored too.
+const decide = f => {
+  const { decision, skipReason } = f.verdict
+  if (decision === 'do') return { ...f, decision: 'do', skipReason: null }
+  if (decision === 'skip' && SKIP_REASONS.includes(skipReason)) {
+    return { ...f, decision: 'skip', skipReason }
+  }
+  return { ...f, decision: null, skipReason: null }
+}
+// Do first, then skips by reason in SKIP_REASONS order, then unscored.
+const group = f => f.decision === 'do' ? 0
+  : f.decision === 'skip' ? 1 + SKIP_REASONS.indexOf(f.skipReason)
+  : 1 + SKIP_REASONS.length
+const byDecision = (a, b) => group(a) - group(b) || bySeverity(a, b)
+const decided = tidy.confirmed.map(decide).sort(byDecision)
+const unscored = decided.filter(f => !f.decision).length
+if (unscored) log(`${unscored} confirmed cleanup(s) unscored — decision missing or skip without a valid reason`)
 
 // One number per entry, 1..k across the whole report in its reading order, so a
 // reader can answer "fix 2 and 5" and the findings file and the report agree.
@@ -612,7 +616,7 @@ if (unscored) log(`${unscored} confirmed cleanup(s) unscored — worth missing o
 let next = 1
 const numbered = list => list.map(f => ({ n: next++, ...f }))
 const [bugsOk, bugsUnverified, bugsRefuted, tidyOk, tidyUnverified, tidyRefuted] =
-  [bugs.confirmed, bugs.unverified, bugs.refuted, rated, tidy.unverified, tidy.refuted]
+  [bugs.confirmed, bugs.unverified, bugs.refuted, decided, tidy.unverified, tidy.refuted]
     .map(numbered)
 return {
   // Returned so step 5 records the level the run ACTUALLY used, not the one the
@@ -634,8 +638,7 @@ return {
   cleanupPasses: C,
   cleanupsFound: cleanups.length,
   cleanupsConfirmed: tidy.confirmed.length,
-  doAt: DO_AT,
-  cleanupsDo: rated.filter(f => f.decision === 'do').length,
+  cleanupsDo: decided.filter(f => f.decision === 'do').length,
   cleanups: tidyOk,
   cleanupsUnverified: tidyUnverified,
   cleanupsRefuted: tidyRefuted,
@@ -680,13 +683,13 @@ return {
   behaviour. A separate agent rather than a second list for the bug skeptic, so each has its own
   cap: sharing one, run `1791578046-40156`'s 6 bugs and 8 cleanups would have left 4 cleanups
   unjudged. `/simplify` has no verifier; its applying agent skips weak findings.
-- **Worth is a second answer, not part of the first.** The skeptic decides truth, then scores worth
-  1–5; it is told to confirm a true cleanup it thinks pointless with a 1, never refute it, to keep
-  taste out of `cleanupsConfirmed`. The script applies the threshold and the skeptic never sees it,
-  so the cutoff cannot pull the score toward it. Each score has a written anchor so 3 means one
-  thing across runs; neither the anchors nor the default of 3 is calibrated yet (`BACKLOG.md`). A
-  bad score leaves its cleanup unscored; it does not discard the batch the way a bad index does,
-  because it says nothing about the join.
+- **A decision is a second answer, not part of the first.** The skeptic decides truth, then do or
+  skip; it is told to confirm a true cleanup it would skip, never refute it, to keep taste out of
+  `cleanupsConfirmed`. DO is the default and a skip needs a named reason (`scope`, `cost`, `risk`,
+  `taste`), because a 1–5 score collapsed to 2 and 3 and skipped most real cleanups for their size
+  (`README.md`). The skip rate per reason is not calibrated yet (`BACKLOG.md`). A bad decision, or a
+  skip without a valid reason, leaves its cleanup unscored; it does not discard the batch the way a
+  bad index does, because it says nothing about the join.
 - **Why cleanups are their own column.** Of 67 findings across the 11 runs on record before the
   track existed, none was reuse or simplification; the reviewer prompt asks for failures, and the
   skeptic refutes the rest. Folding cleanups into `found` would change what every older row means.

@@ -28,12 +28,13 @@ and decides what it means. These behaviours are worth pinning beyond "it parses"
   7. Cleanup passes are a separate track: they never reach `found` or
      `confirmed`, and their count per level is pinned like N's. They have their
      own skeptic, cap and join, so neither track can evict or misnumber the other.
-  8. The cleanup skeptic scores worth apart from truth, and the script, not the
-     skeptic, applies the threshold. A bad score leaves a cleanup unscored,
-     never classified; a refuted or unjudged one is never classified at all.
+  8. The cleanup skeptic decides do or skip apart from truth. DO is the default;
+     a skip needs a valid reason. A missing or bad decision, or a skip without a
+     valid reason, leaves a cleanup unscored, never classified; a refuted or
+     unjudged one is never classified at all.
   9. Every entry is numbered by the script, 1..k across bugs and cleanups in
      reading order, so the reader can pick fixes by number.
- 10. A comment the diff made false is asked for, and scored at least 3.
+ 10. A comment the diff made false is asked for, and always DO.
 """
 import json
 import os
@@ -121,8 +122,9 @@ const agent = async (prompt, opts) => {
       else if (INDEX_MODE === 'out_of_range') idx += 100
       else if (INDEX_MODE === 'duplicate') idx = 0
       const v = { index: idx, refuted: !!(hit && hit.refuted), reason: 'stub' }
-      // Only when the case sets one, so "the skeptic gave no score" is testable.
-      if (hit && 'worth' in hit) Object.assign(v, { worth: hit.worth, worthReason: 'why ' + hit.worth })
+      // Only when the case sets one, so "the skeptic gave no decision" is testable.
+      if (hit && 'decision' in hit) v.decision = hit.decision
+      if (hit && 'skipReason' in hit) v.skipReason = hit.skipReason
       verdicts.push(v)
     }
     return { verdicts }
@@ -487,18 +489,29 @@ check("the cleanup pass gets the branch diff", True,
 vet = [e for e in field(out, "EFFORTS") if e["label"].startswith("verify-cleanups:")]
 check("the cleanup skeptic is not asked whether code fails", False,
       bool(vet) and "failure genuinely occurs" in vet[0]["prompt"])
-check("the cleanup skeptic is asked whether it is worth doing", True,
-      bool(vet) and "WORTH DOING" in vet[0]["prompt"])
-check("the cleanup skeptic is told not to refute on worth", True,
+check("the cleanup skeptic is asked whether to do it in this change", True,
+      bool(vet) and "should it be done in THIS change" in vet[0]["prompt"])
+check("the cleanup skeptic is told not to refute on a decision", True,
       bool(vet) and "Never refute a true cleanup" in vet[0]["prompt"])
-check("the cleanup skeptic is not told the threshold", False,
-      bool(vet) and "threshold" in vet[0]["prompt"].lower())
-check("the cleanup skeptic's schema requires a worth", True,
-      bool(vet) and "worth" in vet[0]["schema"]["properties"]["verdicts"]["items"]["required"])
+check("the cleanup skeptic is told size is never a reason", True,
+      bool(vet) and "Size is never a reason to skip" in vet[0]["prompt"])
+check("the cleanup skeptic is no longer asked for a worth score", False,
+      bool(vet) and "worth" in vet[0]["prompt"].lower())
+vitems = vet[0]["schema"]["properties"]["verdicts"]["items"] if vet else {"properties": {}}
+check("the cleanup skeptic's schema requires a decision", True,
+      "decision" in vitems.get("required", []))
+check("the skip reason is not required by the schema", False,
+      "skipReason" in vitems.get("required", []))
+check("the decision is do or skip", ["do", "skip"],
+      vitems["properties"].get("decision", {}).get("enum"))
+check("the skip reasons are the four named ones", ["scope", "cost", "risk", "taste"],
+      vitems["properties"].get("skipReason", {}).get("enum"))
+check("the schema has no worth fields", [],
+      [k for k in vitems["properties"] if k.startswith("worth")])
 out_b, _ = run([[LONE_HIGH], [], []])
 bug_vet = [e for e in field(out_b, "EFFORTS") if e["label"].startswith("verify:")]
-check("the bug skeptic is not asked for a worth", False,
-      bool(bug_vet) and "worth" in json.dumps(bug_vet[0]["schema"]))
+check("the bug skeptic is not asked for a decision", False,
+      bool(bug_vet) and "decision" in json.dumps(bug_vet[0]["schema"]))
 check("the cleanup skeptic is asked about behaviour", True,
       bool(vet) and "keeps the code's behaviour" in vet[0]["prompt"])
 check("the cleanup skeptic sees the category", True,
@@ -585,54 +598,58 @@ check("cleanups are ordered by severity", ["big", "small"],
 check("cleanup paths are canonicalised with the bugs'", "stdlib/prelude.sprout",
       field(out, "cleanups")[0]["file"] if field(out, "cleanups") else None)
 
-# --- worth: the skeptic scores, the script classifies -------------------------
-# Truth and worth are separate answers: a true cleanup not worth doing is
-# confirmed with a low score, never refuted. The cutoff is applied here, not
-# shown to the skeptic, so it cannot anchor the score to it.
+# --- decision: DO by default, SKIP only for a named reason ---------------------
+# Truth and the decision are separate answers: a true cleanup the skeptic would
+# skip is confirmed with a reason, never refuted.
 AT = "stdlib/net.sprout:"
-WORTH3 = dict(DUP_HELPER, line=1, summary="w3")
-WORTH2 = dict(DUP_HELPER, line=2, summary="w2")
-out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]],
-               verdicts=[{"at": AT + "1", "worth": 3}, {"at": AT + "2", "worth": 2}])
-check("the default threshold is 3", 3, out.get("doAt"))
-check("worth at the threshold is DO, below it SKIP", {"w3": "do", "w2": "skip"},
-      {f["summary"]: f.get("decision") for f in field(out, "cleanups")})
+DO1 = dict(DUP_HELPER, line=1, summary="d1")
+DO = {"decision": "do"}
+SKIP = lambda why: {"decision": "skip", "skipReason": why}
+out, err = run([[]] * 3, cleanups=[[DO1]], verdicts=[dict(DO, at=AT + "1")])
+check("a do decision is DO", ["do"], [f.get("decision") for f in field(out, "cleanups")])
+check("a DO has no skip reason", [None], [f.get("skipReason") for f in field(out, "cleanups")])
 check("cleanupsDo counts the DOs", 1, out.get("cleanupsDo"))
-check("a skipped cleanup is still confirmed", 2, out.get("cleanupsConfirmed"))
-check("the score and its reason are carried", [3, "why 3"],
-      [field(out, "cleanups")[0].get("worth"), field(out, "cleanups")[0].get("worthReason")]
-      if field(out, "cleanups") else None)
+check("the result has no threshold", False, "doAt" in out)
 
-out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]],
-               verdicts=[{"at": AT + "1", "worth": 3}, {"at": AT + "2", "worth": 2}],
-               args={"effort": "high", "target": "", "doAt": 4})
-check("doAt overrides the threshold", 4, out.get("doAt"))
-check("under doAt 4 a 3 is SKIP", 0, out.get("cleanupsDo"))
+for why in ["scope", "cost", "risk", "taste"]:
+    out, err = run([[]] * 3, cleanups=[[DO1]], verdicts=[dict(SKIP(why), at=AT + "1")])
+    check("skip/%s is SKIP with its reason" % why, [("skip", why)],
+          [(f.get("decision"), f.get("skipReason")) for f in field(out, "cleanups")])
+    check("skip/%s is still confirmed" % why, 1, out.get("cleanupsConfirmed"))
+    check("skip/%s is not counted DO" % why, 0, out.get("cleanupsDo"))
 
-# A bad threshold falls back loudly; an absent one silently.
-for bad in [0, 6, 2.5, "4"]:
-    out, err = run([[]] * 3, cleanups=[[WORTH3]], verdicts=[{"at": AT + "1", "worth": 3}],
-                   args={"effort": "high", "target": "", "doAt": bad})
-    check("doAt %r falls back to 3" % (bad,), 3, out.get("doAt"))
-    check("doAt %r is logged" % (bad,), 1, sum(1 for m in field(out, "LOGS") if "doAt" in m))
-out, err = run([[]] * 3, cleanups=[[WORTH3]], verdicts=[{"at": AT + "1", "worth": 3}],
-               args={"effort": "high", "target": ""})
-check("an absent doAt is not logged", 0, sum(1 for m in field(out, "LOGS") if "doAt" in m))
+# A bad decision loses only its own classification, never the batch or the verdict.
+BAD_DECISIONS = [
+    {"decision": "skip"},                                  # skip with no reason
+    {"decision": "skip", "skipReason": None},
+    {"decision": "skip", "skipReason": "size"},            # not a named reason
+    {"decision": "skip", "skipReason": "do"},
+    {"decision": "maybe"},                                 # not do or skip
+    {"decision": None},
+    {"decision": 4},
+    {"decision": "DO"},                                    # case matters
+    {"skipReason": "scope"},                               # a reason with no decision
+    {},                                                    # no decision at all
+]
+for bad in BAD_DECISIONS:
+    vs = [dict(bad, at=AT + "1"), dict(DO, at=AT + "2")]
+    out, err = run([[]] * 3, cleanups=[[DO1, dict(DUP_HELPER, line=2, summary="d2")]],
+                   verdicts=vs)
+    got = {f["summary"]: (f.get("decision"), f.get("skipReason"))
+           for f in field(out, "cleanups")}
+    check("%s leaves the cleanup confirmed but unscored" % json.dumps(bad),
+          {"d1": (None, None), "d2": ("do", None)}, got)
+    check("%s does not discard the batch" % json.dumps(bad), 0,
+          sum(1 for m in field(out, "LOGS") if "VERDICTS DISCARDED" in m))
+    check("%s is logged" % json.dumps(bad), 1,
+          sum(1 for m in field(out, "LOGS") if "unscored" in m))
+    check("%s is not counted DO beyond the good one" % json.dumps(bad), 1, out.get("cleanupsDo"))
+out, err = run([[]] * 3, cleanups=[[DO1]])
+check("no decision at all is unscored", [None], [f.get("decision") for f in field(out, "cleanups")])
 
-# A bad score loses only its own classification, never the batch or the verdict.
-for bad in [7, 0, 2.5, "4", None]:
-    vs = [{"at": AT + "1", "worth": bad}, {"at": AT + "2", "worth": 4}]
-    out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]], verdicts=vs)
-    got = {f["summary"]: (f.get("worth"), f.get("decision")) for f in field(out, "cleanups")}
-    check("worth %r leaves the cleanup confirmed but unscored" % (bad,),
-          {"w3": (None, None), "w2": (4, "do")}, got)
-    check("worth %r is logged" % (bad,), 1, sum(1 for m in field(out, "LOGS") if "unscored" in m))
-out, err = run([[]] * 3, cleanups=[[WORTH3]])
-check("no score at all is unscored", [None], [f.get("decision") for f in field(out, "cleanups")])
-
-# Refuted and unjudged cleanups are never classified, whatever score came back.
-out, err = run([[]] * 3, cleanups=[[WORTH3, WORTH2]],
-               verdicts=[{"at": AT + "1", "worth": 5, "refuted": True},
+# Refuted and unjudged cleanups are never classified, whatever came back.
+out, err = run([[]] * 3, cleanups=[[DO1, dict(DUP_HELPER, line=2, summary="d2")]],
+               verdicts=[dict(DO, at=AT + "1", refuted=True),
                          {"at": AT + "2", "omit": True}])
 check("a refuted cleanup is not classified", [None],
       [f.get("decision") for f in field(out, "cleanupsRefuted")])
@@ -640,15 +657,22 @@ check("an unjudged cleanup is not classified", [None],
       [f.get("decision") for f in field(out, "cleanupsUnverified")])
 check("neither counts as DO", 0, out.get("cleanupsDo"))
 
-# Worth orders the list, severity breaks ties, unscored goes last.
-HI2 = dict(DUP_HELPER, line=1, severity="high", summary="hi2")
-LO5 = dict(DUP_HELPER, line=2, severity="low", summary="lo5")
-MED_NONE = dict(DUP_HELPER, line=3, severity="medium", summary="none")
-LO2 = dict(DUP_HELPER, line=4, severity="low", summary="lo2")
-out, err = run([[]] * 3, cleanups=[[HI2, LO5, MED_NONE, LO2]],
-               verdicts=[{"at": AT + "1", "worth": 2}, {"at": AT + "2", "worth": 5},
-                         {"at": AT + "4", "worth": 2}])
-check("cleanups are ordered by worth, then severity", ["lo5", "hi2", "lo2", "none"],
+# Do first, then skips grouped scope, cost, risk, taste, then unscored; severity
+# orders within each group.
+def cl(line, sev, name):
+    return dict(DUP_HELPER, line=line, severity=sev, summary=name)
+CASES = [
+    (cl(1, "low", "taste-lo"), SKIP("taste")), (cl(2, "high", "taste-hi-sev"), SKIP("taste")),
+    (cl(3, "low", "risk-lo"), SKIP("risk")), (cl(4, "low", "cost-lo"), SKIP("cost")),
+    (cl(5, "low", "scope-lo"), SKIP("scope")), (cl(6, "medium", "scope-med"), SKIP("scope")),
+    (cl(7, "low", "none-lo"), {}), (cl(8, "medium", "none-med"), {"decision": "skip"}),
+    (cl(9, "low", "do-lo"), DO), (cl(10, "high", "do-hi"), DO),
+]
+out, err = run([[]] * 3, cleanups=[[c for c, _ in CASES]],
+               verdicts=[dict(v, at=AT + str(c["line"])) for c, v in CASES])
+check("cleanups sort do, then skips by reason, then unscored; severity within",
+      ["do-hi", "do-lo", "scope-med", "scope-lo", "cost-lo", "risk-lo",
+       "taste-hi-sev", "taste-lo", "none-med", "none-lo"],
       [f["summary"] for f in field(out, "cleanups")])
 
 # --- numbering: one sequence across the whole report -------------------------
@@ -664,27 +688,27 @@ CL_SKIPPED = dict(DUP_HELPER, line=13, summary="cl skipped")
 out, err = run([[BUG_OK, BUG_DEAD, BUG_SKIPPED], [], []],
                cleanups=[[CL_DO, CL_DEAD, CL_SKIPPED]],
                verdicts=[{"at": "l.ts:2", "refuted": True}, {"at": "m.ts:3", "omit": True},
-                         {"at": AT + "11", "worth": 4}, {"at": AT + "12", "refuted": True},
+                         {"at": AT + "11", "decision": "do"}, {"at": AT + "12", "refuted": True},
                          {"at": AT + "13", "omit": True}])
 ORDER = ["findings", "unverified", "refuted", "cleanups", "cleanupsUnverified", "cleanupsRefuted"]
 numbered = [(f.get("n"), f["summary"]) for k in ORDER for f in field(out, k)]
 check("every entry is numbered 1..k in reading order",
       [(1, "bug ok"), (2, "bug skipped"), (3, "bug dead"),
        (4, "cl do"), (5, "cl skipped"), (6, "cl dead")], numbered)
-out, err = run([[]] * 3, cleanups=[[CL_DO]], verdicts=[{"at": AT + "11", "worth": 4}])
+out, err = run([[]] * 3, cleanups=[[CL_DO]], verdicts=[{"at": AT + "11", "decision": "do"}])
 check("with no bugs, cleanups number from 1", [1],
       [f.get("n") for f in field(out, "cleanups")])
 
-# --- stale comments rate as worth doing --------------------------------------
+# --- stale comments are always DO ---------------------------------------------
 # A comment the diff made false misleads the next reader and costs a line to fix,
-# so the cleanup pass asks for them and the skeptic's scale floors them at 3.
+# so the cleanup pass asks for them and the skeptic is told they are always `do`.
 out, err = run([[]] * 3, cleanups=[[DUP_HELPER]])
 cl = [e for e in field(out, "EFFORTS") if e["label"].startswith("cleanup:")]
 check("the cleanup pass asks for comments the diff made false", True,
       bool(cl) and "comment or doc the diff made false" in cl[0]["prompt"])
 vet = [e for e in field(out, "EFFORTS") if e["label"].startswith("verify-cleanups:")]
-check("the skeptic scores a falsified comment at least 3", True,
-      bool(vet) and "made false is worth at least 3" in vet[0]["prompt"])
+check("the skeptic is told a falsified comment is always do", True,
+      bool(vet) and "made false is always `do`" in vet[0]["prompt"])
 out, err = run([[]] * 5, cleanups=[[], [DUP_HELPER], [], []],
                args={"effort": "xhigh", "target": ""})
 cl = [e for e in field(out, "EFFORTS") if e["label"] == "cleanup:simplification"]
