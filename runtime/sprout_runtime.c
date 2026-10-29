@@ -3157,16 +3157,12 @@ static const char* display_ctor_name(const char* name) {
   return dot != NULL ? dot + 1 : name;
 }
 
-long long print_str(const char* s) {
-  printf("%s\n", s);
+/* The String sinks: the prelude's `print_str` (stdout) and `eprint` (stderr) are plain
+   externs, so each takes the String as an i64 like the other String-taking externs. */
+long long print_str(long long s) {
+  printf("%s\n", (const char*)s);
   return 0;
 }
-long long eprint_str(const char* s) {
-  fprintf(stderr, "%s\n", s);
-  return 0;
-}
-/* Bridge for old stage-1 codegen that emits @eprint(i64) — Sprout strings are
-   heap pointers passed as i64 before emit_eprint_call was added. */
 long long eprint(long long s) {
   fprintf(stderr, "%s\n", (const char*)s);
   return 0;

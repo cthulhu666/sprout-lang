@@ -3065,7 +3065,7 @@ instruction, as for the two functions above. Being
 `extern` declarations they are also **never module-qualified** (§"Externs are
 outside the module system") — `import stdlib.bits` puts them in the build and they
 are then called by bare name. They are written `export extern fn`. A parameter or
-local binding with one of these names (or `print_str`, `to_double`,
+local binding with one of these names (or `to_double`,
 `double_to_bits`, `double_from_bits`) is an ordinary binding: a call through it calls the bound
 function.
 

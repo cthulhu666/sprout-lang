@@ -1,15 +1,14 @@
 module main
 
 # Every builtin whose lowering is directed by the CALL SITE has no symbol of its own to forward
-# to: `eprint` and `print_str` lower to @eprint_str / @print_str through a ptr coercion,
-# `to_double` and the bits family lower to a single LLVM instruction. Passing one as a
-# first-class value used to emit a wrapper calling a name that does not exist, and the two
-# halves of the family failed at different stages — a suppressed `declare` made `opt` reject the
-# wrapper, while @to_double and the bits family were declared and failed only at LINK.
+# to: `to_double` and the bits family lower to a single LLVM instruction. Passing one as a
+# first-class value used to emit a wrapper calling a name that does not exist, and the family
+# failed at LINK, where the symbol was declared but never defined.
 #
-# `print` is not one of them: it is an ordinary prelude function over ToString, so it takes the
-# plain constrained-function path as a value. It stays below as the control that each argument
-# type renders through its instance (`Bool` as `true`/`false`, not 1/0).
+# `print` and `eprint` are not among them: `eprint` is a plain extern, and `print` is an
+# ordinary prelude function over ToString, so each takes the ordinary path as a value. They
+# stay below as the control: `print` renders each argument type through its instance (`Bool` as
+# `true`/`false`, not 1/0), and `eprint` must still link.
 #
 # This fixture lives in conformance/run rather than tests/stdlib because this is the only corpus
 # that links and executes; an IR-only or grep-only gate cannot see either failure.

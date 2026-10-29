@@ -1,0 +1,76 @@
+module main
+import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.string as string
+
+# `print_str` and `eprint` are plain externs. An unknown extern is a GC trigger, so each is
+# allow-listed as non-allocating (ir_rooting.is_nonallocating_read): a write-only call does
+# not make a live String a rooting point.
+#
+# Two angles. The predicate: a call to each is not a trigger, an unlisted extern is. The IR:
+# a String live across `print_str(s)` / `eprint(s)` is not rooted, while the same program
+# calling an unlisted extern roots it.
+
+fn is_trigger(fname: String) -> Bool =
+  ir_rooting.op_triggers_gc_summary(
+    sprout_ir.IRCall("r", sprout_ir.IRTUnknown, fname, Cons("a", Nil)), dict_empty())
+
+fn count(haystack: String, needle: String) -> Int =
+  list_length(string.split(haystack, needle)) - 1
+
+fn translate_source(src: String) -> Result String String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> Err("lex error")
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Err("parse error")
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> Err("check: " ++ msg)
+            | typed_ast.TypedOk typed_prog env ->
+                ir_pipeline.compile_program_streaming(lowering.lower_program(typed_prog, env))
+
+fn get_ir_or_msg(src: String) -> String !{IO} =
+  do
+    match translate_source(src) with
+    | Ok ir -> ir
+    | Err msg -> "ERROR: " ++ msg
+
+# `s` is built by an allocating call, passed to `sink`, then returned: live across the sink call.
+fn sink_src(sink: String) -> String =
+  "extern fn " ++ sink ++ "(s: String) -> Unit !{IO}\n" ++
+  "fn mk(n: Int) -> String !{IO} = int_to_string(n)\n" ++
+  "fn driver(n: Int) -> String !{IO} =\n" ++
+  "  do\n" ++
+  "    s <- mk(n)\n" ++
+  "    " ++ sink ++ "(s)\n" ++
+  "    s\n"
+
+fn pushes(sink: String) -> Int !{IO} =
+  do
+    ir <- get_ir_or_msg("extern fn int_to_string(n: Int) -> String\n" ++ sink_src(sink))
+    count(ir, "sprout_gc_push_i64_root")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "print_str is not a GC trigger", !is_trigger("print_str"))
+    assert_true(state, "eprint is not a GC trigger", !is_trigger("eprint"))
+    assert_true(state, "an unlisted extern is a GC trigger", is_trigger("write_somewhere"))
+
+    unlisted <- pushes("write_somewhere")
+    print_str_pushes <- pushes("print_str")
+    eprint_pushes <- pushes("eprint")
+    assert_true(state, "the unlisted-extern twin roots the String across the call", unlisted > 0)
+    assert_true(state, "no root across print_str", print_str_pushes < unlisted)
+    assert_true(state, "no root across eprint", eprint_pushes < unlisted)
+    summary(state)

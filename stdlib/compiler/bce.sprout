@@ -867,7 +867,7 @@ fn any_member(names: List String, s: Set) -> Bool =
 
 fn safe_io_externs() -> Set =
   set_from_list(["vector_get_direct", "vector_mutset", "vec_make_filled", "ref_new", "ref_read",
-                 "ref_write", "eprint", "print_str", "eprint_str"])
+                 "ref_write", "eprint", "print_str"])
 
 # What a body calls: the global functions, and whether anything else could be unsafe.
 type Calls (..) = (unsafe: Bool, callees: List String)

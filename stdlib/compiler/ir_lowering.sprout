@@ -281,11 +281,6 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ "$cmp = call i64 @str_compare(i64 " ++ a ++ ", i64 " ++ b ++ ")\n" ++
       "  " ++ r ++ "$i1 = icmp " ++ pred ++ " i64 " ++ r ++ "$cmp, 0\n" ++
       "  " ++ r ++ " = zext i1 " ++ r ++ "$i1 to i64"
-  | sprout_ir.IRPrintStr r callee arg ->
-      # print_str / eprint_str take `const char*`; coerce the i64 String
-      # handle to ptr (inttoptr) before the call.
-      "  " ++ r ++ "$ptr = inttoptr i64 " ++ arg ++ " to ptr\n" ++
-      "  " ++ r ++ " = call i64 @" ++ callee ++ "(ptr " ++ r ++ "$ptr)"
   | sprout_ir.IRStrFromInt r n ->
       "  " ++ r ++ " = call i64 @int_to_string(i64 " ++ n ++ ")"
   | sprout_ir.IRMakeCtor r _ tag args ->
@@ -628,10 +623,6 @@ let runtime_declares: List RuntimeDeclare =
    decl("i128", "str_char_at_unboxed", "i64, i64"),
    decl("i128", "argv_get_unboxed", "i64"),
    decl("i128", "env_get_unboxed", "i64"),
-   # print_str() is IRPrintStr -> @print_str; eprint() -> @eprint_str. The prelude's
-   # `extern fn eprint` is filtered out (extern_skip_names), so no `@eprint` is declared.
-   decl("i64", "print_str", "ptr"),
-   decl("i64", "eprint_str", "ptr"),
    decl("i64", "argv_get", "i64"),
    # The C main shim stashes argc/argv so argv_all()/argv_get() work.
    decl("i64", "sprout_set_argv", "i32, ptr"),
@@ -656,11 +647,11 @@ export fn ir_header() -> String =
   "target triple = \"unknown-unknown-unknown\"\n" ++
   string_concat_many(list_map(\d -> d.text, runtime_declares)) ++ "\n"
 
-# The header's names (LLVM rejects a duplicate declare), `eprint` (lowered to
-# eprint_str), and `append`: a Semigroup method a program may DEFINE, so a
-# blanket declare would be a redefinition.
+# The header's names (LLVM rejects a duplicate declare), and `append`: a
+# Semigroup method a program may DEFINE, so a blanket declare would be a
+# redefinition.
 let extern_skip_names: Set =
-  set_from_list(list_append(["eprint", "append"], list_map(\d -> d.name, runtime_declares)))
+  set_from_list(list_append(["append"], list_map(\d -> d.name, runtime_declares)))
 
 # Emit `declare i64 @<name>(i64, …)` for each user `extern fn` once, skipping a
 # name in `defined` (a real define of an `extern fn` name is a typeclass-instance

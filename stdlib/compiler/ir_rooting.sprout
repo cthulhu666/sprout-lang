@@ -53,6 +53,8 @@ import stdlib.compiler.sprout_ir as sprout_ir
 #   vector_length     — returns v->len (pure read).
 #   vector_truncate   — zeroes v->data[n..len) and lowers v->len (plain stores;
 #                       no barrier, since a zero creates no old-to-young edge).
+#   print_str, eprint — printf / fprintf of the String and a newline: write-only I/O,
+#                       builds no heap object.
 # Keyed by exact runtime symbol: user functions never reuse a builtin name, and
 # polymorphic wrappers (mutvec_get, mutmatrix_get) route through vector_get and
 # are absent here, so they correctly stay triggers.
@@ -62,6 +64,8 @@ fn is_nonallocating_read(fname: String) -> Bool =
   || fname == "vector_push"
   || fname == "vector_length"
   || fname == "vector_truncate"
+  || fname == "print_str"
+  || fname == "eprint"
 
 # B2 reach extension.  The Tier-1 CPR peephole rewrites a matched/do-bound
 # Maybe-returning read into an `_unboxed` i128 extern (IRCallUnboxed2),
@@ -114,8 +118,6 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRStrEq _ _ _ -> false
   # IRStrCompare calls @str_compare — a pure comparison; does NOT allocate.  NOT a GC trigger.
   | sprout_ir.IRStrCompare _ _ _ _ -> false
-  # IRPrintStr calls @print_str / @eprint_str — write-only I/O; does NOT allocate. NOT a GC trigger.
-  | sprout_ir.IRPrintStr _ _ _ -> false
   | sprout_ir.IRStrConst _ _ _ -> false
   # Direct calls: decided by callee, see the header.
   | sprout_ir.IRCall _ _ _ _ -> false
@@ -226,8 +228,6 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRStrEq _ _ _ -> Nothing
   # IRStrCompare produces an i64-encoded Bool — a scalar, NOT a heap pointer.
   | sprout_ir.IRStrCompare _ _ _ _ -> Nothing
-  # IRPrintStr produces the i64 return of @print_str/@eprint_str (0/unit) — a scalar.
-  | sprout_ir.IRPrintStr _ _ _ -> Nothing
   | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
   # The result is the token's cell: still a heap value.
   | sprout_ir.IRReuseCtor r _ _ _ _ _ -> Just(r)
@@ -497,7 +497,6 @@ export fn op_uses(op: sprout_ir.IROp) -> List String =
   | sprout_ir.IRStrConcat _ a b -> [a, b]
   | sprout_ir.IRStrEq _ a b -> [a, b]
   | sprout_ir.IRStrCompare _ _ a b -> [a, b]
-  | sprout_ir.IRPrintStr _ _ arg -> Cons(arg, Nil)
   | sprout_ir.IRStrFromInt _ n -> Cons(n, Nil)
   | sprout_ir.IRMakeCtor _ _ _ args -> args
   # The token is a use, so it is live from the match to the rebuild and is rooted
@@ -588,7 +587,6 @@ export fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRStrConcat r _ _ -> Just(r)
   | sprout_ir.IRStrEq r _ _ -> Just(r)
   | sprout_ir.IRStrCompare r _ _ _ -> Just(r)
-  | sprout_ir.IRPrintStr r _ _ -> Just(r)
   | sprout_ir.IRStrFromInt r _ -> Just(r)
   | sprout_ir.IRMakeCtor r _ _ _ -> Just(r)
   | sprout_ir.IRReuseCtor r _ _ _ _ _ -> Just(r)
@@ -1123,7 +1121,6 @@ export fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRStrConcat _ _ _ -> false
   | sprout_ir.IRStrEq _ _ _ -> false
   | sprout_ir.IRStrCompare _ _ _ _ -> false
-  | sprout_ir.IRPrintStr _ _ _ -> false
   | sprout_ir.IRStrFromInt _ _ -> false
   # Never reached (not a trigger); nothing allocates between its operands and the stores.
   | sprout_ir.IRReuseCtor _ _ _ _ _ _ -> false

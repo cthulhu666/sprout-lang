@@ -33,8 +33,6 @@ declare i128 @bytes_get_unboxed(i64, i64)
 declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
-declare i64 @print_str(ptr)
-declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @analysis_check_source(ptr)
@@ -48,6 +46,8 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
+declare i64 @eprint(i64)
+declare i64 @print_str(i64)
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -98,8 +98,7 @@ entry:
   store i64 %t$1, ptr %t$2$s1
   %t$3 = call i64 @add_lines(i64 %t$2)
   %t$4 = call i64 @int_to_string(i64 %t$3)
-  %t$5$ptr = inttoptr i64 %t$4 to ptr
-  %t$5 = call i64 @print_str(ptr %t$5$ptr)
+  %t$5 = call i64 @print_str(i64 %t$4)
   ret i64 %t$5
 }
 

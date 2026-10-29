@@ -33,8 +33,6 @@ declare i128 @bytes_get_unboxed(i64, i64)
 declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
-declare i64 @print_str(ptr)
-declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @analysis_check_source(ptr)
@@ -48,6 +46,8 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
+declare i64 @eprint(i64)
+declare i64 @print_str(i64)
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -198,8 +198,7 @@ entry:
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$1$ptr = inttoptr i64 %t$0 to ptr
-  %t$1 = call i64 @print_str(ptr %t$1$ptr)
+  %t$1 = call i64 @print_str(i64 %t$0)
   ret i64 %t$1
 }
 
@@ -1512,8 +1511,7 @@ divok_35:
   %t$97 = call i64 @sprout_gc_push_i64_root(ptr %t$96)
   %t$51 = call i64 @string_concat_many(i64 %t$50)
   %t$98 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$52$ptr = inttoptr i64 %t$51 to ptr
-  %t$52 = call i64 @eprint_str(ptr %t$52$ptr)
+  %t$52 = call i64 @eprint(i64 %t$51)
   %t$99 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$52
 }

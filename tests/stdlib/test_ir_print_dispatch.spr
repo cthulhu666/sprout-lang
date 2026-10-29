@@ -1,15 +1,15 @@
 module main
-import stdlib.test (TestState, new_state, assert_true, summary)
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.fs as fs
 import stdlib.env as env
 import stdlib.string as string
 
-# The String sinks lower to their own runtime symbols, and no program emits the structural
-# renderer `@print_value`. `print_str` and `eprint` are call-site intrinsics
-# (IRPrintStr: @print_str / @eprint_str, with a ptr coercion); `print` is a prelude function
-# that renders through ToString and writes with `print_str`, so it adds no symbol of its own.
+# The String sinks are plain externs: `print_str` and `eprint` call their own runtime symbols
+# with an i64 String, declared once by the generic extern path, and no program emits the
+# structural renderer `@print_value`. `print` is a prelude function that renders through
+# ToString and writes with `print_str`, so it adds no symbol of its own.
 
 fn emitted_ir(path: String, root: String) -> String !{IO} =
   match compiler.compile_full_ir(source.FilePath(path), source.StdlibRoot(root)) with
@@ -22,6 +22,9 @@ fn compile_source(name: String, text: String, root: String) -> String !{IO} =
     fs.write_text(path, text)
     emitted_ir(path, root)
 
+fn occurrences(haystack: String, needle: String) -> Int =
+  list_length(string.split(haystack, needle)) - 1
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -32,18 +35,37 @@ fn main() -> Unit !{IO} =
           sinks <- compile_source("sinks",
             "fn main() -> Unit !{IO} =\n  do\n    print_str(\"out\")\n    eprint(\"err\")\n", root)
           assert_true(state, "print_str/eprint program compiles", string.contains(sinks, "define "))
-          assert_true(state, "print_str lowers to @print_str(ptr",
-            string.contains(sinks, "call i64 @print_str(ptr"))
-          assert_true(state, "eprint lowers to @eprint_str(ptr",
-            string.contains(sinks, "call i64 @eprint_str(ptr"))
+          assert_true(state, "print_str is a plain i64 call",
+            string.contains(sinks, "call i64 @print_str(i64"))
+          assert_true(state, "eprint is a plain i64 call",
+            string.contains(sinks, "call i64 @eprint(i64"))
+          assert_true(state, "no @eprint_str in the IR", !string.contains(sinks, "@eprint_str"))
+          assert_true(state, "no ptr-taking @print_str", !string.contains(sinks, "@print_str(ptr"))
+          assert_true(state, "no ptr-taking @eprint", !string.contains(sinks, "@eprint(ptr"))
+          assert_eq(state, "print_str is declared once",
+            occurrences(sinks, "declare i64 @print_str(i64)"), 1)
+          assert_eq(state, "eprint is declared once",
+            occurrences(sinks, "declare i64 @eprint(i64)"), 1)
           assert_true(state, "no @print_value in the String sinks' IR",
             !string.contains(sinks, "@print_value"))
+
+          valued <- compile_source("valued",
+            "fn main() -> Unit !{IO} =\n  do\n    list_each(eprint, [\"a\"])\n    list_each(print_str, [\"b\"])\n", root)
+          assert_true(state, "sinks as values compile", string.contains(valued, "define "))
+          assert_true(state, "eprint as a value wraps a plain @eprint(i64 call",
+            string.contains(valued, "call i64 @eprint(i64"))
+          assert_true(state, "print_str as a value wraps a plain @print_str(i64 call",
+            string.contains(valued, "call i64 @print_str(i64"))
+          assert_true(state, "no @eprint_str behind a wrapper", !string.contains(valued, "@eprint_str"))
+          assert_eq(state, "eprint stays declared once as a value",
+            occurrences(valued, "declare i64 @eprint(i64)"), 1)
 
           printed <- compile_source("printed",
             "fn main() -> Unit !{IO} =\n  do\n    print(\"hello\")\n    print(42)\n    print(true)\n    print('z')\n", root)
           assert_true(state, "print over String/Int/Bool/Char compiles", string.contains(printed, "define "))
-          assert_true(state, "print writes through @print_str(ptr",
-            string.contains(printed, "call i64 @print_str(ptr"))
+          assert_true(state, "print writes through @print_str(i64",
+            string.contains(printed, "call i64 @print_str(i64"))
+          assert_true(state, "no ptr-taking @print_str in the IR of print", !string.contains(printed, "@print_str(ptr"))
           assert_true(state, "no @print_value in the IR of print over String/Int/Bool/Char",
             !string.contains(printed, "@print_value"))
     summary(state)
