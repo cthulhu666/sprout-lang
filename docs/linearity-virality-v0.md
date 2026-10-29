@@ -387,6 +387,8 @@ missed the places that ask the question differently.
   same value. `chan_new`'s bind form was still rejected, so `http_server`'s thread-it-as-a-
   parameter workaround was still load-bearing while the docs claimed otherwise. Fixed by giving
   `do_bind_type` the phantom test.
+  That patch was later superseded: a `<-` binder now takes the type the checker gave it
+  (`typed_ast.bind_bound_type`, by bind mode), so `do_bind_type` and `payload_type` are gone.
 - **Comprehensions broke.** `first_linear_param` switched to containment also searches the
   *synthesized* fold's accumulator, whose type is `List File` on every step while the
   comprehension builds one — so `[File(n) for n in ns]` was rejected, blaming the generator,

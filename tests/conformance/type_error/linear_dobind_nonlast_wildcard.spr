@@ -1,0 +1,14 @@
+module main
+
+# `_ <- e` at `Two Res Int` drops the Res. The wildcard rule read the
+# stripped type (Int) and let it through.
+
+type linear Res = | Res Int
+type Two a b = | Two a b
+
+fn mk() -> Two Res Int !{IO} = Two(Res(1), 7)
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- mk()
+    print("done")

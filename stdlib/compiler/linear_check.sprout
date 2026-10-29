@@ -198,39 +198,6 @@ fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: Dict 
       list_append(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
   | _ -> Nil
 
-# In a `x <- m` do-bind the bound variable's type is m's payload. The monad kind
-# (Maybe/Result unwrap vs effectful no-unwrap) isn't recoverable here, so we take
-# the last type argument: sound (catches every linear payload), only over-strict
-# on the rare effectful bind of a non-linear container of a linear.
-fn payload_type(t: types.Type) -> types.Type =
-  match t with
-  | types.TApp _ arg -> arg
-  | _ -> t
-
-# The type a `<-` bind introduces. For a monadic bind the pattern binds the container's PAYLOAD
-# (`x <- (m: Maybe File)` binds `x: File`), recovered by `payload_type`. For an effect bind
-# (`h <- (io: Task a !{IO})`) the pattern binds the FULL result type — `<-` does not unwrap an
-# effect — so an effect-bound linear value must be tracked whole. The post-pass cannot see the
-# monad kind, so decide structurally: if the full type is itself linear it is an effect-bound
-# linear (use it whole); otherwise fall back to the payload (the monadic case, and the existing
-# conservative over-strict edge where a non-linear container holds a linear).
-#
-# A PHANTOM last position is not a payload. `Handle File` yields no File — the
-# declaration stores an Int — so stripping the argument invented an obligation
-# the same value escapes as a `let` binder or a parameter, and reported it under
-# a type the binder does not have. Bind the container whole instead; containment
-# then declines to descend the phantom position, as it does everywhere else.
-fn do_bind_type(t: types.Type, env: Dict types.Scheme) -> types.Type =
-  if type_is_linear(t, env) then t
-  else if last_arg_is_phantom(t, env) then t
-  else payload_type(t)
-
-fn last_arg_is_phantom(t: types.Type, env: Dict types.Scheme) -> Bool =
-  match t with
-  | types.TApp _ _ ->
-      param_is_phantom(head_type_name(t), list_length(app_spine_args(t)) - 1, env)
-  | _ -> false
-
 # Each name in `binders` must appear in `consumed` (else it leaked); returns the
 # first unconsumed one.
 fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe LinBinder =
@@ -1385,18 +1352,23 @@ fn lin_do(steps: List typed_ast.TypedDoStep, sc: LinScope,
       | typed_ast.TDoLetStep name rhs -> lin_do_let(name, rhs, rest, sc, env)
       | typed_ast.TDoExprStep e -> lin_do_seq(e, rest, sc, env)
       | typed_ast.TDoBindStep pat e mode ->
-          lin_do_bind(pat, e, typed_ast.bind_mode_propagates(mode), rest, sc, env)
+          lin_do_bind(pat, e, mode, rest, sc, env)
 
 # A `<-` do-bind: its pattern binds variables (possibly linear) scoped to the
 # remaining steps, each consumed exactly once there. The RHS is sequential-before
 # the rest — which is what makes `close(conn)` followed by a later `write(conn,…)`
 # in a do-block a use-after-consume rather than an unordered set collision.
-fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, fallible: Bool, rest: List typed_ast.TypedDoStep,
-               sc: LinScope, env: Dict types.Scheme) -> LinRes =
+#
+# The binder's type is the one the checker gave it (`typed_ast.bind_bound_type`): the whole
+# value for an effect bind, the payload for a Maybe/Result bind. Containment then applies
+# to it as to any other binder.
+fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, mode: typed_ast.BindMode,
+               rest: List typed_ast.TypedDoStep, sc: LinScope, env: Dict types.Scheme) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
-  | LinOk ec eb -> lin_do_bind_checked(pat, do_bind_type(typed_ast.typed_expr_type(e), env),
-                                       ec, eb, e, fallible, rest, sc, env)
+  | LinOk ec eb ->
+      lin_do_bind_checked(pat, typed_ast.bind_bound_type(mode, typed_ast.typed_expr_type(e)),
+                          ec, eb, e, typed_ast.bind_mode_propagates(mode), rest, sc, env)
 
 # `_ <- e` binds no name, so `pattern_linear_binders` yields nothing and the
 # binder-keyed rules attach no obligation — the payload is dropped exactly as a

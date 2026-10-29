@@ -1,0 +1,14 @@
+module main
+
+# The declaration stores Res in a concrete field; the last type argument is
+# Int. Stripping it typed `c` as Int, so the leak went unseen.
+
+type linear Res = | Res Int
+type Crate a = | Crate Res a
+
+fn mk() -> Crate Int !{IO} = Crate(Res(1), 7)
+
+fn main() -> Unit !{IO} =
+  do
+    c <- mk()
+    print("done")

@@ -1,0 +1,19 @@
+module main
+
+# An effect bind `p <- e` binds e's WHOLE type, not its last type argument
+# (spec-v0.md §5.9). The linear Res sits in the first position of `Two`, so
+# stripping the last argument typed `p` as Int and let it be used twice.
+
+type linear Res = | Res Int
+type Two a b = | Two a b
+
+fn release(r: Res) -> Int = match r with | Res n -> n
+
+fn mk() -> Two Res Int !{IO} = Two(Res(1), 7)
+
+fn first(p: Two Res Int) -> Res = match p with | Two r _ -> r
+
+fn main() -> Unit !{IO} =
+  do
+    p <- mk()
+    print(int_to_string(release(first(p)) + release(first(p))))
