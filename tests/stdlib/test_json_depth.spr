@@ -1,0 +1,72 @@
+import stdlib.test (new_state, assert_true, summary)
+import stdlib.json as json
+import stdlib.string as string
+import stdlib.task (Scope, with_scope, task_fork, task_await)
+
+# json.parse rejects input nested deeper than `limit` with an Err. The parser recurses once per
+# nesting level and a task stack is fixed, so without a limit a long run of `[` ends the process.
+
+# Mirrors `max_depth` in stdlib/json.sprout.
+let limit = 64
+
+fn arrays(n: Int) -> String =
+  string.repeat("[", n) ++ string.repeat("]", n)
+
+fn objects(n: Int) -> String =
+  string.repeat("{\"a\":", n) ++ "1" ++ string.repeat("}", n)
+
+# Alternating `[{"a":` levels, `n` levels in all.
+fn mixed(n: Int) -> String =
+  open_mixed(n) ++ "1" ++ close_mixed(n)
+
+fn is_odd(n: Int) -> Bool = n - (n / 2) * 2 == 1
+
+fn open_mixed(n: Int) -> String =
+  if n <= 0 then ""
+  else if is_odd(n) then "[" ++ open_mixed(n - 1)
+  else "{\"a\":" ++ open_mixed(n - 1)
+
+fn close_mixed(n: Int) -> String =
+  if n <= 0 then ""
+  else if is_odd(n) then close_mixed(n - 1) ++ "]"
+  else close_mixed(n - 1) ++ "}"
+
+fn accepts(raw: String) -> Bool =
+  match json.parse(raw) with
+  | Ok _ -> true
+  | Err _ -> false
+
+fn rejects(raw: String) -> Bool =
+  match json.parse(raw) with
+  | Ok _ -> false
+  | Err _ -> true
+
+# The same parse, run inside a spawned task as an HTTP handler would.
+fn in_task(f: Unit -> Bool) -> Bool !{IO} =
+  with_scope(\s -> fork_and_await(s, f))
+
+fn fork_and_await(s: Scope, f: Unit -> Bool) -> Bool !{IO} =
+  do
+    t <- task_fork(s, \_ -> f(()))
+    task_await(t)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    assert_true(state, "arrays nested to the limit parse", accepts(arrays(limit)))
+    assert_true(state, "objects nested to the limit parse", accepts(objects(limit)))
+    assert_true(state, "mixed nesting to the limit parses", accepts(mixed(limit)))
+    assert_true(state, "arrays nested past the limit are rejected", rejects(arrays(limit + 1)))
+    assert_true(state, "objects nested past the limit are rejected", rejects(objects(limit + 1)))
+    assert_true(state, "mixed nesting past the limit is rejected", rejects(mixed(limit + 1)))
+    assert_true(state, "unclosed arrays past the limit are rejected",
+                rejects(string.repeat("[", limit + 1)))
+    assert_true(state, "wide input at depth 1 is not limited",
+                accepts("[" ++ string.repeat("[],", 1000) ++ "[]]"))
+    in_limit <- in_task(\_ -> accepts(arrays(limit)))
+    assert_true(state, "in a task: arrays nested to the limit parse", in_limit)
+    deep <- in_task(\_ -> rejects(string.repeat("[", 100000)))
+    assert_true(state, "in a task: 100k nested arrays are rejected", deep)
+    deep_obj <- in_task(\_ -> rejects(string.repeat("{\"a\":", 100000)))
+    assert_true(state, "in a task: 100k nested objects are rejected", deep_obj)
+    summary(state)

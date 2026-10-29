@@ -228,57 +228,62 @@ fn p_string_run(s: String, len: Int, i: Int, parts: List String) -> Maybe (Strin
 # i at the opening quote.
 fn p_string(s: String, len: Int, i: Int) -> Maybe (String, Int) = p_string_run(s, len, i + 1, Nil)
 
+# Deepest array/object nesting `parse` accepts; deeper input fails like any other invalid JSON. The
+# parser recurses once per level and a task stack is fixed (1 MiB). Measured crash depth is about
+# 1.3k levels in a task at -O0, so 64 leaves a wide margin.
+let max_depth = 64
+
 # --- array ----------------------------------------------------------------------------------
-fn p_array_items(s: String, len: Int, i: Int, acc: List Json) -> Maybe (Json, Int) =
-  match p_value(s, len, i) with
+fn p_array_items(s: String, len: Int, depth: Int, i: Int, acc: List Json) -> Maybe (Json, Int) =
+  match p_value(s, len, depth, i) with
   | Nothing -> Nothing
   | Just (v, j) ->
       let k = skip_ws(s, j)
       in if str_starts_with_at_byte(s, k, "]")
          then Just((JsonArray(json_array_from_reversed(Cons(v, acc), JsonArrayNil)), k + 1))
-         else if str_starts_with_at_byte(s, k, ",") then p_array_items(s, len, skip_ws(s, k + 1), Cons(v, acc))
+         else if str_starts_with_at_byte(s, k, ",") then p_array_items(s, len, depth, skip_ws(s, k + 1), Cons(v, acc))
          else Nothing
 
-fn p_array(s: String, len: Int, i: Int) -> Maybe (Json, Int) =
+fn p_array(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
   let j = skip_ws(s, i + 1)
   in if str_starts_with_at_byte(s, j, "]")
      then Just((JsonArray (JsonArrayNil), j + 1))
-     else p_array_items(s, len, j, Nil)
+     else p_array_items(s, len, depth, j, Nil)
 
 # --- object ---------------------------------------------------------------------------------
-fn p_object_members(s: String, len: Int, i: Int, acc: List (String, Json)) -> Maybe (Json, Int) =
+fn p_object_members(s: String, len: Int, depth: Int, i: Int, acc: List (String, Json)) -> Maybe (Json, Int) =
   if str_starts_with_at_byte(s, i, "\"") then
     match p_string(s, len, i) with
     | Nothing -> Nothing
     | Just (key, j) ->
         let k = skip_ws(s, j)
         in if str_starts_with_at_byte(s, k, ":") then
-             match p_value(s, len, k + 1) with
+             match p_value(s, len, depth, k + 1) with
              | Nothing -> Nothing
              | Just (v, m) ->
                  let n = skip_ws(s, m)
                  in if str_starts_with_at_byte(s, n, "}")
                     then Just((JsonObject(json_object_from_reversed(Cons((key, v), acc), JsonObjectNil)), n + 1))
-                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, skip_ws(s, n + 1), Cons((key, v), acc))
+                    else if str_starts_with_at_byte(s, n, ",") then p_object_members(s, len, depth, skip_ws(s, n + 1), Cons((key, v), acc))
                     else Nothing
            else Nothing
   else Nothing
 
-fn p_object(s: String, len: Int, i: Int) -> Maybe (Json, Int) =
+fn p_object(s: String, len: Int, depth: Int, i: Int) -> Maybe (Json, Int) =
   let j = skip_ws(s, i + 1)
   in if str_starts_with_at_byte(s, j, "}")
      then Just((JsonObject (JsonObjectNil), j + 1))
-     else p_object_members(s, len, j, Nil)
+     else p_object_members(s, len, depth, j, Nil)
 
 # --- value dispatch ---------------------------------------------------------------------------
-fn p_value(s: String, len: Int, i0: Int) -> Maybe (Json, Int) =
+fn p_value(s: String, len: Int, depth: Int, i0: Int) -> Maybe (Json, Int) =
   let i = skip_ws(s, i0)
   in if str_starts_with_at_byte(s, i, "\"") then
        match p_string(s, len, i) with
        | Nothing -> Nothing
        | Just (str, j) -> Just((JsonString(str), j))
-     else if str_starts_with_at_byte(s, i, "{") then p_object(s, len, i)
-     else if str_starts_with_at_byte(s, i, "[") then p_array(s, len, i)
+     else if str_starts_with_at_byte(s, i, "{") then (if depth >= max_depth then Nothing else p_object(s, len, depth + 1, i))
+     else if str_starts_with_at_byte(s, i, "[") then (if depth >= max_depth then Nothing else p_array(s, len, depth + 1, i))
      else if str_starts_with_at_byte(s, i, "true") then Just((JsonBool(true), i + 4))
      else if str_starts_with_at_byte(s, i, "false") then Just((JsonBool(false), i + 5))
      else if str_starts_with_at_byte(s, i, "null") then Just((JsonNull, i + 4))
@@ -287,7 +292,7 @@ fn p_value(s: String, len: Int, i0: Int) -> Maybe (Json, Int) =
 
 # Parse a complete JSON document. Trailing non-whitespace after the top-level value is an error.
 export fn json_parse(raw: String) -> Result JsonError Json =
-  match p_value(raw, len, 0) with
+  match p_value(raw, len, 0, 0) with
   | Nothing -> Err(JsonDecode("invalid JSON"))
   | Just (v, j) ->
       if skip_ws(raw, j) >= len then Ok(v)

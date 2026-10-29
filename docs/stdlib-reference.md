@@ -459,7 +459,7 @@ JSON stdlib helpers (in `stdlib/json.sprout`):
 - `JsonEncode a` plus `encode(value)` for directly encodable values (`Json`, `Int`, `Bool`, `String`)
 - `JsonArrayStep` / `JsonObjectStep` traversal ADTs
 - builder helpers: `null`, `bool(value)`, `int(value)`, `string(value)`, `array_from_list(items)`, `object_from_pairs(items)`, `object_from_dict(items)`
-- `parse(raw) -> Result JsonError Json`
+- `parse(raw) -> Result JsonError Json`. Input nested more than 64 arrays/objects deep is rejected with `Err(JsonDecode("invalid JSON"))`; the limit is fixed because the parser recurses once per level on a fixed-size task stack.
 - `stringify(value: Json) -> Result JsonError String` (compact JSON). Returns `Err(JsonNonFinite x)`
   when the tree contains a NaN or an infinity: RFC 8259 §6 has no syntax for either, so a writer
   must choose between refusing and inventing a stand-in, and every stand-in (`null`, a quoted
