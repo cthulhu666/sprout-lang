@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linear Types in Sprout</title>
+<meta name="description" content="What linear types are and why a functional language wants them, then how to use them in Sprout.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --paper: #f6f7f2; --ink: #1b211d; --muted: #59625c; --rule: #d6dbd2; --panel: #eaede6;
+  --term: #20262a; --term-ink: #dfe6e1;
+  --accent: #2b6e4f; --accent-soft: #d8e9df;
+  --ok: #2b6e4f; --ok-soft: #d8e9df; --bad: #a83a3a; --bad-soft: #f3dcdc;
+  --borrow: #3c63a0; --borrow-soft: #dbe4f3;
+  --display: "Schibsted Grotesk", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #141816; --ink: #e2e7e2; --muted: #9ba59e; --rule: #2c3530; --panel: #1d2320;
+    --term: #0d1012; --term-ink: #d6ded9; --accent: #74c49b; --accent-soft: #1d3a2b;
+    --ok: #74c49b; --ok-soft: #1d3a2b; --bad: #ec8b84; --bad-soft: #3d2121;
+    --borrow: #8fb2e8; --borrow-soft: #1d2a3e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141816; --ink: #e2e7e2; --muted: #9ba59e; --rule: #2c3530; --panel: #1d2320;
+  --term: #0d1012; --term-ink: #d6ded9; --accent: #74c49b; --accent-soft: #1d3a2b;
+  --ok: #74c49b; --ok-soft: #1d3a2b; --bad: #ec8b84; --bad-soft: #3d2121;
+  --borrow: #8fb2e8; --borrow-soft: #1d2a3e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body);
+  font-size: 1.07rem; line-height: 1.68; padding: 0 16px 4rem;
+}
+.wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2.5rem; }
+@media (min-width: 1020px) { .wrap { grid-template-columns: 210px minmax(0, 1fr); } }
+nav.toc { display: none; }
+@media (min-width: 1020px) {
+  nav.toc { display: block; position: sticky; top: 1.5rem; align-self: start; padding-top: 7rem; font-family: var(--display); font-size: .86rem; max-height: 100vh; overflow-y: auto; }
+  nav.toc .part { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin: 1rem 0 .4rem; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+  nav.toc a { color: var(--muted); text-decoration: none; display: grid; grid-template-columns: 1.6rem 1fr; }
+  nav.toc a span { color: var(--accent); font-variant-numeric: tabular-nums; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink); }
+}
+main { min-width: 0; max-width: 44rem; }
+.top { padding-top: 1.2rem; font-family: var(--display); font-size: .9rem; }
+.top a { color: var(--muted); text-decoration: none; }
+header.hero { padding-block: 2.5rem 1.8rem; border-bottom: 1px solid var(--rule); }
+.kicker { font-family: var(--mono); font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(2.3rem, 6.5vw, 3.6rem); line-height: 1.02; letter-spacing: -.02em; margin: .5rem 0 1rem; text-wrap: balance; }
+.lede { font-size: 1.2rem; color: var(--muted); margin: 0; }
+.rule-card { margin-top: 1.8rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .7rem; }
+.rule-card div { background: var(--panel); border-radius: 6px; padding: .8rem 1rem; min-width: 0; }
+.rule-card b { display: block; font-family: var(--display); font-size: .95rem; }
+.rule-card span { font-size: .9rem; color: var(--muted); }
+.partname { font-family: var(--mono); font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 4rem 0 0; padding-top: 1rem; border-top: 2px solid var(--accent); }
+.partname + p { color: var(--muted); margin-top: .4rem; }
+h2 { font-family: var(--display); font-weight: 700; font-size: 1.75rem; line-height: 1.15; margin: 3rem 0 .9rem; text-wrap: balance; letter-spacing: -.01em; }
+h2 .n { color: var(--accent); margin-right: .55rem; font-variant-numeric: tabular-nums; }
+h3 { font-family: var(--display); font-weight: 700; font-size: 1.15rem; margin: 2rem 0 .5rem; }
+p { margin: 0 0 1rem; }
+ul, ol { padding-left: 1.3rem; margin: 0 0 1.1rem; }
+li { margin-bottom: .35rem; }
+a { color: var(--borrow); }
+code { font-family: var(--mono); font-size: .86em; background: var(--panel); padding: .05em .3em; border-radius: 3px; }
+pre { margin: 0; font-family: var(--mono); font-size: .85rem; line-height: 1.55; overflow-x: auto; }
+pre code { background: none; padding: 0; font-size: inherit; }
+pre.code { background: var(--panel); padding: .9rem 1.05rem; border-radius: 6px; margin: 0 0 1.2rem; }
+.tk-kw { color: var(--accent); font-weight: 600; }
+.tk-cm { color: var(--muted); font-style: italic; }
+.tk-mode { color: var(--borrow); font-weight: 600; }
+.case { border: 1px solid var(--rule); border-radius: 8px; margin: 0 0 1.3rem; overflow: hidden; }
+.case-head { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .7rem; padding: .55rem .9rem; border-bottom: 1px solid var(--rule); font-family: var(--display); font-size: .9rem; }
+.pill { font-family: var(--mono); font-size: .72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; padding: .12rem .5rem; border-radius: 999px; }
+.case.ok .pill { background: var(--ok-soft); color: var(--ok); }
+.case.bad .pill { background: var(--bad-soft); color: var(--bad); }
+.case pre.code { margin: 0; border-radius: 0; }
+.case .out { background: var(--term); color: var(--term-ink); padding: .7rem 1.05rem; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.case .out .tag { color: #ec8b84; font-weight: 600; }
+.case.ok .out .tag { color: #74c49b; }
+.tbl { overflow-x: auto; margin: 0 0 1.3rem; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--display); font-size: .82rem; color: var(--muted); font-weight: 700; }
+td code { white-space: nowrap; }
+td.y { color: var(--ok); font-weight: 600; }
+td.n { color: var(--bad); font-weight: 600; }
+figure { margin: 0 0 1.4rem; }
+.fig { background: var(--panel); border-radius: 8px; padding: 1rem; overflow-x: auto; }
+.fig svg { display: block; width: 100%; min-width: 520px; height: auto; }
+figcaption { font-size: .86rem; color: var(--muted); margin-top: .5rem; }
+svg text { font-family: var(--mono); font-size: 12px; fill: var(--ink); }
+svg .muted { fill: var(--muted); }
+svg .line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+svg .node-borrow { fill: var(--borrow-soft); stroke: var(--borrow); stroke-width: 1.6; }
+svg .node-consume { fill: var(--ok); stroke: var(--ok); }
+svg .node-make { fill: var(--paper); stroke: var(--ink); stroke-width: 1.6; }
+svg .box-ok { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.4; }
+svg .box-bad { fill: var(--bad-soft); stroke: var(--bad); stroke-width: 1.4; }
+svg .box { fill: var(--paper); stroke: var(--rule); stroke-width: 1.4; }
+dl.sheet { display: grid; grid-template-columns: minmax(0, 1fr); gap: .1rem 1.2rem; margin: 0 0 1.2rem; }
+@media (min-width: 680px) { dl.sheet { grid-template-columns: 17rem minmax(0, 1fr); } }
+dl.sheet dt { font-family: var(--mono); font-size: .82rem; color: var(--bad); padding-top: .55rem; }
+dl.sheet dd { margin: 0; padding: .45rem 0 .55rem; border-bottom: 1px solid var(--rule); }
+@media (min-width: 680px) { dl.sheet dt { border-bottom: 1px solid var(--rule); padding-bottom: .55rem; } }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: .86rem; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="part">Part I · The ideas</div>
+  <ol>
+    <li><a href="#sharing"><span>1</span>What sharing costs</a></li>
+    <li><a href="#rules"><span>2</span>Copy and drop</a></li>
+    <li><a href="#types"><span>3</span>Linear values, linear types</a></li>
+    <li><a href="#threading"><span>4</span>Threading</a></li>
+    <li><a href="#borrowing"><span>5</span>Borrowing</a></li>
+    <li><a href="#inside"><span>6</span>Inside other values</a></li>
+    <li><a href="#generics"><span>7</span>Generic code</a></li>
+    <li><a href="#closures"><span>8</span>Closures</a></li>
+    <li><a href="#inplace"><span>9</span>In-place updates</a></li>
+  </ol>
+  <div class="part">Part II · In Sprout</div>
+  <ol>
+    <li><a href="#s-once"><span>10</span>Linear types</a></li>
+    <li><a href="#s-borrow"><span>11</span><code>borrowing</code></a></li>
+    <li><a href="#s-inside"><span>12</span>Containers</a></li>
+    <li><a href="#s-generic"><span>13</span><code>where linear</code></a></li>
+    <li><a href="#s-closures"><span>14</span><code>once</code> and <code>local</code></a></li>
+    <li><a href="#s-linvec"><span>15</span>LinVec</a></li>
+    <li><a href="#s-reuse"><span>16</span>Reuse</a></li>
+    <li><a href="#s-limits"><span>17</span>Where it stops</a></li>
+    <li><a href="#s-sheet"><span>18</span>Error cheat sheet</a></li>
+  </ol>
+</nav>
+
+<main>
+<div class="top"><a href="./">← Sprout articles</a></div>
+<header class="hero">
+  <div class="kicker">Sprout · Guide · spec §5.8 · Experimental</div>
+  <h1>Linear Types in Sprout</h1>
+  <p class="lede">Part I explains linear types: what they check, why a functional language wants them, and the ideas built on them (borrowing, closure promises, in-place updates). Part II shows how to write each idea in Sprout. It assumes you know immutable data, pattern matching and higher-order functions.</p>
+  <div class="rule-card">
+    <div><b>Not twice</b><span>a second use is rejected</span></div>
+    <div><b>Not zero times</b><span>a forgotten value is rejected</span></div>
+    <div><b>Same on every path</b><span>branches must agree</span></div>
+  </div>
+</header>
+
+<p class="partname">Part I · The ideas</p>
+<p>Code in this part is pseudo-code. Part II has the real syntax.</p>
+
+<section id="sharing">
+<h2><span class="n">1</span>What sharing costs</h2>
+<p>In a pure language a value never changes. That is why you can share it freely: pass it to ten functions, keep it in three lists, and nobody can surprise anybody. It is also why you can replace an expression by its value without changing the program.</p>
+<p>Free sharing has two costs.</p>
+<p><b>Updates copy.</b> "Setting" one element of an immutable array must build a new array, because someone may still hold the old one and expect the old value. So one write to an array of <em>n</em> elements costs <em>n</em>, not 1. A loop that writes every element does <em>n</em>² work instead of <em>n</em>.</p>
+<p><b>Resources get two owners, or none.</b> Some values stand for something that must be finished exactly once: a file to close, a connection to close, a task to join. If such a value can be shared, two parts of the program can both close it. If it can be dropped, nobody closes it, and the program runs until it is out of file descriptors.</p>
+<p>Both costs have one cause. The compiler does not know how many references to a value exist. If it knew there was exactly one, the update could happen in place (no one else can see the change), and the resource would have exactly one owner who must finish it. Linear types give the compiler that knowledge.</p>
+</section>
+
+<section id="rules">
+<h2><span class="n">2</span>Copy and drop</h2>
+<p>An ordinary type system lets you do two things with a variable that you rarely notice:</p>
+<ul>
+<li><b>Drop</b> it: never use it. <code>k(x, y) = x</code> drops <code>y</code>. Logicians call this <em>weakening</em>.</li>
+<li><b>Copy</b> it: use it twice. <code>dup(x) = (x, x)</code> copies <code>x</code>. Logicians call this <em>contraction</em>.</li>
+</ul>
+<p>Type systems that restrict these rules are called <em>substructural</em>. Taking away one rule or both gives four disciplines:</p>
+<div class="tbl"><table>
+<thead><tr><th>discipline</th><th>may drop</th><th>may copy</th><th>a value is used</th></tr></thead>
+<tbody>
+<tr><td>unrestricted (ordinary types)</td><td class="y">yes</td><td class="y">yes</td><td>any number of times</td></tr>
+<tr><td>affine</td><td class="y">yes</td><td class="n">no</td><td>at most once</td></tr>
+<tr><td>relevant</td><td class="n">no</td><td class="y">yes</td><td>at least once</td></tr>
+<tr><td>linear</td><td class="n">no</td><td class="n">no</td><td>exactly once</td></tr>
+</tbody></table></div>
+<p>"No copy" stops the double close. "No drop" stops the leak. A language that runs a destructor whenever a value is dropped can allow drops, because the destructor does the closing. A language without destructors has to forbid drops, so the programmer closes the file on every path. That is the linear row.</p>
+<p>What counts as a "use"? Any mention of the name: passing it to a function, matching on it, returning it. A match that throws the value away (a wildcard pattern) mentions it but drops it, so it must be rejected too. The count is taken on <b>every path</b> through the function. If an <code>if</code> uses a value in one branch, every branch must use it:</p>
+<figure>
+<div class="fig">
+<svg viewBox="0 0 640 170" role="img" aria-label="The then branch uses f once; the else branch uses it zero times; the counts differ so the function is rejected">
+  <rect class="box" x="16" y="62" width="150" height="40" rx="6"/>
+  <text x="32" y="87">if b then … else …</text>
+  <path class="line" d="M166 82 C 210 82, 210 38, 250 38"/>
+  <path class="line" d="M166 82 C 210 82, 210 128, 250 128"/>
+  <rect class="box-ok" x="250" y="18" width="170" height="40" rx="6"/>
+  <text x="266" y="43">then: close(f)</text>
+  <rect class="box-bad" x="250" y="108" width="170" height="40" rx="6"/>
+  <text x="266" y="133">else: 0</text>
+  <text x="440" y="43">uses of f: 1</text>
+  <text x="440" y="133">uses of f: 0</text>
+  <text x="440" y="88" class="muted">1 ≠ 0 → rejected</text>
+</svg>
+</div>
+<figcaption>Each branch is counted on its own. The counts must match.</figcaption>
+</figure>
+<p>This forces you to decide what happens to the file on every path. That decision is the point.</p>
+</section>
+
+<section id="types">
+<h2><span class="n">3</span>Linear functions or linear types</h2>
+<p>There are two places to put the rule, and they mean different things.</p>
+<p><b>On the function.</b> A function promises to use its argument exactly once. The value itself is not special: the caller may still share it, and call the function twice on it. The promise is about the future, and only about that one function.</p>
+<p><b>On the type.</b> A type is declared linear, and every value of it is linear from the moment it is built. Every function, every <code>let</code>, every branch must treat it as used-once. Then nobody can ever make a second reference to it. So at the point a value is used, its user holds the <em>only</em> reference. This is called <em>uniqueness</em>: a guarantee about the present, not a promise about the future.</p>
+<p>Uniqueness is what makes in-place updates safe, as the end of this part shows. It is also what you need for resources: a file that nobody else can hold has exactly one owner.</p>
+</section>
+
+<section id="threading">
+<h2><span class="n">4</span>Threading: pass it on, get it back</h2>
+<p>If every use consumes a value, how do you do two things with it? You return it. A function that changes a linear value takes it and returns the new one. The caller uses that one exactly once, by passing it to the next step:</p>
+<pre class="code"><code>f1 = open(1)
+f2 = bump(f1, 10)     # f1 is used up; only f2 exists now
+f3 = bump(f2, 100)
+close(f3)</code></pre>
+<p>This is called <em>threading</em>. Since the old value can never be used again, nobody can tell the difference between "a new value" and "the same value, changed". The code stays pure: each function still maps inputs to outputs. Linearity adds only a proof that the old input is dead.</p>
+</section>
+
+<section id="borrowing">
+<h2><span class="n">5</span>Borrowing: look without using up</h2>
+<p>Threading is clumsy for reads. Asking an array its length should not consume the array, and returning it from every read adds noise. So linear systems add <em>borrowing</em>: a use that reads the value but leaves the owner responsible for it. The owner can lend the value many times, and still owes its one real use.</p>
+<figure>
+<div class="fig">
+<svg viewBox="0 0 640 120" role="img" aria-label="Timeline: open creates f, two borrows peek at it, close consumes it">
+  <path class="line" d="M40 52 H600"/>
+  <circle class="node-make" cx="60" cy="52" r="10"/>
+  <circle class="node-borrow" cx="220" cy="52" r="10"/>
+  <circle class="node-borrow" cx="370" cy="52" r="10"/>
+  <circle class="node-consume" cx="540" cy="52" r="11"/>
+  <text x="34" y="90">open(5)</text>
+  <text x="192" y="90">peek(f)</text>
+  <text x="342" y="90">peek(f)</text>
+  <text x="510" y="90">close(f)</text>
+  <text x="182" y="24" class="muted">borrow: still owned</text>
+  <text x="482" y="24" class="muted">the one use</text>
+</svg>
+</div>
+<figcaption>Borrows (outlined) can happen any number of times. The consume (filled) happens once, last.</figcaption>
+</figure>
+<p>The danger is a borrow that is still in use after the owner consumes the value: a read of a file that is already closed. Three rules prevent it:</p>
+<ol>
+<li><b>No borrow after the consume.</b> <code>close(f); peek(f)</code> is rejected.</li>
+<li><b>A borrow lasts the whole call.</b> In <code>both(f, f)</code>, if the first argument is borrowed and the second consumed, the callee could read the first after closing the second. So a value lent to a call may not be consumed by the same call.</li>
+<li><b>A borrow cannot escape.</b> A function that borrows a value may not return it, store it, or release it. Returning it would hand the caller a second owner.</li>
+</ol>
+<p>Rule 3 is a strong limit, and it buys simplicity. A borrow can only be passed <em>down</em>, into calls, so it always ends when the call that received it returns. The compiler never needs to track how long a borrow lives. Values with this limit are called <em>second-class</em>.</p>
+<p><b>Records.</b> Reading a field is a use of the whole record. So an owned linear record can give up only one field. To read several, borrow the record.</p>
+</section>
+
+<section id="inside">
+<h2><span class="n">6</span>Linear values inside other values</h2>
+<p><code>Maybe File</code> is not a linear type: <code>Nothing</code> holds no file. But dropping a <code>Just</code> drops the file inside it. So the checker must track any value whose type <em>contains</em> a linear type, as a type argument, a tuple part or a field. The same rules apply to it: use it once, on every path.</p>
+<p>Two edges of this rule:</p>
+<ul>
+<li><b>A function type is not a container.</b> <code>Unit -> File</code> is a recipe for a file, not a file. Dropping the recipe leaks nothing.</li>
+<li><b>A global cannot hold a linear value.</b> Every function in the module can name a global, so no single scope can use it once.</li>
+</ul>
+</section>
+
+<section id="generics">
+<h2><span class="n">7</span>Generic code</h2>
+<p>Take <code>dup(x: a) = (x, x)</code>. For <code>Int</code> it is fine. For a file it makes two owners. So a language must decide: may a type variable stand for a linear type?</p>
+<p>There are two defaults:</p>
+<ul>
+<li><b>Yes, by default.</b> Then every generic function must be written as if its type variables were linear, and one that copies or drops must say so.</li>
+<li><b>No, by default.</b> A type variable stands only for types that hold no linear value, and a generic function that is careful opts in.</li>
+</ul>
+<p>The second default fits functional code better. Much generic code copies or drops on purpose: <code>const(x, y) = x</code> drops <code>y</code>, and an equality test over a list stops at the first difference without looking at the rest. With the first default all of that code would need annotations.</p>
+<p>The opt-in must be <b>checked, not trusted</b>. A function that says "I use my <code>a</code> once" has its body checked as if <code>a</code> were linear. Otherwise the opt-in would be a way to smuggle a copy through.</p>
+</section>
+
+<section id="closures">
+<h2><span class="n">8</span>Closures: how often, and how long</h2>
+<p>Closures are where linear types get hard. A lambda that captures a linear value carries it. Two questions about the lambda then matter, and neither is visible where the lambda is written. Only the function that receives it knows:</p>
+<ul>
+<li><b>How often will it run?</b> A closure that consumes a captured file and runs twice closes it twice. A closure that never runs never closes it.</li>
+<li><b>How long will it live?</b> A closure that only <em>reads</em> a borrowed file may run many times. But if it is stored and runs after the owner closes the file, it reads a closed file.</li>
+</ul>
+<p>So the receiving function makes promises about its function parameter, and the compiler checks them in its body. One promise per question:</p>
+<div class="tbl"><table>
+<thead><tr><th>the callee promises</th><th>so the caller's lambda may</th></tr></thead>
+<tbody>
+<tr><td>nothing</td><td>capture nothing linear</td></tr>
+<tr><td>"I call it at most once"</td><td><b>move</b> a linear value in; it is consumed when the closure runs</td></tr>
+<tr><td>"I don't keep it past the call"</td><td><b>borrow</b> a value; the closure ends before the owner can consume it</td></tr>
+<tr><td>both</td><td>move in and borrow</td></tr>
+</tbody></table></div>
+<p>Note "at most once", not "exactly once". A callee that never calls the closure keeps its promise, and a value moved into that closure is never consumed. "Exactly once" would need the compiler to prove the call happens, which it cannot do in general. So a library that runs closures, such as a task scheduler, must also guarantee at run time that they run.</p>
+<p><b>A lambda's own parameter.</b> A lambda may take a linear value as its parameter if it only borrows it. This gives the <em>with-resource</em> pattern: a helper opens a file, lends it to your lambda, and closes it afterwards, so you cannot forget the close. A lambda that <em>consumes</em> its parameter is harder: the callee may call it zero times or many, so nothing proves each value it is given gets consumed once. A named function does not have this problem, because it is checked on its own.</p>
+</section>
+
+<section id="inplace">
+<h2><span class="n">9</span>In-place updates</h2>
+<p>An update copies only because someone else may still hold the old value. If the compiler knows nobody does, the update can happen in place. There are two ways to know that.</p>
+<ul>
+<li><b>At run time</b>, by counting references. Each object carries a counter, and each update checks it: a count of one writes in place, anything else copies. The price is the counter, the check, and a copying slow path.</li>
+<li><b>At compile time</b>, from linear types. A value of a linear type is unique, so the proof is in the types. No counter and no check.</li>
+</ul>
+<p>The compile-time proof gives two things.</p>
+<h3>A linear array</h3>
+<p>Put the ideas together and you get an array with pure operations and in-place writes:</p>
+<ul>
+<li><b>Reads borrow</b> the array, so they don't use it up.</li>
+<li><b>Writes consume it and return it</b>, so the array is threaded from one write to the next. After a write, nothing can name the old array, so nobody can see that the write changed it. The write costs 1, not <em>n</em>.</li>
+<li><b>Freeze</b> turns it into an ordinary shared array without copying, since nothing else holds it. After that it is immutable and may be shared again.</li>
+</ul>
+<p>The program that would break purity reads the old version after a write:</p>
+<pre class="code"><code>w   = set(0, 1, v)
+old = get(0, v)       # if this compiled, it would see the new value</code></pre>
+<p>That is exactly a use after consume, so the type system rejects it. The in-place write stays invisible.</p>
+<p>Threading the array through every single write is noise when a loop writes many cells. A <b>bulk operation</b> takes a list of writes and applies them in one call, so the array is threaded once per batch.</p>
+<h3>Reusing a cell</h3>
+<p>The fact behind the array holds for every linear type: a consumed linear value has no other reference. So when a function takes a linear value apart and builds a new value of the same shape, the new one can be written into the old one's memory instead of allocated. A tree insert that rebuilds the path to a new key then allocates only the new node. Code written as pure updates runs as mutation.</p>
+<p>One limit: the value must be owned, not borrowed. A borrowed value's owner still holds it.</p>
+</section>
+
+<p class="partname">Part II · In Sprout</p>
+<p>Sprout puts linearity on the type, so every value of a linear type is unique, and it uses that to update values in place. Each example below was compiled inside a full program.</p>
+
+<section id="s-once">
+<h2><span class="n">10</span>Linear types</h2>
+<p>Write <code>linear</code> after <code>type</code> (or after <code>wrap</code>). Here is a toy file handle used through the rest of this part. It wraps an <code>Int</code>, and <code>close</code> returns that number so the examples have something to print:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>A linear type and its life</div>
+  <pre class="code"><code class="sp">type linear File = File Int
+
+fn open(n: Int) -> File = File(n)
+
+fn close(f: File) -> Int =
+  match f with
+  | File n -> n
+
+fn main() -> Unit !{IO} = print(close(open(3)))</code></pre>
+  <div class="out"><span class="tag">output</span>  3</div>
+</div>
+<p>The checker rejects the three mistakes: a copy, a drop, and a drop on only one path.</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Copy: closing twice</div>
+  <pre class="code"><code class="sp">fn twice(f: File) -> Int = close(f) + close(f)</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'f' is used more than once (linear values must be used exactly once)</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Drop: forgetting to close</div>
+  <pre class="code"><code class="sp">fn forget(f: File) -> Int = 0</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'f' is never used (linear values must be used exactly once)</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A drop on one path</div>
+  <pre class="code"><code class="sp">fn maybe_close(f: File, b: Bool) -> Int = if b then close(f) else 0</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'f' is used in some branches but not others (every branch must use it exactly once)</div>
+</div>
+<p>To change a file, take it and return the new one. <code>bump</code> does that, and the file is threaded through two calls:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Threading through two steps</div>
+  <pre class="code"><code class="sp">fn bump(f: File, x: Int) -> File =
+  match f with
+  | File n -> File(n + x)
+
+fn main() -> Unit !{IO} = print(close(bump(bump(open(1), 10), 100)))</code></pre>
+  <div class="out"><span class="tag">output</span>  111</div>
+</div>
+</section>
+
+<section id="s-borrow">
+<h2><span class="n">11</span><code>borrowing</code></h2>
+<p>To read a value without using it up, mark the parameter <code>borrowing</code>. The function may read it as often as it likes, and the caller still owes the one real use:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Read twice, then close</div>
+  <pre class="code"><code class="sp">fn peek(f: borrowing File) -> Int =
+  match f with
+  | File n -> n
+
+fn report(f: File) -> Int =
+  let a = peek(f)
+      b = peek(f)
+  in a + b + close(f)</code></pre>
+  <div class="out"><span class="tag">output</span>  15   <span style="opacity:.7"># report(open(5))</span></div>
+</div>
+<p>The three borrow rules, as errors:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Rule 1: a borrow after the consume</div>
+  <pre class="code"><code class="sp">fn late(f: File) -> Int =
+  let n = close(f)
+  in n + peek(f)</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'f' is used after it was consumed</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Rule 2: borrowed and consumed in one call</div>
+  <pre class="code"><code class="sp">fn both(b: borrowing File, c: File) -> Int = peek(b) + close(c)
+
+fn main() -> Unit !{IO} =
+  let f = open(1)
+  in print(both(f, f))</code></pre>
+  <div class="out"><span class="tag">error</span>  'f' is borrowed by another argument of this call and cannot be consumed in it: the callee holds the borrow for the whole call, so it could read 'f' after consuming it</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Rule 3: returning a borrow</div>
+  <pre class="code"><code class="sp">fn give_back(f: borrowing File) -> File = f</code></pre>
+  <div class="out"><span class="tag">error</span>  'f' is a borrowing parameter and cannot be consumed; take it `consuming` if this function should release it</div>
+</div>
+<p>An unmarked linear parameter is owned. <code>consuming</code> spells that out, if you want it visible in an API. Borrowing costs nothing at run time.</p>
+
+<h3>Records</h3>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Two fields of an owned record</div>
+  <pre class="code"><code class="sp">type linear Pos = (x: Int, y: Int)
+
+fn sum_owned(p: Pos) -> Int = p.x + p.y</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'p' is used more than once (linear values must be used exactly once)</div>
+</div>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Borrow to read, then finish it</div>
+  <pre class="code"><code class="sp">fn sum_borrowed(p: borrowing Pos) -> Int = p.x + p.y
+
+fn finish(p: Pos) -> Int = p.x
+
+fn total() -> Int =
+  let p = Pos(x = 1, y = 2)
+      s = sum_borrowed(p)
+  in s + finish(p)</code></pre>
+  <div class="out"><span class="tag">output</span>  4</div>
+</div>
+<p>The standard library uses this shape. <code>stdlib.net</code>'s <code>TcpConnection</code> is linear: reads and writes borrow it, and <code>close</code> consumes it.</p>
+</section>
+
+<section id="s-inside">
+<h2><span class="n">12</span>Containers</h2>
+<p>A value that holds a linear value is tracked too. A <code>Maybe File</code> must be settled in both cases:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Dropping a <code>Maybe File</code></div>
+  <pre class="code"><code class="sp">fn lose(m: Maybe File) -> Int = 0</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'm' is never used: its type `Maybe File` contains the linear type `File` (linear values must be used exactly once)</div>
+</div>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Settle both cases</div>
+  <pre class="code"><code class="sp">fn settle(m: Maybe File) -> Int =
+  match m with
+  | Just f -> close(f)
+  | Nothing -> 0</code></pre>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A module-level file</div>
+  <pre class="code"><code class="sp">let shared = open(1)</code></pre>
+  <div class="out"><span class="tag">error</span>  top-level `let` 'shared' holds a linear value (`File`): every function can use a module binding, so it cannot be used exactly once; create the value inside a function and pass it on</div>
+</div>
+
+<h3><code>_</code> drops what it matches</h3>
+<p>Matching a value counts as its use, so a <code>_</code> pattern that matches linear content would leak it. Such a <code>_</code> is rejected, whether it is a whole arm (also <code>let _ = e</code>) or sits inside a constructor or a tuple:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A wildcard arm</div>
+  <pre class="code"><code class="sp">fn sneaky(f: File) -> Int =
+  match f with
+  | _ -> 0</code></pre>
+  <div class="out"><span class="tag">error</span>  `_` drops a linear value of type `File` without consuming it. Bind it and pass it on, or match its constructor and consume its linear fields.</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A wildcard over a linear field</div>
+  <pre class="code"><code class="sp">type Wrap = | Wrap File
+
+fn sneaky2(w: Wrap) -> Int =
+  match w with
+  | Wrap _ -> 0</code></pre>
+  <div class="out"><span class="tag">error</span>  `_` drops a linear field of type `File`. Bind it, as in `Wrap c`, and consume it.</div>
+</div>
+<p>A <code>_</code> that can only match linear-free cases is fine. So is a <code>_</code> over a borrowed value, which consumes nothing:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Earlier arms took the file; a borrow drops nothing</div>
+  <pre class="code"><code class="sp">type Slot = | Filled File | Blank
+
+fn empty_out(s: Slot) -> Int =
+  match s with
+  | Filled f -> close(f)
+  | _ -> 0              # only Blank is left
+
+fn tag(f: borrowing File) -> Int =
+  match f with
+  | _ -> 1</code></pre>
+</div>
+<p>Swap the arms (<code>| Blank -> 0 | _ -> 1</code>) and the <code>_</code> can match a <code>Filled</code>, so it is rejected.</p>
+</section>
+
+<section id="s-generic">
+<h2><span class="n">13</span><code>where linear</code></h2>
+<p>In Sprout a type variable stands only for types that hold no linear value. So <code>dup</code> compiles, and the call that would copy a file is rejected:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span><code>dup(open(1))</code></div>
+  <pre class="code"><code class="sp">fn dup(x: a) -> (a, a) = (x, x)
+
+fn main() -> Unit !{IO} =
+  match dup(open(1)) with
+  | (a, b) -> print(close(a) + close(b))</code></pre>
+  <div class="out"><span class="tag">error</span>  `dup` takes `a` as a value it may copy or drop, and `File` is linear; if `dup` uses its `a` exactly once, add `where linear a` to it</div>
+</div>
+<p>Opt in with <code>where linear a</code>. The function then accepts linear and ordinary types alike:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>An opt-in generic function</div>
+  <pre class="code"><code class="sp">fn ident(x: a) -> a where linear a = x
+
+fn main() -> Unit !{IO} = print(close(ident(open(1))) + ident(2))</code></pre>
+  <div class="out"><span class="tag">output</span>  3</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>The opt-in is checked</div>
+  <pre class="code"><code class="sp">fn dup(x: a) -> (a, a) where linear a = (x, x)</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'x' is used more than once (linear values must be used exactly once)</div>
+</div>
+<p>The prelude's <code>list_fold</code> carries <code>where linear a, linear b</code>, so a fold's accumulator may be linear.</p>
+</section>
+
+<section id="s-closures">
+<h2><span class="n">14</span><code>once</code> and <code>local</code></h2>
+<p>A function that takes a closure states its promises as a mode on that parameter:</p>
+<div class="tbl"><table>
+<thead><tr><th>parameter</th><th>promise</th><th>the caller's lambda may</th></tr></thead>
+<tbody>
+<tr><td><code>g: A -> B</code></td><td>none</td><td>capture nothing linear</td></tr>
+<tr><td><code>g: once A -> B</code></td><td>called at most once</td><td>move a linear value in</td></tr>
+<tr><td><code>g: local A -> B</code></td><td>not kept past the call</td><td>borrow a linear value</td></tr>
+<tr><td><code>g: once local A -> B</code></td><td>both</td><td>both</td></tr>
+</tbody></table></div>
+<p>Without a promise, a capture is rejected:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Moving a file into an ordinary lambda</div>
+  <pre class="code"><code class="sp">fn run(g: Unit -> Int) -> Int = g(())
+
+fn main() -> Unit !{IO} =
+  let f = open(7)
+  in print(run(\_ -> close(f)))</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'f' captured by a lambda is not yet supported (higher-order linearity is deferred; if the callee invokes this closure at most once, declare that parameter `once`)</div>
+</div>
+
+<h3><code>once</code></h3>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>A move into a <code>once</code> closure</div>
+  <pre class="code"><code class="sp">fn run_once(g: once Unit -> Int) -> Int = g(())
+
+fn main() -> Unit !{IO} =
+  let f = open(7)
+  in print(run_once(\_ -> close(f)))</code></pre>
+  <div class="out"><span class="tag">output</span>  7</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Breaking the promise</div>
+  <pre class="code"><code class="sp">fn run_twice(g: once Unit -> Int) -> Int = g(()) + g(())</code></pre>
+  <div class="out"><span class="tag">error</span>  `once` parameter 'g' is used more than once: declaring it `once` promises callers this function invokes it AT MOST once, and that promise is what licenses them to move a linear value into the closure they pass</div>
+</div>
+<p><code>stdlib.task</code>'s <code>task_spawn(scope, work: once Unit -> Unit !{IO})</code> is how a server moves each accepted connection into the task that handles it. <code>with_scope</code> joins its tasks, which is the run-time guarantee that they run.</p>
+
+<h3><code>local</code></h3>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Lending a file to a <code>local</code> closure</div>
+  <pre class="code"><code class="sp">fn sum_with(g: local Int -> Int, xs: List Int) -> Int =
+  match xs with
+  | [] -> 0
+  | [x | rest] -> g(x) + sum_with(g, rest)
+
+fn total(f: File) -> Int =
+  let n = sum_with(\x -> x * peek(f), [1, 2, 3])
+  in n + close(f)</code></pre>
+  <div class="out"><span class="tag">output</span>  14   <span style="opacity:.7"># total(open(2)): 2 + 4 + 6, then close returns 2</span></div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A <code>local</code> parameter that escapes</div>
+  <pre class="code"><code class="sp">fn keep(g: local Int -> Int) -> Int -> Int = g</code></pre>
+  <div class="out"><span class="tag">error</span>  `local` parameter 'g' may outlive the call: returned or stored. Declaring it `local` promises callers it does not, and that promise is what lets them lend it borrowed values</div>
+</div>
+<p>The prelude's concrete combinators take their function <code>local</code>: <code>list_fold</code>, <code>list_map</code>, <code>list_each</code>, the <code>vec_</code>, <code>range_</code> and <code>result_</code> families, and the <code>Foldable</code> functions. So a fold can read a borrowed value:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Borrowing inside <code>list_fold</code></div>
+  <pre class="code"><code class="sp">fn total(f: File) -> Int =
+  let n = list_fold(\ (acc, x) -> acc + x * peek(f), 0, [1, 2, 3])
+  in n + close(f)</code></pre>
+  <div class="out"><span class="tag">output</span>  14   <span style="opacity:.7"># total(open(2))</span></div>
+</div>
+<p>The class methods <code>map</code>, <code>filter</code>, <code>and_then</code> and <code>traverse</code> do not take <code>local</code>, because some instances (a parser, a state monad) keep the function. Use <code>list_map</code> and friends when a lambda must borrow:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Borrowing inside the class method <code>map</code></div>
+  <pre class="code"><code class="sp">fn scaled(f: File) -> Int =
+  let ys = map(\x -> x * peek(f), [1, 2, 3])
+  in list_length(ys) + close(f)</code></pre>
+  <div class="out"><span class="tag">error</span>  borrowed value 'f' captured by a lambda is not yet supported (…); or, if the callee is your own and does not keep this closure past the call, declare that parameter `local`, as the prelude's concrete `list_`, `vec_`, `range_` and `result_` functions and the `Foldable` functions do; the class methods `map`, `filter`, `and_then` and `traverse` do not</div>
+</div>
+
+<h3>With-resource</h3>
+<p>Write the lambda's parameter type as <code>(borrowing File) -> Int</code>. A plain <code>\c -> …</code> in that slot is read as borrowing:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>A with-resource helper</div>
+  <pre class="code"><code class="sp">fn with_file(n: Int, work: (borrowing File) -> Int) -> Int =
+  let f = open(n)
+      r = work(f)
+  in r + close(f)
+
+fn main() -> Unit !{IO} = print(with_file(3, \c -> peek(c) * 10))</code></pre>
+  <div class="out"><span class="tag">output</span>  33</div>
+</div>
+<p>A lambda that consumes its parameter is rejected. A named function in the same slot is accepted: <code>with_file2(3, close)</code> compiles.</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A lambda that consumes its parameter</div>
+  <pre class="code"><code class="sp">fn with_file2(n: Int, work: File -> Int) -> Int = work(open(n))
+
+fn main() -> Unit !{IO} = print(with_file2(3, \c -> close(c)))</code></pre>
+  <div class="out"><span class="tag">error</span>  consuming linear lambda parameter 'c' is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once); take it `borrowing` if this lambda only reads the value</div>
+</div>
+</section>
+
+<section id="s-linvec">
+<h2><span class="n">15</span><code>LinVec</code></h2>
+<p><code>stdlib.linvec</code> provides the linear array: reads borrow it, and writes consume it and return it. It is a <code>wrap linear</code> over the runtime vector, and its constructor is not exported, so only the module can build one or take one apart. Import the type, and call the functions through the module:</p>
+<pre class="code"><code class="sp">import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+linvec.new(n: Int, x: a) -> LinVec a                     # n copies of x
+linvec.empty() -> LinVec a
+linvec.from_list(xs: List a) -> LinVec a
+linvec.get(i: Int, v: borrowing LinVec a) -> Maybe a     # Nothing out of range
+linvec.set(i: Int, x: a, v: LinVec a) -> LinVec a        # consumes v, returns it
+linvec.push(x: a, v: LinVec a) -> LinVec a               # amortised O(1)
+linvec.pop(v: LinVec a) -> (Maybe a, LinVec a)           # the last element and the rest
+linvec.length(v: borrowing LinVec a) -> Int
+linvec.freeze(v: LinVec a) -> Vec a                      # no copy; ends its life
+linvec.drop(v: LinVec a) -> Unit
+linvec.scatter(is: List Int, x: a, v: LinVec a) -> LinVec a
+linvec.accum(f: local a -> b -> a, pairs: List (Int, b), v: LinVec a) -> LinVec a</code></pre>
+<p>A <code>linvec.set</code> costs the same at any size and allocates nothing. The copying <code>vec_set</code> on a <code>Vec</code> costs time in proportion to the vector's length.</p>
+
+<h3>A sieve</h3>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Primes below a million, pure</div>
+  <pre class="code"><code class="sp">import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# Cross out multiples of p, from p*p up to n.
+fn cross_out(i: Int, p: Int, n: Int, marks: LinVec Bool) -> LinVec Bool =
+  if i > n then marks
+  else cross_out(i + p, p, n, linvec.set(i, true, marks))
+
+fn sieve(p: Int, n: Int, marks: LinVec Bool) -> LinVec Bool =
+  if p * p > n then marks
+  else
+    let Just crossed = linvec.get(p, marks) else marks
+    in if crossed then sieve(p + 1, n, marks)
+    else sieve(p + 1, n, cross_out(p * p, p, n, marks))
+
+fn count_primes(n: Int) -> Int =
+  let marks = linvec.freeze(sieve(2, n, linvec.new(n + 1, false)))
+  in list_length([p for p in 2..n if vec_get(p, marks) == Just(false)])</code></pre>
+  <div class="out"><span class="tag">output</span>  78498   <span style="opacity:.7"># count_primes(1000000)</span></div>
+</div>
+<p><code>marks</code> is used once on every path. The <code>let … else marks</code> line borrows it, then either returns it or passes it on.</p>
+
+<h3>What the checker stops</h3>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Reading the old version</div>
+  <pre class="code"><code class="sp">fn oops(v: LinVec Int) -> Maybe Int =
+  let w = linvec.set(0, 1, v)
+      old = linvec.get(0, v)
+      _ = linvec.drop(w)
+  in old</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'v' is used after it was consumed</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Forgetting to freeze or drop</div>
+  <pre class="code"><code class="sp">fn first(v: LinVec Int) -> Maybe Int = linvec.get(0, v)</code></pre>
+  <div class="out"><span class="tag">error</span>  linear value 'v' is never used (linear values must be used exactly once)</div>
+</div>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>An array of linear arrays</div>
+  <pre class="code"><code class="sp">let outer = linvec.new(2, linvec.new(2, 0))
+in print(linvec.drop(outer))</code></pre>
+  <div class="out"><span class="tag">error</span>  `new` takes `a` as a value it may copy or drop, and `stdlib.linvec.LinVec Int` is linear; if `new` uses its `a` exactly once, add `where linear a` to it</div>
+</div>
+<p><code>linvec.new</code> puts <code>n</code> copies of <code>x</code> in the vector, so it has no <code>where linear</code> on <code>a</code>.</p>
+
+<h3>Loops</h3>
+<p>Reading inside a fold works, since <code>list_fold</code> takes its function <code>local</code>:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Borrowing a <code>LinVec</code> inside <code>list_fold</code></div>
+  <pre class="code"><code class="sp">fn weighted(grid: borrowing LinVec Int, xs: List Int) -> Int =
+  list_fold(\ (acc, i) -> acc + maybe_with_default(0, linvec.get(i, grid)), 0, xs)</code></pre>
+  <div class="out"><span class="tag">output</span>  16   <span style="opacity:.7"># grid [1, 5, 1, 5], xs [0, 1, 3, 3]</span></div>
+</div>
+<p>Writing from a fold's lambda does not, because the lambda would consume its parameter:</p>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>A set inside a fold's lambda</div>
+  <pre class="code"><code class="sp">fn fill(v: LinVec Int) -> LinVec Int =
+  list_fold(\ (acc, i) -> linvec.set(i, 1, acc), v, [0, 1, 2])</code></pre>
+  <div class="out"><span class="tag">error</span>  consuming linear lambda parameter 'acc' is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once); take it `borrowing` if this lambda only reads the value</div>
+</div>
+<p>Use a named step function, a recursive loop (as in the sieve), or a bulk operation:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>A named step function</div>
+  <pre class="code"><code class="sp">fn mark(v: LinVec Int, i: Int) -> LinVec Int = linvec.set(i, 1, v)
+
+fn fill(v: LinVec Int) -> LinVec Int = list_fold(mark, v, [0, 2])</code></pre>
+  <div class="out"><span class="tag">output</span>  1 0 1 0   <span style="opacity:.7"># fill(linvec.new(4, 0)), frozen</span></div>
+</div>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span><code>linvec.scatter</code> and <code>linvec.accum</code></div>
+  <pre class="code"><code class="sp">fn histogram(xs: List Int) -> Vec Int =
+  linvec.freeze(linvec.accum(\ (count, one) -> count + one,
+                             [(x, 1) for x in xs], linvec.new(4, 0)))
+
+# linvec.freeze(linvec.scatter([0, 2, 4], 9, linvec.new(5, 0)))
+# histogram([1, 3, 1, 0, 1])</code></pre>
+  <div class="out"><span class="tag">output</span>  9 0 9 0 9
+        1 3 0 1</div>
+</div>
+<p><code>linvec.accum</code>'s function works on elements, not on the array, so it is an ordinary lambda. A write out of range stops the program. A read out of range is <code>Nothing</code>.</p>
+
+<h3>Growing and shrinking</h3>
+<p><code>push</code> appends, doubling the storage when it is full. <code>pop</code> returns the last element with the rest, and an empty vector comes back unchanged with <code>Nothing</code>. The rest is linear, so it must still be consumed:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Push four squares, pop them all</div>
+  <pre class="code"><code class="sp">fn squares(i: Int, n: Int, v: LinVec Int) -> LinVec Int =
+  if i > n then v else squares(i + 1, n, linvec.push(i * i, v))
+
+fn total(acc: Int, v: LinVec Int) -> Int =
+  match linvec.pop(v) with
+  | (Just x, rest) -> total(acc + x, rest)
+  | (Nothing, rest) -> let _ = linvec.drop(rest) in acc
+
+# total(0, squares(1, 4, linvec.empty()))</code></pre>
+  <div class="out"><span class="tag">output</span>  30</div>
+</div>
+<p><code>stdlib.linheap</code> builds a pure binary min-heap on these: <code>wrap linear LinHeap a = LinVec a</code>, with <code>push</code> and <code>pop</code> in amortised O(log n) and <code>peek</code> and <code>size</code> borrowing. It drains the same way:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>Heap sort with <code>LinHeap</code></div>
+  <pre class="code"><code class="sp">import stdlib.linheap (LinHeap)
+import stdlib.linheap as linheap
+
+fn drain(acc: List Int, h: LinHeap Int) -> List Int =
+  match linheap.pop(h) with
+  | (Just x, rest) -> drain(Cons(x, acc), rest)
+  | (Nothing, rest) -> let _ = linheap.drop(rest) in list_reverse(acc)
+
+# drain([], linheap.from_list([5, 1, 4, 2, 3]))</code></pre>
+  <div class="out"><span class="tag">output</span>  1 2 3 4 5</div>
+</div>
+</section>
+
+<section id="s-reuse">
+<h2><span class="n">16</span>Reuse</h2>
+<p>Cell reuse needs no new syntax. When a function matches an owned linear parameter and builds a value of the same type with the same number of fields, the compiler writes it into the old cell:</p>
+<div class="case ok">
+  <div class="case-head"><span class="pill">compiles</span>A linear tree; each rebuilt node reuses its cell</div>
+  <pre class="code"><code class="sp">type linear Tree = | Leaf | Node Tree Int Tree
+
+fn insert(k: Int, t: Tree) -> Tree =
+  match t with
+  | Leaf -> Node(Leaf, k, Leaf)
+  | Node l v r ->
+      if k < v then Node(insert(k, l), v, r)
+      else if k > v then Node(l, v, insert(k, r))
+      else Node(l, v, r)
+
+fn add(t: Tree, k: Int) -> Tree = insert(k, t)
+
+fn to_list(t: Tree, acc: List Int) -> List Int =
+  match t with
+  | Leaf -> acc
+  | Node l v r -> to_list(l, Cons(v, to_list(r, acc)))
+
+# to_list(list_fold(add, Leaf, [72, 88, 72, 95, 61]), Nil)</code></pre>
+  <div class="out"><span class="tag">output</span>  61 72 88 95</div>
+</div>
+<p>This is the ordinary pure insert; only the word <code>linear</code> is new. On a million inserts it runs about 2.3× faster than the same tree without <code>linear</code>, and allocates about 40× fewer objects: one per new key, instead of one per node on every path.</p>
+<p>Reuse applies when the matched value is an owned <em>parameter</em> of the function. The new value must have the same type and the same number of fields.</p>
+</section>
+
+<section id="s-limits">
+<h2><span class="n">17</span>Where it stops today</h2>
+<p>Linear types are <b>Experimental</b> (spec §5.8). The first three limits are rejected with an error that names them. The last two compile, and the spec lists them as known gaps.</p>
+<h3>Consuming in a lambda</h3>
+<p>A lambda that consumes its own parameter is rejected, and so is capturing a linear value at a parameter with no promise. Use a named function, recursion, or a bulk operation.</p>
+<h3>The class methods <code>map</code>, <code>filter</code>, <code>and_then</code>, <code>traverse</code></h3>
+<p>They take no <code>local</code>. Use the concrete <code>list_</code>/<code>vec_</code> functions when a lambda must borrow.</p>
+<h3>Records with several linear fields</h3>
+<div class="case bad">
+  <div class="case-head"><span class="pill">rejected</span>Reading one linear field drops the other</div>
+  <pre class="code"><code class="sp">type linear Pair = (a: File, b: File)
+
+fn first(p: Pair) -> Int = close(p.a)</code></pre>
+  <div class="out"><span class="tag">error</span>  reading `a` consumes `p` and drops its linear field `b`; use a constructor type and `match` it to take every linear field</div>
+</div>
+<h3>Known gaps</h3>
+<ul>
+<li>A channel abandoned while it still holds linear values is not reported.</li>
+<li>Cancelling a task scope, or a <code>with_timeout</code> that expires, drops a waiting task without finishing its closure. A linear value it held is never released. Lending to a <code>with_timeout</code> body is safe: you keep ownership and release the value yourself.</li>
+</ul>
+</section>
+
+<section id="s-sheet">
+<h2><span class="n">18</span>Error cheat sheet</h2>
+<dl class="sheet">
+  <dt>is used more than once</dt>
+  <dd>You consumed it twice. Make the earlier uses <code>borrowing</code>, or thread it: have the first function return the value.</dd>
+  <dt>is never used</dt>
+  <dd>Some path forgets it. Close it, freeze it, drop it, or return it.</dd>
+  <dt>is used in some branches but not others</dt>
+  <dd>Consume it in every branch, or once before the <code>if</code>/<code>match</code>.</dd>
+  <dt>is used after it was consumed</dt>
+  <dd>Move the read before the consume, or read the new value the consuming call returned.</dd>
+  <dt>is borrowed by another argument of this call</dt>
+  <dd>Split the call: do the borrow in a <code>let</code> first, then consume.</dd>
+  <dt>is a borrowing parameter and cannot be consumed</dt>
+  <dd>The function releases or returns a value it only borrowed. Take it owned, or stop returning it.</dd>
+  <dt>takes `a` as a value it may copy or drop</dt>
+  <dd>The generic function was not written for linear values. If it uses its argument exactly once, add <code>where linear a</code>. If not, it really would copy or drop it.</dd>
+  <dt>captured by a lambda is not yet supported</dt>
+  <dd>For a move, the callee's parameter must be <code>once</code>. For a borrow, it must be <code>local</code>. Otherwise read the value before the lambda and capture the result.</dd>
+  <dt>consuming linear lambda parameter</dt>
+  <dd>Use a named function, a recursive loop, or a bulk operation (<code>linvec.scatter</code>, <code>linvec.accum</code>).</dd>
+  <dt>`_` drops a linear value / field</dt>
+  <dd>Bind the value or field to a name and consume it. A <code>_</code> is fine over a borrowed value, or where earlier arms already took every case that holds linear content.</dd>
+  <dt>`local` parameter may outlive the call</dt>
+  <dd>Your function returns, stores or passes on its <code>local</code> parameter somewhere that is not <code>local</code>. Drop the <code>local</code>, or stop keeping the closure.</dd>
+  <dt>drops its linear field</dt>
+  <dd>Declare the type with a constructor and <code>match</code> it, which takes every field at once.</dd>
+</dl>
+</section>
+
+<footer>
+<p>The Sprout examples were compiled at commit <code>985b86d8</code>; outputs and errors are copied from that run, without positions. The normative rules are in <code>docs/spec-v0.md</code> §5.8.</p>
+</footer>
+</main>
+</div>
+
+<script>
+(function () {
+  var KW = /^(fn|let|in|match|with|if|then|else|type|linear|wrap|where|import|do|export|extern)$/;
+  var MODE = /^(borrowing|consuming|once|local)$/;
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  document.querySelectorAll('code.sp').forEach(function (el) {
+    var src = el.textContent, out = '', re = /(#[^\n]*)|([A-Za-z_][A-Za-z0-9_]*)|([\s\S])/g, m;
+    while ((m = re.exec(src))) {
+      if (m[1]) out += '<span class="tk-cm">' + esc(m[1]) + '</span>';
+      else if (m[2]) out += KW.test(m[2]) ? '<span class="tk-kw">' + m[2] + '</span>'
+        : MODE.test(m[2]) ? '<span class="tk-mode">' + m[2] + '</span>' : m[2];
+      else out += esc(m[3]);
+    }
+    el.innerHTML = out;
+  });
+})();
+</script>
+</body>
+</html>
