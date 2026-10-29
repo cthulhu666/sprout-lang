@@ -25,6 +25,7 @@
  * those are inert once any libc header has been read. */
 #include "sprout_context.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
@@ -192,6 +193,19 @@ int sprout_sched_fault_in_guard(const void* addr) {
       sprout_ctx_in_guard(&g_current_task->ctx, addr)) return 1;
   if (sprout_ctx_in_guard(&g_pump, addr)) return 2;
   return 0;
+}
+
+/* Report a sprout_ctx_create failure that names its real cause (map or guard-page
+ * protect, with errno text). Returns for any other code; the caller handles those. */
+static void ctx_create_fail(const char* who, const char* what, int rc) {
+  char msg[192];
+  if (rc == SPROUT_CTX_EMAP)
+    snprintf(msg, sizeof msg, "%s: cannot map %s: %s", who, what, sprout_ctx_errtext());
+  else if (rc == SPROUT_CTX_EGUARD)
+    snprintf(msg, sizeof msg, "%s: cannot protect guard page of %s: %s", who, what, sprout_ctx_errtext());
+  else
+    return;
+  sprout_fail(msg);
 }
 
 /* One global FIFO ready queue (round-robin). */
@@ -455,6 +469,7 @@ static void pump_loop(void) {
         sprout_roots_free(t->roots);
         sprout_ctx_destroy(&t->ctx);
         free(t);
+        g_current_task = &g_task0;        /* never leave it dangling: the crash handler reads it */
       }
     }
   }
@@ -552,6 +567,7 @@ static void sprout_scheduler_init(void) {
 
   int rc = sprout_ctx_create(&g_pump, pump_loop, SPROUT_PUMP_STACK_BYTES);
   if (rc == SPROUT_CTX_ENOMEM) sprout_fail("sprout_scheduler_init: out of memory (pump stack)");
+  ctx_create_fail("sprout_scheduler_init", "pump stack", rc);
   if (rc != 0)                 sprout_fail("sprout_scheduler_init: getcontext failed");
 }
 
@@ -616,6 +632,7 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   /* Allocates the green stack and primes the context to enter the trampoline on it. */
   int rc = sprout_ctx_create(&t->ctx, task_trampoline, SPROUT_TASK_STACK_BYTES);
   if (rc == SPROUT_CTX_ENOMEM) sprout_fail("task scheduler: out of memory (green stack)");
+  ctx_create_fail("task scheduler", "green task stack", rc);
   if (rc != 0)                 sprout_fail("task scheduler: getcontext failed");
 
   rq_push(t);       /* runnable, in the global queue */

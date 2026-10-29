@@ -69,7 +69,8 @@ Shrinking the constants is not the proposal — it cuts maximum recursion depth 
 
 Entirely **outside the GC heap**: stacks and root pools are plain `malloc`, untouched by the
 region arena. Invisible to compiler benchmarks (the self-hosted compiler spawns no green tasks).
-Affects `task_spawn`/`task_fork` workloads only. Not a regression from any recent change — true
+Stacks are now guarded `mmap`s behind a 16-entry cache in `runtime/sprout_context.h`, so only root
+pools are still `malloc`'d per spawn. Affects `task_spawn`/`task_fork` workloads only. Not a regression from any recent change — true
 since L0 concurrency landed.
 
 ## 2. Goals and non-goals

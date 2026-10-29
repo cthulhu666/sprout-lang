@@ -428,13 +428,13 @@ call-site edit was `sprout_ctx_adopt_current` gaining a return code, because
 Decisions worth keeping:
 
 - **Stack sizing is `commit = 0`, `reserve = stack_bytes`.** Commit-0 takes the executable's
-  default so pages are backed as the stack grows — matching the POSIX arm, where a `malloc`'d
+  default so pages are backed as the stack grows — matching the POSIX arm, where an `mmap`'d
   stack is equally only backed once touched. Committing `stack_bytes` up front would make every
   task cost a real megabyte. Windows' own default *reserve* is 1 MiB, which
   `SPROUT_TASK_STACK_BYTES` already is, so the two platforms agree without tuning.
 - **`SproutCtx` carries an `adopted` flag.** `DeleteFiber` on the thread's own fiber makes that
   thread call `ExitThread`; task-0 must never be deleted. The POSIX arm gets this for free
-  (task-0 owns no malloc'd stack), so the flag exists only on the Windows side.
+  (task-0 owns no mmap'd stack), so the flag exists only on the Windows side.
 - **A trampoline, not a function-pointer cast.** `CreateFiberEx` wants `VOID WINAPI f(LPVOID)`
   and the seam's entries take no argument. The cast happens to work on x64 — `WINAPI` is a no-op
   there and the extra argument is ignored — but is wrong under 32-bit `stdcall`, so the entry

@@ -2485,7 +2485,9 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   goroutine-per-connection model while paying **512× Go's per-task cost** (1 MiB vs
   `stackMin = 2048`) — and cannot follow Go's answer of growing small stacks, because growth needs
   `copystack`'s pointer adjustment and Sprout's rooting is non-moving by design. Independent of
-  which pooling design lands. `docs/green-task-pool-v0.md` §3.1.
+  which pooling design lands. Each task also holds two kernel mappings (stack + guard page), so
+  Linux's default `vm.max_map_count` caps live connections near 32k.
+  `docs/green-task-pool-v0.md` §3.1.
 - [ ] `P3` **The accept loop is the next server bottleneck.** Worker count is irrelevant from w=2 to
   w=256, so once task creation leaves the per-request path the single accept task is the limit. Any
   further HTTP-server work should start there, not at the handler.

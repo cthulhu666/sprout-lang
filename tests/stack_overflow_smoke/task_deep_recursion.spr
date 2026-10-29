@@ -5,6 +5,9 @@ import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 # Deep recursion on a GREEN task stack (1 MiB), beside a parked task.
 # Same non-foldable shape as deep_recursion.spr. Expected: the runtime
 # reports "stack overflow in a green task" and exits non-zero; RESULT never prints.
+# A first batch of short tasks finishes before the overflowing spawn, so its stacks
+# return to the stack cache and the overflowing task runs on a reused one: the
+# guard must survive reuse.
 fn combine(n: Int, r: Int) -> Int =
   if r > n then r - n else n + r
 
@@ -12,9 +15,18 @@ fn go(n: Int) -> Int =
   if n <= 0 then 1
   else combine(n, go(n - 1))
 
+fn spawn_short(s: Scope) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> task_sleep(1))
+    task_spawn(s, \_ -> task_sleep(1))
+    task_spawn(s, \_ -> task_sleep(1))
+
 fn spawn_both(s: Scope) -> Unit !{IO} =
   do
     task_spawn(s, \_ -> task_sleep(200))
     task_spawn(s, \_ -> print(`RESULT ${go(10000000)}`))
 
-fn main() -> Unit !{IO} = with_scope(\s -> spawn_both(s))
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> spawn_short(s))
+    with_scope(\s -> spawn_both(s))
