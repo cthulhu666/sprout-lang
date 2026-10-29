@@ -37,11 +37,6 @@
 #include <mach-o/dyld.h>
 #endif
 
-/* SproutObj removed — tag lives in the inline heap header at (payload_ptr - 8);
- * fields are accessed as ((long long*)payload)[idx].  The typedef keeps
- * box_ptr / unbox_ptr compiling without cascading pointer-cast changes. */
-typedef void SproutObj;
-
 /* Adding a kind means editing THREE places: this enum, slot_bytes (its slot
  * size) and sprout_slot_kind_known (the HDRCHECK walk's "is this a header at
  * all" test).  Miss the third and the sweep aborts on the first slot of the new
@@ -1534,10 +1529,6 @@ static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, 
 
 static long long box_ptr(void* p) {
   return (long long)(uintptr_t)p;
-}
-
-static void* unbox_ptr(long long h) {
-  return (void*)(uintptr_t)h;
 }
 
 /* Exact membership: p is a live payload iff (a) it falls in a region, (b) the
@@ -3157,110 +3148,15 @@ static inline long long sprout_tag_get(long long constant, long long* cache, con
 }
 #define SPROUT_TAG(sym) sprout_tag_get(sprout_tag$##sym, &sprout_tag_cache$##sym, #sym)
 
-/* A ctor name as a USER should see it: the name they wrote, never the bundler's
-   qualified symbol.  `print(Apple(3))` in a file headed `module main` must read
-   `Apple(3)` — `main.` is an artefact of bundling, not something in the source.
-
-   The rule is "the segment after the last dot", and it is EXACT rather than a
-   heuristic: bundler.qualified_name builds `<module> ++ "." ++ <ctor>`, and a
-   ctor name is an identifier, so it can never itself contain a dot.  The suffix
-   is therefore the source-form name, recovered losslessly — which is why nothing
-   is carried alongside `name` to support this.  The same rule already renders
-   TYPE names in the REPL (analysis_service_driver.te_to_string, via
-   string.after_last_dot); this extends it to constructors.
-
-   Values render bare; DIAGNOSTICS deliberately keep the qualified name, because
-   there the prefix answers a question the reader actually has ("which module?").
-   The two must not be merged into one helper: applied to a whole message, a
-   last-dot strip would shred every qualified name in it.  See
-   tests/stdlib/compiler/test_ctor_display.spr, which pins both directions.
-
-   Stripping happens HERE, at the render, and never at registration. CtorMeta.name
-   is a single field serving both display and lookup, and one lookup depends on
-   the name being intact:
-
-     - The runtime reads the `sprout_tag$<name>` constant first. An entry file's
-       `Just` registered bare would emit a second `@"sprout_tag$Just"`, a loud
-       duplicate-symbol error. The name scan, find_ctor_tag_by_name, runs only on
-       the cold fallback, where it is first-wins over g_ctor_meta.
-
-   Nullary interning used to be a second reason: sprout_make0 matched
-   strcmp(name, "Nothing"), so a stripped entry-file `Nothing` would be handed a
-   cached object carrying the PRELUDE's tag. It is keyed on the tag now, so
-   distinct tags get distinct singletons whatever they are called.
-
-   This supersedes the narrower rule that shipped with the unconditional prelude
-   (docs/prelude-scope-v0.md §4.2 step 4), which stripped only the synthetic
-   `$entry.` and kept real module prefixes on the grounds that they were useful
-   disambiguation.  They are not, at least not to the reader of a printed value:
-   Haskell (`deriving Show`), Rust (`#[derive(Debug)]`), Swift (default enum
-   reflection) and Python (`@dataclass` repr) all render the bare constructor,
-   and Python has `__module__` right there and uses `__qualname__` instead.  The
-   cost accepted is that two modules' same-named ctors now render identically;
-   tags and identity are untouched, so only the printed string collides. */
+/* Source-form ctor name for the stderr debug dump (sprout_debug_adt_rec): the segment
+   after the last dot, dropping the bundler's module qualifier. CtorMeta.name stays
+   qualified because the `sprout_tag$<name>` lookup and find_ctor_tag_by_name need it. */
 static const char* display_ctor_name(const char* name) {
   if (name == NULL) return NULL;
   const char* dot = strrchr(name, '.');
   return dot != NULL ? dot + 1 : name;
 }
 
-static void print_inline_value(long long v);
-
-static void print_inline_obj(void* o) {
-  long long tag = sprout_tag((long long)(uintptr_t)o);
-  CtorMeta* m = find_ctor(tag);
-  if (m == NULL) {
-    printf("Ctor%lld", tag);
-    return;
-  }
-  printf("%s", display_ctor_name(m->name));
-  if (m->arity <= 0) return;
-  printf("(");
-  long long* fields = (long long*)o;
-  print_inline_value(fields[0]);
-  if (m->arity > 1) { printf(", "); print_inline_value(fields[1]); }
-  if (m->arity > 2) { printf(", "); print_inline_value(fields[2]); }
-  if (m->arity > 3) { printf(", "); print_inline_value(fields[3]); }
-  if (m->arity > 4) { printf(", "); print_inline_value(fields[4]); }
-  if (m->arity > 5) { printf(", "); print_inline_value(fields[5]); }
-  if (m->arity > 6) { printf(", "); print_inline_value(fields[6]); }
-  printf(")");
-}
-
-static void print_inline_value(long long v) {
-  void* hdr = sprout_heap_lookup((void*)(uintptr_t)v);
-  if (hdr != NULL) {
-    uint64_t h; memcpy(&h, hdr, 8);
-    SproutHeapKind kind = sprout_hdr_kind(h);
-    if (kind == SPROUT_HEAP_CSTR) {
-      printf("%s", (const char*)(uintptr_t)v);
-    } else if (kind == SPROUT_HEAP_TUPLE) {
-      /* Tuple blob: aux words, each a value (recurse).  Renders structurally
-         like an ADT — e.g. (1, 7) — consistent with print's Bool-as-i64
-         semantics (print(true) prints 1, not "true"). */
-      size_t n = (size_t)(h >> 14);
-      printf("(");
-      for (size_t i = 0; i < n; i++) {
-        if (i > 0) printf(", ");
-        long long word;
-        memcpy(&word, (const char*)(uintptr_t)v + i * sizeof(uintptr_t), sizeof(word));
-        print_inline_value(word);
-      }
-      printf(")");
-    } else if (kind == SPROUT_HEAP_OBJ) {
-      print_inline_obj(unbox_ptr(v));
-    } else {
-      printf("%lld", v);
-    }
-  } else {
-    printf("%lld", v);
-  }
-}
-
-long long print_int(long long x) {
-  printf("%lld\n", x);
-  return x;
-}
 long long print_str(const char* s) {
   printf("%s\n", s);
   return 0;
@@ -3274,23 +3170,6 @@ long long eprint_str(const char* s) {
 long long eprint(long long s) {
   fprintf(stderr, "%s\n", (const char*)s);
   return 0;
-}
-long long print_text(const char* s) {
-  printf("%s", s);
-  return 0;
-}
-long long print_value_part(long long x) {
-  print_inline_value(x);
-  return x;
-}
-long long print_newline(void) {
-  printf("\n");
-  return 0;
-}
-long long print_value(long long x) {
-  print_inline_value(x);
-  printf("\n");
-  return x;
 }
 // W8/P1 (D5): parse_int is now a total pure-Sprout function (prelude.sprout,
 // String -> Maybe Int). The C strtoll builtin was removed; the committed seed no

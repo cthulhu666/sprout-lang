@@ -34,15 +34,9 @@ else
 fi
 test "$(cat "$TMP_DIR/read_file_gc.out")" = "6"
 
-echo "==> c runtime: read_file Err payload prints as a string"
-compile read_file_error_print.c "$TMP_DIR/read_file_error_print" -O0 -g
-"$TMP_DIR/read_file_error_print" > "$TMP_DIR/read_file_error_print.out"
-grep -q '^Err(' "$TMP_DIR/read_file_error_print.out"
-if grep -Eq '^Err\([0-9]+\)$' "$TMP_DIR/read_file_error_print.out"; then
-  echo "read_file Err payload printed as a raw pointer:" >&2
-  cat "$TMP_DIR/read_file_error_print.out" >&2
-  exit 1
-fi
+echo "==> c runtime: read_file Err payload is a string"
+compile read_file_error_payload.c "$TMP_DIR/read_file_error_payload" -O0 -g
+test "$("$TMP_DIR/read_file_error_payload")" = "read_file-err-payload-string"
 
 echo "==> c runtime: constructor metadata fails before table overflow"
 compile ctor_meta_capacity.c "$TMP_DIR/ctor_meta_capacity" -O0 -g

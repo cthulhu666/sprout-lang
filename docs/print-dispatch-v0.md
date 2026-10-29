@@ -1,6 +1,6 @@
 # `print` through `ToString` — v0
 
-**Status — approved; in progress (§10 steps 1–3 landed).** Changes the normative spec: `print`'s
+**Status — approved; in progress (§10 steps 1–4 landed).** Changes the normative spec: `print`'s
 type, its output for `Bool`, `List`, `Vec` and any type with a hand-written instance, and the
 `no_prelude` floor.
 
@@ -132,12 +132,12 @@ name. Step 5 (§10) drops that declare and makes it a plain extern.
 - ~~`"print"` in the no-runtime-symbol set and the `print_value` declare (`ir_lowering.sprout`).~~
 - ~~`"print"` and `"print_value"` in the effectful-call list in `bce.sprout`.~~
 - ~~The `IRPrintStr` comment in `sprout_ir.sprout`, which routes Int/Bool to `print_value`.~~
-- `print_value`, `print_value_part` and `print_inline_value` in the runtime, once nothing emits
-  them, with their `APPROVED_BUILTINS` lines. §10 step 4.
+- ~~`print_value`, `print_value_part` and `print_inline_value` in the runtime, once nothing emits
+  them, with their `APPROVED_BUILTINS` lines.~~ Landed in §10 step 4.
 - ~~The REPL's `print(to_string(question))` (`eval_main_body`, `compiler.sprout`) becomes
   `print(question)`.~~
 
-All but the runtime item landed in §10 step 3.
+All landed: the compiler items in §10 step 3, the runtime item in step 4.
 
 `print` in value position moves from `synthesize_intrinsic_eta_closure` to the ordinary path for a
 constrained function used as a value. Under a type variable that path captures the dictionary:
@@ -259,9 +259,8 @@ in function main`. For a type declared in the program it should add "add `derivi
     function passed by name, bypassing `infer_lambda`. A constrained `print` passed by name is
     eta-expanded into a lambda (`value_ref_eta`, `infer.sprout`), so the canary would keep
     passing without testing that channel. Re-point it at `eprint`, which stays an extern.
-  - `tests/c_runtime/read_file_error_print.c` links `print_value` directly (`just c-runtime-test`).
-    Step 4 of §10 deletes it, or replaces it with a Sprout fixture over
-    `to_string(read_file(…))`.
+  - ~~`tests/c_runtime/read_file_error_print.c` links `print_value` directly.~~ Landed: replaced by
+    `tests/c_runtime/read_file_error_payload.c` (§10 step 4).
 - Expected outputs that record `1`/`0` for a `Bool`, `Cons(…)` for a list, or a number for a
   nested `Char` change. Each one is read, not regenerated blind.
 - Downstream: no file fails to check. Their test outputs are re-run under the new compiler before
@@ -329,8 +328,10 @@ declaration, and needs a rule for which instance wins when the user also writes 
    The step-2 seed still lowers `print` by name, ahead of the prelude function, so its stage 2
    differs from the stage 3 it builds. `refresh-seed` needs two iterations here (measured, §5);
    that is expected, not a broken fixed point.~~ Landed.
-4. Remove the runtime renderer once nothing emits `print_value` (§4.3), with
-   `tests/c_runtime/read_file_error_print.c` (§7). Separate, small.
+4. ~~Remove the runtime renderer once nothing emits `print_value` (§4.3), with
+   `tests/c_runtime/read_file_error_print.c` (§7). Separate, small.~~ Landed. `print_int`,
+   `print_text` and `print_newline` went with it (also unreferenced). The test became
+   `tests/c_runtime/read_file_error_payload.c`.
 5. **Plain externs for the String sinks.** `print_str` and `eprint` are call-site intrinsics
    because the compiler declares `print_str` and `eprint_str` with a `ptr` parameter
    (`runtime_declares`) and casts at each call (`IRPrintStr`). Ten other externs whose C takes

@@ -17,14 +17,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-long long sprout_register_ctor(long long tag, const char* name, long long arity);
+long long sprout_register_ctor(long long tag, const char* name, long long arity,
+                               const char* field_kinds);
 long long read_file(long long path_i);
 long long sprout_tag(long long h);
 
 int main(int argc, char** argv) {
   if (argc != 3) return 99;
-  sprout_register_ctor(1, "Err", 1);
-  sprout_register_ctor(2, "Ok", 1);
+  sprout_register_ctor(1, "Err", 1, "p");
+  sprout_register_ctor(2, "Ok", 1, "p");
 
   long long ok = read_file((long long)(uintptr_t)argv[1]);
   if (sprout_tag(ok) != 2) {

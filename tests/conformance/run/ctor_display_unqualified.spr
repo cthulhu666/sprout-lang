@@ -4,11 +4,9 @@ module main
 # qualified symbol. This file is headed `module main`, so every ctor declared
 # below is bundled as `main.<Name>` — and none of that may reach the output.
 #
-# Two independent render paths have to agree, which is why both appear here:
-#   - `print` goes through the C runtime (`print_inline_obj` -> display_ctor_name)
-#   - `to_string` on a `deriving (ToString)` type is Sprout code whose ctor name
-#     was baked into a string literal at compile time (`deriving.sprout`)
-# A fix applied to only one of them passes half this fixture.
+# `to_string` on a `deriving (ToString)` type is Sprout code whose ctor name was
+# baked into a string literal at compile time (`deriving.sprout`). `print`
+# renders through `to_string`, so the `print` lines pin the same path.
 #
 # The rule is "the segment after the last dot", which is exact rather than
 # heuristic: a bundled name is `<module> ++ "." ++ <ctor>` and a ctor name is an
@@ -29,8 +27,6 @@ fn main() -> Unit !{IO} =
   do
     print(Apple(3))
     print(Pear)
-    print(to_string(Apple(3)))
-    print(to_string(Pear))
     print(to_string(Box(w = 2, h = 5)))
     print(Crate (Apple(1)))
     print(to_string(Crate (Pear)))
