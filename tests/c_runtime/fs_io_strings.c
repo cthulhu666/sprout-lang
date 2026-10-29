@@ -20,18 +20,14 @@
 #include <string.h>
 #include <unistd.h>
 
-long long sprout_register_ctor(long long tag, const char* name, long long arity,
-                               const char* field_kinds);
-_Bool str_eq(const char* left, const char* right);
-long long str_byte_len(long long s_val);
+#include "str_check.h"
+
 long long read_file(long long path_i);
 long long write_file(long long path_i, long long content_i);
 long long fs_list_dir(long long path_i);
 long long fs_read_bytes(long long path_i);
 long long stdin_read_bytes(long long n);
 long long read_int_lines(const char* path);
-long long sprout_tag(long long h);
-long long sprout_field(long long h, long long idx);
 long long bytes_length(long long bytes_h);
 long long vector_length(long long vec);
 long long vector_get(long long vec, long long index);
@@ -39,20 +35,7 @@ long long vector_get(long long vec, long long index);
 enum { ERR = 1, OK = 2, JUST = 3, NOTHING = 4, CONS = 5, NIL = 6, FS_NOT_FOUND = 7,
        FS_INVALID_PATH = 8 };
 
-static int fail(const char* what) {
-  fprintf(stderr, "FAIL: %s\n", what);
-  return 1;
-}
-
 static long long W(const char* p) { return (long long)(uintptr_t)p; }
-
-/* The word is a headered String of exactly `want` (NULL: any non-empty text). */
-static int is_str(long long word, const char* want) {
-  const char* s = (const char*)(uintptr_t)word;
-  if (s == NULL) return 0;
-  if (!str_eq(s, s) || str_byte_len(word) != (long long)strlen(s)) return 0;
-  return want == NULL ? strlen(s) > 0 : strcmp(s, want) == 0;
-}
 
 /* `r` is Err(<non-empty String>), or Err("want") when want is given. */
 static int is_err(long long r, const char* want) {

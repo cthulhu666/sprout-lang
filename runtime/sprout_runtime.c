@@ -3909,8 +3909,8 @@ long long term_read_line(void) {
     len -= 1;
     line[len] = '\0';
   }
-  line = register_cstr(line);
-  SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
+  SproutStr text = sprout_str_register(line);
+  SPROUT_HANDLE(h_line, sprout_str_word(text));
   return sprout_make1(SPROUT_TAG(Just), sprout_handle_get(h_line));
 }
 /* stdin_read_bytes: read exactly n bytes from stdin; returns Nothing on EOF.
@@ -4013,6 +4013,12 @@ static size_t term_utf8_continuations(int lead) {
   return 0;
 }
 
+/* A static C string as a Sprout String: interned (copied, deduped, permanent), so it is
+ * headered and safe for strerror's static storage; no collection runs. */
+static long long term_interned_word(const char* name) {
+  return sprout_str_word(sprout_str_intern(name));
+}
+
 static long long term_key_utf8(int lead, int from_tty) {
   unsigned char buf[5];
   size_t need = term_utf8_continuations(lead);
@@ -4031,14 +4037,10 @@ static long long term_key_utf8(int lead, int from_tty) {
   }
   const char* reason = NULL;
   if (!ok || !utf8_validate(buf, len, &reason)) {
-    /* U+FFFD; interned like the key-name tokens, so it is headered and deduped. */
-    return (long long)(uintptr_t)intern_string("\357\277\275");
+    return term_interned_word("\357\277\275"); /* U+FFFD */
   }
   sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(len, "term_read_key: out of memory");
-  memcpy(out, buf, len);
-  out[len] = '\0';
-  return (long long)(uintptr_t)out;
+  return sprout_str_word(sprout_str_dup_slice((const char*)buf, len, "term_read_key: out of memory"));
 }
 
 long long term_read_key(void) {
@@ -4103,10 +4105,10 @@ long long term_read_key(void) {
                 ssize_t third_count = read(STDIN_FILENO, &third, 1);
                 if (third_count > 0) {
                   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-                  if (third == 'A') return (long long)(uintptr_t)intern_string(token_up);
-                  if (third == 'B') return (long long)(uintptr_t)intern_string(token_down);
-                  if (third == 'C') return (long long)(uintptr_t)intern_string(token_right);
-                  if (third == 'D') return (long long)(uintptr_t)intern_string(token_left);
+                  if (third == 'A') return term_interned_word(token_up);
+                  if (third == 'B') return term_interned_word(token_down);
+                  if (third == 'C') return term_interned_word(token_right);
+                  if (third == 'D') return term_interned_word(token_left);
                 }
               }
             }
@@ -4116,19 +4118,18 @@ long long term_read_key(void) {
       }
     }
   }
-  /* Key-name tokens are static C literals; intern to headered Sprout Strings
-   * (deduped, permanent) so byte_length reads them via the payload-8 header. */
-  if (ch == EOF) return (long long)(uintptr_t)intern_string("");
-  if (ch == 1) return (long long)(uintptr_t)intern_string(token_ctrl_a);
-  if (ch == 2) return (long long)(uintptr_t)intern_string(token_ctrl_b);
-  if (ch == 4) return (long long)(uintptr_t)intern_string(token_ctrl_d);
-  if (ch == 5) return (long long)(uintptr_t)intern_string(token_ctrl_e);
-  if (ch == 6) return (long long)(uintptr_t)intern_string(token_ctrl_f);
-  if (ch == 12) return (long long)(uintptr_t)intern_string(token_ctrl_l);
-  if (ch == 8 || ch == 127) return (long long)(uintptr_t)intern_string(token_backspace);
-  if (ch == 27) return (long long)(uintptr_t)intern_string(token_escape);
-  if (ch == '\n' || ch == '\r') return (long long)(uintptr_t)intern_string(token_enter);
-  if (ch == '\t') return (long long)(uintptr_t)intern_string(token_tab);
+  /* Key-name tokens. */
+  if (ch == EOF) return term_interned_word("");
+  if (ch == 1) return term_interned_word(token_ctrl_a);
+  if (ch == 2) return term_interned_word(token_ctrl_b);
+  if (ch == 4) return term_interned_word(token_ctrl_d);
+  if (ch == 5) return term_interned_word(token_ctrl_e);
+  if (ch == 6) return term_interned_word(token_ctrl_f);
+  if (ch == 12) return term_interned_word(token_ctrl_l);
+  if (ch == 8 || ch == 127) return term_interned_word(token_backspace);
+  if (ch == 27) return term_interned_word(token_escape);
+  if (ch == '\n' || ch == '\r') return term_interned_word(token_enter);
+  if (ch == '\t') return term_interned_word(token_tab);
   /* Reached only by the non-tty and termios-failure paths; the raw-mode path
    * assembles and returns above, where it still holds raw mode. Continuation bytes
    * come from getchar() here, which is correct precisely because these paths never
@@ -4137,10 +4138,8 @@ long long term_read_key(void) {
   /* Heap-allocate a fresh String per keypress so a retained result never
    * mutates under the caller on the next call (the old static-buffer aliasing). */
   sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(1, "term_read_key: out of memory");
-  out[0] = (char)ch;
-  out[1] = '\0';
-  return (long long)(uintptr_t)out;
+  char c = (char)ch;
+  return sprout_str_word(sprout_str_dup_slice(&c, 1, "term_read_key: out of memory"));
 }
 long long term_write(long long text_val) {
   const char* text = (const char*)text_val;
@@ -4281,9 +4280,7 @@ static long long term_input0(long long ctor_tag) {
 }
 
 static long long term_input_failed(const char* detail) {
-  /* intern_string COPIES into a permanent, non-arena, header-prefixed buffer, so
-   * it is safe for strerror's static storage and triggers no collection. */
-  long long msg = (long long)(uintptr_t)intern_string(detail);
+  long long msg = term_interned_word(detail);
   SPROUT_GC_PUSH_I64_LOCAL(msg);
   long long out = sprout_make1(SPROUT_TAG(stdlib$terminal$TermFailed), msg);
   SPROUT_GC_POP_LOCALS(1);
@@ -4435,7 +4432,7 @@ long long term_read_avail(long long max_val, long long ms_val) {
     return term_input_failed(strerror(errno));
   }
   long long payload =
-    (long long)(uintptr_t)bytes_from_chunk_bytes(buf, (size_t)n, "term_read_avail: out of memory");
+    sprout_ptr_word(bytes_from_chunk_bytes(buf, (size_t)n, "term_read_avail: out of memory"));
   SPROUT_GC_PUSH_I64_LOCAL(payload);
   long long out = sprout_make1(SPROUT_TAG(stdlib$terminal$TermBytes), payload);
   SPROUT_GC_POP_LOCALS(1);
