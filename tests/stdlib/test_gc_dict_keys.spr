@@ -1,0 +1,64 @@
+import stdlib.test (check_eq, check_true, run_suite)
+
+# A Dict or Set key is a GC child of its map node: a key reachable only from the
+# map must survive collection. Keys are built at runtime (heap strings, not
+# static literals) and every other reference to them is dropped before churning.
+
+fn key_of(i: Int) -> String =
+  "key-" ++ int_to_string(i)
+
+fn build(i: Int, n: Int, d: Dict Int) -> Dict Int =
+  if i >= n then d
+  else build(i + 1, n, dict_set(key_of(i), i, d))
+
+fn build_set(i: Int, n: Int, s: Set) -> Set =
+  if i >= n then s
+  else build_set(i + 1, n, set_insert(key_of(i), s))
+
+fn remove_evens(i: Int, n: Int, d: Dict Int) -> Dict Int =
+  if i >= n then d
+  else remove_evens(i + 2, n, dict_remove(key_of(i), d))
+
+# Each call allocates strings and drops them, so collections run between uses.
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + str_len("ab" ++ int_to_string(n)))
+
+fn all_present(i: Int, n: Int, d: Dict Int) -> Bool =
+  if i >= n then true
+  else
+    match dict_get(key_of(i), d) with
+    | Just v -> v == i && all_present(i + 1, n, d)
+    | Nothing -> false
+
+fn all_set_members(i: Int, n: Int, s: Set) -> Bool =
+  if i >= n then true else set_member(key_of(i), s) && all_set_members(i + 1, n, s)
+
+fn odd_present_even_absent(i: Int, n: Int, d: Dict Int) -> Bool =
+  if i >= n then true
+  else
+    let want = i - (i / 2) * 2 == 1
+    in dict_member(key_of(i), d) == want && odd_present_even_absent(i + 1, n, d)
+
+fn key_len(total: Int, key: String) -> Int =
+  total + str_len(key)
+
+fn expected_len(i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc else expected_len(i + 1, n, acc + str_len(key_of(i)))
+
+fn main() -> Unit !{IO} =
+  let n = 300
+  in let d = build(0, n, dict_empty())
+  in let s = build_set(0, n, set_empty())
+  in let pruned = remove_evens(0, n, d)
+  in let _churn = churn(4000, 0)
+  in run_suite("gc_dict_keys", [
+    check_eq("dict size", vec_length(dict_keys(d)), n),
+    check_true("every dict key reads back", all_present(0, n, d)),
+    check_eq("dict key bytes intact", vec_fold(key_len, 0, dict_keys(d)), expected_len(0, n, 0)),
+    check_true("every set member reads back", all_set_members(0, n, s)),
+    check_eq("set size", set_size(s), n),
+    check_true("pruned dict keeps odd keys, drops even", odd_present_even_absent(0, n, pruned)),
+    check_eq("pruned dict size", vec_length(dict_keys(pruned)), n / 2),
+    check_true("original dict untouched by remove", all_present(0, n, d))
+  ])

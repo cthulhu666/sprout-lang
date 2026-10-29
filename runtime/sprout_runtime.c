@@ -99,7 +99,7 @@ struct SproutSlot { long long w; };
 typedef struct InternBucket { char* str; struct InternBucket* next; } InternBucket;
 
 typedef struct {
-  const char* key;    /* interned string — permanent, never freed */
+  const char* key;    /* String as the caller passed it (GC child at index 3) */
   long long   value;  /* Sprout handle (GC child at index 0) */
   long long   left;   /* left child handle, or 0 (GC child at index 1) */
   long long   right;  /* right child handle, or 0 (GC child at index 2) */
@@ -2195,7 +2195,7 @@ static size_t sprout_heap_child_count_payload(void* payload) {
     case SPROUT_HEAP_CLOSURE: /* n_caps (slot 0 skipped); arity shares aux */
       return (size_t)sprout_closure_ncaps(aux);
     case SPROUT_HEAP_VECTOR:  return (size_t)((VectorVal*)payload)->len;
-    case SPROUT_HEAP_MAP:     return 3;
+    case SPROUT_HEAP_MAP:     return 4;  /* value, left, right, key */
     case SPROUT_HEAP_BYTES:   return 0;
     case SPROUT_HEAP_BUILDER: return ((BuilderVal*)payload)->count;
     case SPROUT_HEAP_TUPLE:   return (size_t)aux;
@@ -2224,6 +2224,9 @@ static long long sprout_heap_child_value_payload(void* payload, size_t index) {
       if (index == 0) return bst->value;
       if (index == 1) return bst->left;
       if (index == 2) return bst->right;
+      /* A heap String, a static literal or an interned one; the marker skips the
+       * last two (sprout_heap_lookup finds no slot for them). */
+      if (index == 3) return (long long)(uintptr_t)bst->key;
       break;
     }
     case SPROUT_HEAP_BYTES: break;
@@ -6177,7 +6180,7 @@ long long str_slice(long long s_i, long long start, long long count) {
  * Every Sprout String is a headered CSTR block with its byte length in the
  * header word at payload-8 — arena strings (alloc_cstr / adopt_cstr),
  * header-prefixed static literals (ir_lowering.emit_str_global) and interned
- * strings (intern_string, covering env/argv/map-key/term-key) all carry it — so
+ * strings (intern_string, covering env/argv/term-key) all carry it — so
  * the length never needs a scan, and no arena-membership check is required.
  *
  * Any function that walks a string from a caller-supplied byte OFFSET must use
@@ -6369,7 +6372,9 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * GC INVARIANT: none of these can trigger a collection, and none returns memory
  * the collector manages.  Most simply hand back a pointer they were given
  * (v->data[i], node->key, node->value) or an immediate (a decoded codepoint, a
- * byte).  env_get_unboxed and argv_get_unboxed are the ones worth stating
+ * byte).  A returned element or key may be a collectable object, but it stays
+ * reachable from its container for the whole call, and the caller roots it.
+ * env_get_unboxed and argv_get_unboxed are the ones worth stating
  * carefully: they route through intern_string, which on a cache MISS does call
  * malloc — but it is a bare malloc with no sprout_gc_maybe_collect_threshold(),
  * and interned strings are permanent and non-arena (sprout_heap_lookup returns
@@ -8925,7 +8930,9 @@ long long vector_from_list(long long list_handle) {
 /* ─── Persistent AVL BST map ────────────────────────────────────────────────
  * Each BST node is an independent SPROUT_HEAP_MAP managed object.
  * Empty map = handle 0 (no allocation needed).
- * Keys are interned strings (permanent, never freed by map sweep).
+ * A key is stored as the caller passed it and is a GC child of its node, so it
+ * lives as long as some node holds it. map_set and map_remove root the key across
+ * the node allocations below; the helpers just thread it down.
  * Subtree size enables O(log n) nth-key/nth-value.
  * Structural sharing: O(log n) new nodes per insert/remove.
  */
@@ -9123,7 +9130,7 @@ static long long bst_remove_node(long long h, const char* ikey) {
     long long rh = h, new_right = 0, new_h = 0;
     SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_right); SPROUT_GC_PUSH_I64_LOCAL(new_h);
     BSTNode* succ = bst_find_min(((BSTNode*)(uintptr_t)rh)->right);
-    const char* succ_key = succ->key;
+    const char* succ_key = succ->key;   /* alive: reachable from rh */
     long long succ_value = succ->value; /* alive: reachable from rh */
     new_right = bst_remove_min(((BSTNode*)(uintptr_t)rh)->right);
     BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
@@ -9210,11 +9217,12 @@ long long map_get(long long map_h, long long key_val) {
 long long map_set(long long map_h, long long key_val, long long value) {
   const char* key = (const char*)key_val;
   if (key == NULL) sprout_fail("map_set: null key");
-  const char* ikey = intern_string(key); /* intern before any GC-triggering alloc */
-  long long rm = map_h, rv = value;
-  SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rv);
-  long long result = bst_insert_node(rm, ikey, rv);
-  SPROUT_GC_POP_LOCALS(2);
+  /* The key is stored as given, so it must stay rooted until a node holds it:
+   * bst_insert_node allocates path copies before the leaf that stores it. */
+  long long rm = map_h, rv = value, rk = key_val;
+  SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(rk);
+  long long result = bst_insert_node(rm, key, rv);
+  SPROUT_GC_POP_LOCALS(3);
   return result;
 }
 
@@ -9233,14 +9241,13 @@ static int bst_has_key(long long h, const char* key) {
 long long map_remove(long long map_h, long long key_val) {
   const char* key = (const char*)key_val;
   if (key == NULL) sprout_fail("map_remove: null key");
-  /* An absent key changes nothing: return the map itself, and do not intern the
-     key, since an interned copy is permanent. A present key is interned already. */
+  /* An absent key changes nothing: return the map itself, with no path copy.
+     The key is only compared, never stored, but root it across the allocations. */
   if (!bst_has_key(map_h, key)) return map_h;
-  const char* ikey = intern_string(key);
-  long long rm = map_h;
-  SPROUT_GC_PUSH_I64_LOCAL(rm);
-  long long result = bst_remove_node(rm, ikey);
-  SPROUT_GC_POP_LOCALS(1);
+  long long rm = map_h, rk = key_val;
+  SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rk);
+  long long result = bst_remove_node(rm, key);
+  SPROUT_GC_POP_LOCALS(2);
   return result;
 }
 

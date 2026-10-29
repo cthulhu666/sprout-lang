@@ -1,25 +1,24 @@
-/* The intern table is REPORTED, and the number counts distinct keys.
+/* Map keys do not grow the intern table.
  *
- * Every map_set interns its key into a permanent malloc'd table outside the
- * arena (intern_string), so neither the allocation counters nor the live census
- * can see that memory: the galaxy client's census read cstr=111(9.2KB) while
- * holding 75,640 keys. `intern=` in the exit report is the only account of it.
+ * A map stores its key string as given, and the collector frees it once the map
+ * drops it. The intern table (intern_string) is a permanent malloc'd table outside
+ * the arena, kept for env, argv and terminal tokens; `intern=` in the exit report
+ * is the only account of it, since neither the allocation counters nor the live
+ * census can see that memory.
  *
- * That number is worth nothing unless it counts DISTINCT keys rather than
- * insertions. A program inserting one key in a loop leaks nothing; one computing
- * a fresh key per iteration grows the table forever, and only the first reading
- * distinguishes them.
+ * Map keys once went through it, so a program computing a fresh key per insert
+ * grew it for the life of the process. Each selector below must leave it where one
+ * key repeated leaves it:
  *
- *   distinct — KEYS computed keys must add KEYS entries.
- *   repeated — the same key KEYS times must add one.
- *   remove   — removing KEYS computed keys a map does not hold must add none:
- *              only a key that is stored needs a permanent copy.
+ *   distinct — KEYS computed keys must add no entries.
+ *   repeated — the same key KEYS times: the baseline.
+ *   remove   — removing KEYS computed keys a map does not hold must add none.
  *
  * run.sh reads the number from the exit REPORT rather than the counters, which
  * are static. That is the better assertion anyway: the report is the product, so
- * this covers its format alongside the arithmetic. Neither run asserts an
- * absolute value — the runtime interns during init, and only the difference
- * between two runs of this binary cancels that baseline.
+ * this covers its format alongside the arithmetic. No run asserts an absolute
+ * value — the runtime interns during init, and only the difference between two
+ * runs of this binary cancels that baseline.
  */
 #include <stdio.h>
 #include <string.h>

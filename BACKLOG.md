@@ -874,16 +874,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   and every read unwraps one. `wrap Dict v = Map v` and `wrap Set = Map Unit` would make them the
   tree itself (`ListBuilder` is already a `wrap`). Measure on a self-compile before and after.
 
-- [ ] `P2` **A `Dict` key is interned permanently, so computed keys leak for the process's life.**
-  `map_set` routes every key through `intern_string`, which mallocs outside the arena and never
-  frees; `sprout_heap_lookup` returns NULL for those buffers so the collector skips them. That is
-  deliberate — it makes `BSTNode.key` a raw `const char*` the GC need not trace, and gives every
-  String an O(1) header length — but it means a server keyed on request ids grows the table without
-  bound. Now VISIBLE, not fixed: the report carries `intern=`/`intern_bytes=` and the census an
-  `offheap:` line (`tests/c_runtime/intern_table_report.c` pins that it counts distinct keys).
-  Bounding it means making the key a traced handle, which is a runtime representation change and
-  needs a design round. Measure a long-running server first — the galaxy client's 75,640 keys are
-  boot-loaded and bounded, which is the easy case.
 - [ ] `P2` **`unicode.lookup` allocates a closure per table search.** `find_tag(count, chunk, cp)`
   takes its chunk accessor as a `Int -> String` parameter, and passing `gcb_chunk` allocates a
   closure at every call. Measured with `SPROUT_DEBUG_ALLOC` over a segmentation probe: 82,000
