@@ -1,0 +1,86 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode)
+import stdlib.http_client (http_get)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, read_avail_timeout, write_all)
+import testsupport.listen (listen_or_die)
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# Regression: http_request frames the status line, header block and body in one pass. A response with
+# no header lines, mixed CR/LF terminators, or CRLF bytes inside a bare-LF body used to crash the
+# process or report the wrong head. Prints one line per case; the justfile asserts each.
+fn reply_for(head: String) -> String =
+  if string.contains(head, "/lflf") then "HTTP/1.1 200 OK\n\nhi"
+  else if string.contains(head, "/crlf") then "HTTP/1.1 204 No Content\r\n\r\n"
+  else if string.contains(head, "/mixed1") then "HTTP/1.1 200 OK\r\n\nhi"
+  else if string.contains(head, "/mixed2") then "HTTP/1.1 200 OK\nX-A: 1\r\n\r\nhi"
+  else if string.contains(head, "/lfcr") then "HTTP/1.1 200 OK\nA: 1\n\nx\r\ny\r\n\r\nz"
+  else if string.contains(head, "/bad") then "HTTP/1.1 404 Not Found\r\n\r\n"
+  else if string.contains(head, "/lfbody") then "HTTP/1.1 200 OK\nX-A: 1\n\nab\r\n\r\ncd"
+  else "HTTP/1.1 200 OK\r\nX-A: 1\r\n\r\nhi"
+
+fn read_head(conn: borrowing TcpConnection, acc: String) -> String !{IO} =
+  if string.contains(acc, "\r\n\r\n") then acc
+  else
+    match read_avail_timeout(conn, 3000) with
+    | Err _ -> acc
+    | Ok chunk ->
+        match bytes.to_string(chunk) with
+        | Err _ -> acc
+        | Ok text -> read_head(conn, string.concat(acc, text))
+
+fn serve_one(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    head <- read_head(conn, "")
+    write_all(conn, bytes.from_string(reply_for(head)))
+    close(conn)
+
+fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then terminal.write("")
+  else
+    match accept(listener) with
+    | Err _ -> terminal.write("")
+    | Ok conn ->
+        do
+          serve_one(conn)
+          serve_loop(listener, remaining - 1)
+
+fn server(port: Int, n: Int) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(port)
+    serve_loop(listener, n)
+    close_listener(listener)
+
+fn err_text(e: HttpError) -> String =
+  match e with
+  | HttpTimeout -> "timeout"
+  | HttpNetwork m -> `network ${m}`
+  | HttpBadStatus c -> `status ${int_to_string(c)}`
+  | HttpDecode m -> `decode ${m}`
+
+fn probe(port: Int, path: String) -> Unit !{IO} =
+  match http_get(`http://127.0.0.1:${int_to_string(port)}/${path}`, "", 3000) with
+  | Ok resp ->
+      match resp with
+      | HttpResponse code headers body ->
+          terminal.write(`${path}: ${int_to_string(code)} headers=(${headers}) body=${int_to_string(bytes.length(body))}\n`)
+  | Err e -> terminal.write(`${path}: Err ${err_text(e)}\n`)
+
+fn client(port: Int, cases: List String) -> Unit !{IO} =
+  match cases with
+  | [] -> terminal.write("done\n")
+  | [c | rest] ->
+      do
+        probe(port, c)
+        client(port, rest)
+
+fn run(s: Scope, port: Int, cases: List String) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> server(port, list_length(cases)))
+    task_spawn(s, \_ -> client(port, cases))
+
+fn main() -> Unit !{IO} =
+  do
+    let cases = ["ok", "lflf", "crlf", "mixed1", "mixed2", "lfbody", "lfcr", "bad"]
+    with_scope(\s -> run(s, 28980, cases))
