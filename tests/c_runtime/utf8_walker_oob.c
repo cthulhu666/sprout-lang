@@ -23,7 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-long long sprout_register_ctor(long long tag, const char* name, long long arity);
+long long sprout_register_ctor(long long tag, const char* name, long long arity,
+                               const char* field_kinds);
 long long str_len(long long s_val);
 long long str_char_at(long long s_val, long long index);
 long long str_slice(long long s_i, long long start, long long length);
@@ -40,8 +41,8 @@ static long long make_bad(const unsigned char* bytes, size_t n) {
 
 int main(int argc, char** argv) {
   if (argc != 2) return 99;
-  sprout_register_ctor(1, "Nothing", 0);
-  sprout_register_ctor(2, "Just", 1);
+  sprout_register_ctor(1, "Nothing", 0, "");
+  sprout_register_ctor(2, "Just", 1, "i");
 
   /* Truncated 4-byte lead, immediately terminated. */
   const unsigned char truncated[] = { 0xF0 };

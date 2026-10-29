@@ -203,13 +203,6 @@ fn emit_eq_instance(name: String, type_params: List String, ctors: List ast.Type
 # the one place the name becomes a string LITERAL — the program's own output, not
 # a symbol. The sibling `build_ctor_var_pattern` keeps the qualified name, which
 # it must: that is the pattern that has to match the constructor.
-#
-# The runtime's display path (the C `display_ctor_name`) cannot help with this
-# one: a derived `to_string` returns a String the program may never print, so
-# there is no render for the runtime to intercept. The two carry the same rule,
-# and that duplication is load-bearing: the fixture
-# `tests/conformance/run/ctor_display_unqualified.spr` exercises both paths in
-# one program so they cannot drift apart.
 fn build_to_string_branch_body(ctor_name: String, arity: Int, pos: source.SourcePos) -> ast.Expr =
   if arity == 0 then ast.StringExpr(display, pos)
   else build_to_string_concat_chain(display, arity, pos)
