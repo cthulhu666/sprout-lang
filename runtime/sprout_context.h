@@ -31,6 +31,8 @@
  * internal abort, so each caller keeps its own diagnostic wording. */
 #define SPROUT_CTX_ENOMEM (-1)   /* no memory for the stack */
 #define SPROUT_CTX_EPRIME (-2)   /* the context could not be initialized */
+#define SPROUT_CTX_EMAP   (-3)   /* POSIX: mmap of the stack failed; see sprout_ctx_errtext */
+#define SPROUT_CTX_EGUARD (-4)   /* POSIX: mprotect of the guard page failed; same */
 
 #if defined(_WIN32)
 
@@ -84,6 +86,9 @@ static inline int sprout_ctx_in_guard(const SproutCtx* c, const void* a) {
   return 0;
 }
 
+/* Only the POSIX arm returns EMAP / EGUARD; there is no errno text to give. */
+static inline const char* sprout_ctx_errtext(void) { return ""; }
+
 static inline int sprout_ctx_create(SproutCtx* c, void (*entry)(void), size_t stack_bytes) {
   c->adopted = 0;
   /* commit 0 = the executable's default, so pages are backed as the stack grows —
@@ -126,7 +131,9 @@ static inline void sprout_ctx_destroy(SproutCtx* c) {
 #define _XOPEN_SOURCE 700
 #define _DARWIN_C_SOURCE 1
 
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ucontext.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -170,6 +177,10 @@ typedef struct SproutCtx {
 static void*  g_ctx_cache[SPROUT_CTX_CACHE_CAP];
 static size_t g_ctx_cache_bytes[SPROUT_CTX_CACHE_CAP];
 static int    g_ctx_cache_n = 0;
+static int    g_ctx_errno   = 0;   /* errno of the last EMAP / EGUARD failure */
+
+/* strerror text for the failure sprout_ctx_create last returned EMAP / EGUARD for. */
+static inline const char* sprout_ctx_errtext(void) { return strerror(g_ctx_errno); }
 
 static inline size_t sprout_ctx_round_page(size_t n) {
   size_t pg = (size_t)sysconf(_SC_PAGESIZE);
@@ -214,11 +225,16 @@ static inline int sprout_ctx_create(SproutCtx* c, void (*entry)(void), size_t st
   }
   if (m == NULL) {
     m = mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (m == MAP_FAILED) { c->stack = NULL; return SPROUT_CTX_ENOMEM; }
+    if (m == MAP_FAILED) {
+      g_ctx_errno = errno;
+      c->stack = NULL;
+      return SPROUT_CTX_EMAP;
+    }
     if (mprotect(m, guard, PROT_NONE) != 0) {
+      g_ctx_errno = errno;   /* before munmap can overwrite it */
       munmap(m, total);
       c->stack = NULL;
-      return SPROUT_CTX_ENOMEM;
+      return SPROUT_CTX_EGUARD;
     }
   }
   c->stack       = m;

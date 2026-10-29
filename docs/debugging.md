@@ -321,6 +321,11 @@ one run what an `lldb` backtrace cannot (the overflow faults mid-prologue, so
   fibers carry an OS guard page already and the handler does not classify it.
 - Destroyed task stacks are cached (16, matched by size) and reused by the next
   spawn, so a spawn burst keeps up to 16 stacks resident.
+- Each live green task holds two kernel mappings (the RW stack and its
+  `PROT_NONE` guard). Linux caps mappings per process at `vm.max_map_count`
+  (default 65530), so about 32k tasks can be live at once; past that the spawn
+  fails with `cannot map green task stack` or `cannot protect guard page`. Raise
+  it with `sysctl -w vm.max_map_count=262144`. macOS has no such limit.
 - Regression: `just stack-overflow-smoke` (`tests/stack_overflow_smoke/`);
   `task_deep_recursion.spr` is the green-task case.
 
