@@ -301,10 +301,12 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: kevent EV_DELETE failed");
 }
 
+/* Timer idents come from a counter. A 64-bit counter never repeats, and EVFILT_TIMER's ident
+ * namespace is disjoint from the EVFILT_READ/WRITE fd filters. The token rides in udata. */
+static uintptr_t g_kq_timer_seq = 0;
+
 int sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
-  /* ident = the parked Task* — a task sleeps on at most one timer, so it is unique, and
-   * EVFILT_TIMER's ident namespace is disjoint from the EVFILT_READ/WRITE fd filters. */
-  uintptr_t ident = (uintptr_t)token;
+  uintptr_t ident = ++g_kq_timer_seq;
   struct kevent ev;
   /* fflags = 0: the default EVFILT_TIMER unit is milliseconds (per sys/event.h; this SDK
    * has no NOTE_MSECONDS). EV_ONESHOT fires once then removes the knote. */
@@ -348,6 +350,22 @@ int sprout_poll_wait(void** out_tokens, int* out_is_timer, int max) {
 #include <errno.h>
 
 static int g_ep = -1;
+
+/* TAG the timer's token in bit 0 so sprout_poll_wait can report fd-vs-timer, which the
+ * combined fd-or-timer park needs (it has one task registered on BOTH, and must tear down
+ * the loser — while the timer backend's teardown close()s an fd, so it has to happen exactly
+ * once). kqueue gets this for free from evs[i].filter; epoll_event.data is a union carrying
+ * only the token, so the distinction has to be encoded IN the token. Task pointers come from
+ * malloc and are at least 8-byte aligned, so bit 0 is always free. Tag/untag stays private to
+ * this file — the scheduler only ever sees the untagged token plus the is_timer flag. */
+static void* poll_tag_timer(void* token) {
+  return (void*)((uintptr_t)token | 1u);
+}
+
+static void* poll_untag(void* raw, int* is_timer) {
+  *is_timer = (int)((uintptr_t)raw & 1u);   /* bit 0 set == a timer (see poll_tag_timer) */
+  return (void*)((uintptr_t)raw & ~(uintptr_t)1u);
+}
 
 void sprout_poll_init(void) {
   g_ep = epoll_create1(0);
@@ -401,14 +419,7 @@ int sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
   struct epoll_event ev;
   memset(&ev, 0, sizeof(ev));
   ev.events = EPOLLIN | EPOLLONESHOT;
-  /* TAG the timer's token in bit 0 so sprout_poll_wait can report fd-vs-timer, which the
-   * combined fd-or-timer park needs (it has one task registered on BOTH, and must tear down
-   * the loser — while the timer backend's teardown close()s an fd, so it has to happen exactly
-   * once). kqueue gets this for free from evs[i].filter; epoll_event.data is a union carrying
-   * only the token, so the distinction has to be encoded IN the token. Task pointers come from
-   * malloc and are at least 8-byte aligned, so bit 0 is always free. Tag/untag stays private to
-   * this file — the scheduler only ever sees the untagged token plus the is_timer flag. */
-  ev.data.ptr = (void*)((uintptr_t)token | 1u);
+  ev.data.ptr = poll_tag_timer(token);
   if (epoll_ctl(g_ep, EPOLL_CTL_ADD, tfd, &ev) < 0) {
     close(tfd);
     return 0;
@@ -434,9 +445,7 @@ int sprout_poll_wait(void** out_tokens, int* out_is_timer, int max) {
   if (n < 0 && errno == EINTR) return 0;
   if (n < 0) sprout_fail("sprout_poll_wait: epoll_wait failed");
   for (int i = 0; i < n; i++) {
-    uintptr_t raw = (uintptr_t)evs[i].data.ptr;   /* bit 0 set == a timer (see add_timer) */
-    out_is_timer[i] = (int)(raw & 1u);
-    out_tokens[i]   = (void*)(raw & ~(uintptr_t)1u);
+    out_tokens[i] = poll_untag(evs[i].data.ptr, &out_is_timer[i]);
   }
   return n;
 }

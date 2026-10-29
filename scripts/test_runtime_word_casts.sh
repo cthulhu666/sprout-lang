@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# runtime_word_casts.py against copies of runtime/ with one defect planted at a time.
+# runtime_word_casts.py against copies of runtime/ with defects planted.
 # Each case checks the exit code AND that the message names the offending decl.
+#
+# A clang AST dump of runtime/ takes seconds, so the checker runs with --scan-cache: three trees
+# are scanned (pristine, mutants, planted functions) and every case that only varies the list
+# files re-reads that tree's table. The real gate never passes the flag.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,21 +18,34 @@ fail() {
   exit 1
 }
 
-cp -R "$ROOT/runtime" "$TMPD/runtime"
-cp "$ROOT/runtime/WORD_CASTS_BASELINE" "$TMPD/baseline"
-cp "$ROOT/runtime/ADDRESS_CASTS" "$TMPD/addr"
-RT="$TMPD/runtime"
+# One source for every case: $TMPD/orig is the pristine tree, the baseline and address lists
+# inside it are the ones every case starts from, and each tree below is a copy of it.
+cp -R "$ROOT/runtime" "$TMPD/orig"
+BASE="$TMPD/orig/WORD_CASTS_BASELINE"
+ADDR="$TMPD/orig/ADDRESS_CASTS"
+RT="$TMPD/orig"
+RT_M="$TMPD/rt_mutants"
+RT_T="$TMPD/rt_planted"
+cp -R "$RT" "$RT_M"
+cp -R "$RT" "$RT_T"
+CACHE="$TMPD/cache_orig.json"
 
-# run <runtime-dir> <baseline> <address-casts>: output in $OUT, exit code in $RC.
+# run <runtime-dir> <baseline> <address-casts> <cache>: output in $OUT, exit code in $RC.
 run() {
   RC=0
-  OUT="$(python3 -I "$CHECK" "$CLANG" "$1" "$2" "$3" 2>&1)" || RC=$?
+  OUT="$(python3 -I "$CHECK" "$CLANG" "$1" "$2" "$3" --scan-cache "$4" 2>&1)" || RC=$?
 }
 
 # expect_fail <case> <needle>: the last run exited 1 and printed <needle>.
 expect_fail() {
   [[ "$RC" == 1 ]] || fail "$1: exit $RC, want 1: $OUT"
   grep -qF -- "$2" <<<"$OUT" || fail "$1: output lacks '$2': $OUT"
+  echo "ok: $1"
+}
+
+# expect_absent <case> <needle>: the last run's output does not mention <needle>.
+expect_absent() {
+  if grep -qF -- "$2" <<<"$OUT"; then fail "$1: output mentions '$2': $OUT"; fi
   echo "ok: $1"
 }
 
@@ -41,58 +58,129 @@ plant() {
 }
 
 # (a) the real tree passes.
-run "$RT" "$TMPD/baseline" "$TMPD/addr"
+run "$RT" "$BASE" "$ADDR" "$CACHE"
 [[ "$RC" == 0 ]] || fail "(a) real tree: exit $RC: $OUT"
 grep -q '^runtime-word-casts: ok' <<<"$OUT" || fail "(a) no ok line: $OUT"
 echo "ok: (a) real tree passes"
 
-# (b) the mutant: char_to_string is an exported String producer with no cast today.
-plant "$RT/sprout_runtime.c" 'long long char_to_string(long long ch) {' \
+# (b), (c) planted in one tree. The cache is the pristine tree's, so the run also shows that a
+# cache written for other sources is ignored.
+cp "$CACHE" "$TMPD/cache_mutants.json"
+# (b) char_to_string is an exported String producer with no cast today.
+plant "$RT_M/sprout_runtime.c" 'long long char_to_string(long long ch) {' \
   '  return (long long)(uintptr_t)"x";'
-run "$RT" "$TMPD/baseline" "$TMPD/addr"
-expect_fail "(b) mutant in char_to_string" 'runtime/sprout_runtime.c:char_to_string has 1 pointer-to-integer cast(s) and is not in the baseline'
-cp "$ROOT/runtime/sprout_runtime.c" "$RT/sprout_runtime.c"
-
 # (c) one more cast in a function the baseline already lists.
-plant "$RT/sprout_runtime.c" 'static long long box_ptr(void* p) {' \
+plant "$RT_M/sprout_runtime.c" 'static long long box_ptr(void* p) {' \
   '  uintptr_t extra_ = (uintptr_t)p; (void)extra_;'
-run "$RT" "$TMPD/baseline" "$TMPD/addr"
+run "$RT_M" "$BASE" "$ADDR" "$TMPD/cache_mutants.json"
+expect_fail "(b) mutant in char_to_string" 'runtime/sprout_runtime.c:char_to_string has 1 pointer-to-integer cast(s) and is not in the baseline'
 expect_fail "(c) count rise in box_ptr" 'runtime/sprout_runtime.c:box_ptr has 2 pointer-to-integer cast(s), baseline allows 1'
-cp "$ROOT/runtime/sprout_runtime.c" "$RT/sprout_runtime.c"
 
 # (d) a baseline entry with an inflated count, then one for a decl that has no casts.
-sed 's/^runtime\/sprout_runtime.c:box_ptr:1$/runtime\/sprout_runtime.c:box_ptr:2/' "$ROOT/runtime/WORD_CASTS_BASELINE" >"$TMPD/baseline_inflated"
-cmp -s "$ROOT/runtime/WORD_CASTS_BASELINE" "$TMPD/baseline_inflated" && fail "(d) could not inflate box_ptr"
-run "$RT" "$TMPD/baseline_inflated" "$TMPD/addr"
+sed 's/^runtime\/sprout_runtime.c:box_ptr:1$/runtime\/sprout_runtime.c:box_ptr:2/' "$BASE" >"$TMPD/baseline_inflated"
+cmp -s "$BASE" "$TMPD/baseline_inflated" && fail "(d) could not inflate box_ptr"
+run "$RT" "$TMPD/baseline_inflated" "$ADDR" "$CACHE"
 expect_fail "(d) inflated box_ptr entry" 'runtime/sprout_runtime.c:box_ptr now has 1 pointer-to-integer cast(s), baseline lists 2; lower the baseline entry'
-{ cat "$ROOT/runtime/WORD_CASTS_BASELINE"; echo 'runtime/sprout_runtime.c:no_such_fn:1'; } >"$TMPD/baseline_invented"
-run "$RT" "$TMPD/baseline_invented" "$TMPD/addr"
+{ cat "$BASE"; echo 'runtime/sprout_runtime.c:no_such_fn:1'; } >"$TMPD/baseline_invented"
+run "$RT" "$TMPD/baseline_invented" "$ADDR" "$CACHE"
 expect_fail "(d) invented entry no_such_fn" 'runtime/sprout_runtime.c:no_such_fn now has 0 pointer-to-integer cast(s), baseline lists 1; delete the baseline entry'
 
 # (e) a long long function in ADDRESS_CASTS, where its casts could reach a Sprout word.
-{ cat "$ROOT/runtime/ADDRESS_CASTS"; echo 'box_ptr  # wrong: returns long long'; } >"$TMPD/addr_ll"
-run "$RT" "$TMPD/baseline" "$TMPD/addr_ll"
-expect_fail "(e) long long box_ptr in ADDRESS_CASTS" 'runtime/sprout_runtime.c:box_ptr returns long long'
+{ cat "$ADDR"; echo 'runtime/sprout_runtime.c:box_ptr  # wrong: returns long long'; } >"$TMPD/addr_ll"
+run "$RT" "$BASE" "$TMPD/addr_ll" "$CACHE"
+expect_fail "(e) long long box_ptr in ADDRESS_CASTS" 'runtime/sprout_runtime.c:box_ptr returns a 64-bit integer type (long long)'
 
-# (f) ADDRESS_CASTS names with no cast, and with no definition.
-{ cat "$ROOT/runtime/ADDRESS_CASTS"; echo 'str_len  # defined, no pointer-to-integer cast'; } >"$TMPD/addr_nocast"
-run "$RT" "$TMPD/baseline" "$TMPD/addr_nocast"
-expect_fail "(f) str_len has no cast" 'ADDRESS_CASTS: str_len has no pointer-to-integer cast'
-{ cat "$ROOT/runtime/ADDRESS_CASTS"; echo 'no_such_fn  # not defined'; } >"$TMPD/addr_undef"
-run "$RT" "$TMPD/baseline" "$TMPD/addr_undef"
-expect_fail "(f) no_such_fn is not defined" 'ADDRESS_CASTS: no_such_fn is not defined'
+# (f) ADDRESS_CASTS names with no cast, and with no definition, and in the wrong file.
+{ cat "$ADDR"; echo 'runtime/sprout_runtime.c:str_len  # defined, no pointer-to-integer cast'; } >"$TMPD/addr_nocast"
+run "$RT" "$BASE" "$TMPD/addr_nocast" "$CACHE"
+expect_fail "(f) str_len has no cast" 'ADDRESS_CASTS: runtime/sprout_runtime.c:str_len has no pointer-to-integer cast'
+{ cat "$ADDR"; echo 'runtime/sprout_runtime.c:no_such_fn  # not defined'; } >"$TMPD/addr_undef"
+run "$RT" "$BASE" "$TMPD/addr_undef" "$CACHE"
+expect_fail "(f) no_such_fn is not defined" 'ADDRESS_CASTS: runtime/sprout_runtime.c:no_such_fn is not defined'
+{ cat "$ADDR"; echo 'runtime/sprout_scheduler.c:arena_contains  # defined in another file'; } >"$TMPD/addr_wrongfile"
+run "$RT" "$BASE" "$TMPD/addr_wrongfile" "$CACHE"
+expect_fail "(f) arena_contains is not defined in sprout_scheduler.c" 'ADDRESS_CASTS: runtime/sprout_scheduler.c:arena_contains is not defined'
 
 # (g)-(i) platform tags.  THIS is the host python sees; OTHER is the one it ignores.
 if [[ "$(uname -s)" == Darwin ]]; then THIS=darwin OTHER=linux; else THIS=linux OTHER=darwin; fi
-{ cat "$ROOT/runtime/ADDRESS_CASTS"; echo "str_len $THIS  # defined, no cast"; } >"$TMPD/addr_tag_this"
-run "$RT" "$TMPD/baseline" "$TMPD/addr_tag_this"
-expect_fail "(g) str_len tagged $THIS is stale" 'ADDRESS_CASTS: str_len has no pointer-to-integer cast'
-{ cat "$ROOT/runtime/ADDRESS_CASTS"; echo "str_len $OTHER  # defined, no cast"; } >"$TMPD/addr_tag_other"
-run "$RT" "$TMPD/baseline" "$TMPD/addr_tag_other"
+{ cat "$ADDR"; echo "runtime/sprout_runtime.c:str_len $THIS  # defined, no cast"; } >"$TMPD/addr_tag_this"
+run "$RT" "$BASE" "$TMPD/addr_tag_this" "$CACHE"
+expect_fail "(g) str_len tagged $THIS is stale" 'ADDRESS_CASTS: runtime/sprout_runtime.c:str_len has no pointer-to-integer cast'
+{ cat "$ADDR"; echo "runtime/sprout_runtime.c:str_len $OTHER  # defined, no cast"; } >"$TMPD/addr_tag_other"
+run "$RT" "$BASE" "$TMPD/addr_tag_other" "$CACHE"
 [[ "$RC" == 0 ]] || fail "(h) str_len tagged $OTHER: exit $RC: $OUT"
 echo "ok: (h) entry tagged $OTHER is ignored"
-{ cat "$ROOT/runtime/ADDRESS_CASTS"; echo 'str_len beos  # bad tag'; } >"$TMPD/addr_tag_bad"
-run "$RT" "$TMPD/baseline" "$TMPD/addr_tag_bad"
+{ cat "$ADDR"; echo 'runtime/sprout_runtime.c:str_len beos  # bad tag'; } >"$TMPD/addr_tag_bad"
+run "$RT" "$BASE" "$TMPD/addr_tag_bad" "$CACHE"
 expect_fail "(i) unknown tag" 'malformed entry'
+{ cat "$ADDR"; echo 'str_len  # no file'; } >"$TMPD/addr_nofile"
+run "$RT" "$BASE" "$TMPD/addr_nofile" "$CACHE"
+expect_fail "(i) entry without a file" 'malformed entry'
+
+# (j)-(n) planted functions, all in one tree. Each case lists some of them in ADDRESS_CASTS and
+# puts the rest in the baseline, so only the case's own defect is left to fail.
+R=runtime/sprout_runtime.c
+S=runtime/sprout_scheduler.c
+N=runtime/sprout_wc_new.c
+PLANTED=("$R:wc_ret_uintptr" "$R:wc_ret_long" "$R:wc_ret_intptr" "$R:wc_out_param" "$R:wc_byval_ok"
+  "$R:wc_same" "$S:wc_same" "$N:wc_new_fn")
+cat >>"$RT_T/sprout_runtime.c" <<'EOF'
+uintptr_t wc_ret_uintptr(void* p) { return (uintptr_t)p; }
+long wc_ret_long(void* p) { return (long)(uintptr_t)p; }
+intptr_t wc_ret_intptr(void* p) { return (intptr_t)p; }
+int wc_out_param(void* p, long long* out) { *out = (long long)(uintptr_t)p; return 0; }
+void* wc_byval_ok(uintptr_t a, void* p) { return (void*)((uintptr_t)p + a); }
+static int wc_same(void* p) { return (int)(uintptr_t)p; }
+EOF
+cat >>"$RT_T/sprout_scheduler.c" <<'EOF'
+static int wc_same(void* p) { return (int)(uintptr_t)p; }
+EOF
+cat >"$RT_T/sprout_wc_new.c" <<'EOF'
+#include <stdint.h>
+int wc_new_fn(void* p) { return (int)(uintptr_t)p; }
+EOF
+CACHE_T="$TMPD/cache_planted.json"
+
+# lists <decl>...: writes $TMPD/addr_case and $TMPD/base_case for a case that lists those
+# planted decls and baselines the others.
+lists() {
+  cp "$ADDR" "$TMPD/addr_case"
+  cp "$BASE" "$TMPD/base_case"
+  local d l listed
+  for d in "${PLANTED[@]}"; do
+    listed=0
+    for l in "$@"; do [[ "$l" == "$d" ]] && listed=1; done
+    if ((listed)); then echo "$d  # planted" >>"$TMPD/addr_case"; else echo "$d:1" >>"$TMPD/base_case"; fi
+  done
+}
+
+# (j) return rule and out-param rule; a by-value uintptr_t parameter is not named.
+lists "$R:wc_ret_uintptr" "$R:wc_ret_long" "$R:wc_ret_intptr" "$R:wc_out_param" "$R:wc_byval_ok"
+run "$RT_T" "$TMPD/base_case" "$TMPD/addr_case" "$CACHE_T"
+expect_fail "(j) uintptr_t return" "$R:wc_ret_uintptr returns a 64-bit integer type (uintptr_t)"
+expect_fail "(j) long return" "$R:wc_ret_long returns a 64-bit integer type (long)"
+expect_fail "(j) intptr_t return" "$R:wc_ret_intptr returns a 64-bit integer type (intptr_t)"
+expect_fail "(j) long long* parameter" "$R:wc_out_param takes a pointer to a 64-bit integer type (long long *)"
+expect_absent "(j) by-value uintptr_t parameter is not rejected" "wc_byval_ok"
+
+# (k) a by-value uintptr_t parameter with a pointer return is allowed; so is the static
+# wc_same of the file the entry names.
+lists "$R:wc_byval_ok" "$R:wc_same"
+run "$RT_T" "$TMPD/base_case" "$TMPD/addr_case" "$CACHE_T"
+[[ "$RC" == 0 ]] || fail "(k) by-value uintptr_t parameter: exit $RC: $OUT"
+echo "ok: (k) by-value uintptr_t parameter with a pointer return is allowed"
+
+# (l) the entry for wc_same in sprout_runtime.c does not exempt wc_same in sprout_scheduler.c.
+lists "$R:wc_byval_ok" "$R:wc_same"
+{ grep -vxF "$S:wc_same:1" "$TMPD/base_case"; } >"$TMPD/base_case2"
+run "$RT_T" "$TMPD/base_case2" "$TMPD/addr_case" "$CACHE_T"
+expect_fail "(l) same-named static in another file" "$S:wc_same has 1 pointer-to-integer cast(s) and is not in the baseline"
+expect_absent "(l) the listed file's static is not named" "$R:wc_same has"
+
+# (m) a runtime/*.c the gate did not list before is scanned.
+lists "$R:wc_byval_ok" "$R:wc_same"
+grep -vxF "$N:wc_new_fn:1" "$TMPD/base_case" >"$TMPD/base_case3"
+run "$RT_T" "$TMPD/base_case3" "$TMPD/addr_case" "$CACHE_T"
+expect_fail "(m) planted cast in a new runtime file" "$N:wc_new_fn has 1 pointer-to-integer cast(s) and is not in the baseline"
 
 echo "test-runtime-word-casts: ok"
