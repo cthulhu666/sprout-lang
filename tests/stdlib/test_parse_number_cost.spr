@@ -1,0 +1,66 @@
+import stdlib.test (new_state, summary)
+import testsupport.cost (assert_scales, grow)
+
+# `parse_int` and `parse_double` are linear in the input length. They scan by byte offset, one
+# O(1) read per byte. A codepoint-indexed `str_char_at` walk re-scans from byte 0 on every call
+# and makes each scan quadratic.
+#
+# The inputs are the ones a scan cannot cut short: a run of leading zeros never overflows, and a
+# digit past the ~19 that fit is dropped but still read. Each probe is correct on its input, so
+# one that stops early fails instead of timing fast.
+#
+# 16x more bytes: linear ~16x, quadratic ~256x. The budget sits an order of magnitude from both.
+
+let ratio = 64
+
+fn is_int(m: Maybe Int, want: Int) -> Bool =
+  match m with
+  | Just n -> n == want
+  | Nothing -> false
+
+# "000...01"
+fn int_leading_zeros(s: String) -> Bool = is_int(parse_int(s), 1)
+
+# "-000...01": the sign is read once, so only the digit run's length matters.
+fn int_negative_zeros(s: String) -> Bool = is_int(parse_int(s), -1)
+
+# "0.111...1": the fraction's digits past the significand's width are dropped and counted.
+fn double_long_fraction(s: String) -> Bool =
+  match parse_double(s) with
+  | Just x -> x > 0.11 && x < 0.12
+  | Nothing -> false
+
+# "000...01.5": leading zeros in the integer part cost nothing.
+fn double_leading_zeros(s: String) -> Bool =
+  match parse_double(s) with
+  | Just x -> x > 1.4 && x < 1.6
+  | Nothing -> false
+
+# "1e999...9": an exponent run too wide for Int saturates, which reads the whole run again.
+fn double_wide_exponent(s: String) -> Bool =
+  match parse_double(s) with
+  | Just x -> x > 1000.0
+  | Nothing -> false
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    # 2^12 = 4 KiB and 2^16 = 64 KiB.
+    let zeros_short = grow("0", 12)
+    let zeros_long = grow("0", 16)
+    let ones_short = grow("1", 12)
+    let ones_long = grow("1", 16)
+    let nines_short = grow("9", 12)
+    let nines_long = grow("9", 16)
+
+    assert_scales(state, "parse_int leading zeros", int_leading_zeros,
+                  zeros_short ++ "1", zeros_long ++ "1", ratio)
+    assert_scales(state, "parse_int negative leading zeros", int_negative_zeros,
+                  "-" ++ zeros_short ++ "1", "-" ++ zeros_long ++ "1", ratio)
+    assert_scales(state, "parse_double long fraction", double_long_fraction,
+                  "0." ++ ones_short, "0." ++ ones_long, ratio)
+    assert_scales(state, "parse_double leading zeros", double_leading_zeros,
+                  zeros_short ++ "1.5", zeros_long ++ "1.5", ratio)
+    assert_scales(state, "parse_double wide exponent", double_wide_exponent,
+                  "1e" ++ nines_short, "1e" ++ nines_long, ratio)
+    summary(state)

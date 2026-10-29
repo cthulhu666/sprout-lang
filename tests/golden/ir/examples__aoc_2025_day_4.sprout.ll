@@ -57,6 +57,7 @@ declare i64 @str_len(i64)
 declare i64 @str_char_at(i64, i64)
 declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
+declare i64 @str_starts_with_at_byte(i64, i64, i64)
 declare i64 @vector_empty()
 declare i64 @vector_length(i64)
 declare i64 @vector_get(i64, i64)
@@ -92,7 +93,6 @@ declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
 declare i64 @str_byte_len(i64)
 declare i64 @str_slice_bytes(i64, i64, i64)
-declare i64 @str_starts_with_at_byte(i64, i64, i64)
 declare i64 @str_split_lines(i64)
 declare i64 @split_words(i64)
 declare i64 @read_file(i64)
@@ -114,8 +114,8 @@ declare i64 @fs_rename(i64, i64)
 @.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 497, column 49)\00" }
 @.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 540, column 50)\00" }
 @__sprout_sclo.__sprout_ir_eta_add_ints_0 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_add_ints_0 }
-@.str.9 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 125, column 34)\00" }
-@.str.10 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 142, column 33)\00" }
+@.str.9 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 127, column 34)\00" }
+@.str.10 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 144, column 33)\00" }
 @.str.11 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.12 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @__sprout_sclo.__sprout_ir_lambda_1 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_1 }

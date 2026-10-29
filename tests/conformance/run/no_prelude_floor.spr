@@ -55,6 +55,9 @@ fn main() -> Unit !{IO} =
     # --- Bool through the floor: str_starts_with returns one
     if str_starts_with("prelude", "pre") then print_str("str_starts_with=true")
     else print_str("str_starts_with=false")
+    # --- Bool through the floor at a byte offset: the prelude's number parsers scan with it
+    if str_starts_with_at_byte("prelude", 3, "lude") then print_str("str_starts_with_at_byte=true")
+    else print_str("str_starts_with_at_byte=false")
     # --- the monomorphic String sink
     print_str("print_str=ok")
     # --- the other IO sink

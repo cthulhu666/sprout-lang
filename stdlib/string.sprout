@@ -2,15 +2,18 @@ module stdlib.string
 import stdlib.bytes as bytes
 import stdlib.unicode.utf8 as utf8
 
-# String primitives owned by this module rather than by the prelude.
+# String primitives owned by this module rather than by the prelude, bar one.
 #
 # The prelude keeps the CHAR-INDEXED core that every program uses without thinking —
 # `str_len`, `str_slice`, `str_char_at`, `str_find`, `str_starts_with`, `str_concat`,
 # `str_compare`, `char_to_string`. Those are beginner-facing ergonomics and stay globally
 # reachable. What lives here is the specialist surface: BYTE-indexed operations, whole-string
-# splitters, and codepoint-level Char conversion. Byte offsets in particular are an encoding and
-# performance concern, not a first-week one — a caller reaching for `str_byte_len` over `str_len`
-# is making a deliberate choice, and an explicit import is the right place to record it.
+# splitters, and codepoint-level Char conversion. The one exception is
+# `str_starts_with_at_byte`: the prelude declares it for its own number parsers (the prelude
+# cannot import this module), and a symbol is declared once, so it is not declared here. It is
+# global, and called by bare name like the rest. Byte offsets in particular are an encoding and performance concern, not a first-week one — a
+# caller reaching for `str_byte_len` over `str_len` is making a deliberate choice, and an
+# explicit import is the right place to record it.
 #
 # Unlike stdlib.fs / stdlib.time / stdlib.terminal, consumers of these call them BY BARE NAME and
 # import this module only to bundle it. That is deliberate: `str_starts_with_at_byte` runs ~70
@@ -28,7 +31,6 @@ export extern fn str_byte_len(s: String) -> Int
 # invalid UTF-8. For codepoint-indexed slicing of arbitrary user input, use `str_slice`
 # (prelude) or `slice` below instead.
 export extern fn str_slice_bytes(s: String, byte_start: Int, byte_len: Int) -> String
-export extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
 export extern fn str_split_lines(s: String) -> List String
 export extern fn split_words(s: String) -> List String
 

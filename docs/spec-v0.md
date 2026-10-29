@@ -341,13 +341,14 @@ to be shadowed, and staying bare is what makes the two limits above go away.
 The opt-out is whole-file. Selective hiding (`hiding(null)`) is not provided.
 
 What a `no_prelude` file *does* receive is the **floor**: the prelude `extern fn`
-declarations whose signatures mention only primitive types. Those 15 names are
+declarations whose signatures mention only primitive types. Those 16 names are
 
 ```
 eprint  print_str  panic
 int_to_string  double_to_string  char_to_string  char_to_str
 char_from_codepoint  to_double
 str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
+str_starts_with_at_byte
 ```
 
 Nothing else the prelude declares is in scope. Naming any other prelude name —

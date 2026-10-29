@@ -55,6 +55,7 @@ declare i64 @to_double(i64)
 declare i64 @str_len(i64)
 declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
+declare i64 @str_starts_with_at_byte(i64, i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 17, column 27)\00" }
 
 define i64 @add_lines(i64 %p$p) {

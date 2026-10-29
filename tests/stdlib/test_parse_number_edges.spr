@@ -1,0 +1,105 @@
+import stdlib.test (check_eq, check_true, run_suite)
+import testsupport.cost (grow)
+
+# Edge inputs for `parse_int` / `parse_double`, which scan by byte offset. Digits, signs, '.' and
+# 'e'/'E' are all ASCII, so a byte test is exact. Any non-ASCII byte is a non-digit and must give
+# Nothing, never an abort.
+
+fn describe(m: Maybe Int) -> String =
+  match m with
+  | Just n -> "Just " ++ int_to_string(n)
+  | Nothing -> "Nothing"
+
+fn is_nothing_d(m: Maybe Double) -> Bool =
+  match m with
+  | Just _ -> false
+  | Nothing -> true
+
+fn within(m: Maybe Double, lo: Double, hi: Double) -> Bool =
+  match m with
+  | Just x -> x > lo && x < hi
+  | Nothing -> false
+
+fn at_least(m: Maybe Double, lo: Double) -> Bool =
+  match m with
+  | Just x -> x > lo
+  | Nothing -> false
+
+fn main() -> Unit !{IO} =
+  run_suite("parse_number_edges", [
+    check_eq("parse_int empty", describe(parse_int("")), "Nothing"),
+    check_eq("parse_int lone minus", describe(parse_int("-")), "Nothing"),
+    check_eq("parse_int lone plus", describe(parse_int("+")), "Nothing"),
+    check_eq("parse_int plus digit", describe(parse_int("+5")), "Nothing"),
+    check_eq("parse_int double minus", describe(parse_int("--5")), "Nothing"),
+    check_eq("parse_int minus zero", describe(parse_int("-0")), "Just 0"),
+    check_eq("parse_int INT_MAX", describe(parse_int("9223372036854775807")),
+             "Just 9223372036854775807"),
+    check_eq("parse_int INT_MAX + 1", describe(parse_int("9223372036854775808")), "Nothing"),
+    check_eq("parse_int INT_MIN", describe(parse_int("-9223372036854775808")),
+             "Just -9223372036854775808"),
+    check_eq("parse_int INT_MIN - 1", describe(parse_int("-9223372036854775809")), "Nothing"),
+    check_eq("parse_int leading zeros", describe(parse_int("0000000000000000000000042")),
+             "Just 42"),
+    check_eq("parse_int leading zeros then INT_MAX",
+             describe(parse_int("000009223372036854775807")), "Just 9223372036854775807"),
+    check_eq("parse_int leading zeros then INT_MAX + 1",
+             describe(parse_int("000009223372036854775808")), "Nothing"),
+    check_eq("parse_int negative leading zeros then INT_MIN",
+             describe(parse_int("-000009223372036854775808")), "Just -9223372036854775808"),
+    check_eq("parse_int long zero run", describe(parse_int(grow("0", 12))), "Just 0"),
+    check_eq("parse_int non-ASCII only", describe(parse_int("é")), "Nothing"),
+    check_eq("parse_int non-ASCII after digit", describe(parse_int("1é")), "Nothing"),
+    check_eq("parse_int non-ASCII inside digits", describe(parse_int("12é34")), "Nothing"),
+    check_eq("parse_int non-ASCII after sign", describe(parse_int("-é")), "Nothing"),
+    check_eq("parse_int non-ASCII first", describe(parse_int("é12")), "Nothing"),
+    check_eq("parse_int 4-byte char inside digits", describe(parse_int("1😀2")), "Nothing"),
+    check_eq("parse_int trailing space", describe(parse_int("12 ")), "Nothing"),
+    # Multi-byte chars: every byte after the lead is a continuation byte, and none is a digit.
+    check_eq("parse_int Arabic-Indic digit", describe(parse_int("٣")), "Nothing"),
+    check_eq("parse_int Arabic-Indic digits after ASCII", describe(parse_int("12٣")), "Nothing"),
+    check_eq("parse_int 3-byte char", describe(parse_int("€")), "Nothing"),
+    check_eq("parse_int 3-byte char after digit", describe(parse_int("1€")), "Nothing"),
+    check_eq("parse_int 3-byte char after sign", describe(parse_int("-€5")), "Nothing"),
+
+    check_true("parse_double empty", is_nothing_d(parse_double(""))),
+    check_true("parse_double lone minus", is_nothing_d(parse_double("-"))),
+    check_true("parse_double lone plus", is_nothing_d(parse_double("+"))),
+    check_true("parse_double plus mantissa", is_nothing_d(parse_double("+1.5"))),
+    check_true("parse_double lone dot", is_nothing_d(parse_double("."))),
+    check_true("parse_double bare e", is_nothing_d(parse_double("1e"))),
+    check_true("parse_double e plus only", is_nothing_d(parse_double("1e+"))),
+    check_true("parse_double e plus minus", is_nothing_d(parse_double("1e+-3"))),
+    check_true("parse_double non-ASCII only", is_nothing_d(parse_double("é"))),
+    check_true("parse_double non-ASCII in integer part", is_nothing_d(parse_double("1é2.5"))),
+    check_true("parse_double non-ASCII in fraction", is_nothing_d(parse_double("1.5é"))),
+    check_true("parse_double non-ASCII in exponent", is_nothing_d(parse_double("1e5é"))),
+    check_true("parse_double non-ASCII exponent only", is_nothing_d(parse_double("1eé"))),
+    check_true("parse_double non-ASCII after exponent sign", is_nothing_d(parse_double("1e+é"))),
+    check_true("parse_double non-ASCII in wide exponent",
+               is_nothing_d(parse_double("1e99999999999999999999é"))),
+    check_true("parse_double 4-byte char in fraction", is_nothing_d(parse_double("1.😀"))),
+    check_true("parse_double Arabic-Indic digit", is_nothing_d(parse_double("٣"))),
+    check_true("parse_double Arabic-Indic digit before dot", is_nothing_d(parse_double("٣.5"))),
+    check_true("parse_double Arabic-Indic digit in exponent", is_nothing_d(parse_double("1e٣"))),
+    check_true("parse_double non-ASCII after digit", is_nothing_d(parse_double("1é"))),
+    check_true("parse_double non-ASCII after sign", is_nothing_d(parse_double("-é"))),
+    check_true("parse_double 3-byte char in fraction", is_nothing_d(parse_double("1.€5"))),
+    check_true("parse_double 3-byte char after dot", is_nothing_d(parse_double("1.€"))),
+    check_true("parse_double leading zeros", within(parse_double("0000000001.5"), 1.4, 1.6)),
+    check_true("parse_double fraction leading zeros", within(parse_double("0.0000005"),
+                                                          0.0000004, 0.0000006)),
+    check_true("parse_double dropped digits in integer part",
+               within(parse_double("12345678901234567890123.5"),
+                      12000000000000000000000.0, 13000000000000000000000.0)),
+    check_true("parse_double dropped digits after the dot",
+               within(parse_double("0." ++ grow("3", 10)), 0.33, 0.34)),
+    check_true("parse_double dropped digits balanced by exponent",
+               within(parse_double("0." ++ grow("3", 10) ++ "e1"), 3.3, 3.4)),
+    check_true("parse_double wide exponent saturates",
+               at_least(parse_double("1e" ++ grow("9", 10)), 1000.0)),
+    check_true("parse_double wide negative exponent saturates to zero",
+               within(parse_double("1e-" ++ grow("9", 10)), -1.0, 0.000001)),
+    check_true("parse_double explicit plus exponent", within(parse_double("1e+2"), 99.0, 101.0)),
+    check_true("parse_double negative", within(parse_double("-2.5"), -2.6, -2.4))
+  ])
