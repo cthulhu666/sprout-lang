@@ -5538,7 +5538,9 @@ fn ctor_hides_type(env: Dict types.Scheme, name: String) -> Bool =
 # The arm's escape error against `subst`, when a skolem it minted now sits in a type
 # outside the arm. Names the binding whose own type occurs in a leaked outer type, the
 # largest such type first (`f: a -> Int` over `x: a`, which occurs inside it); else the
-# first binding sharing a leaked skolem.
+# first binding sharing a leaked skolem. A bare hidden type is no proof: it also occurs
+# inside `Holder a`, whose field `a -> Int` is what escaped, and the nominal type's
+# fields are not expanded here. So a bare match names every binding sharing the skolem.
 fn arm_leak(arm: unifier.ArmEscape, subst: Dict types.Type) -> Maybe String =
   let outer = list_map(\t -> unifier.apply_subst(subst, t), arm.outer)
       leaked = list_flat_map(young_skolems(arm.mark, _), outer)
@@ -5548,7 +5550,12 @@ fn arm_leak(arm: unifier.ArmEscape, subst: Dict types.Type) -> Maybe String =
       Just h = maybe_or_else(min_by(hidden_rank, list_filter(occurs_in_parts(subst, parts, _), sharing)),
                              find(\_ -> true, sharing))
         else Nothing
-  in Just(arm_escape_msg(h.name, h.ctor))
+  in Just(arm_escape_msg(h, if is_bare_skolem(h.ty) then sharing else [h]))
+
+fn is_bare_skolem(t: types.Type) -> Bool =
+  match t with
+  | types.TConst _ -> true
+  | _ -> false
 
 fn shares_skolem(mark: Int, leaked: List String, h: unifier.ArmHidden) -> Bool =
   any(\sk -> list_member(sk, leaked), young_skolems(mark, h.ty))
@@ -5583,11 +5590,15 @@ fn type_subterms(t: types.Type) -> List types.Type =
     | types.TThunk ret _ -> type_subterms(ret)
     | types.TTuple items -> list_flat_map(type_subterms, items))
 
-fn arm_escape_msg(name: String, ctor: Maybe String) -> String =
-  "existential type escapes its scope: `" ++ name ++ "` has a type hidden by "
-    ++ maybe_with_default("an `exists` pattern", map(\c -> "`" ++ c ++ "`", ctor))
-    ++ ", and it would outlive this match arm (through the arm's result or a binding from "
-    ++ "outside the arm). Use it inside the arm, or re-pack it."
+# `h` is the best match, among `culprits`. The constructor is named when they share one.
+fn arm_escape_msg(h: unifier.ArmHidden, culprits: List unifier.ArmHidden) -> String =
+  let names = string.join("` or `", list_map(\c -> c.name, culprits))
+      ctor = if all(\c -> maybe_with_default("", c.ctor) == maybe_with_default("", h.ctor), culprits)
+             then h.ctor else Nothing
+  in "existential type escapes its scope: `" ++ names ++ "` has a type hidden by "
+       ++ maybe_with_default("an `exists` pattern", map(\c -> "`" ++ c ++ "`", ctor))
+       ++ ", and it would outlive this match arm (through the arm's result or a binding from "
+       ++ "outside the arm). Use it inside the arm, or re-pack it."
 
 fn young_skolems(mark: Int, t: types.Type) -> List String =
   match t with
@@ -10506,10 +10517,14 @@ fn is_nonempty_inferred(xs: List (Int, FnInferred)) -> Bool =
   | Nil -> false
   | [_ | _] -> true
 
+# The declaration-level escape messages below are backstops. check_arm_escape rejects a
+# hidden type that leaves its arm before any declaration is finished, and no fixture
+# reaches these; they stay so a skolem the arm check missed still cannot reach a
+# declaration's type.
+#
 # Phrased as the same "escapes its scope" family as the unifier's mismatch
 # rewording, so the two ends of the rule read alike. The advice is deliberately
-# NOT "annotate the return type" — writing one moves the error to the rigidity
-# scan (tests/conformance/type_error/existential_escape) without helping.
+# NOT "annotate the return type": it does not remove the escape.
 fn skolem_escape_prefix(name: String) -> String =
   "existential type escapes its scope in " ++ name
     ++ ": a type hidden by an `exists` pattern cannot "
@@ -10553,15 +10568,15 @@ fn infer_fn_decl(
         match r with
         | FnBodyErr pos e -> (FnInferErr(pos, e), subst)
         | FnBodyOk typed_body inferred_fn_type fwd_markers decl_constraints body_subst linear_gate ->
-            # A skolem reaching the decl's own type escaped a match branch, and
-            # generalize cannot notice: a skolem is a rigid TConst, so it has no
-            # free type variables for the ftv-difference to quantify. Being
-            # unquantified it is then NOT refreshed at instantiation, so it would
-            # become one rigid type shared by every call site — which is how an
-            # unannotated one-line unboxer both printed a String as a raw address
-            # and silently merged two unpacks that `existential_merge` rejects
-            # directly. The annotated form errors earlier (the rigidity scan sees
-            # the skolem as a TConst); only the unannotated-return path reaches here.
+            # Backstop behind check_arm_escape, which rejects a hidden type leaving
+            # its arm first: no fixture reaches this branch now. A skolem in the
+            # decl's own type would escape a match branch, and generalize cannot
+            # notice: a skolem is a rigid TConst, so it has no free type variables
+            # for the ftv-difference to quantify. Being unquantified it is NOT
+            # refreshed at instantiation, so it would become one rigid type shared
+            # by every call site — which is how an unannotated one-line unboxer
+            # once printed a String as a raw address and silently merged two
+            # unpacks that `existential_merge` rejects directly.
             if types.type_mentions_skolem(inferred_fn_type)
             then (FnInferErr(decl_pos, skolem_escape_msg(name)), body_subst)
             else (FnInferOk (FnInferred(decl, typed_body, inferred_fn_type, fwd_markers, decl_constraints, group_env_ftv, linear_gate)),
@@ -12389,7 +12404,8 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
   match letdecl_linear_gate(name, s1, typed_expr, let_pos, bound_env) with
   | linear_check.LinFail lp lm -> TypedDeclErr(lp, lm)
   | linear_check.LinPass ->
-      # Sibling of the FnDecl escape check: a skolem is a TConst, so it has no
+      # Sibling of the FnDecl escape check, and a backstop behind check_arm_escape
+      # in the same way: a skolem is a TConst, so it has no
       # free type variables and the value restriction's ftv test below reads it
       # as "fully resolved, nothing to generalize" and binds it monomorphically.
       # `let leaked = match Boxed("hi") with | Boxed x -> x` was accepted as

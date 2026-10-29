@@ -1,1 +1,1 @@
-existential type escapes its scope: `x` has a type hidden by `Shape`, and it would outlive this match arm (through the arm's result or a binding from outside the arm). Use it inside the arm, or re-pack it.
+existential type escapes its scope: `x` or `f` has a type hidden by `Shape`, and it would outlive this match arm (through the arm's result or a binding from outside the arm). Use it inside the arm, or re-pack it.
