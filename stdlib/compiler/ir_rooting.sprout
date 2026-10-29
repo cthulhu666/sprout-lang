@@ -756,8 +756,9 @@ fn block_live_of(ops: List sprout_ir.IROp, block_live_out: Set) -> BlockLive =
 # heap_origin propagation
 #
 # Forward-scan blocks (topological order matches the IR's block-list order).
-# Mark every heap-producing op's result, then any phi whose operands include
-# a marked value.
+# Start from the heap parameters, mark every heap-producing op's result, then any
+# phi whose operands include a marked value.  The parameters must be in the
+# starting set: a phi of parameters is marked only if the scan can see them.
 
 fn any_pair_in_heap(pairs: List (String, String), heap: Set) -> Bool =
   match pairs with
@@ -788,8 +789,9 @@ fn compute_heap_origin_loop(blocks: List sprout_ir.IRBlock, acc: Set) -> Set =
   | Cons b rest ->
       compute_heap_origin_loop(rest, scan_block_for_heap(block_ops(b), acc))
 
-export fn compute_heap_origin(blocks: List sprout_ir.IRBlock) -> Set =
-  compute_heap_origin_loop(blocks, set_empty())
+export fn compute_heap_origin(params: List (String, sprout_ir.IRType),
+                              blocks: List sprout_ir.IRBlock) -> Set =
+  compute_heap_origin_loop(blocks, params_heap_origin(params))
 
 # ---------------------------------------------------------------------------
 # Frame slots (docs/frame-slot-rooting-v0.md).
@@ -1408,7 +1410,7 @@ fn rewrite_fn(f: sprout_ir.IRFunction, start_idx: Int, summary: Dict Bool) -> sp
       let live_in_map = compute_liveness(blocks)
           lives = list_map(\b -> block_live_of(block_ops(b), compute_live_out(b, blocks, live_in_map)),
                            blocks)
-          heap_origin = set_union(params_heap_origin(params), compute_heap_origin(blocks))
+          heap_origin = compute_heap_origin(params, blocks)
           fr = plan_frame(params, blocks, lives, live_in_map, heap_origin, summary, start_idx)
           first_idx = if has_frame(fr) then start_idx + 2 else start_idx
       in sprout_ir.IRFunction(name, params, ret_ty,
@@ -1459,7 +1461,7 @@ fn params_heap_origin_loop(params: List (String, sprout_ir.IRType), acc: Set) ->
       | sprout_ir.IRTScalar _ -> params_heap_origin_loop(rest, acc)
       | _ -> params_heap_origin_loop(rest, set_insert(sprout_ir.param_ssa(p), acc))
 
-export fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
+fn params_heap_origin(params: List (String, sprout_ir.IRType)) -> Set =
   params_heap_origin_loop(params, set_empty())
 
 # ---------------------------------------------------------------------------

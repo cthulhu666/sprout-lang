@@ -1,0 +1,48 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# A value picked from two parameters by `if` is a phi of parameters. Nothing else
+# holds the pick once the parameters die, so it must be rooted itself. The churn
+# runs a collection while the pick is its only reference.
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n == 0 then acc
+  else churn(n - 1, acc + (if str_len(int_to_string(n) ++ "-x") > 0 then 1 else 0))
+
+fn burned() -> Int = churn(20000, 0)
+
+# A closure call does not root its arguments, so the callee's phi is the only root.
+fn apply(f: String -> String -> Bool -> String, i: Int, first: Bool) -> String =
+  f("L" ++ int_to_string(i), "R" ++ int_to_string(i), first)
+
+# A direct call roots its operands today, which hides the callee's missing root.
+# Kept as the premise test for narrowing that rule (BACKLOG: "Calls to Sprout
+# functions root their operands").
+fn pick_direct(a: String, b: String, first: Bool) -> String =
+  let x = if first then a else b in
+  let n = burned() in
+  x ++ " " ++ int_to_string(n)
+
+# Mutual tail calls pop the caller's roots before the jump.
+fn ping(n: Int, a: String, b: String) -> String =
+  if n == 0 then a
+  else pong(n - 1, a ++ "x", b)
+
+fn pong(n: Int, a: String, b: String) -> String =
+  let pick = if n / 2 * 2 == n then a else b in
+  let t = "<" ++ int_to_string(burned()) ++ ">" in
+  ping(n, pick ++ t, b)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let pick = \ (a: String, b: String, first: Bool) ->
+      let x = if first then a else b in
+      let n = burned() in
+      x ++ " " ++ int_to_string(n)
+    assert_eq(state, "closure picks its first parameter", apply(pick, 7, true), "L7 20000")
+    assert_eq(state, "closure picks its second parameter", apply(pick, 8, false), "R8 20000")
+    assert_eq(state, "direct call picks its second parameter",
+              pick_direct("L" ++ int_to_string(9), "R" ++ int_to_string(9), false), "R9 20000")
+    assert_eq(state, "mutual tail call picks a parameter", ping(3, "s", "B"),
+              "B<20000>x<20000>")
+    summary(state)

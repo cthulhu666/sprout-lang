@@ -1786,6 +1786,13 @@ deferral happened, not for current behaviour. Still open:
   rule needs a written GC-safety argument first, since a missing root corrupts the heap.
   Evidence: `docs/sorting-v0.md` §Where the time goes, item 2, and option F.
   The root also keeps a persistent array's whole history alive: `docs/persistent-array-v0.md` §3.
+  Premise test: `tests/stdlib/test_gc_phi_of_params.spr` (a direct call's operand root covers a
+  callee phi of parameters; a closure call and a mutual tail call have no such root).
+- [ ] `P3` **`ir_verify` classifies heap values with `ir_rooting`'s own functions.**
+  `verify_rooting` builds its heap set with `ir_rooting.compute_heap_origin`, so a wrong
+  classification in the pass passes the verifier too: a phi of parameters was missed by both.
+  Fix: an independent classifier in `ir_verify`, for example a fixpoint over phis seeded with the
+  parameter kinds. Limit noted in `docs/gates.md` §Root verifier, "Does not check".
 - [ ] `P3` **A missing frame pop has no executable oracle.** `ir_rooting` pops the frame at every
   exit; a miss leaves a scan root pointing into a green stack that `sprout_ctx_destroy` freed.
   Deleting every exit pop leaves `tests/stdlib/test_frame_slot_rooting.spr` green, plain and under

@@ -502,8 +502,7 @@ export fn verify_rooting(f: sprout_ir.IRFunction, summary: Dict Bool) -> List St
       let infos_list = list_map(block_info, blocks)
           infos = list_fold(\ (d, b) -> dict_set(b.label, b, d), dict_empty(), infos_list)
           live_in = live_in_fixpoint(list_reverse(infos_list), infos, dict_empty())
-          heap = set_union(ir_rooting.params_heap_origin(params),
-                           ir_rooting.compute_heap_origin(blocks))
+          heap = ir_rooting.compute_heap_origin(params, blocks)
           facts = frame_facts(name, params, blocks)
           entry = entry_label(blocks)
       in list_append(
