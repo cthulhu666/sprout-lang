@@ -3761,9 +3761,9 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
 # The builtins whose lowering is chosen at the CALL SITE rather than by a symbol.
 # `to_double` and the Double bit accessors are single LLVM instructions; each
 # bits operation is one integer instruction.  So a plain `call @<name>` would not
-# resolve or would not verify — which is why a reference in
-# VALUE position routes through here too (synthesize_intrinsic_eta_closure), except
-# `unsafe_pure`, which infer rejects as a value.
+# resolve at link — which is why a reference in VALUE position routes through here
+# too (synthesize_intrinsic_eta_closure), except `unsafe_pure`, which infer rejects
+# as a value.
 export fn is_call_site_intrinsic(fname: String) -> Bool =
   fname == "to_double"
     || fname == "double_to_bits" || fname == "double_from_bits"
