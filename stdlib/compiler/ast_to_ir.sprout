@@ -447,80 +447,60 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # Sum constructors, wraps and records are keyed in ONE dict, so a name declared twice
 # would silently replace the first entry (a record's `sole = true` over a sum
 # constructor's tag, for one). infer.check_duplicate_module_values rejects that
-# before codegen; the Err here makes a gap in that check a compile error instead.
+# before codegen; ctor_table_put, the one place a key is written, makes a gap in that
+# check a compile error instead.
 export fn build_ctor_table(decls: List typed_ast.TypedDecl) ->
     Result String (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
-  match ctor_key_clash(decls, set_empty()) with
-  | Just name -> Err("internal error: constructor `" ++ name ++ "` is declared twice in one module")
-  | Nothing -> Ok(build_ctor_table_acc(decls, 0, dict_empty(), Nil, (tables.order, tables.supers)))
+  build_ctor_table_acc(decls, 0, dict_empty(), Nil, (tables.order, tables.supers))
   where tables = typed_ast.class_tables(decls)
 
-# The first table key declared twice: the keys build_ctor_table_acc writes.
-fn ctor_key_clash(decls: List typed_ast.TypedDecl, seen: Set) -> Maybe String =
-  match decls with
-  | Nil -> Nothing
-  | Cons decl rest ->
-      match decl with
-      | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _ _ _) ->
-          ctor_names_clash(list_map(ctor_decl_name, ctors), rest, seen)
-      | typed_ast.TPassThrough (ast.WrapDecl type_name _ _ _ _ _ _) ->
-          ctor_names_clash([type_name], rest, seen)
-      | typed_ast.TPassThrough (ast.RecordDecl type_name _ _ _ _ _ _) ->
-          ctor_names_clash([type_name], rest, seen)
-      | _ -> ctor_key_clash(rest, seen)
-
-fn ctor_names_clash(names: List String, rest: List typed_ast.TypedDecl, seen: Set) -> Maybe String =
-  match names with
-  | Nil -> ctor_key_clash(rest, seen)
-  | Cons name more ->
-      if set_member(name, seen)
-      then Just(name)
-      else ctor_names_clash(more, rest, set_insert(name, seen))
-
-fn ctor_decl_name(tc: ast.TypeConstructor) -> String =
-  match tc with
-  | ast.TypeConstructor name _ _ _ _ -> name
+# Every write to the ctor table goes through here: Err when `name` is already keyed.
+fn ctor_table_put(name: String, info: sprout_ir.CtorInfo,
+                  acc: Dict sprout_ir.CtorInfo) -> Result String (Dict sprout_ir.CtorInfo) =
+  match dict_get(name, acc) with
+  | Just _ -> Err("internal error: constructor `" ++ name ++ "` is declared twice in one module")
+  | Nothing -> Ok(dict_set(name, info, acc))
 
 fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                         acc: Dict sprout_ir.CtorInfo,
                         regs: List sprout_ir.CtorReg,
-                        cenv: (Dict (List String), Dict (List String))) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
+                        cenv: (Dict (List String), Dict (List String))) ->
+    Result String (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
   match decls with
-  | Nil -> (acc, list_reverse(regs))
+  | Nil -> Ok((acc, list_reverse(regs)))
   | Cons decl rest ->
       match decl with
       | typed_ast.TPassThrough (ast.TypeDecl type_name _ ctors _ mult _ _) ->
           match register_ctor_entries(ctors, next_tag, max_arity_of(ctors, 0), list_length(ctors) == 1,
                                      is_linear(ast.ctors_multiplicity(mult, ctors)), type_name,
                                      acc, regs, cenv) with
-          | (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1, cenv)
+          | Err msg -> Err(msg)
+          | Ok (acc1, new_tag, regs1) -> build_ctor_table_acc(rest, new_tag, acc1, regs1, cenv)
       # Wrap types: synthetic ctor with tag sentinel -1 (mirrors codegen.sprout wrap_tag() = -1).
       # Not added to regs — wrap types have no runtime allocation or tag.
       # next_tag is not incremented: wrap consumes no numeric tag slot.
       | typed_ast.TPassThrough (ast.WrapDecl type_name _ inner _ mult _ _) ->
-          build_ctor_table_acc(rest, next_tag,
-            dict_set(type_name,
-                     sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1,
-                                        field_kinds = fk.ctor_field_kinds_string([inner]),
-                                        field_names = Nil, sole = true,
-                                        linear = is_linear(mult), type_name = type_name),
-                     acc),
-            regs, cenv)
+          let acc1 = try ctor_table_put(type_name,
+                       sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1,
+                                          field_kinds = fk.ctor_field_kinds_string([inner]),
+                                          field_names = Nil, sole = true,
+                                          linear = is_linear(mult), type_name = type_name),
+                       acc)
+          in build_ctor_table_acc(rest, next_tag, acc1, regs, cenv)
       # Records: a single-constructor product keyed by the type name.  It carries
       # a real tag/arity (it allocates a boxed object via IRMakeCtor, unlike wrap)
       # plus declaration-order field names so codegen can resolve `.field` offsets
       # and reorder literal fields.  Not added to regs — GC tracing is header-driven
       # (arity in the object header), so no runtime ctor registration is needed.
       | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _ mult _ _) ->
-          build_ctor_table_acc(rest, next_tag + 1,
-            dict_set(type_name,
-              sprout_ir.CtorInfo(tag = next_tag, arity = list_length(fields),
-                                 max_arity = list_length(fields),
-                                 field_kinds = fk.ctor_field_kinds_string(ast.record_field_type_exprs(fields)),
-                                 field_names = list_map(record_field_name, fields), sole = true,
-                                 linear = is_linear(mult), type_name = type_name),
-              acc),
-            regs, cenv)
+          let acc1 = try ctor_table_put(type_name,
+                       sprout_ir.CtorInfo(tag = next_tag, arity = list_length(fields),
+                                          max_arity = list_length(fields),
+                                          field_kinds = fk.ctor_field_kinds_string(ast.record_field_type_exprs(fields)),
+                                          field_names = list_map(record_field_name, fields), sole = true,
+                                          linear = is_linear(mult), type_name = type_name),
+                       acc)
+          in build_ctor_table_acc(rest, next_tag + 1, acc1, regs, cenv)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs, cenv)
 
 fn is_linear(m: ast.Multiplicity) -> Bool =
@@ -600,9 +580,10 @@ fn register_ctor_entries(ctors: List ast.TypeConstructor, next_tag: Int,
                          max_ar: Int, sole: Bool, linear: Bool, type_name: String,
                          acc: Dict sprout_ir.CtorInfo,
                          regs: List sprout_ir.CtorReg,
-                         cenv: (Dict (List String), Dict (List String))) -> (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
+                         cenv: (Dict (List String), Dict (List String))) ->
+    Result String (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
   match ctors with
-  | Nil -> (acc, next_tag, regs)
+  | Nil -> Ok((acc, next_tag, regs))
   | Cons tc rest ->
       match tc with
       | ast.TypeConstructor ctor_name ctor_args _ exist_constraints _ ->
@@ -628,14 +609,14 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr, witness_sl
                      sole: Bool, linear: Bool, type_name: String, acc: Dict sprout_ir.CtorInfo,
                      regs: List sprout_ir.CtorReg,
                      cenv: (Dict (List String), Dict (List String))) ->
-    (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
-  register_ctor_entries(rest, next_tag + 1, max_ar, sole, linear, type_name,
-                        dict_set(ctor_name,
-                                 sprout_ir.CtorInfo(tag = next_tag, arity = arity, max_arity = max_ar,
-                                                    field_kinds = fks, field_names = Nil,
-                                                    sole = sole, linear = linear, type_name = type_name),
-                                 acc),
-                        Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs), cenv)
+    Result String (Dict sprout_ir.CtorInfo, Int, List sprout_ir.CtorReg) =
+  let acc1 = try ctor_table_put(ctor_name,
+               sprout_ir.CtorInfo(tag = next_tag, arity = arity, max_arity = max_ar,
+                                  field_kinds = fks, field_names = Nil,
+                                  sole = sole, linear = linear, type_name = type_name),
+               acc)
+  in register_ctor_entries(rest, next_tag + 1, max_ar, sole, linear, type_name, acc1,
+                           Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs), cenv)
   where arity = list_length(ctor_args) + witness_slots
         fks = fk.ctor_field_kinds_string(ctor_args) ++ string.repeat("p", witness_slots)
 

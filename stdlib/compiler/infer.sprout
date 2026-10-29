@@ -8268,8 +8268,16 @@ fn check_duplicate_module_values(decls: List ast.Decl, seen: Dict NameOwner) -> 
 
 fn check_value_name(name: String, owner: NameOwner, pos: source.SourcePos, rest: List ast.Decl,
                     seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
-  match dict_get(name, seen) with
+  match name_clash(name, owner, pos, seen) with
+  | Just err -> Just(err)
   | Nothing -> check_duplicate_module_values(rest, dict_set(name, owner, seen))
+
+# The error when `name` is already owned in `seen`; Nothing when it is free. A class
+# method owner reads as a shared method, any other owner as a plain duplicate.
+fn name_clash(name: String, owner: NameOwner, pos: source.SourcePos,
+              seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
+  match dict_get(name, seen) with
+  | Nothing -> Nothing
   | Just (OwnedByClass class_name) -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
   | Just first -> Just((pos, duplicate_value_message(name, first, owner)))
 
@@ -8292,11 +8300,10 @@ fn check_type_ctor_names(type_name: String, ctors: List ast.TypeConstructor, pos
   match ctors with
   | Nil -> check_duplicate_module_values(rest, seen)
   | Cons (ast.TypeConstructor name _ _ _ _) more ->
-      match dict_get(name, seen) with
-      | Nothing -> check_type_ctor_names(type_name, more, pos, rest, dict_set(name, OwnedByCtor(type_name), seen))
-      | Just (OwnedByClass class_name) ->
-          Just((pos, shared_method_message(name, class_name, value_label(OwnedByCtor(type_name)))))
-      | Just first -> Just((pos, duplicate_value_message(name, first, OwnedByCtor(type_name))))
+      match name_clash(name, owner, pos, seen) with
+      | Just err -> Just(err)
+      | Nothing -> check_type_ctor_names(type_name, more, pos, rest, dict_set(name, owner, seen))
+  where owner = OwnedByCtor(type_name)
 
 fn check_class_method_names(class_name: String, methods: List ast.ClassMethodSig, pos: source.SourcePos,
                             rest: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =

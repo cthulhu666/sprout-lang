@@ -125,7 +125,7 @@ wrap Hamper a = a
 
 wrap Tagged u = Int
 
-fn crated_used_once(n: Int) -> Int =
+fn hamper_used_once(n: Int) -> Int =
   let c = Hamper(File(n))
   in match c with | Hamper f -> use_file(f)
 
@@ -309,7 +309,7 @@ fn main() -> Unit !{IO} =
     check_eq("concrete linear field, used once", crate_used_once(23), 23),
     check_eq("concrete linear field two declarations deep", nested_crate_used_once(24), 24),
     check_eq("a wrap over a linear, used once", sealed_used_once(25), 25),
-    check_eq("a generic wrap storing its param, used once", crated_used_once(29), 29),
+    check_eq("a generic wrap storing its param, used once", hamper_used_once(29), 29),
     check_eq("a wrap's phantom parameter stores nothing (let)", wrap_phantom_dropped(30), 30),
     check_eq("a wrap's phantom parameter stores nothing (param)",
       wrap_phantom_param_dropped(Tagged(31)), 1),
