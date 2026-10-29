@@ -1065,8 +1065,11 @@ fn main() -> Unit !{IO} =
               count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
 
     # --- A phi of heap parameters is heap: it is rooted across the concat.
-    check_eq("param phi: %x is rooted (one push)",
-             i64_pushes(lower(param_phi_program())) + scan_pushes(lower(param_phi_program())), 1),
+    # The phi is block-local, not a frame slot: one i64 root, no scan root.
+    check_eq("param phi: %x is rooted (one push_i64_root)",
+             i64_pushes(lower(param_phi_program())), 1),
+    check_eq("param phi: no scan root (phi is not a frame slot)",
+             scan_pushes(lower(param_phi_program())), 0),
 
     # --- Test 6: IRMakeCtor operand rooted across the make (PR-A regression).
     # %a is dead after the make but must be rooted because @sprout_alloc_obj
