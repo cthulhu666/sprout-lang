@@ -229,9 +229,10 @@ fn p_string_run(s: String, len: Int, i: Int, parts: List String) -> Maybe (Strin
 fn p_string(s: String, len: Int, i: Int) -> Maybe (String, Int) = p_string_run(s, len, i + 1, Nil)
 
 # Deepest array/object nesting `parse` accepts; deeper input fails like any other invalid JSON. The
-# parser recurses once per level and a task stack is fixed (1 MiB). Measured crash depth is about
-# 1.3k levels in a task at -O0, so 64 leaves a wide margin.
-let max_depth = 64
+# parser recurses once per level and a task stack is fixed (1 MiB). The smallest measured crash
+# depth is 1258 levels (objects, in a task at -O0; 3638 at -O2, 10050 on the main thread), so 128
+# keeps about a 10x margin.
+let max_depth = 128
 
 # --- array ----------------------------------------------------------------------------------
 fn p_array_items(s: String, len: Int, depth: Int, i: Int, acc: List Json) -> Maybe (Json, Int) =
