@@ -240,6 +240,18 @@ fn phi_heap() -> sprout_ir.IRFunction =
                  str("%z1"), str("%z2"), concat("%zw", "%z1", "%z2"),
                  concat("%r", "%phi", "%zw"), sprout_ir.IRRet("%r")])])
 
+# %x picks one of two heap parameters.  Both die at the phi, so %x is the only
+# reference across the concat in `join`.  No roots: the input to the pass.
+fn param_phi() -> sprout_ir.IRFunction =
+  sprout_ir.IRFunction("param_phi", [("a", sprout_ir.IRTHeap), ("b", sprout_ir.IRTHeap)], "i64", [
+    blk("entry", [sprout_ir.IRConst("%c", 1), sprout_ir.IRCondBr("%c", "then", "else")]),
+    blk("then", [sprout_ir.IRBr("join")]),
+    blk("else", [sprout_ir.IRBr("join")]),
+    blk("join", [sprout_ir.IRPhi("%x", "i64", [(sprout_ir.param_ssa("a"), "then"),
+                                               (sprout_ir.param_ssa("b"), "else")]),
+                 str("%s"), concat("%t", "%s", "%s"), concat("%r", "%x", "%t"),
+                 sprout_ir.IRRet("%r")])])
+
 fn heap_param() -> sprout_ir.IRFunction =
   sprout_ir.IRFunction("heap_param", [("s", sprout_ir.IRTHeap)], "i64", [
     blk("entry", [sprout_ir.IRConst("%z0", 0),
@@ -362,6 +374,8 @@ fn main() -> Unit !{IO} =
     check_true("a frame popped before a non-exit terminator is reported",
                mentions(check_fn(framed_diamond(false, false, false, true)), "frame popped")),
     check_eq("two values in two slots are clean", check_fn(slot_misuse(1, "%b")), Nil),
+    check_true("an unrooted phi of heap parameters live across a trigger is reported",
+               mentions(check_fn(param_phi()), "%x")),
     check_true("a slot with two owners is reported",
                mentions(check_fn(slot_misuse(0, "%b")), "two owners")),
     check_true("a value in two slots is reported",
@@ -385,6 +399,7 @@ fn main() -> Unit !{IO} =
     check_eq("insert_roots output: two values live across a concat", rooted_by_pass(two_live()), Nil),
     check_eq("insert_roots output: phi of heap values", rooted_by_pass(phi_heap()), Nil),
     check_eq("insert_roots output: heap param across a call", rooted_by_pass(heap_param()), Nil),
+    check_eq("insert_roots output: phi of heap parameters", rooted_by_pass(param_phi()), Nil),
     check_eq("insert_roots output: ctor operand dead after the make",
              rooted_by_pass(ctor_operand_unrooted()), Nil),
     check_eq("insert_roots output: phi operand across the predecessor's trigger",

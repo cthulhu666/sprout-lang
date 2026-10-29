@@ -162,6 +162,27 @@ fn test5_program() -> sprout_ir.IRProgram =
     Nil), Nil, Nil, Nil)
 
 # ---------------------------------------------------------------------------
+# A phi whose operands are all heap parameters.  Both parameters die at the phi,
+# so %x is the only reference across the concat in `join` and must be rooted.
+# The parameters are seeded into heap_origin before the scan marks phis.
+
+fn param_phi_program() -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram([
+    sprout_ir.IRFunction("param_phi", [("a", sprout_ir.IRTHeap), ("b", sprout_ir.IRTHeap)], "i64", [
+      sprout_ir.IRBlock("entry", [sprout_ir.IRConst("%c", 1),
+                                  sprout_ir.IRCondBr("%c", "then", "else")]),
+      sprout_ir.IRBlock("then", [sprout_ir.IRBr("join")]),
+      sprout_ir.IRBlock("else", [sprout_ir.IRBr("join")]),
+      sprout_ir.IRBlock("join", [
+        sprout_ir.IRPhi("%x", "i64", [(sprout_ir.param_ssa("a"), "then"),
+                                      (sprout_ir.param_ssa("b"), "else")]),
+        sprout_ir.IRStrConst("%s", "%s_raw", "s"),
+        sprout_ir.IRStrConcat("%t", "%s", "%s"),
+        sprout_ir.IRStrConcat("%r", "%x", "%t"),
+        sprout_ir.IRRet("%r")])])],
+    Nil, Nil, Nil)
+
+# ---------------------------------------------------------------------------
 # Test 6: IRMakeCtor with a heap operand that is DEAD after the make.
 #
 # IR for:
@@ -1042,6 +1063,10 @@ fn main() -> Unit !{IO} =
               count(lower(test5_program()), "call i64 @sprout_gc_push_i64_root"), 1),
     check_eq("T5: one pop_roots(i64 1) (single coalesced root)",
               count(lower(test5_program()), "@sprout_gc_pop_roots(i64 1)"), 1),
+
+    # --- A phi of heap parameters is heap: it is rooted across the concat.
+    check_eq("param phi: %x is rooted (one push)",
+             i64_pushes(lower(param_phi_program())) + scan_pushes(lower(param_phi_program())), 1),
 
     # --- Test 6: IRMakeCtor operand rooted across the make (PR-A regression).
     # %a is dead after the make but must be rooted because @sprout_alloc_obj
