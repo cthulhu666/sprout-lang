@@ -1,0 +1,20 @@
+# A sum constructor and a record constructor share the name `Circle`. A record's
+# constructor is named after its type and lives in the same constructor namespace
+# as every sum constructor (spec-v0 §5.6.4), so this is one name declared twice.
+# The front end accepted it, and codegen keyed both under `Circle`: the record's
+# entry replaced the constructor's, the match lost its tag test, and `r.area`
+# was read as a pointer.
+type Shape (..) =
+  | Circle Circle
+  | Rect Rect
+
+type Circle (..) = (label: String)
+
+type Rect (..) = (area: Int)
+
+fn describe(s: Shape) -> String =
+  match s with
+  | Circle c -> "circle " ++ c.label
+  | Rect r -> "rect " ++ int_to_string(r.area)
+
+fn main() -> Unit !{IO} = print(describe(Rect (Rect(area = 3))))

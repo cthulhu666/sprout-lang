@@ -1,0 +1,16 @@
+# As ctor_shares_record_name, with the records declared first. The checker passed
+# this one, and ast_to_ir then failed with "record 'main.Circle' has no field".
+type Circle (..) = (label: String)
+
+type Rect (..) = (area: Int)
+
+type Shape (..) =
+  | Circle Circle
+  | Rect Rect
+
+fn describe(s: Shape) -> String =
+  match s with
+  | Circle c -> "circle " ++ c.label
+  | Rect r -> "rect " ++ int_to_string(r.area)
+
+fn main() -> Unit !{IO} = print(describe(Rect (Rect(area = 3))))

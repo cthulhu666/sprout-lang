@@ -8236,10 +8236,20 @@ fn instance_key_and_class(c: ast.TypeConstraint) -> Maybe (String, String) =
 # A class method is a module value too, so it may not share its name with a
 # top-level value or another class's method (docs/qualified-class-methods-v0.md,
 # rule 2). Instance methods are not declarations and never collide.
+#
+# Constructors share this namespace (spec-v0 §5.1, §5.6.4): a sum constructor, a
+# wrap's constructor and a record's constructor, which is named after its type. The
+# bundler binds all three in one value map, and codegen keys all three in one table
+# (ast_to_ir.build_ctor_table), so a second declaration of the name would silently
+# replace the first there. A sum TYPE's own name is not a constructor, so
+# `| JsonArray JsonArray` is fine when `JsonArray` is a sum type.
 type NameOwner =
   | OwnedByFn
   | OwnedByLet
   | OwnedByClass String
+  | OwnedByCtor String
+  | OwnedByWrap
+  | OwnedByRecord
 
 fn check_duplicate_module_values(decls: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
   match decls with
@@ -8250,6 +8260,10 @@ fn check_duplicate_module_values(decls: List ast.Decl, seen: Dict NameOwner) -> 
       | ast.LetDecl name _ _ pos -> check_value_name(name, OwnedByLet, pos, rest, seen)
       | ast.ClassDecl class_name _ methods _ pos ->
           check_class_method_names(class_name, methods, pos, rest, seen)
+      | ast.TypeDecl type_name _ ctors _ _ _ pos ->
+          check_type_ctor_names(type_name, ctors, pos, rest, seen)
+      | ast.WrapDecl name _ _ _ _ _ pos -> check_value_name(name, OwnedByWrap, pos, rest, seen)
+      | ast.RecordDecl name _ _ _ _ _ pos -> check_value_name(name, OwnedByRecord, pos, rest, seen)
       | _ -> check_duplicate_module_values(rest, seen)
 
 fn check_value_name(name: String, owner: NameOwner, pos: source.SourcePos, rest: List ast.Decl,
@@ -8257,7 +8271,32 @@ fn check_value_name(name: String, owner: NameOwner, pos: source.SourcePos, rest:
   match dict_get(name, seen) with
   | Nothing -> check_duplicate_module_values(rest, dict_set(name, owner, seen))
   | Just (OwnedByClass class_name) -> Just((pos, shared_method_message(name, class_name, value_label(owner))))
-  | Just _ -> Just((pos, "`" ++ name ++ "` is defined more than once in this module"))
+  | Just first -> Just((pos, duplicate_value_message(name, first, owner)))
+
+# The fn/let wording is the original one; a constructor on either side says which
+# two declarations met, since the name alone does not point at either.
+fn duplicate_value_message(name: String, first: NameOwner, second: NameOwner) -> String =
+  if is_ctor_owner(first) || is_ctor_owner(second)
+  then `\`${name}\` is defined more than once in this module: ${value_label(first)} and ${value_label(second)}`
+  else "`" ++ name ++ "` is defined more than once in this module"
+
+fn is_ctor_owner(owner: NameOwner) -> Bool =
+  match owner with
+  | OwnedByCtor _ -> true
+  | OwnedByWrap -> true
+  | OwnedByRecord -> true
+  | _ -> false
+
+fn check_type_ctor_names(type_name: String, ctors: List ast.TypeConstructor, pos: source.SourcePos,
+                         rest: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
+  match ctors with
+  | Nil -> check_duplicate_module_values(rest, seen)
+  | Cons (ast.TypeConstructor name _ _ _ _) more ->
+      match dict_get(name, seen) with
+      | Nothing -> check_type_ctor_names(type_name, more, pos, rest, dict_set(name, OwnedByCtor(type_name), seen))
+      | Just (OwnedByClass class_name) ->
+          Just((pos, shared_method_message(name, class_name, value_label(OwnedByCtor(type_name)))))
+      | Just first -> Just((pos, duplicate_value_message(name, first, OwnedByCtor(type_name))))
 
 fn check_class_method_names(class_name: String, methods: List ast.ClassMethodSig, pos: source.SourcePos,
                             rest: List ast.Decl, seen: Dict NameOwner) -> Maybe(source.SourcePos, String) =
@@ -8277,6 +8316,9 @@ fn value_label(owner: NameOwner) -> String =
   | OwnedByFn -> "a function"
   | OwnedByLet -> "a top-level `let`"
   | OwnedByClass class_name -> "class " ++ class_name
+  | OwnedByCtor type_name -> "a constructor of `" ++ string.after_last_dot(type_name) ++ "`"
+  | OwnedByWrap -> "a wrap constructor"
+  | OwnedByRecord -> "a record constructor"
 
 fn shared_method_message(method: String, class_name: String, other: String) -> String =
   `\`${method_display(method)}\` is declared by class ${class_name} and by ${other} in this module`

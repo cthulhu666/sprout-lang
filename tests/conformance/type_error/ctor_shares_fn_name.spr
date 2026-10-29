@@ -1,0 +1,9 @@
+# A top-level `fn` named like a sum constructor of the same module is a second
+# declaration of that name. It used to shadow the constructor in matches.
+type Shape (..) =
+  | Sq Int
+  | Other String
+
+fn Sq(n: Int) -> Int = n * n
+
+fn main() -> Unit !{IO} = print("x")

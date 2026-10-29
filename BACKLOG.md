@@ -2185,7 +2185,12 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   and measures only that the constraint was obeyed. Motivation is name pressure AND IDE
   discoverability, so the target is namespacing under the type — which makes leading-dot
   inference blocking, not optional, or use sites get longer than today's.
-  `docs/constructor-namespacing-v0.md` has the prior-art survey and the cheaper fallback.
+  `docs/constructor-namespacing-v0.md` has the prior-art survey and the cheaper fallback; the
+  restriction is now checker-enforced.
+- [ ] `P2` **Duplicate type names in one module are accepted.** `type A = | X Int` declared twice
+  with different constructors compiles and runs; the later declaration silently wins. Only a clash
+  of constructor names is rejected (`check_duplicate_module_values`), so this is caught only when
+  the two declarations also share one. Check type names beside value names.
 
 - [ ] `P2` **`(..)` is unenforced for everything the prelude declares.** The prelude has no module
   header, so `bundler.ParsedModule` carries `module_name = ""` and its names are injected

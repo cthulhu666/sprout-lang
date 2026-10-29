@@ -1,0 +1,5 @@
+module main
+import demo.recforge as recforge
+
+fn main() -> Unit !{IO} =
+  print(recforge.reveal(recforge.Token(secret = "forged")))

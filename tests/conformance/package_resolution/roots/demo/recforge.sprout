@@ -1,0 +1,14 @@
+module demo.recforge
+
+# A `(..)` sum with a constructor `Token`, and an abstract record `Token` (no
+# `(..)`) in the same module. The record's constructor is named after its type, so
+# this is one constructor name declared twice. The module is rejected where it is
+# declared, so an importer never sees the clash.
+
+export type Shape (..) =
+  | Token Int
+  | Other String
+
+export type Token = (secret: String)
+
+export fn reveal(t: Token) -> String = t.secret

@@ -569,6 +569,21 @@ blocks for one symbol, which the front end accepted and only the LLVM verifier
 rejected — and where the arities differed, the second declaration shadowed the
 first, so a *caller* was blamed with an arity error for a defect in the module.
 
+Constructors count. A sum constructor, a `wrap`'s constructor and a record's
+constructor (named after its type, §5.6.4) share the one namespace, so a name
+declared by two of them, or twice by one, is rejected at the second declaration:
+
+```
+`Circle` is defined more than once in this module: a constructor of `Shape` and a record constructor
+```
+
+A top-level `fn` or `let` named like a constructor of the same module is the same
+clash and is rejected the same way (`Sq` is defined more than once in this module:
+a constructor of `Shape` and a function).
+
+Rename one side. A sum *type's* own name is not a constructor, so it may match one
+(§5.6).
+
 Functions may also end with a local `where` block:
 
 ```sprout
@@ -1162,6 +1177,9 @@ after its own type (`type Box = | Box Int`), a type with several constructors
 (`| JsonArray JsonArray` in `stdlib/json.sprout`), and a bare name that is a type
 only in another module (`JsonArray` after `import stdlib.json as json`) are all
 unaffected.
+A constructor named after a record or a `wrap` (`| Circle Circle` beside
+`type Circle = (label: String)`) is a second declaration of that name and is
+rejected (§5.1).
 
 #### Existential constructors
 
@@ -1535,7 +1553,9 @@ the declaring module an abstract record is ordinary — opacity is a property of
 the boundary, not of the declaration.
 
 A published record's constructor shares the value namespace with every other
-constructor, so the one-unqualified-name-per-file rule (§3) covers it: selectively
+constructor, so the one-unqualified-name-per-file rule (§3) covers it, and inside
+its own module the one-declaration rule (§5.1) does: a sum constructor, a `wrap` or
+another record of the same name is rejected where it is declared. Selectively
 importing a `(..)` record named `Box` alongside a sum whose `(..)` brings a
 constructor named `Box` is a collision, and is rejected. Import one of them, or
 import the modules whole and qualify.

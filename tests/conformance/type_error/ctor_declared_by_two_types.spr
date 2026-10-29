@@ -1,0 +1,8 @@
+# Two sum types in one module declaring a constructor named `Foo`. The checker
+# accepted this and LLVM rejected the IR: "redefinition of global
+# '@sprout_tag$main$Foo'".
+type A (..) = | Foo Int | Bar
+
+type B (..) = | Foo String | Baz
+
+fn main() -> Unit !{IO} = print("x")

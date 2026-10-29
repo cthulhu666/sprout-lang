@@ -419,5 +419,19 @@ else
   fail=1
 fi
 
+# A record's constructor is named after its type, so an abstract record and a sum
+# constructor of the same name are one constructor declared twice. Rejected in the
+# declaring module; without the rule the sum's exported `Token` bound to the same
+# canonical name as the abstract record's constructor, and an importer could build
+# the record directly.
+rfc="$("$DRV" --phase check "$STDLIB" --package-root "$PKG_ROOT" "$FIX/app_record_forge_via_ctor.spr" 2>&1)"
+if echo "$rfc" | grep -qF '`demo.recforge.Token` is defined more than once in this module'; then
+  echo "PASS record ctor clash: an abstract record sharing a sum constructor's name is rejected"
+else
+  echo "FAIL record ctor clash: expected \`demo.recforge.Token\` is defined more than once in this module"
+  echo "$rfc" | tail -3
+  fail=1
+fi
+
 [ "$fail" -eq 0 ] && echo "==> package-resolution gate: OK" || echo "==> package-resolution gate: FAILED"
 exit $fail
