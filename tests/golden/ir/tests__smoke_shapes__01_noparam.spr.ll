@@ -55,6 +55,7 @@ declare i64 @to_double(i64)
 declare i64 @str_len(i64)
 declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
+declare i64 @str_starts_with_at_byte(i64, i64, i64)
 
 define i64 @val() {
 entry:

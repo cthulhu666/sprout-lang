@@ -55,6 +55,7 @@ declare i64 @to_double(i64)
 declare i64 @str_len(i64)
 declare i64 @str_find(i64, i64)
 declare i64 @str_starts_with(i64, i64)
+declare i64 @str_starts_with_at_byte(i64, i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 10, column 21)\00" }
 @.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 11, column 21)\00" }
 @__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }

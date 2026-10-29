@@ -1818,6 +1818,14 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P3` **Compile caching for the stdlib test runner** so repeated runs of unchanged test files
   skip the IR-emit + clang step. Shares an invalidation strategy with incremental build caching
   below.
+- [ ] `P3` **Forward `str_char_at` loops are quadratic.** `str_char_at` and
+  `str_char_at_unboxed` walk from byte 0 on every call, so a loop over `i` is O(n^2). A runtime
+  cursor cache (2-4 entries: string, byte offset, char index) would make forward loops linear.
+  It must also cache the codepoint count, since many loops guard with `str_len`. Rules: clear
+  an entry on both sweep free paths (region slots and large objects), per entry, like
+  `sprout_gc_invalidate_singleton`; write the cache before the boxed path allocates; and state
+  "a CSTR is freed only by the sweep" next to the non-moving GC note in
+  `docs/compiler-internals.md`. `parse_int`/`parse_double` already use a byte cursor.
 
 ### V1 roadmap candidates
 

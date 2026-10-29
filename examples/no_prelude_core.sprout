@@ -1,11 +1,11 @@
 no_prelude
 
-# `no_prelude` leaves only the floor: the 15 prelude externs whose signatures
+# `no_prelude` leaves only the floor: the 16 prelude externs whose signatures
 # mention primitive types only (docs/no-prelude-core-v0.md §4.1).
 #
 #   print_str  eprint  panic  int_to_string  double_to_string  char_to_string
 #   char_to_str  char_from_codepoint  to_double  str_concat  str_len
-#   str_slice  str_find  str_starts_with  str_compare
+#   str_slice  str_find  str_starts_with  str_compare  str_starts_with_at_byte
 #
 # Everything else is an Unknown variable error: List, Maybe, Vec, Dict, every
 # combinator and class, and the off-floor externs (argv_get, vector_*, map_*,

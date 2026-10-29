@@ -91,8 +91,11 @@ the lowerer's untouched. The two were never the same set.
 > today; 9 is unchanged. The floor's 15 is 16 since `print_str` joined it, and 15
 > again since `print` left it: `print` is a prelude function over `ToString`
 > ([print-dispatch-v0.md](print-dispatch-v0.md)), so a preludeless file writes a line
-> with `print_str`. Below, "the floor name `print`" reads `print_str`. Counts not
-> edited below are left as measured.
+> with `print_str`. Below, "the floor name `print`" reads `print_str`. The floor is 16
+> again since `str_starts_with_at_byte` joined it: the prelude's `parse_int` and
+> `parse_double` scan by byte offset, and the prelude cannot import `stdlib.string`.
+> Counts not edited below are left as measured; read a "15" or "16" below as the
+> floor at that time, and 16 as today's.
 
 Those sets overlap on 9 names and disagree on 31. Measured on `0e1e6fd2`, in a
 `no_prelude` file:
@@ -285,13 +288,15 @@ Sources: [Rust Reference — Preludes](https://doc.rust-lang.org/reference/names
 ### 4.1 The floor — this is the decision
 
 **The floor is the subset of the prelude's `extern fn` block whose signatures
-mention no prelude-defined type.** 15 of the 40 (16 since `print_str`):
+mention no prelude-defined type.** 15 of the 40 (16 since `print_str`, 15 after
+`print` left, 16 since `str_starts_with_at_byte`):
 
 ```
 print  eprint  print_str  panic    (`print` is no longer on the floor)
 int_to_string  double_to_string  char_to_string  char_to_str
 char_from_codepoint  to_double
 str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
+str_starts_with_at_byte
 ```
 
 Their signatures range over `String`, `Int`, `Char`, `Double`, `Unit` and bare
@@ -586,8 +591,8 @@ regenerating.
    Three ways out, in increasing cost:
 
    - **(a) Accept the collision.** A `no_prelude` file may not redefine one of
-     the 15. Cheap, and the diagnostic is already clear. **Measured against the
-     whole corpus: no `no_prelude` fixture redefines any of the 15.** What they
+     the floor names. Cheap, and the diagnostic is already clear. **Measured against the
+     whole corpus: no `no_prelude` fixture redefines any floor name.** What they
      redefine is `Eq` (`instance_check`), `Maybe` (`codegen_do_bind`,
      `test_ir_codegen_do_bind_strip`), and `Color`/`Describable`/`Eq`
      (`type_classes`) — every one a **type or class**, none a value. (All four
@@ -600,7 +605,7 @@ regenerating.
      would make those two items prerequisites of this change.
    - **(c) Give the floor its own module namespace** (`core.str_len`), so the
      entry stays bare and cannot collide. Cleanest namespacing, but it changes
-     how the 15 are *spelled* in a `no_prelude` file, which breaks all three
+     how the floor names are *spelled* in a `no_prelude` file, which breaks all three
      printing fixtures and contradicts goal 3.
 
    **Resolved: (a).** The fixture check came back empty, so it preserves every
@@ -672,7 +677,7 @@ corrected the design rather than silently conforming to it.
   bundled in: it is a diagnostics change with its own tests, and shipping it with
   a semantics change would make both harder to review.
 - **The wider floor (§4.3).** Switching `floor_type_names` to
-  `undeclared_type_names` widens the floor from 15 externs to ~31, admitting
+  `undeclared_type_names` widens the floor from 16 externs to ~32, admitting
   the `vector_*` / `map_*` / `native_set_*` / `ref_*` families. It is a one-word
   change, needs no new code, and is arguably the more principled criterion
   ("everything that needs nothing the prelude declares"). Not taken, for the

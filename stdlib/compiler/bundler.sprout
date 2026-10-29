@@ -2082,7 +2082,7 @@ fn representation_of(published: PublishedTypes, name: String) -> ast.Representat
 # WHY SCALARS AND NOT `undeclared_type_names` (just below). That list — the builtin
 # type constants — also carries `Vector`, `Map`, `Ref`, `Bytes`,
 # `Builder`, which are runtime backing stores the prelude does NOT declare. Using
-# it here is a one-word change and would widen the floor from 15 externs to ~27,
+# it here is a one-word change and would widen the floor from 16 externs to ~28,
 # admitting the `vector_*` / `map_*` / `ref_*` families. It is a
 # coherent alternative and costs no extra code — see docs/no-prelude-core-v0.md
 # §4.3. The narrower cut was chosen because those families are data structures,
