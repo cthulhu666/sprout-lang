@@ -1,0 +1,11 @@
+import stdlib.terminal as terminal
+
+# A handle value the runtime never issued must LOUD-FAIL with a named message, not index the
+# handle table. The raw extern is redeclared (same form as tests/stdlib/test_extern_redeclare.spr)
+# to reach the check.
+extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO} where linear a
+
+fn main() -> Unit !{IO} =
+  do
+    __chan_send(123456789, 1)  # rejected: no such handle
+    terminal.write("should-not-reach\n")

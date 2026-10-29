@@ -1,0 +1,12 @@
+import stdlib.task (Scope, with_scope, scope_handle)
+import stdlib.terminal as terminal
+
+# A handle is checked for its kind. Passing a scope handle where a channel handle is expected
+# must LOUD-FAIL with a named message. The raw extern is redeclared (same form as
+# tests/stdlib/test_extern_redeclare.spr) to reach the check.
+extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO} where linear a
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> __chan_send(scope_handle(s), 1))  # rejected: a scope handle is not a channel
+    terminal.write("should-not-reach\n")
