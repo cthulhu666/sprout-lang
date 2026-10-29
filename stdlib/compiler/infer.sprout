@@ -6169,22 +6169,11 @@ fn late_bind_head_msg(fam: String, t: types.Type) -> String =
 fn extend_env_from_do_step(step: typed_ast.TypedDoStep, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match step with
   | typed_ast.TDoBindStep pat e mode ->
-      extend_env_from_pattern_typed(pat, bound_type(mode, unifier.apply_subst(subst, typed_ast.typed_expr_type(e))),
+      extend_env_from_pattern_typed(pat, typed_ast.bind_bound_type(mode, unifier.apply_subst(subst, typed_ast.typed_expr_type(e))),
                                     subst, env)
   | typed_ast.TDoLetStep name e ->
       bind_local_scheme(name, types.mono(unifier.apply_subst(subst, typed_ast.typed_expr_type(e))), env)
   | typed_ast.TDoExprStep _ -> env
-
-fn bound_type(mode: typed_ast.BindMode, t: types.Type) -> types.Type =
-  match mode with
-  | typed_ast.PlainBind -> t
-  | typed_ast.MaybeBind -> last_type_arg(t)
-  | typed_ast.ResultBind -> last_type_arg(t)
-
-fn last_type_arg(t: types.Type) -> types.Type =
-  match t with
-  | types.TApp _ arg -> arg
-  | _ -> t
 
 fn extend_env_from_pattern_typed(pat: ast.Pattern, t: types.Type, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pat with

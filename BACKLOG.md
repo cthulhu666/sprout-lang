@@ -2059,14 +2059,6 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   fails with an ownership mismatch, while the annotated `\(c: borrowing File) -> …` compiles. The
   fix is to propagate an expected type into a `let` right-hand side generally, which is wider than
   linearity. Limit recorded at `type_error/lambda_borrow_mode_needs_call_position`.
-- [ ] `P3` **The effect-bind fallback still types `x <- e` as the payload.** `do_bind_type` cannot
-  see the monad kind, so for `e : Container Linear !{IO}` it strips a type argument and tracks the
-  payload rather than the container. The shape that made this `P2` is gone: a phantom position is no
-  longer stripped, so `ch <- chan_new(s, cap)` compiles and `http_server`/`pool_server` are written
-  that way. What is left is a diagnostic split between binder forms — leaking `b <- mk()` at
-  `Box Res` reports "linear value 'b' is never used", while the same value as a parameter reports
-  "its type `Box Res` contains the linear type `Res`". Same accept/reject answer, worse message.
-  Fixing it needs the post-pass to tell a monadic bind from an effectful one.
 - [~] `P3` **Containment virality — binder half LANDED (concrete fields included); type half open.**
   Decision (Kuba): **Option 1** — containment decides which *bindings* carry the obligation, while
   linearity stays per-declaration as a property of *types*, so a record containing a linear field is

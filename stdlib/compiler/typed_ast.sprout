@@ -61,6 +61,20 @@ export fn bind_mode_propagates(m: BindMode) -> Bool =
   | MaybeBind -> true
   | ResultBind -> true
 
+# The type a `<-` binder gets: the whole value for a plain bind, the last type argument
+# (the payload) for a Maybe/Result bind. The checker and the linear checker both read it
+# here, so the two cannot type one binder differently.
+export fn bind_bound_type(m: BindMode, t: types.Type) -> types.Type =
+  match m with
+  | PlainBind -> t
+  | MaybeBind -> last_type_arg(t)
+  | ResultBind -> last_type_arg(t)
+
+fn last_type_arg(t: types.Type) -> types.Type =
+  match t with
+  | types.TApp _ arg -> arg
+  | _ -> t
+
 export type TypedRecordField (..) = TypedRecordField String TypedExpr
 
 # Resolved typeclass-dictionary evidence attached to a TDict node.

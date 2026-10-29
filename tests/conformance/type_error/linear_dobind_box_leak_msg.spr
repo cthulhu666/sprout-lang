@@ -1,0 +1,13 @@
+module main
+
+# The leak names the container, as for a parameter or `let`.
+
+type linear Res = | Res Int
+type Box a = | Box a
+
+fn mk() -> Box Res !{IO} = Box(Res(1))
+
+fn main() -> Unit !{IO} =
+  do
+    b <- mk()
+    print("done")

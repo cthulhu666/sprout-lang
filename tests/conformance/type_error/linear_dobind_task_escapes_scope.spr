@@ -1,0 +1,24 @@
+import stdlib.task (Task, Scope, with_scope, task_fork, task_await)
+
+type Two a b = | Two a b
+
+fn fork_pair(s: Scope) -> Two (Task Int) Int !{IO} =
+  do
+    t <- task_fork(s, \_ -> 42)
+    Two(t, 0)
+
+fn take(p: Two (Task Int) Int) -> Task Int =
+  match p with
+  | Two t _ -> t
+
+fn make_getter(s: Scope) -> (Unit -> Task Int) !{IO} =
+  do
+    p <- fork_pair(s)
+    \_ -> take(p)
+
+fn main() -> Unit !{IO} =
+  do
+    getter <- with_scope(make_getter)
+    let t = getter(())
+    v <- task_await(t)
+    print(int_to_string(v))
