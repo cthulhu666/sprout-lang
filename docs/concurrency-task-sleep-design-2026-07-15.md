@@ -91,8 +91,9 @@ The Sprout wrapper handles the `ms <= 0` case (§5.2); `ms > 0` calls the schedu
   like a ready fd's token; the pump unlinks it from `g_io_head` and re-enqueues it.
 - Backends (in `sprout_poll.c`):
   - **kqueue:** `EVFILT_TIMER`, `EV_ADD | EV_ONESHOT`, `NOTE_MSECONDS`, `data = ms`,
-    `ident = (uintptr_t)token` (a task sleeps on ≤1 timer, so the `Task*` is a unique
-    ident; the `EVFILT_TIMER` ident namespace is disjoint from the fd read/write filters).
+    `ident` from a 64-bit counter (`g_kq_timer_seq`), so it never repeats; the token (the
+    `Task*`) rides in `udata`. The `EVFILT_TIMER` ident namespace is disjoint from the fd
+    read/write filters.
   - **epoll:** `timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC)` + `timerfd_settime` (one-shot,
     relative), registered `EPOLLIN | EPOLLONESHOT` with `data.ptr = token`. The timerfd is
     closed exactly once — on resume *or* on drop, never both (mutually exclusive: a dropped

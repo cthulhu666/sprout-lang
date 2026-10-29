@@ -2227,9 +2227,9 @@ static long long sprout_heap_child_value_payload(void* payload, size_t index) {
     case SPROUT_HEAP_BUILDER:
       return (long long)(uintptr_t)((BuilderVal*)payload)->chunks[index];
     case SPROUT_HEAP_TUPLE: {
-      uintptr_t word = 0;
-      memcpy(&word, (char*)payload + (index * sizeof(uintptr_t)), sizeof(uintptr_t));
-      return (long long)word;
+      long long word = 0;
+      memcpy(&word, (char*)payload + (index * sizeof(word)), sizeof(word));
+      return word;
     }
     case SPROUT_HEAP_REF:
       if (index == 0) return ((RefVal*)payload)->value;

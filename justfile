@@ -2080,14 +2080,17 @@ stdlib-reference:
   ./scripts/stdlib_reference_gate.sh
 
 # docs/string-header-invariant-v0.md §4.3, rule 1: the runtime converts a pointer to an
-# integer only inside sprout_str_word/sprout_ptr_word, the runtime/ADDRESS_CASTS functions,
-# or a runtime/WORD_CASTS_BASELINE entry, and that baseline only shrinks. Reads clang's AST,
-# so it sees the host platform's #ifdef branches only (docs/gates.md).
+# integer, or an address to a signed 64-bit integer, only inside sprout_str_word/sprout_ptr_word,
+# the runtime/ADDRESS_CASTS functions, or a runtime/WORD_CASTS_BASELINE entry, and that baseline
+# only shrinks. Reads clang's AST, so it sees the host platform's #ifdef branches only
+# (docs/gates.md). This recipe never passes --scan-cache. CI and `gate` run the check through
+# test-runtime-word-casts, whose case (a) is it on the real tree.
 [group('smoke')]
 runtime-word-casts:
   python3 -I scripts/runtime_word_casts.py clang runtime runtime/WORD_CASTS_BASELINE runtime/ADDRESS_CASTS
 
-# runtime-word-casts against copies of runtime/ with one defect planted at a time.
+# Case (a) is runtime-word-casts on the real runtime/; the others plant one defect at a time in
+# copies of it.
 [group('smoke')]
 test-runtime-word-casts:
   bash scripts/test_runtime_word_casts.sh
@@ -4033,7 +4036,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "backlog-shape|backlog-shape"
     "runtime-line-refs|runtime-line-refs"
     "stdlib-reference|stdlib-reference"
-    "runtime-word-casts|runtime-word-casts"
+    # Includes the real-tree check, so `runtime-word-casts` is not listed on its own.
     "test-runtime-word-casts|test-runtime-word-casts"
   )
   declare -a pids=() labels=()
@@ -4288,7 +4291,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape runtime-word-casts test-runtime-word-casts linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

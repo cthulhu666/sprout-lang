@@ -32,8 +32,9 @@ Goals:
 Non-goals:
 - Changing the extern ABI. Exported runtime functions keep their `long long` signatures.
 - Changing compiled code. Literals are already headered (`ir_lowering.sprout`).
-- Defeating deliberate bypasses (`memcpy` into a word, union punning). The threat is an
-  accidental cast, which is what d9bcd11c was.
+- Defeating deliberate bypasses (`memcpy` into a word, union punning, arithmetic that moves an
+  address into a non-address integer type). The threat is an accidental cast, which is what
+  d9bcd11c was.
 - The permanent interning of Dict keys (`BACKLOG.md`: "A `Dict` key is interned permanently").
 
 ## 3. Prior art
@@ -102,9 +103,10 @@ already happened once, and failed CI at a 389x ratio (`sprout_cstr_byte_len`'s c
 aux-versus-`strlen` check stays in `str_byte_len`.
 
 Non-String pointers have their own exit, `sprout_ptr_word(const void*)`, for object handles,
-vectors, closures, maps, tasks and channels. All of these exits are declared in a header shared by
-`sprout_runtime.c`, `sprout_scheduler.c` and `sprout_poll.c`, since the scheduler and poller TUs
-cast too (`sprout_scheduler.c` returns `(long long)(intptr_t)` for scopes, tasks and channels).
+vectors, closures, maps, tasks and channels. All of these exits are `static inline` in
+`runtime/sprout_word.h`, a header shared by `sprout_runtime.c`, `sprout_scheduler.c` and
+`sprout_poll.c`. The check (§4.3) exempts them by that `file:name` only. It is shared because
+the scheduler and poller TUs cast too (`sprout_scheduler.c` returns `(long long)(intptr_t)` for scopes, tasks and channels).
 The exits need `SproutHeapKind`, `sprout_hdr_of` and `sprout_gc_hdrcheck_on`, which are private to
 `sprout_runtime.c` today, so those move into the header as well.
 
@@ -115,14 +117,22 @@ as `APPROVED_BUILTINS`. An entry whose cast sits in one platform's `#ifdef` bran
 platform's tag: the AST holds only the host's branches, so the entry is checked on that host and
 ignored elsewhere.
 
-A listed function may not return an integer of 64 bits or more (`long`, `long long`, `intptr_t`,
-`uintptr_t`, ...) and may not take a pointer to one, since either route lets a cast result leave the
-function as a word. The kqueue timer id used to be the Task pointer, written through a
-`long long*`. It is now a counter.
+An address must not become a word, whatever route it takes out of the function: a return, an
+out-param, a field store, a call argument or a global. So `uintptr_t` and `intptr_t` are the
+address types, and the check enforces two rules:
+- every pointer-to-integer cast in a listed function produces a `uintptr_t`;
+- nowhere outside the exits may an address-typed value be converted to a signed integer of 64
+  bits or more (`long`, `long long`, `int64_t`), whether the conversion is explicit or implicit.
 
-A third exit, `sprout_addr(const void*) -> uintptr_t`, was rejected. Its integer result could be
-cast to `long long` like any `len`, which reopens the hole. The rule above rejects it as a listed
-function for the same reason.
+A `uintptr_t` stays an address until it reaches a comparison, arithmetic or a pointer. A listed
+function also may not return a 64-bit integer or take a pointer to one. The kqueue timer id used
+to be the Task pointer, written out as a `long long`. It is now a `long long` counter.
+
+A third exit, `sprout_addr(const void*) -> uintptr_t`, was rejected. It would hand out addresses
+under the address type, and an exit has to produce the word type. The rules leave one route open:
+arithmetic that moves an address into a non-address type, e.g. `(size_t)(a - 0)`, and from there
+into a word. That takes intent, not an accident, so it stays with the other deliberate bypasses in
+§2's non-goals.
 
 ### 4.3 The cast check, on clang's AST
 
@@ -130,7 +140,9 @@ function for the same reason.
 `runtime/`, and fails on any of:
 
 - a cast whose `castKind` is `PointerToIntegral` outside the bodies of `sprout_str_word` and
-  `sprout_ptr_word` and the `ADDRESS_CASTS` functions (§4.2);
+  `sprout_ptr_word` and the `ADDRESS_CASTS` functions (§4.2), or one inside a listed function
+  that does not produce `uintptr_t`;
+- an address-typed value converted to a signed 64-bit integer outside the exits (§4.2);
 - a call to `sprout_ptr_word` whose argument, before the implicit conversion to `const void*`,
   is `char*` or `const char*`;
 - construction of a `SproutStr` outside the header writers (§4.1).
