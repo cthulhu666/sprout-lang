@@ -1,8 +1,8 @@
 # Green-task pooling — design v0
 
 Status: **design A prototyped and measured (§5.3); not landed.** Measurements in §1, the
-prototype results in §5.3, and the linear-types findings in §7 are reproducible today. Design B
-(§6) is analysis only.
+prototype results in §5.3 are reproducible today. The §7 linear-types findings are partly
+superseded (§5.4 A1, §7.1: the do-bind edge is fixed). Design B (§6) is analysis only.
 
 Companion to [linear-borrowing-v0.md](./linear-borrowing-v0.md),
 [concurrency-channels-design-2026-07-16.md](./concurrency-channels-design-2026-07-16.md), and
@@ -298,12 +298,12 @@ tail simply because task creation throttles it to ~7k req/s, so it never opens e
 
 ### 5.4 Gotchas for design A
 
-- **A1 — the over-strict do-bind edge is in the way, and must be routed around.**
-  `ch <- chan_new(s, cap)` in an `!{IO}` block is rejected for a container-of-linear payload
-  (§7.1). Threading the channel as a parameter works today and is what the prototype does. The
-  clean fix is `BACKLOG:1059`'s known over-strict edge; until then this is a documented shape
-  constraint, and the stdlib code needs a comment saying *why* it is written that way, or someone
-  will "simplify" it back into a bind.
+- **A1 — the over-strict do-bind edge was in the way, and had to be routed around.**
+  *Superseded:* an effect bind now binds the whole value (`typed_ast.bind_bound_type`), so
+  `ch <- chan_new(s, cap)` in an `!{IO}` block is accepted, and `stdlib/http_server.sprout`
+  already uses it. See [linearity-virality-v0.md](./linearity-virality-v0.md). The text below is
+  the original finding: `ch <- chan_new(s, cap)` was rejected for a container-of-linear payload
+  (§7.1), and the prototype threaded the channel as a parameter.
 - **A2 — worker count is now a capacity decision**, exposed in the public API and needing a
   documented default and tuning guidance.
 - **A3 — a panicking/failing handler must not kill a worker permanently.** Today a task dies per
@@ -418,9 +418,10 @@ Every claim below was checked against the compiler.
 ERROR: check: linear value 'ch' is used more than once
 ```
 
-but the cause is the **effectful do-bind fallback**, not propagation. `BACKLOG:1059` already
-records it: `do_bind_type` takes the RHS's last type argument as the binder type, so
-`ch <- chan_new(…) : Chan Res !{IO}` types `ch` as `Res`. The entry names this exact case as the
+but the cause is the **effectful do-bind fallback**, not propagation. *Superseded:* an effect
+bind now binds the whole value (`typed_ast.bind_bound_type`); `do_bind_type` and the backlog entry
+are gone, and `ch <- chan_new(…)` is accepted. Original finding: `do_bind_type` took the RHS's last type argument as the binder
+type, so `ch <- chan_new(…) : Chan Res !{IO}` typed `ch` as `Res`. The entry named this case as the
 "*Remaining over-strict edge (unchanged):* an effect bind of a non-linear container of a linear
 (`x <- getBox()`, `Box File` non-linear) is still conservatively rejected via the payload
 fallback."
@@ -586,8 +587,9 @@ To be filed in `BACKLOG.md`:
    container holding a linear value drops it silently. Adjacent to `BACKLOG:1066`, related to the
    open Position A/B call at `BACKLOG:1100`. Probes ready as fixtures. **Highest-value item here** —
    it is a soundness gap, not a performance question.
-2. **The over-strict do-bind edge** (§7.1, `BACKLOG:1059`) now has a concrete motivating consumer:
-   it forces the worker-pool channel to be threaded as a parameter. Worth raising in priority.
+2. **The over-strict do-bind edge** (§7.1) — *Superseded:* fixed (`typed_ast.bind_bound_type`);
+   the backlog entry is gone, so there is nothing to file. Original note: it forced the
+   worker-pool channel to be threaded as a parameter.
 3. **`serve` is an unbounded-memory exposure** (§3.1): ~1.4 MiB per concurrent connection, client-
    driven. Independent of which design lands, and arguably the most user-visible issue in this
    document.
