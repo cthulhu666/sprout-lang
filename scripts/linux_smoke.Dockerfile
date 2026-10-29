@@ -28,12 +28,14 @@ FROM ubuntu:24.04
 # green, so two of its ten assertions silently stop being sanitized. The unversioned package
 # name tracks the distro's default clang, so this does not need bumping when it moves.
 #
+# python3 runs scripts/runtime_word_casts.py (`just linux-run runtime-word-casts`).
+#
 # libsqlite3-dev, sqlite3, curl and openssl are for twelve-dollar-example: it links the
 # system libsqlite3, builds a database with the CLI, signs a JWT and calls the server.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       llvm clang libclang-rt-dev ripgrep ca-certificates \
-      libsqlite3-dev sqlite3 curl openssl \
+      libsqlite3-dev sqlite3 curl openssl python3 \
  && rm -rf /var/lib/apt/lists/*
 
 # The recipes invoke BARE `clang` and `opt` from PATH, and only the versioned LLVM

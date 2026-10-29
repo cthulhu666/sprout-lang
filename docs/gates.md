@@ -431,6 +431,35 @@ shrinks — a listed module that gains a section fails until it is removed from 
 a listed name with no module file. Nested modules (`fs/path`, `math/int`) are out of scope, as for
 the REPL's completion list. It checks that a section exists, not what it says.
 
+## Runtime word casts — `just runtime-word-casts`
+
+Counts the `PointerToIntegral` casts in `runtime/*.c` and `runtime/*.h` on clang's JSON AST
+(`scripts/runtime_word_casts.py`), per enclosing top-level decl, and fails on any outside
+`sprout_str_word`, `sprout_ptr_word`, the `runtime/ADDRESS_CASTS` functions or a
+`runtime/WORD_CASTS_BASELINE` entry. Only types tell `(long long)p` from `(long long)len`, which
+is why it reads the AST. Rule 1 of `docs/string-header-invariant-v0.md` §4.3.
+
+- **`WORD_CASTS_BASELINE`** is `file:decl:count`, today's violations. It only shrinks: a new decl or
+  a higher count fails, and so does an entry whose decl now has fewer casts or none (lower or delete
+  it). `--emit-baseline` prints the current counts.
+- **`ADDRESS_CASTS`** lists functions whose casts are address arithmetic, address ordering or kernel
+  tokens, one `# reason` each. A listed function must not return `long long`, so its casts cannot
+  reach a Sprout word through the return. A listed name with no cast, or no definition, fails. These
+  entries stay; they are not debt. A name may carry one tag, `darwin` or `linux`: it is then read
+  only on that host and ignored on the other, so a cast there fails as not in the baseline. An
+  unknown or second tag is malformed.
+- `just test-runtime-word-casts` plants one defect at a time in a copy of `runtime/` (a cast in an
+  exported String producer, a count rise, a stale or inflated entry, a `long long` function in
+  `ADDRESS_CASTS`, a stale or unknown platform tag) and checks that each fails and names the decl.
+
+**How it is defeated:** deliberately. `memcpy` of a pointer into a word, union punning, and a `char*`
+laundered through `void*` all convert without a `PointerToIntegral` node, so the gate does not see
+them. It stops the accidental cast, not an author who routes around it.
+
+**It sees one platform.** The AST holds only the host's `#ifdef` branches, so a decl that casts under
+`__APPLE__` or Linux only is counted on that host alone. Tag its `ADDRESS_CASTS` entry with that
+host; an untagged entry is stale on the other. `just linux-run runtime-word-casts` checks Linux.
+
 ## Render cost — `just render-cost-gate`
 
 Paints 20 frames of a 200×50 screen through the real stack (`tests/cost/render_frame.sprout`) under
