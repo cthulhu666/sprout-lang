@@ -208,6 +208,7 @@ declare i64 @json_stringify(i64)
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 @stdlib.json.null = global i64 zeroinitializer
+@stdlib.json.max_depth = private constant i64 64
 
 define i64 @list_reverse_go(i64 %p$xs$in, i64 %p$acc$in) {
 entry:

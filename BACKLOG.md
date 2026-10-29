@@ -656,11 +656,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 ### 3) JSON Support
 
-- [ ] `P1` **`json.parse` has no nesting limit, so 32 KiB of `[` kills the process.** `p_value`
-  recurses once per level; 2^14 nested arrays overflow the main stack (measured, 2026-10-09), and a
-  green task's stack is smaller (it aborts at its guard page). Reachable from any HTTP or LSP body.
-  Needs a depth cap that returns `Err` — a Design Change Process call on the limit and whether
-  callers can raise it (serde_json and Go's `encoding/json` both cap by default).
 - [ ] `P2` **Reimplement `json_stringify` in Sprout** once string/escaping primitives make that
   practical, keeping host builtins for the impossible or efficiency-critical.
 - [ ] `P2` **An out-of-range literal reads as an infinity, so a conformant document can be READ but
