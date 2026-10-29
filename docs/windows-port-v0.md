@@ -386,9 +386,10 @@ carry an op the Windows arm cannot implement, which is the whole thing the seam 
 | Op | POSIX | W1 |
 |---|---|---|
 | `sprout_ctx_adopt_current` | no-op; `uc` is filled by the first switch out | `ConvertThreadToFiber` |
-| `sprout_ctx_create(c, entry, bytes)` | `malloc` + `getcontext`/`makecontext` | `CreateFiber` |
+| `sprout_ctx_create(c, entry, bytes)` | guarded `mmap` (cached) + `getcontext`/`makecontext` | `CreateFiber` |
 | `sprout_ctx_switch(from, to)` | `swapcontext` | `SwitchToFiber(to)` |
-| `sprout_ctx_destroy` | `free`; idempotent | `DeleteFiber` |
+| `sprout_ctx_destroy` | back to the stack cache, or `munmap`; idempotent | `DeleteFiber` |
+| `sprout_ctx_in_guard(c, addr)` | address in the stack's `PROT_NONE` guard | stub, 0: fibers carry an OS guard page |
 
 `ctx_switch` keeps a `from` argument that `SwitchToFiber` ignores. All three call sites pass the
 currently-running context, so that is documented as the interface's precondition rather than left
@@ -419,9 +420,10 @@ call-site edit was `sprout_ctx_adopt_current` gaining a return code, because
 | Op | POSIX | Windows |
 |---|---|---|
 | `adopt_current` | no-op; `uc` filled by the first switch out | `ConvertThreadToFiber(NULL)` |
-| `create` | `malloc` + `getcontext`/`makecontext` | `CreateFiberEx(0, bytes, FIBER_FLAG_FLOAT_SWITCH, …)` |
+| `create` | guarded `mmap` (cached) + `getcontext`/`makecontext` | `CreateFiberEx(0, bytes, FIBER_FLAG_FLOAT_SWITCH, …)` |
 | `switch` | `swapcontext` | `SwitchToFiber(to)` — `from` unused, as designed |
-| `destroy` | `free` | `DeleteFiber`, skipped when adopted |
+| `destroy` | stack cache, or `munmap` | `DeleteFiber`, skipped when adopted |
+| `in_guard` | address in the `PROT_NONE` guard | stub returning 0 (OS guard page) |
 
 Decisions worth keeping:
 

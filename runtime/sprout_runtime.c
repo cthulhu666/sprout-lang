@@ -297,7 +297,14 @@ static void sprout_crash_handler(int sig, siginfo_t* info, void* ucontext) {
      * the guard pages and the small bounds approximation on Linux. */
     if (a >= g_stack_lo - 65536 && a <= g_stack_hi) is_overflow = 1;
   }
-  if (is_overflow) {
+  /* A green task's stack ends in a PROT_NONE guard (sprout_context.h). Checked first:
+   * a task stack is not inside the main-thread band. */
+  int task_overflow = 0;
+  if ((sig == SIGSEGV || sig == SIGBUS) && info != NULL)
+    task_overflow = sprout_sched_fault_in_guard(info->si_addr);
+  if (task_overflow) {
+    sov_write("\n[sprout] fatal: stack overflow in a green task - unbounded or too-deep recursion\n");
+  } else if (is_overflow) {
     sov_write("\n[sprout] fatal: stack overflow - unbounded or too-deep recursion\n");
   } else {
     sov_write("\n[sprout] ");

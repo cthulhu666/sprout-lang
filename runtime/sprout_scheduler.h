@@ -42,6 +42,10 @@ void sprout_roots_push_ptr(SproutRoots* r, void* slot);
 /* Runtime panic path (backtrace + abort), reusable from the scheduler TU. */
 __attribute__((noreturn)) void sprout_fail(const char* msg);
 
+/* Nonzero when `addr` lies in the guard region of the running green task's stack (or the
+ * pump's). For the crash handler: such a fault is a stack overflow. Signal-safe. */
+int sprout_sched_fault_in_guard(const void* addr);
+
 /* Build a `stdlib.chan.Recv a` (L0.9 channel close). Defined in sprout_runtime.c, where the
  * static ctor-name lookup and the GC temp-root macros live; __chan_recv calls these to return
  * `Got v` / `Closed`. sprout_chan_make_got roots `v` across the boxing allocation. */
