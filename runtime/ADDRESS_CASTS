@@ -4,9 +4,12 @@
 # address arithmetic, address ordering, and kernel tokens.  Checked by `just runtime-word-casts`
 # (scripts/runtime_word_casts.py; docs/string-header-invariant-v0.md §4.2, §4.3).
 #
-# Rules, one name per line, a `# reason` on the SAME line:
-#   - A listed function must not return `long long`.  Its casts therefore cannot reach a Sprout
-#     value through its return.
+# Rules, one `file:name` per line (file as `runtime/x.c`; a same-named static in another file is
+# not covered), a `# reason` on the SAME line:
+#   - A listed function must not return an integer type of 64 bits or more (`long`, `long long`,
+#     `__int128`, or a typedef of one: `uintptr_t`, `size_t`, ...), and must not take a pointer to
+#     one (an out-param).  Its casts therefore cannot reach a Sprout value through its return or
+#     an out-param.  A by-value 64-bit parameter is fine.
 #   - A name with no pointer-to-integer cast on the host platform is stale and fails the gate.
 #   - A function whose cast result can be stored into a Sprout word belongs in
 #     runtime/WORD_CASTS_BASELINE, not here.
@@ -16,11 +19,11 @@
 # a cast that appears in that function on the other host fails as not in the baseline.  An
 # untagged entry is checked on every host and must have a cast on both.
 
-arena_contains          # range test of an address against the arena reservation
-region_find             # address -> region lookup; index arithmetic on the arena base
-region_find_slow        # binary search of the region table by address
-open_new_region         # orders the new region into the table by base address
-region_table_insert     # sorted insert by base address; maintains the heap address span
-sprout_fl_entry_cmp     # qsort comparator: orders free-list entries by address
-sprout_poll_wait linux  # epoll: reads back the tagged kernel token; never a Sprout word
-sprout_poll_add_timer   # kqueue timer ident / epoll token tag; the id stays inside the scheduler
+runtime/sprout_runtime.c:arena_contains       # range test of an address against the arena
+runtime/sprout_runtime.c:region_find          # address -> region; index arithmetic on the base
+runtime/sprout_runtime.c:region_find_slow     # binary search of the region table by address
+runtime/sprout_runtime.c:open_new_region      # orders the new region into the table by address
+runtime/sprout_runtime.c:region_table_insert  # sorted insert by address; keeps the heap span
+runtime/sprout_runtime.c:sprout_fl_entry_cmp  # qsort comparator: free-list entries by address
+runtime/sprout_poll.c:poll_tag_timer linux    # epoll: sets bit 0 of a token; returns a pointer
+runtime/sprout_poll.c:poll_untag linux        # epoll: reads and clears bit 0; returns a pointer

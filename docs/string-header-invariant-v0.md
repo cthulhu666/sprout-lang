@@ -109,14 +109,20 @@ The exits need `SproutHeapKind`, `sprout_hdr_of` and `sprout_gc_hdrcheck_on`, wh
 `sprout_runtime.c` today, so those move into the header as well.
 
 Some casts are not Sprout values at all. `arena_contains`, `region_find` and `region_find_slow` do
-address arithmetic. `sprout_poll_add_timer` and `sprout_poll_wait` tag a token's low bit for the
-kernel. These functions are listed in `runtime/ADDRESS_CASTS`, each with a reason, and reviewed the
-same way as `APPROVED_BUILTINS`. An entry whose cast sits in one platform's `#ifdef` branch
-carries that platform's tag (`sprout_poll_wait linux`): the AST holds only the host's branches, so
-the entry is checked on that host and ignored elsewhere. The check (§4.3) allows a
-pointer-to-integer cast in a listed function only when that function's return type is not `long long`, so no listed function can hand
-Sprout a word. A third exit, `sprout_addr(const void*) -> uintptr_t`, was rejected. Its integer
-result could be cast to `long long` like any `len`, which reopens the hole.
+address arithmetic, and the epoll backend tags a token's low bit for the kernel. These functions
+are listed in `runtime/ADDRESS_CASTS` as `file:name`, each with a reason, and reviewed the same way
+as `APPROVED_BUILTINS`. An entry whose cast sits in one platform's `#ifdef` branch carries that
+platform's tag: the AST holds only the host's branches, so the entry is checked on that host and
+ignored elsewhere.
+
+A listed function may not return an integer of 64 bits or more (`long`, `long long`, `intptr_t`,
+`uintptr_t`, ...) and may not take a pointer to one, since either route lets a cast result leave the
+function as a word. The kqueue timer id used to be the Task pointer, written through a
+`long long*`. It is now a counter.
+
+A third exit, `sprout_addr(const void*) -> uintptr_t`, was rejected. Its integer result could be
+cast to `long long` like any `len`, which reopens the hole. The rule above rejects it as a listed
+function for the same reason.
 
 ### 4.3 The cast check, on clang's AST
 

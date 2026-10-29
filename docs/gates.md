@@ -443,18 +443,29 @@ is why it reads the AST. Rule 1 of `docs/string-header-invariant-v0.md` §4.3.
   a higher count fails, and so does an entry whose decl now has fewer casts or none (lower or delete
   it). `--emit-baseline` prints the current counts.
 - **`ADDRESS_CASTS`** lists functions whose casts are address arithmetic, address ordering or kernel
-  tokens, one `# reason` each. A listed function must not return `long long`, so its casts cannot
-  reach a Sprout word through the return. A listed name with no cast, or no definition, fails. These
-  entries stay; they are not debt. A name may carry one tag, `darwin` or `linux`: it is then read
-  only on that host and ignored on the other, so a cast there fails as not in the baseline. An
-  unknown or second tag is malformed.
-- `just test-runtime-word-casts` plants one defect at a time in a copy of `runtime/` (a cast in an
-  exported String producer, a count rise, a stale or inflated entry, a `long long` function in
-  `ADDRESS_CASTS`, a stale or unknown platform tag) and checks that each fails and names the decl.
+  tokens, one `# reason` each, keyed `file:name` (`runtime/sprout_runtime.c:region_find`), so a
+  same-named static in another file is not exempt. A listed function must not return an integer
+  type of 64 bits or more (`long`, `long long`, `__int128`, or a typedef of one such as `uintptr_t`
+  or `size_t`), and must not take a pointer to one (an out-param like `long long* out_id`); either
+  way its casts could reach a Sprout word. A by-value 64-bit parameter is fine. A listed name with
+  no cast, or no definition, fails. These entries stay; they are not debt. A name may carry one tag,
+  `darwin` or `linux`: it is then read only on that host and ignored on the other, so a cast there
+  fails as not in the baseline. An unknown or second tag is malformed.
+- Every `runtime/*.c` is scanned (a glob, like the justfile's `runtime_src`), so a new file is
+  covered without editing the gate.
+- `just test-runtime-word-casts` plants defects in copies of `runtime/` (a cast in an exported
+  String producer, a count rise, a stale or inflated entry, a function returning `long long`,
+  `uintptr_t`, `long` or `intptr_t` or taking a `long long*`, a same-named static in another file,
+  a cast in a new `runtime/*.c`, a stale or unknown platform tag) and checks that each fails and
+  names the decl. It scans three trees and re-reads each one's decl table through `--scan-cache`
+  for the cases that vary only the list files; the cache is keyed on a hash of `runtime/*.c` and
+  `*.h`, and `just runtime-word-casts` never passes the flag.
 
 **How it is defeated:** deliberately. `memcpy` of a pointer into a word, union punning, and a `char*`
 laundered through `void*` all convert without a `PointerToIntegral` node, so the gate does not see
-them. It stops the accidental cast, not an author who routes around it.
+them. It stops the accidental cast, not an author who routes around it. It also does not look at
+writes into globals: a listed function that stores the address into a global a Sprout word is read
+from passes.
 
 **It sees one platform.** The AST holds only the host's `#ifdef` branches, so a decl that casts under
 `__APPLE__` or Linux only is counted on that host alone. Tag its `ADDRESS_CASTS` entry with that
