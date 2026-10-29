@@ -124,10 +124,11 @@ expect_fail "(i) entry without a file" 'malformed entry'
 R=runtime/sprout_runtime.c
 S=runtime/sprout_scheduler.c
 N=runtime/sprout_wc_new.c
+Q=runtime/sprout_wc_q.c
 PLANTED=("$R:wc_ret_uintptr" "$R:wc_ret_long" "$R:wc_ret_intptr" "$R:wc_out_param" "$R:wc_byval_ok"
   "$R:wc_same" "$S:wc_same" "$N:wc_new_fn"
   "$R:wc_a2_field" "$R:wc_a2_call" "$R:wc_a2_intptr" "$R:wc_a2_implicit" "$R:wc_a1_ulong"
-  "$R:wc_ok_size" "$R:wc_ok_narrow" "$S:sprout_ptr_word")
+  "$R:wc_ok_size" "$R:wc_ok_narrow" "$Q:sprout_ptr_word")
 cat >>"$RT_T/sprout_runtime.c" <<'EOF'
 uintptr_t wc_ret_uintptr(void* p) { return (uintptr_t)p; }
 long wc_ret_long(void* p) { return (long)(uintptr_t)p; }
@@ -147,17 +148,16 @@ int wc_ok_narrow(void* p) { uintptr_t u = (uintptr_t)p; return (int)u; }
 EOF
 cat >>"$RT_T/sprout_scheduler.c" <<'EOF'
 static int wc_same(void* p) { return (int)(uintptr_t)p; }
-static int sprout_ptr_word(void* p) { return (int)(uintptr_t)p; }
-EOF
-cat >"$RT_T/sprout_word.h" <<'EOF'
-#include <stdint.h>
-static inline long long sprout_str_word(const char* p) { return (long long)(uintptr_t)p; }
-static inline long long sprout_ptr_word(void* p) { return (long long)(uintptr_t)p; }
 EOF
 cat >"$RT_T/sprout_wc_new.c" <<'EOF'
 #include <stdint.h>
 #include "sprout_word.h"
 int wc_new_fn(void* p) { return (int)(uintptr_t)p; }
+EOF
+# Does not include sprout_word.h, so its own sprout_ptr_word is a different function from the exit.
+cat >"$RT_T/sprout_wc_q.c" <<'EOF'
+#include <stdint.h>
+static int sprout_ptr_word(void* p) { return (int)(uintptr_t)p; }
 EOF
 CACHE_T="$TMPD/cache_planted.json"
 
@@ -233,9 +233,76 @@ expect_absent "(p) the cast that feeds a conversion is not counted twice" "$R:wc
 
 # (q) the exits are keyed by file: a sprout_ptr_word outside runtime/sprout_word.h is not exempt.
 lists "$R:wc_byval_ok" "$R:wc_same"
-grep -vxF "$S:sprout_ptr_word:1" "$TMPD/base_case" >"$TMPD/base_case5"
+grep -vxF "$Q:sprout_ptr_word:1" "$TMPD/base_case" >"$TMPD/base_case5"
 run "$RT_T" "$TMPD/base_case5" "$TMPD/addr_case" "$CACHE_T"
-expect_fail "(q) sprout_ptr_word in sprout_scheduler.c" "$S:sprout_ptr_word has 1 pointer-to-integer cast(s) and is not in the baseline"
+expect_fail "(q) sprout_ptr_word in another file" "$Q:sprout_ptr_word has 1 pointer-to-integer cast(s) and is not in the baseline"
 expect_absent "(q) the exits in runtime/sprout_word.h are exempt" "runtime/sprout_word.h"
+
+# (r)-(s) rules 2 and 3 (docs/string-header-invariant-v0.md §4.3), planted in a fourth tree. None
+# of these adds a pointer-to-integer cast to its own body, so the baseline stays the real one.
+RT_R="$TMPD/rt_rules"
+cp -R "$RT" "$RT_R"
+cat >>"$RT_R/sprout_runtime.c" <<'EOF'
+long long wc_r2_literal(void) { return sprout_ptr_word("x"); }
+long long wc_r2_voidcast(void) { return sprout_ptr_word((void*)"x"); }
+long long wc_r2_hdr_p(SproutStr s) { return sprout_ptr_word(s.hdr_p); }
+long long wc_r2_uchar(unsigned char* p) { return sprout_ptr_word((const void*)(void*)p); }
+long long wc_r2_ok(long long* p) { return sprout_ptr_word(p); }
+long long wc_r2_ok_void(void* p) { return sprout_ptr_word(p); }
+SproutStr wc_r3_init(char* p) { SproutStr s = { p }; return s; }
+SproutStr wc_r3_zero(void) { SproutStr s = {0}; return s; }
+SproutStr wc_r3_designated(char* p) { SproutStr s = { .hdr_p = p }; return s; }
+SproutStr wc_r3_literal(char* p) { return (SproutStr){ p }; }
+void wc_r3_assign(SproutStr s, char* p) { s.hdr_p = p; }
+void wc_r3_assign_arrow(SproutStr* s, char* p) { s->hdr_p = p; }
+void wc_r3_addr(SproutStr s) { char** pp = &s.hdr_p; (void)pp; }
+void wc_r3_incr(SproutStr s) { s.hdr_p++; }
+void wc_r3_compound(SproutStr s) { s.hdr_p += 1; }
+void wc_r3_ok_fill(SproutStr s) { s.hdr_p[0] = 'a'; memcpy(s.hdr_p, "a", 1); (void)strlen(s.hdr_p); }
+char* wc_r3_ok_read(SproutStr* s) { return s->hdr_p; }
+char* wc_r3_ok_call(void) { return sprout_str_alloc(1, "wc").hdr_p; }
+SproutStr wc_r3_ok_writer(size_t n) { return sprout_str_alloc(n, "wc"); }
+typedef SproutStr WcAlias;
+typedef struct { char* hdr_p; } SproutStrX;
+WcAlias wc_r3_alias_init(char* p) { WcAlias s = { p }; return s; }
+void wc_r3_alias_assign(WcAlias s, char* p) { s.hdr_p = p; }
+void wc_r3_alias_arrow(WcAlias* s, char* p) { s->hdr_p = p; }
+void wc_r3_ok_other(SproutStrX* s, char* p) { SproutStrX t = { p }; t.hdr_p = p; s->hdr_p = p; }
+char* wc_r3p_deref(char* raw) { SproutStr s = *(SproutStr*)&raw; return s.hdr_p; }
+SproutStr* wc_r3p_to_str(char** p) { return (SproutStr*)p; }
+void wc_r3p_from_str(SproutStr s, char* raw) { *(char**)&s = raw; }
+WcAlias* wc_r3p_alias(char** p) { return (WcAlias*)p; }
+void wc_r3p_ok_malloc(void) { SproutStr* a = malloc(4 * sizeof *a); free(a); }
+void wc_r3p_ok_cast_malloc(void) { SproutStr* a = (SproutStr*)malloc(4 * sizeof *a); free(a); }
+void wc_r3p_ok_memcpy(SproutStr x, SproutStr y) { memcpy(&x, &y, sizeof x); }
+const SproutStr* wc_r3p_ok_const(SproutStr* s) { return s; }
+void wc_r3p_ok_other(char** p) { SproutStrX* q = (SproutStrX*)p; (void)q; }
+EOF
+cat >>"$RT_R/sprout_scheduler.c" <<'EOF'
+static SproutStr sprout_str_intern(const char* s) { SproutStr r = { (char*)s }; return r; }
+EOF
+run "$RT_R" "$BASE" "$ADDR" "$TMPD/cache_rules.json"
+for f in wc_r2_literal wc_r2_voidcast wc_r2_hdr_p wc_r2_uchar; do
+  expect_fail "(r) rule 2: $f passes a char pointer to sprout_ptr_word" "$R:$f passes a char pointer to sprout_ptr_word (rule 2"
+done
+for f in wc_r3_init wc_r3_zero wc_r3_designated wc_r3_literal; do
+  expect_fail "(s) rule 3: $f constructs a SproutStr" "$R:$f constructs a SproutStr outside the writers (rule 3"
+done
+expect_fail "(s) rule 3: a typedef alias is still a SproutStr" "$R:wc_r3_alias_init constructs a SproutStr outside the writers (rule 3"
+for f in wc_r3_alias_assign wc_r3_alias_arrow; do
+  expect_fail "(s) rule 3: $f writes hdr_p through an alias" "$R:$f writes SproutStr.hdr_p outside the writers (rule 3"
+done
+for f in wc_r3_assign wc_r3_assign_arrow wc_r3_addr wc_r3_incr wc_r3_compound; do
+  expect_fail "(s) rule 3: $f writes hdr_p" "$R:$f writes SproutStr.hdr_p outside the writers (rule 3"
+done
+expect_fail "(s) rule 3: the writer set is keyed by file" "$S:sprout_str_intern constructs a SproutStr outside the writers (rule 3"
+for f in wc_r3p_deref wc_r3p_to_str wc_r3p_from_str wc_r3p_alias; do
+  expect_fail "(s) rule 3: $f puns a SproutStr pointer" "$R:$f casts between a SproutStr pointer and another pointer type outside the writers (rule 3"
+done
+for k in "$R:wc_r2_ok" "$R:wc_r2_ok_void" "$R:wc_r3_ok_fill" "$R:wc_r3_ok_read" "$R:wc_r3_ok_call" \
+  "$R:wc_r3_ok_writer" "$R:wc_r3_ok_other" "$R:wc_r3p_ok_malloc" "$R:wc_r3p_ok_cast_malloc" "$R:wc_r3p_ok_memcpy" \
+  "$R:wc_r3p_ok_const" "$R:wc_r3p_ok_other" "$R:sprout_str_alloc" "$R:sprout_str_intern" "runtime/sprout_word.h:sprout_str_of_word_in"; do
+  expect_absent "(r) mirror: $k is not reported" "$k "
+done
 
 echo "test-runtime-word-casts: ok"

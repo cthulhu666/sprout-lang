@@ -1,6 +1,6 @@
 # Every String crossing into Sprout is headered — v0
 
-**Status — approved; step 1 landed (§7).** Runtime-internal; no change to the language, the spec
+**Status — approved; steps 1 and 2 landed (§7).** Runtime-internal; no change to the language, the spec
 or the extern ABI.
 Builds on `docs/runtime-invariant-confidence-v0.md`, which made every String headered.
 
@@ -73,11 +73,15 @@ and rejects `(SproutStr)raw`, as hard errors. A `struct Tag*` typedef only warns
 before Clang 22, and CI's Windows image ships LLVM 20; it accepts `void*` and explicit casts
 silently.
 
-Only the header writers construct one: `sprout_gc_alloc_cstr`, `intern_string`, and the wrappers
-built on them (`dup_managed_slice`, `dup_managed_cstr`, `sprout_gc_adopt_cstr`, `register_cstr`).
-A `SproutStr` is never NULL: a writer given NULL calls `sprout_fail`. Today `intern_string(NULL)`
-and `register_cstr(NULL)` return NULL. The cast check (§4.3) rejects any other construction: a
-compound literal, an initializer list, or a write to `hdr_p`.
+Only `sprout_str_alloc` and `sprout_str_intern` construct one directly, plus the exit
+`sprout_str_of_word_in` (§4.2). The other writers get theirs from those two:
+`sprout_str_dup_slice`, `sprout_str_dup`, `sprout_str_adopt` and `sprout_str_register`. The
+`char*` names (`sprout_gc_alloc_cstr`, `intern_string`, `sprout_gc_adopt_cstr`,
+`dup_managed_cstr`, `register_cstr`) are thin wrappers over them until step 4.
+A `SproutStr` is never NULL: a new writer given NULL calls `sprout_fail`. The wrappers
+`intern_string(NULL)` and `register_cstr(NULL)` still return NULL until their callers move (§8).
+The cast check (§4.3) rejects any other construction: a compound literal, an initializer list, a
+write to `hdr_p`, or a pointer cast between `SproutStr*` and a pointer to another type but `void`.
 
 Raw-buffer helpers keep `char*`. Today `alloc_cstr` (malloc) and `sprout_gc_alloc_cstr` differ
 by one name segment, as do `dup_cstr` and `dup_managed_cstr`. After this they differ by type.
@@ -86,13 +90,14 @@ A String parameter typed `const char*` is never sent back to Sprout. About 40 ex
 (`env_get`, `regex_*`, `tcp_*`, `repl_*`, `analysis_*_in_source`), and none re-emits it today. A
 function that must re-emit one takes the parameter as `long long`, which matches the `i64` the
 compiler already declares, and rebuilds the String with `sprout_str_of_word(long long)`. That
-function checks the header under HDRCHECK. A `const char*`→`SproutStr` constructor would let a
+macro checks the header under HDRCHECK. A `const char*`→`SproutStr` constructor would let a
 literal through.
 
 ### 4.2 One exit, checked under HDRCHECK
 
 ```c
-static inline long long sprout_str_word(SproutStr s);
+static inline long long sprout_str_word_in(SproutStr s, const char* caller);
+#define sprout_str_word(s) sprout_str_word_in((s), __func__)
 ```
 
 The only conversion from a String to a Sprout value. Under HDRCHECK it checks that the kind byte
@@ -102,13 +107,22 @@ back existing, possibly long Strings, and an O(n) check there makes HDRCHECK mod
 already happened once, and failed CI at a 389x ratio (`sprout_cstr_byte_len`'s comment). The
 aux-versus-`strlen` check stays in `str_byte_len`.
 
+The reverse, `sprout_str_of_word(long long)` (a macro over `sprout_str_of_word_in`), builds a
+`SproutStr` from a word and runs the same check. It casts an integer to a pointer, which rule 1
+does not see, so it is not an exit; the writer list of rule 3 names it.
+
 Non-String pointers have their own exit, `sprout_ptr_word(const void*)`, for object handles,
-vectors, closures, maps, tasks and channels. All of these exits are `static inline` in
+vectors, closures, maps, tasks and channels. All of these are `static inline` in
 `runtime/sprout_word.h`, a header shared by `sprout_runtime.c`, `sprout_scheduler.c` and
-`sprout_poll.c`. The check (§4.3) exempts them by that `file:name` only. It is shared because
-the scheduler and poller TUs cast too (`sprout_scheduler.c` returns `(long long)(intptr_t)` for scopes, tasks and channels).
-The exits need `SproutHeapKind`, `sprout_hdr_of` and `sprout_gc_hdrcheck_on`, which are private to
-`sprout_runtime.c` today, so those move into the header as well.
+`sprout_poll.c`. The check (§4.3) exempts the two exits by that `file:name` only. It is shared
+because the scheduler and poller TUs cast too (`sprout_scheduler.c` returns
+`(long long)(intptr_t)` for scopes, tasks and channels). The header also holds `SproutHeapKind`,
+`sprout_hdr_of` and `sprout_hdr_kind`, moved out of `sprout_runtime.c`.
+
+With HDRCHECK off an exit costs one load and one branch. `sprout_gc_hdrcheck_on` caches its answer
+in `g_sprout_hdrcheck`, which the header's inline `sprout_hdrcheck` reads, calling the function
+only while the value is -1 (not read yet). The environment is read lazily, on the first query,
+because tests `setenv` in `main`.
 
 Some casts are not Sprout values at all. `arena_contains`, `region_find` and `region_find_slow` do
 address arithmetic, and the epoll backend tags a token's low bit for the kernel. These functions
@@ -139,13 +153,22 @@ into a word. That takes intent, not an accident, so it stays with the other deli
 `just runtime-word-casts` runs `clang -fsyntax-only -Xclang -ast-dump=json` over every TU in
 `runtime/`, and fails on any of:
 
-- a cast whose `castKind` is `PointerToIntegral` outside the bodies of `sprout_str_word` and
+- a cast whose `castKind` is `PointerToIntegral` outside the bodies of `sprout_str_word_in` and
   `sprout_ptr_word` and the `ADDRESS_CASTS` functions (§4.2), or one inside a listed function
   that does not produce `uintptr_t`;
 - an address-typed value converted to a signed 64-bit integer outside the exits (§4.2);
-- a call to `sprout_ptr_word` whose argument, before the implicit conversion to `const void*`,
-  is `char*` or `const char*`;
-- construction of a `SproutStr` outside the header writers (§4.1).
+- a call to `sprout_ptr_word` whose argument, with pointer-to-pointer casts and parentheses
+  stripped, has at any layer the type pointer to `char`, `signed char` or `unsigned char`, any
+  qualifiers (`"x"`, `(void*)"x"`, `s.hdr_p`);
+- outside `sprout_str_alloc`, `sprout_str_intern` and `sprout_str_of_word_in`: an initializer
+  list or compound literal of type `SproutStr`, and any use of `hdr_p` other than a read (an
+  assignment, `&`, `++`, a compound assignment). `s.hdr_p[i] = c` and `memcpy(s.hdr_p, …)` read
+  the field and pass (§4.1);
+- outside the same three: a `BitCast`, implicit or explicit, between a pointer to `SproutStr`
+  (typedefs resolved, any depth) and a pointer to any type but `SproutStr` or `void`, in either
+  direction. `*(SproutStr*)&raw` would build a String from a `char*`; `*(char**)&s = raw` would
+  write `hdr_p`. `void*` is exempt, so `malloc` into a `SproutStr*` and `memcpy` between two
+  `SproutStr` pass.
 
 A text match cannot do this. The tree spells pointer-to-word casts at least four ways:
 `(long long)(uintptr_t)p`, `(uintptr_t)p` stored into tuple words, `(long long)(intptr_t)p`, and
@@ -165,6 +188,10 @@ system headers. The scheduler and poller dumps are 8 MB and 4 MB.
 After this, d9bcd11c's line fails the check: it is a `PointerToIntegral` cast outside an exit.
 Rewritten as `sprout_ptr_word("null path")` it fails the second rule. And `sprout_str_word`
 needs a `SproutStr`, which a literal cannot become.
+
+Not seen: a zero-initialised `static SproutStr` (it has no initializer list), `memcpy` or a union
+into a `SproutStr`, a `char*` laundered through a `void*` variable before `sprout_ptr_word`, and a
+`char*` laundered through `void*` into a `SproutStr*`.
 
 ### 4.4 Exported signatures stay `long long`
 
@@ -224,9 +251,8 @@ cast count is a lower bound: it misses `uintptr_t` array stores, which §4.3 cat
 
 Each step is its own commit and keeps every gate green.
 
-1. ~~**The check, red on a mutant.**~~ Landed: `just runtime-word-casts` (rule 1 only; rules 2
-   and 3 need the types from step 2 and land with it), `just test-runtime-word-casts`,
-   `docs/gates.md` §Runtime word casts.
+1. ~~**The check, red on a mutant.**~~ Landed: `just runtime-word-casts` (rule 1; rules 2 and 3
+   landed with step 2), `just test-runtime-word-casts`, `docs/gates.md` §Runtime word casts.
    - Add `runtime-word-casts` with a baseline file listing today's violations, keyed
      `file:function:count`. Line numbers are not used, because the runtime is append-mostly
      (AGENTS.md, Docs & Spec 6). It fails on any violation not in the baseline, on any count
@@ -237,15 +263,10 @@ Each step is its own commit and keeps every gate green.
      `return (long long)(uintptr_t)"x";` in an exported String producer, and expects the check to
      fail.
    - Green on the current tree before it joins `ci-fast-gates`.
-2. **`SproutStr` and the exits.**
-   - `SproutStr`-returning header writers under new names, beside the `char*` ones, so call
-     sites move one module at a time.
-   - `sprout_str_word`, `sprout_str_of_word`, `sprout_ptr_word` and the shared header, with
-     the definitions they need moved out of `sprout_runtime.c` (§4.2).
-   - §4.3 rules 2 and 3 in `runtime-word-casts`, each with a mutant case.
-   - A C test that builds a `SproutStr` around a headerless buffer, through a test-only
-     constructor, and expects the HDRCHECK abort from `sprout_str_word`.
-   - A C test that a writer given NULL fails.
+2. ~~**`SproutStr` and the exits.**~~ Landed: `runtime/sprout_word.h`, the `sprout_str_*` writers
+   in `sprout_runtime.c` (the `char*` names wrap them), rules 2 and 3 with mutant cases in
+   `scripts/test_runtime_word_casts.sh`, and `tests/c_runtime/str_writers.c` (a headerless
+   `SproutStr` aborts at both exits, a writer given NULL or an arena String fails).
 3. **Convert, one module per commit.** fs, net, http, crypto, terminal, json, analysis, maps,
    scheduler, poll. Each commit shrinks the baseline. `SPROUT_GC_HDRCHECK=1 just test` includes
    `tests/stdlib/test_byte_offset_cost.spr`, so the cost of a new exit check shows up. The
@@ -276,7 +297,8 @@ Gates per step: `just c-runtime-test`, `SPROUT_GC_HDRCHECK=1 just test`, `just c
   takes only an owned malloc'd buffer and drops the arena branch. The premise is that no caller
   passes an arena String. All 11 callers pass malloc'd buffers today: getline, malloc, the JSON
   parser, `sprout_json_extract_string`, the regex error path and http. A C test pins that the new
-  writer rejects an arena String.
+  writer rejects an arena String. The `register_cstr` wrapper keeps the arena branch until step
+  4 deletes it.
 - **`intern_string(NULL)` and `register_cstr(NULL)`** fail instead of returning NULL (§4.1).
   Each caller's NULL branch is checked for what it meant before the change lands.
 - **The sqlite FFI shim** (`examples/twelve_dollar_server/src/sqlite_ffi.c`) is outside

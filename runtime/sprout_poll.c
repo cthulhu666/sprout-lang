@@ -23,6 +23,7 @@
 #include <unistd.h>   /* close() — the epoll arm's per-timer timerfd */
 #endif
 #include "sprout_scheduler.h"
+#include "sprout_word.h"
 
 #if defined(_WIN32)
 /* ── Windows: WSAPoll for sockets, a deadline min-heap for timers ────────────

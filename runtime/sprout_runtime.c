@@ -28,6 +28,7 @@
 #include <sys/mman.h>   /* GC arena: reserve address space (PROT_NONE), commit per chunk */
 #include <dirent.h>     /* stdlib.fs: opendir/readdir/closedir */
 #include "sprout_scheduler.h"
+#include "sprout_word.h"
 #ifdef __APPLE__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -36,23 +37,6 @@
 #include <Security/SecCertificate.h>
 #include <mach-o/dyld.h>
 #endif
-
-/* Adding a kind means editing THREE places: this enum, slot_bytes (its slot
- * size) and sprout_slot_kind_known (the HDRCHECK walk's "is this a header at
- * all" test).  Miss the third and the sweep aborts on the first slot of the new
- * kind — under a flag CI sets job-wide, so the first sign is every job red. */
-typedef enum {
-  SPROUT_HEAP_FREE = 0,   /* slot on a class freelist; header aux = slot_bytes */
-  SPROUT_HEAP_OBJ = 1,
-  SPROUT_HEAP_CLOSURE = 2,
-  SPROUT_HEAP_VECTOR = 3,
-  SPROUT_HEAP_MAP = 4,
-  SPROUT_HEAP_BYTES = 5,
-  SPROUT_HEAP_BUILDER = 6,
-  SPROUT_HEAP_TUPLE = 7,
-  SPROUT_HEAP_REF = 9,
-  SPROUT_HEAP_CSTR = 10
-} SproutHeapKind;
 
 typedef enum {
   SPROUT_ROOT_I64 = 1,
@@ -393,7 +377,7 @@ static char* alloc_cstr(size_t len, const char* ctx);
 static char* dup_slice(const char* start, size_t len);
 static char* dup_cstr(const char* s);
 static char* register_cstr(char* value);
-static char* dup_managed_slice(const char* start, size_t len, const char* ctx);
+static SproutStr sprout_str_dup_slice(const char* start, size_t len, const char* ctx);
 static char* dup_managed_cstr(const char* s, const char* ctx);
 static char* sprout_gc_alloc_cstr(size_t len, const char* ctx);
 static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx);
@@ -653,16 +637,27 @@ static int sprout_gc_lineage_on(void) {
 /* SPROUT_GC_HDRCHECK=1 — consistency assert: a CSTR header's aux byte length
  * must match strlen at sweep time.  Also enabled implicitly when
  * SPROUT_GC_LINEAGE=1 (both catch the same class of corruption). */
-static int g_gc_hdrcheck = -1;
-static int sprout_gc_hdrcheck_on(void) {
-  if (g_gc_hdrcheck < 0) { const char* e = getenv("SPROUT_GC_HDRCHECK"); g_gc_hdrcheck = (e && e[0] == '1') ? 1 : 0; }
+/* The combined answer, cached for the inline exits in sprout_word.h. Both inputs are read once
+ * and never change, so the cache cannot go stale. */
+int g_sprout_hdrcheck = -1;
+int sprout_gc_hdrcheck_on(void) {
+  if (g_sprout_hdrcheck >= 0) return g_sprout_hdrcheck;
+  const char* e = getenv("SPROUT_GC_HDRCHECK");
   /* Must go through sprout_gc_lineage_on(), NOT the raw g_gc_lineage: that global
      is the -1 "not yet read" sentinel until its first query, and -1 is TRUTHY, so
      reading it directly reported HDRCHECK as ON in ordinary runs whenever lineage
      mode had not been queried first. That silently enabled an O(|s|) strlen assert
      on hot paths, and did so ORDER-DEPENDENTLY (on whether a collection had run
      yet), which is why it never looked like a consistent slowdown. */
-  return g_gc_hdrcheck || sprout_gc_lineage_on();
+  g_sprout_hdrcheck = (e && e[0] == '1') || sprout_gc_lineage_on();
+  return g_sprout_hdrcheck;
+}
+
+__attribute__((noreturn, cold, noinline)) void sprout_str_check_fail(int entering, const char* caller) {
+  char msg[256];
+  snprintf(msg, sizeof msg, "%s: headerless String %s %s",
+           entering ? "sprout_str_of_word" : "sprout_str_word", entering ? "entering" : "leaving", caller);
+  sprout_fail(msg);
 }
 
 /* ── Inline heap header (64-bit word at payload_ptr - 8) ────────────────────
@@ -724,12 +719,6 @@ static inline unsigned long long sprout_closure_arity_of(unsigned long long aux)
 
 static inline uint64_t sprout_hdr_make(SproutHeapKind kind, unsigned long long aux) {
   return (uint64_t)(kind & 0xFF) | ((uint64_t)aux << 14);
-}
-static inline uint64_t sprout_hdr_of(void* payload) {
-  uint64_t h; memcpy(&h, (char*)payload - 8, 8); return h;
-}
-static inline SproutHeapKind sprout_hdr_kind(uint64_t h) {
-  return (SproutHeapKind)(h & 0xFF);
 }
 static inline unsigned long long sprout_hdr_aux(uint64_t h) {
   return h >> 14;
@@ -1483,10 +1472,15 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
  * Header aux = byte length (excluding NUL terminator).
  * The slot is already arena-registered by sprout_gc_alloc_block; the caller
  * only fills payload[0..len-1] and sets payload[len] = '\0'.
- * Never returns NULL (sprout_fail on OOM). */
+ * Never returns NULL (sprout_fail on OOM). The SproutStr writers below are the
+ * implementation; the char* names are wrappers for call sites not yet converted. */
+static SproutStr sprout_str_alloc(size_t len, const char* ctx) {
+  SproutStr s = { (char*)sprout_gc_alloc_block(SPROUT_HEAP_CSTR, (unsigned long long)len,
+                                               len + 1, ctx) };
+  return s;
+}
 static char* sprout_gc_alloc_cstr(size_t len, const char* ctx) {
-  return (char*)sprout_gc_alloc_block(SPROUT_HEAP_CSTR, (unsigned long long)len,
-                                      len + 1, ctx);
+  return sprout_str_alloc(len, ctx).hdr_p;
 }
 
 /* Adopt a plain malloc'd buffer into a GC-headered CSTR block.
@@ -1495,12 +1489,14 @@ static char* sprout_gc_alloc_cstr(size_t len, const char* ctx) {
  *
  * INVARIANT: buf must be a plain malloc'd buffer — NEVER a headered arena CSTR
  * (which would cause free() to corrupt the block by ignoring the 8-byte prefix). */
-static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx) {
-  char* out = sprout_gc_alloc_cstr(len, ctx);
-  if (len > 0) memcpy(out, buf, len);
-  out[len] = '\0';
+static SproutStr sprout_str_adopt(char* buf, size_t len, const char* ctx) {
+  if (buf == NULL) sprout_fail("sprout_str_adopt: null input");
+  SproutStr out = sprout_str_dup_slice(buf, len, ctx);
   free(buf);
   return out;
+}
+static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx) {
+  return sprout_str_adopt(buf, len, ctx).hdr_p;
 }
 
 /* lldb anchors for scripts/gc_free_trace.py (`just gc-trace`): empty noinline
@@ -2093,11 +2089,11 @@ static size_t sprout_intern_hash(const char* s) {
   return h % 65537;
 }
 
-static const char* intern_string(const char* s) {
-  if (s == NULL) return NULL;
+static SproutStr sprout_str_intern(const char* s) {
+  if (s == NULL) sprout_fail("sprout_str_intern: null input");
   size_t bucket = sprout_intern_hash(s);
   for (InternBucket* b = g_intern_table[bucket]; b != NULL; b = b->next)
-    if (strcmp(b->str, s) == 0) return b->str;
+    if (strcmp(b->str, s) == 0) { SproutStr hit = { b->str }; return hit; }
   InternBucket* entry = (InternBucket*)malloc(sizeof(InternBucket));
   if (!entry) sprout_fail("intern_string: out of memory");
   size_t len = strlen(s);
@@ -2118,7 +2114,12 @@ static const char* intern_string(const char* s) {
   g_intern_table[bucket] = entry;
   g_intern_entries++;
   g_intern_bytes += (long long)(sizeof(InternBucket) + 8 + len + 1);
-  return entry->str;
+  SproutStr out = { entry->str };
+  return out;
+}
+static const char* intern_string(const char* s) {
+  if (s == NULL) return NULL;
+  return sprout_str_intern(s).hdr_p;
 }
 
 static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
@@ -6826,38 +6827,41 @@ static char* dup_cstr(const char* text) {
   return dup_slice(text, strlen(text));
 }
 
-/* register_cstr: ensure a string is GC-managed with an inline header.
+/* sprout_str_register: adopt a malloc'd buffer as a GC-managed String with an inline header.
+ * A new headered arena block is allocated, the content is copied and buf is freed.
  *
- * If value is already in the GC arena (lookup succeeds) it is returned as-is.
- * Otherwise the plain malloc'd buffer is adopted: a new headered arena block is
- * allocated, the content is copied, the old buffer is freed, and the new pointer
- * is returned.
- *
- * INVARIANT: callers must capture the return value — the returned pointer may
- * differ from value.  NEVER pass a headered arena CSTR here (both
- * sprout_gc_alloc_cstr and sprout_gc_adopt_cstr already produce arena blocks). */
+ * INVARIANT: buf is an owned malloc'd buffer. An arena String fails: the free() would
+ * corrupt the block. Callers must use the returned String, not buf. */
+static SproutStr sprout_str_register(char* buf) {
+  if (buf == NULL) sprout_fail("sprout_str_register: null input");
+  if (sprout_heap_lookup(buf) != NULL) sprout_fail("sprout_str_register: arena String");
+  return sprout_str_adopt(buf, strlen(buf), "register_cstr: out of memory");
+}
+
+/* register_cstr: the char* wrapper. NULL stays NULL, and an arena String is returned as-is.
+ * It calls sprout_str_adopt directly so the arena lookup runs once. */
 static char* register_cstr(char* value) {
   if (value == NULL) return NULL;
   /* Already in the GC arena (lookup succeeds) → already registered. */
   if (sprout_heap_lookup(value) != NULL) return value;
-  size_t len = strlen(value);
-  char* headered = sprout_gc_alloc_cstr(len, "register_cstr: out of memory");
-  if (len > 0) memcpy(headered, value, len);
-  headered[len] = '\0';
-  free(value);
-  /* No register call — sprout_gc_alloc_block already registered the block. */
-  return headered;
+  return sprout_str_adopt(value, strlen(value), "register_cstr: out of memory").hdr_p;
 }
 
-static char* dup_managed_slice(const char* start, size_t len, const char* ctx) {
-  char* out = sprout_gc_alloc_cstr(len, ctx);
-  if (len > 0) memcpy(out, start, len);
-  out[len] = '\0';
+static SproutStr sprout_str_dup_slice(const char* start, size_t len, const char* ctx) {
+  if (start == NULL) sprout_fail("sprout_str_dup_slice: null input");
+  SproutStr out = sprout_str_alloc(len, ctx);
+  if (len > 0) memcpy(out.hdr_p, start, len);
+  out.hdr_p[len] = '\0';
   return out;
 }
 
+static SproutStr sprout_str_dup(const char* text, const char* ctx) {
+  if (text == NULL) sprout_fail("sprout_str_dup: null input");
+  return sprout_str_dup_slice(text, strlen(text), ctx);
+}
+
 static char* dup_managed_cstr(const char* text, const char* ctx) {
-  return dup_managed_slice(text, strlen(text), ctx);
+  return sprout_str_dup(text, ctx).hdr_p;
 }
 
 static char* regex_prefixed_error(const char* prefix, const char* detail) {

@@ -31,6 +31,7 @@
 #include <stdio.h>    /* snprintf — stale-handle messages name the operation */
 #include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
+#include "sprout_word.h"
 
 /* Fixed per-task sizing. Stacks (guarded mmaps, see sprout_context.h) and root
  * pools are non-moving — required because a root slot is an address into the

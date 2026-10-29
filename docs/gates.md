@@ -437,8 +437,9 @@ Counts **sites** in `runtime/*.c` and `runtime/*.h` on clang's JSON AST
 (`scripts/runtime_word_casts.py`), per enclosing top-level decl, and fails on any outside the exits,
 the `runtime/ADDRESS_CASTS` functions or a `runtime/WORD_CASTS_BASELINE` entry. Only types tell
 `(long long)p` from `(long long)len`, which is why it reads the AST. Rule 1 of
-`docs/string-header-invariant-v0.md` §4.3. `uintptr_t` is the address type: a pointer becomes one,
-and the gate watches where a `uintptr_t` or `intptr_t` value goes. A site is either
+`docs/string-header-invariant-v0.md` §4.3 (rules 1 to 3). `uintptr_t` is the address type: a pointer
+becomes one, and the gate watches where a `uintptr_t` or `intptr_t` value goes. Rule 1 counts
+sites. A site is either
 
 - a cast with castKind `PointerToIntegral`, or
 - an `IntegralCast` (implicit or explicit) whose operand is spelled `uintptr_t` or `intptr_t` and
@@ -451,9 +452,27 @@ and the gate watches where a `uintptr_t` or `intptr_t` value goes. A site is eit
 - **`WORD_CASTS_BASELINE`** is `file:decl:count`, today's sites. It only shrinks: a new decl or a
   higher count fails, and so does an entry whose decl now has fewer sites or none (lower or delete
   it). `--emit-baseline` prints the current counts.
-- **Exits** are `runtime/sprout_word.h:sprout_str_word` and `runtime/sprout_word.h:sprout_ptr_word`
+- **Exits** are `runtime/sprout_word.h:sprout_str_word_in` and `runtime/sprout_word.h:sprout_ptr_word`
   (`EXITS` in the script), keyed `file:name`: a same-named function in another file is not exempt.
-  They are exempt from every rule.
+  They are exempt from rule 1. `sprout_str_word` and `sprout_str_of_word` are macros over the
+  `_in` functions, which take the caller's `__func__` for the HDRCHECK failure message.
+- **Rule 2** (everywhere): a call to `sprout_ptr_word` fails when its argument, with
+  pointer-to-pointer casts (`BitCast`, `NoOp`, implicit or explicit) and parentheses stripped, has
+  at any layer the type pointer to `char`, `signed char` or `unsigned char`, whatever the
+  qualifiers. So `"x"`, `(void*)"x"` and `s.hdr_p` all fail: a String leaves through
+  `sprout_str_word`.
+- **Rule 3** (outside `WRITERS` in the script, keyed `file:name`: `sprout_str_alloc`,
+  `sprout_str_intern` in `sprout_runtime.c` and `sprout_str_of_word_in` in `sprout_word.h`): an
+  `InitListExpr` or `CompoundLiteralExpr` of type `SproutStr` fails (`= {p}`, `= {0}`, designated,
+  `(SproutStr){p}`), and so does any `MemberExpr` naming `hdr_p` on a `SproutStr` whose parent
+  (parentheses skipped) is not an `LValueToRValue` cast (`s.hdr_p = p`, `&s.hdr_p`, `s.hdr_p++`,
+  `+=`). A prvalue member passes, because it cannot be written: older clang (CI's Linux) puts no
+  cast on `f().hdr_p`. A read passes: `s.hdr_p[i] = c`, `memcpy(s.hdr_p, …)`, `strlen(s.hdr_p)`.
+  A pointer pun fails too: any `BitCast` (implicit or explicit), in either direction, between a
+  pointer to `SproutStr` (typedefs resolved, any depth) and a pointer to a type other than
+  `SproutStr` or `void`. `*(SproutStr*)&raw` builds a String from a `char*`; `*(char**)&s = raw`
+  writes `hdr_p`. `void*` is exempt on both sides, so `malloc` into a `SproutStr*` and
+  `memcpy(&a, &b, sizeof a)` pass.
 - **`ADDRESS_CASTS`** lists functions whose casts are address arithmetic, address ordering or kernel
   tokens, one `# reason` each, keyed `file:name` (`runtime/sprout_runtime.c:region_find`), so a
   same-named static in another file is not exempt. A listed function is checked for:
@@ -477,9 +496,16 @@ and the gate watches where a `uintptr_t` or `intptr_t` value goes. A site is eit
   `long long`, `uintptr_t`, `long` or `intptr_t` or taking a `long long*`, a same-named static in
   another file, a cast in a new `runtime/*.c`, a stale or unknown platform tag, an A1 cast to
   `unsigned long`, A2 conversions through a field store, a call argument, an implicit local
-  conversion and an `intptr_t`, a `sprout_ptr_word` outside `sprout_word.h`) and check that each
-  fails and names the decl; a `uintptr_t` to `size_t` or `int` conversion must pass. It scans three
-  trees (the real one, one with mutants, one with planted functions) and re-reads each decl table
+  conversion and an `intptr_t`, a `sprout_ptr_word` outside `sprout_word.h`; for rule 2 a literal,
+  a `(void*)` cast, `hdr_p` and an `unsigned char*`; for rule 3 an initializer list, `{0}`, a
+  designated initializer, a compound literal, an assignment through `.` and `->`, `&s.hdr_p`, `++`,
+  `+=` and a `sprout_str_intern` outside its file; a pun in each direction, through an alias and as
+  `*(SproutStr*)&raw`) and check that each fails and names the decl; a
+  `uintptr_t` to `size_t` or `int` conversion, a `sprout_ptr_word` of a non-char pointer, reading
+  or filling through `s.hdr_p`, `malloc` into a `SproutStr*` (cast or implicit), `memcpy` between
+  two `SproutStr` and the real writers must pass. It scans four
+  trees (the real one, one with mutants, one with planted functions, one with rule 2 and 3
+  functions) and re-reads each decl table
   through `--scan-cache` for the cases that vary only the list files. The cache is keyed on a hash
   of `runtime/*.c` and `*.h`. Case (a) passes `--scan-cache` with a file that does not exist yet, so
   it scans and writes and reads nothing, and its table serves the copy of the real tree. `just
@@ -492,6 +518,12 @@ and the gate watches where a `uintptr_t` or `intptr_t` value goes. A site is eit
   there. The operand is no longer spelled `uintptr_t`.
 - `memcpy` of a pointer into a word, and union punning: no cast node exists.
 - A pointer reinterpreted through `void*` (`*(long long*)(void*)&p`): no `PointerToIntegral` node.
+- A zero-initialised `static SproutStr` (`static SproutStr s;`): no initializer list exists.
+- `memcpy` or a union into a `SproutStr`: no `hdr_p` member access or initializer is written.
+- A `char*` laundered through a `void*` variable before `sprout_ptr_word` (`void* v = "x";
+  sprout_ptr_word(v)`): rule 2 sees only the argument's own layers.
+- A `char*` laundered through `void*` into a `SproutStr*` (`SproutStr* p = (void*)&raw;`): the
+  pun rule exempts `void*` on both sides.
 
 **It sees one platform.** The AST holds only the host's `#ifdef` branches, so a decl that casts under
 `__APPLE__` or Linux only is counted on that host alone. Tag its `ADDRESS_CASTS` entry with that
