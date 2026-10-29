@@ -270,9 +270,10 @@ Each step is its own commit and keeps every gate green.
 3. **Convert, one module per commit.** ~~fs~~ (landed: `read_file`, `write_file`, `fs_list_dir`,
    `fs_read_bytes`, `stdin_read_bytes`, `read_int_lines`, and `sprout_err1_text`, which builds the
    `FsError` payloads and is shared with http, crypto and tcp;
-   `tests/c_runtime/fs_io_strings.c`), net, http, crypto, terminal, json, analysis, maps. The
-   scheduler's entries went with its generation-checked handles; poll has none. Each commit
-   shrinks the baseline.
+   `tests/c_runtime/fs_io_strings.c`), net, http, crypto, ~~terminal~~ (landed: `term_read_key`,
+   `term_key_utf8`, `term_read_line`, `term_read_avail`, `term_input_failed`;
+   `tests/c_runtime/term_strings.c`), json, analysis, maps. The scheduler's entries went with its
+   generation-checked handles; poll has none. Each commit shrinks the baseline.
    `SPROUT_GC_HDRCHECK=1 just test` includes `tests/stdlib/test_byte_offset_cost.spr`, so the cost
    of a new exit check shows up. The `test` recipe does not set HDRCHECK itself; CI sets it in the
    job environment.

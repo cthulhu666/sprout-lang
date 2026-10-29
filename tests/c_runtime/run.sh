@@ -150,6 +150,20 @@ test "$(cat "$TMP_DIR/trk_bad.out")" = "term-read-key-replacement"
 printf '\303A' | "$TMP_DIR/term_read_key_safety" badcont > "$TMP_DIR/trk_cont.out"
 test "$(cat "$TMP_DIR/trk_cont.out")" = "term-read-key-badcont-keeps-next"
 
+echo "==> c runtime: terminal Strings leave headered (HDRCHECK)"
+compile term_strings.c "$TMP_DIR/term_strings" -O0 -g
+printf '\001\002\004\005\006\014\010\177\033\n\r\tx\303\251\303A\377' \
+  | "$TMP_DIR/term_strings" key > "$TMP_DIR/term_strings_key.out"
+test "$(cat "$TMP_DIR/term_strings_key.out")" = "term-strings-key"
+printf 'first\r\n\nsecond' | "$TMP_DIR/term_strings" line > "$TMP_DIR/term_strings_line.out"
+test "$(cat "$TMP_DIR/term_strings_line.out")" = "term-strings-line"
+printf 'abc' | "$TMP_DIR/term_strings" avail > "$TMP_DIR/term_strings_avail.out"
+test "$(cat "$TMP_DIR/term_strings_avail.out")" = "term-strings-avail"
+# The pty case SKIPs (exit 0, marker "term-strings-tty-skipped") if the sandbox has no pty.
+"$TMP_DIR/term_strings" tty > "$TMP_DIR/term_strings_tty.out" < /dev/null
+grep -Eq '^term-strings-tty(-skipped)?$' "$TMP_DIR/term_strings_tty.out"
+echo "  $(cat "$TMP_DIR/term_strings_tty.out")"
+
 echo "==> c runtime: EMFILE accept sheds the backlog instead of hot-spinning"
 # Deterministic coverage of finding 9. tcp_accept's EMFILE path used to park-and-retry without
 # draining — a 100% CPU spin, since accept() under EMFILE does not dequeue the pending connection.

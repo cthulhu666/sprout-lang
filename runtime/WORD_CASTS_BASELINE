@@ -77,11 +77,6 @@ runtime/sprout_runtime.c:string_concat_many:1
 runtime/sprout_runtime.c:string_join_newlines:1
 runtime/sprout_runtime.c:tcp_read_exact:1
 runtime/sprout_runtime.c:tcp_read_some:1
-runtime/sprout_runtime.c:term_input_failed:1
-runtime/sprout_runtime.c:term_key_utf8:2
-runtime/sprout_runtime.c:term_read_avail:1
-runtime/sprout_runtime.c:term_read_key:16
-runtime/sprout_runtime.c:term_read_line:1
 runtime/sprout_runtime.c:vec_make_filled:1
 runtime/sprout_runtime.c:vector_append:1
 runtime/sprout_runtime.c:vector_concat:1
