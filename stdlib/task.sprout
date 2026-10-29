@@ -56,16 +56,17 @@ export extern fn task_yield() -> Unit !{IO}
 
 # Expose a scope's raw scheduler handle for sibling stdlib modules that must pass a scope
 # to a scheduler builtin without owning the opaque `Scope` constructor (e.g. stdlib.chan's
-# chan_new). This is a READ-ONLY accessor — the returned Int is an opaque runtime pointer,
-# and the `Scope` constructor stays module-private (no `(..)`), so a scope handle still
-# cannot be forged. Not intended for user code.
+# chan_new). This is a READ-ONLY accessor — the returned Int is an opaque, generation-checked
+# scheduler handle, and the `Scope` constructor stays module-private (no `(..)`), so a scope
+# handle still cannot be forged. Not intended for user code.
 export fn scope_handle(scope: Scope) -> Int =
   match scope with
   | Scope id -> id
 
 # Open a scope, run `body`, then block until all tasks spawned into it finish,
 # and return the body's result. The join runs whatever `body` returns, so no
-# spawned task outlives the scope.
+# spawned task outlives the scope. The `Scope` and any `Chan` made from it do not outlive
+# it either: using one afterwards aborts with a named error.
 export fn with_scope(body: once local Scope -> a !{IO}) -> a !{IO} =
   do
     id <- __scope_open()

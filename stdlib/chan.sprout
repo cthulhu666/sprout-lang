@@ -13,7 +13,8 @@ import stdlib.task (Scope, scope_handle)
 # Channels are tied to a `Scope`: created with `chan_new(scope, capacity)` and freed when
 # that scope closes (Sprout has no finalizers, so a free-floating channel could not be
 # reclaimed). Consequences: there are no top-level channels, and a channel cannot outlive
-# the scope that created it.
+# the scope that created it. Using a channel after its scope closed (a copy returned from
+# `with_scope`, or captured by a task of an outer scope) aborts with a named error.
 #
 # MVP boundary: bounded buffered (L0.8) + rendezvous (L0.10) + `close`/recv-on-closed (L0.9) +
 # `select` over same-typed channels, recv-only (L0.11). Send-cases in select, a non-blocking

@@ -2476,6 +2476,18 @@ task-io-smoke: bootstrap-from-seed
   # must abort on resume (the post-park check, distinct from #11's send-entry check), not return.
   build tests/task_io_smoke/send_parked_close_fails.spr
   run_expect_fail "send-parked-close" "send on closed channel"
+  # (15b) stale-handle guards: a Scope or Chan handle used after its scope joined must LOUD-FAIL
+  # with a named message, not touch the freed record. The capture case reaches the stale channel
+  # through a task of an outer scope, which no result type shows.
+  build tests/task_io_smoke/scope_escape_chan_fails.spr
+  run_expect_fail "scope-escape-chan" "channel used after its scope closed"
+  build tests/task_io_smoke/scope_escape_scope_fails.spr
+  run_expect_fail "scope-escape-scope" "scope used after it closed"
+  build tests/task_io_smoke/scope_escape_capture_fails.spr
+  run_expect_fail "scope-escape-capture" "channel used after its scope closed"
+  # A join must not free a channel a task outside the scope is still parked on.
+  build tests/task_io_smoke/scope_join_foreign_waiter_fails.spr
+  run_expect_fail "scope-join-foreign-waiter" "a task outside the scope is parked on its channel"
   # (16) select cancel-drop (L0.11): scope_cancel force-drops a task parked in chan_select, unlinking
   # it from EVERY channel it listed (both fork + spawn, each on two channels). "done" proves the
   # multi-channel unlink; a broken single-channel unlink double-frees (ASan-verified negative control).
@@ -2813,7 +2825,7 @@ task-io-smoke: bootstrap-from-seed
     "crlf: 204 headers=() body=0" "mixed1: 200 headers=() body=2" "mixed2: 200 headers=(X-A: 1) body=2" \
     "lfbody: 200 headers=(X-A: 1) body=8" "lfcr: 200 headers=(A: 1) body=9" "bad: Err status 404"
   SPROUT_GC_STRESS=1 run_once "http-client-framing/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

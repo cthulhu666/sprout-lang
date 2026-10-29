@@ -1,0 +1,12 @@
+import stdlib.task (Scope, with_scope)
+import stdlib.chan (Chan, chan_new, chan_send)
+import stdlib.terminal as terminal
+
+# A channel is freed when its scope joins. Using a copy of the handle after that must LOUD-FAIL
+# with a named message. A missing check dereferences the freed record (undefined behaviour:
+# a misleading "deadlock", a segfault, or silent success).
+fn main() -> Unit !{IO} =
+  do
+    ch <- with_scope(\s -> chan_new(s, 4))
+    chan_send(ch, 41)  # rejected: channel used after its scope closed
+    terminal.write("should-not-reach\n")

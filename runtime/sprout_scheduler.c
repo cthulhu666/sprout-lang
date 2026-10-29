@@ -28,7 +28,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
+#include <stdio.h>    /* snprintf — stale-handle messages name the operation */
+#include <unistd.h>  /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
 
 /* Fixed per-task sizing. Stacks (guarded mmaps, see sprout_context.h) and root
@@ -51,6 +52,7 @@ typedef struct Scope {
   long long     reason;    /* stop-reason: 0 none / 1 cancelled (scope_cancel) / 2 timed-out
                               (with_timeout). Read cooperatively by task_cancelled/task_status. */
   struct Task*  owner;     /* the task that opened this scope (only it may cancel it) */
+  long long     handle;    /* this scope's entry in the handle table (released at join) */
 } Scope;
 
 /* Scope stop-reasons (Scope.reason). task_cancelled = (reason != 0); task_status maps them. */
@@ -74,7 +76,9 @@ typedef struct Task {
   int          awaitable;  /* 1 = task_fork (keep result until awaited); 0 = fire-and-forget */
   int          done;       /* set by the trampoline when the body returns */
   Scope*       scope;      /* the scope this task was spawned into (NULL for task-0) */
-  struct Task* next;       /* global ready-queue link */
+  long long    handle;     /* handle-table entry of an awaitable task (0 for fire-and-forget,
+                              which has no handle); released when the scope closes */
+  struct Task* next;      /* global ready-queue link */
   struct Task* scope_next; /* scope->forks list link (awaitable tasks only) */
   int          park_kind;  /* PARK_* — what this task is suspended on (routes cancel-drop) */
   int          park_fd;    /* fd this task is suspended-in-the-poller on, or -1 (L0.5) */
@@ -137,11 +141,13 @@ enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3, PARK_SELECT = 
         * the task, and the loser's registration is torn down on resume or on force-drop. */
        PARK_FD_TIMER = 5 };
 
-/* L0.8 channel: a bounded buffered FIFO ring shared between tasks. Non-moving malloc; the
- * pointer IS the Int the Sprout `Chan a` value wraps. Owns a SproutRoots context that roots
- * every buffer slot (registered → the collector scans buffered heap values). Freed at the
- * owning scope's __scope_join, when no task can still be parked on it. */
+/* L0.8 channel: a bounded buffered FIFO ring shared between tasks. Non-moving malloc, named by
+ * a generation-checked handle (below) — the Int the Sprout `Chan a` value wraps. Owns a
+ * SproutRoots context that roots every buffer slot (registered → the collector scans buffered
+ * heap values). Freed at the owning scope's __scope_join, which refuses to free a channel a
+ * task is still parked on. */
 struct Chan {
+  long long    handle;     /* this channel's entry in the handle table (released at join) */
   long long*   buffer;     /* ring of `cap` slots; each slot address rooted via `roots` */
   long long    cap;
   long long    count;      /* occupied slots */
@@ -390,19 +396,111 @@ static Task* rq_pop(void) {
   return t;
 }
 
-/* Scope handle ABI: __scope_open returns the Scope* encoded as the i64 the Sprout
- * `Scope` value wraps; spawn/join decode it back. The Scope is a non-moving malloc
- * live from open until join frees it, so the handle stays valid throughout. */
-static Scope* scope_of(long long handle) { return (Scope*)(intptr_t)handle; }
+/* Handle table. A Scope, Chan or forked Task is named to Sprout by an Int handle, never by its
+ * address. The handle is `(gen << 32) | idx`: `idx` selects a slot in g_handles, `gen` is that
+ * slot's generation when the handle was issued. The record is released at its scope's
+ * __scope_join, which bumps the slot's generation, so a copy of the handle that outlives the
+ * join no longer matches and the decoders below abort instead of reading freed memory. Sprout's
+ * types cannot say where a copy of a handle goes (a closure, an outer task or another channel
+ * can all hold one), so the check sits where the handle is used. Generations start at 1, so a
+ * handle is never 0. A slot whose generation would wrap is retired, never reused, so a stale
+ * handle cannot match a new record. Records stay non-moving mallocs; only the table moves. */
+enum { HANDLE_SCOPE = 1, HANDLE_TASK = 2, HANDLE_CHAN = 3 };
 
-/* Task handle ABI: __task_fork returns the Task* encoded as the i64 the Sprout
- * `Task a` value wraps; task_await decodes it. Valid until the owning scope
- * closes (which frees the record). */
-static Task* task_of(long long handle) { return (Task*)(intptr_t)handle; }
+typedef struct HandleSlot {
+  void*    ptr;        /* the live record, or NULL when the slot is free or retired */
+  uint32_t gen;        /* generation of the live record, or of the next one when free */
+  uint32_t next_free;  /* free-list link (HANDLE_NONE ends it); only meaningful when free */
+  int      kind;       /* HANDLE_* of the live record */
+} HandleSlot;
 
-/* Chan handle ABI: __chan_new returns the Chan* encoded as the i64 the Sprout `Chan a`
- * value wraps; chan_send/chan_recv decode it. Valid until the owning scope closes. */
-static Chan* chan_of(long long handle) { return (Chan*)(intptr_t)handle; }
+#define HANDLE_NONE UINT32_MAX
+static HandleSlot* g_handles = NULL;
+static size_t      g_handles_len = 0;
+static size_t      g_handles_cap = 0;
+static uint32_t    g_handles_free = HANDLE_NONE;
+
+static long long handle_make(uint32_t gen, uint32_t idx) {
+  return (long long)(((uint64_t)gen << 32) | idx);
+}
+
+static long long handle_alloc(int kind, void* ptr) {
+  uint32_t idx;
+  if (g_handles_free != HANDLE_NONE) {
+    idx = g_handles_free;
+    g_handles_free = g_handles[idx].next_free;
+  } else {
+    if (g_handles_len >= (size_t)HANDLE_NONE) sprout_fail("scheduler: out of handles");
+    if (g_handles_len == g_handles_cap) {
+      size_t cap = g_handles_cap == 0 ? 64 : g_handles_cap * 2;
+      HandleSlot* grown = (HandleSlot*)realloc(g_handles, cap * sizeof(HandleSlot));
+      if (grown == NULL) sprout_fail("scheduler: out of memory (handle table)");
+      g_handles = grown;
+      g_handles_cap = cap;
+    }
+    idx = (uint32_t)g_handles_len++;
+    g_handles[idx].gen = 1;
+  }
+  g_handles[idx].ptr = ptr;
+  g_handles[idx].kind = kind;
+  return handle_make(g_handles[idx].gen, idx);
+}
+
+/* End a record's life: any copy of its handle is stale from here on. */
+static void handle_release(long long handle) {
+  uint32_t idx = (uint32_t)((uint64_t)handle & 0xffffffffu);
+  HandleSlot* slot = &g_handles[idx];
+  slot->ptr = NULL;
+  if (slot->gen == UINT32_MAX) return;   /* retired: generations are used up */
+  slot->gen++;
+  slot->next_free = g_handles_free;
+  g_handles_free = idx;
+}
+
+/* Resolve a handle to its record. 0 is "no handle" and yields NULL, which each caller reports
+ * in its own words. A stale handle (its record was released) and a handle that was never issued
+ * or names another kind both abort: undefined behaviour is not an answer. */
+static void* handle_lookup(long long handle, int kind, const char* op, const char* what,
+                           const char* stale) {
+  if (handle == 0) return NULL;
+  uint32_t idx = (uint32_t)((uint64_t)handle & 0xffffffffu);
+  uint32_t gen = (uint32_t)((uint64_t)handle >> 32);
+  char msg[160];
+  if (idx >= g_handles_len || gen == 0) {
+    snprintf(msg, sizeof msg, "%s: invalid %s handle", op, what);
+    sprout_fail(msg);
+  }
+  HandleSlot* slot = &g_handles[idx];
+  if (slot->gen != gen || slot->ptr == NULL) {
+    snprintf(msg, sizeof msg, "%s: %s", op, stale);
+    sprout_fail(msg);
+  }
+  if (slot->kind != kind) {
+    snprintf(msg, sizeof msg, "%s: invalid %s handle", op, what);
+    sprout_fail(msg);
+  }
+  return slot->ptr;
+}
+
+/* Scope handle ABI: __scope_open returns the handle the Sprout `Scope` value wraps;
+ * spawn/join decode it back. Valid from open until join releases it. */
+static Scope* scope_of(long long handle, const char* op) {
+  return (Scope*)handle_lookup(handle, HANDLE_SCOPE, op, "scope", "scope used after it closed");
+}
+
+/* Task handle ABI: __task_fork returns the handle the Sprout `Task a` value wraps;
+ * task_await decodes it. Valid until the owning scope closes (which frees the record). */
+static Task* task_of(long long handle, const char* op) {
+  return (Task*)handle_lookup(handle, HANDLE_TASK, op, "task",
+                              "task used after its scope closed");
+}
+
+/* Chan handle ABI: __chan_new returns the handle the Sprout `Chan a` value wraps;
+ * chan_send/chan_recv decode it. Valid until the owning scope closes. */
+static Chan* chan_of(long long handle, const char* op) {
+  return (Chan*)handle_lookup(handle, HANDLE_CHAN, op, "channel",
+                              "channel used after its scope closed");
+}
 
 /* Task body ABI: a `Unit -> a !{IO}` closure handle points to its env; slot 0
  * is the code pointer; the call is code(env_handle, unit=0) with unit the i64 0
@@ -581,7 +679,8 @@ long long __scope_open(void) {
   s->forks     = NULL;
   s->reason    = REASON_NONE;
   s->owner     = g_current_task;   /* only this task may __scope_cancel it */
-  return (long long)(intptr_t)s;
+  s->handle    = handle_alloc(HANDLE_SCOPE, s);
+  return s->handle;
 }
 
 /* Shared task construction: allocate the record + GC root context, root the
@@ -598,6 +697,7 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   t->awaitable  = awaitable;
   t->done       = 0;
   t->scope      = s;
+  t->handle     = 0;       /* __task_fork issues one for an awaitable task */
   t->next       = NULL;
   t->scope_next = NULL;
   t->park_kind  = PARK_NONE;
@@ -642,7 +742,7 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
 
 /* Fire-and-forget: spawn a Unit->Unit task. Reclaimed fully on done. */
 long long __scope_spawn(long long scope_handle, long long work) {
-  Scope* s = scope_of(scope_handle);
+  Scope* s = scope_of(scope_handle, "__scope_spawn");
   if (s == NULL) sprout_fail("__scope_spawn: null scope");
   task_create(s, work, 0);
   return 0;
@@ -651,12 +751,13 @@ long long __scope_spawn(long long scope_handle, long long work) {
 /* Awaitable: spawn a Unit->a task, link it into the scope's fork list (so a
  * never-awaited fork is reclaimed at scope close), and return its handle. */
 long long __task_fork(long long scope_handle, long long work) {
-  Scope* s = scope_of(scope_handle);
+  Scope* s = scope_of(scope_handle, "__task_fork");
   if (s == NULL) sprout_fail("__task_fork: null scope");
   Task* t = task_create(s, work, 1);
   t->scope_next = s->forks;
   s->forks = t;
-  return (long long)(intptr_t)t;
+  t->handle = handle_alloc(HANDLE_TASK, t);
+  return t->handle;
 }
 
 /* Block until the forked task finishes, then return its result. If it is already
@@ -665,7 +766,7 @@ long long __task_fork(long long scope_handle, long long work) {
  * task's own context until the scope closes, so it survives any collection here
  * and remains valid when handed back to the caller (who then roots it). */
 long long __task_await(long long task_handle) {
-  Task* t = task_of(task_handle);
+  Task* t = task_of(task_handle, "__task_await");
   if (t == NULL) sprout_fail("__task_await: null task");
   /* A task force-dropped by scope_cancel has its roots freed (roots == NULL) and never
    * ran to completion, so it has no result and nothing will ever wake an awaiter of it.
@@ -774,7 +875,7 @@ static void force_drop_task(Task* t) {
  * the cooperative reason; ready/yield-parked tasks observe it via task_cancelled and return on
  * their own; join-parked tasks are left for their inner scope to drain (local propagation). */
 long long __scope_cancel(long long scope_handle) {
-  Scope* s = scope_of(scope_handle);
+  Scope* s = scope_of(scope_handle, "__scope_cancel");
   if (s == NULL) sprout_fail("__scope_cancel: null scope");
   if (g_current_task != s->owner)
     sprout_fail("__scope_cancel: only the scope's owning task may cancel it");
@@ -839,9 +940,9 @@ long long __task_stop_reason(void) {
  * only with ms > 0 — the stdlib wrapper routes ms <= 0 to an immediate Expired without forking.
  * See docs/concurrency-deadlines-design-2026-07-15.md §5.2/§5.3. */
 long long __await_deadline(long long scope_handle, long long task_handle, long long ms) {
-  Scope* s = scope_of(scope_handle);
+  Scope* s = scope_of(scope_handle, "__await_deadline");
   if (s == NULL) sprout_fail("__await_deadline: null scope");
-  Task* child = task_of(task_handle);
+  Task* child = task_of(task_handle, "__await_deadline");
   if (child == NULL) sprout_fail("__await_deadline: null task");
   Task* owner = g_current_task;
 
@@ -949,7 +1050,7 @@ long long task_yield(void) {
 }
 
 long long __scope_join(long long scope_handle) {
-  Scope* s = scope_of(scope_handle);
+  Scope* s = scope_of(scope_handle, "__scope_join");
   if (s == NULL) sprout_fail("__scope_join: null scope");
 
   /* Wait until every task spawned into `s` has finished. If any are still live,
@@ -971,22 +1072,30 @@ long long __scope_join(long long scope_handle) {
     /* A fork force-dropped by scope_cancel already had its roots freed (roots=NULL);
      * only its record survives in this list. Guard against a double-free (design §7). */
     if (f->roots != NULL) sprout_roots_free(f->roots);
+    handle_release(f->handle);
     free(f);
     f = next;
   }
   /* Free this scope's channels. Every task spawned into s has finished, and inner scopes have
-   * already joined (structured nesting), so no task is parked on any channel of s — safe to
-   * free its root context, buffer, and record, and unlink it from the global channel list. */
+   * already joined (structured nesting), so only a task OUTSIDE s (an enclosing scope's, holding
+   * a channel it was handed) can still be parked on one. Freeing the channel under it would leave
+   * that task a dangling park_chan, and a channel whose lifetime ended was not closed by anyone,
+   * so waking it as `Closed` would hide the bug: abort. Otherwise free its root context, buffer
+   * and record, release its handle, and unlink it from the global channel list. */
   for (Chan* ch = g_all_chans; ch != NULL; ) {
     Chan* next = ch->all_next;            /* save before all_chans_remove unlinks ch */
     if (ch->scope == s) {
+      if (ch->send_head != NULL || ch->recv_head != NULL || ch->select_head != NULL)
+        sprout_fail("__scope_join: a task outside the scope is parked on its channel");
       sprout_roots_free(ch->roots);
       free(ch->buffer);
       all_chans_remove(ch);
+      handle_release(ch->handle);
       free(ch);
     }
     ch = next;
   }
+  handle_release(s->handle);
   free(s);
   return 0;
 }
@@ -1136,7 +1245,7 @@ long long __task_sleep(long long ms) {
 /* Create a cap-slot channel in `scope`. cap == 0 is rendezvous (unbuffered): no ring, every value
  * handed sender-to-receiver directly. cap >= 1 buffers. */
 long long __chan_new(long long scope_handle, long long capacity) {
-  Scope* s = scope_of(scope_handle);
+  Scope* s = scope_of(scope_handle, "__chan_new");
   if (s == NULL) sprout_fail("__chan_new: null scope");
   if (capacity < 0)
     sprout_fail("__chan_new: capacity must be >= 0 (0 = rendezvous / unbuffered)");
@@ -1171,13 +1280,14 @@ long long __chan_new(long long scope_handle, long long capacity) {
     }
   }
   all_chans_push(ch);
-  return (long long)(intptr_t)ch;
+  ch->handle = handle_alloc(HANDLE_CHAN, ch);
+  return ch->handle;
 }
 
 /* Send `value` into `ch`. Hands directly to a waiting receiver, else buffers, else (full)
  * parks the sender holding the value until a receiver frees a slot. */
 long long __chan_send(long long chan_handle, long long value) {
-  Chan* ch = chan_of(chan_handle);
+  Chan* ch = chan_of(chan_handle, "__chan_send");
   if (ch == NULL) sprout_fail("__chan_send: null channel");
   /* Sending into a closed channel is a program bug (Go/Kotlin: send-after-close is an error).
    * Sprout has no recovery, so abort rather than silently dropping the value. */
@@ -1228,7 +1338,7 @@ long long __chan_send(long long chan_handle, long long value) {
  * the freed slot. On an empty channel: `Closed` if it was closed (never parks), else park until a
  * sender hands over a value or chan_close wakes us with `Closed`. */
 long long __chan_recv(long long chan_handle) {
-  Chan* ch = chan_of(chan_handle);
+  Chan* ch = chan_of(chan_handle, "__chan_recv");
   if (ch == NULL) sprout_fail("__chan_recv: null channel");
 
   /* Ready (buffered value / parked rendezvous sender / closed-and-drained): take without parking.
@@ -1259,7 +1369,7 @@ long long __chan_recv(long long chan_handle) {
  * delivered; nobody references them). Any task holding the channel may close it. A double close is
  * a synchronization bug → loud-fail (Go panics on double-close). */
 long long __chan_close(long long chan_handle) {
-  Chan* ch = chan_of(chan_handle);
+  Chan* ch = chan_of(chan_handle, "__chan_close");
   if (ch == NULL) sprout_fail("__chan_close: null channel");
   if (ch->closed) sprout_fail("__chan_close: channel already closed");
   ch->closed = 1;
@@ -1298,7 +1408,7 @@ long long __chan_select(long long list_handle) {
   {
     long long i = 0;
     for (long long cur = list_handle; sprout_list_next(cur, &head, &tail); cur = tail) {
-      Chan* ch = chan_of(head);
+      Chan* ch = chan_of(head, "__chan_select");
       if (ch == NULL) { free(chans); sprout_fail("__chan_select: null channel in list"); }
       chans[i++] = ch;
     }
