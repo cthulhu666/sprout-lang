@@ -14,9 +14,9 @@ fn burned() -> Int = churn(20000, 0)
 fn apply(f: String -> String -> Bool -> String, i: Int, first: Bool) -> String =
   f("L" ++ int_to_string(i), "R" ++ int_to_string(i), first)
 
-# A direct call roots its operands today, which hides the callee's missing root.
-# Kept as the premise test for narrowing that rule (BACKLOG: "Calls to Sprout
-# functions root their operands").
+# A direct call also roots its operands in the caller, but the callee roots the phi
+# itself, so the pick survives without that. Kept as the premise test for narrowing
+# the caller's rule (BACKLOG: "Calls to Sprout functions root their operands").
 fn pick_direct(a: String, b: String, first: Bool) -> String =
   let x = if first then a else b in
   let n = burned() in
