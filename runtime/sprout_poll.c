@@ -301,18 +301,20 @@ void sprout_poll_remove(int fd, int interest) {
     sprout_fail("sprout_poll_remove: kevent EV_DELETE failed");
 }
 
-/* Timer idents come from a counter. A 64-bit counter never repeats, and EVFILT_TIMER's ident
- * namespace is disjoint from the EVFILT_READ/WRITE fd filters. The token rides in udata. */
-static uintptr_t g_kq_timer_seq = 0;
+/* Timer idents come from a counter, not an address. A 64-bit counter never repeats, and
+ * EVFILT_TIMER's ident namespace is disjoint from the EVFILT_READ/WRITE fd filters. It is a
+ * long long, not a uintptr_t, so the id handed back is never an address-typed value. The token
+ * rides in udata. */
+static long long g_kq_timer_seq = 0;
 
 int sprout_poll_add_timer(long long ms, void* token, long long* out_id) {
-  uintptr_t ident = ++g_kq_timer_seq;
+  long long id = ++g_kq_timer_seq;
   struct kevent ev;
   /* fflags = 0: the default EVFILT_TIMER unit is milliseconds (per sys/event.h; this SDK
    * has no NOTE_MSECONDS). EV_ONESHOT fires once then removes the knote. */
-  EV_SET(&ev, ident, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, ms, token);
+  EV_SET(&ev, (uintptr_t)id, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0, ms, token);
   if (kevent(g_kq, &ev, 1, NULL, 0, NULL) < 0) return 0;   /* caller decides; see the header */
-  *out_id = (long long)ident;
+  *out_id = id;
   return 1;
 }
 
@@ -363,7 +365,7 @@ static void* poll_tag_timer(void* token) {
 }
 
 static void* poll_untag(void* raw, int* is_timer) {
-  *is_timer = (int)((uintptr_t)raw & 1u);   /* bit 0 set == a timer (see poll_tag_timer) */
+  *is_timer = (int)((uintptr_t)raw & 1u);
   return (void*)((uintptr_t)raw & ~(uintptr_t)1u);
 }
 

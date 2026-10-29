@@ -1,18 +1,24 @@
 # runtime/ADDRESS_CASTS
 #
-# Functions that convert a pointer to an integer for reasons that never hand Sprout a word:
-# address arithmetic, address ordering, and kernel tokens.  Checked by `just runtime-word-casts`
-# (scripts/runtime_word_casts.py; docs/string-header-invariant-v0.md §4.2, §4.3).
+# Functions that convert a pointer to an integer as address arithmetic, address ordering or a
+# kernel token.  Checked by `just runtime-word-casts` (scripts/runtime_word_casts.py;
+# docs/string-header-invariant-v0.md §4.2, §4.3).
 #
-# Rules, one `file:name` per line (file as `runtime/x.c`; a same-named static in another file is
-# not covered), a `# reason` on the SAME line:
-#   - A listed function must not return an integer type of 64 bits or more (`long`, `long long`,
-#     `__int128`, or a typedef of one: `uintptr_t`, `size_t`, ...), and must not take a pointer to
-#     one (an out-param).  Its casts therefore cannot reach a Sprout value through its return or
-#     an out-param.  A by-value 64-bit parameter is fine.
-#   - A name with no pointer-to-integer cast on the host platform is stale and fails the gate.
-#   - A function whose cast result can be stored into a Sprout word belongs in
-#     runtime/WORD_CASTS_BASELINE, not here.
+# One `file:name` per line (file as `runtime/x.c`; a same-named static in another file is not
+# covered), a `# reason` on the SAME line.  A listed function is checked for exactly this:
+#   - A1: every pointer-to-integer cast in it has destination type spelled `uintptr_t`.
+#   - A2: it converts no `uintptr_t` or `intptr_t` value to a signed integer type of 64 bits or
+#     more (`long`, `long long`, `int64_t`, `__int128`), by cast or implicitly.  Conversions to
+#     unsigned or narrower types (`size_t`, `int`) are fine.
+#   - It does not return an integer type of 64 bits or more (`long`, `long long`, `__int128`, or
+#     a typedef of one: `uintptr_t`, `size_t`, ...) and takes no pointer to one (an out-param).
+#     A by-value 64-bit parameter is fine.
+#   - A name with no definition, or no pointer-to-integer cast on the host platform, is stale
+#     and fails the gate.
+# Nothing else is checked.  Not seen: an address laundered through arithmetic into a non-address
+# type, `memcpy`, union punning, or reinterpretation through a `void*` (docs/gates.md).
+# A function that needs to convert an address to a signed 64-bit integer belongs in
+# runtime/WORD_CASTS_BASELINE, not here.
 #
 # The AST holds one platform's #ifdef branches.  An entry may carry one tag, `darwin` or `linux`,
 # after the name: it is then allowed and checked only on that host and ignored on the other, so

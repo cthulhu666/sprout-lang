@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Fail when the C runtime converts a pointer to an integer outside an allowed place.
+"""Fail when the C runtime lets a pointer's address become a signed 64-bit integer.
 
-docs/string-header-invariant-v0.md §4.3, rule 1: every AST cast node with
-castKind PointerToIntegral is counted per enclosing top-level decl (a function, or the
-variable of a global initializer) in runtime/*.c and runtime/*.h.
+docs/string-header-invariant-v0.md §4.3, rule 1. Over runtime/*.c and runtime/*.h, per top-level
+decl (a function, or the variable of a global initializer), the checker counts sites:
 
-  runtime_word_casts.py CLANG RUNTIME_DIR BASELINE ADDRESS_CASTS [--emit-baseline]
-                        [--scan-cache FILE]
+  - an AST cast with castKind PointerToIntegral, and
+  - an IntegralCast whose operand is spelled `uintptr_t` or `intptr_t` (the address types) and
+    whose destination is a signed integer type of 64 bits or more (`long`, `long long`,
+    `int64_t`, `__int128`), implicit or explicit. One whose operand is itself a counted
+    PointerToIntegral cast is not counted twice.
 
-Allowed with no entry: sprout_str_word and sprout_ptr_word (the exits), and the functions in
-ADDRESS_CASTS (`file:name`, so a same-named static in another file is not exempt), provided
-none returns an integer type of 64 bits or more and none takes a pointer to one (an out-param).
+Allowed with no entry: the exits (EXITS, keyed `file:name`), and the functions in ADDRESS_CASTS
+(`file:name`) provided that, inside the function:
+  - A1: every PointerToIntegral cast has destination type spelled `uintptr_t`;
+  - A2: no address-type value is converted to a signed 64-bit-or-wider integer type;
+  - it does not return an integer type of 64 bits or more, and takes no pointer to one.
 Everything else must match BASELINE (`file:decl:count`) exactly or below: a new decl or a higher
-count fails, and so does an entry whose decl now has fewer casts, so the list only shrinks.
+count fails, and so does an entry whose decl now has fewer sites, so the list only shrinks.
 
 Every runtime/*.c is scanned. --emit-baseline prints the current non-allowed counts in baseline
 format and exits. The AST holds only the host's #ifdef branches, so an ADDRESS_CASTS entry may
@@ -21,6 +25,7 @@ carry a `darwin` or `linux` tag: it is then read only on that host and ignored o
 --scan-cache FILE is for the test, which re-checks one tree against many list files. It stores
 the decl table beside a hash of runtime/*.c and *.h and is ignored when the hash differs.
 """
+import argparse
 import glob
 import hashlib
 import json
@@ -28,11 +33,48 @@ import os
 import subprocess
 import sys
 import tempfile
+from collections import namedtuple
 
-EXITS = frozenset(("sprout_str_word", "sprout_ptr_word"))
+# The only places a pointer may become a Sprout word, keyed `file:name`. A same-named function in
+# another file is not exempt. The header is created by docs/string-header-invariant-v0.md §4.
+EXITS = frozenset(("runtime/sprout_word.h:sprout_str_word", "runtime/sprout_word.h:sprout_ptr_word"))
 CAST_KIND = "PointerToIntegral"
+CONV_KIND = "IntegralCast"
+ADDRESS_TYPE = "uintptr_t"
+ADDRESS_TYPES = frozenset(("uintptr_t", "intptr_t"))
 PLATFORMS = ("darwin", "linux")
 QUALIFIERS = frozenset(("const", "volatile", "restrict", "__restrict", "__restrict__", "_Atomic"))
+
+# One top-level decl, merged over every TU that sees it.
+#   casts           PointerToIntegral casts
+#   bad_casts       of those, the ones whose destination is not `uintptr_t` (rule A1)
+#   conv_free       address-type -> signed 64-bit conversions whose operand is not a cast
+#   conv_after_ok   the same, whose operand is a PointerToIntegral cast to `uintptr_t`
+#   bad_dest        spelling of the first A1 destination
+#   conv_note       "uintptr_t to long long": the first A2 conversion
+#   wide_return     spelled return type when 64-bit or wider, else ""
+#   wide_ptr        spelled type of the first pointer-to-wide-integer parameter, else ""
+#   defined         has a body
+Decl = namedtuple(
+    "Decl",
+    "casts bad_casts conv_free conv_after_ok bad_dest conv_note wide_return wide_ptr defined",
+)
+EMPTY = Decl(0, 0, 0, 0, "", "", "", "", False)
+
+
+def sites(d):
+    """Sites counted against the baseline when the decl is not listed in ADDRESS_CASTS."""
+    return d.casts + d.conv_free
+
+
+def merge(a, b, num):
+    """Combine two views of a decl: counts with num (sum or max), strings and flags with `or`."""
+    return Decl(*(x or y if isinstance(x, (str, bool)) else num(x, y) for x, y in zip(a, b)))
+
+
+def sites_note(d):
+    """Suffix naming the conversions behind a count, when there are any."""
+    return " (includes %d %s conversion(s))" % (d.conv_free, d.conv_note) if d.conv_free else ""
 
 
 def host_platform():
@@ -81,19 +123,58 @@ def decl_file(node):
     return (loc.get("expansionLoc") or loc).get("file")
 
 
-def count_casts(node):
-    n = 0
+def spelled(node):
+    """The type clang prints for an expression, qualifiers dropped; typedef names are kept."""
+    t = (node.get("type") or {}).get("qualType") or ""
+    return " ".join(w for w in t.split() if w not in QUALIFIERS)
+
+
+def operand(cast):
+    """A cast's child expression, parentheses skipped (None when it has none)."""
+    inner = cast.get("inner") or ()
+    x = inner[0] if inner else None
+    while x is not None and x.get("kind") == "ParenExpr":
+        inner = x.get("inner") or ()
+        x = inner[0] if inner else None
+    return x
+
+
+def signed_wide(t, typedefs):
+    """Whether spelled type t is a signed integer of 64 bits or more once typedefs are resolved."""
+    base, stars = type_parts(t, typedefs)
+    return stars == 0 and is_wide(base) and "unsigned" not in base.split()
+
+
+def analyze(node, typedefs):
+    """Count a decl's casts and address-type conversions (see Decl); the type fields stay empty."""
+    casts = bad = free = after_ok = 0
+    bad_dest = conv_note = ""
     stack = [node]
     while stack:
         x = stack.pop()
         if isinstance(x, dict):
-            if x.get("castKind") == CAST_KIND:
-                n += 1
+            kind = x.get("castKind")
+            if kind == CAST_KIND:
+                casts += 1
+                if spelled(x) != ADDRESS_TYPE:
+                    bad += 1
+                    bad_dest = bad_dest or spelled(x)
+            elif kind == CONV_KIND:
+                op = operand(x)
+                src, dst = (spelled(op), spelled(x)) if op is not None else ("", "")
+                if src in ADDRESS_TYPES and signed_wide(dst, typedefs):
+                    conv_note = conv_note or "%s to %s" % (src, dst)
+                    if op.get("castKind") != CAST_KIND:
+                        free += 1
+                    elif spelled(op) == ADDRESS_TYPE:
+                        after_ok += 1
             children = x.values()
         else:
             children = x
         stack.extend(v for v in children if isinstance(v, (dict, list)))
-    return n
+    return EMPTY._replace(
+        casts=casts, bad_casts=bad, conv_free=free, conv_after_ok=after_ok, bad_dest=bad_dest, conv_note=conv_note
+    )
 
 
 def has_body(node):
@@ -150,7 +231,7 @@ def fingerprint(rt_dir):
 
 
 def scan(clang, rt_dir):
-    """Return {(relfile, decl): (count, wide_return, wide_ptr_param, defined)} merged over all TUs."""
+    """Return {(relfile, decl): Decl} merged over all TUs."""
     root = os.path.realpath(rt_dir)
     rel_cache = {}
 
@@ -176,18 +257,18 @@ def scan(clang, rt_dir):
                 continue
             kind = node.get("kind")
             name = node.get("name") or kind
-            n = count_casts(node)
-            key = (r, name)
-            c, wr, wp, d = local.get(key, (0, "", "", False))
+            d = analyze(node, typedefs)
             if kind == "FunctionDecl":
-                wr = wr or wide_return(node, typedefs)
-                wp = wp or wide_pointer_param(node, typedefs)
-                d = d or has_body(node)
-            local[key] = (c + n, wr, wp, d)
+                d = d._replace(
+                    wide_return=wide_return(node, typedefs),
+                    wide_ptr=wide_pointer_param(node, typedefs),
+                    defined=has_body(node),
+                )
+            key = (r, name)
+            local[key] = merge(local.get(key, EMPTY), d, lambda x, y: x + y)
         del tu
-        for key, (c, wr, wp, d) in local.items():
-            oc, owr, owp, od = decls.get(key, (0, "", "", False))
-            decls[key] = (max(c, oc), wr or owr, wp or owp, d or od)
+        for key, d in local.items():
+            decls[key] = merge(decls.get(key, EMPTY), d, max)
     return decls
 
 
@@ -198,12 +279,13 @@ def scan_cached(clang, rt_dir, cache_path):
         with open(cache_path) as fh:
             data = json.load(fh)
         if data.get("fingerprint") == fp:
-            return {(f, n): (c, wr, wp, d) for f, n, c, wr, wp, d in data["decls"]}
+            return {(row["file"], row["name"]): Decl(*(row[f] for f in Decl._fields)) for row in data["decls"]}
     except (OSError, ValueError, KeyError):
         pass
     decls = scan(clang, rt_dir)
     with open(cache_path, "w") as fh:
-        json.dump({"fingerprint": fp, "decls": [[f, n, *v] for (f, n), v in sorted(decls.items())]}, fh)
+        rows = [dict(d._asdict(), file=f, name=n) for (f, n), d in sorted(decls.items())]
+        json.dump({"fingerprint": fp, "decls": rows}, fh)
     return decls
 
 
@@ -217,21 +299,18 @@ def read_entries(path):
 
 
 def main():
-    argv = sys.argv[1:]
-    emit = "--emit-baseline" in argv
-    cache = None
-    if "--scan-cache" in argv:
-        i = argv.index("--scan-cache")
-        if i + 1 >= len(argv):
-            sys.exit(__doc__)
-        cache = argv[i + 1]
-        del argv[i : i + 2]
-    args = [a for a in argv if a != "--emit-baseline"]
-    if len(args) != 4:
-        sys.exit(__doc__)
-    clang, rt_dir, baseline_path, addr_path = args
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("clang")
+    ap.add_argument("runtime_dir")
+    ap.add_argument("baseline")
+    ap.add_argument("address_casts")
+    ap.add_argument("--emit-baseline", action="store_true", help="print the current counts in baseline format")
+    ap.add_argument("--scan-cache", metavar="FILE", help="reuse the decl table in FILE (for the test)")
+    args = ap.parse_args()
+    clang, rt_dir, baseline_path, addr_path = args.clang, args.runtime_dir, args.baseline, args.address_casts
+    emit = args.emit_baseline
 
-    decls = scan_cached(clang, rt_dir, cache) if cache else scan(clang, rt_dir)
+    decls = scan_cached(clang, rt_dir, args.scan_cache) if args.scan_cache else scan(clang, rt_dir)
     problems = []
 
     host = host_platform()
@@ -251,34 +330,43 @@ def main():
         addr[key] = i
 
     def allowed(key):
-        return key[1] in EXITS or key in addr
+        return "%s:%s" % key in EXITS or key in addr
 
     if emit:
-        lines = ["%s:%s:%d" % (f, name, v[0]) for (f, name), v in decls.items() if v[0] and not allowed((f, name))]
+        lines = ["%s:%s:%d" % (f, name, sites(d)) for (f, name), d in decls.items() if sites(d) and not allowed((f, name))]
         print("\n".join(sorted(lines)))
         return 0
 
     for key in sorted(addr):
         f, name = key
         d = decls.get(key)
-        if d is None or not d[3]:
+        if d is None or not d.defined:
             problems.append("ADDRESS_CASTS: %s:%s is not defined (stale entry; delete it)" % (f, name))
             continue
-        count, wide_ret, wide_ptr, _ = d
-        if not count:
+        if not d.casts:
             problems.append(
                 "ADDRESS_CASTS: %s:%s has no pointer-to-integer cast on this platform (stale entry; delete it)"
                 % (f, name)
             )
-        if wide_ret:
+        if d.bad_casts:
+            problems.append(
+                "ADDRESS_CASTS: %s:%s casts a pointer to %s (rule A1: a listed function casts to %s); "
+                "it cannot be listed as is" % (f, name, d.bad_dest, ADDRESS_TYPE)
+            )
+        if d.conv_free + d.conv_after_ok:
+            problems.append(
+                "ADDRESS_CASTS: %s:%s converts %s (rule A2: an address must not become a signed 64-bit "
+                "integer); it cannot be listed" % (f, name, d.conv_note)
+            )
+        if d.wide_return:
             problems.append(
                 "ADDRESS_CASTS: %s:%s returns a 64-bit integer type (%s), so its casts can reach a "
-                "Sprout word; it cannot be listed" % (f, name, wide_ret)
+                "Sprout word; it cannot be listed" % (f, name, d.wide_return)
             )
-        if wide_ptr:
+        if d.wide_ptr:
             problems.append(
                 "ADDRESS_CASTS: %s:%s takes a pointer to a 64-bit integer type (%s), an out-param its "
-                "casts can reach a Sprout word through; it cannot be listed" % (f, name, wide_ptr)
+                "casts can reach a Sprout word through; it cannot be listed" % (f, name, d.wide_ptr)
             )
 
     baseline = {}
@@ -295,7 +383,8 @@ def main():
     total = 0
     for key in sorted(set(baseline) | set(decls)):
         f, name = key
-        have = decls.get(key, (0,))[0]
+        d = decls.get(key, EMPTY)
+        have = sites(d)
         want = baseline.get(key)
         if allowed(key):
             if want is not None:
@@ -309,10 +398,13 @@ def main():
                 problems.append(
                     "%s:%s has %d pointer-to-integer cast(s) and is not in the baseline; "
                     "use sprout_str_word/sprout_ptr_word, or list it in ADDRESS_CASTS "
-                    "if it is address arithmetic" % (f, name, have)
+                    "if it is address arithmetic%s" % (f, name, have, sites_note(d))
                 )
         elif have > want:
-            problems.append("%s:%s has %d pointer-to-integer cast(s), baseline allows %d" % (f, name, have, want))
+            problems.append(
+                "%s:%s has %d pointer-to-integer cast(s), baseline allows %d%s"
+                % (f, name, have, want, sites_note(d))
+            )
         elif have < want:
             problems.append(
                 "%s:%s now has %d pointer-to-integer cast(s), baseline lists %d; "

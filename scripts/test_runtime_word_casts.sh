@@ -3,8 +3,9 @@
 # Each case checks the exit code AND that the message names the offending decl.
 #
 # A clang AST dump of runtime/ takes seconds, so the checker runs with --scan-cache: three trees
-# are scanned (pristine, mutants, planted functions) and every case that only varies the list
-# files re-reads that tree's table. The real gate never passes the flag.
+# are scanned (the real one, mutants, planted functions) and every case that only varies the list
+# files re-reads that tree's table. `just runtime-word-casts` never passes the flag. Case (a) IS
+# the real gate on the real tree, so CI does not run `runtime-word-casts` separately.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -57,8 +58,9 @@ plant() {
   mv "$tmp" "$1"
 }
 
-# (a) the real tree passes.
-run "$RT" "$BASE" "$ADDR" "$CACHE"
+# (a) the real tree passes, against its own lists. The cache file does not exist yet, so this
+# run scans and reads nothing; the copies below reuse its table, since the sources are identical.
+run "$ROOT/runtime" "$ROOT/runtime/WORD_CASTS_BASELINE" "$ROOT/runtime/ADDRESS_CASTS" "$CACHE"
 [[ "$RC" == 0 ]] || fail "(a) real tree: exit $RC: $OUT"
 grep -q '^runtime-word-casts: ok' <<<"$OUT" || fail "(a) no ok line: $OUT"
 echo "ok: (a) real tree passes"
@@ -117,13 +119,15 @@ expect_fail "(i) unknown tag" 'malformed entry'
 run "$RT" "$BASE" "$TMPD/addr_nofile" "$CACHE"
 expect_fail "(i) entry without a file" 'malformed entry'
 
-# (j)-(n) planted functions, all in one tree. Each case lists some of them in ADDRESS_CASTS and
+# (j)-(q) planted functions, all in one tree. Each case lists some of them in ADDRESS_CASTS and
 # puts the rest in the baseline, so only the case's own defect is left to fail.
 R=runtime/sprout_runtime.c
 S=runtime/sprout_scheduler.c
 N=runtime/sprout_wc_new.c
 PLANTED=("$R:wc_ret_uintptr" "$R:wc_ret_long" "$R:wc_ret_intptr" "$R:wc_out_param" "$R:wc_byval_ok"
-  "$R:wc_same" "$S:wc_same" "$N:wc_new_fn")
+  "$R:wc_same" "$S:wc_same" "$N:wc_new_fn"
+  "$R:wc_a2_field" "$R:wc_a2_call" "$R:wc_a2_intptr" "$R:wc_a2_implicit" "$R:wc_a1_ulong"
+  "$R:wc_ok_size" "$R:wc_ok_narrow" "$S:sprout_ptr_word")
 cat >>"$RT_T/sprout_runtime.c" <<'EOF'
 uintptr_t wc_ret_uintptr(void* p) { return (uintptr_t)p; }
 long wc_ret_long(void* p) { return (long)(uintptr_t)p; }
@@ -131,12 +135,28 @@ intptr_t wc_ret_intptr(void* p) { return (intptr_t)p; }
 int wc_out_param(void* p, long long* out) { *out = (long long)(uintptr_t)p; return 0; }
 void* wc_byval_ok(uintptr_t a, void* p) { return (void*)((uintptr_t)p + a); }
 static int wc_same(void* p) { return (int)(uintptr_t)p; }
+struct wc_box { long long f; };
+extern void wc_sink(long long);
+int wc_a2_field(struct wc_box* o, void* p) { o->f = (long long)(uintptr_t)p; return 0; }
+void wc_a2_call(void* p) { wc_sink((long long)(uintptr_t)p); }
+void wc_a2_intptr(void* p, intptr_t i) { wc_sink(i); (void)(uintptr_t)p; }
+void wc_a2_implicit(void) { uintptr_t u = 0; wc_sink(u); }
+void wc_a1_ulong(void* p) { unsigned long x = (unsigned long)p; (void)x; }
+void wc_ok_size(void* p) { size_t n = (size_t)(uintptr_t)p; (void)n; }
+int wc_ok_narrow(void* p) { uintptr_t u = (uintptr_t)p; return (int)u; }
 EOF
 cat >>"$RT_T/sprout_scheduler.c" <<'EOF'
 static int wc_same(void* p) { return (int)(uintptr_t)p; }
+static int sprout_ptr_word(void* p) { return (int)(uintptr_t)p; }
+EOF
+cat >"$RT_T/sprout_word.h" <<'EOF'
+#include <stdint.h>
+static inline long long sprout_str_word(const char* p) { return (long long)(uintptr_t)p; }
+static inline long long sprout_ptr_word(void* p) { return (long long)(uintptr_t)p; }
 EOF
 cat >"$RT_T/sprout_wc_new.c" <<'EOF'
 #include <stdint.h>
+#include "sprout_word.h"
 int wc_new_fn(void* p) { return (int)(uintptr_t)p; }
 EOF
 CACHE_T="$TMPD/cache_planted.json"
@@ -150,7 +170,12 @@ lists() {
   for d in "${PLANTED[@]}"; do
     listed=0
     for l in "$@"; do [[ "$l" == "$d" ]] && listed=1; done
-    if ((listed)); then echo "$d  # planted" >>"$TMPD/addr_case"; else echo "$d:1" >>"$TMPD/base_case"; fi
+    if ((listed)); then
+      echo "$d  # planted" >>"$TMPD/addr_case"
+    else
+      # wc_a2_intptr has a cast and an intptr_t -> long long conversion: two sites.
+      case "$d" in *:wc_a2_intptr) echo "$d:2" ;; *) echo "$d:1" ;; esac >>"$TMPD/base_case"
+    fi
   done
 }
 
@@ -182,5 +207,35 @@ lists "$R:wc_byval_ok" "$R:wc_same"
 grep -vxF "$N:wc_new_fn:1" "$TMPD/base_case" >"$TMPD/base_case3"
 run "$RT_T" "$TMPD/base_case3" "$TMPD/addr_case" "$CACHE_T"
 expect_fail "(m) planted cast in a new runtime file" "$N:wc_new_fn has 1 pointer-to-integer cast(s) and is not in the baseline"
+
+# (n) rule A2: a cast result that leaves a listed function through a field store, a call
+# argument or an intptr_t value converted to long long; rule A1: a cast to unsigned long.
+lists "$R:wc_a2_field" "$R:wc_a2_call" "$R:wc_a2_intptr" "$R:wc_a1_ulong" "$R:wc_byval_ok" "$R:wc_same"
+run "$RT_T" "$TMPD/base_case" "$TMPD/addr_case" "$CACHE_T"
+expect_fail "(n) A2 field store" "ADDRESS_CASTS: $R:wc_a2_field converts uintptr_t to long long"
+expect_fail "(n) A2 call argument" "ADDRESS_CASTS: $R:wc_a2_call converts uintptr_t to long long"
+expect_fail "(n) A2 intptr_t operand" "ADDRESS_CASTS: $R:wc_a2_intptr converts intptr_t to long long"
+expect_fail "(n) A1 cast to unsigned long" "ADDRESS_CASTS: $R:wc_a1_ulong casts a pointer to unsigned long"
+expect_absent "(n) A1 is not reported for a uintptr_t cast" "$R:wc_a2_intptr casts a pointer"
+
+# (o) a uintptr_t converted to size_t or to int is allowed in a listed function.
+lists "$R:wc_ok_size" "$R:wc_ok_narrow" "$R:wc_byval_ok" "$R:wc_same"
+run "$RT_T" "$TMPD/base_case" "$TMPD/addr_case" "$CACHE_T"
+[[ "$RC" == 0 ]] || fail "(o) uintptr_t to size_t / int: exit $RC: $OUT"
+echo "ok: (o) uintptr_t to size_t and to int are allowed"
+
+# (p) outside a listed function a uintptr_t local converted to long long is a counted site.
+lists "$R:wc_byval_ok" "$R:wc_same"
+grep -vxF "$R:wc_a2_implicit:1" "$TMPD/base_case" >"$TMPD/base_case4"
+run "$RT_T" "$TMPD/base_case4" "$TMPD/addr_case" "$CACHE_T"
+expect_fail "(p) implicit uintptr_t to long long outside a listed function" "$R:wc_a2_implicit has 1 pointer-to-integer cast(s) and is not in the baseline"
+expect_absent "(p) the cast that feeds a conversion is not counted twice" "$R:wc_a2_field has"
+
+# (q) the exits are keyed by file: a sprout_ptr_word outside runtime/sprout_word.h is not exempt.
+lists "$R:wc_byval_ok" "$R:wc_same"
+grep -vxF "$S:sprout_ptr_word:1" "$TMPD/base_case" >"$TMPD/base_case5"
+run "$RT_T" "$TMPD/base_case5" "$TMPD/addr_case" "$CACHE_T"
+expect_fail "(q) sprout_ptr_word in sprout_scheduler.c" "$S:sprout_ptr_word has 1 pointer-to-integer cast(s) and is not in the baseline"
+expect_absent "(q) the exits in runtime/sprout_word.h are exempt" "runtime/sprout_word.h"
 
 echo "test-runtime-word-casts: ok"

@@ -1,9 +1,10 @@
 # runtime/WORD_CASTS_BASELINE
 #
-# Pointer-to-integer casts still outside sprout_str_word, sprout_ptr_word and the ADDRESS_CASTS
-# functions, one `file:decl:count` per line, sorted.  The list only shrinks: `just
-# runtime-word-casts` fails on a new entry, a higher count, or an entry whose decl now has
-# fewer casts (lower or delete it).  After a conversion, regenerate with
+# Sites still outside sprout_str_word, sprout_ptr_word and the ADDRESS_CASTS functions, one
+# `file:decl:count` per line, sorted.  A site is a pointer-to-integer cast, or a uintptr_t/intptr_t
+# value converted to a signed 64-bit integer that is not itself such a cast's result.  The list
+# only shrinks: `just runtime-word-casts` fails on a new entry, a higher count, or an entry whose
+# decl now has fewer sites (lower or delete it).  After a conversion, regenerate with
 #   python3 -I scripts/runtime_word_casts.py clang runtime /dev/null runtime/ADDRESS_CASTS --emit-baseline
 # and keep only the lines that are still needed.  docs/string-header-invariant-v0.md §4.3.
 runtime/sprout_runtime.c:argv_get:1

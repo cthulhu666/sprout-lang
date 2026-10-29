@@ -433,39 +433,65 @@ the REPL's completion list. It checks that a section exists, not what it says.
 
 ## Runtime word casts — `just runtime-word-casts`
 
-Counts the `PointerToIntegral` casts in `runtime/*.c` and `runtime/*.h` on clang's JSON AST
-(`scripts/runtime_word_casts.py`), per enclosing top-level decl, and fails on any outside
-`sprout_str_word`, `sprout_ptr_word`, the `runtime/ADDRESS_CASTS` functions or a
-`runtime/WORD_CASTS_BASELINE` entry. Only types tell `(long long)p` from `(long long)len`, which
-is why it reads the AST. Rule 1 of `docs/string-header-invariant-v0.md` §4.3.
+Counts **sites** in `runtime/*.c` and `runtime/*.h` on clang's JSON AST
+(`scripts/runtime_word_casts.py`), per enclosing top-level decl, and fails on any outside the exits,
+the `runtime/ADDRESS_CASTS` functions or a `runtime/WORD_CASTS_BASELINE` entry. Only types tell
+`(long long)p` from `(long long)len`, which is why it reads the AST. Rule 1 of
+`docs/string-header-invariant-v0.md` §4.3. `uintptr_t` is the address type: a pointer becomes one,
+and the gate watches where a `uintptr_t` or `intptr_t` value goes. A site is either
 
-- **`WORD_CASTS_BASELINE`** is `file:decl:count`, today's violations. It only shrinks: a new decl or
-  a higher count fails, and so does an entry whose decl now has fewer casts or none (lower or delete
+- a cast with castKind `PointerToIntegral`, or
+- an `IntegralCast` (implicit or explicit) whose operand is spelled `uintptr_t` or `intptr_t` and
+  whose destination is a signed integer of 64 bits or more after typedef resolution (`long`,
+  `long long`, `int64_t`, `__int128`), unless the operand is itself a counted `PointerToIntegral`
+  cast. So `(long long)(uintptr_t)p` outside a listed function is one site, and `long long x = u;`
+  with a `uintptr_t u` is one. Conversions to unsigned or narrower types (`size_t`, `int`) are not
+  sites. The operand's spelling is read from the child expression with parentheses skipped.
+
+- **`WORD_CASTS_BASELINE`** is `file:decl:count`, today's sites. It only shrinks: a new decl or a
+  higher count fails, and so does an entry whose decl now has fewer sites or none (lower or delete
   it). `--emit-baseline` prints the current counts.
+- **Exits** are `runtime/sprout_word.h:sprout_str_word` and `runtime/sprout_word.h:sprout_ptr_word`
+  (`EXITS` in the script), keyed `file:name`: a same-named function in another file is not exempt.
+  They are exempt from every rule.
 - **`ADDRESS_CASTS`** lists functions whose casts are address arithmetic, address ordering or kernel
   tokens, one `# reason` each, keyed `file:name` (`runtime/sprout_runtime.c:region_find`), so a
-  same-named static in another file is not exempt. A listed function must not return an integer
-  type of 64 bits or more (`long`, `long long`, `__int128`, or a typedef of one such as `uintptr_t`
-  or `size_t`), and must not take a pointer to one (an out-param like `long long* out_id`); either
-  way its casts could reach a Sprout word. A by-value 64-bit parameter is fine. A listed name with
-  no cast, or no definition, fails. These entries stay; they are not debt. A name may carry one tag,
-  `darwin` or `linux`: it is then read only on that host and ignored on the other, so a cast there
-  fails as not in the baseline. An unknown or second tag is malformed.
+  same-named static in another file is not exempt. A listed function is checked for:
+  - **A1**: every `PointerToIntegral` cast in it has destination type spelled `uintptr_t`.
+  - **A2**: it converts no `uintptr_t` or `intptr_t` value to a signed integer of 64 bits or more.
+    A cast result that leaves through a field store, a call argument or a global has to pass
+    through such a conversion, so this is what stops it.
+  - It does not return an integer type of 64 bits or more (`long`, `long long`, `__int128`, or a
+    typedef of one such as `uintptr_t` or `size_t`) and takes no pointer to one (an out-param like
+    `long long* out_id`). A by-value 64-bit parameter is fine.
+  - A listed name with no cast on the host, or no definition, fails.
+
+  These entries stay; they are not debt. A name may carry one tag, `darwin` or `linux`: it is then
+  read only on that host and ignored on the other, so a cast there fails as not in the baseline. An
+  unknown or second tag is malformed.
 - Every `runtime/*.c` is scanned (a glob, like the justfile's `runtime_src`), so a new file is
   covered without editing the gate.
-- `just test-runtime-word-casts` plants defects in copies of `runtime/` (a cast in an exported
-  String producer, a count rise, a stale or inflated entry, a function returning `long long`,
-  `uintptr_t`, `long` or `intptr_t` or taking a `long long*`, a same-named static in another file,
-  a cast in a new `runtime/*.c`, a stale or unknown platform tag) and checks that each fails and
-  names the decl. It scans three trees and re-reads each one's decl table through `--scan-cache`
-  for the cases that vary only the list files; the cache is keyed on a hash of `runtime/*.c` and
-  `*.h`, and `just runtime-word-casts` never passes the flag.
+- `just test-runtime-word-casts` is the CI entry for this gate: its case (a) runs the checker on the
+  real `runtime/` and its baseline, and the other cases plant defects in copies of `runtime/` (a
+  cast in an exported String producer, a count rise, a stale or inflated entry, a function returning
+  `long long`, `uintptr_t`, `long` or `intptr_t` or taking a `long long*`, a same-named static in
+  another file, a cast in a new `runtime/*.c`, a stale or unknown platform tag, an A1 cast to
+  `unsigned long`, A2 conversions through a field store, a call argument, an implicit local
+  conversion and an `intptr_t`, a `sprout_ptr_word` outside `sprout_word.h`) and check that each
+  fails and names the decl; a `uintptr_t` to `size_t` or `int` conversion must pass. It scans three
+  trees (the real one, one with mutants, one with planted functions) and re-reads each decl table
+  through `--scan-cache` for the cases that vary only the list files. The cache is keyed on a hash
+  of `runtime/*.c` and `*.h`. Case (a) passes `--scan-cache` with a file that does not exist yet, so
+  it scans and writes and reads nothing, and its table serves the copy of the real tree. `just
+  runtime-word-casts` passes no flag, so it never reads a cache. It is not listed in
+  `ci-fast-gates` or `gate`; running it there too would scan the real tree a second time.
 
-**How it is defeated:** deliberately. `memcpy` of a pointer into a word, union punning, and a `char*`
-laundered through `void*` all convert without a `PointerToIntegral` node, so the gate does not see
-them. It stops the accidental cast, not an author who routes around it. It also does not look at
-writes into globals: a listed function that stores the address into a global a Sprout word is read
-from passes.
+**What it does not check:** it stops the accidental cast, not an author who routes around it.
+- Laundering through arithmetic into a non-address type. Example: a `uintptr_t` copied into an
+  `unsigned long` or `size_t` variable (an allowed conversion) and converted to `long long` from
+  there. The operand is no longer spelled `uintptr_t`.
+- `memcpy` of a pointer into a word, and union punning: no cast node exists.
+- A pointer reinterpreted through `void*` (`*(long long*)(void*)&p`): no `PointerToIntegral` node.
 
 **It sees one platform.** The AST holds only the host's `#ifdef` branches, so a decl that casts under
 `__APPLE__` or Linux only is counted on that host alone. Tag its `ADDRESS_CASTS` entry with that
