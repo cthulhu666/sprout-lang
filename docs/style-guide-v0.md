@@ -79,6 +79,8 @@ Additional rules:
 - Prefer a short group of related helpers over a grab bag of unrelated
   declarations.
 - Keep helper declarations close to the public declaration they support.
+- Put an exported function above its private helpers, so the reader meets the API before the
+  mechanics: `take`, then `take_go`.
 - In docs and examples, prefer short files that demonstrate one primary idea.
 
 ## 4. Naming

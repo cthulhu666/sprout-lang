@@ -551,9 +551,9 @@ A pure vector with in-place writes (in `stdlib/linvec.sprout`;
 
 ## stdlib.list
 
-Slicing a `List` (in `stdlib/list.sprout`; `import stdlib.list as list`). Data-last, so
-`xs |> list.take(3)` works. A count below zero acts as zero and past the end as the end, so none
-fails. All run in constant stack; `take_last` and `drop_last` count the list first.
+Slicing and reshaping a `List` (in `stdlib/list.sprout`; `import stdlib.list as list`).
+Data-last, so `xs |> list.take(3)` works. A count below zero acts as zero and past the end as the
+end, so none fails. All run in constant stack; `take_last` and `drop_last` count the list first.
 
 - `take(n, xs)` / `drop(n, xs)` — the first `n` elements / the rest; O(n)
 - `take_last(n, xs)` / `drop_last(n, xs)` — the last `n` / all but the last `n`; O(|xs|)
@@ -563,6 +563,8 @@ fails. All run in constant stack; `take_last` and `drop_last` count the list fir
   `partition`, it stops at the first element that fails `pred`
 - `map_adjacent(g, xs)` — `g` on each element and its successor, left to right; n − 1 results,
   none for fewer than two elements. `zip(xs, drop(1, xs))` gives the pairs instead
+- `transpose(rows)` — rows become columns; O(cells + rows). A row that has run out is skipped, so
+  ragged input does not round-trip: `transpose([[1], [2, 3]]) == [[1, 2], [3]]`
 
 There is no index lookup on `List`. A loop that needs the index is `fold_indexed`; a position
 kept as state wants a `Vec`.

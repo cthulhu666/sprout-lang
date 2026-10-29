@@ -33,6 +33,14 @@ fn front_length(halves: (List Int, List Int)) -> Int =
   match halves with
   | (front, _) -> list_length(front)
 
+let no_rows: List (List Int) = []
+
+let empty_rows: List (List Int) = [[], []]
+
+# A rectangular matrix survives two transposes.
+fn transpose_twice(m: List (List Int)) -> List (List Int) =
+  list.transpose(list.transpose(m))
+
 fn main() -> Unit !{IO} =
   let xs = [1, 2, 3, 4, 5]
       big = range_to_list(range_up(1, 200000))
@@ -71,11 +79,27 @@ fn main() -> Unit !{IO} =
     check_eq("span is (take_while, drop_while)", span_law(xs), true),
     check_eq("drop_last ++ take_last is the list", last_law(xs), true),
 
+    check_eq("transpose 2x3", list.transpose([[1, 2, 3], [4, 5, 6]]), [[1, 4], [2, 5], [3, 6]]),
+    check_eq("transpose twice is the matrix", transpose_twice([[1, 2, 3], [4, 5, 6]]), [[1, 2, 3], [4, 5, 6]]),
+    check_eq("transpose ragged", list.transpose([[1], [2, 3]]), [[1, 2], [3]]),
+    check_eq("transpose empty", list.transpose(no_rows), []),
+    check_eq("transpose of empty rows", list.transpose(empty_rows), []),
+    check_eq("transpose with an empty first row", list.transpose([[], [1, 2]]), [[1], [2]]),
+    check_eq("transpose one row", list.transpose([[1, 2, 3]]), [[1], [2], [3]]),
+    check_eq("transpose one column", list.transpose([[1], [2], [3]]), [[1, 2, 3]]),
+    check_eq("transpose skips exhausted rows",
+             list.transpose([[10, 11], [20], [], [30, 31, 32]]), [[10, 20, 30], [11, 31], [32]]),
+    check_eq("transpose with a long row among short ones",
+             list.transpose([[1], [2, 3, 4, 5], [6]]), [[1, 2, 6], [3], [4], [5]]),
+    check_eq("transpose on Strings", list.transpose([["a", "b"], ["c", "d"]]), [["a", "c"], ["b", "d"]]),
+
     # Stack safety: each walks 200k elements without deep recursion.
     check_eq("take, long", list_length(list.take(199999, big)), 199999),
     check_eq("take_last, long", list_length(list.take_last(199999, big)), 199999),
     check_eq("drop_last, long", list_length(list.drop_last(1, big)), 199999),
     check_eq("split_at, long", front_length(list.split_at(199999, big)), 199999),
     check_eq("take_while, long", list_length(list.take_while(below(200000), big)), 199999),
-    check_eq("span, long", front_length(list.span(below(200000), big)), 199999)
+    check_eq("span, long", front_length(list.span(below(200000), big)), 199999),
+    check_eq("transpose, long row", list_length(list.transpose([big])), 200000),
+    check_eq("transpose, long column", list.transpose([[x] for x in big]), [big])
   ])

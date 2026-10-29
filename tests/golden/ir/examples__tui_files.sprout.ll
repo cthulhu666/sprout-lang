@@ -210,9 +210,9 @@ declare i64 @unsafe_pure(i64)
 @.str.64 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 46, column 59)\00" }
 @.str.65 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 73, column 39)\00" }
 @.str.66 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 73, column 67)\00" }
-@.str.67 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 12, column 31)\00" }
+@.str.67 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 16, column 31)\00" }
 @.str.68 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 24, column 28)\00" }
-@.str.69 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 40, column 35)\00" }
+@.str.69 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 44, column 35)\00" }
 @.str.70 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.71 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 25, column 41)\00" }
 @.str.72 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 25, column 46)\00" }
@@ -5406,6 +5406,20 @@ entry:
   ret i64 %t$3
 }
 
+define i64 @stdlib.list.take(i64 %p$n, i64 %p$xs) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$xs, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$4 = alloca i64
+  store i64 %t$0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$1 = call i64 @stdlib.list.take_go(i64 %p$n, i64 %p$xs, i64 %t$0)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.list.take_go(i64 %p$n$in, i64 %p$xs$in, i64 %p$acc$in) {
 entry:
   %t$27 = alloca [3 x i64]
@@ -5490,20 +5504,6 @@ join_3:
   ret i64 %t$4
 }
 
-define i64 @stdlib.list.take(i64 %p$n, i64 %p$xs) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$xs, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$4 = alloca i64
-  store i64 %t$0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.list.take_go(i64 %p$n, i64 %p$xs, i64 %t$0)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$1
-}
-
 define i64 @stdlib.list.drop(i64 %p$n$in, i64 %p$xs$in) {
 entry:
   %t$20 = alloca i64
@@ -5560,6 +5560,20 @@ join_6:
 join_3:
   %t$4 = phi i64 [%p$xs, %then_3], [%t$7, %join_6]
   ret i64 %t$4
+}
+
+define i64 @stdlib.list.split_at(i64 %p$n, i64 %p$xs) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$xs, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$4 = alloca i64
+  store i64 %t$0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$1 = call i64 @stdlib.list.split_at_go(i64 %p$n, i64 %p$xs, i64 %t$0)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$1
 }
 
 define i64 @stdlib.list.split_at_go(i64 %p$n$in, i64 %p$xs$in, i64 %p$acc$in) {
@@ -5668,20 +5682,6 @@ join_3:
   %t$4 = phi i64 [%t$6, %then_3], [%t$9, %join_8]
   %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
-}
-
-define i64 @stdlib.list.split_at(i64 %p$n, i64 %p$xs) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$xs, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$4 = alloca i64
-  store i64 %t$0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.list.split_at_go(i64 %p$n, i64 %p$xs, i64 %t$0)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$1
 }
 
 define i64 @stdlib.tui.keys.imod(i64 %p$n, i64 %p$d) {

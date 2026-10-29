@@ -856,6 +856,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `Dict`/`Set` do not, and a scrambled-order test mode finds callers that rely on it. Stage 1 (add
   the types) is safe now; stage 2 (migrate) goes with `Dict k v`, since a hash `Dict` alone would
   save ~4–5% of a self-compile (`docs/dict-representation-v0.md` §6). `docs/sorted-dict-v0.md`.
+- [ ] `P3` **No immutable `Matrix a`.** Only `MutMatrix` exists (`stdlib.mutable`), and it is
+  `!{IO}` throughout, so pure code holds a grid as `List (List a)`, which can be ragged:
+  `list.transpose` must skip missing cells and so does not round-trip. Wanted: a module
+  `stdlib.matrix` with an abstract `Matrix a` (rows, cols, flat `Vec a`), `from_rows` returning
+  `Maybe`, a total `transpose` that round-trips, and conversion to and from `MutMatrix`. Trigger: a
+  second grid caller beyond LeetCode p0054.
 - [ ] `P2` **Prelude O(n²) audit.** Several helpers are quadratic via naive list-append recursion
   and mostly undocumented: `ToString` for `List`/`Vec`/`Dict`, `list_dedup`,
   `Semigroup (Dict v)`, and several `vec_*` (`map`/`filter`/`filter_map`/`reverse`/`slice`).

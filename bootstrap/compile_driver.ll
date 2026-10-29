@@ -3390,7 +3390,7 @@ declare i64 @fs_rename(i64, i64)
 @__sprout_sclo.__sprout_ir_eta_stdlib.compiler.bce.cand_pair_533 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.compiler.bce.cand_pair_533 }
 @.str.3044 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 24, column 28)\00" }
 @.str.3045 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 28, column 47)\00" }
-@.str.3046 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 40, column 35)\00" }
+@.str.3046 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 44, column 35)\00" }
 @.str.3047 = private unnamed_addr constant { i64, [75 x i8] } { i64 1212426, [75 x i8] c"ast_to_ir.compute_free_vars: TMethodRef survived lowering (internal error)\00" }
 @.str.3048 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"ast_to_ir: build_captures_list_ir: free var '\00" }
 @.str.3049 = private unnamed_addr constant { i64, [76 x i8] } { i64 1228810, [76 x i8] c"' not in params or captures — unreachable if filter_capturable is correct\00" }
@@ -282867,6 +282867,20 @@ join_3:
   ret i64 %t$4
 }
 
+define i64 @stdlib.list.split_at(i64 %p$n, i64 %p$xs) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$xs, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$4 = alloca i64
+  store i64 %t$0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$1 = call i64 @stdlib.list.split_at_go(i64 %p$n, i64 %p$xs, i64 %t$0)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.list.split_at_go(i64 %p$n$in, i64 %p$xs$in, i64 %p$acc$in) {
 entry:
   %t$30 = alloca [3 x i64]
@@ -282973,20 +282987,6 @@ join_3:
   %t$4 = phi i64 [%t$6, %then_3], [%t$9, %join_8]
   %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
-}
-
-define i64 @stdlib.list.split_at(i64 %p$n, i64 %p$xs) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$xs, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$4 = alloca i64
-  store i64 %t$0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.list.split_at_go(i64 %p$n, i64 %p$xs, i64 %t$0)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$1
 }
 
 define i64 @stdlib.compiler.ast_to_ir.compute_free_vars(i64 %p$expr$in, i64 %p$bound$in) {
