@@ -1160,7 +1160,7 @@ declare i64 @fs_rename(i64, i64)
 @stdlib.net.read_chunk = private constant i64 65536
 @stdlib.http_server.token_separators = global i64 zeroinitializer
 @stdlib.json.null = global i64 zeroinitializer
-@stdlib.json.max_depth = private constant i64 64
+@stdlib.json.max_depth = private constant i64 128
 @examples.http_web_server.list_template_path = global i64 zeroinitializer
 @examples.http_web_server.form_template_path = global i64 zeroinitializer
 
