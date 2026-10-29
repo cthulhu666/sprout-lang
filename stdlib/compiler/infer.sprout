@@ -5443,17 +5443,75 @@ fn infer_branch(
   match branch with
   | ast.MatchBranch pat body ->
       do
+        mark <- ref_read(state.next_type_id)
         pr <- infer_pattern(state, env, subst, eff_subst, scrut_type, pat)
         match pr with
         | InferErr pos e -> InferErr(pos, e)
         | InferOk _ s1 es1 _ ->
-            # extend_env_with_existential_givens seeds @fwd markers for any packed
-            # existential dict the pattern unpacks (Stage 0b), keyed by the skolem so
-            # a class method on the unpacked value forwards the packed witness rather
-            # than searching global instances (which have none for a skolem).
-            infer_branch_body(state,
-              extend_env_with_existential_givens(pat, s1, extend_env_from_pattern(pat, s1, env)),
-              s1, es1, ret_type, body, src)
+            do
+              # extend_env_with_existential_givens seeds @fwd markers for any packed
+              # existential dict the pattern unpacks (Stage 0b), keyed by the skolem so
+              # a class method on the unpacked value forwards the packed witness rather
+              # than searching global instances (which have none for a skolem).
+              br <- infer_branch_body(state,
+                      extend_env_with_existential_givens(pat, s1, extend_env_from_pattern(pat, s1, env)),
+                      s1, es1, ret_type, body, src)
+              check_arm_escape(mark, pat, env, scrut_type, ret_type, s1, br)
+
+# A skolem is minted per PATTERN, so every run-time unpack of the arm shares it. A hidden
+# type that reaches a type outside the arm can then meet a different unpack's value, which
+# nominal rigidity does not stop (docs/gadts-v0.md §7). Skolems numbered >= `mark` were
+# minted by this arm's pattern. `env` is the environment before the pattern.
+fn check_arm_escape(
+  mark: Int,
+  pat: ast.Pattern,
+  env: Dict types.Scheme,
+  scrut_type: types.Type,
+  ret_type: types.Type,
+  s1: Dict types.Type,
+  br: InferResult
+) -> InferResult =
+  match br with
+  | InferErr _ _ -> br
+  | InferOk _ s3 _ _ ->
+      let bound = list_map(\n -> (n, unifier.apply_subst(s1, types.TVar(types.tyvar_id(n)))),
+                           ast.pattern_names(pat))
+          hidden = list_filter(\b -> list_length(young_skolems(mark, binding_type(b))) > 0, bound)
+      in if list_length(hidden) == 0 then br
+         else
+           let outer = Cons(scrut_type, Cons(ret_type, list_map(\v -> types.TVar(types.tyvar_id(v)),
+                                                                  unifier.ftv_env(env))))
+               leaked = list_flat_map(\t -> young_skolems(mark, unifier.apply_subst(s3, t)), outer)
+               Just b = find(\b -> any(\sk -> list_member(sk, leaked), young_skolems(mark, binding_type(b))), hidden)
+                 else br
+           in InferErr(ast.pattern_pos(pat), arm_escape_msg(binding_name(b)))
+
+fn binding_name(b: (String, types.Type)) -> String =
+  match b with
+  | (name, _) -> name
+
+fn binding_type(b: (String, types.Type)) -> types.Type =
+  match b with
+  | (_, t) -> t
+
+fn arm_escape_msg(name: String) -> String =
+  "existential type escapes its scope: `" ++ name ++ "` has a type hidden by an `exists` pattern, "
+    ++ "and it would outlive this match arm (through the arm's result or a binding from outside "
+    ++ "the arm). Use it inside the arm, or re-pack it."
+
+fn young_skolems(mark: Int, t: types.Type) -> List String =
+  match t with
+  | types.TVar _ -> Nil
+  | types.TConst id -> young_skolem(mark, types.type_id_name(id))
+  | types.TApp base arg -> young_skolems(mark, base) ++ young_skolems(mark, arg)
+  | types.TFunc p ret _ _ -> young_skolems(mark, p) ++ young_skolems(mark, ret)
+  | types.TThunk ret _ -> young_skolems(mark, ret)
+  | types.TTuple items -> list_flat_map(\i -> young_skolems(mark, i), items)
+
+fn young_skolem(mark: Int, name: String) -> List String =
+  match types.skolem_index(name) with
+  | Just n -> if n >= mark then [name] else Nil
+  | Nothing -> Nil
 
 fn infer_branch_body(
   state: unifier.InferState,

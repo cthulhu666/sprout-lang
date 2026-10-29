@@ -1,0 +1,18 @@
+module main
+
+# The arm's result type is outside the arm. Pairing the hidden value with its
+# function in the result lets a later element's function meet an earlier
+# element's value (spec-v0.md §5.6).
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn first_with_last(shapes: List Shape) -> Int =
+  let pairs = list_map(\s -> match s with | Shape x f -> (x, f), shapes)
+#~^ ERROR
+  in match pairs with
+    | [(x, _) | rest] -> match list_reverse(rest) with
+      | [(_, g) | _] -> g(x)
+      | [] -> 0
+    | [] -> 0
+
+fn main() -> Unit !{IO} = print(first_with_last([Shape(12345, \n -> n + 1), Shape("hello", str_len)]))

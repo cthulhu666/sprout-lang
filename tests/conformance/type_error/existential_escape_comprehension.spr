@@ -1,0 +1,17 @@
+module main
+
+# A comprehension head is the arm result of its generated match, so the hidden
+# type may not appear in it (spec-v0.md §5.6).
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn mix(shapes: List Shape) -> Int =
+  let pairs = [(x, f) for Shape x f in shapes]
+#~^ ERROR
+  in match pairs with
+    | [(x, _) | rest] -> match list_reverse(rest) with
+      | [(_, g) | _] -> g(x)
+      | [] -> 0
+    | [] -> 0
+
+fn main() -> Unit !{IO} = print(mix([Shape(12345, \n -> n + 1), Shape("hello", str_len)]))

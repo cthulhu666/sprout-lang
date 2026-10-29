@@ -8,7 +8,7 @@ module main
 # the two unpacks unified through it rather than being kept distinct — the exact
 # property `existential_merge` exists to prevent, reachable by refactoring it.
 #
-# The rejection lands on `unbox`, where the escape happens, not on `merge`.
+# The rejection lands on `unbox`'s pattern, where the escape happens, not on `merge`.
 
 type Boxed = | exists a. Boxed a
 

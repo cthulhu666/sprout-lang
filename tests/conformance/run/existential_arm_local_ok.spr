@@ -1,0 +1,45 @@
+module main
+
+# Existential unpacks that stay inside their arm are accepted: folding over the
+# unpacked values, re-packing, nested unpacks, an arm-local lambda or `Ref`, and a
+# comprehension whose head uses the unpacked value at a visible type.
+
+type Shape = | exists a. Shape a (a -> Int)
+type Shown = | exists a. Shown a where ToString a
+
+fn repack(shapes: List Shape) -> List Shape =
+  list_map(\s -> match s with | Shape x f -> Shape(x, f), shapes)
+
+fn sum_all(shapes: List Shape) -> Int =
+  list_fold(\ (acc, s) -> match s with | Shape x f -> acc + f(x), 0, shapes)
+
+fn inner_lambda(s: Shape) -> Int =
+  match s with | Shape x f -> (\y -> f(y))(x)
+
+fn generic_call(s: Shape) -> Int =
+  match s with | Shape x f -> f(identity(x))
+
+fn arm_ref(s: Shape) -> Int !{IO} =
+  match s with
+  | Shape x f -> do
+      r <- ref_new(x)
+      v <- ref_read(r)
+      f(v)
+
+fn nested(a: Shape, b: Shape) -> Int =
+  match a with
+  | Shape x f -> match b with
+    | Shape y g -> f(x) + g(y)
+
+fn shown_all(xs: List Shown) -> String =
+  list_fold(\ (acc, s) -> acc ++ s ++ ",", "", [to_string(v) for Shown v in xs])
+
+fn main() -> Unit !{IO} = do
+  let shapes = [Shape("hello", str_len), Shape(5, \n -> n + 1)]
+  print(sum_all(repack(shapes)))
+  print(inner_lambda(Shape(3, \n -> n * 2)))
+  print(generic_call(Shape(3, \n -> n * 2)))
+  n <- arm_ref(Shape("abc", str_len))
+  print(n)
+  print(nested(Shape(1, \n -> n), Shape("xy", str_len)))
+  print(shown_all([Shown(1), Shown("a")]))
