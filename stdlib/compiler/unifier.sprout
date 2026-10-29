@@ -296,7 +296,8 @@ export type InferState (..) = (
   try_positions: Ref (List source.SourcePos),
   census: Ref bind_census.Census,
   unpacks: Ref (List Unpack),
-  decl_unpacks: Ref (List Unpack)
+  decl_unpacks: Ref (List Unpack),
+  arm_escapes: Ref (List ArmEscape)
 )
 
 export fn new_state() -> InferState !{IO} =
@@ -313,11 +314,24 @@ export fn new_state() -> InferState !{IO} =
     census_ref <- ref_new(bind_census.CensusOff)
     unpack_ref <- ref_new(Nil)
     decl_unpack_ref <- ref_new(Nil)
+    arm_ref <- ref_new(Nil)
     InferState(next_type_id = t_id, next_effect_id = e_id, ctor_map = ctor_ref, field_obligations = field_ref,
                bound_obligations = bound_ref,
                effect_reports = effect_ref, parked_binds = bind_ref, try_fusions = fusion_ref,
                try_positions = try_ref, census = census_ref, unpacks = unpack_ref,
-               decl_unpacks = decl_unpack_ref)
+               decl_unpacks = decl_unpack_ref, arm_escapes = arm_ref)
+
+# A binding of a match arm whose type mentions a skolem the arm's pattern minted: its
+# name, the constructor that hid the type, and its type under the pattern's substitution.
+export type ArmHidden (..) = (name: String, ctor: Maybe String, ty: types.Type)
+
+# A match arm that unpacked an existential. A skolem is minted per pattern, so a hidden
+# type reaching a type outside the arm lets two run-time unpacks meet. `mark` is the
+# type-id counter before the pattern: skolems numbered at or above it are the arm's.
+# `outer` holds the types outside the arm (scrutinee, result, free variables of the
+# environment). Kept so the check can be repeated once deferred unifications are settled.
+export type ArmEscape (..) = (mark: Int, pos: source.SourcePos, hidden: List ArmHidden,
+                              outer: List types.Type)
 
 # A variable linear by a `where linear`, by the id a type names it with: a rigid
 # variable's, or an unpacked existential's skolem or `$ex_` name. `written` is the
@@ -374,6 +388,19 @@ export fn take_field_obligations(state: InferState) -> List FieldObligation !{IO
   do
     parked <- ref_read(state.field_obligations)
     ref_write(state.field_obligations, Nil)
+    list_reverse(parked)
+
+export fn park_arm_escape(state: InferState, a: ArmEscape) -> Unit !{IO} =
+  do
+    parked <- ref_read(state.arm_escapes)
+    ref_write(state.arm_escapes, Cons(a, parked))
+
+# Read AND clear, at the boundary take_field_obligations reads at: an arm's outer types
+# belong to one declaration, and a failed body must not leave its arms for the next.
+export fn take_arm_escapes(state: InferState) -> List ArmEscape !{IO} =
+  do
+    parked <- ref_read(state.arm_escapes)
+    ref_write(state.arm_escapes, Nil)
     list_reverse(parked)
 
 export fn park_bound_obligation(state: InferState, o: BoundObligation) -> Unit !{IO} =

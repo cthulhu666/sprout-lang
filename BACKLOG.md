@@ -3008,10 +3008,11 @@ acting.
   function type.
 - [ ] `P3` **Local `let` bindings are not generalized.** A `let`-bound helper has one monomorphic
   type, so `let g = \z -> z in (g(1), g("a"))` is a type error. Next to a `match` on an
-  existential (spec §5.6, "Existential constructors") that means a helper let-bound outside the
-  arm cannot be applied to the unpacked value, since its parameter type would become the hidden
-  type; the program is now rejected and the helper must move into the arm or to the top level.
-  Fix: generalize a `let` whose initializer is a syntactic value, with the value restriction.
+  existential ([spec §5.6, Existential constructors](docs/spec-v0.md#existential-constructors))
+  that means a helper let-bound outside the arm cannot be applied to the unpacked value, since
+  its parameter type would become the hidden type; the program is now rejected and the helper
+  must move into the arm or to the top level. Fix: generalize a `let` whose initializer is a
+  syntactic value, with the value restriction.
 - [ ] `P3` **In a recursive group, a parameter another member pins is called generic.** In
   `fn a_fn(n: Int, x) = … Just(x) == Just(x) … b_fn(n - 1, x)`, `b_fn`'s `y == 3` makes `x` an
   `Int`, yet `resolve` asks for an annotation and a `where`. Each member's post-pass and

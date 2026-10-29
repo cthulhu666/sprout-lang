@@ -1,0 +1,18 @@
+module main
+
+# As existential_escape_field_read, through two deferred reads: `.inner`'s result is
+# the receiver of `.cell`, so the second access is settled in a later round.
+
+type Shape = | exists a. Shape a (a -> Int)
+
+type Holder a = (cell: Ref (List(a -> Int)))
+
+type Outer a = (inner: Holder a)
+
+fn go(shapes: List Shape) -> Unit !{IO} = do
+  let body = \o -> list_each(\s -> match s with | Shape x f -> ref_write(o.inner.cell, [f]), shapes)
+#~^ ERROR
+  r <- ref_new([])
+  body(Outer(inner = Holder(cell = r)))
+
+fn main() -> Unit !{IO} = go([Shape("hello", str_len), Shape(12345, \n -> n + 1)])

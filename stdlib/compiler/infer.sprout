@@ -1096,6 +1096,7 @@ export fn typecheck_expr(
         do
           _ <- unifier.take_field_obligations(state)
           _ <- unifier.take_parked_binds(state)
+          _ <- unifier.take_arm_escapes(state)
           r
     | InferOk _ _ _ _ -> r
 
@@ -1113,13 +1114,22 @@ fn finish_field_obligations(
   do
     pending <- unifier.take_field_obligations(state)
     binds <- unifier.take_parked_binds(state)
+    arms <- unifier.take_arm_escapes(state)
     d <- discharge_field_obligations(state, env, subst, pending)
     match d with
     | DischargeErr dpos dmsg -> FinishErr(dpos, dmsg)
     | DischargeOk s2 ->
         match check_parked_binds(binds, s2) with
         | DischargeErr bpos bmsg -> FinishErr(bpos, bmsg)
-        | DischargeOk s3 -> FinishOk(apply_subst_typed_expr(s3, typed_expr), s3)
+        | DischargeOk s3 -> finish_arm_escapes(arms, typed_expr, s3)
+
+# Last: settling a field read is the one deferred step that unifies, so the arms' escape
+# checks (check_arm_escape) are repeated against what it left.
+fn finish_arm_escapes(arms: List unifier.ArmEscape, typed_expr: typed_ast.TypedExpr,
+                      subst: Dict types.Type) -> FinishResult =
+  match find_map(\a -> map(\m -> (a.pos, m), arm_leak(a, subst)), arms) with
+  | Just (apos, amsg) -> FinishErr(apos, amsg)
+  | Nothing -> FinishOk(apply_subst_typed_expr(subst, typed_expr), subst)
 
 type FinishResult =
   | FinishOk typed_ast.TypedExpr (Dict types.Type)
@@ -5456,13 +5466,18 @@ fn infer_branch(
               br <- infer_branch_body(state,
                       extend_env_with_existential_givens(pat, s1, extend_env_from_pattern(pat, s1, env)),
                       s1, es1, ret_type, body, src)
-              check_arm_escape(mark, pat, env, scrut_type, ret_type, s1, br)
+              check_arm_escape(state, mark, pat, env, scrut_type, ret_type, s1, br)
 
 # A skolem is minted per PATTERN, so every run-time unpack of the arm shares it. A hidden
 # type that reaches a type outside the arm can then meet a different unpack's value, which
 # nominal rigidity does not stop (docs/gadts-v0.md §7). Skolems numbered >= `mark` were
 # minted by this arm's pattern. `env` is the environment before the pattern.
+#
+# The test runs here and AGAIN once the declaration's deferred unifications are settled
+# (finish_arm_escapes): a field read on a receiver not yet known parks its result variable,
+# and settling it later can bind an outer variable to the skolem.
 fn check_arm_escape(
+  state: unifier.InferState,
   mark: Int,
   pat: ast.Pattern,
   env: Dict types.Scheme,
@@ -5470,34 +5485,109 @@ fn check_arm_escape(
   ret_type: types.Type,
   s1: Dict types.Type,
   br: InferResult
-) -> InferResult =
+) -> InferResult !{IO} =
   match br with
   | InferErr _ _ -> br
   | InferOk _ s3 _ _ ->
-      let bound = list_map(\n -> (n, unifier.apply_subst(s1, types.TVar(types.tyvar_id(n)))),
-                           ast.pattern_names(pat))
-          hidden = list_filter(\b -> list_length(young_skolems(mark, binding_type(b))) > 0, bound)
-      in if list_length(hidden) == 0 then br
-         else
-           let outer = Cons(scrut_type, Cons(ret_type, list_map(\v -> types.TVar(types.tyvar_id(v)),
-                                                                  unifier.ftv_env(env))))
-               leaked = list_flat_map(\t -> young_skolems(mark, unifier.apply_subst(s3, t)), outer)
-               Just b = find(\b -> any(\sk -> list_member(sk, leaked), young_skolems(mark, binding_type(b))), hidden)
-                 else br
-           in InferErr(ast.pattern_pos(pat), arm_escape_msg(binding_name(b)))
+      match arm_hidden(mark, pat, env, s1) with
+      | Nil -> br
+      | hidden ->
+          let arm = unifier.ArmEscape(mark = mark, pos = ast.pattern_pos(pat), hidden = hidden,
+                      outer = Cons(scrut_type, Cons(ret_type,
+                                list_map(\v -> types.TVar(types.tyvar_id(v)), unifier.ftv_env(env)))))
+          in match arm_leak(arm, s3) with
+             | Just msg -> InferErr(arm.pos, msg)
+             | Nothing ->
+                 do
+                   unifier.park_arm_escape(state, arm)
+                   br
 
-fn binding_name(b: (String, types.Type)) -> String =
-  match b with
-  | (name, _) -> name
+# The pattern's bindings whose type mentions a skolem the pattern minted.
+fn arm_hidden(mark: Int, pat: ast.Pattern, env: Dict types.Scheme,
+              s1: Dict types.Type) -> List unifier.ArmHidden =
+  let names = list_filter(\n -> list_length(young_skolems(mark, pattern_var_type(s1, n))) > 0,
+                          ast.pattern_names(pat))
+  in list_map(\n -> unifier.ArmHidden(name = n, ctor = hiding_ctor(env, pat, n), ty = pattern_var_type(s1, n)),
+              names)
 
-fn binding_type(b: (String, types.Type)) -> types.Type =
-  match b with
-  | (_, t) -> t
+fn pattern_var_type(s1: Dict types.Type, name: String) -> types.Type =
+  unifier.apply_subst(s1, types.TVar(types.tyvar_id(name)))
 
-fn arm_escape_msg(name: String) -> String =
-  "existential type escapes its scope: `" ++ name ++ "` has a type hidden by an `exists` pattern, "
-    ++ "and it would outlive this match arm (through the arm's result or a binding from outside "
-    ++ "the arm). Use it inside the arm, or re-pack it."
+# The constructor whose pattern hides binding `name`'s type: the innermost enclosing one
+# whose scheme has an existential variable.
+fn hiding_ctor(env: Dict types.Scheme, pat: ast.Pattern, name: String) -> Maybe String =
+  hiding_ctor_in(env, pat, name, Nothing)
+
+fn hiding_ctor_in(env: Dict types.Scheme, pat: ast.Pattern, name: String, best: Maybe String) -> Maybe String =
+  match pat with
+  | ast.VarPattern n _ -> if n == name then best else Nothing
+  | ast.TuplePattern pats _ -> find_map(\p -> hiding_ctor_in(env, p, name, best), pats)
+  | ast.ConstructorPattern c pats _ ->
+      let here = if ctor_hides_type(env, c) then Just(string.after_last_dot(c)) else best
+      in find_map(\p -> hiding_ctor_in(env, p, name, here), pats)
+  | _ -> Nothing
+
+# A constructor hides a type when a scheme variable is absent from its result type.
+fn ctor_hides_type(env: Dict types.Scheme, name: String) -> Bool =
+  match dict_get(name, env) with
+  | Just scheme ->
+      list_length(list_diff(types.scheme_vars(scheme),
+                            types.ftv(ctor_result_type(types.scheme_type(scheme))))) > 0
+  | Nothing -> false
+
+# The arm's escape error against `subst`, when a skolem it minted now sits in a type
+# outside the arm. Names the binding whose own type occurs in a leaked outer type, the
+# largest such type first (`f: a -> Int` over `x: a`, which occurs inside it); else the
+# first binding sharing a leaked skolem.
+fn arm_leak(arm: unifier.ArmEscape, subst: Dict types.Type) -> Maybe String =
+  let outer = list_map(\t -> unifier.apply_subst(subst, t), arm.outer)
+      leaked = list_flat_map(young_skolems(arm.mark, _), outer)
+      parts = list_map(type_shape,
+                       list_flat_map(type_subterms, list_filter(\t -> list_length(young_skolems(arm.mark, t)) > 0, outer)))
+      sharing = list_filter(shares_skolem(arm.mark, leaked, _), arm.hidden)
+      Just h = maybe_or_else(min_by(hidden_rank, list_filter(occurs_in_parts(subst, parts, _), sharing)),
+                             find(\_ -> true, sharing))
+        else Nothing
+  in Just(arm_escape_msg(h.name, h.ctor))
+
+fn shares_skolem(mark: Int, leaked: List String, h: unifier.ArmHidden) -> Bool =
+  any(\sk -> list_member(sk, leaked), young_skolems(mark, h.ty))
+
+# Whether the binding's own type, under `subst`, is one of the rendered `parts`.
+fn occurs_in_parts(subst: Dict types.Type, parts: List String, h: unifier.ArmHidden) -> Bool =
+  list_member(type_shape(unifier.apply_subst(subst, h.ty)), parts)
+
+# A type's rendering without effects, which unify through a separate substitution that
+# the type's own does not carry: the same arrow reads differently in two places.
+fn type_shape(t: types.Type) -> String =
+  match t with
+  | types.TVar v -> types.tyvar_name(v)
+  | types.TConst id -> types.type_id_name(id)
+  | types.TApp base arg -> "(" ++ type_shape(base) ++ " " ++ type_shape(arg) ++ ")"
+  | types.TFunc p ret _ _ -> "(" ++ type_shape(p) ++ " -> " ++ type_shape(ret) ++ ")"
+  | types.TThunk ret _ -> "~" ++ type_shape(ret)
+  | types.TTuple items -> "(" ++ string.join(", ", list_map(type_shape, items)) ++ ")"
+
+# Smaller sorts first, so `min_by` takes the binding with the largest type.
+fn hidden_rank(h: unifier.ArmHidden) -> Int =
+  0 - list_length(type_subterms(h.ty))
+
+# Every subterm of a type, itself first.
+fn type_subterms(t: types.Type) -> List types.Type =
+  Cons(t,
+    match t with
+    | types.TVar _ -> Nil
+    | types.TConst _ -> Nil
+    | types.TApp base arg -> type_subterms(base) ++ type_subterms(arg)
+    | types.TFunc p ret _ _ -> type_subterms(p) ++ type_subterms(ret)
+    | types.TThunk ret _ -> type_subterms(ret)
+    | types.TTuple items -> list_flat_map(type_subterms, items))
+
+fn arm_escape_msg(name: String, ctor: Maybe String) -> String =
+  "existential type escapes its scope: `" ++ name ++ "` has a type hidden by "
+    ++ maybe_with_default("an `exists` pattern", map(\c -> "`" ++ c ++ "`", ctor))
+    ++ ", and it would outlive this match arm (through the arm's result or a binding from "
+    ++ "outside the arm). Use it inside the arm, or re-pack it."
 
 fn young_skolems(mark: Int, t: types.Type) -> List String =
   match t with
@@ -10195,6 +10285,7 @@ fn typecheck_group(
     # that failed left its own behind.
     _ <- unifier.take_bound_obligations(state)
     _ <- unifier.take_decl_unpacks(state)
+    _ <- unifier.take_arm_escapes(state)
     let members = group_members(decl_vec, g)
     # Every member of a group shares a module: a group is mutually recursive
     # declarations, and the bundler rejects import cycles, so one cannot span two.

@@ -1,1 +1,1 @@
-escapes its scope
+existential type escapes its scope: `x` has a type hidden by `Boxed`, and it would outlive this match arm (through the arm's result or a binding from outside the arm). Use it inside the arm, or re-pack it.

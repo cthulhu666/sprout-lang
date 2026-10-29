@@ -1,0 +1,10 @@
+module main
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn first_with_last(shapes: List Shape) -> Int =
+  match list_map(\s -> match s with | Shape x f -> f(x), shapes) with
+  | [n | _] -> n
+  | [] -> 0
+
+fn main() -> Unit !{IO} = print(first_with_last([Shape(12345, \n -> n + 1), Shape("hello", str_len)]))

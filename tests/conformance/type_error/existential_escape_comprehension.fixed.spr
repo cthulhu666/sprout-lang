@@ -1,0 +1,10 @@
+module main
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn mix(shapes: List Shape) -> Int =
+  match [f(x) for Shape x f in shapes] with
+  | [n | _] -> n
+  | [] -> 0
+
+fn main() -> Unit !{IO} = print(mix([Shape(12345, \n -> n + 1), Shape("hello", str_len)]))
