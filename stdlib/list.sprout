@@ -1,8 +1,12 @@
 module stdlib.list
 
-# Slicing a List. A count below zero acts as zero and one past the end as the
-# end, so none of these fails. Data-last, so `xs |> list.take(3)` works. All run
-# in constant stack; `take_last` and `drop_last` count the list first.
+# Slicing and reshaping a List. A count below zero acts as zero and one past the
+# end as the end, so none of these fails. Data-last, so `xs |> list.take(3)` works.
+# All run in constant stack; `take_last` and `drop_last` count the list first.
+
+# O(n): the first `n` elements.
+export fn take(n: Int, xs: List a) -> List a =
+  take_go(n, xs, [])
 
 fn take_go(n: Int, xs: List a, acc: List a) -> List a =
   if n <= 0 then list_reverse(acc)
@@ -10,10 +14,6 @@ fn take_go(n: Int, xs: List a, acc: List a) -> List a =
     match xs with
     | [] -> list_reverse(acc)
     | [x | rest] -> take_go(n - 1, rest, Cons(x, acc))
-
-# O(n): the first `n` elements.
-export fn take(n: Int, xs: List a) -> List a =
-  take_go(n, xs, [])
 
 # O(n): what follows the first `n` elements, sharing `xs`'s tail.
 export fn drop(n: Int, xs: List a) -> List a =
@@ -32,21 +32,16 @@ export fn take_last(n: Int, xs: List a) -> List a =
 export fn drop_last(n: Int, xs: List a) -> List a =
   if n <= 0 then xs else take(list_length(xs) - n, xs)
 
+# O(n): `(take(n, xs), drop(n, xs))` in one walk.
+export fn split_at(n: Int, xs: List a) -> (List a, List a) =
+  split_at_go(n, xs, [])
+
 fn split_at_go(n: Int, xs: List a, acc: List a) -> (List a, List a) =
   if n <= 0 then (list_reverse(acc), xs)
   else
     match xs with
     | [] -> (list_reverse(acc), [])
     | [x | rest] -> split_at_go(n - 1, rest, Cons(x, acc))
-
-# O(n): `(take(n, xs), drop(n, xs))` in one walk.
-export fn split_at(n: Int, xs: List a) -> (List a, List a) =
-  split_at_go(n, xs, [])
-
-fn span_go(pred: a -> Bool, xs: List a, acc: List a) -> (List a, List a) =
-  match xs with
-  | [] -> (list_reverse(acc), [])
-  | [x | rest] -> if pred(x) then span_go(pred, rest, Cons(x, acc)) else (list_reverse(acc), xs)
 
 # O(k), k the length of the prefix: the leading elements that satisfy `pred`,
 # up to the first that does not.
@@ -65,7 +60,31 @@ export fn drop_while(pred: a -> Bool, xs: List a) -> List a =
 export fn span(pred: a -> Bool, xs: List a) -> (List a, List a) =
   span_go(pred, xs, [])
 
+fn span_go(pred: a -> Bool, xs: List a, acc: List a) -> (List a, List a) =
+  match xs with
+  | [] -> (list_reverse(acc), [])
+  | [x | rest] -> if pred(x) then span_go(pred, rest, Cons(x, acc)) else (list_reverse(acc), xs)
+
 # O(n): `g` on each element and its successor, left to right. Empty for fewer than two
 # elements.
 export fn map_adjacent(g: local a -> a -> b, xs: List a) -> List b =
   zip_with(g, xs, drop(1, xs))
+
+# O(cells + rows): rows become columns. A row that has run out is skipped, so ragged input
+# does not round-trip: transpose([[1], [2, 3]]) == [[1, 2], [3]].
+export fn transpose(rows: List (List a)) -> List (List a) =
+  transpose_go(rows, [])
+
+fn transpose_go(rows: List (List a), acc: List (List a)) -> List (List a) =
+  match transpose_split(rows, [], []) with
+  | ([], _) -> list_reverse(acc)
+  | (heads, tails) -> transpose_go(list_reverse(tails), Cons(list_reverse(heads), acc))
+
+# One round: split each row into head and tail, dropping rows that have run out. Both
+# accumulators come out reversed, so the caller flips them.
+fn transpose_split(rows: List (List a), heads: List a,
+                   tails: List (List a)) -> (List a, List (List a)) =
+  match rows with
+  | [] -> (heads, tails)
+  | [[x | rest] | more] -> transpose_split(more, Cons(x, heads), Cons(rest, tails))
+  | [[] | more] -> transpose_split(more, heads, tails)

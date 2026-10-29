@@ -3,7 +3,7 @@
 Status: **steps 1, 2 and 4 landed** (§9): `Zip`, `zip_with`, `zip`, `min`, `max`,
 `list.map_adjacent`; a `Sort` class with `sort`/`sort_by` in `stdlib.sort`, sorting in place over
 `LinVec` (§4.6.1), and `vec_sort`/`vec_sort_by` retired (§4.6.2). Approved, not yet built: `scanl`
-(§4.5). `enumerate` deferred (§4.3).
+(§4.5). `enumerate` deferred (§4.3). Since added from the survey's long tail: `list.transpose`.
 
 ## 1. Problem
 
@@ -40,6 +40,8 @@ Non-goals (v0):
   (`docs/non-empty-v0.md` §9). Adjacent-run grouping has no caller.
 - `unzip`, `zip3`, `zip_longest`, a strict zip that fails on unequal lengths, `scanl1`, `scanr`.
   No survey caller; each is additive later.
+- A right fold. Strict, it is `list_fold` over `list_reverse`; its value is a lazy accumulator,
+  so a strict `fold_right` would take the name with the wrong semantics (`docs/laziness-v0.md`).
 - `abs_diff` (§4.7).
 - `enumerate`, until Sprout has a lazy sequence type or decides not to (§4.3).
 - A `Vec` `map_adjacent`. `Vec` callers index instead; add it when a caller asks.
