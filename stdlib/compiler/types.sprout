@@ -163,6 +163,10 @@ instance Eq TypeId
 export fn is_skolem_name(name: String) -> Bool =
   string.starts_with(name, "$sk")
 
+# The counter value inside a skolem's name; skolems number in the order they are minted.
+export fn skolem_index(name: String) -> Maybe Int =
+  if is_skolem_name(name) then parse_int(string.drop(name, 3)) else Nothing
+
 # Stage 0b: the STABLE forwarding identity for a constrained existential's packed
 # dictionary (docs/gadts-v0.md §5b/§7). The skolem `$sk<n>` that unpacking mints is
 # fresh-per-instantiation and unknown to codegen, so it cannot key the dict

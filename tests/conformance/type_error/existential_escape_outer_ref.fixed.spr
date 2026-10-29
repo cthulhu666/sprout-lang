@@ -1,0 +1,8 @@
+module main
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn measure_all(shapes: List Shape) -> Unit !{IO} =
+  list_each(\s -> match s with | Shape x f -> print(f(x)), shapes)
+
+fn main() -> Unit !{IO} = measure_all([Shape("hello", str_len), Shape(5, \n -> n + 1)])

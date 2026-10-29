@@ -337,11 +337,21 @@ deprecated DatatypeContexts).
   `TVar`. This is the key simplification over the original sketch: because the
   existing unifier already treats two `TConst`s as equal only on name identity,
   a skolem unifies with a concrete type or a distinct skolem **nowhere**, so
-  rigidity + the escape guard fall out of ordinary unification. No rank/level
-  machinery and no post-hoc "did this var stay a variable" scan are needed; the
-  "escape check" is purely a **diagnostic** (`types.type_mentions_skolem` at the
-  mismatch site → the message in §8). A leaked skolem is an inert, unusable type,
-  which is why nominal rigidity is sound without levels.
+  rigidity falls out of ordinary unification. Rigidity alone does not stop an
+  escape, though. A skolem is minted per *pattern*, so every run-time unpack of an
+  arm shares it: nominal rigidity keeps it from meeting a *different* type, but not
+  a *second dynamic instance of the same* skolem. A hidden-typed function stored in
+  an outer `Ref`, carried in a fold accumulator, paired into the arm's result or
+  captured by a `let`-bound lambda is then applied to another unpack's value. So
+  escape is checked at the arm: `infer_branch` reads the type counter before the
+  pattern, and after the body fails the arm if a skolem the pattern minted (index at
+  or above that mark) appears in the arm's result, the scrutinee type or any type
+  variable free in the surrounding environment. This is the level check of
+  OCaml/GHC, done once at the end of the arm rather than inside `unify`, because
+  this unifier is name-keyed and its type variables carry no level. The
+  declaration-level checks (`types.type_mentions_skolem` in `infer_fn_decl` and
+  `finish_let_decl`) remain as backstops, and the unifier still rewords a skolem
+  mismatch (§8).
 - The pack (expression) path instantiates the same constructor scheme normally
   (existential vars become flexible unknowns that *hide* the field type); only
   the unpack (pattern) path skolemizes. Existential vars are derived, not marked:
@@ -358,7 +368,8 @@ deprecated DatatypeContexts).
   (or a value of it) appears in a branch's result type or a longer-lived unknown.
   Must be a clear, located, loud error (Sprout's "fail loudly" posture), with a
   message that names the offending binding rather than surfacing a raw
-  unification failure.
+  unification failure. Implemented: the arm check (§7) reports it at the
+  constructor pattern and names the first escaping binding.
 - Constrained form: constructing `Shown(v)` where `v`'s type lacks the required
   instance reuses the existing "no instance for `C t`" diagnostic at the
   construction site.

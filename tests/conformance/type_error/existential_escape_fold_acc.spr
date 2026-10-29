@@ -1,0 +1,15 @@
+module main
+
+# An unpack's hidden type is one static skolem shared by every run-time unpack of
+# the arm. A fold accumulator that carries one element's hidden-typed function to
+# the next element would apply it to a value of a different hidden type, so a
+# hidden type may not reach a binding from outside the arm (spec-v0.md §5.6).
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn total(shapes: List Shape) -> Int =
+  let (sum, _) = list_fold(\ (acc, s) -> match (acc, s) with | ((n, prev), Shape x f) -> (n + list_fold(\ (m, g) -> m + g(x), 0, prev), [f]), (0, []), shapes)
+#~^ ERROR
+  in sum
+
+fn main() -> Unit !{IO} = print(total([Shape("hello", str_len), Shape(5, \n -> n + 1)]))

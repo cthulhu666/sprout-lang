@@ -1,1 +1,1 @@
-existential type escapes its scope in main.unbox
+existential type escapes its scope: `x` has a type hidden by an `exists` pattern

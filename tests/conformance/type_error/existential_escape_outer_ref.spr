@@ -1,0 +1,15 @@
+module main
+
+# A `Ref` made outside the arm holds one static type for every iteration. Storing
+# an unpacked function in it would let a later unpack apply it to a value of a
+# different hidden type (spec-v0.md §5.6). The fix applies the function inside its
+# arm.
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn stash_all(shapes: List Shape) -> Unit !{IO} = do
+  prev <- ref_new([])
+  list_each(\s -> match s with | Shape x f -> ref_write(prev, [f]), shapes)
+#~^ ERROR
+
+fn main() -> Unit !{IO} = stash_all([Shape("hello", str_len), Shape(5, \n -> n + 1)])

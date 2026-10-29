@@ -1195,20 +1195,51 @@ So `match b with | Boxed x -> x` returned at a concrete type, `x + 1`, and
 merging two separately-unpacked existentials are all rejected; re-packing
 (`Boxed x -> Boxed(x)`) and ignoring (`Boxed _ -> ...`) are allowed.
 
-The hidden type must also not **outlive the unpack**: it may not appear in the
-type of the enclosing declaration, whether that type was written or inferred.
-Omitting the annotation is not an exception —
+The hidden type must also not **outlive the unpack**. It may not appear in the
+match arm's result type, in the type of any binding made outside the arm, or in
+the type of the enclosing declaration, whether that type was written or
+inferred. The arm is checked as it ends, and the error is reported at the
+constructor pattern:
 
 ```
-fn unbox(b: Boxed) = match b with | Boxed x -> x       # rejected at the decl
-let leaked = match Boxed("hi") with | Boxed x -> x     # rejected at the binding
+existential type escapes its scope: `f` has a type hidden by an `exists` pattern,
+and it would outlive this match arm (through the arm's result or a binding from
+outside the arm). Use it inside the arm, or re-pack it.
 ```
 
-are both errors, reported as `existential type escapes its scope in <name>`.
-Were either accepted, the abstract type would be fixed into that declaration's
-type and then shared by every one of its call sites — the opposite of the
-per-unpack freshness the rule above depends on, and enough to make two unpacks
-unify through the one shared declaration.
+Omitting the annotation is not an exception, and neither is routing the value
+through something that is not itself a declaration —
+
+```
+fn unbox(b: Boxed) = match b with | Boxed x -> x       # rejected: x is the arm's result
+let leaked = match Boxed("hi") with | Boxed x -> x     # rejected: x is the arm's result
+[(x, f) for Shape x f in shapes]                       # rejected: the head is the arm's result
+```
+
+and a type variable created outside the arm counts as outside: a `Ref` made
+before the arm, a fold accumulator, and a lambda parameter all have one type for
+every iteration, so storing a hidden-typed value in one is rejected. Because a
+local `let` is monomorphic, so is a lambda bound by `let` outside the arm and
+applied to the unpacked value:
+
+```sprout
+type Shown = | exists a. Shown a where ToString a
+
+# rejected: `g`'s parameter type is fixed to the hidden type
+fn go(s: Shown) -> String =
+  let g = \z -> two(z, 9)
+  in match s with | Shown v -> g(v)
+
+# accepted: `g` is bound inside the arm
+fn go(s: Shown) -> String =
+  match s with | Shown v -> let g = \z -> two(z, 9) in g(v)
+```
+
+The hidden type is one static type, but a match arm runs once per value, and each
+run unpacks a different hidden type. If it could reach a type that outlives the
+arm, two unpacks would meet at that one static type: a function from one
+element's hidden type would be applied to another element's value. This is the
+per-unpack freshness the rule above depends on.
 
 **Runtime.** Zero cost — the same tagged representation as an ordinary
 constructor; the hidden type is erased.
