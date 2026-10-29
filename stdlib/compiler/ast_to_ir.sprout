@@ -443,9 +443,43 @@ fn build_load_env_ops_go(frees: List String, kinds: List sprout_ir.IRType, base_
 # existential's packed witness fields via types.witness_slots_for_class (the SAME
 # transitive-super method expansion the dict-lowering path uses), matching the
 # per-method witness args construction packs.
-export fn build_ctor_table(decls: List typed_ast.TypedDecl) -> (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
-  build_ctor_table_acc(decls, 0, dict_empty(), Nil, (tables.order, tables.supers))
+#
+# Sum constructors, wraps and records are keyed in ONE dict, so a name declared twice
+# would silently replace the first entry (a record's `sole = true` over a sum
+# constructor's tag, for one). infer.check_duplicate_module_values rejects that
+# before codegen; the Err here makes a gap in that check a compile error instead.
+export fn build_ctor_table(decls: List typed_ast.TypedDecl) ->
+    Result String (Dict sprout_ir.CtorInfo, List sprout_ir.CtorReg) =
+  match ctor_key_clash(decls, set_empty()) with
+  | Just name -> Err("internal error: constructor `" ++ name ++ "` is declared twice in one module")
+  | Nothing -> Ok(build_ctor_table_acc(decls, 0, dict_empty(), Nil, (tables.order, tables.supers)))
   where tables = typed_ast.class_tables(decls)
+
+# The first table key declared twice: the keys build_ctor_table_acc writes.
+fn ctor_key_clash(decls: List typed_ast.TypedDecl, seen: Set) -> Maybe String =
+  match decls with
+  | Nil -> Nothing
+  | Cons decl rest ->
+      match decl with
+      | typed_ast.TPassThrough (ast.TypeDecl _ _ ctors _ _ _ _) ->
+          ctor_names_clash(list_map(ctor_decl_name, ctors), rest, seen)
+      | typed_ast.TPassThrough (ast.WrapDecl type_name _ _ _ _ _ _) ->
+          ctor_names_clash([type_name], rest, seen)
+      | typed_ast.TPassThrough (ast.RecordDecl type_name _ _ _ _ _ _) ->
+          ctor_names_clash([type_name], rest, seen)
+      | _ -> ctor_key_clash(rest, seen)
+
+fn ctor_names_clash(names: List String, rest: List typed_ast.TypedDecl, seen: Set) -> Maybe String =
+  match names with
+  | Nil -> ctor_key_clash(rest, seen)
+  | Cons name more ->
+      if set_member(name, seen)
+      then Just(name)
+      else ctor_names_clash(more, rest, set_insert(name, seen))
+
+fn ctor_decl_name(tc: ast.TypeConstructor) -> String =
+  match tc with
+  | ast.TypeConstructor name _ _ _ _ -> name
 
 fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                         acc: Dict sprout_ir.CtorInfo,
@@ -6318,7 +6352,8 @@ export fn translate_program(prog: typed_ast.TypedProgram) ->
   match prog with
   | typed_ast.TypedProgram decls ->
       match build_ctor_table(decls) with
-      | (ctors, ctor_regs) ->
+      | Err msg -> Err(msg)
+      | Ok (ctors, ctor_regs) ->
           do
             _ <- validate_reserved_namespace(decls)
             penv <- new_prog_env(decls, ctors)

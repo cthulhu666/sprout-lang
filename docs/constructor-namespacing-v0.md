@@ -12,6 +12,12 @@ one module cannot both declare a constructor called `Ok`, so one of them must
 invent a different name. Module qualification does not help — the collision is
 *inside* one module.
 
+The checker enforces this (spec-v0 §5.1): a second declaration of a constructor
+name is rejected at that declaration, and the rule covers record and `wrap`
+constructors too. Before, only an LLVM global redefinition stopped two sum types
+sharing a name, and a record or `wrap` sharing one with a sum constructor was
+miscompiled or silently shadowed.
+
 The cost is invisible in the code, because it was paid upstream in the naming.
 Counting constructor-name collisions across `stdlib/`, `ide/` and `testsupport/`
 finds almost none — 8 of 652 distinct names (1.2%), none of them within a single
@@ -22,7 +28,8 @@ only that the constraint was obeyed, not that it was cheap.
 
 Measured over `stdlib/`, `ide/` and `testsupport/` — 307 types, 585 sum-arm
 constructors (the 652 above additionally counts record and `wrap` constructors,
-which are named after their type and so cannot collide this way):
+which are named after their type; they share the same namespace, so a sum
+constructor with a record's or `wrap`'s name is also a clash):
 
 - **394 constructors (67%) carry a prefix or suffix shared by every sibling** —
   a namespace spelled by hand. `types.Type` is `TVar TConst TApp TFunc TThunk

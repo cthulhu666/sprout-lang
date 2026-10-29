@@ -121,13 +121,13 @@ fn sealed_used_once(n: Int) -> Int =
 
 # A wrap's own type parameters obey the same two rules as an ADT's: one the RHS
 # stores carries the obligation, one it never mentions is phantom and drops it.
-wrap Crate a = a
+wrap Hamper a = a
 
 wrap Tagged u = Int
 
 fn crated_used_once(n: Int) -> Int =
-  let c = Crate(File(n))
-  in match c with | Crate f -> use_file(f)
+  let c = Hamper(File(n))
+  in match c with | Hamper f -> use_file(f)
 
 fn wrap_phantom_dropped(n: Int) -> Int =
   let t = Tagged(n)

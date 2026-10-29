@@ -1,0 +1,50 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.string as string
+import stdlib.compiler.ast as ast
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.ast_to_ir as ast_to_ir
+
+# ast_to_ir.build_ctor_table keys sum constructors, wraps and records in one table.
+# infer rejects a name declared twice first, so no program reaches the guard here;
+# these tests call it directly on declarations the checker never saw.
+
+fn passthrough(d: ast.Decl) -> typed_ast.TypedDecl = typed_ast.TPassThrough(d)
+
+fn decls_of(src: String) -> List typed_ast.TypedDecl =
+  match lexer.tokenize(src) with
+  | Err _ -> Nil
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> Nil
+      | Ok prog ->
+          let ast.Program decls _ = prog
+          in list_map(passthrough, decls)
+
+# "ok" for a built table, else the error message.
+fn outcome(src: String) -> String =
+  match ast_to_ir.build_ctor_table(decls_of(src)) with
+  | Ok _ -> "ok"
+  | Err msg -> msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let clash = "constructor `Foo` is declared twice"
+    assert_eq(state, "parsed declarations are not empty", list_length(decls_of("type A = | Foo Int")), 1)
+    assert_eq(state, "distinct constructors build a table",
+              outcome("type A = | Foo Int | Bar\ntype B = (x: Int)\nwrap C = Int"), "ok")
+    assert_eq(state, "a sum type named like a constructor is not a clash",
+              outcome("type Foo = | Foo Int"), "ok")
+    assert_true(state, "sum constructor, then record of that name",
+                string.contains(outcome("type A = | Foo Int\ntype Foo = (x: Int)"), clash))
+    assert_true(state, "record, then sum constructor of that name",
+                string.contains(outcome("type Foo = (x: Int)\ntype A = | Foo Int"), clash))
+    assert_true(state, "sum constructor, then wrap of that name",
+                string.contains(outcome("type A = | Foo Int\nwrap Foo = Int"), clash))
+    assert_true(state, "two sum types sharing a constructor",
+                string.contains(outcome("type A = | Foo Int\ntype B = | Foo String"), clash))
+    assert_true(state, "one sum type naming a constructor twice",
+                string.contains(outcome("type A = | Foo Int | Foo String"), clash))
+    summary(state)

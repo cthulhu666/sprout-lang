@@ -354,7 +354,8 @@ fn compile_reachable(prog: typed_ast.TypedProgram) ->
       | Err msg -> Err(msg)
       | Ok _ ->
           match ast_to_ir.build_ctor_table(decls) with
-          | (ctors, ctor_regs) ->
+          | Err msg -> Err(msg)
+          | Ok (ctors, ctor_regs) ->
               do
                 penv <- ast_to_ir.new_prog_env(decls, ctors)
                 let ret_i64 = ast_to_ir.build_ret_i64(decls)

@@ -1,0 +1,15 @@
+# A sum constructor and a wrap constructor share the name `Meters`. The later
+# declaration shadowed the earlier one, so a use of `Meters` was blamed with
+# "Type mismatch: main.Shape vs main.Meters" instead of the declaration.
+type Shape (..) =
+  | Meters Int
+  | Other String
+
+wrap Meters (..) = String
+
+fn f(s: Shape) -> String =
+  match s with
+  | Meters m -> int_to_string(m)
+  | _ -> "other"
+
+fn main() -> Unit !{IO} = print(f(Other("hi")))
