@@ -2490,6 +2490,8 @@ task-io-smoke: bootstrap-from-seed
   # A handle of the wrong kind, or one never issued, is rejected by kind and range.
   build tests/task_io_smoke/invalid_handle_kind_fails.spr
   run_expect_fail "invalid-handle-kind" "invalid channel handle"
+  build tests/task_io_smoke/invalid_handle_stale_kind_fails.spr
+  run_expect_fail "invalid-handle-stale-kind" "invalid channel handle"
   build tests/task_io_smoke/invalid_handle_never_issued_fails.spr
   run_expect_fail "invalid-handle-never-issued" "invalid channel handle"
   # A join must not free a channel a task outside the scope is still parked on.

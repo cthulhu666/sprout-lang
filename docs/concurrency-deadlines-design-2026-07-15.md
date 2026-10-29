@@ -454,8 +454,8 @@ AGENTS.md, performance alone does not justify added surface without a measured b
 
 ## 9. Error-message impact
 
-- `__await_deadline` on a null scope/task → loud fail, matching the existing `__scope_*`
-  null guards.
+- `__await_deadline` on an invalid or stale scope/task handle → loud fail, matching the
+  other `__scope_*` handle checks.
 - The `Expired` path provably never calls `task_await` on the dropped child, so the L0.5
   "awaiting a task dropped by scope_cancel" loud-fail is not reachable through `with_timeout`
   — but it remains the backstop if a future caller misuses the handle.

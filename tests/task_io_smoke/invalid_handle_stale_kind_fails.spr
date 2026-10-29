@@ -1,0 +1,13 @@
+import stdlib.task (Scope, with_scope, scope_handle)
+import stdlib.terminal as terminal
+
+# The kind is checked before staleness. A closed scope's handle passed where a channel handle is
+# expected must report the kind mismatch, not "scope used after it closed". The raw extern is
+# redeclared (same form as invalid_handle_kind_fails.spr) to reach the check.
+extern fn __chan_send(chan_id: Int, value: a) -> Unit !{IO} where linear a
+
+fn main() -> Unit !{IO} =
+  do
+    h <- with_scope(\s -> scope_handle(s))
+    __chan_send(h, 1)  # rejected: a stale scope handle is not a channel
+    terminal.write("should-not-reach\n")
