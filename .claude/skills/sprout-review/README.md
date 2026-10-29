@@ -231,19 +231,30 @@ angles up to `high`, which is `/simplify`'s own fallback shape, and one per angl
 
 **Cleanups are verified, by their own skeptic** (since 2026-10-09). It checks claims first: the
 cited code says what the cleanup says, a named helper exists and does the same job, the proposed
-form keeps behaviour. Since 2026-10-10 it also scores each true cleanup's worth 1–5, as a separate
-answer, and the script marks it DO or SKIP against `--do-at` (default 3). Worth was left out at
-first to keep taste out of the truth verdict; a separate field does that, and a reader handed eight
-unranked cleanups had to do the ranking anyway. Before the skeptic, run `1791578046-40156` handed
-over eight cleanups, none checked by anyone but the pass that wrote them. It is a second agent
+form keeps behaviour. It then makes a second, separate decision on each true cleanup: DO by default,
+SKIP only for a named reason (`taste`, `scope`, `cost` or `risk`). The decision is a separate field
+to keep taste out of the truth verdict.
+
+From 2026-10-10 that second answer was a worth score 1–5, marked DO or SKIP against a threshold of
+3. It misfired, and was replaced by the rule above. Over 20 runs (2026-10-10..13) the skeptic scored
+114 confirmed cleanups 1×1, 64×2, 47×3, 2×4, 0×5, so most real cleanups were skipped. It scored
+size, not kind: 44 of the 64 twos say "small", and removing duplication, a 4 by the scale's own
+anchor, got 2s. And it charged standalone cost the PR already pays: a cleanup was skipped for
+"needs a reseed" on a PR that had already reseeded, and three were skipped as "tiny" inside files
+the PR was editing anyway. Marginal cost is the right question, so the prompt says the diff already
+pays its cycles, size is never a reason, and each skip must name which of the four reasons applies.
+The skip rate per reason is not calibrated (`BACKLOG.md`).
+
+Before the skeptic, run `1791578046-40156` handed over eight cleanups, none checked by anyone but
+the pass that wrote them. It is a second agent
 rather than a second list for the bug skeptic so that each track has its own `VERIFY_CAP`; sharing
 one, that run's 6 bugs would have pushed 4 of its 8 cleanups past the cap.
 
-**A comment the diff made false scores at least 3** (since 2026-10-17). Run `1792220382-44063`
-confirmed two such comments on PR #652 and scored them 2, "small gain, near-zero cost", so both
-landed under SKIP. The scale weighed the size of the edit; the cost is the next reader trusting
-the comment. The same run is why every entry is now numbered by the script: the reader picked
-fixes by position in an unnumbered list, which is one misread away from fixing the wrong one.
+**A comment the diff made false is always DO** (floored at score 3 since 2026-10-17). Run
+`1792220382-44063` confirmed two such comments on PR #652 and scored them 2, "small gain,
+near-zero cost", so both landed under SKIP. The scale weighed the size of the edit; the cost is the
+next reader trusting the comment. The same run is why every entry is now numbered by the script:
+the reader picked fixes by position in an unnumbered list, which is one misread away from fixing the wrong one.
 
 The built-in `/code-review` already runs cleanup angles at `high` — three cleanup, one altitude and
 one conventions, inline in one context. The conventions angle (quote a CLAUDE.md rule, quote the line
