@@ -1145,6 +1145,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   match t with …` is what `[a, b | rest]` exists to flatten, and neither `list-shape-pattern` (which
   needs a chain ending in a literal `Nil`) nor `list-prefix-pattern` (a wildcard tail) covers it.
 
+**Testing tools**
+
+- [ ] `P2` **No property-based testing: tests check hand-picked points and cannot shrink.** Two
+  tests hand-roll generators (`test_mutvec_sort.spr`, `test_parse_double_differential.spr`), and
+  fixed small inputs missed `rng_hash2` trapping near `INT_MAX`. Proposal: `stdlib.prop` with
+  choice-sequence shrinking, then crash shrinking via a subprocess driver, then a mutation-testing
+  report. `docs/property-testing-v0.md`.
+
 **Gates and diagnostics**
 
 - [ ] `P3` **14 stdlib modules have no section in `docs/stdlib-reference.md`.** `args`, `bits`,
