@@ -1,0 +1,8 @@
+module main
+
+type Shape = | exists a. Shape a (a -> Int)
+
+fn total(shapes: List Shape) -> Int =
+  list_fold(\ (acc, s) -> match s with | Shape x f -> acc + f(x), 0, shapes)
+
+fn main() -> Unit !{IO} = print(total([Shape("hello", str_len), Shape(5, \n -> n + 1)]))

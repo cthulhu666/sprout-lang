@@ -1202,10 +1202,15 @@ inferred. The arm is checked as it ends, and the error is reported at the
 constructor pattern:
 
 ```
-existential type escapes its scope: `f` has a type hidden by an `exists` pattern,
-and it would outlive this match arm (through the arm's result or a binding from
-outside the arm). Use it inside the arm, or re-pack it.
+existential type escapes its scope: `f` has a type hidden by `Shape`, and it would
+outlive this match arm (through the arm's result or a binding from outside the arm).
+Use it inside the arm, or re-pack it.
 ```
+
+The check runs again once the declaration's deferred field reads are settled. A
+field read on a value whose type is not yet known (`o.cell`, where `o` is a lambda
+parameter) is typed at the end of the declaration, and that can bind an outer type
+to the hidden one after the arm has ended.
 
 Omitting the annotation is not an exception, and neither is routing the value
 through something that is not itself a declaration —
@@ -1225,13 +1230,15 @@ applied to the unpacked value:
 ```sprout
 type Shown = | exists a. Shown a where ToString a
 
+fn two(x: a, n: Int) -> String where ToString a = to_string(x) ++ int_to_string(n)
+
 # rejected: `g`'s parameter type is fixed to the hidden type
-fn go(s: Shown) -> String =
+fn go_outside(s: Shown) -> String =
   let g = \z -> two(z, 9)
   in match s with | Shown v -> g(v)
 
 # accepted: `g` is bound inside the arm
-fn go(s: Shown) -> String =
+fn go_inside(s: Shown) -> String =
   match s with | Shown v -> let g = \z -> two(z, 9) in g(v)
 ```
 

@@ -1,0 +1,18 @@
+module main
+
+# `o.cell` reads a field of a receiver whose type is not known yet: the access is
+# settled at the end of the declaration, after the arm. That settling is what puts
+# the hidden function's type into `o`'s, so the escape check also runs once the
+# deferred field reads are settled (spec-v0.md §5.6).
+
+type Shape = | exists a. Shape a (a -> Int)
+
+type Holder a = (cell: Ref (List(a -> Int)))
+
+fn go(shapes: List Shape) -> Unit !{IO} = do
+  let body = \o -> list_each(\s -> match s with | Shape x f -> ref_write(o.cell, [f]), shapes)
+#~^ ERROR
+  r <- ref_new([])
+  body(Holder(cell = r))
+
+fn main() -> Unit !{IO} = go([Shape("hello", str_len), Shape(12345, \n -> n + 1)])

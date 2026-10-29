@@ -1,0 +1,14 @@
+module main
+
+type Shape = | exists a. Shape a (a -> Int)
+
+type Holder = (cell: Ref (List Int))
+
+type Outer = (inner: Holder)
+
+fn go(shapes: List Shape) -> Unit !{IO} = do
+  let body = \o -> list_each(\s -> match s with | Shape x f -> ref_write(o.inner.cell, [f(x)]), shapes)
+  r <- ref_new([])
+  body(Outer(inner = Holder(cell = r)))
+
+fn main() -> Unit !{IO} = go([Shape("hello", str_len), Shape(12345, \n -> n + 1)])

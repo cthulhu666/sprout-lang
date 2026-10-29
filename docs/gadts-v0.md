@@ -348,7 +348,13 @@ deprecated DatatypeContexts).
   or above that mark) appears in the arm's result, the scrutinee type or any type
   variable free in the surrounding environment. This is the level check of
   OCaml/GHC, done once at the end of the arm rather than inside `unify`, because
-  this unifier is name-keyed and its type variables carry no level. The
+  this unifier is name-keyed and its type variables carry no level. The check is
+  repeated once the declaration's deferred field obligations are settled
+  (`finish_field_obligations`): a field read on a receiver whose type is not yet
+  known gets a result variable, and settling it at the end of the declaration can
+  bind an outer variable to the skolem after the arm has ended. That is the only
+  deferred step that unifies; the others (parked binds, bound obligations, deferred
+  modes, dispatch repair) only inspect the final substitution. The
   declaration-level checks (`types.type_mentions_skolem` in `infer_fn_decl` and
   `finish_let_decl`) remain as backstops, and the unifier still rewords a skolem
   mismatch (§8).
@@ -369,7 +375,8 @@ deprecated DatatypeContexts).
   Must be a clear, located, loud error (Sprout's "fail loudly" posture), with a
   message that names the offending binding rather than surfacing a raw
   unification failure. Implemented: the arm check (§7) reports it at the
-  constructor pattern and names the first escaping binding.
+  constructor pattern and names the escaping binding and the constructor that hid
+  its type.
 - Constrained form: constructing `Shown(v)` where `v`'s type lacks the required
   instance reuses the existing "no instance for `C t`" diagnostic at the
   construction site.
