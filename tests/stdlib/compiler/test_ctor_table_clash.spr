@@ -45,6 +45,10 @@ fn main() -> Unit !{IO} =
                 string.contains(outcome("type A = | Foo Int\nwrap Foo = Int"), clash))
     assert_true(state, "two sum types sharing a constructor",
                 string.contains(outcome("type A = | Foo Int\ntype B = | Foo String"), clash))
+    assert_true(state, "two records of one name",
+                string.contains(outcome("type Foo = (x: Int)\ntype Foo = (y: Int)"), clash))
+    assert_true(state, "two wraps of one name",
+                string.contains(outcome("wrap Foo = Int\nwrap Foo = String"), clash))
     assert_true(state, "one sum type naming a constructor twice",
                 string.contains(outcome("type A = | Foo Int | Foo String"), clash))
     summary(state)
