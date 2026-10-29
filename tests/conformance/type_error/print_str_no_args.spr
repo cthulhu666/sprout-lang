@@ -1,0 +1,5 @@
+# `print_str` is an ordinary extern taking one String: the checker rejects a call with no
+# argument, so lowering never sees one.
+fn main() -> Unit !{IO} =
+  print_str()
+  #~^ ERROR

@@ -4,7 +4,7 @@ module main
 # `double_from_bits`) is called, not lowered as the intrinsic. Each shape below once compiled
 # the call to a single instruction and never called the local. The control lines keep the real
 # intrinsics working. (`print` is an ordinary prelude function, so it is not a case;
-# `print_str` is covered near the end.)
+# `print_str`, a plain extern, is covered near the end.)
 
 import stdlib.bits
 
@@ -65,8 +65,8 @@ fn pattern_bound(p: (Int -> Int -> Int, Int)) -> Int =
   match p with
   | (bit_or, y) -> bit_or(y, 3)
 
-# `print_str` is an intrinsic too: a parameter and a let-bound lambda of that name are
-# called, not lowered as a write to stdout.
+# `print_str` is a plain extern: a parameter and a let-bound lambda of that name are called,
+# not resolved to the extern and its write to stdout.
 fn param_print_str(print_str: String -> Int) -> Int = print_str("four")
 
 fn let_print_str() -> Int =

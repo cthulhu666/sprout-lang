@@ -307,11 +307,6 @@ export type IROp (..) =
   # (which currently accepts only Int/Char); the is_string_type routing arm here is a
   # forward-compatibility hook for when that restriction is lifted.
   | IRStrCompare String String String String
-  # IRPrintStr <result> <callee> <arg>  — write a String to stdout/stderr.
-  # Serves `print_str` ("print_str", stdout) and `eprint` ("eprint_str", stderr).
-  # Both take a `const char*` in the C runtime, so lowering coerces the i64-uniform
-  # String handle to ptr (inttoptr) before the call.
-  | IRPrintStr String String String
   # IRStrFromInt's IR-op name diverges from the runtime name; it lowers to @int_to_string.
   | IRStrFromInt String String
   # IRMakeCtor <result> <ctor-name> <tag> <args>
@@ -621,7 +616,6 @@ export fn op_direct_callee(op: IROp) -> Maybe String =
   | IRStrConcat _ _ _ -> Nothing
   | IRStrEq _ _ _ -> Nothing
   | IRStrCompare _ _ _ _ -> Nothing
-  | IRPrintStr _ _ _ -> Nothing
   | IRStrFromInt _ _ -> Nothing
   | IRMakeCtor _ _ _ _ -> Nothing
   | IRReuseCtor _ _ _ _ _ _ -> Nothing
@@ -807,8 +801,6 @@ export fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = str_eq " ++ a ++ ", " ++ b
   | IRStrCompare r pred a b ->
       "    " ++ r ++ " = str_compare[" ++ pred ++ "] " ++ a ++ ", " ++ b
-  | IRPrintStr r callee arg ->
-      "    " ++ r ++ " = " ++ callee ++ " " ++ arg
   | IRStrFromInt r n ->
       "    " ++ r ++ " = int_to_string " ++ n
   | IRMakeCtor r name tag args ->

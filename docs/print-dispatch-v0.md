@@ -1,6 +1,6 @@
 # `print` through `ToString` — v0
 
-**Status — approved; in progress (§10 steps 1–4 landed).** Changes the normative spec: `print`'s
+**Status — approved; landed (§10 steps 1–5).** Changes the normative spec: `print`'s
 type, its output for `Bool`, `List`, `Vec` and any type with a hand-written instance, and the
 `no_prelude` floor.
 
@@ -119,10 +119,9 @@ claimed as a gain of this design.
 
 `print_str(s: String) -> Unit !{IO}` replaces `print` in the `no_prelude` floor (spec §3.1). It is
 the existing runtime symbol `print_str`, already in `runtime/APPROVED_BUILTINS`; no runtime
-function is added. It lowers through the existing `IRPrintStr` op, as `eprint` does today, because
-the compiler declares the symbol with a `ptr` parameter while a plain extern call passes `i64`. It
-is monomorphic, so no type-directed lowering remains. No file in the four repositories uses the
-name. Step 5 (§10) drops that declare and makes it a plain extern.
+function is added. It is a plain extern, declared `i64` like `eprint`, with no special lowering
+(step 5, §10). It is monomorphic, so no type-directed lowering remains. No file in the four
+repositories uses the name.
 
 ### 4.3 What the compiler loses
 
@@ -245,8 +244,8 @@ in function main`. For a type declared in the program it should add "add `derivi
   still names `print`. 9 add `deriving (ToString)`.
 - Tests whose premise goes away:
   - `tests/stdlib/compiler/test_intrinsic_eta.spr` asserts `print` as a value emits `@print_str` /
-    `@print_value` and rejects a free type variable. Re-point it at `eprint` and `to_double`,
-    which stay intrinsics.
+    `@print_value` and rejects a free type variable. Re-point it at `to_double`, which stays an
+    intrinsic (`eprint` is a plain extern after step 5).
   - `tests/stdlib/compiler/test_repl_completion_surface.spr` treats `print` as a prelude extern
     (offered as a global, not public). Both checks flip for an exported `fn`.
   - `tests/conformance/run/intrinsic_as_value.spr`: its header states the intrinsic premise, and
@@ -332,9 +331,9 @@ declaration, and needs a rule for which instance wins when the user also writes 
    `tests/c_runtime/read_file_error_print.c` (§7). Separate, small.~~ Landed. `print_int`,
    `print_text` and `print_newline` went with it (also unreferenced). The test became
    `tests/c_runtime/read_file_error_payload.c`.
-5. **Plain externs for the String sinks.** `print_str` and `eprint` are call-site intrinsics
-   because the compiler declares `print_str` and `eprint_str` with a `ptr` parameter
-   (`runtime_declares`) and casts at each call (`IRPrintStr`). Ten other externs whose C takes
+5. ~~**Plain externs for the String sinks.** `print_str` and `eprint` were call-site intrinsics
+   because the compiler declared `print_str` and `eprint_str` with a `ptr` parameter
+   (`runtime_declares`) and cast at each call (`IRPrintStr`). Ten other externs whose C takes
    `const char*`, among them `env_get`, `tcp_write` and `regex_is_match`, are plain externs
    declared `i64`. Make `print_str` one, and change its C parameter to `long long` so the
    declare matches the define. Bind the prelude's `eprint` to the runtime's unused
@@ -345,7 +344,11 @@ declaration, and needs a rule for which instance wins when the user also writes 
    `is_nonallocating_read`: an unknown extern is a GC trigger (`op_triggers_gc_summary`), so
    without it every print becomes a rooting point. Run time is otherwise unchanged. One reseed;
    for one iteration the old seed's `declare @print_str(ptr)` meets a `long long` define, the
-   same register on x86-64 and arm64, as for the ten above.
+   same register on x86-64 and arm64, as for the ten above.~~ Landed, with two reseeds, not
+   one. The compiler calls `eprint` itself, and the old seed lowers that to `@eprint_str`, so
+   `refresh-seed`'s first stage 1 links only while the runtime still defines it. The first
+   reseed ran with `eprint_str` in place; it was deleted after, and the second reseed proved the
+   new seed builds without it.
 
 On landing, these `BACKLOG.md` entries are deleted: "Make compiled `print` dispatch through
 `ToString`", "`print` writes a string literal inside an ADT as a number" and "An unannotated

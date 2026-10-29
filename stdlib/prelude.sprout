@@ -1840,7 +1840,7 @@ instance ToString (a, b, c, d, e) where linear a, linear b, linear c, linear d, 
 
 # I/O
 extern fn eprint(val: String) -> Unit !{IO}
-# Monomorphic String sink; lowers through IRPrintStr like eprint.
+# Writes a String and a newline to stdout. A plain extern, like `eprint` (stderr).
 extern fn print_str(s: String) -> Unit !{IO}
 
 # Writes `to_string(value)` and a newline to stdout. O(n) in the rendered length.

@@ -3759,15 +3759,13 @@ fn finish_match(match_ty: types.Type, s_blocks: List sprout_ir.IRBlock,
           phi_name, idx))
 
 # The builtins whose lowering is chosen at the CALL SITE rather than by a symbol.
-# `eprint` and `print_str` take a String and lower to IRPrintStr, whose runtime
-# symbol takes `ptr` where a plain call passes i64;
 # `to_double` and the Double bit accessors are single LLVM instructions; each
 # bits operation is one integer instruction.  So a plain `call @<name>` would not
 # resolve or would not verify — which is why a reference in
 # VALUE position routes through here too (synthesize_intrinsic_eta_closure), except
 # `unsafe_pure`, which infer rejects as a value.
 export fn is_call_site_intrinsic(fname: String) -> Bool =
-  fname == "eprint" || fname == "print_str" || fname == "to_double"
+  fname == "to_double"
     || fname == "double_to_bits" || fname == "double_from_bits"
     || fname == source.unsafe_pure_name
     || is_bits_intrinsic(fname)
@@ -3779,10 +3777,7 @@ fn translate_call_site_intrinsic(fname: String, args: List typed_ast.TypedExpr,
                                  cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                                  captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  if fname == "eprint" || fname == "print_str"
-  then translate_print_call(fname, args, params, env, idx,
-                            cur_label, cur_ops, captures)
-  else if fname == "to_double"
+  if fname == "to_double"
   then translate_to_double_call(args, params, env, idx,
                                 cur_label, cur_ops, captures)
   else if fname == "double_to_bits" || fname == "double_from_bits"
@@ -3827,27 +3822,6 @@ fn translate_unsafe_pure_call(args: List typed_ast.TypedExpr,
 # (the TCall node's own inferred type), mapped via llvm_ret_type, which
 # returns "i64" for every type post /code-review fix #2 (Bool flows as
 # i64 too — 0 or 1 encoded in an i64 register).
-# eprint / print_str: both take a String and lower to IRPrintStr, whose runtime
-# symbol takes `ptr` (the i64 handle is coerced in lowering).
-#   eprint(_)     -> IRPrintStr "eprint_str"
-#   print_str(_)  -> IRPrintStr "print_str"
-fn translate_print_call(fname: String, args: List typed_ast.TypedExpr,
-                        params: List String, env: TxEnv, idx: Int,
-                        cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
-                        captures: Dict String) ->
-    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
-  match args with
-  | [arg | _] ->
-      do
-        (ablocks, acur_lbl, acur_ops, a_name, idx1) <-
-          translate_expr(arg, params, env, idx, cur_label, cur_ops, captures)
-        Ok((ablocks, acur_lbl,
-             list_builder_add(sprout_ir.IRPrintStr(fresh_name(idx1),
-                                if fname == "eprint" then "eprint_str" else "print_str", a_name),
-                              acur_ops),
-             fresh_name(idx1), idx1 + 1))
-  | Nil -> Err("ast_to_ir: " ++ fname ++ " expects 1 argument, got 0")
-
 # `to_double(n)` — compiler intrinsic (no runtime symbol).  Translate the single
 # Int arg, then emit IRSIToF (sitofp) to convert it to the equal Double value.
 # Recognized by name in translate_call.
@@ -6059,9 +6033,7 @@ export fn collect_extern_decls(decls: List typed_ast.TypedDecl) -> List (String,
 # A call-site-directed intrinsic referenced as a VALUE.  There is no symbol to
 # forward to (see is_call_site_intrinsic), so the wrapper body cannot be the
 # generic `call @<name>` synthesize_eta_wrapper emits — that name resolves
-# nowhere, and the two halves of the family fail at different stages: @eprint has
-# its `declare` suppressed and is rejected by `opt`, while @to_double and the
-# bits family are declared and fail only at LINK.
+# nowhere: @to_double and the bits family are declared and fail only at LINK.
 #
 # Instead the body is lowered by the SAME translator the direct call site uses,
 # over synthetic parameters a0..a(N-1): translate_expr resolves each

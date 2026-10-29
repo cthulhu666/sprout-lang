@@ -9,10 +9,9 @@ import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.string as string
 
-# A call-site-directed intrinsic referenced as a VALUE. `eprint` and `to_double` have no
-# symbol a plain `call @<name>` could reach (`eprint` lowers to @eprint_str through a ptr
-# coercion, `to_double` is one instruction), so the generic eta wrapper named nothing and the
-# program failed at `opt` or at LINK. synthesize_intrinsic_eta_closure lowers the wrapper BODY
+# A call-site-directed intrinsic referenced as a VALUE. `to_double` has no symbol a plain
+# `call @<name>` could reach (it is one instruction), so the generic eta wrapper named nothing
+# and the program failed at `opt` or at LINK. synthesize_intrinsic_eta_closure lowers the wrapper BODY
 # through the same translator as a direct call, which means the wrapper is only well-defined
 # where the argument type is known.
 #
@@ -22,14 +21,9 @@ import stdlib.string as string
 
 fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column = 0)
 
-fn string_t() -> types.Type = types.TConst(types.type_id("String"))
 fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
 fn double_t() -> types.Type = types.TConst(types.type_id("Double"))
-fn unit_t() -> types.Type = types.TConst(types.type_id("Unit"))
 fn free_t() -> types.Type = types.TVar(types.tyvar_id("a"))
-
-fn io_arrow(param: types.Type) -> types.Type =
-  types.TFunc(param, unit_t(), types.EffectIO, types.OwnConsume)
 
 fn pure_arrow(param: types.Type, ret: types.Type) -> types.Type =
   types.TFunc(param, ret, types.EffectPure, types.OwnConsume)
@@ -38,15 +32,11 @@ fn pure_arrow(param: types.Type, ret: types.Type) -> types.Type =
 fn intrinsic_as_value(name: String, ty: types.Type) -> typed_ast.TypedDecl =
   typed_ast.TFnDecl("f", Nil, Nothing, Nothing, Nil, typed_ast.TVar(name, ty, no_pos()))
 
-fn eprint_as_value(t: types.Type) -> typed_ast.TypedDecl =
-  intrinsic_as_value("eprint", io_arrow(t))
-
 fn to_double_as_value(t: types.Type) -> typed_ast.TypedDecl =
   intrinsic_as_value("to_double", pure_arrow(t, double_t()))
 
 fn intrinsic_arities() -> Dict ast_to_ir.FnInfo =
-  dict_set("to_double", ast_to_ir.fn_info(1, false),
-    dict_set("eprint", ast_to_ir.fn_info(1, false), dict_empty()))
+  dict_set("to_double", ast_to_ir.fn_info(1, false), dict_empty())
 
 # Lower the decl and hand back the whole emitted text — the wrapper is a LIFTED
 # function, so the decl's own body is only the IRMkClosure that references it.
@@ -96,8 +86,6 @@ fn check_rejected(state: TestState, label: String, d: typed_ast.TypedDecl, name:
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    check_lowering(state, "eprint at String", eprint_as_value(string_t()), "@eprint_str", "@eprint")
     check_lowering(state, "to_double at Int", to_double_as_value(int_t()), "sitofp i64", "@to_double")
-    check_rejected(state, "eprint at a free tyvar", eprint_as_value(free_t()), "eprint")
     check_rejected(state, "to_double at a free tyvar", to_double_as_value(free_t()), "to_double")
     summary(state)

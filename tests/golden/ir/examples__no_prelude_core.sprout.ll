@@ -33,8 +33,6 @@ declare i128 @bytes_get_unboxed(i64, i64)
 declare i128 @str_char_at_unboxed(i64, i64)
 declare i128 @argv_get_unboxed(i64)
 declare i128 @env_get_unboxed(i64)
-declare i64 @print_str(ptr)
-declare i64 @eprint_str(ptr)
 declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @analysis_check_source(ptr)
@@ -48,6 +46,8 @@ declare i64 @analysis_eval_expr_in_source(ptr, ptr)
 declare i64 @analysis_instances_in_source(ptr, ptr)
 declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
+declare i64 @eprint(i64)
+declare i64 @print_str(i64)
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -617,8 +617,7 @@ body_1_1:
   store i64 %t$9, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$10 = call i64 @__tc_Show_Setting_show(i64 %t$8)
-  %t$11$ptr = inttoptr i64 %t$10 to ptr
-  %t$11 = call i64 @print_str(ptr %t$11$ptr)
+  %t$11 = call i64 @print_str(i64 %t$10)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
   store i64 %t$9, ptr %t$13
   call void @llvm.stackrestore(ptr %t$14)
@@ -659,8 +658,7 @@ entry:
 arm_0_6:
   %t$8 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.8, i64 0, i32 1, i64 0
   %t$9 = ptrtoint ptr %t$8 to i64
-  %t$10$ptr = inttoptr i64 %t$9 to ptr
-  %t$10 = call i64 @print_str(ptr %t$10$ptr)
+  %t$10 = call i64 @print_str(i64 %t$9)
   %t$11 = call i64 @print_all(i64 %t$5)
   %t$12$st = call i128 @endpoint_worker(i64 %t$5)
   %t$12 = trunc i128 %t$12$st to i64
@@ -671,8 +669,7 @@ arm_0_6:
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
   %t$14 = call i64 @describe_argw(i64 %t$12, i64 %t$13)
   %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$15$ptr = inttoptr i64 %t$14 to ptr
-  %t$15 = call i64 @print_str(ptr %t$15$ptr)
+  %t$15 = call i64 @print_str(i64 %t$14)
   %t$16 = getelementptr inbounds { i64, [5 x i8] }, ptr @.str.9, i64 0, i32 1, i64 0
   %t$17 = ptrtoint ptr %t$16 to i64
   %t$18 = getelementptr inbounds { i64, [10 x i8] }, ptr @.str.10, i64 0, i32 1, i64 0
@@ -717,8 +714,7 @@ arm_0_6:
   %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
   %t$25 = call i64 @describe_argw(i64 %t$23, i64 %t$24)
   %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$26$ptr = inttoptr i64 %t$25 to ptr
-  %t$26 = call i64 @print_str(ptr %t$26$ptr)
+  %t$26 = call i64 @print_str(i64 %t$25)
   br label %join_6
 arm_1_6:
   call void @sprout_abort_match()

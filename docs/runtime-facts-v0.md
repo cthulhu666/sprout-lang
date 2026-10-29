@@ -17,7 +17,7 @@ pass that needs it:
 | `unboxed_maybe_extern_name` | has an `_unboxed` variant | `ast_to_ir.sprout` |
 | the eight `i128` `decl` lines in `ir_header` | the `_unboxed` variants' signatures | `ir_lowering.sprout` |
 | `safe_io_externs` | `!{IO}` but cannot change a vector's length | `bce.sprout` |
-| `op_triggers_gc`'s arms for `IRStrEq`, `IRStrCompare`, `IRPrintStr`, `IRGetTag`, `IRGetField` | their C callees cannot trigger GC | `ir_rooting.sprout` |
+| `op_triggers_gc`'s arms for `IRStrEq`, `IRStrCompare`, `IRGetTag`, `IRGetField` | their C callees cannot trigger GC | `ir_rooting.sprout` |
 
 Each entry is a claim about a C body, read by hand. Only the `declare` lines are checked against
 C (`just cpr-declare-check`). A wrong entry is a use-after-free or a dropped bounds check, and no
@@ -25,9 +25,10 @@ test fails. A runtime function added or removed must be found in each list by ha
 `linvec_set`, `linvec_push` and `linvec_truncate` left the runtime, nothing flagged their entries
 in `is_nonallocating_read`.
 
-The lists are also short. Rooting trusts 13 runtime functions not to trigger GC (the five vector
-functions and the eight `_unboxed` reads). Reading the C finds 45 (§4.2). A call to any of the
-other 32 roots every live heap value around it for nothing. §4.5 measures what trusting them buys.
+The lists are also short. Rooting trusts 15 runtime functions not to trigger GC (the five vector
+functions, `print_str` and `eprint`, and the eight `_unboxed` reads). Reading the C finds 45
+(§4.2). A call to any other roots every live heap value around it for nothing. §4.5 measures what
+trusting them buys.
 
 ## 2. Goals and non-goals
 
@@ -266,7 +267,7 @@ A candidate becomes an entry only after the check passes on Linux and macOS.
 | `unboxed_maybe_extern_name` | `runtime_facts.unboxed_symbol` |
 | `ir_header`'s eight `i128` `decl` lines | built from `runtime_facts.unboxed_symbols` |
 | `safe_io_externs` | `runtime_facts.keeps_vec_lengths` |
-| `op_triggers_gc`'s five arms | `runtime_facts.cannot_trigger_gc` on `str_eq`, `str_compare`, `print_str`, `eprint_str`, `sprout_tag`, `sprout_field` |
+| `op_triggers_gc`'s four arms | `runtime_facts.cannot_trigger_gc` on `str_eq`, `str_compare`, `sprout_tag`, `sprout_field` |
 
 Each consumer asks where it asks today: `ir_rooting` in `calls_nonallocating_extern`,
 `op_triggers_gc` and the noreturn-block check, `ast_to_ir` in the CPR routers beside
@@ -282,11 +283,8 @@ C function. Only the link's `duplicate symbol` error stops that, and `--emit-ir`
 the IDE never link. Each consumer already holds the program's function names (`summary`,
 `tables.fn_names`) and checks them first.
 
-`bce` sees Sprout names. `eprint` has a C symbol, a bridge for old codegen that
-nothing emitted today calls (the seed and the golden IR have no `@eprint(`). `ast_to_ir` lowers
-`eprint` and `print_str` to `eprint_str` and `print_str`, and `note_callee_kind` maps each name to
-those symbols before the lookup, through one function beside that lowering, so a loop that prints
-stays versioned.
+`bce` sees Sprout names. `eprint` and `print_str` are plain externs whose Sprout name is their C
+symbol, so `note_callee_kind` needs no mapping and a loop that prints stays versioned.
 
 ### 4.5 Measurement
 
@@ -316,7 +314,7 @@ Each stage is one PR, and each moves its lists into the module unchanged before 
    pre-commit hook. The hook today exits unless a `.sprout`/`.spr` file is staged and leaves
    heavier validation to CI; it gains an arm for staged `runtime/*.c` or module edits, and its
    policy comment says so. Move `is_nonallocating_read`, `is_nonallocating_unboxed_read`,
-   `is_noreturn_extern` and `op_triggers_gc`'s five arms into the module, behind the
+   `is_noreturn_extern` and `op_triggers_gc`'s four arms into the module, behind the
    program-defines-it guard (§4.4). The IR does not change.
 2. **Trust the candidates.** Add the GC fact-check build (premise 10), then add to
    `cannot_trigger_gc` every candidate the check passes on Linux and macOS that is not in
@@ -328,8 +326,8 @@ Each stage is one PR, and each moves its lists into the module unchanged before 
    change. `cpr-declare-check` stays.
 4. **Vector length.** Add the length rule to the check, with its fixtures and the length oracle
    in the fact-check build (premise 10). Only once the check accepts every current entry less the
-   dead `vec_make_filled` (§4.2), move `safe_io_externs`, add the `print`/`eprint` mapping (§4.4)
-   and a BCE test that a loop calling `print` stays versioned. If the check rejects an entry, the
+   dead `vec_make_filled` (§4.2), move `safe_io_externs`
+   and add a BCE test that a loop calling `print` stays versioned. If the check rejects an entry, the
    stage stops there and the rule is revisited. The IR does not change. Stages 1–3 do not depend
    on this rule, and it serves the stage with the least payoff, so it lands last and alone.
 
@@ -359,7 +357,7 @@ Each stage is one PR, and each moves its lists into the module unchanged before 
 
 `recognize_vector_op` (`VecOp`), `recognize_string_builtin` (`StringBuiltin`),
 `is_call_site_intrinsic` and `is_bits_intrinsic` are the remaining name lists. They decide what
-`ast_to_ir` expands inline (`print_str`, `eprint`, `to_double`, the bits ops, `unsafe_pure`, the B1 vector
+`ast_to_ir` expands inline (`to_double`, the bits ops, `unsafe_pure`, the B1 vector
 accesses), which is a compiler choice, not a fact about C. Folding them into one `Intrinsic` ADT
 and one parse would leave one place for those names too. That is a separate design, and so is
 inlining more runtime calls as IR ops (`vector_length` as a guard plus `IRVecLenD`).
