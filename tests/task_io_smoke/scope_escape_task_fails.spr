@@ -1,0 +1,14 @@
+import stdlib.task (Scope, with_scope, scope_handle)
+import stdlib.terminal as terminal
+
+# A task record is freed when its scope joins. Awaiting its id after that must LOUD-FAIL with a
+# named message. The raw externs are redeclared (same form as tests/stdlib/test_extern_redeclare.spr)
+# because stdlib.task's wrappers do not let a task id outlive its scope.
+extern fn __task_fork(scope_id: Int, work: once local Unit -> b !{IO}) -> Int !{IO}
+extern fn __task_await(task_id: Int) -> a !{IO}
+
+fn main() -> Unit !{IO} =
+  do
+    id <- with_scope(\s -> __task_fork(scope_handle(s), \_ -> 7))
+    __task_await(id)  # rejected: task used after its scope closed
+    terminal.write("should-not-reach\n")

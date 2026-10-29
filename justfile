@@ -2485,6 +2485,13 @@ task-io-smoke: bootstrap-from-seed
   run_expect_fail "scope-escape-scope" "scope used after it closed"
   build tests/task_io_smoke/scope_escape_capture_fails.spr
   run_expect_fail "scope-escape-capture" "channel used after its scope closed"
+  build tests/task_io_smoke/scope_escape_task_fails.spr
+  run_expect_fail "scope-escape-task" "task used after its scope closed"
+  # A handle of the wrong kind, or one never issued, is rejected by kind and range.
+  build tests/task_io_smoke/invalid_handle_kind_fails.spr
+  run_expect_fail "invalid-handle-kind" "invalid channel handle"
+  build tests/task_io_smoke/invalid_handle_never_issued_fails.spr
+  run_expect_fail "invalid-handle-never-issued" "invalid channel handle"
   # A join must not free a channel a task outside the scope is still parked on.
   build tests/task_io_smoke/scope_join_foreign_waiter_fails.spr
   run_expect_fail "scope-join-foreign-waiter" "a task outside the scope is parked on its channel"
