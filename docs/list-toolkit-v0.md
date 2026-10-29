@@ -38,8 +38,12 @@ Non-goals (v0):
 - `group_by`. The survey's callers want keyed grouping into a map (`p0049`), which belongs with the
   "`Dict`/`Set` take only `String` keys" entry. Its groups will be `NonEmpty a`
   (`docs/non-empty-v0.md` §9). Adjacent-run grouping has no caller.
-- `unzip`, `zip3`, `zip_longest`, a strict zip that fails on unequal lengths, `scanl1`, `scanr`.
+- `unzip`, `zip3`, a strict zip that fails on unequal lengths, `scanl1`, `scanr`.
   No survey caller; each is additive later.
+- `zip_longest`. One caller (`p0067`), whose carry fold it would not shorten. Fill values are
+  lossy: a fill cannot be told apart from a real element. The lossless form is
+  `(Maybe a, Maybe b)` or a `These` type, filled by the caller with `maybe_with_default`. Haskell
+  `base`, Rust `std`, OCaml, Elm and Gleam leave it out; Python and Scala ship it.
 - A right fold. Strict, it is `list_fold` over `list_reverse`; its value is a lazy accumulator,
   so a strict `fold_right` would take the name with the wrong semantics (`docs/laziness-v0.md`).
 - `abs_diff` (§4.7).
