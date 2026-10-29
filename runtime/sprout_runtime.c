@@ -6801,6 +6801,7 @@ static void buf_append_char(ByteBuf* buf, char ch) {
 }
 
 static char* alloc_cstr(size_t len, const char* ctx) {
+  if (len == SIZE_MAX) sprout_fail(ctx);
   char* out = (char*)malloc(len + 1);
   if (out == NULL) sprout_fail(ctx);
   out[0] = '\0';
@@ -7653,10 +7654,15 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
  * the body to be re-measured with strlen. A response whose body began "AAAA\0BBBB..." arrived as four
  * bytes and an `Ok`.
  *
- * The status line and header block are still located with strstr, and that is deliberate rather than
+ * The status line and header block are still walked with strchr, and that is deliberate rather than
  * an oversight: those regions must be NUL-free to be valid HTTP at all, so a NUL there is a malformed
  * response and stopping early is an acceptable reading of it. Only the BODY is arbitrary bytes, and
- * only the body's extent is now derived from `response_len`. */
+ * only the body's extent is now derived from `response_len`.
+ *
+ * The head is framed by a single forward scan (see the comment at the scan), not by separate
+ * searches for the status line's end and the blank line. Two independent searches could disagree about
+ * where the head ends — a header-less response, or a CRLF inside a bare-LF body — and the header
+ * block's length was then computed from an inverted window. */
 static long long http_response_result(char* response_data, size_t response_len) {
   if (response_data == NULL || response_data[0] == '\0') {
     free(response_data);
@@ -7666,37 +7672,40 @@ static long long http_response_result(char* response_data, size_t response_len) 
     );
   }
 
-  const char* sep = strstr(response_data, "\r\n\r\n");
-  size_t sep_len = 4;
-  if (sep == NULL) {
-    sep = strstr(response_data, "\n\n");
-    sep_len = 2;
-  }
-  if (sep == NULL) {
+  /* One forward scan over the head. The status line ends at the first LF; each header line ends at
+   * its LF; the first empty line ends the head. A CR before an LF is dropped (RFC 9112 §2.2), so CRLF
+   * and bare LF both frame, and `headers_end` can never precede `headers_start`: a response with no
+   * header lines is valid and gives an empty header block. */
+  const char* line_end = strchr(response_data, '\n');
+  if (line_end == NULL) {
     free(response_data);
     return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid http response");
   }
-
-  const char* line_end = strstr(response_data, "\r\n");
-  size_t line_sep_len = 2;
-  if (line_end == NULL || line_end > sep) {
-    line_end = strstr(response_data, "\n");
-    line_sep_len = 1;
-  }
-  if (line_end == NULL || line_end > sep) {
-    free(response_data);
-    return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid status line");
+  const char* status_end = (line_end > response_data && line_end[-1] == '\r') ? line_end - 1 : line_end;
+  const char* headers_start = line_end + 1;
+  const char* headers_end = headers_start;
+  const char* body_start = NULL;
+  for (const char* cursor = headers_start; body_start == NULL;) {
+    const char* nl = strchr(cursor, '\n');
+    if (nl == NULL) {
+      free(response_data);
+      return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid http response");
+    }
+    const char* content_end = (nl > cursor && nl[-1] == '\r') ? nl - 1 : nl;
+    if (content_end == cursor) body_start = nl + 1;
+    else headers_end = content_end;
+    cursor = nl + 1;
   }
 
   const char* code_start = strchr(response_data, ' ');
-  if (code_start == NULL || code_start >= line_end) {
+  if (code_start == NULL || code_start >= status_end) {
     free(response_data);
     return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid status line");
   }
   code_start++;
   char* code_end = NULL;
   long long status = strtoll(code_start, &code_end, 10);
-  if (code_end == code_start || code_end > line_end) {
+  if (code_end == code_start || code_end > status_end) {
     free(response_data);
     return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid status code");
   }
@@ -7705,12 +7714,10 @@ static long long http_response_result(char* response_data, size_t response_len) 
     return http_err1(SPROUT_TAG(stdlib$http$HttpBadStatus), status);
   }
 
-  const char* headers_start = line_end + line_sep_len;
-  char* headers = dup_slice(headers_start, (size_t)(sep - headers_start));
+  char* headers = dup_slice(headers_start, (size_t)(headers_end - headers_start));
   /* The body runs from just past the blank line to the END OF THE BUFFER — a span computed from
    * `response_len`, never from strlen. `dup_slice` copies it byte-for-byte (memcpy), so NULs and
    * invalid UTF-8 both survive; `body_len` is what carries the real extent from here on. */
-  const char* body_start = sep + sep_len;
   size_t body_len = response_len - (size_t)(body_start - response_data);
   char* body_out = dup_slice(body_start, body_len);
   char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
