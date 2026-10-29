@@ -457,26 +457,23 @@ static void handle_release(long long handle) {
   g_handles_free = idx;
 }
 
-/* Resolve a handle to its record. 0 is "no handle" and yields NULL, which each caller reports
- * in its own words. A stale handle (its record was released) and a handle that was never issued
- * or names another kind both abort: undefined behaviour is not an answer. */
+/* Resolve a handle to its record; never returns NULL. Handle 0 is rejected as never issued (its
+ * generation is 0, and issued generations start at 1). A handle of the wrong kind, never issued,
+ * or stale (its record was released) aborts: undefined behaviour is not an answer. The kind is
+ * checked first, so a stale handle of the wrong kind reports the mismatch. After a slot is
+ * reused the kind is the new occupant's, so the kind check only sees the slot's current record. */
 static void* handle_lookup(long long handle, int kind, const char* op, const char* what,
                            const char* stale) {
-  if (handle == 0) return NULL;
   uint32_t idx = (uint32_t)((uint64_t)handle & 0xffffffffu);
   uint32_t gen = (uint32_t)((uint64_t)handle >> 32);
   char msg[160];
-  if (idx >= g_handles_len || gen == 0) {
+  if (idx >= g_handles_len || gen == 0 || g_handles[idx].kind != kind) {
     snprintf(msg, sizeof msg, "%s: invalid %s handle", op, what);
     sprout_fail(msg);
   }
   HandleSlot* slot = &g_handles[idx];
   if (slot->gen != gen || slot->ptr == NULL) {
     snprintf(msg, sizeof msg, "%s: %s", op, stale);
-    sprout_fail(msg);
-  }
-  if (slot->kind != kind) {
-    snprintf(msg, sizeof msg, "%s: invalid %s handle", op, what);
     sprout_fail(msg);
   }
   return slot->ptr;
@@ -743,7 +740,6 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
 /* Fire-and-forget: spawn a Unit->Unit task. Reclaimed fully on done. */
 long long __scope_spawn(long long scope_handle, long long work) {
   Scope* s = scope_of(scope_handle, "__scope_spawn");
-  if (s == NULL) sprout_fail("__scope_spawn: null scope");
   task_create(s, work, 0);
   return 0;
 }
@@ -752,7 +748,6 @@ long long __scope_spawn(long long scope_handle, long long work) {
  * never-awaited fork is reclaimed at scope close), and return its handle. */
 long long __task_fork(long long scope_handle, long long work) {
   Scope* s = scope_of(scope_handle, "__task_fork");
-  if (s == NULL) sprout_fail("__task_fork: null scope");
   Task* t = task_create(s, work, 1);
   t->scope_next = s->forks;
   s->forks = t;
@@ -767,7 +762,6 @@ long long __task_fork(long long scope_handle, long long work) {
  * and remains valid when handed back to the caller (who then roots it). */
 long long __task_await(long long task_handle) {
   Task* t = task_of(task_handle, "__task_await");
-  if (t == NULL) sprout_fail("__task_await: null task");
   /* A task force-dropped by scope_cancel has its roots freed (roots == NULL) and never
    * ran to completion, so it has no result and nothing will ever wake an awaiter of it.
    * The design's invariant is that a cancelled task is never awaited (owner cancels
@@ -876,7 +870,6 @@ static void force_drop_task(Task* t) {
  * their own; join-parked tasks are left for their inner scope to drain (local propagation). */
 long long __scope_cancel(long long scope_handle) {
   Scope* s = scope_of(scope_handle, "__scope_cancel");
-  if (s == NULL) sprout_fail("__scope_cancel: null scope");
   if (g_current_task != s->owner)
     sprout_fail("__scope_cancel: only the scope's owning task may cancel it");
   s->reason = REASON_CANCELLED;
@@ -941,9 +934,7 @@ long long __task_stop_reason(void) {
  * See docs/concurrency-deadlines-design-2026-07-15.md §5.2/§5.3. */
 long long __await_deadline(long long scope_handle, long long task_handle, long long ms) {
   Scope* s = scope_of(scope_handle, "__await_deadline");
-  if (s == NULL) sprout_fail("__await_deadline: null scope");
   Task* child = task_of(task_handle, "__await_deadline");
-  if (child == NULL) sprout_fail("__await_deadline: null task");
   Task* owner = g_current_task;
 
   /* Arm the deadline on the owner + await the child. The owner is now parked on BOTH the timer
@@ -1051,7 +1042,6 @@ long long task_yield(void) {
 
 long long __scope_join(long long scope_handle) {
   Scope* s = scope_of(scope_handle, "__scope_join");
-  if (s == NULL) sprout_fail("__scope_join: null scope");
 
   /* Wait until every task spawned into `s` has finished. If any are still live,
    * park the joiner (task-0 or an outer task) as the scope's waiter; the last
@@ -1246,7 +1236,6 @@ long long __task_sleep(long long ms) {
  * handed sender-to-receiver directly. cap >= 1 buffers. */
 long long __chan_new(long long scope_handle, long long capacity) {
   Scope* s = scope_of(scope_handle, "__chan_new");
-  if (s == NULL) sprout_fail("__chan_new: null scope");
   if (capacity < 0)
     sprout_fail("__chan_new: capacity must be >= 0 (0 = rendezvous / unbuffered)");
   Chan* ch = (Chan*)malloc(sizeof(Chan));
@@ -1288,7 +1277,6 @@ long long __chan_new(long long scope_handle, long long capacity) {
  * parks the sender holding the value until a receiver frees a slot. */
 long long __chan_send(long long chan_handle, long long value) {
   Chan* ch = chan_of(chan_handle, "__chan_send");
-  if (ch == NULL) sprout_fail("__chan_send: null channel");
   /* Sending into a closed channel is a program bug (Go/Kotlin: send-after-close is an error).
    * Sprout has no recovery, so abort rather than silently dropping the value. */
   if (ch->closed) sprout_fail("__chan_send: send on closed channel");
@@ -1339,7 +1327,6 @@ long long __chan_send(long long chan_handle, long long value) {
  * sender hands over a value or chan_close wakes us with `Closed`. */
 long long __chan_recv(long long chan_handle) {
   Chan* ch = chan_of(chan_handle, "__chan_recv");
-  if (ch == NULL) sprout_fail("__chan_recv: null channel");
 
   /* Ready (buffered value / parked rendezvous sender / closed-and-drained): take without parking.
    * Buffered values drain as Got before Closed is observed — chan_poll_take checks count first. */
@@ -1370,7 +1357,6 @@ long long __chan_recv(long long chan_handle) {
  * a synchronization bug → loud-fail (Go panics on double-close). */
 long long __chan_close(long long chan_handle) {
   Chan* ch = chan_of(chan_handle, "__chan_close");
-  if (ch == NULL) sprout_fail("__chan_close: null channel");
   if (ch->closed) sprout_fail("__chan_close: channel already closed");
   ch->closed = 1;
   for (Task* r = chan_q_pop(&ch->recv_head, &ch->recv_tail); r != NULL;
@@ -1409,7 +1395,6 @@ long long __chan_select(long long list_handle) {
     long long i = 0;
     for (long long cur = list_handle; sprout_list_next(cur, &head, &tail); cur = tail) {
       Chan* ch = chan_of(head, "__chan_select");
-      if (ch == NULL) { free(chans); sprout_fail("__chan_select: null channel in list"); }
       chans[i++] = ch;
     }
   }

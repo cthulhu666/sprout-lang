@@ -228,9 +228,9 @@ export fn chan_recv(ch: Chan a) -> a !{IO} =
   | Chan cid -> __chan_recv(cid)
 ```
 
-`Chan a` is a phantom-param wrapper over the runtime pointer, shape-identical to the proven
-`Task a`. The externs are internal (never accessed as `chan.__chan_*`), so the `export extern fn`
-qualification bundler bug does not apply.
+`Chan a` is a phantom-param wrapper over a generation-checked scheduler handle (§4),
+shape-identical to the proven `Task a`. The externs are internal (never accessed as
+`chan.__chan_*`), so the `export extern fn` qualification bundler bug does not apply.
 
 ## 9. Deferred (fast-follows)
 
