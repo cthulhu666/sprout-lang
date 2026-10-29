@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Fail when the C runtime lets a pointer's address become a signed 64-bit integer.
 
-docs/string-header-invariant-v0.md §4.3, rule 1. Over runtime/*.c and runtime/*.h, per top-level
-decl (a function, or the variable of a global initializer), the checker counts sites:
+docs/string-header-invariant-v0.md §4.3. Over runtime/*.c and runtime/*.h, per top-level decl (a
+function, or the variable of a global initializer), the checker enforces three rules.
+
+Rule 1: it counts sites:
 
   - an AST cast with castKind PointerToIntegral, and
   - an IntegralCast whose operand is spelled `uintptr_t` or `intptr_t` (the address types) and
@@ -17,6 +19,14 @@ Allowed with no entry: the exits (EXITS, keyed `file:name`), and the functions i
   - it does not return an integer type of 64 bits or more, and takes no pointer to one.
 Everything else must match BASELINE (`file:decl:count`) exactly or below: a new decl or a higher
 count fails, and so does an entry whose decl now has fewer sites, so the list only shrinks.
+
+Rule 2, everywhere: a call to sprout_ptr_word whose argument, with pointer-to-pointer casts and
+parentheses stripped, has at any layer the type pointer-to-char (any signedness or qualifiers).
+
+Rule 3, outside WRITERS: a SproutStr is not built by an initializer list or a compound literal,
+and `hdr_p` is not written, address-taken or modified. Only a read (an lvalue-to-rvalue
+conversion) passes. Nor is a pointer to SproutStr cast to or from a pointer to any other type but
+`void` (`*(SproutStr*)&raw`, `*(char**)&s = raw`), explicit or implicit.
 
 Every runtime/*.c is scanned. --emit-baseline prints the current non-allowed counts in baseline
 format and exits. The AST holds only the host's #ifdef branches, so an ADDRESS_CASTS entry may
@@ -36,8 +46,24 @@ import tempfile
 from collections import namedtuple
 
 # The only places a pointer may become a Sprout word, keyed `file:name`. A same-named function in
-# another file is not exempt. The header is created by docs/string-header-invariant-v0.md §4.
-EXITS = frozenset(("runtime/sprout_word.h:sprout_str_word", "runtime/sprout_word.h:sprout_ptr_word"))
+# another file is not exempt. sprout_str_of_word_in is not one: it casts an integer to a pointer.
+EXITS = frozenset(("runtime/sprout_word.h:sprout_str_word_in", "runtime/sprout_word.h:sprout_ptr_word"))
+
+# The only decls that may build a SproutStr or write its hdr_p (rule 3), keyed `file:name`.
+WRITERS = frozenset(
+    (
+        "runtime/sprout_runtime.c:sprout_str_alloc",
+        "runtime/sprout_runtime.c:sprout_str_intern",
+        "runtime/sprout_word.h:sprout_str_of_word_in",
+    )
+)
+_names = sorted(w.rsplit(":", 1)[1] for w in WRITERS)
+WRITER_LIST = ", ".join(_names[:-1]) + " and " + _names[-1]
+PTR_EXIT = "sprout_ptr_word"
+STR_TYPE = "SproutStr"
+STR_FIELD = "hdr_p"
+CHAR_TYPES = frozenset(("char", "signed char", "unsigned char"))
+PTR_CAST_KINDS = frozenset(("BitCast", "NoOp"))
 CAST_KIND = "PointerToIntegral"
 CONV_KIND = "IntegralCast"
 ADDRESS_TYPE = "uintptr_t"
@@ -55,11 +81,24 @@ QUALIFIERS = frozenset(("const", "volatile", "restrict", "__restrict", "__restri
 #   wide_return     spelled return type when 64-bit or wider, else ""
 #   wide_ptr        spelled type of the first pointer-to-wide-integer parameter, else ""
 #   defined         has a body
+#   char_words      rule 2: sprout_ptr_word calls whose argument is a char pointer
+#   forges          rule 3: initializer lists and compound literals of type SproutStr
+#   hdr_writes      rule 3: uses of hdr_p other than a read
+#   puns            rule 3: pointer casts between SproutStr* and a non-void pointer type
 Decl = namedtuple(
     "Decl",
-    "casts bad_casts conv_free conv_after_ok bad_dest conv_note wide_return wide_ptr defined",
+    "casts bad_casts conv_free conv_after_ok bad_dest conv_note wide_return wide_ptr defined "
+    "char_words forges hdr_writes puns",
 )
-EMPTY = Decl(0, 0, 0, 0, "", "", "", "", False)
+EMPTY = Decl(0, 0, 0, 0, "", "", "", "", False, 0, 0, 0, 0)
+
+PUN_CAST_KIND = "BitCast"
+
+
+class Typedefs(dict):
+    """One TU's typedef table. str_base is STR_TYPE resolved through it, set once by scan()."""
+
+    str_base = STR_TYPE
 
 
 def sites(d):
@@ -145,14 +184,98 @@ def signed_wide(t, typedefs):
     return stars == 0 and is_wide(base) and "unsigned" not in base.split()
 
 
+def is_char_pointer(t, typedefs):
+    """Whether spelled type t is a pointer to char, signed char or unsigned char."""
+    base, stars = type_parts(t, typedefs)
+    return stars == 1 and base in CHAR_TYPES
+
+
+def first_inner(node):
+    inner = node.get("inner") or ()
+    return inner[0] if inner else None
+
+
+def callee_name(call):
+    """The name of the function a CallExpr calls directly, else ""."""
+    x = first_inner(call)
+    while x is not None and x.get("kind") in ("ParenExpr", "ImplicitCastExpr"):
+        x = first_inner(x)
+    if x is not None and x.get("kind") == "DeclRefExpr":
+        return (x.get("referencedDecl") or {}).get("name") or ""
+    return ""
+
+
+def passes_char_pointer(arg, typedefs):
+    """Whether, at any layer under pointer-to-pointer casts and parentheses, arg is a char pointer."""
+    x = arg
+    while x is not None:
+        if is_char_pointer(spelled(x), typedefs):
+            return True
+        kind = x.get("kind")
+        is_ptr_cast = kind in ("ImplicitCastExpr", "CStyleCastExpr") and x.get("castKind") in PTR_CAST_KINDS
+        if kind == "ParenExpr" or is_ptr_cast:
+            x = first_inner(x)
+        else:
+            return False
+    return False
+
+
+def is_str_type(t, typedefs, stars):
+    """Whether spelled type t is SproutStr at pointer depth `stars`, aliases resolved."""
+    return type_parts(t, typedefs) == (typedefs.str_base, stars)
+
+
+def is_str_pointer_pun(dst, src, typedefs):
+    """Whether a pointer cast dst <- src joins a SproutStr pointer to a non-void, non-SproutStr one.
+
+    `void*` is exempt on both sides (malloc, memcpy). Pointers only: depth >= 1 on both.
+    """
+    d_base, d_stars = type_parts(dst, typedefs)
+    s_base, s_stars = type_parts(src, typedefs)
+    if d_stars < 1 or s_stars < 1 or (d_base == typedefs.str_base) == (s_base == typedefs.str_base):
+        return False
+    other = s_base if d_base == typedefs.str_base else d_base
+    return other != "void"
+
+
+def is_str_write(member, parent, typedefs):
+    """Whether a MemberExpr names SproutStr's hdr_p other than to read it.
+
+    A read is wrapped in an LValueToRValue cast; an assignment, `&`, `++` and a compound
+    assignment have another parent. The parent skips parentheses. A prvalue member (older clang
+    on `f().hdr_p`, which has no cast) cannot be written, so it passes.
+    """
+    base = first_inner(member)
+    if member.get("name") != STR_FIELD or base is None:
+        return False
+    if not is_str_type(spelled(base), typedefs, 1 if member.get("isArrow") else 0):
+        return False
+    if member.get("valueCategory") == "prvalue":
+        return False
+    is_read = (
+        parent is not None and parent.get("kind") == "ImplicitCastExpr" and parent.get("castKind") == "LValueToRValue"
+    )
+    return not is_read
+
+
 def analyze(node, typedefs):
-    """Count a decl's casts and address-type conversions (see Decl); the type fields stay empty."""
+    """Count a decl's casts, address-type conversions and rule 2/3 uses (see Decl)."""
     casts = bad = free = after_ok = 0
+    char_words = forges = hdr_writes = puns = 0
     bad_dest = conv_note = ""
-    stack = [node]
+    stack = [(node, None)]
     while stack:
-        x = stack.pop()
+        x, parent = stack.pop()
         if isinstance(x, dict):
+            nkind = x.get("kind")
+            if nkind == "CallExpr" and callee_name(x) == PTR_EXIT:
+                inner = x.get("inner") or ()
+                if len(inner) > 1 and passes_char_pointer(inner[1], typedefs):
+                    char_words += 1
+            elif nkind in ("InitListExpr", "CompoundLiteralExpr") and is_str_type(spelled(x), typedefs, 0):
+                forges += 1
+            elif nkind == "MemberExpr" and is_str_write(x, parent, typedefs):
+                hdr_writes += 1
             kind = x.get("castKind")
             if kind == CAST_KIND:
                 casts += 1
@@ -168,12 +291,27 @@ def analyze(node, typedefs):
                         free += 1
                     elif spelled(op) == ADDRESS_TYPE:
                         after_ok += 1
+            elif kind == PUN_CAST_KIND:
+                op = operand(x)
+                if op is not None and is_str_pointer_pun(spelled(x), spelled(op), typedefs):
+                    puns += 1
             children = x.values()
+            child_parent = parent if nkind == "ParenExpr" else x
         else:
             children = x
-        stack.extend(v for v in children if isinstance(v, (dict, list)))
+            child_parent = parent
+        stack.extend((v, child_parent) for v in children if isinstance(v, (dict, list)))
     return EMPTY._replace(
-        casts=casts, bad_casts=bad, conv_free=free, conv_after_ok=after_ok, bad_dest=bad_dest, conv_note=conv_note
+        casts=casts,
+        bad_casts=bad,
+        conv_free=free,
+        conv_after_ok=after_ok,
+        bad_dest=bad_dest,
+        conv_note=conv_note,
+        char_words=char_words,
+        forges=forges,
+        hdr_writes=hdr_writes,
+        puns=puns,
     )
 
 
@@ -244,11 +382,12 @@ def scan(clang, rt_dir):
     decls = {}
     for tu_path in sorted(glob.glob(os.path.join(root, "*.c"))):
         tu = load_tu(clang, tu_path)
-        typedefs = {
-            n["name"]: n["type"]["qualType"]
+        typedefs = Typedefs(
+            (n["name"], n["type"]["qualType"])
             for n in tu.get("inner", ())
             if n.get("kind") == "TypedefDecl" and "qualType" in (n.get("type") or {})
-        }
+        )
+        typedefs.str_base = type_parts(STR_TYPE, typedefs)[0]
         local = {}
         for node in tu.get("inner", ()):
             f = decl_file(node)
@@ -336,6 +475,31 @@ def main():
         lines = ["%s:%s:%d" % (f, name, sites(d)) for (f, name), d in decls.items() if sites(d) and not allowed((f, name))]
         print("\n".join(sorted(lines)))
         return 0
+
+    for key in sorted(decls):
+        d = decls[key]
+        if d.char_words:
+            problems.append(
+                "%s:%s passes a char pointer to %s (rule 2: a String leaves the runtime through "
+                "sprout_str_word, which checks its header)" % (key[0], key[1], PTR_EXIT)
+            )
+        if "%s:%s" % key in WRITERS:
+            continue
+        if d.forges:
+            problems.append(
+                "%s:%s constructs a %s outside the writers (rule 3: only %s do)"
+                % (key[0], key[1], STR_TYPE, WRITER_LIST)
+            )
+        if d.puns:
+            problems.append(
+                "%s:%s casts between a %s pointer and another pointer type outside the writers (rule 3: "
+                "only %s may; void* is exempt)" % (key[0], key[1], STR_TYPE, WRITER_LIST)
+            )
+        if d.hdr_writes:
+            problems.append(
+                "%s:%s writes %s.%s outside the writers (rule 3: it may be read, not assigned or address-taken)"
+                % (key[0], key[1], STR_TYPE, STR_FIELD)
+            )
 
     for key in sorted(addr):
         f, name = key

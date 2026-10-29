@@ -336,4 +336,46 @@ grep -q "offheap: intern=" "$TMP_DIR/intern_gc.err" || {
 }
 echo "  intern= grew by $gap (distinct=$d repeated=$r)"
 
+echo "==> c runtime: SproutStr exits check the header; the new writers reject NULL and arena Strings"
+# str_writers.c includes sprout_runtime.c (like root_pool_size.c), so only the other TUs link.
+SW="$TMP_DIR/str_writers"
+clang "$ROOT/tests/c_runtime/str_writers.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g -o "$SW"
+# sw_aborts <selector> <message fragment>: the case exits non-zero and says why on stderr.
+sw_aborts() {
+  if "$SW" "$1" > "$TMP_DIR/sw.out" 2> "$TMP_DIR/sw.err"; then
+    echo "  str_writers '$1' did not abort" >&2
+    cat "$TMP_DIR/sw.out" >&2
+    exit 1
+  fi
+  grep -qF -- "$2" "$TMP_DIR/sw.err" || {
+    echo "  str_writers '$1' aborted without '$2':" >&2
+    cat "$TMP_DIR/sw.err" >&2
+    exit 1
+  }
+}
+# sw_prints <selector> <stdout line>
+sw_prints() {
+  "$SW" "$1" > "$TMP_DIR/sw.out" 2> "$TMP_DIR/sw.err" || {
+    echo "  str_writers '$1' failed:" >&2
+    cat "$TMP_DIR/sw.out" "$TMP_DIR/sw.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/sw.out")" = "$2" || {
+    echo "  str_writers '$1' printed '$(cat "$TMP_DIR/sw.out")', want '$2'" >&2
+    exit 1
+  }
+}
+sw_aborts headerless "headerless String leaving leaves_headerless"
+sw_aborts of_word_headerless "headerless String entering enters_headerless"
+sw_prints headerless_off headerless-off-ok
+sw_prints writer_ok writer-ok
+sw_aborts intern_null "sprout_str_intern: null input"
+sw_aborts register_null "sprout_str_register: null input"
+sw_aborts dup_null "sprout_str_dup: null input"
+sw_aborts dup_slice_null "sprout_str_dup_slice: null input"
+sw_aborts adopt_null "sprout_str_adopt: null input"
+sw_aborts register_arena "sprout_str_register: arena String"
+sw_prints old_wrappers old-wrappers-ok
+
 echo "==> c runtime tests passed"
