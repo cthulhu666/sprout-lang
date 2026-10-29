@@ -29,7 +29,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>    /* snprintf — stale-handle messages name the operation */
-#include <unistd.h>  /* close() — force-dropping an unowned-fd park closes the socket */
+#include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
 
 /* Fixed per-task sizing. Stacks (guarded mmaps, see sprout_context.h) and root
@@ -78,7 +78,7 @@ typedef struct Task {
   Scope*       scope;      /* the scope this task was spawned into (NULL for task-0) */
   long long    handle;     /* handle-table entry of an awaitable task (0 for fire-and-forget,
                               which has no handle); released when the scope closes */
-  struct Task* next;      /* global ready-queue link */
+  struct Task* next;       /* global ready-queue link */
   struct Task* scope_next; /* scope->forks list link (awaitable tasks only) */
   int          park_kind;  /* PARK_* — what this task is suspended on (routes cancel-drop) */
   int          park_fd;    /* fd this task is suspended-in-the-poller on, or -1 (L0.5) */

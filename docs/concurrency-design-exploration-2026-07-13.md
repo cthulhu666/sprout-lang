@@ -709,7 +709,8 @@ structured concurrency is implemented and green:
 **Nested scopes — LANDED (2026-07-14).** A task may now open its own inner scope.
 The single global `g_sched_ctx`/`g_current_task`/scope-counter were replaced by:
 per-`Scope` ready queues (`Scope` is a non-moving malloc; its pointer is the `Int`
-handle the Sprout `Scope` value wraps); a per-`__scope_join`-invocation return
+handle the Sprout `Scope` value wraps — since replaced by a generation-checked handle, see
+concurrency-channels-design §4); a per-`__scope_join`-invocation return
 context (`ucontext_t my_sched` local, so a child's yield returns to *its* driving
 loop, not an outer/exited one); and save/restore of `g_current_task` +
 `g_current_roots` around every switch (a task P drives its inner scope on P's own
