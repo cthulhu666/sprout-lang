@@ -92,7 +92,7 @@ static inline const char* sprout_ctx_errtext(void) { return ""; }
 static inline int sprout_ctx_create(SproutCtx* c, void (*entry)(void), size_t stack_bytes) {
   c->adopted = 0;
   /* commit 0 = the executable's default, so pages are backed as the stack grows —
-   * matching the POSIX arm, where malloc'd pages are equally only backed once
+   * matching the POSIX arm, where mmap'd pages are equally only backed once
    * touched. Committing stack_bytes up front would make every task cost 1 MiB of
    * real memory. Reserve is the same size the POSIX arm allocates; Windows'
    * own default reserve is 1 MiB, which SPROUT_TASK_STACK_BYTES already matches.
@@ -117,7 +117,7 @@ static inline void sprout_ctx_switch(SproutCtx* from, SproutCtx* to) {
 static inline void sprout_ctx_destroy(SproutCtx* c) {
   /* Deleting the thread's OWN fiber makes the thread call ExitThread, so an
    * adopted context releases nothing — same as the POSIX arm, where task-0 owns no
-   * malloc'd stack. Idempotent for the same reason free(NULL) is. */
+   * mmap'd stack. Idempotent for the same reason free(NULL) is. */
   if (c->fiber != NULL && !c->adopted) DeleteFiber(c->fiber);
   c->fiber = NULL;
 }

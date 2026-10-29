@@ -67,11 +67,12 @@ Shrinking the constants is not the proposal — it cuts maximum recursion depth 
 
 ### 1.2 Scope
 
-Entirely **outside the GC heap**: stacks and root pools are plain `malloc`, untouched by the
-region arena. Invisible to compiler benchmarks (the self-hosted compiler spawns no green tasks).
-Stacks are now guarded `mmap`s behind a 16-entry cache in `runtime/sprout_context.h`, so only root
-pools are still `malloc`'d per spawn. Affects `task_spawn`/`task_fork` workloads only. Not a regression from any recent change — true
-since L0 concurrency landed.
+Entirely **outside the GC heap**, untouched by the region arena. Stacks are guarded `mmap`s
+behind a 16-entry cache in `runtime/sprout_context.h`; per spawn the runtime still `malloc`s the
+`Task` record (`task_create`) and the `SproutRoots` struct and its pool (`sprout_roots_new`). The
+§1.1 cost table prices the old `malloc`'d stack. Invisible to compiler benchmarks (the self-hosted
+compiler spawns no green tasks). Affects `task_spawn`/`task_fork` workloads only. Not a regression
+from any recent change — true since L0 concurrency landed.
 
 ## 2. Goals and non-goals
 
@@ -390,8 +391,8 @@ an *unbounded* pool still needs one, but pooling is a large memory **win**, not 
 **G12 — multicore.** No locks needed today (one OS thread, cooperative); tier-2 needs the pool
 per-scheduler-thread. Keep it per-scheduler-shaped so that is a field move, not a rewrite.
 
-**G13 — GC interaction is neutral-to-positive.** Stacks are `malloc`, outside the GC heap and
-arena; skipping `sprout_roots_free` means fewer registry mutations. Idle workers contribute two
+**G13 — GC interaction is neutral-to-positive.** Stacks are guarded `mmap`s, outside the GC heap
+and arena; skipping `sprout_roots_free` means fewer registry mutations. Idle workers contribute two
 roots holding `0`.
 
 **G14 — task-0 stays excluded** (`stack == NULL`, `sprout_roots_main()`, already special-cased).

@@ -195,16 +195,20 @@ int sprout_sched_fault_in_guard(const void* addr) {
   return 0;
 }
 
-/* Report a sprout_ctx_create failure that names its real cause (map or guard-page
- * protect, with errno text). Returns for any other code; the caller handles those. */
-static void ctx_create_fail(const char* who, const char* what, int rc) {
+/* Fail the process for any nonzero sprout_ctx_create code, naming its real cause
+ * (map or guard-page protect carry errno text). Returns only for rc == 0. */
+static void ctx_create_or_fail(const char* who, const char* what, int rc) {
+  if (rc == 0) return;
   char msg[192];
-  if (rc == SPROUT_CTX_EMAP)
+  if (rc == SPROUT_CTX_ENOMEM)
+    snprintf(msg, sizeof msg, "%s: out of memory (%s)", who, what);
+  else if (rc == SPROUT_CTX_EMAP)
     snprintf(msg, sizeof msg, "%s: cannot map %s: %s", who, what, sprout_ctx_errtext());
   else if (rc == SPROUT_CTX_EGUARD)
-    snprintf(msg, sizeof msg, "%s: cannot protect guard page of %s: %s", who, what, sprout_ctx_errtext());
+    snprintf(msg, sizeof msg, "%s: cannot protect guard page of %s: %s", who, what,
+             sprout_ctx_errtext());
   else
-    return;
+    snprintf(msg, sizeof msg, "%s: getcontext failed", who);
   sprout_fail(msg);
 }
 
@@ -565,10 +569,8 @@ static void sprout_scheduler_init(void) {
   sprout_roots_push_ptr(g_task0.roots, &g_task0.chan_pending);
   g_current_task = &g_task0;
 
-  int rc = sprout_ctx_create(&g_pump, pump_loop, SPROUT_PUMP_STACK_BYTES);
-  if (rc == SPROUT_CTX_ENOMEM) sprout_fail("sprout_scheduler_init: out of memory (pump stack)");
-  ctx_create_fail("sprout_scheduler_init", "pump stack", rc);
-  if (rc != 0)                 sprout_fail("sprout_scheduler_init: getcontext failed");
+  ctx_create_or_fail("sprout_scheduler_init", "pump stack",
+                     sprout_ctx_create(&g_pump, pump_loop, SPROUT_PUMP_STACK_BYTES));
 }
 
 long long __scope_open(void) {
@@ -630,10 +632,8 @@ static Task* task_create(Scope* s, long long work, int awaitable) {
   sprout_roots_push_ptr(t->roots, &t->chan_pending);
 
   /* Allocates the green stack and primes the context to enter the trampoline on it. */
-  int rc = sprout_ctx_create(&t->ctx, task_trampoline, SPROUT_TASK_STACK_BYTES);
-  if (rc == SPROUT_CTX_ENOMEM) sprout_fail("task scheduler: out of memory (green stack)");
-  ctx_create_fail("task scheduler", "green task stack", rc);
-  if (rc != 0)                 sprout_fail("task scheduler: getcontext failed");
+  ctx_create_or_fail("task scheduler", "green task stack",
+                     sprout_ctx_create(&t->ctx, task_trampoline, SPROUT_TASK_STACK_BYTES));
 
   rq_push(t);       /* runnable, in the global queue */
   s->live++;
