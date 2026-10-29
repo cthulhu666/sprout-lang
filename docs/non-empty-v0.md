@@ -1,6 +1,7 @@
 # NonEmpty — a list with at least one element
 
-Status: **proposal**. Nothing here is implemented.
+Status: **proposal, deferred** (2026-10-29). Refreshed 2026-10-28 after list toolkit steps 1, 2
+and 4 landed. Nothing here is implemented. §4.2 is decided; where the names live (§4.4) is open.
 
 ## 1. Problem
 
@@ -17,11 +18,18 @@ Code that knows a list is non-empty has no way to say so. It pays one of three w
   their fold with `let Just first = vec_get(0, nums) else 0`: an invented `0` for an input the
   problem rules out (`examples/leetcode/p0053_maximum_subarray.sprout`, `p0121_…`).
 
+In-tree, that is all (surveyed 2026-10-29). The parser already rejects an empty `do`, `match`,
+`let…in` and comprehension, but the AST holds each as a `List`. Of the 142 compiler functions that
+walk those lists, the ones read end their recursion at `Nil` (`translate_match_arms` emits the
+no-arm-matched abort there), so `NonEmpty` would not remove the arm. `translate_do`'s "empty
+do-block" arm may be dead; not checked. Most of the gain is in application code and in the toolkit
+signatures (§9).
+
 `docs/guidelines.md` §3 already names `NonEmpty a` as the example of an illegal state made
 unrepresentable. It does not exist.
 
-It also blocks the list toolkit (`zip_with`, `scanl`, `group_by`, …): some of its signatures want
-`NonEmpty`, and shipping them with `List` first means a breaking change later in four repos (§9).
+It also blocks the rest of the list toolkit: `scanl` and `group_by` want `NonEmpty` in their
+signatures (§9). `zip_with` shipped as the `Zip` class, so a `NonEmpty` instance only adds.
 
 ## 2. Goals and non-goals
 
@@ -38,7 +46,8 @@ Non-goals (v0):
 - `Applicative`/`Monad` instances.
 - `NonEmpty` versions of functions the classes already cover. In particular no `NonEmpty`
   `maximum`/`minimum`/`max_by`/`min_by`: the prelude's `Foldable` ones keep those names and return
-  `Maybe`; the total form is `ne.reduce(imath.max, xs)` (§4.4).
+  `Maybe`; the total form is `ne.reduce(max, xs)` (§4.4).
+- A `Filterable` instance (§4.3); `ne.filter`, `ne.filter_map` and `ne.partition` return `List`.
 - A fold over `NonEmpty` of linear values. `Foldable`'s methods declare no `linear` bound, so the
   instance cannot add one (spec: an instance method restates the class method's bound).
 - List-pattern syntax (`[x | rest]`) on a `NonEmpty` scrutinee.
@@ -111,11 +120,16 @@ or convert it with `non_empty(xs)`, which returns `Maybe (NonEmpty a)`
 
 ### 4.3 Instances
 
-`Functor`, `Foldable`, `Traversable`, `Semigroup`, `Eq`, `Ord`, `ToString`. Each walks the head and
-then the tail with the `List` code; none is slower than the `List` instance.
+`Functor`, `Foldable`, `Traversable`, `Semigroup`, `Eq`, `Ord`, `ToString` and `Zip` in the
+prelude; `Sort` in `stdlib.sort`, which owns that class. Each walks the head and then the tail with
+the `List` code; none is slower than the `List` instance. `Zip` keeps the result non-empty: both
+heads pair, then the tails zip as lists. `Sort` sorts the list and splits off the new head.
 
 Not `Monoid`: there is no empty value. Not `Filterable`: `filter` can remove every element, so its
-result is a `List`, which the class's `f a -> f a` cannot express.
+result is a `List`, which the class's `f a -> f a` cannot express. `stdlib.non_empty` has `filter`,
+`filter_map` and `partition` returning `List` instead, as Haskell's `Data.List.NonEmpty.filter ::
+(a -> Bool) -> NonEmpty a -> [a]` and cats' `NonEmptyList.filter(p): List[A]` do. `any`, `all`,
+`count` and `find` already work through `Foldable`.
 
 `to_string` prints `[1, 2, 3]`, the same as the list, because the value is a list to the reader.
 
@@ -129,6 +143,9 @@ result is a `List`, which the class's `f a -> f a` cannot express.
 | `to_list` | `NonEmpty a -> List a` | O(1), one cell | `stdlib.non_empty` |
 | `last` | `NonEmpty a -> a` | O(n) | `stdlib.non_empty` |
 | `reduce` | `(a -> a -> a) -> NonEmpty a -> a` | O(n), left to right | `stdlib.non_empty` |
+| `filter` | `(a -> Bool) -> NonEmpty a -> List a` | O(n), one pass | `stdlib.non_empty` |
+| `filter_map` | `(a -> Maybe b) -> NonEmpty a -> List b` | O(n), one pass | `stdlib.non_empty` |
+| `partition` | `(a -> Bool) -> NonEmpty a -> (List a, List a)` | O(n), one pass | `stdlib.non_empty` |
 
 The prelude holds the type, its instances, the way in (`non_empty`) and the two names that take it
 apart (`head`, `tail`). The rest is imported as `import stdlib.non_empty as ne`, and reads
@@ -142,8 +159,20 @@ named `non_empty` comes first, and turns `non_empty.last(xs)` into a field read 
 whose error names a field rather than the import. The compiler does not enforce the alias; the
 stdlib reference and the examples use it everywhere.
 
-With `import stdlib.math.int as imath`, `ne.reduce(imath.max, xs)` and `ne.reduce(imath.min, xs)`
-are the total maximum and minimum.
+**Open.** Where the names live is not decided. The options: as above; `head` and `tail` in
+`stdlib.non_empty` too (`ne.head`), leaving the prelude the type, its instances and
+`non_empty`; or all of it there, as Haskell keeps `NonEmpty` in `Data.List.NonEmpty` and out of
+its Prelude. Sprout has no orphan-instance rule (spec §5.6.4), so the instances can sit in any
+module. Prelude names cost the §6 renames; a module name costs an import, and `head(list)` then
+reports an unknown name instead of the §4.2 hint.
+
+`ne.reduce(max, xs)` and `ne.reduce(min, xs)` are the total maximum and minimum for any `Ord`. A
+hot `Int` loop passes `imath.max`/`imath.min` (`import stdlib.math.int as imath`) instead, as the
+generic pair dispatches through `Ord` (`docs/list-toolkit-v0.md` §4.7).
+
+The three `List`-returning names (`filter`, `filter_map`, `partition`) are the prelude's generic
+ones. Used as `ne.filter` they collide with nothing; a selective `import stdlib.non_empty (filter)`
+would hide the prelude's `filter` in that file, so the alias rule above matters doubly here.
 
 ### 4.5 Literals (not in v0)
 
@@ -192,7 +221,8 @@ whose head parameter rules out the empty case as Sprout's constructor does. Hask
   functions). But the bundler renames every local binder that shares a prelude value's name to
   `$l_<name>` (`bundler.local_name`, `docs/prelude-name-identity-v0.md` §5), and parameter
   names reach IR. So every binder named `head`, `tail` or `non_empty` (`| Cons head tail ->` and
-  the like; the words occur in 269 files, 33 of them in the compiler) changes its IR name. The
+  the like; the words occur in 276 files, 33 of them in the compiler, counted 2026-10-28) changes
+  its IR name. The
   seed and golden IR move by name only; nothing else changes.
 
 ## 7. Compatibility and migration
@@ -242,8 +272,9 @@ The toolkit adds no `head`, `first` or other `Maybe`-returning first-element fun
 
 ## 10. Implementation steps
 
-1. Prelude: type, instances, `non_empty`, `head`, `tail`, the §4.2 unifier hint. New
-   `stdlib/non_empty.sprout`: `to_list`, `last`, `reduce`. Tests. Reseed (the prelude is in the
+1. Prelude: type, instances (`Zip` included), `non_empty`, `head`, `tail`, the §4.2 unifier hint.
+   `stdlib.sort`: `instance Sort NonEmpty`. New `stdlib/non_empty.sprout`: `to_list`, `last`,
+   `reduce`, `filter`, `filter_map`, `partition`. Tests. Reseed (the prelude is in the
    compiler's closure) and run the golden IR gate; its diffs are the §6 renames.
 2. Comprehensions: `ComprehensionExpr` carries its generators as `NonEmpty`, and
    `check_comprehension_gens` builds `kinds` as `NonEmpty CompKind`, so both `infer` panics go. The
@@ -262,7 +293,11 @@ files. That migration is its own change.
 - `non_empty([])` is `Nothing`; `non_empty([1, 2])` round-trips through `ne.to_list`.
 - `head`, `tail`, `ne.last`, `ne.reduce` on one and on many elements; `ne.reduce` runs left to
   right.
-- `ne.reduce(imath.max, xs)` and `ne.reduce(imath.min, xs)`.
+- `ne.reduce(max, xs)` and `ne.reduce(min, xs)`.
+- `ne.filter`, `ne.filter_map` and `ne.partition`: keep all, keep none (an empty `List`), mixed;
+  `partition` calls `pred` once per element.
+- `zip_with` on two `NonEmpty`s of unequal length; `sort` and `sort_by` keep stability and return
+  a `NonEmpty`.
 - A file with `| Cons head tail ->` and a parameter named `tail` still compiles and runs (§6).
 - An unaliased `import stdlib.non_empty`: `non_empty.last(xs)` reaches the module and
   `non_empty(ys)` the prelude function, in the same file (§4.4).
