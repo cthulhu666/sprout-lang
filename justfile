@@ -2151,6 +2151,34 @@ stack-overflow-smoke: bootstrap-from-seed
     exit 1
   fi
   echo "==> stack-overflow-smoke ✓ (clean panic, exit $ec)"
+  # Green task stacks carry a guard page, and the crash handler names a fault in it.
+  # Without the guard the recursion writes into neighbouring memory: no clean message.
+  FIXTURE=tests/stack_overflow_smoke/task_deep_recursion.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$FIXTURE" > "$TMPD/task.ll" 2>"$TMPD/emit.err"; then
+    echo "stack-overflow-smoke: task fixture emit-IR failed" >&2; cat "$TMPD/emit.err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/task.ll" {{runtime_src}} -O2 $RDYN {{clang_extra}} -o "$TMPD/task_bin" 2>"$TMPD/link.err"; then
+    echo "stack-overflow-smoke: task fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  set +e
+  "$TMPD/task_bin" > "$TMPD/task.out" 2>"$TMPD/task.err"
+  ec=$?
+  set -e
+  if [ "$ec" -eq 0 ]; then
+    echo "stack-overflow-smoke: task fixture did NOT overflow (exit 0)" >&2
+    exit 1
+  fi
+  if grep -q "RESULT" "$TMPD/task.out"; then
+    echo "stack-overflow-smoke: task fixture ran past its stack (RESULT printed)" >&2
+    exit 1
+  fi
+  if ! grep -q "stack overflow in a green task" "$TMPD/task.err"; then
+    echo "stack-overflow-smoke: green-task overflow was not reported (exit $ec); expected 'stack overflow in a green task' on stderr" >&2
+    echo "  (green stack guard page missing, or sprout_sched_fault_in_guard not consulted by sprout_crash_handler)" >&2
+    echo "--- stderr was ---" >&2; cat "$TMPD/task.err" >&2
+    exit 1
+  fi
+  echo "==> stack-overflow-smoke ✓ (green-task overflow reported, exit $ec)"
 
 # Stdout-flush-on-abnormal-exit regression (CI gate). A program prints a sentinel
 # line, THEN overflows the native stack (SIGSEGV -> crash handler -> `_exit`,

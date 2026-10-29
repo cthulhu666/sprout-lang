@@ -312,7 +312,17 @@ one run what an `lldb` backtrace cannot (the overflow faults mid-prologue, so
 - Detection compares the fault address against the stack bounds captured at
   startup; a genuine wild-pointer fault falls through to a generic
   `[sprout] SIGSEGV` message plus the same backtrace.
-- Regression: `just stack-overflow-smoke` (`tests/stack_overflow_smoke/`).
+- A green task's stack (1 MiB) has a 64 KiB `PROT_NONE` guard at its low end
+  (`runtime/sprout_context.h`). A fault in the running task's guard (or the
+  pump's) prints `stack overflow in a green task` and exits 128+signal (138 on
+  macOS, 139 on Linux). The check runs before the main-thread one, because a
+  task stack lies outside the main-thread bounds. A frame larger than the guard
+  can jump it; none in generated code or the runtime comes close. On Windows,
+  fibers carry an OS guard page already and the handler does not classify it.
+- Destroyed task stacks are cached (16, matched by size) and reused by the next
+  spawn, so a spawn burst keeps up to 16 stacks resident.
+- Regression: `just stack-overflow-smoke` (`tests/stack_overflow_smoke/`);
+  `task_deep_recursion.spr` is the green-task case.
 
 ## Typed-codegen TCO gate (`just tco-runtime-smoke`)
 

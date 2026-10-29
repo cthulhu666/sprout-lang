@@ -30,9 +30,9 @@
 #include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
 
-/* Fixed per-task sizing. Stacks and root pools are non-moving mallocs — required
- * because a root slot is an address into the task's stack read while the task is
- * suspended (see sprout_scheduler.h). */
+/* Fixed per-task sizing. Stacks (guarded mmaps, see sprout_context.h) and root
+ * pools are non-moving — required because a root slot is an address into the
+ * task's stack read while the task is suspended (see sprout_scheduler.h). */
 #define SPROUT_TASK_STACK_BYTES (1u << 20)   /* 1 MiB per green stack */
 #define SPROUT_TASK_ROOT_SLOTS  16384        /* per-task GC temp-root LIFO depth */
 #define SPROUT_PUMP_STACK_BYTES (1u << 18)   /* 256 KiB for the scheduler pump */
@@ -182,6 +182,17 @@ static SproutCtx  g_pump;
  * as a Task so the pump parks/resumes it uniformly (roots set at startup). */
 static Task  g_task0;
 static Task* g_current_task = &g_task0;
+
+/* Crash-handler query (declared in sprout_scheduler.h): 1 when `addr` lies in the
+ * guard of the running green task's stack, 2 when in the pump's, else 0. Reads
+ * globals only, so it is safe from a signal handler. Task-0 runs on the OS stack,
+ * which the handler classifies by its own bounds. */
+int sprout_sched_fault_in_guard(const void* addr) {
+  if (g_current_task != NULL && g_current_task != &g_task0 &&
+      sprout_ctx_in_guard(&g_current_task->ctx, addr)) return 1;
+  if (sprout_ctx_in_guard(&g_pump, addr)) return 2;
+  return 0;
+}
 
 /* One global FIFO ready queue (round-robin). */
 static Task* g_rq_head = NULL;
