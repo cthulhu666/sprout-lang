@@ -11,7 +11,7 @@ import stdlib.string as string
 
 # A call-site-directed intrinsic referenced as a VALUE. `to_double` has no symbol a plain
 # `call @<name>` could reach (it is one instruction), so the generic eta wrapper named nothing
-# and the program failed at `opt` or at LINK. synthesize_intrinsic_eta_closure lowers the wrapper BODY
+# and the program failed at LINK. synthesize_intrinsic_eta_closure lowers the wrapper BODY
 # through the same translator as a direct call, which means the wrapper is only well-defined
 # where the argument type is known.
 #
