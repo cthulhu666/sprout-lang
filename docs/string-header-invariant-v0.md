@@ -1,6 +1,7 @@
 # Every String crossing into Sprout is headered — v0
 
-**Status — proposed.** Runtime-internal; no change to the language, the spec or the extern ABI.
+**Status — approved; step 1 landed (§7).** Runtime-internal; no change to the language, the spec
+or the extern ABI.
 Builds on `docs/runtime-invariant-confidence-v0.md`, which made every String headered.
 
 ## 1. Problem
@@ -110,8 +111,10 @@ The exits need `SproutHeapKind`, `sprout_hdr_of` and `sprout_gc_hdrcheck_on`, wh
 Some casts are not Sprout values at all. `arena_contains`, `region_find` and `region_find_slow` do
 address arithmetic. `sprout_poll_add_timer` and `sprout_poll_wait` tag a token's low bit for the
 kernel. These functions are listed in `runtime/ADDRESS_CASTS`, each with a reason, and reviewed the
-same way as `APPROVED_BUILTINS`. The check (§4.3) allows a pointer-to-integer cast in a listed
-function only when that function's return type is not `long long`, so no listed function can hand
+same way as `APPROVED_BUILTINS`. An entry whose cast sits in one platform's `#ifdef` branch
+carries that platform's tag (`sprout_poll_wait linux`): the AST holds only the host's branches, so
+the entry is checked on that host and ignored elsewhere. The check (§4.3) allows a
+pointer-to-integer cast in a listed function only when that function's return type is not `long long`, so no listed function can hand
 Sprout a word. A third exit, `sprout_addr(const void*) -> uintptr_t`, was rejected. Its integer
 result could be cast to `long long` like any `len`, which reopens the hole.
 
@@ -203,7 +206,9 @@ cast count is a lower bound: it misses `uintptr_t` array stores, which §4.3 cat
 
 Each step is its own commit and keeps every gate green.
 
-1. **The check, red on a mutant.**
+1. ~~**The check, red on a mutant.**~~ Landed: `just runtime-word-casts` (rule 1 only; rules 2
+   and 3 need the types from step 2 and land with it), `just test-runtime-word-casts`,
+   `docs/gates.md` §Runtime word casts.
    - Add `runtime-word-casts` with a baseline file listing today's violations, keyed
      `file:function:count`. Line numbers are not used, because the runtime is append-mostly
      (AGENTS.md, Docs & Spec 6). It fails on any violation not in the baseline, on any count
@@ -219,6 +224,7 @@ Each step is its own commit and keeps every gate green.
      sites move one module at a time.
    - `sprout_str_word`, `sprout_str_of_word`, `sprout_ptr_word` and the shared header, with
      the definitions they need moved out of `sprout_runtime.c` (§4.2).
+   - §4.3 rules 2 and 3 in `runtime-word-casts`, each with a mutant case.
    - A C test that builds a `SproutStr` around a headerless buffer, through a test-only
      constructor, and expects the HDRCHECK abort from `sprout_str_word`.
    - A C test that a writer given NULL fails.

@@ -8265,7 +8265,7 @@ static int tls_park(TlsConn* conn) {
 }
 
 static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* dataLength) {
-  TlsConn* conn = (TlsConn*)(uintptr_t)connection;
+  TlsConn* conn = (TlsConn*)connection;
   if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
   size_t requested = *dataLength;
   if (requested == 0) {
@@ -8296,7 +8296,7 @@ static OSStatus tls_read_func(SSLConnectionRef connection, void* data, size_t* d
 }
 
 static OSStatus tls_write_func(SSLConnectionRef connection, const void* data, size_t* dataLength) {
-  TlsConn* conn = (TlsConn*)(uintptr_t)connection;
+  TlsConn* conn = (TlsConn*)connection;
   if (conn == NULL || data == NULL || dataLength == NULL) return errSSLClosedAbort;
   size_t requested = *dataLength;
   if (requested == 0) {

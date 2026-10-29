@@ -1,0 +1,26 @@
+# runtime/ADDRESS_CASTS
+#
+# Functions that convert a pointer to an integer for reasons that never hand Sprout a word:
+# address arithmetic, address ordering, and kernel tokens.  Checked by `just runtime-word-casts`
+# (scripts/runtime_word_casts.py; docs/string-header-invariant-v0.md §4.2, §4.3).
+#
+# Rules, one name per line, a `# reason` on the SAME line:
+#   - A listed function must not return `long long`.  Its casts therefore cannot reach a Sprout
+#     value through its return.
+#   - A name with no pointer-to-integer cast on the host platform is stale and fails the gate.
+#   - A function whose cast result can be stored into a Sprout word belongs in
+#     runtime/WORD_CASTS_BASELINE, not here.
+#
+# The AST holds one platform's #ifdef branches.  An entry may carry one tag, `darwin` or `linux`,
+# after the name: it is then allowed and checked only on that host and ignored on the other, so
+# a cast that appears in that function on the other host fails as not in the baseline.  An
+# untagged entry is checked on every host and must have a cast on both.
+
+arena_contains          # range test of an address against the arena reservation
+region_find             # address -> region lookup; index arithmetic on the arena base
+region_find_slow        # binary search of the region table by address
+open_new_region         # orders the new region into the table by base address
+region_table_insert     # sorted insert by base address; maintains the heap address span
+sprout_fl_entry_cmp     # qsort comparator: orders free-list entries by address
+sprout_poll_wait linux  # epoll: reads back the tagged kernel token; never a Sprout word
+sprout_poll_add_timer   # kqueue timer ident / epoll token tag; the id stays inside the scheduler
