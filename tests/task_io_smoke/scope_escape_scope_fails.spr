@@ -1,0 +1,10 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.terminal as terminal
+
+# A scope record is freed at its join. Spawning into a copy of the handle after that must
+# LOUD-FAIL. A missing check writes into the freed record and the spawned task silently never runs.
+fn main() -> Unit !{IO} =
+  do
+    s <- with_scope(\s -> s)
+    task_spawn(s, \_ -> terminal.write("ran\n"))  # rejected: scope used after it closed
+    terminal.write("should-not-reach\n")

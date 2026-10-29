@@ -1,0 +1,27 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.chan (Chan, chan_new, chan_send)
+import stdlib.terminal as terminal
+
+# A task spawned into the OUTER scope captures a channel of the INNER scope. The inner join frees
+# the channel; the outer task then sends on its stale copy and must LOUD-FAIL. No result type
+# mentions the channel here, so only a check at the point of use can see it.
+fn late_send(ch: Chan Int) -> Unit !{IO} =
+  do
+    task_sleep(20)
+    chan_send(ch, 1)  # rejected: channel used after its scope closed
+    terminal.write("should-not-reach\n")
+
+fn inner_body(outer: Scope, inner: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(inner, 4)
+    task_spawn(outer, \_ -> late_send(ch))
+
+fn outer_body(outer: Scope) -> Unit !{IO} =
+  do
+    with_scope(\inner -> inner_body(outer, inner))
+    terminal.write("inner joined\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\outer -> outer_body(outer))
+    terminal.write("done\n")

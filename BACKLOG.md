@@ -1680,6 +1680,13 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   but the constants, so it is largely a parameter change. Shamir's trick on the two scalar
   multiplications is a further ~1/3 and is independent. P3 rather than P2: 5.4 ms is no longer a
   deployment problem, and the 484-vector Wycheproof suite makes either change safe to attempt.
+- [ ] `P3` **Compile-time check that `Scope`/`Chan` do not outlive `with_scope`.** Today the
+  scheduler's handle table aborts a handle used after its scope closed; no type rejects the
+  program. Candidates, none chosen: a containment bound on `with_scope`'s result type (misses a
+  handle held by a closure or an outer-scope task); a linear `Scope`/`Chan` (breaks channels shared
+  by several tasks); region or rank-2 typing (needs the region on closure and effect types). The
+  runtime check stays the guarantee until one lands. See
+  `docs/concurrency-channels-design-2026-07-16.md` §4.
 
 ## Design Roadmap
 

@@ -108,13 +108,29 @@ Rust `std::sync::mpsc` module docs.
 
 `chan_new(scope, capacity)` allocates a non-moving `Chan` record and links it into
 `scope->chans`. `__scope_join` frees every channel in the list (alongside the forks) after all
-tasks have finished — at which point no task is parked on any of them, so the free is safe. The
-`Chan` pointer is encoded as the `Int` the Sprout `Chan a` value wraps (the `Scope`/`Task` handle
-ABI), valid from `chan_new` until the owning scope closes.
+tasks have finished. Every task of that scope is done and inner scopes have already joined, but a
+task of an *enclosing* scope can still be parked on the channel (it was handed the `Chan`), so the
+join checks the channel's wait queues and aborts with "a task outside the scope is parked on its
+channel" rather than free it under that task. A channel whose lifetime ended was not closed by
+anyone, so waking the waiter as `Closed` would hide the bug.
+
+The `Int` the Sprout `Chan a` value wraps is not the record's address. `Scope`, `Chan` and a
+forked `Task` are named by a generation-checked handle, `(gen << 32) | idx`, into a scheduler-owned
+slot table in `runtime/sprout_scheduler.c`. `__scope_join` releases the slots of everything it
+frees, which bumps their generation (a slot whose generation would wrap is retired). Every
+scheduler op decodes its handle first and aborts on a handle that is stale ("channel used after
+its scope closed", "scope used after it closed", "task used after its scope closed"), never
+issued, or of another kind. A handle is therefore valid from `chan_new` until the owning scope
+closes, and a copy that outlives the join (returned, captured by a closure or an outer-scope task,
+or forwarded through another channel) is a named abort, not a read of freed memory. Sprout's
+function and effect types carry no region, so no result-type bound can see those copies; the check
+sits where the handle is used. A static check is filed in `BACKLOG.md`.
 
 Limitation (documented in `stdlib/chan.sprout`): a channel cannot outlive its creating scope, and
 there are no top-level channels. Both are acceptable — channels exist to let *sibling tasks in a
-scope* communicate, which is precisely the scope's dynamic extent.
+scope* communicate, which is precisely the scope's dynamic extent. The legitimate lifetime is
+exactly `[chan_new(s), join(s)]`: within it any task may use the channel, including tasks of scopes
+nested inside `s` and of enclosing scopes.
 
 ## 5. GC rooting
 

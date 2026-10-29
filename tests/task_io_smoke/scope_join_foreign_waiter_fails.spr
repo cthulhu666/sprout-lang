@@ -1,0 +1,27 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_recv)
+import stdlib.terminal as terminal
+
+# A task of the OUTER scope parks on a channel of the INNER scope. The inner join would free a
+# channel with a task still parked on it, so it must LOUD-FAIL rather than free it and leave that
+# task holding a dangling pointer.
+fn receiver(ch: Chan Int) -> Unit !{IO} =
+  do
+    r <- chan_recv(ch)
+    terminal.write("should-not-reach\n")
+
+fn inner_body(outer: Scope, inner: Scope) -> Unit !{IO} =
+  do
+    ch <- chan_new(inner, 1)
+    task_spawn(outer, \_ -> receiver(ch))
+    task_yield()  # the outer task runs and parks on the empty channel
+
+fn outer_body(outer: Scope) -> Unit !{IO} =
+  do
+    with_scope(\inner -> inner_body(outer, inner))  # rejected at the join
+    terminal.write("should-not-reach\n")
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\outer -> outer_body(outer))
+    terminal.write("done\n")
