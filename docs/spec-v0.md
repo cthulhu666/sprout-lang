@@ -1207,6 +1207,10 @@ outlive this match arm (through the arm's result or a binding from outside the a
 Use it inside the arm, or re-pack it.
 ```
 
+The error names the binding that escaped. When the hidden type escapes inside a
+named type that wraps it (a record `Holder a` with a field `a -> Int`), it
+names every binding of the pattern that shares the hidden type, joined by `or`.
+
 The check runs again once the declaration's deferred field reads are settled. A
 field read on a value whose type is not yet known (`o.cell`, where `o` is a lambda
 parameter) is typed at the end of the declaration, and that can bind an outer type

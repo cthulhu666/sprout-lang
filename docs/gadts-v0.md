@@ -172,7 +172,7 @@ strictly smaller, self-contained feature. So:
   constructor may bind a type variable absent from the head. De-risks the one
   novel mechanism (skolem + escape check) with zero runtime change. Shipped with
   the nominal-skolem representation of §7 (a rigid `TConst`, not a marked
-  `TVar`), so the escape check is a diagnostic rather than soundness code. Spec
+  `TVar`), so the escape check is soundness code (§7), not only a diagnostic. Spec
   §5.6.
 - **Stage 0b — constrained existentials via `any C`. ✅ IMPLEMENTED (2026-07-30;
   multi-method + superclass generalization 2026-07-31).** A field `(any ToString)`
