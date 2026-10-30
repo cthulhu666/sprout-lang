@@ -1,0 +1,14 @@
+module main
+
+# A `where linear` variable shares its written name with a type variable a declaration
+# stores (`List` declares an `a`). The `Eq (List a)` dictionary below is not a use of
+# the bounded `a`, so the declaration is accepted.
+
+type linear Res = | Res Int
+
+fn f(x: a) -> a where linear a =
+  if [[1]] == [[2]] then x else x
+
+fn close(r: Res) -> Int = match r with | Res n -> n
+
+fn main() -> Unit !{IO} = print(int_to_string(close(f(Res(7)))))

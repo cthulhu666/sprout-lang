@@ -65,12 +65,24 @@ fn tables_bounded(t: Tables) -> List BoundVar =
 # the declaration a diagnostic names as bounding it (docs/linearity-bound-v0.md §6.7).
 type BoundVar = (written: String, owner: String)
 
+# A bounded variable's identity in the linear walk. A written name is not unique:
+# `List` declares an `a` too, and its stored `a` must not read as a bounded one.
+fn bound_ident(written: String) -> String = "$bound:" ++ written
+
+# A dictionary's type with the declaration's bounded variables under their identities.
+fn to_bound_idents(bounded: List BoundVar, t: types.Type) -> types.Type =
+  types.apply_rename_type(list_fold(\ (acc, bv) -> dict_set(bv.written, bound_ident(bv.written), acc), dict_empty(), bounded), t)
+
+# The inverse, so a diagnostic prints the written name.
+fn to_written_names(bounded: List BoundVar, t: types.Type) -> types.Type =
+  types.apply_rename_type(list_fold(\ (acc, bv) -> dict_set(bound_ident(bv.written), bv.written, acc), dict_empty(), bounded), t)
+
 # The tables for one declaration's body: its bounded variables, each marked linear
 # in the env, so linear_check.first_linear_in finds them.
 fn with_bounded(bounded: List BoundVar, t: Tables) -> Tables =
   match t with
   | Tables e c v s p b ->
-      Tables(e, c, list_fold(\ (acc, bv) -> dict_set(types.linear_marker_key(bv.written), types.presence_marker, acc), v, bounded),
+      Tables(e, c, list_fold(\ (acc, bv) -> dict_set(types.linear_marker_key(bound_ident(bv.written)), types.presence_marker, acc), v, bounded),
              s, p, list_append(bounded, b))
 
 # The constraints a declaration forwards as hidden dictionaries, grouped by class and
@@ -363,7 +375,7 @@ fn instance_bounds(cls: String, head_arg: ast.TypeExpr, tables: Tables) -> List 
 fn head_var_fault(cls: String, patterns: List ast.TypeExpr, subs: Dict ast.TypeExpr, pos: source.SourcePos,
                   tables: Tables, v: String) -> Maybe(source.SourcePos, String) =
   let Just arg = dict_get(v, subs) else Nothing
-      t = te_type(arg)
+      t = to_bound_idents(tables_bounded(tables), te_type(arg))
       Just lin = linear_check.first_linear_in(t, tables_env(tables)) else Nothing
   in Just((pos, "the `" ++ string.after_last_dot(cls) ++ "` instance for `" ++ typed_ast.te_display(head_pattern(patterns))
                   ++ "` takes `" ++ v ++ "` as a value it may copy or drop, and " ++ linear_reason(t, lin, tables)
@@ -378,8 +390,9 @@ fn head_pattern(patterns: List ast.TypeExpr) -> ast.TypeExpr =
 # Why `t` is linear, worded as infer.linear_reason words it at a call. A value a
 # pattern unpacked is named by its constructor and `exists` variable.
 fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
-  let v = type_display(lin)
-  in match find(\bv -> types.type_var_name(lin) == Just(bv.written), tables_bounded(tables)) with
+  let bounded = tables_bounded(tables)
+      v = type_display(to_written_names(bounded, lin))
+  in match find(\bv -> types.type_var_name(lin) == Just(bound_ident(bv.written)), bounded) with
      | Just bv -> linear_check.bounded_reason(bv.owner, v)
      | Nothing ->
          match and_then(types.unpacked_of, and_then(\id -> dict_get(types.unpacked_key(id), tables_env(tables)),
@@ -387,7 +400,7 @@ fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
          | Just (owner, written) -> linear_check.bounded_reason(owner, written)
          | Nothing ->
              if t == lin then "`" ++ v ++ "` is linear"
-             else "`" ++ type_display(t) ++ "` holds the linear `" ++ v ++ "`"
+             else "`" ++ type_display(to_written_names(bounded, t)) ++ "` holds the linear `" ++ v ++ "`"
 
 fn type_display(t: types.Type) -> String = typed_ast.te_display(typed_ast.type_to_type_expr(t))
 
