@@ -99,7 +99,7 @@ struct SproutSlot { long long w; };
 typedef struct InternBucket { char* str; struct InternBucket* next; } InternBucket;
 
 typedef struct {
-  const char* key;    /* String as the caller passed it (GC child at index 3) */
+  SproutStr   key;    /* String as the caller passed it (GC child at index 3) */
   long long   value;  /* Sprout handle (GC child at index 0) */
   long long   left;   /* left child handle, or 0 (GC child at index 1) */
   long long   right;  /* right child handle, or 0 (GC child at index 2) */
@@ -2226,7 +2226,7 @@ static long long sprout_heap_child_value_payload(void* payload, size_t index) {
       if (index == 2) return bst->right;
       /* A heap String, a static literal or an interned one; the marker skips the
        * last two (sprout_heap_lookup finds no slot for them). */
-      if (index == 3) return (long long)(uintptr_t)bst->key;
+      if (index == 3) return sprout_str_word(bst->key);
       break;
     }
     case SPROUT_HEAP_BYTES: break;
@@ -6460,7 +6460,7 @@ SproutUnboxed2 map_get_unboxed(long long map_h, long long key_val) {
 SproutUnboxed2 map_nth_key_unboxed(long long map_h, long long index) {
   BSTNode* node = bst_nth_node(map_h, index);
   if (node == NULL) return sprout_unboxed2(SPROUT_TAG(Nothing), 0);
-  return sprout_unboxed2(SPROUT_TAG(Just), (int64_t)(uintptr_t)node->key);
+  return sprout_unboxed2(SPROUT_TAG(Just), (int64_t)sprout_str_word(node->key));
 }
 
 SproutUnboxed2 map_nth_value_unboxed(long long map_h, long long index) {
@@ -9051,7 +9051,7 @@ static long long bst_balance(long long h) {
   return result;
 }
 
-static long long bst_insert_node(long long h, const char* ikey, long long value) {
+static long long bst_insert_node(long long h, SproutStr ikey, long long value) {
   if (h == 0) { /* allocate leaf */
     long long rv = value, new_h = 0;
     SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(new_h);
@@ -9063,7 +9063,7 @@ static long long bst_insert_node(long long h, const char* ikey, long long value)
     return new_h;
   }
   BSTNode* node = (BSTNode*)(uintptr_t)h;
-  int cmp = strcmp(ikey, node->key);
+  int cmp = strcmp(ikey.hdr_p, node->key.hdr_p);
   if (cmp == 0) { /* update value, same structure */
     long long rh = h, rv = value, new_h = 0;
     SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(new_h);
@@ -9119,10 +9119,10 @@ static long long bst_remove_min(long long h) {
   return balanced;
 }
 
-static long long bst_remove_node(long long h, const char* ikey) {
+static long long bst_remove_node(long long h, SproutStr ikey) {
   if (h == 0) return 0;
   BSTNode* node = (BSTNode*)(uintptr_t)h;
-  int cmp = strcmp(ikey, node->key);
+  int cmp = strcmp(ikey.hdr_p, node->key.hdr_p);
   if (cmp == 0) {
     if (node->left == 0) return node->right;
     if (node->right == 0) return node->left;
@@ -9130,7 +9130,7 @@ static long long bst_remove_node(long long h, const char* ikey) {
     long long rh = h, new_right = 0, new_h = 0;
     SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(new_right); SPROUT_GC_PUSH_I64_LOCAL(new_h);
     BSTNode* succ = bst_find_min(((BSTNode*)(uintptr_t)rh)->right);
-    const char* succ_key = succ->key;   /* alive: reachable from rh */
+    SproutStr succ_key = succ->key;     /* alive: reachable from rh */
     long long succ_value = succ->value; /* alive: reachable from rh */
     new_right = bst_remove_min(((BSTNode*)(uintptr_t)rh)->right);
     BSTNode* n = sprout_alloc_bst_node("bst_remove: oom");
@@ -9164,7 +9164,7 @@ static long long bst_remove_node(long long h, const char* ikey) {
 static long long bst_get(long long h, const char* key) {
   while (h != 0) {
     BSTNode* node = (BSTNode*)(uintptr_t)h;
-    int cmp = strcmp(key, node->key);
+    int cmp = strcmp(key, node->key.hdr_p);
     if (cmp == 0) return node->value;
     h = (cmp < 0) ? node->left : node->right;
   }
@@ -9189,7 +9189,7 @@ static long long bst_to_list_acc(long long h, long long tail) {
   SPROUT_GC_PUSH_I64_LOCAL(rh); SPROUT_GC_PUSH_I64_LOCAL(rtail); SPROUT_GC_PUSH_I64_LOCAL(acc);
   acc = bst_to_list_acc(((BSTNode*)(uintptr_t)rh)->right, rtail);
   { BSTNode* node = (BSTNode*)(uintptr_t)rh;
-    long long kv = (long long)(uintptr_t)node->key;
+    long long kv = sprout_str_word(node->key);
     long long cons = sprout_make2(SPROUT_TAG(Cons), kv, acc);
     acc = cons; }
   long long result = bst_to_list_acc(((BSTNode*)(uintptr_t)rh)->left, acc);
@@ -9215,8 +9215,8 @@ long long map_get(long long map_h, long long key_val) {
 }
 
 long long map_set(long long map_h, long long key_val, long long value) {
-  const char* key = (const char*)key_val;
-  if (key == NULL) sprout_fail("map_set: null key");
+  if (key_val == 0) sprout_fail("map_set: null key");
+  SproutStr key = sprout_str_of_word(key_val);
   /* The key is stored as given, so it must stay rooted until a node holds it:
    * bst_insert_node allocates path copies before the leaf that stores it. */
   long long rm = map_h, rv = value, rk = key_val;
@@ -9231,7 +9231,7 @@ long long map_set(long long map_h, long long key_val, long long value) {
 static int bst_has_key(long long h, const char* key) {
   while (h != 0) {
     BSTNode* node = (BSTNode*)(uintptr_t)h;
-    int cmp = strcmp(key, node->key);
+    int cmp = strcmp(key, node->key.hdr_p);
     if (cmp == 0) return 1;
     h = (cmp < 0) ? node->left : node->right;
   }
@@ -9239,11 +9239,11 @@ static int bst_has_key(long long h, const char* key) {
 }
 
 long long map_remove(long long map_h, long long key_val) {
-  const char* key = (const char*)key_val;
-  if (key == NULL) sprout_fail("map_remove: null key");
+  if (key_val == 0) sprout_fail("map_remove: null key");
+  SproutStr key = sprout_str_of_word(key_val);
   /* An absent key changes nothing: return the map itself, with no path copy.
      The key is only compared, never stored, but root it across the allocations. */
-  if (!bst_has_key(map_h, key)) return map_h;
+  if (!bst_has_key(map_h, key.hdr_p)) return map_h;
   long long rm = map_h, rk = key_val;
   SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rk);
   long long result = bst_remove_node(rm, key);
@@ -9261,7 +9261,7 @@ long long map_nth_key(long long map_h, long long index) {
   BSTNode* node = bst_nth_node(rm, index);
   long long out = (node == NULL)
     ? sprout_make0(SPROUT_TAG(Nothing))
-    : sprout_make1(SPROUT_TAG(Just), (long long)(uintptr_t)node->key);
+    : sprout_make1(SPROUT_TAG(Just), sprout_str_word(node->key));
   SPROUT_GC_POP_LOCALS(1);
   return out;
 }
