@@ -88,5 +88,39 @@ fn main() -> Unit !{IO} =
     # alone — a smuggler would simply capitalise it.
     check_eq("Transfer-Encoding is matched case-insensitively",
       describe(parse("POST /x HTTP/1.1\r\nTRANSFER-ENCODING: Chunked\r\n\r\n")),
-      "Err unsupported transfer coding")
+      "Err unsupported transfer coding"),
+
+    # --- Header field names are tokens; Content-Length is digits only ---------------------------
+    # RFC 9112 §5.1: no whitespace between the name and the colon (400); §5.2: a line starting with
+    # SP or HTAB is an obsolete fold (400 for a request). RFC 9110 §5.6.2: a name is a token. A
+    # trimming parser reads these as a valid header that a stricter proxy in front rejects or
+    # ignores, so the two frame the body differently. One token check on the raw name covers all.
+    check_eq("whitespace before the colon is refused",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length : 5\r\n\r\nabcde")),
+      "Err invalid header line"),
+    check_eq("leading space (obs-fold) is refused",
+      describe(parse("POST /x HTTP/1.1\r\n Content-Length: 5\r\n\r\nabcde")),
+      "Err invalid header line"),
+    check_eq("leading tab (obs-fold) is refused",
+      describe(parse("POST /x HTTP/1.1\r\n\tContent-Length: 5\r\n\r\nabcde")),
+      "Err invalid header line"),
+    check_eq("a name with an inner space is refused",
+      describe(parse("GET / HTTP/1.1\r\nX Y: 1\r\n\r\n")),
+      "Err invalid header line"),
+    check_eq("a name with every kind of tchar still parses",
+      describe(parse("POST /x HTTP/1.1\r\nX-Foo_Bar.1!#$%&'*+^`|~: v\r\nContent-Length: 3\r\n\r\nabc")),
+      "POST /x body=abc"),
+    # RFC 9110 §8.6: Content-Length = 1*DIGIT. `parse_int` also takes a sign.
+    check_eq("Content-Length with a plus sign is refused",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: +5\r\n\r\nabcde")),
+      "Err invalid Content-Length"),
+    check_eq("Content-Length -0 is refused",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: -0\r\n\r\n")),
+      "Err invalid Content-Length"),
+    check_eq("Content-Length past Int range is refused",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n")),
+      "Err invalid Content-Length"),
+    check_eq("Content-Length value keeps its OWS trim",
+      describe(parse("POST /x HTTP/1.1\r\nContent-Length:   3 \r\n\r\nabc")),
+      "POST /x body=abc")
   ])
