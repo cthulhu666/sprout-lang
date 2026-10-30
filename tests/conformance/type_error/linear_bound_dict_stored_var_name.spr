@@ -1,0 +1,16 @@
+module main
+
+# The bounded variable is written `a`, as `Box` declares its own. Handing it to the
+# `Taker (Box a)` dictionary, which may copy or drop it, is still rejected.
+
+class Taker t
+  fn take(x: t) -> Int
+
+type Box a = | Box a
+
+instance Taker (Box a)
+  fn take(x: Box a) -> Int = 0
+
+fn f(x: a) -> Int where linear a = take(Box(x))
+
+fn main() -> Unit !{IO} = print("x")
