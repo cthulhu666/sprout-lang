@@ -4,6 +4,13 @@
 and the evidence — read a section when its gate fires, when you are about to override it, or when
 you are changing it.
 
+## Definition of Done — `just dod`
+
+Runs the Definition of Done's gates sequentially, with `seed-stale` first so a stale seed stops it
+before any gate prices the pre-edit compiler. Every gate is a `just` dependency, and `just` runs a
+dependency once per call, so naming a gate that `test` already contains costs nothing. It does not
+fan out, unlike `ci-fast-gates`, which also overlaps `test` (conformance, type errors, linear grid).
+
 ## Golden IR — `just ir-golden-diff`
 
 The rule in `AGENTS.md` (Definition of Done #12): read a reported diff before regenerating.

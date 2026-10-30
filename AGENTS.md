@@ -44,6 +44,10 @@ gates, so it cannot schedule this for you.
 13. The changes are committed.
 14. A self-review has been performed against the review-gate checklist (§Commit Guidance) — early, per the note above, and again before handoff.
 
+**Run the gates with `mise exec -- just dod`**, after the reseed (#9) for a compiler edit. It runs
+#5 to #8a, #11 and #12 once each, in order. Do not assemble them by hand: `just test` already
+contains the conformance and type-error suites, and a hand-built chain ran them twice.
+
 **Verification notes:**
 - During implementation, run individual test files for fast feedback (§Code and Testing); `mise exec -- just test` is the full gate required for #5.
 - **Changes to `runtime/`, the scheduler, `stdlib/net.sprout` or `stdlib/http_server.sprout`: run `mise exec -- just linux-smoke` before pushing.** Local gates run kqueue while CI runs epoll + timerfd, and the two diverge in ways unreachable on macOS ([docs/gates.md](docs/gates.md)). A recommendation, not a Definition of Done item, because it needs a container runtime.
