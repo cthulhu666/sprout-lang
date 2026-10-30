@@ -11,6 +11,8 @@ import {
   issueSegs,
   mergeSeg,
   layoutRows,
+  emptyText,
+  mergedIn,
   parseIssues,
   parsePrView,
   parsePrsArgs,
@@ -18,6 +20,7 @@ import {
   prsFromRuns,
   resolveExpanded,
   runsForPr,
+  scopePrs,
   sortIssues,
   storedPr,
   totalsSegs,
@@ -312,4 +315,27 @@ test('merge segment: label and color per state, draft first, open PRs only', () 
   expect(line({ state: 'MERGED', mergeState: 'DIRTY' })).not.toContain('conflicts')
   expect(line({ base: 'master' })).not.toContain('→')
   expect(line({ base: 'topic' })).toContain('b → topic  OPEN')
+})
+
+test('scopePrs: mine keeps only this session\'s PRs, all keeps everything', () => {
+  expect(scopePrs([3, 1, 2], [2, 9], 'mine')).toEqual([2])
+  expect(scopePrs([3, 1, 2], [2, 9], 'all')).toEqual([3, 1, 2])
+  expect(scopePrs([], [], 'mine')).toEqual([])
+})
+
+test('emptyText: hint when nothing is tracked, count of the hidden ones in mine scope', () => {
+  expect(emptyText(0, 0, 'mine')).toBe('No PRs yet. /prs add <n>')
+  expect(emptyText(0, 3, 'mine')).toBe('No PRs from this session. all shows 3')
+  expect(emptyText(0, 0, 'all')).toBe('No PRs yet. /prs add <n>')
+  expect(emptyText(2, 3, 'mine')).toBeNull()
+})
+
+test('mergedIn: the shown PRs whose stored state is MERGED', () => {
+  const data = {
+    '1': { ...blank(1), state: 'MERGED' },
+    '2': { ...blank(2), state: 'OPEN' },
+    '3': { ...blank(3), state: 'MERGED' },
+  }
+  expect(mergedIn([1, 2, 3, 4], data)).toEqual([1, 3])
+  expect(mergedIn([2, 4], data)).toEqual([])
 })
