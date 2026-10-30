@@ -1,0 +1,18 @@
+module main
+
+# The dictionary's type holds a concrete linear `Res` beside the bounded `a`. The
+# diagnostic names the whole type with `a` as written, not as its internal identity.
+
+type linear Res = | Res Int
+
+class Taker t
+  fn take(x: t) -> Int
+
+type Box a = | Box a
+
+instance Taker (Box a)
+  fn take(x: Box a) -> Int = 0
+
+fn f(x: a) -> Int where linear a = take(Box((Res(1), x)))
+
+fn main() -> Unit !{IO} = print("x")

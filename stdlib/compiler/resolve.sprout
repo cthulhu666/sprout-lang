@@ -69,13 +69,9 @@ type BoundVar = (written: String, owner: String)
 # `List` declares an `a` too, and its stored `a` must not read as a bounded one.
 fn bound_ident(written: String) -> String = "$bound:" ++ written
 
-# A dictionary's type with the declaration's bounded variables under their identities.
-fn to_bound_idents(bounded: List BoundVar, t: types.Type) -> types.Type =
-  types.apply_rename_type(list_fold(\ (acc, bv) -> dict_set(bv.written, bound_ident(bv.written), acc), dict_empty(), bounded), t)
-
-# The inverse, so a diagnostic prints the written name.
-fn to_written_names(bounded: List BoundVar, t: types.Type) -> types.Type =
-  types.apply_rename_type(list_fold(\ (acc, bv) -> dict_set(bound_ident(bv.written), bv.written, acc), dict_empty(), bounded), t)
+# Each bounded identity back to its written name, so a diagnostic prints `a`.
+fn written_names(bounded: List BoundVar) -> Dict String =
+  dict_from_list(list_map(\bv -> (bound_ident(bv.written), bv.written), bounded))
 
 # The tables for one declaration's body: its bounded variables, each marked linear
 # in the env, so linear_check.first_linear_in finds them.
@@ -375,7 +371,7 @@ fn instance_bounds(cls: String, head_arg: ast.TypeExpr, tables: Tables) -> List 
 fn head_var_fault(cls: String, patterns: List ast.TypeExpr, subs: Dict ast.TypeExpr, pos: source.SourcePos,
                   tables: Tables, v: String) -> Maybe(source.SourcePos, String) =
   let Just arg = dict_get(v, subs) else Nothing
-      t = to_bound_idents(tables_bounded(tables), te_type(arg))
+      t = te_type(tables_bounded(tables), arg)
       Just lin = linear_check.first_linear_in(t, tables_env(tables)) else Nothing
   in Just((pos, "the `" ++ string.after_last_dot(cls) ++ "` instance for `" ++ typed_ast.te_display(head_pattern(patterns))
                   ++ "` takes `" ++ v ++ "` as a value it may copy or drop, and " ++ linear_reason(t, lin, tables)
@@ -391,7 +387,8 @@ fn head_pattern(patterns: List ast.TypeExpr) -> ast.TypeExpr =
 # pattern unpacked is named by its constructor and `exists` variable.
 fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
   let bounded = tables_bounded(tables)
-      v = type_display(to_written_names(bounded, lin))
+      names = written_names(bounded)
+      v = type_display(types.apply_rename_type(names, lin))
   in match find(\bv -> types.type_var_name(lin) == Just(bound_ident(bv.written)), bounded) with
      | Just bv -> linear_check.bounded_reason(bv.owner, v)
      | Nothing ->
@@ -400,7 +397,7 @@ fn linear_reason(t: types.Type, lin: types.Type, tables: Tables) -> String =
          | Just (owner, written) -> linear_check.bounded_reason(owner, written)
          | Nothing ->
              if t == lin then "`" ++ v ++ "` is linear"
-             else "`" ++ type_display(to_written_names(bounded, t)) ++ "` holds the linear `" ++ v ++ "`"
+             else "`" ++ type_display(types.apply_rename_type(names, t)) ++ "` holds the linear `" ++ v ++ "`"
 
 fn type_display(t: types.Type) -> String = typed_ast.te_display(typed_ast.type_to_type_expr(t))
 
@@ -408,12 +405,14 @@ let holds_nothing: types.Type = types.TVar(types.tyvar_id("_"))
 
 # A dispatch type as the linear check reads it. A function, thunk or effect type
 # holds no value, as first_linear_in decides for TFunc and TThunk, so it becomes
-# `_`, which no bound marks.
-fn te_type(te: ast.TypeExpr) -> types.Type =
+# `_`, which no bound marks. A bounded variable becomes its identity (bound_ident).
+fn te_type(bounded: List BoundVar, te: ast.TypeExpr) -> types.Type =
   match te with
-  | ast.TypeName n -> if head_is_concrete(te) then types.TConst(types.type_id(n)) else types.TVar(types.tyvar_id(n))
-  | ast.TypeApply base arg -> types.TApp(te_type(base), te_type(arg))
-  | ast.TupleType items -> types.TTuple(list_map(te_type, items))
+  | ast.TypeName n ->
+      if head_is_concrete(te) then types.TConst(types.type_id(n))
+      else types.TVar(types.tyvar_id(if any(\bv -> bv.written == n, bounded) then bound_ident(n) else n))
+  | ast.TypeApply base arg -> types.TApp(te_type(bounded, base), te_type(bounded, arg))
+  | ast.TupleType items -> types.TTuple(list_map(te_type(bounded, _), items))
   | ast.TypeArrow _ _ _ _ -> holds_nothing
   | ast.TypeThunk _ _ -> holds_nothing
   | ast.TypeEffect _ _ -> holds_nothing
