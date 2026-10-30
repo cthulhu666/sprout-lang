@@ -1180,7 +1180,7 @@ fn prelude_names(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, st
       PreludeNames(values = sym_value_locals(syms),
                    bare = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(), sym_extern_names(syms)),
                    types = sym_type_locals(syms), classes = sym_class_locals(syms),
-                   unexported = unexported_fns_and_lets(prelude))
+                   unexported = unexported_fns_and_lets(prelude, sym_exported_vals(syms)))
   where prelude = find(\m -> parsed_path(m) == prelude_path(stdlib_root), modules)
 
 fn no_prelude_names() -> PreludeNames =
@@ -1194,15 +1194,14 @@ fn prelude_seen_from(path: String, stdlib_root: String, names: PreludeNames) -> 
 # Types, constructors, classes and externs are not in the set: the prelude has no
 # unexported type or class, a constructor is in scope without `(..)`, and an extern is
 # outside the module system (spec-v0 §3.1).
-fn unexported_fns_and_lets(prelude: Maybe ParsedModule) -> Set =
+fn unexported_fns_and_lets(prelude: Maybe ParsedModule, public: Dict String) -> Set =
   match prelude with
   | Nothing -> set_empty()
-  | Just (ParsedModule _ _ _ exported _ decls) ->
-      let public = set_from_list(exported)
-      in decls
-         |> list_flat_map(fn_or_let_name)
-         |> list_filter(\n -> !set_member(n, public))
-         |> set_from_list
+  | Just (ParsedModule _ _ _ _ _ decls) ->
+      decls
+      |> list_flat_map(fn_or_let_name)
+      |> list_filter(\n -> !dict_member(n, public))
+      |> set_from_list
 
 # Every variant is listed, so a new declaration kind has to decide whether it can be private.
 fn fn_or_let_name(d: ast.Decl) -> List String =
@@ -1626,7 +1625,11 @@ fn qualify_var(ctx: ResolveCtx, scope: List String, name: String, pos: source.So
   | Unclaimed (head, rest) ->
       match module_level_value(ctx, head) with
       | Just canonical -> ast.build_field_chain(ast.VarExpr(canonical, pos), rest, pos)
-      | Nothing -> ast.VarExpr(guard_canonical(ctx, name), pos)
+      | Nothing ->
+          # A private prelude head is reported as private, not as a bad field on it.
+          if set_member(head, ctx.prelude.unexported) then
+            ast.build_field_chain(ast.VarExpr(source.mark_prelude_private(head), pos), rest, pos)
+          else ast.VarExpr(guard_canonical(ctx, name), pos)
 
 # What readings A and C to E make of a value name. `Unclaimed` is a dotted name
 # none of them took, as its split at the first dot. One field per constructor, so
