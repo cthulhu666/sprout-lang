@@ -1,0 +1,41 @@
+import stdlib.terminal as terminal
+import stdlib.string as string
+
+# `stdin_read_bytes`: memory follows the bytes that arrive, not the count that was asked for.
+#
+# Driven with a pipe carrying 70003 bytes and then EOF (see the task-io-smoke recipe), which gives
+# three reads:
+#  * 70000 bytes are there: `Just` with every byte. 70000 is past the 64 KiB the buffer starts at,
+#    so the read has to grow it at least once.
+#  * A huge count against the three bytes left answers `Nothing`, as any short read does, and the
+#    process lives. An implementation that sizes its buffer from the count exits with "out of memory"
+#    before it reads a byte.
+#  * A read at EOF is `Nothing` again.
+#
+# Marker discipline: every marker appears on its success path only.
+
+extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
+
+let huge_count = 4611686018427387904
+
+let payload_size = 70000
+
+fn check_huge() -> Unit !{IO} =
+  match stdin_read_bytes(huge_count) with
+  | Nothing -> terminal.write("huge-count-eof\n")
+  | Just _ -> terminal.write("MISMATCH: huge count was satisfied\n")
+
+fn report_payload(text: String) -> Unit !{IO} =
+  if string.byte_length(text) == payload_size then terminal.write("grown-read-complete\n")
+  else terminal.write(`MISMATCH: read returned ${int_to_string(string.byte_length(text))} bytes\n`)
+
+fn main() -> Unit !{IO} =
+  do
+    match stdin_read_bytes(payload_size) with
+    | Just text -> report_payload(text)
+    | Nothing -> terminal.write("MISMATCH: payload read reported EOF\n")
+    check_huge()
+    match stdin_read_bytes(1) with
+    | Nothing -> terminal.write("eof-again\n")
+    | Just _ -> terminal.write("MISMATCH: read past EOF returned data\n")
+    terminal.write("done\n")

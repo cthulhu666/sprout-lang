@@ -2659,6 +2659,13 @@ task-io-smoke: bootstrap-from-seed
   run_once "read-exact/no-overread" "park-then-no-overread"
   run_once "read-exact/guards" "count-guards-hold"
   SPROUT_GC_STRESS=1 run_once "read-exact/stress" "chunks-reassembled"
+  # (24e) stdin_read_bytes: the same property. 70003 bytes on a pipe: a 70000-byte read (past the
+  # 64 KiB the buffer starts at) is complete, a 2^62 read over the three bytes left is Nothing
+  # rather than an abort, and EOF stays Nothing.
+  build tests/task_io_smoke/stdin_read_bytes_grows.spr
+  stdin_payload="$(head -c 70003 /dev/zero | tr '\0' x)"
+  run_stdin "stdin-read-bytes/grown" "grown-read-complete" "delay:0.1:$stdin_payload"
+  check_markers "stdin-read-bytes" "huge-count-eof" "eof-again" "done"
   # (25) Content-Length is denominated in BYTES while the body path measured and cut in CODEPOINTS
   # (concurrency review C5). `café` is 5 bytes / 4 codepoints and separates the two; an ASCII body
   # cannot, which is why the fixtures above all missed it. Three paths, because they used different
@@ -2877,7 +2884,7 @@ task-io-smoke: bootstrap-from-seed
     "crlf: 204 headers=() body=0" "mixed1: 200 headers=() body=2" "mixed2: 200 headers=(X-A: 1) body=2" \
     "lfbody: 200 headers=(X-A: 1) body=8" "lfcr: 200 headers=(A: 1) body=9" "bad: Err status 404"
   SPROUT_GC_STRESS=1 run_once "http-client-framing/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
