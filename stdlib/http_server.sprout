@@ -212,10 +212,7 @@ fn digit_byte(byte: Int) -> Bool =
 # (RFC 9112 §5.1, §5.2), so the two framed the body differently. A byte scan keeps this linear;
 # `string.char_at` is per codepoint.
 fn token_name(name: String) -> Bool =
-  total > 0 && all_bytes(tchar, encoded, 0, total)
-where
-  encoded = bytes.from_string(name)
-  total = bytes.length(encoded)
+  !string.is_empty(name) && all_bytes_in(tchar, name)
 
 fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
   match pair with
@@ -313,18 +310,8 @@ fn parse_content_length(headers: Dict String) -> ServerResult Int =
   | Nothing -> Ok(0)
   | Just raw ->
       if string.is_empty(raw) then Err(HttpInvalidRequest("empty Content-Length"))
-      else if !all_digits(raw) then Err(HttpInvalidRequest("invalid Content-Length"))
-      else content_length_result(parse_int(raw))
-
-fn all_digits(raw: String) -> Bool =
-  all_bytes(digit_byte, encoded, 0, bytes.length(encoded))
-where
-  encoded = bytes.from_string(raw)
-
-fn content_length_result(m: Maybe Int) -> ServerResult Int =
-  match m with
-  | Just n -> Ok(n)
-  | Nothing -> Err(HttpInvalidRequest("invalid Content-Length"))
+      else if !all_bytes_in(digit_byte, raw) then Err(HttpInvalidRequest("invalid Content-Length"))
+      else result_from_maybe(HttpInvalidRequest("invalid Content-Length"), parse_int(raw))
 
 # The request line and header block of the request starting at byte `start` of `raw`, whose header
 # terminator ends at byte `body_start`. Both are cut at ASCII CRLFs, so decoding the two pieces
@@ -734,11 +721,7 @@ export fn add_header(name: String, value: String, resp: HttpServerResponse) -> H
 export wrap CookieName = String deriving (Eq)
 
 export fn cookie_name(raw: String) -> Maybe CookieName =
-  if bytes.length(encoded) > 0 && all_bytes(token_byte, encoded, 0, bytes.length(encoded)) then
-    Just(CookieName(raw))
-  else Nothing
-where
-  encoded = bytes.from_string(raw)
+  if token_name(raw) then Just(CookieName(raw)) else Nothing
 
 export fn cookie_name_text(name: CookieName) -> String =
   match name with
@@ -786,19 +769,7 @@ export fn with_cookie(c: SetCookie, resp: HttpServerResponse) -> HttpServerRespo
       HttpServerResponse(status, headers, vec_append(c, vec_filter(\other -> other.name != c.name, cookies)), body)
 
 fn sent_cookie_octets(raw: String) -> Bool =
-  all_bytes(\byte -> byte != 32 && byte != 44 && cookie_octet(byte), encoded, 0, bytes.length(encoded))
-where
-  encoded = bytes.from_string(raw)
-
-let token_separators = bytes.from_string("()<>@,;:\\\"/[]?={}")
-
-# Visible ASCII less the RFC 2616 separators (space and tab are below 33).
-fn token_byte(byte: Int) -> Bool =
-  if byte < 33 || byte > 126 then false
-  else
-    match bytes.find(token_separators, bytes.singleton(byte)) with
-    | Just _ -> false
-    | Nothing -> true
+  all_bytes_in(\byte -> byte != 32 && byte != 44 && cookie_octet(byte), raw)
 
 # A `;` in a path or domain would start an attribute, so it becomes a space, as CR and LF do in
 # `sanitize_field`.
@@ -1005,10 +976,14 @@ fn all_bytes(ok: Int -> Bool, raw: Bytes, index: Int, total: Int) -> Bool =
   if index >= total then true
   else ok(bytes.get_or(raw, index, -1)) && all_bytes(ok, raw, index + 1, total)
 
-fn cookie_octets(value: String) -> Bool =
-  all_bytes(cookie_octet, encoded, 0, bytes.length(encoded))
+# One byte scan over the UTF-8 encoding; the empty string passes.
+fn all_bytes_in(ok: Int -> Bool, raw: String) -> Bool =
+  all_bytes(ok, encoded, 0, bytes.length(encoded))
 where
-  encoded = bytes.from_string(value)
+  encoded = bytes.from_string(raw)
+
+fn cookie_octets(value: String) -> Bool =
+  all_bytes_in(cookie_octet, value)
 
 # A segment with no `=`, an empty name, or a value outside `cookie-octet` is not a
 # cookie-pair and is dropped rather than read as a name with an empty value --- the
