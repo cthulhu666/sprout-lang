@@ -9264,7 +9264,7 @@ long long bytes_empty(void) {
   BytesVal* out = sprout_alloc_bytes_val("bytes_empty: out of memory");
   out->len = 0;
   out->data = NULL;
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_length(long long bytes_h) {
@@ -9299,7 +9299,7 @@ long long bytes_slice(long long bytes_h, long long start, long long count) {
   out->data = sprout_alloc_bytes_data(c, "bytes_slice: out of memory");
   if (c > 0) memcpy(out->data, value->data + s, c);
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_append(long long left_h, long long right_h) {
@@ -9316,7 +9316,7 @@ long long bytes_append(long long left_h, long long right_h) {
   if (left->len > 0) memcpy(out->data, left->data, left->len);
   if (right->len > 0) memcpy(out->data + left->len, right->data, right->len);
   SPROUT_GC_POP_LOCALS(2);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_singleton(long long value) {
@@ -9325,7 +9325,7 @@ long long bytes_singleton(long long value) {
   out->len = 1;
   out->data = sprout_alloc_bytes_data(1, "bytes_singleton: out of memory");
   out->data[0] = (unsigned char)value;
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 /* Length from the CSTR HEADER, not strlen — as DEFENCE, not as licence.
@@ -9350,14 +9350,17 @@ long long bytes_singleton(long long value) {
  *
  * Safe universally because every String is headered — arena, literal and interned alike. */
 long long bytes_from_utf8(long long raw_val) {
-  const char* raw = (const char*)raw_val;
-  if (raw == NULL) sprout_fail("bytes_from_utf8: null input");
+  if (raw_val == 0) sprout_fail("bytes_from_utf8: null input");
+  long long rooted_raw = raw_val;
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_raw);
+  const char* raw = sprout_str_of_word(raw_val).hdr_p;
   size_t len = sprout_cstr_byte_len(raw);
   BytesVal* out = sprout_alloc_bytes_val("bytes_from_utf8: out of memory");
   out->len = len;
   out->data = sprout_alloc_bytes_data(len, "bytes_from_utf8: out of memory");
   if (len > 0) memcpy(out->data, raw, len);
-  return (long long)(uintptr_t)out;
+  SPROUT_GC_POP_LOCALS(1);
+  return sprout_ptr_word(out);
 }
 
 static int utf8_validate(const unsigned char* data, size_t len, const char** reason) {
@@ -9417,21 +9420,16 @@ long long bytes_to_utf8(long long bytes_h) {
   if (value == NULL) sprout_fail("bytes_to_utf8: null bytes");
   const char* reason = NULL;
   if (!utf8_validate(value->data, value->len, &reason)) {
-    char* message = dup_managed_cstr(reason, "bytes_to_utf8: out of memory");
-    SPROUT_HANDLE(h_message, (long long)(uintptr_t)message);
-    long long err = sprout_make1(
-      SPROUT_TAG(stdlib$bytes$Utf8DecodeError),
-      sprout_handle_get(h_message)
-    );
-    SPROUT_GC_PUSH_I64_LOCAL(err);
-    long long out = sprout_make1(SPROUT_TAG(Err), err);
-    SPROUT_GC_POP_LOCALS(2);
+    long long out = sprout_err1_text(
+      SPROUT_TAG(stdlib$bytes$Utf8DecodeError), reason, "bytes_to_utf8: out of memory");
+    SPROUT_GC_POP_LOCALS(1);
     return out;
   }
   size_t vlen = value->len;
-  char* out = sprout_gc_alloc_cstr(vlen, "bytes_to_utf8: out of memory");
-  if (vlen > 0) memcpy(out, value->data, vlen);
-  out[vlen] = '\0';  SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
+  SproutStr out = sprout_str_alloc(vlen, "bytes_to_utf8: out of memory");
+  if (vlen > 0) memcpy(out.hdr_p, value->data, vlen);
+  out.hdr_p[vlen] = '\0';
+  SPROUT_HANDLE(h_out, sprout_str_word(out));
   long long result = sprout_make1(SPROUT_TAG(Ok), sprout_handle_get(h_out));
   SPROUT_GC_POP_LOCALS(1);
   return result;
@@ -9461,7 +9459,7 @@ static long long sprout_div_floor(long long left, long long right) {
 }
 
 long long bytes_builder_empty(void) {
-  return (long long)(uintptr_t)builder_alloc(0, 0);
+  return sprout_ptr_word(builder_alloc(0, 0));
 }
 
 long long bytes_builder_bytes(long long bytes_h) {
@@ -9472,7 +9470,7 @@ long long bytes_builder_bytes(long long bytes_h) {
   BuilderVal* out = builder_alloc(value->len, value->len == 0 ? 0 : 1);
   if (out->count == 1) out->chunks[0] = value;
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_builder_byte(long long value) {
@@ -9483,7 +9481,7 @@ long long bytes_builder_byte(long long value) {
   BuilderVal* out = builder_alloc(1, 1);
   out->chunks[0] = chunk;
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 static unsigned char builder_mod_256(long long value) {
@@ -9500,7 +9498,7 @@ long long bytes_builder_u16_be(long long value) {
   BuilderVal* out = builder_alloc(2, 1);
   out->chunks[0] = chunk;
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_builder_u32_be(long long value) {
@@ -9514,7 +9512,7 @@ long long bytes_builder_u32_be(long long value) {
   BuilderVal* out = builder_alloc(4, 1);
   out->chunks[0] = chunk;
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_builder_append(long long left_h, long long right_h) {
@@ -9537,7 +9535,7 @@ long long bytes_builder_append(long long left_h, long long right_h) {
   for (size_t i = 0; i < left->count; i++) out->chunks[i] = left->chunks[i];
   for (size_t i = 0; i < right->count; i++) out->chunks[left->count + i] = right->chunks[i];
   SPROUT_GC_POP_LOCALS(2);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long bytes_builder_build(long long builder_h) {
@@ -9556,7 +9554,7 @@ long long bytes_builder_build(long long builder_h) {
     offset += chunk->len;
   }
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 static uint32_t crypto_rotr32(uint32_t x, uint32_t n) {
@@ -9876,7 +9874,7 @@ long long crypto_sha256(long long bytes_h) {
   sha256_digest(value->data, value->len, digest);
   BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_sha256: out of memory");
   SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long crypto_hmac_sha256(long long key_h, long long msg_h) {
@@ -9891,7 +9889,7 @@ long long crypto_hmac_sha256(long long key_h, long long msg_h) {
   hmac_sha256_digest(key->data, key->len, msg->data, msg->len, digest);
   BytesVal* out = bytes_from_chunk_bytes(digest, 32, "crypto_hmac_sha256: out of memory");
   SPROUT_GC_POP_LOCALS(2);
-  return (long long)(uintptr_t)out;
+  return sprout_ptr_word(out);
 }
 
 long long crypto_base64_encode(long long bytes_h) {
@@ -9903,15 +9901,18 @@ long long crypto_base64_encode(long long bytes_h) {
   char* plain = base64_encode_bytes(value->data, value->len);
   if (plain == NULL) sprout_fail("crypto_base64_encode: out of memory");
   size_t plain_len = strlen(plain);
-  char* out = sprout_gc_adopt_cstr(plain, plain_len, "crypto_base64_encode: out of memory");  SPROUT_GC_POP_LOCALS(1);
-  return (long long)(uintptr_t)out;
+  long long out = sprout_str_word(sprout_str_adopt(plain, plain_len, "crypto_base64_encode: out of memory"));
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 
-long long crypto_base64_decode(const char* raw) {
-  if (raw == NULL) sprout_fail("crypto_base64_decode: null input");
+long long crypto_base64_decode(long long raw_val) {
+  if (raw_val == 0) sprout_fail("crypto_base64_decode: null input");
+  const char* raw = sprout_str_of_word(raw_val).hdr_p;
   unsigned char* data = NULL;
   size_t len = 0;
   const char* err = NULL;
+  /* raw is dead once decoded: base64_decode_bytes only mallocs, so no collection runs under it. */
   if (!base64_decode_bytes(raw, &data, &len, &err)) {
     return crypto_err1(SPROUT_TAG(stdlib$crypto$Base64DecodeError), err);
   }
@@ -9919,7 +9920,7 @@ long long crypto_base64_decode(const char* raw) {
   SPROUT_GC_PUSH_PTR_LOCAL(out);
   out->len = len;
   out->data = len == 0 ? NULL : data;
-  long long result = sprout_make1(SPROUT_TAG(Ok), (long long)(uintptr_t)out);
+  long long result = sprout_make1(SPROUT_TAG(Ok), sprout_ptr_word(out));
   SPROUT_GC_POP_LOCALS(1);
   return result;
 }
@@ -9941,7 +9942,7 @@ long long crypto_bytes_xor(long long left_h, long long right_h) {
   out->len = left->len;
   out->data = sprout_alloc_bytes_data(out->len, "crypto_bytes_xor: out of memory");
   for (size_t i = 0; i < out->len; i++) out->data[i] = left->data[i] ^ right->data[i];
-  long long result = sprout_make1(SPROUT_TAG(Ok), (long long)(uintptr_t)out);
+  long long result = sprout_make1(SPROUT_TAG(Ok), sprout_ptr_word(out));
   SPROUT_GC_POP_LOCALS(3);
   return result;
 }
@@ -9973,7 +9974,7 @@ long long crypto_random_bytes(long long count) {
     }
     fclose(fp);
   }
-  long long result = sprout_make1(SPROUT_TAG(Ok), (long long)(uintptr_t)out);
+  long long result = sprout_make1(SPROUT_TAG(Ok), sprout_ptr_word(out));
   SPROUT_GC_POP_LOCALS(1);
   return result;
 }

@@ -393,21 +393,33 @@ sw_aborts adopt_null "sprout_str_adopt: null input"
 sw_aborts register_arena "sprout_str_register: arena String"
 sw_prints old_wrappers old-wrappers-ok
 
+# run_hdrcheck_case <name> <marker>: build tests/c_runtime/<name>.c and run it plain (prints
+# <marker>) and as "stress" (prints <marker>-stress). The case includes sprout_runtime.c, so only
+# the other TUs link, as in str_writers.c.
+run_hdrcheck_case() {
+  local name="$1" marker="$2" bin="$TMP_DIR/$1" stress mode want
+  clang "$ROOT/tests/c_runtime/$name.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+    "${CLANG_EXTRA[@]}" -O0 -g -o "$bin"
+  for stress in 0 1; do
+    if [ "$stress" = 1 ]; then mode=stress; want="$marker-stress"; else mode=""; want="$marker"; fi
+    # shellcheck disable=SC2086 # an empty mode must pass no argument
+    "$bin" $mode > "$TMP_DIR/$name.out" 2> "$TMP_DIR/$name.err" || {
+      echo "  $name failed (stress=$stress):" >&2
+      cat "$TMP_DIR/$name.out" "$TMP_DIR/$name.err" >&2
+      exit 1
+    }
+    test "$(cat "$TMP_DIR/$name.out")" = "$want" || {
+      echo "  $name printed '$(cat "$TMP_DIR/$name.out")', want '$want' (stress=$stress)" >&2
+      exit 1
+    }
+  done
+}
+
 echo "==> c runtime: string builders leave headered (HDRCHECK), also under GC stress"
-# Like str_writers.c, the case includes sprout_runtime.c, so only the other TUs link.
-SS="$TMP_DIR/str_strings"
-clang "$ROOT/tests/c_runtime/str_strings.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
-  "${CLANG_EXTRA[@]}" -O0 -g -o "$SS"
-for stress in 0 1; do
-  if [ "$stress" = 1 ]; then ss_mode=stress; ss_want=str-strings-stress; else ss_mode=""; ss_want=str-strings; fi
-  # shellcheck disable=SC2086 # an empty mode must pass no argument
-  "$SS" $ss_mode > "$TMP_DIR/str_strings.out" 2> "$TMP_DIR/str_strings.err" || {
-    echo "  str_strings failed (stress=$stress):" >&2
-    cat "$TMP_DIR/str_strings.out" "$TMP_DIR/str_strings.err" >&2
-    exit 1
-  }
-  test "$(cat "$TMP_DIR/str_strings.out")" = "$ss_want"
-done
+run_hdrcheck_case str_strings str-strings
+
+echo "==> c runtime: bytes and crypto values leave well-formed (HDRCHECK), also under GC stress"
+run_hdrcheck_case bytes_crypto bytes-crypto
 
 echo "==> c runtime: a map key held only by the map survives collection"
 # Every allocation collects (SPROUT_GC_STRESS=1, set by the case itself). A freed

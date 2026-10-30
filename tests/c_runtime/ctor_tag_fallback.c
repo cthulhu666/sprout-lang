@@ -17,7 +17,8 @@ long long sprout_register_ctor(long long tag, const char* name, long long arity,
                                const char* field_kinds);
 long long vector_empty(void);
 long long vector_push(long long vec, long long value);
-long long bytes_from_utf8(long long raw);
+long long bytes_singleton(long long value);
+long long bytes_append(long long left, long long right);
 Unboxed2 vector_get_unboxed(long long vec, long long index);
 Unboxed2 bytes_get_unboxed(long long bytes, long long index);
 long long read_file(long long path);
@@ -56,7 +57,8 @@ int main(void) {
   long long vec = vector_empty();
   vector_push(vec, 41);
   vector_push(vec, 42);
-  long long bytes = bytes_from_utf8((long long)(const char*)"AB");
+  /* Built from bytes, not from a C literal: bytes_from_utf8 takes a headered String. */
+  long long bytes = bytes_append(bytes_singleton('A'), bytes_singleton('B'));
 
   int bad = 0;
   bad |= check("vector hit", vector_get_unboxed(vec, 1), 8, 42);

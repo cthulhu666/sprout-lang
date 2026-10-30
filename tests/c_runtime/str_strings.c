@@ -19,15 +19,10 @@
 #include <stdio.h>
 
 #include "../../runtime/sprout_runtime.c"
+#include "runtime_case.h"
 #include "str_check.h"
 
 enum { ERR = 1, OK = 2, JUST = 3, NOTHING = 4, CONS = 5, NIL = 6 };
-
-/* A headered String the GC never frees, for use as input. */
-static long long (*const I)(const char*) = sprout_interned_word;
-
-/* A collectable String nothing else roots, so under stress the callee must root its input. */
-static long long F(const char* text) { return str_concat(I(text), I("")); }
 
 static long long bits_of(double d) {
   long long b;
@@ -50,11 +45,6 @@ static int list_is(long long l, int n, const char* const* want) {
     l = sprout_field(l, 1);
   }
   return sprout_tag(l) == NIL;
-}
-
-static int g_failed = 0;
-static void check(int ok, const char* what) {
-  if (!ok) { g_failed = 1; fprintf(stderr, "FAIL: %s\n", what); }
 }
 
 static void run_scalars(void) {
