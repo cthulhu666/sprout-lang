@@ -2124,6 +2124,12 @@ static const char* intern_string(const char* s) {
   return sprout_str_intern(s).hdr_p;
 }
 
+/* A C string as a Sprout String: interned (copied, deduped, permanent), so it is headered and
+ * safe for strerror's static storage; no collection runs. */
+static long long sprout_interned_word(const char* name) {
+  return sprout_str_word(sprout_str_intern(name));
+}
+
 static BytesVal* sprout_alloc_bytes_val(const char* ctx) {
   sprout_gc_maybe_collect_threshold();
   BytesVal* out = (BytesVal*)sprout_gc_alloc_block(SPROUT_HEAP_BYTES, 0, sizeof(BytesVal), ctx);
@@ -3187,12 +3193,8 @@ long long int_to_string(long long value) {
   char buf[32];
   int written = snprintf(buf, sizeof(buf), "%lld", value);
   if (written < 0) sprout_fail("int_to_string: formatting failed");
-  size_t content_len = (size_t)written;
   sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(content_len, "int_to_string: out of memory");
-  memcpy(out, buf, content_len);
-  out[content_len] = '\0';
-  return (long long)(uintptr_t)out;
+  return sprout_str_word(sprout_str_dup_slice(buf, (size_t)written, "int_to_string: out of memory"));
 }
 /* Append ".0" when a "%g" rendering came out as a bare integer, so a Double never reads back
  * as an Int.  A rendering carrying '.', an exponent, or inf/nan letters already says what it
@@ -3257,12 +3259,8 @@ long long double_to_string(long long bits) {
     if (end != buf && *end == '\0' && back == d) break;
   }
   written = append_dot_zero_if_bare_int(buf, written, sizeof(buf));
-  size_t content_len = (size_t)written;
   sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(content_len, "double_to_string: out of memory");
-  memcpy(out, buf, content_len);
-  out[content_len] = '\0';
-  return (long long)(uintptr_t)out;
+  return sprout_str_word(sprout_str_dup_slice(buf, (size_t)written, "double_to_string: out of memory"));
 }
 long long env_get(const char* name) {
   if (name == NULL) sprout_fail("env_get: null name");
@@ -4016,12 +4014,6 @@ static size_t term_utf8_continuations(int lead) {
   return 0;
 }
 
-/* A static C string as a Sprout String: interned (copied, deduped, permanent), so it is
- * headered and safe for strerror's static storage; no collection runs. */
-static long long term_interned_word(const char* name) {
-  return sprout_str_word(sprout_str_intern(name));
-}
-
 static long long term_key_utf8(int lead, int from_tty) {
   unsigned char buf[5];
   size_t need = term_utf8_continuations(lead);
@@ -4040,7 +4032,7 @@ static long long term_key_utf8(int lead, int from_tty) {
   }
   const char* reason = NULL;
   if (!ok || !utf8_validate(buf, len, &reason)) {
-    return term_interned_word("\357\277\275"); /* U+FFFD */
+    return sprout_interned_word("\357\277\275"); /* U+FFFD */
   }
   sprout_gc_maybe_collect_threshold();
   return sprout_str_word(sprout_str_dup_slice((const char*)buf, len, "term_read_key: out of memory"));
@@ -4108,10 +4100,10 @@ long long term_read_key(void) {
                 ssize_t third_count = read(STDIN_FILENO, &third, 1);
                 if (third_count > 0) {
                   tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-                  if (third == 'A') return term_interned_word(token_up);
-                  if (third == 'B') return term_interned_word(token_down);
-                  if (third == 'C') return term_interned_word(token_right);
-                  if (third == 'D') return term_interned_word(token_left);
+                  if (third == 'A') return sprout_interned_word(token_up);
+                  if (third == 'B') return sprout_interned_word(token_down);
+                  if (third == 'C') return sprout_interned_word(token_right);
+                  if (third == 'D') return sprout_interned_word(token_left);
                 }
               }
             }
@@ -4121,18 +4113,17 @@ long long term_read_key(void) {
       }
     }
   }
-  /* Key-name tokens. */
-  if (ch == EOF) return term_interned_word("");
-  if (ch == 1) return term_interned_word(token_ctrl_a);
-  if (ch == 2) return term_interned_word(token_ctrl_b);
-  if (ch == 4) return term_interned_word(token_ctrl_d);
-  if (ch == 5) return term_interned_word(token_ctrl_e);
-  if (ch == 6) return term_interned_word(token_ctrl_f);
-  if (ch == 12) return term_interned_word(token_ctrl_l);
-  if (ch == 8 || ch == 127) return term_interned_word(token_backspace);
-  if (ch == 27) return term_interned_word(token_escape);
-  if (ch == '\n' || ch == '\r') return term_interned_word(token_enter);
-  if (ch == '\t') return term_interned_word(token_tab);
+  if (ch == EOF) return sprout_interned_word("");
+  if (ch == 1) return sprout_interned_word(token_ctrl_a);
+  if (ch == 2) return sprout_interned_word(token_ctrl_b);
+  if (ch == 4) return sprout_interned_word(token_ctrl_d);
+  if (ch == 5) return sprout_interned_word(token_ctrl_e);
+  if (ch == 6) return sprout_interned_word(token_ctrl_f);
+  if (ch == 12) return sprout_interned_word(token_ctrl_l);
+  if (ch == 8 || ch == 127) return sprout_interned_word(token_backspace);
+  if (ch == 27) return sprout_interned_word(token_escape);
+  if (ch == '\n' || ch == '\r') return sprout_interned_word(token_enter);
+  if (ch == '\t') return sprout_interned_word(token_tab);
   /* Reached only by the non-tty and termios-failure paths; the raw-mode path
    * assembles and returns above, where it still holds raw mode. Continuation bytes
    * come from getchar() here, which is correct precisely because these paths never
@@ -4283,7 +4274,7 @@ static long long term_input0(long long ctor_tag) {
 }
 
 static long long term_input_failed(const char* detail) {
-  long long msg = term_interned_word(detail);
+  long long msg = sprout_interned_word(detail);
   SPROUT_GC_PUSH_I64_LOCAL(msg);
   long long out = sprout_make1(SPROUT_TAG(stdlib$terminal$TermFailed), msg);
   SPROUT_GC_POP_LOCALS(1);
@@ -4970,8 +4961,8 @@ static int sprout_analysis_service_retry_allowed(const char* op) {
 }
 
 static long long sprout_err_string_result(const char* message) {
-  char* owned = dup_managed_cstr(message, "analysis service: out of memory");
-  SPROUT_HANDLE(h_message, (long long)(uintptr_t)owned);
+  SproutStr owned = sprout_str_dup(message, "analysis service: out of memory");
+  SPROUT_HANDLE(h_message, sprout_str_word(owned));
   return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_message));
 }
 
@@ -5980,10 +5971,11 @@ long long str_concat(long long left_i, long long right_i) {
   const char* left_now = (const char*)(uintptr_t)sprout_handle_get(h_left);
   const char* right_now = (const char*)(uintptr_t)sprout_handle_get(h_right);
   size_t total_len = left_len + right_len;
-  char* out = sprout_gc_alloc_cstr(total_len, "str_concat: out of memory");
-  memcpy(out, left_now, left_len);
-  memcpy(out + left_len, right_now, right_len);
-  out[total_len] = '\0';  return (long long)(uintptr_t)out;
+  SproutStr out = sprout_str_alloc(total_len, "str_concat: out of memory");
+  memcpy(out.hdr_p, left_now, left_len);
+  memcpy(out.hdr_p + left_len, right_now, right_len);
+  out.hdr_p[total_len] = '\0';
+  return sprout_str_word(out);
 }
 
 /* L0.11 select: step a Sprout `List Int` for the scheduler's __chan_select. Returns 1 and fills the
@@ -6001,64 +5993,54 @@ int sprout_list_next(long long cur, long long* out_head, long long* out_tail) {
   return 1;
 }
 
-/* string_concat_many: concatenate a List String into a single String. */
-long long string_concat_many(long long list_handle) {
+/* Error texts for sprout_str_join_list, so each caller keeps its own. */
+typedef struct { const char* malformed; const char* null_elem; const char* oom; } SproutJoinMsgs;
+
+/* Two-pass join of a List String: total length, one alloc, copy. `sep` (0 for none) follows each
+ * element. The list is rooted across the allocation and re-read after it. */
+static long long sprout_str_join_list(long long list_handle, char sep, const SproutJoinMsgs* msgs) {
   long long nil_tag  = SPROUT_TAG(Nil);
   long long cons_tag = SPROUT_TAG(Cons);
-  /* First pass: compute total byte length. */
   size_t total = 0;
   long long cur = list_handle;
   while (sprout_tag(cur) != nil_tag) {
-    if (sprout_tag(cur) != cons_tag) sprout_fail("string_concat_many: malformed list");
+    if (sprout_tag(cur) != cons_tag) sprout_fail(msgs->malformed);
     const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    if (s == NULL) sprout_fail("string_concat_many: null string element");
-    total += strlen(s);
+    if (s == NULL) sprout_fail(msgs->null_elem);
+    total += strlen(s) + (sep ? 1 : 0);
     cur = sprout_field(cur, 1);
   }
   SPROUT_HANDLE(h_list, list_handle);
   sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(total, "string_concat_many: out of memory");
-  /* Second pass: copy bytes. */
+  SproutStr out = sprout_str_alloc(total, msgs->oom);
   size_t pos = 0;
   cur = sprout_handle_get(h_list);
   while (sprout_tag(cur) != nil_tag) {
     const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
     size_t slen = strlen(elem);
-    memcpy(out + pos, elem, slen);
+    memcpy(out.hdr_p + pos, elem, slen);
     pos += slen;
+    if (sep) out.hdr_p[pos++] = sep;
     cur = sprout_field(cur, 1);
   }
-  out[total] = '\0';  return (long long)(uintptr_t)out;
+  out.hdr_p[total] = '\0';
+  return sprout_str_word(out);
 }
 
-/* string_join_newlines: join a List String appending '\n' after each element.
- * Two-pass: compute total length, malloc once, copy. No GC inside traversal. */
+/* string_concat_many: concatenate a List String into a single String. */
+long long string_concat_many(long long list_handle) {
+  static const SproutJoinMsgs msgs = {
+    "string_concat_many: malformed list", "string_concat_many: null string element",
+    "string_concat_many: out of memory" };
+  return sprout_str_join_list(list_handle, 0, &msgs);
+}
+
+/* string_join_newlines: join a List String appending '\n' after each element. */
 long long string_join_newlines(long long list_handle) {
-  long long nil_tag  = SPROUT_TAG(Nil);
-  long long cons_tag = SPROUT_TAG(Cons);
-  size_t total = 0;
-  long long cur = list_handle;
-  while (sprout_tag(cur) != nil_tag) {
-    if (sprout_tag(cur) != cons_tag) sprout_fail("string_join_newlines: malformed list");
-    const char* s = (const char*)(uintptr_t)sprout_field(cur, 0);
-    if (s == NULL) sprout_fail("string_join_newlines: null string element");
-    total += strlen(s) + 1;
-    cur = sprout_field(cur, 1);
-  }
-  SPROUT_HANDLE(h_list, list_handle);
-  sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(total, "string_join_newlines: out of memory");
-  size_t pos = 0;
-  cur = sprout_handle_get(h_list);
-  while (sprout_tag(cur) != nil_tag) {
-    const char* elem = (const char*)(uintptr_t)sprout_field(cur, 0);
-    size_t slen = strlen(elem);
-    memcpy(out + pos, elem, slen);
-    pos += slen;
-    out[pos++] = '\n';
-    cur = sprout_field(cur, 1);
-  }
-  out[pos] = '\0';  return (long long)(uintptr_t)out;
+  static const SproutJoinMsgs msgs = {
+    "string_join_newlines: malformed list", "string_join_newlines: null string element",
+    "string_join_newlines: out of memory" };
+  return sprout_str_join_list(list_handle, '\n', &msgs);
 }
 
 static size_t sprout_utf8_char_width(unsigned char lead) {
@@ -6169,9 +6151,7 @@ long long str_slice(long long s_i, long long start, long long count) {
   size_t take = end_byte - start_byte;
   sprout_gc_maybe_collect_threshold();
   const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
-  char* out = sprout_gc_alloc_cstr(take, "str_slice: out of memory");
-  if (take > 0) memcpy(out, slice_now + start_byte, take);
-  out[take] = '\0';  return (long long)(uintptr_t)out;
+  return sprout_str_word(sprout_str_dup_slice(slice_now + start_byte, take, "str_slice: out of memory"));
 }
 
 /* sprout_cstr_byte_len: O(1) byte length of a Sprout String.
@@ -6247,9 +6227,7 @@ long long str_slice_bytes(long long s_i, long long byte_start, long long byte_le
     sprout_fail("str_slice_bytes: byte_start+byte_len splits a UTF-8 codepoint");
   sprout_gc_maybe_collect_threshold();
   const char* slice_now = (const char*)(uintptr_t)sprout_handle_get(h_s);
-  char* out = sprout_gc_alloc_cstr(bl, "str_slice_bytes: out of memory");
-  if (bl > 0) memcpy(out, slice_now + bs, bl);
-  out[bl] = '\0';  return (long long)(uintptr_t)out;
+  return sprout_str_word(sprout_str_dup_slice(slice_now + bs, bl, "str_slice_bytes: out of memory"));
 }
 
 long long str_char_at(long long s_val, long long index) {
@@ -6276,59 +6254,67 @@ long long str_char_at(long long s_val, long long index) {
   return sprout_make0(SPROUT_TAG(Nothing));
 }
 
+typedef struct { size_t start; size_t end; } SproutSpan;
+
+/* The List String of `word`'s byte spans, built last to first. `word` is rooted because the loop
+ * reads it after each allocation and the caller may not root it. The GC does not move objects,
+ * so `s` stays valid while the handle keeps `word` alive. */
+static long long sprout_str_span_list(long long word, const SproutSpan* spans, size_t nspans,
+                                      const char* oom) {
+  const char* s = sprout_str_of_word(word).hdr_p;
+  long long cons_tag = SPROUT_TAG(Cons);
+  long long nil_tag  = SPROUT_TAG(Nil);
+  SPROUT_HANDLE(h_s, word);
+  SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
+  for (size_t k = nspans; k-- > 0;) {
+    size_t slen = spans[k].end - spans[k].start;
+    SproutStr piece = sprout_str_dup_slice(s + spans[k].start, slen, oom);
+    {
+      SPROUT_HANDLE(h_piece, sprout_str_word(piece));
+      SPROUT_HANDLE_SET(h_list, sprout_make2(cons_tag, sprout_handle_get(h_piece), sprout_handle_get(h_list)));
+    }
+  }
+  return sprout_handle_get(h_list);
+}
+
 /* str_split_lines: O(N) line splitting, replacing the O(N^2) split_lines_at
  * loop that called str_char_at + str_slice for each codepoint in the source.
  * Returns a Sprout List String; each line excludes the trailing newline. */
 long long str_split_lines(long long s_val) {
-  const char* s = (const char*)s_val;
+  const char* s = sprout_str_of_word(s_val).hdr_p;
   if (s == NULL) sprout_fail("str_split_lines: null input");
   size_t total = strlen(s);
 
   /* One forward pass to collect (start_byte, end_byte) spans. */
-  typedef struct { size_t start; size_t end; } Span;
-  Span* spans = NULL;
+  SproutSpan* spans = NULL;
   size_t nspans = 0, cap = 0;
   size_t line_start = 0;
   for (size_t i = 0; i <= total; i++) {
     if (s[i] == '\n' || s[i] == '\0') {
       if (nspans >= cap) {
         cap = (cap < 64) ? 64 : cap * 2;
-        Span* tmp = (Span*)realloc(spans, cap * sizeof(Span));
+        SproutSpan* tmp = (SproutSpan*)realloc(spans, cap * sizeof(SproutSpan));
         if (!tmp) { free(spans); sprout_fail("str_split_lines: out of memory"); }
         spans = tmp;
       }
-      spans[nspans++] = (Span){ line_start, i };
+      spans[nspans++] = (SproutSpan){ line_start, i };
       line_start = i + 1;
     }
   }
 
-  /* Build Cons list from back to front (last span prepended first, head at front). */
-  long long cons_tag = SPROUT_TAG(Cons);
-  long long nil_tag  = SPROUT_TAG(Nil);
-  SPROUT_HANDLE(h_s, (long long)(uintptr_t)s);
-  SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
-  for (size_t k = nspans; k-- > 0;) {
-    size_t slen = spans[k].end - spans[k].start;
-    char* line = sprout_gc_alloc_cstr(slen, "str_split_lines: out of memory");
-    memcpy(line, s + spans[k].start, slen);
-    line[slen] = '\0';    {
-      SPROUT_HANDLE(h_line, (long long)(uintptr_t)line);
-      SPROUT_HANDLE_SET(h_list, sprout_make2(cons_tag, sprout_handle_get(h_line), sprout_handle_get(h_list)));
-    }
-  }
-
+  long long list = sprout_str_span_list(s_val, spans, nspans, "str_split_lines: out of memory");
   free(spans);
-  return sprout_handle_get(h_list);
+  return list;
 }
 
 /* split_words: split a string on ASCII whitespace (space, tab, \n, \r),
  * returning a Sprout List String.  Runs in O(N) with one forward pass. */
-long long split_words(const char* s) {
+long long split_words(long long s_val) {
+  const char* s = sprout_str_of_word(s_val).hdr_p;
   if (s == NULL) sprout_fail("split_words: null input");
   size_t total = strlen(s);
 
-  typedef struct { size_t start; size_t end; } WSpan;
-  WSpan* spans = NULL;
+  SproutSpan* spans = NULL;
   size_t nspans = 0, cap = 0;
   size_t i = 0;
   while (i < total) {
@@ -6338,27 +6324,16 @@ long long split_words(const char* s) {
     while (i < total && !(s[i]==' '||s[i]=='\t'||s[i]=='\n'||s[i]=='\r')) i++;
     if (nspans >= cap) {
       cap = (cap < 64) ? 64 : cap * 2;
-      WSpan* tmp = (WSpan*)realloc(spans, cap * sizeof(WSpan));
+      SproutSpan* tmp = (SproutSpan*)realloc(spans, cap * sizeof(SproutSpan));
       if (!tmp) { free(spans); sprout_fail("split_words: out of memory"); }
       spans = tmp;
     }
-    spans[nspans++] = (WSpan){ wstart, i };
+    spans[nspans++] = (SproutSpan){ wstart, i };
   }
 
-  long long cons_tag = SPROUT_TAG(Cons);
-  long long nil_tag  = SPROUT_TAG(Nil);
-  SPROUT_HANDLE(h_list, sprout_make0(nil_tag));
-  for (size_t k = nspans; k-- > 0;) {
-    size_t slen = spans[k].end - spans[k].start;
-    char* word = sprout_gc_alloc_cstr(slen, "split_words: out of memory");
-    memcpy(word, s + spans[k].start, slen);
-    word[slen] = '\0';    {
-      SPROUT_HANDLE(h_word, (long long)(uintptr_t)word);
-      SPROUT_HANDLE_SET(h_list, sprout_make2(cons_tag, sprout_handle_get(h_word), sprout_handle_get(h_list)));
-    }
-  }
+  long long list = sprout_str_span_list(s_val, spans, nspans, "split_words: out of memory");
   free(spans);
-  return sprout_handle_get(h_list);
+  return list;
 }
 
 static long long bst_get(long long h, const char* key);
@@ -6738,11 +6713,8 @@ long long char_to_str(long long codepoint) {
     buf[2] = (char)(0x80 | ((cp >> 6) & 0x3f));
     buf[3] = (char)(0x80 | (cp & 0x3f)); len = 4;
   }
-  buf[len] = '\0';
   sprout_gc_maybe_collect_threshold();
-  char* out = sprout_gc_alloc_cstr(len, "char_to_str: out of memory");
-  memcpy(out, buf, len);
-  out[len] = '\0';  return (long long)(uintptr_t)out;
+  return sprout_str_word(sprout_str_dup_slice(buf, len, "char_to_str: out of memory"));
 }
 
 /* char_to_string: a Char is an immediate i64 Unicode codepoint; encode it to a

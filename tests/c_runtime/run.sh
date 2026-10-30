@@ -393,6 +393,22 @@ sw_aborts adopt_null "sprout_str_adopt: null input"
 sw_aborts register_arena "sprout_str_register: arena String"
 sw_prints old_wrappers old-wrappers-ok
 
+echo "==> c runtime: string builders leave headered (HDRCHECK), also under GC stress"
+# Like str_writers.c, the case includes sprout_runtime.c, so only the other TUs link.
+SS="$TMP_DIR/str_strings"
+clang "$ROOT/tests/c_runtime/str_strings.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g -o "$SS"
+for stress in 0 1; do
+  if [ "$stress" = 1 ]; then ss_mode=stress; ss_want=str-strings-stress; else ss_mode=""; ss_want=str-strings; fi
+  # shellcheck disable=SC2086 # an empty mode must pass no argument
+  "$SS" $ss_mode > "$TMP_DIR/str_strings.out" 2> "$TMP_DIR/str_strings.err" || {
+    echo "  str_strings failed (stress=$stress):" >&2
+    cat "$TMP_DIR/str_strings.out" "$TMP_DIR/str_strings.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/str_strings.out")" = "$ss_want"
+done
+
 echo "==> c runtime: a map key held only by the map survives collection"
 # Every allocation collects (SPROUT_GC_STRESS=1, set by the case itself). A freed
 # key is caught by the case's own byte and lookup round-trip, not by the sanitizer:

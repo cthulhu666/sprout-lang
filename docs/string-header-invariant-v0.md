@@ -271,8 +271,14 @@ Each step is its own commit and keeps every gate green.
    `FsError` payloads and is shared with http, crypto and tcp;
    `tests/c_runtime/fs_io_strings.c`), net, http, crypto, ~~terminal~~ (landed: `term_read_key`,
    `term_key_utf8`, `term_read_line`, `term_read_avail`, `term_input_failed`;
-   `tests/c_runtime/term_strings.c`), json, analysis, maps. The scheduler's entries went with its
+   `tests/c_runtime/term_strings.c`), ~~strings~~ (landed: `int_to_string`, `double_to_string`,
+   `char_to_str`, `str_concat`, `string_concat_many`, `string_join_newlines`, `str_slice`,
+   `str_slice_bytes`, `str_split_lines`, `split_words`, and `sprout_err_string_result`, which
+   builds the `Err(String)` of the analysis entry points; `tests/c_runtime/str_strings.c`, also
+   under `SPROUT_GC_STRESS=1`), json, analysis, maps. The scheduler's entries went with its
    generation-checked handles; poll has none. Each commit shrinks the baseline.
+   `sprout_interned_word` (an interned String as a word) sits beside `sprout_str_intern` for the
+   later groups.
    `SPROUT_GC_HDRCHECK=1 just test` includes `tests/stdlib/test_byte_offset_cost.spr`, so the cost
    of a new exit check shows up. The `test` recipe does not set HDRCHECK itself; CI sets it in the
    job environment.
