@@ -269,8 +269,13 @@ Each step is its own commit and keeps every gate green.
 3. **Convert, one module per commit.** ~~fs~~ (landed: `read_file`, `write_file`, `fs_list_dir`,
    `fs_read_bytes`, `stdin_read_bytes`, `read_int_lines`, and `sprout_err1_text`, which builds the
    `FsError` payloads and is shared with http, crypto and tcp;
-   `tests/c_runtime/fs_io_strings.c`), net, http, crypto, ~~terminal~~ (landed: `term_read_key`,
-   `term_key_utf8`, `term_read_line`, `term_read_avail`, `term_input_failed`;
+   `tests/c_runtime/fs_io_strings.c`), net, http, ~~crypto~~ (landed: `crypto_sha256`,
+   `crypto_hmac_sha256`, `crypto_base64_encode`, `crypto_base64_decode`, `crypto_bytes_xor`,
+   `crypto_random_bytes`; `crypto_base64_decode` takes the String as a word),
+   ~~bytes~~ (landed: `bytes_empty`, `bytes_slice`, `bytes_append`, `bytes_singleton`,
+   `bytes_from_utf8`, `bytes_to_utf8`, and the `bytes_builder_*` constructors;
+   `tests/c_runtime/bytes_crypto.c`, also under `SPROUT_GC_STRESS=1`), ~~terminal~~ (landed:
+   `term_read_key`, `term_key_utf8`, `term_read_line`, `term_read_avail`, `term_input_failed`;
    `tests/c_runtime/term_strings.c`), ~~strings~~ (landed: `int_to_string`, `double_to_string`,
    `char_to_str`, `str_concat`, `string_concat_many`, `string_join_newlines`, `str_slice`,
    `str_slice_bytes`, `str_split_lines`, `split_words`, and `sprout_err_string_result`, which
