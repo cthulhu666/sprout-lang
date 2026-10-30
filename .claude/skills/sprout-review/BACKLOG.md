@@ -65,6 +65,14 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   rate per reason (`scope`, `cost`, `risk`, `taste`), not yet measured. Then decide whether
   `CLEANUP_LADDER` earns its upper rung, or the track its two agents at all.
 
+- [ ] `P2` **The reviewer scope fallback `git diff main...HEAD` reads a local branch ref nobody
+  updates.** In a worktree whose `@{upstream}` diff a pass can't run, a pass fell back to the stale
+  local `master` (8a828b87, two merges behind `origin/master`) and reviewed merged code as if it
+  were part of the branch: on run 1793356017-7260, 2 of 6 cleanups were about the already-merged
+  #781. The fallback should name `origin/<default>` after a fetch, or the caller should pass the
+  base explicitly in `args`. Needs an edit to the workflow script in `SKILL.md`, so it is its own
+  change.
+
 - [ ] `P2` **Doc and comment drift is ~20% of findings, and no angle asks for it.** Of 67 raw
   findings over 11 runs, about 14 were stale comments, spec prose, PR-body claims or diagnostic
   text. They pass only because a stale comment can be phrased as a misbehaviour. Name it: a drift

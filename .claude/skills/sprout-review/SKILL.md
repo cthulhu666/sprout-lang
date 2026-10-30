@@ -95,8 +95,14 @@ spending them.
 **2. Open the ledger row.** Before any review work:
 
 ```
-bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" open
+bash "$(git rev-parse --show-toplevel)/scripts/review_ledger.sh" open [--pr <n> | --branch <b>]
 ```
+
+Pass `--pr <n>` when the target resolved to a PR number, `--branch <b>` for a branch target, and no
+flag otherwise (working tree, or a path). The row then records the reviewed code's branch and head,
+not the checked-out one: a PR reviewed from another branch is filed under the PR's own branch (a
+fork PR as `<owner>:<branch>`). If `gh` cannot resolve the PR, `open` fails and writes nothing; say
+so, and do not retry without the flag, which would file the run under the wrong branch.
 
 Resolve the repo root rather than using a relative path: a session started in a subdirectory would
 otherwise fail to find the script, and the failure shows up as a *missing row* — indistinguishable
@@ -158,6 +164,13 @@ said.
 Write the cleanups there too — confirmed, unverified and refuted — under their own heading after the
 bugs, with their category, and grouped the same way. Give each confirmed one its decision, its skip
 reason (for a skip) and the skeptic's `reason`.
+
+**Also write the grouped issues as data**, with the same grouping, through
+`review_ledger.sh items <run-id> --write < <file>`. It is a JSON array with one object per issue:
+`ns` (the run's `n` numbers grouped into it, non-empty, none in two issues), `track` (`bug` or
+`cleanup`), `severity`, `verdict` (`confirmed`, `unverified` or `refuted`), `file`, `line`, a
+one-line `summary`, and `decision` (`do`, `skip` or `null`, `null` for every bug). The script
+rejects anything else. A side panel reads this and the status rows below instead of the prose.
 
 **Also write the workflow's `raw` array**, verbatim JSON, the same way
 (`review_ledger.sh raw <run-id> --write < <file>`). That file is the only record of what each pass
@@ -224,6 +237,13 @@ findings arrive alongside "…and I have already fixed all of them, and force-pu
 no decision to make; they got a changelog. **This has happened** (run `1789385000-27845`: the
 workflow returned at 12:07, the findings reached the user at 12:31, after the fixes were amended and
 pushed), which is why it is written here as a rule rather than left to judgement.
+
+**7. Record the reader's decision, when they act on it.** The only thing done after the report.
+When a finding is fixed, skipped or refused, run
+`review_ledger.sh status <run-id> <n> <open|fixed|skipped|wontfix> [<sha>]`, with the commit sha for
+`fixed`. Any `n` of a grouped issue sets the whole issue; the latest line wins; `issues <run-id>`
+prints the result. Status is written when the reader's decision is applied, never in the review turn
+itself, so the rule above holds: the review reports and stops.
 
 ## The workflow script
 
@@ -702,7 +722,8 @@ return {
 - **A level is a cost ladder, not a quality ladder.** `max` buys more passes and more reasoning per
   pass; it does not widen the verify cap, and nothing has measured what the extra passes find.
   Do not describe a `max` run as "thorough" — describe it as eight passes.
-- The ledger lives at `$GIT_DIR/claude-review/runs.tsv` — per-worktree, invisible to `git status`,
-  append-only so two concurrent sessions cannot clobber each other, and ten columns wide since
-  the confirmed-cleanup count joined it (older seven- to nine-field rows still parse). See
+- The ledger lives at `$(git rev-parse --git-common-dir)/claude-review/runs.tsv` — one for all
+  worktrees, invisible to `git status`, append-only so two concurrent sessions cannot clobber each
+  other, and eleven columns wide since the target joined it (older seven- to ten-field rows still
+  parse). Files an older version wrote under a worktree's own git dir are still read. See
   `scripts/review_ledger.sh`.
