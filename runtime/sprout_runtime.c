@@ -9218,7 +9218,7 @@ long long map_set(long long map_h, long long key_val, long long value) {
   if (key_val == 0) sprout_fail("map_set: null key");
   SproutStr key = sprout_str_of_word(key_val);
   /* The key is stored as given, so it must stay rooted until a node holds it:
-   * bst_insert_node allocates path copies before the leaf that stores it. */
+   * the leaf allocation in bst_insert_node can collect before the key is stored. */
   long long rm = map_h, rv = value, rk = key_val;
   SPROUT_GC_PUSH_I64_LOCAL(rm); SPROUT_GC_PUSH_I64_LOCAL(rv); SPROUT_GC_PUSH_I64_LOCAL(rk);
   long long result = bst_insert_node(rm, key, rv);

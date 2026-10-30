@@ -2473,8 +2473,8 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   `let`-bound or pattern-bound owned linear value, or a call result, is as dead after its match
   and could be reused, but needs its own ownership fact in `TxEnv`. Doc §2.
 - [ ] `P3` **A linear ordered map in Sprout, `LinMap k v`.** `Dict`/`Set` are the runtime's
-  persistent AVL tree: `String` keys only, interned for the process's life, O(log n) new nodes per
-  insert. A balanced linear tree in plain Sprout would take any `Ord` key, free its keys, and
+  persistent AVL tree: `String` keys only, a traced key per node, O(log n) new nodes per insert.
+  A balanced linear tree in plain Sprout would take any `Ord` key, free its keys, and
   insert in place (`docs/linear-reuse-v0.md` §1.1: 25M → 632k objects for 1M inserts, unbalanced).
   Blocked on the entry above: a rotation matches a child taken from a field, which mints no token
   today, so every rebalance would allocate. One owner only, so it adds to `Dict`, never replaces it.

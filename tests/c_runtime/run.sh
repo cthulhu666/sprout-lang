@@ -394,8 +394,9 @@ sw_aborts register_arena "sprout_str_register: arena String"
 sw_prints old_wrappers old-wrappers-ok
 
 echo "==> c runtime: a map key held only by the map survives collection"
-# Every allocation collects (SPROUT_GC_STRESS=1, set by the case itself); the
-# sanitizer build also catches a key read after it was freed.
+# Every allocation collects (SPROUT_GC_STRESS=1, set by the case itself). A freed
+# key is caught by the case's own byte and lookup round-trip, not by the sanitizer:
+# GC slots sit in unpoisoned arena chunks, and the sweep only overwrites word 0.
 MKS="$TMP_DIR/map_key_survival"
 if ! compile map_key_survival.c "$MKS" -O1 -g -fsanitize=address,undefined; then
   echo "  sanitizer build unavailable; using unsanitized fallback"
