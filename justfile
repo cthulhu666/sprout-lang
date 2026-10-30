@@ -2658,6 +2658,7 @@ task-io-smoke: bootstrap-from-seed
   run_once "read-exact/park" "parked-read-exact"
   run_once "read-exact/no-overread" "park-then-no-overread"
   run_once "read-exact/guards" "count-guards-hold"
+  run_once "read-exact/parked-eof" "parked-eof"
   SPROUT_GC_STRESS=1 run_once "read-exact/stress" "chunks-reassembled"
   # (24e) stdin_read_bytes: the same property. 70003 bytes on a pipe: a 70000-byte read (past the
   # 64 KiB the buffer starts at) is complete, a 2^62 read over the three bytes left is Nothing

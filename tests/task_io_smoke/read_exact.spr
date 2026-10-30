@@ -18,6 +18,8 @@ import stdlib.terminal as terminal
 #    rest through ordinary recvs; an over-read would swallow the next message's head.
 #  * A negative count is `Err TcpInvalidArgument` and zero is `Ok(empty)`, both without touching
 #    the stream.
+#  * A peer that closes while the read is parked answers `Err TcpEndOfStream`: an error out of the
+#    park itself reaches the caller rather than being swallowed or retried.
 #
 # One listener, four connections in order. Each case has its own connection because a failed read
 # leaves its stream mid-message.
@@ -76,7 +78,7 @@ fn serve_park(conn: consuming TcpConnection) -> Unit !{IO} =
     task_sleep(300)
     close(conn)
 
-# Case 3: nothing to send; the client's calls must not need it.
+# Case 3: nothing to send; the client's calls must not need it, and a read parked on it sees the close.
 fn serve_guards(conn: consuming TcpConnection) -> Unit !{IO} =
   do
     task_sleep(300)
@@ -149,10 +151,19 @@ fn check_park(conn: borrowing TcpConnection) -> Unit !{IO} =
       else terminal.write(`MISMATCH: parked read returned ${text_of(payload)}\n`)
   | Err _ -> terminal.write("MISMATCH: parked read failed\n")
 
+fn check_parked_eof(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, 4) with
+  | Err TcpEndOfStream -> terminal.write("parked-eof\n")
+  | Err _ -> terminal.write("MISMATCH: parked read reported the wrong error\n")
+  | Ok _ -> terminal.write("MISMATCH: parked read was satisfied by a silent peer\n")
+
 fn check_zero(conn: borrowing TcpConnection) -> Unit !{IO} =
   match read_exact(conn, 0) with
   | Ok payload ->
-      if bytes.length(payload) == 0 then terminal.write("count-guards-hold\n")
+      if bytes.length(payload) == 0 then
+        do
+          terminal.write("count-guards-hold\n")
+          check_parked_eof(conn)
       else terminal.write("MISMATCH: zero count returned bytes\n")
   | Err _ -> terminal.write("MISMATCH: zero count reported an error\n")
 
