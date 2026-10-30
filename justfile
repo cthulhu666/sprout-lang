@@ -2646,6 +2646,19 @@ task-io-smoke: bootstrap-from-seed
   run_once "read-exact-by/eof" "close-before-count-eof"
   run_once "read-exact-by/bulk" "bulk-deadline-enforced"
   SPROUT_GC_STRESS=1 run_once "read-exact-by/stress" "chunked-reassembled"
+  # (24d) read_exact: allocation follows the bytes that arrive, not the count asked for. A 2^62 count
+  # against a peer that sends three bytes and closes must answer TcpEndOfStream and leave the process
+  # alive (RED was "out of memory" and exit 1, before any other case ran); a 200000-byte payload in
+  # four stalled writes is reassembled in order; a read started before any data parks and returns
+  # exactly its count, leaving the next message's bytes in the stream; negative and zero counts
+  # answer as read_exact_by's do.
+  build tests/task_io_smoke/read_exact.spr
+  run_once "read-exact/huge" "huge-count-eof"
+  run_once "read-exact/chunks" "chunks-reassembled"
+  run_once "read-exact/park" "parked-read-exact"
+  run_once "read-exact/no-overread" "park-then-no-overread"
+  run_once "read-exact/guards" "count-guards-hold"
+  SPROUT_GC_STRESS=1 run_once "read-exact/stress" "chunks-reassembled"
   # (25) Content-Length is denominated in BYTES while the body path measured and cut in CODEPOINTS
   # (concurrency review C5). `café` is 5 bytes / 4 codepoints and separates the two; an ASCII body
   # cannot, which is why the fixtures above all missed it. Three paths, because they used different
@@ -2864,7 +2877,7 @@ task-io-smoke: bootstrap-from-seed
     "crlf: 204 headers=() body=0" "mixed1: 200 headers=() body=2" "mixed2: 200 headers=(X-A: 1) body=2" \
     "lfbody: 200 headers=(X-A: 1) body=8" "lfcr: 200 headers=(A: 1) body=9" "bad: Err status 404"
   SPROUT_GC_STRESS=1 run_once "http-client-framing/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

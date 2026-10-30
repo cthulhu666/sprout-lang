@@ -683,7 +683,10 @@ TCP client helper types (in `stdlib/net.sprout`):
 - `TcpConnection`
 - `TcpListener`
 - `connect(host, port) -> Result TcpError TcpConnection`
-- `read_exact(conn, count) -> Result TcpError Bytes`
+- `read_exact(conn, count) -> Result TcpError Bytes` — exactly `count` bytes, with no deadline: it
+  parks while the peer is silent. Memory follows the bytes received, not `count`. For a count the
+  peer chose, use `read_exact_by` or lend the connection to `with_timeout`. `Err TcpEndOfStream` if
+  the peer closes first; negative `count` is `Err TcpInvalidArgument`, zero is `Ok(empty)`
 - `write_all(conn, payload) -> Result TcpError Int`
 - `read_exact_utf8(conn, count) -> Result TcpError String`
 - `write_all_utf8(conn, payload) -> Result TcpError Int`
@@ -703,7 +706,7 @@ one silently restarts on every call.
 - `read_exact_by(conn, count, deadline_us) -> Result TcpError Bytes` — `Err TcpTimeout` discards the
   bytes already read and leaves the stream mid-message, so the caller must close rather than reuse.
   `Err TcpEndOfStream` when the peer closes before `count` arrives; a short message is not a timeout.
-  A negative `count` is `Err TcpInvalidArgument`, as in the `tcp_read_exact` builtin; zero is
+  A negative `count` is `Err TcpInvalidArgument`, as in `read_exact`; zero is
   `Ok(empty)`. The first recv always happens and the deadline governs between recvs, so a count one
   recv can satisfy is delivered even past the deadline, and a longer one is cut off at it
 - `read_exact_utf8_by(conn, count, deadline_us) -> Result TcpError String` — `count` is BYTES, and the

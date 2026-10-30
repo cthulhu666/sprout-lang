@@ -532,9 +532,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   separates *readiness* (`tcp_wait`, parks, moves no data) from *transfer* (`tcp_read_some`/
   `tcp_write_some`, never park, report `Err TcpWouldBlock`), with retry-and-deadline loops written
   once in `stdlib/net.sprout`. Both primitives exist; the read half landed 2026-08-11 (net −4
-  builtins). **Remaining:** retire the `tcp_read_exact` builtin — `read_exact_by` now provides the
-  deadlined read in Sprout, so what is left is reimplementing the undeadlined `read_exact` over it
-  and deleting the builtin; migrate `tcp_write_all_timeout`, which re-arms its idle bound
+  builtins). **Remaining:** `tcp_read_exact` is reduced to a one-byte park (`read_exact` is now a
+  Sprout loop); replace it with a wait-forever readiness primitive and delete it;
+  migrate `tcp_write_all_timeout`, which re-arms its idle bound
   inside C so a caller can never impose a total bound (`write_all_by` shows the shape); and retire
   `tcp_write_string`, blocked on the full-duplex item below. Delete each twin's `APPROVED_BUILTINS`
   entry as it goes.

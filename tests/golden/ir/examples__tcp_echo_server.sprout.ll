@@ -122,11 +122,11 @@ declare i64 @term_read_avail(i64, i64)
 @.str.1 = private unnamed_addr constant { i64, [14 x i8] } { i64 213002, [14 x i8] c"end of stream\00" }
 @.str.2 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"timed out\00" }
 @.str.3 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"would block\00" }
-@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 238, column 55)\00" }
+@.str.4 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 271, column 55)\00" }
 @.str.5 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 238, column 62)\00" }
-@.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 263, column 65)\00" }
-@.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 263, column 52)\00" }
+@.str.6 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 271, column 62)\00" }
+@.str.7 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 296, column 65)\00" }
+@.str.8 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 296, column 52)\00" }
 @.str.9 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"127.0.0.1\00" }
 @.str.10 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"echoed\0A\00" }
 @.str.11 = private unnamed_addr constant { i64, [15 x i8] } { i64 229386, [15 x i8] c"write failed: \00" }
@@ -139,8 +139,8 @@ declare i64 @term_read_avail(i64, i64)
 @.str.18 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.19 = private unnamed_addr constant { i64, [24 x i8] } { i64 376842, [24 x i8] c"cannot listen on 8081: \00" }
 @.str.20 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"127.0.0.1\00" }
-@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 263, column 65)\00" }
-@.str.22 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 263, column 52)\00" }
+@.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 296, column 65)\00" }
+@.str.22 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 296, column 52)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"

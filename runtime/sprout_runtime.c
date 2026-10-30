@@ -10376,21 +10376,29 @@ retry:
  * tcp_read_some. The read path is now tcp_wait + tcp_read_some with the loop in Sprout. */
 typedef enum { TCP_WAIT_FOREVER, TCP_WAIT_DEADLINE } TcpWaitMode;
 
+/* Park until the connection is readable, then read ONE byte. `count` must be 1: this is the
+ * no-deadline park that stdlib.net's `read_exact` uses when its non-parking `tcp_read_some` would
+ * block, and the buffer it allocates is one byte, so memory follows what was received.
+ *
+ * It exists because `tcp_wait` has no wait-forever mode. A forever-wait over `tcp_wait` would need a
+ * huge `ms`, which arms a timer on every park, and `tcp_wait` also reports "not ready" when it cannot
+ * arm one, so a retry-forever loop over it could spin. Parking here goes through
+ * `scheduler_park_on_fd` alone, with no timer. Scheduled for deletion once a wait-forever readiness
+ * primitive replaces it (see BACKLOG). */
 long long tcp_read_exact(long long conn, long long count) {
   if (conn <= 0 || conn >= 2048 || !g_conn_used[conn]) return tcp_net_err0(SPROUT_TAG(stdlib$net$TcpInvalidHandle));
-  if (count < 0) {
+  if (count != 1) {
     return tcp_net_err1(
       SPROUT_TAG(stdlib$net$TcpInvalidArgument),
-      "count must be >= 0"
+      "count must be 1"
     );
   }
   BytesVal* out = sprout_alloc_bytes_val("tcp_read_exact: out of memory");
   SPROUT_GC_PUSH_PTR_LOCAL(out);
-  out->len = (size_t)count;
-  out->data = sprout_alloc_bytes_data((size_t)count, "tcp_read_exact: out of memory");
-  size_t received = 0;
-  while (received < (size_t)count) {
-    ssize_t n = recv(g_conn_fd[conn], out->data + received, (size_t)count - received, 0);
+  out->len = 1;
+  out->data = sprout_alloc_bytes_data(1, "tcp_read_exact: out of memory");
+  for (;;) {
+    ssize_t n = recv(g_conn_fd[conn], out->data, 1, 0);
     if (n == 0) {
       SPROUT_GC_POP_LOCALS(1);
       return tcp_net_err0(SPROUT_TAG(stdlib$net$TcpEndOfStream));
@@ -10403,7 +10411,7 @@ long long tcp_read_exact(long long conn, long long count) {
       SPROUT_GC_POP_LOCALS(1);
       return tcp_net_err1(SPROUT_TAG(stdlib$net$TcpReadFailed), strerror(errno));
     }
-    received += (size_t)n;
+    break;
   }
   long long result = tcp_net_ok((long long)(uintptr_t)out);
   SPROUT_GC_POP_LOCALS(1);
