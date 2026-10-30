@@ -91,6 +91,10 @@ declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
+declare i64 @str_byte_len(i64)
+declare i64 @str_slice_bytes(i64, i64, i64)
+declare i64 @str_split_lines(i64)
+declare i64 @split_words(i64)
 @.str.0 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"OK\00" }
 @.str.1 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Created\00" }
 @.str.2 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"Accepted\00" }

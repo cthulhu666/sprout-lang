@@ -1,0 +1,101 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.http (RequestLine, RequestPathVersion, parse_request_line)
+import stdlib.http_server (HttpRequest, HttpServerError, HttpInvalidRequest, parse, request_method, request_path)
+import stdlib.string as string
+
+# Request line = method SP request-target SP HTTP-version (RFC 9112 §3). One record per line:
+# a bare CR or LF, or any other control byte, in the line must not parse as part of a target.
+
+fn show(r: Maybe RequestLine) -> String =
+  match r with
+  | Nothing -> "Nothing"
+  | Just (RequestLine m (RequestPathVersion t v)) -> `${m}|${t}|${v}`
+
+fn ctl(code: Int) -> String =
+  string.string_from_char(char_from_codepoint(code))
+
+fn describe(r: Result HttpServerError HttpRequest) -> String =
+  match r with
+  | Ok req -> `${request_method(req)} ${request_path(req)}`
+  | Err (HttpInvalidRequest msg) -> `Err ${msg}`
+  | Err _ -> "Err other"
+
+fn main() -> Unit !{IO} =
+  run_suite("http_request_line", [
+    check_eq("plain request line parses",
+      show(parse_request_line("GET /path?q=1 HTTP/1.1")), "GET|/path?q=1|HTTP/1.1"),
+    check_eq("asterisk-form parses",
+      show(parse_request_line("OPTIONS * HTTP/1.1")), "OPTIONS|*|HTTP/1.1"),
+    check_eq("UTF-8 target parses",
+      show(parse_request_line("GET /café/日本 HTTP/1.1")), "GET|/café/日本|HTTP/1.1"),
+    check_eq("HTTP/1.0 parses",
+      show(parse_request_line("GET / HTTP/1.0")), "GET|/|HTTP/1.0"),
+    check_eq("text after the first CRLF is ignored",
+      show(parse_request_line("GET / HTTP/1.1\r\nHost: x\r\n\r\n")), "GET|/|HTTP/1.1"),
+
+    # --- Bytes that end or corrupt a record in the target ------------------------------------
+    check_eq("bare LF in the target is refused",
+      show(parse_request_line("GET /a\n2026-01-01T00:00:00Z HTTP/1.1")), "Nothing"),
+    check_eq("bare CR in the target is refused",
+      show(parse_request_line("GET /a\rb HTTP/1.1")), "Nothing"),
+    check_eq("TAB in the target is refused",
+      show(parse_request_line("GET /a\tb HTTP/1.1")), "Nothing"),
+    check_eq("ESC in the target is refused",
+      show(parse_request_line(`GET /a${ctl(27)}[31m HTTP/1.1`)), "Nothing"),
+    check_eq("DEL in the target is refused",
+      show(parse_request_line(`GET /a${ctl(127)}b HTTP/1.1`)), "Nothing"),
+    check_eq("NUL-range control byte 0x01 in the target is refused",
+      show(parse_request_line(`GET /a${ctl(1)}b HTTP/1.1`)), "Nothing"),
+    check_eq("bare CR before the terminator makes the version invalid",
+      show(parse_request_line("GET / HTTP/1.1\r\r\n")), "Nothing"),
+    check_eq("bare LF at the end is refused",
+      show(parse_request_line("GET / HTTP/1.1\n")), "Nothing"),
+
+    # --- Method -------------------------------------------------------------------------------
+    check_eq("LF in the method is refused",
+      show(parse_request_line("GE\nT / HTTP/1.1")), "Nothing"),
+    check_eq("non-token byte in the method is refused",
+      show(parse_request_line("G(T / HTTP/1.1")), "Nothing"),
+    check_eq("empty method is refused",
+      show(parse_request_line(" / HTTP/1.1")), "Nothing"),
+    check_eq("a method with every kind of tchar parses",
+      show(parse_request_line("M-1.x_!#$%&'*+^`|~ / HTTP/1.1")), "M-1.x_!#$%&'*+^`|~|/|HTTP/1.1"),
+
+    # --- Shape: exactly three parts, single SP -----------------------------------------------
+    check_eq("a space in the target is refused",
+      show(parse_request_line("GET /a b HTTP/1.1")), "Nothing"),
+    check_eq("double space is refused",
+      show(parse_request_line("GET  / HTTP/1.1")), "Nothing"),
+    check_eq("double space before the version is refused",
+      show(parse_request_line("GET /  HTTP/1.1")), "Nothing"),
+    check_eq("trailing space is refused",
+      show(parse_request_line("GET / HTTP/1.1 ")), "Nothing"),
+    check_eq("two parts are refused",
+      show(parse_request_line("GET /")), "Nothing"),
+    check_eq("empty line is refused",
+      show(parse_request_line("")), "Nothing"),
+
+    # --- Version ------------------------------------------------------------------------------
+    check_eq("HTTP/1 is refused",
+      show(parse_request_line("GET / HTTP/1")), "Nothing"),
+    check_eq("HTTX/1.1 is refused",
+      show(parse_request_line("GET / HTTX/1.1")), "Nothing"),
+    check_eq("HTTP/1.1x is refused",
+      show(parse_request_line("GET / HTTP/1.1x")), "Nothing"),
+    check_eq("HTTP/1.10 is refused",
+      show(parse_request_line("GET / HTTP/1.10")), "Nothing"),
+    check_eq("HTTP/a.1 is refused",
+      show(parse_request_line("GET / HTTP/a.1")), "Nothing"),
+    check_eq("lowercase http is refused",
+      show(parse_request_line("GET / http/1.1")), "Nothing"),
+
+    # --- Through the server: Nothing becomes 400 ----------------------------------------------
+    check_eq("server parses a valid request",
+      describe(parse("GET /x HTTP/1.1\r\n\r\n")), "GET /x"),
+    check_eq("server refuses a LF in the target",
+      describe(parse("GET /a\nb HTTP/1.1\r\n\r\n")), "Err invalid request line"),
+    check_eq("server refuses a space in the target",
+      describe(parse("GET /a b HTTP/1.1\r\n\r\n")), "Err invalid request line"),
+    check_eq("server refuses a bad version",
+      describe(parse("GET / HTTP/1\r\n\r\n")), "Err invalid request line")
+  ])

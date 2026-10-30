@@ -315,7 +315,8 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
   code, and shifts when a status is added — store `status_code`, not `ordinal`.
 - `status_code(s) -> Int`, `status_reason(s) -> String`, `status_line(s) -> String` (`"HTTP/1.1 200 OK"`)
 - `status_has_content(s) -> Bool` — false for 204 and 304, which send no body, no `content-length` and no default content-type (RFC 9110 §8.6, §15.3.5, §15.4.5)
-- `parse_request_line(raw) -> Maybe RequestLine`
+- `parse_request_line(raw) -> Maybe RequestLine` — the line up to the first CRLF, validated per RFC 9112 §3: exactly `method SP target SP version` with single SPs; the method is a token (RFC 9110 §5.6.2); the target is non-empty with no SP, control byte or DEL (bytes >= 0x80 pass); the version is `HTTP/` DIGIT `.` DIGIT. Anything else is `Nothing`, including a bare CR or LF
+- `is_token(s) -> Bool`, `all_bytes_in(ok, s) -> Bool`, `digit_byte(b) -> Bool` — byte-class helpers shared with `stdlib.http_server`
 - `http_response(status, body) -> String` — a minimal `Connection: close` response
 - `http_response_body(resp: HttpResponse) -> Bytes`
 - `http_response_text(resp: HttpResponse) -> Result Utf8Error String`
