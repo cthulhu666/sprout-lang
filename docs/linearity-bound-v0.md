@@ -289,8 +289,8 @@ Dispatch does not change. Inference changes only in §6.6's mode comparison.
   linearity diagnostic prints `a`, not `$t41`. A bounded variable is named with the declaration
   that bounds it, which in a group may be a sibling: `` `ping`'s `a` is linear under its `where
   linear a` ``. Evidence resolution marks the same variable under `$bound:<written name>` and
-  renames a dictionary's type to match before the walk, so a stored `a` that a declaration such
-  as `List` carries never reads as the bounded one.
+  builds a dictionary's type with that name, so a stored `a` that a declaration such as `List`
+  carries never reads as the bounded one.
 - **Now accepted:** a bare type variable discarded in statement position (§6.4); `borrowing a`
   under the bound, which closes the P3 entry; an instance at a non-linear type of a class that
   borrows its variable, and such a function passed as a value (§6.6).
