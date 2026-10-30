@@ -95,9 +95,9 @@ declare i64 @str_byte_len(i64)
 declare i64 @str_slice_bytes(i64, i64, i64)
 declare i64 @str_split_lines(i64)
 declare i64 @split_words(i64)
-@.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 106, column 38)\00" }
-@.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 127, column 34)\00" }
-@.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 144, column 33)\00" }
+@.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 107, column 38)\00" }
+@.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 128, column 34)\00" }
+@.str.2 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 145, column 33)\00" }
 @.str.3 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c":\00" }
 @.str.4 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.5 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"angle\00" }

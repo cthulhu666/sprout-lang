@@ -3,17 +3,13 @@ import testsupport.cost (grow)
 
 # Edge inputs for `parse_int` / `parse_double`, which scan by byte offset. Digits, signs, '.' and
 # 'e'/'E' are all ASCII, so a byte test is exact. Any non-ASCII byte is a non-digit and must give
-# Nothing, never an abort.
+# Nothing. "Never an abort" holds for `parse_int` only: `parse_double` still calls `str_len`, which
+# aborts on invalid UTF-8. The `parse_int` case is `just argv-smoke` (it needs such a String).
 
 fn describe(m: Maybe Int) -> String =
   match m with
   | Just n -> "Just " ++ int_to_string(n)
   | Nothing -> "Nothing"
-
-fn is_nothing_d(m: Maybe Double) -> Bool =
-  match m with
-  | Just _ -> false
-  | Nothing -> true
 
 fn within(m: Maybe Double, lo: Double, hi: Double) -> Bool =
   match m with
@@ -62,30 +58,30 @@ fn main() -> Unit !{IO} =
     check_eq("parse_int 3-byte char after digit", describe(parse_int("1€")), "Nothing"),
     check_eq("parse_int 3-byte char after sign", describe(parse_int("-€5")), "Nothing"),
 
-    check_true("parse_double empty", is_nothing_d(parse_double(""))),
-    check_true("parse_double lone minus", is_nothing_d(parse_double("-"))),
-    check_true("parse_double lone plus", is_nothing_d(parse_double("+"))),
-    check_true("parse_double plus mantissa", is_nothing_d(parse_double("+1.5"))),
-    check_true("parse_double lone dot", is_nothing_d(parse_double("."))),
-    check_true("parse_double bare e", is_nothing_d(parse_double("1e"))),
-    check_true("parse_double e plus only", is_nothing_d(parse_double("1e+"))),
-    check_true("parse_double e plus minus", is_nothing_d(parse_double("1e+-3"))),
-    check_true("parse_double non-ASCII only", is_nothing_d(parse_double("é"))),
-    check_true("parse_double non-ASCII in integer part", is_nothing_d(parse_double("1é2.5"))),
-    check_true("parse_double non-ASCII in fraction", is_nothing_d(parse_double("1.5é"))),
-    check_true("parse_double non-ASCII in exponent", is_nothing_d(parse_double("1e5é"))),
-    check_true("parse_double non-ASCII exponent only", is_nothing_d(parse_double("1eé"))),
-    check_true("parse_double non-ASCII after exponent sign", is_nothing_d(parse_double("1e+é"))),
+    check_true("parse_double empty", is_nothing(parse_double(""))),
+    check_true("parse_double lone minus", is_nothing(parse_double("-"))),
+    check_true("parse_double lone plus", is_nothing(parse_double("+"))),
+    check_true("parse_double plus mantissa", is_nothing(parse_double("+1.5"))),
+    check_true("parse_double lone dot", is_nothing(parse_double("."))),
+    check_true("parse_double bare e", is_nothing(parse_double("1e"))),
+    check_true("parse_double e plus only", is_nothing(parse_double("1e+"))),
+    check_true("parse_double e plus minus", is_nothing(parse_double("1e+-3"))),
+    check_true("parse_double non-ASCII only", is_nothing(parse_double("é"))),
+    check_true("parse_double non-ASCII in integer part", is_nothing(parse_double("1é2.5"))),
+    check_true("parse_double non-ASCII in fraction", is_nothing(parse_double("1.5é"))),
+    check_true("parse_double non-ASCII in exponent", is_nothing(parse_double("1e5é"))),
+    check_true("parse_double non-ASCII exponent only", is_nothing(parse_double("1eé"))),
+    check_true("parse_double non-ASCII after exponent sign", is_nothing(parse_double("1e+é"))),
     check_true("parse_double non-ASCII in wide exponent",
-               is_nothing_d(parse_double("1e99999999999999999999é"))),
-    check_true("parse_double 4-byte char in fraction", is_nothing_d(parse_double("1.😀"))),
-    check_true("parse_double Arabic-Indic digit", is_nothing_d(parse_double("٣"))),
-    check_true("parse_double Arabic-Indic digit before dot", is_nothing_d(parse_double("٣.5"))),
-    check_true("parse_double Arabic-Indic digit in exponent", is_nothing_d(parse_double("1e٣"))),
-    check_true("parse_double non-ASCII after digit", is_nothing_d(parse_double("1é"))),
-    check_true("parse_double non-ASCII after sign", is_nothing_d(parse_double("-é"))),
-    check_true("parse_double 3-byte char in fraction", is_nothing_d(parse_double("1.€5"))),
-    check_true("parse_double 3-byte char after dot", is_nothing_d(parse_double("1.€"))),
+               is_nothing(parse_double("1e99999999999999999999é"))),
+    check_true("parse_double 4-byte char in fraction", is_nothing(parse_double("1.😀"))),
+    check_true("parse_double Arabic-Indic digit", is_nothing(parse_double("٣"))),
+    check_true("parse_double Arabic-Indic digit before dot", is_nothing(parse_double("٣.5"))),
+    check_true("parse_double Arabic-Indic digit in exponent", is_nothing(parse_double("1e٣"))),
+    check_true("parse_double non-ASCII after digit", is_nothing(parse_double("1é"))),
+    check_true("parse_double non-ASCII after sign", is_nothing(parse_double("-é"))),
+    check_true("parse_double 3-byte char in fraction", is_nothing(parse_double("1.€5"))),
+    check_true("parse_double 3-byte char after dot", is_nothing(parse_double("1.€"))),
     check_true("parse_double leading zeros", within(parse_double("0000000001.5"), 1.4, 1.6)),
     check_true("parse_double fraction leading zeros", within(parse_double("0.0000005"),
                                                           0.0000004, 0.0000006)),

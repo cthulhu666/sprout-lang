@@ -1924,14 +1924,11 @@ fn argv_collect(i: Int, acc: List String) -> List String !{IO} =
 # and cannot abort. Digits, signs, '.' and 'e'/'E' are all ASCII, so a byte test is exact, and
 # any non-ASCII byte is a non-digit, as it was when this read Chars.
 #
-# The end bound `n` is `str_len(s)`, computed ONCE by the caller and passed down; calling it
-# inside a loop would put the quadratic back. It is exact: before the first non-ASCII byte the
-# byte index equals the char index, the scans stop at that byte (a non-digit), and a non-ASCII
-# char adds at least one to `n`, so the cursor is below `n` when it gets there. A String holds
-# no NUL (spec-v0 §4), so `str_len`'s count to the NUL and `str_starts_with_at_byte`'s header
-# length agree. `str_byte_len` is not used: it would answer differently for a NUL.
+# The scans find the end of the input in O(1) too (`at_end`), rather than taking a length up
+# front: `str_len` walks the whole String and aborts on invalid UTF-8, while a scan that stops at
+# the first non-digit never reads further, as it never did.
 #
-# The value of the ASCII digit at byte `i`, or -1 for any other byte (or `i` past the end).
+# The value of the ASCII digit at byte `i`, or -1 for any other byte (or `i` at or past the end).
 fn digit_at(s: String, i: Int) -> Int =
   if str_starts_with_at_byte(s, i, "0") then 0
   else if str_starts_with_at_byte(s, i, "1") then 1
@@ -1945,12 +1942,17 @@ fn digit_at(s: String, i: Int) -> Int =
   else if str_starts_with_at_byte(s, i, "9") then 9
   else 0 - 1
 
+# Whether byte `i` is the end of `s`, for a cursor that has not passed it. The empty prefix
+# matches at every offset up to the byte length and at none past it, so it fails at `i + 1`
+# only when `i` is the length.
+fn at_end(s: String, i: Int) -> Bool = !str_starts_with_at_byte(s, i + 1, "")
+
 # INT_MIN / 10, truncated toward zero: -922337203685477580. `accum_digits`
 # checks a prospective `acc * 10` against this BEFORE multiplying, so the
 # check itself never overflows.
 fn min_int_div10() -> Int = min_int() / 10
 
-# Accumulate digits from byte `i` up to `n` toward INT_MIN, i.e. `acc` is always <= 0 and
+# Accumulate digits from byte `i` toward INT_MIN, i.e. `acc` is always <= 0 and
 # each step is `(acc * 10) - digit`. Nothing if any char is a non-digit, if no
 # digit was seen at all (`seen` guards empty / lone-sign input), or if another
 # digit would push the magnitude past INT_MIN.
@@ -1962,14 +1964,12 @@ fn min_int_div10() -> Int = min_int() / 10
 # that wants the positive value must still separately reject the case where
 # the accumulated magnitude IS INT_MIN (see positive_from_neg_magnitude) since
 # 2^63 itself has no positive Int representation.
-fn accum_digits(s: String, n: Int, i: Int, acc: Int, seen: Bool) -> Maybe Int =
-  if i >= n then (if seen then Just(acc) else Nothing)
-  else
-    let d = digit_at(s, i)
-    in if d < 0 then Nothing
-       else if acc < min_int_div10() then Nothing
-       else if (acc == min_int_div10()) && (d > 8) then Nothing
-       else accum_digits(s, n, i + 1, (acc * 10) - d, true)
+fn accum_digits(s: String, i: Int, acc: Int, seen: Bool) -> Maybe Int =
+  let d = digit_at(s, i)
+  in if d < 0 then (if seen && at_end(s, i) then Just(acc) else Nothing)
+     else if acc < min_int_div10() then Nothing
+     else if (acc == min_int_div10()) && (d > 8) then Nothing
+     else accum_digits(s, i + 1, (acc * 10) - d, true)
 
 # Turn a negative-accumulated magnitude (see accum_digits) into its positive
 # value. Nothing iff the magnitude is exactly INT_MIN: 2^63 has no positive
@@ -1982,9 +1982,8 @@ fn positive_from_neg_magnitude(m: Maybe Int) -> Maybe Int =
 # O(n) in the input length. Total: an over-range digit run (more than [-2^63, 2^63-1] can hold)
 # answers Nothing rather than wrapping or panicking (bigint-v0 Stage 1 §5.1).
 export fn parse_int(s: String) -> Maybe Int =
-  let n = str_len(s)
-  in if str_starts_with_at_byte(s, 0, "-") then accum_digits(s, n, 1, 0, false)
-     else positive_from_neg_magnitude(accum_digits(s, n, 0, 0, false))
+  if str_starts_with_at_byte(s, 0, "-") then accum_digits(s, 1, 0, false)
+  else positive_from_neg_magnitude(accum_digits(s, 0, 0, false))
 
 # 10^k for k >= 0, and the clamp every caller applies first.
 #
@@ -2068,17 +2067,15 @@ fn split_on_char(s: String, sep: String) -> Maybe (String, String) =
 fn sig_fits(sig: Int, d: Int) -> Bool =
   (sig > min_int_div10()) || ((sig == min_int_div10()) && (d <= 8))
 
-# Scan `s` (`n` = `str_len(s)`, see parse_int) from byte `i` into (significand, dropped). A
-# leading zero is not significant and costs nothing; a digit that no longer fits is dropped
-# and counted, for the caller to repay as a power of ten. Nothing on any non-digit.
-fn scan_sig(s: String, n: Int, i: Int, sig: Int, dropped: Int) -> Maybe (Int, Int) =
-  if i >= n then Just((sig, dropped))
-  else
-    let d = digit_at(s, i)
-    in if d < 0 then Nothing
-       else if (sig == 0) && (d == 0) then scan_sig(s, n, i + 1, sig, dropped)
-       else if sig_fits(sig, d) then scan_sig(s, n, i + 1, (sig * 10) - d, dropped)
-       else scan_sig(s, n, i + 1, sig, dropped + 1)
+# Scan `s` from byte `i` into (significand, dropped). A leading zero is not significant and
+# costs nothing; a digit that no longer fits is dropped and counted, for the caller to repay as
+# a power of ten. Nothing on any non-digit.
+fn scan_sig(s: String, i: Int, sig: Int, dropped: Int) -> Maybe (Int, Int) =
+  let d = digit_at(s, i)
+  in if d < 0 then (if at_end(s, i) then Just((sig, dropped)) else Nothing)
+     else if (sig == 0) && (d == 0) then scan_sig(s, i + 1, sig, dropped)
+     else if sig_fits(sig, d) then scan_sig(s, i + 1, (sig * 10) - d, dropped)
+     else scan_sig(s, i + 1, sig, dropped + 1)
 
 # Non-negative mantissa "int[.frac]" -> (significand, exponent). `int` or `frac`
 # may be empty (".5", "5."); a lone "." is rejected. The exponent repays the
@@ -2087,19 +2084,15 @@ fn scan_sig(s: String, n: Int, i: Int, sig: Int, dropped: Int) -> Maybe (Int, In
 # paid for by that width rather than by being counted as significant.
 fn parse_mantissa(mant: String) -> Maybe (Int, Int) =
   match split_on_char(mant, ".") with
-  | Nothing ->
-      let n = str_len(mant)
-      in if n <= 0 then Nothing else scan_sig(mant, n, 0, 0, 0)
+  | Nothing -> if str_len(mant) <= 0 then Nothing else scan_sig(mant, 0, 0, 0)
   | Just (ip, fp) ->
-      let ni = str_len(ip)
-          nf = str_len(fp)
-      in if (ni <= 0) && (nf <= 0) then Nothing
-         else match scan_sig(ip, ni, 0, 0, 0) with
-              | Nothing -> Nothing
-              | Just (isig, idropped) ->
-                  match scan_sig(fp, nf, 0, isig, idropped) with
-                  | Nothing -> Nothing
-                  | Just (sig, dropped) -> Just((sig, dropped - nf))
+      if (str_len(ip) <= 0) && (str_len(fp) <= 0) then Nothing
+      else match scan_sig(ip, 0, 0, 0) with
+           | Nothing -> Nothing
+           | Just (isig, idropped) ->
+               match scan_sig(fp, 0, isig, idropped) with
+               | Nothing -> Nothing
+               | Just (sig, dropped) -> Just((sig, dropped - str_len(fp)))
 
 # `sig * 10^k` as a Double. `sig` is the negatively-accumulated significand, so
 # negating the converted value gives the magnitude — exact for every magnitude
@@ -2128,12 +2121,10 @@ fn scale_significand(sig: Int, k: Int) -> Double =
         c = clamp_exponent(k)
     in if c >= 0 then mag * pow10_pos(c) else divide_by_pow10(mag, -c)
 
-# Whether `s` (`n` = `str_len(s)`, see parse_int) from byte `i` is a non-empty run of nothing but
-# digits.
-fn digits_only(s: String, n: Int, i: Int, seen: Bool) -> Bool =
-  if i >= n then seen
-  else if digit_at(s, i) < 0 then false
-  else digits_only(s, n, i + 1, true)
+# Whether `s` from byte `i` is a non-empty run of nothing but digits.
+fn digits_only(s: String, i: Int, seen: Bool) -> Bool =
+  if digit_at(s, i) < 0 then seen && at_end(s, i)
+  else digits_only(s, i + 1, true)
 
 # An exponent's digits, with the optional sign it is allowed to carry: `-` or an explicit `+`
 # (RFC 8259's `exp` production and IEEE 754 both permit the `+`, and `%g` writers emit it —
@@ -2153,23 +2144,22 @@ fn digits_only(s: String, n: Int, i: Int, seen: Bool) -> Bool =
 # Saturating at Int's end rather than at the clamp: the digit-derived scale is
 # added to this before anything clamps, and a run that overflowed Int must stay
 # out of range afterwards.
-fn saturated_exponent(es: String, n: Int, start: Int, neg: Bool) -> Maybe Int =
-  if digits_only(es, n, start, false)
+fn saturated_exponent(es: String, start: Int, neg: Bool) -> Maybe Int =
+  if digits_only(es, start, false)
   then Just(if neg then min_int() else max_int)
   else Nothing
 
 fn parse_exponent(es: String) -> Maybe Int =
   let neg = str_starts_with(es, "-")
       start = if neg || str_starts_with(es, "+") then 1 else 0
-      n = str_len(es)
-  in match accum_digits(es, n, start, 0, false) with
-     | Nothing -> saturated_exponent(es, n, start, neg)
+  in match accum_digits(es, start, 0, false) with
+     | Nothing -> saturated_exponent(es, start, neg)
      # `m` is the negative magnitude, so it IS the value when the sign is `-`.
      # Only magnitude 2^63 has no positive counterpart, and 2^63 is far past the
      # clamp, so saturating it loses nothing.
      | Just m ->
          if neg then Just(m)
-         else if m == min_int() then saturated_exponent(es, n, start, neg)
+         else if m == min_int() then saturated_exponent(es, start, neg)
          else Just(-m)
 
 # Split off an optional 'e'/'E' exponent: returns (mantissa, exponent). No exponent -> 0;
@@ -2273,8 +2263,9 @@ extern fn str_compare(a: String, b: String) -> Int
 # three of them (`words`, `byte_length`, `string_lines`) and because most consumers are compiler
 # sources that already import it. Two are not: stdlib.unicode.lookup, which already imported
 # stdlib.string so adds no bundling cost, and stdlib.json, which pays ~2,700 lines of unused
-# stdlib.string and stdlib.bytes bodies for a few externs at ~85 call sites — an honest dependency
-# for a text parser, and the concrete cost of having no cross-module DCE (BACKLOG §7).
+# stdlib.string and stdlib.bytes bodies for three call sites (two `str_slice_bytes`, one
+# `str_byte_len`) — an honest dependency for a text parser, and the concrete cost of having no
+# cross-module DCE (BACKLOG §7).
 #
 # The ONE EXCEPTION is `str_starts_with_at_byte`, below. The prelude's own `parse_int` and
 # `parse_double` need a linear scan over their input, `str_char_at` is O(i) per call, and the

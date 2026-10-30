@@ -1994,6 +1994,8 @@ verify-dispatch-smoke: bootstrap-from-seed
 # its command-line arguments — the typed-codegen flip self-compiles the
 # compiler, whose main() reads argv.  The parity corpus runs every binary with
 # NO args, so this is the ONLY gate exercising argv_all() under typed codegen.
+# It also runs tests/argv_smoke/parse_int_bad_utf8.spr, the only way to hand `parse_int` a String
+# holding invalid UTF-8.
 [group('smoke')]
 argv-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -2011,6 +2013,24 @@ argv-smoke: bootstrap-from-seed
   if [[ "$got" != "pong:hello" ]]; then
     echo "argv-smoke: typed-built binary mishandled argv — expected 'pong:hello', got '$got'" >&2
     echo "  (typed main shim likely missing @sprout_set_argv; see ir_lowering.main_shim)" >&2
+    exit 1
+  fi
+  # Second fixture: argv is the one source of a String holding invalid UTF-8, which `parse_int`
+  # must reject at the first non-digit without reading on. $'..' passes the raw bytes.
+  FIXTURE=tests/argv_smoke/parse_int_bad_utf8.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/bad.ll" 2>"$TMPD/err"; then
+    echo "argv-smoke: parse_int fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/bad.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bad_bin" 2>"$TMPD/link.err"; then
+    echo "argv-smoke: parse_int fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  want=$'Nothing\nNothing\nNothing\nNothing\nNothing\nJust 42\nJust -7\nend'
+  got=$("$TMPD/bad_bin" $'x\xff' $'\xff' $'1\xff' $'-\xff' $'12\xc3' 42 -7 2>"$TMPD/bad.err") || {
+    echo "argv-smoke: parse_int aborted on invalid UTF-8 input" >&2; cat "$TMPD/bad.err" >&2; exit 1
+  }
+  if [[ "$got" != "$want" ]]; then
+    echo "argv-smoke: parse_int on invalid UTF-8 — expected:" >&2; echo "$want" >&2
+    echo "got:" >&2; echo "$got" >&2
     exit 1
   fi
   echo "==> argv-smoke ✓"
