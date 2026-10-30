@@ -1,5 +1,7 @@
 module stdlib.log
 
+import stdlib.bytes as bytes
+import stdlib.hex as hex
 import stdlib.string as string
 import stdlib.time as time
 
@@ -111,18 +113,76 @@ export fn format_iso8601(micros: Int) -> String =
 fn all_fields(base: Vec (String, String), call: Vec (String, String)) -> Vec (String, String) =
   base ++ call
 
+# --- Text escaping ---------------------------------------------------------
+# One record is one line, and keys and values read back unambiguously (modelled on Go's
+# log/slog TextHandler). A key or value is written bare unless it is empty or holds a space, `=`,
+# `"` or a control byte; then it is wrapped in `"` and escaped. The message is never quoted, but
+# gets the same escapes. Everything is a byte scan: the bytes that change are all ASCII, so every
+# cut lands on a codepoint boundary and non-ASCII UTF-8 passes through. Docs: logging-v0.md §4.2.
+
+fn control_byte(b: Int) -> Bool =
+  b < 32 || b == 127
+
+# A byte that forces quotes: space, `=`, `"`, or a control byte.
+fn quote_byte(b: Int) -> Bool =
+  b <= 32 || b == 34 || b == 61 || b == 127
+
+# A byte that is rewritten. Inside quotes `"` is too; a message is not quoted, so it keeps `"`.
+fn escaped_byte(quoted: Bool, b: Int) -> Bool =
+  control_byte(b) || b == 92 || (quoted && b == 34)
+
+fn escape_piece(b: Int) -> String =
+  if b == 10 then "\\n"
+  else if b == 13 then "\\r"
+  else if b == 9 then "\\t"
+  else if b == 34 then "\\\""
+  else if b == 92 then "\\\\"
+  else "\\x" ++ hex.encode(bytes.singleton(b))
+
+# Index of the first byte at or after `i` that `hit` accepts, or `n`.
+fn first_byte(hit: Int -> Bool, b: Bytes, i: Int, n: Int) -> Int =
+  if i >= n || hit(bytes.get_or(b, i, 0)) then i else first_byte(hit, b, i + 1, n)
+
+# `run` is the start of the current verbatim run and `acc` holds the pieces, reversed. At each
+# rewritten byte, flush the run, then the escape, and start a new run after it.
+fn escape_go(quoted: Bool, raw: String, b: Bytes, run: Int, i: Int, n: Int, acc: List String) -> List String =
+  if i >= n then Cons(str_slice_bytes(raw, run, n - run), acc)
+  else if escaped_byte(quoted, bytes.get_or(b, i, 0)) then
+    escape_go(quoted, raw, b, i + 1, i + 1, n,
+      Cons(escape_piece(bytes.get_or(b, i, 0)), Cons(str_slice_bytes(raw, run, i - run), acc)))
+  else escape_go(quoted, raw, b, run, i + 1, n, acc)
+
+# O(bytes). `raw` itself when nothing needs rewriting.
+fn escape_text(quoted: Bool, raw: String) -> String =
+  if first == n then raw
+  else string_concat_many(list_reverse(escape_go(quoted, raw, b, 0, first, n, Nil)))
+where
+  b = bytes.from_string(raw)
+  n = bytes.length(b)
+  first = first_byte(\x -> escaped_byte(quoted, x), b, 0, n)
+
+fn needs_quotes(raw: String) -> Bool =
+  first_byte(quote_byte, encoded, 0, bytes.length(encoded)) < bytes.length(encoded)
+where
+  encoded = bytes.from_string(raw)
+
+# A key or a value: bare, or quoted and escaped.
+fn render_atom(raw: String) -> String =
+  if string.is_empty(raw) || needs_quotes(raw) then "\"" ++ escape_text(true, raw) ++ "\""
+  else raw
+
 # ` k=v` for each field, in order (leading space only when there are fields).
 fn render_fields(fields: Vec (String, String)) -> String =
   string_concat_many(vec_to_list(vec_map(render_field, fields)))
 
 fn render_field(pair: (String, String)) -> String =
   match pair with
-  | (k, v) -> " " ++ k ++ "=" ++ v
+  | (k, v) -> " " ++ render_atom(k) ++ "=" ++ render_atom(v)
 
 # One log record as a line WITHOUT a trailing newline: `<ts> <LEVEL> <msg> k=v …`.
 # The sink owns line termination (the default stderr sink's eprint appends "\n").
 export fn format_line(ts: String, lvl: Level, msg: String, fields: Vec (String, String)) -> String =
-  ts ++ " " ++ level_name(lvl) ++ " " ++ msg ++ render_fields(fields)
+  ts ++ " " ++ level_name(lvl) ++ " " ++ escape_text(false, msg) ++ render_fields(fields)
 
 # --- Emission --------------------------------------------------------------
 fn run_sink(lg: Logger, line: String) -> Unit !{IO} =

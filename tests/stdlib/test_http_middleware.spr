@@ -1,7 +1,7 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.http_server (HttpRequest, HttpServerResponse, ok, bad_request, response_status, parse, request_path)
 import stdlib.http_middleware (with_logging)
-import stdlib.log (Logger, Info, logger_with_sink)
+import stdlib.log (Logger, Info, logger_with_sink, with_field)
 import stdlib.string as string
 
 # stdlib.http_middleware.with_logging wraps a handler into an access-logging
@@ -40,6 +40,11 @@ fn drive(buf: Ref String, handler: HttpRequest -> HttpServerResponse !{IO}, raw:
       let wrapped = with_logging(capture_logger(buf), handler)
       in wrapped(req)
 
+fn drive_with(lg: Logger, handler: HttpRequest -> HttpServerResponse !{IO}, raw: String) -> HttpServerResponse !{IO} =
+  match parse(raw) with
+  | Err _ -> bad_request("PARSE_ERR")
+  | Ok req -> with_logging(lg, handler)(req)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -72,5 +77,14 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a 400 handler's status is preserved", response_status(resp2), 400)
     line2 <- ref_read(buf2)
     assert_true(state, "the 400 status is logged", has(line2, "status=400"))
+
+    # --- one request is one log line, whatever the base fields hold -------
+    buf3 <- ref_new("")
+    resp3 <- drive_with(with_field("user", "a\nb c", capture_logger(buf3)), ok_handler, "GET /café HTTP/1.1\r\n\r\n")
+    line3 <- ref_read(buf3)
+    assert_eq(state, "a base field with LF stays on the record line",
+      list_length(string.split(line3, "\n")), 2)
+    assert_true(state, "the base field is quoted and escaped", has(line3, "user=\"a\\nb c\""))
+    assert_true(state, "a UTF-8 path is logged as is", has(line3, "path=/café"))
 
     summary(state)

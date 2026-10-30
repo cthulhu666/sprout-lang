@@ -159,8 +159,28 @@ string (the format work is inside the `if`), so a `Debug`-heavy path under an
 `<iso8601-utc> <LEVEL> <msg> <k=v ...>` where the fields are the logger's base
 context followed by the call's fields. The timestamp comes from
 `wall_time_micros()` (so `log` reads the clock once per emitted line, inside the
-level gate). Values are emitted as-is for v0; escaping/quoting of values
-containing spaces is a documented follow-up (§9 note).
+level gate).
+
+**Quoting and escaping.** One record is one line, and keys and values read back
+unambiguously. The rule is modelled on Go `log/slog`'s `TextHandler`:
+
+- A field key or value is written inside `"…"` when it is empty or contains a
+  space, `=`, `"`, or any byte below 0x20 or 0x7F. Otherwise it is bare, as above.
+- Inside the quotes: `\n`, `\r`, `\t`, `\"` and `\\`, and `\xNN` (two lowercase hex
+  digits) for every other byte below 0x20 and for 0x7F. Non-ASCII UTF-8 is written
+  as is.
+- The message is **not** quoted, so `… INFO request handled k=v` reads as before. It
+  gets the same escapes for control bytes (`\n`, `\r`, `\t`, `\xNN`), and `\\` for a
+  backslash. `\\` is kept even though a message cannot be parsed back exactly (its
+  spaces are bare, so a message containing ` k=v` reads like a field): without it a
+  message holding the two characters `\n` and one holding a newline render the same,
+  which is the ambiguity the escapes exist to remove. The cost is that a backslash in
+  a message prints doubled. `"` is not escaped in a message, since the message is
+  never wrapped in quotes.
+- A lone backslash in a bare key or value stays bare (`path=C:\x`); it is escaped
+  only when the value is quoted for another reason.
+- The pass is a single byte scan, linear in the input; a value that needs nothing is
+  returned as is.
 
 ### 4.3 The sink, and testability
 
@@ -307,17 +327,23 @@ None. No new diagnostics. A miswired sink or a bad field is ordinary Sprout code
   INFO record carrying `method`/`path`/`status`/`dur_us`, with the logged status
   reflecting the handler's actual response (200 and 400 cases). Driven over a
   `Ref`-backed capture logger and a parsed request — no sockets, no stderr.
-- **Follow-up noted, not blocking:** value-escaping for fields containing spaces
-  or `=` (filed to `BACKLOG.md`); a JSON-lines formatter variant (the sink and
-  format are already decoupled, so this is a new formatter, not an API change).
+- Quoting and escaping (§4.2) in `test_log.spr`: bare values unchanged; LF, CR, TAB, ESC,
+  DEL, `"`, backslash, space, `=` and the empty string in a value; keys that need quotes;
+  a message with LF and ESC; a long run of escapes; a record with control bytes stays one
+  line through the capture sink. `test_http_middleware.spr` checks that one request is one
+  line with a base field holding a newline.
+- **Follow-up noted, not blocking:** a JSON-lines formatter. A `Logger` should carry its
+  formatter, chosen at construction (a `logger_with_format`-style constructor), with the
+  text format above as the default; the JSON formatter is added beside it, not in place
+  of it (`BACKLOG.md`).
 
 ## 10. Spec / docs status
 
 - `docs/spec-v0.md`: **unchanged** — logging is experimental stdlib, not core
   language. Explicitly non-normative.
 - `README.md`: add `stdlib/log` to the stdlib listing once implemented.
-- `BACKLOG.md`: the `stdlib/log` entry and its deferred follow-ups (value
-  escaping, JSON formatter, `stdlib/time` graduation) are **filed** under §2
+- `BACKLOG.md`: the `stdlib/log` entry and its deferred follow-ups (swappable
+  JSON formatter, `stdlib/time` graduation) are **filed** under §2
   (Networking and HTTP). Guard-rails item 13's logging sub-point can be checked
   off as *user-facing logging designed* once this lands.
 - This document is the design of record for `stdlib/log` v0.

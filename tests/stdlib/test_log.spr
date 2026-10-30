@@ -25,6 +25,23 @@ fn append_line(buf: Ref String, line: String) -> Unit !{IO} =
 fn capture_logger(buf: Ref String) -> Logger =
   logger_with_sink(Info, \line -> append_line(buf, line))
 
+# One record with a single field, minus the fixed `T INFO m ` prefix and the field's leading space, so each case reads as the
+# field text alone.
+fn field_text(k: String, v: String) -> String =
+  string.drop(format_line("T", Info, "m", [(k, v)]), 9)
+
+# The message part of a record with no fields, minus the `T INFO ` prefix.
+fn msg_text(msg: String) -> String =
+  string.drop(format_line("T", Info, msg, vec_empty()), 7)
+
+fn ctl(code: Int) -> String =
+  string.string_from_char(char_from_codepoint(code))
+
+fn count_lines(buf: String) -> Int =
+  list_length(string.split(buf, "\n")) - 1
+
+let newlines_20000: String = string_concat_many(list_map(\_ -> "\n", range_to_list(0..19999)))
+
 let two_fields: Vec (String, String) =
   [("method", "GET"), ("status", "200")]
 
@@ -90,5 +107,58 @@ fn main() -> Unit !{IO} =
     after_merge <- ref_read(buf3)
     assert_eq(state, "base fields precede per-call fields",
       has_substr(after_merge, "svc=api code=500"), "yes")
+
+    # --- Pure: field values are bare unless they need quoting ---------------
+    assert_eq(state, "a plain value stays bare", field_text("k", "v-1.2/x_y"), "k=v-1.2/x_y")
+    assert_eq(state, "a lone backslash stays bare", field_text("k", "a\\b"), "k=a\\b")
+    assert_eq(state, "non-ASCII UTF-8 stays bare", field_text("k", "café/日本"), "k=café/日本")
+    assert_eq(state, "an empty value is quoted", field_text("k", ""), "k=\"\"")
+    assert_eq(state, "a space quotes the value", field_text("k", "a b"), "k=\"a b\"")
+    assert_eq(state, "an equals sign quotes the value", field_text("k", "a=b"), "k=\"a=b\"")
+    assert_eq(state, "a double quote is escaped inside quotes", field_text("k", "a\"b"), "k=\"a\\\"b\"")
+    assert_eq(state, "a backslash is escaped once the value is quoted",
+      field_text("k", "a b\\c"), "k=\"a b\\\\c\"")
+    assert_eq(state, "LF becomes \\n", field_text("k", "a\nb"), "k=\"a\\nb\"")
+    assert_eq(state, "CR becomes \\r", field_text("k", "a\rb"), "k=\"a\\rb\"")
+    assert_eq(state, "TAB becomes \\t", field_text("k", "a\tb"), "k=\"a\\tb\"")
+    assert_eq(state, "ESC becomes \\x1b", field_text("k", `a${ctl(27)}[0mb`), "k=\"a\\x1b[0mb\"")
+    assert_eq(state, "DEL becomes \\x7f", field_text("k", `a${ctl(127)}b`), "k=\"a\\x7fb\"")
+    assert_eq(state, "NUL-range byte 0x01 becomes \\x01", field_text("k", `a${ctl(1)}b`), "k=\"a\\x01b\"")
+    assert_eq(state, "non-ASCII stays as is inside quotes",
+      field_text("k", "café 日本\n"), "k=\"café 日本\\n\"")
+    assert_eq(state, "every control byte in one value is escaped",
+      field_text("k", `${ctl(10)}${ctl(13)}${ctl(9)}${ctl(27)}${ctl(127)}`), "k=\"\\n\\r\\t\\x1b\\x7f\"")
+
+    # --- Pure: keys follow the same rule ------------------------------------
+    assert_eq(state, "a key with a space is quoted", field_text("my key", "v"), "\"my key\"=v")
+    assert_eq(state, "a key with LF is quoted and escaped", field_text("a\nb", "v"), "\"a\\nb\"=v")
+    assert_eq(state, "an empty key is quoted", field_text("", "v"), "\"\"=v")
+    assert_eq(state, "a key with an equals sign is quoted", field_text("a=b", "v"), "\"a=b\"=v")
+
+    # --- Pure: the message is not quoted, but control bytes are escaped ------
+    assert_eq(state, "a plain message is unchanged", msg_text("request handled"), "request handled")
+    assert_eq(state, "quotes and equals in a message are unchanged", msg_text("say \"a=b\""), "say \"a=b\"")
+    assert_eq(state, "non-ASCII in a message is unchanged", msg_text("café 日本"), "café 日本")
+    assert_eq(state, "LF in a message is escaped", msg_text("a\nb"), "a\\nb")
+    assert_eq(state, "CR in a message is escaped", msg_text("a\rb"), "a\\rb")
+    assert_eq(state, "TAB in a message is escaped", msg_text("a\tb"), "a\\tb")
+    assert_eq(state, "ESC in a message is escaped", msg_text(`a${ctl(27)}[31mb`), "a\\x1b[31mb")
+    assert_eq(state, "DEL in a message is escaped", msg_text(`a${ctl(127)}b`), "a\\x7fb")
+    assert_eq(state, "a backslash in a message is escaped, so \\n text differs from LF",
+      msg_text("a\\nb"), "a\\\\nb")
+    assert_eq(state, "a message escape does not touch the fields after it",
+      format_line("T", Info, "a\nb", [("k", "v")]), "T INFO a\\nb k=v")
+
+    # A long run of escapes is one linear pass; a quadratic builder would not finish this size.
+    assert_eq(state, "20000 escapes are rewritten in one pass",
+      string.byte_length(field_text("k", newlines_20000)), 2 + 2 + 2 * 20000)
+
+    # --- Effectful: one record stays one line ---------------------------------
+    buf4 <- ref_new("")
+    info_f(with_field("svc", "a\nb", capture_logger(buf4)), "two\nlines", [("q", "x\ry"), ("e", `${ctl(27)}[2J`)])
+    after_ctl <- ref_read(buf4)
+    assert_eq(state, "a record with control bytes is one line", count_lines(after_ctl), 1)
+    assert_eq(state, "the quoted fields reach the sink",
+      has_substr(after_ctl, "two\\nlines svc=\"a\\nb\" q=\"x\\ry\" e=\"\\x1b[2J\""), "yes")
 
     summary(state)
