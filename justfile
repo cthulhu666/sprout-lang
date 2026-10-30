@@ -403,6 +403,12 @@ debug-run file: bootstrap-from-seed
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
+# `just` runs a dependency once per call, so a gate `test` already contains cannot run
+# twice. For a compiler edit, `just refresh-seed` first: `seed-stale` stops here otherwise.
+# The Definition of Done's gates (AGENTS.md), each once, one at a time.
+[group('test')]
+dod: seed-stale test compile-examples-stage1 smoke-shapes bundle-smoke rooting-cost-gate scc-cost-gate run-example-canary ir-golden-diff o2-codegen-smoke
+
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
 test: test-stdlib-stage1 test-ide test-type-errors test-linear-grid test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
