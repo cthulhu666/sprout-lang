@@ -6,8 +6,11 @@ you are changing it.
 
 ## Definition of Done — `just dod`
 
-Runs the Definition of Done's gates sequentially, with `seed-stale` first so a stale seed stops it
-before any gate prices the pre-edit compiler. Every gate is a `just` dependency, and `just` runs a
+Runs the Definition of Done's gates sequentially, with `verify-bootstrap-fixed-point` first: it
+compiles the current compiler sources with stage-1 and compares the result with the seed, so an
+edit anywhere in the compiler's closure (the prelude and `stdlib/*.sprout` included) that the seed
+does not reflect stops it before any gate runs the old compiler. `seed-stale` would not: it hashes
+`stdlib/compiler/` only. Every gate is a `just` dependency, and `just` runs a
 dependency once per call, so naming a gate that `test` already contains costs nothing. It does not
 fan out, unlike `ci-fast-gates`, which also overlaps `test` (conformance, type errors, linear grid).
 
