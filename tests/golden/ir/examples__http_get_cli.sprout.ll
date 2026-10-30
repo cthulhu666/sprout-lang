@@ -91,6 +91,10 @@ declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
 declare i64 @bytes_builder_build(i64)
+declare i64 @str_byte_len(i64)
+declare i64 @str_slice_bytes(i64, i64, i64)
+declare i64 @str_split_lines(i64)
+declare i64 @split_words(i64)
 declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"GET\00" }
 @.str.1 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }

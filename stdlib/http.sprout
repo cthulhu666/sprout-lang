@@ -2,6 +2,7 @@ module stdlib.http
 
 import stdlib.bytes (Utf8Error)
 import stdlib.bytes as bytes
+import stdlib.string as string
 
 # Sprout HTTP helpers (v0)
 # Minimal helpers for request-line parsing and response formatting.
@@ -65,30 +66,58 @@ export type RequestPathVersion (..) =
 export type RequestLine (..) =
   | RequestLine String RequestPathVersion
 
-fn str_drop(s: String, n: Int) -> String =
-  if n >= str_len(s) then ""
-  else str_slice(s, n, str_len(s) - n)
-
 fn first_line(raw: String) -> String =
   if str_find(raw, "\r\n") < 0 then raw
   else str_slice(raw, 0, str_find(raw, "\r\n"))
 
-fn parse_request_line_after_rest(method: String, rest: String) -> Maybe RequestLine =
-  if str_find(rest, " ") < 0 then Nothing
-  else
-    Just(
-      RequestLine(
-        method,
-        RequestPathVersion(str_slice(rest, 0, str_find(rest, " ")), str_drop(rest, str_find(rest, " ") + 1))
-      )
-    )
+# RFC 9110 §5.6.2 tchar, by byte value: DIGIT, ALPHA and "!#$%&'*+-.^_`|~".
+fn tchar(byte: Int) -> Bool =
+  (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+  || byte == 33 || byte == 35 || byte == 36 || byte == 37 || byte == 38 || byte == 39
+  || byte == 42 || byte == 43 || byte == 45 || byte == 46 || byte == 94 || byte == 95
+  || byte == 96 || byte == 124 || byte == 126
 
-fn parse_request_line_from_line(line: String) -> Maybe RequestLine =
-  if str_find(line, " ") < 0 then Nothing
-  else parse_request_line_after_rest(str_slice(line, 0, str_find(line, " ")), str_drop(line, str_find(line, " ") + 1))
+fn all_bytes(ok: Int -> Bool, raw: Bytes, index: Int, total: Int) -> Bool =
+  if index >= total then true
+  else ok(bytes.get_or(raw, index, -1)) && all_bytes(ok, raw, index + 1, total)
 
+# One byte scan over the UTF-8 encoding; the empty string passes. `string.char_at` is per
+# codepoint, so a scan through it would be quadratic.
+export fn all_bytes_in(ok: Int -> Bool, raw: String) -> Bool =
+  all_bytes(ok, encoded, 0, bytes.length(encoded))
+where
+  encoded = bytes.from_string(raw)
+
+# RFC 9110 §5.6.2: a non-empty run of tchar. Header names and the request method are tokens.
+export fn is_token(raw: String) -> Bool =
+  !string.is_empty(raw) && all_bytes_in(tchar, raw)
+
+# RFC 9112 §3.2: a request-target holds no SP and no control byte. Bytes >= 0x80 pass; the caller
+# has already decoded the line as UTF-8.
+fn target_byte(byte: Int) -> Bool =
+  byte > 32 && byte != 127
+
+export fn digit_byte(byte: Int) -> Bool =
+  byte >= 48 && byte <= 57
+
+# HTTP-version = "HTTP/" DIGIT "." DIGIT (RFC 9112 §2.3): exactly eight bytes.
+fn is_http_version(raw: String) -> Bool =
+  bytes.length(encoded) == 8 && string.starts_with(raw, "HTTP/") && digit_byte(bytes.get_or(encoded, 5, -1))
+  && bytes.get_or(encoded, 6, -1) == 46 && digit_byte(bytes.get_or(encoded, 7, -1))
+where
+  encoded = bytes.from_string(raw)
+
+fn request_line_parts(method: String, target: String, version: String) -> Maybe RequestLine =
+  if is_token(method) && !string.is_empty(target) && all_bytes_in(target_byte, target) && is_http_version(version)
+  then Just(RequestLine(method, RequestPathVersion(target, version)))
+  else Nothing
+
+# method SP request-target SP HTTP-version (RFC 9112 §3): exactly three parts split on single
+# SPs, each checked. Anything else, including a bare CR or LF anywhere in the line, is Nothing.
 export fn parse_request_line(raw: String) -> Maybe RequestLine =
-  parse_request_line_from_line(first_line(raw))
+  match string.split(first_line(raw), " ") with
+  | [method, target, version] -> request_line_parts(method, target, version)
+  | _ -> Nothing
 
 export fn status_code(status: HttpStatus) -> Int =
   match status with
