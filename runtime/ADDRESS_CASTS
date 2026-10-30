@@ -17,12 +17,12 @@
 #     and fails the gate.
 # Nothing else is checked.  Not seen: an address laundered through arithmetic into a non-address
 # type, `memcpy`, union punning, or reinterpretation through a `void*` (docs/gates.md).
-# A function that needs to convert an address to a signed 64-bit integer belongs in
-# runtime/WORD_CASTS_BASELINE, not here.
+# A function that needs to convert an address to a signed 64-bit integer cannot be listed here:
+# it leaves through sprout_str_word or sprout_ptr_word.
 #
 # The AST holds one platform's #ifdef branches.  An entry may carry one tag, `darwin` or `linux`,
 # after the name: it is then allowed and checked only on that host and ignored on the other, so
-# a cast that appears in that function on the other host fails as not in the baseline.  An
+# a cast that appears in that function on the other host fails the gate.  An
 # untagged entry is checked on every host and must have a cast on both.
 
 runtime/sprout_runtime.c:arena_contains       # range test of an address against the arena

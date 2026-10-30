@@ -453,8 +453,8 @@ the REPL's completion list. It checks that a section exists, not what it says.
 
 Counts **sites** in `runtime/*.c` and `runtime/*.h` on clang's JSON AST
 (`scripts/runtime_word_casts.py`), per enclosing top-level decl, and fails on any outside the exits,
-the `runtime/ADDRESS_CASTS` functions or a `runtime/WORD_CASTS_BASELINE` entry. Only types tell
-`(long long)p` from `(long long)len`, which is why it reads the AST. Rule 1 of
+the `runtime/ADDRESS_CASTS` functions. Only types tell `(long long)p` from `(long long)len`,
+which is why it reads the AST. Rule 1 of
 `docs/string-header-invariant-v0.md` §4.3 (rules 1 to 3). `uintptr_t` is the address type: a pointer
 becomes one, and the gate watches where a `uintptr_t` or `intptr_t` value goes. Rule 1 counts
 sites. A site is either
@@ -467,9 +467,6 @@ sites. A site is either
   with a `uintptr_t u` is one. Conversions to unsigned or narrower types (`size_t`, `int`) are not
   sites. The operand's spelling is read from the child expression with parentheses skipped.
 
-- **`WORD_CASTS_BASELINE`** is `file:decl:count`, today's sites. It only shrinks: a new decl or a
-  higher count fails, and so does an entry whose decl now has fewer sites or none (lower or delete
-  it). `--emit-baseline` prints the current counts.
 - **Exits** are `runtime/sprout_word.h:sprout_str_word_in` and `runtime/sprout_word.h:sprout_ptr_word`
   (`EXITS` in the script), keyed `file:name`: a same-named function in another file is not exempt.
   They are exempt from rule 1. `sprout_str_word` and `sprout_str_of_word` are macros over the
@@ -503,14 +500,13 @@ sites. A site is either
     `long long* out_id`). A by-value 64-bit parameter is fine.
   - A listed name with no cast on the host, or no definition, fails.
 
-  These entries stay; they are not debt. A name may carry one tag, `darwin` or `linux`: it is then
-  read only on that host and ignored on the other, so a cast there fails as not in the baseline. An
-  unknown or second tag is malformed.
+  A name may carry one tag, `darwin` or `linux`: it is then read only on that host and ignored on
+  the other, so a cast there fails rule 1. An unknown or second tag is malformed.
 - Every `runtime/*.c` is scanned (a glob, like the justfile's `runtime_src`), so a new file is
   covered without editing the gate.
 - `just test-runtime-word-casts` is the CI entry for this gate: its case (a) runs the checker on the
-  real `runtime/` and its baseline, and the other cases plant defects in copies of `runtime/` (a
-  cast in an exported String producer, a count rise, a stale or inflated entry, a function returning
+  real `runtime/`, and the other cases plant defects in copies of `runtime/` (a cast in an exported
+  String producer, a cast in a function that has none, a stale entry, a function returning
   `long long`, `uintptr_t`, `long` or `intptr_t` or taking a `long long*`, a same-named static in
   another file, a cast in a new `runtime/*.c`, a stale or unknown platform tag, an A1 cast to
   `unsigned long`, A2 conversions through a field store, a call argument, an implicit local
@@ -524,7 +520,7 @@ sites. A site is either
   two `SproutStr` and the real writers must pass. It scans four
   trees (the real one, one with mutants, one with planted functions, one with rule 2 and 3
   functions) and re-reads each decl table
-  through `--scan-cache` for the cases that vary only the list files. The cache is keyed on a hash
+  through `--scan-cache` for the cases that vary only `ADDRESS_CASTS`. The cache is keyed on a hash
   of `runtime/*.c` and `*.h`. Case (a) passes `--scan-cache` with a file that does not exist yet, so
   it scans and writes and reads nothing, and its table serves the copy of the real tree. `just
   runtime-word-casts` passes no flag, so it never reads a cache. It is not listed in
@@ -546,6 +542,19 @@ sites. A site is either
 **It sees one platform.** The AST holds only the host's `#ifdef` branches, so a decl that casts under
 `__APPLE__` or Linux only is counted on that host alone. Tag its `ADDRESS_CASTS` entry with that
 host; an untagged entry is stale on the other. `just linux-run runtime-word-casts` checks Linux.
+
+## GC safety linter — `just gc-safety-check --strict`
+
+`scripts/gc_safety_check.sh` finds a function body by counting braces, so a miscount hides every
+later function: the next definition is folded into the open body, and the linter reports "0 issues"
+with fewer functions checked. A `'{'` in `json_parse_value`, part of the deleted C JSON parser,
+hid ~118 functions that way (303 checked where 421 are). `strip_literals` drops char and string literals (with escapes) and
+`//` and `/* */` comments, the latter across lines, before any brace is counted. As a backstop,
+`drift` exits 2, with or without `--strict`, when a column-0 definition starts inside an open body,
+when depth goes negative, or when the file ends inside a function. `GC_SAFETY_RUNTIME` overrides the
+file checked. `just test-gc-safety-check` (in `ci-fast-gates`) lints fixtures where each decoy sits
+before a defective function, and one per drift shape. Run it with `GC_SAFETY_SCRIPT=<old copy>`
+`GC_SAFETY_KEEP_GOING=1` to see which cases an older linter fails.
 
 ## Render cost — `just render-cost-gate`
 

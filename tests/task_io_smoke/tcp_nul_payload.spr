@@ -8,7 +8,7 @@ import stdlib.terminal as terminal
 #
 # The defect, reproduced before the fix: `a`, 0x00, `b` sent over loopback and read back with
 # `read_avail_timeout` returned a String, because tcp_read_avail_timeout ended in
-# `sprout_gc_adopt_cstr(buf, n, ...)`. That stamps the byte count into the CSTR header and hands back
+# `sprout_str_adopt(buf, n, ...)`. That stamps the byte count into the CSTR header and hands back
 # a String — but a String is normatively "always valid UTF-8, contains no NUL byte"
 # (docs/spec-v0.md:64), so the value was illegal. It failed in two distinguishable ways:
 #

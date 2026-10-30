@@ -52,7 +52,7 @@ array" — Sprout already has two of those.
   `vector_truncate`). This is Rust's `Vec<T>` and Go's `[]T`-as-buffer. It already exists.
 - `Bytes` — immutable `BytesVal {len, data}` (`runtime/sprout_runtime.c`).
 - `String` — a GC block of kind `SPROUT_HEAP_CSTR`, allocated `len + 1` bytes and
-  **NUL-terminated** (`sprout_gc_alloc_cstr`).
+  **NUL-terminated** (`sprout_str_alloc`).
 
 Sprout therefore already owns the *owner* half of both the Go and the Rust design. What is absent is
 the *view* half — and only the view half is worth discussing.
@@ -137,7 +137,7 @@ free — **as long as the backing store is immutable**, which is why §3's non-g
 
 Two runtime facts, verified, fix the shape of anything we build:
 
-1. **`String` is NUL-terminated.** `sprout_gc_alloc_cstr` allocates `len + 1` and every string
+1. **`String` is NUL-terminated.** `sprout_str_alloc` allocates `len + 1` and every string
    builtin receives a `const char*` (`runtime/sprout_runtime.c`). A sub-range of a string is
    *not* NUL-terminated at its end, so a `String` view cannot be passed to a single existing string
    builtin without copying. A `String` view therefore costs either a parallel `{ptr,len}` API across

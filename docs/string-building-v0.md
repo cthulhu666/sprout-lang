@@ -218,7 +218,7 @@ after a change to:
 
 - the template lowering in `stdlib/compiler/ast_to_ir.sprout`,
 - `str_concat` or `string_concat_many` in `runtime/sprout_runtime.c`,
-- the GC allocation path (`sprout_gc_alloc_cstr`, the collection threshold) —
+- the GC allocation path (`sprout_str_alloc`, the collection threshold) —
   the crossover is a trade between allocation count and copying, so making
   allocation cheaper moves it.
 

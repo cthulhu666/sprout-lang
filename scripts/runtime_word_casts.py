@@ -4,7 +4,7 @@
 docs/string-header-invariant-v0.md §4.3. Over runtime/*.c and runtime/*.h, per top-level decl (a
 function, or the variable of a global initializer), the checker enforces three rules.
 
-Rule 1: it counts sites:
+Rule 1: a decl with a site fails unless it is allowed. A site is:
 
   - an AST cast with castKind PointerToIntegral, and
   - an IntegralCast whose operand is spelled `uintptr_t` or `intptr_t` (the address types) and
@@ -12,13 +12,11 @@ Rule 1: it counts sites:
     `int64_t`, `__int128`), implicit or explicit. One whose operand is itself a counted
     PointerToIntegral cast is not counted twice.
 
-Allowed with no entry: the exits (EXITS, keyed `file:name`), and the functions in ADDRESS_CASTS
-(`file:name`) provided that, inside the function:
+Allowed: the exits (EXITS, keyed `file:name`), and the functions in ADDRESS_CASTS (`file:name`)
+provided that, inside the function:
   - A1: every PointerToIntegral cast has destination type spelled `uintptr_t`;
   - A2: no address-type value is converted to a signed 64-bit-or-wider integer type;
   - it does not return an integer type of 64 bits or more, and takes no pointer to one.
-Everything else must match BASELINE (`file:decl:count`) exactly or below: a new decl or a higher
-count fails, and so does an entry whose decl now has fewer sites, so the list only shrinks.
 
 Rule 2, everywhere: a call to sprout_ptr_word whose argument, with pointer-to-pointer casts and
 parentheses stripped, has at any layer the type pointer-to-char (any signedness or qualifiers).
@@ -28,9 +26,9 @@ and `hdr_p` is not written, address-taken or modified. Only a read (an lvalue-to
 conversion) passes. Nor is a pointer to SproutStr cast to or from a pointer to any other type but
 `void` (`*(SproutStr*)&raw`, `*(char**)&s = raw`), explicit or implicit.
 
-Every runtime/*.c is scanned. --emit-baseline prints the current non-allowed counts in baseline
-format and exits. The AST holds only the host's #ifdef branches, so an ADDRESS_CASTS entry may
-carry a `darwin` or `linux` tag: it is then read only on that host and ignored on the other.
+Every runtime/*.c is scanned. The AST holds only the host's #ifdef branches, so an ADDRESS_CASTS
+entry may carry a `darwin` or `linux` tag: it is then read only on that host and ignored on the
+other.
 
 --scan-cache FILE is for the test, which re-checks one tree against many list files. It stores
 the decl table beside a hash of runtime/*.c and *.h and is ignored when the hash differs.
@@ -102,7 +100,7 @@ class Typedefs(dict):
 
 
 def sites(d):
-    """Sites counted against the baseline when the decl is not listed in ADDRESS_CASTS."""
+    """Sites counted when the decl is not listed in ADDRESS_CASTS."""
     return d.casts + d.conv_free
 
 
@@ -441,13 +439,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("clang")
     ap.add_argument("runtime_dir")
-    ap.add_argument("baseline")
     ap.add_argument("address_casts")
-    ap.add_argument("--emit-baseline", action="store_true", help="print the current counts in baseline format")
     ap.add_argument("--scan-cache", metavar="FILE", help="reuse the decl table in FILE (for the test)")
     args = ap.parse_args()
-    clang, rt_dir, baseline_path, addr_path = args.clang, args.runtime_dir, args.baseline, args.address_casts
-    emit = args.emit_baseline
+    clang, rt_dir, addr_path = args.clang, args.runtime_dir, args.address_casts
 
     decls = scan_cached(clang, rt_dir, args.scan_cache) if args.scan_cache else scan(clang, rt_dir)
     problems = []
@@ -470,11 +465,6 @@ def main():
 
     def allowed(key):
         return "%s:%s" % key in EXITS or key in addr
-
-    if emit:
-        lines = ["%s:%s:%d" % (f, name, sites(d)) for (f, name), d in decls.items() if sites(d) and not allowed((f, name))]
-        print("\n".join(sorted(lines)))
-        return 0
 
     for key in sorted(decls):
         d = decls[key]
@@ -533,56 +523,21 @@ def main():
                 "casts can reach a Sprout word through; it cannot be listed" % (f, name, d.wide_ptr)
             )
 
-    baseline = {}
-    for i, text in read_entries(baseline_path):
-        parts = text.rsplit(":", 2)
-        if len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) < 1:
-            problems.append("%s:%d: malformed entry %r (want file:decl:count)" % (baseline_path, i, text))
-            continue
-        key = (parts[0], parts[1])
-        if key in baseline:
-            problems.append("%s:%d: duplicate entry %s:%s" % (baseline_path, i, key[0], key[1]))
-        baseline[key] = int(parts[2])
-
-    total = 0
-    for key in sorted(set(baseline) | set(decls)):
-        f, name = key
-        d = decls.get(key, EMPTY)
+    for key in sorted(decls):
+        d = decls[key]
         have = sites(d)
-        want = baseline.get(key)
-        if allowed(key):
-            if want is not None:
-                problems.append(
-                    "%s:%s is allowed (exit or ADDRESS_CASTS) and needs no baseline entry; delete it" % (f, name)
-                )
-            continue
-        total += have
-        if want is None:
-            if have:
-                problems.append(
-                    "%s:%s has %d pointer-to-integer cast(s) and is not in the baseline; "
-                    "use sprout_str_word/sprout_ptr_word, or list it in ADDRESS_CASTS "
-                    "if it is address arithmetic%s" % (f, name, have, sites_note(d))
-                )
-        elif have > want:
+        if have and not allowed(key):
             problems.append(
-                "%s:%s has %d pointer-to-integer cast(s), baseline allows %d%s"
-                % (f, name, have, want, sites_note(d))
-            )
-        elif have < want:
-            problems.append(
-                "%s:%s now has %d pointer-to-integer cast(s), baseline lists %d; "
-                "%s the baseline entry" % (f, name, have, want, "lower" if have else "delete")
+                "%s:%s has %d pointer-to-integer cast(s) outside the exits and ADDRESS_CASTS; "
+                "use sprout_str_word/sprout_ptr_word, or list it in ADDRESS_CASTS "
+                "if it is address arithmetic%s" % (key[0], key[1], have, sites_note(d))
             )
 
     if problems:
         for p in problems:
             sys.stderr.write("runtime-word-casts: %s\n" % p)
         return 1
-    print(
-        "runtime-word-casts: ok (%d baseline entries, %d casts, %d ADDRESS_CASTS functions)"
-        % (len(baseline), total, len(addr))
-    )
+    print("runtime-word-casts: ok (%d ADDRESS_CASTS functions)" % len(addr))
     return 0
 
 

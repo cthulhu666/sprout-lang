@@ -391,7 +391,6 @@ sw_aborts dup_null "sprout_str_dup: null input"
 sw_aborts dup_slice_null "sprout_str_dup_slice: null input"
 sw_aborts adopt_null "sprout_str_adopt: null input"
 sw_aborts register_arena "sprout_str_register: arena String"
-sw_prints old_wrappers old-wrappers-ok
 
 # run_hdrcheck_case <name> <marker>: build tests/c_runtime/<name>.c and run it plain (prints
 # <marker>) and as "stress" (prints <marker>-stress). The case includes sprout_runtime.c, so only
@@ -420,6 +419,18 @@ run_hdrcheck_case str_strings str-strings
 
 echo "==> c runtime: bytes and crypto values leave well-formed (HDRCHECK), also under GC stress"
 run_hdrcheck_case bytes_crypto bytes-crypto
+
+echo "==> c runtime: tcp, http, env, argv and proc values leave well-formed (HDRCHECK), also under GC stress"
+run_hdrcheck_case io_edge_strings io-edge
+
+echo "==> c runtime: json and regex values leave well-formed (HDRCHECK), also under GC stress"
+run_hdrcheck_case json_regex_strings json-regex
+
+echo "==> c runtime: analysis result builders leave well-formed (HDRCHECK), also under GC stress"
+run_hdrcheck_case analysis_strings analysis
+
+echo "==> c runtime: vectors, map nodes, closures and tuples leave well-formed (HDRCHECK), also under GC stress"
+run_hdrcheck_case container_words containers
 
 echo "==> c runtime: a map key held only by the map survives collection"
 # Every allocation collects (SPROUT_GC_STRESS=1, set by the case itself). A freed

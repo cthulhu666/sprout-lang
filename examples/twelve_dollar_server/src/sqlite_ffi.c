@@ -6,7 +6,7 @@
  * NUL-terminated `const char*`. Handles (`sqlite3*`, `sqlite3_stmt*`) go back
  * to Sprout as plain Ints; the GC ignores them.
  *
- * The runtime's constructors (`sprout_make*`, `intern_string`,
+ * The runtime's constructors (`sprout_make*`, `sprout_str_intern`,
  * `find_ctor_tag_by_name`) are `static` in sprout_runtime.c. The one Sprout
  * value the shim builds is a column's text as a `String`, through the
  * runtime's exported `str_concat` builtin. Other text crosses back one byte per
