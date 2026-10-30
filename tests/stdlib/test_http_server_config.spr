@@ -18,13 +18,14 @@ fn max_body_bytes(c: ServerConfig) -> Int = c.max_body_bytes
 fn min_rate_bps(c: ServerConfig) -> Int = c.min_rate_bps
 fn idle_ms(c: ServerConfig) -> Int = c.idle_ms
 fn max_idle_connections(c: ServerConfig) -> Int = c.max_idle_connections
+fn max_live_connections(c: ServerConfig) -> Int = c.max_live_connections
 
 # Values that are pairwise distinct and not multiples of each other, so a swap
 # cannot produce a coincidentally-correct read.
 fn sample() -> ServerConfig =
   ServerConfig(header_ms = 11, body_ms = 22, max_header_bytes = 33, write_ms = 44,
                max_body_bytes = 55, min_rate_bps = 66, idle_ms = 77,
-               max_idle_connections = 88)
+               max_idle_connections = 88, max_live_connections = 99)
 
 # Only the named field changes; the rest are copied from the base.
 fn slower_body(c: ServerConfig) -> ServerConfig = c with (body_ms = 99)
@@ -45,6 +46,7 @@ fn main() -> Unit !{IO} =
     # first and never reuses one this server has just closed.
     check_eq("default idle_ms", idle_ms(default_config()), 65000),
     check_eq("default max_idle_connections", max_idle_connections(default_config()), 256),
+    check_eq("default max_live_connections", max_live_connections(default_config()), 512),
 
     # Named construction: each field lands where its label says it does.
     check_eq("constructed header_ms", header_ms(sample()), 11),
@@ -55,6 +57,7 @@ fn main() -> Unit !{IO} =
     check_eq("constructed min_rate_bps", min_rate_bps(sample()), 66),
     check_eq("constructed idle_ms", idle_ms(sample()), 77),
     check_eq("constructed max_idle_connections", max_idle_connections(sample()), 88),
+    check_eq("constructed max_live_connections", max_live_connections(sample()), 99),
 
     # Functional update touches one field and leaves the neighbours alone.
     check_eq("update replaces the named field", body_ms(slower_body(sample())), 99),

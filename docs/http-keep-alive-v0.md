@@ -64,6 +64,9 @@ landed first, in its own change.
 caps the connections waiting at once; at the cap a response closes. Without it one client could
 hold the 2048-slot connection table for `idle_ms` with idle sockets.
 
+`max_live_connections` (default 512) caps every connection that has a task, idle or not, and
+closes a new one at once past it: `docs/http-connection-cap-v0.md`.
+
 **`serve_pooled`**: a worker waiting on an idle connection serves nothing else, and Sprout cannot
 wait on a socket and a channel at once. Two rules, both checked before the response is written:
 

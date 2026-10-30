@@ -2729,6 +2729,23 @@ task-io-smoke: bootstrap-from-seed
   check_markers "http-keep-alive-pooled" a-held-idle b-held-idle c-held-idle reserve-full-closes \
     busy-with-queue-closes queued-not-starved queued-served-promptly
   SPROUT_GC_STRESS=1 run_once "http-keep-alive-pooled/stress" "queued-not-starved"
+  # Live-connection cap under serve_n: the cap closes the next connection at once with nothing sent
+  # (also when the connections held are idle keep-alive ones), a freed place is reused, and a refused
+  # connection does not count toward serve_n's total. RED: nothing is refused, so the third
+  # connection waits for its 408.
+  build tests/task_io_smoke/http_live_cap.spr
+  run_once "http-live-cap" "done"
+  check_markers "http-live-cap" third-refused-at-once first-times-out served-after-a-slot-frees \
+    first-kept-served second-kept-served idle-connections-count served-after-keep-alive-ends \
+    both-places-free-again
+  SPROUT_GC_STRESS=1 run_once "http-live-cap/stress" "both-places-free-again"
+  # A cap outside 1..2046 aborts at serve start; the nearest valid one starts.
+  build tests/task_io_smoke/http_live_cap_zero_fails.spr
+  run_expect_fail "http-live-cap-zero" "max_live_connections must be"
+  check_markers "http-live-cap-zero" cap-1-accepted
+  build tests/task_io_smoke/http_live_cap_table_fails.spr
+  run_expect_fail "http-live-cap-table" "max_live_connections must be"
+  check_markers "http-live-cap-table" cap-2046-accepted
   # (26) Binary request bodies, now that the body is Bytes rather than String. The payload is
   # 0x00 0xFF 0x41 so each old failure mode is separately fatal: a strlen-based accumulator stops at
   # the NUL, a UTF-8 validator rejects the 0xFF, and the trailing 'A' is missing if anything truncated.

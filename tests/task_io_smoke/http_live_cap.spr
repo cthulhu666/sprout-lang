@@ -1,0 +1,104 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, local_port)
+import testsupport.listen (listen_or_die)
+import testsupport.http_wire (mark, read_response, read_to_end, send, with_conn)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
+import stdlib.string as string
+import stdlib.time as time
+import stdlib.terminal as terminal
+
+# `max_live_connections` under `serve_n`: with the cap reached, the accept loop closes a new
+# connection at once and sends nothing. The cap is 2 here, `header_ms` 600 and `idle_ms` 3000.
+#
+# The server serves 7 connections (`serve_n_with`'s count) and refuses 2 more. A refused connection
+# must not count toward the 7, or the server would stop early and the later connections would fail.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
+
+fn request(conn: borrowing TcpConnection) -> Unit !{IO} =
+  send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+
+# A 200 on a connection the server keeps open.
+fn expect_served(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  do
+    request(conn)
+    match read_response(conn) with
+    | Ok (head, body) -> mark(label, body == "hello", head ++ body)
+    | Err e -> mark(label, false, e)
+
+# Closed by the server with nothing sent, in under half of `header_ms`: a connection that was
+# admitted and left to time out would get a 408 at 600 ms.
+fn expect_refused(port: Int, label: String) -> Unit !{IO} =
+  do
+    start <- time.now_micros()
+    with_conn(port, \conn -> refused_by(conn, start, label))
+
+fn refused_by(conn: borrowing TcpConnection, start: Int, label: String) -> Unit !{IO} =
+  match read_to_end(conn) with
+  | Ok rest ->
+      do
+        stop <- time.now_micros()
+        mark(label, rest == "" && stop - start < 300000, `${rest} after ${int_to_string((stop - start) / 1000)} ms`)
+  | Err e -> mark(label, false, e)
+
+# The server's reply to a connection that never sent a request, then its close.
+fn expect_timed_out(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  match read_response(conn) with
+  | Ok (head, _) ->
+      match read_to_end(conn) with
+      | Ok rest -> mark(label, rest == "" && string.contains(head, "HTTP/1.1 408"), head)
+      | Err e -> mark(label, false, e)
+  | Err e -> mark(label, false, e)
+
+# Two silent connections fill the cap. A third is refused. When the first times out, a new
+# connection is served.
+fn fill_then_free(port: Int) -> Unit !{IO} =
+  with_conn(port, \a -> with_conn(port, \_ -> first_times_out(port, a)))
+
+fn first_times_out(port: Int, a: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    expect_refused(port, "third-refused-at-once")
+    expect_timed_out(a, "first-times-out")
+    with_conn(port, \d -> expect_served(d, "served-after-a-slot-frees"))
+
+# Two connections kept open after a response fill the cap as well.
+fn fill_by_keep_alive(port: Int) -> Unit !{IO} =
+  with_conn(port, \e -> with_conn(port, \f -> two_kept(port, e, f)))
+
+fn two_kept(port: Int, e: borrowing TcpConnection, f: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    expect_served(e, "first-kept-served")
+    expect_served(f, "second-kept-served")
+    expect_refused(port, "idle-connections-count")
+
+# The two kept connections above are closed by their client. Both places are free again.
+fn admitted_again(port: Int) -> Unit !{IO} =
+  with_conn(port, \g -> with_conn(port, \h -> both_served(g, h)))
+
+fn both_served(g: borrowing TcpConnection, h: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    expect_served(g, "served-after-keep-alive-ends")
+    expect_served(h, "both-places-free-again")
+
+fn clients(port: Int) -> Unit !{IO} =
+  do
+    fill_then_free(port)
+    # The server finishes the first two connections and sees the third close.
+    task_sleep(200)
+    fill_by_keep_alive(port)
+    task_sleep(200)
+    admitted_again(port)
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(0)
+    port <- local_port(listener)
+    task_spawn(s, \_ -> serve_n_with(config, listener, 7, handle))
+    task_spawn(s, \_ -> clients(port))
+where
+  config = default_config() with (header_ms = 600, idle_ms = 3000, max_live_connections = 2)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    terminal.write("done\n")
