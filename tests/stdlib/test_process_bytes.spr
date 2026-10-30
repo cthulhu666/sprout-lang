@@ -3,7 +3,7 @@
 # REGRESSION (W2 R2, `proc_run` half). A child process's output must not become a Sprout String.
 #
 # The defect, reproduced before the fix — `sprout_make_proc_result` ended in
-# `sprout_gc_adopt_cstr(buf, len, …)`, which stamps the byte count into the CSTR header and hands
+# `sprout_str_adopt(buf, len, …)`, which stamps the byte count into the CSTR header and hands
 # back a String. But a String is normatively "always valid UTF-8, contains no NUL byte"
 # (docs/spec-v0.md §strings), and a child chooses its own output bytes, so the value was illegal.
 # Measured, both cases, before the fix:

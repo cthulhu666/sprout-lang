@@ -1,7 +1,7 @@
 /* Map keys do not grow the intern table.
  *
  * A map stores its key string as given, and the collector frees it once the map
- * drops it. The intern table (intern_string) is a permanent malloc'd table outside
+ * drops it. The intern table (sprout_str_intern) is a permanent malloc'd table outside
  * the arena, kept for env, argv and terminal tokens; `intern=` in the exit report
  * is the only account of it, since neither the allocation counters nor the live
  * census can see that memory.

@@ -1,6 +1,6 @@
 # Every String crossing into Sprout is headered — v0
 
-**Status — approved; steps 1 and 2 landed (§7).** Runtime-internal; no change to the language, the spec
+**Status — approved; steps 1 to 4 landed (§7).** Runtime-internal; no change to the language, the spec
 or the extern ABI.
 Builds on `docs/runtime-invariant-confidence-v0.md`, which made every String headered.
 
@@ -11,7 +11,7 @@ A Sprout String is a `char*` to NUL-terminated bytes with an 8-byte header at `p
 and, when it says CSTR, trust aux as the length. A String without a header is misread whenever
 its byte at `s-8` happens to equal the CSTR kind: a wrong answer, not a crash.
 
-Only two places write the header: `sprout_gc_alloc_cstr` (arena) and `intern_string`
+Only two places write the header: `sprout_str_alloc` (arena) and `sprout_str_intern`
 (permanent). Every runtime path that hands Sprout a String must go through one of them, and
 nothing checks that it does. Inside the runtime a headered String, a C literal, a `strerror()`
 result and a malloc'd buffer all have type `char*`, and any of them becomes a Sprout value by a
@@ -74,16 +74,14 @@ silently.
 
 Only `sprout_str_alloc` and `sprout_str_intern` construct one directly, plus the exit
 `sprout_str_of_word_in` (§4.2). The other writers get theirs from those two:
-`sprout_str_dup_slice`, `sprout_str_dup`, `sprout_str_adopt` and `sprout_str_register`. The
-`char*` names (`sprout_gc_alloc_cstr`, `intern_string`, `sprout_gc_adopt_cstr`,
-`dup_managed_cstr`, `register_cstr`) are thin wrappers over them until step 4.
-A `SproutStr` is never NULL: a new writer given NULL calls `sprout_fail`. The wrappers
-`intern_string(NULL)` and `register_cstr(NULL)` still return NULL until their callers move (§8).
+`sprout_str_dup_slice`, `sprout_str_dup`, `sprout_str_adopt` and `sprout_str_register`. No writer
+returns a `char*`.
+A `SproutStr` is never NULL: a writer given NULL calls `sprout_fail` (§8).
 The cast check (§4.3) rejects any other construction: a compound literal, an initializer list, a
 write to `hdr_p`, or a pointer cast between `SproutStr*` and a pointer to another type but `void`.
 
-Raw-buffer helpers keep `char*`. Today `alloc_cstr` (malloc) and `sprout_gc_alloc_cstr` differ
-by one name segment, as do `dup_cstr` and `dup_managed_cstr`. After this they differ by type.
+Raw-buffer helpers keep `char*`: `alloc_cstr`, `dup_slice` and `dup_cstr` return malloc'd memory,
+and a `SproutStr` writer returns arena or interned memory. The two kinds differ by type.
 
 A String parameter typed `const char*` is never sent back to Sprout. About 40 exports take one
 (`env_get`, `regex_*`, `tcp_*`, `repl_*`, `analysis_*_in_source`), and none re-emits it today. A
@@ -101,7 +99,7 @@ static inline long long sprout_str_word_in(SproutStr s, const char* caller);
 
 The only conversion from a String to a Sprout value. Under HDRCHECK it checks that the kind byte
 at `s.hdr_p - 8` is CSTR, and on failure aborts with the caller's name. The check is O(1). It
-does not compare aux with `strlen`: exits like `map_nth_key` and `intern_string` returns hand
+does not compare aux with `strlen`: exits like `map_nth_key` and the interned-String returns hand
 back existing, possibly long Strings, and an O(n) check there makes HDRCHECK mode quadratic. That
 already happened once, and failed CI at a 389x ratio (`sprout_cstr_byte_len`'s comment). The
 aux-versus-`strlen` check stays in `str_byte_len`.
@@ -169,6 +167,8 @@ into a word. That takes intent, not an accident, so it stays with the other deli
   write `hdr_p`. `void*` is exempt, so `malloc` into a `SproutStr*` and `memcpy` between two
   `SproutStr` pass.
 
+No list of existing violations exists: a site outside the exits and `ADDRESS_CASTS` fails.
+
 A text match cannot do this. The tree spells pointer-to-word casts at least four ways:
 `(long long)(uintptr_t)p`, `(uintptr_t)p` stored into tuple words, `(long long)(intptr_t)p`, and
 a bare `(long long)p`, which clang accepts silently at equal width. Meanwhile `(long long)len`
@@ -235,8 +235,8 @@ replacing it, and it catches every other out-of-bounds read in the runtime.
 
 ## 6. Scope (measured 2026-10-29)
 
-These counts are grep estimates; step 1's baseline replaces them with the check's own count. The
-cast count is a lower bound: it misses `uintptr_t` array stores, which §4.3 catches.
+These counts are grep estimates from before step 1. The cast count is a lower bound: it misses
+`uintptr_t` array stores, which §4.3 catches.
 
 - 62 entry points hand Sprout a String-carrying value: 49 `extern fn`s, 10 `analysis_*`
   intrinsics and 3 `_unboxed` functions.
@@ -252,42 +252,54 @@ Each step is its own commit and keeps every gate green.
 
 1. ~~**The check, red on a mutant.**~~ Landed: `just runtime-word-casts` (rule 1; rules 2 and 3
    landed with step 2), `just test-runtime-word-casts`, `docs/gates.md` §Runtime word casts.
-   - Add `runtime-word-casts` with a baseline file listing today's violations, keyed
-     `file:function:count`. Line numbers are not used, because the runtime is append-mostly
-     (AGENTS.md, Docs & Spec 6). It fails on any violation not in the baseline, on any count
-     that rises, and on any entry that no longer occurs, so the list can only shrink, as
-     `stdlib-reference` works.
-   - Add `runtime/ADDRESS_CASTS` (§4.2), whose entries stay.
-   - Prove it catches the bug: a test copies the runtime, plants
+   - Added `runtime-word-casts` with a baseline file listing the violations of the day, keyed
+     `file:function:count` (line numbers drift, because the runtime is append-mostly; AGENTS.md,
+     Docs & Spec 6). It only shrank, and step 4 deleted it.
+   - Added `runtime/ADDRESS_CASTS` (§4.2), whose entries stay.
+   - Proved it catches the bug: a test copies the runtime, plants
      `return (long long)(uintptr_t)"x";` in an exported String producer, and expects the check to
      fail.
-   - Green on the current tree before it joins `ci-fast-gates`.
 2. ~~**`SproutStr` and the exits.**~~ Landed: `runtime/sprout_word.h`, the `sprout_str_*` writers
-   in `sprout_runtime.c` (the `char*` names wrap them), rules 2 and 3 with mutant cases in
+   in `sprout_runtime.c`, rules 2 and 3 with mutant cases in
    `scripts/test_runtime_word_casts.sh`, and `tests/c_runtime/str_writers.c` (a headerless
    `SproutStr` aborts at both exits, a writer given NULL or an arena String fails).
-3. **Convert, one module per commit.** ~~fs~~ (landed: `read_file`, `write_file`, `fs_list_dir`,
-   `fs_read_bytes`, `stdin_read_bytes`, `read_int_lines`, and `sprout_err1_text`, which builds the
-   `FsError` payloads and is shared with http, crypto and tcp;
-   `tests/c_runtime/fs_io_strings.c`), net, http, ~~crypto~~ (landed: `crypto_sha256`,
-   `crypto_hmac_sha256`, `crypto_base64_encode`, `crypto_base64_decode`, `crypto_bytes_xor`,
-   `crypto_random_bytes`; `crypto_base64_decode` takes the String as a word),
-   ~~bytes~~ (landed: `bytes_empty`, `bytes_slice`, `bytes_append`, `bytes_singleton`,
-   `bytes_from_utf8`, `bytes_to_utf8`, and the `bytes_builder_*` constructors;
-   `tests/c_runtime/bytes_crypto.c`, also under `SPROUT_GC_STRESS=1`), ~~terminal~~ (landed:
-   `term_read_key`, `term_key_utf8`, `term_read_line`, `term_read_avail`, `term_input_failed`;
-   `tests/c_runtime/term_strings.c`), ~~strings~~ (landed: `int_to_string`, `double_to_string`,
-   `char_to_str`, `str_concat`, `string_concat_many`, `string_join_newlines`, `str_slice`,
-   `str_slice_bytes`, `str_split_lines`, `split_words`, and `sprout_err_string_result`, which
-   builds the `Err(String)` of the analysis entry points; `tests/c_runtime/str_strings.c`, also
-   under `SPROUT_GC_STRESS=1`), json, analysis, maps. The scheduler's entries went with its
-   generation-checked handles; poll has none. Each commit shrinks the baseline.
-   `sprout_interned_word` (an interned String as a word) sits beside `sprout_str_intern` for the
-   later groups.
+3. ~~**Convert, one module per commit.**~~ Landed, one group per commit:
+   - fs: `read_file`, `write_file`, `fs_list_dir`, `fs_read_bytes`, `stdin_read_bytes`,
+     `read_int_lines`, and `sprout_err1_text`, which builds the `FsError` payloads and is shared
+     with http, crypto and tcp; `tests/c_runtime/fs_io_strings.c`.
+   - crypto: `crypto_sha256`, `crypto_hmac_sha256`, `crypto_base64_encode`,
+     `crypto_base64_decode`, `crypto_bytes_xor`, `crypto_random_bytes`; `crypto_base64_decode`
+     takes the String as a word.
+   - bytes: `bytes_empty`, `bytes_slice`, `bytes_append`, `bytes_singleton`, `bytes_from_utf8`,
+     `bytes_to_utf8`, and the `bytes_builder_*` constructors; `tests/c_runtime/bytes_crypto.c`,
+     also under `SPROUT_GC_STRESS=1`.
+   - terminal: `term_read_key`, `term_key_utf8`, `term_read_line`, `term_read_avail`,
+     `term_input_failed`; `tests/c_runtime/term_strings.c`.
+   - strings: `int_to_string`, `double_to_string`, `char_to_str`, `str_concat`,
+     `string_concat_many`, `string_join_newlines`, `str_slice`, `str_slice_bytes`,
+     `str_split_lines`, `split_words`, and `sprout_err_string_result`, which builds the
+     `Err(String)` of the analysis entry points; `tests/c_runtime/str_strings.c`, also under
+     `SPROUT_GC_STRESS=1`.
+   - I/O edge (net and http): `tcp_read_exact`, `tcp_read_some`, `http_err_cstr`,
+     `http_ok_response`, `env_get` and `env_get_unboxed`, `argv_get` and `argv_get_unboxed`,
+     `sprout_make_proc_result`; `tests/c_runtime/io_edge_strings.c`.
+   - json and regex: `json_stringify`, the json string-array helpers (the C `json_parse`
+     tree-parser was dead and is deleted), `regex_escape`, `regex_replace_all_literal`, `regex_validate`;
+     `tests/c_runtime/json_regex_strings.c`.
+   - analysis: the `sprout_analysis_*` result builders; `tests/c_runtime/analysis_strings.c`.
+   - containers (maps): the vector and BST node builders, `sprout_alloc_closure`,
+     `sprout_alloc_tuple_blob`, `sprout_heap_child_value_payload`, `sprout_gc_sweep`;
+     `tests/c_runtime/container_words.c`.
+
+   The scheduler's entries went with its generation-checked handles; poll has none.
+   `sprout_interned_word` (an interned String as a word) sits beside `sprout_str_intern`.
    `SPROUT_GC_HDRCHECK=1 just test` includes `tests/stdlib/test_byte_offset_cost.spr`, so the cost
    of a new exit check shows up. The `test` recipe does not set HDRCHECK itself; CI sets it in the
    job environment.
-4. **Finish.** Delete the `char*` writer names and the empty baseline. `ADDRESS_CASTS` stays.
+4. ~~**Finish.**~~ Landed: `sprout_gc_alloc_cstr`, `sprout_gc_adopt_cstr`, `dup_managed_cstr`,
+   `register_cstr` and `intern_string` are deleted, and so is `runtime/WORD_CASTS_BASELINE`.
+   `scripts/runtime_word_casts.py` takes no baseline argument and has no `--emit-baseline`: rule 1
+   fails on any site outside the exits and `ADDRESS_CASTS`. `ADDRESS_CASTS` stays.
 5. **ASan in CI.** Make `build-stage2-asan` run the C runtime tests and the suite (§4.5).
 6. **`check-approved-builtins` sees every builtin Sprout can call.** Its regex matches only
    `^long long name(`, so `_Bool str_eq` and the `SproutUnboxed2 *_unboxed` builtins are
@@ -299,24 +311,29 @@ Each step is its own commit and keeps every gate green.
    - the `CtorMeta` `field_kinds` comment;
    - in `sprout_ir.sprout`: the IRStrCompare comment ("String/Char ordering", "treats Char as a
      single-codepoint String"), `'s' (String AND Char)` and `'s'=String/Char`;
-   - in `ir_lowering.sprout`: the two "String/Char handles" comments on the `str_compare` path.
+   - in `ir_lowering.sprout`: the two "String/Char handles" comments on the `str_compare` path;
+   - in `ast_to_ir.sprout`: the comment on interned literals still names `intern_string`, now
+     `sprout_str_intern`.
 
-   The last two files are under `stdlib/compiler/`, so this step reseeds.
+   The last three files are under `stdlib/compiler/`, so this step reseeds.
 
 Gates per step: `just c-runtime-test`, `SPROUT_GC_HDRCHECK=1 just test`, `just ci-fast-gates`,
 `just linux-smoke`, `just check-approved-builtins`. Only step 7 reseeds.
 
 ## 8. Contract changes
 
-- **`register_cstr`.** It returns any arena String it is given unchanged, and calls `free()` on
-  anything else, so a literal or an interned String passed to it would be freed. The new writer
-  takes only an owned malloc'd buffer and drops the arena branch. The premise is that no caller
-  passes an arena String. All 11 callers pass malloc'd buffers today: getline, malloc, the JSON
-  parser, `sprout_json_extract_string`, the regex error path and http. A C test pins that the new
-  writer rejects an arena String. The `register_cstr` wrapper keeps the arena branch until step
-  4 deletes it.
-- **`intern_string(NULL)` and `register_cstr(NULL)`** fail instead of returning NULL (§4.1).
-  Each caller's NULL branch is checked for what it meant before the change lands.
+- **`sprout_str_register`** takes only an owned malloc'd buffer, and calls `free()` on it. The old
+  `register_cstr` returned an arena String unchanged; the writer has no such branch. The premise
+  is that no caller passes an arena String: every caller passes a malloc'd buffer. The callers are
+  `term_read_line` (getline), `stdin_read_bytes`, `sprout_json_extract_string_array`,
+  `sprout_analysis_ok_string_result_from_response`, `sprout_analysis_ok_string_vec_pair_result`,
+  `sprout_analysis_completion_tuple_or_fail`, `regex_validate`, `http_err_cstr` and
+  `http_ok_response`. It takes the out-of-memory context from the caller. Every NUL-terminated
+  malloc'd buffer goes through it, so each runs the arena guard; `sprout_str_adopt` is kept for
+  buffers with an explicit length (`read_file`, `regex_replace_all_literal`, `regex_escape`,
+  `json_stringify`, `crypto_base64_encode`). The `register_arena` case of `tests/c_runtime/str_writers.c` pins that it rejects one.
+- **`sprout_str_intern(NULL)` and `sprout_str_register(NULL)`** fail instead of returning NULL
+  (§4.1), pinned by the `intern_null` and `register_null` cases of the same test.
 - **The sqlite FFI shim** (`examples/twelve_dollar_server/src/sqlite_ffi.c`) is outside
   `runtime/`. It passes raw `""` and sqlite text to `str_concat`, which works because
   `str_concat` uses `strlen`. The check does not cover it. Moving it to the shared exits is

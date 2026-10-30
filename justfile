@@ -2111,19 +2111,24 @@ stdlib-reference:
 
 # docs/string-header-invariant-v0.md §4.3, rule 1: the runtime converts a pointer to an
 # integer, or an address to a signed 64-bit integer, only inside sprout_str_word/sprout_ptr_word,
-# the runtime/ADDRESS_CASTS functions, or a runtime/WORD_CASTS_BASELINE entry, and that baseline
-# only shrinks. Reads clang's AST, so it sees the host platform's #ifdef branches only
-# (docs/gates.md). This recipe never passes --scan-cache. CI and `gate` run the check through
-# test-runtime-word-casts, whose case (a) is it on the real tree.
+# or the runtime/ADDRESS_CASTS functions. Reads clang's AST, so it sees the host platform's
+# #ifdef branches only (docs/gates.md). This recipe never passes --scan-cache. CI and `gate` run
+# the check through test-runtime-word-casts, whose case (a) is it on the real tree.
 [group('smoke')]
 runtime-word-casts:
-  python3 -I scripts/runtime_word_casts.py clang runtime runtime/WORD_CASTS_BASELINE runtime/ADDRESS_CASTS
+  python3 -I scripts/runtime_word_casts.py clang runtime runtime/ADDRESS_CASTS
 
 # Case (a) is runtime-word-casts on the real runtime/; the others plant one defect at a time in
 # copies of it.
 [group('smoke')]
 test-runtime-word-casts:
   bash scripts/test_runtime_word_casts.sh
+
+# gc_safety_check.sh against fixtures: braces in literals and comments must not hide a later
+# function, and brace drift must fail with exit 2 (docs/gates.md §GC safety linter).
+[group('smoke')]
+test-gc-safety-check:
+  bash scripts/test_gc_safety_check.sh
 
 # DoD #10 — example canary RUN.  The canary set must compile AND run to
 # completion without crashing.  `just compile-examples-stage1` only covers
@@ -2757,8 +2762,8 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-binary-body/split" "binary-split-200"
   SPROUT_GC_STRESS=1 run_once "http-binary-body/stress" "binary-inline-200"
   # (27) W2 R2 regression at the `net` layer: a payload containing 0x00 read back over loopback must
-  # arrive as intact Bytes AND be refused by bytes.to_string. The deleted read builtins ended in
-  # sprout_gc_adopt_cstr, minting a String that violates docs/spec-v0.md:64 — silently (byte_length 3,
+  # arrive as intact Bytes AND be refused by bytes.to_string. The deleted read builtins stamped the
+  # byte count into the String header, minting a String that violates docs/spec-v0.md:64 — silently (byte_length 3,
   # length 1) with HDRCHECK off, and as an abort with it on. http-binary-body covers the same property
   # through the HTTP server; this pins it where the defect lived, so a regression is attributed to
   # `net` rather than diagnosed through a request parser. Run under HDRCHECK as well as the default,
@@ -4085,6 +4090,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "emit-errors|test-emit-errors"
     "example-canary|run-example-canary"
     "gc-safety|gc-safety-check --strict"
+    "test-gc-safety-check|test-gc-safety-check"
     "freelist-verify|test-freelist-verify"
     "gc-ageprof|gc-ageprof-check"
     "gc-adapt|gc-adapt-check"
@@ -4387,7 +4393,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

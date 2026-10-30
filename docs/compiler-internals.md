@@ -96,7 +96,7 @@ Both test files are **workloads, not assertions** — their Sprout-level checks 
 
 Because objects never move, the address of a live heap object is **stable for the entire program lifetime**.
 
-**Load-bearing invariant — registration/adoption paths must never trigger GC.** Functions that register or adopt an already-allocated object into the managed set (e.g. `register_cstr` and its callers) run with earlier, not-yet-rooted objects held in registers: a string builder registers freshly-built strings back-to-back while still holding the previous ones unrooted. The contract "registration itself never collects" is therefore load-bearing — **never add a `sprout_gc_maybe_collect*` call (or any operation that can) to a registration/adoption path**, or those in-flight unrooted objects get swept mid-sequence. Allocation paths may collect; registration paths may not.
+**Load-bearing invariant — registration/adoption paths must never trigger GC.** Functions that register or adopt an already-allocated object into the managed set (e.g. `sprout_str_register` and its callers) run with earlier, not-yet-rooted objects held in registers: a string builder registers freshly-built strings back-to-back while still holding the previous ones unrooted. The contract "registration itself never collects" is therefore load-bearing — **never add a `sprout_gc_maybe_collect*` call (or any operation that can) to a registration/adoption path**, or those in-flight unrooted objects get swept mid-sequence. Allocation paths may collect; registration paths may not.
 
 Implications for codegen / IR design:
 
@@ -246,7 +246,7 @@ its `IRType` kind, and only stores of a non-heap scalar are unchecked. Switches 
 
 ### GC safety linter
 
-`just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only.
+`just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only. It finds function bodies by counting braces outside literals and comments, and exits 2 if that count drifts ([gates.md §GC safety linter](gates.md)).
 
 ## Emitted SSA names: LLVM has ONE namespace for locals and block labels
 

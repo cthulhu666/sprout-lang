@@ -168,7 +168,7 @@ fn main() -> Unit !{IO} =
             | Just name_val -> json.json_get_array(name_val)
         | Err _ -> Nothing
 
-      # Regression: CPR worker for non-allowlisted externs (json_parse) previously
+      # Regression: CPR worker for non-allowlisted externs (json_parse, then a C extern) previously
       # generated `ret { i64, i64 } undef`, causing non-exhaustive match at runtime.
       cpr_regression_ok =
         match json.parse("99") with

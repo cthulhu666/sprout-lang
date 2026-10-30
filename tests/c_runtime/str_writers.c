@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
   } else if (strcmp(sel, "intern_null") == 0) {
     sprout_str_intern(NULL);
   } else if (strcmp(sel, "register_null") == 0) {
-    sprout_str_register(NULL);
+    sprout_str_register(NULL, "register_null");
   } else if (strcmp(sel, "dup_null") == 0) {
     sprout_str_dup(NULL, "dup_null");
   } else if (strcmp(sel, "dup_slice_null") == 0) {
@@ -61,11 +61,7 @@ int main(int argc, char** argv) {
   } else if (strcmp(sel, "register_arena") == 0) {
     SproutStr a = sprout_str_alloc(3, "register_arena");
     memcpy(a.hdr_p, "abc", 4);
-    sprout_str_register(a.hdr_p);
-  } else if (strcmp(sel, "old_wrappers") == 0) {
-    if (intern_string(NULL) != NULL || register_cstr(NULL) != NULL) return 1;
-    printf("old-wrappers-ok\n");
-    return 0;
+    sprout_str_register(a.hdr_p, "register_arena");
   } else {
     return 2;
   }
