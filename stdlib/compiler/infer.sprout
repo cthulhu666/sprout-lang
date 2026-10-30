@@ -1391,6 +1391,7 @@ fn infer_var_or_field(
 fn unresolved_name_message(kind: String, name: String, env: Dict types.Scheme) -> String =
   if source.is_canonical_marked(name) then source.canonical_name_message(name)
   else if source.is_private_extern_marked(name) then source.private_extern_message(name)
+  else if source.is_prelude_private_marked(name) then source.prelude_private_message(name)
   else kind ++ name ++ unresolved_name_hint(name, env)
 
 # A name the bundler could not resolve is absent from every import list, yet the

@@ -134,8 +134,12 @@ type PrivateExtern = (declarer: String, name: String, writes_local: Bool)
 
 # The prelude's own symbol tables, held as they are, built once per bundle beside
 # `canonical`. `bare` is built from the externs, which are in no value table.
+#
+# `unexported` is the prelude's `fn` and `let` names that it does not export. It is
+# built from the declarations, not the value table, which also holds constructors
+# and methods. Empty in the prelude's own context, and when the bundle has none.
 type PreludeNames = (values: Dict String, bare: Dict String, types: Dict String,
-                     classes: Dict String)
+                     classes: Dict String, unexported: Set)
 
 # ---------------------------------------------------------------------------
 # ModuleSymbols accessors
@@ -980,7 +984,7 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
               type_locals = sym_type_locals(own_syms),
               class_locals = sym_class_locals(own_syms),
               canonical_names = canonical,
-              prelude = prelude,
+              prelude = prelude_seen_from(path, stdlib_root, prelude),
               foreign = foreign_externs(own_externs_of(mod_name, sym_extern_names(own_syms)), externs)))
 
 # One extern declaration. `in_prelude` is the prelude or the `no_prelude` floor, found by
@@ -1169,16 +1173,49 @@ fn add_foreign_extern(own: List String, acc: Dict PrivateExtern, entry: PrivateE
 
 # Found by path, as `prelude_type_names` does. Empty when the bundle has no
 # prelude; under `no_prelude` it is the floor.
-fn prelude_names(all_symbols: Dict ModuleSymbols, stdlib_root: String) -> PreludeNames =
+fn prelude_names(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> PreludeNames =
   match dict_get(prelude_path(stdlib_root), all_symbols) with
   | Nothing -> no_prelude_names()
   | Just syms ->
       PreludeNames(values = sym_value_locals(syms),
                    bare = fold(\ (acc, m) -> dict_set(m, m, acc), dict_empty(), sym_extern_names(syms)),
-                   types = sym_type_locals(syms), classes = sym_class_locals(syms))
+                   types = sym_type_locals(syms), classes = sym_class_locals(syms),
+                   unexported = unexported_fns_and_lets(prelude))
+  where prelude = find(\m -> parsed_path(m) == prelude_path(stdlib_root), modules)
 
 fn no_prelude_names() -> PreludeNames =
-  PreludeNames(values = dict_empty(), bare = dict_empty(), types = dict_empty(), classes = dict_empty())
+  PreludeNames(values = dict_empty(), bare = dict_empty(), types = dict_empty(), classes = dict_empty(),
+               unexported = set_empty())
+
+# The module at `path` sees its own unexported names; every other module does not.
+fn prelude_seen_from(path: String, stdlib_root: String, names: PreludeNames) -> PreludeNames =
+  if path == prelude_path(stdlib_root) then names with (unexported = set_empty()) else names
+
+# Types, constructors, classes and externs are not in the set: the prelude has no
+# unexported type or class, a constructor is in scope without `(..)`, and an extern is
+# outside the module system (spec-v0 §3.1).
+fn unexported_fns_and_lets(prelude: Maybe ParsedModule) -> Set =
+  match prelude with
+  | Nothing -> set_empty()
+  | Just (ParsedModule _ _ _ exported _ decls) ->
+      let public = set_from_list(exported)
+      in decls
+         |> list_flat_map(fn_or_let_name)
+         |> list_filter(\n -> !set_member(n, public))
+         |> set_from_list
+
+# Every variant is listed, so a new declaration kind has to decide whether it can be private.
+fn fn_or_let_name(d: ast.Decl) -> List String =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ _ -> [name]
+  | ast.LetDecl name _ _ _ -> [name]
+  | ast.ExternFnDecl _ _ _ _ _ _ _ -> []
+  | ast.TypeDecl _ _ _ _ _ _ _ -> []
+  | ast.RecordDecl _ _ _ _ _ _ _ -> []
+  | ast.ClassDecl _ _ _ _ _ -> []
+  | ast.InstanceDecl _ _ _ _ _ -> []
+  | ast.AliasDecl _ _ _ _ -> []
+  | ast.WrapDecl _ _ _ _ _ _ _ -> []
 
 fn prelude_value(names: PreludeNames, name: String) -> Maybe String =
   maybe_or_else(dict_get(name, names.values), dict_get(name, names.bare))
@@ -1615,7 +1652,7 @@ fn claim_dotted_value(ctx: ResolveCtx, scope: List String, split: (String, Strin
         | Just canonical -> Claimed(canonical)
         | Nothing ->
             match prelude_qualified(ctx, head, rest, \s -> prelude_value(ctx.prelude, s)) with
-            | Just canonical -> Claimed(guard_private_extern(ctx, canonical))
+            | Just canonical -> Claimed(guard_prelude_value(ctx, canonical))
             | Nothing -> Unclaimed(split)
 
 fn bare_value_name(ctx: ResolveCtx, name: String) -> String =
@@ -1624,7 +1661,17 @@ fn bare_value_name(ctx: ResolveCtx, name: String) -> String =
   | Nothing ->
       match dict_get(name, ctx.unqual_values) with
       | Just canonical -> canonical
-      | Nothing -> guard_private_extern(ctx, name)
+      | Nothing -> guard_prelude_value(ctx, name)
+
+# A name that is neither the module's own nor imported is the prelude's, or an extern.
+#
+# An unexported prelude `fn` or `let` is private to the prelude. The rule binds
+# source text only: every name the compiler writes after bundling (deriving's
+# `eq`/`to_string`/`compare`, desugarings) is exported. Marked for the reason
+# `guard_canonical` marks.
+fn guard_prelude_value(ctx: ResolveCtx, name: String) -> String =
+  if set_member(name, ctx.prelude.unexported) then source.mark_prelude_private(name)
+  else guard_private_extern(ctx, name)
 
 # `prelude.X` is the prelude's `X`, after a local, an import alias or a top-level
 # value named `prelude` has declined it (docs/prelude-name-identity-v0.md §5). `Nothing` for an `X` the
@@ -1989,7 +2036,7 @@ type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, pre
 fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleNames =
   let all_symbols = build_all_symbols(modules)
       canonical = all_canonical_names(all_symbols)
-      prelude = prelude_names(all_symbols, stdlib_root)
+      prelude = prelude_names(modules, all_symbols, stdlib_root)
       facts = extern_facts_of(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
       externs = private_externs_of(facts)
   in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude, externs = externs,
@@ -2775,7 +2822,7 @@ fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict Module
   dump_qualify_modules_with(modules, all_symbols, stdlib_root, canonical, prelude,
                             private_externs_of(extern_facts_of(modules, all_symbols, stdlib_root, Nil, canonical, prelude)))
   where canonical = all_canonical_names(all_symbols)
-        prelude = prelude_names(all_symbols, stdlib_root)
+        prelude = prelude_names(modules, all_symbols, stdlib_root)
 
 fn dump_qualify_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                              stdlib_root: String, canonical: Dict String,

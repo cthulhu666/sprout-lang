@@ -420,6 +420,14 @@ The sweep removed the ones sitting beside a named ref; thirteen survive in
 was deleted, so there is no identifier left to name. `.sprout` line refs — several hundred — are out
 of scope.
 
+## Prelude private names — `just prelude-private-names`
+
+Rejects a string literal in `stdlib/compiler/` that names an unexported prelude `fn` or `let`. The
+bundler rejects such a name in source (spec §3.1), but a name the compiler writes itself after
+bundling never meets that check, so it would reach a private helper silently. The rule holds only
+while every generated name is exported; this keeps it so. Export the helper, or generate a name that
+is exported.
+
 ## Stdlib reference — `just stdlib-reference`
 
 Every top-level `stdlib/*.sprout` module but the prelude needs a `## stdlib.<name>` section in

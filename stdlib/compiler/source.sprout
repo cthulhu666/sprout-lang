@@ -340,6 +340,23 @@ export fn export_local_extern_message(module: String, name: String) -> String =
 fn describe_declaring_module(module: String) -> String =
   if module == "" then "the prelude" else "`" ++ module ++ "`"
 
+# ── Private prelude names ────────────────────────────────────────────────────
+#
+# The prelude is in every bundle, so an unexported prelude `fn` or `let` is
+# reachable by its bare name unless the bundler stops it. It marks a reference
+# from any other module with this prefix, on the same terms as `canonical_marker`:
+# a marked name resolves nowhere and `infer` raises it. Shape: `@prelude_private:<name>`.
+export let prelude_private_marker: String = "@prelude_private:"
+
+export fn mark_prelude_private(name: String) -> String =
+  prelude_private_marker ++ name
+
+export fn is_prelude_private_marked(name: String) -> Bool =
+  string.starts_with(name, prelude_private_marker)
+
+export fn prelude_private_message(marked: String) -> String =
+  "`" ++ string.drop(marked, string.length(prelude_private_marker)) ++ "` is private to the prelude"
+
 # ── Header stripping ─────────────────────────────────────────────────────────
 #
 # strip_headers removes the leading block of `module` / `import` / comment /

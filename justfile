@@ -2099,6 +2099,10 @@ backlog-shape:
 runtime-line-refs:
   ./scripts/runtime_line_refs.sh
 
+# No compiler string literal names an unexported prelude fn/let (spec-v0 §3.1).
+prelude-private-names:
+  ./scripts/prelude_private_names.sh
+
 # Every top-level stdlib module has a `## stdlib.<name>` section in docs/stdlib-reference.md.
 # The not-yet-documented ones are listed in the script, and that list can only shrink.
 [group('smoke')]
@@ -4082,6 +4086,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "extern-signatures|check-extern-signatures"
     "backlog-shape|backlog-shape"
     "runtime-line-refs|runtime-line-refs"
+    "prelude-private-names|prelude-private-names"
     "stdlib-reference|stdlib-reference"
     # Includes the real-tree check, so `runtime-word-casts` is not listed on its own.
     "test-runtime-word-casts|test-runtime-word-casts"

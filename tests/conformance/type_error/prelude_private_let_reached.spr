@@ -1,0 +1,5 @@
+module main
+
+fn main() -> Unit !{IO} =
+  print(to_string(pow10_clamp))
+#~^ ERROR
