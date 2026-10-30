@@ -1175,6 +1175,11 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `tests/stdlib/test_ir_rooting.spr`), so none of them runs through `test-file`. Fix: pass
   `--package-root "{{justfile_directory()}}"` there as the other emit-ir recipes do, and drop the
   caveat from AGENTS.md §How to run tests.
+- [ ] `P3` **IR tests — the lex→parse→check→lower→compile helper is pasted into 13 suites.**
+  `translate_source` is defined in 8 of the `tests/stdlib/test_ir_codegen_*.spr` files and 5 under
+  `tests/stdlib/compiler/` (`test_ir_*.spr`, `test_scalar_global_no_root.spr`); 7 of them also
+  define a local substring `count`. A change to the pipeline is made 13 times. Move it to
+  `testsupport/ir_fixtures.sprout` as `ir_of_source`, flatten it with `let..else`, and import it.
 - [ ] `P2` **Robust suite pass/fail signalling + stdout flush.** The runner derives exit status by
   grepping stdout for `^SUITE FAILED`, which couples the machine gate to a human string, false-trips
   on a fixture printing it as data, and blocks golden-stdout tests from sharing the stream. Replace

@@ -259,7 +259,7 @@ in function main`. For a type declared in the program it should add "add `derivi
     eta-expanded into a lambda (`value_ref_eta`, `infer.sprout`), so the canary would keep
     passing without testing that channel. Re-point it at `eprint`, which stays an extern.
   - ~~`tests/c_runtime/read_file_error_print.c` links `print_value` directly.~~ Landed: replaced by
-    `tests/c_runtime/read_file_error_payload.c` (§10 step 4).
+    `tests/c_runtime/fs_io_strings.c` (§10 step 4).
 - Expected outputs that record `1`/`0` for a `Bool`, `Cons(…)` for a list, or a number for a
   nested `Char` change. Each one is read, not regenerated blind.
 - Downstream: no file fails to check. Their test outputs are re-run under the new compiler before
@@ -330,7 +330,7 @@ declaration, and needs a rule for which instance wins when the user also writes 
 4. ~~Remove the runtime renderer once nothing emits `print_value` (§4.3), with
    `tests/c_runtime/read_file_error_print.c` (§7). Separate, small.~~ Landed. `print_int`,
    `print_text` and `print_newline` went with it (also unreferenced). The test became
-   `tests/c_runtime/read_file_error_payload.c`.
+   `tests/c_runtime/fs_io_strings.c`.
 5. ~~**Plain externs for the String sinks.** `print_str` and `eprint` were call-site intrinsics
    because the compiler declared `print_str` and `eprint_str` with a `ptr` parameter
    (`runtime_declares`) and cast at each call (`IRPrintStr`). Ten other externs whose C takes

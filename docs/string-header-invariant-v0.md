@@ -267,10 +267,15 @@ Each step is its own commit and keeps every gate green.
    in `sprout_runtime.c` (the `char*` names wrap them), rules 2 and 3 with mutant cases in
    `scripts/test_runtime_word_casts.sh`, and `tests/c_runtime/str_writers.c` (a headerless
    `SproutStr` aborts at both exits, a writer given NULL or an arena String fails).
-3. **Convert, one module per commit.** fs, net, http, crypto, terminal, json, analysis, maps,
-   scheduler, poll. Each commit shrinks the baseline. `SPROUT_GC_HDRCHECK=1 just test` includes
-   `tests/stdlib/test_byte_offset_cost.spr`, so the cost of a new exit check shows up. The
-   `test` recipe does not set HDRCHECK itself; CI sets it in the job environment.
+3. **Convert, one module per commit.** ~~fs~~ (landed: `read_file`, `write_file`, `fs_list_dir`,
+   `fs_read_bytes`, `stdin_read_bytes`, `read_int_lines`, and `sprout_err1_text`, which builds the
+   `FsError` payloads and is shared with http, crypto and tcp;
+   `tests/c_runtime/fs_io_strings.c`), net, http, crypto, terminal, json, analysis, maps. The
+   scheduler's entries went with its generation-checked handles; poll has none. Each commit
+   shrinks the baseline.
+   `SPROUT_GC_HDRCHECK=1 just test` includes `tests/stdlib/test_byte_offset_cost.spr`, so the cost
+   of a new exit check shows up. The `test` recipe does not set HDRCHECK itself; CI sets it in the
+   job environment.
 4. **Finish.** Delete the `char*` writer names and the empty baseline. `ADDRESS_CASTS` stays.
 5. **ASan in CI.** Make `build-stage2-asan` run the C runtime tests and the suite (§4.5).
 6. **`check-approved-builtins` sees every builtin Sprout can call.** Its regex matches only

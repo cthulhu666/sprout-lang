@@ -378,6 +378,8 @@ static char* dup_slice(const char* start, size_t len);
 static char* dup_cstr(const char* s);
 static char* register_cstr(char* value);
 static SproutStr sprout_str_dup_slice(const char* start, size_t len, const char* ctx);
+static SproutStr sprout_str_dup(const char* text, const char* ctx);
+static SproutStr sprout_str_register(char* buf);
 static char* dup_managed_cstr(const char* s, const char* ctx);
 static char* sprout_gc_alloc_cstr(size_t len, const char* ctx);
 static char* sprout_gc_adopt_cstr(char* buf, size_t len, const char* ctx);
@@ -3300,24 +3302,25 @@ long long argv_get(long long index) {
   /* argv is bare libc memory; intern to a headered Sprout String. */
   return sprout_make1(SPROUT_TAG(Just), (long long)(uintptr_t)intern_string(g_sprout_argv[index + 1]));
 }
+/* Err(<String detail>) from a C string, copied to a managed String and rooted across the
+ * make1. A caller that cleans up first saves errno before it and passes strerror(saved). */
+static long long sprout_err_text(const char* detail, const char* oom_ctx) {
+  long long msg = sprout_str_word(sprout_str_dup(detail, oom_ctx));
+  SPROUT_GC_PUSH_I64_LOCAL(msg);
+  long long out = sprout_make1(SPROUT_TAG(Err), msg);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
 long long read_file(long long path_i) {
   const char* path = (const char*)(uintptr_t)path_i;
-  if (path == NULL) {
-    char* msg = dup_managed_cstr("null path", "read_file: out of memory");
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
-  }
+  if (path == NULL) return sprout_err_text("null path", "read_file: out of memory");
   FILE* f = NULL;
   int close_after = 0;
   if (strcmp(path, "-") == 0) {
     f = stdin;
   } else {
     f = fopen(path, "rb");
-    if (f == NULL) {
-      char* msg = dup_managed_cstr(strerror(errno), "read_file: out of memory");
-      SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-      return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
-    }
+    if (f == NULL) return sprout_err_text(strerror(errno), "read_file: out of memory");
     close_after = 1;
   }
   size_t cap = 4096;
@@ -3326,9 +3329,7 @@ long long read_file(long long path_i) {
   char* out = (char*)malloc(cap);
   if (out == NULL) {
     if (close_after) fclose(f);
-    char* msg = dup_managed_cstr("out of memory", "read_file: out of memory");
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
+    return sprout_err_text("out of memory", "read_file: out of memory");
   }
   char buf[4096];
   while (1) {
@@ -3340,9 +3341,7 @@ long long read_file(long long path_i) {
         if (grown == NULL) {
           if (close_after) fclose(f);
           free(out);
-          char* msg = dup_managed_cstr("out of memory", "read_file: out of memory");
-          SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-          return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
+          return sprout_err_text("out of memory", "read_file: out of memory");
         }
         out = grown;
         cap = new_cap;
@@ -3353,11 +3352,10 @@ long long read_file(long long path_i) {
     if (n < sizeof(buf)) {
       if (feof(f)) break;
       if (ferror(f)) {
-        char* msg = dup_managed_cstr(strerror(errno), "read_file: out of memory");
+        int e = errno;
         if (close_after) fclose(f);
         free(out);
-        SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-        return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
+        return sprout_err_text(strerror(e), "read_file: out of memory");
       }
     }
   }
@@ -3366,38 +3364,24 @@ long long read_file(long long path_i) {
   const char* utf8_reason = NULL;
   if (!utf8_validate((const unsigned char*)out, len, &utf8_reason)) {
     free(out);
-    char* msg = dup_managed_cstr(utf8_reason, "read_file: out of memory");
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
+    return sprout_err_text(utf8_reason, "read_file: out of memory");
   }
-  out = sprout_gc_adopt_cstr(out, len, "read_file: out of memory");  SPROUT_HANDLE(h_out, (long long)(uintptr_t)out);
+  SproutStr text = sprout_str_adopt(out, len, "read_file: out of memory");
+  SPROUT_HANDLE(h_out, sprout_str_word(text));
   return sprout_make1(SPROUT_TAG(Ok), sprout_handle_get(h_out));
 }
 long long write_file(long long path_i, long long content_i) {
   const char *path    = (const char *)(uintptr_t)path_i;
   const char *content = (const char *)(uintptr_t)content_i;
-  if (path == NULL) {
-    char* msg = dup_managed_cstr("null path", "write_file: out of memory");
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
-  }
-  if (content == NULL) {
-    char* msg = dup_managed_cstr("null content", "write_file: out of memory");
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
-  }
+  if (path == NULL) return sprout_err_text("null path", "write_file: out of memory");
+  if (content == NULL) return sprout_err_text("null content", "write_file: out of memory");
   FILE *f = fopen(path, "wb");
-  if (!f) {
-    char* msg = dup_managed_cstr(strerror(errno), "write_file: out of memory");
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
-  }
+  if (!f) return sprout_err_text(strerror(errno), "write_file: out of memory");
   size_t len = strlen(content);
   if (fwrite(content, 1, len, f) != len) {
-    char* msg = dup_managed_cstr(strerror(errno), "write_file: out of memory");
+    int e = errno;
     fclose(f);
-    SPROUT_HANDLE(h_msg, (long long)(uintptr_t)msg);
-    return sprout_make1(SPROUT_TAG(Err), sprout_handle_get(h_msg));
+    return sprout_err_text(strerror(e), "write_file: out of memory");
   }
   fclose(f);
   return sprout_make1(SPROUT_TAG(Ok), 0LL);
@@ -3437,7 +3421,7 @@ static long long fs_error_ctor(int err) {
  * CSTR header a String must have (http_err_cstr adopts a malloc'd one instead).
  * Each intermediate is a GC local before the next allocation can run a collection. */
 static long long sprout_err1_text(long long ctor_tag, const char* detail, const char* oom_ctx) {
-  long long msg = (long long)(uintptr_t)dup_managed_cstr(detail, oom_ctx);
+  long long msg = sprout_str_word(sprout_str_dup(detail, oom_ctx));
   SPROUT_GC_PUSH_I64_LOCAL(msg);
   long long err = sprout_make1(ctor_tag, msg);
   SPROUT_GC_PUSH_I64_LOCAL(err);
@@ -3515,9 +3499,9 @@ long long fs_list_dir(long long path_i) {
     struct dirent* de = readdir(dir);
     if (de == NULL) { read_err = errno; break; }
     if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
-    char* name = dup_managed_cstr(de->d_name, "fs_list_dir: out of memory");
+    SproutStr name = sprout_str_dup(de->d_name, "fs_list_dir: out of memory");
     {
-      SPROUT_HANDLE(h_name, (long long)(uintptr_t)name);
+      SPROUT_HANDLE(h_name, sprout_str_word(name));
       SPROUT_HANDLE_SET(h_list,
         sprout_make2(cons_tag, sprout_handle_get(h_name), sprout_handle_get(h_list)));
     }
@@ -3613,7 +3597,7 @@ long long fs_read_bytes(long long path_i) {
   close(fd);
 
   long long payload =
-    (long long)(uintptr_t)bytes_from_chunk_bytes(buf, len, "fs_read_bytes: out of memory");
+    sprout_ptr_word(bytes_from_chunk_bytes(buf, len, "fs_read_bytes: out of memory"));
   free(buf);
   return fs_ok(payload);
 }
@@ -3947,8 +3931,8 @@ long long stdin_read_bytes(long long n_val) {
     total += got;
   }
   buf[n_val] = '\0';
-  buf = register_cstr(buf);
-  SPROUT_HANDLE(h_buf, (long long)(uintptr_t)buf);
+  SproutStr text = sprout_str_register(buf);
+  SPROUT_HANDLE(h_buf, sprout_str_word(text));
   return sprout_make1(SPROUT_TAG(Just), sprout_handle_get(h_buf));
 }
 /* Returns long long, NOT _Bool — see "Bool-returning builtins return long long"
@@ -5762,7 +5746,7 @@ long long read_int_lines(const char* path) {
   FILE* f = fopen(path, "r");
   if (f == NULL) sprout_fail("read_int_lines: cannot open file");
   VectorVal* v = sprout_alloc_vector_val("read_int_lines: out of memory");
-  SPROUT_HANDLE(h_v, (long long)(uintptr_t)v);
+  SPROUT_HANDLE(h_v, sprout_ptr_word(v));
 
   char buf[4096];
   while (fgets(buf, sizeof(buf), f) != NULL) {

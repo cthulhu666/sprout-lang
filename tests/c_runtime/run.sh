@@ -34,9 +34,11 @@ else
 fi
 test "$(cat "$TMP_DIR/read_file_gc.out")" = "6"
 
-echo "==> c runtime: read_file Err payload is a string"
-compile read_file_error_payload.c "$TMP_DIR/read_file_error_payload" -O0 -g
-test "$("$TMP_DIR/read_file_error_payload")" = "read_file-err-payload-string"
+echo "==> c runtime: fs / io Strings leave headered (HDRCHECK)"
+mkdir "$TMP_DIR/fs_io"
+compile fs_io_strings.c "$TMP_DIR/fs_io_strings" -O0 -g
+printf 'hello' | "$TMP_DIR/fs_io_strings" "$TMP_DIR/fs_io" > "$TMP_DIR/fs_io_strings.out"
+test "$(cat "$TMP_DIR/fs_io_strings.out")" = "fs-io-strings"
 
 echo "==> c runtime: constructor metadata fails before table overflow"
 compile ctor_meta_capacity.c "$TMP_DIR/ctor_meta_capacity" -O0 -g
