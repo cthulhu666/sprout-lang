@@ -275,8 +275,9 @@ fn module_path(module_name: String) -> String =
 # Two authorities are consumed here and neither is re-derived:
 #   parser.scan_module_surface  — the export set, `(..)` markers, and globals
 #   ast.decl_value_scopes       — the names a declaration introduces
-# So a completion can no longer offer a name the compiler would reject, nor miss
-# one it would accept. See docs/module-surface-authority-v0.md §6.
+# So a completion can no longer offer a name the compiler would reject. It does
+# miss some: an unexported prelude fn still resolves, because the prelude is
+# prepended (spec §3.1). See docs/module-surface-authority-v0.md §6.
 #
 # It parses, which the line scan could not afford to. A parse of the largest module (the
 # prelude) measures ~80ms against ~40ms to tokenize it.

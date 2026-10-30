@@ -1,0 +1,22 @@
+import stdlib.test (check_eq, run_suite)
+
+# `list_length` over element types with heap fields: field-bearing constructors, tuples,
+# records, nested lists and a `Maybe` of a tuple.
+
+type Shape =
+  | Circle Double
+  | Rect (Int, Int)
+  | Dot
+
+type Point = (x: Int, y: Int)
+
+fn main() -> Unit !{IO} =
+  run_suite("list_length", [
+    check_eq("empty", list_length([]), 0),
+    check_eq("Int", list_length([1, 2, 3]), 3),
+    check_eq("field-bearing ADT", list_length([Circle(1.0), Rect((2, 3)), Dot, Rect((4, 5))]), 4),
+    check_eq("tuple", list_length([(1, "a"), (2, "b"), (3, "c")]), 3),
+    check_eq("record", list_length([Point(x = 1, y = 2), Point(x = 3, y = 4)]), 2),
+    check_eq("nested List", list_length([[1, 2], [3], []]), 3),
+    check_eq("Maybe of a tuple", list_length([Just((1, 2)), Nothing]), 2)
+  ])

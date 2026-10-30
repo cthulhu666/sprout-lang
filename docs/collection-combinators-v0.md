@@ -146,8 +146,7 @@ inherent rather than a limitation.
   class methods with per-instance overrides; Sprout has no default method
   bodies (`parse_class_body` collects signatures only), so that route makes
   them mandatory for every future instance. Left out rather than shipped at the
-  wrong complexity. Note `list_length` is currently **private**, so List still
-  has no public length; `count(\_ -> true, xs)` is the O(n) stand-in.
+  wrong complexity. `list_length` is the List-only form.
 - `position` / `index_of`, and `take`/`drop`/`zip` (List-shaped, not derivable
   from `Foldable`). Since landed: `take`/`drop` in `stdlib.list`, and `zip` as the
   `Zip` class (`docs/list-toolkit-v0.md` §4.2).

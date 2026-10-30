@@ -39,6 +39,9 @@ fn main() -> Unit !{IO} =
     # prelude names, bare
     offered(state, session, pn, "list_m", "list_map")
     offered(state, session, pn, "pri", "print")
+    offered(state, session, pn, "list_len", "list_length")
+    # unexported prelude helpers are not offered
+    not_offered(state, session, pn, "list_dedup_a", "list_dedup_acc")
     # case-insensitive prefix
     offered(state, session, pn, "LIST_M", "list_map")
     # commands and module names
