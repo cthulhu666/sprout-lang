@@ -26,7 +26,7 @@ import stdlib.terminal as terminal
 #  * A peer that closes before `count` arrives is `Err TcpEndOfStream`, NOT `Err TcpTimeout`. The
 #    two say different things about the connection — one is dead, the other is retryable — and the
 #    close is only reachable as itself while a budget remains.
-#  * A NEGATIVE count is `Err TcpInvalidArgument`, matching the tcp_read_exact builtin. `Ok(empty)`
+#  * A NEGATIVE count is `Err TcpInvalidArgument`, matching read_exact. `Ok(empty)`
 #    there would let a length-prefixed reader take a desynchronised stream for a whole message.
 #    Zero stays `Ok(empty)`, which is the one case that is genuinely satisfiable.
 #

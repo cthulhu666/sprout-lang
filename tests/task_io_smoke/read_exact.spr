@@ -1,0 +1,185 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.net (TcpConnection, TcpListener, TcpEndOfStream, TcpInvalidArgument, accept, close, close_listener, connect, read_exact, write_all, write_all_utf8)
+import testsupport.listen (listen_or_die)
+import stdlib.bytes as bytes
+import stdlib.terminal as terminal
+
+# `read_exact`: memory follows the bytes that arrive, not the count that was asked for.
+#
+# Four properties, each one a plausible implementation getting it wrong:
+#  * A huge `count` against a peer that sends three bytes and closes answers `Err TcpEndOfStream`
+#    and the process lives. An implementation that sizes its buffer from `count` before the first
+#    recv exits with "out of memory" instead.
+#  * A payload past 64 KiB, sent as four writes with stalls, is reassembled in order and in full.
+#    Chunks hold one repeated byte each (A, B, C, D) and are 50000 long, so no chunk boundary falls
+#    on a 64 KiB recv boundary and a reordered, dropped or duplicated chunk shows at a known offset.
+#  * A read that starts before any data exists parks and still returns exactly `count` bytes, and
+#    leaves the bytes after them for the next read. The first byte arrives through the park, the
+#    rest through ordinary recvs; an over-read would swallow the next message's head.
+#  * A negative count is `Err TcpInvalidArgument` and zero is `Ok(empty)`, both without touching
+#    the stream.
+#
+# One listener, four connections in order. Each case has its own connection because a failed read
+# leaves its stream mid-message.
+#
+# Marker discipline: every marker appears on its success path only.
+
+let huge_count = 4611686018427387904
+
+let chunk_size = 50000
+
+let chunk_count = 4
+
+fn send(conn: borrowing TcpConnection, text: String) -> Unit !{IO} =
+  match write_all_utf8(conn, text) with
+  | Ok _ -> ()
+  | Err _ -> terminal.write(`MISMATCH: server could not send ${text}\n`)
+
+fn doubled(seed: Bytes, target: Int) -> Bytes =
+  if bytes.length(seed) >= target then seed
+  else doubled(bytes.append(seed, seed), target)
+
+# 50000 copies of byte `65 + k`.
+fn chunk(k: Int) -> Bytes =
+  bytes.slice(doubled(bytes.singleton(65 + k), chunk_size), 0, chunk_size)
+
+fn send_chunks(conn: borrowing TcpConnection, k: Int) -> Unit !{IO} =
+  if k >= chunk_count then ()
+  else
+    do
+      match write_all(conn, chunk(k)) with
+      | Ok _ -> ()
+      | Err _ -> terminal.write("MISMATCH: server could not send a chunk\n")
+      task_sleep(60)
+      send_chunks(conn, k + 1)
+
+# Case 0: three bytes, then a close.
+fn serve_huge(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    send(conn, "abc")
+    task_sleep(50)
+    close(conn)
+
+# Case 1: four stalled writes, then a close.
+fn serve_chunks(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    send_chunks(conn, 0)
+    close(conn)
+
+# Case 2: silence until the client is parked, then "pi", "ng" and the next message in two writes.
+fn serve_park(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    task_sleep(200)
+    send(conn, "pi")
+    task_sleep(100)
+    send(conn, "ngXY")
+    task_sleep(300)
+    close(conn)
+
+# Case 3: nothing to send; the client's calls must not need it.
+fn serve_guards(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    task_sleep(300)
+    close(conn)
+
+fn serve_case(i: Int, conn: consuming TcpConnection) -> Unit !{IO} =
+  if i == 0 then serve_huge(conn)
+  else if i == 1 then serve_chunks(conn)
+  else if i == 2 then serve_park(conn)
+  else serve_guards(conn)
+
+fn serve_from(listener: consuming TcpListener, i: Int) -> Unit !{IO} =
+  match accept(listener) with
+  | Ok conn ->
+    do
+      serve_case(i, conn)
+      if i >= 3 then close_listener(listener)
+      else serve_from(listener, i + 1)
+  | Err _ ->
+    do
+      terminal.write(`MISMATCH: server could not accept ${int_to_string(i)}\n`)
+      close_listener(listener)
+
+fn check_huge(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, huge_count) with
+  | Err TcpEndOfStream -> terminal.write("huge-count-eof\n")
+  | Err _ -> terminal.write("MISMATCH: huge count reported the wrong error\n")
+  | Ok _ -> terminal.write("MISMATCH: huge count was satisfied\n")
+
+# Byte `i` of the expected payload is `65 + i / chunk_size`. Returns the first offset that differs,
+# or -1.
+fn first_diff(payload: Bytes, i: Int, total: Int) -> Int =
+  if i >= total then -1
+  else if bytes.get_or(payload, i, -1) != 65 + i / chunk_size then i
+  else first_diff(payload, i + 1, total)
+
+fn report_diff(at: Int) -> Unit !{IO} =
+  if at < 0 then terminal.write("chunks-reassembled\n")
+  else terminal.write(`MISMATCH: chunked read differs at ${int_to_string(at)}\n`)
+
+fn report_chunks(payload: Bytes) -> Unit !{IO} =
+  if bytes.length(payload) != chunk_size * chunk_count then
+    terminal.write(`MISMATCH: chunked read returned ${int_to_string(bytes.length(payload))} bytes\n`)
+  else report_diff(first_diff(payload, 0, chunk_size * chunk_count))
+
+fn check_chunks(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, chunk_size * chunk_count) with
+  | Ok payload -> report_chunks(payload)
+  | Err _ -> terminal.write("MISMATCH: chunked read failed\n")
+
+fn text_of(payload: Bytes) -> String =
+  match bytes.to_string(payload) with
+  | Ok text -> text
+  | Err _ -> "NOT UTF-8"
+
+fn check_tail(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, 2) with
+  | Ok payload ->
+      if text_of(payload) == "XY" then terminal.write("park-then-no-overread\n")
+      else terminal.write(`MISMATCH: next read returned ${text_of(payload)}\n`)
+  | Err _ -> terminal.write("MISMATCH: next read failed\n")
+
+fn check_park(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, 4) with
+  | Ok payload ->
+      if text_of(payload) == "ping" then
+        do
+          terminal.write("parked-read-exact\n")
+          check_tail(conn)
+      else terminal.write(`MISMATCH: parked read returned ${text_of(payload)}\n`)
+  | Err _ -> terminal.write("MISMATCH: parked read failed\n")
+
+fn check_zero(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, 0) with
+  | Ok payload ->
+      if bytes.length(payload) == 0 then terminal.write("count-guards-hold\n")
+      else terminal.write("MISMATCH: zero count returned bytes\n")
+  | Err _ -> terminal.write("MISMATCH: zero count reported an error\n")
+
+fn check_guards(conn: borrowing TcpConnection) -> Unit !{IO} =
+  match read_exact(conn, -1) with
+  | Err (TcpInvalidArgument _) -> check_zero(conn)
+  | Err _ -> terminal.write("MISMATCH: negative count reported the wrong error\n")
+  | Ok _ -> terminal.write("MISMATCH: negative count was satisfied\n")
+
+fn client_from(port: Int, i: Int) -> Unit !{IO} =
+  match connect("127.0.0.1", port) with
+  | Ok conn ->
+    do
+      if i == 0 then check_huge(conn)
+      else if i == 1 then check_chunks(conn)
+      else if i == 2 then check_park(conn)
+      else check_guards(conn)
+      close(conn)
+      if i < 3 then client_from(port, i + 1) else ()
+  | Err _ -> terminal.write(`MISMATCH: client could not connect ${int_to_string(i)}\n`)
+
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve_from(listen_or_die(port), 0))
+    task_spawn(s, \_ -> client_from(port, 0))
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s, 28971))
+    terminal.write("done\n")
