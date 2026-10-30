@@ -3916,14 +3916,31 @@ long long term_read_line(void) {
 }
 /* stdin_read_bytes: read exactly n bytes from stdin; returns Nothing on EOF.
  * Required because fread has no Sprout equivalent — getline reads to newline,
- * not to a fixed byte count as LSP/DAP Content-Length framing requires. */
+ * not to a fixed byte count as LSP/DAP Content-Length framing requires.
+ *
+ * The buffer follows the bytes received, not n: it starts at min(n, 64 KiB) and doubles up to n
+ * as data arrives, so a count the stream never fills costs what was read. One byte beyond `cap`
+ * is always kept for the NUL. */
+#define STDIN_READ_BYTES_START ((size_t)65536)
 long long stdin_read_bytes(long long n_val) {
   if (n_val < 0) sprout_fail("stdin_read_bytes: negative byte count");
-  char* buf = (char*)malloc((size_t)n_val + 1);
+  size_t want = (size_t)n_val;
+  size_t cap = want < STDIN_READ_BYTES_START ? want : STDIN_READ_BYTES_START;
+  char* buf = (char*)malloc(cap + 1);
   if (!buf) sprout_fail("stdin_read_bytes: out of memory");
   size_t total = 0;
-  while (total < (size_t)n_val) {
-    size_t got = fread(buf + total, 1, (size_t)n_val - total, stdin);
+  while (total < want) {
+    if (total == cap) {
+      size_t next = cap > want / 2 ? want : cap * 2;
+      char* grown = (char*)realloc(buf, next + 1);
+      if (!grown) {
+        free(buf);
+        sprout_fail("stdin_read_bytes: out of memory");
+      }
+      buf = grown;
+      cap = next;
+    }
+    size_t got = fread(buf + total, 1, cap - total, stdin);
     if (got == 0) {
       free(buf);
       if (feof(stdin)) return sprout_make0(SPROUT_TAG(Nothing));
@@ -3931,7 +3948,7 @@ long long stdin_read_bytes(long long n_val) {
     }
     total += got;
   }
-  buf[n_val] = '\0';
+  buf[want] = '\0';
   SproutStr text = sprout_str_register(buf);
   SPROUT_HANDLE(h_buf, sprout_str_word(text));
   return sprout_make1(SPROUT_TAG(Just), sprout_handle_get(h_buf));
