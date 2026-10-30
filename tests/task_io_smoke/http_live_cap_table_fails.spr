@@ -1,0 +1,19 @@
+import testsupport.listen (listen_or_die)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
+import stdlib.terminal as terminal
+
+# The runtime's connection table holds 2047 handles (`alloc_conn_handle`) and outbound connects share
+# it, so `max_live_connections` of 2047 or more could fill it. `serve_n_with` must refuse that at
+# start. 2046, the highest valid cap, starts and returns (it serves 0 connections); 2047 aborts.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
+
+fn serve_with_cap(cap: Int) -> Unit !{IO} =
+  serve_n_with(default_config() with (max_live_connections = cap), listen_or_die(0), 0, handle)
+
+fn main() -> Unit !{IO} =
+  do
+    serve_with_cap(2046)
+    terminal.write("cap-2046-accepted\n")
+    serve_with_cap(2047)
+    terminal.write("should-not-reach\n")

@@ -595,6 +595,7 @@ To be filed in `BACKLOG.md`:
 3. **`serve` is an unbounded-memory exposure** (§3.1): ~1.4 MiB per concurrent connection, client-
    driven. Independent of which design lands, and arguably the most user-visible issue in this
    document.
+   Bounded since by `max_live_connections` (`docs/http-connection-cap-v0.md`).
 4. **`chan_select`'s per-call `malloc`** — `malloc(n * sizeof(Chan*))` on every call, plus
    `malloc(n * sizeof(SelectWaiter))` on the parking path. A select loop pays the first every
    iteration; unmeasured.

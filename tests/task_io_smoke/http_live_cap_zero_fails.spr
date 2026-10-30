@@ -1,0 +1,18 @@
+import testsupport.listen (listen_or_die)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
+import stdlib.terminal as terminal
+
+# `max_live_connections` below 1 admits no connection at all, so `serve_n_with` must refuse it at
+# start. A cap of 1, the lowest valid one, starts and returns (it serves 0 connections); 0 aborts.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
+
+fn serve_with_cap(cap: Int) -> Unit !{IO} =
+  serve_n_with(default_config() with (max_live_connections = cap), listen_or_die(0), 0, handle)
+
+fn main() -> Unit !{IO} =
+  do
+    serve_with_cap(1)
+    terminal.write("cap-1-accepted\n")
+    serve_with_cap(0)
+    terminal.write("should-not-reach\n")

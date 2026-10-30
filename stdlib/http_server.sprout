@@ -10,6 +10,9 @@ import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.url (parse_query)
 import stdlib.time as time
 
+# Meant to run behind a reverse proxy such as nginx. `serve` and `serve_n` close a new connection
+# at once once `max_live_connections` tasks are live: docs/http-connection-cap-v0.md.
+
 export type HttpRequest =
   | HttpRequest String String HttpRequestMeta
 
@@ -122,9 +125,14 @@ type alias ServerResult a = Result HttpServerError a
 # header budget starts at that byte. `max_idle_connections` caps how many connections `serve` keeps
 # waiting at once: past it a response closes its connection instead. An idle connection holds a
 # green task, so the cap bounds that memory. Pooled serving keeps its own cap (see `Admission`).
+#
+# `max_live_connections` caps every connection `serve` and `serve_n` hold, serving or idle: each has
+# a task. At the cap a new connection is accepted and closed at once, with nothing sent. Pooled
+# serving ignores it: its workers and queue are the bound. Sizing and why a close:
+# docs/http-connection-cap-v0.md.
 export type ServerConfig (..) = (header_ms: Int, body_ms: Int, max_header_bytes: Int, write_ms: Int,
                             max_body_bytes: Int, min_rate_bps: Int, idle_ms: Int,
-                            max_idle_connections: Int)
+                            max_idle_connections: Int, max_live_connections: Int)
 
 # header 10 s total / body 30 s grace / 64 KiB of headers / response writes 30 s grace. Chosen well
 # above any legitimate client (headers normally arrive in the first segment) and well below the
@@ -139,10 +147,13 @@ export type ServerConfig (..) = (header_ms: Int, body_ms: Int, max_header_bytes:
 #
 # `idle_ms` is 65 s: above nginx's 60 s upstream `keepalive_timeout`, so a proxy in front closes an
 # idle connection first and never sends a request into one this server has just closed.
+#
+# `max_live_connections` is 512, about 0.7 GiB of task memory at most, and a quarter of the runtime's
+# connection table, which outbound connects share (see `max_table_handles`).
 export fn default_config() -> ServerConfig =
   ServerConfig(header_ms = 10000, body_ms = 30000, max_header_bytes = 65536, write_ms = 30000,
                max_body_bytes = 1048576, min_rate_bps = 1024, idle_ms = 65000,
-               max_idle_connections = 256)
+               max_idle_connections = 256, max_live_connections = 512)
 
 # Milliseconds it takes to move `bytes` at `rate_bps` bytes/second — the size-scaled half of every
 # deadline here. A non-positive rate disables the scaling rather than dividing by zero, leaving the
@@ -1068,9 +1079,10 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
 
 # Whether a connection may stay open after its response, as far as the server's capacity goes.
 #
-# `Spawned idle cap`: each connection has its own task, so an idle one costs a parked task and no
-# worker. `idle` counts connections kept open and not yet serving their next request; at `cap` a
-# response closes.
+# `Spawned idle cap live live_cap`: each connection has its own task, so an idle one costs a parked
+# task and no worker. `idle` counts connections kept open and not yet serving their next request; at
+# `cap` a response closes. `live` counts connections that have a task, idle or not; at `live_cap`
+# the accept loop closes a new connection instead of spawning one (see `admit`).
 #
 # `Pooled idle queued cap`: a worker holding a kept connection serves nothing else. `idle` counts
 # those workers and `cap` is three quarters of the pool, rounded down, so a quarter is always free to
@@ -1085,13 +1097,13 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
 # plain `Ref`s: the scheduler runs one task at a time, and nothing here parks between reading a
 # counter and writing it back.
 type Admission =
-  | Spawned (Ref Int) Int
+  | Spawned (Ref Int) Int (Ref Int) Int
   | Pooled (Ref Int) (Ref Int) Int
 
 # Takes a place in `idle` when the connection may stay open.
 fn reserve(adm: Admission) -> Bool !{IO} =
   match adm with
-  | Spawned idle cap -> take_below(idle, cap)
+  | Spawned idle cap _ _ -> take_below(idle, cap)
   | Pooled idle queued cap ->
       do
         waiting <- ref_read(queued)
@@ -1106,6 +1118,18 @@ fn take_below(count: Ref Int, cap: Int) -> Bool !{IO} =
 fn release(adm: Admission) -> Unit !{IO} =
   bump(idle_count(adm), -1)
 
+# Takes a place in `live` when the connection may get a task. Pooled serving has no such count.
+fn admit(adm: Admission) -> Bool !{IO} =
+  match adm with
+  | Spawned _ _ live live_cap -> take_below(live, live_cap)
+  | Pooled _ _ _ -> true
+
+# Gives the place `admit` took back. Run once per admitted connection, by the task that served it.
+fn leave(adm: Admission) -> Unit !{IO} =
+  match adm with
+  | Spawned _ _ live _ -> bump(live, -1)
+  | Pooled _ _ _ -> ()
+
 # An accepted connection handed to the pool's queue, and one a worker took off it.
 fn enqueue(adm: Admission) -> Unit !{IO} =
   queue_by(adm, 1)
@@ -1116,11 +1140,11 @@ fn dequeue(adm: Admission) -> Unit !{IO} =
 fn queue_by(adm: Admission, by: Int) -> Unit !{IO} =
   match adm with
   | Pooled _ queued _ -> bump(queued, by)
-  | Spawned _ _ -> ()
+  | Spawned _ _ _ _ -> ()
 
 fn idle_count(adm: Admission) -> Ref Int =
   match adm with
-  | Spawned idle _ -> idle
+  | Spawned idle _ _ _ -> idle
   | Pooled idle _ _ -> idle
 
 fn bump(count: Ref Int, by: Int) -> Unit !{IO} =
@@ -1279,6 +1303,34 @@ where
 fn accept_fatal(err: TcpError) -> a !{IO} =
   panic(`http_server: accept failed on the listener: ${tcp_error_message(err)}`)
 
+# At `max_live_connections` the connection is accepted and closed at once, with nothing sent. A reverse
+# proxy sees the close as an upstream error and may retry on another upstream; a 503 would need a
+# write with a deadline, which needs a task, which is what the cap limits. Why not stop accepting:
+# docs/http-connection-cap-v0.md. Answers whether a task was spawned.
+fn spawn_handler(scope: Scope, conn: consuming TcpConnection, config: ServerConfig, adm: Admission,
+                 handler: HttpRequest -> HttpServerResponse !{IO}) -> Bool !{IO} =
+  do
+    admitted <- admit(adm)
+    if admitted then
+      do
+        task_spawn(scope, \_ -> serve_connection(config, adm, conn, handler))
+        true
+    else
+      do
+        close(conn)
+        false
+
+# The one place a live place is given back: after `handle_connection` returns, whichever of its paths
+# ended the connection. A handler that panics ends the process (`panic` exits), and a spawned
+# handler is never force-dropped while the server runs: only the `with_scope` body that opened a scope
+# may `scope_cancel` it, and that body is `serve_loop`. So a place cannot leak on a path that keeps
+# the server running.
+fn serve_connection(config: ServerConfig, adm: Admission, conn: consuming TcpConnection,
+                    handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
+  do
+    handle_connection(config, adm, conn, handler, (bytes.empty(), 0))
+    leave(adm)
+
 # `remaining < 0` means "forever", as in `pooled_accept_loop`. Each handler is a fire-and-forget green
 # task reclaimed on completion (see stdlib.task), so an unbounded run does not accumulate finished
 # handlers even though its scope never joins; it never closes the listener either, and the tail call
@@ -1288,16 +1340,39 @@ fn serve_loop(scope: Scope, listener: consuming TcpListener, remaining: Int, con
   if remaining == 0 then close_listener(listener)
   else
     match accept(listener) with
-    # `remaining` decrements only here. A failed accept served no connection, so counting it would let
-    # a burst of accept failures end a bounded run early — and this is the path CI's serve_n uses.
+    # `remaining` decrements only for a connection that got a task. A failed accept served no
+    # connection, so counting it would let a burst of accept failures end a bounded run early — and
+    # this is the path CI's serve_n uses. A refused connection served nothing either, for the same
+    # reason.
     | Ok conn ->
         do
-          task_spawn(scope, \_ -> handle_connection(config, adm, conn, handler, (bytes.empty(), 0)))
-          serve_loop(scope, listener, remaining - 1, config, adm, handler)
+          spawned <- spawn_handler(scope, conn, config, adm, handler)
+          serve_loop(scope, listener, if spawned then remaining - 1 else remaining, config, adm, handler)
     | Err err ->
         do
           close_listener(listener)
           accept_fatal(err)
+
+fn spawned_admission(config: ServerConfig) -> Admission !{IO} =
+  do
+    idle <- ref_new(0)
+    live <- ref_new(0)
+    Spawned(idle, config.max_idle_connections, live, config.max_live_connections)
+
+# Handles in the runtime's connection table (`alloc_conn_handle` in runtime/sprout_runtime.c). Accepted
+# and outbound connections share it, so a live cap at or past it could leave no room for the
+# server's own outbound connects, which then fail with "connection table full".
+let max_table_handles = 2047
+
+fn valid_live_cap(config: ServerConfig) -> Bool =
+  config.max_live_connections > 0 && config.max_live_connections < max_table_handles
+
+# A cap of 0 or less admits nothing, and one at or past the table could fill it. Loud, like
+# `accept_fatal`: a server that refuses every connection looks like one that is down.
+fn refuse_live_cap(listener: consuming TcpListener, config: ServerConfig) -> Unit !{IO} =
+  do
+    close_listener(listener)
+    panic(`http_server: max_live_connections must be between 1 and ${int_to_string(max_table_handles - 1)}, got ${int_to_string(config.max_live_connections)}`)
 
 # Every `serve*` takes a listener the caller has bound (`net.listen_on`, `net.listen_local`), so a
 # bind failure is the caller's Err to handle, and a port-0 listener's port can be read before serving.
@@ -1312,9 +1387,11 @@ export fn serve_n(listener: consuming TcpListener, max_connections: Int, handler
 # hard-coded 10 s header budget would make a regression test either slow or impossible — but it is
 # also the knob a deployment behind a slow link needs.
 export fn serve_n_with(config: ServerConfig, listener: consuming TcpListener, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  do
-    idle <- ref_new(0)
-    with_scope(\s -> serve_loop(s, listener, max_connections, config, Spawned(idle, config.max_idle_connections), handler))
+  if valid_live_cap(config) then
+    do
+      adm <- spawned_admission(config)
+      with_scope(\s -> serve_loop(s, listener, max_connections, config, adm, handler))
+  else refuse_live_cap(listener, config)
 
 # Serve requests forever. Unlike `serve_n`, this never returns under normal
 # operation — the enclosing `with_scope` join is unreachable, which is exactly
@@ -1325,9 +1402,11 @@ export fn serve(listener: consuming TcpListener, handler: HttpRequest -> HttpSer
 
 # `serve` with explicit read budgets (see serve_n_with).
 export fn serve_with(config: ServerConfig, listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  do
-    idle <- ref_new(0)
-    with_scope(\s -> serve_loop(s, listener, -1, config, Spawned(idle, config.max_idle_connections), handler))
+  if valid_live_cap(config) then
+    do
+      adm <- spawned_admission(config)
+      with_scope(\s -> serve_loop(s, listener, -1, config, adm, handler))
+  else refuse_live_cap(listener, config)
 
 # ---------------------------------------------------------------------------
 # Pooled serving (opt-in)
