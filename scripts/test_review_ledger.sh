@@ -190,8 +190,8 @@ git switch -q -c effort-bogus
 idb=$(bash "$LEDGER" open)
 bash "$LEDGER" done "$idb" 1 1 "$(printf 'hi\tgh')"
 check "a bogus level is not recorded"  "review:1 1 found 1 real" "$(bash "$LEDGER" show)"
-check "a bogus level keeps 10 columns" "1" \
-  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^10$')"
+check "a bogus level keeps 11 columns" "1" \
+  "$(awk -F'\t' '$2=="done" && $3=="effort-bogus" { print NF }' "$runs" | grep -c '^11$')"
 
 # --- the cleanups column -------------------------------------------------
 # Cleanups are not bugs, so they get their own ninth column rather than a share
@@ -202,7 +202,7 @@ bash "$LEDGER" done "$idc" 4 2 high 6
 check "the cleanup count is column 9"  "6" \
   "$(awk -F'\t' '$2=="done" && $3=="cleanup-col" { print $9 }' "$runs")"
 check "cleanups leave show unchanged"  "review:1 4 found 2 real @high" "$(bash "$LEDGER" show)"
-check "a start row is 10 columns wide" "10" \
+check "a start row is 11 columns wide" "11" \
   "$(awk -F'\t' '$2=="start" && $3=="cleanup-col" { print NF }' "$runs")"
 # Same rule as the level: only a count is stored, never a token that could
 # carry a tab into the row.
@@ -236,6 +236,350 @@ check "an omitted confirmed count is '-'" "-" \
 printf '2020-01-01T00:00:00Z\tdone\tcleanup-real\tdeadbee\t999-3\t3\t1\tlow\t2\n' >> "$runs"
 check "a legacy 9-field row counts"    "4"  "$(bash "$LEDGER" count)"
 git switch -q main
+
+# --- the reviewed target --------------------------------------------------
+# A review of PR 779 run while another branch is checked out used to be filed under
+# the checked-out branch. `open --pr` records the PR's branch and head instead, in
+# an eleventh column `target`; `done` copies all three from the start row.
+mkdir -p "$R/stub"
+cat > "$R/stub/gh" <<'EOF'
+#!/usr/bin/env bash
+if [ "${STUB_GH_FAIL:-}" = 1 ]; then echo "gh: boom" >&2; exit 1; fi
+printf '%s\n' "$*" > "$STUB_GH_ARGS"
+# With --jq the real gh prints the selected values, one per line: branch, head oid,
+# cross-repo flag, head repository owner.
+printf '%s\n%s\n%s\n%s\n' "${STUB_GH_BRANCH:-pr-branch}" \
+  "${STUB_GH_OID:-0123456789abcdef0123456789abcdef01234567}" \
+  "${STUB_GH_CROSS:-false}" "${STUB_GH_OWNER-owner}"
+EOF
+chmod +x "$R/stub/gh"
+export STUB_GH_ARGS="$R/gh_args.txt"
+rows() { wc -l < "$runs" | tr -d ' '; }
+start_of() { awk -F'\t' -v i="$1" '$2=="start" && $5==i' "$runs"; }
+done_of() { awk -F'\t' -v i="$1" '$2=="done" && $5==i' "$runs"; }
+field() { printf '%s' "$2" | awk -F'\t' -v n="$1" '{ print $n }'; }
+
+idp=$(PATH="$R/stub:$PATH" bash "$LEDGER" open --pr 779)
+rowp=$(start_of "$idp")
+check "open --pr asks gh for the PR"    "1" \
+  "$(grep -c '^pr view 779 --json headRefName,headRefOid,isCrossRepository,headRepositoryOwner --jq ' \
+     "$STUB_GH_ARGS")"
+check "open --pr records the PR branch" "pr-branch" "$(field 3 "$rowp")"
+check "open --pr records the PR head"   "01234567"  "$(field 4 "$rowp")"
+check "open --pr records the target"    "pr:779"    "$(field 11 "$rowp")"
+check "open --pr is not the checked-out branch" "main" "$(git rev-parse --abbrev-ref HEAD)"
+check "a start row is 11 wide with --pr" "11" "$(printf '%s' "$rowp" | awk -F'\t' '{ print NF }')"
+
+# HEAD moves between open and done; the done row must still name the reviewed code.
+git switch -q -c mover
+echo b > b.txt
+git add b.txt
+git commit -qm second
+bash "$LEDGER" done "$idp" 2 1 medium
+rowd=$(done_of "$idp")
+check "done copies the branch"          "pr-branch" "$(field 3 "$rowd")"
+check "done copies the head"            "01234567"  "$(field 4 "$rowd")"
+check "done copies the target"          "pr:779"    "$(field 11 "$rowd")"
+check "done row is 11 wide"             "11"        "$(printf '%s' "$rowd" | awk -F'\t' '{ print NF }')"
+check "count --branch sees the PR run"  "1"  "$(bash "$LEDGER" count --branch pr-branch)"
+check "the checked-out branch is not credited" "0" "$(bash "$LEDGER" count)"
+check "count --branch of an unknown name is 0" "0" "$(bash "$LEDGER" count --branch nosuch)"
+check "count --branch matches plain count" "$(bash "$LEDGER" count)" \
+  "$(bash "$LEDGER" count --branch mover)"
+bash "$LEDGER" count --branch > /dev/null 2>&1
+check "count --branch needs a name"     "2"  "$?"
+bash "$LEDGER" count --bogus > /dev/null 2>&1
+check "count rejects an unknown flag"   "2"  "$?"
+
+# gh failing must not fall back to the checked-out branch.
+before=$(rows)
+PATH="$R/stub:$PATH" STUB_GH_FAIL=1 bash "$LEDGER" open --pr 780 > /dev/null 2> "$R/err.txt"
+check "gh failing exits non-zero"       "1"  "$?"
+check "gh failing names the problem"    "1"  "$(grep -c 'no row written' "$R/err.txt")"
+check "gh failing writes no row"        "$before" "$(rows)"
+bash "$LEDGER" open --pr 12x > /dev/null 2>&1
+check "a non-numeric PR is rejected"    "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+bash "$LEDGER" open --pr > /dev/null 2>&1
+check "a missing PR number is rejected" "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+PATH="$R/stub:$PATH" STUB_GH_OID=nothex bash "$LEDGER" open --pr 781 > /dev/null 2>&1
+check "a non-hex head from gh is rejected" "1" "$([ $? -ne 0 ] && echo 1 || echo 0)"
+check "rejected opens write no row"     "$before" "$(rows)"
+
+# --branch names the reviewed branch without asking gh.
+git switch -q main
+git switch -q -c feature
+echo c > c.txt
+git add c.txt
+git commit -qm third
+git switch -q main
+idbr=$(bash "$LEDGER" open --branch feature)
+rowb=$(start_of "$idbr")
+check "open --branch records the branch" "feature" "$(field 3 "$rowb")"
+check "open --branch records its head"   "$(git rev-parse --short feature)" "$(field 4 "$rowb")"
+check "open --branch records the target" "branch:feature" "$(field 11 "$rowb")"
+bash "$LEDGER" done "$idbr" 1 1
+check "count --branch sees a branch run" "1" "$(bash "$LEDGER" count --branch feature)"
+before=$(rows)
+bash "$LEDGER" open --branch nosuch > /dev/null 2>&1
+check "an unknown branch is rejected"   "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+bash "$LEDGER" open --branch "$(printf 'a\tb')" > /dev/null 2>&1
+check "a tab in a branch is rejected"   "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+bash "$LEDGER" open --branch -x > /dev/null 2>&1
+check "a dash-led branch is rejected"   "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+bash "$LEDGER" open --bogus > /dev/null 2>&1
+check "open rejects an unknown flag"    "2"  "$?"
+check "rejected opens write no row (branch)" "$before" "$(rows)"
+
+# A remote-only branch resolves through origin; the bare name is what gets recorded.
+git update-ref refs/remotes/origin/remoteonly "$(git rev-parse HEAD)"
+idr=$(bash "$LEDGER" open --branch remoteonly)
+check "open --branch falls back to origin" "remoteonly" "$(field 3 "$(start_of "$idr")")"
+check "open --branch origin head"       "$(git rev-parse --short HEAD)" \
+  "$(field 4 "$(start_of "$idr")")"
+check "open --branch origin target"     "branch:remoteonly" "$(field 11 "$(start_of "$idr")")"
+bash "$LEDGER" done "$idr" 1 1
+check "count --branch finds the bare name" "1" "$(bash "$LEDGER" count --branch remoteonly)"
+# A local branch wins over origin's, and a tag or bare sha is not a branch.
+git update-ref refs/remotes/origin/feature "$(git rev-parse main)"
+check "a local branch beats origin's"   "$(git rev-parse --short feature)" \
+  "$(field 4 "$(start_of "$(bash "$LEDGER" open --branch feature)")")"
+git tag atag
+bash "$LEDGER" open --branch atag > /dev/null 2>&1
+check "a tag is not a branch"           "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+bash "$LEDGER" open --branch nosuch > /dev/null 2> "$R/err.txt"
+check "neither ref: rejected"           "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+check "neither ref: says so"            "1"  "$(grep -c "no such branch 'nosuch'" "$R/err.txt")"
+
+# A PR head that exists locally is abbreviated like every other row; one that does not
+# keeps the 8-char slice.
+here=$(git rev-parse HEAD)
+idh=$(PATH="$R/stub:$PATH" STUB_GH_OID="$here" bash "$LEDGER" open --pr 782)
+check "a local PR head uses rev-parse --short" "$(git rev-parse --short HEAD)" \
+  "$(field 4 "$(start_of "$idh")")"
+idh2=$(PATH="$R/stub:$PATH" STUB_GH_OID="$here" bash "$LEDGER" open --pr 782)
+check "and not the 8-char slice"        "1" \
+  "$([ "$(field 4 "$(start_of "$idh2")")" != "${here:0:8}" ] && echo 1 || echo 0)"
+idh3=$(PATH="$R/stub:$PATH" STUB_GH_OID=abcdef0123456789 bash "$LEDGER" open --pr 782)
+check "an unknown PR head keeps 8 chars" "abcdef01" "$(field 4 "$(start_of "$idh3")")"
+
+# A fork PR is filed as <owner>:<branch>, so it cannot collide with a local branch of
+# the same name; a same-repo PR is unchanged.
+idk=$(PATH="$R/stub:$PATH" STUB_GH_CROSS=true STUB_GH_OWNER=alice STUB_GH_BRANCH=fix \
+      bash "$LEDGER" open --pr 783)
+check "a fork PR is filed as owner:branch" "alice:fix" "$(field 3 "$(start_of "$idk")")"
+check "a fork PR keeps its target"      "pr:783" "$(field 11 "$(start_of "$idk")")"
+bash "$LEDGER" done "$idk" 1 1
+check "a fork PR done keeps the name"   "alice:fix" "$(field 3 "$(done_of "$idk")")"
+check "count --branch owner:branch"     "1"  "$(bash "$LEDGER" count --branch alice:fix)"
+check "a fork PR does not credit the local branch" "0" "$(bash "$LEDGER" count --branch fix)"
+idk2=$(PATH="$R/stub:$PATH" STUB_GH_CROSS=false STUB_GH_OWNER=alice STUB_GH_BRANCH=fix \
+       bash "$LEDGER" open --pr 784)
+check "a same-repo PR is not prefixed"  "fix" "$(field 3 "$(start_of "$idk2")")"
+before=$(rows)
+for bad_owner in "$(printf 'a\tb')" "-x" ""; do
+  PATH="$R/stub:$PATH" STUB_GH_CROSS=true STUB_GH_OWNER="$bad_owner" \
+    bash "$LEDGER" open --pr 785 > /dev/null 2>&1
+  rc=$?
+  check "a bad fork owner [$(printf '%s' "$bad_owner" | tr '\t' T)] is rejected" "1" \
+    "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"
+done
+PATH="$R/stub:$PATH" STUB_GH_CROSS=maybe bash "$LEDGER" open --pr 785 > /dev/null 2>&1
+check "a bad cross-repo flag is rejected" "1" "$([ $? -ne 0 ] && echo 1 || echo 0)"
+check "rejected fork opens write no row" "$before" "$(rows)"
+
+# No flag behaves as before and records no target.
+idn=$(bash "$LEDGER" open)
+check "a plain open has target '-'"     "-"  "$(field 11 "$(start_of "$idn")")"
+check "a plain open records HEAD's branch" "main" "$(field 3 "$(start_of "$idn")")"
+
+# done needs a start row: with none there is nothing to copy, and recomputing from HEAD
+# is the misattribution this fixes.
+before=$(rows)
+bash "$LEDGER" done "no-such-run" 1 1 > /dev/null 2> "$R/err.txt"
+check "done of an unknown id fails"     "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+check "done of an unknown id says so"   "1"  "$(grep -c 'no-such-run' "$R/err.txt")"
+check "done of an unknown id writes no row" "$before" "$(rows)"
+
+# Rows written before the target column: 7, 9 and 10 fields all keep counting.
+git switch -q -c legacy-widths
+printf '2020-01-01T00:00:00Z\tdone\tlegacy-widths\tdeadbee\tL-1\t3\t1\n' >> "$runs"
+printf '2020-01-01T00:00:00Z\tdone\tlegacy-widths\tdeadbee\tL-2\t2\t2\thigh\t4\n' >> "$runs"
+printf '2020-01-01T00:00:00Z\tdone\tlegacy-widths\tdeadbee\tL-3\t1\t0\tlow\t2\t1\n' >> "$runs"
+check "legacy 7-, 9- and 10-field rows count" "3" "$(bash "$LEDGER" count)"
+check "legacy rows keep show intact"    "review:3 6 found 3 real @low" "$(bash "$LEDGER" show)"
+check "count --branch reads legacy rows" "3" "$(bash "$LEDGER" count --branch legacy-widths)"
+# A legacy start row has no target; done copies "-".
+printf '2020-01-01T00:00:00Z\tstart\told-branch\tabc1234\tL-4\t-\t-\t-\t-\t-\n' >> "$runs"
+bash "$LEDGER" done L-4 1 1
+rowl=$(done_of L-4)
+check "done from a legacy start: branch" "old-branch" "$(field 3 "$rowl")"
+check "done from a legacy start: head"   "abc1234"    "$(field 4 "$rowl")"
+check "done from a legacy start: target" "-"           "$(field 11 "$rowl")"
+git switch -q main
+
+# --- items: the run's grouped issues ---------------------------------------
+# `findings` is prose for a reader; `items` is the same list as data, so a side panel
+# can show each issue and its status without parsing markdown.
+good='[{"ns":[1,3],"track":"bug","severity":"high","verdict":"confirmed","file":"a.sprout","line":10,"summary":"one","decision":null},
+{"ns":[2],"track":"bug","severity":"low","verdict":"refuted","file":"b.sprout","line":5,"summary":"two","decision":null},
+{"ns":[4],"track":"cleanup","severity":"low","verdict":"confirmed","file":"c.sprout","line":7,"summary":"three","decision":"do"}]'
+ipath=$(bash "$LEDGER" items itm)
+check "items path names the run"        "1"  "$(printf '%s' "$ipath" | grep -c "items-itm.json$")"
+check "items path is under GIT_DIR"     "1"  "$(printf '%s' "$ipath" | grep -c '/claude-review/')"
+check "items without --write writes nothing" "0" "$([ -e "$ipath" ] && echo 1 || echo 0)"
+wpath=$(printf '%s' "$good" | bash "$LEDGER" items itm --write)
+check "items --write prints the path"   "$ipath" "$wpath"
+check "items --write stores the input"  "0" "$(printf '%s' "$good" | cmp -s - "$ipath"; echo $?)"
+check "items --write leaves no temp file" "0" "$(ls -A "${ipath%/*}" | grep -c '^\.tmp\.')"
+
+# A rejected write exits 2 and keeps the earlier file.
+rejects() {
+  local what="$1" body="$2"
+  printf '%s' "$body" | bash "$LEDGER" items itm --write > /dev/null 2> "$R/err.txt"
+  check "items rejects $what"           "2"  "$?"
+  check "items keeps the file after $what" "0" "$(printf '%s' "$good" | cmp -s - "$ipath"; echo $?)"
+}
+rejects "bad JSON"                      'not json'
+rejects "a non-array"                   '{"ns":[1]}'
+rejects "a missing field" \
+  '[{"ns":[1],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"decision":null}]'
+rejects "a bad severity" \
+  '[{"ns":[1],"track":"bug","severity":"critical","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":null}]'
+rejects "a bad track" \
+  '[{"ns":[1],"track":"nit","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":null}]'
+rejects "a bad verdict" \
+  '[{"ns":[1],"track":"bug","severity":"low","verdict":"maybe","file":"a","line":1,"summary":"s","decision":null}]'
+rejects "a bad decision" \
+  '[{"ns":[1],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":"later"}]'
+rejects "a bug with a decision" \
+  '[{"ns":[1],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":"do"}]'
+rejects "empty ns" \
+  '[{"ns":[],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":null}]'
+rejects "non-integer ns" \
+  '[{"ns":["1"],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":null}]'
+rejects "a string line" \
+  '[{"ns":[1],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":"1","summary":"s","decision":null}]'
+rejects "a multi-line summary" \
+  '[{"ns":[1],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s\nt","decision":null}]'
+rejects "a duplicate n across issues" \
+  '[{"ns":[1,2],"track":"bug","severity":"low","verdict":"confirmed","file":"a","line":1,"summary":"s","decision":null},
+{"ns":[2],"track":"bug","severity":"low","verdict":"confirmed","file":"b","line":2,"summary":"t","decision":null}]'
+printf '[]' | bash "$LEDGER" items empty-items --write > /dev/null
+check "items accepts an empty list"     "0"  "$?"
+printf 'x' | bash "$LEDGER" items "../../escape" --write > /dev/null 2>&1
+check "items rejects a traversing id"   "2"  "$?"
+
+# --- status ---------------------------------------------------------------
+spath="${ipath%/*}/status-itm.tsv"
+st() { bash "$LEDGER" status "$@" > /dev/null 2> "$R/err.txt"; }
+st itm 1 bogus
+check "status rejects a bad word"       "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st itm 1x open
+check "status rejects a non-digit n"    "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st itm 9 open
+check "status rejects an n not in items" "1" "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st no-items 1 open
+check "status needs an items file"      "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st itm 1 fixed
+check "fixed needs a sha"               "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st itm 1 fixed xyz1234
+check "status rejects a non-hex sha"    "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st itm 1 fixed abc123
+check "status rejects a 6-char sha"     "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+st itm 1 fixed "$(printf 'a%.0s' $(seq 41))"
+check "status rejects a 41-char sha"    "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+check "rejected statuses write nothing" "0"  "$([ -e "$spath" ] && echo 1 || echo 0)"
+st "../../escape" 1 open
+check "status rejects a traversing id"  "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+
+# --- issues ---------------------------------------------------------------
+want="1,3	bug	high	open	-	a.sprout:10	one
+2	bug	low	refuted	-	b.sprout:5	two
+4	cleanup	low	open	-	c.sprout:7	three"
+check "issues with no status: open, or refuted" "$want" "$(bash "$LEDGER" issues itm)"
+bash "$LEDGER" issues no-items > /dev/null 2>&1
+check "issues needs an items file"      "1"  "$([ $? -ne 0 ] && echo 1 || echo 0)"
+
+# The second n of a grouped issue sets the whole issue's status.
+st itm 3 fixed abc1234
+check "status is recorded"              "1"  "$(wc -l < "$spath" | tr -d ' ')"
+check "a status row has four fields"    "4"  "$(awk -F'\t' '{ print NF }' "$spath")"
+check "status row: n, status, sha"      "3	fixed	abc1234" \
+  "$(awk -F'\t' '{ print $2 "\t" $3 "\t" $4 }' "$spath")"
+want="1,3	bug	high	fixed	abc1234	a.sprout:10	one
+2	bug	low	refuted	-	b.sprout:5	two
+4	cleanup	low	open	-	c.sprout:7	three"
+check "a grouped issue takes its second n's status" "$want" "$(bash "$LEDGER" issues itm)"
+
+# The latest line wins, whichever of the issue's numbers it names.
+st itm 1 open
+check "the latest status wins"          "open	-" \
+  "$(bash "$LEDGER" issues itm | sed -n 1p | awk -F'\t' '{ print $4 "\t" $5 }')"
+st itm 3 skipped
+check "the latest status wins again"    "skipped	-" \
+  "$(bash "$LEDGER" issues itm | sed -n 1p | awk -F'\t' '{ print $4 "\t" $5 }')"
+
+# A refuted issue shows `refuted` until a status line says otherwise.
+st itm 2 wontfix
+check "a status overrides refuted"      "wontfix" \
+  "$(bash "$LEDGER" issues itm | sed -n 2p | awk -F'\t' '{ print $4 }')"
+st itm 4 fixed 0123456789abcdef0123456789abcdef01234567
+check "a 40-char sha is accepted"       "fixed	0123456789abcdef0123456789abcdef01234567" \
+  "$(bash "$LEDGER" issues itm | sed -n 3p | awk -F'\t' '{ print $4 "\t" $5 }')"
+check "status and issues leave count alone" "3" "$(bash "$LEDGER" count)"
+
+# --- one ledger for every worktree ------------------------------------------
+# `open --pr` and `open --branch` file a run under another branch's name, so a review
+# done in worktree A of a branch checked out in worktree B must be visible from B.
+git worktree add -q -b wt-a "$R/wtA"
+git worktree add -q -b wt-b "$R/wtB"
+cd "$R/wtA" || exit 1
+idw=$(bash "$LEDGER" open --branch wt-b)
+bash "$LEDGER" done "$idw" 2 1
+check "the reviewing worktree is not credited" "0" "$(bash "$LEDGER" count)"
+check "the run is in the common ledger" "2" "$(grep -c "$idw" "$runs")"
+check "no per-worktree ledger is written" "0" \
+  "$([ -e "$(git rev-parse --absolute-git-dir)/claude-review/runs.tsv" ] && echo 1 || echo 0)"
+cd "$R/wtB" || exit 1
+check "another worktree sees the run"   "1"  "$(bash "$LEDGER" count)"
+check "show sees it too"                "review:1 2 found 1 real" "$(bash "$LEDGER" show)"
+cd "$R" || exit 1
+check "the main checkout sees it"       "1"  "$(bash "$LEDGER" count --branch wt-b)"
+
+# Rows written before the move sit in the worktree's own runs.tsv and stay readable.
+cd "$R/wtB" || exit 1
+legacy="$(git rev-parse --absolute-git-dir)/claude-review"
+mkdir -p "$legacy"
+printf '2020-01-01T00:00:00Z\tdone\twt-b\tdeadbee\tW-1\t3\t1\thigh\n' >> "$legacy/runs.tsv"
+check "a legacy per-worktree row counts" "2" "$(bash "$LEDGER" count)"
+check "a legacy row feeds show"         "review:2 5 found 2 real" "$(bash "$LEDGER" show)"
+# A row present in both files is one row.
+awk -F'\t' '$5=="W-1"' "$legacy/runs.tsv" >> "$runs"
+check "an identical row in both counts once" "2" "$(bash "$LEDGER" count)"
+check "and sums once"                   "review:2 5 found 2 real" "$(bash "$LEDGER" show)"
+printf '2020-01-01T00:00:00Z\tstart\twt-b\tabc1234\tW-2\t-\t-\t-\t-\t-\n' >> "$legacy/runs.tsv"
+bash "$LEDGER" done W-2 1 1
+check "done finds a legacy start row"   "3"  "$(bash "$LEDGER" count)"
+check "and writes to the common ledger" "1"  "$(awk -F'\t' '$2=="done" && $5=="W-2"' "$runs" | wc -l | tr -d ' ')"
+check "and not to the legacy one"       "0"  "$(awk -F'\t' '$2=="done" && $5=="W-2"' "$legacy/runs.tsv" | wc -l | tr -d ' ')"
+
+# Sibling files: the common dir first, then the legacy one.
+printf '%s' "$good" > "$legacy/items-leg.json"
+printf '2020-01-01T00:00:00Z\t1\tfixed\tabc1234\n' > "$legacy/status-leg.tsv"
+check "a legacy findings path is found" "$legacy/items-leg.json" "$(bash "$LEDGER" items leg)"
+check "issues reads legacy items and status" "fixed	abc1234" \
+  "$(bash "$LEDGER" issues leg | sed -n 1p | awk -F'\t' '{ print $4 "\t" $5 }')"
+bash "$LEDGER" status leg 4 skipped
+check "a new status goes to the common dir" "1" \
+  "$([ -f "$(dirname "$runs")/status-leg.tsv" ] && echo 1 || echo 0)"
+check "issues merges legacy and common status" "fixed	abc1234|skipped	-" \
+  "$(bash "$LEDGER" issues leg | awk -F'\t' 'NR==1 || NR==3 { printf "%s%s\t%s", s, $4, $5; s="|" }')"
+printf '%s' "$good" | bash "$LEDGER" items leg --write > /dev/null
+check "--write targets the common dir"  "$(dirname "$runs")/items-leg.json" "$(bash "$LEDGER" items leg)"
+cd "$R" || exit 1
+
+# In the main checkout the git dir is the common dir, so there is no second file.
+check "the main checkout counts as before" "3" "$(bash "$LEDGER" count)"
 
 # Outside a repository the ledger must stay quiet rather than erroring: the
 # status line calls `show` on every render, wherever the user happens to be.

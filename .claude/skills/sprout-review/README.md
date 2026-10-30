@@ -140,8 +140,11 @@ rather than less.
 read-modify-write, so they cannot clobber each other. The status line reads it on a 300 ms debounce
 and must not parse anything — one `awk`, no dependency.
 
-**Under `$GIT_DIR`.** Per-worktree automatically, and invisible to `git status`, so a review can
-never dirty a commit or collide in a merge. Same place `review_gate.py` keeps its state.
+**Under the common git dir.** Invisible to `git status`, so a review can never dirty a commit or
+collide in a merge. One ledger serves every worktree: `open --pr` and `open --branch` file a run
+under another branch's name, and a per-worktree ledger hid it from the worktree that has that
+branch checked out. Rows carry their branch. Per-worktree files from earlier versions are still
+read, never written, so no history is lost and nothing migrates.
 
 **Deduplicated by run id.** A `done` row can be written twice — a retry, a resumed workflow — and
 the count must not move. This was not hypothetical: the first implementation deduplicated the run
@@ -271,12 +274,13 @@ bash scripts/review_ledger.sh findings <id> --write < file  # write stdin there;
 just test-review-ledger                      # the suite, also in ci-fast-gates
 ```
 
-`findings` returns `$GIT_DIR/claude-review/findings-<id>.md`, creating the directory. The skill writes
-every finding there via `--write` — confirmed, unverified and refuted — before reporting, so a
-review can be pointed at afterwards instead of recalled. The counts say a review happened; the file
-says what it said, and it is where the reports are grouped into issues, since `found` deliberately counts the
-former. The path is absolute (`--absolute-git-dir`, not `--git-dir`, which answers `.git` at the root
-and an absolute path from a subdirectory).
+`findings` returns `<common git dir>/claude-review/findings-<id>.md`, creating the directory. The
+skill writes every finding there via `--write` — confirmed, unverified and refuted — before
+reporting, so a review can be pointed at afterwards instead of recalled. The counts say a review
+happened; the file says what it said, and it is where the reports are grouped into issues, since
+`found` deliberately counts the former. The path is absolute (`--path-format=absolute`, not the
+bare `--git-common-dir`, which answers `.git` at the root and an absolute path from a subdirectory).
+A file an older version left in a worktree's own git dir is returned while no common one exists.
 
 The status line renders `rv:N` after the branch — green when reviewed, red at `rv:0`, and silent in
 repositories that have no ledger at all.
