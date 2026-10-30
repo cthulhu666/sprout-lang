@@ -584,10 +584,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   and a web-server example rendering a page from a template. `docs/template-engine-v0.md`.
   - [ ] `P3` **Template engine phase 3 — inheritance/includes.** `{% extends %}`/`{% block %}`/
     `{% include %}` composition, if demand warrants once phase 2 ships.
-- [ ] `P3` **`stdlib/log` follow-ups (deferred from v0):** (a) escape/quote field values containing
-  spaces or `=` in the line formatter; (b) a JSON-lines formatter variant (the sink/format split
-  makes this a new formatter, not an API change); (c) graduate `format_iso8601` + a
-  `wall_now_micros` re-export into a dedicated `stdlib/time.sprout` once a second consumer appears.
+- [ ] `P3` **`stdlib/log` follow-ups (deferred from v0):** (a) a JSON-lines formatter. It must be
+  swappable: a `Logger` carries its formatter, chosen at construction (a `logger_with_format`-style
+  constructor), with the current text format as the default; the JSON formatter is added beside
+  the text one, not in place of it; (b) graduate `format_iso8601` + a `wall_now_micros` re-export
+  into a dedicated `stdlib/time.sprout` once a second consumer appears.
   `docs/logging-v0.md` §9–§10.
 
 **Runtime and diagnostics**

@@ -570,6 +570,19 @@ end, so none fails. All run in constant stack; `take_last` and `drop_last` count
 There is no index lookup on `List`. A loop that needs the index is `fold_indexed`; a position
 kept as state wants a `Vec`.
 
+## stdlib.log
+
+Leveled, structured logging (in `stdlib/log.sprout`; design: [logging-v0.md](logging-v0.md)). A
+`Logger` is a value you thread: `stderr_logger(min)`, `logger_with_sink(min, sink)`,
+`with_field(k, v, lg)`, then `debug`/`info`/`warn`/`error` and the `_f` forms that take fields.
+
+One record is one line: `<ts> <LEVEL> <msg> k=v …`. A key or value is written bare unless it is
+empty or holds a space, `=`, `"`, or a byte below 0x20 or 0x7F; then it is wrapped in `"…"`.
+Inside the quotes `\n`, `\r`, `\t`, `\"` and `\\` are escaped, and any other control byte is `\xNN`
+(two lowercase hex digits). The message is not quoted, but it gets the same escapes for control
+bytes and `\\`; `"` is left alone. Non-ASCII UTF-8 is written as is. The escape pass is linear in
+the input.
+
 ## stdlib.sort
 
 Sorting that keeps the container (in `stdlib/sort.sprout`; `import stdlib.sort (sort, sort_by)`).

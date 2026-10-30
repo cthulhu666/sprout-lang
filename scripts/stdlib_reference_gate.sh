@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 DOC=docs/stdlib-reference.md
-UNDOCUMENTED=" args bits chan http_middleware log mutable process repl rng stamped task template test version "
+UNDOCUMENTED=" args bits chan http_middleware mutable process repl rng stamped task template test version "
 
 fail=0
 for file in stdlib/*.sprout; do
