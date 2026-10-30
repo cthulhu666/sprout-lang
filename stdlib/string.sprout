@@ -11,17 +11,18 @@ import stdlib.unicode.utf8 as utf8
 # splitters, and codepoint-level Char conversion. The one exception is
 # `str_starts_with_at_byte`: the prelude declares it for its own number parsers (the prelude
 # cannot import this module), and a symbol is declared once, so it is not declared here. It is
-# global, and called by bare name like the rest. Byte offsets in particular are an encoding and performance concern, not a first-week one — a
+# global, and called by bare name like the rest.
+#
+# Byte offsets in particular are an encoding and performance concern, not a first-week one — a
 # caller reaching for `str_byte_len` over `str_len` is making a deliberate choice, and an
 # explicit import is the right place to record it.
 #
 # Unlike stdlib.fs / stdlib.time / stdlib.terminal, consumers of these call them BY BARE NAME and
-# import this module only to bundle it. That is deliberate: `str_starts_with_at_byte` runs ~70
-# times in stdlib/json.sprout's parse loop and `str_slice_bytes` sits in the lexer's per-token
-# path, so routing them through wrappers would fold an unmeasured performance change into a
-# relocation refactor. Externs resolve by bare name wherever their module is bundled
-# (bundler.sprout:597 never registers them), so the import alone is sufficient — and a consumer
-# that forgets it gets `Unknown variable`, not a missing-import diagnostic.
+# import this module only to bundle it. That is deliberate: `str_slice_bytes` sits in the
+# lexer's per-token path, so routing it through a wrapper would fold an unmeasured performance
+# change into a relocation refactor. Externs resolve by bare name wherever their module is
+# bundled (bundler.sprout:597 never registers them), so the import alone is sufficient — and a
+# consumer that forgets it gets `Unknown variable`, not a missing-import diagnostic.
 export extern fn str_byte_len(s: String) -> Int
 # O(byte_len), whatever the offset: the bounds check reads the CSTR header rather than
 # scanning. Byte-indexed substring; cheaper than str_slice when the caller already tracks
