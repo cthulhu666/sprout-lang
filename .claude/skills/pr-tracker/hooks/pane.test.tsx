@@ -34,6 +34,8 @@ const PR_782 = JSON.stringify({
   state: 'OPEN',
   headRefName: 'review-ledger-targets',
   headRefOid: 'abc',
+  mergeStateStatus: 'CLEAN',
+  baseRefName: 'master',
   statusCheckRollup: [
     { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
     { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' },
@@ -181,7 +183,7 @@ test('/prs add fills the pane: header, totals, issues, and an error marker per f
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const header = await ui.find({ type: 'Button', key: 'pr-782' })
-    expect(header?.text).toBe('▾ #782 review-ledger-targets  OPEN  CI 1/3 ✗1 …1  1 review (medium)')
+    expect(header?.text).toBe('▾ #782 review-ledger-targets  OPEN  mergeable  CI 1/3 ✗1 …1  1 review (medium)')
     const broken = await ui.find({ type: 'Button', key: 'pr-999' })
     expect(broken?.text).toContain('⚠ no pull requests found')
     expect(await ui.find({ type: 'Text', text: /2 issues: 1 fixed · 1 open/ })).toBeDefined()
@@ -346,6 +348,7 @@ test('every call out to git, gh and the ledger script has a timeout; gh asks for
   for (const c of w.calls) expect(c.timeoutMs).toBeGreaterThan(0)
   const gh = w.calls.find(c => c.argv[0] === 'gh')
   expect(gh?.argv.join(' ')).toContain('isCrossRepository,headRepositoryOwner')
+  expect(gh?.argv.join(' ')).toContain('mergeStateStatus,baseRefName,isDraft')
 })
 
 test('a failed issues call is retried on the next round, and keeps the issues already shown', async ($, on) => {
