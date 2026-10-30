@@ -59,7 +59,7 @@ Checked by compiling a probe, unless marked otherwise.
 | `range_fold` has no `where linear b` | 2 | Its signature; `list_fold` has the bound. A `LinVec` accumulator needs explicit recursion. | "No fast pure table whose entries read earlier entries" |
 | `0..n` is inclusive | 1 | Gave a silently wrong answer (Climbing Stairs). By design, `docs/ranges-v0.md`; a beginner trap. | — |
 | `to_string` does not quote strings in a list | — | `to_string([[""]])` prints `[[]]`; `to_string(["", "a"])` prints `[, a]`. | "`to_string` does not quote strings inside a container" |
-| A private prelude function is callable from user code | — | `list_length` is declared without `export` and `list_length([1, 2, 3])` compiles. | "A private prelude function is callable from user code" |
+| A private prelude function is callable from user code | — | `split_on_char` is declared without `export` and `split_on_char("a,b", ",")` compiles. | "A private prelude function is callable from user code" |
 | `print` of a list shows constructors | — | `print(xs)` prints `Cons(…)`; `print(to_string(xs))` prints `[…]`. | "Reassess the `print` design" |
 
 ## 4. What worked

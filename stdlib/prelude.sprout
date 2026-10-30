@@ -636,7 +636,8 @@ fn list_length_go(xs: List a, acc: Int) -> Int =
   | Nil -> acc
   | Cons _ rest -> list_length_go(rest, acc + 1)
 
-fn list_length(xs: List a) -> Int =
+# O(n): a List stores no count, so this walks every cell.
+export fn list_length(xs: List a) -> Int =
   list_length_go(xs, 0)
 
 # O(n): one pass over the list plus one native allocation/copy into the vector.

@@ -154,9 +154,6 @@ fn load_dataset(path: String) -> List (MutVec Double, Int) !{IO} =
   | Err _ -> Nil
   | Ok text -> load_lines(str_split_lines(text))
 
-fn dataset_size(xs: List (MutVec Double, Int)) -> Int =
-  list_fold(\ (acc, _) -> acc + 1, 0, xs)
-
 # ---------------------------------------------------------------------------
 # Forward pass (writes into the ctx hidden/out buffers)
 # ---------------------------------------------------------------------------
@@ -261,8 +258,8 @@ fn main() -> Unit !{IO} =
   do
     train_set <- load_dataset("examples/digit_recognizer/optdigits_train.txt")
     test_set <- load_dataset("examples/digit_recognizer/optdigits_test.txt")
-    let n_train = dataset_size(train_set)
-    let n_test = dataset_size(test_set)
+    let n_train = list_length(train_set)
+    let n_test = list_length(test_set)
     print(`loaded ${n_train} train / ${n_test} test samples`)
 
     w1 <- mutmatrix_new(n_hid, n_in, 0.0)

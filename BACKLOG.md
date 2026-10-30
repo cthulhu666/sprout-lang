@@ -894,10 +894,6 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   quadratic. Prefix slicing no longer is — `str_slice` walks to `start + count` and stops, making
   `slice(s, 0, k)` independent of `|s|`. Closing the rest needs a codepoint-to-byte cache on String
   values, or byte-indexed callers. Measured shapes: `tests/stdlib/test_slice_cost.spr`.
-- [ ] `P2` **B4 — `list_length` is unreliable on complex element ADTs.**
-  `examples/digit_recognizer/recognizer.sprout` hand-writes two monomorphic length helpers purely
-  because of it. Root-cause and fix so those can be deleted; add a regression over a `List` of a
-  field-bearing ADT and of a tuple. Likely the same dispatch/monomorphization family as B2.
 - [ ] `P2` **Retire `prelude.split_on_char`, a private re-implementation of `split`.** It predates
   `stdlib.string.split`. Check two things: the shared one is O(bytes × |sep|) where the
   `split_once`-recursion is quadratic; and it **keeps** empty segments, so a caller relying on the
@@ -944,15 +940,15 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   comparator-taking `min_with`/`max_with` — there is no `sort_with` either, so comparator forms
   should arrive as a set.
 - [ ] `P3` **Deferred non-goals from `docs/collection-combinators-v0.md` §7 and
-  `docs/filterable-v0.md` §7.** (a) `length`/`is_empty` over `Foldable` — a fold-derived version
-  is O(n) *even on `Vec`*, so free functions would put two spellings of one question at different
+  `docs/filterable-v0.md` §7.** (a) `length`/`is_empty` over `Foldable` — a fold-derived version is
+  O(n) *even on `Vec`*, so free functions would put two spellings of one question at different
   complexities in one prelude; doing it right needs class methods with per-instance overrides, which
   Sprout cannot soften with default bodies (`parse_class_body` collects signatures only), so both
-  become mandatory for every future instance. Note `list_length` is private, so List has no public
-  length and `count(\_ -> true, xs)` is the O(n) stand-in. (c) `position`/`index_of`
-  (List-shaped, not `Foldable`-derivable). (d) a `Set` `Filterable`, gated on `Set` getting
-  `Functor`/`Foldable` (`Dict` has `Filterable`). (e) An effectful predicate (`a -> Bool !{e}`)
-  needs `Filterable` to state `pred`'s call order, not B2 (`docs/effect-polymorphism-policy-v0.md`).
+  become mandatory for every future instance. `list_length` is the List-only form. (c)
+  `position`/`index_of` (List-shaped, not `Foldable`-derivable). (d) a `Set` `Filterable`, gated on
+  `Set` getting `Functor`/`Foldable` (`Dict` has `Filterable`).
+  (e) An effectful predicate (`a -> Bool !{e}`) needs `Filterable` to state `pred`'s call order,
+  not B2 (`docs/effect-polymorphism-policy-v0.md`).
 - [ ] `P3` **No `NonEmpty a`, though `docs/guidelines.md` §3 names it as the illegal-states
   exemplar.** Four in-tree sites pay for the gap: two panics in `infer.build_comp_level` and
   `infer.comp_fold_name` (a comprehension always has ≥1 generator, so `ComprehensionExpr` should
