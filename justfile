@@ -403,12 +403,6 @@ debug-run file: bootstrap-from-seed
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 
-# `just` runs a dependency once per call, so a gate `test` already contains cannot run
-# twice. The fixed-point check stops a stale seed before any gate runs the old compiler.
-# The Definition of Done's gates (AGENTS.md), each once, one at a time.
-[group('test')]
-dod: verify-bootstrap-fixed-point test compile-examples-stage1 smoke-shapes bundle-smoke rooting-cost-gate scc-cost-gate run-example-canary ir-golden-diff o2-codegen-smoke
-
 # Run all stdlib + compiler-stage tests (stage-1).
 [group('test')]
 test: test-stdlib-stage1 test-ide test-type-errors test-linear-grid test-parse-errors test-executable-errors test-emit-errors test-conformance-run test-package-resolution test-front-end-agreement test-renaming-termination
@@ -4351,6 +4345,7 @@ verify-roots: bootstrap-from-seed build-stage2
 # a silent reformat.
 #
 #   just gate-quick   fast edit->commit loop  (fmt-check, test, examples, 2 smokes)
+#   just dod          the Definition of Done  (gate-quick + seed, cost, canary, IR gates)
 #   just gate         full CI parity          (mirrors .github/workflows/ci.yml)
 #   just gate-audit   guard: fails if CI runs a task `gate` misses, or if a
 #                     scripts/ gate is invoked by nothing at all
@@ -4363,6 +4358,11 @@ verify-roots: bootstrap-from-seed build-stage2
 [group('gate')]
 gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
   @echo "==> gate-quick ✓ (fmt-check · test · compile-examples-stage1 · smoke-shapes · bundle-smoke)"
+
+# See docs/gates.md §Definition of Done.
+# The Definition of Done's gates (AGENTS.md), each once, one at a time.
+[group('gate')]
+dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run-example-canary ir-golden-diff o2-codegen-smoke
 
 # Full CI-parity battery.  Dependencies are ordered cheap->expensive so a failure
 # surfaces fast; `just` runs them sequentially and deduplicates the shared

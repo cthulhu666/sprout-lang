@@ -11,7 +11,7 @@ compiles the current compiler sources with stage-1 and compares the result with 
 edit anywhere in the compiler's closure (the prelude and `stdlib/*.sprout` included) that the seed
 does not reflect stops it before any gate runs the old compiler. `seed-stale` would not: it hashes
 `stdlib/compiler/` only. Every gate is a `just` dependency, and `just` runs a
-dependency once per call, so naming a gate that `test` already contains costs nothing. It does not
+dependency once per call, so naming a gate that `gate-quick` or `test` already contains costs nothing. It does not
 fan out, unlike `ci-fast-gates`, which also overlaps `test` (conformance, type errors, linear grid).
 
 ## Golden IR — `just ir-golden-diff`
