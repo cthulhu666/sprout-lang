@@ -1,6 +1,6 @@
 ---
 name: sprout-review
-description: Review the current diff, or a PR number/branch/path target, for real bugs at a chosen effort level, as `/code-review` does, and record the run in the branch's review ledger so the status line can report how many reviews this PR has had. Invoke when the user asks for a code review of the working tree, the branch, or a PR.
+description: Review the current diff, or a PR number/branch/path target, for real bugs at a chosen effort level, as `/code-review` does, and record the run in the branch's review ledger so the pr-tracker pane (`/prs`) can show how many reviews this PR has had. Invoke when the user asks for a code review of the working tree, the branch, or a PR.
 argument-hint: "[low|medium|high|xhigh|max] [<pr#>|<branch>|<path>]"
 ---
 

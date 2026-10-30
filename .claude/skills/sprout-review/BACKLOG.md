@@ -53,10 +53,10 @@ Rationale and measurements live in `README.md`; the skill itself is `SKILL.md`.
   answered.
 
 - [ ] `P2` **Nothing says whether the code changed since the last review.**
-  `rv:2` on a branch reviewed two commits ago reads exactly like `rv:2` on one reviewed just now.
+  "2 reviews" on a branch reviewed two commits ago reads exactly like one reviewed just now.
   The `done` row already stores the head SHA; comparing it against the current tree would give a
-  staleness marker (`rv:2*`). `review_gate.py` already computes a per-path tree digest that could
-  be reused rather than reinvented.
+  staleness marker in the pr-tracker pane. `review_gate.py` already computes a per-path tree
+  digest that could be reused rather than reinvented.
 
 - [ ] `P2` **The cleanup track's value is unmeasured.** The ledger's tenth column says how many
   cleanups survived their skeptic, and the findings file their DO/SKIP, but not how many get acted

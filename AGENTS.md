@@ -76,7 +76,7 @@ is judged and grouped by the reader, so it cannot say what the passes said. Writ
 retired the clustering it belonged to, so the script now groups nothing and gates nothing.
 A run is filed under the reviewed PR's or branch's name, not the checked-out one (`open --pr`), and
 the reader's grouped issues (`items`) and their fixed/skipped status (`status`, `issues`) sit beside
-the rows.
+the rows. `.claude/skills/pr-tracker/` (`/prs`) shows each PR's runs and issues from that ledger.
 It takes an effort level like `/code-review` does — `/sprout-review [low|medium|high|xhigh|max]
 [<pr#>|<branch>|<path>]`, defaulting to `high` so runs on one branch stay comparable — which buys
 1/2/3/5/8 reviewer passes and is recorded in the ledger beside the counts. Beside them run

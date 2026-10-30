@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Ledger for `/sprout-review`: how many reviews have run on this branch.
 #
-# Append-only TSV rather than JSON, for two reasons. Two sessions can write at once,
-# and an append needs no read-modify-write; and the status line reads this on a 300ms
-# debounce, so it must not parse anything.
+# Append-only TSV rather than JSON: two sessions can write at once, and an append
+# needs no read-modify-write.
 #
 # Lives under the common git dir, invisible to `git status`, so a review can never
 # dirty a commit. One ledger serves every worktree of a repo: a run filed under
@@ -32,7 +31,11 @@
 #     issue's ns sets it; no line: `refuted` for a refuted issue, else `open`):
 #       ns (comma-joined) | track | severity | status | sha or - | file:line | summary
 #   review_ledger.sh count [--branch <name>]   completed runs on this (or that) branch
-#   review_ledger.sh show            one-line summary, for the status line
+#   review_ledger.sh show            one-line summary
+#   review_ledger.sh runs
+#     every completed run, one line each, oldest first: runs.tsv's eleven columns, an
+#     older row padded with "-"; an id's first `done` row, as count and show take it
+#   review_ledger.sh dir             the directories read, the common one first
 set -uo pipefail
 
 # Sets LEDGER_DIR (written and read) and LEGACY_DIR (read only; empty in the main
@@ -169,7 +172,7 @@ cmd_done() {
   confirmed="${3:--}"
   # The level arrives from an argument the skill parsed, so only the known
   # vocabulary is stored: a tab in it would split the row, and every reader here
-  # and in the status line addresses columns by number.
+  # and in the pr-tracker plugin addresses columns by number.
   case "${4:-}" in
     low | medium | high | xhigh | max) effort="$4" ;;
     *) effort=- ;;
@@ -194,9 +197,9 @@ cmd_done() {
 }
 
 # Where a run's findings are written, as a sibling of the TSV rather than a column
-# in it: findings are multi-line prose, and the status line must keep parsing this
-# ledger with one `awk`. The counts say a review happened; this says what it found,
-# so a reader can be pointed at the list instead of at a number.
+# in it: findings are multi-line prose, and a ledger row must stay one line. The counts
+# say a review happened; this says what it found, so a reader can be pointed at the
+# list instead of at a number.
 #
 # The id arrives from a workflow result, so it is not trusted to be a bare token —
 # a `/` or `..` in it would resolve outside the ledger directory.
@@ -450,6 +453,23 @@ cmd_show() {
           printf "\n" }'
 }
 
+# For readers that parse rows (the pr-tracker plugin): the ledger layout stays in this
+# file. Outside a repository both print nothing and succeed.
+cmd_runs() {
+  { read_rows || true; } | awk -F'\t' -v OFS='\t' '
+    $2=="done" && !($5 in seen) {
+      seen[$5]=1
+      line = $1
+      for (i = 2; i <= 11; i++) line = line OFS (i <= NF ? $i : "-")
+      print line }' | LC_ALL=C sort -s -t "$(printf '\t')" -k1,1
+}
+
+cmd_dir() {
+  resolve_dirs || return 0
+  printf '%s\n' "$LEDGER_DIR"
+  [ -z "$LEGACY_DIR" ] || printf '%s\n' "$LEGACY_DIR"
+}
+
 case "${1:-show}" in
   open)  shift; cmd_open "$@" ;;
   done)  shift; cmd_done "$@" ;;
@@ -459,7 +479,9 @@ case "${1:-show}" in
   status) shift; cmd_status "$@" ;;
   issues) shift; cmd_issues "$@" ;;
   count) shift; cmd_count "$@" ;;
+  runs)  cmd_runs ;;
+  dir)   cmd_dir ;;
   show)  cmd_show ;;
-  *) echo "usage: review_ledger.sh {open [--pr <n>|--branch <name>]|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id> [--write]|raw <id> [--write]|items <id> [--write]|status <id> <n> <open|fixed|skipped|wontfix> [sha]|issues <id>|count [--branch <name>]|show}" >&2
+  *) echo "usage: review_ledger.sh {open [--pr <n>|--branch <name>]|done <id> <found> <confirmed> [effort] [cleanups] [cleanups-confirmed]|findings <id> [--write]|raw <id> [--write]|items <id> [--write]|status <id> <n> <open|fixed|skipped|wontfix> [sha]|issues <id>|count [--branch <name>]|runs|dir|show}" >&2
      exit 2 ;;
 esac
