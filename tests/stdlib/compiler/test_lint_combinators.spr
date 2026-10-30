@@ -161,8 +161,7 @@ let fallback_is_a_literal: String =
   ++ "  | Just v -> v\n"
   ++ "  | Nothing -> 0\n"
 
-# §5.1 rewrap-only. `stdlib/http_server.sprout`'s content_length_result is the
-# live near-miss: the Just branch does work, so it is not the combinator.
+# §5.1 rewrap-only: the Just branch does work, so it is not the combinator.
 let just_branch_transforms: String =
   "fn f(m: Maybe Int) -> Maybe Int =\n"
   ++ "  match m with\n"
