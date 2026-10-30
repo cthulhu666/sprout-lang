@@ -267,7 +267,7 @@ export fn scheme_of_expr_in_source(src: String, expr: String, stdlib_root: sourc
         | bundler.QuestionBundleOk modules qualified ->
             do
               checked <- checker.typecheck_bundle_question(modules, qualified)
-              answer_in_buffer(src, expr, checked)
+              answer_in_buffer(src, expr, qualified, checked)
 
 fn parse_question(expr: String) -> Result Diagnostic ast.Expr =
   match lexer.tokenize(expr) with
@@ -285,7 +285,8 @@ fn check_failed(pos: source.SourcePos, msg: String) -> ExprSchemeResult =
 # A bare name answers with what it was DECLARED as. Typing a reference to it would drop an
 # effect that lives only on its Scheme (`fn main() -> Unit !{IO}` would read as `Unit`),
 # and its `where` clause, which Sprout does not infer back.
-fn answer_in_buffer(src: String, expr: String, checked: checker.BundleQuestion) -> ExprSchemeResult !{IO} =
+fn answer_in_buffer(src: String, expr: String, question: ast.Expr,
+                    checked: checker.BundleQuestion) -> ExprSchemeResult !{IO} =
   match checked with
   | checker.BundleQuestionErr pos msg -> check_failed(pos, "check: " ++ msg)
   | checker.BundleQuestionOk prog env answer ->
@@ -294,9 +295,18 @@ fn answer_in_buffer(src: String, expr: String, checked: checker.BundleQuestion) 
         match resolved with
         | typed_ast.TypedErr pos msg -> check_failed(pos, msg)
         | typed_ast.TypedOk _ _ ->
-            match env_scheme(string.trim(expr), unqualify_entry_names(bundler.scan_module_name(src), env)) with
-            | Just declared -> ExprSchemeOk(declared)
-            | Nothing -> scheme_of_answer(prog, env, answer)
+            # The env holds the prelude's unexported names bare, so a name the bundler
+            # marked private must not be answered from it.
+            if is_prelude_private(question) then scheme_of_answer(prog, env, answer)
+            else
+              match env_scheme(string.trim(expr), unqualify_entry_names(bundler.scan_module_name(src), env)) with
+              | Just declared -> ExprSchemeOk(declared)
+              | Nothing -> scheme_of_answer(prog, env, answer)
+
+fn is_prelude_private(question: ast.Expr) -> Bool =
+  match question with
+  | ast.VarExpr name _ -> source.is_prelude_private_marked(name)
+  | _ -> false
 
 # The question passes the dictionary passes a declaration would. Only the dispatch
 # verifier sees a class method left at a type the expression does not fix

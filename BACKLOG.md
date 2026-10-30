@@ -470,11 +470,6 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the rest of the module sees is not something a user can know. That check covers `fn`, `let`
   and class-method names only; extend it to type, alias and class declarations, each in its own
   namespace.
-- [ ] `P2` **A private prelude function is callable from user code.** `list_length` is declared
-  without `export` in the prelude, yet `list_length([1, 2, 3])` compiles in a user module. Spec
-  §Imports rejects listing an unexported name, so the prelude skips the export rule every other
-  module obeys, and each private helper is public API by accident. Found by the LeetCode survey
-  (`docs/leetcode-survey-2026-10-27.md` §3).
 - [ ] `P2` **`match u with | () -> …` fails with no source location.** `ast_to_ir` returns
   "UnitPattern in match not yet supported" with no position, against guideline §5, so the user
   has nothing to search for. Either lower a unit pattern (it always matches) or reject it in the

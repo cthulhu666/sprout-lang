@@ -250,12 +250,23 @@ a canonical name is untouched, so field-access chains (`opts.look.normal`,
 **The prelude is available in every file, unconditionally.** Its declarations are
 prepended to every bundle. Rationale and migration: `docs/prelude-scope-v0.md`.
 
-Being prepended rather than imported, they are **locally declared** in every bundle
-(§5.6), so there is no import boundary for the `(..)` constructor-export marker to
-filter: a prelude declaration's constructors are in scope everywhere whether or not it
-carries `(..)`. None of `Maybe`, `List`, `Vec`, `Dict` or `Set` carries the marker, and
-`Just`, `Cons` and `Vec` are nevertheless usable unqualified in any file. The
-consequence for a library author is that an **abstract, invariant-carrying `wrap`
+What is in scope from every file is asymmetric:
+
+- the prelude's **exported** `fn` and `let` names;
+- **all** its type and constructor names, with or without `(..)`: being prepended
+  rather than imported, its types are locally declared in every bundle (§5.6), so
+  there is no import boundary for the `(..)` marker to filter. None of `Maybe`,
+  `List`, `Vec`, `Dict` or `Set` carries the marker, and `Just`, `Cons` and `Vec` are
+  nevertheless usable unqualified in any file;
+- its externs, which are outside the module system (§ Externs).
+
+An **unexported** prelude `fn` or `let` is private to the prelude. Naming it from any
+other module, bare or as `prelude.<name>`, is an error: `` `<name>` is private to the
+prelude``. A top-level declaration or a local binder of the same name shadows it as
+usual. The rule binds source text only: every name the compiler writes after bundling
+(deriving's `eq`, `to_string` and `compare`; desugarings) is exported.
+
+The consequence for a library author is that an **abstract, invariant-carrying `wrap`
 (§5.6.1) cannot live in the prelude** — hiding a constructor requires an import
 boundary, so it requires its own module.
 

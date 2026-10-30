@@ -1,0 +1,33 @@
+module main
+
+# Shadows a private prelude name at top level.
+fn split_on_char(s: String) -> Int = str_len(s)
+
+fn describe(m: Maybe Int) -> String =
+  match m with
+  | Just (n) -> "just " ++ to_string(n)
+  | Nothing -> "nothing"
+
+fn head_or_zero(xs: List Int) -> Int =
+  match xs with
+  | [h | _] -> h
+  | [] -> 0
+
+fn check(n: Int) -> Result String Int =
+  if n > 0 then Ok(n) else Err("neg")
+
+fn main() -> Unit !{IO} =
+  do
+    # Shadows a private prelude name with a local binder.
+    let list_reverse_go = 5
+    print(to_string(prelude.list_length([1, 2])))
+    print(to_string(list_length([1, 2, 3])))
+    print(describe(Just(3)))
+    print(describe(Nothing))
+    print(to_string(head_or_zero(Cons(7, Cons(8, Nil)))))
+    print(to_string(check(1)))
+    print(to_string(check(-1)))
+    print(to_string(split_on_char("abc")))
+    print(to_string(list_reverse_go))
+    let b = list_builder_empty |> list_builder_add(1) |> list_builder_add(2)
+    print(to_string(list_builder_build(b)))

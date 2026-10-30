@@ -69,6 +69,18 @@ All 8 shared the root cause this removes. The manifest also claimed `Cons`/`Nil`
 they are prelude List constructors (`stdlib/prelude.sprout:32-34`) and those
 fixtures needed only the prelude.
 
+## 0.1 Unexported prelude names are private (2026-10-30)
+
+Prepending put every prelude `fn` and `let` in scope from every file, exported or
+not. Now only the exported ones are: an unexported one is rejected outside the
+prelude, bare or as `prelude.<name>`, with `` `<name>` is private to the prelude``.
+Types and constructors stay open (spec §3.1, §5.6), and externs are outside the
+module system. The bundler marks the reference (`source.mark_prelude_private`) and
+`infer` reports it, as for a private extern. The set is built from the prelude's
+declarations, since its value table also holds constructors. A top-level or local
+name of the same spelling still shadows. The rule binds source text: names the
+compiler writes after bundling are all exported.
+
 ## 1. Problem statement
 
 Whether a Sprout file gets the prelude is inferred from its import graph. In
