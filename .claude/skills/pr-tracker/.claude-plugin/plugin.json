@@ -1,0 +1,7 @@
+{
+  "name": "pr-tracker",
+  "version": "0.1.0",
+  "author": { "name": "Jakub Głuszecki" },
+  "description": "Side pane or band listing PRs, their /sprout-review runs and the issues those reviews found, with each issue's status.",
+  "types": "./types/index.d.ts"
+}

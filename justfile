@@ -732,11 +732,17 @@ test-shell-hooks:
   python3 scripts/test_shell_hooks.py "$D"
 
 # Exercise the `/sprout-review` run ledger. Same rationale as the two above: only
-# the skill writes it and only the status line reads it, so nothing else notices
+# the skill writes it and only the `/prs` plugin reads it, so nothing else notices
 # when the count stops being right — and a wrong count reads as authoritative.
 [group('test')]
 test-review-ledger:
   bash scripts/test_review_ledger.sh
+
+# Validate and test the `/prs` pane plugin. Local only: CI has no `claude` CLI.
+[group('test')]
+test-pr-tracker:
+  claude plugin validate .claude/skills/pr-tracker
+  claude plugin test .claude/skills/pr-tracker
 
 # Exercise the `#~^ ERROR` line check the reject fixtures run (_test-reject).
 [group('test')]
@@ -4541,7 +4547,8 @@ gate-audit:
   # column-0 line ends a just recipe body.)
   VERIFY_EXCLUDE=$(printf '%s\n' gate gate-quick check lint test-file fmt-check-file \
                                  lint-file check-iface-all test-stdlib-stage2 linux-smoke \
-                                 windows-tu-check windows-poll-selftest plugin-verify)
+                                 windows-tu-check windows-poll-selftest plugin-verify \
+                                 test-pr-tracker)
   #   gate, gate-quick — the batteries themselves; C already covers gate's membership, and
   #     gate-quick is the deliberately-partial local subset (its point is being faster than CI).
   #   check, lint, test-file, fmt-check-file, lint-file — single-FILE / interactive developer
@@ -4567,6 +4574,8 @@ gate-audit:
   #     It stays out of CI because it downloads a full IDE distribution for every version in
   #     its recommended range — several GB per run — which is disproportionate for a per-push
   #     gate on a subproject most changes never touch. Run it before publishing.
+  #   test-pr-tracker — runs `claude plugin test`, and CI has no `claude` CLI. Run it after
+  #     editing .claude/skills/pr-tracker/.
   all_recipes=$(just --summary 2>/dev/null | tr ' ' '\n' | sort -u)
   if [[ -z "$all_recipes" ]]; then
     echo "gate-audit ✗ — could not enumerate recipes; assertion D would pass vacuously." >&2

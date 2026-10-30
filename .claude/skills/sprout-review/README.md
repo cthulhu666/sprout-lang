@@ -137,8 +137,7 @@ rather than less.
 ## Why the ledger looks the way it does
 
 **Append-only TSV, not JSON.** Two sessions can review one worktree at once, and an append needs no
-read-modify-write, so they cannot clobber each other. The status line reads it on a 300 ms debounce
-and must not parse anything — one `awk`, no dependency.
+read-modify-write, so they cannot clobber each other.
 
 **Under the common git dir.** Invisible to `git status`, so a review can never dirty a commit or
 collide in a merge. One ledger serves every worktree: `open --pr` and `open --branch` file a run
@@ -151,15 +150,16 @@ the count must not move. This was not hypothetical: the first implementation ded
 count correctly and then summed `found`/`confirmed` over *every* row, so one re-reported 7-finding
 review read as `16 found 6 real`. `scripts/test_review_ledger.sh` pins both halves.
 
-**A `start` row is not a review.** An opened-but-unclosed run shows `rv:0`. Beginning a review is
-not having had one.
+**A `start` row is not a review.** An opened-but-unclosed run counts as 0 reviews. Beginning a
+review is not having had one.
 
-**The level is an eighth column, appended.** `rv:3` cannot tell three `low` reviews from three
-`max` ones, which is the question a reader asks next. It could be appended because every reader —
-`count`, `show`, and the status line's own inline `awk` — selects columns by number and stops at
-`$7`, so rows written before it exists still parse. `show` reports the *latest* completed run's
-level (`review:2 9 found 3 real @max`): averaging levels across runs answers nothing, and "how
-hard was the last look" is the question worth answering.
+**The level is an eighth column, appended.** A count of 3 cannot tell three `low` reviews from
+three `max` ones, which is the question a reader asks next. It could be appended because every
+reader selects columns by number — `count` reads up to `$5`, `show` up to `$8` and tests `NF`
+first, and `runs` pads a short row to eleven columns for the pr-tracker plugin — so rows written
+before it exists still parse. `show` reports the *latest* completed run's level
+(`review:2 9 found 3 real @max`): averaging levels across runs answers nothing, and "how hard was
+the last look" is the question worth answering.
 
 ## Why the clustering went
 
@@ -282,5 +282,5 @@ happened; the file says what it said, and it is where the reports are grouped in
 bare `--git-common-dir`, which answers `.git` at the root and an absolute path from a subdirectory).
 A file an older version left in a worktree's own git dir is returned while no common one exists.
 
-The status line renders `rv:N` after the branch — green when reviewed, red at `rv:0`, and silent in
-repositories that have no ledger at all.
+The pr-tracker pane (`.claude/skills/pr-tracker/`, `/prs`) shows each PR's review count, runs and
+issues from the ledger.

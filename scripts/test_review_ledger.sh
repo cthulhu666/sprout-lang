@@ -147,7 +147,7 @@ check "raw path from a subdir"         "1"  "$([ -n "$sub_raw" ] && [ "$sub_raw"
 cd "$R" || exit 1
 
 # --- the effort column ---------------------------------------------------
-# `rv:3` cannot distinguish three `low` reviews from three `max` ones, so the
+# A count of 3 cannot distinguish three `low` reviews from three `max` ones, so the
 # level a run was asked for is recorded as an eighth column. Everything below
 # pins that it is additive: every existing reader selects $2/$3/$5/$6/$7, and a
 # row written before the column existed has only seven fields.
@@ -581,11 +581,70 @@ cd "$R" || exit 1
 # In the main checkout the git dir is the common dir, so there is no second file.
 check "the main checkout counts as before" "3" "$(bash "$LEDGER" count)"
 
-# Outside a repository the ledger must stay quiet rather than erroring: the
-# status line calls `show` on every render, wherever the user happens to be.
+# --- runs and dir: what the pr-tracker plugin reads ---------------------------
+# `runs` is every completed run once, with the dedupe rule count and show use (the FIRST
+# `done` row of an id), padded to eleven columns and ordered by `when`. `dir` names the
+# directories the ledger reads, the common one first.
+mkdir "$R/rr"
+cd "$R/rr" || exit 1
+git init -q -b main .
+git config user.email t@t
+git config user.name t
+echo a > a.txt
+git add a.txt
+git commit -qm first
+rrdir="$(git rev-parse --path-format=absolute --git-common-dir)/claude-review"
+mkdir -p "$rrdir"
+{
+  printf '2026-10-30T10:30:00Z\tdone\tb-late\thhh\tr2\t4\t4\thigh\t6\t5\tpr:782\n'
+  printf '2026-10-30T08:00:00Z\tstart\tb-early\taaa\tr1\t-\t-\t-\t-\t-\t-\n'
+  printf '2026-10-30T09:00:00Z\tdone\tb-early\taaa\tr1\t2\t1\n'
+  printf '2026-10-30T09:30:00Z\tdone\tb-early\taaa\tr1\t9\t9\tlow\n'
+  printf '2026-10-30T09:15:00Z\tdone\told\tdead\tr0\t3\t1\thigh\t2\n'
+  printf '2026-10-30T11:00:00Z\tstart\tb-open\tbbb\tr3\t-\t-\t-\t-\t-\t-\n'
+} > "$rrdir/runs.tsv"
+tab=$'\t'
+check "runs: one line per completed run, oldest first" "r1 r0 r2" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '{ printf "%s%s", s, $5; s=" " }')"
+check "runs: a started run is left out" "0" "$(bash "$LEDGER" runs | grep -c "${tab}start${tab}")"
+check "runs: the first done row of an id wins" "2${tab}1" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '$5=="r1" { print $6 "\t" $7 }')"
+check "runs: every line has 11 columns" "11" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '{ print NF }' | sort -u)"
+check "runs: a 7-field row is padded with '-'" "-${tab}-${tab}-${tab}-" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '$5=="r1" { print $8 "\t" $9 "\t" $10 "\t" $11 }')"
+check "runs: an 8-field row is padded too" "high${tab}2${tab}-${tab}-" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '$5=="r0" { print $8 "\t" $9 "\t" $10 "\t" $11 }')"
+check "runs: an 11-field row is kept as is" "high${tab}6${tab}5${tab}pr:782" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '$5=="r2" { print $8 "\t" $9 "\t" $10 "\t" $11 }')"
+check "runs: as many lines as count and show see" "3" "$(bash "$LEDGER" runs | wc -l | tr -d ' ')"
+check "dir: the main checkout has one dir" "$rrdir" "$(bash "$LEDGER" dir)"
+
+# A worktree reads its own legacy file too: legacy rows come in, an identical row in
+# both files is one line, and `dir` lists the common dir first.
+git worktree add -q -b rr-wt "$R/rrwt"
+cd "$R/rrwt" || exit 1
+rrlegacy="$(git rev-parse --absolute-git-dir)/claude-review"
+mkdir -p "$rrlegacy"
+printf '2026-10-30T08:30:00Z\tdone\told\tdead\tL9\t1\t1\n' > "$rrlegacy/runs.tsv"
+printf '2026-10-30T10:30:00Z\tdone\tb-late\thhh\tr2\t4\t4\thigh\t6\t5\tpr:782\n' >> "$rrlegacy/runs.tsv"
+check "runs: a legacy row is included, once" "L9 r1 r0 r2" \
+  "$(bash "$LEDGER" runs | awk -F'\t' '{ printf "%s%s", s, $5; s=" " }')"
+check "dir: common first, then the legacy dir" "$rrdir|$rrlegacy" \
+  "$(bash "$LEDGER" dir | paste -sd'|' -)"
+cd "$R" || exit 1
+
+# Outside a repository the ledger must stay quiet rather than erroring: a caller
+# may run it from any directory.
 cd /tmp || exit 1
 check "outside a repo, count is zero"  "0"  "$(bash "$LEDGER" count)"
 check "outside a repo, show is silent" ""   "$(bash "$LEDGER" show 2>/dev/null)"
+bash "$LEDGER" runs > "$R/out.txt" 2> "$R/err.txt"
+check "outside a repo, runs exits 0"   "0"  "$?"
+check "outside a repo, runs prints nothing" "00" "$(wc -c < "$R/out.txt" | tr -d ' ')$(wc -c < "$R/err.txt" | tr -d ' ')"
+bash "$LEDGER" dir > "$R/out.txt" 2> "$R/err.txt"
+check "outside a repo, dir exits 0"    "0"  "$?"
+check "outside a repo, dir prints nothing" "00" "$(wc -c < "$R/out.txt" | tr -d ' ')$(wc -c < "$R/err.txt" | tr -d ' ')"
 
 if [ "$fail" -ne 0 ]; then
   echo "==> review-ledger tests FAILED" >&2
