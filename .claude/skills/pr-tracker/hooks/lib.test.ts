@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
+  blank,
   cells,
   ciSummary,
   createdPrNumber,
@@ -8,6 +9,7 @@ import {
   fitSegs,
   headerSegs,
   issueSegs,
+  mergeSeg,
   layoutRows,
   parseIssues,
   parsePrView,
@@ -17,6 +19,7 @@ import {
   resolveExpanded,
   runsForPr,
   sortIssues,
+  storedPr,
   totalsSegs,
   touchesPrs,
 } from './lib'
@@ -150,8 +153,13 @@ test('gh pr view output parses into a PR', () => {
   expect(parsePrView(json)).toEqual({
     number: 782, title: 'ledger', state: 'OPEN', branch: 'review-ledger-targets',
     ledgerBranch: 'review-ledger-targets', oid: 'abc',
+    mergeState: '', base: '', draft: false,
     ci: { ok: 1, fail: 0, pending: 0, total: 1 }, error: null,
   })
+  const merge = JSON.stringify({
+    number: 6, mergeStateStatus: 'BEHIND', baseRefName: 'stack-base', isDraft: true,
+  })
+  expect(parsePrView(merge)).toMatchObject({ mergeState: 'BEHIND', base: 'stack-base', draft: true })
   // The ledger files a fork PR's run as <owner>:<branch>.
   const fork = JSON.stringify({
     number: 5, headRefName: 'fix', isCrossRepository: true, headRepositoryOwner: { login: 'alice' },
@@ -189,9 +197,7 @@ test('/prs arguments', () => {
 })
 
 test('expansion defaults to the newest open PR', () => {
-  const pr = (number: number, state: string) => ({
-    number, title: '', state, branch: '', ledgerBranch: '', oid: '', ci: { ok: 0, fail: 0, pending: 0, total: 0 }, error: null,
-  })
+  const pr = (number: number, state: string) => ({ ...blank(number), state })
   const data = { '1': pr(1, 'OPEN'), '2': pr(2, 'MERGED'), '3': pr(3, 'OPEN') }
   expect(resolveExpanded('auto', [1, 2, 3], data)).toBe(3)
   expect(resolveExpanded('auto', [2], data)).toBe(null)
@@ -239,15 +245,31 @@ test('rows fit the width: fit, fitSegs, header and issue rows', () => {
   expect(segs.map(s => s.text)).toEqual(['aaaa', 'b…'])
 
   const pr = {
-    number: 782, title: '', state: 'OPEN', branch: 'a-very-long-branch-name-indeed',
-    ledgerBranch: 'a-very-long-branch-name-indeed', oid: '',
-    ci: { ok: 5, fail: 2, pending: 3, total: 10 }, error: null,
+    ...blank(782), state: 'OPEN', branch: 'a-very-long-branch-name-indeed',
+    ledgerBranch: 'a-very-long-branch-name-indeed', mergeState: 'CLEAN',
+    ci: { ok: 5, fail: 2, pending: 3, total: 10 },
   }
   const [run] = parseRuns(R11)
   const wide = headerSegs(782, pr, run === undefined ? [] : [run], true, 100).map(s => s.text).join('')
-  expect(wide).toBe('▾ #782 a-very-long-branch-name-indeed  OPEN  CI 5/10 ✗2 …3  1 review (high)')
+  expect(wide).toBe('▾ #782 a-very-long-branch-name-indeed  OPEN  mergeable  CI 5/10 ✗2 …3  1 review (high)')
   for (const w of [30, 45, 60]) {
     expect(cells(headerSegs(782, pr, [], false, w).map(s => s.text).join(''))).toBeLessThanOrEqual(w)
+  }
+  const stacked = { ...pr, base: 'parent-branch' }
+  const stackedWide = headerSegs(782, stacked, [], false, 120).map(s => s.text).join('')
+  expect(stackedWide).toContain('a-very-long-branch-name-indeed → parent-branch  OPEN  mergeable')
+  for (const w of [30, 45, 60, 80]) {
+    const line = headerSegs(782, stacked, [], false, w).map(s => s.text).join('')
+    expect(cells(line)).toBeLessThanOrEqual(w)
+    if (w >= 60) expect(line).toContain('→ p')
+  }
+  const longBase = { ...pr, base: 'some-long-parent-feature-branch-name' }
+  for (const w of [45, 60, 80]) {
+    const line = headerSegs(782, longBase, [], false, w).map(s => s.text).join('')
+    expect(cells(line)).toBeLessThanOrEqual(w)
+    expect(line).toContain('OPEN')
+    expect(line).toContain('mergeable')
+    expect(line).toContain('CI ')
   }
   const issue = parseIssues(ISSUES)[1]!
   for (const w of [30, 50, 80]) {
@@ -255,4 +277,39 @@ test('rows fit the width: fit, fitSegs, header and issue rows', () => {
     expect(cells(line)).toBeLessThanOrEqual(w)
   }
   expect(issueSegs(issue, 3, 6, 80).map(s => s.text).join('')).toContain('🟠 term_interned_word is generic')
+})
+
+test('a stored PR from before the merge fields existed gets them from blank', () => {
+  const old = { number: 9, title: 't', state: 'OPEN', branch: 'b', ledgerBranch: 'b', oid: 'x', ci: ciSummary(null), error: null }
+  const pr = storedPr(9, old as never)
+  expect(pr).toMatchObject({ mergeState: '', base: '', draft: false, branch: 'b' })
+  const line = headerSegs(9, pr, [], false, 100).map(s => s.text).join('')
+  expect(line).not.toContain('undefined')
+  expect(line).not.toContain('→')
+  expect(storedPr(9, undefined)).toEqual(blank(9))
+})
+
+test('merge segment: label and color per state, draft first, open PRs only', () => {
+  const base = { ...blank(1), state: 'OPEN', branch: 'b', ledgerBranch: 'b' }
+  const seg = (mergeState: string, extra: object = {}) => mergeSeg({ ...base, mergeState, ...extra })
+  expect(seg('CLEAN')).toEqual({ text: 'mergeable', color: 'success' })
+  expect(seg('HAS_HOOKS')).toEqual({ text: 'mergeable', color: 'success' })
+  expect(seg('BEHIND')).toEqual({ text: 'behind', color: 'warning' })
+  expect(seg('BLOCKED')).toEqual({ text: 'blocked', color: 'warning' })
+  expect(seg('UNSTABLE')).toEqual({ text: 'unstable', color: 'warning' })
+  expect(seg('DIRTY')).toEqual({ text: 'conflicts', color: 'error' })
+  expect(seg('DRAFT')).toEqual({ text: 'draft', dim: true })
+  expect(seg('UNKNOWN')).toEqual({ text: 'merge ?', dim: true })
+  expect(seg('')).toEqual({ text: 'merge ?', dim: true })
+  expect(seg('SOMETHING_NEW')).toEqual({ text: 'merge ?', dim: true })
+  expect(seg('DIRTY', { draft: true })).toEqual({ text: 'draft', dim: true })
+  expect(seg('CLEAN', { state: 'MERGED' })).toBe(null)
+  expect(seg('CLEAN', { state: 'CLOSED' })).toBe(null)
+
+  const line = (extra: object) =>
+    headerSegs(1, { ...base, ...extra }, [], false, 100).map(s => s.text).join('')
+  expect(line({ mergeState: 'DIRTY' })).toContain('OPEN  conflicts  CI')
+  expect(line({ state: 'MERGED', mergeState: 'DIRTY' })).not.toContain('conflicts')
+  expect(line({ base: 'master' })).not.toContain('→')
+  expect(line({ base: 'topic' })).toContain('b → topic  OPEN')
 })

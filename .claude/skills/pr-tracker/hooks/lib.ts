@@ -123,10 +123,32 @@ function ledgerBranchOf(j: Record<string, unknown>, head: string): string {
   return typeof owner === 'string' && owner !== '' ? `${owner}:${head}` : ''
 }
 
-/**
- * Parses `gh pr view --json number,title,state,headRefName,headRefOid,isCrossRepository,
- * headRepositoryOwner,statusCheckRollup`.
- */
+/** What `gh pr view` is asked for; `parsePrView` reads these. */
+export const PR_FIELDS =
+  'number,title,state,headRefName,headRefOid,isCrossRepository,headRepositoryOwner,statusCheckRollup,mergeStateStatus,baseRefName,isDraft'
+
+/** A PR not fetched yet. */
+export const blank = (n: number): PrTrackerPr => ({
+  number: n,
+  title: '',
+  state: '',
+  branch: '',
+  ledgerBranch: '',
+  oid: '',
+  mergeState: '',
+  base: '',
+  draft: false,
+  ci: ciSummary(null),
+  error: null,
+})
+
+/** A PR kept in the data atom; fields added since it was stored come from `blank`. */
+export const storedPr = (n: number, stored: PrTrackerPr | undefined): PrTrackerPr => ({
+  ...blank(n),
+  ...stored,
+})
+
+/** Parses `gh pr view --json` with `PR_FIELDS`. */
 export function parsePrView(stdout: string): PrTrackerPr | null {
   try {
     const j = JSON.parse(stdout) as Record<string, unknown>
@@ -139,6 +161,9 @@ export function parsePrView(stdout: string): PrTrackerPr | null {
       branch: head,
       ledgerBranch: ledgerBranchOf(j, head),
       oid: String(j['headRefOid'] ?? ''),
+      mergeState: String(j['mergeStateStatus'] ?? ''),
+      base: String(j['baseRefName'] ?? ''),
+      draft: j['isDraft'] === true,
       ci: ciSummary(j['statusCheckRollup'] as Check[] | null),
       error: null,
     }
@@ -240,6 +265,23 @@ export const pad = (s: string, width: number): string =>
 
 const STATE_COLOR: Record<string, string> = { OPEN: 'success', MERGED: 'merged', CLOSED: 'error' }
 
+const MERGE_SEG: Record<string, Seg> = {
+  CLEAN: { text: 'mergeable', color: 'success' },
+  HAS_HOOKS: { text: 'mergeable', color: 'success' },
+  BEHIND: { text: 'behind', color: 'warning' },
+  BLOCKED: { text: 'blocked', color: 'warning' },
+  UNSTABLE: { text: 'unstable', color: 'warning' },
+  DIRTY: { text: 'conflicts', color: 'error' },
+  DRAFT: { text: 'draft', dim: true },
+}
+
+/** Mergeability of an open PR, from GitHub's MergeStateStatus; null for a merged or closed one. */
+export function mergeSeg(pr: PrTrackerPr): Seg | null {
+  if (pr.state !== 'OPEN') return null
+  if (pr.draft) return { text: 'draft', dim: true }
+  return MERGE_SEG[pr.mergeState] ?? { text: 'merge ?', dim: true }
+}
+
 /** The PR the pane expands: the chosen one, or by default the newest open one. */
 export function resolveExpanded(
   selected: number | 'auto' | 'none',
@@ -302,7 +344,7 @@ export function layoutRows(budget: number, sorted: readonly number[], expanded: 
   return { shown, hidden, totals, room: Math.max(0, hidden === 0 ? left + 1 : left) }
 }
 
-/** `#n branch  STATE  CI ok/total ✗fail …pending  k reviews (effort)` */
+/** `#n branch [→ base]  STATE  [merge state]  CI ok/total ✗fail …pending  k reviews (effort)` */
 export function headerSegs(
   n: number,
   pr: PrTrackerPr | undefined,
@@ -317,21 +359,29 @@ export function headerSegs(
   const ci = pr.ci
   const latest = runs[0]
   const effort = latest !== undefined && latest.effort !== '-' && latest.effort !== '' ? ` (${latest.effort})` : ''
+  const merge = mergeSeg(pr)
+  const baseFull = pr.base !== '' && pr.base !== 'master' ? ` → ${pr.base}` : ''
   const tail: Seg[] = [
     { text: '  ' },
     { text: pr.state === '' ? '?' : pr.state, color: STATE_COLOR[pr.state] },
+    ...(merge === null ? [] : [{ text: '  ' }, merge]),
     { text: `  CI ${ci.ok}/${ci.total}` },
     ...(ci.fail > 0 ? [{ text: ` ✗${ci.fail}`, color: 'error' }] : []),
     ...(ci.pending > 0 ? [{ text: ` …${ci.pending}`, color: 'warning' }] : []),
     { text: `  ${runs.length} ${runs.length === 1 ? 'review' : 'reviews'}${effort}` },
     ...(pr.error !== null ? [{ text: `  ⚠ ${fit(pr.error, 24)}`, color: 'error' }] : []),
   ]
+  // Branch and base share the room the tail leaves: the base takes at most half, or what the
+  // branch does not need. A part with no room for a few cells is dropped.
   const fixed = cells(marker) + cells(`#${n}`) + tail.reduce((w, s) => w + cells(s.text), 0)
-  const branch = pr.branch === '' ? [] : [{ text: ' ' + fit(pr.branch, Math.max(8, columns - fixed - 1)) }]
-  return fitSegs(
-    [{ text: marker }, { text: `#${n}`, bold: true }, ...branch, ...tail],
-    columns,
-  )
+  const avail = Math.max(0, columns - fixed)
+  const branchFull = pr.branch === '' ? 0 : cells(pr.branch) + 1
+  const baseW = cells(baseFull)
+  let baseRoom = Math.min(baseW, Math.max(Math.floor(avail / 2), avail - branchFull))
+  const branchRoom = avail - baseRoom
+  const branch: Seg[] = branchRoom > 1 && pr.branch !== '' ? [{ text: ' ' + fit(pr.branch, branchRoom - 1) }] : []
+  const base: Seg[] = baseRoom > 3 ? [{ text: fit(baseFull, baseRoom), dim: true }] : []
+  return fitSegs([{ text: marker }, { text: `#${n}`, bold: true }, ...branch, ...base, ...tail], columns)
 }
 
 const ORDER: readonly PrTrackerStatus[] = ['fixed', 'skipped', 'wontfix', 'refuted', 'open']

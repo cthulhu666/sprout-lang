@@ -3,7 +3,7 @@ import type { EngineInterface, Register, ResolveInput, Timer } from 'claude-code
 
 import type { PrTrackerIssue, PrTrackerPr } from '../types'
 import {
-  ciSummary,
+  PR_FIELDS,
   clock,
   createdPrNumber,
   headerSegs,
@@ -18,6 +18,7 @@ import {
   resolveExpanded,
   runsForPr,
   sortIssues,
+  storedPr,
   totalsSegs,
   touchesPrs,
 } from './lib'
@@ -27,9 +28,6 @@ type Dollar = EngineInterface
 
 const PANE = 'prs'
 const VIEW_KEY = 'view'
-// What `gh pr view` is asked for; `parsePrView` reads these.
-const PR_FIELDS =
-  'number,title,state,headRefName,headRefOid,isCrossRepository,headRepositoryOwner,statusCheckRollup'
 const LONG_TIMEOUT_MS = 30_000
 const SHORT_TIMEOUT_MS = 10_000
 const prsA = atom({ plugin: 'pr-tracker', key: 'prs' } as const, [])
@@ -50,17 +48,6 @@ let isDirty = false
 let ledgerFor: { cwd: string; ledger: Ledger | null } | null = null
 // Last seen mtimes of a run's issue files, to skip spawning `issues` when nothing changed.
 const seen = new Map<string, string>()
-
-const blank = (n: number): PrTrackerPr => ({
-  number: n,
-  title: '',
-  state: '',
-  branch: '',
-  ledgerBranch: '',
-  oid: '',
-  ci: ciSummary(null),
-  error: null,
-})
 
 async function fetchPr(
   $: Dollar,
@@ -99,7 +86,7 @@ async function refreshPrs($: Dollar): Promise<void> {
         const next: Record<string, PrTrackerPr> = {}
         for (const r of results) {
           const prev = old[String(r.n)]
-          next[String(r.n)] = r.pr ?? { ...(prev ?? blank(r.n)), error: r.error }
+          next[String(r.n)] = r.pr ?? { ...storedPr(r.n, prev), error: r.error }
         }
         return next
       })
@@ -393,7 +380,8 @@ async function drawPrs(
   const room = layout.room
 
   const blocks = layout.shown.map(n => {
-    const pr = data[String(n)]
+    const stored = data[String(n)]
+    const pr = stored === undefined ? undefined : storedPr(n, stored)
     const prRuns = runsForPr(runs, { number: n, ledgerBranch: pr?.ledgerBranch ?? '' })
     const all = prRuns.flatMap(r => issues[r.id] ?? [])
     const isExpanded = expanded === n

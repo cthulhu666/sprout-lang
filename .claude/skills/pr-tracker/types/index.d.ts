@@ -15,6 +15,12 @@ export type PrTrackerPr = {
    *  fork, else `branch`; empty when unknown. */
   ledgerBranch: string
   oid: string
+  /** Raw `mergeStateStatus` (CLEAN, DIRTY, BEHIND, ...); empty if absent. */
+  mergeState: string
+  /** The base branch, `baseRefName`; empty if absent. */
+  base: string
+  /** `isDraft`. */
+  draft: boolean
   ci: PrTrackerCi
   error: string | null
 }

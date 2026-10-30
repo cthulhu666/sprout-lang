@@ -13,7 +13,8 @@ Companion to `.claude/skills/sprout-review/`.
 
 ## Data
 
-- `gh pr view` every 60 s, and after `git push` or `gh pr` in Bash.
+- `gh pr view` every 60 s, and after `git push` or `gh pr` in Bash. An open PR's header shows its
+  mergeability, and its base branch when that is not `master`.
 - The review ledger every 5 s, only through `scripts/review_ledger.sh` (`runs`, `dir`, `issues`),
   run from the repo root.
 
