@@ -753,7 +753,7 @@ export fn set_member(item: String, s: Set) -> Bool =
       | Just _ -> true
       | Nothing -> false
 
-# O(n): in-order traversal; the returned list is sorted by interned-key order.
+# O(n): in-order traversal; the returned list is sorted by the keys' byte (strcmp) order.
 export fn set_to_list(s: Set) -> List String =
   match s with
   | Set raw -> map_keys(raw)

@@ -1,15 +1,18 @@
 /* A map key is a GC child of its node: a key reachable only from the map must
  * survive collection, under SPROUT_GC_STRESS=1 where every allocation collects.
  *
- * Keys are built at runtime (int_to_string), so each is a heap string, and the
- * only reference left to it after map_set is the one inside the map. Churn then
- * collects repeatedly, and every key is read back by position and by lookup.
+ * Keys are built at runtime (int_to_string), so each is a heap string. A key is
+ * passed straight into map_set / map_remove with no root of its own here, so the
+ * only thing holding it during the call is the root inside the builtin. Once
+ * stored, the only reference left is the one inside the map. Churn then collects
+ * repeatedly, and every key is read back by position and by lookup.
  *
- *   insert — keys survive the inserts themselves, which allocate path copies
- *            (and rebalance) while a new key is held only by the caller.
+ *   insert — a key survives its own insert, whose leaf allocation can collect
+ *            before the key is stored in it.
  *   churn  — keys survive unrelated allocation.
- *   remove — keys of the nodes that stay survive a remove, including the
- *            two-child case that copies the successor's key into a new node.
+ *   remove — a key survives its own remove, and the keys of the nodes that stay
+ *            survive too, including the two-child case that copies the
+ *            successor's key into a new node.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -26,11 +29,17 @@ long long map_size(long long map_h);
 long long map_nth_key(long long map_h, long long index);
 long long int_to_string(long long value);
 long long sprout_field(long long h, long long idx);
+long long sprout_tag(long long h);
 long long sprout_gc_push_i64_root(void* slot);
 long long sprout_gc_pop_roots(long long count);
 
 #define KEYS 600
 #define CHURN 400
+#define TAG_NOTHING 7
+#define TAG_JUST 8
+
+/* The lookup key; rooted for the whole run since building it allocates. */
+static long long g_probe = 0;
 
 static int fail(const char* what, long long i) {
   fprintf(stderr, "map-key-survival: %s (i=%lld)\n", what, i);
@@ -55,6 +64,17 @@ static int check_map(long long m, int (*keep)(long long), long long want) {
   }
   for (long long i = 0; i < KEYS; i++)
     if ((seen[i] != 0) != (keep(i) != 0)) return fail("wrong key set", i);
+  /* By lookup: a stored key must be found by a fresh equal string, an absent one not. */
+  for (long long i = 0; i < KEYS; i++) {
+    g_probe = int_to_string(i);
+    long long found = map_get(m, g_probe);
+    if (keep(i)) {
+      if (sprout_tag(found) != TAG_JUST) return fail("lookup missed a stored key", i);
+      if (sprout_field(found, 0) != i) return fail("lookup returned the wrong value", i);
+    } else if (sprout_tag(found) != TAG_NOTHING) {
+      return fail("lookup found an absent key", i);
+    }
+  }
   return 0;
 }
 
@@ -70,23 +90,15 @@ int main(void) {
   sprout_register_ctor(7, "Nothing", 0, "");
   sprout_register_ctor(8, "Just", 1, "p");
   long long m = map_empty();
-  long long key = 0;
   sprout_gc_push_i64_root(&m);
-  sprout_gc_push_i64_root(&key);
+  sprout_gc_push_i64_root(&g_probe);
 
-  for (long long i = 0; i < KEYS; i++) {
-    key = int_to_string(i);
-    m = map_set(m, key, i);
-  }
-  key = 0;  /* the map holds the only reference to every key now */
+  /* No caller root on the key: map_set's own root is all that holds it. */
+  for (long long i = 0; i < KEYS; i++) m = map_set(m, int_to_string(i), i);
   churn();
   if (check_map(m, keep_all, KEYS)) return 1;
 
-  for (long long i = 0; i < KEYS; i += 2) {
-    key = int_to_string(i);
-    m = map_remove(m, key);
-  }
-  key = 0;
+  for (long long i = 0; i < KEYS; i += 2) m = map_remove(m, int_to_string(i));
   churn();
   if (check_map(m, keep_odd, KEYS / 2)) return 1;
 
