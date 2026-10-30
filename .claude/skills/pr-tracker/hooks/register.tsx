@@ -6,10 +6,12 @@ import {
   PR_FIELDS,
   clock,
   createdPrNumber,
+  emptyText,
   headerSegs,
   issueSegs,
   issueWidths,
   layoutRows,
+  mergedIn,
   parseIssues,
   parsePrView,
   parsePrsArgs,
@@ -17,12 +19,13 @@ import {
   prsFromRuns,
   resolveExpanded,
   runsForPr,
+  scopePrs,
   sortIssues,
   storedPr,
   totalsSegs,
   touchesPrs,
 } from './lib'
-import type { PrsView, Seg } from './lib'
+import type { PrsScope, PrsView, Seg } from './lib'
 
 type Dollar = EngineInterface
 
@@ -39,6 +42,8 @@ const selectedA = atom({ plugin: 'pr-tracker', key: 'selected' } as const, 'auto
 const dismissedA = atom({ plugin: 'pr-tracker', key: 'dismissed' } as const, [])
 const sinceA = atom({ plugin: 'pr-tracker', key: 'since' } as const, 0)
 const viewA = atom({ plugin: 'pr-tracker', key: 'view' } as const, 'pane')
+const mineA = atom({ plugin: 'pr-tracker', key: 'mine' } as const, [])
+const scopeA = atom({ plugin: 'pr-tracker', key: 'scope' } as const, 'mine')
 
 // Module variables are lost on a hot reload, along with the old timers, so
 // every hook that may run first calls `ensureTimers`, which starts them again.
@@ -134,7 +139,10 @@ async function ledgerOf($: Dollar, cwd: string): Promise<Ledger | null> {
 async function addPrs($: Dollar, numbers: readonly number[], isTyped: boolean): Promise<boolean> {
   const dismissed = await read($, dismissedA)
   const wanted = numbers.filter(n => isTyped || !dismissed.includes(n))
-  if (isTyped) await update($, dismissedA, list => list.filter(n => !numbers.includes(n)))
+  if (isTyped) {
+    await update($, dismissedA, list => list.filter(n => !numbers.includes(n)))
+    await update($, mineA, list => [...list, ...numbers.filter(n => !list.includes(n))])
+  }
   let isAdded = false
   await update($, prsA, list => {
     const next = [...list]
@@ -147,6 +155,7 @@ async function addPrs($: Dollar, numbers: readonly number[], isTyped: boolean): 
 
 async function removePrs($: Dollar, numbers: readonly number[]): Promise<void> {
   await update($, prsA, list => list.filter(n => !numbers.includes(n)))
+  await update($, mineA, list => list.filter(n => !numbers.includes(n)))
   await update($, dismissedA, list => [...list, ...numbers.filter(n => !list.includes(n))])
   await update($, dataA, old => {
     const next = { ...old }
@@ -335,7 +344,9 @@ async function drawPrs(
   size: { columns: number; rows: number },
 ) {
   const { Box, Text, Button } = $.ui.resolve(e)
-  const prs = await read($, prsA)
+  const tracked = await read($, prsA)
+  const scope = await read($, scopeA)
+  const prs = scopePrs(tracked, await read($, mineA), scope)
   const data = await read($, dataA)
   const runs = await read($, runsA)
   const issues = await read($, issuesA)
@@ -348,7 +359,8 @@ async function drawPrs(
   const sorted = [...prs].sort((a, b) => b - a)
 
   const toggle = (n: number) => async () => {
-    const current = resolveExpanded(await read($, selectedA), await read($, prsA), await read($, dataA))
+    const shown = scopePrs(await read($, prsA), await read($, mineA), await read($, scopeA))
+    const current = resolveExpanded(await read($, selectedA), shown, await read($, dataA))
     await update($, selectedA, () => (current === n ? 'none' : n))
   }
   const refresh = async () => {
@@ -357,6 +369,14 @@ async function drawPrs(
   const switchView = async () => {
     await setView($, (await read($, viewA)) === 'pane' ? 'band' : 'pane')
   }
+  const switchScope = async () => {
+    await update($, scopeA, s => (s === 'mine' ? 'all' : 'mine'))
+  }
+  const clearMerged = async () => {
+    const shown = scopePrs(await read($, prsA), await read($, mineA), await read($, scopeA))
+    await removePrs($, mergedIn(shown, await read($, dataA)))
+  }
+  const merged = mergedIn(prs, data)
   const view = await read($, viewA)
 
   // Segments to elements. A Text takes no key.
@@ -413,7 +433,9 @@ async function drawPrs(
 
   return (
     <Box flexDirection="column">
-      {prs.length === 0 && <Text dimColor>{'No PRs yet. /prs add <n>'}</Text>}
+      {emptyText(prs.length, tracked.length, scope) !== null && (
+        <Text dimColor>{emptyText(prs.length, tracked.length, scope)}</Text>
+      )}
       {blocks}
       {layout.hidden > 0 && <Text dimColor>{`… ${layout.hidden} more PRs`}</Text>}
       <Box gap={2}>
@@ -424,6 +446,14 @@ async function drawPrs(
         <Button key="view" onPress={() => quiet(switchView())}>
           {view === 'pane' ? 'band' : 'pane'}
         </Button>
+        <Button key="scope" onPress={() => quiet(switchScope())}>
+          {scope === 'mine' ? 'all' : 'mine'}
+        </Button>
+        {merged.length > 0 && (
+          <Button key="clear" onPress={() => quiet(clearMerged())}>
+            {`clear merged (${merged.length})`}
+          </Button>
+        )}
       </Box>
     </Box>
   )

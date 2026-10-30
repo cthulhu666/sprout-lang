@@ -294,6 +294,25 @@ export function resolveExpanded(
   return open[0] ?? null
 }
 
+export type PrsScope = 'mine' | 'all'
+
+/** The PRs to draw: this session's own, or all of them. */
+export const scopePrs = (prs: readonly number[], mine: readonly number[], scope: PrsScope): number[] =>
+  scope === 'all' ? [...prs] : prs.filter(n => mine.includes(n))
+
+/** The line for an empty list; null when PRs are shown. `tracked` counts the PRs in every scope. */
+export function emptyText(shown: number, tracked: number, scope: PrsScope): string | null {
+  if (shown > 0) return null
+  if (scope === 'mine' && tracked > 0) return `No PRs from this session. all shows ${tracked}`
+  return 'No PRs yet. /prs add <n>'
+}
+
+/** The shown PRs whose stored state is MERGED. */
+export const mergedIn = (
+  shown: readonly number[],
+  data: Readonly<Record<string, PrTrackerPr>>,
+): number[] => shown.filter(n => data[String(n)]?.state === 'MERGED')
+
 export type Layout = {
   /** The PRs drawn, in list order. */
   shown: number[]

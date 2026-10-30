@@ -10,6 +10,11 @@ Companion to `.claude/skills/sprout-review/`.
 - `/prs add <n…>` and `/prs remove <n…>` edit the list. The list holds the PRs added here plus
   any PR that a review from any session in this repo (the ledger is shared) finished after this
   session started, unless removed.
+- The default view draws only PRs this session created (`gh pr create`) or added by hand. The
+  `all` button draws the full list; `mine` switches back. Each new session starts on `mine`.
+  Scope only filters the drawing: polling and auto-adding go on for every PR.
+- `clear merged (k)` appears when `k` drawn PRs are merged; it removes them, and later review
+  runs do not add them back.
 
 ## Data
 

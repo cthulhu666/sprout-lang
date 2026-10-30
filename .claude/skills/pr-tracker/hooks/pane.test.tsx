@@ -79,11 +79,13 @@ const world = () => ({
   isRepo: true,
   /** How many git calls reject first, as a timeout does. */
   gitRejects: 0,
+  /** PR state `gh pr view` answers for 771-776; OPEN when absent. */
+  states: {} as Record<number, string>,
 })
 
-const prJson = (n: number, branch: string) =>
+const prJson = (n: number, branch: string, state = 'OPEN') =>
   JSON.stringify({
-    number: n, title: 'older', state: 'OPEN', headRefName: branch, headRefOid: 'abc',
+    number: n, title: 'older', state, headRefName: branch, headRefOid: 'abc',
     isCrossRepository: false, headRepositoryOwner: { login: 'o' }, statusCheckRollup: [],
   })
 
@@ -156,7 +158,7 @@ const wire = (on: On, runs = RUNS, stored: Record<string, unknown> = {}, cwd = '
     if (a === 'git' && b === 'rev-parse' && e.argv.includes('--show-toplevel')) return ok('/repo\n')
     if (a === 'gh' && b === 'pr' && e.argv[3] === '782') return ok(PR_782)
     if (a === 'gh' && b === 'pr' && /^77[1-6]$/.test(e.argv[3] ?? '')) {
-      return ok(prJson(Number(e.argv[3]), `old-${e.argv[3]}`))
+      return ok(prJson(Number(e.argv[3]), `old-${e.argv[3]}`, w.states[Number(e.argv[3])]))
     }
     if (a === 'gh') return out(1, '', 'no pull requests found\n')
     if (a === 'bash' && b === '/repo/scripts/review_ledger.sh') {
@@ -251,6 +253,8 @@ test('a run that targets a PR adds it on the next ledger read, unless the PR was
   await clock.advance(5_000)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'scope' })
+  await settle()
   expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeDefined()
 
   await $.command.run({ ...CMD, args: 'remove 900' })
@@ -474,4 +478,89 @@ test('the list never draws more rows than its budget', async ($, on) => {
   expect(await least.find({ type: 'Text', text: /… 6 more PRs/ })).toBeDefined()
   expect(await least.find({ type: 'Button', key: 'refresh' })).toBeDefined()
   await least.unmount()
+})
+
+const LATER = (n: number) =>
+  ['2099-01-01T00:00:00Z', 'done', 'other', 'abc', `r${n}`, '0', '0', 'low', '-', '-', `pr:${n}`].join(T)
+
+test('default scope shows PRs added by hand or created here, and hides ones a run named', async ($, on) => {
+  const clock = wire(on, `${RUNS}\n${LATER(900)}`)
+  on('tool.call', () => ({
+    result: { stdout: '', stderr: '', interrupted: false },
+    text: 'https://github.com/cthulhu666/sprout-lang/pull/776\n',
+  }))
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run({ ...CMD, args: 'add 782' })
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --fill' })
+  await clock.advance(5_000)
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'pr-782' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'pr-776' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the scope button switches between this session\'s PRs and all of them', async ($, on) => {
+  const clock = wire(on, `${RUNS}\n${LATER(900)}`)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run({ ...CMD, args: 'add 782' })
+  await clock.advance(5_000)
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'scope' }))?.text).toBe('all')
+  expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeUndefined()
+  await ui.press({ key: 'scope' })
+  await settle()
+  expect((await ui.find({ type: 'Button', key: 'scope' }))?.text).toBe('mine')
+  expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'pr-782' })).toBeDefined()
+  await ui.press({ key: 'scope' })
+  await settle()
+  expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('mine scope with only hidden PRs says how many all shows', async ($, on) => {
+  const clock = wire(on, `${RUNS}\n${LATER(900)}`)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.advance(5_000)
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /No PRs from this session\. all shows 1/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /No PRs yet/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('clear merged shows with merged PRs drawn, removes them, and a later run does not bring them back', async ($, on) => {
+  const w = world()
+  w.states[771] = 'MERGED'
+  // The ledger names 771 throughout.
+  const clock = wire(on, `${RUNS}\n${LATER(771)}`, {}, '/work', w)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run({ ...CMD, args: 'add 772' })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await settle()
+  expect(await ui.find({ type: 'Button', key: 'clear' })).toBeUndefined()
+
+  await $.command.run({ ...CMD, args: 'add 771' })
+  await settle()
+  expect((await ui.find({ type: 'Button', key: 'clear' }))?.text).toBe('clear merged (1)')
+  await ui.press({ key: 'clear' })
+  await settle()
+  expect(await ui.find({ type: 'Button', key: 'pr-771' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'pr-772' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'clear' })).toBeUndefined()
+
+  // Later rounds see the run again; the PR stays gone, in either scope.
+  await clock.advance(10_000)
+  await settle()
+  await ui.press({ key: 'scope' })
+  await settle()
+  expect(await ui.find({ type: 'Button', key: 'pr-771' })).toBeUndefined()
+  await ui.unmount()
 })

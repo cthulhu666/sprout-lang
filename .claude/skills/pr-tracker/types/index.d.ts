@@ -76,6 +76,10 @@ declare module 'claude-code' {
       selected: number | 'auto' | 'none'
       /** Where the list shows: the `Pane` or the `AbovePrompt` band. */
       view: 'pane' | 'band'
+      /** PRs this session created or added by hand; the default scope draws only these. */
+      mine: number[]
+      /** What the list draws: `mine`, or `all` tracked PRs. Per session; not stored. */
+      scope: 'mine' | 'all'
     }
   }
 }
