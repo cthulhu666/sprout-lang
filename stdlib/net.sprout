@@ -172,9 +172,9 @@ fn read_exact_go(handle: Int, count: Int, acc: List Builder, have: Int) -> Resul
     | Err err -> Err(err)
 
 fn read_exact_park(handle: Int, count: Int, acc: List Builder, have: Int) -> Result TcpError Bytes !{IO} =
-  match tcp_read_exact(handle, 1) with
-  | Ok byte -> read_exact_go(handle, count, Cons(builder_bytes(byte), acc), have + length(byte))
-  | Err err -> Err(err)
+  do
+    byte <- tcp_read_exact(handle, 1)
+    read_exact_go(handle, count, Cons(builder_bytes(byte), acc), have + length(byte))
 
 # O(|payload|): writes the full payload, retrying partial sends as needed.
 export fn write_all(conn: borrowing TcpConnection, payload: Bytes) -> Result TcpError Int !{IO} =

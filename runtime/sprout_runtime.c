@@ -10390,7 +10390,9 @@ retry:
  * with three thin entry points over it — tcp_read, tcp_read_avail, tcp_read_avail_timeout — and all
  * three are gone: they welded timeout policy to syscall retry inside C, and each ended by adopting
  * the received bytes as a String, which is the W2 R2 invariant violation documented on
- * tcp_read_some. The read path is now tcp_wait + tcp_read_some with the loop in Sprout. */
+ * tcp_read_some. The read path is now tcp_wait + tcp_read_some with the loop in Sprout, except
+ * read_exact's no-deadline park, tcp_read_exact below, until a wait-forever readiness primitive
+ * replaces it. */
 typedef enum { TCP_WAIT_FOREVER, TCP_WAIT_DEADLINE } TcpWaitMode;
 
 /* Park until the connection is readable, then read ONE byte. `count` must be 1: this is the
