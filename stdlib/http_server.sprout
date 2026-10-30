@@ -197,11 +197,31 @@ where
 fn has_bare_terminator(line: String) -> Bool =
   string.contains(line, "\r") || string.contains(line, "\n")
 
+# RFC 9110 §5.6.2 tchar, by byte value: DIGIT, ALPHA and "!#$%&'*+-.^_`|~".
+fn tchar(byte: Int) -> Bool =
+  (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+  || byte == 33 || byte == 35 || byte == 36 || byte == 37 || byte == 38 || byte == 39
+  || byte == 42 || byte == 43 || byte == 45 || byte == 46 || byte == 94 || byte == 95
+  || byte == 96 || byte == 124 || byte == 126
+
+fn digit_byte(byte: Int) -> Bool =
+  byte >= 48 && byte <= 57
+
+# The raw name must be a non-empty token. Trimming it first read `Content-Length : 5`, a fold line
+# ` Content-Length: 5` and `X Y: 1` as headers that a stricter proxy in front refuses or ignores
+# (RFC 9112 §5.1, §5.2), so the two framed the body differently. A byte scan keeps this linear;
+# `string.char_at` is per codepoint.
+fn token_name(name: String) -> Bool =
+  total > 0 && all_bytes(tchar, encoded, 0, total)
+where
+  encoded = bytes.from_string(name)
+  total = bytes.length(encoded)
+
 fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
   match pair with
   | (name, value) ->
-      if string.is_empty(name) then Nothing
-      else Just((string.to_lower_ascii(string.trim(name)), string.trim(value)))
+      if token_name(name) then Just((string.to_lower_ascii(name), string.trim(value)))
+      else Nothing
 
 fn parse_header_line(raw: String) -> Maybe (String, String) =
   and_then(parse_header_pair, string.split_once(raw, ":"))
@@ -286,18 +306,24 @@ fn parse_body_framing(headers: Dict String) -> ServerResult Int =
   | Just _ -> Err(HttpUnsupportedTransferCoding)
   | Nothing -> parse_content_length(headers)
 
-# W8/P1: parse_int is now total (Maybe Int), so the all_digits predicate is
-# redundant. Still reject negatives (the old digits check excluded '-').
+# RFC 9110 §8.6: Content-Length is 1*DIGIT. `parse_int` also takes a leading `-`, so `-0` would
+# pass as 0 where a stricter proxy refuses it. It answers Nothing on overflow.
 fn parse_content_length(headers: Dict String) -> ServerResult Int =
   match dict_get("content-length", headers) with
   | Nothing -> Ok(0)
   | Just raw ->
       if string.is_empty(raw) then Err(HttpInvalidRequest("empty Content-Length"))
+      else if !all_digits(raw) then Err(HttpInvalidRequest("invalid Content-Length"))
       else content_length_result(parse_int(raw))
+
+fn all_digits(raw: String) -> Bool =
+  all_bytes(digit_byte, encoded, 0, bytes.length(encoded))
+where
+  encoded = bytes.from_string(raw)
 
 fn content_length_result(m: Maybe Int) -> ServerResult Int =
   match m with
-  | Just n -> if n >= 0 then Ok(n) else Err(HttpInvalidRequest("invalid Content-Length"))
+  | Just n -> Ok(n)
   | Nothing -> Err(HttpInvalidRequest("invalid Content-Length"))
 
 # The request line and header block of the request starting at byte `start` of `raw`, whose header
