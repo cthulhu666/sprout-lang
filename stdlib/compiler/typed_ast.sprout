@@ -421,9 +421,10 @@ export fn node_count(prog: TypedProgram) -> Int =
   | TypedProgram decls -> count_decls(decls)
 
 fn count_decls(decls: List TypedDecl) -> Int =
-  list_fold(\ (acc, d) -> acc + count_decl(d), 0, decls)
+  list_fold(\ (acc, d) -> acc + decl_node_count(d), 0, decls)
 
-fn count_decl(d: TypedDecl) -> Int =
+# One declaration's share of `node_count`.
+export fn decl_node_count(d: TypedDecl) -> Int =
   match d with
   | TFnDecl _ _ _ _ _ body -> count_expr(body)
   | TExternFnDecl _ _ _ _ -> 0

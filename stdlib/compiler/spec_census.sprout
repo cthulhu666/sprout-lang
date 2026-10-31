@@ -1,0 +1,376 @@
+module stdlib.compiler.spec_census
+import stdlib.compiler.ast as ast
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.sort (sort)
+import stdlib.string as string
+
+# How many calls would specialising constrained functions copy, and what would the
+# copies cost? (docs/specialisation-v0.md §4 and §7, M0a: the Dictionaries and
+# Growth axes.) Runs on the RESOLVED program, before dictionary lowering, where a
+# call's evidence is still a tree of `EvInstance` / `EvForward` rather than hidden
+# parameters. Counts and rewrites nothing.
+#
+# A KEY is a constrained top-level function and the evidence for each of its
+# constraints. §4 keys a copy by the instances of the CONSTRAINED type variables;
+# the serialised evidence trees (`ev_text`) are that, since the evidence fixes
+# exactly those instances and nothing else.
+#
+#   concrete_calls — calls in the original program to a constrained function whose
+#     evidence is `EvInstance` all the way down. A forwarded, unresolved or missing
+#     piece anywhere in it excludes the call; existential evidence is forwarded.
+#   direct_keys    — distinct keys among those calls.
+#   closed_keys    — direct keys plus every key their copies would call, to a fixed
+#     point (§4 "A worklist with a cache"). Walking a copy's body replaces each
+#     forwarded dictionary by the caller's, by slot key (`typed_ast.dict_slot_key`).
+#   declined       — keys the growth backstop refuses: the same function already on
+#     the key's path with instances that are a strict subterm of the new ones. §4
+#     expects 0 while polymorphic recursion is rejected for constrained functions.
+#   devirt_multi   — method calls inside copies that `try_devirt_concrete` cannot
+#     finish: more than one leading dictionary (`sole_leading_ev_classes`).
+#   devirt_context — method calls inside copies whose evidence has an instance with
+#     context dictionaries (`generate_one_instance_fn`); copying gains nothing in them.
+#     The two overlap when a call is both.
+#   closed_nodes   — sum over closed keys of the callee's node count: what the copies
+#     add. program_nodes is `typed_ast.node_count`, the size they add to.
+#
+# Instance method bodies are not copied (§4 "Limits"), so the closure walks
+# constrained top-level functions only.
+
+export type Census (..) = (
+  concrete_calls: Int,
+  direct_keys: Int,
+  closed_keys: Int,
+  declined: Int,
+  devirt_multi: Int,
+  devirt_context: Int,
+  closed_nodes: Int,
+  program_nodes: Int
+)
+
+# The census, and one line per closed key ("<key> <- direct" or "<- <producing fn>"),
+# sorted, so the keys behind the numbers can be read.
+export type Analysis (..) = (census: Census, keys: List String)
+
+export fn analyse(prog: typed_ast.TypedProgram) -> Analysis =
+  match prog with
+  | typed_ast.TypedProgram decls -> analyse_decls(decls, prog)
+
+# ---------------------------------------------------------------------------
+# Keys and sites
+# ---------------------------------------------------------------------------
+
+# `text` is the whole key as one string: the function, then its evidence trees.
+type Key = (fn_name: String, evs: List typed_ast.Evidence, text: String)
+
+# A constrained top-level function, as a copy would start from it.
+type Callee = (constraints: List ast.TypeConstraint, params: List ast.Param,
+               body: typed_ast.TypedExpr, nodes: Int)
+
+# What one body walk finds: the keys of its concrete calls, and its method calls the
+# devirtualiser would not finish.
+type Sites = (keys: List Key, multi: Int, context: Int)
+
+# What a walk needs: the constrained functions by name, the class methods by name, and
+# the concrete evidence to put in each forwarded slot (empty for the original program).
+type Walk = (callees: Dict Callee, methods: Dict Bool,
+             slots: typed_ast.SlotTable typed_ast.Evidence)
+
+fn no_sites() -> Sites = Sites(keys = Nil, multi = 0, context = 0)
+
+fn make_key(fn_name: String, evs: List typed_ast.Evidence) -> Key =
+  Key(fn_name = fn_name, evs = evs, text = string.join(" ", Cons(fn_name, list_map(ev_text, evs))))
+
+# ---------------------------------------------------------------------------
+# Evidence
+# ---------------------------------------------------------------------------
+
+# An instance by its key with its context in parentheses, a forwarded slot by name.
+fn ev_text(ev: typed_ast.Evidence) -> String =
+  match ev with
+  | typed_ast.EvInstance _ key children -> typed_ast.instance_key_text(key) ++ context_text(children)
+  | typed_ast.EvClasses blocks -> "[" ++ string.join(" ", list_map(ev_text, blocks)) ++ "]"
+  | typed_ast.EvForward _ slot -> "fwd:" ++ typed_ast.slot_key_text(slot)
+  | typed_ast.EvUnresolved -> "unresolved"
+  | typed_ast.EvMissing _ -> "missing"
+
+fn context_text(children: List typed_ast.Evidence) -> String =
+  match children with
+  | Nil -> ""
+  | _ -> "(" ++ string.join(",", list_map(ev_text, children)) ++ ")"
+
+fn ev_children(ev: typed_ast.Evidence) -> List typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> children
+  | typed_ast.EvClasses blocks -> blocks
+  | typed_ast.EvForward _ _ -> Nil
+  | typed_ast.EvUnresolved -> Nil
+  | typed_ast.EvMissing _ -> Nil
+
+# `EvInstance` all the way down.
+fn ev_concrete(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> all(ev_concrete, children)
+  | typed_ast.EvClasses blocks -> all(ev_concrete, blocks)
+  | typed_ast.EvForward _ _ -> false
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+
+# Some instance inside takes context dictionaries of its own.
+fn ev_has_context(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> list_length(children) > 0
+  | typed_ast.EvClasses blocks -> any(ev_has_context, blocks)
+  | typed_ast.EvForward _ _ -> false
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+
+# `ev` with each forwarded slot that `slots` holds replaced by its evidence. A slot it
+# does not hold (an existential's, or a phantom variable's) stays forwarded.
+fn ev_substitute(ev: typed_ast.Evidence, slots: typed_ast.SlotTable typed_ast.Evidence) -> typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvForward _ slot -> maybe_with_default(ev, typed_ast.slot_get(slot, slots))
+  | typed_ast.EvInstance cls key children ->
+      typed_ast.EvInstance(cls, key, list_map(ev_substitute(_, slots), children))
+  | typed_ast.EvClasses blocks -> typed_ast.EvClasses(list_map(ev_substitute(_, slots), blocks))
+  | typed_ast.EvUnresolved -> ev
+  | typed_ast.EvMissing _ -> ev
+
+fn ev_contains(outer: typed_ast.Evidence, inner_text: String) -> Bool =
+  ev_text(outer) == inner_text || any(ev_contains(_, inner_text), ev_children(outer))
+
+# `new` repeats `old` inside itself, position by position, and differs in at least one.
+fn ev_list_grows(old: List typed_ast.Evidence, new: List typed_ast.Evidence, differs: Bool) -> Bool =
+  match (old, new) with
+  | ([], []) -> differs
+  | ([o | os], [n | ns]) ->
+      if ev_contains(n, ev_text(o))
+      then ev_list_grows(os, ns, differs || ev_text(o) != ev_text(n))
+      else false
+  | _ -> false
+
+# The slots a copy fills, one per block of each constraint's evidence. `build_hidden_for_constraints`
+# keys the callee's own slots by each effective class and the constraint's WRITTEN arguments, and
+# a TDict's blocks come in the same class order, so a block's class names its slot.
+fn slots_for(constraints: List ast.TypeConstraint, evs: List typed_ast.Evidence)
+    -> typed_ast.SlotTable typed_ast.Evidence =
+  match (constraints, evs) with
+  | ([ast.TypeConstraint _ type_args | cs], [typed_ast.EvClasses blocks | es]) ->
+      list_fold(\ (t, b) -> typed_ast.slot_set(typed_ast.dict_slot_key(block_class(b), type_args), b, t),
+                slots_for(cs, es), blocks)
+  | _ -> typed_ast.slot_table_empty()
+
+fn block_class(ev: typed_ast.Evidence) -> String =
+  match ev with
+  | typed_ast.EvInstance cls _ _ -> cls
+  | typed_ast.EvForward cls _ -> cls
+  | typed_ast.EvClasses _ -> ""
+  | typed_ast.EvUnresolved -> ""
+  | typed_ast.EvMissing _ -> ""
+
+# ---------------------------------------------------------------------------
+# One walk
+# ---------------------------------------------------------------------------
+
+# Every call in `e`, with the names bound locally at that point tracked: a local can
+# share a top-level function's or a method's name, and then the call is not to it.
+# Every variant is listed, so a new binding form cannot fall through unbound.
+fn scan(e: typed_ast.TypedExpr, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  match e with
+  | typed_ast.TCall callee args _ _ -> scan_all(typed_ast.children(e), locals, w, note_call(callee, args, locals, w, acc))
+  | typed_ast.TLambda params body _ _ -> scan(body, bind_params(params, locals), w, acc)
+  | typed_ast.TMatch scrut branches _ _ ->
+      list_fold(\ (a, b) -> scan_branch(b, locals, w, a), scan(scrut, locals, w, acc), branches)
+  | typed_ast.TDo steps _ _ -> scan_steps(steps, locals, w, acc)
+  | typed_ast.TVar _ _ _ -> acc
+  | typed_ast.TInt _ _ _ -> acc
+  | typed_ast.TFloat _ _ _ -> acc
+  | typed_ast.TBool _ _ _ -> acc
+  | typed_ast.TString _ _ _ -> acc
+  | typed_ast.TChar _ _ _ -> acc
+  | typed_ast.TUnit _ _ -> acc
+  | typed_ast.TDict _ _ _ _ -> acc
+  | typed_ast.TMethodRef _ _ _ _ _ -> acc
+  | typed_ast.TTuple _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TIf _ _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TBinary _ _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TUnary _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TRange _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TRecord _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TGetField _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TRecordUpdate _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+
+fn scan_all(es: List typed_ast.TypedExpr, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  list_fold(\ (a, e) -> scan(e, locals, w, a), acc, es)
+
+fn scan_branch(b: typed_ast.TypedMatchBranch, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  match b with
+  | typed_ast.TypedMatchBranch pat body -> scan(body, bind_names(ast.pattern_names(pat), locals), w, acc)
+
+# A step binds for the steps below it, not for its own value.
+fn scan_steps(steps: List typed_ast.TypedDoStep, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  match steps with
+  | Nil -> acc
+  | Cons s rest -> scan_steps(rest, step_binds(s, locals), w, scan(typed_ast.step_value(s), locals, w, acc))
+
+fn step_binds(s: typed_ast.TypedDoStep, locals: Dict Bool) -> Dict Bool =
+  match s with
+  | typed_ast.TDoBindStep pat _ _ -> bind_names(ast.pattern_names(pat), locals)
+  | typed_ast.TDoLetStep name _ -> dict_set(name, true, locals)
+  | typed_ast.TDoExprStep _ -> locals
+
+fn bind_names(names: List String, locals: Dict Bool) -> Dict Bool =
+  list_fold(\ (l, n) -> dict_set(n, true, l), locals, names)
+
+fn bind_params(params: List ast.Param, locals: Dict Bool) -> Dict Bool =
+  list_fold(\ (l, p) -> dict_set(param_name(p), true, l), locals, params)
+
+fn param_name(p: ast.Param) -> String =
+  match p with
+  | ast.Param name _ _ -> name
+
+# The dictionaries a call carries, with `w`'s slots filled in, in argument order.
+fn call_evidence(args: List typed_ast.TypedExpr, w: Walk) -> List typed_ast.Evidence =
+  list_filter_map(\a -> dict_evidence(a, w), args)
+
+fn dict_evidence(a: typed_ast.TypedExpr, w: Walk) -> Maybe typed_ast.Evidence =
+  match a with
+  | typed_ast.TDict _ _ _ ev -> Just(ev_substitute(ev, w.slots))
+  | _ -> Nothing
+
+fn note_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, locals: Dict Bool, w: Walk,
+             acc: Sites) -> Sites =
+  let typed_ast.TVar name _ _ = callee else acc
+      Nothing = dict_get(name, locals) else acc
+      evs = call_evidence(args, w)
+  in
+    if !all(ev_concrete, evs) then acc
+    else
+      match dict_get(name, w.callees) with
+      | Just info ->
+          if list_length(evs) == list_length(info.constraints)
+          then acc with (keys = Cons(make_key(name, evs), acc.keys))
+          else acc
+      | Nothing -> note_method(name, evs, w, acc)
+
+# A call to a class method: finished by the devirtualiser unless it takes a second
+# dictionary of its own.
+fn note_method(name: String, evs: List typed_ast.Evidence, w: Walk, acc: Sites) -> Sites =
+  if !dict_member(name, w.methods) || list_length(evs) == 0 then acc
+  else acc with (multi = acc.multi + (if list_length(evs) > 1 then 1 else 0),
+                 context = acc.context + (if any(ev_has_context, evs) then 1 else 0))
+
+# ---------------------------------------------------------------------------
+# The program
+# ---------------------------------------------------------------------------
+
+fn callee_table(decls: List typed_ast.TypedDecl) -> Dict Callee =
+  list_fold(\ (t, d) -> add_callee(d, t), dict_empty(), decls)
+
+fn add_callee(d: typed_ast.TypedDecl, table: Dict Callee) -> Dict Callee =
+  match d with
+  | typed_ast.TFnDecl name params _ _ (Cons c cs) body ->
+      dict_set(name, Callee(constraints = Cons(c, cs), params = params, body = body,
+                            nodes = typed_ast.decl_node_count(d)), table)
+  | _ -> table
+
+fn method_table(decls: List typed_ast.TypedDecl) -> Dict Bool =
+  list_fold(\ (t, names) -> list_fold(\ (u, n) -> dict_set(n, true, u), t, names), dict_empty(),
+            vec_to_list(dict_values(typed_ast.class_tables(decls).order)))
+
+# Every body of the original program, nothing yet substituted.
+fn original_sites(decls: List typed_ast.TypedDecl, w: Walk) -> Sites =
+  list_fold(\ (acc, d) -> decl_sites(d, w, acc), no_sites(), decls)
+
+fn decl_sites(d: typed_ast.TypedDecl, w: Walk, acc: Sites) -> Sites =
+  match d with
+  | typed_ast.TFnDecl _ params _ _ _ body -> scan(body, bind_params(params, dict_empty()), w, acc)
+  | typed_ast.TLetDecl _ value -> scan(value, dict_empty(), w, acc)
+  | typed_ast.TInstanceDecl _ _ methods -> list_fold(\ (a, m) -> method_sites(m, w, a), acc, methods)
+  | typed_ast.TExternFnDecl _ _ _ _ -> acc
+  | typed_ast.TPassThrough _ -> acc
+
+fn method_sites(m: typed_ast.TypedInstanceMethod, w: Walk, acc: Sites) -> Sites =
+  match m with
+  | typed_ast.TypedInstanceMethod _ params _ _ _ body -> scan(body, bind_params(params, dict_empty()), w, acc)
+
+# ---------------------------------------------------------------------------
+# The closure
+# ---------------------------------------------------------------------------
+
+# A key seen, and the key that produced it ("" for a direct one): the chain of
+# `parent`s is its path.
+type Seen = (key: Key, parent: String)
+
+type Closure = (seen: Dict Seen, pending: List Key, declined: Dict Bool, nodes: Int,
+                multi: Int, context: Int)
+
+fn start(direct: List Key) -> Closure =
+  Closure(seen = list_fold(\ (s, k) -> dict_set(k.text, Seen(key = k, parent = ""), s), dict_empty(), direct),
+          pending = direct, declined = dict_empty(), nodes = 0, multi = 0, context = 0)
+
+# Each key is visited once: its callee's body, walked under its evidence, gives the
+# keys and devirtualisation blockers of that copy.
+fn drain(cl: Closure, callees: Dict Callee, methods: Dict Bool) -> Closure =
+  match cl.pending with
+  | Nil -> cl
+  | Cons k rest -> drain(visit(k, cl with (pending = rest), callees, methods), callees, methods)
+
+fn visit(k: Key, cl: Closure, callees: Dict Callee, methods: Dict Bool) -> Closure =
+  match dict_get(k.fn_name, callees) with
+  | Nothing -> cl
+  | Just info ->
+      let w = Walk(callees = callees, methods = methods, slots = slots_for(info.constraints, k.evs))
+          found = scan(info.body, bind_params(info.params, dict_empty()), w, no_sites())
+          grown = cl with (nodes = cl.nodes + info.nodes, multi = cl.multi + found.multi,
+                           context = cl.context + found.context)
+      in list_fold(\ (c, found_key) -> admit(found_key, k, c), grown, found.keys)
+
+fn admit(found: Key, producer: Key, cl: Closure) -> Closure =
+  if dict_member(found.text, cl.seen) || dict_member(found.text, cl.declined) then cl
+  else if grows_on_path(found, producer.text, cl.seen)
+  then cl with (declined = dict_set(found.text, true, cl.declined))
+  else cl with (seen = dict_set(found.text, Seen(key = found, parent = producer.text), cl.seen),
+                pending = Cons(found, cl.pending))
+
+# The same function earlier on the path, at instances `found` strictly contains.
+fn grows_on_path(found: Key, at: String, seen: Dict Seen) -> Bool =
+  match dict_get(at, seen) with
+  | Nothing -> false
+  | Just s ->
+      (s.key.fn_name == found.fn_name && ev_list_grows(s.key.evs, found.evs, false))
+        || grows_on_path(found, s.parent, seen)
+
+# ---------------------------------------------------------------------------
+# Assembly
+# ---------------------------------------------------------------------------
+
+fn analyse_decls(decls: List typed_ast.TypedDecl, prog: typed_ast.TypedProgram) -> Analysis =
+  let callees = callee_table(decls)
+      methods = method_table(decls)
+      direct_sites = original_sites(decls, Walk(callees = callees, methods = methods,
+                                                slots = typed_ast.slot_table_empty()))
+      direct = distinct_keys(direct_sites.keys)
+      closed = drain(start(direct), callees, methods)
+  in Analysis(
+       census = Census(
+         concrete_calls = list_length(direct_sites.keys),
+         direct_keys = list_length(direct),
+         closed_keys = vec_length(dict_values(closed.seen)),
+         declined = vec_length(dict_values(closed.declined)),
+         devirt_multi = closed.multi,
+         devirt_context = closed.context,
+         closed_nodes = closed.nodes,
+         program_nodes = typed_ast.node_count(prog)),
+       keys = sort(list_map(seen_line(closed.seen, _), vec_to_list(dict_values(closed.seen)))))
+
+fn distinct_keys(keys: List Key) -> List Key =
+  vec_to_list(dict_values(list_fold(\ (d, k) -> dict_set(k.text, k, d), dict_empty(), keys)))
+
+# The producer is named by its function; the key text would repeat its evidence.
+fn seen_line(seen: Dict Seen, s: Seen) -> String =
+  s.key.text ++ " <- " ++ (if s.parent == "" then "direct" else producer_fn(s.parent, seen))
+
+fn producer_fn(text: String, seen: Dict Seen) -> String =
+  match dict_get(text, seen) with
+  | Just p -> p.key.fn_name
+  | Nothing -> text

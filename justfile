@@ -1630,6 +1630,27 @@ bind-census-smoke: bootstrap-from-seed
   fi
   echo "bind-census-smoke: OK ($(grep -c . "$WANT") lines)"
 
+# `--phase spec-keys` against its fixture, line for line. The census prices
+# specialisation before it is built (docs/specialisation-v0.md §7 M0a), so a count it
+# gets wrong is a design decision made on a wrong number. An exact diff: a missing
+# key and an extra key are both failures.
+[group('smoke')]
+spec-census-smoke: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -euo pipefail
+  WANT=tests/spec_census/dicts.expected
+  TMPD=$(mktemp -d /tmp/sprout_spec_census_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase spec-keys "{{stdlib_root}}" tests/spec_census/dicts.spr > "$TMPD/out" 2>&1; then
+    echo "spec-census-smoke: --phase spec-keys failed" >&2; cat "$TMPD/out" >&2; exit 1
+  fi
+  # program_nodes counts the whole prelude, so pinning it would fail on every prelude edit.
+  sed -E 's/ program_nodes=[0-9]+/ program_nodes=N/' "$TMPD/out" > "$TMPD/masked"
+  if ! diff -u "$WANT" "$TMPD/masked" >&2; then
+    echo "spec-census-smoke: output differs from $WANT (- expected, + actual)" >&2; exit 1
+  fi
+  echo "spec-census-smoke: OK ($(grep -c . "$WANT") lines)"
+
 # Calibration gate for `--phase effects`, the declared-vs-inferred effect report.
 #
 # This gate exists because the instrument's failure mode is SILENCE, not noise.
@@ -4183,6 +4204,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "bundle-smoke|bundle-smoke"
     "effect-report-smoke|effect-report-smoke"
     "bind-census-smoke|bind-census-smoke"
+    "spec-census-smoke|spec-census-smoke"
     "fmt-check|fmt-check"
     "fmt-batch-smoke|fmt-batch-smoke"
     "tui-files-smoke|tui-files-smoke"
