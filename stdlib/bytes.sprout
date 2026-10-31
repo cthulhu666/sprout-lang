@@ -241,9 +241,7 @@ where
 # O(|value|): true when `hit` accepts every byte; the empty input passes. It stops at the first
 # rejected byte.
 export fn all_bytes(hit: local Int -> Bool, value: Bytes) -> Bool =
-  match find_byte_from(\b -> !hit(b), value, 0) with
-  | Just _ -> false
-  | Nothing -> true
+  is_nothing(find_byte_from(\b -> !hit(b), value, 0))
 
 fn c_string_len_from(value: Bytes, index: Int, total: Int) -> Int =
   if index >= total then total
