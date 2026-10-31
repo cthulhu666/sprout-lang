@@ -873,7 +873,8 @@ field, and does not inspect the stored value — C cannot type it without a heap
 
 `IRReuseCtor` carries no field types, so lowering cannot tell a scalar cell from a pointer
 cell. `ast_to_ir` decides when it builds the ctor table (`CtorInfo.scalar_only`, from
-`type_kind.type_expr_is_non_heap_scalar`, the twin of the predicate that gates `IRVecSetD`)
+`field_kinds.ctor_fields_scalar_only` over `type_kind.type_expr_is_non_heap_scalar`, the twin
+of the predicate that gates `IRVecSetD`)
 and passes a `Bool` on the op. A type-variable field or a witness slot counts as heap, or a
 polymorphic linear cell loses its barrier.
 

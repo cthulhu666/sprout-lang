@@ -59,6 +59,12 @@ export fn ctor_field_kinds_string(exprs: List ast.TypeExpr) -> String =
   | Nil -> ""
   | Cons e rest -> ctor_field_kind(e) ++ ctor_field_kinds_string(rest)
 
+# True when no physical field can hold a heap value: no witness slots, and every
+# field a non-heap scalar (Double included, unlike the 'i'/'b' codes).  Clears
+# IRReuseCtor's write barrier.
+export fn ctor_fields_scalar_only(exprs: List ast.TypeExpr, witness_slots: Int) -> Bool =
+  witness_slots == 0 && all(type_kind.type_expr_is_non_heap_scalar, exprs)
+
 # --- Decoder ---
 
 # Decode a single field-kind byte to the rooting-classification IRType

@@ -1,11 +1,14 @@
 import stdlib.test (check_eq, check_true, run_suite)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.field_kinds as fk
 import stdlib.compiler.sprout_ir as sprout_ir
 
 # Unit tests for sprout_ir.CtorInfo, the name-keyed constructor-table value
 # ast_to_ir reads. The field values are all distinct (5 / 2 / 3 / "ips" /
 # ["a", "b"]), so a field read through the wrong name cannot pass by accident.
 # field_names is empty for ADT and wrap constructors (positional) and the
-# declaration-order labels for a record.
+# declaration-order labels for a record. fk.ctor_fields_scalar_only is what
+# ast_to_ir fills scalar_only from at every ctor-table row.
 
 fn main() -> Unit !{IO} =
   let ci = sprout_ir.CtorInfo(tag = 5, arity = 2, max_arity = 3, field_kinds = "ips",
@@ -14,6 +17,7 @@ fn main() -> Unit !{IO} =
       wrap_ci = sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1, field_kinds = "p",
                                    field_names = Nil, sole = true, linear = false,
                                    type_name = "Cell", scalar_only = true)
+      int_t = ast.TypeName("Int")
   in run_suite("ir_ctor_info", [
     check_eq("CtorInfo: tag", ci.tag, 5),
     check_eq("CtorInfo: arity", ci.arity, 2),
@@ -27,5 +31,11 @@ fn main() -> Unit !{IO} =
     check_true("CtorInfo: sole is read from its own field", !ci.sole),
     check_true("CtorInfo: linear is read from its own field", ci.linear && !wrap_ci.linear),
     check_true("CtorInfo: type_name names the enclosing type", ci.type_name == "Pair" && wrap_ci.type_name == "Cell"),
-    check_true("CtorInfo: scalar_only is read from its own field", !ci.scalar_only && wrap_ci.scalar_only)
+    check_true("CtorInfo: scalar_only is read from its own field", !ci.scalar_only && wrap_ci.scalar_only),
+    check_true("scalar_only: Int, Bool, Char and Double fields",
+               fk.ctor_fields_scalar_only([int_t, ast.TypeName("Bool"), ast.TypeName("Char"), ast.TypeName("Double")], 0)),
+    check_true("scalar_only: no fields", fk.ctor_fields_scalar_only(Nil, 0)),
+    check_true("scalar_only: a String field is heap", !fk.ctor_fields_scalar_only([int_t, ast.TypeName("String")], 0)),
+    check_true("scalar_only: a type-variable field is heap", !fk.ctor_fields_scalar_only([int_t, ast.TypeName("a")], 0)),
+    check_true("scalar_only: a witness slot is heap", !fk.ctor_fields_scalar_only([int_t], 1))
   ])
