@@ -124,9 +124,6 @@ static void run_builders(void) {
         "build(bytes_builder_bytes)");
   check(builder_is(bytes_builder_bytes(bytes_empty()), 0, 0), "bytes_builder_bytes(empty)");
 
-  check(builder_is(bytes_builder_byte(0x41), 1, 1), "bytes_builder_byte");
-  check(bytes_is_text(bytes_builder_build(bytes_builder_byte(0x41)), "A"), "build(byte)");
-
   check(builder_is(bytes_builder_u16_be(0x4142), 2, 1), "bytes_builder_u16_be");
   check(bytes_is_text(bytes_builder_build(bytes_builder_u16_be(0x4142)), "AB"), "build(u16_be)");
   check(bytes_is(bytes_builder_build(bytes_builder_u16_be(-1)), "\xff\xff", 2),
@@ -140,7 +137,7 @@ static void run_builders(void) {
   check(bytes_is(bytes_builder_build(bytes_builder_u32_be(-1)), "\xff\xff\xff\xff", 4),
         "build(u32_be(-1)) wraps");
 
-  SPROUT_HANDLE(h_a, bytes_builder_byte('a'));
+  SPROUT_HANDLE(h_a, bytes_builder_bytes(bytes_singleton('a')));
   SPROUT_HANDLE(h_bc, bytes_builder_u16_be(('b' << 8) | 'c'));
   SPROUT_HANDLE(h_none, bytes_builder_empty());
   long long a = sprout_handle_get(h_a);

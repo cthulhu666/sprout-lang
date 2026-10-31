@@ -9555,17 +9555,6 @@ long long bytes_builder_bytes(long long bytes_h) {
   return sprout_ptr_word(out);
 }
 
-long long bytes_builder_byte(long long value) {
-  if (value < 0 || value > 255) sprout_fail("bytes_builder_byte: byte out of range");
-  unsigned char data[1] = {(unsigned char)value};
-  BytesVal* chunk = bytes_from_chunk_bytes(data, 1, "bytes_builder_byte: out of memory");
-  SPROUT_GC_PUSH_PTR_LOCAL(chunk);
-  BuilderVal* out = builder_alloc(1, 1);
-  out->chunks[0] = chunk;
-  SPROUT_GC_POP_LOCALS(1);
-  return sprout_ptr_word(out);
-}
-
 static unsigned char builder_mod_256(long long value) {
   long long q = sprout_div_floor(value, 256);
   return (unsigned char)(value - q * 256);

@@ -54,7 +54,6 @@ argv_get_bytes  # reads the C argv stashed by the main shim — the process argu
 bytes_append
 bytes_builder_append
 bytes_builder_build
-bytes_builder_byte
 bytes_builder_bytes
 bytes_builder_empty
 bytes_builder_u16_be

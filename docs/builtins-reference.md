@@ -222,7 +222,6 @@ panics, and a negative *literal* count is a compile error.
 - `bytes_to_utf8(value: Bytes) -> Result stdlib.bytes.Utf8Error String`
 - `bytes_builder_empty() -> Builder`
 - `bytes_builder_bytes(value: Bytes) -> Builder`
-- `bytes_builder_byte(value: Int) -> Builder`
 - `bytes_builder_u16_be(value: Int) -> Builder`
 - `bytes_builder_u32_be(value: Int) -> Builder`
 - `bytes_builder_append(left: Builder, right: Builder) -> Builder`

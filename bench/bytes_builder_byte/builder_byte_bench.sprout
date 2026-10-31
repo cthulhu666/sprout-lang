@@ -1,0 +1,47 @@
+module main
+
+# Cost of the public `bytes.builder_byte`, alone and in the append chain hex and bigint build.
+#
+# usage: builder_byte_bench <row> <iterations>
+#   row byte   one builder_byte per iteration
+#       chain  1024 builder_byte appended, then built, per iteration
+
+import stdlib.time as time
+import stdlib.bytes as bytes
+import stdlib.argv as argv
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+# Each result is passed on, so no call can be dropped.
+fn byte_loop(i: Int, last: Builder) -> Builder =
+  if i <= 0 then last
+  else byte_loop(i - 1, bytes.builder_byte(rem(i, 256)))
+
+fn chain(i: Int, acc: Builder) -> Builder =
+  if i <= 0 then acc
+  else chain(i - 1, bytes.builder_append(acc, bytes.builder_byte(rem(i, 256))))
+
+fn chain_loop(i: Int, total: Int) -> Int =
+  if i <= 0 then total
+  else chain_loop(i - 1, total + bytes.length(bytes.builder_build(chain(1024, bytes.builder_empty()))))
+
+fn measure(row: String, iters: Int) -> Int =
+  if row == "byte" then bytes.length(bytes.builder_build(byte_loop(iters, bytes.builder_empty())))
+  else chain_loop(iters, 0)
+
+fn run(row: String, iters: Int) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    let out = measure(row, iters)
+    t1 <- time.now_micros()
+    let ns_x10 = (t1 - t0) * 10000 / iters
+    print(`${row} iters=${iters} out=${out} ns_per_call=${ns_x10 / 10}.${rem(ns_x10, 10)}`)
+
+let usage = "usage: builder_byte_bench <row> <iterations>"
+
+fn main() -> Unit !{IO} =
+  do
+    let Ok([row, iters_text]) = argv.all() else print(usage)
+    let Just iters = parse_int(iters_text) else print(usage)
+    run(row, iters)

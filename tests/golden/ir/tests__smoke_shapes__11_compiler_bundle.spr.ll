@@ -85,7 +85,6 @@ declare i64 @bytes_from_utf8(i64)
 declare i64 @bytes_to_utf8(i64)
 declare i64 @bytes_builder_empty()
 declare i64 @bytes_builder_bytes(i64)
-declare i64 @bytes_builder_byte(i64)
 declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
 declare i64 @bytes_builder_append(i64, i64)
@@ -159,7 +158,7 @@ declare i64 @fs_rename(i64, i64)
 @.str.26 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1977, column 45)\00" }
 @.str.27 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 58)\00" }
 @.str.28 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.29 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
+@.str.29 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 69, column 30)\00" }
 @__sprout_sclo.__sprout_ir_lambda_4 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_4 }
 @.str.30 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.31 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 67, column 18)\00" }

@@ -4,9 +4,13 @@ import testsupport.cost (assert_scales)
 
 # `builder_concat` joins many builders in order. `builder_append` copies both chunk tables, so a
 # left fold over k builders is O(k^2); a chunked reader whose k the peer picks needs better.
+# `builder_byte` builds one byte for every value in 0..255, and appends keep their order.
 
 fn low_byte(i: Int) -> Int =
   i - (i / 256) * 256
+
+fn builds_itself(v: Int) -> Bool =
+  bytes.builder_build(bytes.builder_byte(v)) == bytes.singleton(v)
 
 fn byte_builders(n: Int) -> List Builder =
   list_map(\i -> bytes.builder_byte(low_byte(i)), range_to_list(range_up(0, n - 1)))
@@ -24,6 +28,11 @@ fn in_order(b: Bytes, i: Int, n: Int) -> Bool =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    # `0..255` is inclusive, so this covers both ends.
+    assert_true(state, "every byte value builds itself", all(builds_itself, range_to_list(0..255)))
+    assert_true(state, "appends keep order",
+                bytes.builder_build(bytes.builder_append(bytes.builder_byte(1), bytes.builder_byte(2)))
+                  == bytes.append(bytes.singleton(1), bytes.singleton(2)))
     assert_true(state, "no builders give empty bytes",
                 bytes.length(bytes.builder_build(bytes.builder_concat([]))) == 0)
     assert_true(state, "one builder passes through", joins_in_order(1))
