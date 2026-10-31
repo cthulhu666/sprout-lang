@@ -1,0 +1,23 @@
+module main
+
+import stdlib.env as env
+
+# Prints the parse_int answer for the environment variable SPROUT_SMOKE_VALUE.
+#
+# `env_get` is, for now, one way to hand a program a String holding invalid UTF-8 (argv is checked
+# at startup). The digit scan in `parse_int` stops at the first byte that is not a digit, so it
+# must answer Nothing for `1<bad byte>` without walking the rest of the String; computing the
+# length first aborts at the bad byte. Run via `just argv-smoke`.
+# `parse_double` is not exercised: it still walks the whole String and aborts on one that is not
+# valid UTF-8. When `env_get` moves to the Bytes-primary API this fixture moves with it.
+
+fn show_int(m: Maybe Int) -> String =
+  match m with
+  | Just n -> "Just " ++ int_to_string(n)
+  | Nothing -> "Nothing"
+
+fn main() -> Unit !{IO} =
+  do
+    match env.get("SPROUT_SMOKE_VALUE") with
+    | Just v -> print(show_int(parse_int(v)))
+    | Nothing -> print("unset")

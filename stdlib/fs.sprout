@@ -127,6 +127,10 @@ extern fn fs_rename(from: String, to: String) -> Result FsError Unit !{IO}
 # ORDER IS UNSPECIFIED — it is the filesystem's order, not sorted. Sort at the
 # point of display; depending on the incidental order is a bug that reproduces
 # on one machine and not another.
+#
+# An entry name that is not valid UTF-8 cannot be a `String`, so it makes the whole
+# call `Err(FsIoError)`; no entry is skipped. Such a file cannot be listed (or
+# removed with `remove_dir_all`) through this module.
 export fn list_dir(dir: String) -> Result FsError (List String) !{IO} =
   fs_list_dir(dir)
 
@@ -201,6 +205,8 @@ export fn is_file(p: String) -> Bool !{IO} =
 # pointing at an ancestor is a leaf here, not a cycle.
 #
 # O(n) syscalls for n entries, one lstat each.
+#
+# Fails like `list_dir` when an entry name is not valid UTF-8.
 export fn read_dir(dir: String) -> Result FsError (List (String, Entry)) !{IO} =
   match fs_list_dir(dir) with
   | Err e -> Err(e)
@@ -253,6 +259,9 @@ fn make_dir_step(p: String) -> Result FsError Unit !{IO} =
 # link to a directory reports `SymlinkEntry` and takes the `remove` branch. A
 # version built on a following stat would delete the link's target instead, and
 # would loop forever on a link pointing at an ancestor.
+#
+# A directory holding an entry whose name is not valid UTF-8 fails with
+# `Err(FsIoError)`, as `list_dir` does; entries removed before that stay removed.
 export fn remove_dir_all(p: String) -> Result FsError Unit !{IO} =
   match symlink_stat(p) with
   | Err e -> Err(e)

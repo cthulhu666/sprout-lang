@@ -365,6 +365,7 @@ long long sprout_set_current_fn(const char* fn_name) {
 /* A Sprout String is required to be valid UTF-8; raw bytes from external
  * sources (files, stdin, processes, network) are validated at ingestion. */
 static int utf8_validate(const unsigned char* data, size_t len, const char** reason);
+static int utf8_valid(const unsigned char* data, size_t len);
 __attribute__((noreturn)) void sprout_abort_match(void);
 static long long sprout_make0(long long tag);
 static long long sprout_make1(long long tag, long long a0);
@@ -3253,8 +3254,7 @@ long long sprout_set_argv(int argc, char** argv) {
    * argv_get_unboxed intern the bytes as a String, which must be valid UTF-8. argv[0] is
    * never exposed to Sprout, so it is not checked. */
   for (int i = 1; i < argc; i++) {
-    const char* reason = NULL;
-    if (!utf8_validate((const unsigned char*)argv[i], strlen(argv[i]), &reason)) {
+    if (!utf8_valid((const unsigned char*)argv[i], strlen(argv[i]))) {
       fprintf(stderr, "argument %d is not valid UTF-8\n", i);
       exit(2);
     }
@@ -3427,10 +3427,26 @@ static long long fs_err_ctor_msg(long long ctor_tag, const char* detail) {
 /* The payload carries the path as well as strerror: by the time an error
  * reaches a log line the caller's own path variable is usually long gone, and
  * "No such file or directory" on its own names nothing. */
-static long long fs_err(int err, const char* path) {
+static long long fs_err_text(long long ctor_tag, const char* path, const char* what) {
   char detail[1024];
-  snprintf(detail, sizeof(detail), "%s: %s", path ? path : "(null path)", strerror(err));
-  return fs_err_ctor_msg(fs_error_ctor(err), detail);
+  int n = snprintf(detail, sizeof(detail), "%s: %s", path ? path : "(null path)", what);
+  if (n >= (int)sizeof(detail)) {
+    /* Truncated: drop a codepoint cut in half, as the text must stay valid UTF-8. */
+    size_t kept = sizeof(detail) - 1;
+    size_t start = kept;
+    while (start > 0 && ((unsigned char)detail[start - 1] & 0xC0) == 0x80) start--;
+    if (start > 0) {
+      start--;
+      unsigned char lead = (unsigned char)detail[start];
+      size_t width = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+      if (start + width > kept) detail[start] = '\0';
+    }
+  }
+  return fs_err_ctor_msg(ctor_tag, detail);
+}
+
+static long long fs_err(int err, const char* path) {
+  return fs_err_text(fs_error_ctor(err), path, strerror(err));
 }
 
 static long long fs_ok(long long payload) {
@@ -3491,12 +3507,9 @@ long long fs_list_dir(long long path_i) {
     if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
     /* A name is raw bytes, and a String must be valid UTF-8: fail the call rather than skip
      * the entry (a listing that silently loses one is wrong) or make the String. */
-    const char* utf8_reason = NULL;
-    if (!utf8_validate((const unsigned char*)de->d_name, strlen(de->d_name), &utf8_reason)) {
+    if (!utf8_valid((const unsigned char*)de->d_name, strlen(de->d_name))) {
       closedir(dir);
-      char detail[1024];
-      snprintf(detail, sizeof(detail), "entry name is not valid UTF-8 in %s", path);
-      return fs_err_ctor_msg(SPROUT_TAG(stdlib$fs$FsIoError), detail);
+      return fs_err_text(SPROUT_TAG(stdlib$fs$FsIoError), path, "entry name is not valid UTF-8");
     }
     SproutStr name = sprout_str_dup(de->d_name, "fs_list_dir: out of memory");
     {
@@ -4045,8 +4058,7 @@ static long long term_key_utf8(int lead, int from_tty) {
     }
     buf[len++] = (unsigned char)b;
   }
-  const char* reason = NULL;
-  if (!ok || !utf8_validate(buf, len, &reason)) {
+  if (!ok || !utf8_valid(buf, len)) {
     return sprout_interned_word("\357\277\275"); /* U+FFFD */
   }
   sprout_gc_maybe_collect_threshold();
@@ -4139,8 +4151,8 @@ long long term_read_key(void) {
   if (ch == 27) return sprout_interned_word(token_escape);
   if (ch == '\n' || ch == '\r') return sprout_interned_word(token_enter);
   if (ch == '\t') return sprout_interned_word(token_tab);
-  /* A String cannot hold a NUL; U+FFFD, as for any other byte that is not a key. */
-  if (ch == 0) return sprout_interned_word("\357\277\275");
+  /* A String cannot hold a NUL: term_key_utf8 rejects it and returns U+FFFD. */
+  if (ch == 0) return term_key_utf8(ch, 0);
   /* Reached only by the non-tty and termios-failure paths; the raw-mode path
    * assembles and returns above, where it still holds raw mode. Continuation bytes
    * come from getchar() here, which is correct precisely because these paths never
@@ -7365,6 +7377,53 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
   return out.data != NULL ? out.data : dup_cstr("");
 }
 
+/* The header block as a malloc'd, NUL-terminated, valid UTF-8 C string.
+ *
+ * Decided per line: a line that is valid UTF-8 is kept as is; any other line is read as
+ * ISO-8859-1, each byte b >= 0x80 becoming U+00b (two bytes in UTF-8). The result is always valid
+ * UTF-8, so a response is never refused for its headers. RFC 9110 section 5.5 treats a byte in
+ * %x80-FF ("obs-text") as opaque data, and older HTTP allowed ISO-8859-1 there; Python's
+ * http.client decodes headers as ISO-8859-1 too. A field name is made of ASCII token characters, so
+ * in effect only the value is ever decoded. The source is read twice, to size the output and to
+ * fill it, so nothing is copied before it is known to be valid. */
+static size_t http_headers_fill(const char* src, size_t len, char* dst) {
+  size_t out = 0;
+  size_t i = 0;
+  while (i < len) {
+    const char* nl = (const char*)memchr(src + i, '\n', len - i);
+    size_t line = nl != NULL ? (size_t)(nl - (src + i)) : len - i;
+    size_t take = line + (nl != NULL ? 1 : 0);
+    if (utf8_valid((const unsigned char*)(src + i), line)) {
+      if (dst != NULL) memcpy(dst + out, src + i, take);
+      out += take;
+    } else {
+      for (size_t k = 0; k < take; k++) {
+        unsigned char b = (unsigned char)src[i + k];
+        if (b < 0x80) {
+          if (dst != NULL) dst[out] = (char)b;
+          out += 1;
+        } else {
+          if (dst != NULL) {
+            dst[out] = (char)(0xC0 | (b >> 6));
+            dst[out + 1] = (char)(0x80 | (b & 0x3F));
+          }
+          out += 2;
+        }
+      }
+    }
+    i += take;
+  }
+  return out;
+}
+
+static char* http_headers_to_utf8(const char* src, size_t len) {
+  size_t out_len = http_headers_fill(src, len, NULL);
+  char* out = alloc_cstr(out_len, "http_request: out of memory");
+  http_headers_fill(src, len, out);
+  out[out_len] = '\0';
+  return out;
+}
+
 /* `response_len` is the exact byte count the recv loop accumulated, and taking it is the whole of the
  * fix for the truncated-body defect. The buffer was always correct — buf_append_bytes memcpy's, so a
  * 0x00 in the payload survives the read — but the length was dropped at this call boundary, leaving
@@ -7431,14 +7490,7 @@ static long long http_response_result(char* response_data, size_t response_len) 
     return http_err1(SPROUT_TAG(stdlib$http$HttpBadStatus), status);
   }
 
-  char* headers = dup_slice(headers_start, (size_t)(headers_end - headers_start));
-  /* The header block becomes a String, which must be valid UTF-8. */
-  const char* headers_reason = NULL;
-  if (!utf8_validate((const unsigned char*)headers, (size_t)(headers_end - headers_start), &headers_reason)) {
-    free(headers);
-    free(response_data);
-    return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "response headers are not valid UTF-8");
-  }
+  char* headers = http_headers_to_utf8(headers_start, (size_t)(headers_end - headers_start));
   /* The body runs from just past the blank line to the END OF THE BUFFER — a span computed from
    * `response_len`, never from strlen. `dup_slice` copies it byte-for-byte (memcpy), so NULs and
    * invalid UTF-8 both survive; `body_len` is what carries the real extent from here on. */
@@ -9166,6 +9218,11 @@ static int utf8_validate(const unsigned char* data, size_t len, const char** rea
     return 0;
   }
   return 1;
+}
+
+static int utf8_valid(const unsigned char* data, size_t len) {
+  const char* reason = NULL;
+  return utf8_validate(data, len, &reason);
 }
 
 long long bytes_to_utf8(long long bytes_h) {

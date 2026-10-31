@@ -16,15 +16,8 @@ fn show_double(m: Maybe Double) -> String =
   | Just d -> "Just " ++ double_to_string(d)
   | Nothing -> "Nothing"
 
-fn report(args: List String) -> Unit !{IO} =
-  match args with
-  | [a | rest] ->
-      do
-        print(show_int(parse_int(a)) ++ " " ++ show_double(parse_double(a)))
-        report(rest)
-  | _ -> print("end")
-
 fn main() -> Unit !{IO} =
   do
     args <- argv_all()
-    report(args)
+    list_each(\a -> print(show_int(parse_int(a)) ++ " " ++ show_double(parse_double(a))), args)
+    print("end")

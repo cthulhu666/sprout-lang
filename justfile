@@ -2052,8 +2052,9 @@ verify-dispatch-smoke: bootstrap-from-seed
 # its command-line arguments — the typed-codegen flip self-compiles the
 # compiler, whose main() reads argv.  The parity corpus runs every binary with
 # NO args, so this is the ONLY gate exercising argv_all() under typed codegen.
-# It also runs tests/argv_smoke/parse_int_bad_utf8.spr, the only way to hand `parse_int` a String
-# holding invalid UTF-8.
+# It also runs tests/argv_smoke/argv_utf8.spr (an argument that is not valid UTF-8 stops the program
+# at startup) and tests/argv_smoke/env_utf8.spr (parse_int on an env String holding
+# invalid UTF-8, the way left to hand them one).
 [group('smoke')]
 argv-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -2076,16 +2077,16 @@ argv-smoke: bootstrap-from-seed
   # Second fixture: an argument that is not valid UTF-8 stops the program at startup, before any
   # user code runs, with status 2 and a message naming the argument. $'..' passes the raw bytes.
   FIXTURE=tests/argv_smoke/argv_utf8.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/bad.ll" 2>"$TMPD/err"; then
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/utf8.ll" 2>"$TMPD/err"; then
     echo "argv-smoke: argv_utf8 fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
   fi
-  if ! clang "$TMPD/bad.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bad_bin" 2>"$TMPD/link.err"; then
+  if ! clang "$TMPD/utf8.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/utf8_bin" 2>"$TMPD/link.err"; then
     echo "argv-smoke: argv_utf8 fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
   fi
   # Valid arguments, ASCII and not, reach the program.
   want=$'Nothing Nothing\nNothing Nothing\nJust 42 Just 42.0\nend'
-  got=$("$TMPD/bad_bin" abc $'\xc3\xa9' 42 2>"$TMPD/bad.err") || {
-    echo "argv-smoke: valid arguments were rejected" >&2; cat "$TMPD/bad.err" >&2; exit 1
+  got=$("$TMPD/utf8_bin" abc $'\xc3\xa9' 42 2>"$TMPD/utf8.err") || {
+    echo "argv-smoke: valid arguments were rejected" >&2; cat "$TMPD/utf8.err" >&2; exit 1
   }
   if [[ "$got" != "$want" ]]; then
     echo "argv-smoke: argv_utf8 on valid arguments - expected:" >&2; echo "$want" >&2
@@ -2095,20 +2096,42 @@ argv-smoke: bootstrap-from-seed
   # Invalid arguments: exit 2, the message names the bad index, nothing reaches stdout.
   for bad in $'x\xff' $'\xff' $'1\xff' $'12\xc3' $'\xed\xa0\x80'; do
     rc=0
-    out=$("$TMPD/bad_bin" ok "$bad" other 2>"$TMPD/bad.err") || rc=$?
+    out=$("$TMPD/utf8_bin" ok "$bad" other 2>"$TMPD/utf8.err") || rc=$?
     if [[ "$rc" -ne 2 || -n "$out" ]]; then
       echo "argv-smoke: invalid argument: expected exit 2 and no output, got exit $rc, output '$out'" >&2
       exit 1
     fi
-    if [[ "$(cat "$TMPD/bad.err")" != "argument 2 is not valid UTF-8" ]]; then
-      echo "argv-smoke: wrong message: $(cat "$TMPD/bad.err")" >&2; exit 1
+    if [[ "$(cat "$TMPD/utf8.err")" != "argument 2 is not valid UTF-8" ]]; then
+      echo "argv-smoke: wrong message: $(cat "$TMPD/utf8.err")" >&2; exit 1
     fi
   done
   # With several bad arguments the first is the one reported.
   rc=0
-  "$TMPD/bad_bin" $'\xff' $'\xfe' >/dev/null 2>"$TMPD/bad.err" || rc=$?
-  if [[ "$rc" -ne 2 || "$(cat "$TMPD/bad.err")" != "argument 1 is not valid UTF-8" ]]; then
-    echo "argv-smoke: first bad argument was not reported: exit $rc, $(cat "$TMPD/bad.err")" >&2; exit 1
+  "$TMPD/utf8_bin" $'\xff' $'\xfe' >/dev/null 2>"$TMPD/utf8.err" || rc=$?
+  if [[ "$rc" -ne 2 || "$(cat "$TMPD/utf8.err")" != "argument 1 is not valid UTF-8" ]]; then
+    echo "argv-smoke: first bad argument was not reported: exit $rc, $(cat "$TMPD/utf8.err")" >&2; exit 1
+  fi
+  # Third fixture: env_get can still hand a program an invalid String. parse_int
+  # must answer Nothing for `1<bad byte>` without the UTF-8 walker aborting. The later Bytes-primary
+  # change to env_get moves this test with it.
+  FIXTURE=tests/argv_smoke/env_utf8.spr
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/env.ll" 2>"$TMPD/err"; then
+    echo "argv-smoke: env_utf8 fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
+  fi
+  if ! clang "$TMPD/env.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/env_bin" 2>"$TMPD/link.err"; then
+    echo "argv-smoke: env_utf8 fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+  fi
+  for bad in $'1\xff' $'\xff' $'x\xff' $'12\xc3'; do
+    rc=0
+    got=$(SPROUT_SMOKE_VALUE="$bad" "$TMPD/env_bin" 2>"$TMPD/env.err") || rc=$?
+    if [[ "$rc" -ne 0 || "$got" != "Nothing" ]]; then
+      echo "argv-smoke: parse_int on an invalid env String: exit $rc, output '$got'" >&2
+      cat "$TMPD/env.err" >&2; exit 1
+    fi
+  done
+  got=$(SPROUT_SMOKE_VALUE=42 "$TMPD/env_bin")
+  if [[ "$got" != "Just 42" ]]; then
+    echo "argv-smoke: env_utf8 on a valid value: got '$got'" >&2; exit 1
   fi
   echo "==> argv-smoke ✓"
 
