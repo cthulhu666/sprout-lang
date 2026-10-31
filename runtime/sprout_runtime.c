@@ -838,11 +838,9 @@ static inline void sprout_gc_barrier(void* payload) {
     sprout_gc_remember_slow(payload, h);
 }
 
-/* The extern entry, for emitted IR.  NULL is ignored; any other non-managed
- * pointer is the caller's bug, since telling it apart costs a heap lookup. */
-void sprout_gc_write_barrier(void* payload) {
-  if (payload != NULL) sprout_gc_barrier(payload);
-}
+/* The extern entry, for emitted IR.  Its one emitter, IRReuseCtor, passes a reused
+ * constructor cell, which is always a managed payload; there is no NULL check. */
+void sprout_gc_write_barrier(void* payload) { sprout_gc_barrier(payload); }
 
 /* ── SPROUT_GC_AGEPROF=1 — how much of a collection is re-work? ───────────────
  *
@@ -889,12 +887,12 @@ static long long g_ap_live_by_age[SPROUT_GC_AGE_MAX + 1];
 #ifdef SPROUT_GC_AGEPROF_STORES
 static long long g_ap_mut_calls = 0;       /* mutation-primitive calls seen */
 static long long g_ap_ptr_stores = 0;      /* ...of which stored a heap pointer */
-static long long g_ap_old_to_young = 0;    /* ...of which a barrier would record */
+static long long g_ap_old_to_young = 0;    /* ...of which went old (age >= 1) to young */
 
-/* Price a pointer store into an already-allocated object.  Called from the
- * mutation primitives (ref_write, vector_mutset) — the candidate barrier sites.
- * A value that is not a heap pointer needs no barrier, so it is not counted in
- * the denominator either. */
+/* Price a pointer store into an already-allocated object.  Called from every C
+ * barrier site, through sprout_gc_on_store.  old_to_young estimates by age; the
+ * barrier itself records by colour bit.  A value that is not a heap pointer is
+ * not counted in the denominator. */
 static void sprout_ap_note_ptr_store(long long target, long long value) {
   /* Counted before the lookups so a zero ptr_stores can be told apart from a hook
    * that never ran — "a barrier would be free here" and "we did not measure this"
@@ -928,6 +926,13 @@ static inline void sprout_ap_on_store(long long target, long long value) {
   (void)value;
 }
 #endif
+
+/* Every C store of `value` into the already-allocated object `target`: the
+ * barrier records `target`, and AGEPROF prices the store. */
+static inline void sprout_gc_on_store(long long target, long long value) {
+  sprout_gc_barrier((void*)(uintptr_t)target);
+  sprout_ap_on_store(target, value);
+}
 
 /* Runs after the atexit full collect (destructors follow atexit handlers), so
  * the totals include every cycle.  Aborts rather than reports on an internal
@@ -2208,10 +2213,7 @@ long long ref_read(long long ref) {
 long long ref_write(long long ref, long long value) {
   if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
     sprout_fail("ref_write: not a Ref");
-  /* A pointer store into an already-allocated object: the barrier records the
-   * Ref, and AGEPROF prices the store (see sprout_ap_note_ptr_store). */
-  sprout_gc_barrier((void*)(uintptr_t)ref);
-  sprout_ap_on_store(ref, value);
+  sprout_gc_on_store(ref, value);
   ((RefVal*)(uintptr_t)ref)->value = value;
   return 0;
 }
@@ -5259,8 +5261,7 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
     words[1] = (uintptr_t)lines[i];
     words[2] = (uintptr_t)columns[i];
     out->data[i] = tuple;
-    sprout_gc_barrier(out);  /* an earlier tuple allocation may have promoted out */
-    sprout_ap_on_store(rooted_out, tuple);
+    sprout_gc_on_store(rooted_out, tuple);  /* an earlier tuple allocation may have promoted out */
     out->len = i + 1;
   }
   if (lines != NULL) free(lines);
@@ -5313,8 +5314,7 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
     words[2] = (uintptr_t)lines[i];
     words[3] = (uintptr_t)columns[i];
     out->data[i] = tuple;
-    sprout_gc_barrier(out);  /* an earlier tuple allocation may have promoted out */
-    sprout_ap_on_store(rooted_out, tuple);
+    sprout_gc_on_store(rooted_out, tuple);  /* an earlier tuple allocation may have promoted out */
     out->len = i + 1;
   }
   if (lines != NULL) free(lines);
@@ -8629,9 +8629,8 @@ long long vector_mutset(long long vec, long long index, long long value) {
   if (index < 0 || index >= v->len) sprout_fail("vector_mutset: index out of bounds");
   /* The store lands either in the VectorVal's own slot or in a malloc buffer it
    * owns; neither is a GC object in its own right, so the barrier records the
-   * OWNING VectorVal.  See ref_write. */
-  sprout_gc_barrier(v);
-  sprout_ap_on_store(vec, value);
+   * OWNING VectorVal. */
+  sprout_gc_on_store(vec, value);
   ((struct SproutSlot*)v->data)[index].w = value;
   return 0;
 }
@@ -8668,7 +8667,7 @@ long long vector_push(long long vec, long long value) {
   if (v == NULL) sprout_fail("vector_push: null vector");
   /* Before any growth: the growth below moves the elements out of the object's
    * own slot, and the barrier records the VectorVal, which does not move. */
-  sprout_gc_barrier(v);
+  sprout_gc_on_store(vec, value);
   if (v->len >= v->cap) {
     if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) sprout_fail("vector_push: vector too large");
     long long new_cap = v->cap <= 0 ? 8 : v->cap * 2;
@@ -8690,8 +8689,6 @@ long long vector_push(long long vec, long long value) {
     }
     v->cap = new_cap;
   }
-  /* AGEPROF prices the push like vector_mutset; its barrier ran above. */
-  sprout_ap_on_store(vec, value);
   v->data[v->len] = value;
   v->len = v->len + 1;
   return 0;

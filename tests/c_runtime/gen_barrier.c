@@ -54,13 +54,6 @@ static void old_is_recorded_once(void) {
   make_young(r);
 }
 
-/* NULL is a no-op: the extern entry is called from emitted IR, which has no payload to test. */
-static void null_is_ignored(void) {
-  reset_set();
-  sprout_gc_write_barrier(NULL);
-  check(g_gen.len == 0, "NULL records nothing");
-}
-
 /* Each C store site records its target, and only an old one. */
 static void sites_record_their_target(void) {
   long long r = ref_new(0);
@@ -131,7 +124,6 @@ int main(void) {
   setenv("SPROUT_GC_LINEAGE", "0", 1);
   young_records_nothing();
   old_is_recorded_once();
-  null_is_ignored();
   sites_record_their_target();
   set_grows();
   age_saturates();

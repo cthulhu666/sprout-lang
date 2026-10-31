@@ -338,7 +338,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `Double` a scalar, but `type_kind.scalar_field_code` gives it no code, so its field encodes `"p"`
   and every `IRGetField` of it is rooted. Safe (the GC ignores a non-address root), only wasted
   pushes. Fix: a scalar code for `Double`; it changes the ctor metadata strings, so golden IR moves
-  and `sprout_debug_adt` must decode the new byte.
+  and `sprout_debug_adt` must decode the new byte. With it, `ast_to_ir`'s `CtorInfo.scalar_only`
+  can be derived from `field_kinds` instead of computed from TypeExprs at three sites.
 - [ ] `P3` **Two `@fwd:` marker lookups still walk the whole type environment.**
   `infer.forwarded_tdict_for_tyvar` (after a direct-key miss) and `resolve_via_fwd_for_prog_var`
   turn `dict_entries(env)` into a list to find `@fwd:*:<class>` markers: 2.9% and 1.0% of
