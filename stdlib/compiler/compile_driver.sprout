@@ -12,6 +12,7 @@ import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.iface_codec as iface_codec
 import stdlib.compiler.cse_census as cse_census
 import stdlib.compiler.bind_census as bind_census
+import stdlib.compiler.spec_census as spec_census
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.fs as fs
@@ -276,6 +277,33 @@ fn census_key_line(entry: (String, Int)) -> String =
   | (key, n) -> "  x" ++ int_to_string(n) ++ " " ++ key
 
 # ---------------------------------------------------------------------------
+# Phase: spec-census — how many calls specialising constrained functions would copy
+# (docs/specialisation-v0.md §7 M0a). Reports, never rewrites. Measured on the
+# resolved program, before dictionary lowering, where the pass would run.
+#
+# `--phase spec-keys` also lists every closed key, so a count can be checked by eye.
+fn run_file_spec_census(path: String, stdlib_root: String, extra_roots: List String, keys: Bool, failed: Ref Int) -> Unit !{IO} =
+  do
+    result <- compiler.compile_phase_check_with_roots(source.FilePath(path), source.StdlibRoot(stdlib_root), extra_roots)
+    match result with
+    | typed_ast.TypedErr pos msg -> report_error(failed, format_pos(pos) ++ "ERROR: " ++ msg)
+    | typed_ast.TypedOk typed_prog _ ->
+        do
+          let analysis = spec_census.analyse(typed_prog)
+          print(spec_census_line(analysis.census))
+          if keys then list_each(\k -> print("  " ++ k), analysis.keys) else ()
+
+fn spec_census_line(c: spec_census.Census) -> String =
+  "spec-census concrete_calls=" ++ int_to_string(c.concrete_calls)
+    ++ " direct_keys=" ++ int_to_string(c.direct_keys)
+    ++ " closed_keys=" ++ int_to_string(c.closed_keys)
+    ++ " declined=" ++ int_to_string(c.declined)
+    ++ " devirt_multi=" ++ int_to_string(c.devirt_multi)
+    ++ " devirt_context=" ++ int_to_string(c.devirt_context)
+    ++ " closed_nodes=" ++ int_to_string(c.closed_nodes)
+    ++ " program_nodes=" ++ int_to_string(c.program_nodes)
+
+# ---------------------------------------------------------------------------
 # Mode: --emit-iface — Phase 1.x of iface-precompiled-modules-v1-draft.md
 #
 # Parses + typechecks the given module, filters the post-typecheck env to
@@ -431,11 +459,14 @@ type Phase =
   | PhaseLower
   | PhaseRecheck
   | PhaseScanInfo
+  | PhaseSpecCensus
+  | PhaseSpecKeys
 
 # Every phase `--phase` accepts, in the order messages list them.
 let named_phases: List Phase =
   [PhaseBindCensus, PhaseBundle, PhaseCheck, PhaseCseCensus, PhaseCseKeys, PhaseDumpQualify,
-   PhaseEffects, PhaseIrTyped, PhaseLower, PhaseRecheck, PhaseScanInfo]
+   PhaseEffects, PhaseIrTyped, PhaseLower, PhaseRecheck, PhaseScanInfo,
+   PhaseSpecCensus, PhaseSpecKeys]
 
 # The `--phase` spelling. The default has none: no `--phase` selects it.
 fn phase_name(phase: Phase) -> String =
@@ -452,6 +483,8 @@ fn phase_name(phase: Phase) -> String =
   | PhaseLower -> "lower"
   | PhaseRecheck -> "recheck"
   | PhaseScanInfo -> "scan-info"
+  | PhaseSpecCensus -> "spec-census"
+  | PhaseSpecKeys -> "spec-keys"
 
 let known_phases: String = string.join("|", list_map(phase_name, named_phases))
 
@@ -474,6 +507,8 @@ fn run_phase(phase: Phase, path: String, stdlib_root: String, extra_roots: List 
   | PhaseLower -> run_file_typed(compiler.compile_phase_lower_with_roots, path, stdlib_root, extra_roots, failed)
   | PhaseRecheck -> run_file_typed(compiler.compile_phase_recheck_with_roots, path, stdlib_root, extra_roots, failed)
   | PhaseScanInfo -> run_file_scan_info(path, stdlib_root)
+  | PhaseSpecCensus -> run_file_spec_census(path, stdlib_root, extra_roots, false, failed)
+  | PhaseSpecKeys -> run_file_spec_census(path, stdlib_root, extra_roots, true, failed)
 
 # The IR phase's stdout is the artifact, so it gets no per-file header.
 fn prints_file_header(phase: Phase) -> Bool =

@@ -1,0 +1,51 @@
+# Fixture for `--phase spec-census` and `--phase spec-keys` (docs/specialisation-v0.md
+# §7 M0a, Dictionaries and Growth). `just spec-census-smoke` pins the output.
+#
+# The prelude is in every program, so its constrained calls are in the output too. The
+# cases below say what each one adds; the prelude's share is whatever the rest of
+# `dicts.expected` lists.
+
+# One Eq dictionary. The body calls a method on the forwarded dictionary.
+fn same(a: x, b: x) -> Bool where Eq x = eq(a, b)
+
+# Ord brings Eq along: one dictionary, two blocks.
+fn larger(a: x, b: x) -> x where Ord x = if compare(a, b) > 0 then a else b
+
+# Calls `same` with its own forwarded dictionary, twice at one instance.
+fn same_both(a: x, b: x) -> Bool where Eq x = same(a, b) && same(b, a)
+
+# Never called at a concrete type, so it adds no key. Its call to `same` is forwarded.
+fn forwards(a: x, b: x) -> Bool where Eq x = same(a, b)
+
+# A method with its own constraint takes two leading dictionaries.
+fn traverse_some(xs: List x) -> Maybe (List x) where Eq x =
+  traverse_values(\v -> Just(v), xs)
+
+# A local named like a constrained function is not a call to it. Two checks exclude it:
+# the local-name tracking, and the dictionary count, since only a reference to the global
+# gets dictionaries. Either alone passes this case. Only the prelude's bare names collide.
+fn shadowed(list_member: Int -> Int -> Bool) -> Bool = list_member(1, 2)
+
+# Concrete call: key same@Int.
+fn call_int() -> Bool = same(1, 2)
+
+# Same function, same instance: still one key, two calls.
+fn call_int_again() -> Bool = same(3, 4)
+
+# Second instance: a second key.
+fn call_string() -> Bool = same("a", "b")
+
+# Closure: the key same_both@Bool is direct, and its copy calls same at Bool, which is not.
+fn call_closed() -> Bool = same_both(true, false)
+
+# Superclass: larger@Ord_Int carries the Eq block too.
+fn call_super() -> Int = larger(1, 2)
+
+# Context instance: Eq (Maybe Int) takes Eq Int as a hidden parameter.
+fn call_context() -> Bool = same(Just(1), Just(2))
+
+# Context instance through a superclass: Ord (List Int).
+fn call_context_super() -> List Int = larger([1], [2])
+
+# A method call with two dictionaries inside the copy of traverse_some@Eq_Int.
+fn call_multi() -> Maybe (List Int) = traverse_some([1, 2])

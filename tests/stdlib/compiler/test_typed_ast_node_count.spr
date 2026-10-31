@@ -68,5 +68,16 @@ fn main() -> Unit !{IO} =
                                    typed_ast.EvUnresolved)), 1),
     check_eq("do block counts steps", count(with_dead_let()), 5),
     check_eq("dle delta: one dead let step is two nodes",
-             count(with_dead_let()) - count(without_dead_let()), 2)
+             count(with_dead_let()) - count(without_dead_let()), 2),
+    check_eq("decl_node_count is one declaration's share",
+             typed_ast.decl_node_count(typed_ast.TFnDecl("f", [], Nothing, Nothing, [],
+                                                         typed_ast.TCall(var_("g"), [lit(1)], int_t(), pos()))),
+             3),
+    check_eq("decl_node_count of an extern is zero",
+             typed_ast.decl_node_count(typed_ast.TExternFnDecl("e", [], Nothing, Nothing)), 0),
+    check_eq("decl_node_count sums to node_count",
+             typed_ast.decl_node_count(typed_ast.TLetDecl("a", lit(1)))
+               + typed_ast.decl_node_count(typed_ast.TLetDecl("b", lit(2))),
+             typed_ast.node_count(typed_ast.TypedProgram(
+               [typed_ast.TLetDecl("a", lit(1)), typed_ast.TLetDecl("b", lit(2))])))
   ])

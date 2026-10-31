@@ -217,7 +217,8 @@ Drive it directly when you need a phase the recipes do not expose:
 
 `<stdlib-root>` is a **path**, not a flag — pass the literal `stdlib` directory.
 `--phase` accepts `bind-census`, `bundle`, `check`, `cse-census`, `cse-keys`,
-`dump-qualify`, `effects`, `ir-typed`, `lower`, `recheck` and `scan-info`;
+`dump-qualify`, `effects`, `ir-typed`, `lower`, `recheck`, `scan-info`, `spec-census`
+and `spec-keys`;
 [debugging.md](./debugging.md) explains what each is for. An unknown phase exits 1
 before any file is read.
 `just build-debug` passes `--emit-ir --debug` and then links with `clang -g -O0`. The `--debug` flag itself is currently a **no-op** — both `--emit-ir` arms dispatch identically, and the DWARF comes from `clang -g`; see [debugging.md §Debugging compiled programs](./debugging.md#debugging-compiled-programs-dwarf--lldb).

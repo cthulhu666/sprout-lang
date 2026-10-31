@@ -14,6 +14,7 @@ Tools and protocols to reach for **when something is broken** in the Sprout comp
 | `recheck <stdlib> <file>` | As `lower`, after re-type-checking the lowered AST so typed nodes carry resolved types. |
 | `ir-typed <stdlib> <file>` | What `--emit-ir` runs: LLVM IR on stdout, with no `=== <file> ===` header. |
 | `cse-census`, `cse-keys` | Counts of shareable repeated pure calls; see [below](#where-is-a-program-repeating-itself---phase-cse-census---phase-cse-keys). |
+| `spec-census`, `spec-keys` | How many calls specialising constrained functions would copy, and what the copies add; see [below](#what-would-specialisation-copy---phase-spec-census---phase-spec-keys). |
 | `effects <stdlib> <file>` | Prints one line per declaration — declared effect vs the effect its body was inferred to perform — plus a summary. Reports, never rejects — deliberately. Since 2026-08-16 an ordinary compile DOES enforce spec §7 rules 8 and 9 (`checker.enforce_effects`); this phase calls the un-enforcing entry point directly so the census instrument survives enforcement, which matters most while migrating a codebase against it. Read the count as a **lower bound**; nothing writes an inferred effect back to the env, so a mis-declared callee is flagged but its callers are not until it is annotated. Calibrated by `just effect-report-smoke` against `tests/effects/canaries.spr`; see `docs/effect-enforcement-v0.md`. |
 | `bind-census <stdlib> <file>` | The `try` migration's worklist (docs/try-propagate-v0.md §8 step 1a). One tab-separated line per site in the **entry file only**, sorted by position: `bind path:l:c <plain\|Maybe\|Result> rhs=<pure\|effectful\|unknown> pat=<shape> try=<no\|head\|chain>` for every `<-`; `discard path:l:c <Maybe\|Result>` for a fallible non-final `do` statement; `let path:l:c <do-let\|let-in\|top-level> <family> rhs=… pat=… try=<yes\|no>` for a `let` that is not pure or that discards a failure (`let _ = e`). `pat` is `name`, `wildcard`, `unit`, `tuple`, `destructure` or `destructure-else`. A `where` binding reports as `let-in`. Positions: `bind` and pattern `let`s at the statement start; `discard` and a plain `do`-`let` at the expression's own position, which is inside the statement but not its start (a call's is its `(`). Reports, never rejects. Calibrated by `just bind-census-smoke` against `tests/bind_census/canaries.spr` and `collide.spr` (an imported instance of the same class at the same offset must not leak into the entry's list). |
 
@@ -150,6 +151,41 @@ the same `if` do not count. `cse-keys` lists what is behind it, most useful sort
 
 Do not read a large number as a speed-up waiting to happen — it is a **static** count, and
 `bench/results-2026-09-11-cse-census.md` records what happened when one was cashed in.
+
+## What would specialisation copy? (`--phase spec-census`, `--phase spec-keys`)
+
+The Dictionaries and Growth axes of `docs/specialisation-v0.md` §7 M0a. It runs on the
+resolved program, before dictionary lowering, and rewrites nothing:
+
+```
+compile_driver_bin_stage1 --phase spec-keys stdlib prog.spr
+spec-census concrete_calls=8 direct_keys=7 closed_keys=8 declined=0 devirt_multi=1 devirt_context=2 closed_nodes=60 program_nodes=5040
+  $entry.same [Eq_Bool] <- $entry.same_both
+  $entry.same [Eq_Int] <- direct
+```
+
+A **key** is a constrained top-level function and the evidence for each of its constraints,
+`EvInstance` all the way down. The listing shows the evidence: `Ord_List([Ord_Int Eq_Int])` is
+`Ord (List Int)`, the brackets group one constraint's classes, superclasses included.
+
+- `concrete_calls`: calls in the original program to a constrained function with concrete
+  evidence. A forwarded, unresolved or missing piece anywhere in it excludes the call.
+- `direct_keys`: distinct keys among those calls.
+- `closed_keys`: the closure, which adds each key a copy's body would call once its forwarded
+  dictionaries are the caller's. `spec-keys` lists them, each with `direct` or the function
+  whose copy produced it.
+- `declined`: keys the growth backstop refuses. Expected 0 while constrained polymorphic
+  recursion is rejected.
+- `devirt_multi`, `devirt_context`: method calls inside the copies that devirtualisation cannot
+  finish (a method with its own constraint, so two leading dictionaries) or that dispatch into
+  an instance with context dictionaries. A call can be in both.
+- `closed_nodes` against `program_nodes`: what the copies add, and what they add to.
+
+The counts show reach, not time. Instance method bodies are not copied, so the closure walks
+constrained top-level functions only. Calibrated by `just spec-census-smoke` against
+`tests/spec_census/dicts.spr`; the expected file lists the prelude's keys too, so a change to
+a prelude function's constraints moves it. `program_nodes` is masked there, since it counts the
+whole prelude.
 
 ## What did a program allocate? (`SPROUT_DEBUG_ALLOC=1`, `SPROUT_DEBUG_GC=1`)
 
