@@ -49,7 +49,7 @@ fn session(imports: String, body: String) -> String =
 # no-opping to "0 passed, 0 failed / SUITE PASSED" — the trap recorded in
 # docs/repl-env-type-vocabulary-v0.md §9.
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

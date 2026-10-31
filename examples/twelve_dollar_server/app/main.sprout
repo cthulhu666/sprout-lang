@@ -244,8 +244,9 @@ fn accept_loop(cfg: Config, scope: Scope, pool: Pool, listener: consuming TcpLis
 
 fn env_or(name: String, fallback: String) -> String !{IO} =
   match env.get(name) with
-  | Just value -> value
-  | Nothing -> fallback
+  | Ok (Just value) -> value
+  | Ok Nothing -> fallback
+  | Err _ -> panic(`${name} is not valid UTF-8`)
 
 fn main() -> Unit !{IO} =
   do

@@ -9,5 +9,5 @@ module main
 # After the fix it panics with a located "Int overflow in +" and a non-zero exit.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     print(int_to_string(9223372036854775807 + (1 + list_length(args))))

@@ -17,6 +17,6 @@ module main
 # while staying opaque to constant folding.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let hi = 9223372036854775807 - list_length(args)
     print(int_to_string(range_count(range_up(0, hi))))

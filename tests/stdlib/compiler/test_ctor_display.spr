@@ -67,7 +67,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "prelude ctor is unaffected", to_string(Just(9)), "Just(9)")
 
     # ---- diagnostics stay qualified ---------------------------------------
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
     | Nothing ->
         # Deliberately a FAILURE, not a skip: these assertions need the bundler,
         # and a silent skip would report a vacuous green (BACKLOG 7.2, the

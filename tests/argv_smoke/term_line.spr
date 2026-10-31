@@ -1,0 +1,45 @@
+module main
+
+import stdlib.argv as argv
+import stdlib.terminal as terminal
+import stdlib.bytes as bytes
+
+# Reads stdin one line at a time and prints one answer per line, then "end". Run via
+# `just argv-smoke`, which pipes the input and picks the mode with argument 0.
+#
+#   string   term_read_line: `Line <text>` for a line that is valid UTF-8 without NUL, `Err` for
+#            one that is not. A NUL byte is not allowed in a String, so such a line is `Err` too.
+#   bytes    term_read_line_bytes: `Bytes <n>` with the line's byte count, NUL bytes kept.
+#
+# EOF is `Ok(Nothing)` on the String path and `Nothing` on the Bytes path; both print "eof".
+
+fn string_loop() -> Unit !{IO} =
+  match terminal.term_read_line() with
+  | Err _ ->
+      do
+        print("Err")
+        string_loop()
+  | Ok Nothing -> print("eof")
+  | Ok (Just line) ->
+      do
+        print("Line " ++ line)
+        string_loop()
+
+fn bytes_loop() -> Unit !{IO} =
+  match terminal.term_read_line_bytes() with
+  | Nothing -> print("eof")
+  | Just raw ->
+      do
+        print("Bytes " ++ int_to_string(bytes.length(raw)))
+        bytes_loop()
+
+fn mode_of(raw: Result bytes.Utf8Error (Maybe String)) -> String =
+  match raw with
+  | Ok (Just mode) -> mode
+  | _ -> "string"
+
+fn main() -> Unit !{IO} =
+  do
+    mode <- mode_of(argv.get(0))
+    if mode == "bytes" then bytes_loop() else string_loop()
+    print("end")

@@ -1,4 +1,5 @@
 module examples.string_templates
+import stdlib.argv as argv
 
 # Demonstrates two string-template use cases:
 # - a template in a String context, replacing long `++` chains
@@ -9,9 +10,9 @@ module examples.string_templates
 #   /tmp/string_templates Ada 3
 
 fn arg_or(index: Int, fallback: String) -> String !{IO} =
-  match argv_get(index) with
-  | Nothing -> fallback
-  | Just value -> value
+  match argv.get(index) with
+  | Ok (Just value) -> value
+  | _ -> fallback
 
 # Both status helpers return String. This version spells out the older
 # concat-chain shape, allocating at each `++`.

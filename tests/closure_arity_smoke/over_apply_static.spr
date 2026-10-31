@@ -12,11 +12,11 @@ fn curried() -> Int -> Int -> Int = \x -> \y -> 7
 
 fn nary() -> Int -> Int -> Int = \ (x, y) -> x + y
 
-fn pick(args: List String) -> Int -> Int -> Int =
+fn pick(args: List Bytes) -> Int -> Int -> Int =
   if list_length(args) == 0 then curried() else nary()
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let f = pick(args)
     print(int_to_string(f(1, 2)))

@@ -4,6 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.lsp_driver as lsp
 import stdlib.compiler.source as source
 import stdlib.json as json
+import stdlib.bytes as bytes
 
 fn hover_params_json(uri: json.Json, position: json.Json) -> json.Json =
   json.JsonObject(
@@ -167,6 +168,17 @@ fn main() -> Unit !{IO} =
       Just(lsp.HoverParams("file:///a.spr", 0, 0))),
     check_eq("extract_hover_params: empty object rejected",
       lsp.extract_hover_params(json.JsonObject(json.JsonObjectNil)), Nothing),
+
+    # content_length_after — what one header line adds. A line that is not valid UTF-8 is a
+    # malformed header: it names no length, so it changes nothing (it does not end the session).
+    check_eq("header: a Content-Length line sets the length",
+      lsp.content_length_after(Nothing, Ok("Content-Length: 12")), Just(12)),
+    check_eq("header: an unrelated line keeps the length",
+      lsp.content_length_after(Just(5), Ok("Content-Type: x")), Just(5)),
+    check_eq("header: a line that is not valid UTF-8 keeps the length",
+      lsp.content_length_after(Just(5), bytes.to_string(bytes.singleton(255))), Just(5)),
+    check_eq("header: a line that is not valid UTF-8 sets none",
+      lsp.content_length_after(Nothing, bytes.to_string(bytes.singleton(255))), Nothing),
 
     # unknown_method_response — request vs notification
     check_eq("unknown method: a request is answered with method-not-found",

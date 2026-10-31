@@ -15,7 +15,7 @@ module main
 # 0. After the fix it panics cleanly.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let int_min = 0 - 9223372036854775807 - 1
         neg_one = 0 - 1 - list_length(args)
     print(int_to_string(int_min / neg_one))

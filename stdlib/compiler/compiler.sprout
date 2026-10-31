@@ -462,7 +462,7 @@ export type IrFullResult (..) =
 # `verified > 0` on real programs is the evidence that the verifier fires on actual
 # calls rather than skipping everything (a clean run vs. a silent no-op).
 fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
-  match sys_env.get("SPROUT_VERIFY_DISPATCH_STATS") with
+  match sys_env.get_or_panic("SPROUT_VERIFY_DISPATCH_STATS") with
   | Nothing -> ()
   | Just _ ->
       match verify_dispatch.verify_stats(prog) with
@@ -591,7 +591,7 @@ fn enforced_dispatch_finding(found: Maybe (source.SourcePos, String)) -> Maybe(s
   match found with
   | Nothing -> Nothing
   | Just (_, vmsg) ->
-      match sys_env.get("SPROUT_VERIFY_DISPATCH_OFF") with
+      match sys_env.get_or_panic("SPROUT_VERIFY_DISPATCH_OFF") with
       | Nothing -> found
       | Just _ ->
           do

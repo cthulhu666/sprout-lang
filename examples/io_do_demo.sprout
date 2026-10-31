@@ -10,11 +10,16 @@ import stdlib.env as env
 #   mise exec -- just run examples/io_do_demo.sprout
 #   SPROUT_NAME="  Ada  " mise exec -- just run examples/io_do_demo.sprout
 
+# `env.get` is a `Result` (an `Err` is a value that is not valid UTF-8); the demo treats that like
+# an unset name.
+fn env_name() -> Maybe String !{IO} =
+  result_with_default(Nothing, env.get("SPROUT_NAME"))
+
 fn configured_name() -> Maybe String !{IO} =
   do
     print("do:io-maybe")
     print("reading SPROUT_NAME")
-    raw <- env.get("SPROUT_NAME")
+    raw <- env_name()
     let cleaned = string.trim(raw)
     Just(cleaned)
 

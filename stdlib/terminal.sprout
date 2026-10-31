@@ -1,5 +1,7 @@
 module stdlib.terminal
 
+import stdlib.bytes as bytes
+
 # Terminal control primitives. Declared here rather than in the prelude: nothing in the prelude
 # calls them, and under the rule "an extern lives in the module that owns its surface" this is
 # that module. Reaching a terminal becomes an explicit dependency — the same reasoning the
@@ -16,8 +18,14 @@ extern fn term_hide_cursor() -> Unit !{IO}
 extern fn term_show_cursor() -> Unit !{IO}
 extern fn term_is_interactive() -> Bool !{IO}
 extern fn term_read_key() -> String !{IO}
-export extern fn term_read_line() -> Maybe String !{IO}
+extern fn term_read_line_bytes() -> Maybe Bytes !{IO}
 export extern fn term_write(text: String) -> Unit !{IO}
+
+# One stdin line without its trailing `\n` / `\r\n`. `Ok(Nothing)` is end of input. `Err` is a line
+# that is not valid UTF-8 or holds a NUL byte, neither of which a String may hold; the line has
+# been consumed. `term_read_line_bytes` gives the same line unchecked, as `Bytes`.
+export fn term_read_line() -> Result bytes.Utf8Error (Maybe String) !{IO} =
+  bytes.to_string_maybe(term_read_line_bytes())
 
 export fn clear() -> Unit !{IO} =
   term_clear()
@@ -70,7 +78,7 @@ export fn term_render_line(row: Int, text: String) -> Unit !{IO} =
 export fn term_read_key_once() -> String !{IO} =
   term_read_key()
 
-export fn term_read_line_once() -> Maybe String !{IO} =
+export fn term_read_line_once() -> Result bytes.Utf8Error (Maybe String) !{IO} =
   term_read_line()
 
 export fn term_is_interactive_once() -> Bool !{IO} =

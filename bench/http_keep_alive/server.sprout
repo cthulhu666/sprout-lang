@@ -12,11 +12,11 @@ fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
 
 fn port() -> Int !{IO} =
   match env.get("PORT") with
-  | Just raw ->
+  | Ok (Just raw) ->
       match parse_int(raw) with
       | Just p -> p
       | Nothing -> 8099
-  | Nothing -> 8099
+  | _ -> 8099
 
 type Mode =
   | PerConnection
@@ -24,8 +24,8 @@ type Mode =
 
 fn mode() -> Mode !{IO} =
   match env.get("MODE") with
-  | Just raw -> if raw == "pool" then Pooled else PerConnection
-  | Nothing -> PerConnection
+  | Ok (Just raw) -> if raw == "pool" then Pooled else PerConnection
+  | _ -> PerConnection
 
 fn main() -> Unit !{IO} =
   do
