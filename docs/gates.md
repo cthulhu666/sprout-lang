@@ -179,8 +179,8 @@ a confusing red, not a bad merge. Until it is closed: **after any rebase of a br
 
 ## Review gate — `scripts/review_gate.py`
 
-Wired as a Stop hook in `.claude/settings.json`. Once per distinct working-tree state it refuses the
-turn and prints a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`, `docs/guidelines.md`
+Wired as a Stop hook in `.claude/settings.json`. Once per distinct working-tree state it blocks the
+turn and returns a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`, `docs/guidelines.md`
 for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync always. Stop is the
 only unconditional exit from a turn, so it is the only event that can gate "the change is finished"
 — `PostToolUse` fires mid-edit and cannot block. It cannot loop: the session's first Stop records
@@ -188,6 +188,17 @@ the tree as a baseline, a state already shown is never shown twice, and `MAX_BLO
 any one user turn. Generated artifacts (`bootstrap/compile_driver.ll`, `tests/golden/ir/`, `build/`,
 `.claude/`) are invisible to it, so a reseed or a golden snapshot never trips it. Test with `just
 test-review-gate`.
+
+It blocks by printing `{"hookSpecificOutput": {"additionalContext": ...}}` and exiting 0, which Claude
+Code shows as "Stop hook feedback", not as a hook error. The report asks for one-line verdicts per
+item, groups the changed-file list by directory (two or more paths in a directory print as
+`<dir>/ (N files)`), and shows each item's instructions once per turn; later blocks in the same turn
+show only its title.
+
+Re-fires on a changed tree are kept on purpose. Of 778 firings (2026-09-07 to 2026-10-31), the
+agent's reply reported a real defect in 53 (classified per reply, a sample checked by hand).
+Suppressing a re-fire when no new file appeared would have lost 18 of them: second looks at the
+same files found defects at 8%, first looks at 7%.
 
 ### The budget is per user turn, and deliberately weaker than the loop safety it looks like
 

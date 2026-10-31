@@ -61,7 +61,7 @@ Use commit messages that explain intent:
 - `types: improve error for mismatched function arguments`
 
 **Review gate** — `scripts/review_gate.py`, a Stop hook. Once per distinct working-tree state it
-refuses the turn and prints a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`,
+blocks the turn and returns a path-aware checklist: idiomatic Sprout for `.sprout`/`.spr`,
 `docs/guidelines.md` for `stdlib/`, GC/rooting for `stdlib/compiler/` and `runtime/`, docs+spec sync
 always. Generated artifacts (the seed, `tests/golden/ir/`, `build/`, `.claude/`) are invisible to it,
 so a reseed or a golden snapshot never trips it. A turn whose last tool call is

@@ -11,6 +11,10 @@
 # is AskUserQuestion therefore passes through — recording NOTHING, so the change is
 # still unreviewed and still gated once the answer arrives (see ended_on_question).
 #
+# The gate blocks by printing {"hookSpecificOutput": {"additionalContext": ...}} on
+# stdout and exiting 0: the turn continues and the report shows as "Stop hook feedback"
+# rather than as a hook error (exit 2 + stderr).
+#
 # Loop safety, three ways: the first Stop of a session records the tree as the
 # BASELINE (pre-existing dirt never fires), a state already shown is never shown
 # twice, and MAX_BLOCKS_PER_TURN caps any single user turn.
@@ -235,6 +239,24 @@ def new_turn(d, state):
     return not d.get("stop_hook_active"), state.get("turn")
 
 
+def grouped(moved):
+    """Report lines for moved (status, path) pairs, one per directory when it holds 2+.
+
+    Bounds the message: an ungrouped list once ran to hundreds of files.
+    """
+    by_dir = {}
+    for status, path in moved:
+        by_dir.setdefault(os.path.dirname(path), []).append((status, path))
+    out = []
+    for d in sorted(by_dir):
+        group = by_dir[d]
+        if len(group) == 1:
+            out.append(f"  {group[0][0]} {group[0][1]}")
+        else:
+            out.append(f"  {d or '.'}/ ({len(group)} files)")
+    return out
+
+
 def digest(state):
     return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
@@ -305,13 +327,12 @@ def main():
 
     fresh, turn = new_turn(d, state)
     if fresh:
-        state["turn"], state["blocks"] = turn, 0
+        state["turn"], state["blocks"], state["shown"] = turn, 0, []
     state["seen"].append(fp)
     state["blocks"] += 1
-    over_cap = state["blocks"] > MAX_BLOCKS_PER_TURN
-    state_path.write_text(json.dumps(state))
 
-    if over_cap:
+    if state["blocks"] > MAX_BLOCKS_PER_TURN:
+        state_path.write_text(json.dumps(state))
         print(json.dumps({"systemMessage": "[review-gate] block cap reached — passing through"}))
         return 0
 
@@ -319,23 +340,34 @@ def main():
     moved = [(s, p) for s, p in paths if now[p] != base.get(p)]
     moved += [(" X", p) for p in sorted(set(base) - set(now))]
 
+    # Each item's "how" line shows once per turn; its title shows on every block.
+    shown = state.setdefault("shown", [])
     lines = [
-        "REVIEW GATE — this change has not been reviewed. Review it against the",
-        "checklist, state the verdict per item, and fix what fails before stopping.",
+        "REVIEW GATE — review this change against the checklist and fix what fails "
+        "before stopping.",
+        'Reply with one line per item, e.g. "1 pass · 2 n/a · 3 FAIL — <what>"; '
+        "give detail only for a FAIL.",
         "",
         "Changed since the last review:",
     ]
-    lines += [f"  {status} {path}" for status, path in moved]
+    lines += grouped(moved)
     lines.append("")
     n = 0
-    for applies, item, how in CHECKLIST:
+    for i, (applies, item, how) in enumerate(CHECKLIST):
         if not any(applies(p) for _, p in moved):
             continue
         n += 1
         lines.append(f"{n}) {item}")
-        lines.append(f"   {how}")
-    print("\n".join(lines), file=sys.stderr)
-    return 2
+        if i not in shown:
+            lines.append(f"   {how}")
+            shown.append(i)
+    state_path.write_text(json.dumps(state))
+    print(
+        json.dumps(
+            {"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "\n".join(lines)}}
+        )
+    )
+    return 0
 
 
 if __name__ == "__main__":

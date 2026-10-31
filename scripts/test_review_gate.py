@@ -98,58 +98,69 @@ def run(label, expect, absent=None, present=None, session="sess1", prompt=None, 
         cwd=str(wt),
         env={**os.environ, "CLAUDE_PROJECT_DIR": str(S)},
     )
-    good = p.returncode == expect
+    # A block is exit 0 plus one JSON object on stdout carrying additionalContext.
+    context = None
+    try:
+        out = json.loads(p.stdout)
+        context = out["hookSpecificOutput"]["additionalContext"]
+    except (ValueError, KeyError, TypeError):
+        pass
+    got = "block" if p.returncode == 0 and context is not None else "pass"
+    good = p.returncode == 0 and got == expect
+    text = context or ""
     for needle in absent or []:
-        if needle in p.stderr:
+        if needle in text:
             good = False
             label += f"  [{needle!r} should not be present]"
     for needle in present or []:
-        if needle not in p.stderr:
+        if needle not in text:
             good = False
             label += f"  [{needle!r} missing]"
-    print(f"{'OK  ' if good else 'FAIL'} {label}: exit {p.returncode} (expected {expect})")
-    if p.stdout.strip():
+    print(f"{'OK  ' if good else 'FAIL'} {label}: exit {p.returncode}, {got} (expected {expect})")
+    if p.stdout.strip() and context is None:
         print("     stdout:", p.stdout.strip())
+    for line in text.splitlines():
+        print("     >", line)
     for line in p.stderr.splitlines():
         print("     |", line)
     return good
 
 
-results = [run("1. first Stop, pre-existing dirt -> baseline", 0)]
-results.append(run("2. nothing changed since baseline", 0))
+results = [run("1. first Stop, pre-existing dirt -> baseline", "pass")]
+results.append(run("2. nothing changed since baseline", "pass"))
 
 write("stdlib/prelude.sprout", "a\nb\n")
 results.append(
     run(
         "3. .sprout edit -> idiomatic + guidelines items",
-        2,
+        "block",
         absent=["preexisting.md"],
         present=["stdlib/prelude.sprout", "idiomatic-sprout.md", "guidelines.md", "spec"],
     )
 )
-results.append(run("4. same state re-presented", 0))
+results.append(run("4. same state re-presented", "pass"))
 
 write("g.spr", "new\n")
-results.append(run("5. new untracked file", 2, present=["g.spr"]))
+results.append(run("5. new untracked file", "block", present=["g.spr"]))
 
 (S / ".claude").mkdir(exist_ok=True)
 write(".claude/settings.local.json", "{}\n")
-results.append(run("6. .claude/ change only", 0))
+results.append(run("6. .claude/ change only", "pass"))
 
 write("bootstrap/compile_driver.ll", "reseeded\n" * 100)
-results.append(run("7. generated seed change only", 0))
+results.append(run("7. generated seed change only", "pass"))
 
 write("tests/golden/ir/examples__x.sprout.ll", "regenerated\n")
 write("build/compile_driver_bin_stage1", "binary\n")
-results.append(run("8. golden IR + build/ change only", 0))
+results.append(run("8. golden IR + build/ change only", "pass"))
 
 # A fresh session baselines the existing dirt, so only the docs file has moved.
-results.append(run("9a. fresh session baselines current dirt", 0, session="sess2"))
+results.append(run("9a. fresh session baselines current dirt", "pass", session="sess2"))
 write("docs/spec-v0.md", "prose\n")
 results.append(
     run(
         "9b. docs-only change -> spec item only",
-        2,
+        "block",
         absent=["idiomatic-sprout.md", "compiler-internals.md", "guidelines.md"],
         present=["docs/spec-v0.md", "AGENTS.md"],
         session="sess2",
@@ -160,7 +171,7 @@ write("stdlib/compiler/infer.sprout", "x\n")
 results.append(
     run(
         "10. stdlib/compiler edit -> GC/internals item",
-        2,
+        "block",
         present=["compiler-internals.md", "idiomatic-sprout.md"],
     )
 )
@@ -171,7 +182,7 @@ results.append(
 WT = S.parent / (S.name + "-wt")
 shutil.rmtree(WT, ignore_errors=True)
 g("worktree", "add", "-q", "-b", "wt-branch", str(WT))
-results.append(run("12a. worktree session baselines", 0, session="sess3", cwd=WT))
+results.append(run("12a. worktree session baselines", "pass", session="sess3", cwd=WT))
 
 (WT / "stdlib/compiler").mkdir(parents=True, exist_ok=True)
 (WT / "stdlib/compiler/types.sprout").write_text("edited in a worktree\n")
@@ -179,7 +190,7 @@ write("only-in-main.md", "a different session, editing the main checkout\n")
 results.append(
     run(
         "12b. worktree session sees its own edit, not the main checkout's",
-        2,
+        "block",
         present=["types.sprout", "idiomatic-sprout.md", "compiler-internals.md"],
         absent=["only-in-main.md"],
         session="sess3",
@@ -191,32 +202,32 @@ results.append(
 # session-lifetime counter this replaced went dead here and never re-armed.
 for i in range(4):
     write("stdlib/prelude.sprout", "a\n" + "b\n" * (i + 2))
-    results.append(run(f"11.{i}. turn t1, block {i + 1} of 3", 2 if i < 3 else 0, prompt="t1"))
+    results.append(run(f"11.{i}. turn t1, block {i + 1} of 3", "block" if i < 3 else "pass", prompt="t1"))
 for i in range(2):
     write("stdlib/prelude.sprout", "a\n" + "c\n" * (i + 2))
-    results.append(run(f"11.{i + 4}. turn t2 refills the budget", 2, prompt="t2"))
+    results.append(run(f"11.{i + 4}. turn t2 refills the budget", "block", prompt="t2"))
 
 # prompt_id is optional in the payload; stop_hook_active carries the same signal,
 # being false exactly when this Stop opens a fresh turn.
 write("stdlib/prelude.sprout", "a\nd\n")
-results.append(run("15a. no prompt_id, fresh chain -> refilled", 2, prompt=False))
+results.append(run("15a. no prompt_id, fresh chain -> refilled", "block", prompt=False))
 for i in range(3):
     write("stdlib/prelude.sprout", "a\nd\n" + "e\n" * (i + 1))
     results.append(
-        run(f"15b.{i}. no prompt_id, same chain", 2 if i < 2 else 0, prompt=False, chain=True)
+        run(f"15b.{i}. no prompt_id, same chain", "block" if i < 2 else "pass", prompt=False, chain=True)
     )
 
 # An accepted review re-anchors the baseline, so the next report is scoped to what is
 # new. Without it, both the report and the checklist filter grow to the whole session.
-results.append(run("13a. fresh session baselines", 0, session="sess4"))
+results.append(run("13a. fresh session baselines", "pass", session="sess4"))
 write("stdlib/noisy.sprout", "s\n")
-results.append(run("13b. sprout edit blocks", 2, session="sess4", present=["idiomatic-sprout.md"]))
-results.append(run("13c. unchanged -> review accepted", 0, session="sess4"))
+results.append(run("13b. sprout edit blocks", "block", session="sess4", present=["idiomatic-sprout.md"]))
+results.append(run("13c. unchanged -> review accepted", "pass", session="sess4"))
 write("docs/quiet.md", "d\n")
 results.append(
     run(
         "13d. docs-only edit now shows only the spec item",
-        2,
+        "block",
         session="sess4",
         present=["docs/quiet.md", "AGENTS.md"],
         absent=["idiomatic-sprout.md", "guidelines.md", "noisy.sprout"],
@@ -226,18 +237,18 @@ results.append(
 # Committing clears the tree. Nothing is pending review then, so the landed files must
 # not come back as phantom deletions the next time something moves. Runs last: it
 # commits every other case's leftovers too.
-results.append(run("14a. fresh session baselines", 0, session="sess5"))
+results.append(run("14a. fresh session baselines", "pass", session="sess5"))
 write("stdlib/landed.sprout", "s\n")
-results.append(run("14b. edit blocks", 2, session="sess5", present=["landed.sprout"]))
-results.append(run("14c. unchanged -> review accepted", 0, session="sess5"))
+results.append(run("14b. edit blocks", "block", session="sess5", present=["landed.sprout"]))
+results.append(run("14c. unchanged -> review accepted", "pass", session="sess5"))
 g("add", "-A")
 g("commit", "-qm", "land the change")
-results.append(run("14d. clean tree passes", 0, session="sess5"))
+results.append(run("14d. clean tree passes", "pass", session="sess5"))
 write("docs/after-landing.md", "d\n")
 results.append(
     run(
         "14e. next edit does not resurrect the landed file",
-        2,
+        "block",
         session="sess5",
         present=["docs/after-landing.md"],
         absent=["landed.sprout"],
@@ -247,12 +258,12 @@ results.append(
 # A turn that stopped to ASK the user is not a finished change, and the agent cannot
 # review-and-fix while blocked on an answer. It must pass through — and must record
 # nothing, or answering the question would let the change past the gate for good.
-results.append(run("16a. fresh session baselines", 0, session="sess6"))
+results.append(run("16a. fresh session baselines", "pass", session="sess6"))
 write("stdlib/asked.sprout", "s\n")
 results.append(
     run(
         "16b. last tool call is AskUserQuestion -> pass through",
-        0,
+        "pass",
         session="sess6",
         tpath=transcript("t_ask.jsonl", "do the thing", ["Read", "Grep"], ("result",), ["AskUserQuestion"]),
     )
@@ -260,7 +271,7 @@ results.append(
 results.append(
     run(
         "16c. SAME tree still unreviewed: nothing was recorded",
-        2,
+        "block",
         session="sess6",
         present=["stdlib/asked.sprout", "idiomatic-sprout.md"],
         tpath=transcript("t_done.jsonl", "do the thing", ["Edit"]),
@@ -275,7 +286,7 @@ NOISE = [
     for t in ("last-prompt", "file-history-delta", "attachment", "queue-operation", "mode")
 ]
 write("stdlib/noisy_transcript.sprout", "s\n")
-results.append(run("16d. fresh session baselines", 0, session="sess8"))
+results.append(run("16d. fresh session baselines", "pass", session="sess8"))
 write("stdlib/noisy_transcript.sprout", "s\nt\n")
 tp = S / "t_noise.jsonl"
 tp.write_text(
@@ -294,17 +305,17 @@ tp.write_text(
     + "\n"
 )
 results.append(
-    run("16e. real-shaped transcript, noise types ignored -> pass through", 0, session="sess8", tpath=str(tp))
+    run("16e. real-shaped transcript, noise types ignored -> pass through", "pass", session="sess8", tpath=str(tp))
 )
 
 # The three ways this must NOT fire, since a hook that stops gating is worse than a
 # hook that nags: ordinary work, work resumed after an answer, and an unreadable file.
-results.append(run("17a. fresh session baselines", 0, session="sess7"))
+results.append(run("17a. fresh session baselines", "pass", session="sess7"))
 write("stdlib/worked.sprout", "s\n")
 results.append(
     run(
         "17b. question ANSWERED then edited -> still blocks",
-        2,
+        "block",
         session="sess7",
         present=["stdlib/worked.sprout"],
         tpath=transcript(
@@ -316,26 +327,26 @@ write("stdlib/worked.sprout", "s\nt\n")
 results.append(
     run(
         "17c. a NEW user message after the question -> still blocks",
-        2,
+        "block",
         session="sess7",
         tpath=transcript("t_superseded.jsonl", "go", ["AskUserQuestion"], "actually, do this instead"),
     )
 )
 write("stdlib/worked.sprout", "s\nt\nu\n")
 results.append(
-    run("17d. unreadable transcript -> fails safe and blocks", 2, session="sess7", tpath=str(S / "nope.jsonl"))
+    run("17d. unreadable transcript -> fails safe and blocks", "block", session="sess7", tpath=str(S / "nope.jsonl"))
 )
 write("stdlib/worked.sprout", "s\nt\nu\nv\n")
 (S / "garbage.jsonl").write_text("not json\n{\n")
 results.append(
-    run("17e. garbage transcript -> fails safe and blocks", 2, session="sess7", tpath=str(S / "garbage.jsonl"))
+    run("17e. garbage transcript -> fails safe and blocks", "block", session="sess7", tpath=str(S / "garbage.jsonl"))
 )
 
 write("tests/conformance/type_error/x_new.err", "msg\n")
 results.append(
     run(
         "17g. type_error .err -> fixed.spr item, and the line marker",
-        2,
+        "block",
         session="sess7",
         present=["x_new.err", ".fixed.spr", "#~^ ERROR"],
         tpath=str(S / "nope.jsonl"),
@@ -346,7 +357,7 @@ write("stdlib/compiler/linear_check.sprout", "s\n")
 results.append(
     run(
         "17i. a linear check change -> the linear grid item",
-        2,
+        "block",
         session="sess7",
         present=["linear_check.sprout", "gen_linear_grid.sh"],
         tpath=str(S / "nope.jsonl"),
@@ -357,7 +368,7 @@ write("tests/conformance/executable_error/x_new.err", "msg\n")
 results.append(
     run(
         "17h. executable_error .err -> fixed.spr item too",
-        2,
+        "block",
         session="sess7",
         present=["executable_error/x_new.err", ".fixed.spr"],
         tpath=str(S / "nope.jsonl"),
@@ -393,15 +404,48 @@ write("stdlib/worked.sprout", "s\nt\nu\nv\nw\n")
 results.append(
     run(
         "17f. wrong-shaped entries do not crash, question still seen",
-        0,
+        "pass",
         session="sess7",
         absent=["Traceback"],
         tpath=str(S / "wrongshape.jsonl"),
     )
 )
 
+# The file list is grouped by directory, so a mass change cannot blow up the message.
+results.append(run("18a. fresh session baselines", "pass", session="sess9"))
+for n in "abc":
+    write(f"many/{n}.md", "d\n")
+write("lone/x.md", "d\n")
+results.append(
+    run(
+        "18b. 3 files in one dir collapse; a lone file keeps its path; one-line verdicts asked",
+        "block",
+        session="sess9",
+        present=["many/ (3 files)", "lone/x.md", "one line per item"],
+        absent=["many/a.md", "many/b.md", "many/c.md"],
+    )
+)
+
+# An item's instructions show once per turn; a new turn shows them again.
+results.append(run("19a. fresh session baselines", "pass", session="sess10"))
+write("stdlib/once.sprout", "s\n")
+results.append(
+    run("19b. first block shows the how-text", "block", session="sess10", prompt="o1",
+        present=["idiomatic-sprout.md"])
+)
+write("stdlib/once.sprout", "s\nt\n")
+results.append(
+    run("19c. same turn: title only", "block", session="sess10", prompt="o1",
+        present=["1) Is it idiomatic Sprout?"], absent=["idiomatic-sprout.md"])
+)
+write("stdlib/once.sprout", "s\nt\nu\n")
+results.append(
+    run("19d. new turn: how-text again", "block", session="sess10", prompt="o2",
+        present=["idiomatic-sprout.md"])
+)
+
 shutil.rmtree(WT, ignore_errors=True)
-state = json.loads((S / ".git/claude-review-gate/sess1.json").read_text())
+state =json.loads((S / ".git/claude-review-gate/sess1.json").read_text())
 print("state:", {k: (v if k != "seen" else len(v)) for k, v in state.items()})
 print("\nSUITE", "PASSED" if all(results) else "FAILED")
 sys.exit(0 if all(results) else 1)
