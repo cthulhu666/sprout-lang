@@ -707,7 +707,7 @@ fn run_eval_binary() -> json.Json !{IO} =
     collect_eval_output(run_result)
 
 fn env_forces_frameworks() -> Bool !{IO} =
-  match env.get("SPROUT_DARWIN_FRAMEWORKS") with
+  match env.get_or_panic("SPROUT_DARWIN_FRAMEWORKS") with
   | Just _ -> true
   | Nothing -> false
 
@@ -949,14 +949,21 @@ fn response_text(response: json.Json) -> String =
 
 fn service_loop(state: StartupState) -> Unit !{IO} =
   match terminal.term_read_line_once() with
-  | Nothing -> ()
-  | Just line ->
+  | Ok Nothing -> ()
+  | Ok (Just line) ->
       if string.is_empty(line) then service_loop(state)
       else
         do
           response <- dispatch_line(line, state)
           terminal.write(response_text(response) ++ "\n")
           service_loop(state)
+  # A request line that is not valid UTF-8 is a malformed request like invalid JSON: it is
+  # answered with an error and the next line is read, so a client reading one reply per request
+  # stays in step.
+  | Err _ ->
+      do
+        terminal.write(response_text(error_response("invalid request: not valid UTF-8")) ++ "\n")
+        service_loop(state)
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
   if stdlib_root == "" then do

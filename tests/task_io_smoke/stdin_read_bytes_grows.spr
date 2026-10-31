@@ -1,5 +1,5 @@
 import stdlib.terminal as terminal
-import stdlib.string as string
+import stdlib.bytes as bytes
 
 # `stdin_read_bytes`: memory follows the bytes that arrive, not the count that was asked for.
 #
@@ -14,7 +14,7 @@ import stdlib.string as string
 #
 # Marker discipline: every marker appears on its success path only.
 
-extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
+extern fn stdin_read_bytes(n: Int) -> Maybe Bytes !{IO}
 
 let huge_count = 4611686018427387904
 
@@ -25,14 +25,14 @@ fn check_huge() -> Unit !{IO} =
   | Nothing -> terminal.write("huge-count-eof\n")
   | Just _ -> terminal.write("MISMATCH: huge count was satisfied\n")
 
-fn report_payload(text: String) -> Unit !{IO} =
-  if string.byte_length(text) == payload_size then terminal.write("grown-read-complete\n")
-  else terminal.write(`MISMATCH: read returned ${int_to_string(string.byte_length(text))} bytes\n`)
+fn report_payload(payload: Bytes) -> Unit !{IO} =
+  if bytes.length(payload) == payload_size then terminal.write("grown-read-complete\n")
+  else terminal.write(`MISMATCH: read returned ${int_to_string(bytes.length(payload))} bytes\n`)
 
 fn main() -> Unit !{IO} =
   do
     match stdin_read_bytes(payload_size) with
-    | Just text -> report_payload(text)
+    | Just payload -> report_payload(payload)
     | Nothing -> terminal.write("MISMATCH: payload read reported EOF\n")
     check_huge()
     match stdin_read_bytes(1) with

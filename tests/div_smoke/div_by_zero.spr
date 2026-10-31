@@ -7,5 +7,5 @@ module main
 # "division by zero" and a non-zero exit.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     print(int_to_string(10 / list_length(args)))

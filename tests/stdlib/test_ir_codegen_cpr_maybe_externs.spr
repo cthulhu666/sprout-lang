@@ -59,7 +59,7 @@ fn probe_two_arg(name: String) -> String =
     ++ "  | Just m -> m\n"
     ++ "  | Nothing -> 0\n"
 
-# argv_get and env_get take exactly one argument. An earlier draft probed env_get
+# An earlier draft probed env_get
 # with probe_no_arg, which emitted a 0-arg call against a `@env_get_unboxed(i64)`
 # declare; the assertion still passed because it greps a prefix. Arity is matched
 # here so each fixture is IR the declare block would actually accept.
@@ -131,15 +131,15 @@ fn main() -> Unit !{IO} =
     assert_false(state, "term_read_line_unboxed appears nowhere (call or declare)",
                  has(trl, "term_read_line_unboxed"))
 
-    # --- SURVIVORS: all eight keep the peephole. -----------------------------
+    # --- SURVIVORS: all six keep the peephole. -----------------------------
     # These are the hot ones — across the 60-file golden corpus str_char_at has
     # 165 call sites, map_nth_key/map_nth_value 147 each, vector_get 98 — and none
     # can trigger a collection, which is what lets the runtime block assert its
     # strong invariant once the two allocating variants above go.
     #
-    # All eight are asserted, deliberately. A first draft covered only four; the
+    # All six are asserted, deliberately. A first draft covered only four; the
     # header comment and two documents nevertheless described this file as pinning
-    # "the eight survivors", so dropping bytes_get from the allow-list would have
+    # "the survivors", so dropping bytes_get from the allow-list would have
     # left the suite green while three separate places claimed otherwise.
     vget <- translate_or_msg(probe_two_arg("vector_get"))
     assert_true(state, "vector_get fixture translates", translated(vget))
@@ -169,13 +169,16 @@ fn main() -> Unit !{IO} =
     assert_true(state, "bytes_get keeps CPR (non-allocating read)",
                 has(bget, "call i128 @bytes_get_unboxed"))
 
+    # argv_get and env_get left the list when stdlib.argv and stdlib.env moved to
+    # argv_get_bytes and env_get_bytes (a Bytes copy, so no interned entry to hand back); the
+    # names now lower like any other extern.
     aget <- translate_or_msg(probe_one_arg("argv_get"))
-    assert_true(state, "argv_get keeps CPR (returns an interned argv entry)",
-                has(aget, "call i128 @argv_get_unboxed"))
+    assert_false(state, "argv_get no longer gets CPR",
+                 has(aget, "argv_get_unboxed"))
 
     eget <- translate_or_msg(probe_one_arg("env_get"))
-    assert_true(state, "env_get keeps CPR (interned, GC-invisible)",
-                has(eget, "call i128 @env_get_unboxed"))
+    assert_false(state, "env_get no longer gets CPR",
+                 has(eget, "env_get_unboxed"))
 
     # --- The ir_lowering declare block, pinned POSITIVELY. -------------------
     # Checking only that the two removed names are ABSENT would stay green if a
@@ -183,7 +186,7 @@ fn main() -> Unit !{IO} =
     # allow-list — a drift that surfaces at link time, which is the exact failure
     # the "Must stay in sync" comment at ir_lowering.sprout:520 warns about.
     # ir_lowering emits the whole block unconditionally, so ONE fixture's IR
-    # carries all eight declares.
+    # carries all six declares.
     assert_true(state, "declare: vector_get_unboxed",
                 has(eget, "declare i128 @vector_get_unboxed(i64, i64)"))
     assert_true(state, "declare: map_get_unboxed",
@@ -196,10 +199,10 @@ fn main() -> Unit !{IO} =
                 has(eget, "declare i128 @bytes_get_unboxed(i64, i64)"))
     assert_true(state, "declare: str_char_at_unboxed",
                 has(eget, "declare i128 @str_char_at_unboxed(i64, i64)"))
-    assert_true(state, "declare: argv_get_unboxed",
-                has(eget, "declare i128 @argv_get_unboxed(i64)"))
-    assert_true(state, "declare: env_get_unboxed",
-                has(eget, "declare i128 @env_get_unboxed(i64)"))
+    assert_false(state, "declare: argv_get_unboxed is gone",
+                 has(eget, "declare i128 @argv_get_unboxed"))
+    assert_false(state, "declare: env_get_unboxed is gone",
+                 has(eget, "declare i128 @env_get_unboxed"))
 
     # --- Membership is an explicit allow-list, not a suffix convention. -------
     # Locks that nothing opts in merely by existing: an extern absent from

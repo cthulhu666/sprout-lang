@@ -19,11 +19,11 @@ fn nested() -> Int -> Int -> Int = \x -> \y -> x + y
 # at RUNTIME — as in `div_by_zero.spr`, neither the Sprout compiler nor clang can
 # fold it away and recover the callee statically. With no arguments this yields
 # `add2`, the two-parameter closure.
-fn pick(args: List String) -> Int -> Int -> Int =
+fn pick(args: List Bytes) -> Int -> Int -> Int =
   if list_length(args) == 0 then add2 else nested()
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let f = pick(args)
     print(int_to_string(f(1)(2)))

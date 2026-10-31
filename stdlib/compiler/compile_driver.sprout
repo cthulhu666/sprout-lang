@@ -15,6 +15,7 @@ import stdlib.compiler.bind_census as bind_census
 import stdlib.compiler.spec_census as spec_census
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.argv as argv
 import stdlib.fs as fs
 
 # ---------------------------------------------------------------------------
@@ -521,15 +522,16 @@ fn prints_file_header(phase: Phase) -> Bool =
 # Prints "=== <path> ===" before each file's output (except the IR phase).
 
 fn run_batch(stdlib_root: String, idx: Int, phase: Phase, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
-  match argv_get(idx) with
-  | Nothing -> ()
-  | Just path ->
+  match argv.get(idx) with
+  | Ok Nothing -> ()
+  | Ok (Just path) ->
       do
         if prints_file_header(phase) then print("=== " ++ path ++ " ===") else ()
         run_phase(phase, path, stdlib_root, extra_roots, failed)
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
         run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
+  | Err _ -> report_error(failed, "ERROR: an argument is not valid UTF-8")
 
 # An unknown phase is reported once, before any file is read and with no files
 # too, so a typo cannot run something else, or nothing, and exit 0.
@@ -547,49 +549,54 @@ fn run_named_phase(name: String, stdlib_root: String, idx: Int, extra_roots: Lis
 fn main() -> Int !{IO} =
   do
     failed <- ref_new(0)
-    args <- argv_all()
-    match args with
-    | ["--emit-ir", "--debug", stdlib_root | _] ->
-        run_batch(stdlib_root, 3, PhaseIrTyped, Nil, failed)
-    | ["--emit-ir", "--debug" | _] ->
-        report_error(failed, "ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
-    # One extra package root, fixed right after <stdlib-root>: dotted non-stdlib
-    # imports (e.g. postgres.*) resolve under <pkg-root> (docs/packaging-v0.md §10
-    # phase 2). Single root, fixed position — the walking-skeleton surface.
-    | ["--emit-ir", stdlib_root, "--package-root", dir | _] ->
-        run_batch(stdlib_root, 4, PhaseIrTyped, Cons(dir, Nil), failed)
-    | ["--emit-ir", stdlib_root | _] ->
-        run_batch(stdlib_root, 2, PhaseIrTyped, Nil, failed)
-    | ["--emit-ir" | _] ->
-        report_error(failed, "ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
-    | ["--phase", phase, stdlib_root, "--package-root", dir | _] ->
-        run_named_phase(phase, stdlib_root, 5, Cons(dir, Nil), failed)
-    | ["--phase", phase, stdlib_root | _] ->
-        run_named_phase(phase, stdlib_root, 3, Nil, failed)
-    | ["--phase", _ | _] ->
-        report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
-    | ["--phase" | _] ->
-        report_error(failed, "ERROR: --phase requires an argument: " ++ known_phases)
-    # --package-root before the bare form: the general arm would otherwise bind
-    # path to the literal "--package-root". Mirrors the --emit-ir surface so the
-    # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
-    | ["--use-ir-codegen", stdlib_root, "--package-root", dir, path | _] ->
-        run_file_use_ir_codegen(path, stdlib_root, Cons(dir, Nil), failed)
-    | ["--use-ir-codegen", stdlib_root, path | _] ->
-        run_file_use_ir_codegen(path, stdlib_root, Nil, failed)
-    | ["--use-ir-codegen" | _] ->
-        report_error(failed, "ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> [--package-root <dir>] <file>")
-    | ["--emit-iface", stdlib_root, module_name, path | _] ->
-        run_file_emit_iface(module_name, path, stdlib_root, failed)
-    | ["--emit-iface" | _] ->
-        report_error(failed, "ERROR: usage: compile-driver --emit-iface <stdlib-root> <module-name> <file>")
-    | ["--check-iface", path | _] ->
-        run_check_iface(path, failed)
-    | ["--check-iface" | _] ->
-        report_error(failed, "ERROR: usage: compile-driver --check-iface <iface-file>")
-    | [stdlib_root | _] ->
-        run_batch(stdlib_root, 1, PhaseDefault, Nil, failed)
-    | _ ->
-        report_error(failed, "ERROR: usage: compile-driver [--phase " ++ known_phases ++ " | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+    match argv.all() with
+    | Err _ -> report_error(failed, "ERROR: an argument is not valid UTF-8")
+    | Ok args -> run_command(args, failed)
     code <- ref_read(failed)
     code
+
+fn run_command(args: List String, failed: Ref Int) -> Unit !{IO} =
+  match args with
+  | ["--emit-ir", "--debug", stdlib_root | _] ->
+      run_batch(stdlib_root, 3, PhaseIrTyped, Nil, failed)
+  | ["--emit-ir", "--debug" | _] ->
+      report_error(failed, "ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
+  # One extra package root, fixed right after <stdlib-root>: dotted non-stdlib
+  # imports (e.g. postgres.*) resolve under <pkg-root> (docs/packaging-v0.md §10
+  # phase 2). Single root, fixed position — the walking-skeleton surface.
+  | ["--emit-ir", stdlib_root, "--package-root", dir | _] ->
+      run_batch(stdlib_root, 4, PhaseIrTyped, Cons(dir, Nil), failed)
+  | ["--emit-ir", stdlib_root | _] ->
+      run_batch(stdlib_root, 2, PhaseIrTyped, Nil, failed)
+  | ["--emit-ir" | _] ->
+      report_error(failed, "ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
+  | ["--phase", phase, stdlib_root, "--package-root", dir | _] ->
+      run_named_phase(phase, stdlib_root, 5, Cons(dir, Nil), failed)
+  | ["--phase", phase, stdlib_root | _] ->
+      run_named_phase(phase, stdlib_root, 3, Nil, failed)
+  | ["--phase", _ | _] ->
+      report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
+  | ["--phase" | _] ->
+      report_error(failed, "ERROR: --phase requires an argument: " ++ known_phases)
+  # --package-root before the bare form: the general arm would otherwise bind
+  # path to the literal "--package-root". Mirrors the --emit-ir surface so the
+  # typed-codegen path resolves dotted non-stdlib imports (e.g. testsupport.*).
+  | ["--use-ir-codegen", stdlib_root, "--package-root", dir, path | _] ->
+      run_file_use_ir_codegen(path, stdlib_root, Cons(dir, Nil), failed)
+  | ["--use-ir-codegen", stdlib_root, path | _] ->
+      run_file_use_ir_codegen(path, stdlib_root, Nil, failed)
+  | ["--use-ir-codegen" | _] ->
+      report_error(failed, "ERROR: usage: compile-driver --use-ir-codegen <stdlib-root> [--package-root <dir>] <file>")
+  | ["--emit-iface", stdlib_root, module_name, path | _] ->
+      run_file_emit_iface(module_name, path, stdlib_root, failed)
+  | ["--emit-iface" | _] ->
+      report_error(failed, "ERROR: usage: compile-driver --emit-iface <stdlib-root> <module-name> <file>")
+  | ["--check-iface", path | _] ->
+      run_check_iface(path, failed)
+  | ["--check-iface" | _] ->
+      report_error(failed, "ERROR: usage: compile-driver --check-iface <iface-file>")
+  | [stdlib_root | _] ->
+      run_batch(stdlib_root, 1, PhaseDefault, Nil, failed)
+  | _ ->
+      report_error(failed, "ERROR: usage: compile-driver [--phase " ++ known_phases ++ " | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
+

@@ -1,0 +1,15 @@
+module main
+
+import stdlib.bytes as bytes
+
+# Prints the byte count of every argument, taken through `argv_all_bytes`, then "end".
+#
+# The Bytes path never checks UTF-8, so an argument that is not valid UTF-8 reaches the program as
+# its raw bytes. The String path (`argv.all`) answers `Err` for it; see argv_utf8.spr. Run via
+# `just argv-smoke`, which passes the arguments.
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all_bytes()
+    list_each(\a -> print(int_to_string(bytes.length(a))), args)
+    print("end")

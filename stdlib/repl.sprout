@@ -593,7 +593,17 @@ fn interactive_read_line(prompt: String, history: Vec String, session: compiler.
 fn read_input_line(prompt: Maybe String, history: Vec String, session: compiler.StatefulSession, completion_cache: Ref (Maybe (Vec String))) -> Maybe String !{IO} =
   match prompt with
   | Just text -> interactive_read_line(text, history, session, completion_cache)
-  | Nothing -> terminal.term_read_line_once()
+  | Nothing -> read_stdin_line()
+
+# One line from stdin. A line that is not valid UTF-8 (or holds a NUL) is reported and skipped:
+# the session goes on with the next line.
+fn read_stdin_line() -> Maybe String !{IO} =
+  match terminal.term_read_line_once() with
+  | Ok line -> line
+  | Err _ ->
+      do
+        print("error: input line is not valid UTF-8; skipped")
+        read_stdin_line()
 
 fn append_submission_line(acc: String, line: String) -> String =
   if acc == "" then line else acc ++ "\n" ++ line

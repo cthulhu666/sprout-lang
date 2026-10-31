@@ -269,8 +269,12 @@ fn is_infinite(x: Double) -> Bool = !is_finite(x)
 fn is_zero(x: Double) -> Bool = double_to_bits(x) == 0
 
 fn main() -> Unit !{IO} =
+  match args.parse_argv() with
+  | Ok argv -> run_differential(argv)
+  | Err _ -> eprint("an argument is not valid UTF-8")
+
+fn run_differential(argv: args.Args) -> Unit !{IO} =
   do
-    let argv = args.parse_argv()
     let runs = args.arg_int(argv, "runs", 40)
     let seed = seed_state(args.arg_int(argv, "seed", 20260925))
     let runs_sweep = sweep(sample_run, seed, runs, lengths)

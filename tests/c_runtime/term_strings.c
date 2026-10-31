@@ -4,11 +4,12 @@
  * header-checked, and str_eq / str_byte_len check each payload again on the way in. argv[1]:
  *   key   stdin carries every key the non-tty path of term_read_key names, a fresh one-byte
  *         key, a 2-byte key, two malformed sequences (U+FFFD), then EOF.
- *   line  term_read_line: CRLF, an empty line, a last line without a newline, then EOF.
+ *   line  term_read_line_bytes: CRLF, an empty line, a line with an interior NUL, a line that is
+ *         not UTF-8, a last line without a newline, then EOF. The lines are Bytes, kept whole.
  *   avail term_read_avail: Bytes from a pipe, then TermFailed(text) once fd 0 is closed.
  *   tty   term_read_key on a pty: the four arrow keys, a 2-byte key, a malformed one with the
  *         next key kept, a plain key, an unknown CSI and a lone ESC.
- * Not reached: term_read_line's read error (sprout_fail) and term_input_failed's poll branches
+ * Not reached: term_read_line_bytes's read error (sprout_fail) and term_input_failed's poll branches
  * ("stdin is not open", poll error), which need a descriptor that fstat accepts and poll refuses.
  */
 #define _GNU_SOURCE
@@ -27,9 +28,10 @@
 #include "str_check.h"
 
 long long term_read_key(void);
-long long term_read_line(void);
+long long term_read_line_bytes(void);
 long long term_read_avail(long long max_val, long long ms_val);
 long long bytes_length(long long bytes_h);
+long long bytes_get(long long bytes_h, long long index);
 
 enum { JUST = 3, NOTHING = 4, BYTES = 10, FAILED = 11 };
 
@@ -52,14 +54,26 @@ static int run_key(void) {
   return expect_keys(want, (int)(sizeof want / sizeof want[0]));
 }
 
-static int run_line(void) {
-  static const char* const want[] = { "first", "", "second" };
-  for (int i = 0; i < 3; i++) {
-    long long r = term_read_line();
-    if (sprout_tag(r) != JUST || !is_str(sprout_field(r, 0), want[i]))
-      return fail("term_read_line is not Just(<headered String>)");
+/* `b` is a Bytes object holding exactly the `n` bytes at `want`. */
+static int bytes_is(long long b, const char* want, size_t n) {
+  if (bytes_length(b) != (long long)n) return 0;
+  for (size_t i = 0; i < n; i++) {
+    long long r = bytes_get(b, (long long)i);
+    if (sprout_tag(r) != JUST || sprout_field(r, 0) != (unsigned char)want[i]) return 0;
   }
-  if (sprout_tag(term_read_line()) != NOTHING) return fail("term_read_line at EOF");
+  return 1;
+}
+
+static int run_line(void) {
+  static const struct { const char* data; size_t len; } want[] = {
+    { "first", 5 }, { "", 0 }, { "a\0b", 3 }, { "\xff", 1 }, { "second", 6 }
+  };
+  for (int i = 0; i < 5; i++) {
+    long long r = term_read_line_bytes();
+    if (sprout_tag(r) != JUST || !bytes_is(sprout_field(r, 0), want[i].data, want[i].len))
+      return fail("term_read_line_bytes is not Just(<the line's bytes>)");
+  }
+  if (sprout_tag(term_read_line_bytes()) != NOTHING) return fail("term_read_line_bytes at EOF");
   return 0;
 }
 

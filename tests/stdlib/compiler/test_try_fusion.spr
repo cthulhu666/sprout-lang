@@ -183,7 +183,7 @@ fn check_pair(state: TestState, stdlib_root: String, name: String, try_src: Stri
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

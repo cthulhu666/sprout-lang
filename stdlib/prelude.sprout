@@ -1890,17 +1890,21 @@ export fn print(value: a) -> Unit !{IO} where linear a, ToString a =
 # effectful made all nine advertise an impurity they do not have.
 # tests/effects/canaries.spr pins it via `unreachable_arm`.
 extern fn panic(msg: String) -> a where linear a
-extern fn argv_get(idx: Int) -> Maybe String !{IO}
+# Process arguments, raw. Nothing here checks UTF-8: an argument is whatever bytes the OS passed.
+# The checked String forms, `argv.get` and `argv.all`, are in stdlib.argv — they need `Utf8Error`,
+# which lives in stdlib.bytes and so cannot be named from the prelude. `Nothing` is an index past
+# the last argument.
+extern fn argv_get_bytes(idx: Int) -> Maybe Bytes !{IO}
 
-export fn argv_all() -> List String !{IO} =
-  argv_collect(0, Nil)
+export fn argv_all_bytes() -> List Bytes !{IO} =
+  argv_collect_bytes(0, Nil)
 
-fn argv_collect(i: Int, acc: List String) -> List String !{IO} =
-  match argv_get(i) with
+fn argv_collect_bytes(i: Int, acc: List Bytes) -> List Bytes !{IO} =
+  match argv_get_bytes(i) with
   | Nothing -> list_reverse_go(acc, Nil)
-  | Just s -> argv_collect(i + 1, Cons(s, acc))
+  | Just b -> argv_collect_bytes(i + 1, Cons(b, acc))
 
-# The process environment is NOT declared here. `env_get` lives in stdlib.env; callers use
+# The process environment is NOT declared here. `env_get_bytes` lives in stdlib.env; callers use
 # `env.get`. It is a leaf module rather than part of stdlib.process — where the environment would
 # sit more naturally, beside the `proc_run` family that hands it to every child — because there is
 # no cross-module dead-code elimination, so that placement made every consumer that wanted one

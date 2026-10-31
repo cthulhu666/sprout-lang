@@ -23,7 +23,7 @@ import stdlib.string as string
 # the same two authorities the bundler uses. See docs/module-surface-authority-v0.md.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

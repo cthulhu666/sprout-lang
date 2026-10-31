@@ -25,7 +25,7 @@ fn session(body: String) -> String = `module app.session\n\n${body}\n`
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
     # Loud, not silent: a skipped run reports "0 passed", which reads as green.
     | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
     | Just stdlib_root ->

@@ -1,5 +1,6 @@
 module main
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import stdlib.argv as argv
 
 # BCE differential fixture (scripts/bce_gate.sh): the case name arrives as argv[0]. Every
 # case runs with the pass on and off and must print the same text and exit with the same
@@ -71,10 +72,10 @@ fn main() -> Unit !{IO} =
     dst <- mutvec_new(8, 7)
     _ <- fill(src, 0, 5)
     _ <- print("before")
-    match argv_get(0) with
-    | Just name ->
+    match argv.get(0) with
+    | Ok (Just name) ->
         do
           _ <- run_case(name, src, dst)
           total <- sum(dst, 0, 8, 0)
           print(`${name}: dst sum ${total}`)
-    | Nothing -> print("no case")
+    | _ -> print("no case")

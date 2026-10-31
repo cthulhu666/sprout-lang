@@ -1,5 +1,6 @@
 module main
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+import stdlib.argv as argv
 
 # BCE differential fixture (scripts/bce_gate.sh), descending loop: the case name arrives
 # as argv[0]. `insert` slides `x` down from slot `j` to `lo`; its write at the exit slot
@@ -55,13 +56,13 @@ fn main() -> Unit !{IO} =
     v <- mutvec_new(6, 0)
     _ <- fill(v, 0, 6)
     _ <- print("before")
-    match argv_get(0) with
-    | Just name ->
+    match argv.get(0) with
+    | Ok (Just name) ->
         do
           _ <- run_case(name, v)
           shown <- show(v, 0, 6, "")
           print(`${name}:${shown}`)
-    | Nothing -> print("no case")
+    | _ -> print("no case")
 
 fn rem(a: Int, m: Int) -> Int =
   a - (a / m) * m

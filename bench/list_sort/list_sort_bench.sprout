@@ -13,6 +13,7 @@ module main
 #   dsort_by   Vec input, sort_by through that merge: decorated, one compare
 #   dsort_lean dsort_by without the two order-keeping reversals the index makes moot
 
+import stdlib.argv as argv
 import stdlib.time as time
 import stdlib.sort (sort, sort_by)
 
@@ -149,7 +150,6 @@ let usage = "usage: list_sort_bench <variant> <n> <reps>"
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
-    let [variant, n_text, reps_text] = args else print(usage)
+    let Ok([variant, n_text, reps_text]) = argv.all() else print(usage)
     let (Just n, Just reps) = (parse_int(n_text), parse_int(reps_text)) else print(usage)
     run(variant, n, reps)

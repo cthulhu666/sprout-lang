@@ -582,16 +582,15 @@ fn test21_program() -> sprout_ir.IRProgram =
       Nil)),
     Nil), Nil, Nil, Nil)
 
-# Test 22: `env_get_unboxed` is a NON-trigger — it returns getenv()'s pointer
-# (runtime:4342), no allocation.  Locks the corrected fact that env_get does NOT
-# allocate (the handoff wrongly listed it among the allocators).  RED pre-fix.
+# Test 22: `str_char_at_unboxed` is a NON-trigger — it returns the decoded codepoint,
+# no allocation.
 fn test22_program() -> sprout_ir.IRProgram =
   sprout_ir.IRProgram(Cons(
-    sprout_ir.IRFunction("env_get_unboxed_nontrigger",
+    sprout_ir.IRFunction("str_char_at_unboxed_nontrigger",
       Cons(("p", sprout_ir.IRTHeap), Cons(("name", sprout_ir.IRTHeap), Nil)), "i64", Cons(
       sprout_ir.IRBlock("entry",
         Cons(sprout_ir.IRCallUnboxed2("%tag", "%eo", sprout_ir.IRTHeap,
-                                      "env_get_unboxed", Cons(sprout_ir.param_ssa("name"), Nil)),
+                                      "str_char_at_unboxed", Cons(sprout_ir.param_ssa("name"), Nil)),
         Cons(sprout_ir.IRRet(sprout_ir.param_ssa("p")), Nil))),
       Nil)),
     Nil), Nil, Nil, Nil)
@@ -1176,8 +1175,8 @@ fn main() -> Unit !{IO} =
     check_true("T21: an unboxed variant outside the allow-list still roots the live heap value",
                 contains(lower(test21_program()), "call i64 @sprout_gc_push_i64_root")),
 
-    # --- Test 22 (B2 reach): env_get_unboxed is a NON-trigger (returns getenv ptr, no alloc).
-    check_false("T22: no push_i64_root across env_get_unboxed (non-allocating unboxed read)",
+    # --- Test 22 (B2 reach): str_char_at_unboxed is a NON-trigger (returns a codepoint, no alloc).
+    check_false("T22: no push_i64_root across str_char_at_unboxed (non-allocating unboxed read)",
                  contains(lower(test22_program()), "call i64 @sprout_gc_push_i64_root")),
 
     # --- Test 23 (alloc fixpoint): call to a provably-non-triggering Sprout fn is a non-trigger.

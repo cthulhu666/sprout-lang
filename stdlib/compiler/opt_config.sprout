@@ -64,7 +64,7 @@ export fn parse(off: Maybe String, stats: Maybe String) -> OptConfig =
 
 export fn from_env() -> OptConfig !{IO} =
   do
-    let cfg = parse(env.get("SPROUT_OPT_OFF"), env.get("SPROUT_OPT_STATS"))
+    let cfg = parse(env.get_or_panic("SPROUT_OPT_OFF"), env.get_or_panic("SPROUT_OPT_STATS"))
     _ <- warn_unrecognised(cfg.unrecognised)
     _ <- warn_unimplemented(list_filter(is_pending, cfg.disabled))
     cfg
@@ -75,7 +75,7 @@ export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
 # For a pass that runs below `compiler.run_opt_passes`, which has already reported
 # any unknown name: reads the switch without repeating the warnings.
 export fn pass_enabled(p: Pass) -> Bool !{IO} =
-  enabled(parse(env.get("SPROUT_OPT_OFF"), Nothing), p)
+  enabled(parse(env.get_or_panic("SPROUT_OPT_OFF"), Nothing), p)
 
 fn requested_names(off: Maybe String) -> List String =
   match off with

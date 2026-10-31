@@ -39,7 +39,7 @@ import stdlib.env as env
 # time. That case belongs to the timeout-bounded sweep gate instead.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

@@ -18,7 +18,7 @@ import stdlib.string as string
 # not — the suite runs from the repo root and downstream repos never run it.
 
 fn stdlib_root() -> String !{IO} =
-  maybe_with_default("stdlib", env.get("SPROUT_STDLIB_ROOT"))
+  maybe_with_default("stdlib", env.get_or_panic("SPROUT_STDLIB_ROOT"))
 
 fn read_prelude(root: String) -> String !{IO} =
   match fs.read_text(root ++ "/prelude.sprout") with

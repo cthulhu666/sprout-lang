@@ -5,6 +5,7 @@ import testsupport.listen (listen_or_die)
 import stdlib.bytes as bytes
 import stdlib.string as string
 import stdlib.terminal as terminal
+import stdlib.argv as argv
 
 # Regression (code review, finding 8): the HTTP CLIENT must deliver a response body byte-for-byte,
 # including 0x00 and bytes that are not valid UTF-8.
@@ -204,17 +205,19 @@ fn run_client(port: Int) -> Unit !{IO} =
     report_headers("mixed", url_for(port, "/mixed"), ["X-A: café", "X-B: café"])
 
 # `arg_or` takes the `Maybe` rather than being bound with `<-`, because `<-` on a `Maybe` SHORT-
-# CIRCUITS it: `mode <- argv_get(0)` would bind a `String` and make a missing argument abandon the
+# CIRCUITS it: `mode <- argv.get(0)` would bind a `String` and make a missing argument abandon the
 # block, which a `Unit`-returning main cannot carry. Passing the Maybe as an argument keeps the
 # absence a value — the same shape examples/http_get_cli.sprout uses.
 fn main() -> Unit !{IO} =
   do
-    mode <- arg_or(argv_get(0), "")
-    port_text <- arg_or(argv_get(1), "")
+    mode <- arg_or(argv.get(0), "")
+    port_text <- arg_or(argv.get(1), "")
     dispatch(mode, port_text)
 
-fn arg_or(raw: Maybe String, fallback: String) -> String =
-  maybe_with_default(fallback, raw)
+fn arg_or(raw: Result bytes.Utf8Error (Maybe String), fallback: String) -> String =
+  match raw with
+  | Ok (Just text) -> text
+  | _ -> fallback
 
 fn dispatch(mode: String, port_text: String) -> Unit !{IO} =
   if mode == "serve" then run_server(port_or(port_text, 28771))

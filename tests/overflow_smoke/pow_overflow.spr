@@ -18,6 +18,6 @@ fn describe(m: Maybe Int) -> String =
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let base = 2 + list_length(args)
     print(describe(pow(base, 100)))

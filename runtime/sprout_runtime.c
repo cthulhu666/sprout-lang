@@ -3249,16 +3249,22 @@ long long env_get(const char* name) {
   /* getenv returns bare libc memory; intern to a headered Sprout String. */
   return sprout_make1(SPROUT_TAG(Just), sprout_interned_word(value));
 }
+/* env_get_bytes: the raw bytes of an environment value, as Bytes, or Nothing when the name is
+ * unset. An empty value is Just(empty). The bytes are not checked: a value may not be UTF-8, and
+ * stdlib.env decodes it with bytes_to_utf8. getenv returns bare libc memory, so the bytes are
+ * copied; the copy is rooted across the Just allocation. */
+long long env_get_bytes(const char* name) {
+  if (name == NULL) sprout_fail("env_get_bytes: null name");
+  const char* value = getenv(name);
+  if (value == NULL) return sprout_make0(SPROUT_TAG(Nothing));
+  long long payload = sprout_ptr_word(
+    bytes_from_chunk_bytes((const unsigned char*)value, strlen(value), "env_get_bytes: out of memory"));
+  SPROUT_GC_PUSH_I64_LOCAL(payload);
+  long long out = sprout_make1(SPROUT_TAG(Just), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
+}
 long long sprout_set_argv(int argc, char** argv) {
-  /* Every argument is checked here, once, before any user code runs: argv_get and
-   * argv_get_unboxed intern the bytes as a String, which must be valid UTF-8. argv[0] is
-   * never exposed to Sprout, so it is not checked. */
-  for (int i = 1; i < argc; i++) {
-    if (!utf8_valid((const unsigned char*)argv[i], strlen(argv[i]))) {
-      fprintf(stderr, "argument %d is not valid UTF-8\n", i);
-      exit(2);
-    }
-  }
   g_sprout_argc = argc;
   g_sprout_argv = argv;
   /* Line-buffer stdout even when it is a pipe/file (libc would otherwise fully
@@ -3284,6 +3290,20 @@ long long sprout_set_argv(int argc, char** argv) {
  * and so returned an object bearing the FIRST tag it was ever called with. */
 long long sprout_nothing(long long tag) {
   return sprout_make0(tag);
+}
+/* argv_get_bytes: the raw bytes of user argument `index` (0 is the first one after the program
+ * name), or Nothing when there is no such argument. The bytes are not checked; the Sprout wrapper
+ * decodes them with bytes_to_utf8. argv is bare libc memory, so they are copied. */
+long long argv_get_bytes(long long index) {
+  if (index < 0 || g_sprout_argv == NULL || index >= (long long)(g_sprout_argc - 1))
+    return sprout_make0(SPROUT_TAG(Nothing));
+  const char* arg = g_sprout_argv[index + 1];
+  long long payload = sprout_ptr_word(
+    bytes_from_chunk_bytes((const unsigned char*)arg, strlen(arg), "argv_get_bytes: out of memory"));
+  SPROUT_GC_PUSH_I64_LOCAL(payload);
+  long long out = sprout_make1(SPROUT_TAG(Just), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 long long argv_get(long long index) {
   if (index < 0) return sprout_make0(SPROUT_TAG(Nothing));
@@ -3906,30 +3926,34 @@ long long proc_run_stdin_vec(long long argv_val, long long stdin_val) {
   return result;
 }
 
-long long term_read_line(void) {
+/* term_read_line_bytes: one stdin line as Bytes, without its trailing \n / \r\n; Nothing at EOF.
+ * The length comes from getline, never strlen, so an interior NUL is kept. The bytes are not
+ * checked: stdlib.terminal decodes them with bytes_to_utf8. */
+long long term_read_line_bytes(void) {
   char* line = NULL;
   size_t cap = 0;
   ssize_t len = getline(&line, &cap, stdin);
   if (len < 0) {
     free(line);
     if (feof(stdin)) return sprout_make0(SPROUT_TAG(Nothing));
-    sprout_fail("term_read_line: read error");
+    sprout_fail("term_read_line_bytes: read error");
   }
-  while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-    len -= 1;
-    line[len] = '\0';
-  }
-  SproutStr text = sprout_str_register(line, "term_read_line: out of memory");
-  SPROUT_HANDLE(h_line, sprout_str_word(text));
-  return sprout_make1(SPROUT_TAG(Just), sprout_handle_get(h_line));
+  while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) len -= 1;
+  long long payload = sprout_ptr_word(
+    bytes_from_chunk_bytes((const unsigned char*)line, (size_t)len, "term_read_line_bytes: out of memory"));
+  free(line);
+  SPROUT_GC_PUSH_I64_LOCAL(payload);
+  long long out = sprout_make1(SPROUT_TAG(Just), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
-/* stdin_read_bytes: read exactly n bytes from stdin; returns Nothing on EOF.
+/* stdin_read_bytes: read exactly n bytes from stdin as Bytes; returns Nothing on EOF.
  * Required because fread has no Sprout equivalent — getline reads to newline,
- * not to a fixed byte count as LSP/DAP Content-Length framing requires.
+ * not to a fixed byte count as LSP/DAP Content-Length framing requires. NUL and non-UTF-8 bytes
+ * are kept; the caller decodes with bytes_to_utf8.
  *
  * The buffer follows the bytes received, not n: it starts at min(n, 64 KiB) and doubles up to n
- * as data arrives, so a count the stream never fills costs what was read. One byte beyond `cap`
- * is always kept for the NUL. */
+ * as data arrives, so a count the stream never fills costs what was read. */
 #define STDIN_READ_BYTES_START ((size_t)65536)
 long long stdin_read_bytes(long long n_val) {
   if (n_val < 0) sprout_fail("stdin_read_bytes: negative byte count");
@@ -3957,10 +3981,13 @@ long long stdin_read_bytes(long long n_val) {
     }
     total += got;
   }
-  buf[want] = '\0';
-  SproutStr text = sprout_str_register(buf, "stdin_read_bytes: out of memory");
-  SPROUT_HANDLE(h_buf, sprout_str_word(text));
-  return sprout_make1(SPROUT_TAG(Just), sprout_handle_get(h_buf));
+  long long payload = sprout_ptr_word(
+    bytes_from_chunk_bytes((const unsigned char*)buf, want, "stdin_read_bytes: out of memory"));
+  free(buf);
+  SPROUT_GC_PUSH_I64_LOCAL(payload);
+  long long out = sprout_make1(SPROUT_TAG(Just), payload);
+  SPROUT_GC_POP_LOCALS(1);
+  return out;
 }
 /* Returns long long, NOT _Bool — see "Bool-returning builtins return long long"
  * below (near str_starts_with_at_byte). `extern fn … -> Bool` lowers to

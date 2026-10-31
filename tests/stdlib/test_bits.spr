@@ -36,7 +36,7 @@ import stdlib.bits
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    args <- argv_all()
+    args <- argv_all_bytes()
 
     # `zero` is 0 but opaque to both compilers; `dyn n` is n by the same route.
     let zero = list_length(args)

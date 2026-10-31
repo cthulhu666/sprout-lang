@@ -1,6 +1,7 @@
 module stdlib.compiler.lsp_driver
 
 import stdlib.json as json
+import stdlib.bytes as bytes
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.module_loader as module_loader
@@ -9,7 +10,7 @@ import stdlib.string as string
 import stdlib.fs as fs
 import stdlib.terminal as terminal
 
-extern fn stdin_read_bytes(n: Int) -> Maybe String !{IO}
+extern fn stdin_read_bytes(n: Int) -> Maybe Bytes !{IO}
 
 # ---------------------------------------------------------------------------
 # LspState
@@ -51,7 +52,8 @@ fn build_lsp_state(stdlib_root: String, package_roots: List String) -> LspState 
 # LSP framing
 #
 # Write: compose "Content-Length: N\r\n\r\n<body>" via term_write (fflushes).
-# Read headers: term_read_line_once (strips \r\n).
+# Read headers: term_read_line_once (strips \r\n). A header line that is not valid UTF-8 cannot be
+# a Content-Length line, so it is skipped like any other header this server does not understand.
 # Read body: stdin_read_bytes(n) — BYTES, matching the byte count the header declares
 # and the byte count `lsp_send` writes. Reading the body as a line would desync on any
 # document containing a multi-byte character, because Content-Length counts bytes.
@@ -64,17 +66,27 @@ fn lsp_send(body: String) -> Unit !{IO} =
 export fn parse_content_length(line: String) -> Maybe Int =
   and_then(parse_int, string.strip_prefix(line, "Content-Length: "))
 
+# What one header line adds to the length seen so far. A line that is not valid UTF-8 names no
+# length, the same as any header line that is not `Content-Length`.
+export fn content_length_after(cl: Maybe Int, line: Result bytes.Utf8Error String) -> Maybe Int =
+  match line with
+  | Err _ -> cl
+  | Ok text ->
+      match parse_content_length(text) with
+      | Just n -> Just(n)
+      | Nothing -> cl
+
 fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
   match terminal.term_read_line_once() with
-  | Nothing -> Nothing
-  | Just line ->
+  | Ok Nothing -> Nothing
+  | Ok (Just line) ->
       if string.is_empty(line) then cl
-      else
-        match parse_content_length(line) with
-        | Just n -> read_headers_loop(Just(n))
-        | Nothing -> read_headers_loop(cl)
+      else read_headers_loop(content_length_after(cl, Ok(line)))
+  | Err e -> read_headers_loop(content_length_after(cl, Err(e)))
 
-fn read_lsp_message() -> Maybe String !{IO} =
+# The body as Bytes: it is decoded by the caller, which treats text that is not valid UTF-8 like
+# any other malformed message.
+fn read_lsp_message() -> Maybe Bytes !{IO} =
   match read_headers_loop(Nothing) with
   | Nothing -> Nothing
   | Just n -> stdin_read_bytes(n)
@@ -550,7 +562,8 @@ fn handle_after_shutdown_check(method: String, req: json.Json, shutdown: Bool, s
 # Main loop
 
 fn lsp_loop(state: LspState) -> Unit !{IO} =
-  let Just body = read_lsp_message() else ()
+  let Just raw = read_lsp_message() else ()
+      Ok body = bytes.to_string(raw) else lsp_loop(state)
       Ok req = json.parse(body) else lsp_loop(state)
       Just method = get_method(req) else lsp_loop(state)
   in
