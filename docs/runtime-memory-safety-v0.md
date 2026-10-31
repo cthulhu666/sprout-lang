@@ -133,7 +133,8 @@ Notes:
 
 **Stays C**, with its reason:
 - `regex_validate`, `regex_find_match`: libc's regex engine. `regex_replace_all_literal` for now:
-  a Sprout loop over `regex_find_match` would recompile the pattern per match.
+  a Sprout loop over `regex_find_match` would recompile the pattern per match. All five `regex_*`
+  move together if a Sprout engine passes the rule: [regex-engine-v0.md](regex-engine-v0.md).
 - `double_to_string`: the first of `%.15g` to `%.17g` that reads back, over libc `snprintf` and
   `strtod`.
 - `map_*`: the AVL tree behind `Dict` and `Set` (`dict_get` has 332 compiler call sites). A Sprout

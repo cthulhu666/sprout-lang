@@ -1621,12 +1621,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   cross-compiles to clean Win64 COFF, gated by `just windows-ir-gate`. `docs/windows-port-v0.md` is
   the authority: §5.1 is the resume point, §6 the measured W3 surface inventory, §4.3.1 the
   `WSAPoll` decision with the AFD/wepoll and IOCP re-open triggers.
-- [ ] `P2` **POSIX `<regex.h>` has no MSVC equivalent.** One use, `regex_compile_ere`, via
-  `regcomp`/`REG_EXTENDED`. Filed separately from W3 because stubbing it removes a
-  **language-visible** feature rather than an internal capability — vendor a small ERE
-  implementation vs. narrow the feature, decided on its own terms. **DECISION PENDING (owner) — W3
-  should not start without it**; `sprout_runtime.c` stops on this include at line 7, so it is also
-  W3's first ordering constraint.
+- [ ] `P2` **POSIX `<regex.h>` has no MSVC equivalent.** `sprout_runtime.c` stops on this include,
+  so W3 waits on **A regex engine in Sprout**, which deletes it.
 - [ ] `P2` **`proc_run` on Windows via `CreateProcess`.** `fork`/`execvp`/`pipe` (3/3/7 occurrences)
   → `CreateProcess` + anonymous pipes, preserving the deadlock-safe separate stdout/stderr
   capture. Not needed by the shipped game so not a Milestone A blocker; it *is* needed by Milestone
@@ -2908,6 +2904,9 @@ acting.
   executable oracle**, **Compare each `extern fn`'s C definition against the emitted `declare`**
   and **Reimplement `json_stringify` in Sprout**.
   `docs/runtime-memory-safety-v0.md`.
+- [ ] `P2` **A regex engine in Sprout.** `stdlib.regex` is five builtins over libc
+  `regcomp`/`regexec`. Each call recompiles the pattern, `.` and classes match bytes, and macOS
+  and glibc accept different patterns. `docs/regex-engine-v0.md`.
 
 - [ ] `P2` **Compare each `extern fn`'s C definition against the emitted `declare`.** The
   duplicate-declaration half is gated — `scripts/check_extern_signatures.sh` enforces one C symbol
