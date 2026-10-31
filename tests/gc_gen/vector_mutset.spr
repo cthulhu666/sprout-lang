@@ -1,0 +1,33 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# Barrier site: vector_mutset, through mutvec_set. Run by `just gc-gen-check` under
+# SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1. The MutVec is old after the first
+# collection; each round overwrites a slot with a fresh String, allocates garbage, and reads the
+# whole vector back. Without the barrier a freshly stored String is reachable only through the
+# old vector, which no minor collection scans: GENCHECK aborts.
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else churn(n - 1, acc + str_len(int_to_string(n)))
+
+fn read_all(v: MutVec String, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      s <- mutvec_at(v, i)
+      read_all(v, i + 1, n, acc + str_len(s))
+
+fn rounds(v: MutVec String, i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      _ <- mutvec_set(v, i - (i / 8) * 8, "item-" ++ int_to_string(i))
+      _ <- churn(3, 0)
+      total <- read_all(v, 0, 8, 0)
+      rounds(v, i + 1, n, acc + total)
+
+fn main() -> Unit !{IO} =
+  do
+    v <- mutvec_new(8, "start")
+    total <- rounds(v, 0, 60, 0)
+    print(`gc-gen vector_mutset ${int_to_string(total)}`)

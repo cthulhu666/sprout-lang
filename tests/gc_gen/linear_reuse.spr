@@ -1,0 +1,23 @@
+module main
+
+# Barrier site: IRReuseCtor (docs/linear-reuse-v0.md §4.3). Run by `just gc-gen-check` under
+# SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1. One linear cell lives across the
+# whole loop, so it is old after the first collection, and each step rebuilds it in place around
+# a fresh String. The emitted IR holds the call this test exists for; without it the new String
+# is reachable only through the old cell: GENCHECK aborts.
+
+type linear Cell = Cell Int String
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else churn(n - 1, acc + str_len(int_to_string(n)))
+
+fn run(c: Cell, i: Int, n: Int, acc: Int) -> Int =
+  match c with
+  | Cell k s ->
+      if i >= n then acc + k * 1000 + str_len(s)
+      else
+        let w = churn(2, str_len(s))
+        in run(Cell(k + 1, "item-" ++ int_to_string(i)), i + 1, n, acc + w)
+
+fn main() -> Unit !{IO} =
+  print(`gc-gen linear_reuse ${int_to_string(run(Cell(0, "start"), 0, 80, 0))}`)
