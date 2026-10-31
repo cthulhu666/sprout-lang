@@ -2041,33 +2041,25 @@ argv-smoke: bootstrap-from-seed
   fi
   echo "==> argv-smoke ✓"
 
-# DoD #9 — APPROVED_BUILTINS guard.  Every non-static `long long <name>(` in
-# any runtime source (runtime/*.c) must be listed in runtime/APPROVED_BUILTINS.
-# Per AGENTS.md "Builtin vs Stdlib" rules 4–6.
+# DoD #10 — APPROVED_BUILTINS guard.  runtime/APPROVED_BUILTINS must list exactly the runtime
+# functions Sprout can call: an `extern fn`, or a `declare` in the compiler's IR header, that a
+# runtime object defines.  Per AGENTS.md "Builtin vs Stdlib" rules 4-6.
+# docs/string-header-invariant-v0.md §7 step 6.
 [group('smoke')]
-check-approved-builtins:
+check-approved-builtins: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  APPROVED=runtime/APPROVED_BUILTINS
-  if [[ ! -f "$APPROVED" ]]; then
-    echo "check-approved-builtins: missing $APPROVED" >&2; exit 1
-  fi
-  # Names declared across ALL runtime sources (excluding `static long long`).
-  # grep -h suppresses the file: prefix so the ^long long anchor still matches.
-  declared=$(grep -hE '^long long [a-z_][a-zA-Z0-9_]*\(' {{runtime_src}} | sed -E 's/^long long ([a-z_][a-zA-Z0-9_]*)\(.*/\1/' | sort -u)
-  # Names listed in APPROVED_BUILTINS (strip comments and whitespace).
-  approved=$(sed -E 's/#.*$//; s/^[[:space:]]+|[[:space:]]+$//g' "$APPROVED" | grep -v '^$' | sort -u)
-  missing=$(comm -23 <(echo "$declared") <(echo "$approved") || true)
-  if [[ -n "$missing" ]]; then
-    echo "check-approved-builtins: builtins in runtime/*.c missing from $APPROVED:" >&2
-    printf '  %s\n' $missing >&2
-    echo >&2
-    echo "  Per AGENTS.md 'Builtin vs Stdlib' rules 4-6: add each name to" >&2
-    echo "  $APPROVED with an inline comment explaining why it cannot be" >&2
-    echo "  done in Sprout." >&2
-    exit 1
-  fi
-  echo "==> check-approved-builtins ✓"
+  TMPD=$(mktemp -d /tmp/sprout_approved_ir_XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" tests/smoke_shapes/01_noparam.spr > "$TMPD/header.ll"
+  ./scripts/check_approved_builtins.sh --allowlist runtime/APPROVED_BUILTINS --ir "$TMPD/header.ll" \
+    --extern-root stdlib --extern-root tests --extern-root examples --extern-root ide \
+    --exclude tests/approved_builtins -- {{runtime_src}}
+
+# check_approved_builtins.sh against tests/approved_builtins/ fixtures.
+[group('smoke')]
+test-approved-builtins:
+  bash scripts/test_approved_builtins.sh
 
 # One C symbol, one `extern fn` declaration.  Externs are invisible to the
 # module system (bundler.sprout:597) and the LLVM `declare` is deduped by name
@@ -4067,6 +4059,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "b1-gate|b1-gate"
     "bce-gate|bce-gate"
     "approved-builtins|check-approved-builtins"
+    "test-approved-builtins|test-approved-builtins"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
     "linvec-smoke|linvec-smoke"
@@ -4393,7 +4386,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

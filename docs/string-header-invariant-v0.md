@@ -1,6 +1,6 @@
 # Every String crossing into Sprout is headered — v0
 
-**Status — approved; steps 1 to 4 landed (§7).** Runtime-internal; no change to the language, the spec
+**Status — approved; steps 1 to 4, 6 and 7 landed (§7).** Runtime-internal; no change to the language, the spec
 or the extern ABI.
 Builds on `docs/runtime-invariant-confidence-v0.md`, which made every String headered.
 
@@ -301,11 +301,11 @@ Each step is its own commit and keeps every gate green.
    `scripts/runtime_word_casts.py` takes no baseline argument and has no `--emit-baseline`: rule 1
    fails on any site outside the exits and `ADDRESS_CASTS`. `ADDRESS_CASTS` stays.
 5. **ASan in CI.** Make `build-stage2-asan` run the C runtime tests and the suite (§4.5).
-6. **`check-approved-builtins` sees every builtin Sprout can call.** Its regex matches only
-   `^long long name(`, so `_Bool str_eq` and the `SproutUnboxed2 *_unboxed` builtins are
-   invisible to it. Matching every non-static C definition would instead flag cross-TU internals
-   (`sprout_poll_init`, `scheduler_park_on_fd`, `sprout_roots_new`). Build the set from the Sprout
-   side: every stdlib `extern fn`, plus the runtime declares in `ir_lowering.sprout`.
+6. ~~**`check-approved-builtins` sees every builtin Sprout can call.**~~ Landed: the gate
+   intersects the Sprout side (every `extern fn` under `stdlib`, `tests`, `examples`, `ide`, plus
+   the `declare` names in the IR header the compiler emits) with the global text symbols `nm`
+   reports for the compiled runtime. `runtime/APPROVED_BUILTINS` must equal that set: a missing
+   and a stale name both fail. `just test-approved-builtins` runs it on fixtures.
 7. ~~**Stale comments.**~~ Landed: `s` is String only, and Char is an `i64` codepoint (`i`),
    compared with `icmp`, never `str_compare`. The `CtorMeta` `field_kinds` comment, the
    `IRStrCompare`, `IRGetField` and `CtorReg` comments in `sprout_ir.sprout`, the two

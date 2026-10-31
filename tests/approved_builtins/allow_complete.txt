@@ -1,0 +1,5 @@
+# fixture: every builtin, exactly
+fx_flag
+fx_pair
+fx_plain  # inline comment
+fx_abort

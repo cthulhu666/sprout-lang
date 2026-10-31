@@ -339,7 +339,7 @@ are unaffected: LLVM agrees with itself, so they return directly.
 
 - **Platform-conditional.** arm64 leaves the register clean in practice, so no macOS run can catch it. It is live only on x86-64 — which is what CI and the release artifacts build.
 - **Input-conditional.** It bites only where the function falls through to a comparison. An early `return 0` compiles to `xorl %eax, %eax`, which zeroes all of `RAX`, so the *same function* is correct for some inputs and wrong for others.
-- **It hid itself from the audit gate.** the `check-approved-builtins` justfile recipe greps for `^long long <name>(`, so a `_Bool` definition was invisible to `runtime/APPROVED_BUILTINS` too — the ABI mismatch and the missing allowlist entry had one cause.
+- **It hid itself from the audit gate.** `check-approved-builtins` once grepped for `^long long <name>(`, so a `_Bool` definition was invisible to `runtime/APPROVED_BUILTINS` too — the ABI mismatch and the missing allowlist entry had one cause. The gate now builds its set from the Sprout side (every `extern fn` and every `declare` in the emitted IR header) intersected with the runtime objects' defined symbols, so the return type no longer matters.
 
 It surfaced only when a new test called `str_starts_with_at_byte` with the first inputs in the repo's history that returned false via the comparison path.
 

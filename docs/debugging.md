@@ -425,12 +425,12 @@ new runtime. If the old seed still calls the removed builtin, linking fails with
 
 - Remove **every** re-added bridge function, not just the obvious one. Leftover
   bridge functions are dead (the seed has 0 references, so `just test` passes
-  green) — nothing local catches them except `check-approved-builtins`.
+  green), and no gate catches dead C (BACKLOG **Dead runtime functions**).
 - `check-approved-builtins` is a **CI gate**, not part of `just test`. Run it
   locally for any runtime change: `mise exec -- just check-approved-builtins`. It
-  fails if a `long long name(...)`/`SproutUnboxed2 name(...)` in
-  `runtime/sprout_runtime.c` has no `runtime/APPROVED_BUILTINS` entry (or vice
-  versa) — a leftover bridge function trips it.
+  requires `runtime/APPROVED_BUILTINS` to equal the runtime functions Sprout can
+  call (an `extern fn` or a compiler `declare`). It trips on the old builtin's
+  entry once nothing names it, not on the leftover C itself.
 
 ## GC rooting-bug oracle (`SPROUT_GC_STRESS`)
 

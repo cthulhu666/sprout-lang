@@ -1,0 +1,6 @@
+fx_flag
+fx_pair
+fx_plain
+fx_abort
+fx_ghost
+fx_internal
