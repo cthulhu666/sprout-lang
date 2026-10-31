@@ -174,8 +174,8 @@ A **key** is a constrained top-level function and the evidence for each of its c
 - `closed_keys`: the closure, which adds each key a copy's body would call once its forwarded
   dictionaries are the caller's. `spec-keys` lists them, each with `direct` or the function
   whose copy produced it.
-- `declined`: keys the growth backstop refuses. Expected 0 while constrained polymorphic
-  recursion is rejected.
+- `declined`: keys the growth backstop refuses. Nonzero when a binding-group peer is called at a
+  larger type (a self-call cannot grow).
 - `devirt_multi`, `devirt_context`: method calls inside the copies that devirtualisation cannot
   finish (a method with its own constraint, so two leading dictionaries) or that dispatch into
   an instance with context dictionaries. A call can be in both.
@@ -183,9 +183,9 @@ A **key** is a constrained top-level function and the evidence for each of its c
 
 The counts show reach, not time. Instance method bodies are not copied, so the closure walks
 constrained top-level functions only. Calibrated by `just spec-census-smoke` against
-`tests/spec_census/dicts.spr`; the expected file lists the prelude's keys too, so a change to
-a prelude function's constraints moves it. `program_nodes` is masked there, since it counts the
-whole prelude.
+`tests/spec_census/dicts.spr`; the prelude adds no keys today, so only a concrete constrained
+call inside the prelude would move the expected file. `program_nodes` is masked there, since it
+counts the whole prelude.
 
 ## What did a program allocate? (`SPROUT_DEBUG_ALLOC=1`, `SPROUT_DEBUG_GC=1`)
 

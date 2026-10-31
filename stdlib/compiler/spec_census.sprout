@@ -23,8 +23,8 @@ import stdlib.string as string
 #     point (§4 "A worklist with a cache"). Walking a copy's body replaces each
 #     forwarded dictionary by the caller's, by slot key (`typed_ast.dict_slot_key`).
 #   declined       — keys the growth backstop refuses: the same function already on
-#     the key's path with instances that are a strict subterm of the new ones. §4
-#     expects 0 while polymorphic recursion is rejected for constrained functions.
+#     the key's path with instances that are a strict subterm of the new ones. Nonzero
+#     for a binding-group peer called at a larger type; a self-call cannot grow.
 #   devirt_multi   — method calls inside copies that `try_devirt_concrete` cannot
 #     finish: more than one leading dictionary (`sole_leading_ev_classes`).
 #   devirt_context — method calls inside copies whose evidence has an instance with
@@ -53,7 +53,7 @@ export type Analysis (..) = (census: Census, keys: List String)
 
 export fn analyse(prog: typed_ast.TypedProgram) -> Analysis =
   match prog with
-  | typed_ast.TypedProgram decls -> analyse_decls(decls, prog)
+  | typed_ast.TypedProgram decls -> analyse_decls(decls)
 
 # ---------------------------------------------------------------------------
 # Keys and sites
@@ -84,19 +84,22 @@ fn make_key(fn_name: String, evs: List typed_ast.Evidence) -> Key =
 # Evidence
 # ---------------------------------------------------------------------------
 
+fn ev_text(ev: typed_ast.Evidence) -> String = ev_node_text(ev, list_map(ev_text, ev_children(ev)))
+
 # An instance by its key with its context in parentheses, a forwarded slot by name.
-fn ev_text(ev: typed_ast.Evidence) -> String =
+# `kids` are the texts of `ev_children(ev)`.
+fn ev_node_text(ev: typed_ast.Evidence, kids: List String) -> String =
   match ev with
-  | typed_ast.EvInstance _ key children -> typed_ast.instance_key_text(key) ++ context_text(children)
-  | typed_ast.EvClasses blocks -> "[" ++ string.join(" ", list_map(ev_text, blocks)) ++ "]"
+  | typed_ast.EvInstance _ key _ -> typed_ast.instance_key_text(key) ++ context_text(kids)
+  | typed_ast.EvClasses _ -> "[" ++ string.join(" ", kids) ++ "]"
   | typed_ast.EvForward _ slot -> "fwd:" ++ typed_ast.slot_key_text(slot)
   | typed_ast.EvUnresolved -> "unresolved"
   | typed_ast.EvMissing _ -> "missing"
 
-fn context_text(children: List typed_ast.Evidence) -> String =
-  match children with
+fn context_text(kids: List String) -> String =
+  match kids with
   | Nil -> ""
-  | _ -> "(" ++ string.join(",", list_map(ev_text, children)) ++ ")"
+  | _ -> "(" ++ string.join(",", kids) ++ ")"
 
 fn ev_children(ev: typed_ast.Evidence) -> List typed_ast.Evidence =
   match ev with
@@ -135,17 +138,23 @@ fn ev_substitute(ev: typed_ast.Evidence, slots: typed_ast.SlotTable typed_ast.Ev
   | typed_ast.EvUnresolved -> ev
   | typed_ast.EvMissing _ -> ev
 
-fn ev_contains(outer: typed_ast.Evidence, inner_text: String) -> Bool =
-  ev_text(outer) == inner_text || any(ev_contains(_, inner_text), ev_children(outer))
+# An evidence tree's text, and whether it or a subtree has the text `needle`. Built
+# bottom-up, so each subtree's text is made once.
+type Found = (text: String, found: Bool)
+
+fn ev_find(ev: typed_ast.Evidence, needle: String) -> Found =
+  let kids = list_map(ev_find(_, needle), ev_children(ev))
+      text = ev_node_text(ev, list_map(\k -> k.text, kids))
+  in Found(text = text, found = text == needle || any(\k -> k.found, kids))
 
 # `new` repeats `old` inside itself, position by position, and differs in at least one.
 fn ev_list_grows(old: List typed_ast.Evidence, new: List typed_ast.Evidence, differs: Bool) -> Bool =
   match (old, new) with
   | ([], []) -> differs
   | ([o | os], [n | ns]) ->
-      if ev_contains(n, ev_text(o))
-      then ev_list_grows(os, ns, differs || ev_text(o) != ev_text(n))
-      else false
+      let old_text = ev_text(o)
+          in_new = ev_find(n, old_text)
+      in if in_new.found then ev_list_grows(os, ns, differs || old_text != in_new.text) else false
   | _ -> false
 
 # The slots a copy fills, one per block of each constraint's evidence. `build_hidden_for_constraints`
@@ -222,11 +231,7 @@ fn bind_names(names: List String, locals: Dict Bool) -> Dict Bool =
   list_fold(\ (l, n) -> dict_set(n, true, l), locals, names)
 
 fn bind_params(params: List ast.Param, locals: Dict Bool) -> Dict Bool =
-  list_fold(\ (l, p) -> dict_set(param_name(p), true, l), locals, params)
-
-fn param_name(p: ast.Param) -> String =
-  match p with
-  | ast.Param name _ _ -> name
+  bind_names(ast.param_names(params), locals)
 
 # The dictionaries a call carries, with `w`'s slots filled in, in argument order.
 fn call_evidence(args: List typed_ast.TypedExpr, w: Walk) -> List typed_ast.Evidence =
@@ -301,25 +306,28 @@ fn method_sites(m: typed_ast.TypedInstanceMethod, w: Walk, acc: Sites) -> Sites 
 # `parent`s is its path.
 type Seen = (key: Key, parent: String)
 
-type Closure = (seen: Dict Seen, pending: List Key, declined: Dict Bool, nodes: Int,
-                multi: Int, context: Int)
+# `closed_keys` counts `seen`, `declined_keys` counts `declined`.
+type Closure = (seen: Dict Seen, pending: List Key, declined: Dict Bool, closed_keys: Int,
+                declined_keys: Int, nodes: Int, multi: Int, context: Int)
 
+# `direct` holds distinct keys.
 fn start(direct: List Key) -> Closure =
   Closure(seen = list_fold(\ (s, k) -> dict_set(k.text, Seen(key = k, parent = ""), s), dict_empty(), direct),
-          pending = direct, declined = dict_empty(), nodes = 0, multi = 0, context = 0)
+          pending = direct, declined = dict_empty(), closed_keys = list_length(direct),
+          declined_keys = 0, nodes = 0, multi = 0, context = 0)
 
 # Each key is visited once: its callee's body, walked under its evidence, gives the
 # keys and devirtualisation blockers of that copy.
-fn drain(cl: Closure, callees: Dict Callee, methods: Dict Bool) -> Closure =
+fn drain(cl: Closure, base: Walk) -> Closure =
   match cl.pending with
   | Nil -> cl
-  | Cons k rest -> drain(visit(k, cl with (pending = rest), callees, methods), callees, methods)
+  | Cons k rest -> drain(visit(k, cl with (pending = rest), base), base)
 
-fn visit(k: Key, cl: Closure, callees: Dict Callee, methods: Dict Bool) -> Closure =
-  match dict_get(k.fn_name, callees) with
+fn visit(k: Key, cl: Closure, base: Walk) -> Closure =
+  match dict_get(k.fn_name, base.callees) with
   | Nothing -> cl
   | Just info ->
-      let w = Walk(callees = callees, methods = methods, slots = slots_for(info.constraints, k.evs))
+      let w = base with (slots = slots_for(info.constraints, k.evs))
           found = scan(info.body, bind_params(info.params, dict_empty()), w, no_sites())
           grown = cl with (nodes = cl.nodes + info.nodes, multi = cl.multi + found.multi,
                            context = cl.context + found.context)
@@ -328,9 +336,9 @@ fn visit(k: Key, cl: Closure, callees: Dict Callee, methods: Dict Bool) -> Closu
 fn admit(found: Key, producer: Key, cl: Closure) -> Closure =
   if dict_member(found.text, cl.seen) || dict_member(found.text, cl.declined) then cl
   else if grows_on_path(found, producer.text, cl.seen)
-  then cl with (declined = dict_set(found.text, true, cl.declined))
+  then cl with (declined = dict_set(found.text, true, cl.declined), declined_keys = cl.declined_keys + 1)
   else cl with (seen = dict_set(found.text, Seen(key = found, parent = producer.text), cl.seen),
-                pending = Cons(found, cl.pending))
+                pending = Cons(found, cl.pending), closed_keys = cl.closed_keys + 1)
 
 # The same function earlier on the path, at instances `found` strictly contains.
 fn grows_on_path(found: Key, at: String, seen: Dict Seen) -> Bool =
@@ -344,23 +352,22 @@ fn grows_on_path(found: Key, at: String, seen: Dict Seen) -> Bool =
 # Assembly
 # ---------------------------------------------------------------------------
 
-fn analyse_decls(decls: List typed_ast.TypedDecl, prog: typed_ast.TypedProgram) -> Analysis =
-  let callees = callee_table(decls)
-      methods = method_table(decls)
-      direct_sites = original_sites(decls, Walk(callees = callees, methods = methods,
-                                                slots = typed_ast.slot_table_empty()))
+fn analyse_decls(decls: List typed_ast.TypedDecl) -> Analysis =
+  let base = Walk(callees = callee_table(decls), methods = method_table(decls),
+                  slots = typed_ast.slot_table_empty())
+      direct_sites = original_sites(decls, base)
       direct = distinct_keys(direct_sites.keys)
-      closed = drain(start(direct), callees, methods)
+      closed = drain(start(direct), base)
   in Analysis(
        census = Census(
          concrete_calls = list_length(direct_sites.keys),
          direct_keys = list_length(direct),
-         closed_keys = vec_length(dict_values(closed.seen)),
-         declined = vec_length(dict_values(closed.declined)),
+         closed_keys = closed.closed_keys,
+         declined = closed.declined_keys,
          devirt_multi = closed.multi,
          devirt_context = closed.context,
          closed_nodes = closed.nodes,
-         program_nodes = typed_ast.node_count(prog)),
+         program_nodes = list_fold(\ (n, d) -> n + typed_ast.decl_node_count(d), 0, decls)),
        keys = sort(list_map(seen_line(closed.seen, _), vec_to_list(dict_values(closed.seen)))))
 
 fn distinct_keys(keys: List Key) -> List Key =

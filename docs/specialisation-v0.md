@@ -166,19 +166,19 @@ body may call other constrained functions with evidence that is now concrete; th
 worklist. Each key is copied once. Each worklist entry records the key that produced it, so a
 key's **path** is the chain of producing keys back to a call in the original program.
 
-**Why it terminates.** The premise: a constrained function cannot call itself, or a member of its
-binding group, at a larger type.
-- a self-call sees the provisional, ungeneralised scheme (`self_binding_scheme`, `infer.sprout`);
-- a binding group is inferred against the members' shared, ungeneralised schemes
-  (`register_fn_decl_scheme`, `typecheck_fn_group`).
+**Why it terminates.** A cache alone is no backstop: growing evidence is a new key every time.
+- A self-call sees the provisional, ungeneralised scheme (`self_binding_scheme`, `infer.sprout`),
+  so it is at the caller's own type.
+  `tests/conformance/type_error/polymorphic_recursion_constrained.spr` pins that. `BACKLOG.md` P2 **Allow polymorphic recursion for a CONSTRAINED declaration** would
+  lift it and give the backstop more inputs.
+- A call to a binding-group peer with a complete signature is not restricted: the peer is visible
+  already quantified (`spec-v0.md` §5; `register_fn_decl_scheme` registers its declared scheme),
+  so `f` can call `g` at `List x` while `g` calls `f` back at `x`. The evidence grows every lap.
 
-It is pinned by `tests/conformance/type_error/polymorphic_recursion_constrained.spr`, and
-`BACKLOG.md` P2 **Allow polymorphic recursion for a CONSTRAINED declaration** would remove it.
-A cache alone is no backstop: growing evidence is a new key every time. So the pass also declines
-a key when the same function is on its path with instances that are a strict subterm of the new
-ones. This is a structural check, not a numeric cap. While the premise holds, no input reaches
-the backstop and no test can; it gets its test in the change that lands that BACKLOG entry, which
-may not land without it.
+So the pass declines a key when the same function is on its path with instances that are a strict
+subterm of the new ones. This is a structural check, not a numeric cap. The call stays on
+dictionary passing, which is correct, since the generic code is kept. The census fixture
+(`tests/spec_census/dicts.spr`, `declined=1`) pins the check now; M1 pins the pass (§7).
 
 **The rooting gain** follows from step 1, for constrained variables only. A parameter typed by
 one and rewritten to `Int` gets `IRTScalar`, so `ir_rooting` keeps it out of `heap_origin` and
@@ -201,10 +201,11 @@ follow-up.
 ## 5. Why copies follow dictionaries, not types
 
 Copying for types too, so unconstrained callees also get exact rooting, is monomorphisation by
-another name. It also loses the termination argument: `spec-v0.md` §7 allows polymorphic
+another name. It also puts more on the termination backstop: `spec-v0.md` §5 allows polymorphic
 recursion for a function with a complete, constraint-free signature, which can call itself at an
-ever-larger type. Removing dictionaries is where the measured 2× is; the rooting gain inside
-copies is a side effect, not the target.
+ever-larger type, so each such function that does would reach the backstop too. Removing
+dictionaries is where the measured 2× is; the rooting gain inside copies is a side effect, not
+the target.
 
 Copying by representation is a third line. Every Sprout value fills the same 64-bit slot, so a
 copy could be keyed by a class per type variable instead of a type: heap, `Double`, other scalar,
@@ -333,9 +334,9 @@ code compares through `Ord`/`Eq`.
   the context-instance limit of §4 visible in the IR.
 - Modes survive the copy: a `local` parameter still lends, and a `where linear a` function still
   accepts a linear argument.
-- Termination: mutually recursive constrained functions; a constrained function calling a
-  constraint-free, polymorphically recursive one. The growing-evidence backstop is tested when
-  its premise goes (§4).
+- Termination: mutually recursive constrained functions, one calling the other at a larger type
+  (the backstop declines the key; the pass terminates and the output equals `SPROUT_OPT_OFF=spec`);
+  a constrained function calling a constraint-free, polymorphically recursive one.
 - Same behaviour with the pass on and off: `just test` under `SPROUT_OPT_OFF=spec` as well as with
   it enabled.
 

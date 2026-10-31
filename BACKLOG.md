@@ -399,6 +399,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the enum with no `default:` arms, add `-Werror=switch` to the runtime clang lines. Converts silent
   wrong-dispatch after a new heap kind into a build break.
   `docs/gc-phase2-retro-handoff-2026-07-05.md` §1.
+- [ ] `P3` **Two typed-AST walkers track local scope by hand and can drift.**
+  `spec_census.sprout` (`bind_names`, `bind_params`, `step_binds`, `scan_branch`) re-implements
+  the shadow-aware call walk that `verify_dispatch.sprout` has. A binding form taught to one and
+  not the other makes a local named like a top-level function count as a call in one pass only.
+  Fix: one exported helper in `typed_ast` that yields each call with its locals in scope, used by
+  both.
 - [ ] `P3` **Runtime-function facts are hand-written, unchecked name lists.**
   `is_nonallocating_read`, `is_nonallocating_unboxed_read`, `is_noreturn_extern`,
   `unboxed_maybe_extern_name`, `safe_io_externs` and five `op_triggers_gc` arms are claims about C
