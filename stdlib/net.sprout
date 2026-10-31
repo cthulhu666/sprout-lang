@@ -10,8 +10,8 @@ extern fn tcp_listener_port(listener: Int) -> Int !{IO}
 # Everything transient is absorbed inside the builtin — EAGAIN parks; EINTR, ECONNABORTED and the eight
 # pending-network errnos accept(2) says to treat like EAGAIN retry; descriptor exhaustion and a full
 # handle table park on the listener and retry, since no Sprout-visible primitive can wait for those.
-# After 16 accepts in a row with no park it parks once before the next accept, so other tasks run
-# while connections keep arriving.
+# After ACCEPT_FAIR_STREAK accepts in a row with no park it parks once before the next accept, so
+# other tasks run while connections keep arriving (docs/http-connection-cap-v0.md, accept fairness).
 export extern fn tcp_accept(listener: Int) -> Result TcpError Int !{IO}
 export extern fn tcp_write(conn: Int, data: String) -> Unit !{IO}
 # Raw connect. Exported for the same reason tcp_listen/tcp_accept/tcp_write/tcp_close are: code whose

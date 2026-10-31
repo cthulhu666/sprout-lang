@@ -424,15 +424,15 @@ declare i64 @fs_rename(i64, i64)
 @.str.245 = private unnamed_addr constant { i64, [5 x i8] } { i64 65546, [5 x i8] c"HEAD\00" }
 @.str.246 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"http_server: accept failed on the listener: \00" }
 @.str.247 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1354, column 65)\00" }
-@.str.248 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1364, column 80)\00" }
+@.str.248 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1361, column 42)\00" }
 @.str.249 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.250 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1364, column 84)\00" }
+@.str.250 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1361, column 46)\00" }
 @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_39 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_39 }
 @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_40 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_40 }
 @.str.251 = private unnamed_addr constant { i64, [57 x i8] } { i64 917514, [57 x i8] c"http_server: max_live_connections must be between 1 and \00" }
-@.str.252 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in - (line 1379, column 102)\00" }
+@.str.252 = private unnamed_addr constant { i64, [42 x i8] } { i64 671754, [42 x i8] c"Int overflow in - (line 1383, column 102)\00" }
 @.str.253 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c", got \00" }
-@.str.254 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1413, column 34)\00" }
+@.str.254 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1417, column 34)\00" }
 @.str.255 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"0123456789abcdef\00" }
 @.str.256 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
 @.str.257 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 19, column 45)\00" }
@@ -14821,6 +14821,43 @@ join_3:
   ret i64 %t$4
 }
 
+define i64 @stdlib.http_server.keep_cap(i64 %p$places) {
+entry:
+  %t$0 = add i64 0, 3
+  %t$1$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %p$places, i64 %t$0)
+  %t$1 = extractvalue { i64, i1 } %t$1$agg, 0
+  %t$1$ovf = extractvalue { i64, i1 } %t$1$agg, 1
+  br i1 %t$1$ovf, label %ovfpanic_1, label %ovfok_1
+ovfpanic_1:
+  %t$2 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.248, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  call i64 @panic(i64 %t$3)
+  unreachable
+ovfok_1:
+  %t$4 = add i64 0, 4
+  %t$5 = icmp eq i64 %t$4, 0
+  br i1 %t$5, label %divpanic_5, label %divchk2_5
+divpanic_5:
+  %t$6 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.249, i64 0, i32 1, i64 0
+  %t$7 = ptrtoint ptr %t$6 to i64
+  call i64 @panic(i64 %t$7)
+  unreachable
+divchk2_5:
+  %t$8 = icmp eq i64 %t$4, -1
+  br i1 %t$8, label %divovfchk_5, label %divok_5
+divovfchk_5:
+  %t$9 = icmp eq i64 %t$1, -9223372036854775808
+  br i1 %t$9, label %divovfpanic_5, label %divok_5
+divovfpanic_5:
+  %t$10 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.250, i64 0, i32 1, i64 0
+  %t$11 = ptrtoint ptr %t$10 to i64
+  call i64 @panic(i64 %t$11)
+  unreachable
+divok_5:
+  %t$12 = sdiv i64 %t$1, %t$4
+  ret i64 %t$12
+}
+
 define i64 @__sprout_ir_eta___tc_Ord_Int_compare_39(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
@@ -14835,69 +14872,38 @@ entry:
 
 define i64 @stdlib.http_server.spawned_admission(i64 %p$config) {
 entry:
-  %t$24 = alloca [3 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$24, i8 0, i64 24, i1 false)
-  %t$25 = call i64 @sprout_gc_push_scan_root(ptr %t$24, i64 24)
-  %t$24$0 = getelementptr i64, ptr %t$24, i64 0
-  store i64 %p$config, ptr %t$24$0
   %t$0 = add i64 0, 0
+  %t$12 = alloca i64
+  store i64 %p$config, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @ref_new(i64 %t$0)
-  %t$24$1 = getelementptr i64, ptr %t$24, i64 1
-  store i64 %t$1, ptr %t$24$1
   %t$2 = add i64 0, 0
+  %t$14 = alloca i64
+  store i64 %t$1, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$3 = call i64 @ref_new(i64 %t$2)
-  %t$24$2 = getelementptr i64, ptr %t$24, i64 2
-  store i64 %t$3, ptr %t$24$2
   %t$4 = call i64 @sprout_field(i64 %p$config, i64 7)
   %t$5 = call i64 @sprout_field(i64 %p$config, i64 8)
-  %t$6 = add i64 0, 3
-  %t$7$agg = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %t$5, i64 %t$6)
-  %t$7 = extractvalue { i64, i1 } %t$7$agg, 0
-  %t$7$ovf = extractvalue { i64, i1 } %t$7$agg, 1
-  br i1 %t$7$ovf, label %ovfpanic_7, label %ovfok_7
-ovfpanic_7:
-  %t$8 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.248, i64 0, i32 1, i64 0
-  %t$9 = ptrtoint ptr %t$8 to i64
-  call i64 @panic(i64 %t$9)
-  unreachable
-ovfok_7:
-  %t$10 = add i64 0, 4
-  %t$11 = icmp eq i64 %t$10, 0
-  br i1 %t$11, label %divpanic_11, label %divchk2_11
-divpanic_11:
-  %t$12 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.249, i64 0, i32 1, i64 0
-  %t$13 = ptrtoint ptr %t$12 to i64
-  call i64 @panic(i64 %t$13)
-  unreachable
-divchk2_11:
-  %t$14 = icmp eq i64 %t$10, -1
-  br i1 %t$14, label %divovfchk_11, label %divok_11
-divovfchk_11:
-  %t$15 = icmp eq i64 %t$7, -9223372036854775808
-  br i1 %t$15, label %divovfpanic_11, label %divok_11
-divovfpanic_11:
-  %t$16 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.250, i64 0, i32 1, i64 0
-  %t$17 = ptrtoint ptr %t$16 to i64
-  call i64 @panic(i64 %t$17)
-  unreachable
-divok_11:
-  %t$18 = sdiv i64 %t$7, %t$10
-  %t$19 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_39, i64 8) to i64
-  %t$20 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_40, i64 8) to i64
-  %t$21 = call i64 @min(i64 %t$4, i64 %t$18, i64 %t$19, i64 %t$20)
-  %t$22 = call i64 @sprout_field(i64 %p$config, i64 8)
-  %t$23 = call i64 @sprout_alloc_obj(i64 92, i64 4)
-  %t$23$ptr = inttoptr i64 %t$23 to ptr
-  %t$23$f0 = getelementptr i64, ptr %t$23$ptr, i64 0
-  store i64 %t$1, ptr %t$23$f0
-  %t$23$f1 = getelementptr i64, ptr %t$23$ptr, i64 1
-  store i64 %t$21, ptr %t$23$f1
-  %t$23$f2 = getelementptr i64, ptr %t$23$ptr, i64 2
-  store i64 %t$3, ptr %t$23$f2
-  %t$23$f3 = getelementptr i64, ptr %t$23$ptr, i64 3
-  store i64 %t$22, ptr %t$23$f3
-  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$23
+  %t$6 = call i64 @stdlib.http_server.keep_cap(i64 %t$5)
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_39, i64 8) to i64
+  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_40, i64 8) to i64
+  %t$16 = alloca i64
+  store i64 %t$3, ptr %t$16
+  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$9 = call i64 @min(i64 %t$4, i64 %t$6, i64 %t$7, i64 %t$8)
+  %t$10 = call i64 @sprout_field(i64 %p$config, i64 8)
+  %t$11 = call i64 @sprout_alloc_obj(i64 92, i64 4)
+  %t$11$ptr = inttoptr i64 %t$11 to ptr
+  %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
+  store i64 %t$1, ptr %t$11$f0
+  %t$11$f1 = getelementptr i64, ptr %t$11$ptr, i64 1
+  store i64 %t$9, ptr %t$11$f1
+  %t$11$f2 = getelementptr i64, ptr %t$11$ptr, i64 2
+  store i64 %t$3, ptr %t$11$f2
+  %t$11$f3 = getelementptr i64, ptr %t$11$ptr, i64 3
+  store i64 %t$10, ptr %t$11$f3
+  %t$18 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %t$11
 }
 
 define i64 @stdlib.http_server.valid_live_cap(i64 %p$config) {

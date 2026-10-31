@@ -15,6 +15,7 @@ let port: Int = 28972
 # A task spawned after that records how many accepts had finished when it first ran: 40 if the loop
 # never parked, at most `streak` if it did.
 let queued: Int = 40
+# Mirrors ACCEPT_FAIR_STREAK in runtime/sprout_runtime.c.
 let streak: Int = 16
 
 fn connect_all(made: Int, handles: List Int) -> List Int !{IO} =
@@ -41,14 +42,6 @@ fn accept_all(listener: Int, count: Ref Int, left: Int, accepted: List Int) -> L
           terminal.write(`MISMATCH: accept: ${tcp_error_message(e)}\n`)
           accepted
 
-fn close_all(handles: List Int) -> Unit !{IO} =
-  match handles with
-  | Nil -> ()
-  | Cons h rest ->
-      do
-        tcp_close(h)
-        close_all(rest)
-
 fn record(count: Ref Int, seen: Ref Int) -> Unit !{IO} =
   do
     n <- ref_read(count)
@@ -70,8 +63,8 @@ fn run(s: Scope) -> Unit !{IO} =
     mark("all-accepted", done == queued, int_to_string(done))
     mark("other-task-ran-within-streak", recorded >= 0 && recorded <= streak,
          `recorded ${int_to_string(recorded)} of ${int_to_string(queued)}`)
-    close_all(served)
-    close_all(clients)
+    list_each(tcp_close, served)
+    list_each(tcp_close, clients)
     tcp_close_listener(listener)
 
 fn main() -> Unit !{IO} =

@@ -1357,11 +1357,15 @@ fn serve_loop(scope: Scope, listener: consuming TcpListener, remaining: Int, con
           close_listener(listener)
           accept_fatal(err)
 
+# Places an idle connection may take out of `places`: a quarter stay free, and 1 place keeps none.
+fn keep_cap(places: Int) -> Int = places * 3 / 4
+
 fn spawned_admission(config: ServerConfig) -> Admission !{IO} =
   do
     idle <- ref_new(0)
     live <- ref_new(0)
-    Spawned(idle, min(config.max_idle_connections, config.max_live_connections * 3 / 4), live, config.max_live_connections)
+    Spawned(idle, min(config.max_idle_connections, keep_cap(config.max_live_connections)), live,
+            config.max_live_connections)
 
 # Handles in the runtime's connection table (`alloc_conn_handle` in runtime/sprout_runtime.c). Accepted
 # and outbound connections share it, so a live cap at or past it could leave no room for the
@@ -1408,7 +1412,7 @@ export fn serve_n_with(config: ServerConfig, listener: consuming TcpListener, ma
 export fn serve(listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   serve_with(default_config(), listener, handler)
 
-# `serve` with explicit read budgets (see serve_n_with). A negative count means "forever".
+# `serve` with explicit read budgets (see serve_n_with).
 export fn serve_with(config: ServerConfig, listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   serve_n_with(config, listener, -1, handler)
 
@@ -1515,7 +1519,7 @@ fn pooled_run(scope: Scope, config: ServerConfig, listener: consuming TcpListene
     ch <- chan_new(scope, queue_depth)
     idle <- ref_new(0)
     queued <- ref_new(0)
-    let adm = Pooled(idle, queued, workers * 3 / 4)
+    let adm = Pooled(idle, queued, keep_cap(workers))
     spawn_pool(scope, ch, config, adm, handler, workers)
     pooled_accept_loop(ch, adm, listener, remaining)
 
