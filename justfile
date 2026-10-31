@@ -860,7 +860,7 @@ _test-file stage file:
   trap 'rm -f "$TMP_LL" "$TMP_BIN" "$TMP_ERR" "$TMP_RT"' EXIT
   # Single binary: link the runtime sources directly (no object cache needed).
   echo "==> {{file}}"
-  if ! "./$STAGE" --emit-ir "{{stdlib_root}}" "{{file}}" > "$TMP_LL" 2>"$TMP_ERR"; then
+  if ! "./$STAGE" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "{{file}}" > "$TMP_LL" 2>"$TMP_ERR"; then
     echo "  COMPILE FAILED:"; cat "$TMP_ERR"; exit 1
   fi
   if ! clang "$TMP_LL" {{runtime_src}} {{clang_extra}} -o "$TMP_BIN" 2>"$TMP_ERR"; then
@@ -4460,6 +4460,12 @@ plugin-run:
 lsp-smoke: build-sproutd
   bash scripts/lsp_smoke.sh
 
+# The REPL on piped stdin with lines that are not valid UTF-8: skipped outside a `:{ ... :}` block,
+# cancelling it inside one. OPT-IN like lsp-smoke: it needs the sproutd build.
+[group('test')]
+repl-smoke: build-sproutd
+  bash scripts/repl_smoke.sh
+
 # Drive `app.run`'s TermResized arm under a pty. OPT-IN, not in any aggregate:
 # it depends on `script(1)` and on process timing, and has no CI track record
 # yet. Every other arm of `run` is reachable with piped stdin; this one needs a
@@ -4586,7 +4592,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

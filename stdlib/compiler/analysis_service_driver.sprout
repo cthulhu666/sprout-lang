@@ -709,10 +709,8 @@ fn run_eval_binary() -> json.Json !{IO} =
 # SPROUT_DARWIN_FRAMEWORKS changes the link line, and so what eval can do, so an invalid value is
 # an error for the request rather than something to ignore.
 fn env_forces_frameworks() -> Result String Bool !{IO} =
-  match env.get("SPROUT_DARWIN_FRAMEWORKS") with
-  | Ok (Just _) -> Ok(true)
-  | Ok Nothing -> Ok(false)
-  | Err _ -> Err("SPROUT_DARWIN_FRAMEWORKS is not valid UTF-8")
+  result_map_error(\_ -> "SPROUT_DARWIN_FRAMEWORKS is not valid UTF-8",
+                   result_map(is_just, env.get("SPROUT_DARWIN_FRAMEWORKS")))
 
 fn uname_is_darwin() -> Bool !{IO} =
   do
@@ -726,12 +724,8 @@ fn uname_is_darwin() -> Bool !{IO} =
 # the justfile's `os() == "macos"` gate; SPROUT_DARWIN_FRAMEWORKS forces it on.
 fn use_darwin_frameworks() -> Result String Bool !{IO} =
   match env_forces_frameworks() with
-  | Err msg -> Err(msg)
-  | Ok true -> Ok(true)
-  | Ok false ->
-      do
-        darwin <- uname_is_darwin()
-        Ok(darwin)
+  | Ok false -> Ok(uname_is_darwin())
+  | forced -> forced
 
 fn diag_msg(d: compiler.Diagnostic) -> String =
   match d with
@@ -739,20 +733,17 @@ fn diag_msg(d: compiler.Diagnostic) -> String =
   | compiler.DiagWarning _ msg -> msg
 
 fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
-  match ir_result with
-  | compiler.IrFullFail diags -> first_diag_response(diags, "eval_expr_in_source: codegen failed")
-  | compiler.IrFullOk ir_text ->
-      match fs.write_text(eval_ir_path, ir_text) with
-      | Err msg -> panic("write_file: eval.ir: " ++ msg)
-      | Ok _ ->
-          match use_darwin_frameworks() with
-          | Err msg -> error_response("eval_expr_in_source: " ++ msg)
-          | Ok use_darwin ->
-              match compile_runtime_and_link_eval(
-                runtime_dir(state_stdlib_root(state)), eval_ir_path, eval_bin_path,
-                state_runtime_obj_ref(state), use_darwin) with
-              | Err msg -> error_response("eval_expr_in_source: " ++ msg)
-              | Ok _ -> run_eval_binary()
+  let compiler.IrFullOk ir_text = ir_result
+        else compiler.IrFullFail diags -> first_diag_response(diags, "eval_expr_in_source: codegen failed")
+      Ok _ = fs.write_text(eval_ir_path, ir_text)
+        else Err msg -> panic("write_file: eval.ir: " ++ msg)
+      Ok use_darwin = use_darwin_frameworks()
+        else Err msg -> error_response("eval_expr_in_source: " ++ msg)
+      Ok _ = compile_runtime_and_link_eval(
+               runtime_dir(state_stdlib_root(state)), eval_ir_path, eval_bin_path,
+               state_runtime_obj_ref(state), use_darwin)
+        else Err msg -> error_response("eval_expr_in_source: " ++ msg)
+  in run_eval_binary()
 
 fn compile_and_run_eval(src: String, expr: String, how: compiler.EvalMain, state: StartupState) -> json.Json !{IO} =
   do
@@ -955,7 +946,7 @@ fn response_text(response: json.Json) -> String =
 # Service loop
 
 fn service_loop(state: StartupState) -> Unit !{IO} =
-  match terminal.term_read_line_once() with
+  match terminal.term_read_line() with
   | Ok Nothing -> ()
   | Ok (Just line) ->
       if string.is_empty(line) then service_loop(state)

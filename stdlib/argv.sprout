@@ -13,12 +13,7 @@ import stdlib.bytes as bytes
 export fn get(idx: Int) -> Result bytes.Utf8Error (Maybe String) !{IO} =
   bytes.to_string_maybe(argv_get_bytes(idx))
 
-# Every argument, in order. `Err` if any one is not valid UTF-8.
+# Every argument, in order. `Err` if any one is not valid UTF-8; the first bad argument is the one
+# reported (`traverse` keeps the earliest failure).
 export fn all() -> Result bytes.Utf8Error (List String) !{IO} =
-  all_go(0, Nil)
-
-fn all_go(i: Int, acc: List String) -> Result bytes.Utf8Error (List String) !{IO} =
-  match get(i) with
-  | Err e -> Err(e)
-  | Ok Nothing -> Ok(list_reverse(acc))
-  | Ok (Just text) -> all_go(i + 1, Cons(text, acc))
+  traverse(\raw -> bytes.to_string(raw), argv_all_bytes())

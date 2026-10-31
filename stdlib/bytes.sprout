@@ -96,7 +96,9 @@ export fn to_string(value: Bytes) -> Result Utf8Error String =
 
 # O(|value|): `to_string` over a value that may be absent. The outer `Result` is validity and the
 # inner `Maybe` is presence, so an absent value (`Nothing`) is `Ok(Nothing)` and never an error.
-# For readers of outside input: an unset variable, end of input.
+# For readers of outside input: an unset variable, end of input. Written as a match rather than
+# `traverse`: the compiler reads its switches through it at every call site, and `traverse` would
+# pass the Traversable and Applicative dictionaries on each of those reads.
 export fn to_string_maybe(value: Maybe Bytes) -> Result Utf8Error (Maybe String) =
   match value with
   | Nothing -> Ok(Nothing)

@@ -750,7 +750,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_user_main() {
+define i64 @__sprout_user_main_int() {
 entry:
   %t$0$st = call i128 @examples.http_get_cli.fetch_body_from_argv_worker()
   %t$0 = trunc i128 %t$0$st to i64
@@ -763,29 +763,26 @@ arm_0_2:
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
   %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
-  %t$12 = alloca i64
-  store i64 %t$1, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$13 = alloca i64
+  store i64 %t$1, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$7 = call i64 @print(i64 %t$1, i64 %t$6)
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$8 = add i64 0, 0
   br label %join_2
 arm_1_2:
-  %t$8 = add i64 0, 8
-  %t$9 = icmp eq i64 %t$0, %t$8
-  br i1 %t$9, label %body_1_2, label %arm_2_2
+  %t$9 = add i64 0, 8
+  %t$10 = icmp eq i64 %t$0, %t$9
+  br i1 %t$10, label %body_1_2, label %arm_2_2
 body_1_2:
-  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_3, i64 8) to i64
-  %t$15 = alloca i64
-  store i64 %t$1, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$11 = call i64 @print(i64 %t$1, i64 %t$10)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$11 = call i64 @eprint(i64 %t$1)
+  %t$12 = add i64 0, 1
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
-  %t$3 = phi i64 [%t$7, %body_0_2], [%t$11, %body_1_2]
+  %t$3 = phi i64 [%t$8, %body_0_2], [%t$12, %body_1_2]
   ret i64 %t$3
 }
 
@@ -1524,7 +1521,8 @@ entry:
   %cfkinds_ptr_50 = getelementptr inbounds [3 x i8], ptr @.cfkinds.50, i64 0, i64 0
   %creg_50 = call i64 @sprout_register_ctor(i64 50, ptr %cname_ptr_50, i64 2, ptr %cfkinds_ptr_50)
   call void @__sprout_init_globals()
-  call i64 @__sprout_user_main()
-  ret i32 0
+  %user_main_ret = call i64 @__sprout_user_main_int()
+  %exit_code = trunc i64 %user_main_ret to i32
+  ret i32 %exit_code
 }
 

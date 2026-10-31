@@ -78,9 +78,6 @@ export fn term_render_line(row: Int, text: String) -> Unit !{IO} =
 export fn term_read_key_once() -> String !{IO} =
   term_read_key()
 
-export fn term_read_line_once() -> Result bytes.Utf8Error (Maybe String) !{IO} =
-  term_read_line()
-
 export fn term_is_interactive_once() -> Bool !{IO} =
   term_is_interactive()
 

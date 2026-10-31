@@ -18,7 +18,7 @@ import stdlib.terminal as terminal
 #   clear / move / hide_cursor / show_cursor / set_fg / set_bold — these emit ANSI
 #     escapes to stdout, which would garble the harness's own output (the runner
 #     greps stdout for "SUITE FAILED").
-#   term_read_key_once / term_read_line_once — these block on stdin.
+#   term_read_key_once / term_read_line — these block on stdin.
 #
 # term_is_interactive_once's VALUE is deliberately not asserted: it is
 # `isatty(stdin) && isatty(stdout)` (`term_is_interactive`), so it is false under

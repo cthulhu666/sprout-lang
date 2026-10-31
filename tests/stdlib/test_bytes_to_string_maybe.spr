@@ -1,0 +1,53 @@
+import stdlib.test (check_true, run_suite)
+import stdlib.bytes as bytes
+
+# `to_string_maybe` is `to_string` over a value that may be absent: the outer Result is validity, the
+# inner Maybe is presence. The reader of a whole list of such values (`argv.all`) uses `traverse`,
+# which must report the FIRST bad element — the decode errors below differ, so they tell the two apart.
+
+fn nul_byte() -> Bytes =
+  bytes.singleton(0)
+
+# A lone 0xE9 lead byte with nothing after it: a truncated sequence.
+fn truncated() -> Bytes =
+  bytes.singleton(233)
+
+fn cafe() -> String =
+  "caf" ++ char_to_str(233)
+
+fn reason(r: Result bytes.Utf8Error a) -> String =
+  match r with
+  | Ok _ -> "ok"
+  | Err (bytes.Utf8DecodeError why) -> why
+
+fn is_ok_nothing(r: Result bytes.Utf8Error (Maybe String)) -> Bool =
+  match r with
+  | Ok Nothing -> true
+  | _ -> false
+
+fn is_ok_just(r: Result bytes.Utf8Error (Maybe String), want: String) -> Bool =
+  match r with
+  | Ok (Just got) -> got == want
+  | _ -> false
+
+fn is_err(r: Result bytes.Utf8Error (Maybe String)) -> Bool =
+  match r with
+  | Err _ -> true
+  | _ -> false
+
+fn main() -> Unit !{IO} =
+  run_suite("bytes_to_string_maybe", [
+    check_true("an absent value is Ok(Nothing), not an error", is_ok_nothing(bytes.to_string_maybe(Nothing))),
+    check_true("a valid value is Ok(Just text)",
+               is_ok_just(bytes.to_string_maybe(Just(bytes.from_string(cafe()))), cafe())),
+    check_true("an empty value is Ok(Just \"\")", is_ok_just(bytes.to_string_maybe(Just(bytes.empty())), "")),
+    check_true("a truncated sequence is Err", is_err(bytes.to_string_maybe(Just(truncated())))),
+    check_true("a NUL byte is Err", is_err(bytes.to_string_maybe(Just(nul_byte())))),
+    check_true("the two bad values give different reasons", reason(bytes.to_string(truncated())) != reason(bytes.to_string(nul_byte()))),
+    check_true("traverse reports the first bad element, truncated first",
+               reason(traverse(\raw -> bytes.to_string(raw), [bytes.from_string("a"), truncated(), nul_byte()]))
+                 == reason(bytes.to_string(truncated()))),
+    check_true("traverse reports the first bad element, NUL first",
+               reason(traverse(\raw -> bytes.to_string(raw), [bytes.from_string("a"), nul_byte(), truncated()]))
+                 == reason(bytes.to_string(nul_byte())))
+  ])

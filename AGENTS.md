@@ -201,7 +201,7 @@ it with a confidence label. Present this *with* the decision, before asking for 
    `./build/compile_driver_bin_stage1 --emit-ir stdlib tests/stdlib/test_foo.spr > /tmp/t.ll && clang /tmp/t.ll runtime/*.c -O2 -o /tmp/t && /tmp/t`
    - the root argument is the literal path `stdlib`, not the justfile variable's name;
    - the runtime is all three `runtime/*.c`; on macOS add `-framework Security -framework CoreFoundation`;
-   - a test importing `testsupport.*` needs `--package-root <repo-root>`, which `just test-file` does **not** pass.
+   - a test importing `testsupport.*` needs `--package-root <repo-root>` on this raw line; `just test-file` passes it.
    The full gate is `mise exec -- just test` (Definition of Done #5).
 
 ## Directory Conventions

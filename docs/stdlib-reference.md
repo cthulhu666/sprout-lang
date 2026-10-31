@@ -852,7 +852,7 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_render_line(row, text) -> Unit !{IO}`
 - `term_read_key_once() -> String !{IO}` — a byte that is not a key (a NUL, or a malformed
   UTF-8 sequence) reads as U+FFFD
-- `term_read_line() -> Result Utf8Error (Maybe String) !{IO}` / `term_read_line_once()` — one stdin line
+- `term_read_line() -> Result Utf8Error (Maybe String) !{IO}` — one stdin line
   without its newline. `Ok(Nothing)` is end of input; `Err` is a line that is not valid UTF-8 or
   holds a NUL, which a String cannot hold (the line is consumed)
 - `term_read_line_bytes() -> Maybe Bytes !{IO}` — the same line unchecked, NUL and all

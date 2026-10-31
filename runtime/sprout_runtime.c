@@ -393,6 +393,7 @@ static long long sprout_utf8_decode_at(const char* s, size_t pos, size_t width);
 static long long sprout_utf8_codepoint_prefix_count(const char* s, size_t byte_limit);
 static void json_append_value(ByteBuf* out, long long value);
 static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, const char* ctx);
+static long long sprout_just_bytes(const unsigned char* data, size_t len, const char* ctx);
 static void sha256_digest(const unsigned char* data, size_t len, unsigned char out[32]);
 static void hmac_sha256_digest(const unsigned char* key, size_t key_len, const unsigned char* msg, size_t msg_len, unsigned char out[32]);
 static char* base64_encode_bytes(const unsigned char* data, size_t len);
@@ -3250,12 +3251,7 @@ long long env_get_bytes(const char* name) {
   if (name == NULL) sprout_fail("env_get_bytes: null name");
   const char* value = getenv(name);
   if (value == NULL) return sprout_make0(SPROUT_TAG(Nothing));
-  long long payload = sprout_ptr_word(
-    bytes_from_chunk_bytes((const unsigned char*)value, strlen(value), "env_get_bytes: out of memory"));
-  SPROUT_GC_PUSH_I64_LOCAL(payload);
-  long long out = sprout_make1(SPROUT_TAG(Just), payload);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+  return sprout_just_bytes((const unsigned char*)value, strlen(value), "env_get_bytes: out of memory");
 }
 long long sprout_set_argv(int argc, char** argv) {
   g_sprout_argc = argc;
@@ -3291,12 +3287,7 @@ long long argv_get_bytes(long long index) {
   if (index < 0 || g_sprout_argv == NULL || index >= (long long)(g_sprout_argc - 1))
     return sprout_make0(SPROUT_TAG(Nothing));
   const char* arg = g_sprout_argv[index + 1];
-  long long payload = sprout_ptr_word(
-    bytes_from_chunk_bytes((const unsigned char*)arg, strlen(arg), "argv_get_bytes: out of memory"));
-  SPROUT_GC_PUSH_I64_LOCAL(payload);
-  long long out = sprout_make1(SPROUT_TAG(Just), payload);
-  SPROUT_GC_POP_LOCALS(1);
-  return out;
+  return sprout_just_bytes((const unsigned char*)arg, strlen(arg), "argv_get_bytes: out of memory");
 }
 /* Err(<String detail>) from a C string, copied to a managed String and rooted across the
  * make1. A caller that cleans up first saves errno before it and passes strerror(saved). */
@@ -3925,12 +3916,9 @@ long long term_read_line_bytes(void) {
     sprout_fail("term_read_line_bytes: read error");
   }
   while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) len -= 1;
-  long long payload = sprout_ptr_word(
-    bytes_from_chunk_bytes((const unsigned char*)line, (size_t)len, "term_read_line_bytes: out of memory"));
+  long long out =
+    sprout_just_bytes((const unsigned char*)line, (size_t)len, "term_read_line_bytes: out of memory");
   free(line);
-  SPROUT_GC_PUSH_I64_LOCAL(payload);
-  long long out = sprout_make1(SPROUT_TAG(Just), payload);
-  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 /* stdin_read_bytes: read exactly n bytes from stdin as Bytes; returns Nothing on EOF.
@@ -3967,12 +3955,9 @@ long long stdin_read_bytes(long long n_val) {
     }
     total += got;
   }
-  long long payload = sprout_ptr_word(
-    bytes_from_chunk_bytes((const unsigned char*)buf, want, "stdin_read_bytes: out of memory"));
+  long long out =
+    sprout_just_bytes((const unsigned char*)buf, want, "stdin_read_bytes: out of memory");
   free(buf);
-  SPROUT_GC_PUSH_I64_LOCAL(payload);
-  long long out = sprout_make1(SPROUT_TAG(Just), payload);
-  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 /* Returns long long, NOT _Bool — see "Bool-returning builtins return long long"
@@ -9243,6 +9228,15 @@ static BytesVal* bytes_from_chunk_bytes(const unsigned char* data, size_t len, c
   out->len = len;
   out->data = sprout_alloc_bytes_data(len, ctx);
   if (len > 0) memcpy(out->data, data, len);
+  return out;
+}
+
+/* Just(Bytes of data[0..len)). The copy is rooted across the Just allocation, which may collect. */
+static long long sprout_just_bytes(const unsigned char* data, size_t len, const char* ctx) {
+  long long payload = sprout_ptr_word(bytes_from_chunk_bytes(data, len, ctx));
+  SPROUT_GC_PUSH_I64_LOCAL(payload);
+  long long out = sprout_make1(SPROUT_TAG(Just), payload);
+  SPROUT_GC_POP_LOCALS(1);
   return out;
 }
 

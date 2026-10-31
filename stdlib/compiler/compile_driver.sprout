@@ -518,26 +518,25 @@ fn prints_file_header(phase: Phase) -> Bool =
   | _ -> true
 
 # ---------------------------------------------------------------------------
-# Batch entry point: the file paths are argv[idx..N].
+# Batch entry point: `paths` are the files named on the command line, already decoded.
 # Prints "=== <path> ===" before each file's output (except the IR phase).
 
-fn run_batch(stdlib_root: String, idx: Int, phase: Phase, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
-  match argv.get(idx) with
-  | Ok Nothing -> ()
-  | Ok (Just path) ->
+fn run_batch(stdlib_root: String, paths: List String, phase: Phase, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+  match paths with
+  | Nil -> ()
+  | Cons path rest ->
       do
         if prints_file_header(phase) then print("=== " ++ path ++ " ===") else ()
         run_phase(phase, path, stdlib_root, extra_roots, failed)
         # Keep going after a failure: a batch reports every bad file, and `failed`
         # is write-1-only so the status survives the remaining files.
-        run_batch(stdlib_root, idx + 1, phase, extra_roots, failed)
-  | Err _ -> report_error(failed, "ERROR: an argument is not valid UTF-8")
+        run_batch(stdlib_root, rest, phase, extra_roots, failed)
 
 # An unknown phase is reported once, before any file is read and with no files
 # too, so a typo cannot run something else, or nothing, and exit 0.
-fn run_named_phase(name: String, stdlib_root: String, idx: Int, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
+fn run_named_phase(name: String, stdlib_root: String, paths: List String, extra_roots: List String, failed: Ref Int) -> Unit !{IO} =
   match parse_phase(name) with
-  | Just phase -> run_batch(stdlib_root, idx, phase, extra_roots, failed)
+  | Just phase -> run_batch(stdlib_root, paths, phase, extra_roots, failed)
   | Nothing -> report_error(failed, "ERROR: unknown phase `" ++ name ++ "`: expected " ++ known_phases)
 
 # Exit status: 0 when nothing reported an error, 1 otherwise. `failed` is created
@@ -557,23 +556,23 @@ fn main() -> Int !{IO} =
 
 fn run_command(args: List String, failed: Ref Int) -> Unit !{IO} =
   match args with
-  | ["--emit-ir", "--debug", stdlib_root | _] ->
-      run_batch(stdlib_root, 3, PhaseIrTyped, Nil, failed)
+  | ["--emit-ir", "--debug", stdlib_root | paths] ->
+      run_batch(stdlib_root, paths, PhaseIrTyped, Nil, failed)
   | ["--emit-ir", "--debug" | _] ->
       report_error(failed, "ERROR: usage: compile-driver --emit-ir --debug <stdlib-root> <file>...")
   # One extra package root, fixed right after <stdlib-root>: dotted non-stdlib
   # imports (e.g. postgres.*) resolve under <pkg-root> (docs/packaging-v0.md §10
   # phase 2). Single root, fixed position — the walking-skeleton surface.
-  | ["--emit-ir", stdlib_root, "--package-root", dir | _] ->
-      run_batch(stdlib_root, 4, PhaseIrTyped, Cons(dir, Nil), failed)
-  | ["--emit-ir", stdlib_root | _] ->
-      run_batch(stdlib_root, 2, PhaseIrTyped, Nil, failed)
+  | ["--emit-ir", stdlib_root, "--package-root", dir | paths] ->
+      run_batch(stdlib_root, paths, PhaseIrTyped, Cons(dir, Nil), failed)
+  | ["--emit-ir", stdlib_root | paths] ->
+      run_batch(stdlib_root, paths, PhaseIrTyped, Nil, failed)
   | ["--emit-ir" | _] ->
       report_error(failed, "ERROR: usage: compile-driver --emit-ir [--debug] <stdlib-root> [--package-root <dir>] <file>...")
-  | ["--phase", phase, stdlib_root, "--package-root", dir | _] ->
-      run_named_phase(phase, stdlib_root, 5, Cons(dir, Nil), failed)
-  | ["--phase", phase, stdlib_root | _] ->
-      run_named_phase(phase, stdlib_root, 3, Nil, failed)
+  | ["--phase", phase, stdlib_root, "--package-root", dir | paths] ->
+      run_named_phase(phase, stdlib_root, paths, Cons(dir, Nil), failed)
+  | ["--phase", phase, stdlib_root | paths] ->
+      run_named_phase(phase, stdlib_root, paths, Nil, failed)
   | ["--phase", _ | _] ->
       report_error(failed, "ERROR: usage: compile-driver --phase <phase> <stdlib-root> [--package-root <dir>] <file>...")
   | ["--phase" | _] ->
@@ -595,8 +594,8 @@ fn run_command(args: List String, failed: Ref Int) -> Unit !{IO} =
       run_check_iface(path, failed)
   | ["--check-iface" | _] ->
       report_error(failed, "ERROR: usage: compile-driver --check-iface <iface-file>")
-  | [stdlib_root | _] ->
-      run_batch(stdlib_root, 1, PhaseDefault, Nil, failed)
+  | [stdlib_root | paths] ->
+      run_batch(stdlib_root, paths, PhaseDefault, Nil, failed)
   | _ ->
       report_error(failed, "ERROR: usage: compile-driver [--phase " ++ known_phases ++ " | --emit-ir [--debug] | --use-ir-codegen | --emit-iface <module-name> | --check-iface <iface-file>] <stdlib-root> <file>...")
 

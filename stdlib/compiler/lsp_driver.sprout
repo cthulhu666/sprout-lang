@@ -52,7 +52,7 @@ fn build_lsp_state(stdlib_root: String, package_roots: List String) -> LspState 
 # LSP framing
 #
 # Write: compose "Content-Length: N\r\n\r\n<body>" via term_write (fflushes).
-# Read headers: term_read_line_once (strips \r\n). A header line that is not valid UTF-8 cannot be
+# Read headers: term_read_line (strips \r\n). A header line that is not valid UTF-8 cannot be
 # a Content-Length line, so it is skipped like any other header this server does not understand.
 # Read body: stdin_read_bytes(n) — BYTES, matching the byte count the header declares
 # and the byte count `lsp_send` writes. Reading the body as a line would desync on any
@@ -66,23 +66,20 @@ fn lsp_send(body: String) -> Unit !{IO} =
 export fn parse_content_length(line: String) -> Maybe Int =
   and_then(parse_int, string.strip_prefix(line, "Content-Length: "))
 
-# What one header line adds to the length seen so far. A line that is not valid UTF-8 names no
-# length, the same as any header line that is not `Content-Length`.
-export fn content_length_after(cl: Maybe Int, line: Result bytes.Utf8Error String) -> Maybe Int =
-  match line with
-  | Err _ -> cl
-  | Ok text ->
-      match parse_content_length(text) with
-      | Just n -> Just(n)
-      | Nothing -> cl
+# What one header line adds to the length seen so far: its value when it is a `Content-Length`
+# line, else the length unchanged.
+export fn content_length_after(cl: Maybe Int, line: String) -> Maybe Int =
+  match parse_content_length(line) with
+  | Just n -> Just(n)
+  | Nothing -> cl
 
 fn read_headers_loop(cl: Maybe Int) -> Maybe Int !{IO} =
-  match terminal.term_read_line_once() with
+  match terminal.term_read_line() with
   | Ok Nothing -> Nothing
   | Ok (Just line) ->
       if string.is_empty(line) then cl
-      else read_headers_loop(content_length_after(cl, Ok(line)))
-  | Err e -> read_headers_loop(content_length_after(cl, Err(e)))
+      else read_headers_loop(content_length_after(cl, line))
+  | Err _ -> read_headers_loop(cl)
 
 # The body as Bytes: it is decoded by the caller, which treats text that is not valid UTF-8 like
 # any other malformed message.

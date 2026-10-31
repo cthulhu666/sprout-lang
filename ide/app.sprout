@@ -307,9 +307,14 @@ fn boot(scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} = do
   m <- read_children(Nil)
   chan_send(ch, app.SigTo(files_id, m))
 
-export fn main() -> Unit !{IO} =
+export fn main() -> Int !{IO} =
   match args.parse_argv() with
   | Ok a ->
-      app.run(app.App(root = root(saving.save_when(a)), update = update,
-                      tick_ms = saving.tick_ms, boot = boot))
-  | Err _ -> eprint("ide: an argument is not valid UTF-8")
+      do
+        app.run(app.App(root = root(saving.save_when(a)), update = update,
+                        tick_ms = saving.tick_ms, boot = boot))
+        0
+  | Err _ ->
+      do
+        eprint("ide: an argument is not valid UTF-8")
+        1

@@ -63,8 +63,17 @@ where
   initials_text = initials(raw)
   no_vowels_text = strip_vowels(raw)
 
-fn main() -> Unit !{IO} =
+fn main() -> Int !{IO} =
   match argv.get(0) with
-  | Ok (Just raw) -> print(summarize(raw))
-  | Ok Nothing -> print("usage: sprout run examples/text_demo.sprout <text>")
-  | Err _ -> print("the argument is not valid UTF-8")
+  | Ok (Just raw) ->
+      do
+        print(summarize(raw))
+        0
+  | Ok Nothing ->
+      do
+        print("usage: sprout run examples/text_demo.sprout <text>")
+        0
+  | Err _ ->
+      do
+        eprint("the argument is not valid UTF-8")
+        1
