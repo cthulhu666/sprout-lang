@@ -3433,13 +3433,11 @@ static long long fs_err_text(long long ctor_tag, const char* path, const char* w
   if (n >= (int)sizeof(detail)) {
     /* Truncated: drop a codepoint cut in half, as the text must stay valid UTF-8. */
     size_t kept = sizeof(detail) - 1;
-    size_t start = kept;
-    while (start > 0 && ((unsigned char)detail[start - 1] & 0xC0) == 0x80) start--;
-    if (start > 0) {
-      start--;
-      unsigned char lead = (unsigned char)detail[start];
-      size_t width = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
-      if (start + width > kept) detail[start] = '\0';
+    size_t lead = kept;
+    while (lead > 0 && ((unsigned char)detail[lead - 1] & 0xC0) == 0x80) lead--;
+    if (lead > 0) {
+      lead--;
+      if (!utf8_valid((const unsigned char*)detail + lead, kept - lead)) detail[lead] = '\0';
     }
   }
   return fs_err_ctor_msg(ctor_tag, detail);
@@ -4042,6 +4040,9 @@ static size_t term_utf8_continuations(int lead) {
   return 0;
 }
 
+/* U+FFFD REPLACEMENT CHARACTER: what a key that is not valid UTF-8 reads as. */
+static const char k_term_replacement[] = "\357\277\275";
+
 static long long term_key_utf8(int lead, int from_tty) {
   unsigned char buf[5];
   size_t need = term_utf8_continuations(lead);
@@ -4059,7 +4060,7 @@ static long long term_key_utf8(int lead, int from_tty) {
     buf[len++] = (unsigned char)b;
   }
   if (!ok || !utf8_valid(buf, len)) {
-    return sprout_interned_word("\357\277\275"); /* U+FFFD */
+    return sprout_interned_word(k_term_replacement);
   }
   sprout_gc_maybe_collect_threshold();
   return sprout_str_word(sprout_str_dup_slice((const char*)buf, len, "term_read_key: out of memory"));
@@ -4151,8 +4152,8 @@ long long term_read_key(void) {
   if (ch == 27) return sprout_interned_word(token_escape);
   if (ch == '\n' || ch == '\r') return sprout_interned_word(token_enter);
   if (ch == '\t') return sprout_interned_word(token_tab);
-  /* A String cannot hold a NUL: term_key_utf8 rejects it and returns U+FFFD. */
-  if (ch == 0) return term_key_utf8(ch, 0);
+  /* A String cannot hold a NUL. */
+  if (ch == 0) return sprout_interned_word(k_term_replacement);
   /* Reached only by the non-tty and termios-failure paths; the raw-mode path
    * assembles and returns above, where it still holds raw mode. Continuation bytes
    * come from getchar() here, which is correct precisely because these paths never
@@ -7384,8 +7385,9 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
  * UTF-8, so a response is never refused for its headers. RFC 9110 section 5.5 treats a byte in
  * %x80-FF ("obs-text") as opaque data, and older HTTP allowed ISO-8859-1 there; Python's
  * http.client decodes headers as ISO-8859-1 too. A field name is made of ASCII token characters, so
- * in effect only the value is ever decoded. The source is read twice, to size the output and to
- * fill it, so nothing is copied before it is known to be valid. */
+ * in effect only the value is ever decoded. Every input is accepted and a decoded byte takes at
+ * most two bytes, so the output is sized once at 2 * len and filled in one pass over the source;
+ * nothing is copied before its line is known to be valid. */
 static size_t http_headers_fill(const char* src, size_t len, char* dst) {
   size_t out = 0;
   size_t i = 0;
@@ -7394,19 +7396,17 @@ static size_t http_headers_fill(const char* src, size_t len, char* dst) {
     size_t line = nl != NULL ? (size_t)(nl - (src + i)) : len - i;
     size_t take = line + (nl != NULL ? 1 : 0);
     if (utf8_valid((const unsigned char*)(src + i), line)) {
-      if (dst != NULL) memcpy(dst + out, src + i, take);
+      memcpy(dst + out, src + i, take);
       out += take;
     } else {
       for (size_t k = 0; k < take; k++) {
         unsigned char b = (unsigned char)src[i + k];
         if (b < 0x80) {
-          if (dst != NULL) dst[out] = (char)b;
+          dst[out] = (char)b;
           out += 1;
         } else {
-          if (dst != NULL) {
-            dst[out] = (char)(0xC0 | (b >> 6));
-            dst[out + 1] = (char)(0x80 | (b & 0x3F));
-          }
+          dst[out] = (char)(0xC0 | (b >> 6));
+          dst[out + 1] = (char)(0x80 | (b & 0x3F));
           out += 2;
         }
       }
@@ -7417,9 +7417,8 @@ static size_t http_headers_fill(const char* src, size_t len, char* dst) {
 }
 
 static char* http_headers_to_utf8(const char* src, size_t len) {
-  size_t out_len = http_headers_fill(src, len, NULL);
-  char* out = alloc_cstr(out_len, "http_request: out of memory");
-  http_headers_fill(src, len, out);
+  char* out = alloc_cstr(2 * len, "http_request: out of memory");
+  size_t out_len = http_headers_fill(src, len, out);
   out[out_len] = '\0';
   return out;
 }
