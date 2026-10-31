@@ -52,6 +52,17 @@ fn effectful_source() -> String =
     ++ "\n"
     ++ "fn ident(x: a) -> a = x\n"
 
+# The entry file's `main`, with and without a `module` header. The bundler names it
+# `source.entry_main_name` either way, and a bare `main` must still resolve.
+let entry_main_source: String = "fn main() -> Unit !{IO} = ()\n"
+
+fn named_entry_main_source() -> String =
+  "module foo\n"
+    ++ "\n"
+    ++ "fn twice(x: Int) -> Int = x * 2\n"
+    ++ "\n"
+    ++ "fn main() -> Unit !{IO} = print(twice(1))\n"
+
 # A constrained polymorphic name declared in the source under test, as opposed to one
 # imported from the prelude. The two behave differently and both are pinned below.
 fn constrained_source() -> String =
@@ -149,6 +160,14 @@ fn main() -> Unit !{IO} =
     nullary_effect <- rendered_type(effectful_source(), "boot", sr, Nil, cache)
     assert_true(state, "a nullary effectful function reports its effect",
       string.contains(nullary_effect, "!{IO}"))
+
+    entry_main <- rendered_type(entry_main_source, "main", sr, Nil, cache)
+    assert_true(state, "a headerless entry's main resolves bare",
+      string.contains(entry_main, "!{IO}"))
+
+    named_main <- rendered_type(named_entry_main_source(), "main", sr, Nil, cache)
+    assert_true(state, "a named entry's main resolves bare",
+      string.contains(named_main, "!{IO}"))
 
     # The control that says the fix is about the Scheme and not about effects generally:
     # this one already worked, because its effect rides on the arrow inside the type.

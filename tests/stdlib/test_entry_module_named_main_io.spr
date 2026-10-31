@@ -1,0 +1,11 @@
+module foo
+import stdlib.test (check_eq, run_suite)
+import testsupport.main_io (helper)
+
+# The entry file's `main` is the one entry point even when an imported module
+# keeps its own IO `main`: the program emits one entry, not two.
+
+fn main() -> Unit !{IO} =
+  run_suite("entry foo, import with IO main", [
+    check_eq("imported helper", helper(41), 42)
+  ])

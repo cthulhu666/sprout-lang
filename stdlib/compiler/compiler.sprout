@@ -210,7 +210,14 @@ fn check_bundle_result(bundled: bundler.BundleResult) -> typed_ast.TypedResult !
 # kept as well, since imported names are only reachable that way.
 fn unqualify_entry_names(module_name: String, env: Dict types.Scheme) -> Dict types.Scheme =
   if module_name == "" then env
-  else add_bare_aliases(vec_to_list(dict_entries(env)), module_name ++ ".", env)
+  else alias_entry_main(env, add_bare_aliases(vec_to_list(dict_entries(env)), module_name ++ ".", env))
+
+# The entry's `main` is `$entry.main` whatever the module is called, so no prefix strip
+# finds it.
+fn alias_entry_main(env: Dict types.Scheme, acc: Dict types.Scheme) -> Dict types.Scheme =
+  match dict_get(source.entry_main_name, env) with
+  | Nothing -> acc
+  | Just scheme -> dict_set("main", scheme, acc)
 
 fn add_bare_aliases(entries: List (String, types.Scheme), prefix: String, acc: Dict types.Scheme) -> Dict types.Scheme =
   match entries with

@@ -127,9 +127,8 @@ matches PureScript and Sprout's own type-and-constructors rule.
   parameters. `__cm_` used to drop the class's module; the `__tc_` names already kept it, so
   they are unchanged. Prelude names are bare, so `ast_to_ir`'s literal `__cm_Semigroup_append`
   still matches. LLVM takes the dots unquoted; the golden IR already holds `@$entry.f`.
-- The short method also settles the entry-name hazard. `ast_to_ir.is_entry_fn_name` and
-  `dce.is_entry_name` accept any name ending in `.main`, which a qualified method `main` would
-  have put at the end of `__tc_<class>_<head>_m.main`. It ends in `_main` instead.
+- The short method also keeps a method `main` from being read as the entry: the entry is the
+  exact name `$entry.main` (`source.entry_main_name`), and `__tc_<class>_<head>_main` is not it.
 - Dispatch keys (`typed_ast.constraint_key_from_tc`) keep the class in full too, so two
   same-named classes' instances at one head no longer collide. Keys are `typed_ast.InstanceKey`
   and `typed_ast.SlotKey`, which only `typed_ast` builds; each kind has its own table type.

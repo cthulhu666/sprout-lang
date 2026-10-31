@@ -1,0 +1,16 @@
+module main
+import stdlib.test (check_eq, run_suite)
+
+# An entry file that names its module `main` canonicalises its siblings to
+# `main.<f>` and its entry point to something else, so a sibling is never read
+# as a field chain on `main`.
+
+fn twice(x: Int) -> Int = x * 2
+
+fn twice_plus_one(x: Int) -> Int = twice(x) + 1
+
+fn main() -> Unit !{IO} =
+  run_suite("entry module main", [
+    check_eq("sibling call", twice_plus_one(20), 41),
+    check_eq("nested sibling call", twice(twice(3)), 12)
+  ])

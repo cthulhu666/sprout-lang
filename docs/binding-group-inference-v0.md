@@ -236,7 +236,7 @@ fn fwd(x) = x                                print(fwd("s"))
 ```
 6:14: ERROR: check: Call type mismatch:   main.fwd : forall a. a -> a
   Type mismatch: Int vs String            main.use_two : Unit !{IO}
-  in function main.use_two                main.main : Unit !{IO}
+  in function main.use_two                $entry.main : Unit !{IO}
 ```
 
 Define-before-use was fully polymorphic; use-before-define was not — precisely

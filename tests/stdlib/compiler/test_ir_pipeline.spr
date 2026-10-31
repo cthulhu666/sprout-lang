@@ -16,7 +16,7 @@ fn no_pos() -> source.SourcePos = source.SourcePos(index = 0, line = 0, column =
 fn trivial_program() -> typed_ast.TypedProgram =
   typed_ast.TypedProgram(
     Cons(
-      typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
+      typed_ast.TFnDecl(source.entry_main_name, Nil, Nothing, Nothing, Nil,
         typed_ast.TInt(42, types.TConst(types.type_id("Int")), no_pos())),
       Nil
     )

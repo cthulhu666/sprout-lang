@@ -3683,8 +3683,8 @@ written or `deriving (ToString)` (§8.6).  A function value, `Unit`, and a 6-tup
 have no instance, so printing one is a compile error.  The missing-instance error for a
 program-declared type with no function-typed field names the fix.  In a headerless file it
 reads `No instance of ToString for Answers in function main`, with the hint
-``add `deriving (ToString)` to `Answers` ``; under `module main` the type and function are
-qualified (`main.Answers`, `main.main`).
+``add `deriving (ToString)` to `Answers` ``; under `module main` the type is qualified
+(`main.Answers`) and the function still reads `main`.
 
 **A constructor renders under its source-form name, never a module-qualified
 one.**  A ctor declared in `module main` renders `Apple(3)`, not `main.Apple(3)`,
@@ -4593,9 +4593,9 @@ signature, not the inferred type, so `fn main() = print("hi")` is rejected even
 though its body is well-typed.
 
 These rules are enforced at type-check for any **defined** `main` (a function
-named `main`, or the entry module's qualified `<mod>.main`), as a final
-well-formedness gate that runs only once the body itself typechecks — so a
-broken `main` body reports its own error first. The diagnostics are:
+named `main` in the entry file; an imported module's `main` is an ordinary function
+and is not gated), as a final well-formedness gate that runs only once the body
+itself typechecks — so a broken `main` body reports its own error first. The diagnostics are:
 `Executable entrypoint \`main\` must take zero arguments`,
 `… must declare its return type and effect` (an unannotated `main`),
 `… must return Unit or Int`, `… must declare the {IO} effect` (a pure `main`),

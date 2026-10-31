@@ -471,10 +471,12 @@ a missing typeclass instance at runtime.** Concretely, this is a constraint on:
   intersect the stdlib's function names with the string literals in the codegen
   modules — that comparison returns exactly these two plus `main` (the root) and
   `append` (a name predicate in `ir_lowering`, not a call target).
-- **New entry points.** The root set is `is_entry_name` — bare `main` or
-  `<module>.main` — deliberately duplicating codegen's `ast_to_ir.is_entry_fn_name`
-  so the two cannot disagree about what the entry is. Adding a second entry
-  convention means changing both.
+- **New entry points.** The root set is `source.is_entry_main`: `source.entry_main_name`
+  (`$entry.main`), which the bundler gives to the entry file's `main` alone
+  (`bundler.entry_main_canonical`), or a bare `main` from the unbundled front end. DCE,
+  codegen (`ast_to_ir`) and the entrypoint gate (`infer`) all call it, so they cannot
+  disagree about what the entry is. An imported `<module>.main` is an ordinary function.
+  Adding a second entry convention means changing that one predicate.
 
 `refs_expr` threads the names a binder has taken — lambda and declaration
 parameters, match binders, do-bindings — as the free-variable check in the same

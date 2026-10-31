@@ -141,6 +141,38 @@ fn f(p: P) -> Int =
   | P a _ -> a
 `
 
+# The entry `main` is named `$entry.main` whatever the module is called, so the
+# module that owns it is read off the file's other declarations. Both halves
+# matter: a named entry's `main` reads its own record, and still cannot read a
+# foreign abstract one.
+fn named_entry_main_reads_own_record() -> String =
+  `module foo
+
+type Point = (x: Int, y: Int)
+
+fn main() -> Unit !{IO} = print((Point(x = 1, y = 2) with (y = 7)).y)
+`
+
+# An instance names no module, so the owner comes from a later declaration.
+fn named_entry_main_after_instance() -> String =
+  `module foo
+
+instance ToString Point
+  fn to_string(p: Point) -> String = "pt"
+
+type Point = (x: Int, y: Int)
+
+fn main() -> Unit !{IO} = print((Point(x = 1, y = 2) with (y = 7)).y)
+`
+
+fn named_entry_main_reads_foreign_record() -> String =
+  `module foo
+
+import demo.recop as recop
+
+fn main() -> Unit !{IO} = print(recop.mk(3).x)
+`
+
 fn fail_message(result: compiler.CompileResult) -> String =
   match result with
   | compiler.CompileOk _ -> ""
@@ -214,5 +246,17 @@ fn main() -> Unit !{IO} =
     own_pat <- check(own_record_in_a_pattern(), root)
     assert_true(state, "a record destructured in this file gets no note",
       own_pat != "" && string.contains(own_pat, "note:") == false)
+
+    main_own <- check(named_entry_main_reads_own_record(), root)
+    assert_true(state, "a named entry's main reads its own module's record",
+      main_own == "")
+
+    main_after_instance <- check(named_entry_main_after_instance(), root)
+    assert_true(state, "an instance first does not hide the entry's module",
+      main_after_instance == "")
+
+    main_foreign <- check(named_entry_main_reads_foreign_record(), root)
+    assert_true(state, "a named entry's main cannot read a foreign abstract record",
+      string.contains(main_foreign, "is abstract here"))
 
     summary(state)

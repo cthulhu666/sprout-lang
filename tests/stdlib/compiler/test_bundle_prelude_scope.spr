@@ -105,8 +105,8 @@ fn main() -> Unit !{IO} =
             "module demo\n\nfn main() -> Unit !{IO} =\n  print(negate(7))\n",
             "/tmp/sprout_prelude_scope_named.spr", stdlib_root)
           assert_false(state, "named module bundles cleanly", errored(named))
-          assert_true(state, "named module keeps its declared name", has(named, "demo.main"))
-          assert_false(state, "named module is never renamed to $entry", has(named, "$entry.main"))
+          assert_true(state, "named module's entry main is the $entry.main entry point", has(named, "$entry.main"))
+          assert_false(state, "named module's entry main is not qualified by its module", has(named, "demo.main"))
 
           # ── Redefining a prelude name shadows instead of colliding ────────
           # This is the pair that steps 1 and 2 must land together to satisfy:

@@ -1,0 +1,5 @@
+module testsupport.main_arity
+
+# An imported `main` is an ordinary function, so it may take arguments.
+
+export fn main(x: Int) -> Int = x * 2

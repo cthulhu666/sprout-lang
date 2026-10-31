@@ -20,8 +20,12 @@ compiler).
 
 ## 2. Rules (on a DEFINED `main`)
 
-A function named `main` (bare, or the entry module's qualified `<mod>.main`) is
-only ever an intended process entrypoint, so if defined it must satisfy:
+A function named `main` in the entry file is only ever an intended process
+entrypoint, so if defined it must satisfy the rules below. An imported module's
+`main` is an ordinary function and is not gated. The bundler names the entry
+file's `main` `source.entry_main_name` (`$entry.main`) whatever its module is
+called; the checker, DCE and codegen test it through `source.is_entry_main`, which also
+accepts a bare `main` from the unbundled front end.
 
 | Rule | Diagnostic |
 |---|---|

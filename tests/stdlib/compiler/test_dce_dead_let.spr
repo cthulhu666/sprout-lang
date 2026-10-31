@@ -46,7 +46,7 @@ fn steps_after_dle(body: typed_ast.TypedExpr) -> Int =
   | typed_ast.TypedProgram decls -> step_count(decls)
 
 fn decl(body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
-  typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil, body)
+  typed_ast.TFnDecl(source.entry_main_name, Nil, Nothing, Nothing, Nil, body)
 
 fn step_count(decls: List typed_ast.TypedDecl) -> Int =
   match decls with

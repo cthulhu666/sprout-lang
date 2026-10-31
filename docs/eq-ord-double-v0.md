@@ -17,10 +17,10 @@ type Reading = (label: String, value: Double) deriving (Eq, Ord)
   3:1: ERROR: check: No instance of Eq for Double in instance method eq
 
 member(1.0, [1.0, 2.0])
-  4:25: ERROR: check: No instance of Eq for Double in function main.main
+  4:25: ERROR: check: No instance of Eq for Double in function main
 
 minimum([3.0, 1.0, 2.0])
-  4:16: ERROR: check: No instance of Ord for Double in function main.main
+  4:16: ERROR: check: No instance of Ord for Double in function main
 ```
 
 The shape this gives the prelude: **`Double` is the only primitive that can be
