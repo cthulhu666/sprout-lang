@@ -273,13 +273,87 @@ jobs:
       - name: Run compiler tests (stage-1, shard 2/2)
         run: SPROUT_TEST_SHARD=2/2 just test-stdlib-compiler-stage1
 
+  # The ASan gate (docs/gates.md): the suites and the C runtime tests against an ASan+UBSan
+  # runtime, sharded like the plain suites so no job outlasts test-gates. The libclang-rt
+  # install is in *install-llvm; without it the sanitized link fails and `c-runtime-test-asan`
+  # fails with it, because it forbids run.sh's unsanitized fallback.
+  asan-core-1:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: C runtime tests, sanitized (with the positive control)
+        run: just c-runtime-test-asan
+
+      - name: Run stdlib core tests (sanitized runtime, shard 1/2)
+        run: SPROUT_TEST_SHARD=1/2 just test-stdlib-asan-core
+
+  asan-core-2:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Sanitized compiler emits the driver's IR
+        run: just asan-self-compile
+
+      - name: Run stdlib core tests (sanitized runtime, shard 2/2)
+        run: SPROUT_TEST_SHARD=2/2 just test-stdlib-asan-core
+
+  asan-compiler-1:
+    needs: changes
+    if: *compiler-if
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Run compiler tests (sanitized runtime, shard 1/2)
+        run: SPROUT_TEST_SHARD=1/2 just test-stdlib-asan-compiler
+
+  asan-compiler-2:
+    needs: changes
+    if: *compiler-if
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Run compiler tests (sanitized runtime, shard 2/2)
+        run: SPROUT_TEST_SHARD=2/2 just test-stdlib-asan-compiler
+
   test:
     # The one required check on master, and the only job here that is never skipped while a
     # shard has failed. GitHub reports a job skipped by `if:` as SUCCESS, so a required check
     # that could be skipped would pass a red shard — hence `!cancelled()`, which runs it after
     # a failed `needs` too, and an explicit verdict below rather than trusting the needs.
     # A skipped shard counts only where `changes` says it should skip.
-    needs: [changes, test-gates, test-core-1, test-core-2, test-compiler-1, test-compiler-2]
+    needs: [changes, test-gates, test-core-1, test-core-2, test-compiler-1, test-compiler-2, asan-core-1, asan-core-2, asan-compiler-1, asan-compiler-2]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -293,19 +367,27 @@ jobs:
           CORE2: ${{ needs.test-core-2.result }}
           COMPILER1: ${{ needs.test-compiler-1.result }}
           COMPILER2: ${{ needs.test-compiler-2.result }}
+          ASAN_CORE1: ${{ needs.asan-core-1.result }}
+          ASAN_CORE2: ${{ needs.asan-core-2.result }}
+          ASAN_COMPILER1: ${{ needs.asan-compiler-1.result }}
+          ASAN_COMPILER2: ${{ needs.asan-compiler-2.result }}
         run: |
           set -u
           echo "changes=$CHANGES docs_only=$DOCS_ONLY run_compiler=$RUN_COMPILER"
           echo "test-gates=$GATES test-core-1=$CORE1 test-core-2=$CORE2"
           echo "test-compiler-1=$COMPILER1 test-compiler-2=$COMPILER2"
+          echo "asan-core-1=$ASAN_CORE1 asan-core-2=$ASAN_CORE2"
+          echo "asan-compiler-1=$ASAN_COMPILER1 asan-compiler-2=$ASAN_COMPILER2"
           [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
           if [ "$DOCS_ONLY" = true ]; then echo "docs-only change: no shard runs"; exit 0; fi
           [ "$GATES" = success ] || { echo "test-gates: $GATES"; exit 1; }
           [ "$CORE1" = success ] || { echo "test-core-1: $CORE1"; exit 1; }
           [ "$CORE2" = success ] || { echo "test-core-2: $CORE2"; exit 1; }
-          for c in "$COMPILER1" "$COMPILER2"; do
+          [ "$ASAN_CORE1" = success ] || { echo "asan-core-1: $ASAN_CORE1"; exit 1; }
+          [ "$ASAN_CORE2" = success ] || { echo "asan-core-2: $ASAN_CORE2"; exit 1; }
+          for c in "$COMPILER1" "$COMPILER2" "$ASAN_COMPILER1" "$ASAN_COMPILER2"; do
             if [ "$RUN_COMPILER" = true ] || [ "$c" != skipped ]; then
-              [ "$c" = success ] || { echo "a test-compiler shard: $c"; exit 1; }
+              [ "$c" = success ] || { echo "a compiler shard: $c"; exit 1; }
             fi
           done
           echo "all shards green"

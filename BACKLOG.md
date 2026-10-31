@@ -2882,16 +2882,6 @@ acting.
 
 #### Runtime-invariant confidence tooling
 
-- [ ] `P2` **Run the Sprout suites against a sanitized compiler.** The C *unit* tests already run
-  sanitized (`tests/c_runtime/run.sh` builds with `-fsanitize=address,undefined`, gated as
-  `c-runtime-test` in `gate` and `ci-fast-gates`, with CI installing `libclang-rt-dev` so the link
-  cannot silently fall back). What is open is the other half: `just build-stage2-asan` only *builds*
-  a sanitized stage-2 and is not in `gate`. Add a recipe running a representative test + canary set
-  against the instrumented runtime, then a CI step. A stray `payload-8` read on a bare string, or
-  any UB the HDRCHECK strlen-assert misses, would then surface as a located C stack trace instead of
-  a silent wrong value. **Re-measure before deciding nightly-vs-PR:** the old sizing constraint
-  (ASan ~2× slower, 2–3× fatter, on a memory-tight worker at capacity 2) was measured against a
-  self-hosted box that no longer exists.
 - [ ] `P2` **Compare each `extern fn`'s C definition against the emitted `declare`.** The
   duplicate-declaration half is gated — `scripts/check_extern_signatures.sh` enforces one C symbol
   to one `extern fn` — but it never reads `runtime/*.c`, so the type comparison is untouched and

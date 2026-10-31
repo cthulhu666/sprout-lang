@@ -1,6 +1,6 @@
 # Every String crossing into Sprout is headered — v0
 
-**Status — approved; steps 1 to 4, 6 and 7 landed (§7).** Runtime-internal; no change to the language, the spec
+**Status — approved; all steps landed (§7).** Runtime-internal; no change to the language, the spec
 or the extern ABI.
 Builds on `docs/runtime-invariant-confidence-v0.md`, which made every String headered.
 
@@ -208,14 +208,16 @@ Exported functions therefore build a `SproutStr` and return `sprout_str_word(s)`
 
 ### 4.5 ASan as a second net
 
-`just build-stage2-asan` builds an ASan compiler and runs nothing (`BACKLOG.md`). Run with the
-suite under it, `sprout_hdr_of` reading `payload-8` of a malloc'd or stack buffer hits the
-buffer's left redzone: a deterministic report at the first consumer, naming the allocation. A
-literal is best-effort only. ASan gives globals trailing redzones and no leading ones, so `lit-8`
-is reported only when an instrumented global happens to sit just before the literal. For
-literals, the deterministic net is `sprout_str_word` under HDRCHECK. ASan also misses libc's
-static buffers (`strerror`) and paths no test exercises. So it complements §4.3 rather than
-replacing it, and it catches every other out-of-bounds read in the runtime.
+`just test-asan` (`docs/gates.md` §ASan gate) runs the C runtime tests, the sanitized compiler and
+both suites against an ASan+UBSan runtime, on every PR (the compiler suite on compiler-affecting
+ones). Under it, `sprout_hdr_of` reading
+`payload-8` of a malloc'd or stack buffer hits the buffer's left redzone: a deterministic report
+at the first consumer, naming the allocation. A literal is best-effort only. ASan gives globals
+trailing redzones and no leading ones, so `lit-8` is reported only when an instrumented global
+happens to sit just before the literal. For literals, the deterministic net is `sprout_str_word`
+under HDRCHECK. ASan also misses libc's static buffers (`strerror`), reads inside the GC arena
+(one malloc to ASan) and paths no test exercises. So it complements §4.3 rather than replacing
+it, and it catches every other out-of-bounds read in the runtime.
 
 ## 5. Rejected
 
@@ -300,7 +302,10 @@ Each step is its own commit and keeps every gate green.
    `register_cstr` and `intern_string` are deleted, and so is `runtime/WORD_CASTS_BASELINE`.
    `scripts/runtime_word_casts.py` takes no baseline argument and has no `--emit-baseline`: rule 1
    fails on any site outside the exits and `ADDRESS_CASTS`. `ADDRESS_CASTS` stays.
-5. **ASan in CI.** Make `build-stage2-asan` run the C runtime tests and the suite (§4.5).
+5. ~~**ASan in CI.**~~ Landed: `just test-asan` runs `c-runtime-test-asan` (every case sanitized,
+   plus a positive control that must see ASan report a headerless `str_eq` input),
+   `asan-self-compile`, `test-stdlib-asan-core` and `test-stdlib-asan-compiler`. CI runs them as
+   the `asan-core-{1,2}` and `asan-compiler-{1,2}` jobs, under the required `test` check.
 6. ~~**`check-approved-builtins` sees every builtin Sprout can call.**~~ Landed: the gate
    intersects the Sprout side (every `extern fn` under `stdlib`, `tests`, `examples`, `ide`, plus
    the `declare` names in the IR header the compiler emits) with the global text symbols `nm`

@@ -6,6 +6,11 @@ export PATH := if llvm_bindir == "" { env_var("PATH") } else { llvm_bindir + ":"
 stdlib_root := justfile_directory() / "stdlib"
 driver      := stdlib_root / "compiler" / "compile_driver.sprout"
 clang_extra := if os() == "macos" { "-framework Security -framework CoreFoundation" } else { "" }
+# ASan+UBSan settings, shared by every sanitized build and run (docs/gates.md §ASan gate).
+# No leak report: the GC arena is never freed. halt_on_error: UBSan fails the test.
+asan_flags  := "-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+asan_opts   := "detect_leaks=0:halt_on_error=1"
+ubsan_opts  := "halt_on_error=1:print_stacktrace=1"
 build_dir   := justfile_directory() / "build"
 # Single source of truth for the runtime C sources. A glob so splitting
 # sprout_runtime.c into more files (scheduler, GC, net, …) needs zero build edits.
@@ -579,10 +584,23 @@ ir-golden-snapshot: bootstrap-from-seed
   bash scripts/ir_golden_snapshot.sh
 
 [private]
-_test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
+_test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler" sanitize="":
   #!/usr/bin/env bash
   set -euo pipefail
   STAGE="{{stage}}"
+  # sanitize=asan: runtime and test binaries get ASan+UBSan (docs/gates.md §ASan gate).
+  RT_OPT="-O2"
+  SAN_LINK=""
+  case "{{sanitize}}" in
+    "") ;;
+    asan)
+      RT_OPT="{{asan_flags}}"
+      SAN_LINK="$RT_OPT"
+      export ASAN_OPTIONS="{{asan_opts}}"
+      export UBSAN_OPTIONS="{{ubsan_opts}}"
+      ;;
+    *) echo "ERROR: sanitize must be '' or 'asan' (got '{{sanitize}}')" >&2; exit 1 ;;
+  esac
   if [[ ! -x "./$STAGE" ]]; then
     echo "ERROR: $STAGE not found" >&2; exit 1
   fi
@@ -592,7 +610,7 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
   # Pre-compile the runtime once (each source -> its own .o); tests link the set.
   mkdir -p "$TMPD/rtobj"
   for rtsrc in {{runtime_src}}; do
-    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+    clang -c "$rtsrc" $RT_OPT {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "ERROR: runtime compile failed ($rtsrc)"; cat "$TMPD/rt.err"; exit 1; }
   done
   declare -a files=()
@@ -638,7 +656,7 @@ _test-stdlib stage dirs="tests/stdlib tests/stdlib/compiler":
       elif ! opt --passes=verify "$TMPD/$idx.ll" -o /dev/null 2>"$TMPD/$idx.err"; then
         { echo "  IR INVALID (opt --passes=verify):"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
       else
-        clang "$TMPD/$idx.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
+        clang "$TMPD/$idx.ll" "$TMPD/rtobj"/*.o $SAN_LINK {{clang_extra}} -o "$TMPD/$idx.bin" 2>"$TMPD/$idx.err"
         if [[ $? -ne 0 ]]; then
           { echo "  LINK FAILED:"; cat "$TMPD/$idx.err"; } >> "$TMPD/$idx.out"; ok=0
         fi
@@ -708,6 +726,40 @@ test-stdlib-core-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver
 # stdlib-test CPU. PR-gated to compiler-affecting paths; always run on master + nightly.
 [group('test')]
 test-stdlib-compiler-stage1: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib/compiler")
+
+# The ASan gate (docs/gates.md §ASan gate): the suites and the C runtime tests against an
+# ASan+UBSan runtime. `test-asan` runs all four; CI shards them over four parallel jobs.
+# Core suite (tests/stdlib) against a sanitized runtime.
+[group('test')]
+test-stdlib-asan-core: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib" "asan")
+
+# Compiler suite (tests/stdlib/compiler) against a sanitized runtime.
+[group('test')]
+test-stdlib-asan-compiler: bootstrap-from-seed (_test-stdlib "build/compile_driver_bin_stage1" "tests/stdlib/compiler" "asan")
+
+# The sanitized and unsanitized builds of the same compiler (one IR) emit the same driver IR, with no report.
+[group('test')]
+asan-self-compile: bootstrap-from-seed build-stage2-asan
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export ASAN_OPTIONS="{{asan_opts}}"
+  export UBSAN_OPTIONS="{{ubsan_opts}}"
+  T=$(mktemp -d /tmp/sprout_asan_self_XXXXXX); trap 'rm -rf "$T"' EXIT
+  clang "{{build_dir}}/compile_driver_stage2_src.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$T/plain"
+  "$T/plain" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$T/plain.ll"
+  "{{build_dir}}/compile_driver_bin_stage2_asan" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$T/asan.ll" 2> "$T/asan.err" \
+    || { echo "ERROR: sanitized compiler failed:" >&2; cat "$T/asan.err" >&2; exit 1; }
+  cmp "$T/plain.ll" "$T/asan.ll" || { echo "ERROR: sanitized and unsanitized builds of the same compiler emitted different IR" >&2; exit 1; }
+  echo "==> asan-self-compile: clean, sanitized and unsanitized IR identical"
+
+# The C runtime tests, every build sanitized, plus the positive control (tests/c_runtime/asan_control.c).
+[group('test')]
+c-runtime-test-asan:
+  SPROUT_C_RUNTIME_SANITIZE=1 SPROUT_C_RUNTIME_SAN_FLAGS="{{asan_flags}}" ASAN_OPTIONS="{{asan_opts}}" UBSAN_OPTIONS="{{ubsan_opts}}" bash tests/c_runtime/run.sh
+
+# The whole ASan gate.
+[group('test')]
+test-asan: c-runtime-test-asan asan-self-compile test-stdlib-asan-core test-stdlib-asan-compiler
 
 # Stage-2: emit IR → clang link → run for each test file.
 [group('test')]
@@ -886,18 +938,18 @@ build-stage2: (_build-stage "build/compile_driver_bin_stage1" "build/compile_dri
 [group('build')]
 build-stage3: (_build-stage "build/compile_driver_bin_stage2" "build/compile_driver_bin_stage3")
 
-# Build stage-2 with AddressSanitizer + UBSan (slow; for debugging only).
+# Build stage-2 with AddressSanitizer + UBSan (slow). `asan-self-compile` runs it; also for debugging.
 [group('build')]
 build-stage2-asan: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
-  TMP_LL="/tmp/sprout_stage2_asan_$$.ll"
-  trap 'rm -f "$TMP_LL"' EXIT
+  # Kept: asan-self-compile links the unsanitized twin from this same IR.
+  TMP_LL="{{build_dir}}/compile_driver_stage2_src.ll"
+  mkdir -p "{{build_dir}}"
   echo "==> Emitting LLVM IR via stage-1..."
   "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "{{driver}}" > "$TMP_LL"
   echo "==> Linking with clang + ASan/UBSan..."
-  mkdir -p "{{build_dir}}"
-  clang "$TMP_LL" {{runtime_src}} -O1 -fsanitize=address,undefined {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage2_asan"
+  clang "$TMP_LL" {{runtime_src}} {{asan_flags}} {{clang_extra}} -o "{{build_dir}}/compile_driver_bin_stage2_asan"
   echo "==> Built {{build_dir}}/compile_driver_bin_stage2_asan (asan)"
 
 # ── Examples ──────────────────────────────────────────────────────────────────
@@ -4399,7 +4451,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
