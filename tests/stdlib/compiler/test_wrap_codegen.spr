@@ -3,7 +3,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # IR-level tests for the 'wrap' zero-cost guarantee, checked against the typed
 # IR pipeline (the sole codegen backend since the direct backend was retired).
@@ -62,7 +62,7 @@ fn has_field_call(ir: String) -> Bool =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

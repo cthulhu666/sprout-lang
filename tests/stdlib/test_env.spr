@@ -48,12 +48,4 @@ fn main() -> Unit !{IO} =
     | Ok (Just p) -> assert_eq(state, "PATH matches the child's view", p, child_path)
     | _ -> assert_true(state, "PATH matches the child's view", false)
 
-    # get_or_panic is get with the Result folded away: same answers for a valid value and an unset name.
-    match env.get_or_panic("PATH") with
-    | Just p -> assert_eq(state, "get_or_panic reads a set name", p, child_path)
-    | Nothing -> assert_true(state, "get_or_panic reads a set name", false)
-    match env.get_or_panic("SPROUT_DEFINITELY_NOT_SET_XYZZY") with
-    | Nothing -> assert_true(state, "get_or_panic on an unset name is Nothing", true)
-    | Just _ -> assert_true(state, "get_or_panic on an unset name is Nothing", false)
-
     summary(state)

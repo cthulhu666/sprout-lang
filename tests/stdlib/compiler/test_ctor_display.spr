@@ -4,7 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # The display-vs-identity split for qualified names, pinned from BOTH sides.
 #
@@ -67,7 +67,7 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "prelude ctor is unaffected", to_string(Just(9)), "Just(9)")
 
     # ---- diagnostics stay qualified ---------------------------------------
-    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing ->
         # Deliberately a FAILURE, not a skip: these assertions need the bundler,
         # and a silent skip would report a vacuous green (BACKLOG 7.2, the

@@ -1,0 +1,11 @@
+module testsupport.envvar
+
+import stdlib.env as env
+
+# Environment reads for tests. A test cannot recover from a value that is not valid UTF-8, so it
+# ends the run naming the variable; `Nothing` is an unset name, as in `env.get`.
+
+export fn read(name: String) -> Maybe String !{IO} =
+  match env.get(name) with
+  | Ok value -> value
+  | Err _ -> panic(name ++ " is not valid UTF-8")

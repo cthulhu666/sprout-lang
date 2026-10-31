@@ -2161,16 +2161,25 @@ argv-smoke: bootstrap-from-seed
       echo "argv-smoke: env.get on '${pair%%|*}': got '$got'" >&2; exit 1
     fi
   done
-  # The compiler reads its switches through env.get. One that is not valid UTF-8 stops the compile
-  # with a message naming the variable; it does not read as unset.
+  # The compiler reads its switches through env.get. One that is not valid UTF-8 reads as unset:
+  # the compile succeeds with its defaults, writes `<VAR> is not valid UTF-8; ignored` once, and
+  # emits the same IR as with the switch unset.
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
+    tests/argv_smoke/argv_echo.spr >"$TMPD/cfg_base.ll" 2>"$TMPD/cfg_base.err"
+  if [[ -s "$TMPD/cfg_base.err" ]]; then
+    echo "argv-smoke: the baseline compile wrote to stderr:" >&2; cat "$TMPD/cfg_base.err" >&2; exit 1
+  fi
   for var in SPROUT_OPT_OFF SPROUT_OPT_STATS SPROUT_TRACE_DISPATCH SPROUT_VERIFY_ROOTS \
              SPROUT_VERIFY_DISPATCH_STATS; do
     rc=0
     env "$var=$(printf 'x\xff')" "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
-      tests/argv_smoke/argv_echo.spr >/dev/null 2>"$TMPD/cfg.err" || rc=$?
-    if [[ "$rc" -eq 0 ]] || ! grep -q "$var is not valid UTF-8" "$TMPD/cfg.err"; then
+      tests/argv_smoke/argv_echo.spr >"$TMPD/cfg.ll" 2>"$TMPD/cfg.err" || rc=$?
+    if [[ "$rc" -ne 0 || "$(cat "$TMPD/cfg.err")" != "$var is not valid UTF-8; ignored" ]]; then
       echo "argv-smoke: $var holding invalid UTF-8: exit $rc, stderr:" >&2
       cat "$TMPD/cfg.err" >&2; exit 1
+    fi
+    if ! cmp -s "$TMPD/cfg_base.ll" "$TMPD/cfg.ll"; then
+      echo "argv-smoke: $var holding invalid UTF-8 changed the emitted IR" >&2; exit 1
     fi
   done
   # term_read_line: Err for a line that is not valid UTF-8 or holds a NUL, Ok(Nothing) at EOF.
