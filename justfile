@@ -3793,7 +3793,9 @@ gc-ageprof-check: bootstrap-from-seed
     # gate validates the age COUNTER; `gc-adapt-check` covers the threshold POLICY.
     # Keeping them separate means a future factor change cannot silently recalibrate
     # the instrument's own correctness check.
-    SPROUT_GC_AGEPROF=1 SPROUT_GC_ADAPT_FACTOR=2 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.prof" \
+    # SPROUT_GC_MINOR=0 is pinned too: under minor collections an old object is not re-marked,
+    # which is the quantity this counter exists to measure.
+    SPROUT_GC_MINOR=0 SPROUT_GC_AGEPROF=1 SPROUT_GC_ADAPT_FACTOR=2 "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.prof" \
       || { echo "gc-ageprof-check: $f aborted under SPROUT_GC_AGEPROF=1" >&2; tail -5 "$TMPD/$name.prof" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-ageprof-check: $f workload did not pass" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
@@ -3866,7 +3868,7 @@ gc-ageprof-check: bootstrap-from-seed
   for rt in rtobj rtobj_st; do
     clang "$TMPD/st.ll" "$TMPD/$rt"/*.o {{clang_extra}} -o "$TMPD/st_$rt.bin" 2>"$TMPD/st.err" \
       || { echo "gc-ageprof-check: link failed: $st ($rt)" >&2; cat "$TMPD/st.err" >&2; exit 1; }
-    SPROUT_GC_AGEPROF=1 "$TMPD/st_$rt.bin" > /dev/null 2>"$TMPD/st_$rt.prof" \
+    SPROUT_GC_MINOR=0 SPROUT_GC_AGEPROF=1 "$TMPD/st_$rt.bin" > /dev/null 2>"$TMPD/st_$rt.prof" \
       || { echo "gc-ageprof-check: $st failed ($rt)" >&2; tail -5 "$TMPD/st_$rt.prof" >&2; exit 1; }
   done
   grep -q "mut_calls=off ptr_stores=off old_to_young=off " "$TMPD/st_rtobj.prof" \
@@ -3914,7 +3916,9 @@ gc-adapt-check: bootstrap-from-seed
   probe() {
     local name="$1" factor="$2" line
     if [ -n "$factor" ]; then export SPROUT_GC_ADAPT_FACTOR="$factor"; else unset SPROUT_GC_ADAPT_FACTOR; fi
-    line=$(SPROUT_GC_AGEPROF=1 "$TMPD/$name.bin" 2>"$TMPD/$name.prof" >"$TMPD/$name.out"; grep -m1 "ageprof.*cycles=" "$TMPD/$name.prof") \
+    # SPROUT_GC_MINOR=0 is pinned: the assertions below are exact cycle counts, and the
+    # minor/major mix would move them.
+    line=$(SPROUT_GC_MINOR=0 SPROUT_GC_AGEPROF=1 "$TMPD/$name.bin" 2>"$TMPD/$name.prof" >"$TMPD/$name.out"; grep -m1 "ageprof.*cycles=" "$TMPD/$name.prof") \
       || { echo "gc-adapt-check: $name emitted no ageprof summary at factor='${factor:-default}'" >&2; return 1; }
     grep -q "SUITE PASSED" "$TMPD/$name.out" \
       || { echo "gc-adapt-check: $name did not pass at factor='${factor:-default}'" >&2; tail -5 "$TMPD/$name.out" >&2; return 1; }
@@ -3944,6 +3948,75 @@ gc-adapt-check: bootstrap-from-seed
     || { echo "gc-adapt-check: floor-pinned workload changed with the factor ('${none_f2}' vs '${none_f4}') — raising the default is NOT free for small-live-set programs" >&2; failed=1; }
   (( failed == 0 )) || exit 1
   echo "==> gc-adapt-check ✓"
+
+# The generational write barrier, checked under minor collections (docs/gc-generational-v0.md
+# §14.4, §14.5; docs/gates.md). One program per barrier site Sprout can drive (tests/gc_gen/), run
+# with SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1: every allocation collects, so a
+# store without its barrier is caught by the verifier within a few allocations. Each program must
+# print its known line, and must have run minor collections. Also run with the mode off, where
+# the line must be the same. The two analysis helpers are static and need a live analysis
+# service to reach from Sprout, so a C case covers them (tests/c_runtime/analysis_strings.c).
+[group('test')]
+gc-gen-check: bootstrap-from-seed
+  #!/usr/bin/env bash
+  set -uo pipefail
+  TMPD=$(mktemp -d /tmp/sprout_gcgen_XXXXXX); trap 'rm -rf "$TMPD"' EXIT
+  mkdir -p "$TMPD/rtobj"
+  for rtsrc in {{runtime_src}}; do
+    clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
+      || { echo "gc-gen-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
+  done
+  expected() {
+    case "$1" in
+      ref_write)      echo "gc-gen ref_write 11202" ;;
+      vector_mutset)  echo "gc-gen vector_mutset 3224" ;;
+      vector_push)    echo "gc-gen vector_push 16740" ;;
+      linear_reuse)   echo "gc-gen linear_reuse 80715" ;;
+      *)              echo "" ;;
+    esac
+  }
+  failed=0
+  for f in tests/gc_gen/*.spr; do
+    name=$(basename "$f" .spr)
+    want=$(expected "$name")
+    [ -n "$want" ] || { echo "gc-gen-check: no expected line for $f; add one to the recipe" >&2; failed=1; continue; }
+    "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
+      || { echo "gc-gen-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
+    clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
+      || { echo "gc-gen-check: link failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
+    SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
+      "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.gc"
+    rc=$?
+    if [ "$rc" != 0 ] || [ "$(cat "$TMPD/$name.out")" != "$want" ]; then
+      echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc, want '$want')" >&2
+      grep -A4 'GENCHECK' "$TMPD/$name.gc" | head -8 >&2
+      tail -3 "$TMPD/$name.out" >&2
+      failed=1; continue
+    fi
+    minors=$(grep -c 'kind=minor' "$TMPD/$name.gc")
+    majors=$(grep -c 'kind=major' "$TMPD/$name.gc")
+    echo "  $name: ok ($minors minor, $majors major collections)"
+    (( minors >= 20 )) \
+      || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
+    SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
+    [ "$(cat "$TMPD/$name.off")" = "$want" ] \
+      || { echo "gc-gen-check: $name differs with SPROUT_GC_MINOR=0: '$(cat "$TMPD/$name.off")'" >&2; failed=1; }
+  done
+  clang tests/c_runtime/analysis_strings.c runtime/sprout_scheduler.c runtime/sprout_poll.c -O1 -g {{clang_extra}} \
+      -o "$TMPD/analysis.bin" 2>"$TMPD/analysis.err" \
+    || { echo "gc-gen-check: analysis_strings.c failed to build" >&2; cat "$TMPD/analysis.err" >&2; exit 1; }
+  # The case itself fails when fewer than 20 minor collections ran.
+  SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 "$TMPD/analysis.bin" stress > "$TMPD/analysis.out" 2>"$TMPD/analysis.gc"
+  rc=$?
+  if [ "$rc" != 0 ] || [ "$(cat "$TMPD/analysis.out")" != "analysis-stress" ]; then
+    echo "gc-gen-check: the analysis helpers failed under MINOR=1 GENCHECK=1 (rc=$rc)" >&2
+    head -8 "$TMPD/analysis.gc" >&2
+    failed=1
+  else
+    echo "  analysis helpers (C case): ok"
+  fi
+  (( failed == 0 )) || exit 1
+  echo "==> gc-gen-check ✓"
 
 # Validate the sweep-walk counter (`walked=` on every SPROUT_DEBUG_GC cycle line):
 # slots the sweep stepped over, live and FREE included. Divided by `swept` it is the
@@ -4217,6 +4290,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "freelist-verify|test-freelist-verify"
     "gc-ageprof|gc-ageprof-check"
     "gc-adapt|gc-adapt-check"
+    "gc-gen|gc-gen-check"
     "gc-arena|gc-arena-check"
     "gc-walk|gc-walk-check"
     "gc-trigger|gc-trigger-check"
@@ -4510,7 +4584,7 @@ gate-quick: fmt-check test compile-examples-stage1 smoke-shapes bundle-smoke
 # See docs/gates.md §Definition of Done.
 # The Definition of Done's gates (AGENTS.md), each once, one at a time.
 [group('gate')]
-dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run-example-canary ir-golden-diff o2-codegen-smoke
+dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run-example-canary ir-golden-diff o2-codegen-smoke gc-gen-check
 
 # Full CI-parity battery.  Dependencies are ordered cheap->expensive so a failure
 # surfaces fast; `just` runs them sequentially and deduplicates the shared

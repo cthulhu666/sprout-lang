@@ -582,14 +582,16 @@ static void sprout_gc_log_cycle(
   long long alloc_since_gc,
   long long swept_delta,
   long long elapsed_us,
-  long long walked_delta
+  long long walked_delta,
+  const char* kind_suffix
 ) {
   if (!g_debug_gc_enabled) return;
   /* walked= and free= go last: bench/gc_pause/pause_stats.py reads swept= and
-     elapsed_us= as adjacent fields. */
+     elapsed_us= as adjacent fields.  kind= follows them, and only under
+     SPROUT_GC_MINOR=1, so the line is unchanged with the mode off. */
   fprintf(
     stderr,
-    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld\n",
+    "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld%s\n",
     g_gc_cycle_count,
     reason,
     g_gc_threshold,
@@ -604,7 +606,8 @@ static void sprout_gc_log_cycle(
     g_arena_region_count,
     g_overflow_region_count,
     walked_delta,
-    g_gc_free_after_sweep
+    g_gc_free_after_sweep,
+    kind_suffix
   );
   fprintf(
     stderr,
@@ -663,8 +666,10 @@ __attribute__((noreturn, cold, noinline)) void sprout_str_check_fail(int enterin
 
 /* ── Inline heap header (64-bit word at payload_ptr - 8) ────────────────────
  * Layout: bits 0-7  = SproutHeapKind (kind)
- *         bits 8-9  = GC color (unused in this phase, written as 0)
- *         bits 10-13 = reserved GC bits (written as 0)
+ *         bit 8     = GC color: marked during a collection; "old" between
+ *                     collections under SPROUT_GC_MINOR=1, clear otherwise
+ *         bits 9-12 = age (SPROUT_GC_AGE_*)
+ *         bit 13    = REMEMBERED (SPROUT_GC_REMEMBERED_BIT)
  *         bits 14-63 = aux (50 bits); interpretation per kind:
  *           OBJ:     (tag << 8) | arity  — low 8 bits = ctor arity (0..255)
  *           CLOSURE: n_caps
@@ -781,10 +786,10 @@ static inline void sprout_obj_write_tag(void* payload, long long tag, int arity)
  * POISON headers rewrite the whole word.
  *
  * Bit 13 is REMEMBERED: set only by the write barrier (sprout_gc_write_barrier),
- * and meaningful once minor collections exist (docs/gc-generational-v0.md §14.4).
- * Nothing clears it yet, and nothing in the collector's behaviour depends on it
- * or on the age value today; SPROUT_GC_AGEPROF reads the age (measurement only,
- * see sprout_gc_ageprof_on).  aux starts at bit 14, via sprout_hdr_make. */
+ * and cleared by a minor collection or the major pre-pass (docs/gc-generational-v0.md
+ * §14.4).  Nothing in the collector depends on the age value; SPROUT_GC_AGEPROF
+ * reads it (measurement only, see sprout_gc_ageprof_on).  aux starts at bit 14,
+ * via sprout_hdr_make. */
 #define SPROUT_GC_AGE_SHIFT 9
 #define SPROUT_GC_AGE_MAX   15                      /* 4 bits: 0..15, saturating */
 #define SPROUT_GC_AGE_MASK  ((uint64_t)SPROUT_GC_AGE_MAX << SPROUT_GC_AGE_SHIFT)
@@ -803,16 +808,44 @@ static inline uint64_t sprout_hdr_age_bump(uint64_t h) {
 /* ── Generational write barrier (docs/gc-generational-v0.md §14.4) ─────────────
  *
  * The collector state a per-domain heap would own.  The remembered set holds the
- * payloads of objects whose REMEMBERED bit is set, each once.  Nothing reads it
- * yet: the sweep clears every color bit, so between collections no object is old
- * and the barrier's fast path always exits.  Not thread-safe, like the rest of
- * the heap. */
+ * payloads of objects whose REMEMBERED bit is set, each once.  A minor collection
+ * (SPROUT_GC_MINOR=1, sprout_gc_collect_with_reason) reads and empties it.  With
+ * the mode off the sweep clears every color bit, so between collections no object
+ * is old and the barrier's fast path always exits.  Not thread-safe, like the
+ * rest of the heap. */
 typedef struct {
   void**  remembered;  /* payload pointers */
   size_t  len;
   size_t  cap;
+  int       on;                  /* SPROUT_GC_MINOR=1; -1 until sprout_gc_gen_on reads it */
+  int       check;               /* SPROUT_GC_GENCHECK=1, and only with `on` */
+  long long major_every;         /* SPROUT_GC_MAJOR_EVERY: minors between majors */
+  int       have_major;          /* a major has run */
+  long long baseline;            /* heap count after the last major */
+  long long last_live;           /* heap count after the previous collection */
+  long long minors_since_major;
+  long long n_minor, n_major;    /* collections run, by kind */
 } SproutGenState;
-static SproutGenState g_gen;
+static SproutGenState g_gen = { .on = -1, .check = -1, .major_every = 19 };
+
+/* Reads the three generational switches once.  SPROUT_GC_MAJOR_EVERY=0 makes every
+ * collection a major. */
+static int sprout_gc_gen_on(void) {
+  if (g_gen.on >= 0) return g_gen.on;
+  const char* m = getenv("SPROUT_GC_MINOR");
+  const char* c = getenv("SPROUT_GC_GENCHECK");
+  const char* every = getenv("SPROUT_GC_MAJOR_EVERY");
+  if (every != NULL && every[0] != '\0') {
+    char* end = NULL;
+    long long parsed = strtoll(every, &end, 10);
+    if (end == every || *end != '\0' || parsed < 0)
+      sprout_fail("SPROUT_GC_MAJOR_EVERY: expected non-negative integer");
+    g_gen.major_every = parsed;
+  }
+  g_gen.check = (m != NULL && m[0] == '1' && c != NULL && c[0] == '1');
+  g_gen.on = (m != NULL && m[0] == '1');
+  return g_gen.on;
+}
 
 /* Record `payload`, whose header is `h` (color set, REMEMBERED clear). */
 __attribute__((noinline, cold)) static void sprout_gc_remember_slow(void* payload, uint64_t h) {
@@ -2296,9 +2329,20 @@ static void**  g_gc_mark_worklist = NULL;  /* payload pointers (void*) */
 static size_t  g_gc_mark_wl_len = 0;
 static size_t  g_gc_mark_wl_cap = 0;
 
+static inline void gc_mark_wl_push(void* payload) {
+  if (g_gc_mark_wl_len >= g_gc_mark_wl_cap) {
+    size_t new_cap = g_gc_mark_wl_cap < 1024 ? 1024 : g_gc_mark_wl_cap * 2;
+    void** new_wl = (void**)realloc(g_gc_mark_worklist, new_cap * sizeof(void*));
+    if (!new_wl) sprout_fail("GC mark: out of memory for worklist");
+    g_gc_mark_worklist = new_wl;
+    g_gc_mark_wl_cap = new_cap;
+  }
+  g_gc_mark_worklist[g_gc_mark_wl_len++] = payload;
+}
+
 static void gc_mark_enqueue(void* payload) {
   if (payload == NULL) return;
-  /* Color bit in header (bit 8). */
+  /* Color bit in header (bit 8): marked this cycle or, under SPROUT_GC_MINOR, old. */
   void* hdr_ptr = (char*)payload - 8;
   uint64_t h; memcpy(&h, hdr_ptr, 8);
   if (h & SPROUT_GC_COLOR_BIT) return;  /* already marked */
@@ -2312,22 +2356,22 @@ static void gc_mark_enqueue(void* payload) {
   h |= SPROUT_GC_COLOR_BIT;
   memcpy(hdr_ptr, &h, 8);
   g_gc_marked_count++;
-  if (g_gc_mark_wl_len >= g_gc_mark_wl_cap) {
-    size_t new_cap = g_gc_mark_wl_cap < 1024 ? 1024 : g_gc_mark_wl_cap * 2;
-    void** new_wl = (void**)realloc(g_gc_mark_worklist, new_cap * sizeof(void*));
-    if (!new_wl) sprout_fail("GC mark: out of memory for worklist");
-    g_gc_mark_worklist = new_wl;
-    g_gc_mark_wl_cap = new_cap;
-  }
-  g_gc_mark_worklist[g_gc_mark_wl_len++] = payload;
+  gc_mark_wl_push(payload);
 }
 
+/* GENCHECK's full mark takes the same roots as the collection: while it runs, a root is
+ * reported to sprout_gc_check_reach instead of being marked. */
+static int g_gc_check_active = 0;
+static void sprout_gc_check_reach(void* payload, void* owner, long long field);
+
 static void sprout_gc_mark_value(long long value) {
+  if (g_gc_check_active) { sprout_gc_check_reach((void*)(uintptr_t)value, NULL, -1); return; }
   void* hdr = sprout_heap_lookup((void*)(uintptr_t)value);
   if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8);
 }
 
 static void sprout_gc_mark_ptr(void* ptr) {
+  if (g_gc_check_active) { sprout_gc_check_reach(ptr, NULL, -1); return; }
   void* hdr = sprout_heap_lookup(ptr);
   if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8);
 }
@@ -2406,6 +2450,157 @@ static void sprout_gc_mark_roots(void) {
     if (g_handle_table[i].in_use)
       sprout_gc_mark_value(g_handle_table[i].value);
   }
+}
+
+/* ── Minor collections (SPROUT_GC_MINOR=1, docs/gc-generational-v0.md §14.4) ─────
+ *
+ * Between collections the color bit means OLD.  gc_mark_enqueue stops at a set color bit,
+ * so a minor marks only young objects.  An old object that was written to since the last
+ * collection is in the remembered set: its children are traced regardless of its color. */
+
+/* Minor: trace the children of every remembered object, then empty the set.  Pushing the
+ * object itself (not its children) lets the ordinary drain expand it. */
+static void sprout_gc_mark_remembered(void) {
+  for (size_t i = 0; i < g_gen.len; i++) {
+    void* payload = g_gen.remembered[i];
+    uint64_t h = sprout_hdr_of(payload);
+    h &= ~SPROUT_GC_REMEMBERED_BIT;
+    memcpy((char*)payload - 8, &h, 8);
+    gc_mark_wl_push(payload);
+  }
+  g_gen.len = 0;
+}
+
+/* Major: clear color and REMEMBERED on every slot, so the mark that follows re-marks the
+ * whole live heap.  Same slot walk as the sweep; FREE and POISON slots carry neither bit. */
+static inline size_t sprout_slot_step(uint64_t h);
+static void sprout_gc_clear_marks(void) {
+  g_gen.len = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    SproutRegion* r = &g_regions[ri];
+    const uint64_t clear = SPROUT_GC_COLOR_BIT | SPROUT_GC_REMEMBERED_BIT;
+    if (r->is_large) {
+      uint64_t h; memcpy(&h, r->base, 8);
+      h &= ~clear;
+      memcpy(r->base, &h, 8);
+      continue;
+    }
+    size_t off = 0;
+    while (off < r->bump) {
+      uint64_t h; memcpy(&h, r->base + off, 8);
+      size_t ssize = sprout_slot_step(h);
+      uint64_t kind_bits = h & 0xFF;
+      if (kind_bits != SPROUT_HEAP_FREE && kind_bits != SPROUT_GC_POISON) {
+        h &= ~clear;
+        memcpy(r->base + off, &h, 8);
+      }
+      off += ssize;
+    }
+  }
+}
+
+/* Which collection to run.  Major on the first collection, on any reason but the
+ * allocation trigger (atexit), when the heap has more than doubled since the last major,
+ * and every SPROUT_GC_MAJOR_EVERY minors.  The doubling rule alone never fires when the
+ * live set shrinks, which is what the count bound is for. */
+static int sprout_gc_gen_choose_minor(const char* reason) {
+  if (strcmp(reason, "threshold") != 0) return 0;
+  if (!g_gen.have_major) return 0;
+  if (g_gen.last_live > 2 * g_gen.baseline) return 0;
+  if (g_gen.minors_since_major >= g_gen.major_every) return 0;
+  return 1;
+}
+
+/* ── SPROUT_GC_GENCHECK=1 — does a minor collection free anything reachable? ───
+ *
+ * Runs after a minor's mark and before its sweep.  A second, full mark from the same
+ * roots ignores color bits and keeps its own visited bitmaps (one bit per 16-byte slot,
+ * like the slotmap; one bit for a large region).  The first time it reaches an object
+ * whose color bit is clear, that object is unmarked and not old, so the sweep would free
+ * it: report the owner it was reached through (a root, or an object and field) and abort.
+ * That is a store that skipped the barrier.  Headers are only read, never written. */
+static uint8_t** g_check_maps = NULL;      /* per region: visited bitmap */
+static void**    g_check_wl = NULL;
+static size_t    g_check_wl_len = 0, g_check_wl_cap = 0;
+
+static const char* sprout_gc_kind_name(uint64_t kind) {
+  switch (kind) {
+    case SPROUT_HEAP_FREE:    return "FREE";
+    case SPROUT_HEAP_OBJ:     return "OBJ";
+    case SPROUT_HEAP_CLOSURE: return "CLOSURE";
+    case SPROUT_HEAP_VECTOR:  return "VECTOR";
+    case SPROUT_HEAP_MAP:     return "MAP";
+    case SPROUT_HEAP_BYTES:   return "BYTES";
+    case SPROUT_HEAP_BUILDER: return "BUILDER";
+    case SPROUT_HEAP_TUPLE:   return "TUPLE";
+    case SPROUT_HEAP_REF:     return "REF";
+    case SPROUT_HEAP_CSTR:    return "CSTR";
+    default:                  return "?";
+  }
+}
+
+__attribute__((noreturn, cold, noinline))
+static void sprout_gc_check_fail(void* payload, uint64_t h, void* owner, long long field) {
+  fprintf(stderr,
+          "[sprout] GENCHECK: a minor collection would free a reachable object\n"
+          "  object: kind=%s header=0x%016llx payload=%p\n",
+          sprout_gc_kind_name(h & 0xFF), (unsigned long long)h, payload);
+  if (owner == NULL) {
+    fprintf(stderr, "  owner: root\n");
+  } else {
+    uint64_t oh = sprout_hdr_of(owner);
+    fprintf(stderr, "  owner: kind=%s header=0x%016llx payload=%p field=%lld%s\n",
+            sprout_gc_kind_name(oh & 0xFF), (unsigned long long)oh, owner, field,
+            (oh & SPROUT_GC_REMEMBERED_BIT) ? " (remembered)" : "");
+  }
+  fprintf(stderr, "  a store into an old object skipped sprout_gc_write_barrier\n");
+  fflush(stderr);
+  abort();
+}
+
+static void sprout_gc_check_reach(void* payload, void* owner, long long field) {
+  void* hdr = sprout_heap_lookup(payload);
+  if (hdr == NULL) return;
+  SproutRegion* r = region_find(payload);
+  size_t bit = r->is_large ? 0 : (size_t)((char*)hdr - r->base) / SPROUT_SLOT_GRAN;
+  uint8_t* map = g_check_maps[r - g_regions];
+  if ((map[bit / 8] >> (bit % 8)) & 1) return;
+  map[bit / 8] |= (uint8_t)(1u << (bit % 8));
+  uint64_t h; memcpy(&h, hdr, 8);
+  if (!(h & SPROUT_GC_COLOR_BIT)) sprout_gc_check_fail(payload, h, owner, field);
+  if (g_check_wl_len >= g_check_wl_cap) {
+    size_t new_cap = g_check_wl_cap < 1024 ? 1024 : g_check_wl_cap * 2;
+    void** grown = (void**)realloc(g_check_wl, new_cap * sizeof(void*));
+    if (!grown) sprout_fail("GENCHECK: out of memory for worklist");
+    g_check_wl = grown;
+    g_check_wl_cap = new_cap;
+  }
+  g_check_wl[g_check_wl_len++] = payload;
+}
+
+static void sprout_gc_gen_verify(void) {
+  g_check_maps = (uint8_t**)calloc(g_region_count > 0 ? g_region_count : 1, sizeof(uint8_t*));
+  if (!g_check_maps) sprout_fail("GENCHECK: out of memory");
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    g_check_maps[ri] = (uint8_t*)calloc(1, g_regions[ri].is_large ? 1 : SPROUT_SLOTMAP_BYTES);
+    if (!g_check_maps[ri]) sprout_fail("GENCHECK: out of memory");
+  }
+  g_gc_check_active = 1;
+  sprout_gc_mark_roots();
+  while (g_check_wl_len > 0) {
+    void* payload = g_check_wl[--g_check_wl_len];
+    size_t n = sprout_heap_child_count_payload(payload);
+    for (size_t i = 0; i < n; i++)
+      sprout_gc_check_reach((void*)(uintptr_t)sprout_heap_child_value_payload(payload, i),
+                            payload, (long long)i);
+  }
+  g_gc_check_active = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) free(g_check_maps[ri]);
+  free(g_check_maps);
+  g_check_maps = NULL;
+  free(g_check_wl);
+  g_check_wl = NULL;
+  g_check_wl_len = g_check_wl_cap = 0;
 }
 
 /* Release extra-allocated storage for a payload (the slot itself is NOT freed;
@@ -2736,7 +2931,10 @@ static void sprout_fl_verify_against_full_walk(void) {
  * onto the per-class freelists.  Pass 2: release every region with no live and
  * no poison, dropping its staged freelist entries.  There is no third pass —
  * the freelists are complete when Pass 1 ends. */
-static void sprout_gc_sweep(void) {
+/* `keep_color`: a survivor keeps its color bit, which then means old (SPROUT_GC_MINOR).
+ * Otherwise the sweep clears it and no object is old between collections. */
+static void sprout_gc_sweep(int keep_color) {
+  const uint64_t clear_color = keep_color ? 0 : SPROUT_GC_COLOR_BIT;
   /* Rebuilt from scratch every cycle, as the old separate rebuild pass did.
      Safe here because nothing between this point and the end of the sweep
      allocates a managed object: Pass 1/2 only free(), malloc() and realloc(). */
@@ -2767,7 +2965,7 @@ static void sprout_gc_sweep(void) {
       void* payload = r->base + 8;
       uint64_t h; memcpy(&h, r->base, 8);
       if (h & SPROUT_GC_COLOR_BIT) {
-        h &= ~SPROUT_GC_COLOR_BIT;
+        h &= ~clear_color;
         h = sprout_hdr_age_bump(h);
         memcpy(r->base, &h, 8);
         r->live_count = 1;
@@ -2864,7 +3062,7 @@ static void sprout_gc_sweep(void) {
         }
       }
       if (h & SPROUT_GC_COLOR_BIT) {
-        h &= ~SPROUT_GC_COLOR_BIT;
+        h &= ~clear_color;
         /* Survived a collection: bump the age in the same store that clears the
          * color bit, so this costs no extra traversal or write. */
         h = sprout_hdr_age_bump(h);
@@ -3040,16 +3238,31 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_cycles++);
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
+  /* SPROUT_GC_MINOR=1: a minor marks only young objects (plus what the remembered set
+     reaches); a major clears every color bit first and marks everything.  Mode off:
+     neither step runs, and the sweep clears the color bit as it always did. */
+  int gen_on = sprout_gc_gen_on();
+  int minor = gen_on && sprout_gc_gen_choose_minor(reason);
+  if (gen_on && !minor) sprout_gc_clear_marks();
   sprout_gc_mark_roots();
+  if (minor) sprout_gc_mark_remembered();
   sprout_gc_drain_marks();
-  sprout_gc_sweep();
+  if (minor && g_gen.check) sprout_gc_gen_verify();
+  sprout_gc_sweep(gen_on);
+  if (gen_on) {
+    if (minor) { g_gen.minors_since_major++; g_gen.n_minor++; }
+    else { g_gen.baseline = g_managed_heap_count; g_gen.minors_since_major = 0;
+           g_gen.have_major = 1; g_gen.n_major++; }
+    g_gen.last_live = g_managed_heap_count;
+  }
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
   if (finished_us >= started_us) elapsed_us = finished_us - started_us;
   SPROUT_PROF_COLD(g_prof_gc_us += (unsigned long long)elapsed_us);
   /* O(regions); only pay for it when the line is actually printed. */
   if (g_debug_gc_enabled) arena_recount_regions();
-  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before);
+  sprout_gc_log_cycle(reason, heap_before, g_managed_heap_count, root_count, g_gc_marked_count, alloc_since_gc, g_debug_gc_swept - swept_before, elapsed_us, g_debug_gc_walked - walked_before,
+                    !gen_on ? "" : minor ? " kind=minor" : " kind=major");
   /* Adaptive threshold: re-base on the LIVE set after each collection so the heap
      (hence RSS) stays proportional to live data instead of ratcheting upward
      without bound.  The previous policy only ever GREW the threshold (x

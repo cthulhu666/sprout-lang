@@ -1,0 +1,33 @@
+module main
+
+# Barrier site: ref_write. `just gc-gen-check` runs this under SPROUT_GC_MINOR=1
+# SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1, so every allocation collects and the Ref is old after
+# the first one. Each round stores a fresh heap value into it, allocates garbage so collections
+# run between the store and the read, and reads the value back. Without the barrier the value is
+# reachable only through an old object no minor collection scans: GENCHECK aborts.
+
+fn fresh(i: Int) -> List String =
+  Cons(int_to_string(i), Cons("v" ++ int_to_string(i * 3), Nil))
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc else churn(n - 1, acc + str_len(int_to_string(n)))
+
+fn weight(xs: List String) -> Int =
+  match xs with
+  | [a, b] -> str_len(a) * 100 + str_len(b)
+  | _ -> -1
+
+fn rounds(r: Ref (List String), i: Int, n: Int, acc: Int) -> Int !{IO} =
+  if i >= n then acc
+  else
+    do
+      _ <- ref_write(r, fresh(i))
+      _ <- churn(3, 0)
+      xs <- ref_read(r)
+      rounds(r, i + 1, n, acc + weight(xs))
+
+fn main() -> Unit !{IO} =
+  do
+    r <- ref_new(fresh(0))
+    total <- rounds(r, 0, 60, 0)
+    print(`gc-gen ref_write ${int_to_string(total)}`)
