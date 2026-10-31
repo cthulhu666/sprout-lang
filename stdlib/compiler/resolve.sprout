@@ -41,7 +41,7 @@ export type ResolveResult (..) =
 # (class_name → direct superclass names, for transitive-super expansion — the same
 # source lowering's collect_super_map reads), and the `where linear` variables of the
 # declaration being resolved (with_bounded).
-type Tables = Tables(typed_ast.InstanceTable(List ast.TypeExpr))(typed_ast.InstanceTable(List ast.TypeExpr, List ast.TypeConstraint)) (Dict types.Scheme) (Dict (List String)) (Dict String) (List BoundVar)
+type Tables = Tables(typed_ast.InstanceTable(List ast.TypeExpr))(typed_ast.InstanceTable(List ast.TypeExpr, List ast.TypeConstraint)) linear_check.LinEnv(Dict (List String)) (Dict String) (List BoundVar)
 
 fn tables_exists(t: Tables) -> typed_ast.InstanceTable(List ast.TypeExpr) =
   match t with | Tables e _ _ _ _ _ -> e
@@ -50,6 +50,11 @@ fn tables_ctx(t: Tables) -> typed_ast.InstanceTable(List ast.TypeExpr, List ast.
   match t with | Tables _ c _ _ _ _ -> c
 
 fn tables_env(t: Tables) -> Dict types.Scheme =
+  tables_lin_env(t).env
+
+# The env with the declaration's bounded variables marked, and what containment reads:
+# the program's tables and the env's `@linear:` names.
+fn tables_lin_env(t: Tables) -> linear_check.LinEnv =
   match t with | Tables _ _ v _ _ _ -> v
 
 fn tables_super(t: Tables) -> Dict (List String) =
@@ -78,8 +83,10 @@ fn written_names(bounded: List BoundVar) -> Dict String =
 fn with_bounded(bounded: List BoundVar, t: Tables) -> Tables =
   match t with
   | Tables e c v s p b ->
-      Tables(e, c, list_fold(\ (acc, bv) -> dict_set(types.linear_marker_key(bound_ident(bv.written)), types.presence_marker, acc), v, bounded),
-             s, p, list_append(bounded, b))
+      Tables(e, c, list_fold(mark_bounded, v, bounded), s, p, list_append(bounded, b))
+
+fn mark_bounded(v: linear_check.LinEnv, bv: BoundVar) -> linear_check.LinEnv =
+  linear_check.mark_linear(bound_ident(bv.written), v)
 
 # The constraints a declaration forwards as hidden dictionaries, grouped by class and
 # head constructor (constraint_key_str): each slot's key (typed_ast.dict_slot_key, one slot
@@ -265,8 +272,12 @@ fn resolve_with_tables(decls: List typed_ast.TypedDecl, tables: Tables) -> Resol
 # Table construction (from typed decls — prelude is bundled in)
 # ---------------------------------------------------------------------------
 
+# The containment tables are built from `env` before any `$bound:` mark, which
+# `with_bounded` adds to the `LinEnv` per declaration.
 fn build_tables(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Tables =
-  collect_tables(decls, Tables(typed_ast.instance_table_empty(), typed_ast.instance_table_empty(), env, classes.supers, classes.params, Nil))
+  collect_tables(decls, Tables(typed_ast.instance_table_empty(), typed_ast.instance_table_empty(),
+                               linear_check.make_lin_env(env, linear_check.build_lin_tables(env)),
+                               classes.supers, classes.params, Nil))
   where classes = typed_ast.class_tables(decls)
 
 fn collect_tables(decls: List typed_ast.TypedDecl, acc: Tables) -> Tables =
@@ -286,7 +297,7 @@ fn add_instance(
   let ast.TypeConstraint _ type_args = constraint
       key = typed_ast.constraint_key_from_tc(constraint)
   in Tables(typed_ast.instance_set(key, type_args, tables_exists(acc)), add_ctx(key, type_args, inst_constraints, tables_ctx(acc)),
-            tables_env(acc), tables_super(acc), tables_class_params(acc), tables_bounded(acc))
+            tables_lin_env(acc), tables_super(acc), tables_class_params(acc), tables_bounded(acc))
 
 fn add_ctx(
   key: typed_ast.InstanceKey,
@@ -372,7 +383,7 @@ fn head_var_fault(cls: String, patterns: List ast.TypeExpr, subs: Dict ast.TypeE
                   tables: Tables, v: String) -> Maybe(source.SourcePos, String) =
   let Just arg = dict_get(v, subs) else Nothing
       t = te_type(tables_bounded(tables), arg)
-      Just lin = linear_check.first_linear_in(t, tables_env(tables)) else Nothing
+      Just lin = linear_check.first_linear_in(t, tables_lin_env(tables)) else Nothing
   in Just((pos, "the `" ++ string.after_last_dot(cls) ++ "` instance for `" ++ typed_ast.te_display(head_pattern(patterns))
                   ++ "` takes `" ++ v ++ "` as a value it may copy or drop, and " ++ linear_reason(t, lin, tables)
                   ++ "; if the instance uses its `" ++ v ++ "` exactly once, add `where linear " ++ v

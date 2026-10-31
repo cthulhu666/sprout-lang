@@ -145,7 +145,7 @@ Semantics, under 1 or 2: a binding whose type mentions a linear type must be use
 on every control-flow path, under the existing reuse / leak / branch-convergence rules. Nothing
 new is added to the rule set — the same three rules see more bindings.
 
-`type_mentions_linear` deliberately does **not** descend a function type, with a reason worth
+`holds_linear` (then `type_mentions_linear`) deliberately does **not** descend a function type, with a reason worth
 preserving in the spec: `Unit -> File` is a recipe for a resource, not a resource, and discarding
 one leaks nothing.
 

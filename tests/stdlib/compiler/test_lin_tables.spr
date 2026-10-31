@@ -1,0 +1,165 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.types as types
+import stdlib.compiler.linear_check as lc
+
+# `build_lin_tables` answers "does declared type T hold a linear value" once, and
+# `lin_holds` must agree with `first_linear_in` on every type. Each group below is
+# the shape of a `tests/conformance/*/linear_contains_*` fixture.
+
+# A snippet that fails to check is a broken test, not an empty env.
+fn env_of(src: String) -> Dict types.Scheme !{IO} =
+  let Ok toks = lexer.tokenize(src) else panic("test_lin_tables: snippet does not lex")
+      Ok prog = parser.parse_program(toks) else panic("test_lin_tables: snippet does not parse")
+  in do
+       r <- checker.check_program(prog)
+       match r with
+       | checker.CheckOk env -> env
+       | checker.CheckErr _ _ -> panic("test_lin_tables: snippet does not check")
+
+fn tc(name: String) -> types.Type = types.TConst(types.type_id(name))
+
+fn tv(name: String) -> types.Type = types.TVar(types.tyvar_id(name))
+
+fn app(f: types.Type, x: types.Type) -> types.Type = types.TApp(f, x)
+
+fn walk(t: types.Type, env: Dict types.Scheme) -> Bool = is_just(lc.first_linear_witness(t, env))
+
+# Asserts the query against the walk and against the answer the fixture froze.
+fn agree(state: TestState, label: String, t: types.Type, expected: Bool,
+         lin: lc.LinTables, env: Dict types.Scheme) -> Unit !{IO} =
+  do
+    assert_eq(state, label ++ ": walk", walk(t, env), expected)
+    assert_eq(state, label ++ ": query", lc.lin_holds(t, lin, lc.lin_marked(env)), expected)
+
+fn holds_of(lin: lc.LinTables) -> List String = set_to_list(lin.holds)
+
+fn key_name(prefix: String, e: (String, types.Scheme)) -> String =
+  let (key, _) = e
+  in str_slice(key, str_len(prefix), str_len(key))
+
+fn key_names(prefix: String, env: Dict types.Scheme) -> List String =
+  list_map(key_name(prefix, _), vec_to_list(dict_entries_with_prefix(prefix, env)))
+
+# For every declared name (and `extra`), membership in `holds` is the walk's answer.
+fn agree_all(state: TestState, label: String, extra: List String, lin: lc.LinTables,
+             env: Dict types.Scheme) -> Unit !{IO} =
+  list_each(\n -> assert_eq(state, label ++ ": holds " ++ n, set_member(n, lin.holds), walk(tc(n), env)),
+            extra ++ key_names("@stores:", env) ++ key_names("@linear:", env))
+
+let decls: String =
+  "type linear Res = | Res Int\n"
+    ++ "type A = | A B Res\n"
+    ++ "type B = | B A\n"
+    ++ "type R = (x: Int, y: Res)\n"
+    ++ "wrap W = Res\n"
+    ++ "type Chan a = | Chan Int\n"
+    ++ "type Tagged a b = | Tagged a\n"
+    ++ "type Lst a = | Nil2 | Cons2 a (Lst a)\n"
+    ++ "type Outer = | Outer (Chan Res)\n"
+    ++ "type OuterL = | OuterL (Lst Res)\n"
+    ++ "type T = | T (Int, Res)\n"
+    ++ "type Boxed = | exists a. Boxed a where linear a\n"
+    ++ "type Wrapper = | Wrapper Boxed\n"
+    ++ "type Box t = | Box t\n"
+    ++ "type Color = | Red | Green\n"
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    env <- env_of(decls)
+    let lin = lc.build_lin_tables(env)
+
+    # A stores B and Res, B stores A: both hold. A table built by one memoised walk
+    # would read B as Nothing partway through A and drop it.
+    assert_eq(state, "holds is exactly the containers",
+              holds_of(lin),
+              ["A", "B", "Boxed", "OuterL", "R", "Res", "T", "W", "Wrapper"])
+    agree(state, "cycle A", tc("A"), true, lin, env)
+    agree(state, "cycle B", tc("B"), true, lin, env)
+    agree(state, "record field", tc("R"), true, lin, env)
+    agree(state, "wrap of a linear type", tc("W"), true, lin, env)
+    agree(state, "linear type itself", tc("Res"), true, lin, env)
+
+    # `Chan`'s argument is not stored, so neither `Chan Res` nor a type around it holds.
+    agree(state, "Chan Res is phantom", app(tc("Chan"), tc("Res")), false, lin, env)
+    agree(state, "Outer around Chan Res", tc("Outer"), false, lin, env)
+    assert_eq(state, "Chan phantom positions", dict_get("Chan", lin.phantom), Just([0]))
+    assert_eq(state, "Tagged phantom positions", dict_get("Tagged", lin.phantom), Just([1]))
+    assert_eq(state, "a type with no phantom position has no entry", dict_get("Lst", lin.phantom), Nothing)
+
+    # `Lst` stores its argument.
+    agree(state, "Lst Res", app(tc("Lst"), tc("Res")), true, lin, env)
+    agree(state, "Lst Int", app(tc("Lst"), tc("Int")), false, lin, env)
+    agree(state, "Outer around Lst Res", tc("OuterL"), true, lin, env)
+    agree(state, "Tagged Res Int stores its first", app(app(tc("Tagged"), tc("Res")), tc("Int")), true, lin, env)
+    agree(state, "Tagged Int Res drops its second", app(app(tc("Tagged"), tc("Int")), tc("Res")), false, lin, env)
+
+    # Tuples: the component decides, and a tuple field makes its owner hold.
+    agree(state, "tuple field owner", tc("T"), true, lin, env)
+    agree(state, "tuple holding Res", types.TTuple([tc("Int"), tc("Res")]), true, lin, env)
+    agree(state, "tuple of Ints", types.TTuple([tc("Int"), tc("Int")]), false, lin, env)
+
+    # `where linear a` on an existential field makes the declaration linear.
+    agree(state, "existential field", tc("Boxed"), true, lin, env)
+    agree(state, "wrapper of an existential", tc("Wrapper"), true, lin, env)
+
+    # `Box Int` stores its parameter, but `Int` is not linear.
+    agree(state, "Box Int", app(tc("Box"), tc("Int")), false, lin, env)
+    agree(state, "Box Res", app(tc("Box"), tc("Res")), true, lin, env)
+    agree(state, "fieldless enum", tc("Color"), false, lin, env)
+    agree(state, "undeclared name", tc("Nope"), false, lin, env)
+
+    # Functions and thunks are recipes, not resources.
+    agree(state, "function from Res",
+          types.TFunc(tc("Res"), tc("Res"), types.EffectPure, types.OwnConsume), false, lin, env)
+
+    # Scoped marks live on the env: a skolem, and a variable bounded `where linear`.
+    let scoped = dict_set(types.linear_marker_key("$sk1"), types.presence_marker,
+                   dict_set(types.linear_marker_key("f"), types.presence_marker,
+                     dict_set(types.linear_marker_key("a"), types.presence_marker, env)))
+    let marked = lc.lin_marked(scoped)
+    assert_eq(state, "lin_marked holds scoped and declared names, not String",
+              (set_member("$sk1", marked), set_member("a", marked), set_member("Res", marked),
+               set_member("String", marked)),
+              (true, true, true, false))
+    agree(state, "skolem", tc("$sk1"), true, lin, scoped)
+    agree(state, "Maybe of a skolem", app(tc("Maybe"), tc("$sk1")), true, lin, scoped)
+    agree(state, "tyvar head", app(tv("f"), tv("b")), true, lin, scoped)
+    agree(state, "bounded tyvar", tv("a"), true, lin, scoped)
+    agree(state, "unbounded tyvar", tv("z"), false, lin, scoped)
+    agree(state, "unmarked skolem", tc("$sk2"), false, lin, scoped)
+    agree(state, "tuple holding a skolem", types.TTuple([tc("Int"), tc("$sk1")]), true, lin, scoped)
+
+    # Without a linear declaration nothing holds.
+    let plain = env_of("type Pair a b = | Pair a b\n")
+    let plain_lin = lc.build_lin_tables(plain)
+    assert_eq(state, "no linear type, nothing holds", holds_of(plain_lin), [])
+    agree(state, "Pair of Ints", app(app(tc("Pair"), tc("Int")), tc("Int")), false, plain_lin, plain)
+
+    # `where linear a` marks `a` even in a program with no linear type, and the walk
+    # still skips `Chan`'s phantom position.
+    let chan_env = env_of("type Chan a = | Chan Int\ntype Box t = | Box t\n")
+    let bounded = dict_set(types.linear_marker_key("a"), types.presence_marker, chan_env)
+    let chan_lin = lc.build_lin_tables(chan_env)
+    assert_eq(state, "phantom table without a linear type", dict_get("Chan", chan_lin.phantom), Just([0]))
+    agree(state, "Chan a under a bound, no linear type", app(tc("Chan"), tv("a")), false, chan_lin, bounded)
+    agree(state, "Box a under a bound, no linear type", app(tc("Box"), tv("a")), true, chan_lin, bounded)
+
+    # Every declared name: the reachability set equals the walk.
+    agree_all(state, "decls", ["Color", "Int", "Nope"], lin, env)
+    agree_all(state, "plain", ["Pair"], plain_lin, plain)
+
+    # Four types in a cycle, the last storing `Res`; a second cycle holds nothing.
+    let ring = env_of("type linear Res = | Res Int\n"
+                        ++ "type C1 = | C1 C2\ntype C2 = | C2 C3\ntype C3 = | C3 C4\n"
+                        ++ "type C4 = | C4 C1 Res\n"
+                        ++ "type D1 = | D1 D2\ntype D2 = | D2 D3\ntype D3 = | D3 D4 Int\n"
+                        ++ "type D4 = | D4 D1\n")
+    let ring_lin = lc.build_lin_tables(ring)
+    assert_eq(state, "ring holds", holds_of(ring_lin), ["C1", "C2", "C3", "C4", "Res"])
+    agree_all(state, "ring", [], ring_lin, ring)
+
+    summary(state)

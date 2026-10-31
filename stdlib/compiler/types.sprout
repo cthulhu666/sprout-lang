@@ -231,6 +231,14 @@ export fn rec_field_key(rec_name: String, field: String) -> String = rec_fields_
 # says the env has one, `@bounded_decl` that the body being checked, or a group
 # sibling, has a bound.
 export fn linear_marker_key(name: String) -> String = "@linear:" ++ name
+
+# What a declaration stores (`@stores:<Type>`), and a type parameter it drops
+# (`@phantom:<Type>:<index>`). infer writes both; linear_check reads them back.
+export let stores_marker_prefix: String = "@stores:"
+export fn stores_marker_key(tname: String) -> String = stores_marker_prefix ++ tname
+export let phantom_marker_prefix: String = "@phantom:"
+export fn phantom_marker_key(tname: String, idx: Int) -> String =
+  phantom_marker_prefix ++ tname ++ ":" ++ int_to_string(idx)
 export let any_linear_key: String = "@any_linear"
 export let bounded_decl_key: String = "@bounded_decl"
 

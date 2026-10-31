@@ -54,7 +54,7 @@ Sprout follows GHC: per constructor, per field.
 ## 4. The rule
 
 A `_` pattern at an **owned** position is a leak when it can match a value that holds linear
-content. "Holds linear content" is `type_mentions_linear`, the binder rules' containment test
+content. "Holds linear content" is `holds_linear`, the binder rules' containment test
 (phantom positions excluded).
 
 1. **Nested `_`** (a constructor field or tuple component): a leak iff that position's type

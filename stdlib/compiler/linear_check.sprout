@@ -114,7 +114,11 @@ fn head_type_name(t: types.Type) -> String =
   | types.TTuple items -> types.tuple_head(list_length(items))
   | _ -> types.type_to_string(t)
 
-fn type_is_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
+# The head alone carries the mark: not a containment test (that is `lin_holds`).
+fn type_is_linear(t: types.Type, env: LinEnv) -> Bool =
+  head_is_marked(t, env.env)
+
+fn head_is_marked(t: types.Type, env: Dict types.Scheme) -> Bool =
   dict_member(types.linear_marker_key(head_type_name(t)), env)
 
 # True when the program declares any linear type (a cheap gate that lets a
@@ -157,8 +161,8 @@ fn apply_tvar_subst(sub: Dict types.Type, t: types.Type) -> types.Type =
 # variables are the skolems it unpacked (types.unpack_key); any other reads the
 # constructor's scheme.
 fn ctor_field_types_at(ctor: String, pos: source.SourcePos, value_type: types.Type,
-                       env: Dict types.Scheme) -> Maybe (List types.Type) =
-  match maybe_or_else(dict_get(types.unpack_key(ctor, pos.index), env), dict_get(ctor, env)) with
+                       env: LinEnv) -> Maybe (List types.Type) =
+  match maybe_or_else(dict_get(types.unpack_key(ctor, pos.index), env.env), dict_get(ctor, env.env)) with
   | Nothing -> Nothing
   | Just scheme ->
       let body = types.scheme_type(scheme)
@@ -168,15 +172,15 @@ fn ctor_field_types_at(ctor: String, pos: source.SourcePos, value_type: types.Ty
 # The variables a pattern binds that carry a linear obligation, when matched
 # against `value_type`.
 #
-# `type_mentions_linear`, not `type_is_linear`: a binder is obliged when its type
+# `holds_linear`, not `type_is_linear`: a binder is obliged when its type
 # CONTAINS a linear type, not only when its head is one. Head-only left every
 # container silently leaking — `let m = Just(File(1)) in 7` compiled — while the
 # discarded-do-step rule next door already used containment for the same reason.
 # See docs/linearity-virality-v0.md §1.1.
-fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict types.Scheme) -> List LinBinder =
+fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: LinEnv) -> List LinBinder =
   match pat with
   | ast.VarPattern name _ ->
-      if type_mentions_linear(value_type, env) then Cons(LinBinder(name, value_type), Nil) else Nil
+      if holds_linear(value_type, env) then Cons(LinBinder(name, value_type), Nil) else Nil
   | ast.WildcardPattern _ -> Nil
   | ast.IntPattern _ _ -> Nil
   | ast.BoolPattern _ _ -> Nil
@@ -192,7 +196,7 @@ fn pattern_linear_binders(pat: ast.Pattern, value_type: types.Type, env: Dict ty
       | Just field_tys -> pattern_binders_list(subpats, field_tys, env)
       | Nothing -> Nil
 
-fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: Dict types.Scheme) -> List LinBinder =
+fn pattern_binders_list(pats: List ast.Pattern, tys: List types.Type, env: LinEnv) -> List LinBinder =
   match (pats, tys) with
   | (Cons p prest, Cons t trest) ->
       list_append(pattern_linear_binders(p, t, env), pattern_binders_list(prest, trest, env))
@@ -213,13 +217,13 @@ fn unconsumed_binder(binders: List LinBinder, consumed: List LinUse) -> Maybe Li
 # tells the reader a type is linear that §5.8 says is not. Same fix, and same
 # reason, as leak_binder_msg on the binder path.
 fn first_owned_linear_param(params: List ast.Param, lam_type: types.Type,
-                            env: Dict types.Scheme) -> Maybe LinBinder =
+                            env: LinEnv) -> Maybe LinBinder =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
       match lam_type with
       | types.TFunc a b _ own ->
-          if type_mentions_linear(a, env) && !types.ownership_is_borrow(own)
+          if holds_linear(a, env) && !types.ownership_is_borrow(own)
           then Just(LinBinder(ast.param_name(prm), a))
           else first_owned_linear_param(rest, b, env)
       | _ -> Nothing
@@ -228,13 +232,13 @@ fn first_owned_linear_param(params: List ast.Param, lam_type: types.Type,
 # by type AND ownership, so a non-linear parameter at a `borrowing` slot is not
 # tracked — nothing about it is checkable and the scope lists mean linearity.
 fn borrowed_linear_params(params: List ast.Param, lam_type: types.Type,
-                          env: Dict types.Scheme) -> List String =
+                          env: LinEnv) -> List String =
   match params with
   | Nil -> Nil
   | Cons prm rest ->
       match lam_type with
       | types.TFunc a b _ own ->
-          linear_param_cons(type_mentions_linear(a, env) && types.ownership_is_borrow(own),
+          linear_param_cons(holds_linear(a, env) && types.ownership_is_borrow(own),
                             ast.param_name(prm), borrowed_linear_params(rest, b, env))
       | _ -> Nil
 
@@ -285,16 +289,16 @@ fn leak_msg(name: String) -> String =
 # only met the `type linear` rule cannot see why `xs` is bound by it. So name the
 # type and the linear type inside it. A binder that IS linear keeps the original
 # wording — there is nothing to explain there.
-fn leak_binder_msg(b: LinBinder, env: Dict types.Scheme) -> String =
+fn leak_binder_msg(b: LinBinder, env: LinEnv) -> String =
   if type_is_linear(lbind_type(b), env) then leak_msg(lbind_name(b))
   else contained_leak_msg(lbind_name(b), lbind_type(b), first_linear_in(lbind_type(b), env), env)
 
-fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type, env: Dict types.Scheme) -> String =
+fn contained_leak_msg(name: String, t: types.Type, inner: Maybe types.Type, env: LinEnv) -> String =
   match inner with
   | Nothing -> leak_msg(name)
   | Just lin ->
-      "linear value '" ++ name ++ "' is never used: its type `" ++ type_text(t, env)
-        ++ "` contains the linear type `" ++ type_text(lin, env)
+      "linear value '" ++ name ++ "' is never used: its type `" ++ type_text(t, env.env)
+        ++ "` contains the linear type `" ++ type_text(lin, env.env)
         ++ "` (linear values must be used exactly once)"
 
 # Why a variable a `where linear` bounds is linear, as infer and resolve both word it.
@@ -326,8 +330,8 @@ fn after_try_msg(name: String) -> String =
 export fn try_marker(p: source.SourcePos) -> String =
   "@try:" ++ int_to_string(p.index) ++ ":" ++ int_to_string(p.line) ++ ":" ++ int_to_string(p.column)
 
-fn try_at(p: source.SourcePos, env: Dict types.Scheme) -> Maybe source.SourcePos =
-  match dict_get(try_marker(p), env) with
+fn try_at(p: source.SourcePos, env: LinEnv) -> Maybe source.SourcePos =
+  match dict_get(try_marker(p), env.env) with
   | Just _ -> Just(p)
   | Nothing -> Nothing
 
@@ -483,18 +487,18 @@ fn lambda_param_advice(name: String) -> String =
 # A parameter obliged by CONTAINMENT is not itself of a linear type, so the
 # wording above would assert what §5.8 denies. Name the type and the linear type
 # inside it, as contained_leak_msg does for a binder.
-fn lambda_param_binder_msg(b: LinBinder, env: Dict types.Scheme) -> String =
+fn lambda_param_binder_msg(b: LinBinder, env: LinEnv) -> String =
   if type_is_linear(lbind_type(b), env) then linear_lambda_param_msg(lbind_name(b))
   else contained_lambda_param_msg(lbind_name(b), lbind_type(b),
                                   first_linear_in(lbind_type(b), env), env)
 
 fn contained_lambda_param_msg(name: String, t: types.Type, inner: Maybe types.Type,
-                               env: Dict types.Scheme) -> String =
+                               env: LinEnv) -> String =
   match inner with
   | Nothing -> linear_lambda_param_msg(name)
   | Just lin ->
-      "lambda parameter '" ++ name ++ "' has type `" ++ type_text(t, env)
-        ++ "`, which contains the linear type `" ++ type_text(lin, env)
+      "lambda parameter '" ++ name ++ "' has type `" ++ type_text(t, env.env)
+        ++ "`, which contains the linear type `" ++ type_text(lin, env.env)
         ++ "`; this is not yet supported (higher-order linearity is deferred: the closure may run 0..n times, so the value cannot be proved consumed exactly once). `borrowing` is not a way out here — it is only allowed on a parameter whose own type is linear — so take the container apart before the lambda, or walk it in a named recursive function"
 
 # Two captures, two ways out. `once` licenses a MOVE (M4.4a) — the answer for an
@@ -644,7 +648,7 @@ fn scope_add_owned_after(names: List String, sc: LinScope) -> LinScope =
 
 # --- the recursive walk ---
 
-fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn lin_consumed(e: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   match e with
   | typed_ast.TVar name _ p -> lin_var(name, p, sc)
   | typed_ast.TInt _ _ _ -> LinOk(Nil, Nil)
@@ -704,7 +708,7 @@ fn lin_var(name: String, p: source.SourcePos, sc: LinScope) -> LinRes =
 # is the field-access form, which that path never reached.
 # Regressions: tests/conformance/type_error/borrow_field_{extract,escape}.
 fn lin_getfield(base: typed_ast.TypedExpr, field: String, field_ty: types.Type,
-                p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   if expr_is_borrowed_binding(base, sc) then
     if type_is_linear(field_ty, env) then LinErr(p, borrowed_field_read_msg)
     else lin_read(base, sc, env)
@@ -715,16 +719,16 @@ fn lin_getfield(base: typed_ast.TypedExpr, field: String, field_ty: types.Type,
 
 # An owned read consumes the whole record, so a linear field other than `field`
 # is dropped. `Nothing` when no other field holds a linear value.
-fn linear_sibling(rec_ty: types.Type, field: String, env: Dict types.Scheme) -> Maybe String =
-  if !type_mentions_linear(rec_ty, env) then Nothing
+fn linear_sibling(rec_ty: types.Type, field: String, env: LinEnv) -> Maybe String =
+  if !holds_linear(rec_ty, env) then Nothing
   else find(\g -> g != field && field_holds_linear(rec_ty, g, env),
            record_field_names(head_type_name(rec_ty), env))
 
-fn field_holds_linear(rec_ty: types.Type, field: String, env: Dict types.Scheme) -> Bool =
-  match dict_get(types.rec_field_key(head_type_name(rec_ty), field), env) with
+fn field_holds_linear(rec_ty: types.Type, field: String, env: LinEnv) -> Bool =
+  match dict_get(types.rec_field_key(head_type_name(rec_ty), field), env.env) with
   | Nothing -> false
   | Just scheme ->
-      type_mentions_linear(
+      holds_linear(
         apply_tvar_subst(zip_tvars(types.scheme_vars(scheme), app_spine_args(rec_ty)),
                          types.scheme_type(scheme)),
         env)
@@ -734,20 +738,20 @@ fn zip_tvars(vars: List String, args: List types.Type) -> Dict types.Type =
   | (Cons v vrest, Cons a arest) -> dict_set(v, a, zip_tvars(vrest, arest))
   | _ -> dict_empty()
 
-fn record_field_names(rec: String, env: Dict types.Scheme) -> List String =
+fn record_field_names(rec: String, env: LinEnv) -> List String =
   let prefix = types.rec_fields_prefix(rec)
-  in vec_to_list(vec_filter_map(\k -> string.strip_prefix(k, prefix), dict_keys(env)))
+  in vec_to_list(vec_filter_map(\k -> string.strip_prefix(k, prefix), dict_keys(env.env)))
 
 # `e with (f = v)` drops the old `f`, so an updated field that holds a linear
 # value would leak it.
 fn lin_update(base: typed_ast.TypedExpr, fields: List typed_ast.TypedRecordField,
-              p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   match find_map(\f -> updated_linear_field(typed_ast.typed_expr_type(base), f, env), fields) with
   | Just name -> LinErr(p, update_drops_msg(name))
   | Nothing -> seq_list(Cons(base, list_map(typed_ast.field_value, fields)), sc, env)
 
 fn updated_linear_field(rec_ty: types.Type, f: typed_ast.TypedRecordField,
-                        env: Dict types.Scheme) -> Maybe String =
+                        env: LinEnv) -> Maybe String =
   match f with
   | typed_ast.TypedRecordField name _ ->
       if field_holds_linear(rec_ty, name, env) then Just(name) else Nothing
@@ -757,13 +761,13 @@ fn base_label(base: typed_ast.TypedExpr) -> String =
   | typed_ast.TVar name _ _ -> "`" ++ name ++ "`"
   | _ -> "the record"
 
-fn lin_read(e: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn lin_read(e: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   match e with
   | typed_ast.TVar name _ p -> lin_read_var(name, p, sc, e, env)
   | _ -> lin_consumed(e, sc, env)
 
 fn lin_read_var(name: String, p: source.SourcePos, sc: LinScope,
-                e: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
+                e: typed_ast.TypedExpr, env: LinEnv) -> LinRes =
   if scope_is_borrowed(name, sc) then LinOk(Nil, Cons (LinUse(name, p), Nil))
   else lin_consumed(e, sc, env)
 
@@ -806,7 +810,7 @@ fn drop_leading_dicts(args: List typed_ast.TypedExpr) -> List typed_ast.TypedExp
       | _ -> args
 
 fn lin_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr,
-            sc: LinScope, env: Dict types.Scheme) -> LinRes =
+            sc: LinScope, env: LinEnv) -> LinRes =
   match lin_consumed(callee, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk cc cb ->
@@ -848,7 +852,7 @@ fn first_loaned(us: List LinUse, loans: List Loan) -> Maybe (LinUse, Loan) =
 # use-after-consume.
 fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
                  ac: List LinUse, ab: List LinUse, lent: List Loan,
-                 sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                 sc: LinScope, env: LinEnv) -> LinRes =
   match args with
   | Nil -> LinOk(ac, ab)
   | Cons a rest ->
@@ -859,7 +863,7 @@ fn lin_call_args(args: List typed_ast.TypedExpr, spine: types.Type,
 fn lin_call_args_rest(a: typed_ast.TypedExpr, rest: List typed_ast.TypedExpr, spine: types.Type,
                       ac: List LinUse, ab: List LinUse, lent: List Loan,
                       c: List LinUse, b: List LinUse,
-                      sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                      sc: LinScope, env: LinEnv) -> LinRes =
   match first_loaned(c, lent) with
   | Just (u, l) -> LinErr(luse_pos(u), loan_consumed_msg(l))
   | Nothing ->
@@ -888,7 +892,7 @@ fn lent_by_arg(a: typed_ast.TypedExpr, own: types.Ownership, borrows: List LinUs
 # binders only (BACKLOG "discarded linear expression result"). A non-linear
 # argument at a borrowing position is walked normally; the position is simply
 # irrelevant to it.
-fn lin_arg(a: typed_ast.TypedExpr, own: types.Ownership, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn lin_arg(a: typed_ast.TypedExpr, own: types.Ownership, sc: LinScope, env: LinEnv) -> LinRes =
   match own with
   | types.OwnBorrow -> lin_borrow_arg(a, sc, env)
   | types.OwnOnce -> lin_once_arg(a, sc, env)
@@ -903,7 +907,7 @@ fn lin_arg(a: typed_ast.TypedExpr, own: types.Ownership, sc: LinScope, env: Dict
 # Only a literal lambda gets the licence. Anything else — a named function, a
 # `let`-bound one — captures nothing by construction, so there is nothing to
 # transfer and the ordinary consuming walk is exactly right.
-fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   match a with
   | typed_ast.TLambda params body lam_type p -> lin_once_lambda(params, body, lam_type, p, sc, env)
   | _ -> lin_consumed(a, sc, env)
@@ -920,7 +924,7 @@ fn lin_once_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) ->
 # position — `once` is the stricter promise, so a shape legal at a plain slot
 # cannot sensibly be illegal here.
 fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
-                   p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                   p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   lin_once_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), p)
 
 # The walk a lambda gets at a `once` or `local` slot: raw consumed and borrowed
@@ -928,7 +932,7 @@ fn lin_once_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: 
 # rejected here. A comprehension's fold lands here too, so it gets lin_lambda's
 # accumulator drop and its generator wording.
 fn lin_slot_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
-                   p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                   p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   lin_lambda_params(params, body, lam_type, p, env,
     \ (_, borrowed) -> lin_slot_lambda_body(borrowed, params, body, sc, env))
 
@@ -936,7 +940,7 @@ fn lin_slot_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: 
 # consumed, then dropped from both sets — so what the slot's rule sees is the
 # captures alone.
 fn lin_slot_lambda_body(borrowed: List String, params: List ast.Param,
-                        body: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                        body: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   borrow_params_discharged(
     lin_consumed(body,
       scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)), env),
@@ -988,7 +992,7 @@ fn lin_once_no_borrows(bc: List LinUse, bb: List LinUse, p: source.SourcePos) ->
 # call). A MOVE needs `once` as well — a plain `local` closure may run many times.
 # Anything but a literal lambda captures nothing, so the ordinary walk applies.
 fn lin_local_arg(a: typed_ast.TypedExpr, moves_ok: Bool, sc: LinScope,
-                 env: Dict types.Scheme) -> LinRes =
+                 env: LinEnv) -> LinRes =
   match a with
   | typed_ast.TLambda params body lam_type p ->
       lin_local_captures(lin_slot_lambda(params, body, lam_type, p, sc, env), moves_ok,
@@ -1020,7 +1024,7 @@ fn local_move_msg_for(origin: LambdaOrigin, name: String) -> String =
 fn luse_remove_all(names: List String, uses: List LinUse) -> List LinUse =
   list_filter(\u -> !list_member(luse_name(u), names), uses)
 
-fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   match a with
   | typed_ast.TVar name _ p -> lin_borrow_var(name, p, sc, a, env)
   | _ -> lin_nonvar_borrow(a, sc, env)
@@ -1030,17 +1034,17 @@ fn lin_borrow_arg(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) 
 # ordinary reference. (The case that reached here, a module-level linear `let`,
 # is now rejected at its declaration: check_let_linear.)
 fn lin_borrow_var(name: String, p: source.SourcePos, sc: LinScope,
-                  a: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
+                  a: typed_ast.TypedExpr, env: LinEnv) -> LinRes =
   if scope_is_linear(name, sc) then LinOk(Nil, Cons (LinUse(name, p), Nil))
   else lin_consumed(a, sc, env)
 
-fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn lin_nonvar_borrow(a: typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   if type_is_linear(typed_ast.typed_expr_type(a), env)
   then LinErr(typed_ast.typed_expr_pos(a), nonvar_borrow_msg)
   else lin_consumed(a, sc, env)
 
 # Sequentially combine a list of subexpressions, left to right.
-fn seq_list(exprs: List typed_ast.TypedExpr, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+fn seq_list(exprs: List typed_ast.TypedExpr, sc: LinScope, env: LinEnv) -> LinRes =
   match exprs with
   | Nil -> LinOk(Nil, Nil)
   | Cons e rest ->
@@ -1049,13 +1053,13 @@ fn seq_list(exprs: List typed_ast.TypedExpr, sc: LinScope, env: Dict types.Schem
       | LinOk ac ab -> seq_list_rest(rest, ac, ab, sc, env)
 
 fn seq_list_rest(rest: List typed_ast.TypedExpr, ac: List LinUse, ab: List LinUse,
-                 sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                 sc: LinScope, env: LinEnv) -> LinRes =
   match seq_list(rest, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk bc bb -> seq2(ac, ab, bc, bb)
 
 fn lin_if(c: typed_ast.TypedExpr, a: typed_ast.TypedExpr, b: typed_ast.TypedExpr,
-          p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+          p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   let LinOk cc cb = lin_consumed(c, sc, env) else LinErr ep m -> LinErr(ep, m)
       LinOk ac ab = lin_consumed(a, sc, env) else LinErr ep m -> LinErr(ep, m)
       LinOk bc bb = lin_consumed(b, sc, env) else LinErr ep m -> LinErr(ep, m)
@@ -1064,14 +1068,14 @@ fn lin_if(c: typed_ast.TypedExpr, a: typed_ast.TypedExpr, b: typed_ast.TypedExpr
   in seq2(cc, cb, mc, mb)
 
 fn lin_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
-             p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+             p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   match lin_read(scrut, sc, env) with
   | LinErr ep m -> LinErr(ep, m)
   | LinOk sc_c sc_b -> lin_match_arms(scrut, arms, sc_c, sc_b, try_at(p, env), sc, env)
 
 fn lin_match_arms(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBranch,
                   sc_c: List LinUse, sc_b: List LinUse, try_pos: Maybe source.SourcePos,
-                  sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                  sc: LinScope, env: LinEnv) -> LinRes =
   match arm_sets(arms, sc, typed_ast.typed_expr_type(scrut),
                  expr_is_borrowed_binding(scrut, sc), Nil, try_pos, env) with
   | LinErr ep m -> LinErr(ep, m)
@@ -1097,7 +1101,7 @@ fn expr_is_borrowed_binding(e: typed_ast.TypedExpr, sc: LinScope) -> Bool =
 # `_` can no longer reach (`arm_wildcard_drop`).
 fn arm_sets(arms: List typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
             from_borrow: Bool, taken: List String, try_pos: Maybe source.SourcePos,
-            env: Dict types.Scheme) -> LinRes =
+            env: LinEnv) -> LinRes =
   match arms with
   | Nil -> LinOk(Nil, Nil)
   | [br] -> arm_consumed(br, sc, scrut_type, from_borrow, taken, env)
@@ -1111,7 +1115,7 @@ fn arm_sets(arms: List typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: typ
 fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: List LinUse,
                  at: source.SourcePos, sc: LinScope, scrut_type: types.Type,
                  from_borrow: Bool, taken: List String, try_pos: Maybe source.SourcePos,
-                 env: Dict types.Scheme) -> LinRes =
+                 env: LinEnv) -> LinRes =
   match arm_sets(rest, sc, scrut_type, from_borrow, taken, try_pos, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk bc bb -> alt_converge(ac, ab, bc, bb, at, try_pos, scope_at_most(sc))
@@ -1120,7 +1124,7 @@ fn arm_sets_rest(rest: List typed_ast.TypedMatchBranch, ac: List LinUse, ab: Lis
 # `scope_shadow` gets EVERY binder, because a non-linear pattern variable must still
 # shadow a linear binding of the same name.
 fn arm_consumed(br: typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.Type,
-                from_borrow: Bool, taken: List String, env: Dict types.Scheme) -> LinRes =
+                from_borrow: Bool, taken: List String, env: LinEnv) -> LinRes =
   match br with
   | typed_ast.TypedMatchBranch pat body ->
       match arm_wildcard_drop(pat, scrut_type, from_borrow, taken, env) with
@@ -1135,7 +1139,7 @@ fn arm_consumed(br: typed_ast.TypedMatchBranch, sc: LinScope, scrut_type: types.
 # borrowed binders must NOT be consumed at all. Either way they are removed from
 # both sets reported to the enclosing scope.
 fn scope_consumed(binders: List LinBinder, from_borrow: Bool, body: typed_ast.TypedExpr,
-                  leak_pos: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                  leak_pos: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   match lin_consumed(body, scope_add(binder_names(binders), from_borrow, sc), env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk consumed borrowed -> scope_close(binders, from_borrow, consumed, borrowed, leak_pos, env)
@@ -1149,7 +1153,7 @@ fn scope_add_borrowed(names: List String, sc: LinScope) -> LinScope =
 
 fn scope_close(binders: List LinBinder, from_borrow: Bool, consumed: List LinUse,
                borrowed: List LinUse, leak_pos: source.SourcePos,
-               env: Dict types.Scheme) -> LinRes =
+               env: LinEnv) -> LinRes =
   if from_borrow then scope_close_borrowed(binders, consumed, borrowed)
   else scope_close_owned(binders, consumed, borrowed, leak_pos, env)
 
@@ -1161,7 +1165,7 @@ fn scope_close_borrowed(binders: List LinBinder, consumed: List LinUse,
                      luse_remove_all(binder_names(binders), borrowed))
 
 fn scope_close_owned(binders: List LinBinder, consumed: List LinUse, borrowed: List LinUse,
-                     leak_pos: source.SourcePos, env: Dict types.Scheme) -> LinRes =
+                     leak_pos: source.SourcePos, env: LinEnv) -> LinRes =
   match unconsumed_binder(binders, consumed) with
   | Just leaked -> LinErr(leak_pos, leak_binder_msg(leaked, env))
   | Nothing -> LinOk(luse_remove_all(binder_names(binders), consumed),
@@ -1184,8 +1188,8 @@ fn arm_pos(br: typed_ast.TypedMatchBranch) -> source.SourcePos =
 #      refinement.
 # A borrowed scrutinee consumes nothing, so it is exempt.
 
-fn wildcard_value_msg(t: types.Type, env: Dict types.Scheme) -> String =
-  "`_` drops a linear value of type `" ++ type_text(t, env) ++ "` without consuming it. "
+fn wildcard_value_msg(t: types.Type, env: LinEnv) -> String =
+  "`_` drops a linear value of type `" ++ type_text(t, env.env) ++ "` without consuming it. "
     ++ "Bind it and pass it on, or match its constructor and consume its linear fields."
 
 # Where a nested `_` stands, for its diagnostic: a field of a constructor (its name,
@@ -1196,8 +1200,8 @@ type WildcardSlot (..) =
   | SlotField String Int Int
   | SlotComponent
 
-fn wildcard_field_msg(t: types.Type, slot: WildcardSlot, env: Dict types.Scheme) -> String =
-  "`_` drops a linear field of type `" ++ type_text(t, env) ++ "`. " ++ field_bind_hint(slot)
+fn wildcard_field_msg(t: types.Type, slot: WildcardSlot, env: LinEnv) -> String =
+  "`_` drops a linear field of type `" ++ type_text(t, env.env) ++ "`. " ++ field_bind_hint(slot)
     ++ " and consume it."
 
 fn field_bind_hint(slot: WildcardSlot) -> String =
@@ -1217,11 +1221,11 @@ fn field_example_args(idx: Int, arity: Int, i: Int) -> List String =
 # Rule 1 under `pat`, matched against `t`: the first `_` at a field or component
 # whose type mentions a linear type, with its position and message. The `_` that
 # IS the whole pattern is not reported here (see `arm_wildcard_drop`).
-fn wildcard_drop(pat: ast.Pattern, t: types.Type, env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+fn wildcard_drop(pat: ast.Pattern, t: types.Type, env: LinEnv) -> Maybe(source.SourcePos, String) =
   pattern_drop(pat, t, SlotWhole, env)
 
 fn pattern_drop(pat: ast.Pattern, t: types.Type, slot: WildcardSlot,
-                env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+                env: LinEnv) -> Maybe(source.SourcePos, String) =
   match pat with
   | ast.WildcardPattern pos -> slot_drop(slot, pos, t, env)
   | ast.VarPattern _ _ -> Nothing
@@ -1240,20 +1244,20 @@ fn pattern_drop(pat: ast.Pattern, t: types.Type, slot: WildcardSlot,
       | Nothing -> Nothing
 
 fn slot_drop(slot: WildcardSlot, pos: source.SourcePos, t: types.Type,
-             env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+             env: LinEnv) -> Maybe(source.SourcePos, String) =
   match slot with
   | SlotWhole -> Nothing
   | SlotField _ _ _ -> field_drop(slot, pos, t, env)
   | SlotComponent -> field_drop(slot, pos, t, env)
 
 fn field_drop(slot: WildcardSlot, pos: source.SourcePos, t: types.Type,
-              env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
-  if type_mentions_linear(t, env) then Just((pos, wildcard_field_msg(t, slot, env))) else Nothing
+              env: LinEnv) -> Maybe(source.SourcePos, String) =
+  if holds_linear(t, env) then Just((pos, wildcard_field_msg(t, slot, env))) else Nothing
 
 # The sub-patterns of one constructor (`owner` names it) or tuple, against the
 # types of its fields or components.
 fn slots_drop(pats: List ast.Pattern, tys: List types.Type, owner: Maybe String, idx: Int,
-              arity: Int, env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+              arity: Int, env: LinEnv) -> Maybe(source.SourcePos, String) =
   match (pats, tys) with
   | (Cons p prest, Cons ft trest) ->
       match pattern_drop(p, ft, slot_of(owner, idx, arity), env) with
@@ -1268,7 +1272,7 @@ fn slot_of(owner: Maybe String, idx: Int, arity: Int) -> WildcardSlot =
 
 # The diagnostic for an arm's own pattern, when the scrutinee is owned.
 fn arm_wildcard_drop(pat: ast.Pattern, scrut_type: types.Type, from_borrow: Bool,
-                     taken: List String, env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+                     taken: List String, env: LinEnv) -> Maybe(source.SourcePos, String) =
   if from_borrow then Nothing
   else
     match pat with
@@ -1280,8 +1284,8 @@ fn arm_wildcard_drop(pat: ast.Pattern, scrut_type: types.Type, from_borrow: Bool
 
 # Rule 2. `taken` are the constructors earlier arms matched whole.
 fn whole_wildcard_leaks(t: types.Type, taken: List String, pos: source.SourcePos,
-                        env: Dict types.Scheme) -> Bool =
-  if !type_mentions_linear(t, env) then false
+                        env: LinEnv) -> Bool =
+  if !holds_linear(t, env) then false
   else if type_is_linear(t, env) then true
   else
     match type_ctors(t, env) with
@@ -1293,17 +1297,17 @@ fn reachable_ctors(ctors: List String, taken: List String) -> List String =
 
 # Read through `types.ctors_marker_key`. A type without the marker (a record, an
 # extern, a type variable, a tuple) has no list, and so no refinement.
-fn type_ctors(t: types.Type, env: Dict types.Scheme) -> Maybe (List String) =
-  match dict_get(types.ctors_marker_key(head_type_name(t)), env) with
+fn type_ctors(t: types.Type, env: LinEnv) -> Maybe (List String) =
+  match dict_get(types.ctors_marker_key(head_type_name(t)), env.env) with
   | Just marker -> Just(types.ctors_of(marker))
   | Nothing -> Nothing
 
 # A constructor the env does not know counts as holding one: the answer that
 # rejects rather than accepts.
 fn ctor_holds_linear(ctor: String, pos: source.SourcePos, t: types.Type,
-                     env: Dict types.Scheme) -> Bool =
+                     env: LinEnv) -> Bool =
   match ctor_field_types_at(ctor, pos, t, env) with
-  | Just field_tys -> any(\ft -> type_mentions_linear(ft, env), field_tys)
+  | Just field_tys -> any(\ft -> holds_linear(ft, env), field_tys)
   | Nothing -> true
 
 # The constructor an arm takes out of play for the arms after it: one whose
@@ -1344,7 +1348,7 @@ fn pattern_takes(pat: ast.Pattern) -> List String =
 # to remember the flag across steps: the OUTERMOST fallible bind sees the whole
 # remainder of the block in its `restc` and reports there.
 fn lin_do(steps: List typed_ast.TypedDoStep, sc: LinScope,
-          env: Dict types.Scheme) -> LinRes =
+          env: LinEnv) -> LinRes =
   match steps with
   | Nil -> LinOk(Nil, Nil)
   | Cons step rest ->
@@ -1363,7 +1367,7 @@ fn lin_do(steps: List typed_ast.TypedDoStep, sc: LinScope,
 # value for an effect bind, the payload for a Maybe/Result bind. Containment then applies
 # to it as to any other binder.
 fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, mode: typed_ast.BindMode,
-               rest: List typed_ast.TypedDoStep, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+               rest: List typed_ast.TypedDoStep, sc: LinScope, env: LinEnv) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk ec eb ->
@@ -1384,7 +1388,7 @@ fn lin_do_bind(pat: ast.Pattern, e: typed_ast.TypedExpr, mode: typed_ast.BindMod
 fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
                        eb: List LinUse, e: typed_ast.TypedExpr, fallible: Bool,
                        rest: List typed_ast.TypedDoStep,
-                       sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                       sc: LinScope, env: LinEnv) -> LinRes =
   match bind_wildcard_drop(pat, bind_type, e, env) with
   | Just (p, m) -> LinErr(p, m)
   | Nothing ->
@@ -1393,16 +1397,16 @@ fn lin_do_bind_checked(pat: ast.Pattern, bind_type: types.Type, ec: List LinUse,
 
 # A bare `_` is reported at `e`, a `_` inside a tuple at itself.
 fn bind_wildcard_drop(pat: ast.Pattern, t: types.Type, e: typed_ast.TypedExpr,
-                      env: Dict types.Scheme) -> Maybe(source.SourcePos, String) =
+                      env: LinEnv) -> Maybe(source.SourcePos, String) =
   match pat with
   | ast.WildcardPattern _ ->
-      if type_mentions_linear(t, env) then Just((typed_ast.typed_expr_pos(e), wildcard_value_msg(t, env)))
+      if holds_linear(t, env) then Just((typed_ast.typed_expr_pos(e), wildcard_value_msg(t, env)))
       else Nothing
   | _ -> wildcard_drop(pat, t, env)
 
 fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                     e: typed_ast.TypedExpr, fallible: Bool, rest: List typed_ast.TypedDoStep,
-                    sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                    sc: LinScope, env: LinEnv) -> LinRes =
   match lin_do(rest, scope_add_owned(binder_names(binders), sc), env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb ->
@@ -1411,7 +1415,7 @@ fn lin_do_bind_rest(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
 fn lin_do_bind_close(binders: List LinBinder, ec: List LinUse, eb: List LinUse,
                      restc: List LinUse, restb: List LinUse,
                      e: typed_ast.TypedExpr, fallible: Bool, at_most: List String,
-                     env: Dict types.Scheme) -> LinRes =
+                     env: LinEnv) -> LinRes =
   match unconsumed_binder(binders, restc) with
   | Just leaked -> LinErr(typed_ast.typed_expr_pos(e), leak_binder_msg(leaked, env))
   | Nothing -> lin_do_bind_after(binders, ec, eb, restc, restb, fallible, at_most)
@@ -1448,7 +1452,7 @@ fn conditional_consume(sc_bind: Bool, outer: List LinUse) -> Maybe LinUse =
     | [u | _] -> Just(u)
 
 fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              sc: LinScope, env: LinEnv) -> LinRes =
   match lin_consumed(e, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk ec eb -> lin_do_seq_checked(e, rest, ec, eb, sc, env)
@@ -1473,17 +1477,17 @@ fn lin_do_seq(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
 # way — not something this rule introduces.
 fn lin_do_seq_checked(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
                       ec: List LinUse, eb: List LinUse,
-                      sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                      sc: LinScope, env: LinEnv) -> LinRes =
   if step_discards_linear(e, rest, env) then
     LinErr(typed_ast.typed_expr_pos(e), discarded_step_msg(e))
   else
     lin_do_seq_rest(rest, ec, eb, sc, env)
 
 fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-                        env: Dict types.Scheme) -> Bool =
+                        env: LinEnv) -> Bool =
   match rest with
   | [] -> false
-  | [_ | _] -> type_mentions_linear(typed_ast.typed_expr_type(e), env)
+  | [_ | _] -> holds_linear(typed_ast.typed_expr_type(e), env)
 
 # The linear type inside `t`, if any — `t` itself when its head is linear, else
 # the first one found among its type arguments and tuple components.
@@ -1498,7 +1502,13 @@ fn step_discards_linear(e: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep
 #
 # Does NOT descend into a function type: `Unit -> File` is a recipe for a
 # resource, not a resource, and discarding one leaks nothing.
-export fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
+#
+# The decision is `lin_holds`; the walk runs only to find the type a diagnostic names.
+export fn first_linear_in(t: types.Type, env: LinEnv) -> Maybe types.Type =
+  if lin_holds(t, env.lin, env.marked) then first_linear_witness(t, env.env) else Nothing
+
+# Today's walk, read from the env alone: the witness for a diagnostic.
+export fn first_linear_witness(t: types.Type, env: Dict types.Scheme) -> Maybe types.Type =
   match first_linear_seen(t, env, dict_empty()) with
   | (found, _) -> found
 
@@ -1518,7 +1528,7 @@ export fn first_linear_in(t: types.Type, env: Dict types.Scheme) -> Maybe types.
 # short-circuits the whole walk anyway.
 fn first_linear_seen(t: types.Type, env: Dict types.Scheme,
                      seen: Dict Bool) -> (Maybe types.Type, Dict Bool) =
-  if type_is_linear(t, env) then (Just(t), seen)
+  if head_is_marked(t, env) then (Just(t), seen)
   else
     match t with
     # Both halves of containment, in the order that keeps the diagnostic useful:
@@ -1548,19 +1558,19 @@ fn first_linear_in_stored(tname: String, env: Dict types.Scheme,
   | Nothing ->
       first_linear_in_list(stored_field_types(tname, env), env, dict_set(tname, true, seen))
 
-# Mirrors infer.stored_fields_marker, respelled for the same reason
-# param_is_phantom is (the infer <-> linear_check cycle); the two must agree and
-# only behaviour says so. A type with no marker stores nothing this walk can see
-# — an extern or C-runtime type, or a declaration with no fields.
+# A type with no marker stores nothing this walk can see — an extern or C-runtime
+# type, or a declaration with no fields.
 fn stored_field_types(tname: String, env: Dict types.Scheme) -> List types.Type =
-  match dict_get("@stores:" ++ tname, env) with
+  match dict_get(types.stores_marker_key(tname), env) with
   | Nothing -> Nil
-  | Just scheme ->
-      match scheme with
-      | types.Scheme _ _ body _ _ ->
-          match body with
-          | types.TTuple items -> items
-          | _ -> Nil
+  | Just scheme -> stores_items(scheme)
+
+# The field types a `@stores:` marker's scheme holds.
+fn stores_items(scheme: types.Scheme) -> List types.Type =
+  let types.Scheme _ _ body _ _ = scheme
+  in match body with
+     | types.TTuple items -> items
+     | _ -> Nil
 
 # The arguments of a type application in DECLARATION order. `TApp` nests to the
 # left, so the spine is unwound and re-appended; the index is what lets the
@@ -1590,13 +1600,8 @@ fn first_linear_in_args(tname: String, idx: Int, args: List types.Type,
         | (Just found, seen2) -> (Just(found), seen2)
         | (Nothing, seen2) -> first_linear_in_args(tname, idx + 1, rest, env, seen2)
 
-# Mirrors infer.phantom_param_marker, respelled rather than imported for the same
-# reason type_is_linear is (the infer <-> linear_check cycle). The two spellings
-# must agree, and nothing but behaviour says so: a drift silently stops finding
-# the marker and every phantom position is descended again. That is what the
-# phantom cases in tests/stdlib/test_linear_binders.spr catch.
 fn param_is_phantom(tname: String, idx: Int, env: Dict types.Scheme) -> Bool =
-  dict_member("@phantom:" ++ tname ++ ":" ++ int_to_string(idx), env)
+  dict_member(types.phantom_marker_key(tname, idx), env)
 
 fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme,
                         seen: Dict Bool) -> (Maybe types.Type, Dict Bool) =
@@ -1612,10 +1617,163 @@ fn first_linear_in_list(ts: List types.Type, env: Dict types.Scheme,
 # `t` is or contains a linear type. A type variable counts only under `where
 # linear`, which marks it linear in `env`: without the bound no caller can
 # instantiate it at a linear type (docs/linearity-bound-v0.md §6.4).
-fn type_mentions_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
-  match first_linear_in(t, env) with
-  | Just _ -> true
-  | Nothing -> false
+export fn holds_linear(t: types.Type, env: LinEnv) -> Bool = lin_holds(t, env.lin, env.marked)
+
+# Containment answered once per program. `holds` is every declared type name whose
+# values hold a linear value; `phantom` maps a name to the argument positions its
+# declaration does not store. Keys are the bare names `head_type_name` yields, so a
+# query builds no key string for a declared name. Scoped `@linear:` marks (skolems,
+# bounded variables) stay on the env.
+export type LinTables (..) = (holds: Set, phantom: Dict (List Int))
+
+# What a gate's containment queries read: its env, the program's tables, and the
+# `@linear:` suffixes of that env. `lin_holds` takes the last two; the walk that finds
+# a diagnostic's witness takes `env`.
+export type LinEnv (..) = (env: Dict types.Scheme, lin: LinTables, marked: Set)
+
+# `marked` is read from `env` once, so build one `LinEnv` per gate.
+export fn make_lin_env(env: Dict types.Scheme, lin: LinTables) -> LinEnv =
+  LinEnv(env = env, lin = lin, marked = lin_marked(env))
+
+# Marks `name` linear. The env entry and the `marked` name go in together, so the
+# walk and `lin_holds` keep giving one answer.
+export fn mark_linear(name: String, env: LinEnv) -> LinEnv =
+  LinEnv(env = dict_set(types.linear_marker_key(name), types.presence_marker, env.env),
+         lin = env.lin, marked = set_insert(name, env.marked))
+
+# Build it from an env with no scoped marks: a mark would put its name in `holds`.
+# `phantom` comes from the `@phantom:` markers, which exist in every program, and a
+# `where linear` bound runs the checks even where no linear type is declared.
+export fn build_lin_tables(env: Dict types.Scheme) -> LinTables =
+  let phantom = phantom_table(env)
+  in LinTables(holds = holds_table(env, phantom), phantom = phantom)
+
+# The walk from `TConst T` answers `Just` iff it reaches a `@linear:` name through the
+# edges `type_names` lists: a DFS with a `seen` set finds a leaf iff one is reachable.
+# So `holds` is every name that reaches a marked name, by one search over reversed
+# edges. It is empty while no name is marked.
+fn holds_table(env: Dict types.Scheme, phantom: Dict (List Int)) -> Set =
+  let marked = lin_marked(env)
+  in if set_size(marked) == 0 then set_empty()
+     else reach_back(set_to_list(marked), marked, reverse_edges(env, phantom))
+
+# `rev[U]` lists the declared names whose stored fields read `U`.
+fn reverse_edges(env: Dict types.Scheme, phantom: Dict (List Int)) -> Dict (List String) =
+  vec_fold(\ (acc, e) -> add_reverse(entry_suffix(types.stores_marker_prefix, e), e, phantom, acc),
+           dict_empty(), dict_entries_with_prefix(types.stores_marker_prefix, env))
+
+fn add_reverse(owner: String, e: (String, types.Scheme), phantom: Dict (List Int),
+               acc: Dict (List String)) -> Dict (List String) =
+  let (_, scheme) = e
+  in list_fold(\ (rev, u) -> dict_set(u, Cons(owner, maybe_with_default([], dict_get(u, rev))), rev),
+               acc, type_names_list(stores_items(scheme), phantom, Nil))
+
+# The names `first_linear_seen` reads a mark for or opens, as it descends `t`: a
+# constant, an application's head and its stored arguments, a tuple's `Tuple<n>` and
+# its items. Variables, functions and thunks read nothing.
+fn type_names(t: types.Type, phantom: Dict (List Int), acc: List String) -> List String =
+  match t with
+  | types.TConst id -> Cons(types.type_id_name(id), acc)
+  | types.TApp _ _ ->
+      let (head, args) = app_spine_parts(t, Nil)
+          name = head_type_name(head)
+      in Cons(name, type_names_list(stored_args(name, args, phantom), phantom, acc))
+  | types.TTuple items ->
+      Cons(types.tuple_head(list_length(items)), type_names_list(items, phantom, acc))
+  | types.TVar _ -> acc
+  | types.TFunc _ _ _ _ -> acc
+  | types.TThunk _ _ -> acc
+
+fn type_names_list(ts: List types.Type, phantom: Dict (List Int), acc: List String) -> List String =
+  list_fold(\ (names, t) -> type_names(t, phantom, names), acc, ts)
+
+# Back from the marked names: every owner of a reached name is reached.
+fn reach_back(work: List String, seen: Set, rev: Dict (List String)) -> Set =
+  match work with
+  | Nil -> seen
+  | Cons n rest ->
+      let owners = maybe_with_default([], dict_get(n, rev))
+          (work2, seen2) = list_fold(visit_owner, (rest, seen), owners)
+      in reach_back(work2, seen2, rev)
+
+fn visit_owner(acc: (List String, Set), owner: String) -> (List String, Set) =
+  let (work, seen) = acc
+  in if set_member(owner, seen) then acc else (Cons(owner, work), set_insert(owner, seen))
+
+# The linear marker's prefix, as `types.linear_marker_key` spells it.
+let linear_prefix: String = types.linear_marker_key("")
+
+fn marker_suffixes(prefix: String, env: Dict types.Scheme, acc: Set) -> Set =
+  vec_fold(\ (names, e) -> set_insert(entry_suffix(prefix, e), names), acc,
+           dict_entries_with_prefix(prefix, env))
+
+fn entry_suffix(prefix: String, e: (String, types.Scheme)) -> String =
+  let (key, _) = e
+  in str_slice(key, str_len(prefix), str_len(key))
+
+fn phantom_table(env: Dict types.Scheme) -> Dict (List Int) =
+  vec_fold(\ (acc, e) -> phantom_add(entry_suffix(types.phantom_marker_prefix, e), acc), dict_empty(),
+           dict_entries_with_prefix(types.phantom_marker_prefix, env))
+
+# A key is `<TypeName>:<index>`, spelled by types.phantom_marker_key.
+fn phantom_add(tail: String, acc: Dict (List Int)) -> Dict (List Int) =
+  let Just(name, index_text) = string.rsplit_once(tail, ":") else malformed_phantom(tail)
+      Just index = parse_int(index_text) else malformed_phantom(tail)
+  in dict_set(name, Cons(index, maybe_with_default([], dict_get(name, acc))), acc)
+
+fn malformed_phantom(tail: String) -> Dict (List Int) =
+  panic("linear_check: malformed @phantom marker `" ++ tail ++ "` (internal error)")
+
+# The bare names of every `@linear:` mark in `env`, one scan. `linear_check` adds no
+# such mark to its env, so one set per gate answers every query in it.
+export fn lin_marked(env: Dict types.Scheme) -> Set =
+  marker_suffixes(linear_prefix, env, set_empty())
+
+# Same answer as `first_linear_in` returning `Just`, read from the tables and the
+# `marked` set. The constructor is matched first, so a declared name costs one set
+# lookup. The query never reads the env.
+export fn lin_holds(t: types.Type, lin: LinTables, marked: Set) -> Bool =
+  match t with
+  | types.TConst id -> lin_name_holds(types.type_id_name(id), lin, marked)
+  | types.TVar v -> set_member(types.tyvar_identity(v), marked)
+  | types.TApp _ _ -> lin_app_holds(t, lin, marked)
+  | types.TTuple items -> lin_tuple_holds(items, lin, marked)
+  | types.TFunc _ _ _ _ -> false  # a recipe for a resource, not a resource
+  | types.TThunk _ _ -> false  # nothing is held until it is forced
+
+fn lin_name_holds(name: String, lin: LinTables, marked: Set) -> Bool =
+  set_member(name, lin.holds) || set_member(name, marked)
+
+# The head, then the arguments the declaration stores. The head's own stored
+# fields are already part of its `holds` answer.
+fn lin_app_holds(t: types.Type, lin: LinTables, marked: Set) -> Bool =
+  let (head, args) = app_spine_parts(t, Nil)
+  in lin_holds(head, lin, marked)
+       || any(lin_holds(_, lin, marked), stored_args(head_type_name(head), args, lin.phantom))
+
+# The spine's head and its arguments in declaration order, in one walk: the outermost
+# application holds the last argument, so consing from the outside leaves them in order.
+fn app_spine_parts(t: types.Type, args: List types.Type) -> (types.Type, List types.Type) =
+  match t with
+  | types.TApp base arg -> app_spine_parts(base, Cons(arg, args))
+  | _ -> (t, args)
+
+# The arguments the declaration of `name` stores, in order: phantom positions drop out.
+fn stored_args(name: String, args: List types.Type, phantom: Dict (List Int)) -> List types.Type =
+  stored_args_from(maybe_with_default([], dict_get(name, phantom)), 0, args)
+
+fn stored_args_from(skip: List Int, idx: Int, args: List types.Type) -> List types.Type =
+  match args with
+  | Nil -> Nil
+  | Cons a rest ->
+      let kept = stored_args_from(skip, idx + 1, rest)
+      in if list_member(idx, skip) then kept else Cons(a, kept)
+
+# A tuple is linear only through a `@linear:Tuple<n>` mark, never its `@stores:`,
+# which is what the walk reads.
+fn lin_tuple_holds(items: List types.Type, lin: LinTables, marked: Set) -> Bool =
+  set_member(types.tuple_head(list_length(items)), marked)
+    || any(lin_holds(_, lin, marked), items)
 
 let discarded_value_msg: String =
   "this step discards a linear value (linear values must be used exactly once); bind its result with `<-` or `let` and consume the binding"
@@ -1633,37 +1791,37 @@ fn discarded_ref_msg(name: String) -> String =
   "linear value '" ++ name ++ "' is referenced as a statement, which discards it — a bare reference does not consume it; pass it to a consuming function, or destructure it with `match`"
 
 fn lin_do_seq_rest(rest: List typed_ast.TypedDoStep, ec: List LinUse, eb: List LinUse,
-                   sc: LinScope, env: Dict types.Scheme) -> LinRes =
+                   sc: LinScope, env: LinEnv) -> LinRes =
   match lin_do(rest, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb -> seq2(ec, eb, restc, restb)
 
 fn lin_do_let(name: String, rhs: typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
-              sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              sc: LinScope, env: LinEnv) -> LinRes =
   match lin_consumed(rhs, sc, env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk rc rb ->
       lin_do_let_body(name, rhs, rc, rb, rest, sc, env,
-                      type_mentions_linear(typed_ast.typed_expr_type(rhs), env))
+                      holds_linear(typed_ast.typed_expr_type(rhs), env))
 
 # A linear do-let binding is OWNED, scoped to `rest`, consumed exactly once there.
 fn lin_do_let_body(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
                    rest: List typed_ast.TypedDoStep, sc: LinScope,
-                   env: Dict types.Scheme, is_lin: Bool) -> LinRes =
+                   env: LinEnv, is_lin: Bool) -> LinRes =
   match lin_do(rest, extend_scope(is_lin, name, sc), env) with
   | LinErr p m -> LinErr(p, m)
   | LinOk restc restb -> lin_do_let_close(name, rhs, rc, rb, restc, restb, is_lin, env)
 
 fn lin_do_let_close(name: String, rhs: typed_ast.TypedExpr, rc: List LinUse, rb: List LinUse,
                     restc: List LinUse, restb: List LinUse, is_lin: Bool,
-                    env: Dict types.Scheme) -> LinRes =
+                    env: LinEnv) -> LinRes =
   if !is_lin then seq2(rc, rb, restc, restb)
   else if luse_member(name, restc) then
     seq2(rc, rb, luse_remove(name, restc), luse_remove(name, restb))
   else LinErr(typed_ast.typed_expr_pos(rhs), unused_let_msg(name, typed_ast.typed_expr_type(rhs), env))
 
 # `let _ = e` reads as every other `_` that drops a linear value.
-fn unused_let_msg(name: String, t: types.Type, env: Dict types.Scheme) -> String =
+fn unused_let_msg(name: String, t: types.Type, env: LinEnv) -> String =
   if name == "_" then wildcard_value_msg(t, env) else leak_binder_msg(LinBinder(name, t), env)
 
 # A non-linear do-`let` must SHADOW, not be ignored: `let c = 5` over a linear
@@ -1694,7 +1852,7 @@ fn extend_scope(is_lin: Bool, name: String, sc: LinScope) -> LinScope =
 # Ownership is read off the lambda's TYPE, not its source text, because the mode
 # usually is not written — it is pushed down from the slot (infer.seed_param_modes).
 fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
-              p: source.SourcePos, sc: LinScope, env: Dict types.Scheme) -> LinRes =
+              p: source.SourcePos, sc: LinScope, env: LinEnv) -> LinRes =
   lin_lambda_params(params, body, lam_type, p, env,
     \ (origin, borrowed) -> lin_lambda_body(body, p, params, borrowed, sc, env, origin))
 
@@ -1702,7 +1860,7 @@ fn lin_lambda(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types
 # rejected, the borrowing ones go to `walk` as names, and the result is held to
 # the lambda's own `once` parameters.
 fn lin_lambda_params(params: List ast.Param, body: typed_ast.TypedExpr, lam_type: types.Type,
-                     p: source.SourcePos, env: Dict types.Scheme,
+                     p: source.SourcePos, env: LinEnv,
                      walk: LambdaOrigin -> List String -> LinRes) -> LinRes =
   let origin = lambda_origin(params)
       written = drop_comp_acc_params(params)
@@ -1720,7 +1878,7 @@ fn lin_lambda_params(params: List ast.Param, body: typed_ast.TypedExpr, lam_type
 # TYPE's ownership: the mode is written, never pushed down from the slot.
 # Regressions: tests/conformance/type_error/lambda_once_param_{invoked_twice,escapes}.
 fn lambda_once_after(res: LinRes, params: List ast.Param, lam_type: types.Type,
-                     body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinRes =
+                     body: typed_ast.TypedExpr, env: LinEnv) -> LinRes =
   let LinOk c b = res else LinErr ep m -> LinErr(ep, m)
       names = once_lambda_params(params, lam_type)
   in match once_honesty_after(escape_honesty(EscOnce, names, body), names, body, env) with
@@ -1736,7 +1894,7 @@ fn once_lambda_params(params: List ast.Param, t: types.Type) -> List String =
 
 # The rejection is identical either way; only the wording differs, so provenance
 # is carried as a value rather than duplicating the analysis.
-fn linear_param_msg(origin: LambdaOrigin, b: LinBinder, env: Dict types.Scheme) -> String =
+fn linear_param_msg(origin: LambdaOrigin, b: LinBinder, env: LinEnv) -> String =
   match origin with
   | LamComprehension -> comprehension_binder_msg(lbind_name(b))
   | LamWritten -> lambda_param_binder_msg(b, env)
@@ -1776,7 +1934,7 @@ fn is_comprehension_fold(params: List ast.Param) -> Bool =
 # identity, so this is the pre-M4.4b walk unchanged for them.
 fn lin_lambda_body(body: typed_ast.TypedExpr, p: source.SourcePos,
                    params: List ast.Param, borrowed: List String,
-                   sc: LinScope, env: Dict types.Scheme, origin: LambdaOrigin) -> LinRes =
+                   sc: LinScope, env: LinEnv, origin: LambdaOrigin) -> LinRes =
   match lin_consumed(body,
           scope_add_borrowed(borrowed, scope_shadow(ast.param_names(params), sc)),
           env) with
@@ -1890,7 +2048,7 @@ fn any_type_expr_writes_mode(tes: List ast.TypeExpr) -> Bool =
 # `inst_type` is the instance method's own type: on a parameter type holding no
 # linear value `borrowing` and consuming coincide (docs/linearity-bound-v0.md §6.6).
 export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type, inst_type: types.Type,
-                               env: Dict types.Scheme) -> Maybe String =
+                               env: LinEnv) -> Maybe String =
   match params with
   | Nil -> Nothing
   | Cons prm rest ->
@@ -1902,13 +2060,13 @@ export fn method_mode_mismatch(params: List ast.Param, class_type: types.Type, i
         else Just(method_mismatch_for(ast.param_name(prm), inst, cls))
 
 fn ownership_agrees(inst: types.Ownership, cls: types.Ownership, inst_type: types.Type,
-                    env: Dict types.Scheme) -> Bool =
+                    env: LinEnv) -> Bool =
   inst == cls
     || (types.borrow_axis_only(inst) && types.borrow_axis_only(cls) && !spine_param_holds_linear(inst_type, env))
 
-fn spine_param_holds_linear(t: types.Type, env: Dict types.Scheme) -> Bool =
+fn spine_param_holds_linear(t: types.Type, env: LinEnv) -> Bool =
   match t with
-  | types.TFunc p _ _ _ -> is_just(first_linear_in(p, env))
+  | types.TFunc p _ _ _ -> holds_linear(p, env)
   | _ -> true
 
 fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership) -> String =
@@ -1924,7 +2082,7 @@ fn method_mismatch_for(name: String, inst: types.Ownership, cls: types.Ownership
 # `extern fn`, which has no body and so never reaches check_fn_linear.
 export fn check_signature_modes(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
                                 fn_type: types.Type,
-                                pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
+                                pos: source.SourcePos, env: LinEnv) -> LinCheck =
   match first_bad_modifier(params, ret_te, fn_type, env) with
   | Just bad -> LinFail(pos, bad_modifier_message(bad))
   | Nothing -> LinPass
@@ -1945,7 +2103,7 @@ export fn check_signature_modes(params: List ast.Param, ret_te: Maybe ast.TypeEx
 # modifier nowhere near a parameter, and the walk reached only parameters, so the
 # position went unchecked and surfaced as a return-type MISMATCH instead.
 fn first_bad_modifier(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
-                      fn_type: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
+                      fn_type: types.Type, env: LinEnv) -> Maybe BadModifier =
   match params with
   | Nil ->
       match written_mode_fault("the return type", ret_te, declared_result(fn_type), env) with
@@ -1958,7 +2116,7 @@ fn first_bad_modifier(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
 
 fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
                      rest: List ast.Param, b: types.Type,
-                     env: Dict types.Scheme) -> Maybe BadModifier =
+                     env: LinEnv) -> Maybe BadModifier =
   match written_mode_fault(ast.param_name(prm), param_type_expr(prm), a, env) with
   | Just bad -> Just(bad)
   | Nothing ->
@@ -1974,7 +2132,7 @@ fn bad_modifier_here(prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
 
 # `borrowing`/`consuming` needs a linear type. A type variable is linear only under
 # `where linear`, so an unbounded one gets the message that names the bound.
-fn ownership_fault(name: String, a: types.Type, env: Dict types.Scheme) -> Maybe BadModifier =
+fn ownership_fault(name: String, a: types.Type, env: LinEnv) -> Maybe BadModifier =
   if type_is_linear(a, env) then Nothing
   else if type_is_tyvar(a) then Just(BadOnTyvar(name))
   else Just(BadNonLinear(name))
@@ -2001,13 +2159,13 @@ fn ownership_fault(name: String, a: types.Type, env: Dict types.Scheme) -> Maybe
 # stops. Failing open there keeps it from inventing a fault out of a mismatch
 # between two representations of the same type.
 fn written_mode_fault(name: String, te: Maybe ast.TypeExpr, t: types.Type,
-                      env: Dict types.Scheme) -> Maybe BadModifier =
+                      env: LinEnv) -> Maybe BadModifier =
   match te with
   | Nothing -> Nothing
   | Just written -> written_mode_fault_at(name, written, t, env)
 
 fn written_mode_fault_at(name: String, te: ast.TypeExpr, t: types.Type,
-                         env: Dict types.Scheme) -> Maybe BadModifier =
+                         env: LinEnv) -> Maybe BadModifier =
   match (te, t) with
   # A trailing `!{...}` wraps the TypeExpr but never the resolved type, so it is
   # unwrapped rather than treated as a desync.
@@ -2029,7 +2187,7 @@ fn written_mode_fault_at(name: String, te: ast.TypeExpr, t: types.Type,
   | _ -> Nothing
 
 fn written_mode_fault_list(name: String, tes: List ast.TypeExpr, ts: List types.Type,
-                           env: Dict types.Scheme) -> Maybe BadModifier =
+                           env: LinEnv) -> Maybe BadModifier =
   match (tes, ts) with
   | (Cons te trest, Cons t rest) ->
       match written_mode_fault_at(name, te, t, env) with
@@ -2040,7 +2198,7 @@ fn written_mode_fault_list(name: String, tes: List ast.TypeExpr, ts: List types.
 # One arrow's written mode against its resolved parameter type. ModeDefault is the
 # only one that says nothing the author wrote, so it is the only one skipped.
 fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
-                       env: Dict types.Scheme) -> Maybe BadModifier =
+                       env: LinEnv) -> Maybe BadModifier =
   if ast.mode_is_local(mode) then function_only_fault(BadLocalOnTyvar, BadLocalNonFunction, name, a)
   else if ast.mode_is_once(mode) then function_only_fault(BadOnceOnTyvar, BadOnceNonFunction, name, a)
   else if !mode_is_written(mode) then Nothing
@@ -2066,7 +2224,7 @@ fn written_arrow_fault(name: String, mode: ast.ParamMode, a: types.Type,
 fn bad_function_only_here(on_tyvar: String -> BadModifier, on_non_func: String -> BadModifier,
                           prm: ast.Param, ret_te: Maybe ast.TypeExpr, a: types.Type,
                           rest: List ast.Param, b: types.Type,
-                          env: Dict types.Scheme) -> Maybe BadModifier =
+                          env: LinEnv) -> Maybe BadModifier =
   match function_only_fault(on_tyvar, on_non_func, ast.param_name(prm), a) with
   | Just bad -> Just(bad)
   | Nothing -> first_bad_modifier(rest, ret_te, b, env)
@@ -2097,13 +2255,13 @@ fn type_is_func(t: types.Type) -> Bool =
 # binder path learned this first (leak_binder_msg); this is the same fix for
 # parameters, which is why both now end in the same message function.
 fn owned_param_binders(params: List ast.Param, fn_type: types.Type,
-                       env: Dict types.Scheme) -> List LinBinder =
+                       env: LinEnv) -> List LinBinder =
   match params with
   | Nil -> Nil
   | Cons prm rest ->
       match fn_type with
       | types.TFunc a b _ _ ->
-          linear_binder_cons(type_mentions_linear(a, env) && !ast.mode_is_borrowing(ast.param_mode_of(prm)),
+          linear_binder_cons(holds_linear(a, env) && !ast.mode_is_borrowing(ast.param_mode_of(prm)),
                              LinBinder(ast.param_name(prm), a), owned_param_binders(rest, b, env))
       | _ -> Nil
 
@@ -2117,7 +2275,7 @@ fn linear_binder_cons(keep: Bool, b: LinBinder, tail: List LinBinder) -> List Li
 # the deferred Option 2, so matching the owned list here would be dead code that
 # reads like a decision.
 fn borrowed_param_names(params: List ast.Param, fn_type: types.Type,
-                        env: Dict types.Scheme) -> List String =
+                        env: LinEnv) -> List String =
   match params with
   | Nil -> Nil
   | Cons prm rest ->
@@ -2156,7 +2314,7 @@ fn declared_result(fn_type: types.Type) -> types.Type =
 export fn check_fn_linear(params: List ast.Param, ret_te: Maybe ast.TypeExpr,
                           fn_type: types.Type,
                           body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
-                          env: Dict types.Scheme) -> LinCheck =
+                          env: LinEnv) -> LinCheck =
   match first_bad_modifier(params, ret_te, fn_type, env) with
   | Just bad -> LinFail(fn_pos, bad_modifier_message(bad))
   | Nothing ->
@@ -2189,7 +2347,7 @@ fn local_param_names(params: List ast.Param) -> List String =
 # use. Binders inside the body are enforced by the walk as in any function.
 # Regressions: tests/conformance/type_error/linear_toplevel_let_{holds,contains}_linear.
 export fn check_let_linear(name: String, body: typed_ast.TypedExpr, let_pos: source.SourcePos,
-                           env: Dict types.Scheme) -> LinCheck =
+                           env: LinEnv) -> LinCheck =
   let t = typed_ast.typed_expr_type(body)
   in match first_linear_in(t, env) with
      | Just lin -> LinFail(let_pos, toplevel_linear_msg(name, toplevel_linear_type(t, lin, env)))
@@ -2202,13 +2360,13 @@ fn toplevel_linear_msg(name: String, what: String) -> String =
   "top-level `let` '" ++ name ++ "' holds a linear value (" ++ what
     ++ "): every function can use a module binding, so it cannot be used exactly once; create the value inside a function and pass it on"
 
-fn toplevel_linear_type(t: types.Type, lin: types.Type, env: Dict types.Scheme) -> String =
+fn toplevel_linear_type(t: types.Type, lin: types.Type, env: LinEnv) -> String =
   if type_is_linear(t, env) then "`" ++ types.type_to_string(t) ++ "`"
   else "`" ++ types.type_to_string(t) ++ "` contains `" ++ types.type_to_string(lin) ++ "`"
 
 fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List String,
                  local_names: List String, body: typed_ast.TypedExpr, fn_pos: source.SourcePos,
-                 env: Dict types.Scheme) -> LinCheck =
+                 env: LinEnv) -> LinCheck =
   match lin_consumed(body, LinScope(binder_names(owned), borrowed, Nil), env) with
   | LinErr p m -> LinFail(p, m)
   | LinOk consumed _ ->
@@ -2242,13 +2400,13 @@ fn linear_result(owned: List LinBinder, borrowed: List String, once_names: List 
 # branch_then_reuse}, and tests/stdlib/test_once_closures.spr `declines_to_run`
 # and `one_path` for the skipped side.
 fn once_honesty_after(prior: LinCheck, once_names: List String,
-                      body: typed_ast.TypedExpr, env: Dict types.Scheme) -> LinCheck =
+                      body: typed_ast.TypedExpr, env: LinEnv) -> LinCheck =
   match prior with
   | LinFail p m -> LinFail(p, m)
   | LinPass -> once_honesty(once_names, body, env)
 
 fn once_honesty(names: List String, body: typed_ast.TypedExpr,
-                env: Dict types.Scheme) -> LinCheck =
+                env: LinEnv) -> LinCheck =
   match names with
   | Nil -> LinPass
   | Cons n rest ->
@@ -2449,7 +2607,7 @@ fn esc_do_rest(r: LinCheck, shadows: Bool, p: String, k: EscKind,
 # reference in return position is a consume — so no separate escape rule is needed.
 fn param_obligations(owned: List LinBinder, borrowed: List String,
                      consumed: List LinUse, fn_pos: source.SourcePos,
-                     env: Dict types.Scheme) -> LinCheck =
+                     env: LinEnv) -> LinCheck =
   match first_consumed_borrow(borrowed, consumed) with
   | Just u -> LinFail(luse_pos(u), consumed_borrow_msg(luse_name(u)))
   | Nothing -> unused_linear_param(owned, consumed, fn_pos, env)
@@ -2458,7 +2616,7 @@ fn first_consumed_borrow(borrowed: List String, consumed: List LinUse) -> Maybe 
   find(\u -> list_member(luse_name(u), borrowed), consumed)
 
 fn unused_linear_param(owned: List LinBinder, consumed: List LinUse,
-                       fn_pos: source.SourcePos, env: Dict types.Scheme) -> LinCheck =
+                       fn_pos: source.SourcePos, env: LinEnv) -> LinCheck =
   match owned with
   | Nil -> LinPass
   | Cons b rest ->
