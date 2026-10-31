@@ -282,14 +282,17 @@ export function mergeSeg(pr: PrTrackerPr): Seg | null {
   return MERGE_SEG[pr.mergeState] ?? { text: 'merge ?', dim: true }
 }
 
-/** The PR the pane expands: the chosen one, or by default the newest open one. */
+/**
+ * The PR the pane expands: the chosen one, or the newest open one. A choice not in `prs`
+ * (hidden by scope, or removed) falls back to the newest open one too.
+ */
 export function resolveExpanded(
   selected: number | 'auto' | 'none',
   prs: readonly number[],
   data: Readonly<Record<string, PrTrackerPr>>,
 ): number | null {
   if (selected === 'none') return null
-  if (selected !== 'auto') return prs.includes(selected) ? selected : null
+  if (selected !== 'auto' && prs.includes(selected)) return selected
   const open = [...prs].filter(n => data[String(n)]?.state === 'OPEN').sort((a, b) => b - a)
   return open[0] ?? null
 }
@@ -299,6 +302,38 @@ export type PrsScope = 'mine' | 'all'
 /** The PRs to draw: this session's own, or all of them. */
 export const scopePrs = (prs: readonly number[], mine: readonly number[], scope: PrsScope): number[] =>
   scope === 'all' ? [...prs] : prs.filter(n => mine.includes(n))
+
+/** `list` with the `numbers` it lacks appended, order kept. */
+export const withAll = (list: readonly number[], numbers: readonly number[]): number[] => {
+  const out = [...list]
+  for (const n of numbers) if (!out.includes(n)) out.push(n)
+  return out
+}
+
+/** `list` without the `numbers`. */
+export const without = (list: readonly number[], numbers: readonly number[]): number[] =>
+  list.filter(n => !numbers.includes(n))
+
+/**
+ * Packs footer items into lines of at most `columns` cells, `gap` cells between items.
+ * An item wider than `columns` gets a line to itself.
+ */
+export function footerLines(labels: readonly string[], columns: number, gap = 2): string[][] {
+  const lines: string[][] = []
+  let width = 0
+  for (const label of labels) {
+    const w = cells(label)
+    const last = lines[lines.length - 1]
+    if (last !== undefined && width + gap + w <= columns) {
+      last.push(label)
+      width += gap + w
+    } else {
+      lines.push([label])
+      width = w
+    }
+  }
+  return lines
+}
 
 /** The line for an empty list; null when PRs are shown. `tracked` counts the PRs in every scope. */
 export function emptyText(shown: number, tracked: number, scope: PrsScope): string | null {

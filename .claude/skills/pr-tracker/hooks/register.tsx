@@ -7,6 +7,7 @@ import {
   clock,
   createdPrNumber,
   emptyText,
+  footerLines,
   headerSegs,
   issueSegs,
   issueWidths,
@@ -24,6 +25,8 @@ import {
   storedPr,
   totalsSegs,
   touchesPrs,
+  withAll,
+  without,
 } from './lib'
 import type { PrsScope, PrsView, Seg } from './lib'
 
@@ -140,13 +143,12 @@ async function addPrs($: Dollar, numbers: readonly number[], isTyped: boolean): 
   const dismissed = await read($, dismissedA)
   const wanted = numbers.filter(n => isTyped || !dismissed.includes(n))
   if (isTyped) {
-    await update($, dismissedA, list => list.filter(n => !numbers.includes(n)))
-    await update($, mineA, list => [...list, ...numbers.filter(n => !list.includes(n))])
+    await update($, dismissedA, list => without(list, numbers))
+    await update($, mineA, list => withAll(list, numbers))
   }
   let isAdded = false
   await update($, prsA, list => {
-    const next = [...list]
-    for (const n of wanted) if (!next.includes(n)) next.push(n)
+    const next = withAll(list, wanted)
     isAdded = next.length !== list.length
     return next
   })
@@ -154,9 +156,9 @@ async function addPrs($: Dollar, numbers: readonly number[], isTyped: boolean): 
 }
 
 async function removePrs($: Dollar, numbers: readonly number[]): Promise<void> {
-  await update($, prsA, list => list.filter(n => !numbers.includes(n)))
-  await update($, mineA, list => list.filter(n => !numbers.includes(n)))
-  await update($, dismissedA, list => [...list, ...numbers.filter(n => !list.includes(n))])
+  await update($, prsA, list => without(list, numbers))
+  await update($, mineA, list => without(list, numbers))
+  await update($, dismissedA, list => withAll(list, numbers))
   await update($, dataA, old => {
     const next = { ...old }
     for (const n of numbers) delete next[String(n)]
@@ -264,7 +266,7 @@ export const register: Register = on => {
     await $.command.register({
       name: 'prs',
       description:
-        'Track PRs added here and PRs any session in this repo reviewed since this one started, with their reviews and issues',
+        'Track PRs created or added here; all also shows PRs any session in this repo reviewed since this one started. With reviews and issues',
       argumentHint: '[add <n>... | remove <n>... | pane | band]',
     })
     await loadView($)
@@ -337,6 +339,11 @@ export const register: Register = on => {
   })
 }
 
+/** The PRs the current scope draws. */
+async function shownPrs($: Dollar): Promise<number[]> {
+  return scopePrs(await read($, prsA), await read($, mineA), await read($, scopeA))
+}
+
 /** The PR list, for the pane and the band alike. */
 async function drawPrs(
   $: Dollar,
@@ -346,7 +353,7 @@ async function drawPrs(
   const { Box, Text, Button } = $.ui.resolve(e)
   const tracked = await read($, prsA)
   const scope = await read($, scopeA)
-  const prs = scopePrs(tracked, await read($, mineA), scope)
+  const prs = await shownPrs($)
   const data = await read($, dataA)
   const runs = await read($, runsA)
   const issues = await read($, issuesA)
@@ -359,7 +366,7 @@ async function drawPrs(
   const sorted = [...prs].sort((a, b) => b - a)
 
   const toggle = (n: number) => async () => {
-    const shown = scopePrs(await read($, prsA), await read($, mineA), await read($, scopeA))
+    const shown = await shownPrs($)
     const current = resolveExpanded(await read($, selectedA), shown, await read($, dataA))
     await update($, selectedA, () => (current === n ? 'none' : n))
   }
@@ -373,10 +380,11 @@ async function drawPrs(
     await update($, scopeA, s => (s === 'mine' ? 'all' : 'mine'))
   }
   const clearMerged = async () => {
-    const shown = scopePrs(await read($, prsA), await read($, mineA), await read($, scopeA))
+    const shown = await shownPrs($)
     await removePrs($, mergedIn(shown, await read($, dataA)))
   }
   const merged = mergedIn(prs, data)
+  const empty = emptyText(prs.length, tracked.length, scope)
   const view = await read($, viewA)
 
   // Segments to elements. A Text takes no key.
@@ -395,8 +403,52 @@ async function drawPrs(
       ),
     )
 
+  const stamp = updatedAt === 0 ? 'not updated yet' : `updated ${clock(updatedAt)}`
+  const items = [
+    { label: stamp, node: <Text dimColor>{stamp}</Text> },
+    {
+      label: 'refresh',
+      node: (
+        <Button key="refresh" onPress={() => quiet(refresh())}>
+          refresh
+        </Button>
+      ),
+    },
+    {
+      label: view === 'pane' ? 'band' : 'pane',
+      node: (
+        <Button key="view" onPress={() => quiet(switchView())}>
+          {view === 'pane' ? 'band' : 'pane'}
+        </Button>
+      ),
+    },
+    {
+      label: scope === 'mine' ? 'all' : 'mine',
+      node: (
+        <Button key="scope" onPress={() => quiet(switchScope())}>
+          {scope === 'mine' ? 'all' : 'mine'}
+        </Button>
+      ),
+    },
+    ...(merged.length === 0
+      ? []
+      : [
+          {
+            label: `clear merged (${merged.length})`,
+            node: (
+              <Button key="clear" onPress={() => quiet(clearMerged())}>
+                {`clear merged (${merged.length})`}
+              </Button>
+            ),
+          },
+        ]),
+  ]
+  let from = 0
+  const footer = footerLines(items.map(i => i.label), columns).map(l => items.slice(from, (from += l.length)))
+
   // The expanded PR gets the rows the headers, totals and footer leave for its issues.
-  const layout = layoutRows(rows, sorted, expanded)
+  // layoutRows counts one footer row; a wrapped footer takes more.
+  const layout = layoutRows(rows - (footer.length - 1), sorted, expanded)
   const room = layout.room
 
   const blocks = layout.shown.map(n => {
@@ -433,27 +485,13 @@ async function drawPrs(
 
   return (
     <Box flexDirection="column">
-      {emptyText(prs.length, tracked.length, scope) !== null && (
-        <Text dimColor>{emptyText(prs.length, tracked.length, scope)}</Text>
-      )}
+      {empty !== null && <Text dimColor>{empty}</Text>}
       {blocks}
       {layout.hidden > 0 && <Text dimColor>{`… ${layout.hidden} more PRs`}</Text>}
-      <Box gap={2}>
-        <Text dimColor>{updatedAt === 0 ? 'not updated yet' : `updated ${clock(updatedAt)}`}</Text>
-        <Button key="refresh" onPress={() => quiet(refresh())}>
-          refresh
-        </Button>
-        <Button key="view" onPress={() => quiet(switchView())}>
-          {view === 'pane' ? 'band' : 'pane'}
-        </Button>
-        <Button key="scope" onPress={() => quiet(switchScope())}>
-          {scope === 'mine' ? 'all' : 'mine'}
-        </Button>
-        {merged.length > 0 && (
-          <Button key="clear" onPress={() => quiet(clearMerged())}>
-            {`clear merged (${merged.length})`}
-          </Button>
-        )}
+      <Box flexDirection="column">
+        {footer.map(line => (
+          <Box gap={2}>{line.map(i => i.node)}</Box>
+        ))}
       </Box>
     </Box>
   )

@@ -564,3 +564,57 @@ test('clear merged shows with merged PRs drawn, removes them, and a later run do
   expect(await ui.find({ type: 'Button', key: 'pr-771' })).toBeUndefined()
   await ui.unmount()
 })
+
+test('a narrow footer wraps onto lines the row budget counts', async ($, on) => {
+  const w = world()
+  w.states[771] = 'MERGED'
+  wire(on, RUNS, {}, '/work', w)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run({ ...CMD, args: 'add 771 772 773 782' })
+  await settle()
+
+  // One gap Box per footer line.
+  const footerLinesOf = async (ui: { findAll: (q: object) => Promise<readonly unknown[]> }) =>
+    ((await ui.findAll({})) as Node[]).filter(b => b.type === 'Box' && (b.props as { gap?: number }).gap === 2).length
+
+  const pane = await $.ui.mount({
+    ...PANE,
+    props: { ...PANE.props, bodyColumns: 30, scroll: { offset: 0, bodyRows: 6 } },
+    surface: 'terminal',
+  })
+  expect(await pane.find({ type: 'Button', key: 'clear' })).toBeDefined()
+  expect(await footerLinesOf(pane)).toBeGreaterThan(1)
+  expect(await rowsDrawn(pane)).toBeLessThanOrEqual(6)
+  expect(await pane.find({ type: 'Button', key: 'refresh' })).toBeDefined()
+  await pane.unmount()
+
+  await $.command.run({ ...CMD, args: 'band' })
+  const band = await $.ui.mount({
+    ...BAND,
+    props: { ...BAND.props, bodyColumns: 34, maxRows: 8 },
+    surface: 'terminal',
+  })
+  expect(await footerLinesOf(band)).toBeGreaterThan(1)
+  expect(await band.find({ type: 'Button', key: 'refresh' })).toBeDefined()
+  await band.unmount()
+})
+
+test('a selection that scope hides falls back to the newest open PR', async ($, on) => {
+  const clock = wire(on, `${RUNS}\n${LATER(900)}`)
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await $.command.run({ ...CMD, args: 'add 782' })
+  await clock.advance(5_000)
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'scope' })
+  await settle()
+  await ui.press({ key: 'pr-900' })
+  await settle()
+  expect((await ui.find({ type: 'Button', key: 'pr-900' }))?.text).toMatch(/^▾/)
+  await ui.press({ key: 'scope' })
+  await settle()
+  expect(await ui.find({ type: 'Button', key: 'pr-900' })).toBeUndefined()
+  expect((await ui.find({ type: 'Button', key: 'pr-782' }))?.text).toMatch(/^▾/)
+  await ui.unmount()
+})
