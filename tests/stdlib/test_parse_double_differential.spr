@@ -268,10 +268,16 @@ fn is_infinite(x: Double) -> Bool = !is_finite(x)
 
 fn is_zero(x: Double) -> Bool = double_to_bits(x) == 0
 
-fn main() -> Unit !{IO} =
+fn main() -> Int !{IO} =
   match args.parse_argv() with
-  | Ok argv -> run_differential(argv)
-  | Err _ -> eprint("an argument is not valid UTF-8")
+  | Ok argv ->
+      do
+        run_differential(argv)
+        0
+  | Err _ ->
+      do
+        eprint("an argument is not valid UTF-8")
+        1
 
 fn run_differential(argv: args.Args) -> Unit !{IO} =
   do

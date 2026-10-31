@@ -8,7 +8,7 @@ module main
 # stream is identical piped or on a tty, which is what makes this testable at all.
 #
 # The half of the module NOT covered here is the input side
-# (term_read_key_once / term_read_line_once / term_is_interactive_once): those
+# (term_read_key_once / term_read_line / term_is_interactive_once): those
 # depend on stdin and on isatty, so they are not golden-stdout testable. See the
 # `P0` key-input entry in BACKLOG §4.
 import stdlib.terminal as term

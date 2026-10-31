@@ -23,18 +23,24 @@ export fn env_switch(name: String) -> Maybe String !{IO} =
         eprint(invalid_notice(name))
         Nothing
 
-# The same without the notice, for a switch read at every call site or function. The notice for
-# these comes once per compile from `warn_invalid_repeated`.
+# The switches read at every call site or function, through `env_switch_quiet`. The one list the
+# readers and `warn_invalid_repeated` share, so a switch added here is warned about too.
+export let trace_dispatch = "SPROUT_TRACE_DISPATCH"
+
+export let verify_roots = "SPROUT_VERIFY_ROOTS"
+
+export let quiet_switches = [trace_dispatch, verify_roots]
+
+# The same without the notice. The notice for a quiet switch comes once per compile from
+# `warn_invalid_repeated`.
 export fn env_switch_quiet(name: String) -> Maybe String !{IO} =
   match env.get(name) with
   | Ok value -> value
   | Err _ -> Nothing
 
-# The notice for each switch read through `env_switch_quiet`, once.
+# The notice for each quiet switch, once.
 export fn warn_invalid_repeated() -> Unit !{IO} =
-  do
-    warn_if_invalid("SPROUT_TRACE_DISPATCH")
-    warn_if_invalid("SPROUT_VERIFY_ROOTS")
+  list_each(warn_if_invalid, quiet_switches)
 
 fn warn_if_invalid(name: String) -> Unit !{IO} =
   match env.get(name) with
