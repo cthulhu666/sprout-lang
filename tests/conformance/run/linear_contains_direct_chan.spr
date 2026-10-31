@@ -1,0 +1,20 @@
+module main
+
+import stdlib.task as task
+import stdlib.chan as chan
+
+# A parameter typed directly `Chan Res`: the argument is phantom, so it may be copied and dropped.
+
+type linear Res = | Res Int
+
+fn twice(c: chan.Chan Res) -> (chan.Chan Res, chan.Chan Res) = (c, c)
+
+fn drop_chan(c: chan.Chan Res) -> Int = 0
+
+fn run(s: task.Scope) -> Int !{IO} =
+  do
+    c <- chan.chan_new(s, 1)
+    let (p, q) = twice(c)
+    drop_chan(p) + drop_chan(q) + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(task.with_scope(run)))

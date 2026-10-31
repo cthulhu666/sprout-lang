@@ -1,0 +1,9 @@
+module main
+
+# A parameter typed directly `(Int, Res)` holds a linear value.
+
+type linear Res = | Res Int
+
+fn drop_pair(p: (Int, Res)) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")
