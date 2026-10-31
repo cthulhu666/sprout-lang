@@ -1,0 +1,30 @@
+module main
+
+# Prints the parse_int and parse_double answer for each argument, then "end".
+#
+# The runtime checks every argument for valid UTF-8 at startup, so a program that is handed one
+# that is not exits with status 2 before any of this runs. A valid non-ASCII argument reaches
+# here and must be handled like any other. Run via `just argv-smoke`, which passes the arguments.
+
+fn show_int(m: Maybe Int) -> String =
+  match m with
+  | Just n -> "Just " ++ int_to_string(n)
+  | Nothing -> "Nothing"
+
+fn show_double(m: Maybe Double) -> String =
+  match m with
+  | Just d -> "Just " ++ double_to_string(d)
+  | Nothing -> "Nothing"
+
+fn report(args: List String) -> Unit !{IO} =
+  match args with
+  | [a | rest] ->
+      do
+        print(show_int(parse_int(a)) ++ " " ++ show_double(parse_double(a)))
+        report(rest)
+  | _ -> print("end")
+
+fn main() -> Unit !{IO} =
+  do
+    args <- argv_all()
+    report(args)

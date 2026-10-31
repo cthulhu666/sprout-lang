@@ -63,6 +63,24 @@ compile fs_io_strings.c "$TMP_DIR/fs_io_strings" -O0 -g
 printf 'hello' | "$TMP_DIR/fs_io_strings" "$TMP_DIR/fs_io" > "$TMP_DIR/fs_io_strings.out"
 test "$(cat "$TMP_DIR/fs_io_strings.out")" = "fs-io-strings"
 
+echo "==> c runtime: fs_list_dir returns Err for an entry name that is not valid UTF-8"
+# Needs a filesystem that accepts such a name: Linux does, macOS APFS does not (the case then
+# prints "...-invalid-skipped"). So the Linux CI job and `just linux-smoke` are where it bites.
+mkdir "$TMP_DIR/fs_list_utf8"
+compile fs_list_dir_utf8.c "$TMP_DIR/fs_list_dir_utf8" -O0 -g
+"$TMP_DIR/fs_list_dir_utf8" "$TMP_DIR/fs_list_utf8" > "$TMP_DIR/fs_list_dir_utf8.out"
+grep -Eq '^fs-list-dir-utf8(-invalid-skipped)?$' "$TMP_DIR/fs_list_dir_utf8.out" || {
+  echo "fs_list_dir utf8 test did not reach a known outcome:" >&2
+  cat "$TMP_DIR/fs_list_dir_utf8.out" >&2
+  exit 1
+}
+if [[ "$(uname)" == "Linux" ]]; then
+  test "$(cat "$TMP_DIR/fs_list_dir_utf8.out")" = "fs-list-dir-utf8" || {
+    echo "fs_list_dir utf8 test skipped its invalid-name case on Linux" >&2
+    exit 1
+  }
+fi
+
 echo "==> c runtime: constructor metadata fails before table overflow"
 compile ctor_meta_capacity.c "$TMP_DIR/ctor_meta_capacity" -O0 -g
 if "$TMP_DIR/ctor_meta_capacity" > "$TMP_DIR/ctor_meta_capacity.out" 2> "$TMP_DIR/ctor_meta_capacity.err"; then
@@ -167,6 +185,10 @@ test "$(cat "$TMP_DIR/trk_bad.out")" = "term-read-key-replacement"
 # follows: that byte is the next keystroke.
 printf '\303A' | "$TMP_DIR/term_read_key_safety" badcont > "$TMP_DIR/trk_cont.out"
 test "$(cat "$TMP_DIR/trk_cont.out")" = "term-read-key-badcont-keeps-next"
+# A NUL byte must yield U+FFFD, not a String that holds a NUL. HDRCHECK is on so a
+# String whose header length disagrees with its text also aborts.
+printf '\000A' | SPROUT_GC_HDRCHECK=1 "$TMP_DIR/term_read_key_safety" nul > "$TMP_DIR/trk_nul.out"
+test "$(cat "$TMP_DIR/trk_nul.out")" = "term-read-key-nul"
 
 echo "==> c runtime: terminal Strings leave headered (HDRCHECK)"
 compile term_strings.c "$TMP_DIR/term_strings" -O0 -g

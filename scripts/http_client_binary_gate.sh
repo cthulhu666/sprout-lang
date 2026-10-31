@@ -76,6 +76,20 @@ for label in content-length chunked; do
   fi
 done
 
+# A header value that is not valid UTF-8 must end as an HttpDecode error, not as a String; a valid
+# non-ASCII value must still arrive.
+for pair in "bad-header:HttpDecode" "utf8-header:Ok"; do
+  label="${pair%%:*}"
+  want="${pair#*:}"
+  got="$(grep "^$label: " "$TMPD/run.out" | head -1 | sed "s/^$label: //")"
+  if [[ "$got" != "$want" ]]; then
+    echo "FAIL [$label]: got '$got', expected $want" >&2
+    status=1
+  else
+    echo "PASS [$label]: $want"
+  fi
+done
+
 if [[ "$status" -ne 0 ]]; then
   echo "--- client output ---" >&2; cat "$TMPD/run.out" >&2
   echo "--- server stderr ---" >&2; cat "$TMPD/server.err" >&2

@@ -242,7 +242,9 @@ The rest of the module is the **classified** surface, whose error is a matchable
 deprecated.
 
 - `list_dir(dir) -> Result FsError (List String) !{IO}` — entry names, excluding
-  `.` and `..`. **Order is unspecified** (the filesystem's, not sorted).
+  `.` and `..`. **Order is unspecified** (the filesystem's, not sorted). An entry name that is
+  not valid UTF-8 makes the whole call `Err (FsIoError "entry name is not valid UTF-8 in <dir>")`;
+  no entry is skipped and no partial list is returned.
 - `stat(p) -> Result FsError Entry !{IO}` — **follows** a final symlink, like
   Rust's `fs::metadata` and Go's `os.Stat`.
 - `symlink_stat(p) -> Result FsError Entry !{IO}` — does **not** follow, like
@@ -307,7 +309,9 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 
 - uses foundational prelude `Maybe` and `Result`
 - `HttpResponse(status, headers, body)` — `body` is **`Bytes`**, not `String`
-- `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`)
+- `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`). A
+  response whose header block is not valid UTF-8 is `HttpDecode "response headers are not valid
+  UTF-8"`
 - `HttpStatus` — the statuses a server can send, one constructor each, its code in its name:
   `Ok200`, `Created201`, `Accepted202`, `NoContent204`, `MovedPermanently301`, `Found302`,
   `SeeOther303`, `NotModified304`, `TemporaryRedirect307`, `PermanentRedirect308`,
@@ -828,7 +832,8 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_home() -> Unit !{IO}`
 - `term_reset_screen() -> Unit !{IO}`
 - `term_render_line(row, text) -> Unit !{IO}`
-- `term_read_key_once() -> String !{IO}`
+- `term_read_key_once() -> String !{IO}` — a byte that is not a key (a NUL, or a malformed
+  UTF-8 sequence) reads as U+FFFD
 - `term_read_line_once() -> Maybe String !{IO}`
 
 Session surface, for a UI rather than a prompt:

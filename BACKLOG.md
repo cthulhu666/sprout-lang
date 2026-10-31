@@ -616,12 +616,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `unused_must_use`, GHC `-Wunused-do-bind`, Swift SE-0047). Recommended as a **driver-side lint
   pass**, not an `infer` change: `CompileResult` has no channel for a warning on a *successful*
   compile. Remaining blockers are the two decisions (warn vs error; whether CI gates on it).
-- [ ] `P3` **Three R2 producers still mint Strings that can violate the `String` invariant:**
-  `term_read_line`, `env_get`, `argv_get`. None has a cheap NUL repro any more (the OS NUL-delimits
-  env and argv; `term_read_line` truncates at the NUL — data loss, not an inconsistent header),
-  but all three can still mint invalid UTF-8, which `SPROUT_GC_HDRCHECK` is blind to because it
-  compares `aux` against `strlen` and a bad lead byte leaves those equal. `docs/debugging.md`
-  records the asymmetry.
+- [ ] `P3` **Two R2 producers still mint Strings that can violate the `String` invariant:**
+  `term_read_line`, `env_get`. Neither has a cheap NUL repro (the OS NUL-delimits env;
+  `term_read_line` truncates at the NUL: data loss, not an inconsistent header), but both can
+  still mint invalid UTF-8, which `SPROUT_GC_HDRCHECK` is blind to because it compares `aux`
+  against `strlen` and a bad lead byte leaves those equal. `docs/debugging.md` records the
+  asymmetry. `argv_get` is closed: argv is checked once at startup.
 - [ ] `P2` **`http_request`'s `timeout_ms` does not bound name resolution.** The deadline starts
   before `http_resolve`, but `async_resolve` parks on its pipe with `scheduler_park_on_unowned_fd`,
   which has no timeout, so a 30 s lookup under `timeout_ms = 1000` returns ~29 s late
