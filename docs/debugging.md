@@ -687,13 +687,13 @@ Three details this line gets wrong if you shorten it. The root argument is the l
 macOS the link also needs `-framework Security -framework CoreFoundation` (the justfile's
 `clang_extra`).
 
-**A test that imports `testsupport.*` needs `--package-root`, and `just test-file` does not pass
-it.** `_test-file` runs `--emit-ir "{{stdlib_root}}" "{{file}}"` with no package root, so a
-`testsupport.*` import resolves to nothing and every type from it is reported as ``unknown type
-`X`: nothing in scope declares that name`` — including in `tests/stdlib/test_imported_records.spr`,
-which is green in CI. Only the `_test-stdlib` runner passes
-`--package-root "{{justfile_directory()}}"`. So either run the whole directory
-(`mise exec -- just test-stdlib-core-stage1`) or invoke the driver directly with the flag:
+**A test that imports `testsupport.*` needs `--package-root`.** `just test-file` passes it
+(`--package-root "{{justfile_directory()}}"`), as `_test-stdlib` does, so
+`mise exec -- just test-file tests/stdlib/test_foo.spr` runs such a test alone. The raw line above
+does not: without a package root a `testsupport.*` import resolves to nothing and every type from
+it is reported as ``unknown type `X`: nothing in scope declares that name`` — including in
+`tests/stdlib/test_imported_records.spr`, which is green in CI. When driving the compiler by hand,
+add the flag:
 
 ```
 ./build/compile_driver_bin_stage1 --emit-ir <repo-root>/stdlib --package-root <repo-root> \

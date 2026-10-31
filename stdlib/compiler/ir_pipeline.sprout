@@ -77,7 +77,7 @@ fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
 # to stderr and mark the compile failed.  Unset: one env lookup, nothing else.
 fn verify_roots_if_enabled(rooted: sprout_ir.IRFunction, summary: Dict Bool,
                            failed: Ref Bool) -> Unit !{IO} =
-  match switches.env_switch_quiet("SPROUT_VERIFY_ROOTS") with
+  match switches.env_switch_quiet(switches.verify_roots) with
   | Just "1" ->
       match ir_verify.verify_rooting(rooted, summary) with
       | Nil -> ()

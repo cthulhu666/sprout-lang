@@ -245,10 +245,16 @@ fn conformance_step(acc: List String, line: String) -> List String =
 
 # ── Driver ──────────────────────────────────────────────────────────────────
 
-fn main() -> Unit !{IO} =
+fn main() -> Int !{IO} =
   match argv.all() with
-  | Ok args -> run(arg_at(args, 0), arg_at(args, 1))
-  | Err _ -> print("gen_unicode_tables: an argument is not valid UTF-8")
+  | Ok args ->
+      do
+        run(arg_at(args, 0), arg_at(args, 1))
+        0
+  | Err _ ->
+      do
+        eprint("gen_unicode_tables: an argument is not valid UTF-8")
+        1
 
 # The inputs are parameters rather than `<-` bindings: a `pure(...)` binding
 # leaves the type unanchored and `++` then finds no Semigroup instance.
