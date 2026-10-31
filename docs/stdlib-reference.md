@@ -119,17 +119,28 @@ fn compute(x: Int) -> Result String Int =
     Ok((large * 2) + 1)
 
 fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> print("usage: ... <int>")
-  | Just raw ->
+  match argv.get(0) with
+  | Ok (Just raw) ->
       match compute(parse_int(raw)) with
       | Ok value -> print(value)
       | Err err -> print(err)
+  | Ok Nothing -> print("usage: ... <int>")
+  | Err _ -> print("the argument is not valid UTF-8")
 ```
 
 Runnable demo (compile to native then pass args directly):
 - `mise exec -- just compile-native examples/result_demo.sprout /tmp/result_demo && /tmp/result_demo 21`
 - `mise exec -- just compile-native examples/result_demo.sprout /tmp/result_demo && /tmp/result_demo 3`
+
+## stdlib.argv
+
+Process arguments as Strings (in `stdlib/argv.sprout`). Index 0 is the first argument after the
+program name. An argument is whatever bytes the OS passed, so these answer `Err` for one that is not
+valid UTF-8; the raw form `argv_all_bytes() -> List Bytes !{IO}` (prelude) never fails.
+
+- `get(index: Int) -> Result Utf8Error (Maybe String) !{IO}` — `Ok(Nothing)` is an index past the
+  last argument, `Err` an argument that is not valid UTF-8
+- `all() -> Result Utf8Error (List String) !{IO}` — `Err` if any argument is invalid
 
 ## stdlib.bytes
 
@@ -158,6 +169,8 @@ Bytes helpers (in `stdlib/bytes.sprout`):
   O(|value|), stops at the first rejected byte
 - `from_string(raw) -> Bytes`
 - `to_string(value) -> Result Utf8Error String`
+- `to_string_maybe(value: Maybe Bytes) -> Result Utf8Error (Maybe String)` — `to_string` for a value
+  that may be absent: `Nothing` is `Ok(Nothing)`, never an error
 - `c_string(raw) -> Bytes`
 - `read_c_string(value) -> Result Utf8Error String`
 - builder helpers:
@@ -219,10 +232,15 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 
 Environment module (in `stdlib/env.sprout`):
 
-- `get(name: String) -> Maybe String !{IO}`
+- `get(name: String) -> Result Utf8Error (Maybe String) !{IO}`
+- `get_or_panic(name: String) -> Maybe String !{IO}` — for a switch read where there is no `Result`
+  to carry an error; a value that is not valid UTF-8 stops the program with `<name> is not valid UTF-8`
+- `env_get_bytes(name: String) -> Maybe Bytes !{IO}` — the raw bytes, unchecked
 
-`Nothing` means the name is unset. A name set to the **empty string** is
-`Just ""`, not `Nothing`, matching POSIX — test the constructor, not emptiness.
+`Ok(Nothing)` means the name is unset. A name set to the **empty string** is
+`Ok(Just "")`, not `Ok(Nothing)`, matching POSIX — test the constructor, not emptiness.
+`Err` means the value is set but is not valid UTF-8: the outer layer is validity, the inner is
+presence.
 
 ## stdlib.fs
 
@@ -836,7 +854,10 @@ Terminal convenience module (in `stdlib/terminal.sprout`):
 - `term_render_line(row, text) -> Unit !{IO}`
 - `term_read_key_once() -> String !{IO}` — a byte that is not a key (a NUL, or a malformed
   UTF-8 sequence) reads as U+FFFD
-- `term_read_line_once() -> Maybe String !{IO}`
+- `term_read_line() -> Result Utf8Error (Maybe String) !{IO}` / `term_read_line_once()` — one stdin line
+  without its newline. `Ok(Nothing)` is end of input; `Err` is a line that is not valid UTF-8 or
+  holds a NUL, which a String cannot hold (the line is consumed)
+- `term_read_line_bytes() -> Maybe Bytes !{IO}` — the same line unchecked, NUL and all
 
 Session surface, for a UI rather than a prompt:
 

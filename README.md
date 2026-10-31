@@ -210,7 +210,7 @@ both of those resolve by unqualified name, so they only work without a prelude t
 collide with. And what is left is the **floor**: the 16 `extern fn`s whose signatures
 mention only primitive types (`print_str`, `eprint`, `panic`, `str_concat`, …). Naming
 anything else the prelude declares is a checked error with a source position
-(`Unknown variable: argv_get`), not a link failure. `examples/no_prelude_core.sprout`
+(`Unknown variable: argv_get_bytes`), not a link failure. `examples/no_prelude_core.sprout`
 is a whole program written against that floor;
 [no-prelude-core-v0.md](./docs/no-prelude-core-v0.md) §4.1 lists the 16 and says why
 the cut falls there.

@@ -472,6 +472,11 @@ be mirrored for values.
 
 ## 8. Compatibility and migration
 
+> **Naming note.** This section was written when the extern was `argv_get: Int -> Maybe String`.
+> The extern is now `argv_get_bytes: Int -> Maybe Bytes`, and the String forms live in
+> `stdlib.argv` (`get`, `all`, returning `Result Utf8Error ...`). The reasoning below is
+> unchanged: the exception is still the one argv extern, and `Maybe` is why.
+
 **Normal files: no change.** Verified on the prototype — `ir-golden-diff` reports
 60 files, 0 differences with the seeding removed, which is direct evidence that
 the seeded schemes were inert for every program in the corpus.

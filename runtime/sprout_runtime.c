@@ -3242,13 +3242,6 @@ long long double_to_string(long long bits) {
   sprout_gc_maybe_collect_threshold();
   return sprout_str_word(sprout_str_dup_slice(buf, (size_t)written, "double_to_string: out of memory"));
 }
-long long env_get(const char* name) {
-  if (name == NULL) sprout_fail("env_get: null name");
-  const char* value = getenv(name);
-  if (value == NULL) return sprout_make0(SPROUT_TAG(Nothing));
-  /* getenv returns bare libc memory; intern to a headered Sprout String. */
-  return sprout_make1(SPROUT_TAG(Just), sprout_interned_word(value));
-}
 /* env_get_bytes: the raw bytes of an environment value, as Bytes, or Nothing when the name is
  * unset. An empty value is Just(empty). The bytes are not checked: a value may not be UTF-8, and
  * stdlib.env decodes it with bytes_to_utf8. getenv returns bare libc memory, so the bytes are
@@ -3304,13 +3297,6 @@ long long argv_get_bytes(long long index) {
   long long out = sprout_make1(SPROUT_TAG(Just), payload);
   SPROUT_GC_POP_LOCALS(1);
   return out;
-}
-long long argv_get(long long index) {
-  if (index < 0) return sprout_make0(SPROUT_TAG(Nothing));
-  if (g_sprout_argv == NULL) return sprout_make0(SPROUT_TAG(Nothing));
-  if (index >= (long long)(g_sprout_argc - 1)) return sprout_make0(SPROUT_TAG(Nothing));
-  /* argv is bare libc memory; intern to a headered Sprout String. */
-  return sprout_make1(SPROUT_TAG(Just), sprout_interned_word(g_sprout_argv[index + 1]));
 }
 /* Err(<String detail>) from a C string, copied to a managed String and rooted across the
  * make1. A caller that cleans up first saves errno before it and passes strerror(saved). */
@@ -6400,13 +6386,8 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * (v->data[i], node->key, node->value) or an immediate (a decoded codepoint, a
  * byte).  A returned element or key may be a collectable object, but it stays
  * reachable from its container for the whole call, and the caller roots it.
- * env_get_unboxed and argv_get_unboxed are the ones worth stating
- * carefully: they route through sprout_str_intern, which on a cache MISS does call
- * malloc — but it is a bare malloc with no sprout_gc_maybe_collect_threshold(),
- * and interned strings are permanent and non-arena (sprout_heap_lookup returns
- * NULL for them, so the collector skips them).  So "allocates nothing" is loose;
- * the load-bearing property is *triggers no collection and produces no GC-managed
- * object*, which is what makes returning a bare unrooted i64 pointer safe.
+ * (`env_get_unboxed` and `argv_get_unboxed` were here until the environment and argv
+ * moved to Bytes copies, which allocate.)
  *
  * This invariant held only weakly until 2026-08-19: `regex_find_match_unboxed`
  * and `term_read_line_unboxed` DID allocate their payload, so the rule had to be
@@ -6432,22 +6413,6 @@ static BSTNode*  bst_nth_node(long long h, long long n);
  * NOTE: if a future moving GC is added, the returned i64 pointers must be
  * re-rooted via handles before any allocation; the non-moving invariant makes
  * this safe today. */
-
-SproutUnboxed2 env_get_unboxed(long long name_val) {
-  const char* name = (const char*)name_val;
-  if (name == NULL) sprout_fail("env_get_unboxed: null name");
-  const char* value = getenv(name);
-  if (value == NULL) return sprout_unboxed2(SPROUT_TAG(Nothing), 0);
-  /* getenv returns bare libc memory; intern to a headered Sprout String. */
-  return sprout_unboxed2(SPROUT_TAG(Just), (int64_t)sprout_interned_word(value));
-}
-
-SproutUnboxed2 argv_get_unboxed(long long index) {
-  if (index < 0 || g_sprout_argv == NULL || index >= (long long)(g_sprout_argc - 1))
-    return sprout_unboxed2(SPROUT_TAG(Nothing), 0);
-  /* argv is bare libc memory; intern to a headered Sprout String. */
-  return sprout_unboxed2(SPROUT_TAG(Just), (int64_t)sprout_interned_word(g_sprout_argv[index + 1]));
-}
 
 SproutUnboxed2 str_char_at_unboxed(long long s_val, long long index) {
   const char* s = (const char*)s_val;

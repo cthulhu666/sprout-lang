@@ -11,6 +11,8 @@ import stdlib.bytes as bytes
 #            one that is not. A NUL byte is not allowed in a String, so such a line is `Err` too.
 #   bytes    term_read_line_bytes: `Bytes <n>` with the line's byte count, NUL bytes kept.
 #
+# `term_read_line_bytes` is an exported extern of stdlib.terminal, called by its bare name.
+#
 # EOF is `Ok(Nothing)` on the String path and `Nothing` on the Bytes path; both print "eof".
 
 fn string_loop() -> Unit !{IO} =
@@ -26,7 +28,7 @@ fn string_loop() -> Unit !{IO} =
         string_loop()
 
 fn bytes_loop() -> Unit !{IO} =
-  match terminal.term_read_line_bytes() with
+  match term_read_line_bytes() with
   | Nothing -> print("eof")
   | Just raw ->
       do

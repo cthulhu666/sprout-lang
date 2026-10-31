@@ -18,7 +18,7 @@ extern fn term_hide_cursor() -> Unit !{IO}
 extern fn term_show_cursor() -> Unit !{IO}
 extern fn term_is_interactive() -> Bool !{IO}
 extern fn term_read_key() -> String !{IO}
-extern fn term_read_line_bytes() -> Maybe Bytes !{IO}
+export extern fn term_read_line_bytes() -> Maybe Bytes !{IO}
 export extern fn term_write(text: String) -> Unit !{IO}
 
 # One stdin line without its trailing `\n` / `\r\n`. `Ok(Nothing)` is end of input. `Err` is a line
