@@ -172,8 +172,9 @@ key's **path** is the chain of producing keys back to a call in the original pro
 **Why it terminates.** A cache alone is no backstop: growing evidence is a new key every time.
 - A self-call sees the provisional, ungeneralised scheme (`self_binding_scheme`, `infer.sprout`),
   so it is at the caller's own type.
-  `tests/conformance/type_error/polymorphic_recursion_constrained.spr` pins that. `BACKLOG.md` P2 **Allow polymorphic recursion for a CONSTRAINED declaration** would
-  lift it and give the backstop more inputs.
+  `tests/conformance/type_error/polymorphic_recursion_constrained.spr` pins that. `BACKLOG.md`
+  P2 **Allow polymorphic recursion for a CONSTRAINED declaration** would lift it and give the
+  backstop more inputs.
 - A call to a binding-group peer with a complete signature is not restricted: the peer is visible
   already quantified (`spec-v0.md` §5; `register_fn_decl_scheme` registers its declared scheme),
   so `f` can call `g` at `List x` while `g` calls `f` back at `x`. The evidence grows every lap.
@@ -293,23 +294,27 @@ code compares through `Ord`/`Eq`.
     reach the same rooting and B1 gain.
 
   The counts show reach, not time. Each lever still needs its own A/B before it lands.
-- **M1 — the pass, behind a switch.** Add `Spec` to `opt_config.Pass` and to
-  `pass_implemented`. `SPROUT_OPT_OFF` is read today in `run_opt_passes`, after lowering, where
-  this pass has already run; `lower_checked` reads the config once and passes it to both. `report_opt_delta`
-  prints `removed=`, and `bench/optpasses/bench.sh` counts a pass as fired only when that is
+- **M1 — the pass, behind a switch.** Add `Spec` to `opt_config.Pass`, implemented and off by
+  default: a default-off set holds it, and `SPROUT_OPT_ON=spec` turns it on. `SPROUT_OPT_OFF`
+  wins when both name it, and an unknown name warns as it does there. `just refresh-seed` and
+  `just verify-bootstrap-fixed-point` refuse to run while either is set, or a seed built with
+  the pass on, or another pass off, gets committed. `SPROUT_OPT_OFF` is read today in
+  `run_opt_passes`, after lowering, where this pass has already run; `lower_checked` reads the
+  config once and passes it to both. `report_opt_delta` prints `removed=`, and `bench/optpasses/bench.sh` counts a pass as fired only when that is
   non-zero; this pass adds nodes, so both learn `added=`. A/B with
   `just bench-opt spec` and with `bench/native_runtime/bench.sh`. Target: generic `mutvec_sort`
   near §1's hand-applied copy (46 / 70), not the Int row, which also drops the closure. The bench
-  gains that row as a copy of the closure-taking sort, since `mutvec_sort_with` is private. Gates: self-compile time within its noise floor (2.2% in the
+  gains that row as a copy of the closure-taking sort, since `mutvec_sort_with` is private.
+  Gates: self-compile time within its noise floor (2.2% in the
   2026-10-18 baseline; it is the GC-heaviest workload), `just rooting-cost-gate`, which prices
   the compiler's own compile, and the emitted binary size of the bench corpus and the compiler,
   within 10%.
-- **M2 — turn it on by default**, in its own change. From here the compiler is built by this pass,
-  so a bug in it miscompiles the compiler that must build the fix. Require a 2-step bootstrap fixed
-  point with the pass on (`docs/debugging.md` §2-Step Bootstrap Protocol). `SPROUT_OPT_OFF=spec`
-  changes what a compiler emits; it cannot repair a seed the pass miscompiled, so the way back is
-  reverting the seed commit. `just refresh-seed` and `just verify-bootstrap-fixed-point` refuse to
-  run while `SPROUT_OPT_OFF` is set, or a pass-off seed gets committed. Then reseed.
+- **M2 — turn it on by default**, in its own change: `Spec` leaves the default-off set. From
+  here the compiler is built by this pass, so a bug in it miscompiles the compiler that must build
+  the fix. Require a 2-step bootstrap fixed point with the pass on (`docs/debugging.md` §2-Step
+  Bootstrap Protocol). `SPROUT_OPT_OFF=spec` changes what a compiler emits; it cannot repair a
+  seed the pass miscompiled, so the way back is reverting the seed commit. Then reseed; M1's
+  guard keeps a pass-off seed out.
 
   **Golden IR.** `print` is a `ToString`-constrained function, so every snapshot that prints moves,
   and the diff is too large to read (`docs/gates.md` §Golden IR, "When the diff is too large to
