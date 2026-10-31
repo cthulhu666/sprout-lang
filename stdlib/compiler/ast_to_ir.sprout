@@ -485,7 +485,7 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                                           field_kinds = fk.ctor_field_kinds_string([inner]),
                                           field_names = Nil, sole = true,
                                           linear = is_linear(mult), type_name = type_name,
-                                          scalar_only = type_kind.type_expr_is_non_heap_scalar(inner)),
+                                          scalar_only = fk.ctor_fields_scalar_only([inner], 0)),
                        acc)
           in build_ctor_table_acc(rest, next_tag, acc1, regs, cenv)
       # Records: a single-constructor product keyed by the type name.  It carries
@@ -494,14 +494,14 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
       # and reorder literal fields.  Not added to regs — GC tracing is header-driven
       # (arity in the object header), so no runtime ctor registration is needed.
       | typed_ast.TPassThrough (ast.RecordDecl type_name _params fields _ mult _ _) ->
-          let acc1 = try ctor_table_put(type_name,
+          let exprs = ast.record_field_type_exprs(fields)
+              acc1 = try ctor_table_put(type_name,
                        sprout_ir.CtorInfo(tag = next_tag, arity = list_length(fields),
                                           max_arity = list_length(fields),
-                                          field_kinds = fk.ctor_field_kinds_string(ast.record_field_type_exprs(fields)),
+                                          field_kinds = fk.ctor_field_kinds_string(exprs),
                                           field_names = list_map(record_field_name, fields), sole = true,
                                           linear = is_linear(mult), type_name = type_name,
-                                          scalar_only = all(type_kind.type_expr_is_non_heap_scalar,
-                                                            ast.record_field_type_exprs(fields))),
+                                          scalar_only = fk.ctor_fields_scalar_only(exprs, 0)),
                        acc)
           in build_ctor_table_acc(rest, next_tag + 1, acc1, regs, cenv)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs, cenv)
@@ -618,8 +618,7 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr, witness_sl
                sprout_ir.CtorInfo(tag = next_tag, arity = arity, max_arity = max_ar,
                                   field_kinds = fks, field_names = Nil,
                                   sole = sole, linear = linear, type_name = type_name,
-                                  scalar_only = witness_slots == 0
-                                    && all(type_kind.type_expr_is_non_heap_scalar, ctor_args)),
+                                  scalar_only = fk.ctor_fields_scalar_only(ctor_args, witness_slots)),
                acc)
   in register_ctor_entries(rest, next_tag + 1, max_ar, sole, linear, type_name, acc1,
                            Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs), cenv)

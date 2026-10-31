@@ -199,8 +199,8 @@ whether a field may hold a heap value:
   `store` that `lower_stores` emits for `IRMakeCtor`. For the token's own constructor the header
   is untouched. For another constructor the header word is loaded, its low 14 bits (kind, colour,
   age, REMEMBERED) kept, and the new aux `(tag << 8) | arity` ORed in at bit 14: the encoding of
-  `sprout_obj_write_tag`, so both get a `SYNC` comment. Between collections the colour bit means
-  *old* (`docs/gc-generational-v0.md` §14.4), and bit 13 (REMEMBERED) says the cell is already in
+  `sprout_obj_write_tag`, so both get a `SYNC` comment. Once minor collections run, the colour
+  bit between collections means *old* (`docs/gc-generational-v0.md` §14.4), and bit 13 (REMEMBERED) says the cell is already in
   the remembered set. The mask keeps both, so a reused cell keeps its generation and is not
   recorded twice. The barrier call follows the stores and the header rewrite.
 - **Write barrier.** A reused cell can be old while the new field values are young. When
