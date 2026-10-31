@@ -301,13 +301,18 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
            ", i64 " ++ int_to_string(list_length(args)) ++ ")\n" ++
          "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
          lower_stores(r, "$f", args, 0))
-  | sprout_ir.IRReuseCtor r token from_tag _ tag args ->
+  | sprout_ir.IRReuseCtor r token from_tag _ tag args barrier ->
       # The token's cell, refilled: same field stores as IRMakeCtor. A different
       # constructor also rewrites the header tag; the arity is the cell's own.
+      # The cell may be old and now point at young objects, so a cell with a field that may
+      # hold a heap value is reported to the collector after the stores. A plain call, not an
+      # inline header test: an op that opened a basic block would break downstream phis (see
+      # IRApplyClosure); the test is inside the runtime function.
       "  " ++ r ++ " = add i64 " ++ token ++ ", 0\n" ++
       "  " ++ r ++ "$ptr = inttoptr i64 " ++ r ++ " to ptr\n" ++
       lower_stores(r, "$f", args, 0) ++
-      (if from_tag == tag then "" else "\n" ++ lower_reuse_header(r, tag, list_length(args)))
+      (if from_tag == tag then "" else "\n" ++ lower_reuse_header(r, tag, list_length(args))) ++
+      (if barrier then "\n  call void @sprout_gc_write_barrier(ptr " ++ r ++ "$ptr)" else "")
   | sprout_ir.IRMkClosure r code_fn arity caps ->
       if sprout_ir.closure_is_static(caps)
       then
@@ -491,7 +496,8 @@ fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
 let hdr_aux_unit: Int = 16384
 
 # Rewrite a reused cell's header to constructor `tag`, keeping the low 14 bits
-# (kind, colour, age) and the arity.
+# (kind, colour, age, REMEMBERED) and the arity. Keeping colour and REMEMBERED is what lets
+# the write barrier that follows the stores see an old cell and record it once.
 # SYNC WITH runtime/sprout_runtime.c sprout_obj_write_tag: aux is (tag << 8) | arity.
 fn lower_reuse_header(r: String, tag: Int, arity: Int) -> String =
   "  " ++ r ++ "$hp = getelementptr i8, ptr " ++ r ++ "$ptr, i64 -8\n" ++
@@ -590,6 +596,8 @@ let runtime_declares: List RuntimeDeclare =
    # Arity guard on every closure-value application; aborts on a mismatch rather
    # than calling through with the wrong argument count.
    decl("void", "sprout_closure_arity_check", "i64, i64"),
+   # Generational write barrier after a linear reuse stores into an old cell (docs/gc-generational-v0.md §14.4).
+   decl("void", "sprout_gc_write_barrier", "ptr"),
    # A raw N * 8-byte blob for tuple storage; one declare covers all arities.
    decl("i64", "sprout_alloc_tuple_blob", "i64"),
    # Fills g_ctor_meta[] so find_ctor(tag) returns metadata and the GC traces

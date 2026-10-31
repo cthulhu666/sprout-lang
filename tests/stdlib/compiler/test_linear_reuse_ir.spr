@@ -277,6 +277,54 @@ fn check_shapes(state: TestState, ir: String, ll: String) -> Unit !{IO} =
     assert_eq(state, "let alias of an owned parameter: reuses", reuses(ir_fn(ir, "alias_inline")), 1)
     assert_eq(state, "let alias of an owned parameter: no make", makes(ir_fn(ir, "alias_inline")), 0)
 
+# A reused cell can be old and its new fields young (docs/gc-generational-v0.md §14.4), so a
+# reuse whose constructor has a field that may hold a heap value calls the write barrier.
+# Int, Bool, Char and Double fields hold no heap pointer; a type variable may.
+let barrier_src =
+  "type linear Scalars = Scalars Int Bool Double\n" ++
+  "type linear Held = Held Int String\n" ++
+  "type linear Slot a = Slot a Int\n" ++
+  "type linear Sw = | SwA Int String | SwB Int String\n" ++
+  "type linear Mixed = | Pure Int Int | Heapy Int String\n" ++
+  "fn bump_scalars(s: Scalars) -> Scalars = match s with | Scalars n b d -> Scalars(n + 1, b, d)\n" ++
+  "fn bump_held(h: Held) -> Held = match h with | Held n s -> Held(n + 1, s)\n" ++
+  "fn bump_slot(s: Slot a) -> Slot a = match s with | Slot x n -> Slot(x, n + 1)\n" ++
+  "fn flip_sw(t: Sw) -> Sw =\n" ++
+  "  match t with\n" ++
+  "  | SwA n s -> SwB(n, s)\n" ++
+  "  | SwB n s -> SwA(n, s)\n" ++
+  "fn bump_pure(m: Mixed) -> Mixed =\n" ++
+  "  match m with\n" ++
+  "  | Pure a b -> Pure(a + 1, b)\n" ++
+  "  | Heapy a s -> Heapy(a + 1, s)\n"
+
+fn barriers(ll: String) -> Int = count(ll, "call void @sprout_gc_write_barrier(")
+
+fn check_barrier(state: TestState, ir: String, ll: String) -> Unit !{IO} =
+  do
+    assert_true(state, "barrier program translates", contains(ir, "fn bump_held("))
+    assert_true(state, "barrier declare is in the header",
+                contains(ll, "declare void @sprout_gc_write_barrier(ptr)\n"))
+
+    assert_eq(state, "scalar-only reuse: reuses", reuses(ir_fn(ir, "bump_scalars")), 1)
+    assert_eq(state, "scalar-only reuse (Int, Bool, Double): no barrier",
+              barriers(ll_fn(ll, "bump_scalars")), 0)
+    assert_eq(state, "mixed type: only the heap-field constructor's reuse has a barrier",
+              barriers(ll_fn(ll, "bump_pure")), 1)
+
+    assert_eq(state, "heap field reuse: reuses", reuses(ir_fn(ir, "bump_held")), 1)
+    assert_eq(state, "heap field reuse: one barrier", barriers(ll_fn(ll, "bump_held")), 1)
+    assert_true(state, "barrier takes the cell pointer",
+                contains(ll_fn(ll, "bump_held"), "call void @sprout_gc_write_barrier(ptr %t"))
+
+    assert_eq(state, "type-variable field reuse: reuses", reuses(ir_fn(ir, "bump_slot")), 1)
+    assert_eq(state, "type-variable field reuse: one barrier", barriers(ll_fn(ll, "bump_slot")), 1)
+
+    let flip = ll_fn(ll, "flip_sw")
+    assert_eq(state, "tag change with a heap field: one barrier per reuse", barriers(flip), 2)
+    assert_true(state, "tag change: the barrier follows the header rewrite",
+                str_find(flip, "16383") != -1 && str_find(flip, "16383") < str_find(flip, "@sprout_gc_write_barrier("))
+
 fn check_lambda(state: TestState, ir: String) -> Unit !{IO} =
   do
     assert_true(state, "lambda program translates", contains(ir, "fn in_lambda("))
@@ -298,4 +346,6 @@ fn main() -> Unit !{IO} =
     check_lambda(state, lam_ir)
     (shadow_ir, _) <- render(lambda_shadow_src)
     check_lambda_shadow(state, shadow_ir)
+    (barrier_ir, barrier_ll) <- render(barrier_src)
+    check_barrier(state, barrier_ir, barrier_ll)
     summary(state)

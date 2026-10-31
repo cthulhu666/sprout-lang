@@ -484,7 +484,8 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                        sprout_ir.CtorInfo(tag = -1, arity = 1, max_arity = 1,
                                           field_kinds = fk.ctor_field_kinds_string([inner]),
                                           field_names = Nil, sole = true,
-                                          linear = is_linear(mult), type_name = type_name),
+                                          linear = is_linear(mult), type_name = type_name,
+                                          scalar_only = type_kind.type_expr_is_non_heap_scalar(inner)),
                        acc)
           in build_ctor_table_acc(rest, next_tag, acc1, regs, cenv)
       # Records: a single-constructor product keyed by the type name.  It carries
@@ -498,7 +499,9 @@ fn build_ctor_table_acc(decls: List typed_ast.TypedDecl, next_tag: Int,
                                           max_arity = list_length(fields),
                                           field_kinds = fk.ctor_field_kinds_string(ast.record_field_type_exprs(fields)),
                                           field_names = list_map(record_field_name, fields), sole = true,
-                                          linear = is_linear(mult), type_name = type_name),
+                                          linear = is_linear(mult), type_name = type_name,
+                                          scalar_only = all(type_kind.type_expr_is_non_heap_scalar,
+                                                            ast.record_field_type_exprs(fields))),
                        acc)
           in build_ctor_table_acc(rest, next_tag + 1, acc1, regs, cenv)
       | _ -> build_ctor_table_acc(rest, next_tag, acc, regs, cenv)
@@ -548,9 +551,9 @@ fn finish_make_ctor(env: TxEnv, what: String, name: String, tag: Int, arg_names:
   | Just msg -> Err(msg)
   | Nothing ->
       match reuse_for_ctor(env, name, arg_names) with
-      | Just tok ->
+      | Just (tok, barrier) ->
           Ok((blocks, cur_label,
-               list_builder_add(sprout_ir.IRReuseCtor(fresh_name(idx), tok.ssa, tok.tag, name, tag, arg_names), cur_ops),
+               list_builder_add(sprout_ir.IRReuseCtor(fresh_name(idx), tok.ssa, tok.tag, name, tag, arg_names, barrier), cur_ops),
                fresh_name(idx), idx + 1))
       | Nothing ->
           Ok((blocks, cur_label,
@@ -558,12 +561,13 @@ fn finish_make_ctor(env: TxEnv, what: String, name: String, tag: Int, arg_names:
                fresh_name(idx), idx + 1))
 
 # The token a build of constructor `name` takes: same type and the same physical field count
-# (the args include any dictionary witnesses), at least one field.
-fn reuse_for_ctor(env: TxEnv, name: String, arg_names: List String) -> Maybe ReuseTok !{IO} =
+# (the args include any dictionary witnesses), at least one field. The Bool is whether the
+# rebuilt cell needs a write barrier: unless every field is a scalar.
+fn reuse_for_ctor(env: TxEnv, name: String, arg_names: List String) -> Maybe (ReuseTok, Bool) !{IO} =
   match dict_get(name, env.prog.ctors) with
   | Just entry ->
       if entry.linear && entry.arity >= 1 && entry.arity == list_length(arg_names)
-      then reuse_take(env, entry.type_name, entry.arity)
+      then map(\tok -> (tok, !entry.scalar_only), reuse_take(env, entry.type_name, entry.arity))
       else Nothing
   | Nothing -> Nothing
 
@@ -613,7 +617,9 @@ fn register_ctor_one(ctor_name: String, ctor_args: List ast.TypeExpr, witness_sl
   let acc1 = try ctor_table_put(ctor_name,
                sprout_ir.CtorInfo(tag = next_tag, arity = arity, max_arity = max_ar,
                                   field_kinds = fks, field_names = Nil,
-                                  sole = sole, linear = linear, type_name = type_name),
+                                  sole = sole, linear = linear, type_name = type_name,
+                                  scalar_only = witness_slots == 0
+                                    && all(type_kind.type_expr_is_non_heap_scalar, ctor_args)),
                acc)
   in register_ctor_entries(rest, next_tag + 1, max_ar, sole, linear, type_name, acc1,
                            Cons(sprout_ir.CtorReg(ctor_name, next_tag, arity, fks), regs), cenv)

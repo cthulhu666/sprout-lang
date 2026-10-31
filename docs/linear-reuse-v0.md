@@ -77,8 +77,9 @@ Non-goals (v0):
   `p with (x = p.x + 1)` uses `p` twice, and cannot replace a linear field (spec §5.8).
 - Non-linear values. Uniqueness is unknown without a runtime count, which Sprout does not keep.
 - An explicit guarantee such as Koka's `fip`. A `linear-reuse` smoke counts allocations instead.
-- A write barrier. The collector is not generational (`docs/gc-generational-v0.md` is
-  exploratory); a reused cell is a barrier site if one lands (`persistent-array-v0.md` §5.3).
+- A new write-barrier design. A reused cell is a barrier site for the generational collector
+  (`docs/gc-generational-v0.md` §14.4), which this design only feeds: the op carries a flag
+  and lowering calls `sprout_gc_write_barrier` (§4.3). It does not decide how the barrier works.
 
 ## 3. Prior art
 
@@ -161,7 +162,7 @@ The token is the scrutinee's SSA name, its type, the arm's constructor and its f
 lives in one `Ref` in the translation environment, so there is one token at a time:
 - The first `IRMakeCtor` on the arm's path whose constructor has the token's type and field count
   (at least 1; nullary constructors are interned) takes it and becomes
-  `IRReuseCtor dst token ctor tag args`.
+  `IRReuseCtor dst token ctor tag args barrier`.
 - A `match` nested in an arm mints its own token in place of the outer one. The outer token comes
   back at the nested match's join, under the join rule below. Each cell is still reused at most
   once.
@@ -191,14 +192,24 @@ lambda path, would be unsound. Each is one call site, and each gets a test.
 
 ### 4.3 The op
 
-`IRReuseCtor <dst> <token> <from-tag> <ctor> <tag> <args>`, where `from-tag` is the matched
-constructor's tag, so the lowering knows whether the header changes:
+`IRReuseCtor <dst> <token> <from-tag> <ctor> <tag> <args> <barrier>`, where `from-tag` is the
+matched constructor's tag, so the lowering knows whether the header changes, and `barrier` says
+whether a field may hold a heap value:
 - **Lowering.** `dst` is the token's value. Each field is stored through the same GEP and
   `store` that `lower_stores` emits for `IRMakeCtor`. For the token's own constructor the header
   is untouched. For another constructor the header word is loaded, its low 14 bits (kind, colour,
-  age) kept, and the new aux `(tag << 8) | arity` ORed in at bit 14: the encoding of
-  `sprout_obj_write_tag`, so both get a `SYNC` comment. Outside a collection the colour bit is 0.
-  The age bits carry over; only `SPROUT_GC_AGEPROF` reads them.
+  age, REMEMBERED) kept, and the new aux `(tag << 8) | arity` ORed in at bit 14: the encoding of
+  `sprout_obj_write_tag`, so both get a `SYNC` comment. Between collections the colour bit means
+  *old* (`docs/gc-generational-v0.md` §14.4), and bit 13 (REMEMBERED) says the cell is already in
+  the remembered set. The mask keeps both, so a reused cell keeps its generation and is not
+  recorded twice. The barrier call follows the stores and the header rewrite.
+- **Write barrier.** A reused cell can be old while the new field values are young. When
+  `barrier` is set, lowering ends the op with `call void @sprout_gc_write_barrier(ptr <cell>)`.
+  It is a plain call, not an inline header test, because an op that opens a basic block would
+  break downstream phis (see `IRApplyClosure`); the test runs inside the runtime function.
+  `ast_to_ir` clears the flag only when every field is an `Int`, `Bool`, `Char` or `Double`
+  (`CtorInfo.scalar_only`). A type-variable field or a dictionary witness slot counts as heap.
+  The call does not allocate, so it is not a GC trigger.
 - **Rooting.** Not a GC trigger. Its uses are the token and the args. The token is therefore live
   from the match to the rebuild and is rooted across every trigger in between, so the collector
   cannot sweep the cell and write a freelist link into word 0. That costs a root push and pop

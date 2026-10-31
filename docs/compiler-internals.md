@@ -209,7 +209,7 @@ Regression tests: `tests/stdlib/compiler/test_scalar_global_no_root.spr` (global
 Design: [linear-reuse-v0.md](linear-reuse-v0.md). `ast_to_ir` mints a token at a `match` arm over
 an owned linear parameter's own cell (`TxEnv.owned` holds parameter SSA names) and the first
 same-type, same-physical-field-count build on the path takes it: `IRReuseCtor dst token from_tag
-ctor tag args` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
+ctor tag args barrier` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
 
 - **Not a GC trigger; its uses are the token and the args.** The token is therefore live from
   the match to the rebuild and `ir_rooting` roots it across every trigger between them. A swept
@@ -219,7 +219,9 @@ ctor tag args` replaces the `IRMakeCtor`. The only taker is `finish_make_ctor`.
   `op_uses` drops the token.
 - **Lowering** stores the fields as `IRMakeCtor` does. Another constructor of the same type
   also rewrites the header's tag, keeping its low 14 bits and the arity
-  (`ir_lowering.lower_reuse_header`, SYNC with `sprout_obj_write_tag`).
+  (`ir_lowering.lower_reuse_header`, SYNC with `sprout_obj_write_tag`). A cell with a field
+  that may hold a heap value then calls `sprout_gc_write_barrier`, as the `barrier` flag from
+  `CtorInfo.scalar_only` says; the call allocates nothing, so `ir_rooting` does not see a trigger.
 - **One token per path.** `TxEnv.reuse_ref` holds a stack of tokens. `if`, `match` and the
   unboxed-`Maybe` match push a frame, start each branch from the entry stack and leave a token
   taken after the join if any branch took it; a nested match's token sits above the outer one,

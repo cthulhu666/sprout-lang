@@ -13,6 +13,7 @@ declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
+declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
@@ -679,6 +680,7 @@ then_17:
   store i64 %t$13, ptr %t$19$f3
   %t$19$f4 = getelementptr i64, ptr %t$19$ptr, i64 4
   store i64 %t$14, ptr %t$19$f4
+  call void @sprout_gc_write_barrier(ptr %t$19$ptr)
   %t$37 = alloca i64
   store i64 %t$19, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
@@ -710,6 +712,7 @@ else_17:
   store i64 %t$13, ptr %t$22$f3
   %t$22$f4 = getelementptr i64, ptr %t$22$ptr, i64 4
   store i64 %p$passed, ptr %t$22$f4
+  call void @sprout_gc_write_barrier(ptr %t$22$ptr)
   store i64 %p$f, ptr %t$25
   store i64 %p$g, ptr %t$26
   store i64 %p$x, ptr %t$27
@@ -770,6 +773,7 @@ body_1_1:
   store i64 %t$10, ptr %t$12$f3
   %t$12$f4 = getelementptr i64, ptr %t$12$ptr, i64 4
   store i64 %p$tail, ptr %t$12$f4
+  call void @sprout_gc_write_barrier(ptr %t$12$ptr)
   store i64 %t$11, ptr %t$14
   store i64 %t$12, ptr %t$15
   br label %tco_loop
@@ -904,6 +908,7 @@ then_28:
   store i64 %t$12, ptr %t$30$f1
   %t$30$f2 = getelementptr i64, ptr %t$30$ptr, i64 2
   store i64 %t$13, ptr %t$30$f2
+  call void @sprout_gc_write_barrier(ptr %t$30$ptr)
   br label %join_28
 else_28:
   %t$31 = call i64 @stdlib.linvec.set(i64 %t$14, i64 %p$ng, i64 %t$11)
@@ -933,6 +938,7 @@ ovfok_33:
   store i64 %t$12, ptr %t$37$f1
   %t$37$f2 = getelementptr i64, ptr %t$37$ptr, i64 2
   store i64 %t$36, ptr %t$37$f2
+  call void @sprout_gc_write_barrier(ptr %t$37$ptr)
   br label %join_28
 join_28:
   %t$29 = phi i64 [%t$30, %then_28], [%t$37, %ovfok_33]
@@ -1167,6 +1173,7 @@ then_40:
   store i64 %t$3, ptr %t$42$f1
   %t$42$f2 = getelementptr i64, ptr %t$42$ptr, i64 2
   store i64 %t$18, ptr %t$42$f2
+  call void @sprout_gc_write_barrier(ptr %t$42$ptr)
   %t$67 = getelementptr i64, ptr %t$57, i64 1
   call void @llvm.memset.p0.i64(ptr %t$67, i8 0, i64 24, i1 false)
   store i64 %t$42, ptr %t$55
@@ -1194,6 +1201,7 @@ ovfok_45:
   store i64 %t$49, ptr %t$50$f1
   %t$50$f2 = getelementptr i64, ptr %t$50$ptr, i64 2
   store i64 %t$18, ptr %t$50$f2
+  call void @sprout_gc_write_barrier(ptr %t$50$ptr)
   %t$68 = alloca i64
   store i64 %t$50, ptr %t$68
   %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
