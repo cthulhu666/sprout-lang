@@ -148,7 +148,7 @@ static long long g_ctor_meta_len = 0;
 static int g_ctor_by_tag[sizeof(g_ctor_meta) / sizeof(g_ctor_meta[0])];
 static int g_listener_fd[2048];
 static int g_listener_used[2048];
-/* Accepts in a row per listener with no park in between; see ACCEPT_FAIR_STREAK. */
+/* Per listener: tcp_accept calls in a row that did not park inside it; see ACCEPT_FAIR_STREAK. */
 static int g_accept_streak[2048];
 static int g_conn_fd[2048];
 static int g_conn_used[2048];
@@ -10003,6 +10003,25 @@ int accept_shed_backlog(int listener_fd) {
   return shed;
 }
 
+/* Fairness. With connections always queued, accept() never returns EAGAIN, so tcp_accept never
+ * parks, and the pump polls only when nothing is runnable: an accept loop that does not park keeps
+ * every other task off the CPU. After ACCEPT_FAIR_STREAK calls in a row that returned without
+ * parking inside tcp_accept, the next call parks on the listener BEFORE its accept(), so no accepted
+ * fd is held without a handle while parked (a task dropped by scope_cancel would leak it). A park
+ * elsewhere (a chan_send in the caller, say) does not reset the count. A queued connection makes the
+ * listener readable, so the park returns at the next poll, after every runnable task has had a turn.
+ * With an empty queue it is the same wait EAGAIN would cause.
+ *
+ * This per-listener count is a workaround: delete it when the fix in the BACKLOG entry "The pump
+ * only polls when the ready queue is empty, so one busy task starves all I/O" lands. */
+#define ACCEPT_FAIR_STREAK 16
+
+/* Every park in tcp_accept goes through here, so the streak count restarts after each one. */
+static void accept_park(long long listener) {
+  g_accept_streak[listener] = 0;
+  scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+}
+
 /* RECOVERABLE accept (concurrency review C3). Two of the paths below used to be `sprout_fail`, so a
  * server died rather than shedding one connection — and one of them was reachable by ordinary
  * traffic: `ECONNABORTED` means a peer reset between SYN and accept, which any public listener sees.
@@ -10034,21 +10053,6 @@ int accept_shed_backlog(int listener_fd) {
  * Table-full is absorbed alongside descriptor exhaustion rather than distinguished: it means the same
  * thing (no connection slot is available right now) and has the same remedy. The distinction between
  * an OS descriptor and one of our 2048 handles is not one a server can act on. */
-/* Fairness. With connections always queued, accept() never returns EAGAIN, so the loop below never
- * parks, and the pump polls only when nothing is runnable: an accept loop that does not park keeps
- * every other task off the CPU. After ACCEPT_FAIR_STREAK accepts in a row the next call parks on the
- * listener BEFORE its accept(), so no accepted fd is held without a handle while parked (a task
- * dropped by scope_cancel would leak it). A queued connection makes the listener readable, so the
- * park returns at the next poll, after every runnable task has had a turn. With an empty queue it is
- * the same wait EAGAIN would cause. */
-#define ACCEPT_FAIR_STREAK 16
-
-/* Every park in tcp_accept goes through here, so the streak count restarts after each one. */
-static void accept_park(long long listener) {
-  g_accept_streak[listener] = 0;
-  scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
-}
-
 long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener])
     return tcp_net_err0(SPROUT_TAG(stdlib$net$TcpInvalidHandle));

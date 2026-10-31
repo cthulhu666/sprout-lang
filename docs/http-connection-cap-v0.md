@@ -65,12 +65,15 @@ upstream connections per worker process by default (`keepalive 32 local;`), so w
 (live 512, idle cap 256) one nginx worker's idle connections fit under the idle cap, and several
 workers need `max_idle_connections` raised.
 
-**Accept fairness.** `tcp_accept` parks on the listener after 16 accepts in a row with no park in
-between, before its next `accept()`. The pump polls only when nothing is runnable, so an accept loop
+**Accept fairness.** `tcp_accept` parks on the listener after 16 calls in a row on that listener
+that did not park inside `tcp_accept`, before its next `accept()`. A park elsewhere (a `chan_send` in
+the caller, say) does not reset the count. The pump polls only when nothing is runnable, so an accept loop
 that never parks (the refuse-at-cap loop, or `serve_loop` spawning handlers) would keep every other
 task off the CPU while connections keep arriving. A queued connection makes the listener readable,
 so the park returns at the next poll, after every runnable task had a turn. With an empty queue it
 is the same wait `EAGAIN` causes. `tcp_accept` in `runtime/sprout_runtime.c` (`ACCEPT_FAIR_STREAK`).
+The count is a workaround: it goes when the fix in the BACKLOG entry on the pump polling only when
+the ready queue is empty lands.
 
 ## 4. Sizing
 

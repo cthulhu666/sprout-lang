@@ -2550,8 +2550,8 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/listen_backlog.spr
   run_once "listen-backlog" "listen-backlog-ok"
   # (18c) accept fairness: with 40 connections queued, `tcp_accept` parks after ACCEPT_FAIR_STREAK
-  # accepts in a row (docs/http-connection-cap-v0.md) so a task spawned beside the accept loop runs.
-  # RED: it ran after all 40 (recorded 40).
+  # calls in a row that did not park (docs/http-connection-cap-v0.md) so a task spawned beside the
+  # accept loop runs. RED: it ran after all 40 (recorded 40).
   build tests/task_io_smoke/accept_fairness.spr
   run_once "accept-fairness" "done"
   check_markers "accept-fairness" all-accepted other-task-ran-within-streak
