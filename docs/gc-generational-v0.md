@@ -1,8 +1,8 @@
 # Generational GC for Sprout — measurement and decision (v0, 2026-08-09)
 
-**Status:** exploratory. Records a measurement and a recommendation; no collector
-change is proposed here. Normative GC behaviour remains
-[docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
+**Status:** §1–§13 are measurement. **§14 is the approved design for stage 1**
+(sticky mark bits, object barrier, verifier), not yet implemented. Normative GC
+behaviour remains [docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
 
 §1–§11 are about the nursery: whether to build one, and for what. **§12 answers a
 separate question — why the collector is not switchable per workload — and §13 measures
@@ -372,7 +372,29 @@ primitive)". Enumerated:
   &r->chan_pending */`) and `sprout_gc_collect` scans every registered per-task root
   context, so a minor collection visits them regardless of generation.
 - **Persistent, so no barrier:** `vector_set`, `map_set` (which backs `Set` too) and the
-  string `Builder` path all return new objects rather than writing into existing ones.
+  bytes `BuilderVal` path all return new objects rather than writing into existing ones.
+
+**Re-derived 2026-10-31: the list above was incomplete a second time.** Three more sites
+store a heap pointer into an object that may already have survived a collection:
+
+- **`sprout_analysis_diagnostics_vec_or_fail` and
+  `sprout_analysis_ok_symbol_locations_from_response`** — `static`, so the grep recipe
+  above (non-static functions) cannot see them. Each roots a fresh `out` vector, then per
+  element allocates a tuple with `sprout_alloc_tuple_blob`, which can collect, and stores
+  it into `out->data[i]`. Under a full collector that is safe (`->len` trails the fill for
+  exactly this reason). Under sticky marks the collection promotes `out`, and the next
+  store is old→young.
+- **`IRReuseCtor`** — not C at all. Linear reuse ([linear-reuse-v0.md](linear-reuse-v0.md))
+  rewrites an owned cell's fields in emitted IR, and the cell can be arbitrarily old.
+  `lower_reuse_header` keeps the low 14 header bits, so the cell keeps its colour and age.
+
+Also: `IRVecSetD` stores vector elements in emitted IR, bypassing `vector_mutset`, but only
+scalars (`Vector Double`, and BCE clones gated by `type_is_non_heap_scalar`). That includes
+`mutmatrix_row_sub_scaled_go` above: its `vector_mutset` is on a `Vector Double` and lowers
+to `IRVecSetD`, so it never reaches the C function. And `vector_push` has a C caller that
+pushes heap pointers, `sprout_json_extract_string_array`, so its barrier must sit in the C
+body, not a Sprout wrapper. A list re-derived by hand has now been wrong twice; §14.5
+replaces it with a runtime check.
 
 ## 8. Recommendation
 
@@ -397,6 +419,11 @@ Sequencing, if it goes ahead:
 
 Do **not** expect it to move nqueens, astar, or HTTP throughput. If those need to get
 faster, §5.1 says look outside the collector.
+
+**Scope amended 2026-10-31.** "Compiler only" predates §13.6. The galaxy client's pause is
+~65% mark of a live set that is 97% one static map, and a minor collection does not mark
+old objects; its sweep half needs §14.6's stage 2. Both effects are unmeasured, so §14
+measures the game beside the compiler instead of assuming either.
 
 ### Concurrency outlook
 
@@ -736,3 +763,218 @@ game's. Second, the **server is not the client**. They happen to land within 1,0
 objects of each other here, which makes the mistake invisible if you only measure one;
 the client is the one with the frame budget, and it is also the one whose log carries the
 type census above.
+
+## 14. Stage 1 design — sticky mark bits, object barrier, verifier (2026-10-31)
+
+### 14.1 The prize, re-measured
+
+Master `65f8563f`, `--emit-ir stdlib/compiler/compile_driver.sprout`, `SPROUT_GC_AGEPROF=1
+SPROUT_DEBUG_GC=1`, load average ~6:
+
+| cycles | marked | age ≥ 1 | freed at age 0 | GC time | wall / user |
+|---|---|---|---|---|---|
+| 91 | 31.1M | **27.6M (89%)** | 94.2% of 61.4M | 1.65 s | 4.4 s / 3.7 s |
+
+Late cycles mark ~950k objects and walk 4.4M slots, 1.6M of them already free. §5.4's
+phase split puts mark at about half of GC, so skipping re-marks is worth roughly 15% of
+a self-compile. That is an estimate; §14.8 measures it.
+
+### 14.2 Goals and non-goals
+
+- **Goal:** a minor collection that does not mark objects that survived an earlier one.
+- **Goal:** a runtime check that fails when any store path lacks the barrier, so §7's
+  list stops being the safety argument.
+- **Goal:** one switch, `SPROUT_GC_MINOR=0`, that makes every collection major, for A/B
+  measurement in one binary.
+- **Non-goal (stage 2, §14.6):** a minor sweep proportional to the young set. Stage 1
+  still walks every slot.
+- **Non-goal:** moving objects, a nursery region, concurrent or incremental marking.
+
+### 14.3 Prior art (primary sources, read 2026-10-31)
+
+| Collector | Young is | Promoted after | Barrier records | Minor sweep | Full collection when |
+|---|---|---|---|---|---|
+| CRuby 3.4 RGenGC | not old (per-page bitmaps) | 3 survivals (`RVALUE_OLD_AGE 3`) | the old object, per-page `remembered_bits` | every page, word-wise bitmaps | old objects > R × N after last full, R = 2.0 |
+| Boehm-Demers-Weiser | unmarked; marks kept | 1 | dirty pages (mprotect and others) | lazy, per block on allocation; blocks with `hb_n_marks > HBLK_OBJS(sz) * 7 / 8` skipped (`reclaim.c`) | every `GC_full_freq` partials (19, `alloc.c`), or heap growth |
+| Demers et al. 1990 | unmarked; "neglect to reset the mark bits" | 1 | dirty cards | deferred to allocation; cards > 3/4 full ignored | when all cards > 3/4 full |
+| MMTk StickyImmix | `!is_marked` | 1 | the object, logged on first write | every allocated block, per 256 B line | page budget, request |
+| Whippet mmc/nofl | marks not rotated by a minor | 1 | the field, sequential store buffer | **only blocks allocated into since the last GC** | low yield |
+| Lua 5.4 generational | NEW/SURVIVAL ages on a list | OLD1 after 2, OLD after 3 (`luaC_barrier_` comment) | old object turned grey (back barrier) | list prefix, stops at `old1` | memory > base × (1 + `genmajormul`%) |
+
+Where they agree: sticky marks, promotion after one survival, a barrier on the old
+object, and minor collections interleaved with full ones. Where they diverge is the minor
+sweep, which is stage 2. Lua's ordered-list bound does not transfer: freelist reuse puts
+young slots between old ones. Lua's bug list has three generational-mode entries, one of
+them a store path that missed its barrier — §14.5's reason to exist.
+
+Sources: `gc/default/default.c` at ruby v3_4_1; bdwgc `docs/gcdescr.md`, `alloc.c`,
+`mark.c`, `reclaim.c`; Demers et al., POPL '90 (bitsavers PCR `NewGCPopl.pdf`);
+mmtk-core `src/plan/sticky/immix/global.rs`, `src/policy/immix/immixspace.rs`; whippet
+`src/nofl-space.h`, `src/mmc.c`; lua `lgc.c` v5.4 and lua.org/bugs.html.
+
+### 14.4 Mechanism
+
+**Header bits.** The colour bit (8) means *old* between collections. Age shrinks to bits
+9–12 (0..15, still saturating) and bit 13 becomes `REMEMBERED`. Allocation writes the whole
+header word, so a new object is young and not remembered. `gc-ageprof-check` reads the
+root floor off bucket 14 instead of 30, and needs > 15 cycles instead of > 31.
+
+**Minor collection.**
+1. Mark from the roots `sprout_gc_mark_roots` scans today. Marking stops at any object
+   whose colour bit is set — old, or marked this cycle.
+2. For each remembered object, trace its children without the colour check, then clear
+   its `REMEMBERED` bit. Empty the set.
+3. Sweep as today, except a live slot keeps its colour bit (it is now old) instead of
+   clearing it. Unmarked slots are freed, with `sprout_gc_invalidate_singleton` and
+   `sprout_release_payload_extras` as today.
+
+Every survivor is promoted, so after a minor collection no young object exists and no
+old→young edge can remain. That is why the set can be emptied, not aged.
+
+**Major collection.** A pre-pass clears the colour and `REMEMBERED` bits on every slot and
+empties the set; then mark and sweep exactly as a minor. The pre-pass is one more slot
+walk, paid only on majors.
+
+**Trigger.** Minors fire through today's `sprout_gc_maybe_collect_threshold`, but the
+threshold does not stay today's. `sprout_gc_collect_with_reason` re-bases it on
+`g_managed_heap_count` and `g_gc_free_after_sweep`, and after a minor that count still holds
+every old object that has died since the last major. So minors run fewer, larger cycles, and
+a default-settings A/B cannot isolate per-collection cost (§14.8 says how it is measured).
+
+A major runs:
+- on the first collection (the baseline starts at 0);
+- when live after a collection exceeds 2 × live after the last major (CRuby's
+  `GC_HEAP_OLDOBJECT_LIMIT_FACTOR`);
+- when `SPROUT_GC_MAJOR_EVERY` minors have run since the last major (Boehm's
+  `GC_full_freq`; start at 19, step 4 sets the default);
+- at `atexit`, and always under `SPROUT_GC_MINOR=0`.
+
+The count bound is not optional. The 2× rule alone never fires when the live set shrinks:
+1M live at the last major, 10k really live after a phase change, and the count stays above
+1M on old garbage, so the heap keeps its peak until exit. Under `SPROUT_GC_ADAPT_CAP` that is
+§11.3's livelock with a cause a major would clear.
+
+**Remembered set.** A growable array of payload pointers in a `SproutGenState` struct. One
+instance exists today; the struct is the unit a per-domain heap would own (§8).
+
+**Barrier.** `sprout_gc_write_barrier(payload)`: if the colour bit is set and `REMEMBERED`
+is not, set `REMEMBERED` and append the object. The fast path is one header load and one
+masked compare, and it is `static inline` at the C sites. It records the *object*, not the
+field, and does not inspect the stored value — C cannot type it without a heap lookup.
+
+| Site | Kind |
+|---|---|
+| `ref_write` | C, extern |
+| `vector_mutset` | C, extern; records the `VectorVal` |
+| `vector_push` | C, extern and internal callers; records the `VectorVal` before any growth |
+| `sprout_analysis_diagnostics_vec_or_fail` | C, static |
+| `sprout_analysis_ok_symbol_locations_from_response` | C, static |
+| `IRReuseCtor` | emitted IR: inline header test, call `sprout_gc_write_barrier` on the slow path |
+
+`IRReuseCtor` carries no field types, so lowering cannot tell a scalar cell from a pointer
+cell. `ast_to_ir` decides, with `type_kind.type_is_non_heap_scalar` over the ctor's field
+types (as it gates `IRVecSetD`), and passes a `Bool` on the op. A type-variable field counts
+as heap, or a polymorphic linear cell loses its barrier.
+
+The AGEPROF store hook (`sprout_ap_on_store`) is added at the three sites that lack it, so
+`old_to_young` counts every site.
+
+**`sprout_gc_write_barrier` is a new compiler-emitted runtime `declare`**, approved
+2026-10-31. Justification for `runtime/APPROVED_BUILTINS`: the remembered set is collector
+state that Sprout code cannot reach. The alternative — skip reuse when the cell is old —
+needs the same inline header test and gives up reuse for exactly the long-lived cells.
+
+**Typed barrier deferred.** §6 asked for a barrier only on pointer-typed stores. Two facts
+moved since: `Vector Double` element writes no longer reach `vector_mutset` (`IRVecSetD`),
+and a remembered object costs one rescan per minor, not one record per store. An old
+scalar `MutVec` is still rescanned in full at each minor. §14.8 measures it before the
+compiler is taught to omit the call for scalar element types.
+
+### 14.5 Verifier — `SPROUT_GC_GENCHECK=1`
+
+At each minor collection, after its mark and before its sweep, run a full mark from the
+same roots into a side bitmap (one bit per 16-byte slot per region, like the slotmap),
+ignoring colour bits and recording each object's first owner. Any object the full mark
+reaches whose colour bit is clear would be freed while reachable: abort, printing its kind,
+the owner's kind and the field index.
+
+This turns "every store into an existing object has a barrier" from a list into a checked
+property, with three limits:
+
+- **It sees a missing barrier only if a minor runs while the unbarriered edge is the young
+  object's only path.** A young object still in a root slot is marked through the root; one
+  that dies before the next minor is never checked. At the default threshold (a minor per
+  ≥ 4096 allocations) a short window passes unseen. So the barrier tests also run under
+  `SPROUT_GC_STRESS=1`, where every allocation collects.
+- **It checks only paths that run under it**, so the gate runs the whole suite as well.
+- **It can report a false positive.** The child walk (`sprout_heap_child_value_payload`)
+  returns raw words for OBJ fields, `Vector Int` elements, tuple words and closure captures,
+  so a scalar that equals a young payload address is an edge to both marks. The owner kind
+  and field index in the report are there to triage that.
+
+A C runtime test stores a young pointer into an old object without the barrier and must
+see the abort, so a verifier that checks nothing fails its own test.
+
+### 14.6 Stage 2 — bounding the sweep (not designed yet)
+
+Two candidates, chosen on stage 1's numbers:
+
+- **Skip regions** that served no allocation since the last collection, and take dense
+  regions off allocation until a major (Whippet; Boehm's 7/8 and Demers' 3/4 rules).
+  Requires per-region freelists — the BACKLOG entry "The freelists are still wiped and
+  rebuilt from *all* regions every sweep".
+- **An allocation log**: append each new object, and sweep only the log. Exact and
+  proportional to the young set, at 8 bytes per allocation. None of the six collectors in
+  §14.3 does this, so it carries the risk of an unprecedented design.
+
+### 14.7 Premises
+
+Each premise has a test or a check that fails when it breaks.
+
+1. Every store of a heap pointer into an existing object goes through the barrier — the
+   six sites, one test each in `just gc-gen-check` (§14.8 step 3) that stores a young value
+   into an old target under stress; plus §14.5 over the whole suite.
+2. No collection can run between a fresh object's allocation and its initialising stores
+   (codegen: field values are computed first, then one allocating call and its stores; C:
+   the census in §7) — §14.5.
+3. A minor collection scans every root a major does — it calls the same
+   `sprout_gc_mark_roots`; §14.5.
+4. After a minor collection no young object exists — by construction while the sweep
+   visits every slot, since each visited slot is freed or keeps its colour bit. Stage 2
+   removes that construction, so stage 2 must restate this premise with its own check.
+5. A new object is young and not remembered — allocation writes the whole header word;
+   `IRReuseCtor` keeps the low 14 bits, so a reused cell keeps its age, which is premise 1's
+   case.
+
+### 14.8 Steps
+
+Each step lands with its tests and the gates its files require.
+
+Steps 1 and 2 are inert by construction: the sweep still clears every colour bit, so the
+barrier never sees an old object. Nothing goes red between steps.
+
+1. **Runtime plumbing.** Header bit move, with the `gc-ageprof-check` update and
+   `compiler-internals.md`'s header table; `SproutGenState`; `sprout_gc_write_barrier` at
+   the five C sites; AGEPROF hooks.
+2. **The `IRReuseCtor` barrier.** The `Bool` from `ast_to_ir`, the inline test in
+   `ir_lowering`, the `APPROVED_BUILTINS` entry, reseed, golden IR. Rewrite
+   `linear-reuse-v0.md`'s "outside a collection the colour bit is 0" premise: under minors,
+   colour means old, and bit 13 is load-bearing.
+3. **Minor collections behind `SPROUT_GC_MINOR=1`, default off**, §14.5 with its self-test,
+   and a recipe, `just gc-gen-check`, that runs one test per §14.4 site with
+   `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1` (the harness passes no
+   per-test environment; `gc-ageprof-check` is the pattern). Each site test is confirmed
+   to fail with that site's barrier removed. `gc-ageprof-check` and `gc-adapt-check` pin
+   `SPROUT_GC_MINOR=0`: the first needs old objects re-marked, the second pins cycle counts.
+4. **Measure, then flip the default.** Two A/B arms, `SPROUT_GC_MINOR=0` vs `1`, interleaved,
+   ≥ 6 runs each, cycles reported beside time:
+   - per-collection cost, with adaptation off (`SPROUT_GC_ADAPT_RATIO=0`, fixed
+     `SPROUT_GC_THRESHOLD`), so both arms run the same number of cycles;
+   - end to end, at default settings: CPU, GC time, peak RSS.
+
+   Workloads: self-compile, one heavy compiler test, the §5 set, an old `Vector Int`
+   `MutVec` workload, the galaxy client. Pick `SPROUT_GC_MAJOR_EVERY`'s default from the
+   same runs. Run the suite under GENCHECK. Flip only if the compiler gains and no §5
+   workload regresses beyond run-to-run spread. Then: the barrier rule goes normative in
+   `compiler-internals.md`, `SPROUT_DEBUG_GC`'s `marked` and AGEPROF's `marked_total` are
+   documented as minor-only counts, and the GENCHECK gate goes into CI.
