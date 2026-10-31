@@ -10,11 +10,14 @@ Non-normative. An optimisation only: no syntax, typing-rule or evaluation-order 
 A `where C a` function receives its class dictionaries as hidden parameters
 (`lowering.sprout`, `build_hidden_for_constraints`) and calls every method through them. This holds
 even when every caller passes the same concrete instance. Generic `mutvec_sort` on `Int` takes
-120 / 224 ns per element at n=440 / 100k, against 55 / 109 for a hand-specialised copy: about 2×
-(`bench/results-2026-10-18-native-runtime.md`; cause in `docs/sorting-v0.md` §Where the time
-goes, item 1). The prelude's generic collection functions pay the same toll per call: `any` on a
-4-element `Vec` costs 31.4 ns per element against 25.1 for `vec_any`, which has the same closures
-and no dictionaries (`docs/collections-surface-v0.md` §4).
+94 / 140 ns per element at n=440 / 100k, against 20 / 42 for a hand-specialised Int copy
+(2026-10-31, min of 7 rounds; `bench/native_runtime/sort_bench.sprout`). The gap is dictionaries
+and a closure together: `mutvec_sort` passes `\ (x, y) -> compare(x, y) < 0` to the unconstrained
+`mutvec_sort_with`, so a copy of it keeps a closure call per comparison. That copy, applied by
+hand, takes 46 / 70: this pass gets 2×, and the rest is the function-values axis below. The
+prelude's generic collection functions pay the same toll per call: `any` on a 4-element `Vec`
+costs 31.4 ns per element against 25.1 for `vec_any`, which has the same closures and no
+dictionaries (`docs/collections-surface-v0.md` §4).
 
 Devirtualisation (`docs/devirtualization-v0.md`) already turns a method call at a known instance
 into a direct call. It cannot reach inside a generic function: there the evidence is `EvForward`, a
@@ -296,7 +299,8 @@ code compares through `Ord`/`Eq`.
   prints `removed=`, and `bench/optpasses/bench.sh` counts a pass as fired only when that is
   non-zero; this pass adds nodes, so both learn `added=`. A/B with
   `just bench-opt spec` and with `bench/native_runtime/bench.sh`. Target: generic `mutvec_sort`
-  near the Int-specialised row. Gates: self-compile time within its noise floor (2.2% in the
+  near §1's hand-applied copy (46 / 70), not the Int row, which also drops the closure. The bench
+  gains that row as a copy of the closure-taking sort, since `mutvec_sort_with` is private. Gates: self-compile time within its noise floor (2.2% in the
   2026-10-18 baseline; it is the GC-heaviest workload), `just rooting-cost-gate`, which prices
   the compiler's own compile, and the emitted binary size of the bench corpus and the compiler,
   within 10%.
