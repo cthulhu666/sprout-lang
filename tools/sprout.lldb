@@ -55,7 +55,7 @@ command alias sprout-adt  expression -l c -- (void)sprout_debug_adt((long long)
 # ── Backtrace note ────────────────────────────────────────────────────────────
 #
 # Sprout functions appear with qualified names in backtraces:
-#   main.fact, main.main, stdlib.prelude.list_map, …
+#   main.fact, __sprout_user_main (the entry's `main`), stdlib.prelude.list_map, …
 # Stdlib frames show "(no debug info)" — expected; stdlib is not DWARF-annotated.
 
 # ── Example session ───────────────────────────────────────────────────────────

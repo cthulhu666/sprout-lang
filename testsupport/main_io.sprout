@@ -1,0 +1,8 @@
+module testsupport.main_io
+
+# Exports a helper and keeps a private `main` that prints. An importer must not
+# take it for its own program entry point.
+
+export fn helper(n: Int) -> Int = n + 1
+
+fn main() -> Unit !{IO} = print("IMPORTED main_io RAN")

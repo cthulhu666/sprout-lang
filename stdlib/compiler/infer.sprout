@@ -1533,18 +1533,54 @@ fn abstract_record_marker(name: String) -> String = "@abstract:" ++ name
 # name, and a key-encoded marker is only ever asked whether it is present.
 let current_module_marker: String = "@in_module"
 
+# A group whose module cannot be determined. Not a legal module name, so it can
+# never equal a record's owner, and record_is_abstract_here reads it as "do not
+# gate" rather than as "some other module".
+let unattributed_module: String = "?"
+
 fn enter_module(members: List (Int, ast.Decl), env: GlobalEnv) -> GlobalEnv =
   match members with
   | Nil -> env
   | [(_, decl) | _] ->
       GlobalEnv(dict_set(current_module_marker,
-        types.mono(types.TConst(types.type_id(group_module(decl)))),
+        module_marker(entry_main_module(group_module(decl), global_env_dict(env))),
         global_env_dict(env)))
 
-# A group whose module cannot be determined. Not a legal module name, so it can
-# never equal a record's owner, and record_is_abstract_here reads it as "do not
-# gate" rather than as "some other module".
-let unattributed_module: String = "?"
+# A module name rides in an env marker as a `TConst`; `marker_module` reads it back.
+fn module_marker(module: String) -> types.Scheme =
+  types.mono(types.TConst(types.type_id(module)))
+
+fn marker_module(marker: String, env: Dict types.Scheme) -> Maybe String =
+  let Just scheme = dict_get(marker, env) else Nothing
+      types.TConst id = types.scheme_type(scheme) else Nothing
+  in Just(types.type_id_name(id))
+
+# The entry file's own module, whatever it is called. Set once per program: the
+# entry `main` is `source.entry_main_name`, which names no module, so the module
+# that owns it is read off its siblings instead.
+let entry_module_marker: String = "@entry_module"
+
+# `main`'s owner reads as the synthetic `$entry`; swap in the entry file's real
+# module, or leave `$entry` when it has none (a headerless file, whose own names
+# are `$entry.<x>` too).
+fn entry_main_module(owner: String, env: Dict types.Scheme) -> String =
+  if owner != source.entry_module_name then owner
+  else maybe_with_default(owner, marker_module(entry_module_marker, env))
+
+# The module that holds the entry `main`, named by the first sibling decl that
+# carries a module of its own. `$entry` when none does.
+fn entry_module_of(modules: List (List ast.Decl)) -> String =
+  let Just decls = find(any(is_entry_main_decl, _), modules) else source.entry_module_name
+  in maybe_with_default(source.entry_module_name, find_map(own_module_of, decls))
+
+fn is_entry_main_decl(d: ast.Decl) -> Bool =
+  match d with
+  | ast.FnDecl name _ _ _ _ _ _ _ -> source.is_entry_main(name)
+  | _ -> false
+
+fn own_module_of(d: ast.Decl) -> Maybe String =
+  let m = group_module(d)
+  in if m != unattributed_module && m != source.entry_module_name then Just(m) else Nothing
 
 # Every name a declaration introduces is canonical by the time inference sees it,
 # so any one of them names the module.
@@ -1572,12 +1608,7 @@ fn group_module(decl: ast.Decl) -> String =
       | [name | _] -> owning_module(name)
 
 fn current_module(env: Dict types.Scheme) -> String =
-  match dict_get(current_module_marker, env) with
-  | Nothing -> ""
-  | Just scheme ->
-      match types.scheme_type(scheme) with
-      | types.TConst id -> types.type_id_name(id)
-      | _ -> ""
+  maybe_with_default("", marker_module(current_module_marker, env))
 
 # `demo.recop.Opaque` -> `demo.recop`; a prelude name has no module and yields "".
 fn owning_module(canonical: String) -> String =
@@ -7554,7 +7585,8 @@ fn typecheck_decls_resolved(
     # before processing bodies.  This enables forward references and
     # mutual recursion (e.g., decorated_sort_split calling decorated_sort which
     # is defined later in the same file).
-    let scanned_env = pre_scan_fn_decls(decls, env, qual_env)
+    let scanned_env = dict_set(entry_module_marker, module_marker(entry_module_of(modules)),
+                               pre_scan_fn_decls(decls, env, qual_env))
     # Containment, answered once per program. `scanned_env` holds every declared type's
     # marks and none of a gate's scoped ones (bounds, unpacks), which each gate adds to
     # its own copy.
@@ -8109,8 +8141,8 @@ fn bound_on_class_var_msg(v: String, method: String) -> String =
 # Executable entrypoint validation
 # ---------------------------------------------------------------------------
 #
-# A function named `main` (bare, or the entry module's qualified `<mod>.main`)
-# is only ever an intended process entrypoint, so if one is DEFINED it must be
+# The entry file's `main` (`source.entry_main_name` after bundling) is only ever
+# an intended process entrypoint, so if one is DEFINED it must be
 # well-formed: zero parameters, a `Unit` or `Int` return type, and a concrete
 # `!{IO}` effect (not pure, not effect-polymorphic). An `Int` return is the
 # process exit code (see ast_to_ir.user_main_fn_name); any other return type
@@ -8132,9 +8164,8 @@ fn bound_on_class_var_msg(v: String, method: String) -> String =
 # one edit fixes the signature outright instead of each rejected field
 # surfacing the next one.
 #
-# is_main_decl_name mirrors ast_to_ir.is_entry_fn_name / dce.is_entry_name.
-fn is_main_decl_name(name: String) -> Bool =
-  name == "main" || string.ends_with(name, ".main")
+# `source.is_entry_main` names the entry, the same test DCE and codegen use. Only the
+# entry file's `main` passes it after bundling, so an imported `<module>.main` is not gated.
 
 fn main_return_ok(ret: Maybe ast.TypeExpr) -> Bool =
   match ret with
@@ -8178,7 +8209,7 @@ fn validate_entrypoint(decls: List ast.Decl) -> Maybe(source.SourcePos, String) 
 fn entrypoint_error(decl: ast.Decl) -> Maybe String =
   match decl with
   | ast.FnDecl name params ret effects _ _ _ _ ->
-      if is_main_decl_name(name) then check_main_signature(params, ret, effects)
+      if source.is_entry_main(name) then check_main_signature(params, ret, effects)
       else Nothing
   | _ -> Nothing
 

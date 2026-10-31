@@ -189,6 +189,19 @@ export let entry_module_name: String = "$entry"
 
 export let entry_module_prefix: String = "$entry."
 
+# The canonical name of the program entry point. The bundler gives the entry
+# file's `main` this name whatever its module is called; an imported module's
+# `main` stays `<module>.main`. The checker, DCE and codegen all recognise the
+# entry by it.
+export let entry_main_name: String = entry_module_prefix ++ "main"
+
+# The one test for "this is the program entry point", shared by the checker's
+# entrypoint gate, DCE and codegen. A bare `main` counts for the unbundled front end,
+# which never renames it; bundled code never produces one, since a module's `main`
+# is `<module>.main`.
+export fn is_entry_main(name: String) -> Bool =
+  name == "main" || name == entry_main_name
+
 # The bundler renames a local that shares a prelude value's name to this prefix
 # plus the name (docs/prelude-name-identity-v0.md §5.1). `$` makes it unforgeable,
 # as for `$entry`; no dot, since a dotted local reads as a field chain.

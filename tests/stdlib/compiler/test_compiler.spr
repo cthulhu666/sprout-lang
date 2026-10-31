@@ -148,6 +148,17 @@ fn main() -> Unit !{IO} =
             "unannotated fn with param, no module header, compiles ok",
             is_ok(r_bare))
 
+          # The entry's main is `$entry.main` whatever the module is called, but the
+          # env a named entry returns must still hold it bare, like its other names.
+          cache_e <- bundler.new_load_env()
+          r_named_main <- compiler.compile_source_with_cache(
+            "module foo\n\nfn twice(x: Int) -> Int = x * 2\n\nfn main() -> Unit !{IO} = print(twice(1))\n",
+            source.StdlibRoot(stdlib_root), cache_e)
+          assert_eq(state, "a named entry's main is in the env bare",
+            scheme_str("main", r_named_main), "() -> Unit !{IO}")
+          assert_eq(state, "a named entry's other names are in the env bare",
+            scheme_str("twice", r_named_main), "Int -> Int")
+
           # module app.session header, spaces around operator
           cache_d2 <- bundler.new_load_env()
           r_session_space <- compiler.compile_source_with_cache(

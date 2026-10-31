@@ -4770,12 +4770,6 @@ fn param_known(name: String, params: List String) -> Bool =
   | Nil -> false
   | Cons p rest -> if p == name then true else param_known(name, rest)
 
-# True for the program entry point: bare `main`, or the bundler-qualified
-# `<module>.main` when the entry file declares a `module`.  Mirrors direct
-# codegen's is_entry_fn_name (codegen.sprout:1906).  O(name length).
-fn is_entry_fn_name(name: String) -> Bool =
-  name == "main" || string.ends_with(name, ".main")
-
 # The synthetic name a non-trivial `main` body is translated to.  An
 # `Int`-declared return type uses __sprout_user_main_int instead of
 # __sprout_user_main: main_shim (ir_lowering.sprout) recognizes it and
@@ -5190,7 +5184,7 @@ fn tco_assemble(name: String, params: List (String, sprout_ir.IRType), ret_ty: S
 # Apply TCO unless this is the program entry point (mirrors direct codegen's
 # is_entry exclusion). tco_rewrite is itself a no-op without a tail self-call.
 fn maybe_tco(name: String, f: sprout_ir.IRFunction, next_idx: Int) -> (sprout_ir.IRFunction, Int) =
-  if is_entry_fn_name(name) then (f, next_idx) else tco_rewrite(f, next_idx)
+  if source.is_entry_main(name) then (f, next_idx) else tco_rewrite(f, next_idx)
 
 # ===========================================================================
 # MUTUAL TCO — cross-function tail calls in a same-prototype cycle become
@@ -5879,12 +5873,9 @@ export fn translate_decl_with_idx(d: typed_ast.TypedDecl, penv: ProgEnv) ->
   | typed_ast.TFnDecl name params ret_ty _ _ body ->
       # __sprout_ reservation check is done once up-front in translate_program via
       # validate_reserved_namespace; no per-arm check needed here.
-      # is_entry_fn_name accepts both bare `main` and the bundler-qualified
-      # `<module>.main` (any entry file with a `module` declaration), mirroring
-      # direct codegen's is_entry_fn_name (codegen.sprout:1906). Without the
-      # qualified form, a module-declaring program's main was emitted as
-      # `<module>.main` and the @main shim never called it → empty output.
-      if is_entry_fn_name(name)
+      # `source.is_entry_main`: the entry's `main` is `$entry.main` whatever its module
+      # is called, so the @main shim finds it; an imported `<module>.main` is ordinary.
+      if source.is_entry_main(name)
       then
         # M3 PR 11: accept any main body.  A trivial TUnit body needs no IR
         # (the C-ABI shim in ir_lowering handles @main); a non-trivial body
@@ -6990,7 +6981,7 @@ fn build_worker_decls_go(decls: List typed_ast.TypedDecl, acc: Dict typed_ast.Ty
   | Cons d rest ->
       match d with
       | typed_ast.TFnDecl fname _ _ _ _ _ ->
-          build_worker_decls_go(rest, if is_entry_fn_name(fname) then acc else dict_set_absent(fname, d, acc))
+          build_worker_decls_go(rest, if source.is_entry_main(fname) then acc else dict_set_absent(fname, d, acc))
       | typed_ast.TExternFnDecl ename _ _ _ ->
           build_worker_decls_go(rest, dict_set_absent(ename, d, acc))
       | _ -> build_worker_decls_go(rest, acc)

@@ -635,7 +635,7 @@ True
 
 - Breakpoints by source file and line: `b myprog.spr:N` — line numbers match the original `.spr` file exactly
 - Breakpoints by function name: `br set -n "main.fact"` — the `b` shorthand misparses dots; `br set -n` with quotes is required
-- Sprout-attributed backtraces in `bt`: frame names are qualified Sprout function names (`main.add`, `main.main`)
+- Sprout-attributed backtraces in `bt`: frame names are qualified Sprout function names (`main.add`; the entry's `main` is `__sprout_user_main`, called from the runtime's `main`)
 - Instruction-level `n` and `s`
 - `call sprout_debug_adt($x0)` / `call sprout_debug_int($x0)` for value inspection
 

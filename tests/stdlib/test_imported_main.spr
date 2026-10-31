@@ -1,0 +1,14 @@
+import stdlib.test (check_eq, run_suite)
+import testsupport.main_arity as arity
+import testsupport.main_io (helper)
+
+# An imported module's `main` is an ordinary function. Only the entry file's own
+# `main` is the program entry point (spec-v0 §10.10), so the imported IO `main`
+# must neither be emitted a second time nor run, and the imported `main(x: Int)`
+# must not be rejected by the entrypoint signature gate.
+
+fn main() -> Unit !{IO} =
+  run_suite("imported main", [
+    check_eq("imported main takes arguments", arity.main(21), 42),
+    check_eq("sibling export of a module with a private main", helper(1), 2)
+  ])

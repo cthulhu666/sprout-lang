@@ -1,0 +1,42 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ir_pipeline as ir_pipeline
+import stdlib.compiler.typed_ast as typed_ast
+
+# The unbundled front end never renames `main`, so a bare `fn main` must still be the
+# entry point, leaving `@main` to the C-ABI shim alone.
+# Typechecked with NO prelude, so the source may only use primitives.
+
+fn count_from(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_from(str_slice(haystack, pos + str_len(needle),
+                            str_len(haystack) - pos - str_len(needle)), needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn emit_ir(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERROR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERROR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERROR: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ir_pipeline.compile_program_streaming(lowering.lower_program(typed_prog, env)) with
+                | Ok ir -> ir
+                | Err msg -> "ERROR: " ++ msg
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    ir <- emit_ir("fn main() -> Unit !{IO} = ()\n")
+    assert_true(state, "the source compiles", count_from(ir, "ERROR:", 0) == 0)
+    assert_eq(state, "one `define` for @main: the C-ABI shim", count_from(ir, "define i32 @main(", 0), 1)
+    assert_eq(state, "no user `@main` beside the shim", count_from(ir, "@main()", 0), 0)
+    summary(state)

@@ -102,4 +102,12 @@ fn main() -> Unit !{IO} =
     c7 <- run_check("class Sz t\n  fn sz(x: t) -> Int\ninstance Sz Int\n  fn sz(x: Int) -> Int = x\ninstance Sz Bool\n  fn sz(x: Int) -> Int = x")
     assert_true(state, "second instance signature checked", fails_with(c7, "class Sz declares"))
 
+    # An unbundled `main` is the entrypoint too, so its signature is gated.
+    m1 <- run_check("fn main() -> String !{IO} = \"x\"")
+    assert_true(state, "unbundled main with a wrong return type rejected",
+      fails_with(m1, "Executable entrypoint `main`"))
+
+    m2 <- run_check("fn main() -> Unit !{IO} = ()")
+    assert_true(state, "unbundled well-formed main accepted", is_ok(m2))
+
     summary(state)

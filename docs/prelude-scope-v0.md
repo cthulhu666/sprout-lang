@@ -302,11 +302,10 @@ headerless files the prelude's own name.
    > on a ctor-name suffix match, so it treats `$entry.X` exactly as it already
    > treats `main.X`. Pre-existing class; this change does not widen it.
 
-   **Entry-point detection needs no change** — verified, not assumed.
-   `is_entry_fn_name` (`ast_to_ir.sprout:5915`, mirrored in `infer.is_main_decl_name`
-   and `codegen.sprout:1906`) accepts `name == "main" || name` ending in `".main"`.
-   `$entry.main` satisfies the suffix arm, so the synthetic name routes through the
-   existing qualified-main path that `module main` files already use.
+   **Entry-point detection:** the entry file's `main` is `$entry.main` whatever its
+   module is called (`bundler.entry_main_canonical`), and `ast_to_ir`, `infer` and `dce`
+   all test it through `source.is_entry_main` (that name, or a bare `main` from the
+   unbundled front end). An imported `<module>.main` is not the entry.
 
 5. **Add an explicit opt-out header.** A file whose header block contains the
    directive gets no prelude. Because headers are stripped *before* `tokenize`

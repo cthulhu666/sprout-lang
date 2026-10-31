@@ -34,12 +34,13 @@ fn main() -> Unit !{IO} =
     [
       check_eq("the first declaration of a name wins", 1, body_of(dict_get("f", ix))),
       check_eq("a later fn is indexed", 3, body_of(dict_get("g", ix))),
-      check_true("entry main is left out", absent(dict_get("main", ix))),
-      check_true("a module-qualified entry is left out", absent(dict_get("app.main", ix))),
+      check_true("entry main is left out", absent(dict_get(source.entry_main_name, ix))),
+      check_true("an imported <module>.main is an ordinary fn and is indexed",
+                 !absent(dict_get("app.main", ix))),
       check_true("an extern is indexed", is_extern(dict_get("ext", ix))),
       check_true("an unknown name is absent", absent(dict_get("nope", ix))),
       check_true("no decls, empty index", absent(dict_get("f", ast_to_ir.build_worker_decls(Nil))))
     ])
   where ix = ast_to_ir.build_worker_decls(
-               [fn_decl("f", 1), fn_decl("main", 9), fn_decl("f", 2), fn_decl("app.main", 8),
+               [fn_decl("f", 1), fn_decl(source.entry_main_name, 9), fn_decl("f", 2), fn_decl("app.main", 8),
                 typed_ast.TExternFnDecl("ext", Nil, Nothing, Nothing), fn_decl("g", 3)])

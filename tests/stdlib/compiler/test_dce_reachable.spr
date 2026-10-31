@@ -45,7 +45,7 @@ fn leaf(name: String) -> typed_ast.TypedDecl = fn_calling(name, Nil)
 
 # `main` with a hand-built body, for the fixtures whose point is that shape.
 fn main_returning(body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
-  typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil, body)
+  typed_ast.TFnDecl(source.entry_main_name, Nil, Nothing, Nothing, Nil, body)
 
 fn lam(params: List String, body: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   typed_ast.TLambda(list_map(named_param, params), body, int_ty(), pos())
@@ -86,47 +86,51 @@ fn count_decls(p: typed_ast.TypedProgram) -> Int =
   match p with
   | typed_ast.TypedProgram decls -> list_length(decls)
 
-# Every fixture roots at a bare `main`, matching codegen's own entry predicate
-# (`ast_to_ir.is_entry_fn_name`: bare `main`, or any `<module>.main`).
+# Every fixture roots at `source.entry_main_name`, the entry test codegen shares
+# (`source.is_entry_main`).
 fn kept(decls: List typed_ast.TypedDecl) -> List String =
   survivors(dce.elim_unreachable(prog(decls)))
 
 fn main() -> Unit !{IO} =
   let
     # 1. The base case: an unreferenced function goes, a referenced one stays.
-    basic = kept([fn_calling("main", ["used"]), leaf("used"), leaf("unused")])
+    basic = kept([fn_calling(source.entry_main_name, ["used"]), leaf("used"), leaf("unused")])
+
+    # 1b. The unbundled front end never renames `main`, so a bare one roots too.
+    bare_main = kept([fn_calling("main", ["used"]), leaf("used"), leaf("unused")])
 
     # 2. Reachability is transitive — `deep` is only reachable through `mid`.
-    chain = kept([fn_calling("main", ["mid"]), fn_calling("mid", ["deep"]),
+    chain = kept([fn_calling(source.entry_main_name, ["mid"]), fn_calling("mid", ["deep"]),
                   leaf("deep"), leaf("orphan")])
 
     # 3. A self-recursive dead function must not root itself. This is the bug a
     #    naive "is this name referenced anywhere?" implementation ships with.
-    selfrec = kept([fn_calling("main", ["used"]), leaf("used"),
+    selfrec = kept([fn_calling(source.entry_main_name, ["used"]), leaf("used"),
                     fn_calling("dead_loop", ["dead_loop"])])
 
     # 4. The same trap one step further out: two dead functions that reference
     #    each other keep each other alive under a reference-counting approach.
-    mutual = kept([fn_calling("main", ["used"]), leaf("used"),
+    mutual = kept([fn_calling(source.entry_main_name, ["used"]), leaf("used"),
                    fn_calling("dead_a", ["dead_b"]), fn_calling("dead_b", ["dead_a"])])
 
     # 5. `main` is the root by construction, even though nothing calls it.
-    root_only = kept([fn_calling("main", []), leaf("unused")])
+    root_only = kept([fn_calling(source.entry_main_name, []), leaf("unused")])
 
-    # 6. A qualified entry name is equally a root — a file with a `module`
-    #    header emits `<module>.main`, which is what every real program is.
-    qualified = survivors(dce.elim_unreachable(
-      prog([fn_calling("app.main", ["used"]), leaf("used"), leaf("unused")])))
+    # 6. An imported module's `main` is an ordinary function, not a root: it goes
+    #    when nothing calls it, and survives only when something does.
+    imported_dead = kept([fn_calling(source.entry_main_name, ["used"]), leaf("used"),
+                          leaf("app.main")])
+    imported_live = kept([fn_calling(source.entry_main_name, ["app.main"]), leaf("app.main")])
 
     # 7. Externs are kept unconditionally: they lower to `declare` lines, and a
     #    missing one is a link error rather than a dead-code saving.
-    externs = kept([fn_calling("main", []),
+    externs = kept([fn_calling(source.entry_main_name, []),
                     typed_ast.TExternFnDecl("str_len", Nil, Nothing, Nothing)])
 
     # 8. Type declarations ride through untouched — constructors are reached from
     #    patterns, which carry no `TVar`, so pruning these would be unsound.
     types_kept = count_decls(dce.elim_unreachable(
-      prog([fn_calling("main", []),
+      prog([fn_calling(source.entry_main_name, []),
             typed_ast.TPassThrough(ast.WrapDecl("Meters", Nil, ast.TypeName("Int"), Nil, ast.Unrestricted, ast.Abstract, pos()))])))
 
     # 10. REGRESSION. A fragment with no entry point must come back untouched.
@@ -140,14 +144,12 @@ fn main() -> Unit !{IO} =
     #     literal in codegen, so nothing in the typed AST names it. Before the fix
     #     the callee was pruned and the IR failed to parse with
     #     `use of undefined value '@range_up'`.
-    ranged = kept([typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
-                     typed_ast.TRange(lit(), lit(), int_ty(), pos())),
+    ranged = kept([main_returning(typed_ast.TRange(lit(), lit(), int_ty(), pos())),
                    leaf("range_up"), leaf("unused")])
 
     # 12. REGRESSION, same class: `++` on lists lowers to a literal-named
     #     `list_append` call.
-    appended = kept([typed_ast.TFnDecl("main", Nil, Nothing, Nothing, Nil,
-                       typed_ast.TBinary("++", lit(), lit(), int_ty(), pos())),
+    appended = kept([main_returning(typed_ast.TBinary("++", lit(), lit(), int_ty(), pos())),
                      leaf("list_append"), leaf("unused")])
 
     # 13. A lambda parameter named `helper` shadows the top-level `helper`, so
@@ -215,8 +217,11 @@ fn main() -> Unit !{IO} =
                           leaf("helper")])
   in run_suite("dce_reachable", [
     check_true("keeps a called function", has_name("used", basic)),
-    check_true("keeps the entry point", has_name("main", basic)),
+    check_true("keeps the entry point", has_name(source.entry_main_name, basic)),
     check_true("drops an uncalled function", !has_name("unused", basic)),
+
+    check_true("a bare main is a root", has_name("used", bare_main)),
+    check_true("a bare main roots nothing else", !has_name("unused", bare_main)),
 
     check_true("reachability is transitive", has_name("deep", chain)),
     check_true("drops a function off the call graph", !has_name("orphan", chain)),
@@ -227,12 +232,12 @@ fn main() -> Unit !{IO} =
     check_true("mutually recursive dead fns both go (a)", !has_name("dead_a", mutual)),
     check_true("mutually recursive dead fns both go (b)", !has_name("dead_b", mutual)),
 
-    check_true("main is a root with no callers", has_name("main", root_only)),
+    check_true("main is a root with no callers", has_name(source.entry_main_name, root_only)),
     check_true("unused goes even when main calls nothing", !has_name("unused", root_only)),
 
-    check_true("a qualified <module>.main is a root", has_name("app.main", qualified)),
-    check_true("a qualified root reaches its callees", has_name("used", qualified)),
-    check_true("a qualified root still drops the unreachable", !has_name("unused", qualified)),
+    check_true("an uncalled imported <module>.main is not a root", !has_name("app.main", imported_dead)),
+    check_true("the entry still keeps its callee beside it", has_name("used", imported_dead)),
+    check_true("a called imported <module>.main is kept", has_name("app.main", imported_live)),
 
     check_true("externs are kept unconditionally", has_name("str_len", externs)),
 

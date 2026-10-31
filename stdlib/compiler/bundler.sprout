@@ -797,16 +797,30 @@ fn parse_prelude(path: String, src: String, load_env: LoadEnv) -> (Maybe LoadIss
 # Symbol table building
 # ---------------------------------------------------------------------------
 
-fn build_all_symbols(modules: List ParsedModule) -> Dict ModuleSymbols =
-  build_symbols_acc(modules, dict_empty())
+fn build_all_symbols(modules: List ParsedModule, entry_path: String) -> Dict ModuleSymbols =
+  build_symbols_acc(modules, entry_path, dict_empty())
 
-fn build_symbols_acc(modules: List ParsedModule, acc: Dict ModuleSymbols) -> Dict ModuleSymbols =
+fn build_symbols_acc(modules: List ParsedModule, entry_path: String, acc: Dict ModuleSymbols) -> Dict ModuleSymbols =
   match modules with
   | Nil -> acc
   | Cons mod rest ->
       match mod with
       | ParsedModule mod_name path _ exported ctor_types decls ->
-          build_symbols_acc(rest, dict_set(path, build_module_symbols(mod_name, exported, ctor_types, decls), acc))
+          let syms = build_module_symbols(mod_name, exported, ctor_types, decls)
+          in build_symbols_acc(rest, entry_path,
+               dict_set(path, if path == entry_path then entry_main_canonical(syms) else syms, acc))
+
+# The one place the program entry point is named. The entry module's `main` gets
+# `source.entry_main_name` whatever the module is called (or none, for a `no_prelude`
+# entry); every other module's stays `<module>.main` and is an ordinary function.
+# The checker, DCE and codegen recognise the entry by that name.
+fn entry_main_canonical(syms: ModuleSymbols) -> ModuleSymbols =
+  match syms with
+  | ModuleSymbols vl tl cl ev et ec cm ce xs ->
+      if !dict_member("main", vl) then syms
+      else ModuleSymbols(dict_set("main", source.entry_main_name, vl), tl, cl,
+                         if dict_member("main", ev) then dict_set("main", source.entry_main_name, ev) else ev,
+                         et, ec, cm, ce, xs)
 
 fn build_module_symbols(mod_name: String, exported: List String, ctor_types: List String, decls: List ast.Decl) -> ModuleSymbols =
   build_symbols_from_decls(mod_name, exported, ctor_types, decls,
@@ -2036,8 +2050,8 @@ type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, pre
                     externs: List PrivateExtern, extern_decl_error: Maybe (String, source.SourcePos, String),
                     qualified: List QualifiedModule)
 
-fn bundle_names(modules: List ParsedModule, stdlib_root: String, extra_roots: List String) -> BundleNames =
-  let all_symbols = build_all_symbols(modules)
+fn bundle_names(modules: List ParsedModule, entry_path: String, stdlib_root: String, extra_roots: List String) -> BundleNames =
+  let all_symbols = build_all_symbols(modules, entry_path)
       canonical = all_canonical_names(all_symbols)
       prelude = prelude_names(modules, all_symbols, stdlib_root)
       facts = extern_facts_of(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
@@ -2716,7 +2730,7 @@ fn load_bundle(entry_path: String, root: String, extra_roots: List String, entry
     | Just issue -> LoadFailed(issue_pos_for_entry(issue, entry_path), issue_message(issue))
     | Nothing ->
         let modules = list_map(append_to_entry(entry_path, entry_extra, _), loaded)
-        in LoadedBundle(modules, bundle_names(modules, root, extra_roots))
+        in LoadedBundle(modules, bundle_names(modules, entry_path, root, extra_roots))
 
 fn append_to_entry(entry_path: String, extra: List ast.Decl, mod: ParsedModule) -> ParsedModule =
   match mod with
@@ -2842,5 +2856,5 @@ export fn dump_qualify_file(path: source.FilePath, stdlib_root: source.StdlibRoo
     (err, modules) <- collect_modules(source.filepath_str(path), source.stdlib_root_str(stdlib_root), Nil, load_env)
     match err with
     | Just issue -> Cons("ERROR: " ++ issue_message(issue), Nil)
-    | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules), source.stdlib_root_str(stdlib_root))
+    | Nothing -> dump_qualify_modules_acc(modules, build_all_symbols(modules, source.filepath_str(path)), source.stdlib_root_str(stdlib_root))
 

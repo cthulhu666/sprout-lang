@@ -2,7 +2,7 @@ module stdlib.compiler.dce
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
-import stdlib.string as string
+import stdlib.compiler.source as source
 
 # Two eliminations, both applied after typeclass lowering and before IR emission.
 #
@@ -438,13 +438,6 @@ fn refs_decl(d: typed_ast.TypedDecl, acc: Set) -> Set =
   | typed_ast.TInstanceDecl _ _ methods -> refs_instance_methods(methods, acc)
   | typed_ast.TPassThrough decl -> refs_passthrough(decl, acc)
 
-# The program entry: bare `main`, or the bundler-qualified `<module>.main` a file
-# with a `module` header emits. Deliberately the same rule as codegen's
-# `ast_to_ir.is_entry_fn_name`, so what this pass keeps and what codegen calls
-# cannot disagree.
-fn is_entry_name(name: String) -> Bool =
-  name == "main" || string.ends_with(name, ".main")
-
 # A declaration kept regardless of who references it — so also a starting point
 # for reachability, since whatever its body calls is live too.
 #
@@ -453,7 +446,7 @@ fn is_entry_name(name: String) -> Bool =
 # name, so neither is a candidate for pruning.
 fn is_rooted_decl(d: typed_ast.TypedDecl) -> Bool =
   match d with
-  | typed_ast.TFnDecl name _ _ _ _ _ -> is_entry_name(name)
+  | typed_ast.TFnDecl name _ _ _ _ _ -> source.is_entry_main(name)
   | typed_ast.TExternFnDecl _ _ _ _ -> true
   # Order-sensitive and effectively free to keep: the prelude declares none.
   | typed_ast.TLetDecl _ _ -> true
@@ -522,7 +515,7 @@ fn has_entry(decls: List typed_ast.TypedDecl) -> Bool =
   | Nil -> false
   | Cons d rest ->
       match d with
-      | typed_ast.TFnDecl name _ _ _ _ _ -> if is_entry_name(name) then true else has_entry(rest)
+      | typed_ast.TFnDecl name _ _ _ _ _ -> if source.is_entry_main(name) then true else has_entry(rest)
       | _ -> has_entry(rest)
 
 # Drop every declaration the entry point cannot reach.
