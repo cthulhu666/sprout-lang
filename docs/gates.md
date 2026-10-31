@@ -1022,6 +1022,38 @@ N/A cells.
 - A new way to declare a linear type gets a header, not a row. Every cell on the linear ADT
   header repeats as `w_<name>` on a `wrap linear` (docs/linear-wrap-v0.md §8).
 
+## ASan gate — `just test-asan`
+
+Builds the runtime and every test binary with `-fsanitize=address,undefined` and runs four things:
+`c-runtime-test-asan` (`tests/c_runtime/run.sh` with `SPROUT_C_RUNTIME_SANITIZE=1`),
+`asan-self-compile` (the sanitized and an unsanitized stage-2, both linked from one stage-1 IR, emit
+the driver's IR, which must match byte for byte), and `test-stdlib-asan-core` / `test-stdlib-asan-compiler` (the `_test-stdlib` suites
+with `sanitize=asan`). Runs use `halt_on_error=1`, so a UBSan report fails the test instead of
+printing. CI runs it as four jobs, `asan-core-{1,2}` and `asan-compiler-{1,2}` (each suite split
+with `SPROUT_TEST_SHARD`, so no job outlasts `test-gates`), in parallel with the shards and under
+the required `test` check; `gate` runs it through `test-asan`.
+
+A stray `payload-8` read on a headerless String lands in a malloc'd buffer's left redzone and is
+reported at `sprout_hdr_of` with the allocation site (`docs/string-header-invariant-v0.md` §4.5).
+
+**What it cannot see.**
+- The GC arena is one malloc to ASan, so an overread inside it is invisible; only a String that
+  lives outside the arena is caught.
+- A literal is caught only when an instrumented global happens to precede it (§4.5).
+- Leaks are off (`detect_leaks=0`): the arena is never freed.
+- Code no test reaches.
+
+**How it could be defeated: a silent unsanitized fallback.** `run.sh` falls back to an unsanitized
+build when the sanitizer link fails, which is what a runner without `libclang-rt` does. In
+sanitize mode the fallback is an error, and `tests/c_runtime/asan_control.c` is the guard behind
+it: it hands `str_eq` a `strdup`'d buffer, exits 0 unsanitized, and the case demands an ASan
+`heap-buffer-overflow` report naming `sprout_hdr_of` or `str_eq`. A build that lost the flags
+fails there. Do not drop the case.
+
+**Linux.** The green-thread tests switch stacks with `swapcontext`, and `runtime/sprout_context.h`
+has no `__sanitizer_start_switch_fiber` / `__sanitizer_finish_switch_fiber` annotations. If CI
+shows ASan false positives in those tests, annotate `sprout_ctx_switch`; do not skip the tests.
+
 ## `just linux-smoke`
 
 Every other local gate runs the kqueue backend; CI runs epoll + timerfd, and the two diverge in ways

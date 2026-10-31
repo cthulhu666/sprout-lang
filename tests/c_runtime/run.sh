@@ -10,6 +10,23 @@ if [[ "$(uname)" == "Darwin" ]]; then
   CLANG_EXTRA=(-framework Security -framework CoreFoundation)
 fi
 
+# SPROUT_C_RUNTIME_SANITIZE=1 builds every case with ASan+UBSan, runs it with halt_on_error, and
+# turns the "sanitizer build unavailable" fallbacks into failures. `just c-runtime-test-asan`.
+SAN=()
+if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
+  read -ra SAN <<< "${SPROUT_C_RUNTIME_SAN_FLAGS:--O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer}"
+  export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0:halt_on_error=1}"
+  export UBSAN_OPTIONS="${UBSAN_OPTIONS:-halt_on_error=1:print_stacktrace=1}"
+fi
+
+sanitizer_fallback() {
+  if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
+    echo "  sanitizer build failed and SPROUT_C_RUNTIME_SANITIZE=1 forbids the unsanitized fallback" >&2
+    exit 1
+  fi
+  echo "  sanitizer build unavailable; using unsanitized fallback"
+}
+
 # Link EVERY runtime translation unit, not just sprout_runtime.c. When the runtime was
 # split (sprout_scheduler.c, sprout_poll.c) this harness was not updated, so every case
 # here failed to link — "symbol(s) not found: _scheduler_park_on_fd" and friends — and
@@ -20,18 +37,24 @@ compile() {
   local src="$1"
   local out="$2"
   shift 2
-  clang "$@" "$ROOT"/runtime/*.c "$ROOT/tests/c_runtime/$src" "${CLANG_EXTRA[@]}" -o "$out"
+  clang "$@" ${SAN[@]+"${SAN[@]}"} "$ROOT"/runtime/*.c "$ROOT/tests/c_runtime/$src" "${CLANG_EXTRA[@]}" -o "$out"
+}
+
+# compile_sanitized <src> <out>: sanitized build; else the fallback (an error in sanitize mode) at -O0.
+# In sanitize mode compile() already adds the flags, so none are passed here.
+compile_sanitized() {
+  if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
+    compile "$1" "$2" || sanitizer_fallback
+  elif ! compile "$1" "$2" -O1 -g -fsanitize=address,undefined; then
+    sanitizer_fallback
+    compile "$1" "$2" -O0 -g
+  fi
 }
 
 echo "==> c runtime: read_file keeps Ok payload alive under stress GC"
 printf "abcdef" > "$TMP_DIR/input.txt"
-if compile read_file_gc.c "$TMP_DIR/read_file_gc_asan" -O1 -g -fsanitize=address,undefined; then
-  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$TMP_DIR/read_file_gc_asan" "$TMP_DIR/input.txt" > "$TMP_DIR/read_file_gc.out"
-else
-  echo "  sanitizer build unavailable; using unsanitized fallback"
-  compile read_file_gc.c "$TMP_DIR/read_file_gc" -O0 -g
-  "$TMP_DIR/read_file_gc" "$TMP_DIR/input.txt" > "$TMP_DIR/read_file_gc.out"
-fi
+compile_sanitized read_file_gc.c "$TMP_DIR/read_file_gc"
+ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$TMP_DIR/read_file_gc" "$TMP_DIR/input.txt" > "$TMP_DIR/read_file_gc.out"
 test "$(cat "$TMP_DIR/read_file_gc.out")" = "6"
 
 echo "==> c runtime: fs / io Strings leave headered (HDRCHECK)"
@@ -90,12 +113,7 @@ if grep -q 'tcp_fail' "$ROOT"/runtime/*.c "$ROOT"/runtime/*.h; then
 fi
 
 echo "==> c runtime: UTF-8 walkers reject truncated multibyte with a clean panic"
-if compile utf8_walker_oob.c "$TMP_DIR/utf8_walker_oob" -O1 -g -fsanitize=address,undefined; then
-  :
-else
-  echo "  sanitizer build unavailable; using unsanitized fallback"
-  compile utf8_walker_oob.c "$TMP_DIR/utf8_walker_oob" -O0 -g
-fi
+compile_sanitized utf8_walker_oob.c "$TMP_DIR/utf8_walker_oob"
 for sel in len char_at slice; do
   if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$TMP_DIR/utf8_walker_oob" "$sel" \
        > "$TMP_DIR/utf8_oob.out" 2> "$TMP_DIR/utf8_oob.err"; then
@@ -227,10 +245,7 @@ echo "==> c runtime: the GC temp-root stack marks its whole live range"
 # from the cause. Under GC stress each case collects on every allocation; see the file
 # header for what each selector pins.
 GRS="$TMP_DIR/gc_root_stack"
-if ! compile gc_root_stack.c "$GRS" -O1 -g -fsanitize=address,undefined; then
-  echo "  sanitizer build unavailable; using unsanitized fallback"
-  compile gc_root_stack.c "$GRS" -O0 -g
-fi
+compile_sanitized gc_root_stack.c "$GRS"
 for sel in survive other_context pop_frees; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GRS" "$sel" > "$TMP_DIR/grs.out" 2> "$TMP_DIR/grs.err" || {
     echo "  root-stack case '$sel' failed:" >&2
@@ -256,7 +271,7 @@ echo "==> c runtime: the documented per-task root-pool size matches the code"
 # no test could see it. Derive it here and grep for it, so the next size change
 # names the files it invalidated.
 clang tests/c_runtime/root_pool_size.c "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
-  "${CLANG_EXTRA[@]}" -O0 -g -o "$TMP_DIR/root_pool_size"
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$TMP_DIR/root_pool_size"
 node_bytes="$("$TMP_DIR/root_pool_size")"
 slots="$(sed -nE 's/^#define SPROUT_TASK_ROOT_SLOTS[[:space:]]+([0-9]+).*/\1/p' "$ROOT/runtime/sprout_scheduler.c")"
 [ -n "$slots" ] || { echo "  could not read SPROUT_TASK_ROOT_SLOTS from sprout_scheduler.c" >&2; exit 1; }
@@ -282,10 +297,7 @@ echo "==> c runtime: every nullary constructor is interned, keyed on its tag"
 # combinations below (exit 1 on the tag readback, 134 on the poison abort), while the
 # real runtime passes all sixteen.
 NCI="$TMP_DIR/nullary_ctor_interning"
-if ! compile nullary_ctor_interning.c "$NCI" -O1 -g -fsanitize=address,undefined; then
-  echo "  sanitizer build unavailable; using unsanitized fallback"
-  compile nullary_ctor_interning.c "$NCI" -O0 -g
-fi
+compile_sanitized nullary_ctor_interning.c "$NCI"
 for sel in intern distinct arity weak; do
   for stress in 0 1; do
    for lineage in 0 1; do
@@ -355,7 +367,7 @@ echo "==> c runtime: SproutStr exits check the header; the new writers reject NU
 # str_writers.c includes sprout_runtime.c (like root_pool_size.c), so only the other TUs link.
 SW="$TMP_DIR/str_writers"
 clang "$ROOT/tests/c_runtime/str_writers.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
-  "${CLANG_EXTRA[@]}" -O0 -g -o "$SW"
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$SW"
 # sw_aborts <selector> <message fragment>: the case exits non-zero and says why on stderr.
 sw_aborts() {
   if "$SW" "$1" > "$TMP_DIR/sw.out" 2> "$TMP_DIR/sw.err"; then
@@ -398,7 +410,7 @@ sw_aborts register_arena "sprout_str_register: arena String"
 run_hdrcheck_case() {
   local name="$1" marker="$2" bin="$TMP_DIR/$1" stress mode want
   clang "$ROOT/tests/c_runtime/$name.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
-    "${CLANG_EXTRA[@]}" -O0 -g -o "$bin"
+    "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$bin"
   for stress in 0 1; do
     if [ "$stress" = 1 ]; then mode=stress; want="$marker-stress"; else mode=""; want="$marker"; fi
     # shellcheck disable=SC2086 # an empty mode must pass no argument
@@ -437,10 +449,7 @@ echo "==> c runtime: a map key held only by the map survives collection"
 # key is caught by the case's own byte and lookup round-trip, not by the sanitizer:
 # GC slots sit in unpoisoned arena chunks, and the sweep only overwrites word 0.
 MKS="$TMP_DIR/map_key_survival"
-if ! compile map_key_survival.c "$MKS" -O1 -g -fsanitize=address,undefined; then
-  echo "  sanitizer build unavailable; using unsanitized fallback"
-  compile map_key_survival.c "$MKS" -O0 -g
-fi
+compile_sanitized map_key_survival.c "$MKS"
 for lineage in 0 1; do
   SPROUT_GC_LINEAGE="$lineage" ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" \
     "$MKS" > "$TMP_DIR/mks.out" 2> "$TMP_DIR/mks.err" || {
@@ -453,5 +462,21 @@ for lineage in 0 1; do
     exit 1
   }
 done
+
+if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
+  echo "==> c runtime: the sanitizer is live (a headerless String read by str_eq is reported)"
+  # Positive control. Unsanitized, asan_control exits 0, so only a live ASan can fail it. Without
+  # this case a build that dropped the flags would pass every other case here.
+  compile asan_control.c "$TMP_DIR/asan_control" -O0 -g
+  if "$TMP_DIR/asan_control" > "$TMP_DIR/asan_control.out" 2> "$TMP_DIR/asan_control.err"; then
+    echo "  asan_control exited 0: the sanitizer did not report a headerless String" >&2
+    exit 1
+  fi
+  grep -q "heap-buffer-overflow" "$TMP_DIR/asan_control.err" && grep -Eq "sprout_hdr_of|str_eq" "$TMP_DIR/asan_control.err" || {
+    echo "  asan_control failed without the expected ASan report:" >&2
+    cat "$TMP_DIR/asan_control.err" >&2
+    exit 1
+  }
+fi
 
 echo "==> c runtime tests passed"
