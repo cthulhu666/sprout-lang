@@ -59,8 +59,7 @@ from **C exhaustiveness for heap-kind dispatch** when that entry lands.
 
 The only stage that shrinks the surface instead of checking it. Sprout code cannot write a header,
 miss a root or mistype a signature: the compiler does all three, once, for every function. The
-inventory comes right after stage 1; the moves run beside the other stages, one builtin per PR.
-It comes before the checks because it is the prevention, and every builtin moved is one fewer
+moves run beside the other stages, one builtin per PR. It comes before the checks because it is the prevention, and every builtin moved is one fewer
 signature for stage 6. It does not replace them: 97 of the 168 builtins stay C whatever it
 achieves, and stages 3 and 5 report a rooting bug a move exposes at the bad read.
 
@@ -71,20 +70,81 @@ achieves, and stages 3 and 5 report a rooting bug a move exposes at the bad read
 | OS and effects: `fs_`, `tcp_`, `term_`, `proc_`, scheduler, `analysis_`, … | 82 | stay C |
 | Compiler ABI: `sprout_alloc_*`, `sprout_tag`, `sprout_gc_*`, `ref_*` | 15 | stay C |
 | Data-structure primitives: `bytes_*`, `vector_*`, `map_*` | 40 | per item |
-| Pure helpers: `str_*`, `char_*`, number/JSON format, `regex_*`, `crypto_*` but random | 31 | move |
+| Pure helpers: `str_*`, `char_*`, number/JSON format, `regex_*`, `crypto_*` but random | 31 | per item |
+
+**Rule: no move may be slower.** Each move benchmarks the public function on unchanged master
+and on the branch, at least 15 rounds each, interleaved one row per round as in
+`bench/results-2026-10-18-native-runtime.md`. Spread is (median − min) / min, as there. A move
+lands only if, for every row, the branch's median ≤ master's median × (1 + master's spread). A
+compiler-called builtin also adds a self-compile row, and every row covers the slowest input the
+Sprout form has, not only a typical one. Otherwise the builtin stays, and the numbers become its recorded reason. Each move deletes the
+C function, its `extern fn` and its `APPROVED_BUILTINS` line, and ports or deletes its calls in
+`tests/c_runtime/`.
+
+#### Inventory (2026-10-31)
+
+Each of the 71 is a primitive other code builds on, a builtin the compiler emits itself (`str_eq`,
+`str_concat`, `str_compare`, `string_concat_many`, `int_to_string` with 272 call sites in
+`stdlib/compiler/`, the `_unboxed` twins), or a helper. The helpers fall into three tiers.
+
+**Movable now**, with existing builtins only, cheapest first:
+
+| Builtin | Sprout form | C lines |
+|---|---|---|
+| `regex_is_match` | `regex_find_match` found something (see notes) | 12 |
+| `regex_escape` | byte scan, `str_slice_bytes`, `string_concat_many` | 17 |
+| `bytes_builder_u16_be`, `_u32_be` | `stdlib.bits` + `bytes_builder_byte` | 34 |
+| `bytes_builder_byte` | `bytes_builder_bytes(bytes_singleton(v))` | 10 |
+| `crypto_hmac_sha256` | `crypto_sha256`, `bytes_append`, `crypto_bytes_xor` | 41 |
+| `json_stringify` | match on `Json`, byte-scan escape | ≈ 167 |
+| `str_starts_with` | `str_starts_with_at_byte(s, 0, p)` | 7 |
+| `split_words`, `str_split_lines` | byte scan, `str_slice_bytes` | 69 |
+| `char_to_str` | `char_to_string(char_from_codepoint(cp))` | 23 |
+| `vector_empty`, `bytes_empty`, `bytes_builder_empty` | one call to another builtin | 3–6 each |
+
+Notes:
+- `regex_find_match` does more than `regex_is_match`: two codepoint counts up to the match end, a
+  `Match` and a `Just`. It also panics on a `regexec` error other than no-match, where
+  `regex_is_match` returns False. A late match in a long text is its slowest row.
+- `json_stringify` writes floats with `%.17g`; `double_to_string` keeps the first of `%.15g` to
+  `%.17g` that reads back. So its output changes (`0.1` prints `0.1`, not `0.10000000000000001`).
+- `bytes_builder_u16_be` and `_u32_be` have no caller in this repo but are used downstream.
+- The seed declares `bytes_builder_u16_be`, `_u32_be`, `bytes_builder_byte`, `str_starts_with`,
+  `split_words`, `str_split_lines`, `char_to_str`, `vector_empty`, `bytes_empty` and
+  `bytes_builder_empty`: moving any of them needs a reseed.
+
+**Blocked on a missing primitive.** Each is the only kind of new builtin this stage may propose
+(AGENTS.md §Builtin vs Stdlib), ranked by what it unlocks:
+
+1. An O(1) bounds-checked byte read on a `String`. Today every Sprout byte scan copies the String
+   into `Bytes` first (`str_char_at_byte` was removed). Unlocks `str_len`, `str_char_at` and its
+   twin, `str_slice` and `str_find`, all called from the compiler, and makes the scans above
+   copy-free.
+2. `unsafe_pure` for the prelude: a compiler change (`source.unsafe_pure_users` lists only
+   `stdlib.linvec`), not a builtin. Unlocks `vector_set`, `vector_append`, `vector_concat`,
+   `vector_from_list`, `vector_get` and its twin.
+3. `bytes_concat_many(List Bytes)`, with `Builder` turned into a Sprout type (it is one of the
+   compiler's built-in types in `bundler.sprout`). Replaces the 7 builder builtins with 1.
+4. A byte buffer with inline byte access (`docs/byte-buffer-v0.md`, a proposal). Unlocks base64,
+   `crypto_bytes_xor` and `crypto_sha256`, measured at 22–55× C without it.
+5. An unchecked Bytes→String, private to stdlib, for `bytes_to_utf8`, `char_to_string` and
+   `int_to_string`. A safety hole if it leaks: a String must be valid UTF-8 with no NUL.
+6. Int↔Char cast intrinsics, for `char_from_codepoint`.
+
+**Stays C**, with its reason:
+- `regex_validate`, `regex_find_match`: libc's regex engine. `regex_replace_all_literal` for now:
+  a Sprout loop over `regex_find_match` would recompile the pattern per match.
+- `double_to_string`: the first of `%.15g` to `%.17g` that reads back, over libc `snprintf` and
+  `strtod`.
+- `map_*`: the AVL tree behind `Dict` and `Set` (`dict_get` has 332 compiler call sites). A Sprout
+  port "keeps its cost and adds Sprout's" (`docs/native-sprout-runtime-v0.md` §3.4).
+- The representation primitives and the compiler-emitted builtins listed above.
 
 Steps:
-1. **Inventory.** For each of the 71 in the last two groups, record: primitive (stays, other code
-   builds on it) or helper; the primitives a Sprout version needs; and whether those exist
-   (`bytes_builder_*`, `str_slice_bytes`, `unsafe_pure` from `docs/unsafe-primitives-v0.md`). A
-   missing primitive is the only new builtin this stage may propose, under AGENTS.md §Builtin vs
-   Stdlib, and only when it replaces more than one helper.
-2. **Move helpers, cheapest first.** Each move deletes the C function and its `APPROVED_BUILTINS`
-   line, keeps every test green, and measures the Sprout version against the C one on the
-   workloads that call it. A regression is stated in the PR; a large one keeps the builtin, with
-   the measurement as its justification. Absorbs **Reimplement `json_stringify` in Sprout**.
-3. **Keep what must stay**, with a recorded reason: libc's regex engine, shortest round-trip
-   `Double` formatting and the hashes are likely candidates, each decided by measurement.
+1. ~~Inventory~~ — above.
+2. **Move the movable helpers**, one per PR, under the rule. Absorbs **Reimplement
+   `json_stringify` in Sprout**.
+3. **Propose the primitives** in the order above, each with its own design note.
 
 **Dead runtime functions** removes C nothing calls, beside this stage.
 **Done when:** every builtin in the last two groups is moved, or listed with its reason to stay.
