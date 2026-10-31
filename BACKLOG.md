@@ -297,7 +297,9 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   recursion over `match bvec_index(n, len)` allocates none: BFS w = 1,000 runs 415 against 335 ms
   (`docs/persistent-array-v0.md` §5.7). Every `Maybe`-returning lambda passed to a combinator
   pays this. Fix candidates: specialise a combinator at a known lambda argument, or inline small
-  combinators before the CPR router runs.
+  combinators before the CPR router runs. The same lever removes a layer cost: `count`/`member`
+  wrap the caller's lambda in a `fold` step, 1.6–2.5× per element (`docs/collections-surface-v0.md`
+  §4). Needs its own design; `docs/specialisation-v0.md` lists it as a non-goal.
 - [ ] `P3` **Argument CPR reaches only calls `translate_direct_call` lowers.** A consumer call as a
   `match` scrutinee (`match maybe_or_else(vec_get(i, v), fb) with`), in a worker's tail chain, or
   as a routed producer's argument goes through `translate_args`, so its argument is boxed; and
@@ -2946,6 +2948,11 @@ acting.
   that neither declares `where C (T a)` nor can build it (the class has no `T` instance) gets
   `under-application ... reached codegen` instead of a diagnostic: `infer.compound_head_tdict`
   returns Nothing. A method call on such a constraint is already rejected, so this is rare.
+- [ ] `P3` **A type mismatch prints a raw type-constructor variable.** `map(\x -> x + 1, 5)`
+  reports `Type mismatch: $t3190 Int vs Int`; `list_map` at the same misuse says `List Int vs
+  Int`. The unsolved `c` of `c a` reaches the message unnamed. Every generic collection call
+  (`map`, `filter`, `count`, …) shows it on a wrong argument. Print it as a named variable
+  (`f Int`) or say which class constrains it. Context: `docs/collections-surface-v0.md` §4.
 
 - [~] `P1` **A `where`-constrained function used as a first-class VALUE.** Fixed everywhere the
   dictionary is readable at the mention, by rewriting a bare mention into the eta-lambda the
