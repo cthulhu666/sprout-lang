@@ -319,7 +319,7 @@ Example classification:
 - `examples/sentry_api.sprout` is a library-style module layering Sentry-specific API helpers plus typed issue-summary and issue-detail decoding on top of generic `stdlib.http` + `stdlib.http_client`.
 - `examples/sentry_issue_browser_tui.sprout` is a library-style interactive issue browser module with environment-based config loading, list navigation, refresh, and detail rendering.
 - `examples/sentry_issue_browser.sprout` is the runnable wrapper around that helper module for `just run` and `just compile-native`, including HTTPS-backed Sentry API calls in native mode.
-- `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv_get(0)` and prints the response body.
+- `examples/http_get_cli.sprout` is a runnable CLI example that reads its URL from `argv.get(0)` and prints the response body.
 - `examples/text_demo.sprout` is a runnable Unicode-aware text summary CLI showing `Char`, `char_at_or`, `string_from_char`, and code-point `length`.
 - `examples/regex_demo.sprout` is a runnable experimental regex demo showing `compile`, `find_first`, `is_match`, `replace_all_literal`, and `escape`, including doubled-backslash regex patterns inside ordinary string literals.
 - `examples/string_templates.sprout` is a runnable string-template demo showing templates in both `String` contexts (`string_concat_many` instead of `++` chains) and `StringTemplate` contexts (structured parts passed to a sink).
@@ -330,7 +330,7 @@ The dev recipes (`check`, `run`, `compile`, `compile-native`, `gc-profile`, `bui
 
 Load HTTP and JSON helpers via imports such as `import stdlib.http (...)`, `import stdlib.http_client (...)`, `import stdlib.json as json`, and `import stdlib.string as string`.
 
-For programs that take program arguments (`argv_get`), use `just compile-native` and then run the binary directly. `just run` does not forward arguments.
+For programs that take program arguments (`stdlib.argv`), use `just compile-native` and then run the binary directly. `just run` does not forward arguments.
 
 - Typecheck a file: `mise exec -- just check examples/fizzbuzz.sprout`
 - Run a file (no program arguments): `mise exec -- just run examples/fizzbuzz.sprout`

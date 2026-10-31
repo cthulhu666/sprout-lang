@@ -111,7 +111,9 @@ DEFERRED pending an effect-system design pass. Details inline below.
   `Result Utf8Error (Maybe String)` (outer=validity, inner=presence). `tcp_read` retires
   in favor of the existing `tcp_read_exact -> Result TcpError Bytes` + `bytes_to_utf8`.
   Pair with an opt-in lossy `Bytes -> String` (U+FFFD) helper for best-effort text.
-  **R2 is a designed workstream** (coupled with D5's signature changes), NOT a quick
+  **R2 LANDED 2026-10-31** (see W2): `env_get_bytes`, `term_read_line_bytes`, `argv_get_bytes`
+  and a `Bytes` `stdin_read_bytes`; `env.get`, `terminal.term_read_line` and `argv.get`/`argv.all`
+  return `Result Utf8Error ...`. **R2 was a designed workstream** (coupled with D5's signature changes), NOT a quick
   patch — and non-urgent, since W2/R1 (done on branch `fix/w2-utf8-runtime-safety`)
   already makes invalid UTF-8 a clean panic when walked rather than a memory-safety hole.
 - **D5 (blocks P1/P2 in W8) — DECIDED 2026-07-04.** **P1 — fix the root, not `split_ints`.**
@@ -187,7 +189,7 @@ TYPED path (its IR header reads `ir_lowering.sprout`), not the direct path.
 
 </details>
 
-### W2 — F-UTF8: runtime string-safety batch  [R1+R3+R4 DONE 2026-07-04, CRITICAL; R2 remains, blocked on D4]
+### W2 — F-UTF8: runtime string-safety batch  [R1+R3+R4 DONE 2026-07-04; R2 DONE 2026-10-31 (D4: reject, Bytes-primary)]
 
 All in `runtime/sprout_runtime.c`. No compiler changes, no seed refresh. No new builtins
 (APPROVED_BUILTINS untouched).
@@ -222,7 +224,10 @@ separate feature deferred to the D4 ingestion-policy decision.
   clean `tcp_fail`-style panic (interior code may assume validity only once ingestion
   validates — until W2 completes fully, the walkers are the last line of defense; keep
   the check permanently anyway, it's O(1)).
-- **R2 — unvalidated ingestion (needs D4):** `utf8_validate` (correct, :6276) is called
+- **R2 — unvalidated ingestion — DONE 2026-10-31.** The producers below return `Bytes` and the
+  String forms decode with `bytes_to_utf8`: `env_get_bytes` (`env.get`), `term_read_line_bytes`
+  (`terminal.term_read_line`), `argv_get_bytes` (`argv.get`, `argv.all`; the startup check is gone),
+  `stdin_read_bytes` (now `Maybe Bytes`). Original finding: `utf8_validate` (correct, :6276) is called
   only from `read_file` (:1581) and one other site (:6332). Missing at: `proc_run`
   stdout/stderr (`sprout_make_proc_result` :1660), `tcp_read` (:7025, also silently
   truncates at embedded NUL), `term_read_line` (:1820) + `_unboxed` (:3905), `env_get`
@@ -701,7 +706,7 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
 | Session | Workstream | Blocked on |
 |---|---|---|
 | 1 | ~~W1 global GC roots~~ **DONE 2026-07-03** | — |
-| 2 | ~~W2 runtime UTF-8 (R1+R3+R4)~~ **DONE 2026-07-04**; R2 = designed workstream | D4 DECIDED (reject) |
+| 2 | ~~W2 runtime UTF-8 (R1+R3+R4)~~ **DONE 2026-07-04**; ~~R2~~ **DONE 2026-10-31** | D4 DECIDED (reject) |
 | 3 | W4 dispatch-by-constraint-position | — |
 | 4-5 | W3 rigidity + value restriction | — |
 | 6 | ~~W5 exhaustiveness + unreachability~~ **DONE 2026-07-03** | — |
@@ -710,7 +715,7 @@ retirement PR's loud-panic pass; each needs a `--use-direct-codegen` repro only 
 | 12 | W7 division | D1 DECIDED |
 | 13 | W10 direct-path retirement (C5-typed + C9 elsewhere) | D3 DECIDED (retire) |
 | — | ~~W6 effects campaign~~ **DONE 2026-08-16**, except top-level `let` purity (BACKLOG) | D2 RESOLVED |
-| — | W2/R2 ingestion (reject, Bytes-primary) | D4 DECIDED; design + D5 coupling |
+| — | ~~W2/R2 ingestion (reject, Bytes-primary)~~ **DONE 2026-10-31** | — |
 | — | W11 mediums | fold into adjacent sessions |
 
 Rationale for the order: W1 is the worst confirmed corruption with the smallest fix; W4

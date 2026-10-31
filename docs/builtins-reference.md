@@ -59,7 +59,7 @@ a missing-import diagnostic.
 `!{IO}` builtins in the prelude:
 
 - `print(x) -> Unit !{IO}`
-- `argv_get(index: Int) -> Maybe String !{IO}` (`0` is the first user-supplied program argument). Every argument is checked for valid UTF-8 at startup, before any user code runs; a bad one prints `argument N is not valid UTF-8` to stderr (`N` counts from 1) and exits with status 2, so `argv_get` never returns an invalid String.
+- `argv_get_bytes(index: Int) -> Maybe Bytes !{IO}` (`0` is the first user-supplied program argument; `Nothing` is an index past the last). The raw bytes, never checked: the OS does not promise UTF-8. `argv_all_bytes() -> List Bytes !{IO}` collects them. The String forms are `stdlib.argv`'s `get(index) -> Result Utf8Error (Maybe String)` and `all() -> Result Utf8Error (List String)`: `Err` for an argument that is not valid UTF-8, `Ok(Nothing)` for a missing one. Nothing in the runtime stops a program over a bad argument.
 
 Pure builtin in the prelude that nevertheless touches the terminal:
 
@@ -83,7 +83,7 @@ call the wrapper API:
 | `read_file(path) -> Result String String` | `stdlib.fs` | `fs.read_text(path)` |
 | `write_file(path, content) -> Result String Unit` | `stdlib.fs` | `fs.write_text(path, content)` |
 | `fs_*` (7: list_dir, stat_path, read_bytes, write_bytes, make_dir, remove, rename) | `stdlib.fs` | `fs.list_dir(…)`, `fs.stat(…)`, … |
-| `env_get(name) -> Maybe String` | `stdlib.env` | `env.get(name)` |
+| `env_get_bytes(name) -> Maybe Bytes` | `stdlib.env` | `env.get(name)` — `Result Utf8Error (Maybe String)`: `Err` for a value that is not valid UTF-8, `Ok(Nothing)` for an unset name |
 | `time_now_micros() -> Int` | `stdlib.time` | `time.now_micros()` — monotonic, for elapsed time |
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
@@ -120,7 +120,8 @@ call the wrapper API:
 - `term_hide_cursor() -> Unit !{IO}`
 - `term_show_cursor() -> Unit !{IO}`
 - `term_read_key() -> String !{IO}` (reads one key from stdin; in TTY mode it reads immediately without waiting for newline). A NUL byte, or a malformed UTF-8 sequence, reads as U+FFFD. **Enters and leaves raw mode around each keypress**, which bounds what it can decode: it recognises `ESC [ A/B/C/D` and returns the tail bytes of anything longer — a modifier chord, an SGR mouse report, a bracketed paste — as separate fake keypresses. It also **blocks the OS thread**, so a key read starves every other green task. Use the session surface below for anything beyond a prompt; this one is kept for `stdlib.repl` and is unchanged.
-- `term_read_line() -> Maybe String !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF)
+- `term_read_line_bytes() -> Maybe Bytes !{IO}` (reads one stdin line, trims trailing `\n`/`\r\n`, returns `Nothing` at EOF; a NUL byte or bytes that are not UTF-8 are kept). `stdlib.terminal.term_read_line() -> Result Utf8Error (Maybe String) !{IO}` decodes it: `Ok(Nothing)` at EOF, `Err` for a line that is not valid UTF-8 or holds a NUL (the line is consumed).
+- `stdin_read_bytes(n: Int) -> Maybe Bytes !{IO}` (reads exactly `n` bytes from stdin, NUL and non-UTF-8 bytes kept; `Nothing` when stdin ends first)
 - `term_write(text: String) -> Unit !{IO}`
 - `term_raw_enter() -> Unit !{IO}` / `term_raw_exit() -> Unit !{IO}` — hold raw mode for a **session** rather than a keypress: no echo, no line buffering, and ctrl-C, ctrl-S and ctrl-Q delivered as ordinary bytes (`ISIG`/`IXON` off) so a UI can bind them. `OPOST` is off too, so `\n` no longer implies `\r` and `print` is unusable while raw mode is held — send diagnostics to stderr. `term_raw_enter` also installs a `SIGWINCH` handler and an `atexit` restore; the restore is mandatory rather than tidy, because a crash would otherwise strand the user's shell with echo off and no working ctrl-C. A no-op when stdin is not a terminal.
 - `term_size() -> stdlib.terminal.TermSize !{IO}` — rows and columns from `TIOCGWINSZ`, falling back to `$LINES`/`$COLUMNS` and then 24x80, so a layout always has finite numbers. Nothing else can answer this: the DSR escape (`ESC[6n`) writes its reply into stdin, where `term_read_key` discards it.
