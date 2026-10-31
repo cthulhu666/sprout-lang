@@ -76,9 +76,9 @@ for label in content-length chunked; do
   fi
 done
 
-# A header value that is not valid UTF-8 must end as an HttpDecode error, not as a String; a valid
-# non-ASCII value must still arrive.
-for pair in "bad-header:HttpDecode" "utf8-header:Ok"; do
+# A header line that is not valid UTF-8 is read as ISO-8859-1 and the response, body included,
+# is returned; a valid non-ASCII line is unchanged; a mix of the two gives both right.
+for pair in "bad-header:Ok" "latin1:Ok" "utf8-header:Ok" "mixed:Ok"; do
   label="${pair%%:*}"
   want="${pair#*:}"
   got="$(grep "^$label: " "$TMPD/run.out" | head -1 | sed "s/^$label: //")"

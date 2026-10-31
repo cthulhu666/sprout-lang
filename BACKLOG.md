@@ -622,6 +622,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   still mint invalid UTF-8, which `SPROUT_GC_HDRCHECK` is blind to because it compares `aux`
   against `strlen` and a bad lead byte leaves those equal. `docs/debugging.md` records the
   asymmetry. `argv_get` is closed: argv is checked once at startup.
+- [ ] `P3` **File names that are not valid UTF-8 cannot be listed or removed through `stdlib.fs`.**
+  `fs_list_dir` returns `Err(FsIoError)` for the whole directory when one entry name fails UTF-8
+  validation (a `String` cannot hold it), so `list_dir`, `read_dir` and `remove_dir_all` cannot get
+  past such a file, and it cannot be deleted from Sprout. **Target:** a byte-based path type for
+  the fs API (Rust's `OsString`, Python's bytes paths), so a name round-trips unchanged; not a
+  separate raw-name listing call. Decide with the Bytes-primary ingestion work for `env_get` and
+  `term_read_line` (`docs/fundamentals-code-review-handoff-2026-07-03.md`, D4).
 - [ ] `P2` **`http_request`'s `timeout_ms` does not bound name resolution.** The deadline starts
   before `http_resolve`, but `async_resolve` parks on its pipe with `scheduler_park_on_unowned_fd`,
   which has no timeout, so a 30 s lookup under `timeout_ms = 1000` returns ~29 s late

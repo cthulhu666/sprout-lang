@@ -243,8 +243,10 @@ deprecated.
 
 - `list_dir(dir) -> Result FsError (List String) !{IO}` — entry names, excluding
   `.` and `..`. **Order is unspecified** (the filesystem's, not sorted). An entry name that is
-  not valid UTF-8 makes the whole call `Err (FsIoError "entry name is not valid UTF-8 in <dir>")`;
-  no entry is skipped and no partial list is returned.
+  not valid UTF-8 makes the whole call `Err (FsIoError "<dir>: entry name is not valid UTF-8")`;
+  no entry is skipped and no partial list is returned. `read_dir` and `remove_dir_all` list
+  through the same call, so they return the same `Err`; such a file cannot be listed or removed
+  through this module.
 - `stat(p) -> Result FsError Entry !{IO}` — **follows** a final symlink, like
   Rust's `fs::metadata` and Go's `os.Stat`.
 - `symlink_stat(p) -> Result FsError Entry !{IO}` — does **not** follow, like
@@ -310,8 +312,8 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - uses foundational prelude `Maybe` and `Result`
 - `HttpResponse(status, headers, body)` — `body` is **`Bytes`**, not `String`
 - `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`). A
-  response whose header block is not valid UTF-8 is `HttpDecode "response headers are not valid
-  UTF-8"`
+  header line that is not valid UTF-8 is read as ISO-8859-1 (each byte 0x80-0xFF becomes
+  U+0080-U+00FF), so the response is still returned
 - `HttpStatus` — the statuses a server can send, one constructor each, its code in its name:
   `Ok200`, `Created201`, `Accepted202`, `NoContent204`, `MovedPermanently301`, `Found302`,
   `SeeOther303`, `NotModified304`, `TemporaryRedirect307`, `PermanentRedirect308`,

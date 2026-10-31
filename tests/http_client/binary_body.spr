@@ -1,5 +1,5 @@
 import stdlib.http_client (http_get)
-import stdlib.http (HttpDecode, HttpResponse, http_response_body)
+import stdlib.http (HttpResponse, http_response_body)
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, read_avail_timeout, write_all)
 import testsupport.listen (listen_or_die)
 import stdlib.bytes as bytes
@@ -29,9 +29,9 @@ import stdlib.terminal as terminal
 # version used a python3 helper and broke immediately — python3 is absent from the Linux smoke
 # container, so `just linux-run http-client-binary-gate` could not run the gate at all.
 #
-#   binary_body serve <port>    one process, serves four connections, then exits
+#   binary_body serve <port>    one process, serves six connections, then exits
 #   binary_body <port>          the client, printing the byte count it received on each path, and
-#                               how a response whose header value is / is not valid UTF-8 ended
+#                               whether each response's headers and body arrived as expected
 
 # 20 bytes: "AAAA" 0x00 "BBBB" 0xFF "CCCCCCCCCC". Deliberately hostile in three ways at once, so no
 # half-fix passes:
@@ -92,16 +92,22 @@ fn chunked_response() -> Bytes =
     )
   )
 
-# A response whose header value is `caf` plus `tail`: the bytes C3 A9 (valid UTF-8) or FF (not).
-fn header_response(tail: Bytes) -> Bytes =
+# One header line: `<name>: caf` plus `tail`, raw. `tail` is E9 (Latin-1), C3 A9 (UTF-8) or FF.
+fn header_line(name: String, tail: Bytes) -> Builder =
+  bytes.builder_concat([
+    bytes.builder_bytes(bytes.from_string(string.concat(name, ": caf"))),
+    bytes.builder_bytes(tail),
+    bytes.builder_bytes(bytes.from_string("\r\n"))
+  ])
+
+# A 200 response with the given header lines and the body `ok`.
+fn header_response(lines: List Builder) -> Bytes =
   bytes.builder_build(
-    bytes.builder_append(
-      bytes.builder_append(
-        bytes.builder_bytes(bytes.from_string("HTTP/1.1 200 OK\r\nX-Name: caf")),
-        bytes.builder_bytes(tail)
-      ),
-      bytes.builder_bytes(bytes.from_string("\r\nContent-Length: 2\r\n\r\nok"))
-    )
+    bytes.builder_concat([
+      bytes.builder_bytes(bytes.from_string("HTTP/1.1 200 OK\r\n")),
+      bytes.builder_concat(lines),
+      bytes.builder_bytes(bytes.from_string("Content-Length: 2\r\n\r\nok"))
+    ])
   )
 
 # --- server role ------------------------------------------------------------------------------
@@ -129,11 +135,17 @@ fn serve_one(conn: consuming TcpConnection) -> Unit !{IO} =
 
 fn pick_reply(head: String) -> Bytes !{IO} =
   if string.contains(head, "/chunked") then chunked_response()
-  else if string.contains(head, "/bad-header") then header_response(bytes.builder_build(bytes.builder_byte(255)))
-  else if string.contains(head, "/utf8-header") then header_response(bytes.from_string("é"))
+  else if string.contains(head, "/bad-header") then
+    header_response([header_line("X-Name", bytes.singleton(255))])
+  else if string.contains(head, "/latin1") then
+    header_response([header_line("X-Name", bytes.singleton(233))])
+  else if string.contains(head, "/utf8-header") then
+    header_response([header_line("X-Name", bytes.from_string("é"))])
+  else if string.contains(head, "/mixed") then
+    header_response([header_line("X-A", bytes.singleton(233)), header_line("X-B", bytes.from_string("é"))])
   else framed_response()
 
-# Exactly four connections, then exit — the client makes exactly four requests, so this terminates on
+# Exactly six connections, then exit — the client makes exactly six requests, so this terminates on
 # its own and the gate needs no kill.
 fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
   if remaining <= 0 then terminal.write("")
@@ -150,7 +162,7 @@ fn run_server(port: Int) -> Unit !{IO} =
     listener <- listen_or_die(port)
     # The readiness marker the gate waits on, printed only once the listener is bound.
     terminal.write("ready\n")
-    serve_loop(listener, 4)
+    serve_loop(listener, 6)
     close_listener(listener)
 
 # --- client role ------------------------------------------------------------------------------
@@ -163,13 +175,26 @@ fn report(label: String, url: String) -> Unit !{IO} =
   | Err _ -> terminal.write(line(label, "REQUEST FAILED"))
   | Ok resp -> terminal.write(line(label, int_to_string(bytes.length(http_response_body(resp)))))
 
-# How a request ended: a header value that is not valid UTF-8 must be an HttpDecode error, not a
-# String; a valid one must still arrive.
-fn report_ending(label: String, url: String) -> Unit !{IO} =
+fn body_is_ok(body: Bytes) -> Bool =
+  match bytes.to_string(body) with
+  | Ok text -> text == "ok"
+  | Err _ -> false
+
+fn contains_all(text: String, wants: List String) -> Bool =
+  match wants with
+  | [w | rest] -> string.contains(text, w) && contains_all(text, rest)
+  | _ -> true
+
+# A header line that is not valid UTF-8 is read as ISO-8859-1 and the response is returned
+# normally; a valid one is unchanged. Prints "Ok" when the header block holds every string in
+# `wants` and the body is `ok`, else "FAIL" with what arrived.
+fn report_headers(label: String, url: String, wants: List String) -> Unit !{IO} =
   match http_get(url, "", 5000) with
-  | Err (HttpDecode _) -> terminal.write(line(label, "HttpDecode"))
-  | Err _ -> terminal.write(line(label, "OTHER ERROR"))
-  | Ok _ -> terminal.write(line(label, "Ok"))
+  | Err _ -> terminal.write(line(label, "REQUEST FAILED"))
+  | Ok (HttpResponse _ headers body) ->
+      if contains_all(headers, wants) && body_is_ok(body)
+      then terminal.write(line(label, "Ok"))
+      else terminal.write(line(label, string.concat("FAIL ", headers)))
 
 fn url_for(port: Int, path: String) -> String =
   string.concat("http://127.0.0.1:", string.concat(int_to_string(port), path))
@@ -178,8 +203,10 @@ fn run_client(port: Int) -> Unit !{IO} =
   do
     report("content-length", url_for(port, "/binary"))
     report("chunked", url_for(port, "/chunked"))
-    report_ending("bad-header", url_for(port, "/bad-header"))
-    report_ending("utf8-header", url_for(port, "/utf8-header"))
+    report_headers("bad-header", url_for(port, "/bad-header"), ["X-Name: cafÿ"])
+    report_headers("latin1", url_for(port, "/latin1"), ["X-Name: café"])
+    report_headers("utf8-header", url_for(port, "/utf8-header"), ["X-Name: café"])
+    report_headers("mixed", url_for(port, "/mixed"), ["X-A: café", "X-B: café"])
 
 # `arg_or` takes the `Maybe` rather than being bound with `<-`, because `<-` on a `Maybe` SHORT-
 # CIRCUITS it: `mode <- argv_get(0)` would bind a `String` and make a missing argument abandon the
