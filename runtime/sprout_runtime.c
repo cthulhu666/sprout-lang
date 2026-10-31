@@ -774,19 +774,21 @@ static inline void sprout_obj_write_tag(void* payload, long long tag, int arity)
 #define SPROUT_GC_COLOR_BIT     ((uint64_t)0x100)  /* bit 8 = mark color */
 #define SPROUT_FREELIST_CLASSES 257                 /* classes 1..256 + sentinel */
 
-/* Object age — header bits 9..13, the gap between the color bit and aux (which
- * sprout_hdr_make shifts to bit 14).  A saturating count of collections this
- * object has survived: 0 = allocated since the last sweep.  Written only by the
- * sweep's live branch, and reset to 0 whenever a slot is (re)initialised, since
- * sprout_hdr_write / the FREE and POISON headers rewrite the whole word.
+/* Object age — header bits 9..12, between the color bit and the REMEMBERED bit.
+ * A saturating count of collections this object has survived: 0 = allocated
+ * since the last sweep.  Written only by the sweep's live branch, and reset to 0
+ * whenever a slot is (re)initialised, since sprout_hdr_write / the FREE and
+ * POISON headers rewrite the whole word.
  *
- * Read by SPROUT_GC_AGEPROF (measurement only, see sprout_gc_ageprof_on).  These
- * are the same bits a generational collector would use for age/remembered state,
- * so the instrument doubles as a dry run of that mechanism — but nothing in the
- * collector's behaviour depends on the value today. */
+ * Bit 13 is REMEMBERED: set only by the write barrier (sprout_gc_write_barrier),
+ * and meaningful once minor collections exist (docs/gc-generational-v0.md §14.4).
+ * Nothing clears it yet, and nothing in the collector's behaviour depends on it
+ * or on the age value today; SPROUT_GC_AGEPROF reads the age (measurement only,
+ * see sprout_gc_ageprof_on).  aux starts at bit 14, via sprout_hdr_make. */
 #define SPROUT_GC_AGE_SHIFT 9
-#define SPROUT_GC_AGE_MAX   31                      /* 5 bits: 0..31, saturating */
+#define SPROUT_GC_AGE_MAX   15                      /* 4 bits: 0..15, saturating */
 #define SPROUT_GC_AGE_MASK  ((uint64_t)SPROUT_GC_AGE_MAX << SPROUT_GC_AGE_SHIFT)
+#define SPROUT_GC_REMEMBERED_BIT ((uint64_t)1 << 13)
 
 static inline unsigned sprout_hdr_age(uint64_t h) {
   return (unsigned)((h & SPROUT_GC_AGE_MASK) >> SPROUT_GC_AGE_SHIFT);
@@ -796,6 +798,50 @@ static inline uint64_t sprout_hdr_age_bump(uint64_t h) {
   unsigned age = sprout_hdr_age(h);
   if (age >= SPROUT_GC_AGE_MAX) return h;
   return (h & ~SPROUT_GC_AGE_MASK) | ((uint64_t)(age + 1) << SPROUT_GC_AGE_SHIFT);
+}
+
+/* ── Generational write barrier (docs/gc-generational-v0.md §14.4) ─────────────
+ *
+ * The collector state a per-domain heap would own.  The remembered set holds the
+ * payloads of objects whose REMEMBERED bit is set, each once.  Nothing reads it
+ * yet: the sweep clears every color bit, so between collections no object is old
+ * and the barrier's fast path always exits.  Not thread-safe, like the rest of
+ * the heap. */
+typedef struct {
+  void**  remembered;  /* payload pointers */
+  size_t  len;
+  size_t  cap;
+} SproutGenState;
+static SproutGenState g_gen;
+
+/* Record `payload`, whose header is `h` (color set, REMEMBERED clear). */
+__attribute__((noinline, cold)) static void sprout_gc_remember_slow(void* payload, uint64_t h) {
+  if (g_gen.len >= g_gen.cap) {
+    size_t new_cap = g_gen.cap < 256 ? 256 : g_gen.cap * 2;
+    void** grown = (void**)realloc(g_gen.remembered, new_cap * sizeof(void*));
+    if (!grown) sprout_fail("GC write barrier: out of memory for the remembered set");
+    g_gen.remembered = grown;
+    g_gen.cap = new_cap;
+  }
+  h |= SPROUT_GC_REMEMBERED_BIT;
+  memcpy((char*)payload - 8, &h, 8);
+  g_gen.remembered[g_gen.len++] = payload;
+}
+
+/* Fast path at the C store sites: one header load and one masked compare.
+ * `payload` must be a managed payload; it records the OBJECT stored into, not the
+ * field, and never looks at the stored value. */
+static inline void sprout_gc_barrier(void* payload) {
+  uint64_t h;
+  memcpy(&h, (char*)payload - 8, 8);
+  if ((h & (SPROUT_GC_COLOR_BIT | SPROUT_GC_REMEMBERED_BIT)) == SPROUT_GC_COLOR_BIT)
+    sprout_gc_remember_slow(payload, h);
+}
+
+/* The extern entry, for emitted IR.  NULL is ignored; any other non-managed
+ * pointer is the caller's bug, since telling it apart costs a heap lookup. */
+void sprout_gc_write_barrier(void* payload) {
+  if (payload != NULL) sprout_gc_barrier(payload);
 }
 
 /* ── SPROUT_GC_AGEPROF=1 — how much of a collection is re-work? ───────────────
@@ -2041,7 +2087,7 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
     sprout_fail("vector_push: vector header records no inline elements to release");
   if (r == NULL || r->is_large || r->slotmap == NULL)
     sprout_fail("vector_push: inline vector is not in an ordinary region");
-  h &= ((uint64_t)1 << 14) - 1;                  /* aux := 0, keep kind/color/age */
+  h &= ((uint64_t)1 << 14) - 1;                  /* aux := 0, keep kind/color/age/remembered */
   memcpy(hdr_addr, &h, 8);
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
   char* tail = hdr_addr + new_slot;
@@ -2162,9 +2208,9 @@ long long ref_read(long long ref) {
 long long ref_write(long long ref, long long value) {
   if (sprout_heap_kind_at((void*)(uintptr_t)ref) != SPROUT_HEAP_REF)
     sprout_fail("ref_write: not a Ref");
-  /* Candidate write-barrier site: a pointer store into an already-allocated
-   * object.  Measured under SPROUT_GC_AGEPROF to price a barrier before one
-   * exists (see sprout_ap_note_ptr_store). */
+  /* A pointer store into an already-allocated object: the barrier records the
+   * Ref, and AGEPROF prices the store (see sprout_ap_note_ptr_store). */
+  sprout_gc_barrier((void*)(uintptr_t)ref);
   sprout_ap_on_store(ref, value);
   ((RefVal*)(uintptr_t)ref)->value = value;
   return 0;
@@ -5213,6 +5259,8 @@ static long long sprout_analysis_diagnostics_vec_or_fail(
     words[1] = (uintptr_t)lines[i];
     words[2] = (uintptr_t)columns[i];
     out->data[i] = tuple;
+    sprout_gc_barrier(out);  /* an earlier tuple allocation may have promoted out */
+    sprout_ap_on_store(rooted_out, tuple);
     out->len = i + 1;
   }
   if (lines != NULL) free(lines);
@@ -5265,6 +5313,8 @@ static long long sprout_analysis_ok_symbol_locations_from_response(
     words[2] = (uintptr_t)lines[i];
     words[3] = (uintptr_t)columns[i];
     out->data[i] = tuple;
+    sprout_gc_barrier(out);  /* an earlier tuple allocation may have promoted out */
+    sprout_ap_on_store(rooted_out, tuple);
     out->len = i + 1;
   }
   if (lines != NULL) free(lines);
@@ -8577,10 +8627,10 @@ long long vector_mutset(long long vec, long long index, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) sprout_fail("vector_mutset: null vector");
   if (index < 0 || index >= v->len) sprout_fail("vector_mutset: index out of bounds");
-  /* The other candidate write-barrier site — see ref_write.  The store lands
-   * either in the VectorVal's own slot or in a malloc buffer it owns; neither is
-   * a GC object in its own right, so a real barrier here must record the OWNING
-   * object, which is what is priced. */
+  /* The store lands either in the VectorVal's own slot or in a malloc buffer it
+   * owns; neither is a GC object in its own right, so the barrier records the
+   * OWNING VectorVal.  See ref_write. */
+  sprout_gc_barrier(v);
   sprout_ap_on_store(vec, value);
   ((struct SproutSlot*)v->data)[index].w = value;
   return 0;
@@ -8616,6 +8666,9 @@ long long vector_mutset(long long vec, long long index, long long value) {
 long long vector_push(long long vec, long long value) {
   VectorVal* v = (VectorVal*)(uintptr_t)vec;
   if (v == NULL) sprout_fail("vector_push: null vector");
+  /* Before any growth: the growth below moves the elements out of the object's
+   * own slot, and the barrier records the VectorVal, which does not move. */
+  sprout_gc_barrier(v);
   if (v->len >= v->cap) {
     if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) sprout_fail("vector_push: vector too large");
     long long new_cap = v->cap <= 0 ? 8 : v->cap * 2;
@@ -8637,8 +8690,7 @@ long long vector_push(long long vec, long long value) {
     }
     v->cap = new_cap;
   }
-  /* The same candidate write-barrier site as vector_mutset: a push stores into an
-   * already-allocated object, so a generational barrier would have to cover it. */
+  /* AGEPROF prices the push like vector_mutset; its barrier ran above. */
   sprout_ap_on_store(vec, value);
   v->data[v->len] = value;
   v->len = v->len + 1;

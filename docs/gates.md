@@ -909,14 +909,14 @@ young, separation 49pp against a 40pp floor. The failure message said "objects a
 cycles that should not" about an object whose whole job is to survive.
 
 The fix is to subtract the steady state rather than to raise the bound: a rooted object is marked
-once at each age, so buckets 1..30 of `marked_by_age` each hold exactly the root count, and
+once at each age, so buckets 1..14 of `marked_by_age` each hold exactly the root count, and
 `marked_age_ge1 - roots × (cycles-1)` is the churn that actually outlived a collection (0% on
 both sides of this change, where the raw ratio read 12% and 24%). Raising 15% to 35% would have
 worked for exactly one more root.
 
 **Subtracting a floor needs the floor bounded, or a leak hides inside it.** The histogram cannot
 tell a rooted global from an object retained for the whole run — both are flat steady state — so
-a 500-object leak old enough to fill buckets 1..30 would be read as a 502-root floor and
+a 500-object leak old enough to fill buckets 1..14 would be read as a 502-root floor and
 subtracted away. Hence `roots ≤ 8` beside the flatness check: the count is small, known, and
 changes only when someone adds a global, so bounding it costs nothing and is what keeps the
 correction from absorbing the thing it exists to detect.
