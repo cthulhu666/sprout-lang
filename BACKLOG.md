@@ -2884,6 +2884,16 @@ acting.
 
 #### Runtime-invariant confidence tooling
 
+- [ ] `P2` **Runtime memory-safety roadmap.** Stale reads of swept objects, out-of-bounds reads and
+  extern signature mismatches recur, each fixed one instance at a time. ASan checks only C: Sprout
+  IR has no `sanitize_address`, and the GC arena is unpoisoned. Stages: runtime `-Werror`, moving
+  the 71 pure and data builtins into Sprout (beside the rest), arena poisoning with quarantine,
+  freed task stacks poisoned, ASan over Sprout code, one source for the extern interface, measured
+  extras. Absorbs **C exhaustiveness for heap-kind dispatch**, **A missing frame pop has no
+  executable oracle**, **Compare each `extern fn`'s C definition against the emitted `declare`**
+  and **Reimplement `json_stringify` in Sprout**.
+  `docs/runtime-memory-safety-v0.md`.
+
 - [ ] `P2` **Compare each `extern fn`'s C definition against the emitted `declare`.** The
   duplicate-declaration half is gated — `scripts/check_extern_signatures.sh` enforces one C symbol
   to one `extern fn` — but it never reads `runtime/*.c`, so the type comparison is untouched and

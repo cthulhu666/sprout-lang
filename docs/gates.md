@@ -1037,8 +1037,9 @@ A stray `payload-8` read on a headerless String lands in a malloc'd buffer's lef
 reported at `sprout_hdr_of` with the allocation site (`docs/string-header-invariant-v0.md` §4.5).
 
 **What it cannot see.**
-- The GC arena is one malloc to ASan, so an overread inside it is invisible; only a String that
-  lives outside the arena is caught.
+- GC regions hold many slots in one block: arena chunks are `mmap`'d and untracked, an overflow
+  region is one `malloc`. An overread between slots is invisible; only a String in a large object,
+  `malloc`'d alone, is caught.
 - A literal is caught only when an instrumented global happens to precede it (§4.5).
 - Leaks are off (`detect_leaks=0`): the arena is never freed.
 - Code no test reaches.

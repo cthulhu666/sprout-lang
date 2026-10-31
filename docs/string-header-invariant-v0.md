@@ -215,9 +215,10 @@ ones). Under it, `sprout_hdr_of` reading
 at the first consumer, naming the allocation. A literal is best-effort only. ASan gives globals
 trailing redzones and no leading ones, so `lit-8` is reported only when an instrumented global
 happens to sit just before the literal. For literals, the deterministic net is `sprout_str_word`
-under HDRCHECK. ASan also misses libc's static buffers (`strerror`), reads inside the GC arena
-(one malloc to ASan) and paths no test exercises. So it complements §4.3 rather than replacing
-it, and it catches every other out-of-bounds read in the runtime.
+under HDRCHECK. ASan also misses libc's static buffers (`strerror`), reads between slots of a GC
+region (one block of many slots: an untracked `mmap`'d chunk or one `malloc`) and paths no test
+exercises. So it complements §4.3 rather than replacing it, and it catches every other
+out-of-bounds read in the runtime.
 
 ## 5. Rejected
 
