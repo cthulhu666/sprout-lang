@@ -1,6 +1,20 @@
 # Linear containment table — v0
 
-Status: proposed (2026-10-30). Compiler-internal; no language change, not in the spec.
+Status: landed (2026-10-31). Compiler-internal; no language change, not in the spec.
+
+## Result
+
+Same heavy compile, stage1 from the branch's base seed against this change, three alternating runs
+each, macOS `sample` at 1 ms:
+
+| | before | after |
+|---|---|---|
+| user time, mean | 3.75 s | 3.26 s (−13%) |
+| `fn_linear_gate`, inclusive | 404 / 2919 samples (13.8%) | 42 / 2626 (1.6%) |
+| `strcmp`, top of stack | 340 | 235 |
+
+The temporary cross-check (query against walk on every call) ran over the self-compile, `just test`
+and all examples with no disagreement before it was removed.
 
 ## Problem
 
@@ -62,7 +76,7 @@ whose declaration stores an `a` (such as `List`) looked linear. #796 marks them 
 |---|---|---|---|
 | Per-query memo inside `check_fn_linear` | nothing per node; a hit still needs a key for the whole type | small | no: building that key costs as much as the walk |
 | `@holds:T` presence markers in the env | the opened declarations, about a third | no signature changes | not enough alone: per-node strings and big-env lookups stay |
-| **`LinEnv { env, lin: LinTables }`** | the opened declarations **and** the per-node strings and big-env lookups | 107 `env: Dict types.Scheme` parameters in `linear_check`, plus `LinearGate`, `resolve.head_var_fault` and three `infer` callers | **recommended** |
+| **`LinEnv { env, lin: LinTables, marked: Set }`** | the opened declarations **and** the per-node strings and big-env lookups | 107 `env: Dict types.Scheme` parameters in `linear_check`, plus `LinearGate`, `resolve.head_var_fault` and three `infer` callers | **recommended** |
 
 ## Proposal
 
@@ -70,20 +84,28 @@ whose declaration stores an `a` (such as `List`) looked linear. #796 marks them 
 built:
 
 - `holds: Set` — declared type names whose values hold a linear value;
-- `phantom: Dict (Set Int)` — for each type name, its phantom argument positions;
-- `scoped` stays on the env, as today's `@linear:` markers for type variables, skolems and `$ex_`
-  ids, because those come and go with scope.
+- `phantom: Dict (List Int)` — for each type name, its phantom argument positions.
 
-Build `holds` **by running today's walk once per declared type name**: `T` is in `holds` iff
-`first_linear_in(TConst T, scanned_env)` is `Just`. Each name starts from an empty `seen`, exactly as
-a query does today, so the table matches today's answers by construction. It needs no new fixed-point
-code.
+Scoped markers for type variables, skolems and `$ex_` ids come and go with scope, so they stay on
+the env. Each gate collects them once: `marked: Set` holds the bare suffix of every `@linear:` key
+in the gate's env, from one `dict_entries_with_prefix` scan. `linear_check` never adds a
+`@linear:` key, so the set is exact for every query in the gate. Builtins such as `String` and
+`List` carry no marker and are in neither set.
+
+Build `holds` **by reachability**: `T` is in `holds` iff `first_linear_in(TConst T, scanned_env)` is
+`Just`. The walk answers `Just` iff it reaches a `@linear:` name, whatever the visit order. So the
+build lists, for each declared `T`, the names the walk reads or opens from `T`'s stored fields (a
+constant; an application's head and its non-phantom arguments; a tuple's `Tuple<n>` and its items;
+nothing for variables, functions and thunks), and runs one search from the marked names over the
+reversed edges. It costs one pass over the declarations, not one walk per name.
 
 Caching the walk's per-name answers *within* one walk would be wrong. In `type A = | A B Res` with
-`type B = | B A`, the walk on `A` reads `B` as `Nothing` partway through. A table built per name from
-fresh walks never does this.
+`type B = | B A`, the walk on `A` reads `B` as `Nothing` partway through. Reachability does not
+cache answers; it asks only which names reach a leaf.
 
-- **When:** only when `@any_linear` is present; otherwise the sets are empty.
+- **When:** `phantom` is built from the `@phantom:` markers always: they exist in every program, and
+  a `where linear` bound runs the checks even where no linear type is declared. `holds` is empty
+  while no name carries a `@linear:` mark.
 - **Where:** from `scanned_env`, the output of `pre_scan_fn_decls` (~7565 in `infer`), before
   `check_published_linear_types` (~7599) runs. That check's wording already depends on
   `first_linear_in`.
@@ -95,11 +117,10 @@ fresh walks never does this.
 
 | `t` | Answer |
 |---|---|
-| `TConst n`, `n` declared | `n ∈ holds` |
-| `TConst n`, anything else (skolem, `$ex_`, an `existv<n>` reached through a stored field) | the scoped `@linear:n` lookup, as today |
+| `TConst n` | `n ∈ holds` or `n ∈ marked` (a skolem, `$ex_` or `existv<n>` is only in `marked`) |
 | `TApp`, spine head `h` | `h` answered as `TConst` or `TVar` would be; if that says no, walk the arguments whose position is not in `phantom[h]` |
-| `TTuple` | `Tuple<n> ∈ holds` (a declared `Tuple2` behaves as today), then the components |
-| `TVar v` | the scoped `@linear:v` lookup |
+| `TTuple` | `Tuple<n> ∈ marked`, as today's walk reads only that mark, then the components |
+| `TVar v` | `v ∈ marked` |
 | `TFunc`, `TThunk` | `Nothing` |
 
 **3. Witnesses keep today's walk.** When the query says no, the answer is `Nothing`. When it says
@@ -114,15 +135,24 @@ Decisions use only `Just` versus `Nothing`.
 
 **4. Threading.**
 
-- `LinEnv` replaces `env: Dict types.Scheme` in `linear_check`; the change is mechanical.
-- `LinearGate` carries `LinTables`, and `linear_gate_error` wraps them with the per-gate
-  `bound_env`.
-- `resolve` receives the scheme env through `TypedOk`. It either gets `LinTables` alongside, or
-  rebuilds them from the same markers; to be decided while implementing.
-- Callers to update:
+- `LinEnv { env, lin, marked }` replaces `env: Dict types.Scheme` in `linear_check`; the change
+  is mechanical. `make_lin_env(env, lin)` builds `marked` once per gate. The walk that finds a
+  witness (`first_linear_witness`) and the env lookups that are not containment keep reading
+  `env.env`.
+- `build_lin_tables(scanned_env)` runs once, in `typecheck_decls_resolved`. The tables live in
+  `unifier.InferState` (`set_lin_tables`, `get_lin_tables`), which already reaches every
+  declaration check. `LinearGate` copies them out as `lin`; `linear_gate_error` wraps them with
+  its per-gate `bound_env` into one `LinEnv`, shared by `fn_linear_gate` and
+  `bound_obligation_error`.
+- `resolve` rebuilds them in `build_tables`, from the env `TypedOk` carries, before any
+  `$bound:` mark. `TypedOk` has 55 uses, so adding a field to it costs more than one extra build
+  per `resolve_program`. `Tables` holds a `LinEnv`; `with_bounded` adds each `$bound:` mark to its
+  env and its name to `marked`, with no rescan.
+- Callers updated:
   - `fn_linear_gate` and `letdecl_linear_gate`;
   - `infer`'s `untracked_reason`, `mode_pair_fault` and `obligation_fault`;
   - `check_published_linear_types`;
+  - `signature_modes_error` and `class_method_mode_error`, which only need the type's shape;
   - `resolve.head_var_fault`;
   - inside `linear_check`, `spine_param_holds_linear`.
 
@@ -133,7 +163,9 @@ walk instead reads scoped markers at every node, including inside opened declara
 agree only while no scoped `@linear:` key can equal a name that appears in a stored field:
 
 - `$t…` from `unifier.fresh`, `$sk…` and `$ex_…` from unpacks, and `$bound:…` from #796 all start
-  with `$`, which no source identifier can.
+  with `$`, which no source identifier can. A declared name can: the entry module's types are
+  `$entry.<Name>` and carry a real `@linear:` mark, so a check for "no `$` marks" is wrong. The
+  scoped prefixes are `$sk`, `$ex_` and `$bound:`; none appears in `scanned_env`.
 - **One exception:** `infer.signature_modes_error` (~11851) marks *written* names, including a
   class's own parameters. It is out of reach today only because its one consumer,
   `first_bad_modifier` → `ownership_fault`, looks at the head alone and never at containment. The
@@ -155,7 +187,7 @@ agree only while no scoped `@linear:` key can equal a name that appears in a sto
   - a type-variable spine head (`f a` under `where linear f`);
   - the class-method case under §Premises.
 - **Cross-check, temporary:** compare the query with the walk's `Just`/`Nothing` on every call,
-  across the full test corpus. Remove it before landing.
+  across the full test corpus. Removed before landing.
 - **Byte-identical:** every `type_error`, `linear*` and published-linear fixture. Then
   `test_linear_containment_cost.spr`, `just test` and `just dod`.
 - **Cost:** re-run the profile. Report `fn_linear_gate`'s share (15.5% today) and the walk's
@@ -163,9 +195,12 @@ agree only while no scoped `@linear:` key can equal a name that appears in a sto
 
 ## Implementation steps
 
-1. Semantics tests.
-2. `LinTables` and how they are built, plus the query and the temporary cross-check. `linear_check`
-   still reads the env.
-3. Thread `LinEnv` through `linear_check`, `LinearGate`, `infer` and `resolve`. This step is
-   mechanical.
-4. Run the corpus cross-check, then remove it. Reseed, `just dod`, and profile before and after.
+All four landed together (§Result).
+
+1. ~~Semantics tests.~~
+2. ~~`LinTables`, `marked` and how they are built, plus the query, checked against the walk on the
+   semantics cases.~~
+3. ~~Thread `LinEnv` through `linear_check`, `LinearGate`, `infer` and `resolve`, with the temporary
+   cross-check at the query.~~
+4. ~~Run the corpus cross-check, then remove it.~~ Removing it left `holds_linear` = `lin_holds` and
+   `first_linear_in` = `if lin_holds then witness walk else Nothing`.

@@ -1,6 +1,6 @@
 module main
 
-# A tuple component. `type_mentions_linear` descends TTuple, so this is the shape
+# A tuple component. `holds_linear` descends TTuple, so this is the shape
 # that proves the walk is structural rather than a List/Maybe special case.
 
 type linear File = File Int

@@ -2017,11 +2017,6 @@ M4.1–M4.6 plus M4.4a (one-shot closures) have landed. Design and the full rule
 `docs/linear-borrowing-v0.md`, `docs/one-shot-closures-v0.md`, `docs/linearity-virality-v0.md`;
 normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
 
-- [ ] `P2` **The linear check re-walks every type on every query: 15.5% of a heavy compile.**
-  Any linear type in the bundle turns `check_fn_linear` on for every function, and
-  `first_linear_in` rebuilds its answer per query: 1.76M `@linear:` lookups for 1,929 distinct
-  keys, 125 hits. Plan: small sets built once (today's walk per declared name), queried with no
-  string building, threaded as `LinEnv`. `docs/linear-containment-table-v0.md`.
 - [ ] `P2` **Higher-order linearity (M4.4) — the general case.** M4.2 loud-rejects a linear
   binding captured by a lambda, because a closure may run 0..n times and its call count is
   untracked; M4.5 borrowing did not lift this and extends the rejection to borrowed values, since

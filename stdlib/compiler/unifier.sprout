@@ -3,6 +3,7 @@ import stdlib.compiler.types as types
 import stdlib.compiler.source as source
 import stdlib.compiler.ast as ast
 import stdlib.compiler.bind_census as bind_census
+import stdlib.compiler.linear_check as linear_check
 import stdlib.string as string
 
 # ---------------------------------------------------------------------------
@@ -297,7 +298,8 @@ export type InferState (..) = (
   census: Ref bind_census.Census,
   unpacks: Ref (List Unpack),
   decl_unpacks: Ref (List Unpack),
-  arm_escapes: Ref (List ArmEscape)
+  arm_escapes: Ref (List ArmEscape),
+  lin_tables: Ref linear_check.LinTables
 )
 
 export fn new_state() -> InferState !{IO} =
@@ -315,11 +317,12 @@ export fn new_state() -> InferState !{IO} =
     unpack_ref <- ref_new(Nil)
     decl_unpack_ref <- ref_new(Nil)
     arm_ref <- ref_new(Nil)
+    lin_ref <- ref_new(linear_check.build_lin_tables(dict_empty()))
     InferState(next_type_id = t_id, next_effect_id = e_id, ctor_map = ctor_ref, field_obligations = field_ref,
                bound_obligations = bound_ref,
                effect_reports = effect_ref, parked_binds = bind_ref, try_fusions = fusion_ref,
                try_positions = try_ref, census = census_ref, unpacks = unpack_ref,
-               decl_unpacks = decl_unpack_ref, arm_escapes = arm_ref)
+               decl_unpacks = decl_unpack_ref, arm_escapes = arm_ref, lin_tables = lin_ref)
 
 # A binding of a match arm whose type mentions a skolem the arm's pattern minted: its
 # name, the constructor that hid the type, and its type under the pattern's substitution.
@@ -451,6 +454,14 @@ export fn set_ctor_map(state: InferState, ctor_map: Dict (List String)) -> Unit 
 
 export fn get_ctor_map(state: InferState) -> Dict (List String) !{IO} =
   ref_read(state.ctor_map)
+
+# The program's linear containment tables, built once from the pre-scanned env
+# (linear_check.build_lin_tables) and read by every linear gate.
+export fn set_lin_tables(state: InferState, lin: linear_check.LinTables) -> Unit !{IO} =
+  ref_write(state.lin_tables, lin)
+
+export fn get_lin_tables(state: InferState) -> linear_check.LinTables !{IO} =
+  ref_read(state.lin_tables)
 
 export fn set_try_fusions(state: InferState, fusions: TryFusions) -> Unit !{IO} =
   ref_write(state.try_fusions, fusions)
