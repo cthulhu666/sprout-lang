@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, local_port)
 import testsupport.listen (listen_or_die)
-import testsupport.http_wire (mark, read_response, read_to_end, says_close, send, with_conn)
+import testsupport.http_wire (expect_closed, expect_kept, send, with_conn)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
 import stdlib.terminal as terminal
 
@@ -16,36 +16,29 @@ fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
 fn request(conn: borrowing TcpConnection) -> Unit !{IO} =
   send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 
-fn expect_kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+fn kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   do
     request(conn)
-    match read_response(conn) with
-    | Ok (head, body) -> mark(label, body == "hello" && !says_close(head), head ++ body)
-    | Err e -> mark(label, false, e)
+    expect_kept(conn, label)
 
-fn expect_closed(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+fn closed(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
   do
     request(conn)
-    match read_response(conn) with
-    | Ok (head, _) ->
-        match read_to_end(conn) with
-        | Ok rest -> mark(label, says_close(head) && rest == "", `${head}| then: ${rest}`)
-        | Err e -> mark(label, false, e)
-    | Err e -> mark(label, false, e)
+    expect_closed(conn, label)
 
 fn four(a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing TcpConnection,
         d: borrowing TcpConnection) -> Unit !{IO} =
   do
-    expect_kept(a, "first-kept")
-    expect_kept(b, "second-kept")
-    expect_kept(c, "third-kept")
-    expect_closed(d, "fourth-closes")
+    kept(a, "first-kept")
+    kept(b, "second-kept")
+    kept(c, "third-kept")
+    closed(d, "fourth-closes")
 
 fn clamped(port: Int) -> Unit !{IO} =
   with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> with_conn(port, \d -> four(a, b, c, d)))))
 
 fn live_one(port: Int) -> Unit !{IO} =
-  with_conn(port, \a -> expect_closed(a, "live-cap-1-closes"))
+  with_conn(port, \a -> closed(a, "live-cap-1-closes"))
 
 fn run(s: Scope) -> Unit !{IO} =
   do

@@ -8,7 +8,7 @@ let port: Int = 28972
 
 # `tcp_accept` lets other tasks run under a steady stream of connections. With the queue never empty
 # it never sees EAGAIN, so it never parks on its own, and a task spawned beside an accept loop waits
-# until the loop ends. After `streak` accepts in a row it parks on the listener first, which returns
+# until the loop ends. After `streak` calls in a row it parks on the listener first, which returns
 # at the next poll; the other tasks run, then accepting resumes.
 #
 # 40 connects are queued before the first accept (the backlog is far larger, see listen_backlog).

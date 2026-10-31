@@ -1,7 +1,7 @@
 import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, local_port)
 import testsupport.listen (listen_or_die)
-import testsupport.http_wire (count_of, mark, read_response, read_head_reply, read_to_end, says_close, send, with_conn)
+import testsupport.http_wire (count_of, expect_closed, expect_kept, mark, read_head_reply, read_to_end, says_close, send, with_conn)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with, with_header)
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -13,21 +13,6 @@ import stdlib.terminal as terminal
 fn handle(req: HttpRequest) -> HttpServerResponse !{IO} =
   if request_path(req) == "/close" then with_header("connection", "close", ok("bye"))
   else ok("hello")
-
-# A kept response: the body arrived and nothing said close.
-fn expect_kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
-  match read_response(conn) with
-  | Ok (head, body) -> mark(label, body == "hello" && !says_close(head), head ++ body)
-  | Err e -> mark(label, false, e)
-
-# A closing response: it says close, then the server closes with nothing more.
-fn expect_closed(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
-  match read_response(conn) with
-  | Ok (head, _) ->
-      match read_to_end(conn) with
-      | Ok rest -> mark(label, says_close(head) && rest == "", `${head}| then: ${rest}`)
-      | Err e -> mark(label, false, e)
-  | Err e -> mark(label, false, e)
 
 fn reuse(conn: borrowing TcpConnection) -> Unit !{IO} =
   do
