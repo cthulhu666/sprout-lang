@@ -31,9 +31,6 @@ declare i128 @map_nth_key_unboxed(i64, i64)
 declare i128 @map_nth_value_unboxed(i64, i64)
 declare i128 @bytes_get_unboxed(i64, i64)
 declare i128 @str_char_at_unboxed(i64, i64)
-declare i128 @argv_get_unboxed(i64)
-declare i128 @env_get_unboxed(i64)
-declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @analysis_check_source(ptr)
 declare i64 @analysis_declared_names_in_source(ptr)
@@ -48,6 +45,7 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 declare i64 @eprint(i64)
 declare i64 @print_str(i64)
+declare i64 @argv_get_bytes(i64)
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -76,13 +74,28 @@ declare i64 @map_nth_value(i64, i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
+declare i64 @bytes_empty()
+declare i64 @bytes_singleton(i64)
+declare i64 @bytes_length(i64)
+declare i64 @bytes_get(i64, i64)
+declare i64 @bytes_slice(i64, i64, i64)
+declare i64 @bytes_append(i64, i64)
+declare i64 @bytes_from_utf8(i64)
+declare i64 @bytes_to_utf8(i64)
+declare i64 @bytes_builder_empty()
+declare i64 @bytes_builder_bytes(i64)
+declare i64 @bytes_builder_byte(i64)
+declare i64 @bytes_builder_u16_be(i64)
+declare i64 @bytes_builder_u32_be(i64)
+declare i64 @bytes_builder_append(i64, i64)
+declare i64 @bytes_builder_build(i64)
 declare i64 @term_clear()
 declare i64 @term_move(i64, i64)
 declare i64 @term_hide_cursor()
 declare i64 @term_show_cursor()
 declare i64 @term_is_interactive()
 declare i64 @term_read_key()
-declare i64 @term_read_line()
+declare i64 @term_read_line_bytes()
 declare i64 @term_write(i64)
 declare i64 @term_raw_enter()
 declare i64 @term_raw_exit()
@@ -135,22 +148,24 @@ declare i64 @term_read_avail(i64, i64)
 @.cfkinds.14 = private unnamed_addr constant [2 x i8] c"_\00"
 @.cname.15 = private unnamed_addr constant [6 x i8] c"Break\00"
 @.cfkinds.15 = private unnamed_addr constant [2 x i8] c"_\00"
-@.cname.16 = private unnamed_addr constant [25 x i8] c"stdlib.terminal.TermSize\00"
-@.cfkinds.16 = private unnamed_addr constant [3 x i8] c"ii\00"
-@.cname.17 = private unnamed_addr constant [26 x i8] c"stdlib.terminal.TermBytes\00"
-@.cfkinds.17 = private unnamed_addr constant [2 x i8] c"p\00"
-@.cname.18 = private unnamed_addr constant [25 x i8] c"stdlib.terminal.TermIdle\00"
-@.cfkinds.18 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.19 = private unnamed_addr constant [28 x i8] c"stdlib.terminal.TermResized\00"
+@.cname.16 = private unnamed_addr constant [29 x i8] c"stdlib.bytes.Utf8DecodeError\00"
+@.cfkinds.16 = private unnamed_addr constant [2 x i8] c"s\00"
+@.cname.17 = private unnamed_addr constant [25 x i8] c"stdlib.terminal.TermSize\00"
+@.cfkinds.17 = private unnamed_addr constant [3 x i8] c"ii\00"
+@.cname.18 = private unnamed_addr constant [26 x i8] c"stdlib.terminal.TermBytes\00"
+@.cfkinds.18 = private unnamed_addr constant [2 x i8] c"p\00"
+@.cname.19 = private unnamed_addr constant [25 x i8] c"stdlib.terminal.TermIdle\00"
 @.cfkinds.19 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.20 = private unnamed_addr constant [24 x i8] c"stdlib.terminal.TermEof\00"
+@.cname.20 = private unnamed_addr constant [28 x i8] c"stdlib.terminal.TermResized\00"
 @.cfkinds.20 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.21 = private unnamed_addr constant [27 x i8] c"stdlib.terminal.TermFailed\00"
-@.cfkinds.21 = private unnamed_addr constant [2 x i8] c"s\00"
-@.cname.22 = private unnamed_addr constant [39 x i8] c"examples.wrap_session_states.LoggedOut\00"
-@.cfkinds.22 = private unnamed_addr constant [1 x i8] c"\00"
-@.cname.23 = private unnamed_addr constant [38 x i8] c"examples.wrap_session_states.LoggedIn\00"
+@.cname.21 = private unnamed_addr constant [24 x i8] c"stdlib.terminal.TermEof\00"
+@.cfkinds.21 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.22 = private unnamed_addr constant [27 x i8] c"stdlib.terminal.TermFailed\00"
+@.cfkinds.22 = private unnamed_addr constant [2 x i8] c"s\00"
+@.cname.23 = private unnamed_addr constant [39 x i8] c"examples.wrap_session_states.LoggedOut\00"
 @.cfkinds.23 = private unnamed_addr constant [1 x i8] c"\00"
+@.cname.24 = private unnamed_addr constant [38 x i8] c"examples.wrap_session_states.LoggedIn\00"
+@.cfkinds.24 = private unnamed_addr constant [1 x i8] c"\00"
 @"sprout_tag$Nothing" = constant i64 0
 @"sprout_tag$Just" = constant i64 1
 @"sprout_tag$TemplateLit" = constant i64 2
@@ -167,14 +182,15 @@ declare i64 @term_read_avail(i64, i64)
 @"sprout_tag$IntRange" = constant i64 13
 @"sprout_tag$Continue" = constant i64 14
 @"sprout_tag$Break" = constant i64 15
-@"sprout_tag$stdlib$terminal$TermSize" = constant i64 16
-@"sprout_tag$stdlib$terminal$TermBytes" = constant i64 17
-@"sprout_tag$stdlib$terminal$TermIdle" = constant i64 18
-@"sprout_tag$stdlib$terminal$TermResized" = constant i64 19
-@"sprout_tag$stdlib$terminal$TermEof" = constant i64 20
-@"sprout_tag$stdlib$terminal$TermFailed" = constant i64 21
-@"sprout_tag$examples$wrap_session_states$LoggedOut" = constant i64 22
-@"sprout_tag$examples$wrap_session_states$LoggedIn" = constant i64 23
+@"sprout_tag$stdlib$bytes$Utf8DecodeError" = constant i64 16
+@"sprout_tag$stdlib$terminal$TermSize" = constant i64 17
+@"sprout_tag$stdlib$terminal$TermBytes" = constant i64 18
+@"sprout_tag$stdlib$terminal$TermIdle" = constant i64 19
+@"sprout_tag$stdlib$terminal$TermResized" = constant i64 20
+@"sprout_tag$stdlib$terminal$TermEof" = constant i64 21
+@"sprout_tag$stdlib$terminal$TermFailed" = constant i64 22
+@"sprout_tag$examples$wrap_session_states$LoggedOut" = constant i64 23
+@"sprout_tag$examples$wrap_session_states$LoggedIn" = constant i64 24
 @list_builder_empty = global i64 zeroinitializer
 @pow10_clamp = private constant i64 400
 @max_int = private constant i64 9223372036854775807
@@ -637,30 +653,33 @@ entry:
   %cname_ptr_15 = getelementptr inbounds [6 x i8], ptr @.cname.15, i64 0, i64 0
   %cfkinds_ptr_15 = getelementptr inbounds [2 x i8], ptr @.cfkinds.15, i64 0, i64 0
   %creg_15 = call i64 @sprout_register_ctor(i64 15, ptr %cname_ptr_15, i64 1, ptr %cfkinds_ptr_15)
-  %cname_ptr_16 = getelementptr inbounds [25 x i8], ptr @.cname.16, i64 0, i64 0
-  %cfkinds_ptr_16 = getelementptr inbounds [3 x i8], ptr @.cfkinds.16, i64 0, i64 0
-  %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 2, ptr %cfkinds_ptr_16)
-  %cname_ptr_17 = getelementptr inbounds [26 x i8], ptr @.cname.17, i64 0, i64 0
-  %cfkinds_ptr_17 = getelementptr inbounds [2 x i8], ptr @.cfkinds.17, i64 0, i64 0
-  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 1, ptr %cfkinds_ptr_17)
-  %cname_ptr_18 = getelementptr inbounds [25 x i8], ptr @.cname.18, i64 0, i64 0
-  %cfkinds_ptr_18 = getelementptr inbounds [1 x i8], ptr @.cfkinds.18, i64 0, i64 0
-  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 0, ptr %cfkinds_ptr_18)
-  %cname_ptr_19 = getelementptr inbounds [28 x i8], ptr @.cname.19, i64 0, i64 0
+  %cname_ptr_16 = getelementptr inbounds [29 x i8], ptr @.cname.16, i64 0, i64 0
+  %cfkinds_ptr_16 = getelementptr inbounds [2 x i8], ptr @.cfkinds.16, i64 0, i64 0
+  %creg_16 = call i64 @sprout_register_ctor(i64 16, ptr %cname_ptr_16, i64 1, ptr %cfkinds_ptr_16)
+  %cname_ptr_17 = getelementptr inbounds [25 x i8], ptr @.cname.17, i64 0, i64 0
+  %cfkinds_ptr_17 = getelementptr inbounds [3 x i8], ptr @.cfkinds.17, i64 0, i64 0
+  %creg_17 = call i64 @sprout_register_ctor(i64 17, ptr %cname_ptr_17, i64 2, ptr %cfkinds_ptr_17)
+  %cname_ptr_18 = getelementptr inbounds [26 x i8], ptr @.cname.18, i64 0, i64 0
+  %cfkinds_ptr_18 = getelementptr inbounds [2 x i8], ptr @.cfkinds.18, i64 0, i64 0
+  %creg_18 = call i64 @sprout_register_ctor(i64 18, ptr %cname_ptr_18, i64 1, ptr %cfkinds_ptr_18)
+  %cname_ptr_19 = getelementptr inbounds [25 x i8], ptr @.cname.19, i64 0, i64 0
   %cfkinds_ptr_19 = getelementptr inbounds [1 x i8], ptr @.cfkinds.19, i64 0, i64 0
   %creg_19 = call i64 @sprout_register_ctor(i64 19, ptr %cname_ptr_19, i64 0, ptr %cfkinds_ptr_19)
-  %cname_ptr_20 = getelementptr inbounds [24 x i8], ptr @.cname.20, i64 0, i64 0
+  %cname_ptr_20 = getelementptr inbounds [28 x i8], ptr @.cname.20, i64 0, i64 0
   %cfkinds_ptr_20 = getelementptr inbounds [1 x i8], ptr @.cfkinds.20, i64 0, i64 0
   %creg_20 = call i64 @sprout_register_ctor(i64 20, ptr %cname_ptr_20, i64 0, ptr %cfkinds_ptr_20)
-  %cname_ptr_21 = getelementptr inbounds [27 x i8], ptr @.cname.21, i64 0, i64 0
-  %cfkinds_ptr_21 = getelementptr inbounds [2 x i8], ptr @.cfkinds.21, i64 0, i64 0
-  %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 1, ptr %cfkinds_ptr_21)
-  %cname_ptr_22 = getelementptr inbounds [39 x i8], ptr @.cname.22, i64 0, i64 0
-  %cfkinds_ptr_22 = getelementptr inbounds [1 x i8], ptr @.cfkinds.22, i64 0, i64 0
-  %creg_22 = call i64 @sprout_register_ctor(i64 22, ptr %cname_ptr_22, i64 0, ptr %cfkinds_ptr_22)
-  %cname_ptr_23 = getelementptr inbounds [38 x i8], ptr @.cname.23, i64 0, i64 0
+  %cname_ptr_21 = getelementptr inbounds [24 x i8], ptr @.cname.21, i64 0, i64 0
+  %cfkinds_ptr_21 = getelementptr inbounds [1 x i8], ptr @.cfkinds.21, i64 0, i64 0
+  %creg_21 = call i64 @sprout_register_ctor(i64 21, ptr %cname_ptr_21, i64 0, ptr %cfkinds_ptr_21)
+  %cname_ptr_22 = getelementptr inbounds [27 x i8], ptr @.cname.22, i64 0, i64 0
+  %cfkinds_ptr_22 = getelementptr inbounds [2 x i8], ptr @.cfkinds.22, i64 0, i64 0
+  %creg_22 = call i64 @sprout_register_ctor(i64 22, ptr %cname_ptr_22, i64 1, ptr %cfkinds_ptr_22)
+  %cname_ptr_23 = getelementptr inbounds [39 x i8], ptr @.cname.23, i64 0, i64 0
   %cfkinds_ptr_23 = getelementptr inbounds [1 x i8], ptr @.cfkinds.23, i64 0, i64 0
   %creg_23 = call i64 @sprout_register_ctor(i64 23, ptr %cname_ptr_23, i64 0, ptr %cfkinds_ptr_23)
+  %cname_ptr_24 = getelementptr inbounds [38 x i8], ptr @.cname.24, i64 0, i64 0
+  %cfkinds_ptr_24 = getelementptr inbounds [1 x i8], ptr @.cfkinds.24, i64 0, i64 0
+  %creg_24 = call i64 @sprout_register_ctor(i64 24, ptr %cname_ptr_24, i64 0, ptr %cfkinds_ptr_24)
   call void @__sprout_init_globals()
   call i64 @__sprout_user_main()
   ret i32 0

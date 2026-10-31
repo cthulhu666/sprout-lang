@@ -31,9 +31,6 @@ declare i128 @map_nth_key_unboxed(i64, i64)
 declare i128 @map_nth_value_unboxed(i64, i64)
 declare i128 @bytes_get_unboxed(i64, i64)
 declare i128 @str_char_at_unboxed(i64, i64)
-declare i128 @argv_get_unboxed(i64)
-declare i128 @env_get_unboxed(i64)
-declare i64 @argv_get(i64)
 declare i64 @sprout_set_argv(i32, ptr)
 declare i64 @analysis_check_source(ptr)
 declare i64 @analysis_declared_names_in_source(ptr)
@@ -48,6 +45,7 @@ declare i64 @analysis_complete_in_state(ptr, ptr, ptr)
 
 declare i64 @eprint(i64)
 declare i64 @print_str(i64)
+declare i64 @argv_get_bytes(i64)
 declare i64 @double_to_string(i64)
 declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
@@ -183,7 +181,7 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.68 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1796, column 43)\00" }
 @.str.69 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c": \00" }
 @.str.70 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
-@.str.71 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1901, column 30)\00" }
+@.str.71 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1905, column 36)\00" }
 @.str.72 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"0\00" }
 @.str.73 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"1\00" }
 @.str.74 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"2\00" }
@@ -194,43 +192,43 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.79 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"7\00" }
 @.str.80 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"8\00" }
 @.str.81 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"9\00" }
-@.str.82 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1944, column 10)\00" }
-@.str.83 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1949, column 70)\00" }
+@.str.82 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1948, column 10)\00" }
+@.str.83 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1953, column 70)\00" }
 @.str.84 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.85 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.86 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1954, column 39)\00" }
-@.str.87 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1973, column 29)\00" }
-@.str.88 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1973, column 39)\00" }
-@.str.89 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1973, column 45)\00" }
-@.str.90 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1981, column 58)\00" }
+@.str.86 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 1958, column 39)\00" }
+@.str.87 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1977, column 29)\00" }
+@.str.88 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1977, column 39)\00" }
+@.str.89 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1977, column 45)\00" }
+@.str.90 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 58)\00" }
 @.str.91 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.92 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2004, column 10)\00" }
-@.str.93 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2004, column 28)\00" }
-@.str.94 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2013, column 33)\00" }
-@.str.95 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2013, column 57)\00" }
-@.str.96 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2014, column 25)\00" }
-@.str.97 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2015, column 10)\00" }
-@.str.98 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2022, column 81)\00" }
-@.str.99 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2026, column 50)\00" }
+@.str.92 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2008, column 10)\00" }
+@.str.93 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2008, column 28)\00" }
+@.str.94 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2017, column 33)\00" }
+@.str.95 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2017, column 57)\00" }
+@.str.96 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2018, column 25)\00" }
+@.str.97 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2019, column 10)\00" }
+@.str.98 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2026, column 81)\00" }
+@.str.99 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2030, column 50)\00" }
 @.str.100 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.101 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 2033, column 17)\00" }
-@.str.102 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2034, column 41)\00" }
-@.str.103 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2034, column 32)\00" }
-@.str.104 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2045, column 52)\00" }
-@.str.105 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2077, column 56)\00" }
-@.str.106 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2078, column 50)\00" }
-@.str.107 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2078, column 60)\00" }
-@.str.108 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2078, column 66)\00" }
-@.str.109 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2079, column 25)\00" }
-@.str.110 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2079, column 43)\00" }
+@.str.101 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in / (line 2037, column 17)\00" }
+@.str.102 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2038, column 41)\00" }
+@.str.103 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2038, column 32)\00" }
+@.str.104 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2049, column 52)\00" }
+@.str.105 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2081, column 56)\00" }
+@.str.106 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2082, column 50)\00" }
+@.str.107 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 2082, column 60)\00" }
+@.str.108 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2082, column 66)\00" }
+@.str.109 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2083, column 25)\00" }
+@.str.110 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2083, column 43)\00" }
 @.str.111 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c".\00" }
-@.str.112 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2096, column 60)\00" }
-@.str.113 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2116, column 58)\00" }
-@.str.114 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2123, column 68)\00" }
-@.str.115 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2128, column 25)\00" }
+@.str.112 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2100, column 60)\00" }
+@.str.113 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 2120, column 58)\00" }
+@.str.114 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2127, column 68)\00" }
+@.str.115 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2132, column 25)\00" }
 @.str.116 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.117 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"+\00" }
-@.str.118 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2164, column 20)\00" }
+@.str.118 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2168, column 20)\00" }
 @.str.119 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"e\00" }
 @.str.120 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"E\00" }
 @.str.121 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
@@ -238,35 +236,36 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.123 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
 @.str.124 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 76, column 35)\00" }
 @.str.125 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 83, column 38)\00" }
+@__sprout_sclo.__sprout_ir_lambda_35 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_35 }
 @.str.126 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.127 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 143, column 18)\00" }
-@.str.128 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 143, column 25)\00" }
-@.str.129 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 143, column 9)\00" }
+@.str.127 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 151, column 18)\00" }
+@.str.128 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 151, column 25)\00" }
+@.str.129 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 151, column 9)\00" }
 @.str.130 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.131 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 148, column 34)\00" }
+@.str.131 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 156, column 34)\00" }
 @.str.132 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.133 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 154, column 29)\00" }
+@.str.133 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 162, column 29)\00" }
 @.str.134 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.135 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 156, column 31)\00" }
+@.str.135 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 164, column 31)\00" }
 @.str.136 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.137 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 157, column 38)\00" }
-@.str.138 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 166, column 13)\00" }
-@.str.139 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 166, column 19)\00" }
-@.str.140 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 175, column 13)\00" }
-@.str.141 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 175, column 29)\00" }
-@.str.142 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 175, column 24)\00" }
-@.str.143 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 175, column 42)\00" }
-@.str.144 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 175, column 37)\00" }
-@.str.145 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 175, column 48)\00" }
-@.str.146 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 180, column 31)\00" }
-@.str.147 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 180, column 40)\00" }
-@.str.148 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 180, column 69)\00" }
-@.str.149 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 181, column 44)\00" }
-@.str.150 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 187, column 42)\00" }
-@.str.151 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 212, column 80)\00" }
-@.str.152 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 230, column 49)\00" }
-@.str.153 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 231, column 36)\00" }
-@.str.154 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 253, column 45)\00" }
+@.str.137 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in / (line 165, column 38)\00" }
+@.str.138 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 174, column 13)\00" }
+@.str.139 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 174, column 19)\00" }
+@.str.140 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 183, column 13)\00" }
+@.str.141 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 183, column 29)\00" }
+@.str.142 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 183, column 24)\00" }
+@.str.143 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 183, column 42)\00" }
+@.str.144 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 183, column 37)\00" }
+@.str.145 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 183, column 48)\00" }
+@.str.146 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 188, column 31)\00" }
+@.str.147 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 188, column 40)\00" }
+@.str.148 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 188, column 69)\00" }
+@.str.149 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 189, column 44)\00" }
+@.str.150 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 195, column 42)\00" }
+@.str.151 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 220, column 80)\00" }
+@.str.152 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 238, column 49)\00" }
+@.str.153 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 239, column 36)\00" }
+@.str.154 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 261, column 45)\00" }
 @.str.155 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 18, column 39)\00" }
 @.str.156 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 18, column 46)\00" }
 @.str.157 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 18, column 57)\00" }
@@ -295,7 +294,7 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.180 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 45, column 61)\00" }
 @.str.181 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 45, column 88)\00" }
 @.str.182 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 59, column 18)\00" }
-@__sprout_sclo.__sprout_ir_lambda_36 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_36 }
+@__sprout_sclo.__sprout_ir_lambda_37 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_37 }
 @.str.183 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.str.184 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 67, column 18)\00" }
 @.str.185 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 68, column 48)\00" }
@@ -336,10 +335,10 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.220 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 362, column 44)\00" }
 @.str.221 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 364, column 46)\00" }
 @.str.222 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@__sprout_sclo.__sprout_ir_lambda_37 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_37 }
+@__sprout_sclo.__sprout_ir_lambda_38 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_38 }
 @.str.223 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 378, column 39)\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_39 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_39 }
-@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_40 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_40 }
+@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_40 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_Foldable_List_fold_values_40 }
+@__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_41 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_Foldable_List_fold_while_values_41 }
 @.str.224 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
 @.str.225 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 418, column 58)\00" }
 @.str.226 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 418, column 76)\00" }
@@ -347,12 +346,12 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.228 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 429, column 21)\00" }
 @.str.229 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
 @.str.230 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http.tchar_41 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http.tchar_41 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.http.tchar_42 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http.tchar_42 }
 @.str.231 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"HTTP/\00" }
 @.str.232 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 94, column 105)\00" }
 @.str.233 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 95, column 31)\00" }
 @.str.234 = private unnamed_addr constant { i64, [45 x i8] } { i64 720906, [45 x i8] c"Int overflow in unary - (line 95, column 80)\00" }
-@__sprout_sclo.__sprout_ir_eta_stdlib.http.target_byte_42 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http.target_byte_42 }
+@__sprout_sclo.__sprout_ir_eta_stdlib.http.target_byte_43 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_stdlib.http.target_byte_43 }
 @.str.235 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
 @.str.236 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"OK\00" }
 @.str.237 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Created\00" }
@@ -578,8 +577,8 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.457 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1306, column 64)\00" }
 @.str.458 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1324, column 69)\00" }
 @.str.459 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@__sprout_sclo.__sprout_ir_lambda_43 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_43 }
-@__sprout_sclo.__sprout_ir_lambda_44 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_44 }
+@__sprout_sclo.__sprout_ir_lambda_44 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_44 }
+@__sprout_sclo.__sprout_ir_lambda_45 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_lambda_45 }
 @.str.460 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
 @.str.461 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"Just(\00" }
 @.str.462 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
@@ -613,15 +612,15 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.490 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.491 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.492 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
-@.str.493 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1973, column 29)\00" }
-@.str.494 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1973, column 39)\00" }
-@.str.495 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1973, column 45)\00" }
+@.str.493 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 1977, column 29)\00" }
+@.str.494 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1977, column 39)\00" }
+@.str.495 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1977, column 45)\00" }
 @.str.496 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.497 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.498 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"+\00" }
-@.str.499 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2164, column 20)\00" }
+@.str.499 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 2168, column 20)\00" }
 @.str.500 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.501 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2045, column 52)\00" }
+@.str.501 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in + (line 2049, column 52)\00" }
 @.str.502 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c" \00" }
 @.str.503 = private unnamed_addr constant { i64, [4 x i8] } { i64 49162, [4 x i8] c"GET\00" }
 @.str.504 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
@@ -639,7 +638,7 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.516 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0D\00" }
 @.str.517 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"b\00" }
 @.str.518 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"f\00" }
-@.str.519 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1981, column 58)\00" }
+@.str.519 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 58)\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -10718,19 +10717,19 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @argv_all() {
+define i64 @argv_all_bytes() {
 entry:
   %t$0 = add i64 0, 0
   %t$1 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$3 = alloca i64
   store i64 %t$1, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$2 = call i64 @argv_collect(i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @argv_collect_bytes(i64 %t$0, i64 %t$1)
   %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
-define i64 @argv_collect(i64 %p$i$in, i64 %p$acc$in) {
+define i64 @argv_collect_bytes(i64 %p$i$in, i64 %p$acc$in) {
 entry:
   %t$19 = alloca [1 x i64]
   call void @llvm.memset.p0.i64(ptr %t$19, i8 0, i64 8, i1 false)
@@ -10744,7 +10743,7 @@ entry:
 tco_loop:
   %p$i = load i64, ptr %t$16
   %p$acc = load i64, ptr %t$17
-  %t$0$st = call i128 @argv_get_unboxed(i64 %p$i)
+  %t$0$st = call i128 @argv_get_bytes_worker(i64 %p$i)
   %t$0 = trunc i128 %t$0$st to i64
   %t$0$hi = lshr i128 %t$0$st, 64
   %t$1 = trunc i128 %t$0$hi to i64
@@ -12920,6 +12919,67 @@ entry:
   ret i64 %t$0
 }
 
+define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$text) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$text, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @sprout_alloc_obj(i64 1, i64 1)
+  %t$0$ptr = inttoptr i64 %t$0 to ptr
+  %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
+  store i64 %p$text, ptr %t$0$f0
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
+define i64 @stdlib.bytes.to_string_maybe(i64 %p$value) {
+entry:
+  %t$0 = call i64 @sprout_tag(i64 %p$value)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  %t$14 = alloca i64
+  store i64 %t$5, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$6 = call i64 @sprout_alloc_obj(i64 7, i64 1)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %t$5, ptr %t$6$f0
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 1
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$9 = call i64 @sprout_field(i64 %p$value, i64 0)
+  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_35, i64 8) to i64
+  %t$17 = alloca i64
+  store i64 %t$9, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$11$st = call i128 @stdlib.bytes.to_string_worker(i64 %t$9)
+  %t$11 = trunc i128 %t$11$st to i64
+  %t$11$hi = lshr i128 %t$11$st, 64
+  %t$12 = trunc i128 %t$11$hi to i64
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$20 = alloca i64
+  store i64 %t$12, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$13 = call i64 @result_map_argw(i64 %t$10, i64 %t$11, i64 %t$12)
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$13, %body_1_1]
+  ret i64 %t$2
+}
+
 define i64 @stdlib.bytes.builder_empty() {
 entry:
   %t$0 = call i64 @bytes_builder_empty()
@@ -13853,7 +13913,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$b) {
+define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$b) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -13876,7 +13936,7 @@ entry:
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_35, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_36, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$hit, ptr %t$0$raw$slot$1
   %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -14531,7 +14591,7 @@ ovfok_1:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$cp) {
+define i64 @__sprout_ir_lambda_37(i64 %p$env$, i64 %p$cp) {
 entry:
   %t$2 = alloca i64
   store i64 %p$cp, ptr %t$2
@@ -14544,7 +14604,7 @@ entry:
 
 define i64 @stdlib.unicode.utf8.from_codepoints(i64 %p$cps) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_36, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_37, i64 8) to i64
   %t$3 = alloca i64
   store i64 %p$cps, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
@@ -16625,7 +16685,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_37(i64 %p$env$, i64 %p$acc, i64 %p$s) {
+define i64 @__sprout_ir_lambda_38(i64 %p$env$, i64 %p$acc, i64 %p$s) {
 entry:
   %t$1 = alloca i64
   store i64 %p$s, ptr %t$1
@@ -16643,7 +16703,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_38(i64 %p$env$, i64 %p$acc, i64 %p$s) {
+define i64 @__sprout_ir_lambda_39(i64 %p$env$, i64 %p$acc, i64 %p$s) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -16682,7 +16742,7 @@ entry:
   %t$15 = trunc i64 %t$2 to i1
   br i1 %t$15, label %then_3, label %else_3
 then_3:
-  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_37, i64 8) to i64
+  %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_38, i64 8) to i64
   %t$6 = call i64 @sprout_alloc_obj(i64 5, i64 0)
   %t$18 = alloca i64
   store i64 %t$6, ptr %t$18
@@ -16706,7 +16766,7 @@ else_3:
   %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$10 = call i64 @sprout_alloc_closure(i64 16, i64 2)
   %t$10$raw = inttoptr i64 %t$10 to ptr
-  store ptr @__sprout_ir_lambda_38, ptr %t$10$raw
+  store ptr @__sprout_ir_lambda_39, ptr %t$10$raw
   %t$10$raw$slot$1 = getelementptr i64, ptr %t$10$raw, i64 1
   store i64 %p$sep, ptr %t$10$raw$slot$1
   %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
@@ -16806,7 +16866,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_39(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
+define i64 @__sprout_ir_eta___tc_Foldable_List_fold_values_40(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a2, ptr %t$0
@@ -16822,7 +16882,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_40(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
+define i64 @__sprout_ir_eta___tc_Foldable_List_fold_while_values_41(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a3, ptr %t$0
@@ -16877,8 +16937,8 @@ then_14:
   br label %join_14
 else_14:
   %t$16 = call i64 @stdlib.string.split_from(i64 %p$s, i64 %p$from, i64 %t$0)
-  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_39, i64 8) to i64
-  %t$18 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_40, i64 8) to i64
+  %t$17 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_values_40, i64 8) to i64
+  %t$18 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Foldable_List_fold_while_values_41, i64 8) to i64
   %t$23 = alloca i64
   store i64 %t$16, ptr %t$23
   %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
@@ -17568,7 +17628,7 @@ join_136:
   ret i64 %t$137
 }
 
-define i64 @__sprout_ir_eta_stdlib.http.tchar_41(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.http.tchar_42(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.http.tchar(i64 %p$a0)
   ret i64 %ret
@@ -17581,7 +17641,7 @@ entry:
   %t$8 = trunc i64 %t$1 to i1
   br i1 %t$8, label %then_2, label %else_2
 then_2:
-  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http.tchar_41, i64 8) to i64
+  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http.tchar_42, i64 8) to i64
   %t$9 = alloca i64
   store i64 %p$raw, ptr %t$9
   %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
@@ -17754,7 +17814,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_eta_stdlib.http.target_byte_42(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_stdlib.http.target_byte_43(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @stdlib.http.target_byte(i64 %p$a0)
   ret i64 %ret
@@ -17786,7 +17846,7 @@ join_1:
   %t$13 = trunc i64 %t$2 to i1
   br i1 %t$13, label %then_7, label %else_7
 then_7:
-  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http.target_byte_42, i64 8) to i64
+  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http.target_byte_43, i64 8) to i64
   %t$10 = call i64 @stdlib.bytes.from_string(i64 %p$target)
   %t$28 = alloca i64
   store i64 %t$10, ptr %t$28
@@ -26962,7 +27022,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_43(i64 %p$env$, i64 %p$y) {
+define i64 @__sprout_ir_lambda_44(i64 %p$env$, i64 %p$y) {
 entry:
   %t$1 = alloca i64
   store i64 %p$y, ptr %t$1
@@ -27006,7 +27066,7 @@ arm_1_1:
   br i1 %t$8, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$9 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_43, i64 8) to i64
+  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_44, i64 8) to i64
   call void @sprout_closure_arity_check(i64 %p$g, i64 1)
   %t$11$env_ptr = inttoptr i64 %p$g to ptr
   %t$11$code = load ptr, ptr %t$11$env_ptr
@@ -27549,7 +27609,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_lambda_44(i64 %p$env$, i64 %p$acc, i64 %p$d) {
+define i64 @__sprout_ir_lambda_45(i64 %p$env$, i64 %p$acc, i64 %p$d) {
 entry:
   %t$1 = alloca i64
   store i64 %p$d, ptr %t$1
@@ -27564,7 +27624,7 @@ entry:
 
 define i64 @__tc_Monoid_Dict_v_concat_all(i64 %p$xs) {
 entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_44, i64 8) to i64
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_45, i64 8) to i64
   %t$3 = alloca i64
   store i64 %p$xs, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
@@ -27631,7 +27691,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_45(i64 %p$env$, i64 %p$v) {
+define i64 @__sprout_ir_lambda_46(i64 %p$env$, i64 %p$v) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -27662,7 +27722,7 @@ entry:
   %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$2 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$2$raw = inttoptr i64 %t$2 to ptr
-  store ptr @__sprout_ir_lambda_45, ptr %t$2$raw
+  store ptr @__sprout_ir_lambda_46, ptr %t$2$raw
   %t$2$raw$slot$1 = getelementptr i64, ptr %t$2$raw, i64 1
   store i64 %p$__tc_ToString_0_to_string, ptr %t$2$raw$slot$1
   %t$15 = alloca i64
@@ -29290,6 +29350,35 @@ wrepack_hit_58:
   %t$61$r = or i128 %t$61$hi, %t$61$lo
   ret i128 %t$61$r
 wrepack_next_58:
+  call void @sprout_abort_match()
+  unreachable
+}
+
+define i128 @argv_get_bytes_worker(i64 %p$idx) {
+entry:
+  %t$0 = call i64 @argv_get_bytes(i64 %p$idx)
+  %t$1 = call i64 @sprout_tag(i64 %t$0)
+  %t$2 = add i64 0, 0
+  %t$3 = icmp eq i64 %t$1, %t$2
+  br i1 %t$3, label %wrepack_hit_2, label %wrepack_next_2
+wrepack_hit_2:
+  %t$5$lo = zext i64 %t$1 to i128
+  %t$5$hw = zext i64 0 to i128
+  %t$5$hi = shl i128 %t$5$hw, 64
+  %t$5$r = or i128 %t$5$hi, %t$5$lo
+  ret i128 %t$5$r
+wrepack_next_2:
+  %t$6 = add i64 0, 1
+  %t$7 = icmp eq i64 %t$1, %t$6
+  br i1 %t$7, label %wrepack_hit_6, label %wrepack_next_6
+wrepack_hit_6:
+  %t$8 = call i64 @sprout_field(i64 %t$0, i64 0)
+  %t$9$lo = zext i64 %t$1 to i128
+  %t$9$hw = zext i64 %t$8 to i128
+  %t$9$hi = shl i128 %t$9$hw, 64
+  %t$9$r = or i128 %t$9$hi, %t$9$lo
+  ret i128 %t$9$r
+wrepack_next_6:
   call void @sprout_abort_match()
   unreachable
 }
@@ -31044,6 +31133,49 @@ arm_2_0:
   unreachable
 join_0:
   %t$1 = phi i64 [%t$4, %body_0_0], [%t$11, %join_10]
+  ret i64 %t$1
+}
+
+define i64 @result_map_argw(i64 %p$f, i64 %p$r$tag, i64 %p$r$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 7
+  %t$3 = icmp eq i64 %p$r$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  call void @sprout_closure_arity_check(i64 %p$f, i64 1)
+  %t$4$env_ptr = inttoptr i64 %p$f to ptr
+  %t$4$code = load ptr, ptr %t$4$env_ptr
+  %t$4 = call i64 (i64, i64) %t$4$code(i64 %p$f, i64 %p$r$val)
+  %t$9 = alloca i64
+  store i64 %t$4, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$5 = call i64 @sprout_alloc_obj(i64 7, i64 1)
+  %t$5$ptr = inttoptr i64 %t$5 to ptr
+  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
+  store i64 %t$4, ptr %t$5$f0
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_1_0:
+  %t$6 = add i64 0, 8
+  %t$7 = icmp eq i64 %p$r$tag, %t$6
+  br i1 %t$7, label %body_1_0, label %arm_2_0
+body_1_0:
+  %t$12 = alloca i64
+  store i64 %p$r$val, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$8 = call i64 @sprout_alloc_obj(i64 8, i64 1)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %p$r$val, ptr %t$8$f0
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_0
+arm_2_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$5, %body_0_0], [%t$8, %body_1_0]
   ret i64 %t$1
 }
 
