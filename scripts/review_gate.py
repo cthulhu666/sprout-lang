@@ -326,8 +326,11 @@ def main():
         return 0
 
     fresh, turn = new_turn(d, state)
+    # `shown`: items whose "how" line this turn already printed; a pre-`shown` state file lacks it.
+    if fresh or "shown" not in state:
+        state["shown"] = []
     if fresh:
-        state["turn"], state["blocks"], state["shown"] = turn, 0, []
+        state["turn"], state["blocks"] = turn, 0
     state["seen"].append(fp)
     state["blocks"] += 1
 
@@ -341,7 +344,7 @@ def main():
     moved += [(" X", p) for p in sorted(set(base) - set(now))]
 
     # Each item's "how" line shows once per turn; its title shows on every block.
-    shown = state.setdefault("shown", [])
+    shown = state["shown"]
     lines = [
         "REVIEW GATE — review this change against the checklist and fix what fails "
         "before stopping.",

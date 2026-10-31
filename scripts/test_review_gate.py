@@ -105,7 +105,7 @@ def run(label, expect, absent=None, present=None, session="sess1", prompt=None, 
         context = out["hookSpecificOutput"]["additionalContext"]
     except (ValueError, KeyError, TypeError):
         pass
-    got = "block" if p.returncode == 0 and context is not None else "pass"
+    got = "block" if context is not None else "pass"
     good = p.returncode == 0 and got == expect
     text = context or ""
     for needle in absent or []:
@@ -445,7 +445,7 @@ results.append(
 )
 
 shutil.rmtree(WT, ignore_errors=True)
-state =json.loads((S / ".git/claude-review-gate/sess1.json").read_text())
+state = json.loads((S / ".git/claude-review-gate/sess1.json").read_text())
 print("state:", {k: (v if k != "seen" else len(v)) for k, v in state.items()})
 print("\nSUITE", "PASSED" if all(results) else "FAILED")
 sys.exit(0 if all(results) else 1)
