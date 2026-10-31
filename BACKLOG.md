@@ -590,8 +590,10 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   swappable: a `Logger` carries its formatter, chosen at construction (a `logger_with_format`-style
   constructor), with the current text format as the default; the JSON formatter is added beside
   the text one, not in place of it; (b) graduate `format_iso8601` + a `wall_now_micros` re-export
-  into a dedicated `stdlib/time.sprout` once a second consumer appears.
-  `docs/logging-v0.md` §9–§10.
+  into a dedicated `stdlib/time.sprout` once a second consumer appears; (c) text escaping leaves
+  Unicode bidi controls (U+202A–U+202E, U+2066–U+2069) unchanged, where Go slog quotes any
+  non-printable rune; decide whether to escape them or all non-printable runes.
+  `docs/logging-v0.md` §4.2, §9–§10.
 
 **Runtime and diagnostics**
 

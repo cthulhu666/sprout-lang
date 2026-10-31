@@ -77,27 +77,16 @@ fn tchar(byte: Int) -> Bool =
   || byte == 42 || byte == 43 || byte == 45 || byte == 46 || byte == 94 || byte == 95
   || byte == 96 || byte == 124 || byte == 126
 
-fn all_bytes(ok: Int -> Bool, raw: Bytes, index: Int, total: Int) -> Bool =
-  if index >= total then true
-  else ok(bytes.get_or(raw, index, -1)) && all_bytes(ok, raw, index + 1, total)
-
-# One byte scan over the UTF-8 encoding; the empty string passes. `string.char_at` is per
-# codepoint, so a scan through it would be quadratic.
-export fn all_bytes_in(ok: Int -> Bool, raw: String) -> Bool =
-  all_bytes(ok, encoded, 0, bytes.length(encoded))
-where
-  encoded = bytes.from_string(raw)
-
 # RFC 9110 §5.6.2: a non-empty run of tchar. Header names and the request method are tokens.
 export fn is_token(raw: String) -> Bool =
-  !string.is_empty(raw) && all_bytes_in(tchar, raw)
+  !string.is_empty(raw) && bytes.all_bytes(tchar, bytes.from_string(raw))
 
 # RFC 9112 §3.2: a request-target holds no SP and no control byte. Bytes >= 0x80 pass; the caller
 # has already decoded the line as UTF-8.
 fn target_byte(byte: Int) -> Bool =
   byte > 32 && byte != 127
 
-export fn digit_byte(byte: Int) -> Bool =
+fn digit_byte(byte: Int) -> Bool =
   byte >= 48 && byte <= 57
 
 # HTTP-version = "HTTP/" DIGIT "." DIGIT (RFC 9112 §2.3): exactly eight bytes.
@@ -108,7 +97,7 @@ where
   encoded = bytes.from_string(raw)
 
 fn request_line_parts(method: String, target: String, version: String) -> Maybe RequestLine =
-  if is_token(method) && !string.is_empty(target) && all_bytes_in(target_byte, target) && is_http_version(version)
+  if is_token(method) && !string.is_empty(target) && bytes.all_bytes(target_byte, bytes.from_string(target)) && is_http_version(version)
   then Just(RequestLine(method, RequestPathVersion(target, version)))
   else Nothing
 
