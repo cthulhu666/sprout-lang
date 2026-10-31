@@ -2893,8 +2893,8 @@ acting.
 
 - [ ] `P2` **Runtime memory-safety roadmap.** Stale reads of swept objects, out-of-bounds reads and
   extern signature mismatches recur, each fixed one instance at a time. ASan checks only C: Sprout
-  IR has no `sanitize_address`, and the GC arena is unpoisoned. Stages: moving
-  the 71 pure and data builtins into Sprout (beside the rest), arena poisoning with quarantine,
+  IR has no `sanitize_address`, and the GC arena is unpoisoned. Stages: moving helpers into Sprout
+  beside the rest (a move lands only if no slower), arena poisoning with quarantine,
   freed task stacks poisoned, ASan over Sprout code, one source for the extern interface, measured
   extras. Absorbs **C exhaustiveness for heap-kind dispatch**, **A missing frame pop has no
   executable oracle**, **Compare each `extern fn`'s C definition against the emitted `declare`**
