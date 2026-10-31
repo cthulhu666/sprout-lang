@@ -13,6 +13,7 @@ declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
+declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
@@ -787,6 +788,7 @@ then_15:
   store i64 %t$11, ptr %t$18$f1
   %t$18$f2 = getelementptr i64, ptr %t$18$ptr, i64 2
   store i64 %t$12, ptr %t$18$f2
+  call void @sprout_gc_write_barrier(ptr %t$18$ptr)
   br label %join_15
 else_15:
   %t$19 = icmp sgt i64 %p$k, %t$11
@@ -803,6 +805,7 @@ then_21:
   store i64 %t$11, ptr %t$24$f1
   %t$24$f2 = getelementptr i64, ptr %t$24$ptr, i64 2
   store i64 %t$23, ptr %t$24$f2
+  call void @sprout_gc_write_barrier(ptr %t$24$ptr)
   br label %join_21
 else_21:
   %t$25 = add i64 %p$t, 0
@@ -813,6 +816,7 @@ else_21:
   store i64 %t$11, ptr %t$25$f1
   %t$25$f2 = getelementptr i64, ptr %t$25$ptr, i64 2
   store i64 %t$12, ptr %t$25$f2
+  call void @sprout_gc_write_barrier(ptr %t$25$ptr)
   br label %join_21
 join_21:
   %t$22 = phi i64 [%t$24, %then_21], [%t$25, %else_21]

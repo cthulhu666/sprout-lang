@@ -869,15 +869,17 @@ field, and does not inspect the stored value — C cannot type it without a heap
 | `vector_push` | C, extern and internal callers; records the `VectorVal` before any growth |
 | `sprout_analysis_diagnostics_vec_or_fail` | C, static |
 | `sprout_analysis_ok_symbol_locations_from_response` | C, static |
-| `IRReuseCtor` | emitted IR: inline header test, call `sprout_gc_write_barrier` on the slow path |
+| `IRReuseCtor` | emitted IR: a plain `call void @sprout_gc_write_barrier(ptr)` after the stores (an op that opened a basic block would break downstream phis, so no inline test) |
 
 `IRReuseCtor` carries no field types, so lowering cannot tell a scalar cell from a pointer
-cell. `ast_to_ir` decides, with `type_kind.type_is_non_heap_scalar` over the ctor's field
-types (as it gates `IRVecSetD`), and passes a `Bool` on the op. A type-variable field counts
-as heap, or a polymorphic linear cell loses its barrier.
+cell. `ast_to_ir` decides when it builds the ctor table (`CtorInfo.scalar_only`, from
+`type_kind.type_expr_is_non_heap_scalar`, the twin of the predicate that gates `IRVecSetD`)
+and passes a `Bool` on the op. A type-variable field or a witness slot counts as heap, or a
+polymorphic linear cell loses its barrier.
 
-The AGEPROF store hook (`sprout_ap_on_store`) is added at the three sites that lack it, so
-`old_to_young` counts every site.
+The AGEPROF store hook (`sprout_ap_on_store`) is added at the two analysis helpers, so
+`old_to_young` counts every C site. `IRReuseCtor` gets no hook: its stores are emitted IR,
+and a hook call per field would price the instrument, not the store.
 
 **`sprout_gc_write_barrier` is a new compiler-emitted runtime `declare`**, approved
 2026-10-31. Justification for `runtime/APPROVED_BUILTINS`: the remembered set is collector
@@ -956,8 +958,8 @@ barrier never sees an old object. Nothing goes red between steps.
 1. **Runtime plumbing.** Header bit move, with the `gc-ageprof-check` update and
    `compiler-internals.md`'s header table; `SproutGenState`; `sprout_gc_write_barrier` at
    the five C sites; AGEPROF hooks.
-2. **The `IRReuseCtor` barrier.** The `Bool` from `ast_to_ir`, the inline test in
-   `ir_lowering`, the `APPROVED_BUILTINS` entry, reseed, golden IR. Rewrite
+2. **The `IRReuseCtor` barrier.** The `Bool` from `ast_to_ir` (`CtorInfo.scalar_only`), the
+   barrier call in `ir_lowering`, the `APPROVED_BUILTINS` entry, reseed, golden IR. Rewrite
    `linear-reuse-v0.md`'s "outside a collection the colour bit is 0" premise: under minors,
    colour means old, and bit 13 is load-bearing.
 3. **Minor collections behind `SPROUT_GC_MINOR=1`, default off**, §14.5 with its self-test,

@@ -13,6 +13,7 @@ declare void @llvm.memset.p0.i64(ptr, i8, i64, i1)
 declare i64 @sprout_gc_register_i64_root(ptr)
 declare i64 @sprout_alloc_closure(i64, i64)
 declare void @sprout_closure_arity_check(i64, i64)
+declare void @sprout_gc_write_barrier(ptr)
 declare i64 @sprout_alloc_tuple_blob(i64)
 declare i64 @sprout_register_ctor(i64, ptr, i64, ptr)
 declare i64 @sprout_tag(i64)
@@ -330,6 +331,7 @@ arm_0_0:
   store i64 %t$7, ptr %t$9$f2
   %t$9$f3 = getelementptr i64, ptr %t$9$ptr, i64 3
   store i64 %t$8, ptr %t$9$f3
+  call void @sprout_gc_write_barrier(ptr %t$9$ptr)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -368,6 +370,7 @@ ovfok_7:
   store i64 %t$4, ptr %t$10$f2
   %t$10$f3 = getelementptr i64, ptr %t$10$ptr, i64 3
   store i64 %t$5, ptr %t$10$f3
+  call void @sprout_gc_write_barrier(ptr %t$10$ptr)
   br label %join_0
 arm_1_0:
   call void @sprout_abort_match()
@@ -477,6 +480,7 @@ ovfok_37:
   store i64 %t$4, ptr %t$42$f2
   %t$42$f3 = getelementptr i64, ptr %t$42$ptr, i64 3
   store i64 %t$5, ptr %t$42$f3
+  call void @sprout_gc_write_barrier(ptr %t$42$ptr)
   %t$43 = call i64 @examples.nqueens_linvec.mark(i64 %p$col, i64 %t$6, i64 %t$18, i64 %t$41, i64 %t$42) noinline
   %t$44 = call i64 @examples.nqueens_linvec.queens(i64 %p$n, i64 %t$37, i64 %t$40, i64 %t$43) noinline
   br label %arm_0_45
@@ -521,6 +525,7 @@ ovfok_55:
   store i64 %t$4, ptr %t$58$f2
   %t$58$f3 = getelementptr i64, ptr %t$58$ptr, i64 3
   store i64 %t$5, ptr %t$58$f3
+  call void @sprout_gc_write_barrier(ptr %t$58$ptr)
   %t$59 = musttail call i64 @examples.nqueens_linvec.queens(i64 %p$n, i64 %p$row, i64 %t$55, i64 %t$58) noinline
   ret i64 %t$59
 arm_1_21:
