@@ -1,5 +1,7 @@
 === tests/spec_census/dicts.spr ===
-spec-census concrete_calls=8 direct_keys=7 closed_keys=8 declined=0 devirt_multi=1 devirt_context=2 closed_nodes=60 program_nodes=N
+spec-census concrete_calls=9 direct_keys=8 closed_keys=10 declined=1 devirt_multi=1 devirt_context=2 closed_nodes=89 program_nodes=N
+  $entry.f [Eq_Int] <- direct
+  $entry.g [Eq_List([Eq_Int])] <- $entry.f
   $entry.larger [Ord_Int Eq_Int] <- direct
   $entry.larger [Ord_List([Ord_Int Eq_Int]) Eq_List([Eq_Int])] <- direct
   $entry.same [Eq_Bool] <- $entry.same_both

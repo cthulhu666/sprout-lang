@@ -1609,47 +1609,42 @@ bundle-smoke: bootstrap-from-seed
   fi
   echo "==> bundle-smoke ✓"
 
-# `--phase bind-census` against its canaries, line for line. The census is the
-# `try` migration's worklist and done-check (docs/try-propagate-v0.md §8 step 1a),
-# so a site it silently drops is a site the codemods never touch. An exact diff,
-# not greps: a missing line and an extra line are both failures.
-[group('smoke')]
-bind-census-smoke: bootstrap-from-seed
+# Shared by the census smokes: run `--phase <phase>` over <fixtures>, optionally rewrite the
+# output with the `sed -E` expression <mask>, and diff it against <want>. An exact diff.
+[private]
+_census-diff name phase want mask fixtures:
   #!/usr/bin/env bash
   set -euo pipefail
-  # collide.spr imports collide/dep.sprout, found under the package root.
-  FIXES=(tests/bind_census/canaries.spr tests/bind_census/collide.spr)
-  WANT=tests/bind_census/canaries.expected
+  WANT="{{want}}"
   TMPD=$(mktemp -d /tmp/sprout_census_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase bind-census "{{stdlib_root}}" --package-root tests/bind_census "${FIXES[@]}" > "$TMPD/out" 2>&1; then
-    echo "bind-census-smoke: --phase bind-census failed" >&2; cat "$TMPD/out" >&2; exit 1
+  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase {{phase}} "{{stdlib_root}}" {{fixtures}} > "$TMPD/out" 2>&1; then
+    echo "{{name}}: --phase {{phase}} failed" >&2; cat "$TMPD/out" >&2; exit 1
   fi
-  if ! diff -u "$WANT" "$TMPD/out" >&2; then
-    echo "bind-census-smoke: output differs from $WANT (- expected, + actual)" >&2; exit 1
+  if [ -n "{{mask}}" ]; then
+    sed -E '{{mask}}' "$TMPD/out" > "$TMPD/masked"
+  else
+    cp "$TMPD/out" "$TMPD/masked"
   fi
-  echo "bind-census-smoke: OK ($(grep -c . "$WANT") lines)"
+  if ! diff -u "$WANT" "$TMPD/masked" >&2; then
+    echo "{{name}}: output differs from $WANT (- expected, + actual)" >&2; exit 1
+  fi
+  echo "{{name}}: OK ($(grep -c . "$WANT") lines)"
+
+# `--phase bind-census` against its canaries, line for line. The census is the
+# `try` migration's worklist and done-check (docs/try-propagate-v0.md §8 step 1a),
+# so a site it silently drops is a site the codemods never touch. collide.spr
+# imports collide/dep.sprout, found under the package root. An exact diff,
+# not greps: a missing line and an extra line are both failures.
+[group('smoke')]
+bind-census-smoke: bootstrap-from-seed (_census-diff "bind-census-smoke" "bind-census" "tests/bind_census/canaries.expected" "" "--package-root tests/bind_census tests/bind_census/canaries.spr tests/bind_census/collide.spr")
 
 # `--phase spec-keys` against its fixture, line for line. The census prices
 # specialisation before it is built (docs/specialisation-v0.md §7 M0a), so a count it
-# gets wrong is a design decision made on a wrong number. An exact diff: a missing
-# key and an extra key are both failures.
+# gets wrong is a design decision made on a wrong number. program_nodes is masked: it
+# counts the whole prelude. An exact diff: a missing key and an extra key are both failures.
 [group('smoke')]
-spec-census-smoke: bootstrap-from-seed
-  #!/usr/bin/env bash
-  set -euo pipefail
-  WANT=tests/spec_census/dicts.expected
-  TMPD=$(mktemp -d /tmp/sprout_spec_census_XXXXXX)
-  trap 'rm -rf "$TMPD"' EXIT
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --phase spec-keys "{{stdlib_root}}" tests/spec_census/dicts.spr > "$TMPD/out" 2>&1; then
-    echo "spec-census-smoke: --phase spec-keys failed" >&2; cat "$TMPD/out" >&2; exit 1
-  fi
-  # program_nodes counts the whole prelude, so pinning it would fail on every prelude edit.
-  sed -E 's/ program_nodes=[0-9]+/ program_nodes=N/' "$TMPD/out" > "$TMPD/masked"
-  if ! diff -u "$WANT" "$TMPD/masked" >&2; then
-    echo "spec-census-smoke: output differs from $WANT (- expected, + actual)" >&2; exit 1
-  fi
-  echo "spec-census-smoke: OK ($(grep -c . "$WANT") lines)"
+spec-census-smoke: bootstrap-from-seed (_census-diff "spec-census-smoke" "spec-keys" "tests/spec_census/dicts.expected" "s/ program_nodes=[0-9]+/ program_nodes=N/" "tests/spec_census/dicts.spr")
 
 # Calibration gate for `--phase effects`, the declared-vs-inferred effect report.
 #

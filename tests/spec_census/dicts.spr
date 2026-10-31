@@ -1,9 +1,9 @@
 # Fixture for `--phase spec-census` and `--phase spec-keys` (docs/specialisation-v0.md
 # §7 M0a, Dictionaries and Growth). `just spec-census-smoke` pins the output.
 #
-# The prelude is in every program, so its constrained calls are in the output too. The
-# cases below say what each one adds; the prelude's share is whatever the rest of
-# `dicts.expected` lists.
+# The prelude is in every program but makes no concrete constrained calls, so it adds no
+# keys; a concrete constrained call inside it would show up in `dicts.expected`. The
+# cases below say what each one adds.
 
 # One Eq dictionary. The body calls a method on the forwarded dictionary.
 fn same(a: x, b: x) -> Bool where Eq x = eq(a, b)
@@ -49,3 +49,9 @@ fn call_context_super() -> List Int = larger([1], [2])
 
 # A method call with two dictionaries inside the copy of traverse_some@Eq_Int.
 fn call_multi() -> Maybe (List Int) = traverse_some([1, 2])
+
+# A peer call at a larger type: f calls g at `List x`, g calls f back, so the key grows every
+# lap. The backstop declines it (declined=1) and that call stays on dictionary passing.
+fn f(n: Int, a: x, b: x) -> Bool where Eq x = if n == 0 then eq(a, b) else g(n - 1, [a], [b])
+fn g(n: Int, a: x, b: x) -> Bool where Eq x = f(n, a, b)
+fn call_grow() -> Bool = f(2, 1, 2)
