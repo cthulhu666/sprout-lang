@@ -31,10 +31,12 @@ Sprout's GC is **non-moving mark-sweep**.  Every heap object occupies a 16-byte-
 ```
 bits  0– 7  kind   (SproutHeapKind: FREE=0, OBJ=1, CLOSURE=2, …, CSTR=10; POISON=0xFF)
 bit   8      color  (mark bit, toggled during the mark phase)
-bits  9–13  age    (saturating count of collections survived; 0 = allocated since the last sweep.
-                    Written by the sweep's live branch, reset by any header (re)write — so an
-                    in-place header edit that must preserve it masks rather than calls
+bits  9–12  age    (saturating 4-bit count of collections survived; 0 = allocated since the last
+                    sweep. Written by the sweep's live branch, reset by any header (re)write — so
+                    an in-place header edit that must preserve it masks rather than calls
                     sprout_hdr_write, as sprout_vec_release_inline_tail does)
+bit  13      remembered  (set only by the write barrier, sprout_gc_write_barrier; meaningful only
+                    once minor collections exist — see gc-generational-v0 §14.4)
 bits 14–63  aux    (OBJ: (tag<<8)|arity; CSTR: byte length; CLOSURE: n_caps; TUPLE: word count;
                     VECTOR: inline element capacity; FREE/POISON: slot_bytes)
 ```
@@ -92,7 +94,7 @@ Per-region 1-bit slotmaps track live slot starts; `sprout_heap_lookup` does a bi
 
 Both test files are **workloads, not assertions** — their Sprout-level checks were mutation-tested against three broken sweeps and all three still reported "passed". A freelist defect is not observable from Sprout as a wrong value, so the detection is entirely `SPROUT_FL_VERIFY`. Do not treat a green `just test` as covering this.
 
-**Object age — header bits 9–13.** The gap between the colour bit and aux (which `sprout_hdr_make` shifts to bit 14) holds a saturating 5-bit count of collections an object has survived, bumped in the same store that clears the colour bit in pass 1, and reset whenever a slot is re-initialised. Nothing in the collector's behaviour depends on it today; it exists so the generational question can be measured, and it is the field a generational collector would reuse. **`SPROUT_GC_AGEPROF=1`** reports, per run, how much marking is spent on objects that already survived a cycle (the ceiling on what a minor collection could skip) plus, in a runtime built with `-DSPROUT_GC_AGEPROF_STORES`, the mutation traffic a write barrier would carry — `mut_calls` is deliberately separate from `ptr_stores` so a zero cannot be misread as "free" when it means "never called". Without the flag those counters print as `off`: their hook in every store kept LLVM from optimising store loops. The mark-side counters need no special build and, unlike `-DSPROUT_GC_PROFILE`, do not distort timings. Calibrated by `just gc-ageprof-check` against two workloads with known answers (`tests/stdlib/test_gc_age_retain_{all,none}.spr`); the runtime also aborts if the age histogram disagrees with `g_managed_heap_count`. Findings and the resulting recommendation: [docs/gc-generational-v0.md](gc-generational-v0.md) — note the headline is that the nursery's payoff is specific to self-hosted compilation (97% ceiling) and near-zero on the HTTP server (13%).
+**Object age — header bits 9–12.** The gap between the colour bit and the remembered bit (bit 13; aux starts at bit 14, via `sprout_hdr_make`) holds a saturating 4-bit count of collections an object has survived, bumped in the same store that clears the colour bit in pass 1, and reset whenever a slot is re-initialised. Nothing in the collector's behaviour depends on it today; it exists so the generational question can be measured, and it is the field a generational collector would reuse. **`SPROUT_GC_AGEPROF=1`** reports, per run, how much marking is spent on objects that already survived a cycle (the ceiling on what a minor collection could skip) plus, in a runtime built with `-DSPROUT_GC_AGEPROF_STORES`, the mutation traffic a write barrier would carry — `mut_calls` is deliberately separate from `ptr_stores` so a zero cannot be misread as "free" when it means "never called". Without the flag those counters print as `off`: their hook in every store kept LLVM from optimising store loops. The mark-side counters need no special build and, unlike `-DSPROUT_GC_PROFILE`, do not distort timings. Calibrated by `just gc-ageprof-check` against two workloads with known answers (`tests/stdlib/test_gc_age_retain_{all,none}.spr`); the runtime also aborts if the age histogram disagrees with `g_managed_heap_count`. Findings and the resulting recommendation: [docs/gc-generational-v0.md](gc-generational-v0.md) — note the headline is that the nursery's payoff is specific to self-hosted compilation (97% ceiling) and near-zero on the HTTP server (13%).
 
 Because objects never move, the address of a live heap object is **stable for the entire program lifetime**.
 

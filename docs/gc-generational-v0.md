@@ -115,14 +115,14 @@ workload that retains nothing — and this fixture marks only ~6 objects per col
 each root moves the raw ratio by ~12pp. It read **0%** when the ≤15% bound was set, 12%
 once `pow10_exact_unit` became a rooted global, and 24% at `list_builder_empty`, failing a
 bound that nothing had regressed against: same cycle count, same `freed_total`, 99% still
-dying young. The gate now reads the root count off age bucket 30 — a rooted object is
-marked once at every age, so buckets 1..30 each hold exactly that count — subtracts
+dying young. The gate now reads the root count off age bucket 14 — a rooted object is
+marked once at every age, so buckets 1..14 each hold exactly that count — subtracts
 `roots × (cycles-1)` from `marked_age_ge1`, and bounds the remainder (≤5%) and the
-separation. Three checks keep the subtraction honest: buckets 1..30 must really be flat
+separation. Three checks keep the subtraction honest: buckets 1..14 must really be flat
 (a churn object that starts surviving breaks flatness instead of hiding in it), the floor
 itself is bounded (≤8, so a steady-state leak cannot be absorbed into it — the histogram
-alone cannot tell one from a rooted global), and retain-none must run >31 cycles for
-bucket 30 to be reachable at all.
+alone cannot tell one from a rooted global), and retain-none must run >15 cycles for
+bucket 14 to be reachable at all.
 
 ## 5. Measured — the nursery's ceiling is a compiler fact, not a general one
 

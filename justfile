@@ -3803,11 +3803,11 @@ gc-ageprof-check: bootstrap-from-seed
     ages=$(grep -m1 "ageprof.*marked_by_age:" "$TMPD/$name.prof") \
       || { echo "gc-ageprof-check: $f emitted no marked_by_age histogram" >&2; return 1; }
     # Emits "<name> <marked%> <died_young%> <marked_age_ge1> <cycles> <root_floor> <flat> <marked_total>".
-    # root_floor is read off age bucket 30 — the last before the 5-bit age saturates.
+    # root_floor is read off age bucket 14 — the last before the 4-bit age saturates.
     # A permanently-rooted object is marked once at every age, so in a workload that
-    # retains nothing each bucket 1..30 holds exactly the permanent-root count, and the
+    # retains nothing each bucket 1..14 holds exactly the permanent-root count, and the
     # caller can subtract that steady state from marked_age_ge1.  `flat` reports whether
-    # 1..30 really are equal, which is what makes the subtraction self-validating: a
+    # 1..14 really are equal, which is what makes the subtraction self-validating: a
     # churn object that starts surviving breaks the flatness instead of hiding in it.
     printf '%s\n%s\n' "$line" "$ages" | awk -v n="$name" '
       NR == 1 {
@@ -3819,8 +3819,8 @@ gc-ageprof-check: bootstrap-from-seed
         if (v["marked_total"] <= 0) { print "gc-ageprof-check: " n ": marked_total=0, workload drove no marking" > "/dev/stderr"; exit 1 }
         if (v["freed_total"]  <= 0) { print "gc-ageprof-check: " n ": freed_total=0, workload freed nothing"    > "/dev/stderr"; exit 1 }
         flat = 1
-        for (k = 1; k <= 30; k++) if (a[k] != a[30]) flat = 0
-        printf "%s %d %d %d %d %d %d %d\n", n, (100 * v["marked_age_ge1"]) / v["marked_total"], (100 * v["freed_age0"]) / v["freed_total"], v["marked_age_ge1"], v["cycles"], a[30], flat, v["marked_total"]
+        for (k = 1; k <= 14; k++) if (a[k] != a[14]) flat = 0
+        printf "%s %d %d %d %d %d %d %d\n", n, (100 * v["marked_age_ge1"]) / v["marked_total"], (100 * v["freed_age0"]) / v["freed_total"], v["marked_age_ge1"], v["cycles"], a[14], flat, v["marked_total"]
       }'
   }
   ALL=$(run_one test_gc_age_retain_all)   || exit 1
@@ -3847,9 +3847,9 @@ gc-ageprof-check: bootstrap-from-seed
   # bound is the load-bearing one; a stuck counter passes the one-sided bounds
   # only if it happens to sit inside all of them, which it cannot.
   (( all_marked >= 70 ))                     || { echo "gc-ageprof-check: retain_all marked_age_ge1 ${all_marked}% < 70% — retained chain is not dominating mark work" >&2; failed=1; }
-  (( none_cycles > 31 ))                     || { echo "gc-ageprof-check: retain_none ran ${none_cycles} cycles, too few to reach age bucket 30 — the permanent-root floor is unreadable, so raise the churn" >&2; failed=1; }
+  (( none_cycles > 15 ))                     || { echo "gc-ageprof-check: retain_none ran ${none_cycles} cycles, too few to reach age bucket 14 — the permanent-root floor is unreadable, so raise the churn" >&2; failed=1; }
   (( none_roots <= 8 ))                      || { echo "gc-ageprof-check: retain_none permanent-root floor is ${none_roots}, over 8 — either a rooted global was added (raise this bound) or objects are being retained for the whole run" >&2; failed=1; }
-  (( none_flat == 1 ))                       || { echo "gc-ageprof-check: retain_none age buckets 1..30 are not flat at ${none_roots} — something other than a permanent root is surviving cycles" >&2; failed=1; }
+  (( none_flat == 1 ))                       || { echo "gc-ageprof-check: retain_none age buckets 1..14 are not flat at ${none_roots} — something other than a permanent root is surviving cycles" >&2; failed=1; }
   (( none_churn_pct <= 5 ))                  || { echo "gc-ageprof-check: retain_none churn survivors ${none_churn_pct}% > 5% (marked_age_ge1=${none_ge1}, ${none_roots} root(s) x ${none_cycles} cycles) — objects are surviving cycles that should not" >&2; failed=1; }
   (( all_marked - none_churn_pct >= 40 ))    || { echo "gc-ageprof-check: separation $(( all_marked - none_churn_pct ))pp < 40pp — the counter does not discriminate" >&2; failed=1; }
   (( none_young >= 90 ))                     || { echo "gc-ageprof-check: retain_none died_young ${none_young}% < 90% — weak generational hypothesis not reproduced on pure churn" >&2; failed=1; }

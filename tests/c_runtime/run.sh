@@ -485,6 +485,18 @@ for lineage in 0 1; do
   }
 done
 
+echo "==> c runtime: the generational write barrier records an old object once; age saturates at 15"
+# gen_barrier.c includes sprout_runtime.c to reach the static remembered set, so only the other TUs link.
+GB="$TMP_DIR/gen_barrier"
+clang "$ROOT/tests/c_runtime/gen_barrier.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$GB"
+"$GB" > "$TMP_DIR/gen_barrier.out" 2> "$TMP_DIR/gen_barrier.err" || {
+  echo "  gen_barrier failed:" >&2
+  cat "$TMP_DIR/gen_barrier.out" "$TMP_DIR/gen_barrier.err" >&2
+  exit 1
+}
+test "$(cat "$TMP_DIR/gen_barrier.out")" = "gen-barrier"
+
 if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
   echo "==> c runtime: the sanitizer is live (a headerless String read by str_eq is reported)"
   # Positive control. Unsanitized, asan_control exits 0, so only a live ASan can fail it. Without
