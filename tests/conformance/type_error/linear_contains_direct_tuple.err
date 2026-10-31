@@ -1,0 +1,1 @@
+linear value 'p' is never used: its type `(Int, main.Res)` contains the linear type `main.Res` (linear values must be used exactly once)
