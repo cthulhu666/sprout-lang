@@ -2549,6 +2549,12 @@ task-io-smoke: bootstrap-from-seed
   # so connect #17 was dropped and waited out a ~1 s SYN retransmit — behind nginx, the p99 tail.
   build tests/task_io_smoke/listen_backlog.spr
   run_once "listen-backlog" "listen-backlog-ok"
+  # (18c) accept fairness: with 40 connections queued, `tcp_accept` parks after 16 accepts in a row
+  # so a task spawned beside the accept loop runs. RED: it ran after all 40 (recorded 40).
+  build tests/task_io_smoke/accept_fairness.spr
+  run_once "accept-fairness" "done"
+  check_markers "accept-fairness" all-accepted other-task-ran-within-streak
+  SPROUT_GC_STRESS=1 run_once "accept-fairness/stress" "other-task-ran-within-streak"
   # (19) http_server idle-connection timeout (C3): a peer that connects and sends NOTHING must be
   # answered 408 and closed on a TOTAL header deadline, instead of parking its handler forever and
   # leaking the connection handle (slowloris). The same fixture's prompt client must still get 200,
@@ -2733,9 +2739,15 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_live_cap.spr
   run_once "http-live-cap" "done"
   check_markers "http-live-cap" third-refused-at-once first-times-out served-after-a-slot-frees \
-    first-kept-served second-kept-served idle-connections-count served-after-keep-alive-ends \
+    first-kept-served idle-connections-count served-after-keep-alive-ends \
     both-places-free-again
   SPROUT_GC_STRESS=1 run_once "http-live-cap/stress" "both-places-free-again"
+  # The idle cap is held to 3/4 of the live cap: live 4 and idle 4 keep three connections and close the
+  # fourth; live 1 keeps none. RED: the fourth and the live-1 response kept their connection.
+  build tests/task_io_smoke/http_idle_clamp.spr
+  run_once "http-idle-clamp" "done"
+  check_markers "http-idle-clamp" first-kept second-kept third-kept fourth-closes live-cap-1-closes
+  SPROUT_GC_STRESS=1 run_once "http-idle-clamp/stress" "live-cap-1-closes"
   # A cap outside 1..2046 aborts at serve start; the nearest valid one starts.
   build tests/task_io_smoke/http_live_cap_zero_fails.spr
   run_expect_fail "http-live-cap-zero" "max_live_connections must be"

@@ -61,17 +61,17 @@ fn first_times_out(port: Int, a: borrowing TcpConnection) -> Unit !{IO} =
     expect_timed_out(a, "first-times-out")
     with_conn(port, \d -> expect_served(d, "served-after-a-slot-frees"))
 
-# Two connections kept open after a response fill the cap as well.
+# A connection kept open after a response takes a place as well. The idle cap is 1 here (3/4 of a
+# live cap of 2, rounded down), so the second place is held by a silent connection.
 fn fill_by_keep_alive(port: Int) -> Unit !{IO} =
-  with_conn(port, \e -> with_conn(port, \f -> two_kept(port, e, f)))
+  with_conn(port, \e -> with_conn(port, \_ -> one_kept(port, e)))
 
-fn two_kept(port: Int, e: borrowing TcpConnection, f: borrowing TcpConnection) -> Unit !{IO} =
+fn one_kept(port: Int, e: borrowing TcpConnection) -> Unit !{IO} =
   do
     expect_served(e, "first-kept-served")
-    expect_served(f, "second-kept-served")
     expect_refused(port, "idle-connections-count")
 
-# The two kept connections above are closed by their client. Both places are free again.
+# The two connections above are closed by their client. Both places are free again.
 fn admitted_again(port: Int) -> Unit !{IO} =
   with_conn(port, \g -> with_conn(port, \h -> both_served(g, h)))
 

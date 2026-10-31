@@ -1,0 +1,67 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.net (TcpConnection, local_port)
+import testsupport.listen (listen_or_die)
+import testsupport.http_wire (mark, read_response, read_to_end, says_close, send, with_conn)
+import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, serve_n_with)
+import stdlib.terminal as terminal
+
+# The idle cap is held under the live cap, as `serve_pooled` holds its own: a quarter of the places
+# stay free for new connections, so the cap is `min(max_idle_connections, max_live_connections * 3 / 4)`.
+#
+# Live 4 and idle 4 give an idle cap of 3: three responses keep their connection and the fourth
+# closes. A live cap of 1 gives 0, so its first response closes.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("hello")
+
+fn request(conn: borrowing TcpConnection) -> Unit !{IO} =
+  send(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+
+fn expect_kept(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  do
+    request(conn)
+    match read_response(conn) with
+    | Ok (head, body) -> mark(label, body == "hello" && !says_close(head), head ++ body)
+    | Err e -> mark(label, false, e)
+
+fn expect_closed(conn: borrowing TcpConnection, label: String) -> Unit !{IO} =
+  do
+    request(conn)
+    match read_response(conn) with
+    | Ok (head, _) ->
+        match read_to_end(conn) with
+        | Ok rest -> mark(label, says_close(head) && rest == "", `${head}| then: ${rest}`)
+        | Err e -> mark(label, false, e)
+    | Err e -> mark(label, false, e)
+
+fn four(a: borrowing TcpConnection, b: borrowing TcpConnection, c: borrowing TcpConnection,
+        d: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    expect_kept(a, "first-kept")
+    expect_kept(b, "second-kept")
+    expect_kept(c, "third-kept")
+    expect_closed(d, "fourth-closes")
+
+fn clamped(port: Int) -> Unit !{IO} =
+  with_conn(port, \a -> with_conn(port, \b -> with_conn(port, \c -> with_conn(port, \d -> four(a, b, c, d)))))
+
+fn live_one(port: Int) -> Unit !{IO} =
+  with_conn(port, \a -> expect_closed(a, "live-cap-1-closes"))
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    clamp_listener <- listen_or_die(0)
+    clamp_port <- local_port(clamp_listener)
+    one_listener <- listen_or_die(0)
+    one_port <- local_port(one_listener)
+    task_spawn(s, \_ -> serve_n_with(clamp_config, clamp_listener, 4, handle))
+    task_spawn(s, \_ -> serve_n_with(one_config, one_listener, 1, handle))
+    task_spawn(s, \_ -> clamped(clamp_port))
+    task_spawn(s, \_ -> live_one(one_port))
+where
+  clamp_config = default_config() with (idle_ms = 3000, max_idle_connections = 4, max_live_connections = 4)
+  one_config = default_config() with (idle_ms = 3000, max_idle_connections = 4, max_live_connections = 1)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    terminal.write("done\n")

@@ -148,6 +148,8 @@ static long long g_ctor_meta_len = 0;
 static int g_ctor_by_tag[sizeof(g_ctor_meta) / sizeof(g_ctor_meta[0])];
 static int g_listener_fd[2048];
 static int g_listener_used[2048];
+/* Accepts in a row per listener with no park in between; see ACCEPT_FAIR_STREAK. */
+static int g_accept_streak[2048];
 static int g_conn_fd[2048];
 static int g_conn_used[2048];
 
@@ -9771,6 +9773,7 @@ long long tcp_listen(const char* host, long long port) {
   if (h < 0) return tcp_listen_fail(fd, "listen", host, port, "listener table full");
   g_listener_fd[h] = fd;
   g_listener_used[h] = 1;
+  g_accept_streak[h] = 0;
   return tcp_net_ok(h);
 }
 
@@ -10031,15 +10034,29 @@ int accept_shed_backlog(int listener_fd) {
  * Table-full is absorbed alongside descriptor exhaustion rather than distinguished: it means the same
  * thing (no connection slot is available right now) and has the same remedy. The distinction between
  * an OS descriptor and one of our 2048 handles is not one a server can act on. */
+/* Fairness. With connections always queued, accept() never returns EAGAIN, so the loop below never
+ * parks, and the pump polls only when nothing is runnable: an accept loop that does not park keeps
+ * every other task off the CPU. After ACCEPT_FAIR_STREAK accepts in a row the next call parks on the
+ * listener BEFORE its accept(), so no accepted fd is held without a handle while parked (a task
+ * dropped by scope_cancel would leak it). A queued connection makes the listener readable, so the
+ * park returns at the next poll, after every runnable task has had a turn. With an empty queue it is
+ * the same wait EAGAIN would cause. */
+#define ACCEPT_FAIR_STREAK 16
+
 long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener])
     return tcp_net_err0(SPROUT_TAG(stdlib$net$TcpInvalidHandle));
+  if (g_accept_streak[listener] >= ACCEPT_FAIR_STREAK) {
+    g_accept_streak[listener] = 0;
+    scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+  }
   int fd;
 retry:
   for (;;) {
     fd = accept(g_listener_fd[listener], NULL, NULL);
     if (fd >= 0) break;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      g_accept_streak[listener] = 0;
       scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
       continue;
     }
@@ -10067,6 +10084,7 @@ retry:
      * once the queue is empty the park is a genuine wait until a new connection arrives. */
     if (errno == EMFILE || errno == ENFILE) {
       accept_shed_backlog(g_listener_fd[listener]);
+      g_accept_streak[listener] = 0;
       scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
       continue;
     }
@@ -10081,11 +10099,13 @@ retry:
      * for the same reason as the EMFILE path above: shedding drains the backlog, after which the park
      * is a real wait rather than an immediate return. */
     close(fd);
+    g_accept_streak[listener] = 0;
     scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
     goto retry;
   }
   g_conn_fd[h] = fd;
   g_conn_used[h] = 1;
+  g_accept_streak[listener]++;
   return tcp_net_ok(h);
 }
 
@@ -10353,6 +10373,7 @@ long long tcp_close_listener(long long listener) {
   close(g_listener_fd[listener]);
   g_listener_used[listener] = 0;
   g_listener_fd[listener] = -1;
+  g_accept_streak[listener] = 0;
   return 0;
 }
 

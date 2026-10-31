@@ -3,7 +3,8 @@
 **Status:** landed (experimental, like all of `stdlib.http_server`; not part of normative v0).
 Code: `stdlib/http_server.sprout` (`ServerConfig.max_live_connections`, `Admission`, `spawn_handler`,
 `serve_connection`). Tests: `tests/task_io_smoke/http_live_cap.spr`,
-`http_live_cap_zero_fails.spr`, `http_live_cap_table_fails.spr`.
+`http_live_cap_zero_fails.spr`, `http_live_cap_table_fails.spr`, `http_idle_clamp.spr`,
+`accept_fairness.spr`.
 
 ## 1. Problem
 
@@ -55,6 +56,21 @@ failed accept does not.
 **Cost when exposed directly.** A real client past the cap is closed, not queued: it sees a reset or
 an empty reply and has to retry. Under sustained load that is more visible than queuing would be.
 A non-idempotent request that nginx had already sent is not retried and ends as a 502.
+
+**Idle cap.** The effective idle cap is `min(max_idle_connections, max_live_connections * 3 / 4)`,
+rounded down: the rule `Pooled` uses for its workers. A quarter of the places stay free for new
+connections, and a live cap of 1 keeps nothing open (every response says `connection: close`).
+Live 4 with idle 4 keeps three. nginx (since 1.29.7, `ngx_http_upstream_module`) keeps up to 32 idle
+upstream connections per worker process by default (`keepalive 32 local;`), so with default sizing
+(live 512, idle cap 256) one nginx worker's idle connections fit under the idle cap, and several
+workers need `max_idle_connections` raised.
+
+**Accept fairness.** `tcp_accept` parks on the listener after 16 accepts in a row with no park in
+between, before its next `accept()`. The pump polls only when nothing is runnable, so an accept loop
+that never parks (the refuse-at-cap loop, or `serve_loop` spawning handlers) would keep every other
+task off the CPU while connections keep arriving. A queued connection makes the listener readable,
+so the park returns at the next poll, after every runnable task had a turn. With an empty queue it
+is the same wait `EAGAIN` causes. `tcp_accept` in `runtime/sprout_runtime.c` (`ACCEPT_FAIR_STREAK`).
 
 ## 4. Sizing
 
