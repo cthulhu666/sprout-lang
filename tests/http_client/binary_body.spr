@@ -180,11 +180,6 @@ fn body_is_ok(body: Bytes) -> Bool =
   | Ok text -> text == "ok"
   | Err _ -> false
 
-fn contains_all(text: String, wants: List String) -> Bool =
-  match wants with
-  | [w | rest] -> string.contains(text, w) && contains_all(text, rest)
-  | _ -> true
-
 # A header line that is not valid UTF-8 is read as ISO-8859-1 and the response is returned
 # normally; a valid one is unchanged. Prints "Ok" when the header block holds every string in
 # `wants` and the body is `ok`, else "FAIL" with what arrived.
@@ -192,7 +187,7 @@ fn report_headers(label: String, url: String, wants: List String) -> Unit !{IO} 
   match http_get(url, "", 5000) with
   | Err _ -> terminal.write(line(label, "REQUEST FAILED"))
   | Ok (HttpResponse _ headers body) ->
-      if contains_all(headers, wants) && body_is_ok(body)
+      if all(\w -> string.contains(headers, w), wants) && body_is_ok(body)
       then terminal.write(line(label, "Ok"))
       else terminal.write(line(label, string.concat("FAIL ", headers)))
 

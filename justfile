@@ -2061,13 +2061,17 @@ argv-smoke: bootstrap-from-seed
   set -euo pipefail
   TMPD=$(mktemp -d /tmp/sprout_argv_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
-  FIXTURE=tests/argv_smoke/argv_echo.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/out.ll" 2>"$TMPD/err"; then
-    echo "argv-smoke: typed emit failed" >&2; cat "$TMPD/err" >&2; exit 1
-  fi
-  if ! clang "$TMPD/out.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bin" 2>"$TMPD/link.err"; then
-    echo "argv-smoke: link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
-  fi
+  # build_fixture <source> <binary> <emit failure message> <link failure message>
+  build_fixture() {
+    local src="$1" bin="$2" emit_msg="$3" link_msg="$4"
+    if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$src" > "$bin.ll" 2>"$TMPD/err"; then
+      echo "argv-smoke: $emit_msg" >&2; cat "$TMPD/err" >&2; exit 1
+    fi
+    if ! clang "$bin.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$bin" 2>"$TMPD/link.err"; then
+      echo "argv-smoke: $link_msg" >&2; cat "$TMPD/link.err" >&2; exit 1
+    fi
+  }
+  build_fixture tests/argv_smoke/argv_echo.spr "$TMPD/bin" "typed emit failed" "link failed"
   got=$("$TMPD/bin" ping hello)
   if [[ "$got" != "pong:hello" ]]; then
     echo "argv-smoke: typed-built binary mishandled argv — expected 'pong:hello', got '$got'" >&2
@@ -2076,13 +2080,8 @@ argv-smoke: bootstrap-from-seed
   fi
   # Second fixture: an argument that is not valid UTF-8 stops the program at startup, before any
   # user code runs, with status 2 and a message naming the argument. $'..' passes the raw bytes.
-  FIXTURE=tests/argv_smoke/argv_utf8.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/utf8.ll" 2>"$TMPD/err"; then
-    echo "argv-smoke: argv_utf8 fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
-  fi
-  if ! clang "$TMPD/utf8.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/utf8_bin" 2>"$TMPD/link.err"; then
-    echo "argv-smoke: argv_utf8 fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
-  fi
+  build_fixture tests/argv_smoke/argv_utf8.spr "$TMPD/utf8_bin" \
+    "argv_utf8 fixture emit failed" "argv_utf8 fixture link failed"
   # Valid arguments, ASCII and not, reach the program.
   want=$'Nothing Nothing\nNothing Nothing\nJust 42 Just 42.0\nend'
   got=$("$TMPD/utf8_bin" abc $'\xc3\xa9' 42 2>"$TMPD/utf8.err") || {
@@ -2114,13 +2113,8 @@ argv-smoke: bootstrap-from-seed
   # Third fixture: env_get can still hand a program an invalid String. parse_int
   # must answer Nothing for `1<bad byte>` without the UTF-8 walker aborting. The later Bytes-primary
   # change to env_get moves this test with it.
-  FIXTURE=tests/argv_smoke/env_utf8.spr
-  if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/env.ll" 2>"$TMPD/err"; then
-    echo "argv-smoke: env_utf8 fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
-  fi
-  if ! clang "$TMPD/env.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/env_bin" 2>"$TMPD/link.err"; then
-    echo "argv-smoke: env_utf8 fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
-  fi
+  build_fixture tests/argv_smoke/env_utf8.spr "$TMPD/env_bin" \
+    "env_utf8 fixture emit failed" "env_utf8 fixture link failed"
   for bad in $'1\xff' $'\xff' $'x\xff' $'12\xc3'; do
     rc=0
     got=$(SPROUT_SMOKE_VALUE="$bad" "$TMPD/env_bin" 2>"$TMPD/env.err") || rc=$?
