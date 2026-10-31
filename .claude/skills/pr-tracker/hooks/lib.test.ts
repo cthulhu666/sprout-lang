@@ -6,6 +6,7 @@ import {
   ciSummary,
   createdPrNumber,
   fit,
+  footerLines,
   fitSegs,
   headerSegs,
   issueSegs,
@@ -25,6 +26,8 @@ import {
   storedPr,
   totalsSegs,
   touchesPrs,
+  withAll,
+  without,
 } from './lib'
 
 const T = '\t'
@@ -205,7 +208,8 @@ test('expansion defaults to the newest open PR', () => {
   expect(resolveExpanded('auto', [1, 2, 3], data)).toBe(3)
   expect(resolveExpanded('auto', [2], data)).toBe(null)
   expect(resolveExpanded(2, [1, 2, 3], data)).toBe(2)
-  expect(resolveExpanded(9, [1, 2, 3], data)).toBe(null)
+  // A selection that is not in the list (hidden by scope) falls back to the auto rule.
+  expect(resolveExpanded(9, [1, 2, 3], data)).toBe(3)
   expect(resolveExpanded('none', [1, 2, 3], data)).toBe(null)
 })
 
@@ -338,4 +342,24 @@ test('mergedIn: the shown PRs whose stored state is MERGED', () => {
   }
   expect(mergedIn([1, 2, 3, 4], data)).toEqual([1, 3])
   expect(mergedIn([2, 4], data)).toEqual([])
+})
+
+test('footerLines: packs items greedily into lines no wider than the columns', () => {
+  expect(footerLines(['aa', 'bb', 'cc'], 20)).toEqual([['aa', 'bb', 'cc']])
+  // 'aa  bb' is 6 cells; adding '  cc' makes 10.
+  expect(footerLines(['aa', 'bb', 'cc'], 8)).toEqual([['aa', 'bb'], ['cc']])
+  expect(footerLines(['aa', 'bb', 'cc'], 8, 3)).toEqual([['aa', 'bb'], ['cc']])
+  expect(footerLines(['aa', 'bb', 'cc'], 6, 3)).toEqual([['aa'], ['bb'], ['cc']])
+  expect(footerLines([], 10)).toEqual([])
+})
+
+test('footerLines: an item wider than the columns gets its own line', () => {
+  expect(footerLines(['a', 'wider than ten', 'b'], 10)).toEqual([['a'], ['wider than ten'], ['b']])
+})
+
+test('withAll appends the missing numbers in order; without filters them out', () => {
+  expect(withAll([1, 2], [2, 3, 4, 3])).toEqual([1, 2, 3, 4])
+  expect(withAll([], [5])).toEqual([5])
+  expect(without([1, 2, 3, 4], [2, 4, 9])).toEqual([1, 3])
+  expect(without([1], [])).toEqual([1])
 })

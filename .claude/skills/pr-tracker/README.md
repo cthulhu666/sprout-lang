@@ -12,7 +12,10 @@ Companion to `.claude/skills/sprout-review/`.
   session started, unless removed.
 - The default view draws only PRs this session created (`gh pr create`) or added by hand. The
   `all` button draws the full list; `mine` switches back. Each new session starts on `mine`.
-  Scope only filters the drawing: polling and auto-adding go on for every PR.
+  Scope only filters the drawing: polling and auto-adding go on for every PR. A PR you opened
+  that the scope then hides stops being the chosen one; the newest open PR is expanded instead.
+- The footer (updated time, `refresh`, view, scope, `clear merged`) wraps onto more lines on a
+  narrow pane or band; the list gives up rows for them.
 - `clear merged (k)` appears when `k` drawn PRs are merged; it removes them, and later review
   runs do not add them back.
 
