@@ -165,13 +165,16 @@ level gate).
 unambiguously. The rule is modelled on Go `log/slog`'s `TextHandler`:
 
 - A field key or value is written inside `"…"` when it is empty or contains a
-  space, `=`, `"`, or any byte below 0x20 or 0x7F. Otherwise it is bare, as above.
+  space, `=`, `"`, any byte below 0x20 or 0x7F, a C1 control (U+0080–U+009F, which
+  includes U+0085 NEL) or U+2028/U+2029. Otherwise it is bare, as above.
 - Inside the quotes: `\n`, `\r`, `\t`, `\"` and `\\`, and `\xNN` (two lowercase hex
-  digits) for every other byte below 0x20 and for 0x7F. Non-ASCII UTF-8 is written
-  as is.
+  digits) for every other byte below 0x20 and for 0x7F. A C1 control is `\u00XX`
+  (lowercase hex, as `hex.encode` writes it), U+2028 is `\u2028` and U+2029 is
+  `\u2029`. Every other non-ASCII UTF-8 sequence, such as U+00A0, U+2027 or é, is
+  written as is.
 - The message is **not** quoted, so `… INFO request handled k=v` reads as before. It
-  gets the same escapes for control bytes (`\n`, `\r`, `\t`, `\xNN`), and `\\` for a
-  backslash. `\\` is kept even though a message cannot be parsed back exactly (its
+  gets the same escapes for control bytes (`\n`, `\r`, `\t`, `\xNN`), C1 controls and
+  U+2028/U+2029 (`\u…`), and `\\` for a backslash. `\\` is kept even though a message cannot be parsed back exactly (its
   spaces are bare, so a message containing ` k=v` reads like a field): without it a
   message holding the two characters `\n` and one holding a newline render the same,
   which is the ambiguity the escapes exist to remove. The cost is that a backslash in
@@ -180,7 +183,9 @@ unambiguously. The rule is modelled on Go `log/slog`'s `TextHandler`:
 - A lone backslash in a bare key or value stays bare (`path=C:\x`); it is escaped
   only when the value is quoted for another reason.
 - The pass is a single byte scan, linear in the input; a value that needs nothing is
-  returned as is.
+  returned as is. It finds the lead bytes `C2` and `E2`, then checks the whole
+  sequence, so a passing codepoint is never cut.
+- Not escaped yet: Unicode bidi controls (U+202A–U+202E, U+2066–U+2069); `BACKLOG.md`.
 
 ### 4.3 The sink, and testability
 
@@ -329,7 +334,8 @@ None. No new diagnostics. A miswired sink or a bad field is ordinary Sprout code
   `Ref`-backed capture logger and a parsed request — no sockets, no stderr.
 - Quoting and escaping (§4.2) in `test_log.spr`: bare values unchanged; LF, CR, TAB, ESC,
   DEL, `"`, backslash, space, `=` and the empty string in a value; keys that need quotes;
-  a message with LF and ESC; a long run of escapes; a record with control bytes stays one
+  a message with LF and ESC; U+0080–U+009F, U+2028 and U+2029 in a value, key and message,
+  with U+00A0, U+2027 and é passing through; a long run of escapes; a record with control bytes stays one
   line through the capture sink. `test_http_middleware.spr` checks that one request is one
   line with a base field holding a newline.
 - **Follow-up noted, not blocking:** a JSON-lines formatter. A `Logger` should carry its

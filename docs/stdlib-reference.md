@@ -151,6 +151,11 @@ Bytes helpers (in `stdlib/bytes.sprout`):
 - `u32_be(value) -> Bytes`
 - `read_u16_be(value) -> Maybe Int`
 - `read_u32_be(value) -> Maybe Int`
+- `find_byte_from(hit, value, start) -> Maybe Int` — the byte offset of the first byte at or
+  after `start` that `hit: Int -> Bool` accepts. A negative `start` scans from 0; a `start` past
+  the end finds nothing. O(|value| - start)
+- `all_bytes(hit, value) -> Bool` — true when `hit` accepts every byte; the empty input passes.
+  O(|value|), stops at the first rejected byte
 - `from_string(raw) -> Bytes`
 - `to_string(value) -> Result Utf8Error String`
 - `c_string(raw) -> Bytes`
@@ -316,7 +321,7 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 - `status_code(s) -> Int`, `status_reason(s) -> String`, `status_line(s) -> String` (`"HTTP/1.1 200 OK"`)
 - `status_has_content(s) -> Bool` — false for 204 and 304, which send no body, no `content-length` and no default content-type (RFC 9110 §8.6, §15.3.5, §15.4.5)
 - `parse_request_line(raw) -> Maybe RequestLine` — the line up to the first CRLF, validated per RFC 9112 §3: exactly `method SP target SP version` with single SPs; the method is a token (RFC 9110 §5.6.2); the target is non-empty with no SP, control byte or DEL (bytes >= 0x80 pass); the version is `HTTP/` DIGIT `.` DIGIT. Anything else is `Nothing`, including a bare CR or LF
-- `is_token(s) -> Bool`, `all_bytes_in(ok, s) -> Bool`, `digit_byte(b) -> Bool` — byte-class helpers shared with `stdlib.http_server`
+- `is_token(s) -> Bool` — RFC 9110 §5.6.2 token check, shared with `stdlib.http_server`
 - `http_response(status, body) -> String` — a minimal `Connection: close` response
 - `http_response_body(resp: HttpResponse) -> Bytes`
 - `http_response_text(resp: HttpResponse) -> Result Utf8Error String`
@@ -578,11 +583,12 @@ Leveled, structured logging (in `stdlib/log.sprout`; design: [logging-v0.md](log
 `with_field(k, v, lg)`, then `debug`/`info`/`warn`/`error` and the `_f` forms that take fields.
 
 One record is one line: `<ts> <LEVEL> <msg> k=v …`. A key or value is written bare unless it is
-empty or holds a space, `=`, `"`, or a byte below 0x20 or 0x7F; then it is wrapped in `"…"`.
-Inside the quotes `\n`, `\r`, `\t`, `\"` and `\\` are escaped, and any other control byte is `\xNN`
-(two lowercase hex digits). The message is not quoted, but it gets the same escapes for control
-bytes and `\\`; `"` is left alone. Non-ASCII UTF-8 is written as is. The escape pass is linear in
-the input.
+empty or holds a space, `=`, `"`, a byte below 0x20 or 0x7F, a C1 control (U+0080–U+009F) or
+U+2028/U+2029; then it is wrapped in `"…"`. Inside the quotes `\n`, `\r`, `\t`, `\"` and `\\` are
+escaped, any other control byte is `\xNN`, a C1 control is `\u00XX`, and U+2028/U+2029 are
+`\u2028`/`\u2029` (all lowercase hex). The message is not quoted, but it gets the same escapes for
+control bytes, C1 controls, U+2028/U+2029 and `\\`; `"` is left alone. Other non-ASCII UTF-8
+(U+00A0, U+2027, é) is written as is. The escape pass is linear in the input.
 
 ## stdlib.sort
 

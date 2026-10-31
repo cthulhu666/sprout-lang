@@ -149,6 +149,51 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "a message escape does not touch the fields after it",
       format_line("T", Info, "a\nb", [("k", "v")]), "T INFO a\\nb k=v")
 
+    # --- Pure: C1 controls and U+2028/U+2029 are escaped; other non-ASCII is not ------
+    assert_eq(state, "U+009B in a value is quoted and escaped",
+      field_text("k", `a${ctl(155)}b`), "k=\"a\\u009bb\"")
+    assert_eq(state, "U+0085 in a value is quoted and escaped",
+      field_text("k", `a${ctl(133)}b`), "k=\"a\\u0085b\"")
+    assert_eq(state, "U+0080 and U+009F bound the C1 range",
+      field_text("k", `${ctl(128)}${ctl(159)}`), "k=\"\\u0080\\u009f\"")
+    assert_eq(state, "U+2028 in a value is quoted and escaped",
+      field_text("k", `a${ctl(8232)}b`), "k=\"a\\u2028b\"")
+    assert_eq(state, "U+2029 in a value is quoted and escaped",
+      field_text("k", `a${ctl(8233)}b`), "k=\"a\\u2029b\"")
+    assert_eq(state, "U+009B in a key is quoted and escaped",
+      field_text(`a${ctl(155)}b`, "v"), "\"a\\u009bb\"=v")
+    assert_eq(state, "U+0085 in a key is quoted and escaped",
+      field_text(`a${ctl(133)}b`, "v"), "\"a\\u0085b\"=v")
+    assert_eq(state, "U+2028 in a key is quoted and escaped",
+      field_text(`a${ctl(8232)}b`, "v"), "\"a\\u2028b\"=v")
+    assert_eq(state, "U+2029 in a key is quoted and escaped",
+      field_text(`a${ctl(8233)}b`, "v"), "\"a\\u2029b\"=v")
+    assert_eq(state, "U+009B in a message is escaped, not quoted",
+      msg_text(`a${ctl(155)}b`), "a\\u009bb")
+    assert_eq(state, "U+0085 in a message is escaped, not quoted",
+      msg_text(`a${ctl(133)}b`), "a\\u0085b")
+    assert_eq(state, "U+2028 in a message is escaped, not quoted",
+      msg_text(`a${ctl(8232)}b`), "a\\u2028b")
+    assert_eq(state, "U+2029 in a message is escaped, not quoted",
+      msg_text(`a${ctl(8233)}b`), "a\\u2029b")
+    assert_eq(state, "U+00A0 passes through bare",
+      field_text("k", `a${ctl(160)}b`), `k=a${ctl(160)}b`)
+    assert_eq(state, "U+2027 passes through bare",
+      field_text("k", `a${ctl(8231)}b`), `k=a${ctl(8231)}b`)
+    assert_eq(state, "e-acute passes through bare", field_text("k", "café"), "k=café")
+    assert_eq(state, "U+00A0, U+2027 and e-acute pass through a key",
+      field_text(`${ctl(160)}${ctl(8231)}é`, "v"), `${ctl(160)}${ctl(8231)}é=v`)
+    assert_eq(state, "U+00A0, U+2027 and e-acute pass through a message",
+      msg_text(`${ctl(160)}${ctl(8231)}é`), `${ctl(160)}${ctl(8231)}é`)
+    assert_eq(state, "a passing codepoint beside an escaped one is kept",
+      field_text("k", `${ctl(160)}${ctl(133)}${ctl(8231)}${ctl(8232)}`),
+      `k="${ctl(160)}\\u0085${ctl(8231)}\\u2028"`)
+    assert_eq(state, "ASCII and Unicode escapes mix in one value",
+      field_text("k", `a\n${ctl(155)}"${ctl(8233)}\\${ctl(27)}`),
+      "k=\"a\\n\\u009b\\\"\\u2029\\\\\\x1b\"")
+    assert_eq(state, "a record with U+2028 and U+0085 stays one line",
+      count_lines(string.concat(format_line("T", Info, `a${ctl(8232)}b${ctl(133)}c`, [("k", `${ctl(8233)}`)]), "\n")), 1)
+
     # A long run of escapes is one linear pass; a quadratic builder would not finish this size.
     assert_eq(state, "20000 escapes are rewritten in one pass",
       string.byte_length(field_text("k", newlines_20000)), 2 + 2 + 2 * 20000)

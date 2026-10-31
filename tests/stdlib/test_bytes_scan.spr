@@ -1,0 +1,47 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+
+# `bytes.find_byte_from` and `bytes.all_bytes`: one byte-predicate scan, no String detour.
+
+fn describe(m: Maybe Int) -> String =
+  match m with
+  | Just i -> int_to_string(i)
+  | Nothing -> "none"
+
+fn of(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+fn yn(b: Bool) -> String =
+  if b then "yes" else "no"
+
+fn is_a(byte: Int) -> Bool =
+  byte == 97
+
+fn is_digit(byte: Int) -> Bool =
+  byte >= 48 && byte <= 57
+
+fn main() -> Unit !{IO} =
+  run_suite("bytes_scan", [
+    check_eq("find_byte_from on empty input", describe(bytes.find_byte_from(is_a, bytes.empty(), 0)), "none"),
+    check_eq("find_byte_from matches at 0", describe(bytes.find_byte_from(is_a, of("abc"), 0)), "0"),
+    check_eq("find_byte_from finds a later match", describe(bytes.find_byte_from(is_a, of("xxa"), 0)), "2"),
+    check_eq("find_byte_from with no match", describe(bytes.find_byte_from(is_a, of("xyz"), 0)), "none"),
+    check_eq("find_byte_from skips a match before start",
+      describe(bytes.find_byte_from(is_a, of("abca"), 1)), "3"),
+    check_eq("find_byte_from matches at start itself",
+      describe(bytes.find_byte_from(is_a, of("xa"), 1)), "1"),
+    check_eq("find_byte_from past the end", describe(bytes.find_byte_from(is_a, of("abc"), 3)), "none"),
+    check_eq("find_byte_from far past the end", describe(bytes.find_byte_from(is_a, of("abc"), 99)), "none"),
+    check_eq("find_byte_from from a negative start scans from 0",
+      describe(bytes.find_byte_from(is_a, of("abc"), -4)), "0"),
+    check_eq("find_byte_from reads a NUL byte",
+      describe(bytes.find_byte_from(\b -> b == 0, bytes.append(of("a"), bytes.singleton(0)), 0)), "1"),
+    check_eq("find_byte_from reads a byte above 127",
+      describe(bytes.find_byte_from(\b -> b == 195, of("café"), 0)), "3"),
+
+    check_eq("all_bytes on empty input", yn(bytes.all_bytes(is_digit, bytes.empty())), "yes"),
+    check_eq("all_bytes with every byte accepted", yn(bytes.all_bytes(is_digit, of("0123"))), "yes"),
+    check_eq("all_bytes rejects a bad first byte", yn(bytes.all_bytes(is_digit, of("a123"))), "no"),
+    check_eq("all_bytes rejects a bad last byte", yn(bytes.all_bytes(is_digit, of("123a"))), "no"),
+    check_eq("all_bytes rejects a bad middle byte", yn(bytes.all_bytes(is_digit, of("1a3"))), "no")
+  ])

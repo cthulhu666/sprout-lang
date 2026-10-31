@@ -1,6 +1,6 @@
 module stdlib.http_server
 
-import stdlib.http (HttpStatus, Ok200, SeeOther303, BadRequest400, NotFound404, RequestTimeout408, ContentTooLarge413, RequestHeaderFieldsTooLarge431, NotImplemented501, RequestLine, RequestPathVersion, all_bytes_in, digit_byte, is_token, parse_request_line, status_code, status_has_content, status_line)
+import stdlib.http (HttpStatus, Ok200, SeeOther303, BadRequest400, NotFound404, RequestTimeout408, ContentTooLarge413, RequestHeaderFieldsTooLarge431, NotImplemented501, RequestLine, RequestPathVersion, is_token, parse_request_line, status_code, status_has_content, status_line)
 import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpError, accept, close, close_listener, read_avail_timeout, tcp_error_message, write_all_utf8_by)
 import stdlib.string as string
 import stdlib.bytes as bytes
@@ -212,15 +212,12 @@ fn has_bare_terminator(line: String) -> Bool =
 
 # The raw name must be a non-empty token. Trimming it first read `Content-Length : 5`, a fold line
 # ` Content-Length: 5` and `X Y: 1` as headers that a stricter proxy in front refuses or ignores
-# (RFC 9112 §5.1, §5.2), so the two framed the body differently. A byte scan keeps this linear;
-# `string.char_at` is per codepoint.
-fn token_name(name: String) -> Bool =
-  is_token(name)
-
+# (RFC 9112 §5.1, §5.2), so the two framed the body differently. `is_token` is a byte scan, so
+# this stays linear; `string.char_at` is per codepoint.
 fn parse_header_pair(pair: (String, String)) -> Maybe (String, String) =
   match pair with
   | (name, value) ->
-      if token_name(name) then Just((string.to_lower_ascii(name), string.trim(value)))
+      if is_token(name) then Just((string.to_lower_ascii(name), string.trim(value)))
       else Nothing
 
 fn parse_header_line(raw: String) -> Maybe (String, String) =
@@ -306,6 +303,9 @@ fn parse_body_framing(headers: Dict String) -> ServerResult Int =
   | Just _ -> Err(HttpUnsupportedTransferCoding)
   | Nothing -> parse_content_length(headers)
 
+fn digit_byte(byte: Int) -> Bool =
+  byte >= 48 && byte <= 57
+
 # RFC 9110 §8.6: Content-Length is 1*DIGIT. `parse_int` also takes a leading `-`, so `-0` would
 # pass as 0 where a stricter proxy refuses it. It answers Nothing on overflow.
 fn parse_content_length(headers: Dict String) -> ServerResult Int =
@@ -313,7 +313,7 @@ fn parse_content_length(headers: Dict String) -> ServerResult Int =
   | Nothing -> Ok(0)
   | Just raw ->
       if string.is_empty(raw) then Err(HttpInvalidRequest("empty Content-Length"))
-      else if !all_bytes_in(digit_byte, raw) then Err(HttpInvalidRequest("invalid Content-Length"))
+      else if !bytes.all_bytes(digit_byte, bytes.from_string(raw)) then Err(HttpInvalidRequest("invalid Content-Length"))
       else result_from_maybe(HttpInvalidRequest("invalid Content-Length"), parse_int(raw))
 
 # The request line and header block of the request starting at byte `start` of `raw`, whose header
@@ -724,7 +724,7 @@ export fn add_header(name: String, value: String, resp: HttpServerResponse) -> H
 export wrap CookieName = String deriving (Eq)
 
 export fn cookie_name(raw: String) -> Maybe CookieName =
-  if token_name(raw) then Just(CookieName(raw)) else Nothing
+  if is_token(raw) then Just(CookieName(raw)) else Nothing
 
 export fn cookie_name_text(name: CookieName) -> String =
   match name with
@@ -772,7 +772,7 @@ export fn with_cookie(c: SetCookie, resp: HttpServerResponse) -> HttpServerRespo
       HttpServerResponse(status, headers, vec_append(c, vec_filter(\other -> other.name != c.name, cookies)), body)
 
 fn sent_cookie_octets(raw: String) -> Bool =
-  all_bytes_in(\byte -> byte != 32 && byte != 44 && cookie_octet(byte), raw)
+  bytes.all_bytes(\byte -> byte != 32 && byte != 44 && cookie_octet(byte), bytes.from_string(raw))
 
 # A `;` in a path or domain would start an attribute, so it becomes a space, as CR and LF do in
 # `sanitize_field`.
@@ -976,7 +976,7 @@ fn cookie_octet(byte: Int) -> Bool =
   byte >= 32 && byte <= 126 && byte != 34 && byte != 59 && byte != 92
 
 fn cookie_octets(value: String) -> Bool =
-  all_bytes_in(cookie_octet, value)
+  bytes.all_bytes(cookie_octet, bytes.from_string(value))
 
 # A segment with no `=`, an empty name, or a value outside `cookie-octet` is not a
 # cookie-pair and is dropped rather than read as a name with an empty value --- the

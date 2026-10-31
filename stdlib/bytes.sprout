@@ -225,6 +225,26 @@ instance Eq Bytes
   fn eq(left: Bytes, right: Bytes) -> Bool =
     length(left) == length(right) && matches_at(left, right, 0, 0, length(left))
 
+# The first index at or after `index` whose byte `hit` accepts, or `total`.
+fn scan_byte(hit: local Int -> Bool, value: Bytes, index: Int, total: Int) -> Int =
+  if index >= total || hit(get_or(value, index, -1)) then index
+  else scan_byte(hit, value, index + 1, total)
+
+# O(|value| - start): the index of the first byte at or after `start` that `hit` accepts, or Nothing.
+# A negative `start` scans from 0; one past the end finds nothing. The index is a BYTE offset.
+export fn find_byte_from(hit: local Int -> Bool, value: Bytes, start: Int) -> Maybe Int =
+  if found >= total then Nothing else Just(found)
+where
+  total = length(value)
+  found = scan_byte(hit, value, if start < 0 then 0 else start, total)
+
+# O(|value|): true when `hit` accepts every byte; the empty input passes. It stops at the first
+# rejected byte.
+export fn all_bytes(hit: local Int -> Bool, value: Bytes) -> Bool =
+  match find_byte_from(\b -> !hit(b), value, 0) with
+  | Just _ -> false
+  | Nothing -> true
+
 fn c_string_len_from(value: Bytes, index: Int, total: Int) -> Int =
   if index >= total then total
   else

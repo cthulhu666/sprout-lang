@@ -116,22 +116,48 @@ fn all_fields(base: Vec (String, String), call: Vec (String, String)) -> Vec (St
 # --- Text escaping ---------------------------------------------------------
 # One record is one line, and keys and values read back unambiguously (modelled on Go's
 # log/slog TextHandler). A key or value is written bare unless it is empty or holds a space, `=`,
-# `"` or a control byte; then it is wrapped in `"` and escaped. The message is never quoted, but
-# gets the same escapes. Everything is a byte scan: the bytes that change are all ASCII, so every
-# cut lands on a codepoint boundary and non-ASCII UTF-8 passes through. Docs: logging-v0.md §4.2.
+# `"`, a control byte, a C1 control (U+0080-U+009F) or U+2028/U+2029; then it is wrapped in `"` and
+# escaped. The message is never quoted, but gets the same escapes. Everything is a byte scan. The
+# ASCII bytes that change are single bytes; the rest are the UTF-8 sequences `C2 80`-`C2 9F` and
+# `E2 80 A8`/`E2 80 A9`, found by their lead byte and then checked whole, so every cut lands on a
+# codepoint boundary and all other non-ASCII UTF-8 passes through. Docs: logging-v0.md §4.2.
 
 fn control_byte(b: Int) -> Bool =
   b < 32 || b == 127
 
 # A byte that forces quotes: space, `=`, `"`, or a control byte.
 fn quote_byte(b: Int) -> Bool =
-  b <= 32 || b == 34 || b == 61 || b == 127
+  control_byte(b) || b == 32 || b == 34 || b == 61
 
 # A byte that is rewritten. Inside quotes `"` is too; a message is not quoted, so it keeps `"`.
 fn escaped_byte(quoted: Bool, b: Int) -> Bool =
   control_byte(b) || b == 92 || (quoted && b == 34)
 
-fn escape_piece(b: Int) -> String =
+# Lead bytes of the multi-byte sequences: `C2` (C1 controls) and `E2` (U+2028/U+2029).
+fn multi_lead(b: Int) -> Bool =
+  b == 194 || b == 226
+
+# The length of the escaped multi-byte sequence at `i`: 2 for a C1 control, 3 for U+2028/U+2029,
+# else 0. 256 is no byte, so a truncated sequence never matches.
+fn multi_len(b: Bytes, i: Int) -> Int =
+  if lead == 194 && next >= 128 && next <= 159 then 2
+  else if lead == 226 && next == 128 && (last == 168 || last == 169) then 3
+  else 0
+where
+  lead = bytes.get_or(b, i, 256)
+  next = bytes.get_or(b, i + 1, 256)
+  last = bytes.get_or(b, i + 2, 256)
+
+# The length of the sequence at `i` that is rewritten: 0 none, 1 an ASCII byte, 2 or 3 multi-byte.
+fn escape_len(quoted: Bool, b: Bytes, i: Int) -> Int =
+  if escaped_byte(quoted, bytes.get_or(b, i, 256)) then 1 else multi_len(b, i)
+
+fn escape_piece(b: Bytes, i: Int, len: Int) -> String =
+  if len == 2 then "\\u00" ++ hex.encode(bytes.slice(b, i + 1, 1))
+  else if len == 3 then (if bytes.get_or(b, i + 2, 256) == 168 then "\\u2028" else "\\u2029")
+  else escape_ascii(bytes.get_or(b, i, 256))
+
+fn escape_ascii(b: Int) -> String =
   if b == 10 then "\\n"
   else if b == 13 then "\\r"
   else if b == 9 then "\\t"
@@ -139,37 +165,42 @@ fn escape_piece(b: Int) -> String =
   else if b == 92 then "\\\\"
   else "\\x" ++ hex.encode(bytes.singleton(b))
 
-# Index of the first byte at or after `i` that `hit` accepts, or `n`.
-fn first_byte(hit: Int -> Bool, b: Bytes, i: Int, n: Int) -> Int =
-  if i >= n || hit(bytes.get_or(b, i, 0)) then i else first_byte(hit, b, i + 1, n)
+# `run` is the start of the current verbatim run and `acc` holds the pieces, reversed. `hit` accepts
+# every byte that may start an escape; `escape_len` then decides, so a lead byte that starts a
+# passing sequence (U+00A0) is skipped without ending the run. At each escape, flush the run, then
+# the escape, and start a new run after it. `raw` itself comes back when no run was ever flushed.
+fn escape_go(quoted: Bool, hit: Int -> Bool, raw: String, b: Bytes, run: Int, i: Int, acc: List String) -> List String =
+  match bytes.find_byte_from(hit, b, i) with
+  | Nothing -> if run == 0 then [raw] else Cons(str_slice_bytes(raw, run, bytes.length(b) - run), acc)
+  | Just at ->
+      let len = escape_len(quoted, b, at)
+      in if len == 0 then escape_go(quoted, hit, raw, b, run, at + 1, acc)
+         else escape_go(quoted, hit, raw, b, at + len, at + len,
+           Cons(escape_piece(b, at, len), Cons(str_slice_bytes(raw, run, at - run), acc)))
 
-# `run` is the start of the current verbatim run and `acc` holds the pieces, reversed. At each
-# rewritten byte, flush the run, then the escape, and start a new run after it.
-fn escape_go(quoted: Bool, raw: String, b: Bytes, run: Int, i: Int, n: Int, acc: List String) -> List String =
-  if i >= n then Cons(str_slice_bytes(raw, run, n - run), acc)
-  else if escaped_byte(quoted, bytes.get_or(b, i, 0)) then
-    escape_go(quoted, raw, b, i + 1, i + 1, n,
-      Cons(escape_piece(bytes.get_or(b, i, 0)), Cons(str_slice_bytes(raw, run, i - run), acc)))
-  else escape_go(quoted, raw, b, run, i + 1, n, acc)
+# O(bytes). `raw` itself when nothing needs rewriting. `b` is `raw` encoded.
+fn escape_text(quoted: Bool, raw: String, b: Bytes) -> String =
+  match escape_go(quoted, \x -> escaped_byte(quoted, x) || multi_lead(x), raw, b, 0, 0, Nil) with
+  | [only] -> only
+  | parts -> string_concat_many(list_reverse(parts))
 
-# O(bytes). `raw` itself when nothing needs rewriting.
-fn escape_text(quoted: Bool, raw: String) -> String =
-  if first == n then raw
-  else string_concat_many(list_reverse(escape_go(quoted, raw, b, 0, first, n, Nil)))
-where
-  b = bytes.from_string(raw)
-  n = bytes.length(b)
-  first = first_byte(\x -> escaped_byte(quoted, x), b, 0, n)
+fn quote_lead(b: Int) -> Bool =
+  quote_byte(b) || multi_lead(b)
 
-fn needs_quotes(raw: String) -> Bool =
-  first_byte(quote_byte, encoded, 0, bytes.length(encoded)) < bytes.length(encoded)
+# True when a byte at or after `i` forces quotes. A lead byte that starts a passing sequence is skipped.
+fn quote_at(b: Bytes, i: Int) -> Bool =
+  match bytes.find_byte_from(quote_lead, b, i) with
+  | Nothing -> false
+  | Just at ->
+      if quote_byte(bytes.get_or(b, at, 256)) || multi_len(b, at) > 0 then true
+      else quote_at(b, at + 1)
+
+# A key or a value: bare, or quoted and escaped. Encoded once for both passes.
+fn render_atom(raw: String) -> String =
+  if string.is_empty(raw) || quote_at(encoded, 0) then "\"" ++ escape_text(true, raw, encoded) ++ "\""
+  else raw
 where
   encoded = bytes.from_string(raw)
-
-# A key or a value: bare, or quoted and escaped.
-fn render_atom(raw: String) -> String =
-  if string.is_empty(raw) || needs_quotes(raw) then "\"" ++ escape_text(true, raw) ++ "\""
-  else raw
 
 # ` k=v` for each field, in order (leading space only when there are fields).
 fn render_fields(fields: Vec (String, String)) -> String =
@@ -182,7 +213,7 @@ fn render_field(pair: (String, String)) -> String =
 # One log record as a line WITHOUT a trailing newline: `<ts> <LEVEL> <msg> k=v …`.
 # The sink owns line termination (the default stderr sink's eprint appends "\n").
 export fn format_line(ts: String, lvl: Level, msg: String, fields: Vec (String, String)) -> String =
-  ts ++ " " ++ level_name(lvl) ++ " " ++ escape_text(false, msg) ++ render_fields(fields)
+  ts ++ " " ++ level_name(lvl) ++ " " ++ escape_text(false, msg, bytes.from_string(msg)) ++ render_fields(fields)
 
 # --- Emission --------------------------------------------------------------
 fn run_sink(lg: Logger, line: String) -> Unit !{IO} =
