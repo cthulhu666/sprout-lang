@@ -437,6 +437,11 @@ jobs:
       - name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
+      - name: Runtime warnings under -Werror (__APPLE__ branches)
+        # The Linux job never compiles the `#ifdef __APPLE__` code. Pinned to this job's own clang
+        # major, since under `CI` the script fails on a mismatch with the Linux pin.
+        run: bash scripts/check_runtime_warnings.sh --pinned-major "$(bash scripts/check_runtime_warnings.sh --print-local-major)"
+
       - name: CPR declares match clang on arm64
         # ci-fast-gates runs this on x86_64, where a two-word struct return is `{ i64, i64 }`;
         # aarch64 lowers it to `[2 x i64]`, so only this runner sees that mismatch.
