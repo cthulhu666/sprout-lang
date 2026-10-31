@@ -2204,6 +2204,18 @@ runtime-word-casts:
 test-runtime-word-casts:
   bash scripts/test_runtime_word_casts.sh
 
+# runtime/*.c under -Wall -Wextra; -Werror only on the clang major CI pins (docs/gates.md
+# §Runtime warnings).
+[group('smoke')]
+runtime-warnings:
+  bash scripts/check_runtime_warnings.sh
+
+# check_runtime_warnings.sh against fixtures (-Werror on the pinned major only), then on the real
+# runtime/.
+[group('smoke')]
+test-runtime-warnings:
+  bash scripts/test_check_runtime_warnings.sh
+
 # gc_safety_check.sh against fixtures: braces in literals and comments must not hide a later
 # function, and brace drift must fail with exit 2 (docs/gates.md §GC safety linter).
 [group('smoke')]
@@ -4226,6 +4238,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "runtime-line-refs|runtime-line-refs"
     "prelude-private-names|prelude-private-names"
     "stdlib-reference|stdlib-reference"
+    # Includes the real-tree check, so `runtime-warnings` is not listed on its own.
+    "test-runtime-warnings|test-runtime-warnings"
     # Includes the real-tree check, so `runtime-word-casts` is not listed on its own.
     "test-runtime-word-casts|test-runtime-word-casts"
   )

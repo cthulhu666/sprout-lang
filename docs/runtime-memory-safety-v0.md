@@ -45,6 +45,9 @@ acceptance check; a stage without one is not done.
 
 ### Stage 1 — runtime warnings as errors
 
+**Landed:** `just runtime-warnings` (`docs/gates.md` §Runtime warnings), in `ci-fast-gates`. The
+`-Werror=switch` sentence below is still open.
+
 A gate compiles `runtime/*.c` with `-Wall -Wextra -Werror` and runs in `ci-fast-gates`. Gate only:
 user builds (`analysis_service_driver.sprout`) compile the runtime themselves, and a
 warning a newer clang adds must not break them. The gate applies `-Werror` only on the clang major

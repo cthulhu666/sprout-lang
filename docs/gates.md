@@ -460,6 +460,22 @@ shrinks — a listed module that gains a section fails until it is removed from 
 a listed name with no module file. Nested modules (`fs/path`, `math/int`) are out of scope, as for
 the REPL's completion list. It checks that a section exists, not what it says.
 
+## Runtime warnings — `just runtime-warnings`
+
+Compiles each `runtime/*.c` with `clang -fsyntax-only -Wall -Wextra`
+(`scripts/check_runtime_warnings.sh`), once per build variant: default, `-DSPROUT_GC_PROFILE` and
+`-DSPROUT_GC_AGEPROF_STORES` (the only compile-time switches the justfile passes). When the local clang major equals the one
+`scripts/ci_install_llvm.sh` pins (`LLVM_VERSION`), it adds `-Werror` and any warning fails the
+gate. On any other major it prints the warnings, says they are not enforced, and exits 0.
+
+`-Werror` is gate-only. User builds (`stdlib/compiler/analysis_service_driver.sprout`) compile the
+runtime themselves, and a warning a newer clang adds must not break them. The same rule keeps a
+newer local clang from failing the gate: only CI's pinned major enforces. Under `CI` a major
+mismatch fails, so a toolchain drift there cannot turn the gate warn-only. `just
+test-runtime-warnings` plants an unused variable and checks all four outcomes, then runs the gate
+on the real runtime. The `macos` CI job runs the gate pinned to its own clang major
+(`--print-local-major`), so `__APPLE__` code is checked under `-Werror` too.
+
 ## Runtime word casts — `just runtime-word-casts`
 
 Counts **sites** in `runtime/*.c` and `runtime/*.h` on clang's JSON AST
