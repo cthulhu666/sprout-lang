@@ -223,9 +223,9 @@ holes   = { err, value }
 pattern = match ?value with | Nothing -> Err(?err) | Just unwrapped -> Ok(unwrapped)
 ```
 
-Matching `match env.get(name) with | Just value -> Ok(value) | Nothing -> Err(concat(…))` binds
-`?value := env.get(name)` and `?err := concat(…)`, and the finding reconstructs
-`result_from_maybe(concat(…), env.get(name))`.
+Matching `match lookup(name) with | Just value -> Ok(value) | Nothing -> Err(concat(…))` binds
+`?value := lookup(name)` and `?err := concat(…)`, and the finding reconstructs
+`result_from_maybe(concat(…), lookup(name))`.
 
 Note the branch orders differ — the pattern above is `Nothing`-first and that subject is
 `Just`-first. **The prelude is not internally consistent here**: `result_from_maybe`

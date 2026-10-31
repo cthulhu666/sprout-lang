@@ -8,7 +8,7 @@ no_prelude
 #   str_slice  str_find  str_starts_with  str_compare  str_starts_with_at_byte
 #
 # Everything else is an Unknown variable error: List, Maybe, Vec, Dict, every
-# combinator and class, and the off-floor externs (argv_get, vector_*, map_*,
+# combinator and class, and the off-floor externs (argv_get_bytes, vector_*, map_*,
 # ref_*). `++` goes through Semigroup, and `${…}` through string_concat_many,
 # so both are out. Primitives, operators, match, do and effects are untouched.
 

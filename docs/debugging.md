@@ -549,38 +549,28 @@ that routes external bytes through one, must be run locally under
 
 Reading it as a diagnosis rather than a flake: the abort names a producer, not a consumer.
 `aux > strlen` means some builtin built a String from raw bytes without validating —
-the W2 R2 class (`tcp_read*`, `proc_run`, `term_read_line`, `env_get`,
-`stdin_read_bytes`; see BACKLOG). The fix belongs at the producer, which per decision D4
-means returning `Bytes` and letting `bytes_to_utf8` be the single validating choke point —
+the W2 R2 class (external bytes made into a String without validating). The fix belongs at the
+producer, which per decision D4 means returning `Bytes` and letting `bytes_to_utf8` be the single
+validating choke point —
 *not* making the downstream consumer tolerate the invalid value, which merely moves the
 violation out of sight.
 
-Minimal repro needing no sockets — **this one no longer reproduces, and that is the point:**
+Every producer of that class now returns `Bytes` (`tcp_read_some`, `tcp_read_exact`, `proc_run`, `env_get_bytes`,
+`term_read_line_bytes`, `argv_get_bytes`, `stdin_read_bytes`), and the String forms decode with
+`bytes_to_utf8`, so a bad value is an `Err` at the producer rather than a `str_utf8` panic in
+whichever walker touches it first. A repro of the class therefore needs a new producer: if
+HDRCHECK or a `str_utf8` panic names one, that builtin is the bug.
+
+What the old repro looked like, for the shape:
 
 ```
 proc_run(["printf", "a\000b"])   # was: byte_length 3, length 1
 SPROUT_GC_HDRCHECK=1 ./prog      # was: HDRCHECK: str_byte_len aux=3 strlen=1
 ```
 
-`proc_run` returns `Bytes` since the R2 reduction landed (2026-08-11), so this aborts nothing.
-Kept here because the *shape* is the lesson, and because what replaced it is worth knowing:
-**there is no longer a cheap NUL-bearing repro among the remaining producers**, so do not go
-looking for one and conclude the class is closed.
-
-- `argv_get` is closed: the runtime checks every argument at startup (`sprout_set_argv`) and exits
-  with status 2 on one that is not valid UTF-8.
-- `env_get` cannot carry a NUL at all — the OS delimits it with NUL, so the byte
-  cannot reach the builtin. It can still mint a String from **invalid UTF-8**, which HDRCHECK
-  does *not* catch: it compares the header's `aux` against `strlen`, and a bad lead byte leaves
-  those equal. That case surfaces later as `runtime error: str_utf8: invalid UTF-8 lead byte` from
-  whichever walker touches the value first, arbitrarily far from the producer.
-- `term_read_line` truncates at the NUL when it reads (measured: input `a\0b\n` yields
-  `byte_length 1`), so it loses data rather than producing an inconsistent header. Silent data
-  loss, no abort.
-
-So HDRCHECK's coverage of this class is narrower than it looks: it is a reliable detector of the
-NUL half and blind to the invalid-UTF-8 half. Treat `str_utf8` panics from unexpected places as
-the same diagnosis with a different signal.
+`tests/argv_smoke/` pins the current producers end to end (`just argv-smoke`): an argument, an
+environment value and a stdin line that are not valid UTF-8 each give `Err`, and the Bytes forms
+keep every byte, NUL included.
 
 ## Debugging self-hosted compiler-source miscompiles
 

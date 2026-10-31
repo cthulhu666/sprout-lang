@@ -363,7 +363,7 @@ str_starts_with_at_byte
 ```
 
 Nothing else the prelude declares is in scope. Naming any other prelude name —
-a function, a type, a class, or an off-floor extern such as `argv_get`,
+a function, a type, a class, or an off-floor extern such as `argv_get_bytes`,
 `vector_*`, `map_*` or `ref_*` — is an `Unknown variable` error
 from the typechecker, reported with a source position.
 
@@ -463,10 +463,13 @@ Built-in types:
 (§4.1). A `String` value is always valid UTF-8 and contains no NUL byte. Builtins
 that construct a `String` from raw external bytes (e.g. `read_file`) validate the
 input and report malformed content through their error channel rather than
-producing an invalid `String`. Program arguments are checked once at startup: if
-one is not valid UTF-8, the program writes `argument N is not valid UTF-8` to
-stderr (`N` is its position, counting from 1) and exits with status 2 before any
-user code runs.
+producing an invalid `String`. The process arguments, the environment and a
+terminal line arrive as `Bytes` (`argv_get_bytes`, `env_get_bytes`,
+`term_read_line_bytes`); their `String` forms (`argv.get`, `argv.all`, `env.get`,
+`terminal.term_read_line`) decode with `bytes.to_string` and answer
+`Err Utf8Error` for input that is not valid UTF-8, with the outer `Result`
+reporting validity and the inner `Maybe` presence. Nothing stops a program at
+startup over a bad argument; the program decides what to do with the `Err`.
 
 Effect annotations are attached to function types rather than encoded as an
 ordinary type constructor.
