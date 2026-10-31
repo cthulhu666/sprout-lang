@@ -1,0 +1,1 @@
+linear value 'b' is never used: its type `main.B` contains the linear type `main.Res` (linear values must be used exactly once)

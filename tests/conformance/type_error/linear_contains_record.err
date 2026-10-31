@@ -1,0 +1,1 @@
+linear value 'r' is never used: its type `main.Rec` contains the linear type `main.Res` (linear values must be used exactly once)

@@ -1,0 +1,10 @@
+module main
+
+# A tuple component inside a stored field holds a linear value.
+
+type linear Res = | Res Int
+type T = | T (Int, Res)
+
+fn drop_t(t: T) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

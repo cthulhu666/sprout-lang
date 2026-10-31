@@ -1,0 +1,22 @@
+module main
+
+import stdlib.task as task
+import stdlib.chan as chan
+
+# `Chan`'s argument is phantom, so `Outer` around `Chan Res` holds no linear value: it may be
+# copied and dropped.
+
+type linear Res = | Res Int
+type Outer = | Outer (chan.Chan Res)
+
+fn twice(o: Outer) -> (Outer, Outer) = (o, o)
+
+fn drop_outer(o: Outer) -> Int = 0
+
+fn run(s: task.Scope) -> Int !{IO} =
+  do
+    c <- chan.chan_new(s, 1)
+    let (p, q) = twice(Outer(c))
+    drop_outer(p) + drop_outer(q) + 1
+
+fn main() -> Unit !{IO} = print(int_to_string(task.with_scope(run)))

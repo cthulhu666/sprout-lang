@@ -1,0 +1,10 @@
+module main
+
+# `Box Int` is not linear although `Box` stores the class's own `t`, so `borrowing` is rejected.
+
+type Box t = | Box t
+
+class Sized t
+  fn size(r: t, b: borrowing Box Int) -> Int
+
+fn main() -> Unit !{IO} = print("x")
