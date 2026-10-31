@@ -73,7 +73,7 @@ typedef struct {
   long long tag;
   const char* name;
   long long arity;
-  const char* field_kinds; /* one char per field: i=Int b=Bool s=String/Char p=ADT/closure _=type-var */
+  const char* field_kinds; /* one char per field: i=Int/Char b=Bool s=String p=ADT/closure _=type-var */
   /* Nullary ctors only: the shared object every construction of this tag
    * returns, or NULL if none is cached.  WEAK — the object is an ordinary
    * managed allocation, and sprout_gc_invalidate_singleton clears this slot
