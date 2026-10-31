@@ -921,6 +921,31 @@ subtracted away. Hence `roots ≤ 8` beside the flatness check: the count is sma
 changes only when someone adds a global, so bounding it costs nothing and is what keeps the
 correction from absorbing the thing it exists to detect.
 
+## Generational barrier — `just gc-gen-check`
+
+Runs the write barrier under minor collections ([gc-generational-v0.md](gc-generational-v0.md)
+§14.4, §14.5). One program per barrier site Sprout can drive (`tests/gc_gen/`: `ref_write`,
+`vector_mutset`, `vector_push` past its inline capacity, `linear_reuse`) runs with
+`SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. It must print its known line, run at
+least 20 minor collections, and print the same line with `SPROUT_GC_MINOR=0`. The two static
+`sprout_analysis_*` helpers cannot be reached without a live analysis service, so
+`tests/c_runtime/analysis_strings.c` covers them under the same switches. `just c-runtime-test`
+holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store
+must abort with the owner and field named.
+
+**Each site test was confirmed to fail with its barrier removed**, and the fact is the only reason
+to trust the gate: ref_write, vector_mutset, vector_push, each analysis helper, and the barrier
+call `IRReuseCtor` emits (checked by turning `sprout_gc_write_barrier` into a no-op).
+
+**How it is defeated.**
+- It checks only the paths these programs run. A new store site passes it until it gets its own
+  program, and a store path with no Sprout driver and no C case is invisible.
+- It needs `SPROUT_GC_STRESS=1`. At the default trigger a minor runs per 4096 or more allocations,
+  and a young object that dies or stays rooted before the next minor is never checked. A test
+  without allocation between the store and the read passes whether or not the barrier exists.
+- The verifier can report a scalar that equals a young payload address as an edge (§14.5). The
+  report names the owner kind and field index to triage that.
+
 ## Sweep-walk counter — `just gc-walk-check`
 
 Calibrates `walked=` on the `SPROUT_DEBUG_GC` cycle line: slots the sweep stepped over, FREE

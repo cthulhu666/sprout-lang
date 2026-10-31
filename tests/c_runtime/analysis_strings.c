@@ -257,6 +257,12 @@ int main(int argc, char** argv) {
   run_diagnostics();
   run_symbols();
   if (g_failed) return 1;
+  /* `just gc-gen-check` runs this under SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1: the builders'
+   * barriers only matter if minor collections ran while their vectors were old. */
+  if (g_gen.on == 1 && g_gen.n_minor < 20) {
+    fprintf(stderr, "FAIL: only %lld minor collections ran\n", g_gen.n_minor);
+    return 1;
+  }
   printf("analysis%s\n", argc == 2 ? "-stress" : "");
   return 0;
 }

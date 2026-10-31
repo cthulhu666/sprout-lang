@@ -784,8 +784,9 @@ a self-compile. That is an estimate; §14.8 measures it.
 - **Goal:** a minor collection that does not mark objects that survived an earlier one.
 - **Goal:** a runtime check that fails when any store path lacks the barrier, so §7's
   list stops being the safety argument.
-- **Goal:** one switch, `SPROUT_GC_MINOR=0`, that makes every collection major, for A/B
-  measurement in one binary.
+- **Goal:** one switch, `SPROUT_GC_MINOR`, for A/B measurement in one binary. Off (`0`, the
+  default until step 4) runs today's collector unchanged: no pre-pass, and the sweep clears the
+  colour bit. On (`1`) chooses between minor and major per collection.
 - **Non-goal (stage 2, §14.6):** a minor sweep proportional to the young set. Stage 1
   still walks every slot.
 - **Non-goal:** moving objects, a nursery region, concurrent or incremental marking.
@@ -847,7 +848,21 @@ A major runs:
   `GC_HEAP_OLDOBJECT_LIMIT_FACTOR`);
 - when `SPROUT_GC_MAJOR_EVERY` minors have run since the last major (Boehm's
   `GC_full_freq`; start at 19, step 4 sets the default);
-- at `atexit`, and always under `SPROUT_GC_MINOR=0`.
+- for any reason but the allocation trigger. `sprout_gc_collect_with_reason` has two, `threshold`
+  (also what `SPROUT_GC_STRESS=1` reports) and `atexit`, so that means `atexit`;
+- always with the mode off.
+
+`SPROUT_GC_MAJOR_EVERY=0` makes every collection a major. The cycle line of `SPROUT_DEBUG_GC`
+gains a trailing `kind=minor|major`, printed only with the mode on, so its output is unchanged
+with it off. With it on, `marked` counts what that collection marked: a minor's figure leaves
+out every old object. The "live after the previous collection" in the second rule is the heap
+count after the sweep, which after a minor still holds the old objects that died since the last
+major.
+
+Observed in one self-compile (`compile_driver.sprout`, default settings, one run each): 91
+collections without the mode, 68 with it (55 minor, 13 major), GC time 1585 ms against 917 ms,
+output byte-identical. Most of the 13 majors come from the 2× rule firing while the heap grows
+early in the run, not from the count bound; step 4 decides whether that rule needs a floor.
 
 The count bound is not optional. The 2× rule alone never fires when the live set shrinks:
 1M live at the last major, 10k really live after a phase change, and the count stays above
@@ -896,10 +911,14 @@ compiler is taught to omit the call for scalar element types.
 ### 14.5 Verifier — `SPROUT_GC_GENCHECK=1`
 
 At each minor collection, after its mark and before its sweep, run a full mark from the
-same roots into a side bitmap (one bit per 16-byte slot per region, like the slotmap),
-ignoring colour bits and recording each object's first owner. Any object the full mark
-reaches whose colour bit is clear would be freed while reachable: abort, printing its kind,
-the owner's kind and the field index.
+same roots into side bitmaps (one bit per 16-byte slot per region, like the slotmap; one bit
+for a large region), ignoring colour bits. The first time it reaches an object whose colour
+bit is clear, that object would be freed while reachable: abort, printing its kind and
+header and its owner's kind, header and field index (`owner: root` for a root). The owner is
+the object it was first reached through, so the check runs at that first reach and no owner
+table is kept. Because the first unmarked object on any path has a marked or old owner, the
+owner named is the one holding the unbarriered edge. The check reads headers and writes none.
+`SPROUT_GC_GENCHECK=1` does nothing without `SPROUT_GC_MINOR=1`.
 
 This turns "every store into an existing object has a barrier" from a list into a checked
 property, with three limits:
@@ -915,8 +934,11 @@ property, with three limits:
   so a scalar that equals a young payload address is an edge to both marks. The owner kind
   and field index in the report are there to triage that.
 
-A C runtime test stores a young pointer into an old object without the barrier and must
-see the abort, so a verifier that checks nothing fails its own test.
+A C runtime test (`tests/c_runtime/gen_check.c`, in `just c-runtime-test`) stores a young
+pointer into an old object without the barrier and must see the abort, with the owner and
+field named, so a verifier that checks nothing fails its own test. The same file runs the
+barriered store (no abort, the young object survives and is promoted), a minor that keeps an
+unrooted old object where a major frees it, and `SPROUT_GC_MAJOR_EVERY`.
 
 ### 14.6 Stage 2 — bounding the sweep (not designed yet)
 
@@ -935,8 +957,10 @@ Two candidates, chosen on stage 1's numbers:
 Each premise has a test or a check that fails when it breaks.
 
 1. Every store of a heap pointer into an existing object goes through the barrier — the
-   six sites, one test each in `just gc-gen-check` (§14.8 step 3) that stores a young value
-   into an old target under stress; plus §14.5 over the whole suite.
+   six sites, each covered in `just gc-gen-check` (§14.8 step 3) by a test that stores a young
+   value into an old target under stress: four Sprout programs (`ref_write`, `vector_mutset`,
+   `vector_push`, `linear_reuse`) and one C case for the two `sprout_analysis_*` helpers, which
+   need a live analysis service to reach from Sprout; plus §14.5 over the whole suite.
 2. No collection can run between a fresh object's allocation and its initialising stores
    (codegen: field values are computed first, then one allocating call and its stores; C:
    the census in §7) — §14.5.
@@ -969,6 +993,9 @@ barrier never sees an old object. Nothing goes red between steps.
    per-test environment; `gc-ageprof-check` is the pattern). Each site test is confirmed
    to fail with that site's barrier removed. `gc-ageprof-check` and `gc-adapt-check` pin
    `SPROUT_GC_MINOR=0`: the first needs old objects re-marked, the second pins cycle counts.
+   **Landed.** The recipe is in `just dod` and in `ci-fast-gates`. For `IRReuseCtor` the barrier
+   is removed by making the extern `sprout_gc_write_barrier` a no-op, since the call itself is
+   emitted by the compiler.
 4. **Measure, then flip the default.** Two A/B arms, `SPROUT_GC_MINOR=0` vs `1`, interleaved,
    ≥ 6 runs each, cycles reported beside time:
    - per-collection cost, with adaptation off (`SPROUT_GC_ADAPT_RATIO=0`, fixed

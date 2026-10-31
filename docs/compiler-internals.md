@@ -30,13 +30,13 @@ Sprout's GC is **non-moving mark-sweep**.  Every heap object occupies a 16-byte-
 
 ```
 bits  0– 7  kind   (SproutHeapKind: FREE=0, OBJ=1, CLOSURE=2, …, CSTR=10; POISON=0xFF)
-bit   8      color  (mark bit, toggled during the mark phase)
+bit   8      color  (mark bit during a collection; "old" between collections under SPROUT_GC_MINOR=1)
 bits  9–12  age    (saturating 4-bit count of collections survived; 0 = allocated since the last
                     sweep. Written by the sweep's live branch, reset by any header (re)write — so
                     an in-place header edit that must preserve it masks rather than calls
                     sprout_hdr_write, as sprout_vec_release_inline_tail does)
-bit  13      remembered  (set only by the write barrier, sprout_gc_write_barrier; meaningful only
-                    once minor collections exist — see gc-generational-v0 §14.4)
+bit  13      remembered  (set only by the write barrier, sprout_gc_write_barrier; read and cleared
+                    by minor collections and the major pre-pass — see gc-generational-v0 §14.4)
 bits 14–63  aux    (OBJ: (tag<<8)|arity; CSTR: byte length; CLOSURE: n_caps; TUPLE: word count;
                     VECTOR: inline element capacity; FREE/POISON: slot_bytes)
 ```
@@ -75,7 +75,7 @@ reintroduced quadratic alone rather than against master.
 
 Per-region 1-bit slotmaps track live slot starts; `sprout_heap_lookup` does a binary search over the region table, verifies the slotmap bit, and rejects FREE-kind headers — giving exact membership in O(log region_count).  Large objects (slot > 4096 bytes) are stored as single-slot dedicated `malloc` blocks registered in the region table with `is_large=1`.
 
-`sprout_gc_sweep` in `runtime/sprout_runtime.c` runs two passes: (1) scan all slots — live slots clear their color bit; dead slots release external storage and get a FREE header (or a POISON header in lineage mode, retaining the corpse with the slotmap bit set) — while **staging** each region's FREE slots onto the per-class freelists; (2) release every region with no live and no poison objects, dropping the staged freelist entries of each region it releases, and reopen one region if that released them all.
+`sprout_gc_sweep` in `runtime/sprout_runtime.c` runs two passes: (1) scan all slots — live slots clear their color bit (kept under `SPROUT_GC_MINOR=1`, where it means *old*); dead slots release external storage and get a FREE header (or a POISON header in lineage mode, retaining the corpse with the slotmap bit set) — while **staging** each region's FREE slots onto the per-class freelists; (2) release every region with no live and no poison objects, dropping the staged freelist entries of each region it releases, and reopen one region if that released them all.
 
 **Exact-fit classes with no coalescing is the standard non-moving design** — Go, TCMalloc, jemalloc, OCaml 5 and GHC's `--nonmoving-gc` all reuse only within a class and reclaim whole spans. Sprout's actual divergence is that a region holds **mixed** classes where those hold one per span, which is why the slotmap must record slot starts at all (a uniform span computes them by division) and why coalescing here needs a `slotmap_clear` that the others never need. Survey, the options it opens, and the census GHC ships for measuring class retention: [docs/gc-size-classes-v0.md](gc-size-classes-v0.md).
 
@@ -95,6 +95,8 @@ Per-region 1-bit slotmaps track live slot starts; `sprout_heap_lookup` does a bi
 Both test files are **workloads, not assertions** — their Sprout-level checks were mutation-tested against three broken sweeps and all three still reported "passed". A freelist defect is not observable from Sprout as a wrong value, so the detection is entirely `SPROUT_FL_VERIFY`. Do not treat a green `just test` as covering this.
 
 **Object age — header bits 9–12.** The gap between the colour bit and the remembered bit (bit 13; aux starts at bit 14, via `sprout_hdr_make`) holds a saturating 4-bit count of collections an object has survived, bumped in the same store that clears the colour bit in pass 1, and reset whenever a slot is re-initialised. Nothing in the collector's behaviour depends on it today; it exists so the generational question can be measured, and it is the field a generational collector would reuse. **`SPROUT_GC_AGEPROF=1`** reports, per run, how much marking is spent on objects that already survived a cycle (the ceiling on what a minor collection could skip) plus, in a runtime built with `-DSPROUT_GC_AGEPROF_STORES`, the mutation traffic a write barrier would carry — `mut_calls` is deliberately separate from `ptr_stores` so a zero cannot be misread as "free" when it means "never called". Without the flag those counters print as `off`: their hook in every store kept LLVM from optimising store loops. The mark-side counters need no special build and, unlike `-DSPROUT_GC_PROFILE`, do not distort timings. Calibrated by `just gc-ageprof-check` against two workloads with known answers (`tests/stdlib/test_gc_age_retain_{all,none}.spr`); the runtime also aborts if the age histogram disagrees with `g_managed_heap_count`. Findings and the resulting recommendation: [docs/gc-generational-v0.md](gc-generational-v0.md) — note the headline is that the nursery's payoff is specific to self-hosted compilation (97% ceiling) and near-zero on the HTTP server (13%).
+
+**Experimental minor collections — `SPROUT_GC_MINOR=1` (default off).** With it set, a surviving object keeps its colour bit through the sweep, so between collections colour means *old*. A minor collection marks from the roots (marking stops at old objects), traces the children of each *remembered* object (an old object a store hit since the last collection; `sprout_gc_write_barrier` and the C store sites record it), then sweeps as before. Every survivor becomes old, so the remembered set is emptied. A major clears every colour bit first and marks the whole heap; it runs on the first collection, at exit, when the heap exceeds 2× its size after the last major, and every `SPROUT_GC_MAJOR_EVERY` (default 19) minors. A store of a heap pointer into an existing object that skips the barrier would free a live object, so **`SPROUT_GC_GENCHECK=1`** runs a second, full mark before each minor's sweep and aborts, naming the object and its owner, when it reaches an object the minor would free. `SPROUT_DEBUG_GC` cycle lines gain `kind=minor|major` in this mode, and `marked` counts only what that collection marked. `just gc-gen-check` (`docs/gates.md`) is the test. Design and status: [docs/gc-generational-v0.md](gc-generational-v0.md) §14.
 
 Because objects never move, the address of a live heap object is **stable for the entire program lifetime**.
 

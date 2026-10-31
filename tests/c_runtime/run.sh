@@ -497,6 +497,35 @@ clang "$ROOT/tests/c_runtime/gen_barrier.c" "$ROOT/runtime/sprout_scheduler.c" "
 }
 test "$(cat "$TMP_DIR/gen_barrier.out")" = "gen-barrier"
 
+echo "==> c runtime: minor collections, and GENCHECK aborts on a store that skipped the barrier"
+# gen_check.c includes sprout_runtime.c (like gen_barrier.c). The abort is the verifier's whole
+# job, so it is checked by exit status AND message: a verifier that checks nothing fails here.
+GC="$TMP_DIR/gen_check"
+clang "$ROOT/tests/c_runtime/gen_check.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$GC"
+if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" missing_barrier > "$TMP_DIR/gc_mb.out" 2> "$TMP_DIR/gc_mb.err"; then
+  echo "  GENCHECK did not abort on an unbarriered old->young store" >&2
+  exit 1
+fi
+grep -q "GENCHECK: a minor collection would free a reachable object" "$TMP_DIR/gc_mb.err" || {
+  echo "  missing_barrier failed without the GENCHECK message:" >&2
+  cat "$TMP_DIR/gc_mb.out" "$TMP_DIR/gc_mb.err" >&2
+  exit 1
+}
+grep -q "owner: kind=REF .* field=0" "$TMP_DIR/gc_mb.err" || {
+  echo "  GENCHECK did not name the owner and field:" >&2
+  cat "$TMP_DIR/gc_mb.err" >&2
+  exit 1
+}
+for sel in barrier minor_keeps_old major_every no_check; do
+  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
+    echo "  gen_check '$sel' failed:" >&2
+    cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/gc_$sel.out")" = "gen-check-$sel"
+done
+
 if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
   echo "==> c runtime: the sanitizer is live (a headerless String read by str_eq is reported)"
   # Positive control. Unsanitized, asan_control exits 0, so only a live ASan can fail it. Without
