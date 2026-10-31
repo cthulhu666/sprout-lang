@@ -61,8 +61,10 @@ landed first, in its own change.
 
 **`serve` / `serve_n`** run a task per connection, so an idle connection costs a parked task
 (~1.4 MiB, `docs/green-task-pool-v0.md` §3.1) and no worker. `max_idle_connections` (default 256)
-caps the connections waiting at once; at the cap a response closes. Without it one client could
-hold the 2048-slot connection table for `idle_ms` with idle sockets.
+caps the connections waiting at once; at the cap a response closes. The effective cap is also held
+to ¾ of `max_live_connections`, rounded down, so some places stay free for new connections (a live
+cap of 1 keeps none). Without it one client could hold the 2047 usable slots of the connection table
+for `idle_ms` with idle sockets.
 
 `max_live_connections` (default 512) caps every connection that has a task, idle or not, and
 closes a new one at once past it: `docs/http-connection-cap-v0.md`.

@@ -124,7 +124,9 @@ type alias ServerResult a = Result HttpServerError a
 # `idle_ms` bounds the wait for the first byte of the next request on a kept-alive connection; the
 # header budget starts at that byte. `max_idle_connections` caps how many connections `serve` keeps
 # waiting at once: past it a response closes its connection instead. An idle connection holds a
-# green task, so the cap bounds that memory. Pooled serving keeps its own cap (see `Admission`).
+# green task, so the cap bounds that memory. The effective cap is also held to three quarters of
+# `max_live_connections`, rounded down, so some places stay free for new connections. Pooled serving
+# keeps its own cap (see `Admission`).
 #
 # `max_live_connections` caps every connection `serve` and `serve_n` hold, serving or idle: each has
 # a task. At the cap a new connection is accepted and closed at once, with nothing sent. Pooled
@@ -1081,8 +1083,10 @@ fn read_error_response(err: HttpServerError) -> HttpServerResponse =
 #
 # `Spawned idle cap live live_cap`: each connection has its own task, so an idle one costs a parked
 # task and no worker. `idle` counts connections kept open and not yet serving their next request; at
-# `cap` a response closes. `live` counts connections that have a task, idle or not; at `live_cap`
-# the accept loop closes a new connection instead of spawning one (see `admit`).
+# `cap` a response closes. `cap` is `max_idle_connections`, held to three quarters of `live_cap`
+# (rounded down) as `Pooled` does, so a quarter of the places stay free for new connections and a
+# live cap of 1 keeps nothing open. `live` counts connections that have a task, idle or not; at
+# `live_cap` the accept loop closes a new connection instead of spawning one (see `admit`).
 #
 # `Pooled idle queued cap`: a worker holding a kept connection serves nothing else. `idle` counts
 # those workers and `cap` is three quarters of the pool, rounded down, so a quarter is always free to
@@ -1278,10 +1282,10 @@ where
 
 # Each accepted connection is handled in its own fire-and-forget green task, so a
 # slow connection (one dribbling its request) cannot block others: `tcp_accept`
-# resumes the moment a handler parks on socket I/O. `remaining` counts connections
-# ACCEPTED, not fully served — the enclosing scope join is what waits for the last
-# spawned handler to finish. Handlers therefore complete in I/O-ready order, not
-# accept order.
+# resumes the moment a handler parks on socket I/O. `remaining` counts connections that got a task,
+# not fully served ones: a refused connection or a failed accept does not count, and the enclosing
+# scope join is what waits for the last spawned handler to finish. Handlers therefore complete in
+# I/O-ready order, not accept order.
 #
 # `conn` is MOVED into the spawned closure (M4.4a): `task_spawn`'s `work` parameter
 # is declared `once`, so ownership transfers at the call and the handler holds the
@@ -1357,7 +1361,7 @@ fn spawned_admission(config: ServerConfig) -> Admission !{IO} =
   do
     idle <- ref_new(0)
     live <- ref_new(0)
-    Spawned(idle, config.max_idle_connections, live, config.max_live_connections)
+    Spawned(idle, min(config.max_idle_connections, config.max_live_connections * 3 / 4), live, config.max_live_connections)
 
 # Handles in the runtime's connection table (`alloc_conn_handle` in runtime/sprout_runtime.c). Accepted
 # and outbound connections share it, so a live cap at or past it could leave no room for the
@@ -1380,6 +1384,10 @@ fn refuse_live_cap(listener: consuming TcpListener, config: ServerConfig) -> Uni
 # `with_scope` does not return until every spawned handler has finished, so no
 # connection outlives the call (structured concurrency — no orphaned handlers). A kept
 # connection's handler finishes when the client closes it or `idle_ms` passes.
+#
+# `max_connections` counts connections that got a handler task. One refused at `max_live_connections`
+# and a failed accept do not count, so the call returns after `max_connections` served connections,
+# however many were refused on the way. A negative count never ends.
 export fn serve_n(listener: consuming TcpListener, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   serve_n_with(default_config(), listener, max_connections, handler)
 
@@ -1400,13 +1408,9 @@ export fn serve_n_with(config: ServerConfig, listener: consuming TcpListener, ma
 export fn serve(listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
   serve_with(default_config(), listener, handler)
 
-# `serve` with explicit read budgets (see serve_n_with).
+# `serve` with explicit read budgets (see serve_n_with). A negative count means "forever".
 export fn serve_with(config: ServerConfig, listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  if valid_live_cap(config) then
-    do
-      adm <- spawned_admission(config)
-      with_scope(\s -> serve_loop(s, listener, -1, config, adm, handler))
-  else refuse_live_cap(listener, config)
+  serve_n_with(config, listener, -1, handler)
 
 # ---------------------------------------------------------------------------
 # Pooled serving (opt-in)

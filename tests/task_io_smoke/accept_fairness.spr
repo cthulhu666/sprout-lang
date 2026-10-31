@@ -1,0 +1,80 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_yield)
+import stdlib.net (tcp_accept, tcp_close, tcp_close_listener, tcp_connect, tcp_error_message)
+import testsupport.listen (tcp_listen_or_die)
+import testsupport.http_wire (mark)
+import stdlib.terminal as terminal
+
+let port: Int = 28972
+
+# `tcp_accept` lets other tasks run under a steady stream of connections. With the queue never empty
+# it never sees EAGAIN, so it never parks on its own, and a task spawned beside an accept loop waits
+# until the loop ends. After `streak` accepts in a row it parks on the listener first, which returns
+# at the next poll; the other tasks run, then accepting resumes.
+#
+# 40 connects are queued before the first accept (the backlog is far larger, see listen_backlog).
+# A task spawned after that records how many accepts had finished when it first ran: 40 if the loop
+# never parked, at most `streak` if it did.
+let queued: Int = 40
+let streak: Int = 16
+
+fn connect_all(made: Int, handles: List Int) -> List Int !{IO} =
+  if made >= queued then handles
+  else
+    match tcp_connect("127.0.0.1", port) with
+    | Ok h -> connect_all(made + 1, Cons(h, handles))
+    | Err e ->
+        do
+          terminal.write(`MISMATCH: connect ${int_to_string(made + 1)}: ${tcp_error_message(e)}\n`)
+          handles
+
+fn accept_all(listener: Int, count: Ref Int, left: Int, accepted: List Int) -> List Int !{IO} =
+  if left <= 0 then accepted
+  else
+    match tcp_accept(listener) with
+    | Ok h ->
+        do
+          n <- ref_read(count)
+          ref_write(count, n + 1)
+          accept_all(listener, count, left - 1, Cons(h, accepted))
+    | Err e ->
+        do
+          terminal.write(`MISMATCH: accept: ${tcp_error_message(e)}\n`)
+          accepted
+
+fn close_all(handles: List Int) -> Unit !{IO} =
+  match handles with
+  | Nil -> ()
+  | Cons h rest ->
+      do
+        tcp_close(h)
+        close_all(rest)
+
+fn record(count: Ref Int, seen: Ref Int) -> Unit !{IO} =
+  do
+    n <- ref_read(count)
+    ref_write(seen, n)
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    listener <- tcp_listen_or_die(port)
+    clients <- connect_all(0, [])
+    count <- ref_new(0)
+    seen <- ref_new(-1)
+    task_spawn(s, \_ -> record(count, seen))
+    served <- accept_all(listener, count, queued, [])
+    # Lets the recorder run if it has not yet.
+    task_yield()
+    recorded <- ref_read(seen)
+    done <- ref_read(count)
+    # A recorder that never ran leaves -1, so the bound also checks it ran.
+    mark("all-accepted", done == queued, int_to_string(done))
+    mark("other-task-ran-within-streak", recorded >= 0 && recorded <= streak,
+         `recorded ${int_to_string(recorded)} of ${int_to_string(queued)}`)
+    close_all(served)
+    close_all(clients)
+    tcp_close_listener(listener)
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))
+    terminal.write("done\n")
