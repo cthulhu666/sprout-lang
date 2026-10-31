@@ -463,7 +463,10 @@ Built-in types:
 (§4.1). A `String` value is always valid UTF-8 and contains no NUL byte. Builtins
 that construct a `String` from raw external bytes (e.g. `read_file`) validate the
 input and report malformed content through their error channel rather than
-producing an invalid `String`.
+producing an invalid `String`. Program arguments are checked once at startup: if
+one is not valid UTF-8, the program writes `argument N is not valid UTF-8` to
+stderr (`N` is its position, counting from 1) and exits with status 2 before any
+user code runs.
 
 Effect annotations are attached to function types rather than encoded as an
 ordinary type constructor.

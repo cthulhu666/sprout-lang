@@ -38,6 +38,8 @@
  *   badcont   -> stdin C3 41 ('A' where a continuation byte belongs): must
  *                return U+FFFD, proving continuation bytes are VALIDATED and not
  *                merely counted.
+ *   nul       -> stdin 00 41: a NUL byte must return U+FFFD, not a String holding a
+ *                NUL (its payload would read as empty), and the next key is intact.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -90,6 +92,20 @@ int main(int argc, char** argv) {
       return 1;
     }
     printf("term-read-key-badcont-keeps-next\n");
+    return 0;
+  }
+  if (strcmp(argv[1], "nul") == 0) {
+    const char* r = (const char*)(uintptr_t)term_read_key();
+    if (strcmp(r, replacement) != 0) {
+      fprintf(stderr, "FAIL: NUL byte gave a %zu-byte String, want U+FFFD\n", strlen(r));
+      return 1;
+    }
+    const char* next = (const char*)(uintptr_t)term_read_key();
+    if (strcmp(next, "A") != 0) {
+      fprintf(stderr, "FAIL: byte after a NUL was lost, got '%s'\n", next);
+      return 1;
+    }
+    printf("term-read-key-nul\n");
     return 0;
   }
   if (strcmp(argv[1], "multibyte") == 0) {

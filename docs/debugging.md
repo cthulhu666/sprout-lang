@@ -513,7 +513,7 @@ that routes external bytes through one, must be run locally under
 
 Reading it as a diagnosis rather than a flake: the abort names a producer, not a consumer.
 `aux > strlen` means some builtin built a String from raw bytes without validating —
-the W2 R2 class (`tcp_read*`, `proc_run`, `term_read_line`, `env_get`, `argv_get`,
+the W2 R2 class (`tcp_read*`, `proc_run`, `term_read_line`, `env_get`,
 `stdin_read_bytes`; see BACKLOG). The fix belongs at the producer, which per decision D4
 means returning `Bytes` and letting `bytes_to_utf8` be the single validating choke point —
 *not* making the downstream consumer tolerate the invalid value, which merely moves the
@@ -531,8 +531,10 @@ Kept here because the *shape* is the lesson, and because what replaced it is wor
 **there is no longer a cheap NUL-bearing repro among the remaining producers**, so do not go
 looking for one and conclude the class is closed.
 
-- `env_get` / `argv_get` cannot carry a NUL at all — the OS delimits both with NUL, so the byte
-  cannot reach the builtin. They can still mint a String from **invalid UTF-8**, which HDRCHECK
+- `argv_get` is closed: the runtime checks every argument at startup (`sprout_set_argv`) and exits
+  with status 2 on one that is not valid UTF-8.
+- `env_get` cannot carry a NUL at all — the OS delimits it with NUL, so the byte
+  cannot reach the builtin. It can still mint a String from **invalid UTF-8**, which HDRCHECK
   does *not* catch: it compares the header's `aux` against `strlen`, and a bad lead byte leaves
   those equal. That case surfaces later as `runtime error: str_utf8: invalid UTF-8 lead byte` from
   whichever walker touches the value first, arbitrarily far from the producer.

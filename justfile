@@ -2073,23 +2073,42 @@ argv-smoke: bootstrap-from-seed
     echo "  (typed main shim likely missing @sprout_set_argv; see ir_lowering.main_shim)" >&2
     exit 1
   fi
-  # Second fixture: argv is the one source of a String holding invalid UTF-8, which `parse_int`
-  # must reject at the first non-digit without reading on. $'..' passes the raw bytes.
-  FIXTURE=tests/argv_smoke/parse_int_bad_utf8.spr
+  # Second fixture: an argument that is not valid UTF-8 stops the program at startup, before any
+  # user code runs, with status 2 and a message naming the argument. $'..' passes the raw bytes.
+  FIXTURE=tests/argv_smoke/argv_utf8.spr
   if ! "{{build_dir}}/compile_driver_bin_stage1" --use-ir-codegen "{{stdlib_root}}" "$FIXTURE" > "$TMPD/bad.ll" 2>"$TMPD/err"; then
-    echo "argv-smoke: parse_int fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
+    echo "argv-smoke: argv_utf8 fixture emit failed" >&2; cat "$TMPD/err" >&2; exit 1
   fi
   if ! clang "$TMPD/bad.ll" {{runtime_src}} -O2 {{clang_extra}} -o "$TMPD/bad_bin" 2>"$TMPD/link.err"; then
-    echo "argv-smoke: parse_int fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
+    echo "argv-smoke: argv_utf8 fixture link failed" >&2; cat "$TMPD/link.err" >&2; exit 1
   fi
-  want=$'Nothing\nNothing\nNothing\nNothing\nNothing\nJust 42\nJust -7\nend'
-  got=$("$TMPD/bad_bin" $'x\xff' $'\xff' $'1\xff' $'-\xff' $'12\xc3' 42 -7 2>"$TMPD/bad.err") || {
-    echo "argv-smoke: parse_int aborted on invalid UTF-8 input" >&2; cat "$TMPD/bad.err" >&2; exit 1
+  # Valid arguments, ASCII and not, reach the program.
+  want=$'Nothing Nothing\nNothing Nothing\nJust 42 Just 42.0\nend'
+  got=$("$TMPD/bad_bin" abc $'\xc3\xa9' 42 2>"$TMPD/bad.err") || {
+    echo "argv-smoke: valid arguments were rejected" >&2; cat "$TMPD/bad.err" >&2; exit 1
   }
   if [[ "$got" != "$want" ]]; then
-    echo "argv-smoke: parse_int on invalid UTF-8 — expected:" >&2; echo "$want" >&2
+    echo "argv-smoke: argv_utf8 on valid arguments - expected:" >&2; echo "$want" >&2
     echo "got:" >&2; echo "$got" >&2
     exit 1
+  fi
+  # Invalid arguments: exit 2, the message names the bad index, nothing reaches stdout.
+  for bad in $'x\xff' $'\xff' $'1\xff' $'12\xc3' $'\xed\xa0\x80'; do
+    rc=0
+    out=$("$TMPD/bad_bin" ok "$bad" other 2>"$TMPD/bad.err") || rc=$?
+    if [[ "$rc" -ne 2 || -n "$out" ]]; then
+      echo "argv-smoke: invalid argument: expected exit 2 and no output, got exit $rc, output '$out'" >&2
+      exit 1
+    fi
+    if [[ "$(cat "$TMPD/bad.err")" != "argument 2 is not valid UTF-8" ]]; then
+      echo "argv-smoke: wrong message: $(cat "$TMPD/bad.err")" >&2; exit 1
+    fi
+  done
+  # With several bad arguments the first is the one reported.
+  rc=0
+  "$TMPD/bad_bin" $'\xff' $'\xfe' >/dev/null 2>"$TMPD/bad.err" || rc=$?
+  if [[ "$rc" -ne 2 || "$(cat "$TMPD/bad.err")" != "argument 1 is not valid UTF-8" ]]; then
+    echo "argv-smoke: first bad argument was not reported: exit $rc, $(cat "$TMPD/bad.err")" >&2; exit 1
   fi
   echo "==> argv-smoke ✓"
 
@@ -3142,8 +3161,8 @@ twelve-dollar-example: bootstrap-from-seed
 
 # The curated Linux gate: the park/timer/socket surface, on the backend CI uses.
 [group('smoke')]
-linux-smoke: (linux-run "task-io-smoke")
-  @echo "==> linux-smoke ✓ (task-io-smoke on Linux, epoll+timerfd backend, HDRCHECK on)"
+linux-smoke: (linux-run "task-io-smoke") (linux-run "c-runtime-test")
+  @echo "==> linux-smoke ✓ (task-io-smoke and c-runtime-test on Linux, epoll+timerfd backend, HDRCHECK on)"
 
 # Windows port W0a. DIAGNOSTIC, not a gate: the runtime is POSIX-only today, so a
 # non-zero "missing" count is the expected state and the output IS the port's work

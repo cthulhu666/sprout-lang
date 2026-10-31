@@ -3249,6 +3249,16 @@ long long env_get(const char* name) {
   return sprout_make1(SPROUT_TAG(Just), sprout_interned_word(value));
 }
 long long sprout_set_argv(int argc, char** argv) {
+  /* Every argument is checked here, once, before any user code runs: argv_get and
+   * argv_get_unboxed intern the bytes as a String, which must be valid UTF-8. argv[0] is
+   * never exposed to Sprout, so it is not checked. */
+  for (int i = 1; i < argc; i++) {
+    const char* reason = NULL;
+    if (!utf8_validate((const unsigned char*)argv[i], strlen(argv[i]), &reason)) {
+      fprintf(stderr, "argument %d is not valid UTF-8\n", i);
+      exit(2);
+    }
+  }
   g_sprout_argc = argc;
   g_sprout_argv = argv;
   /* Line-buffer stdout even when it is a pipe/file (libc would otherwise fully
@@ -3479,6 +3489,15 @@ long long fs_list_dir(long long path_i) {
     struct dirent* de = readdir(dir);
     if (de == NULL) { read_err = errno; break; }
     if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+    /* A name is raw bytes, and a String must be valid UTF-8: fail the call rather than skip
+     * the entry (a listing that silently loses one is wrong) or make the String. */
+    const char* utf8_reason = NULL;
+    if (!utf8_validate((const unsigned char*)de->d_name, strlen(de->d_name), &utf8_reason)) {
+      closedir(dir);
+      char detail[1024];
+      snprintf(detail, sizeof(detail), "entry name is not valid UTF-8 in %s", path);
+      return fs_err_ctor_msg(SPROUT_TAG(stdlib$fs$FsIoError), detail);
+    }
     SproutStr name = sprout_str_dup(de->d_name, "fs_list_dir: out of memory");
     {
       SPROUT_HANDLE(h_name, sprout_str_word(name));
@@ -4120,6 +4139,8 @@ long long term_read_key(void) {
   if (ch == 27) return sprout_interned_word(token_escape);
   if (ch == '\n' || ch == '\r') return sprout_interned_word(token_enter);
   if (ch == '\t') return sprout_interned_word(token_tab);
+  /* A String cannot hold a NUL; U+FFFD, as for any other byte that is not a key. */
+  if (ch == 0) return sprout_interned_word("\357\277\275");
   /* Reached only by the non-tty and termios-failure paths; the raw-mode path
    * assembles and returns above, where it still holds raw mode. Continuation bytes
    * come from getchar() here, which is correct precisely because these paths never
@@ -7411,6 +7432,13 @@ static long long http_response_result(char* response_data, size_t response_len) 
   }
 
   char* headers = dup_slice(headers_start, (size_t)(headers_end - headers_start));
+  /* The header block becomes a String, which must be valid UTF-8. */
+  const char* headers_reason = NULL;
+  if (!utf8_validate((const unsigned char*)headers, (size_t)(headers_end - headers_start), &headers_reason)) {
+    free(headers);
+    free(response_data);
+    return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "response headers are not valid UTF-8");
+  }
   /* The body runs from just past the blank line to the END OF THE BUFFER — a span computed from
    * `response_len`, never from strlen. `dup_slice` copies it byte-for-byte (memcpy), so NULs and
    * invalid UTF-8 both survive; `body_len` is what carries the real extent from here on. */
