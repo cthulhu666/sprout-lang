@@ -1,0 +1,3 @@
+extern fn fx_flag(x: Int) -> Bool
+extern fn fx_pair(x: Int) -> Int
+export extern fn fx_plain(x: Int) -> Int

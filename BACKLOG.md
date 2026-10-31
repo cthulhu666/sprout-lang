@@ -2538,6 +2538,14 @@ acting.
 
 **Codegen and IR correctness**
 
+- [ ] `P3` **Dead runtime functions.** Defined in `runtime/` and named by no `extern fn`, compiler
+  `declare` or C caller: the 16 `repl_*` stubs (`repl_add_import` … `repl_type_of_in_source`,
+  `repl_reset_session`, `repl_complete_in_state`), `sprout_gc_register_ptr_root`,
+  `sprout_gc_register_scan_root`, `sprout_nothing`, `sprout_rebox2`, `sprout_rebox3` and
+  `sprout_set_current_fn`. `APPROVED_BUILTINS` listed them only because the old gate grepped
+  `long long` definitions; the Sprout-side gate no longer does. Delete the C, then
+  `just c-runtime-test`. Not dead: `read_int_lines`, `string_join_newlines`,
+  `sprout_gc_push_ptr_root`, `sprout_chan_make_*` (C tests or the scheduler call them).
 - [ ] `P3` **46 compiler comments cite `codegen.sprout`, deleted 2026-07-12 in `5f29b9da`.** Spread
   over `ast_to_ir` (31), `ir_lowering` (7), `sprout_ir` (6), `type_kind` and `field_kinds` (1 each),
   mostly as "mirrors codegen.sprout:<fn>" provenance notes whose target cannot be opened. They read
@@ -2894,9 +2902,7 @@ acting.
   `_Bool`-vs-`i64` Bool returns, after CPR width-3 needing `sret` (`native_set_to_list` returned
   `Nil` for months). Both were invisible to `opt --passes=verify` and to linking, because LLVM only
   sees the `declare`. Derive each expected C signature from its `extern fn` and fail on a mismatch,
-  wired into `ci-fast-gates`; longer term generate the C prototypes from the declarations. That also
-  closes the reverse hole: `check_approved_builtins.sh` greps `long long <name>(`, so a builtin
-  returning anything else is invisible to `APPROVED_BUILTINS`.
+  wired into `ci-fast-gates`; longer term generate the C prototypes from the declarations.
 - [ ] `P2` **Both seed checks hang off a commit, so a rebase replays a stale seed unseen.**
   `scripts/seed_gate.sh` matches the command text for a literal `git … commit`, and
   `.githooks/pre-commit` is a git `pre-commit` hook — which `git rebase` does not run for replayed

@@ -1,8 +1,10 @@
 # runtime/APPROVED_BUILTINS
 #
-# Allowlist of every non-static `long long <name>(` function exported from
-# sprout_runtime.c.  The pre-commit hook blocks any addition to that file
-# whose name does not appear here.
+# Every runtime function Sprout can call: one that a runtime object defines
+# (non-static, any return type) and that an `extern fn` or a `declare` in the
+# compiler's IR header names.  `just check-approved-builtins` matches this list
+# against that set exactly, so a missing name and a stale name both fail.
+# Runtime-internal functions no Sprout code names do not belong here.
 #
 # To add a new builtin you MUST:
 #   1. Add its name to this file (one per line, leading/trailing whitespace ignored).
@@ -12,6 +14,7 @@
 #
 # Existing builtins are listed without individual justifications because they
 # predate this policy.  New additions MUST include an inline comment.
+# Remove a name when its C definition or its last Sprout reference goes.
 #
 # Format:  <function_name>  [# <justification for new entries>]
 #
@@ -48,6 +51,7 @@ analysis_symbol_inventory_in_source
 analysis_symbol_locations_in_source
 analysis_type_of_in_source
 argv_get
+argv_get_unboxed  # unboxed-return twin of argv_get: (tag, payload) in two registers, no ADT allocation; predates the policy
 bytes_append
 bytes_builder_append
 bytes_builder_build
@@ -59,6 +63,7 @@ bytes_builder_u32_be
 bytes_empty
 bytes_from_utf8
 bytes_get
+bytes_get_unboxed  # unboxed-return twin of bytes_get; predates the policy
 bytes_length
 bytes_singleton
 bytes_slice
@@ -75,6 +80,7 @@ crypto_sha256
 double_to_string  # formats a Double to decimal text (snprintf at the shortest of %.15g/%.16g/%.17g that strtod's back bit-equal, + ".0" for integrals). Justified under rule 4 (IMPOSSIBLE in Sprout), not the weaker "impractical" — re-evaluated 2026-08-06 rather than assumed. Expressiveness is NOT the blocker: a float->decimal converter is writable in pure Sprout, and needs no Double->Int conversion (a digit is recoverable with ten comparisons). ACCURACY is: 10 is not a power of two, so every *10 / /10 scaling step rounds, and a ~45-line pure-Sprout attempt round-tripped only 5 of 7 sampled values. Guaranteed shortest-round-trip conversion (Ryu/Grisu/Dragon4) needs exact WIDE-integer arithmetic (128-bit or bignum), which Sprout does not have. NB the missing prerequisite is wide integers, NOT Double bit access. Pinned by tests/stdlib/test_double_to_string_precision.spr. See AGENTS.md Builtin vs Stdlib 4-6.
 eprint  # writes a String and a newline to stderr; Sprout has no stderr output primitive (print/print_str target stdout only)
 env_get
+env_get_unboxed  # unboxed-return twin of env_get; predates the policy
 fs_list_dir  # opendir/readdir/closedir — Sprout has no directory-stream primitive, and nothing else in the language can enumerate a directory. The alternative available today is proc_run(["find", …]), a subprocess per listing whose newline-joined output silently loses any filename containing a newline. Names only, deliberately: pairing each with its metadata is read_dir's job in Sprout (rule 2), which costs one lstat per entry that dirent's d_type could sometimes save — not a measured bottleneck (rule 6), and d_type is DT_UNKNOWN on several filesystems so the saving is conditional while the C would not be.
 fs_make_dir  # mkdir(2) — a syscall with no Sprout expression. ONE level only. Recursive creation is make_dir_all in Sprout over this primitive, so the interesting part (an existing tree is success, but a regular file blocking the path is FsNotADirectory) is a readable branch the test suite reaches, not untestable C.
 fs_read_bytes  # open/read/close with NO UTF-8 validation. read_file cannot substitute: it runs utf8_validate over the whole buffer and returns Err on any non-UTF-8 byte, so it genuinely cannot read an image, an object file or a .ll. Correctness, not speed.
@@ -87,9 +93,12 @@ int_to_string
 json_stringify
 map_empty
 map_get
+map_get_unboxed  # unboxed-return twin of map_get; predates the policy
 map_keys  # In-order key list, O(n). Replaces native_set_to_list when Set became a Map Unit, so set_remove can use map_remove (O(log n)) instead of rebuilding the set: that rebuild was ~60% of a self-compile (#599). From Sprout the keys are reachable only through map_nth_key, one O(log n) descent and one Just per key. Approved 2026-10-12; the five native_set_* go, so 4 fewer builtins net.
 map_nth_key
+map_nth_key_unboxed  # unboxed-return twin of map_nth_key; predates the policy
 map_nth_value
+map_nth_value_unboxed  # unboxed-return twin of map_nth_value; predates the policy
 map_remove
 map_set
 map_size
@@ -98,31 +107,14 @@ print_str
 proc_run_stdin_vec
 proc_run_vec
 read_file
-read_int_lines
 ref_new
 ref_read
 ref_write
 regex_escape
 regex_find_match  # Renamed from regex_find_range (2026-08-19). Same justification — wraps POSIX regcomp/regexec — but now returns stdlib.regex.Match instead of borrowing IntRange as a two-Int transport, which is what let IntRange leave the runtime entirely.
-regex_is_match  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: wraps POSIX regcomp/regexec.
+regex_is_match  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate then grepped `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: wraps POSIX regcomp/regexec.
 regex_replace_all_literal
 regex_validate
-repl_add_declaration
-repl_add_import
-repl_check_source
-repl_complete
-repl_complete_in_state
-repl_declared_names_in_source
-repl_diagnostics_in_source
-repl_eval_expr
-repl_eval_expr_in_source
-repl_exported_names_in_source
-repl_instances
-repl_instances_in_source
-repl_reset_session
-repl_symbol_inventory_in_source
-repl_type_of
-repl_type_of_in_source
 split_words
 sprout_abort_match
 sprout_alloc_obj  # arity-generic boxed-product allocation; replaces the former sprout_make0..sprout_make10 set (codegen now emits one call plus a store per field, as IRMakeTuple already did). Allocation writes the GC object header, so it cannot live in Sprout
@@ -132,37 +124,28 @@ sprout_alloc_tuple_blob
 sprout_field
 sprout_gc_pop_roots
 sprout_gc_push_i64_root
-sprout_gc_push_ptr_root
 sprout_gc_push_scan_root
 sprout_gc_register_i64_root
-sprout_gc_register_ptr_root
-sprout_gc_register_scan_root
-sprout_nothing
-sprout_rebox2  # CPR wrapper helper: boxes { tag, f0 } struct back to i64 heap pointer; needs C-level ctor-arity dispatch that Sprout stdlib cannot call directly
-sprout_rebox3  # CPR wrapper helper: boxes { tag, f0, f1 } struct back to i64 heap pointer; same rationale as sprout_rebox2
-sprout_chan_make_got  # L0.9 channels: build a stdlib.chan.Recv `Got v` for __chan_recv. C-level helper (not Sprout-callable) — the scheduler TU cannot reach the static ctor-name lookup or the GC temp-root macros; also roots the payload across the boxing alloc. Same class as sprout_rebox2/3.
-sprout_chan_make_closed  # L0.9 channels: build a stdlib.chan.Recv `Closed` for __chan_recv; same rationale as sprout_chan_make_got.
-sprout_chan_make_selected  # L0.11 select: build a stdlib.chan.Selected `index (Recv a)` for __chan_select; C-level helper (not Sprout-callable), roots the boxed Recv across the make2 alloc. Same class as sprout_chan_make_got/closed.
 sprout_register_ctor
 sprout_set_argv
-sprout_set_current_fn
 sprout_tag
 sproutd_self_init
 sproutd_init_with_root  # like sproutd_self_init but takes explicit stdlib_root — setenv/exe-path resolution impossible in Sprout
 str_byte_len
 str_char_at
+str_char_at_unboxed  # unboxed-return twin of str_char_at; predates the policy
 stdin_read_bytes  # fread(n) — no Sprout way to read exactly N bytes; needed for Content-Length framing (LSP, DAP)
 str_compare
+str_eq  # returns `_Bool`: lowered specially as `declare i1 @str_eq(ptr, ptr)` + zext (IRStrEq); predates the policy
 str_concat
 str_find
 str_len
 str_slice
 str_slice_bytes  # byte-indexed substring; required to avoid two O(N) codepoint->byte conversions per call inside hot compiler loops (codegen.dbg_count_header_lines pattern). Caller responsible for UTF-8 codepoint boundary alignment; runtime panics on mid-codepoint split.
-str_starts_with  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-level prefix compare (strncmp) over the raw UTF-8 buffer.
-str_starts_with_at_byte  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-offset prefix compare; the whole point is to avoid the O(N) remaining-text slice a Sprout implementation would need.
+str_starts_with  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate then grepped `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-level prefix compare (strncmp) over the raw UTF-8 buffer.
+str_starts_with_at_byte  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate then grepped `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-offset prefix compare; the whole point is to avoid the O(N) remaining-text slice a Sprout implementation would need.
 str_split_lines
 string_concat_many
-string_join_newlines
 tcp_accept
 tcp_close
 tcp_close_listener
@@ -193,7 +176,7 @@ __chan_close  # L0.9: close a channel (end-of-stream signal); wakes recv-parked 
 __chan_select  # L0.11: wait on several channels at once (recv), returning which became ready first and its Recv outcome. Registers the current task on every channel's select wait-queue and parks (context switch) until one fires; unregisters from the rest atomically. Drives the cooperative scheduler across N channels — not expressible in Sprout.
 term_clear
 term_hide_cursor
-term_is_interactive  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate greps `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: isatty(2) on stdin/stdout.
+term_is_interactive  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate then grepped `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: isatty(2) on stdin/stdout.
 term_move
 term_raw_enter  # tcgetattr/tcsetattr(3) — Sprout cannot address the tty driver. Holds raw mode for a SESSION, which term_read_key's per-keypress toggle cannot: that toggle is why it decodes only `ESC [ A/B/C/D` and leaks a longer sequence's tail as fake keypresses. Also installs the SIGWINCH handler and the atexit restore, neither expressible in Sprout.
 term_raw_exit  # The termios restore half of the pair above. Same reason.
@@ -211,6 +194,7 @@ vector_concat  # O(n+m) two-array concat into one fresh backing array (single al
 vector_empty
 vector_from_list
 vector_get
+vector_get_unboxed  # unboxed-return twin of vector_get; predates the policy
 vector_get_direct  # O(1) read directly from VectorVal pointer; bypasses Vec ADT for MutVec; bounds-checked in C
 vector_length
 vector_mutset  # O(1) in-place write to VectorVal slot; required for MutVec mutation; not expressible as a pure Sprout fn
