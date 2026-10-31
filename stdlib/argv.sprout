@@ -1,0 +1,24 @@
+module stdlib.argv
+
+import stdlib.bytes as bytes
+
+# The process arguments as Strings. An argument is whatever bytes the OS passed, and a String must
+# be valid UTF-8, so each call answers `Err` for an argument that is not. The raw, never-failing
+# form is `argv_all_bytes` in the prelude (it needs only `Bytes`, not `Utf8Error`).
+#
+# Index 0 is the first argument after the program name.
+
+# `Ok(Nothing)` is an index past the last argument; `Err` is an argument that is not valid UTF-8.
+# The outer layer is validity and the inner is presence, as in `env.get`.
+export fn get(idx: Int) -> Result bytes.Utf8Error (Maybe String) !{IO} =
+  bytes.to_string_maybe(argv_get_bytes(idx))
+
+# Every argument, in order. `Err` if any one is not valid UTF-8.
+export fn all() -> Result bytes.Utf8Error (List String) !{IO} =
+  all_go(0, Nil)
+
+fn all_go(i: Int, acc: List String) -> Result bytes.Utf8Error (List String) !{IO} =
+  match get(i) with
+  | Err e -> Err(e)
+  | Ok Nothing -> Ok(list_reverse(acc))
+  | Ok (Just text) -> all_go(i + 1, Cons(text, acc))

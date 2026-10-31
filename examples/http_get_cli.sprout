@@ -1,6 +1,7 @@
 module examples.http_get_cli
 import stdlib.http (HttpError, http_response_text)
 import stdlib.http_client (http_get)
+import stdlib.argv as argv
 
 # Simple HTTP GET CLI client.
 #
@@ -15,9 +16,15 @@ fn http_error_message(err: HttpError) -> String =
   | HttpBadStatus _ -> "http error status"
   | HttpDecode msg -> "decode error: " ++ msg
 
+fn url_from_argv() -> Result String String !{IO} =
+  match argv.get(0) with
+  | Ok (Just url) -> Ok(url)
+  | Ok Nothing -> Err("usage: sprout run examples/http_get_cli.sprout <url>")
+  | Err _ -> Err("the url argument is not valid UTF-8")
+
 fn fetch_body_from_argv() -> Result String String !{IO} =
   do
-    url <- result_from_maybe("usage: sprout run examples/http_get_cli.sprout <url>", argv_get(0))
+    url <- url_from_argv()
     resp <- result_map_error(http_error_message, http_get(url, "", 5000))
     # The body is Bytes, so printing it is a decode and a decode can fail. A CLI that prints text
     # says so here rather than having the decision made for it during the read — `http_response_body`

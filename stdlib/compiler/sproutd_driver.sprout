@@ -2,6 +2,7 @@ module main
 import stdlib.repl as repl
 import stdlib.compiler.analysis_service_driver as service
 import stdlib.compiler.lsp_driver as lsp
+import stdlib.argv as argv
 
 extern fn sproutd_self_init() -> Unit !{IO}
 extern fn sproutd_init_with_root(root: String) -> Unit !{IO}
@@ -26,18 +27,29 @@ fn collect_package_roots(args: List String) -> List String =
         | Cons dir tail -> Cons(dir, collect_package_roots(tail))
       else collect_package_roots(rest)
 
-fn main() -> Unit !{IO} =
-  do
-    args <- argv_all()
-    match args with
-    | ["--analysis-service", stdlib_root | _] -> service.run_service(stdlib_root)
-    | ["--analysis-service" | _] -> panic("sproutd: --analysis-service requires stdlib_root argument")
-    | ["--lsp", stdlib_root | rest] ->
-        do
-          sproutd_init_with_root(stdlib_root)
-          lsp.run_lsp_with_roots(stdlib_root, collect_package_roots(rest))
-    | ["--lsp" | _] -> panic("sproutd: --lsp requires stdlib_root argument")
-    | _ ->
-        do
-          sproutd_self_init()
-          repl.run()
+# An argument that is not valid UTF-8 is a usage error: a message on stderr and status 1. Every
+# other path exits 0 as before.
+fn main() -> Int !{IO} =
+  match argv.all() with
+  | Ok args ->
+      do
+        run_command(args)
+        0
+  | Err _ ->
+      do
+        eprint("sproutd: an argument is not valid UTF-8")
+        1
+
+fn run_command(args: List String) -> Unit !{IO} =
+  match args with
+  | ["--analysis-service", stdlib_root | _] -> service.run_service(stdlib_root)
+  | ["--analysis-service" | _] -> panic("sproutd: --analysis-service requires stdlib_root argument")
+  | ["--lsp", stdlib_root | rest] ->
+      do
+        sproutd_init_with_root(stdlib_root)
+        lsp.run_lsp_with_roots(stdlib_root, collect_package_roots(rest))
+  | ["--lsp" | _] -> panic("sproutd: --lsp requires stdlib_root argument")
+  | _ ->
+      do
+        sproutd_self_init()
+        repl.run()

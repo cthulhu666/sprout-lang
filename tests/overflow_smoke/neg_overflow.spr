@@ -15,6 +15,6 @@ module main
 # as `-` or names itself distinctly is the implementer's call.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let int_min = 0 - 9223372036854775807 - 1 + list_length(args)
     print(int_to_string(-int_min))

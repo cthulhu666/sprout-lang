@@ -5,6 +5,7 @@ import stdlib.compiler.lexer as lexer
 import stdlib.compiler.lint_rules as lint_rules
 import stdlib.compiler.fmt_cli as fmt_cli
 import stdlib.string as string
+import stdlib.argv as argv
 import stdlib.fs as fs
 
 # What to do with each path. Separate from fmt_cli.Command so the fold below has
@@ -112,13 +113,19 @@ fn run_all(mode: Mode, paths: List String) -> Int !{IO} =
   list_fold(\ (worst, path) -> keep_worst(mode, worst, path), 0, paths)
 
 fn main() -> Int !{IO} =
-  do
-    args <- argv_all()
-    match fmt_cli.parse_command(args) with
-    | fmt_cli.CmdFmt paths -> run_all(ModeFmtWrite, paths)
-    | fmt_cli.CmdFmtCheck paths -> run_all(ModeFmtCheck, paths)
-    | fmt_cli.CmdLint paths -> run_all(ModeLint, paths)
-    | fmt_cli.CmdUsage msg ->
-        do
-          eprint(msg)
-          1
+  match argv.all() with
+  | Ok args -> run_command(args)
+  | Err _ ->
+      do
+        eprint("fmt_bin: an argument is not valid UTF-8")
+        1
+
+fn run_command(args: List String) -> Int !{IO} =
+  match fmt_cli.parse_command(args) with
+  | fmt_cli.CmdFmt paths -> run_all(ModeFmtWrite, paths)
+  | fmt_cli.CmdFmtCheck paths -> run_all(ModeFmtCheck, paths)
+  | fmt_cli.CmdLint paths -> run_all(ModeLint, paths)
+  | fmt_cli.CmdUsage msg ->
+      do
+        eprint(msg)
+        1

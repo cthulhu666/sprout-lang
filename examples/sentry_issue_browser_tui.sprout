@@ -9,8 +9,9 @@ export type SentryConfig (..) =
 
 fn read_env_required(name: String) -> Result String String !{IO} =
   match env.get(name) with
-  | Just value -> Ok(value)
-  | Nothing -> Err(strlib.concat("missing environment variable: ", name))
+  | Ok (Just value) -> Ok(value)
+  | Ok Nothing -> Err(strlib.concat("missing environment variable: ", name))
+  | Err _ -> Err(strlib.concat("environment variable is not valid UTF-8: ", name))
 
 fn concat3(a: String, b: String, c: String) -> String =
   strlib.concat(a, strlib.concat(b, c))

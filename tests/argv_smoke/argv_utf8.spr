@@ -1,23 +1,17 @@
 module main
 
-# Prints the parse_int and parse_double answer for each argument, then "end".
+import stdlib.argv as argv
+import stdlib.string as string
+
+# Prints every argument joined by `|`, or its own message when one is not valid UTF-8.
 #
-# The runtime checks every argument for valid UTF-8 at startup, so a program that is handed one
-# that is not exits with status 2 before any of this runs. A valid non-ASCII argument reaches
-# here and must be handled like any other. Run via `just argv-smoke`, which passes the arguments.
-
-fn show_int(m: Maybe Int) -> String =
-  match m with
-  | Just n -> "Just " ++ int_to_string(n)
-  | Nothing -> "Nothing"
-
-fn show_double(m: Maybe Double) -> String =
-  match m with
-  | Just d -> "Just " ++ double_to_string(d)
-  | Nothing -> "Nothing"
+# `argv.all` answers `Err` for an argument that is not valid UTF-8; nothing in the runtime stops
+# the program, and the exit status is whatever this program chooses (here 0). A valid non-ASCII
+# argument is handled like any other. Run via `just argv-smoke`, which passes the arguments.
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
-    list_each(\a -> print(show_int(parse_int(a)) ++ " " ++ show_double(parse_double(a))), args)
+    match argv.all() with
+    | Ok args -> print("Ok " ++ string.join("|", args))
+    | Err _ -> print("argument is not valid UTF-8")
     print("end")

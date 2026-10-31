@@ -77,7 +77,7 @@ fn emit_one_fn(f: sprout_ir.IRFunction, idx_map: Dict Int,
 # to stderr and mark the compile failed.  Unset: one env lookup, nothing else.
 fn verify_roots_if_enabled(rooted: sprout_ir.IRFunction, summary: Dict Bool,
                            failed: Ref Bool) -> Unit !{IO} =
-  match env.get("SPROUT_VERIFY_ROOTS") with
+  match env.get_or_panic("SPROUT_VERIFY_ROOTS") with
   | Just "1" ->
       match ir_verify.verify_rooting(rooted, summary) with
       | Nil -> ()
@@ -333,7 +333,7 @@ fn version_if(on: Bool, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram 
 
 # SPROUT_TRACE_BCE=1: one line per loop the pass looked at, to stderr.
 fn trace_bce(lines: List String, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram !{IO} =
-  match env.get("SPROUT_TRACE_BCE") with
+  match env.get_or_panic("SPROUT_TRACE_BCE") with
   | Nothing -> prog
   | Just _ ->
       do

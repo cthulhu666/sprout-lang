@@ -28,7 +28,7 @@ import stdlib.env as env
 # output are observable, so each caller renders its own wording.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

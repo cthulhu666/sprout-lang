@@ -76,12 +76,6 @@ fn is_nonallocating_read(fname: String) -> Bool =
 #     map_nth_value_unboxed, bytes_get_unboxed — return data[i] / node->key /
 #     node->value directly.
 #   str_char_at_unboxed — returns the decoded codepoint (immediate i64).
-#   argv_get_unboxed, env_get_unboxed — return an interned string.  These two do
-#     reach malloc on an intern-table MISS, but it is a bare malloc with no
-#     sprout_gc_maybe_collect_threshold(), and interned strings are permanent and
-#     non-arena, so no collection triggers and nothing GC-managed is produced.
-#     (See the CPR block header in runtime/sprout_runtime.c, which states the
-#     invariant in that precise form.)
 #
 # Line numbers deliberately omitted.  This block used to cite one per name
 # (4342-4437); every one had drifted ~1100 lines out of date by 2026-08-19 while
@@ -102,8 +96,6 @@ fn is_nonallocating_unboxed_read(fname: String) -> Bool =
   || fname == "map_nth_value_unboxed"
   || fname == "bytes_get_unboxed"
   || fname == "str_char_at_unboxed"
-  || fname == "argv_get_unboxed"
-  || fname == "env_get_unboxed"
 
 # Whether `op` can trigger a collection by ITSELF, not counting a direct call:
 # a call is decided by its callee (op_raw_callee, op_triggers_gc_summary), so

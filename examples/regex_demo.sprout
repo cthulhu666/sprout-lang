@@ -1,6 +1,7 @@
 module examples.regex_demo
 import stdlib.regex as regex
 import stdlib.string as string
+import stdlib.argv as argv
 
 # Regex ergonomics demo.
 #
@@ -43,6 +44,7 @@ fn summarize(raw: String) -> String =
       | regex.RegexUnsupportedFeature msg -> "unsupported pattern: " ++ msg
 
 fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> print("usage: sprout run examples/regex_demo.sprout <text>")
-  | Just raw -> print(summarize(raw))
+  match argv.get(0) with
+  | Ok (Just raw) -> print(summarize(raw))
+  | Ok Nothing -> print("usage: sprout run examples/regex_demo.sprout <text>")
+  | Err _ -> print("the argument is not valid UTF-8")

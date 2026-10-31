@@ -99,7 +99,7 @@ fn main() -> Unit !{IO} =
 
     # Integration: drive the real bundle+probe path when the suite provides the
     # stdlib root (no-op under `just test-file`, which does not set it).
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

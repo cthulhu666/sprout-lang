@@ -42,8 +42,8 @@ fn main() -> Unit !{IO} =
     r_argv <- proc_run(["echo", "one", "two", "three"])
     assert_eq(state, "argv words", out(r_argv), "one two three\n")
 
-    # argv_all collects all argv as a List String without crashing
-    let _ = argv_all()
+    # argv_all_bytes collects all argv as a List Bytes without crashing
+    let _ = argv_all_bytes()
 
     # empty stdin string must not deadlock — child sees EOF immediately
     r_empty_stdin <- proc_run_stdin(["cat"], "")

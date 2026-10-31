@@ -31,8 +31,9 @@ fn greet(r: Result String String) -> String =
 
 fn main() -> Unit !{IO} =
   match env.get("USER") with
-  | Just raw -> raw |> string.trim |> check |> greet |> print
-  | Nothing  -> print("no USER set")
+  | Ok (Just raw) -> raw |> string.trim |> check |> greet |> print
+  | Ok Nothing     -> print("no USER set")
+  | Err _          -> print("USER is not valid UTF-8")
 ```
 
 Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examples/).

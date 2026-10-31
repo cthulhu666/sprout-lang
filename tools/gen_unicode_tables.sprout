@@ -9,6 +9,7 @@ module tools.gen_unicode_tables
 # This program is written in Sprout on purpose: it is the first real consumer of
 # stdlib.fs outside its own tests.
 
+import stdlib.argv as argv
 import stdlib.fs as fs
 import stdlib.string as string
 
@@ -244,9 +245,10 @@ fn conformance_step(acc: List String, line: String) -> List String =
 
 # ── Driver ──────────────────────────────────────────────────────────────────
 
-fn main() -> Unit !{IO} = do
-  args <- argv_all()
-  run(arg_at(args, 0), arg_at(args, 1))
+fn main() -> Unit !{IO} =
+  match argv.all() with
+  | Ok args -> run(arg_at(args, 0), arg_at(args, 1))
+  | Err _ -> print("gen_unicode_tables: an argument is not valid UTF-8")
 
 # The inputs are parameters rather than `<-` bindings: a `pure(...)` binding
 # leaves the type unanchored and `++` then finds no Semigroup instance.

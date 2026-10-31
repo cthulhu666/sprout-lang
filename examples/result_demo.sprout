@@ -1,4 +1,5 @@
 module examples.result_demo
+import stdlib.argv as argv
 
 # Demonstrates the preferred narrow `do` style for step-by-step `Result`
 # sequencing.
@@ -17,7 +18,7 @@ fn compute(x: Int) -> Result String Int =
     Ok((large * 2) + 1)
 
 fn main() -> Unit !{IO} =
-  let Just raw = argv_get(0) else print("usage: sprout run examples/result_demo.sprout <int>")
+  let Ok(Just raw) = argv.get(0) else print("usage: sprout run examples/result_demo.sprout <int>")
       Just n = parse_int(raw) else print("not a number: " ++ raw)
   in
     match compute(n) with

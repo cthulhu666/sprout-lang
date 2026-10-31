@@ -15,5 +15,5 @@ import stdlib.bits
 # Same shape, and same reason, as tests/div_smoke/div_by_zero.spr.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     print(int_to_string(bit_shl(1, list_length(args) - 1)))

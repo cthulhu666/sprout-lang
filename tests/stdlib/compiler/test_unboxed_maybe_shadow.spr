@@ -2,28 +2,26 @@ module main
 import stdlib.test (TestState, new_state, assert_eq, summary)
 
 # Regression: the Tier-1 CPR peephole must NOT fire when the callee name is a
-# LOCAL binding (param/capture/let) that merely happens to match one of the 10
+# LOCAL binding (param/capture/let) that merely happens to match one of the
 # unboxable extern names — it would emit a direct `@<name>_unboxed` call to the C
 # runtime instead of applying the user's closure, silently miscompiling.
 #
-# Here `env_get` is a PARAMETER of Maybe-returning function type.  `match env_get(k)`
+# Here `str_char_at` is a PARAMETER of Maybe-returning function type.  `match str_char_at(s, k)`
 # is a closure application, not the prelude extern.  Correct result routes through
-# the passed closure; the bug routes to the C runtime's real env_get (→ Nothing).
+# the passed closure; the bug routes to the C runtime's real str_char_at (→ Nothing).
 
-# The slot carries `!{IO}` because the extern it shadows does; a pure slot here
-# rejects the `!{IO}` closure below (spec §7 rule 8, arrow positions).
-fn use_getter(env_get: String -> Maybe String !{IO}, k: String) -> String !{IO} =
-  match env_get(k) with
+fn use_getter(str_char_at: String -> Int -> Maybe Int, s: String, k: Int) -> Int =
+  match str_char_at(s, k) with
   | Just v -> v
-  | Nothing -> "MISS"
+  | Nothing -> -1
 
-fn my_lookup(k: String) -> Maybe String !{IO} = Just(str_concat(k, "!"))
+fn my_lookup(s: String, k: Int) -> Maybe Int = Just(k + 100)
 
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    r <- use_getter(my_lookup, "hello")
-    # The closure `my_lookup` always returns Just("<k>!"); "MISS" means the
-    # peephole wrongly called the C extern instead of the parameter.
-    assert_eq(state, "peephole must not fire on a param shadowing an extern name", r, "hello!")
+    let r = use_getter(my_lookup, "hello", 7)
+    # The closure `my_lookup` always returns Just(<k> + 100); -1 means the
+    # peephole wrongly called the C extern (which gives Nothing past the end) instead of the parameter.
+    assert_eq(state, "peephole must not fire on a param shadowing an extern name", r, 107)
     summary(state)

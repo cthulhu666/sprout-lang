@@ -29,6 +29,6 @@ fn describe(c: BootConfig) -> String =
         ++ `sim-days=${int_to_string(sim_days)} sc-boot=${to_string(sc_boot)}`
 
 fn main() -> Unit !{IO} =
-  do
-    a <- parse_argv()
-    print(describe(boot_config(a)))
+  match parse_argv() with
+  | Ok a -> print(describe(boot_config(a)))
+  | Err _ -> print("an argument is not valid UTF-8")

@@ -3,7 +3,7 @@ import stdlib.args (Args, parse, arg_get, arg_str, arg_int, arg_flag, positional
 import stdlib.string as string
 
 # Pure `--key=value` argv parser. All coverage runs against `parse` (the pure
-# core); the IO wrapper `parse_argv` is a one-line `parse(argv_all())` with
+# core); the IO wrapper `parse_argv` is a one-line `result_map(parse, argv.all())` with
 # nothing testable in this harness.
 
 # A representative boot-config invocation, mirroring the uncharted-suns rationale:

@@ -72,7 +72,7 @@ fn allocates_tuple(ir: String) -> Bool =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

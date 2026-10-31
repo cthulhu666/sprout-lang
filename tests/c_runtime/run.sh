@@ -60,7 +60,7 @@ test "$(cat "$TMP_DIR/read_file_gc.out")" = "6"
 echo "==> c runtime: fs / io Strings leave headered (HDRCHECK)"
 mkdir "$TMP_DIR/fs_io"
 compile fs_io_strings.c "$TMP_DIR/fs_io_strings" -O0 -g
-printf 'hello' | "$TMP_DIR/fs_io_strings" "$TMP_DIR/fs_io" > "$TMP_DIR/fs_io_strings.out"
+printf 'hel\0o' | "$TMP_DIR/fs_io_strings" "$TMP_DIR/fs_io" > "$TMP_DIR/fs_io_strings.out"
 test "$(cat "$TMP_DIR/fs_io_strings.out")" = "fs-io-strings"
 
 echo "==> c runtime: fs_list_dir returns Err for an entry name that is not valid UTF-8"
@@ -195,7 +195,7 @@ compile term_strings.c "$TMP_DIR/term_strings" -O0 -g
 printf '\001\002\004\005\006\014\010\177\033\n\r\tx\303\251\303A\377' \
   | "$TMP_DIR/term_strings" key > "$TMP_DIR/term_strings_key.out"
 test "$(cat "$TMP_DIR/term_strings_key.out")" = "term-strings-key"
-printf 'first\r\n\nsecond' | "$TMP_DIR/term_strings" line > "$TMP_DIR/term_strings_line.out"
+printf 'first\r\n\na\0b\n\xff\nsecond' | "$TMP_DIR/term_strings" line > "$TMP_DIR/term_strings_line.out"
 test "$(cat "$TMP_DIR/term_strings_line.out")" = "term-strings-line"
 printf 'abc' | "$TMP_DIR/term_strings" avail > "$TMP_DIR/term_strings_avail.out"
 test "$(cat "$TMP_DIR/term_strings_avail.out")" = "term-strings-avail"
