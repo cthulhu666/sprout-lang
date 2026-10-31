@@ -1,0 +1,7 @@
+module main
+
+# Under `where linear f`, a value of type `f a` holds a linear value.
+
+fn drop_it(x: f a) -> Int where linear f = 0
+
+fn main() -> Unit !{IO} = print("x")

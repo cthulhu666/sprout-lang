@@ -1,0 +1,10 @@
+module main
+
+# A stored `List Res` holds a linear value: `List` stores its argument.
+
+type linear Res = | Res Int
+type Outer = | Outer (List Res)
+
+fn drop_outer(o: Outer) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

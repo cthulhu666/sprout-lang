@@ -1,0 +1,10 @@
+module main
+
+# A `wrap` of a linear type holds a linear value.
+
+type linear Res = | Res Int
+wrap Handle = Res
+
+fn drop_handle(h: Handle) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

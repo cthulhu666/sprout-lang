@@ -1,0 +1,10 @@
+module main
+
+# A linear-bounded existential field makes the non-linear `Wrapper` hold a linear value.
+
+type Boxed = | exists a. Boxed a where linear a
+type Wrapper = | Wrapper Boxed
+
+fn drop_wrapper(w: Wrapper) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

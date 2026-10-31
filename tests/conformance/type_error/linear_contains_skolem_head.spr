@@ -1,0 +1,11 @@
+module main
+
+# An unpacked existential `x` is linear, so `Just(x)` holds it and `b` leaks.
+
+type Pack = | exists a. Pack a where linear a
+
+fn leak(p: Pack) -> Int =
+  match p with
+  | Pack x -> let b = Just(x) in 0
+
+fn main() -> Unit !{IO} = print("x")

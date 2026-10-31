@@ -1,0 +1,10 @@
+module main
+
+# A record with a linear field holds a linear value.
+
+type linear Res = | Res Int
+type Rec = (n: Int, res: Res)
+
+fn drop_rec(r: Rec) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

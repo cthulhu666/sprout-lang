@@ -1,0 +1,11 @@
+module main
+
+# `A` and `B` store each other and `A` stores `Res`: a value of `A` holds a linear value.
+
+type linear Res = | Res Int
+type A = | A B Res
+type B = | B A
+
+fn drop_a(a: A) -> Int = 0
+
+fn main() -> Unit !{IO} = print("x")

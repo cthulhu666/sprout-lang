@@ -1,0 +1,1 @@
+linear value 'w' is never used: its type `main.Wrapper` contains the linear type `main.Boxed` (linear values must be used exactly once)
