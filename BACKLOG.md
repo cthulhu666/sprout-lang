@@ -497,10 +497,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `pump_loop` reaches `sprout_poll_wait` only on `rq_pop() == NULL`, so a task looping on
   `task_yield` — the documented cooperative idiom — means no fd readiness or timer is ever
   observed: `task_sleep` never wakes, deadlines never fire. Already worked around locally rather
-  than fixed (`tcp_accept`'s EMFILE comment rejects a yield back-off for exactly this). **Fix (needs
-  a call):** poll with a zero timeout on some cadence even when the queue is non-empty; the cadence
-  is the only design question. Pairs with the timerfd-free backend below, which needs a
-  timeout-driven wait anyway.
+  than fixed (`tcp_accept`'s EMFILE comment rejects a yield back-off for exactly this). Any builtin
+  loop that never parks (e.g. `tcp_read_some` on a fast peer) does the same; `tcp_accept` alone has
+  its own per-listener count (`ACCEPT_FAIR_STREAK`). **Fix (needs a call):** poll with a zero
+  timeout on some cadence even when the queue is non-empty, e.g. an ops-since-park count on `Task`,
+  zeroed in `park_to_pump`, read by a `scheduler_should_yield()` in builtins. Pairs with the
+  timerfd-free backend below, which needs a timeout-driven wait anyway.
 - [ ] `P2` **A timed read costs a timerfd per park on Linux.** `sprout_poll_add_timer` calls
   `timerfd_create` per registration, doubling the per-connection fd cost. The fatal half is fixed
   (arming failure is reported, not `sprout_fail`). **Remaining: the timerfd-free backend** — one

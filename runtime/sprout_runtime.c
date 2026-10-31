@@ -10043,21 +10043,23 @@ int accept_shed_backlog(int listener_fd) {
  * the same wait EAGAIN would cause. */
 #define ACCEPT_FAIR_STREAK 16
 
+/* Every park in tcp_accept goes through here, so the streak count restarts after each one. */
+static void accept_park(long long listener) {
+  g_accept_streak[listener] = 0;
+  scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+}
+
 long long tcp_accept(long long listener) {
   if (listener <= 0 || listener >= 2048 || !g_listener_used[listener])
     return tcp_net_err0(SPROUT_TAG(stdlib$net$TcpInvalidHandle));
-  if (g_accept_streak[listener] >= ACCEPT_FAIR_STREAK) {
-    g_accept_streak[listener] = 0;
-    scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
-  }
+  if (g_accept_streak[listener] >= ACCEPT_FAIR_STREAK) accept_park(listener);
   int fd;
 retry:
   for (;;) {
     fd = accept(g_listener_fd[listener], NULL, NULL);
     if (fd >= 0) break;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      g_accept_streak[listener] = 0;
-      scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+      accept_park(listener);
       continue;
     }
     if (tcp_accept_errno_is_retryable(errno)) continue;
@@ -10084,8 +10086,7 @@ retry:
      * once the queue is empty the park is a genuine wait until a new connection arrives. */
     if (errno == EMFILE || errno == ENFILE) {
       accept_shed_backlog(g_listener_fd[listener]);
-      g_accept_streak[listener] = 0;
-      scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+      accept_park(listener);
       continue;
     }
     return tcp_net_err1(SPROUT_TAG(stdlib$net$TcpAcceptFailed), strerror(errno));
@@ -10099,8 +10100,7 @@ retry:
      * for the same reason as the EMFILE path above: shedding drains the backlog, after which the park
      * is a real wait rather than an immediate return. */
     close(fd);
-    g_accept_streak[listener] = 0;
-    scheduler_park_on_fd(g_listener_fd[listener], SPROUT_POLL_READ);
+    accept_park(listener);
     goto retry;
   }
   g_conn_fd[h] = fd;
@@ -10373,7 +10373,6 @@ long long tcp_close_listener(long long listener) {
   close(g_listener_fd[listener]);
   g_listener_used[listener] = 0;
   g_listener_fd[listener] = -1;
-  g_accept_streak[listener] = 0;
   return 0;
 }
 
