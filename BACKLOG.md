@@ -624,19 +624,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   `unused_must_use`, GHC `-Wunused-do-bind`, Swift SE-0047). Recommended as a **driver-side lint
   pass**, not an `infer` change: `CompileResult` has no channel for a warning on a *successful*
   compile. Remaining blockers are the two decisions (warn vs error; whether CI gates on it).
-- [ ] `P3` **Two R2 producers still mint Strings that can violate the `String` invariant:**
-  `term_read_line`, `env_get`. Neither has a cheap NUL repro (the OS NUL-delimits env;
-  `term_read_line` truncates at the NUL: data loss, not an inconsistent header), but both can
-  still mint invalid UTF-8, which `SPROUT_GC_HDRCHECK` is blind to because it compares `aux`
-  against `strlen` and a bad lead byte leaves those equal. `docs/debugging.md` records the
-  asymmetry. `argv_get` is closed: argv is checked once at startup.
 - [ ] `P3` **File names that are not valid UTF-8 cannot be listed or removed through `stdlib.fs`.**
   `fs_list_dir` returns `Err(FsIoError)` for the whole directory when one entry name fails UTF-8
   validation (a `String` cannot hold it), so `list_dir`, `read_dir` and `remove_dir_all` cannot get
   past such a file, and it cannot be deleted from Sprout. **Target:** a byte-based path type for
   the fs API (Rust's `OsString`, Python's bytes paths), so a name round-trips unchanged; not a
-  separate raw-name listing call. Decide with the Bytes-primary ingestion work for `env_get` and
-  `term_read_line` (`docs/fundamentals-code-review-handoff-2026-07-03.md`, D4).
+  separate raw-name listing call. Same Bytes-primary approach as `env_get_bytes` and
+  `term_read_line_bytes` (`docs/fundamentals-code-review-handoff-2026-07-03.md`, D4).
 - [ ] `P2` **`http_request`'s `timeout_ms` does not bound name resolution.** The deadline starts
   before `http_resolve`, but `async_resolve` parks on its pipe with `scheduler_park_on_unowned_fd`,
   which has no timeout, so a 30 s lookup under `timeout_ms = 1000` returns ~29 s late
@@ -1044,7 +1038,7 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
 
 ### 6.5) OS and Process Primitives
 
-- [ ] `P2` **Relocate `read_file`/`write_file`/`env_get`/`argv_get` out of the prelude.** They are
+- [ ] `P2` **Relocate `read_file`/`write_file` out of the prelude.** They are
   globally available but belong in a namespaced module; `stdlib.fs` settled where the namespace goes
   (`list_dir`/`path_join`/`path_exists`/`delete_file` already landed there, so they are off this
   list). Migration touches every stdlib and example caller, needs a stage-0/stage-1 rebuild, and

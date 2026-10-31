@@ -13,6 +13,6 @@ import stdlib.math.bigint as bigint
 # wrong product rather than panicking.
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let wide = bigint.shl(bigint.from_int(1), 53249 + list_length(args))
     print(bigint.to_string(bigint.mul(wide, wide)))

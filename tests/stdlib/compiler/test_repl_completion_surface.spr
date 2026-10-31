@@ -3,7 +3,7 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.repl as repl
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 import stdlib.process as process
 import stdlib.string as string
 
@@ -23,7 +23,7 @@ import stdlib.string as string
 # the same two authorities the bundler uses. See docs/module-surface-authority-v0.md.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

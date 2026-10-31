@@ -4,7 +4,7 @@ import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # Two modules that import each other: the bundler must stop with a cycle error
 # naming the module it re-entered, not recurse or bundle.
@@ -17,7 +17,7 @@ fn cycle_error(r: bundler.BundleResult) -> String =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> assert_true(state, "SPROUT_STDLIB_ROOT is set", false)
     | Just stdlib_root ->
         do

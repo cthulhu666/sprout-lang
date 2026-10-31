@@ -2517,9 +2517,10 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 # load-bearing property, not a coincidence: it is what lets the runtime's CPR block
 # assert the strong "no GC can trigger inside these" invariant, and what lets
 # ir_rooting.is_nonallocating_unboxed_read treat the whole list as non-triggers.
-# Do not add an extern here that allocates GC memory.  (argv_get/env_get do reach
-# malloc via sprout_str_intern on a cache miss, but interned strings are permanent and
-# non-arena and no collection can trigger there — see the runtime's CPR header.)
+# Do not add an extern here that allocates GC memory.
+#
+# `argv_get` and `env_get` were on this list until they were retired for `argv_get_bytes` and
+# `env_get_bytes`, which copy into a Bytes object and so allocate.
 #
 # `regex_find_match` and `term_read_line` WERE on this list until 2026-08-19 and
 # were the only two that allocated their payload.  Both were removed: measured at
@@ -2531,7 +2532,6 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 fn unboxed_maybe_extern_name(base: String) -> Maybe String =
   if base == "vector_get" || base == "map_get" || base == "map_nth_key"
      || base == "map_nth_value" || base == "bytes_get" || base == "str_char_at"
-     || base == "argv_get" || base == "env_get"
   then Just(base ++ "_unboxed")
   else Nothing
 
@@ -2603,8 +2603,8 @@ fn arms_have_ctor_anchor(arms: List typed_ast.TypedMatchBranch) -> Bool =
 # bare TVar does NOT refer to the prelude C extern, so the peephole must NOT fire:
 # the boxed path routes these to IRApplyClosure / IRLoadGlobal / a ctor call.
 # Mirrors translate_call's dispatch precedence (captures → param → let → ctor →
-# direct call); a param named e.g. `env_get` would otherwise be miscompiled into
-# a direct `@env_get_unboxed` call to the C runtime.
+# direct call); a param named e.g. `str_char_at` would otherwise be miscompiled into
+# a direct `@str_char_at_unboxed` call to the C runtime.
 fn callee_name_shadowed(name: String, params: List String, captures: Dict String,
                         penv: ProgEnv) -> Bool =
   dict_member(name, captures)

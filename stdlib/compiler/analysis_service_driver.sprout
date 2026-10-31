@@ -706,10 +706,13 @@ fn run_eval_binary() -> json.Json !{IO} =
     run_result <- process.proc_run([eval_bin_path])
     collect_eval_output(run_result)
 
-fn env_forces_frameworks() -> Bool !{IO} =
+# SPROUT_DARWIN_FRAMEWORKS changes the link line, and so what eval can do, so an invalid value is
+# an error for the request rather than something to ignore.
+fn env_forces_frameworks() -> Result String Bool !{IO} =
   match env.get("SPROUT_DARWIN_FRAMEWORKS") with
-  | Just _ -> true
-  | Nothing -> false
+  | Ok (Just _) -> Ok(true)
+  | Ok Nothing -> Ok(false)
+  | Err _ -> Err("SPROUT_DARWIN_FRAMEWORKS is not valid UTF-8")
 
 fn uname_is_darwin() -> Bool !{IO} =
   do
@@ -721,11 +724,14 @@ fn uname_is_darwin() -> Bool !{IO} =
 # frameworks (the runtime's TLS/net code needs them).  Detect the platform at
 # runtime via `uname` so a fresh macOS checkout works with no env var, mirroring
 # the justfile's `os() == "macos"` gate; SPROUT_DARWIN_FRAMEWORKS forces it on.
-fn use_darwin_frameworks() -> Bool !{IO} =
-  do
-    forced <- env_forces_frameworks()
-    darwin <- uname_is_darwin()
-    if forced then true else darwin
+fn use_darwin_frameworks() -> Result String Bool !{IO} =
+  match env_forces_frameworks() with
+  | Err msg -> Err(msg)
+  | Ok true -> Ok(true)
+  | Ok false ->
+      do
+        darwin <- uname_is_darwin()
+        Ok(darwin)
 
 fn diag_msg(d: compiler.Diagnostic) -> String =
   match d with
@@ -739,13 +745,14 @@ fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> j
       match fs.write_text(eval_ir_path, ir_text) with
       | Err msg -> panic("write_file: eval.ir: " ++ msg)
       | Ok _ ->
-          do
-            use_darwin <- use_darwin_frameworks()
-            match compile_runtime_and_link_eval(
-              runtime_dir(state_stdlib_root(state)), eval_ir_path, eval_bin_path,
-              state_runtime_obj_ref(state), use_darwin) with
-            | Err msg -> error_response("eval_expr_in_source: " ++ msg)
-            | Ok _ -> run_eval_binary()
+          match use_darwin_frameworks() with
+          | Err msg -> error_response("eval_expr_in_source: " ++ msg)
+          | Ok use_darwin ->
+              match compile_runtime_and_link_eval(
+                runtime_dir(state_stdlib_root(state)), eval_ir_path, eval_bin_path,
+                state_runtime_obj_ref(state), use_darwin) with
+              | Err msg -> error_response("eval_expr_in_source: " ++ msg)
+              | Ok _ -> run_eval_binary()
 
 fn compile_and_run_eval(src: String, expr: String, how: compiler.EvalMain, state: StartupState) -> json.Json !{IO} =
   do
@@ -949,14 +956,21 @@ fn response_text(response: json.Json) -> String =
 
 fn service_loop(state: StartupState) -> Unit !{IO} =
   match terminal.term_read_line_once() with
-  | Nothing -> ()
-  | Just line ->
+  | Ok Nothing -> ()
+  | Ok (Just line) ->
       if string.is_empty(line) then service_loop(state)
       else
         do
           response <- dispatch_line(line, state)
           terminal.write(response_text(response) ++ "\n")
           service_loop(state)
+  # A request line that is not valid UTF-8 is a malformed request like invalid JSON: it is
+  # answered with an error and the next line is read, so a client reading one reply per request
+  # stays in step.
+  | Err _ ->
+      do
+        terminal.write(response_text(error_response("invalid request: not valid UTF-8")) ++ "\n")
+        service_loop(state)
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
   if stdlib_root == "" then do

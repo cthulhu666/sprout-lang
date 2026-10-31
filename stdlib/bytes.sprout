@@ -94,6 +94,14 @@ export fn from_string(raw: String) -> Bytes =
 export fn to_string(value: Bytes) -> Result Utf8Error String =
   bytes_to_utf8(value)
 
+# O(|value|): `to_string` over a value that may be absent. The outer `Result` is validity and the
+# inner `Maybe` is presence, so an absent value (`Nothing`) is `Ok(Nothing)` and never an error.
+# For readers of outside input: an unset variable, end of input.
+export fn to_string_maybe(value: Maybe Bytes) -> Result Utf8Error (Maybe String) =
+  match value with
+  | Nothing -> Ok(Nothing)
+  | Just raw -> result_map(\text -> Just(text), to_string(raw))
+
 # O(1): the builder stores chunk references and the total length.
 export fn builder_empty() -> Builder =
   bytes_builder_empty()

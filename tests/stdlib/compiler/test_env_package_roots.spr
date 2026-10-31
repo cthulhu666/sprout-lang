@@ -5,7 +5,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # PACKAGE ROOTS MUST REACH THE ENV TYPECHECK PATH.
 #
@@ -30,7 +30,7 @@ import stdlib.env as env
 # front end — which is the point.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

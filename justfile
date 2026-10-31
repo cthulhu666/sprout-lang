@@ -2064,13 +2064,13 @@ verify-dispatch-smoke: bootstrap-from-seed
   echo "==> verify-dispatch-smoke ✓ ($stats)"
 
 # Typed-codegen argv gate.  The typed `main` shim (ir_lowering.main_shim) must
-# call @sprout_set_argv(argc, argv) so a typed-built binary's argv_all() sees
+# call @sprout_set_argv(argc, argv) so a typed-built binary's `argv.all()` sees
 # its command-line arguments — the typed-codegen flip self-compiles the
 # compiler, whose main() reads argv.  The parity corpus runs every binary with
-# NO args, so this is the ONLY gate exercising argv_all() under typed codegen.
-# It also runs tests/argv_smoke/argv_utf8.spr (an argument that is not valid UTF-8 stops the program
-# at startup) and tests/argv_smoke/env_utf8.spr (parse_int on an env String holding
-# invalid UTF-8, the way left to hand them one).
+# NO args, so this is the ONLY gate exercising argv under typed codegen.
+# It also covers the other ways outside bytes reach a program, none of which may mint a String
+# that is not valid UTF-8: an argument (argv_utf8.spr, argv_bytes.spr), an environment value
+# (env_utf8.spr), a stdin line (term_line.spr) and stdin bytes (stdin_nul.spr).
 [group('smoke')]
 argv-smoke: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -2094,12 +2094,13 @@ argv-smoke: bootstrap-from-seed
     echo "  (typed main shim likely missing @sprout_set_argv; see ir_lowering.main_shim)" >&2
     exit 1
   fi
-  # Second fixture: an argument that is not valid UTF-8 stops the program at startup, before any
-  # user code runs, with status 2 and a message naming the argument. $'..' passes the raw bytes.
+  # Second fixture: argv.all answers Err for an argument that is not valid UTF-8, and the program
+  # prints its own message. The runtime does not stop it: the exit status is the program's (0).
+  # $'..' passes the raw bytes.
   build_fixture tests/argv_smoke/argv_utf8.spr "$TMPD/utf8_bin" \
     "argv_utf8 fixture emit failed" "argv_utf8 fixture link failed"
   # Valid arguments, ASCII and not, reach the program.
-  want=$'Nothing Nothing\nNothing Nothing\nJust 42 Just 42.0\nend'
+  want=$'Ok abc|\xc3\xa9|42\nend'
   got=$("$TMPD/utf8_bin" abc $'\xc3\xa9' 42 2>"$TMPD/utf8.err") || {
     echo "argv-smoke: valid arguments were rejected" >&2; cat "$TMPD/utf8.err" >&2; exit 1
   }
@@ -2108,40 +2109,107 @@ argv-smoke: bootstrap-from-seed
     echo "got:" >&2; echo "$got" >&2
     exit 1
   fi
-  # Invalid arguments: exit 2, the message names the bad index, nothing reaches stdout.
+  # Invalid arguments, wherever they sit: Err, the program's message, exit 0, nothing on stderr.
   for bad in $'x\xff' $'\xff' $'1\xff' $'12\xc3' $'\xed\xa0\x80'; do
     rc=0
     out=$("$TMPD/utf8_bin" ok "$bad" other 2>"$TMPD/utf8.err") || rc=$?
-    if [[ "$rc" -ne 2 || -n "$out" ]]; then
-      echo "argv-smoke: invalid argument: expected exit 2 and no output, got exit $rc, output '$out'" >&2
-      exit 1
-    fi
-    if [[ "$(cat "$TMPD/utf8.err")" != "argument 2 is not valid UTF-8" ]]; then
-      echo "argv-smoke: wrong message: $(cat "$TMPD/utf8.err")" >&2; exit 1
+    if [[ "$rc" -ne 0 || "$out" != $'argument is not valid UTF-8\nend' || -s "$TMPD/utf8.err" ]]; then
+      echo "argv-smoke: invalid argument: got exit $rc, output '$out', stderr:" >&2
+      cat "$TMPD/utf8.err" >&2; exit 1
     fi
   done
-  # With several bad arguments the first is the one reported.
-  rc=0
-  "$TMPD/utf8_bin" $'\xff' $'\xfe' >/dev/null 2>"$TMPD/utf8.err" || rc=$?
-  if [[ "$rc" -ne 2 || "$(cat "$TMPD/utf8.err")" != "argument 1 is not valid UTF-8" ]]; then
-    echo "argv-smoke: first bad argument was not reported: exit $rc, $(cat "$TMPD/utf8.err")" >&2; exit 1
+  # The Bytes path: argv_all_bytes gets the raw bytes of an argument that is not valid UTF-8.
+  build_fixture tests/argv_smoke/argv_bytes.spr "$TMPD/bytes_bin" \
+    "argv_bytes fixture emit failed" "argv_bytes fixture link failed"
+  want=$'3\n2\n6\n3\n0\nend'
+  got=$("$TMPD/bytes_bin" $'ab\xff' $'\xff\xfe' $'h\xc3\xa9llo' $'\xed\xa0\x80' "" 2>"$TMPD/bytes.err") || {
+    echo "argv-smoke: argv_all_bytes failed" >&2; cat "$TMPD/bytes.err" >&2; exit 1
+  }
+  if [[ "$got" != "$want" ]]; then
+    echo "argv-smoke: argv_all_bytes - expected:" >&2; echo "$want" >&2; echo "got:" >&2; echo "$got" >&2
+    exit 1
   fi
-  # Third fixture: env_get can still hand a program an invalid String. parse_int
-  # must answer Nothing for `1<bad byte>` without the UTF-8 walker aborting. The later Bytes-primary
-  # change to env_get moves this test with it.
+  # A compiler binary given an argument that is not valid UTF-8 reports it on stderr and exits 1
+  # (a usage error); it does not abort in the runtime.
+  rc=0
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" $'x\xff' \
+    >/dev/null 2>"$TMPD/drv.err" || rc=$?
+  if [[ "$rc" -ne 1 ]] || ! grep -q "not valid UTF-8" "$TMPD/drv.err" \
+     || grep -q "runtime error" "$TMPD/drv.err"; then
+    echo "argv-smoke: compiler given an invalid argument: exit $rc, stderr:" >&2
+    cat "$TMPD/drv.err" >&2; exit 1
+  fi
+  # env.get answers Result Utf8Error (Maybe String): Err for a value that is not valid UTF-8,
+  # Ok(Nothing) for an unset name, Ok(Just _) otherwise.
   build_fixture tests/argv_smoke/env_utf8.spr "$TMPD/env_bin" \
     "env_utf8 fixture emit failed" "env_utf8 fixture link failed"
-  for bad in $'1\xff' $'\xff' $'x\xff' $'12\xc3'; do
+  for bad in $'1\xff' $'\xff' $'x\xff' $'12\xc3' $'\xed\xa0\x80'; do
     rc=0
     got=$(SPROUT_SMOKE_VALUE="$bad" "$TMPD/env_bin" 2>"$TMPD/env.err") || rc=$?
-    if [[ "$rc" -ne 0 || "$got" != "Nothing" ]]; then
-      echo "argv-smoke: parse_int on an invalid env String: exit $rc, output '$got'" >&2
+    if [[ "$rc" -ne 0 || "$got" != "Err" ]]; then
+      echo "argv-smoke: env.get on an invalid value: exit $rc, output '$got'" >&2
       cat "$TMPD/env.err" >&2; exit 1
     fi
   done
-  got=$(SPROUT_SMOKE_VALUE=42 "$TMPD/env_bin")
-  if [[ "$got" != "Just 42" ]]; then
-    echo "argv-smoke: env_utf8 on a valid value: got '$got'" >&2; exit 1
+  got=$(env -u SPROUT_SMOKE_VALUE "$TMPD/env_bin")
+  if [[ "$got" != "unset" ]]; then
+    echo "argv-smoke: env.get on an unset name: got '$got'" >&2; exit 1
+  fi
+  for pair in "42|Just 42 Just 42" $'\xc3\xa9|Just \xc3\xa9 Nothing' "|Just  Nothing"; do
+    got=$(SPROUT_SMOKE_VALUE="${pair%%|*}" "$TMPD/env_bin")
+    if [[ "$got" != "${pair#*|}" ]]; then
+      echo "argv-smoke: env.get on '${pair%%|*}': got '$got'" >&2; exit 1
+    fi
+  done
+  # The compiler reads its switches through env.get. One that is not valid UTF-8 reads as unset:
+  # the compile succeeds with its defaults, writes `<VAR> is not valid UTF-8; ignored` once, and
+  # emits the same IR as with the switch unset.
+  "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
+    tests/argv_smoke/argv_echo.spr >"$TMPD/cfg_base.ll" 2>"$TMPD/cfg_base.err"
+  if [[ -s "$TMPD/cfg_base.err" ]]; then
+    echo "argv-smoke: the baseline compile wrote to stderr:" >&2; cat "$TMPD/cfg_base.err" >&2; exit 1
+  fi
+  for var in SPROUT_OPT_OFF SPROUT_OPT_STATS SPROUT_TRACE_DISPATCH SPROUT_VERIFY_ROOTS \
+             SPROUT_VERIFY_DISPATCH_STATS; do
+    rc=0
+    env "$var=$(printf 'x\xff')" "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" \
+      tests/argv_smoke/argv_echo.spr >"$TMPD/cfg.ll" 2>"$TMPD/cfg.err" || rc=$?
+    if [[ "$rc" -ne 0 || "$(cat "$TMPD/cfg.err")" != "$var is not valid UTF-8; ignored" ]]; then
+      echo "argv-smoke: $var holding invalid UTF-8: exit $rc, stderr:" >&2
+      cat "$TMPD/cfg.err" >&2; exit 1
+    fi
+    if ! cmp -s "$TMPD/cfg_base.ll" "$TMPD/cfg.ll"; then
+      echo "argv-smoke: $var holding invalid UTF-8 changed the emitted IR" >&2; exit 1
+    fi
+  done
+  # term_read_line: Err for a line that is not valid UTF-8 or holds a NUL, Ok(Nothing) at EOF.
+  # term_read_line_bytes keeps every byte of the line.
+  build_fixture tests/argv_smoke/term_line.spr "$TMPD/term_bin" \
+    "term_line fixture emit failed" "term_line fixture link failed"
+  want=$'Line ok\nErr\nErr\nErr\nLine \xc3\xa9\nLine last\neof\nend'
+  got=$(printf 'ok\r\n\xff\nbad\xff\na\0b\n\xc3\xa9\nlast' | "$TMPD/term_bin" string)
+  if [[ "$got" != "$want" ]]; then
+    echo "argv-smoke: term_read_line - expected:" >&2; echo "$want" >&2; echo "got:" >&2; echo "$got" >&2
+    exit 1
+  fi
+  want=$'Bytes 2\nBytes 1\nBytes 4\nBytes 3\nBytes 2\nBytes 4\neof\nend'
+  got=$(printf 'ok\r\n\xff\nbad\xff\na\0b\n\xc3\xa9\nlast' | "$TMPD/term_bin" bytes)
+  if [[ "$got" != "$want" ]]; then
+    echo "argv-smoke: term_read_line_bytes - expected:" >&2; echo "$want" >&2; echo "got:" >&2; echo "$got" >&2
+    exit 1
+  fi
+  got=$("$TMPD/term_bin" string < /dev/null)
+  if [[ "$got" != $'eof\nend' ]]; then
+    echo "argv-smoke: term_read_line at EOF: got '$got'" >&2; exit 1
+  fi
+  # stdin_read_bytes keeps NUL and non-UTF-8 bytes: 5 bytes in, 5 out, then EOF.
+  build_fixture tests/argv_smoke/stdin_nul.spr "$TMPD/stdin_bin" \
+    "stdin_nul fixture emit failed" "stdin_nul fixture link failed"
+  want=$'5: 97 0 98 255 99 \neof'
+  got=$(printf 'a\0b\xffc' | "$TMPD/stdin_bin")
+  if [[ "$got" != "$want" ]]; then
+    echo "argv-smoke: stdin_read_bytes - expected:" >&2; echo "$want" >&2; echo "got:" >&2; echo "$got" >&2
+    exit 1
   fi
   echo "==> argv-smoke ✓"
 
@@ -3338,7 +3406,7 @@ runtime-diag-smoke: bootstrap-from-seed
 # Overflow-panic guard regression (CI gate, bigint-v0 Stage 1 — docs/bigint-v0.md
 # §5.1, Option A of docs/int-overflow-policy-decision.md). Same shape and reason
 # as div-by-zero-smoke above: each fixture makes the overflowing
-# operand a RUNTIME value (derived from `list_length(argv_all())`, which is 0
+# operand a RUNTIME value (derived from `list_length(argv_all_bytes())`, which is 0
 # with no args), so neither the Sprout compiler nor clang can constant-fold the
 # operation away and hide a missing guard.
 #

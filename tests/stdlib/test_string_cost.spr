@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, summary)
 import stdlib.string as string
-import stdlib.env as env
+import testsupport.envvar as envvar
 import stdlib.terminal as terminal
 import testsupport.cost (assert_scales, grow)
 
@@ -30,7 +30,7 @@ fn ends_with_probe(s: String) -> Bool = ends_go(s, 200, 0) == 200
 # Under SPROUT_GC_HDRCHECK=1 `str_byte_len` validates the header with a `strlen`, so
 # ends_with is O(|raw|) there and the arm would fail for a reason unrelated to the code.
 fn ends_with_arm(state: TestState) -> Unit !{IO} =
-  match env.get("SPROUT_GC_HDRCHECK") with
+  match envvar.read("SPROUT_GC_HDRCHECK") with
   | Just _ -> terminal.write("  [cost] ends_with: skipped under SPROUT_GC_HDRCHECK\n")
   | Nothing ->
       assert_scales(state, "ends_with", ends_with_probe, grow("ab", 9) ++ "xy",

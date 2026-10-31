@@ -69,8 +69,10 @@ fn driver(winch: Bool, ch: Chan (app.Signal Msg), u: Unit) -> Unit !{IO} = do
 fn boot(winch: Bool, scope: Scope, ch: Chan (app.Signal Msg)) -> Unit !{IO} =
   task_spawn(scope, driver(winch, ch, _))
 
-fn main() -> Unit !{IO} = do
-  a <- args.parse_argv()
-  let winch = !args.arg_flag(a, "no-winch")
-  app.run(app.App(root = root(), update = update, tick_ms = 100,
-                  boot = boot(winch, _, _)))
+fn main() -> Unit !{IO} =
+  match args.parse_argv() with
+  | Ok a ->
+      let winch = !args.arg_flag(a, "no-winch")
+      in app.run(app.App(root = root(), update = update, tick_ms = 100,
+                         boot = boot(winch, _, _)))
+  | Err _ -> eprint("an argument is not valid UTF-8")

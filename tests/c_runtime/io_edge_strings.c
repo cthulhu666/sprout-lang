@@ -7,8 +7,8 @@
  * function fails to root across its own allocations is freed and fails the byte check.
  * None of these functions takes a String as a word, so there is no unrooted input (F) to pass.
  *
- * Covered: env_get and env_get_unboxed (set, unset), argv_get and argv_get_unboxed (in range,
- * out of range, negative), tcp_read_exact (one byte) and tcp_read_some over a socketpair (data,
+ * Covered: env_get_bytes (set, unset, empty, not UTF-8), argv_get_bytes (in range, out of range,
+ * negative, an argument that is not UTF-8, no argv), tcp_read_exact (one byte) and tcp_read_some over a socketpair (data,
  * EOF, invalid handle, bad count, a read error with its strerror text),
  * http_err_cstr and http_ok_response (headers String, binary body with an interior NUL, a headers
  * buffer with an interior NUL, which still stops at it), sprout_make_proc_result (data, empty).
@@ -45,38 +45,31 @@ static int err_ctor(long long r, long long ctor, int has_text, const char* want)
   return !has_text || is_str(sprout_field(e, 0), want);
 }
 
-static int just_str(long long r, const char* want) {
-  return sprout_tag(r) == JUST && is_str(sprout_field(r, 0), want);
+/* `r` is Just(Bytes of `data`). */
+static int just_bytes(long long r, const void* data, size_t n) {
+  return sprout_tag(r) == JUST && bytes_is(sprout_field(r, 0), data, n);
 }
-
-/* A SproutUnboxed2 is Just(<String>) / Nothing. */
-static int unboxed_just_str(SproutUnboxed2 u, const char* want) {
-  return (int64_t)(uint64_t)u == JUST && is_str((long long)(int64_t)(uint64_t)(u >> 64), want);
-}
-static int unboxed_nothing(SproutUnboxed2 u) { return (int64_t)(uint64_t)u == NOTHING; }
 
 static void run_env_argv(void) {
   setenv("IO_EDGE_VAR", "from the environment", 1);
+  setenv("IO_EDGE_EMPTY", "", 1);
+  setenv("IO_EDGE_BAD", "1\xff", 1);
   unsetenv("IO_EDGE_UNSET");
-  check(just_str(env_get("IO_EDGE_VAR"), "from the environment"), "env_get set");
-  check(sprout_tag(env_get("IO_EDGE_UNSET")) == NOTHING, "env_get unset");
-  check(unboxed_just_str(env_get_unboxed(I("IO_EDGE_VAR")), "from the environment"),
-        "env_get_unboxed set");
-  check(unboxed_nothing(env_get_unboxed(I("IO_EDGE_UNSET"))), "env_get_unboxed unset");
+  check(just_bytes(env_get_bytes("IO_EDGE_VAR"), "from the environment", 20), "env_get_bytes set");
+  check(just_bytes(env_get_bytes("IO_EDGE_EMPTY"), "", 0), "env_get_bytes empty is Just");
+  check(just_bytes(env_get_bytes("IO_EDGE_BAD"), "1\xff", 2), "env_get_bytes keeps invalid UTF-8");
+  check(sprout_tag(env_get_bytes("IO_EDGE_UNSET")) == NOTHING, "env_get_bytes unset");
 
-  static char* args[] = { "prog", "first", "h\xc3\xa9llo", NULL };
-  g_sprout_argc = 3;
+  static char* args[] = { "prog", "first", "h\xc3\xa9llo", "\xff\xfe", NULL };
+  g_sprout_argc = 4;
   g_sprout_argv = args;
-  check(just_str(argv_get(0), "first"), "argv_get(0)");
-  check(just_str(argv_get(1), "h\xc3\xa9llo"), "argv_get(1)");
-  check(sprout_tag(argv_get(2)) == NOTHING, "argv_get past the end");
-  check(sprout_tag(argv_get(-1)) == NOTHING, "argv_get negative");
-  check(unboxed_just_str(argv_get_unboxed(0), "first"), "argv_get_unboxed(0)");
-  check(unboxed_just_str(argv_get_unboxed(1), "h\xc3\xa9llo"), "argv_get_unboxed(1)");
-  check(unboxed_nothing(argv_get_unboxed(2)), "argv_get_unboxed past the end");
-  check(unboxed_nothing(argv_get_unboxed(-1)), "argv_get_unboxed negative");
+  check(just_bytes(argv_get_bytes(0), "first", 5), "argv_get_bytes(0)");
+  check(just_bytes(argv_get_bytes(1), "h\xc3\xa9llo", 6), "argv_get_bytes(1)");
+  check(just_bytes(argv_get_bytes(2), "\xff\xfe", 2), "argv_get_bytes keeps invalid UTF-8");
+  check(sprout_tag(argv_get_bytes(3)) == NOTHING, "argv_get_bytes past the end");
+  check(sprout_tag(argv_get_bytes(-1)) == NOTHING, "argv_get_bytes negative");
   g_sprout_argv = NULL;
-  check(sprout_tag(argv_get(0)) == NOTHING, "argv_get without argv");
+  check(sprout_tag(argv_get_bytes(0)) == NOTHING, "argv_get_bytes without argv");
   g_sprout_argc = 0;
 }
 

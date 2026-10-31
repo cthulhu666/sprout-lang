@@ -4,7 +4,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # `(..)` MEANS THE SAME THING ON A RECORD AS ON A SUM.
 #
@@ -24,7 +24,7 @@ import stdlib.env as env
 # the one reading it — a rule that over-fires on either makes records unusable.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

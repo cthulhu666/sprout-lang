@@ -1,0 +1,22 @@
+module main
+
+import stdlib.bytes as bytes
+
+extern fn stdin_read_bytes(n: Int) -> Maybe Bytes !{IO}
+
+# Reads 5 bytes from stdin and prints how many arrived and each byte value, then what a second
+# read at EOF gives. NUL and non-UTF-8 bytes must come through unchanged. Run via
+# `just argv-smoke`, which pipes `a\0b\xff` and `c`.
+
+fn show_bytes(raw: Bytes, i: Int) -> String =
+  if i >= bytes.length(raw) then ""
+  else int_to_string(bytes.get_or(raw, i, -1)) ++ " " ++ show_bytes(raw, i + 1)
+
+fn main() -> Unit !{IO} =
+  do
+    match stdin_read_bytes(5) with
+    | Nothing -> print("eof")
+    | Just raw -> print(int_to_string(bytes.length(raw)) ++ ": " ++ show_bytes(raw, 0))
+    match stdin_read_bytes(1) with
+    | Nothing -> print("eof")
+    | Just _ -> print("more")

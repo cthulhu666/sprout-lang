@@ -50,8 +50,7 @@ analysis_session_update
 analysis_symbol_inventory_in_source
 analysis_symbol_locations_in_source
 analysis_type_of_in_source
-argv_get
-argv_get_unboxed  # unboxed-return twin of argv_get: (tag, payload) in two registers, no ADT allocation; predates the policy
+argv_get_bytes  # reads the C argv stashed by the main shim — the process arguments have no Sprout expression. Returns Bytes, not String, because the OS does not promise UTF-8 (decision D4); the Sprout wrappers decode with bytes.to_string and report a bad argument as Err.
 bytes_append
 bytes_builder_append
 bytes_builder_build
@@ -79,8 +78,7 @@ crypto_random_bytes
 crypto_sha256
 double_to_string  # formats a Double to decimal text (snprintf at the shortest of %.15g/%.16g/%.17g that strtod's back bit-equal, + ".0" for integrals). Justified under rule 4 (IMPOSSIBLE in Sprout), not the weaker "impractical" — re-evaluated 2026-08-06 rather than assumed. Expressiveness is NOT the blocker: a float->decimal converter is writable in pure Sprout, and needs no Double->Int conversion (a digit is recoverable with ten comparisons). ACCURACY is: 10 is not a power of two, so every *10 / /10 scaling step rounds, and a ~45-line pure-Sprout attempt round-tripped only 5 of 7 sampled values. Guaranteed shortest-round-trip conversion (Ryu/Grisu/Dragon4) needs exact WIDE-integer arithmetic (128-bit or bignum), which Sprout does not have. NB the missing prerequisite is wide integers, NOT Double bit access. Pinned by tests/stdlib/test_double_to_string_precision.spr. See AGENTS.md Builtin vs Stdlib 4-6.
 eprint  # writes a String and a newline to stderr; Sprout has no stderr output primitive (print/print_str target stdout only)
-env_get
-env_get_unboxed  # unboxed-return twin of env_get; predates the policy
+env_get_bytes  # getenv(3) — the process environment has no Sprout expression. Returns Bytes, not String, because the OS does not promise UTF-8 (decision D4); stdlib.env decodes with bytes.to_string and reports a bad value as Err.
 fs_list_dir  # opendir/readdir/closedir — Sprout has no directory-stream primitive, and nothing else in the language can enumerate a directory. The alternative available today is proc_run(["find", …]), a subprocess per listing whose newline-joined output silently loses any filename containing a newline. Names only, deliberately: pairing each with its metadata is read_dir's job in Sprout (rule 2), which costs one lstat per entry that dirent's d_type could sometimes save — not a measured bottleneck (rule 6), and d_type is DT_UNKNOWN on several filesystems so the saving is conditional while the C would not be.
 fs_make_dir  # mkdir(2) — a syscall with no Sprout expression. ONE level only. Recursive creation is make_dir_all in Sprout over this primitive, so the interesting part (an existing tree is success, but a regular file blocking the path is FsNotADirectory) is a readable branch the test suite reaches, not untestable C.
 fs_read_bytes  # open/read/close with NO UTF-8 validation. read_file cannot substitute: it runs utf8_validate over the whole buffer and returns Err on any non-UTF-8 byte, so it genuinely cannot read an image, an object file or a .ll. Correctness, not speed.
@@ -182,7 +180,7 @@ term_raw_enter  # tcgetattr/tcsetattr(3) — Sprout cannot address the tty drive
 term_raw_exit  # The termios restore half of the pair above. Same reason.
 term_read_avail  # read(2) on fd 0 combined with a scheduler park — parking is runtime-internal and has no Sprout expression. Correctness, not speed: term_read_key blocks the OS thread, so a key read starves every other green task, and there is no other way to wait on stdin without also mutating the open file description the parent shell shares (O_NONBLOCK).
 term_read_key
-term_read_line
+term_read_line_bytes  # getline(3) on stdin — a tty/pipe line has no Sprout expression. Returns Bytes, not String, because the line may hold a NUL or bytes that are not UTF-8 (decision D4); stdlib.terminal decodes with bytes.to_string and reports a bad line as Err.
 term_show_cursor
 term_size  # ioctl(TIOCGWINSZ) — Sprout cannot issue an ioctl. Nothing else can answer it: the DSR escape (`ESC[6n`) writes a reply into stdin that term_read_key discards, and $COLUMNS/$LINES are shell-local and normally unexported.
 term_write

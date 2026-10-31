@@ -3,7 +3,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # Rule 9's unknown-label check is a decl-scan, the shape compiler-internals.md
 # §"Whole-program passes" warns can see an empty program on this front end. It
@@ -22,7 +22,7 @@ fn session(body: String) -> String = `module app.session\n\n${body}\n`
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     # Loud, not silent: a skipped run reports "0 passed", which reads as green.
     | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
     | Just stdlib_root ->

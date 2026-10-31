@@ -5,6 +5,7 @@ import stdlib.bytes as bytes
 import stdlib.string as string
 import stdlib.terminal as terminal
 import stdlib.time as time
+import stdlib.argv as argv
 
 # The HTTPS client path, end to end, against a local TLS server.
 #
@@ -72,10 +73,12 @@ fn run(s: Scope, url: String) -> Unit !{IO} =
     task_spawn(s, \_ -> probe())
     task_spawn(s, \_ -> caller(url))
 
-# `argv_get(0)` is passed as a value rather than bound with `<-`: a `<-` on a `Maybe` SHORT-CIRCUITS
+# `argv.get(0)` is passed as a value rather than bound with `<-`: a `<-` on a `Maybe` SHORT-CIRCUITS
 # it, so a missing argument would abandon a block that returns Unit and cannot carry the absence.
 fn main() -> Unit !{IO} =
-  with_scope(\s -> run(s, url_or(argv_get(0))))
+  with_scope(\s -> run(s, url_or(argv.get(0))))
 
-fn url_or(raw: Maybe String) -> String =
-  maybe_with_default("https://localhost:28444/", raw)
+fn url_or(raw: Result bytes.Utf8Error (Maybe String)) -> String =
+  match raw with
+  | Ok (Just url) -> url
+  | _ -> "https://localhost:28444/"

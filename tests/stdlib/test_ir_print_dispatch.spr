@@ -3,7 +3,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 import stdlib.string as string
 
 # The String sinks are plain externs: `print_str` and `eprint` call their own runtime symbols
@@ -28,7 +28,7 @@ fn occurrences(haystack: String, needle: String) -> Int =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just root ->
         do

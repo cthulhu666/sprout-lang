@@ -4,7 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import stdlib.string as string
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # Instance overlap on the REPL / analysis-service path (compile_source_with_cache).
 # A session instance overlapping a PRELUDE one is rejected as on `--phase check`:
@@ -24,7 +24,7 @@ fn session(body: String) -> String = `module app.session\n\n${body}\n`
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     # Loud, not silent: a skipped run reports "0 passed", which reads as green.
     | Nothing -> print("SKIP: SPROUT_STDLIB_ROOT unset — no assertion ran")
     | Just stdlib_root ->

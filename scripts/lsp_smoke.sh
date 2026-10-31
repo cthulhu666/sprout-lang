@@ -343,5 +343,23 @@ else
   echo "SKIP completion is not advertised (honest: the handler is not wired yet)"
 fi
 
+# --- 4. input that is not valid UTF-8 --------------------------------------------
+# Stdin is read as bytes and decoded by the server. Text that is not valid UTF-8 is a malformed
+# message like any other: it is dropped and the server keeps answering.
+raw_drive() {
+  "$SPROUTD" --lsp "$STDLIB" 2>/dev/null \
+    | tr -d '\r' \
+    | awk '{gsub(/Content-Length: [0-9]+/, "\n"); print}' \
+    | grep '^{'
+}
+# A header line that is not valid UTF-8 is skipped; the Content-Length line after it still counts.
+resp="$( { printf 'X-Bad: \377\r\n'; printf '%s\n' "$INIT" | frame; } | raw_drive )"
+echo "$resp" | grep -q '"id":1'
+check "a header line that is not valid UTF-8 is skipped" $?
+# A body that is not valid UTF-8 is dropped, and the next message is answered.
+resp="$( { printf 'Content-Length: 3\r\n\r\n{\377}'; printf '%s\n' "$INIT" | frame; } | raw_drive )"
+echo "$resp" | grep -q '"id":1'
+check "a body that is not valid UTF-8 is dropped, the next message is answered" $?
+
 if [ "$fail" -eq 0 ]; then echo "==> lsp smoke: OK"; else echo "==> lsp smoke: FAILED"; fi
 exit $fail

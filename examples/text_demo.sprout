@@ -1,5 +1,6 @@
 module examples.text_demo
 import stdlib.string as string
+import stdlib.argv as argv
 
 # Unicode-aware text summary demo.
 #
@@ -63,6 +64,7 @@ where
   no_vowels_text = strip_vowels(raw)
 
 fn main() -> Unit !{IO} =
-  match argv_get(0) with
-  | Nothing -> print("usage: sprout run examples/text_demo.sprout <text>")
-  | Just raw -> print(summarize(raw))
+  match argv.get(0) with
+  | Ok (Just raw) -> print(summarize(raw))
+  | Ok Nothing -> print("usage: sprout run examples/text_demo.sprout <text>")
+  | Err _ -> print("the argument is not valid UTF-8")

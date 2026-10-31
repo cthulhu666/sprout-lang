@@ -242,17 +242,34 @@ fn accept_loop(cfg: Config, scope: Scope, pool: Pool, listener: consuming TcpLis
         close_listener(listener)
         panic(`accept failed: ${tcp_error_message(err)}`)
 
-fn env_or(name: String, fallback: String) -> String !{IO} =
+fn env_or(name: String, fallback: String) -> Result String String !{IO} =
   match env.get(name) with
-  | Just value -> value
-  | Nothing -> fallback
+  | Ok (Just value) -> Ok(value)
+  | Ok Nothing -> Ok(fallback)
+  | Err _ -> Err(`${name} is not valid UTF-8`)
 
-fn main() -> Unit !{IO} =
+fn settings() -> Result String (String, String, String, String) !{IO} =
   do
     db_path <- env_or("SQLITE_PATH", "feed.db")
     secret <- env_or("JWT_SECRET", "")
     host <- env_or("HOST", "127.0.0.1")
     port <- env_or("PORT", "3000")
+    Ok((db_path, secret, host, port))
+
+# A setting that is not valid UTF-8 ends the run with a message and status 1.
+fn main() -> Int !{IO} =
+  match settings() with
+  | Err msg ->
+      do
+        eprint(msg)
+        1
+  | Ok (db_path, secret, host, port) ->
+      do
+        run(db_path, secret, host, port)
+        0
+
+fn run(db_path: String, secret: String, host: String, port: String) -> Unit !{IO} =
+  do
     started <- time.now_micros()
     let cfg = Config(secret = bytes.from_string(secret), started_us = started)
     match sqlite_open(db_path) with

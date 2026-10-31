@@ -6,7 +6,7 @@ import stdlib.json as json
 import stdlib.process as process
 import stdlib.string as string
 import stdlib.terminal as terminal
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # eval_expr_in_source end to end: the service compiles the buffer with a `main` built
 # around the expression, links it and runs it. No binding is added for the expression, so
@@ -64,7 +64,7 @@ fn main() -> Unit !{IO} =
   do
     test <- new_state()
     have_clang <- clang_available()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> assert_true(test, "eval end to end (auto-skipped: no SPROUT_STDLIB_ROOT)", true)
     | Just root ->
         if have_clang then

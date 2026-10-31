@@ -6,7 +6,7 @@ import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
 import stdlib.json as json
 import stdlib.string as string
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # An import with no file behind it is an error at its own line: a dotted name
 # with no package root, or a path that cannot be read. A REPL session survives it.
@@ -87,7 +87,7 @@ fn repl_cases(t: TestState, root: String) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     t <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing ->
         assert_true(t, "SPROUT_STDLIB_ROOT is set (the suite cannot bundle without it)", false)
     | Just root ->

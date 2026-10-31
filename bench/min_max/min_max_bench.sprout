@@ -9,6 +9,7 @@ module main
 #   int      `imath.max`
 #   inline   `if a >= b then a else b`, written out
 
+import stdlib.argv as argv
 import stdlib.time as time
 import stdlib.math.int as imath
 
@@ -70,7 +71,6 @@ let usage = "usage: min_max_bench <variant> <n> <reps>"
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
-    let [variant, n_text, reps_text] = args else print(usage)
+    let Ok([variant, n_text, reps_text]) = argv.all() else print(usage)
     let (Just n, Just reps) = (parse_int(n_text), parse_int(reps_text)) else print(usage)
     run(variant, n, reps)

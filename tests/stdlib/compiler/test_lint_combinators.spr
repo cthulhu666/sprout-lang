@@ -4,7 +4,7 @@ import stdlib.test (TestState, new_state, assert_true, assert_false, assert_eq, 
 import stdlib.compiler.lint_rules as lint_rules
 import stdlib.compiler.lint_pattern as lint_pattern
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 import stdlib.string as string
 
 # THE EMBEDDED COMBINATOR SOURCE MUST NOT DRIFT FROM THE PRELUDE.
@@ -18,7 +18,7 @@ import stdlib.string as string
 # not — the suite runs from the repo root and downstream repos never run it.
 
 fn stdlib_root() -> String !{IO} =
-  maybe_with_default("stdlib", env.get("SPROUT_STDLIB_ROOT"))
+  maybe_with_default("stdlib", envvar.read("SPROUT_STDLIB_ROOT"))
 
 fn read_prelude(root: String) -> String !{IO} =
   match fs.read_text(root ++ "/prelude.sprout") with

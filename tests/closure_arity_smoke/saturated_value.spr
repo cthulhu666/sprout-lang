@@ -15,10 +15,10 @@ fn add2(x: Int, y: Int) -> Int = x + y
 
 fn nested() -> Int -> Int -> Int = \x -> \y -> x + y
 
-fn pick_nary(args: List String) -> Int -> Int -> Int =
+fn pick_nary(args: List Bytes) -> Int -> Int -> Int =
   if list_length(args) == 0 then add2 else nested()
 
-fn pick_curried(args: List String) -> Int -> Int -> Int =
+fn pick_curried(args: List Bytes) -> Int -> Int -> Int =
   if list_length(args) == 0 then nested() else add2
 
 # A function-typed PARAMETER: the arity is invisible at this definition site, so
@@ -27,7 +27,7 @@ fn feed_saturated(g: Int -> Int -> Int) -> Int = g(1, 2)
 
 fn main() -> Unit !{IO} =
   do
-    args <- argv_all()
+    args <- argv_all_bytes()
     let nary = pick_nary(args)
         curried = pick_curried(args)
     print(int_to_string(nary(1, 2)))

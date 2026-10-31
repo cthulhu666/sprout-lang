@@ -5,7 +5,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # ONE QUESTION, ONE ANSWER: the two typecheck front ends must reach the same verdict.
 #
@@ -39,7 +39,7 @@ import stdlib.env as env
 # time. That case belongs to the timeout-bounded sweep gate instead.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

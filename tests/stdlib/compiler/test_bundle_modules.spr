@@ -4,7 +4,7 @@ import stdlib.compiler.bundler as bundler
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # BundleOk's modules are what infer checks one at a time (a class is checked at
 # its module's start, an instance registered there), so each must be one module:
@@ -31,7 +31,7 @@ fn check_modules(state: TestState, modules: List (List ast.Decl)) -> Unit !{IO} 
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing ->
         assert_true(state, "SPROUT_STDLIB_ROOT is set (the suite cannot bundle without it)", false)
     | Just stdlib_root ->

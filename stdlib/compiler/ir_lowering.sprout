@@ -621,10 +621,7 @@ let runtime_declares: List RuntimeDeclare =
    decl("i128", "map_nth_value_unboxed", "i64, i64"),
    decl("i128", "bytes_get_unboxed", "i64, i64"),
    decl("i128", "str_char_at_unboxed", "i64, i64"),
-   decl("i128", "argv_get_unboxed", "i64"),
-   decl("i128", "env_get_unboxed", "i64"),
-   decl("i64", "argv_get", "i64"),
-   # The C main shim stashes argc/argv so argv_all()/argv_get() work.
+   # The C main shim stashes argc/argv so argv_all_bytes()/argv.all() work.
    decl("i64", "sprout_set_argv", "i32, ptr"),
    # Compiler-bridge intrinsics, registered only via checker.analysis_entries()
    # and synthesised into call sites, never as a TExternFnDecl. String args are
@@ -765,8 +762,8 @@ fn emit_ctor_reg_calls(regs: List sprout_ir.CtorReg) -> String =
 # Unit-returning main keeps its current exit-code-0 behaviour unconditionally.
 export fn main_shim(regs: List sprout_ir.CtorReg, has_init: Bool, has_user_main: Bool, main_returns_int: Bool) -> String =
   "define i32 @main(i32 %argc, ptr %argv) {\nentry:\n" ++
-    # Stash argc/argv into the runtime before any user code so argv_all()/
-    # argv_get() work (mirrors direct codegen).  Allocates nothing, so its
+    # Stash argc/argv into the runtime before any user code so argv_all_bytes()/
+    # argv.all() work (mirrors direct codegen).  Allocates nothing, so its
     # position relative to the ctor registrations below does not matter.
     "  %argv_set = call i64 @sprout_set_argv(i32 %argc, ptr %argv)\n" ++
     emit_ctor_reg_calls(regs) ++

@@ -1,5 +1,7 @@
 module stdlib.args
 
+import stdlib.argv as argv
+import stdlib.bytes as bytes
 import stdlib.string as string
 
 # A small, pure `--key=value` argv parser — named CLI arguments in place of
@@ -38,8 +40,9 @@ fn parse_go(tokens: List String, opts: Dict String, pos_rev: List String) -> Arg
               if string.is_empty(body) then parse_go(rest, opts, pos_rev)
               else parse_go(rest, dict_set(body, "", opts), pos_rev)
 
-export fn parse_argv() -> Args !{IO} =
-  parse(argv_all())
+# `Err` if any argument is not valid UTF-8 (see `argv.all`).
+export fn parse_argv() -> Result bytes.Utf8Error Args !{IO} =
+  result_map(parse, argv.all())
 
 # Raw value of an option/flag key, if the key was present (a bare flag reads "").
 export fn arg_get(a: Args, key: String) -> Maybe String =

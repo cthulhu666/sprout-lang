@@ -4,7 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # The missing-instance message hints `deriving (C)` only for a program type that can
 # derive C. A type with a function-typed field cannot: the derived method would need an
@@ -41,7 +41,7 @@ fn check_no_hint(state: TestState, label: String, msg: String) -> Unit !{IO} =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just root ->
         do

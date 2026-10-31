@@ -4,7 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # Known-instance fusion (docs/try-propagate-v0.md §5): a `try` at a known instance
 # emits the IR of the hand-written `match`, with no `branch` call and no
@@ -183,7 +183,7 @@ fn check_pair(state: TestState, stdlib_root: String, name: String, try_src: Stri
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

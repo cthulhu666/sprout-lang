@@ -6,13 +6,13 @@
  * Covered: read_file (null path, directory, missing file, invalid UTF-8, Ok), write_file (null
  * path, null content, unopenable path, short write on /dev/full where it exists, Ok), fs_list_dir
  * (entries; Err(FsNotFound) and Err(FsInvalidPath), which leave through sprout_err1_text, the
- * helper http, crypto and tcp share), stdin_read_bytes, and the non-String words of
+ * helper http, crypto and tcp share), stdin_read_bytes (as Bytes), and the non-String words of
  * fs_read_bytes and read_int_lines.
  * Not covered: read_file's out-of-memory branches and its "-" (stdin) path, fs_list_dir's readdir
  * error, the other fs_* entry points (they share fs_err), and the http, crypto and tcp callers
  * of sprout_err1_text.
  *
- * argv[1] = a scratch directory that exists and is empty; stdin carries the bytes "hello".
+ * argv[1] = a scratch directory that exists and is empty; stdin carries the bytes "hel\0o".
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -29,6 +29,7 @@ long long fs_read_bytes(long long path_i);
 long long stdin_read_bytes(long long n);
 long long read_int_lines(const char* path);
 long long bytes_length(long long bytes_h);
+long long bytes_get(long long bytes_h, long long index);
 long long vector_length(long long vec);
 long long vector_get(long long vec, long long index);
 
@@ -139,10 +140,16 @@ int main(int argc, char** argv) {
   if (vector_length(ints) != 3 || sprout_tag(last) != JUST || sprout_field(last, 0) != 3)
     return fail("read_int_lines");
 
-  /* stdin_read_bytes: Just("hello"), then Nothing at EOF. */
+  /* stdin_read_bytes: Just(Bytes "hel\0o", NUL kept), then Nothing at EOF. */
   long long in = stdin_read_bytes(5);
-  if (sprout_tag(in) != JUST || !is_str(sprout_field(in, 0), "hello"))
-    return fail("stdin_read_bytes(5) is not Just(\"hello\")");
+  static const char want[5] = { 'h', 'e', 'l', '\0', 'o' };
+  if (sprout_tag(in) != JUST || bytes_length(sprout_field(in, 0)) != 5)
+    return fail("stdin_read_bytes(5) is not Just(<5 bytes>)");
+  for (int i = 0; i < 5; i++) {
+    long long b = bytes_get(sprout_field(in, 0), i);
+    if (sprout_tag(b) != JUST || sprout_field(b, 0) != (unsigned char)want[i])
+      return fail("stdin_read_bytes(5) changed a byte");
+  }
   if (sprout_tag(stdin_read_bytes(1)) != NOTHING) return fail("stdin_read_bytes at EOF");
 
   printf("fs-io-strings\n");
