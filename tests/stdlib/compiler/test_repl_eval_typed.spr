@@ -4,7 +4,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.bundler as bundler
 import stdlib.fs as fs
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # Coverage + forward-regression guard for `compile_full_ir` and
 # `compile_question_ir`, the entry the REPL / analysis-service daemon uses to
@@ -53,7 +53,7 @@ fn first_diag_msg(r: compiler.IrFullResult) -> String =
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    match env.get_or_panic("SPROUT_STDLIB_ROOT") with
+    match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
         do

@@ -4,7 +4,7 @@ import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.string as string
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # A CANONICAL NAME IS NOT A WAY TO REACH A MODULE.
 #
@@ -24,7 +24,7 @@ import stdlib.env as env
 # over-fires takes record access down with it.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 
