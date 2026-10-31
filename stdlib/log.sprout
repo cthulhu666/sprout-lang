@@ -148,9 +148,14 @@ where
   next = bytes.get_or(b, i + 1, 256)
   last = bytes.get_or(b, i + 2, 256)
 
-# The length of the sequence at `i` that is rewritten: 0 none, 1 an ASCII byte, 2 or 3 multi-byte.
-fn escape_len(quoted: Bool, b: Bytes, i: Int) -> Int =
-  if escaped_byte(quoted, bytes.get_or(b, i, 256)) then 1 else multi_len(b, i)
+# The start and length of the next sequence at or after `i` that `single` accepts as one byte (length
+# 1) or `multi_len` accepts (2 or 3). A lead byte that starts a passing sequence (U+00A0) is skipped.
+fn find_seq(single: Int -> Bool, b: Bytes, i: Int) -> Maybe (Int, Int) =
+  match bytes.find_byte_from(\x -> single(x) || multi_lead(x), b, i) with
+  | Nothing -> Nothing
+  | Just at ->
+      let len = if single(bytes.get_or(b, at, 256)) then 1 else multi_len(b, at)
+      in if len == 0 then find_seq(single, b, at + 1) else Just((at, len))
 
 fn escape_piece(b: Bytes, i: Int, len: Int) -> String =
   if len == 2 then "\\u00" ++ hex.encode(bytes.slice(b, i + 1, 1))
@@ -165,39 +170,28 @@ fn escape_ascii(b: Int) -> String =
   else if b == 92 then "\\\\"
   else "\\x" ++ hex.encode(bytes.singleton(b))
 
-# `run` is the start of the current verbatim run and `acc` holds the pieces, reversed. `hit` accepts
-# every byte that may start an escape; `escape_len` then decides, so a lead byte that starts a
-# passing sequence (U+00A0) is skipped without ending the run. At each escape, flush the run, then
-# the escape, and start a new run after it. `raw` itself comes back when no run was ever flushed.
-fn escape_go(quoted: Bool, hit: Int -> Bool, raw: String, b: Bytes, run: Int, i: Int, acc: List String) -> List String =
-  match bytes.find_byte_from(hit, b, i) with
-  | Nothing -> if run == 0 then [raw] else Cons(str_slice_bytes(raw, run, bytes.length(b) - run), acc)
-  | Just at ->
-      let len = escape_len(quoted, b, at)
-      in if len == 0 then escape_go(quoted, hit, raw, b, run, at + 1, acc)
-         else escape_go(quoted, hit, raw, b, at + len, at + len,
-           Cons(escape_piece(b, at, len), Cons(str_slice_bytes(raw, run, at - run), acc)))
+# `run` is the start of the current verbatim run and `acc` holds the pieces, reversed. At each
+# sequence `find_seq` finds, flush the run, then the escape, and start a new run after it. Nil when
+# nothing was flushed, so the caller keeps `raw` itself.
+fn escape_go(single: Int -> Bool, raw: String, b: Bytes, run: Int, i: Int, acc: List String) -> List String =
+  match find_seq(single, b, i) with
+  | Nothing -> if run == 0 then Nil else Cons(str_slice_bytes(raw, run, bytes.length(b) - run), acc)
+  | Just (at, len) ->
+      escape_go(single, raw, b, at + len, at + len,
+        Cons(escape_piece(b, at, len), Cons(str_slice_bytes(raw, run, at - run), acc)))
 
 # O(bytes). `raw` itself when nothing needs rewriting. `b` is `raw` encoded.
 fn escape_text(quoted: Bool, raw: String, b: Bytes) -> String =
-  match escape_go(quoted, \x -> escaped_byte(quoted, x) || multi_lead(x), raw, b, 0, 0, Nil) with
-  | [only] -> only
+  match escape_go(\x -> escaped_byte(quoted, x), raw, b, 0, 0, Nil) with
+  | Nil -> raw
   | parts -> string_concat_many(list_reverse(parts))
 
-fn quote_lead(b: Int) -> Bool =
-  quote_byte(b) || multi_lead(b)
-
-# True when a byte at or after `i` forces quotes. A lead byte that starts a passing sequence is skipped.
-fn quote_at(b: Bytes, i: Int) -> Bool =
-  match bytes.find_byte_from(quote_lead, b, i) with
-  | Nothing -> false
-  | Just at ->
-      if quote_byte(bytes.get_or(b, at, 256)) || multi_len(b, at) > 0 then true
-      else quote_at(b, at + 1)
+fn needs_quotes(b: Bytes) -> Bool =
+  is_just(find_seq(quote_byte, b, 0))
 
 # A key or a value: bare, or quoted and escaped. Encoded once for both passes.
 fn render_atom(raw: String) -> String =
-  if string.is_empty(raw) || quote_at(encoded, 0) then "\"" ++ escape_text(true, raw, encoded) ++ "\""
+  if string.is_empty(raw) || needs_quotes(encoded) then "\"" ++ escape_text(true, raw, encoded) ++ "\""
   else raw
 where
   encoded = bytes.from_string(raw)

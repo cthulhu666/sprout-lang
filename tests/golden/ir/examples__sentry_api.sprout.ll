@@ -266,7 +266,7 @@ declare i64 @http_request(i64, i64, i64, i64, i64)
 @.str.151 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in - (line 212, column 80)\00" }
 @.str.152 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 230, column 49)\00" }
 @.str.153 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 231, column 36)\00" }
-@.str.154 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 255, column 45)\00" }
+@.str.154 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 253, column 45)\00" }
 @.str.155 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 18, column 39)\00" }
 @.str.156 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in * (line 18, column 46)\00" }
 @.str.157 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 18, column 57)\00" }
@@ -13868,48 +13868,29 @@ entry:
 
 define i64 @stdlib.bytes.all_bytes(i64 %p$hit, i64 %p$value) {
 entry:
-  %t$12 = alloca i64
-  store i64 %p$value, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$14 = alloca i64
-  store i64 %p$hit, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
+  %t$5 = alloca i64
+  store i64 %p$value, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %p$hit, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
   store ptr @__sprout_ir_lambda_35, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$hit, ptr %t$0$raw$slot$1
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$1 = add i64 0, 0
-  %t$17 = alloca i64
-  store i64 %t$0, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$10 = alloca i64
+  store i64 %t$0, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$2$st = call i128 @stdlib.bytes.find_byte_from_worker(i64 %t$0, i64 %p$value, i64 %t$1)
   %t$2 = trunc i128 %t$2$st to i64
   %t$2$hi = lshr i128 %t$2$st, 64
   %t$3 = trunc i128 %t$2$hi to i64
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
-  br label %arm_0_4
-arm_0_4:
-  %t$6 = add i64 0, 1
-  %t$7 = icmp eq i64 %t$2, %t$6
-  br i1 %t$7, label %body_0_4, label %arm_1_4
-body_0_4:
-  %t$8 = add i64 0, 0
-  br label %join_4
-arm_1_4:
-  %t$9 = add i64 0, 0
-  %t$10 = icmp eq i64 %t$2, %t$9
-  br i1 %t$10, label %body_1_4, label %arm_2_4
-body_1_4:
-  %t$11 = add i64 0, 1
-  br label %join_4
-arm_2_4:
-  call void @sprout_abort_match()
-  unreachable
-join_4:
-  %t$5 = phi i64 [%t$8, %body_0_4], [%t$11, %body_1_4]
-  ret i64 %t$5
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$4 = call i64 @is_nothing_argw(i64 %t$2, i64 %t$3)
+  ret i64 %t$4
 }
 
 define i64 @stdlib.bytes.c_string_len_from(i64 %p$value$in, i64 %p$index$in, i64 %p$total$in) {
@@ -30988,6 +30969,31 @@ entry:
   %t$3$hi = shl i128 %t$3$hw, 64
   %t$3$r = or i128 %t$3$hi, %t$3$lo
   ret i128 %t$3$r
+}
+
+define i64 @is_nothing_argw(i64 %p$m$tag, i64 %p$m$val) {
+entry:
+  br label %arm_0_0
+arm_0_0:
+  %t$2 = add i64 0, 1
+  %t$3 = icmp eq i64 %p$m$tag, %t$2
+  br i1 %t$3, label %body_0_0, label %arm_1_0
+body_0_0:
+  %t$4 = add i64 0, 0
+  br label %join_0
+arm_1_0:
+  %t$5 = add i64 0, 0
+  %t$6 = icmp eq i64 %p$m$tag, %t$5
+  br i1 %t$6, label %body_1_0, label %arm_2_0
+body_1_0:
+  %t$7 = add i64 0, 1
+  br label %join_0
+arm_2_0:
+  call void @sprout_abort_match()
+  unreachable
+join_0:
+  %t$1 = phi i64 [%t$4, %body_0_0], [%t$7, %body_1_0]
+  ret i64 %t$1
 }
 
 define i64 @positive_from_neg_magnitude_argw(i64 %p$m$tag, i64 %p$m$val) {
