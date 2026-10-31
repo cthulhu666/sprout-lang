@@ -657,13 +657,13 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   reader uses; `bigint.builder_of_mag` and `hex` still hand-roll the same halving.
 
 - [ ] `P2` **`bytes.singleton` and `bytes.builder_byte` are partial**, trapping via `sprout_fail`
-  on a value outside 0..255 (`bytes_singleton`, `bytes_builder_byte`). `docs/guidelines.md` §2 makes
-  totality a hard mandate for [Library] code, so two stdlib exports currently break it. The sibling
-  `builder_u16_be`/`builder_u32_be` take the other branch and wrap silently, so the module is also
-  inconsistent with itself about an out-of-range byte. Decide one answer for all four — `Maybe
-  Bytes`, a documented wrap, or a smart constructor over a `Byte` wrap — since changing the two
-  trapping signatures is a breaking API change. Found while annotating complexity for the `Eq Bytes`
-  instance; the traps are pre-existing and undocumented until that change.
+  on a value outside 0..255 (`bytes_singleton`, which `builder_byte` calls). `docs/guidelines.md`
+  §2 makes totality a hard mandate for [Library] code, so two stdlib exports currently break it.
+  The sibling `builder_u16_be`/`builder_u32_be` take the other branch and wrap silently, so the
+  module is also inconsistent with itself about an out-of-range byte. Decide one answer for all
+  four — `Maybe Bytes`, a documented wrap, or a smart constructor over a `Byte` wrap — since
+  changing the two trapping signatures is a breaking API change. Found while annotating complexity
+  for the `Eq Bytes` instance; the traps are pre-existing and undocumented until that change.
 
 ### 3) JSON Support
 

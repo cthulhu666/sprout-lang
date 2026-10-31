@@ -63,7 +63,7 @@ moves run beside the other stages, one builtin per PR. It comes before the check
 signature for stage 6. It does not replace them: 97 of the 168 builtins stay C whatever it
 achieves, and stages 3 and 5 report a rooting bug a move exposes at the bad read.
 
-`runtime/APPROVED_BUILTINS` holds 168 names. By name prefix (2026-10-31):
+`runtime/APPROVED_BUILTINS` held 168 names on 2026-10-31. By name prefix:
 
 | Group | Count | Fate |
 |---|---|---|
@@ -93,8 +93,8 @@ Each of the 71 is a primitive other code builds on, a builtin the compiler emits
 |---|---|---|
 | `regex_is_match` | `regex_find_match` found something (see notes) | 12 |
 | `regex_escape` | byte scan, `str_slice_bytes`, `string_concat_many` | 17 |
-| `bytes_builder_u16_be`, `_u32_be` | `stdlib.bits` + `bytes_builder_byte` | 34 |
-| `bytes_builder_byte` | `bytes_builder_bytes(bytes_singleton(v))` | 10 |
+| `bytes_builder_u16_be`, `_u32_be` | `stdlib.bits` + `bytes.builder_byte` | 34 |
+| ~~`bytes_builder_byte`~~ | moved: [results](../bench/results-2026-10-31-bytes-builder-byte.md) | 10 |
 | `crypto_hmac_sha256` | `crypto_sha256`, `bytes_append`, `crypto_bytes_xor` | 41 |
 | `json_stringify` | match on `Json`, byte-scan escape | ≈ 167 |
 | `str_starts_with` | `str_starts_with_at_byte(s, 0, p)` | 7 |
@@ -109,9 +109,9 @@ Notes:
 - `json_stringify` writes floats with `%.17g`; `double_to_string` keeps the first of `%.15g` to
   `%.17g` that reads back. So its output changes (`0.1` prints `0.1`, not `0.10000000000000001`).
 - `bytes_builder_u16_be` and `_u32_be` have no caller in this repo but are used downstream.
-- The seed declares `bytes_builder_u16_be`, `_u32_be`, `bytes_builder_byte`, `str_starts_with`,
-  `split_words`, `str_split_lines`, `char_to_str`, `vector_empty`, `bytes_empty` and
-  `bytes_builder_empty`: moving any of them needs a reseed.
+- The seed declares `bytes_builder_u16_be`, `_u32_be`, `str_starts_with`, `split_words`,
+  `str_split_lines`, `char_to_str`, `vector_empty`, `bytes_empty` and `bytes_builder_empty`:
+  moving any of them needs a reseed.
 
 **Blocked on a missing primitive.** Each is the only kind of new builtin this stage may propose
 (AGENTS.md §Builtin vs Stdlib), ranked by what it unlocks:

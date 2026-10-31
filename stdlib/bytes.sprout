@@ -13,7 +13,6 @@ export extern fn bytes_from_utf8(s: String) -> Bytes
 extern fn bytes_to_utf8(b: Bytes) -> Result Utf8Error String
 extern fn bytes_builder_empty() -> Builder
 extern fn bytes_builder_bytes(b: Bytes) -> Builder
-extern fn bytes_builder_byte(val: Int) -> Builder
 extern fn bytes_builder_u16_be(val: Int) -> Builder
 extern fn bytes_builder_u32_be(val: Int) -> Builder
 extern fn bytes_builder_append(a: Builder, b: Builder) -> Builder
@@ -114,7 +113,7 @@ export fn builder_bytes(value: Bytes) -> Builder =
 
 # O(1): one 1-byte chunk. Traps outside 0..255, unlike the two builders below, which wrap.
 export fn builder_byte(value: Int) -> Builder =
-  bytes_builder_byte(value)
+  builder_bytes(singleton(value))
 
 # O(1): one 2-byte big-endian chunk. Each byte is taken mod 256, so a wider value wraps.
 export fn builder_u16_be(value: Int) -> Builder =
