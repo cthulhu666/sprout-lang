@@ -1,0 +1,42 @@
+module stdlib.compiler.switches
+
+import stdlib.env as env
+
+# The compiler's environment switches (SPROUT_OPT_OFF, SPROUT_TRACE_DISPATCH, ...). Each one only
+# changes diagnostics, tracing, verification or which optimisations run, never what a successful
+# compile produces, so a value that is not valid UTF-8 is reported and ignored: the switch reads
+# as unset. A switch that changes the output does not belong here; it reports through its driver.
+#
+# The compiler lives in the module that owns it, so the helper does too: nothing outside
+# stdlib/compiler/ should read a switch this way.
+
+fn invalid_notice(name: String) -> String =
+  name ++ " is not valid UTF-8; ignored"
+
+# The switch's value, or `Nothing` when it is unset or not valid UTF-8 (the notice goes to stderr).
+# Read at most once per compile, so the notice prints once.
+export fn env_switch(name: String) -> Maybe String !{IO} =
+  match env.get(name) with
+  | Ok value -> value
+  | Err _ ->
+      do
+        eprint(invalid_notice(name))
+        Nothing
+
+# The same without the notice, for a switch read at every call site or function. The notice for
+# these comes once per compile from `warn_invalid_repeated`.
+export fn env_switch_quiet(name: String) -> Maybe String !{IO} =
+  match env.get(name) with
+  | Ok value -> value
+  | Err _ -> Nothing
+
+# The notice for each switch read through `env_switch_quiet`, once.
+export fn warn_invalid_repeated() -> Unit !{IO} =
+  do
+    warn_if_invalid("SPROUT_TRACE_DISPATCH")
+    warn_if_invalid("SPROUT_VERIFY_ROOTS")
+
+fn warn_if_invalid(name: String) -> Unit !{IO} =
+  match env.get(name) with
+  | Err _ -> eprint(invalid_notice(name))
+  | Ok _ -> ()

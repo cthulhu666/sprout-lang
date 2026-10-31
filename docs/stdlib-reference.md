@@ -233,8 +233,6 @@ Crypto helpers (in `stdlib/crypto.sprout`):
 Environment module (in `stdlib/env.sprout`):
 
 - `get(name: String) -> Result Utf8Error (Maybe String) !{IO}`
-- `get_or_panic(name: String) -> Maybe String !{IO}` — for a switch read where there is no `Result`
-  to carry an error; a value that is not valid UTF-8 stops the program with `<name> is not valid UTF-8`
 - `env_get_bytes(name: String) -> Maybe Bytes !{IO}` — the raw bytes, unchecked
 
 `Ok(Nothing)` means the name is unset. A name set to the **empty string** is

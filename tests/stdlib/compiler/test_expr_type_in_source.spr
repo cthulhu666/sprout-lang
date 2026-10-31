@@ -5,7 +5,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.source as source
 import stdlib.compiler.bundler as bundler
 import stdlib.string as string
-import stdlib.env as env
+import testsupport.envvar as envvar
 
 # THE TYPE OF AN EXPRESSION IN A SOURCE CONTEXT — ONE AUTHORITY.
 #
@@ -28,7 +28,7 @@ import stdlib.env as env
 # output are observable, so each caller renders its own wording.
 
 fn stdlib_root() -> String !{IO} =
-  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 

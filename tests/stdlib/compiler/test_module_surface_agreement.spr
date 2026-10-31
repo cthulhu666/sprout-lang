@@ -5,7 +5,7 @@ import stdlib.compiler.compiler as compiler
 import stdlib.compiler.module_loader as module_loader
 import stdlib.compiler.bundler as bundler
 import stdlib.compiler.source as source
-import stdlib.env as env
+import testsupport.envvar as envvar
 import stdlib.fs as fs
 
 # THE TWO PATHS MUST AGREE ON WHAT AN IMPORT BRINGS INTO SCOPE.
@@ -49,7 +49,7 @@ fn session(imports: String, body: String) -> String =
 # no-opping to "0 passed, 0 failed / SUITE PASSED" — the trap recorded in
 # docs/repl-env-type-vocabulary-v0.md §9.
 fn stdlib_root() -> String !{IO} =
-  match env.get_or_panic("SPROUT_STDLIB_ROOT") with
+  match envvar.read("SPROUT_STDLIB_ROOT") with
   | Just root -> root
   | Nothing -> "stdlib"
 
