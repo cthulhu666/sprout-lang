@@ -11,9 +11,41 @@
 #   - char_from_codepoint round-trip (encode -> identity)
 #   - char_at / str_char_at result (Maybe Char return value flips ABI)
 #   - a Char carried in a tuple
+#   - a Char in a constructor field and a record field (field kind 'i', a scalar)
 #   - MULTI-BYTE chars throughout (the swept-multi-byte-char UAF class)
 import stdlib.string (char_at)
 import stdlib.test (check_eq, check_true, check_false, run_suite)
+
+# A Char beside a String in a constructor and in a record.
+type Glyph = Glyph Char String
+type Cell = (ch: Char, label: String)
+
+fn glyph_char(g: Glyph) -> Char =
+  match g with
+  | Glyph c _ -> c
+
+# One- to four-byte UTF-8 codepoints, so a misread field cannot pass by chance.
+fn nth_char(i: Int) -> Char =
+  match i - i / 4 * 4 with
+  | 0 -> 'a'
+  | 1 -> 'λ'
+  | 2 -> '✓'
+  | _ -> '😀'
+
+fn label_of(i: Int, ch: Char) -> String = int_to_string(i) ++ "-" ++ to_string(ch)
+
+# The i-th Glyph and Cell, sharing one Char and one label. Each call allocates,
+# so collections run while the list of earlier ones is live.
+fn fields_at(i: Int) -> (Int, Glyph, Cell) =
+  let ch = nth_char(i)
+      lbl = label_of(i, ch)
+  in (i, Glyph(ch, lbl), Cell(ch = ch, label = lbl))
+
+fn fields_intact(f: (Int, Glyph, Cell)) -> Bool =
+  let (i, g, c) = f
+      ch = nth_char(i)
+  in glyph_char(g) == ch && c.ch == ch && (c with (label = "x")).ch == ch
+     && c.label == label_of(i, ch)
 
 # Non-trivial: builds a Maybe, compares the payload (not a trivial accessor).
 fn char_at_eq(s: String, i: Int, expected: Char) -> Bool =
@@ -71,6 +103,9 @@ fn main() -> Unit !{IO} =
     # Char in a tuple
     check_true("tuple snd ascii", pair_snd_is('q')),
     check_true("tuple snd multibyte", pair_snd_is('λ')),
+
+    # Char in constructor and record fields, read back after collections
+    check_true("ctor and record fields", all(fields_intact, [fields_at(i) for i in 0..4999])),
 
     # 4-byte / high-codepoint chars (U+1F600 = 128512) — the path most likely to
     # surprise the i64-codepoint flip.

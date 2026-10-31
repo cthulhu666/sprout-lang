@@ -306,16 +306,13 @@ Each step is its own commit and keeps every gate green.
    invisible to it. Matching every non-static C definition would instead flag cross-TU internals
    (`sprout_poll_init`, `scheduler_park_on_fd`, `sprout_roots_new`). Build the set from the Sprout
    side: every stdlib `extern fn`, plus the runtime declares in `ir_lowering.sprout`.
-7. **Stale comments.** `s` is String only, and Char is an `i64` codepoint (`i`), compared with
-   `icmp`, never `str_compare`. Fix every comment that calls Char a String:
-   - the `CtorMeta` `field_kinds` comment;
-   - in `sprout_ir.sprout`: the IRStrCompare comment ("String/Char ordering", "treats Char as a
-     single-codepoint String"), `'s' (String AND Char)` and `'s'=String/Char`;
-   - in `ir_lowering.sprout`: the two "String/Char handles" comments on the `str_compare` path;
-   - in `ast_to_ir.sprout`: the comment on interned literals still names `intern_string`, now
-     `sprout_str_intern`.
-
-   The last three files are under `stdlib/compiler/`, so this step reseeds.
+7. ~~**Stale comments.**~~ Landed: `s` is String only, and Char is an `i64` codepoint (`i`),
+   compared with `icmp`, never `str_compare`. The `CtorMeta` `field_kinds` comment, the
+   `IRStrCompare`, `IRGetField` and `CtorReg` comments in `sprout_ir.sprout`, the two
+   `str_compare` comments in `ir_lowering.sprout`, and the `argv_get`/`env_get` note in
+   `ast_to_ir.sprout` (`intern_string`, now `sprout_str_intern`) say so.
+   `tests/stdlib/test_char_representation.spr` reads a Char back from a constructor field and a
+   record field after collections.
 
 Gates per step: `just c-runtime-test`, `SPROUT_GC_HDRCHECK=1 just test`, `just ci-fast-gates`,
 `just linux-smoke`, `just check-approved-builtins`. Only step 7 reseeds.

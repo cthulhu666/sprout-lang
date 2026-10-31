@@ -274,7 +274,7 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ " = zext i1 " ++ r ++ "$i1 to i64"
   | sprout_ir.IRStrCompare r pred a b ->
       # str_compare takes i64/i64 per the C signature (long long str_compare(long long, long long)).
-      # Operands are already i64 String/Char handles — NO inttoptr needed.
+      # Operands are already i64 String handles — NO inttoptr needed.
       # Declare: `declare i64 @str_compare(i64, i64)` in ir_header().
       # The runtime returns -1/0/1; icmp <pred> against 0 gives the Bool i1;
       # zext to i64 produces the Bool ABI value.
@@ -574,7 +574,7 @@ let runtime_declares: List RuntimeDeclare =
    # str_eq takes ptr/ptr and returns i1 (C: _Bool str_eq(const char*, const char*)).
    # Strings are passed as i64 in the uniform ABI; IRStrEq lowering coerces with inttoptr.
    decl("i1", "str_eq", "ptr, ptr"),
-   # Returns -1/0/1 for i64 String/Char handles; IRStrCompare compares it to 0.
+   # Returns -1/0/1 for i64 String handles; IRStrCompare compares it to 0.
    decl("i64", "str_compare", "i64, i64"),
    decl("i64", "str_slice", "i64, i64, i64"),
    decl("i64", "int_to_string", "i64"),

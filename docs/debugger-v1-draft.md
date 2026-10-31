@@ -159,7 +159,7 @@ typedef struct {
 
 The codegen has the information to derive `field_kinds` at constructor-emission time:
 `CtorSig` carries both `arg_lltypes` (for the `i64`/`i1` distinction) and
-`arg_type_exprs` (for distinguishing String/Char `i64` from Int/ADT `i64`).
+`arg_type_exprs` (for distinguishing String `i64` from Int/ADT `i64`).
 
 This global is inert at runtime — never read by the program itself, only by debugger
 tools introspecting the binary.

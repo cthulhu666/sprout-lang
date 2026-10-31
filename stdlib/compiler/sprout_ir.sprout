@@ -296,13 +296,13 @@ export type IROp (..) =
   # `!=` appends IRBoolNot on the i64 result.
   # Mirrors direct codegen's emit_ptr_comparison (codegen.sprout ~2094).
   | IRStrEq String String String
-  # IRStrCompare <result> <pred> <lhs> <rhs>  — String/Char ordering (lowers to @str_compare).
-  # Both operands are i64-uniform String/Char handles (the ABI treats Char as a
-  # single-codepoint String).  Lowering calls `i64 @str_compare(i64, i64)` (which
+  # IRStrCompare <result> <pred> <lhs> <rhs>  — String ordering (lowers to @str_compare).
+  # Both operands are i64 String handles.  Lowering calls `i64 @str_compare(i64, i64)` (which
   # returns -1/0/1 per the C signature), then `icmp <pred> i64 <result>, 0`, then
   # zexts the i1 to i64 (Bool ABI).
   # pred is one of: "slt" / "sle" / "sgt" / "sge".
-  # Emitted by translate_binop for `<` / `<=` / `>` / `>=` on String/Char operands.
+  # Emitted by translate_binop for `<` / `<=` / `>` / `>=` on String operands.  A Char
+  # is an i64 codepoint and orders with a plain icmp.
   # Note: String literal ordering is additionally gated by infer.sprout's check_compare
   # (which currently accepts only Int/Char); the is_string_type routing arm here is a
   # forward-compatibility hook for when that restriction is lifted.
@@ -390,10 +390,9 @@ export type IROp (..) =
   # `field_kinds` is computed by build_ctor_table and passed to
   # CtorReg; the same value is threaded into the dict. translate_match
   # decodes per-byte via stdlib.compiler.field_kinds.field_kind_char_to_irtype:
-  #   'i' (Int)              -> IRTScalar
+  #   'i' (Int|Char)         -> IRTScalar
   #   'b' (Bool)             -> IRTScalar
-  #   's' (String AND Char)  -> IRTHeap   (/code-review fix #1: String must
-  #                                        be rooted; Char over-rooted)
+  #   's' (String)           -> IRTHeap
   #   'p' (ADT|closure|tuple) -> IRTHeap
   #   '_' (type-var)         -> IRTUnknown   (conservative — avoid missed roots)
   # Lowers to: %result = call i64 @sprout_field(i64 %scrut-handle, i64 <idx>)
@@ -659,7 +658,7 @@ export fn is_tco_entry(op: IROp) -> Bool =
 
 # CtorReg carries the metadata emitted as @sprout_register_ctor calls in @main.
 # Fields: name (source-level, possibly qualified), tag, arity, field_kinds.
-# field_kinds encoding: 'i'=Int, 'b'=Bool, 's'=String/Char, 'p'=ADT/closure/tuple,
+# field_kinds encoding: 'i'=Int/Char, 'b'=Bool, 's'=String, 'p'=ADT/closure/tuple,
 # '_'=type-var.  Matches codegen.sprout's ctor_field_kinds_string byte-for-byte.
 # Every constructor (boxed and CPR-eligible) is registered so the runtime's
 # find_ctor(tag) never returns NULL during GC tracing.
