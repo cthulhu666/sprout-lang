@@ -1,0 +1,35 @@
+module main
+
+# The occurrence is reached through two polymorphic layers, so its type is a
+# variable unified several times over. The result tuple is `(a, b)` in one
+# function and `(b, a)` in the other: the slot follows the type, not the order of
+# the constraints.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn layer(f: Int -> c, n: Int) -> c = apply_int(f, n)
+
+fn layer2(f: Int -> d, n: Int) -> d = layer(f, n)
+
+fn straight(x: a, y: b) -> (a, b) where Make a, Make b =
+  (layer2(from_int, 1), layer2(from_int, 2))
+
+fn swapped(x: a, y: b) -> (b, a) where Make a, Make b =
+  (layer2(from_int, 1), layer2(from_int, 2))
+
+fn main() -> Unit !{IO} = do
+  match straight(0, "q") with
+  | (m, n) -> print(int_to_string(m) ++ "|" ++ n)
+  match swapped(0, "q") with
+  | (m, n) -> print(m ++ "|" ++ int_to_string(n))
+  match swapped("q", 0) with
+  | (m, n) -> print(int_to_string(m) ++ "|" ++ n)

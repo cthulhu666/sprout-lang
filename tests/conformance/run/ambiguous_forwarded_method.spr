@@ -1,11 +1,9 @@
 module main
 
 # `from_int`'s class variable is in its RESULT, so its class position carries no
-# tvar head and the forwarded slot cannot be chosen by key. Reaching the site
-# through the polymorphic `apply_int` leaves its type a fresh tvar that no
-# @eta_fwd marker names, so which of the two constraints this occurrence belongs
-# to is not recoverable at lowering. Both slots carry the method; picking either
-# runs one instance's code at the other's type. Rejected instead of guessed.
+# tvar head. Reached through the polymorphic `apply_int`, the occurrence's type is
+# the representative of the unified variables, which `@eta_fwdvar` maps back to the
+# written `a` or `b`. Each occurrence takes its own constraint's slot.
 
 class Make t
   fn from_int(n: Int) -> t

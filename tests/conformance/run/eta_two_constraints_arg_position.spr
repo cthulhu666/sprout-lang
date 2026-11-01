@@ -1,0 +1,33 @@
+module main
+
+# The class variable is in an argument. `bump` has it in the argument and the
+# result; `weigh` in the argument only, used with the constraints swapped.
+
+class Step t
+  fn bump(x: t) -> t
+  fn weigh(x: t) -> Int
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+  fn weigh(x: Int) -> Int = x * 10
+
+instance Step String
+  fn bump(x: String) -> String = x ++ "!"
+  fn weigh(x: String) -> Int = str_len(x)
+
+fn app(f: t -> t, x: t) -> t = f(x)
+
+fn app_w(f: t -> Int, x: t) -> Int = f(x)
+
+fn bump_both(x: a, y: b) -> (a, b) where Step a, Step b = (app(bump, x), app(bump, y))
+
+fn weigh_swapped(x: a, y: b) -> (Int, Int) where Step a, Step b =
+  (app_w(weigh, y), app_w(weigh, x))
+
+fn main() -> Unit !{IO} = do
+  match bump_both(7, "q") with
+  | (m, n) -> print(int_to_string(m) ++ "|" ++ n)
+  match bump_both("q", 7) with
+  | (m, n) -> print(m ++ "|" ++ int_to_string(n))
+  match weigh_swapped(7, "abc") with
+  | (m, n) -> print(int_to_string(m) ++ "|" ++ int_to_string(n))

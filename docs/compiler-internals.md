@@ -684,8 +684,12 @@ A request finds a slot by name, so every producer names its variables:
 `named_typeexpr` and `type_to_typeexpr_with_prog_vars` in `infer` (through `@fwdvar`, then
 the signature variable the substitution now identifies it with, `sig_var_now_named`), and
 `@eta_fwdvar` markers, one per signature variable, for the value-position paths in
-`resolve.method_ref_evidence` and `lowering.eta_slot_key`, written after the body is
-inferred under both the seeded and the final variable. `resolve` checks a method used as
+`resolve.method_ref_evidence`, `lowering.eta_slot_key` and `lowering.eta_class_var_name`,
+written after the body is inferred under both the seeded and the final variable, and all
+read through `types.eta_written_var`. A method
+used as a value under two same-class constraints has the unification representative as its
+class variable, which only this marker maps back to `a` or `b`; a variable with no marker
+names no slot. `resolve` checks a method used as
 a value against them as it checks a call, so a missing `where` is reported for both. A
 local that shadows a method (`empty` in a `where`) is turned back into a variable first,
 in `infer`'s post-pass (`resolve_dispatch_typed_expr`), or it would be checked as one.

@@ -32,9 +32,9 @@ fn fold_all(xs: List t) -> t where Blank t = list_fold(combine, blank(), xs)
 # `blank` unapplied under a forwarded dict: the eta path, not a direct call.
 fn seeded(x: t) -> t where Blank t = combine(x, run_thunk(blank))
 
-# A SECOND same-class constraint makes this shape unresolvable rather than harder:
-# both slots carry `blank` and the occurrence's type is a fresh tvar naming neither,
-# so it is rejected. See tests/conformance/emit_error/ambiguous_forwarded_nullary.spr.
+# A SECOND same-class constraint puts `blank` in both slots; the occurrence's
+# variable is named through `@eta_fwdvar`. See
+# tests/conformance/run/ambiguous_forwarded_nullary.spr and eta_two_constraints_nullary.spr.
 
 fn main() -> Unit !{IO} =
   run_suite("nullary_class_method_dispatch", [

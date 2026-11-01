@@ -7,9 +7,10 @@ import testsupport.ident_class as ident
 # the result, as `parse`/`decode`/`from_int` all have — there is no key to look up
 # and selection falls back to scanning the slots by method name.
 #
-# One constraint means one candidate, so that scan cannot pick wrongly. Every
-# ambiguous shape is rejected at compile time rather than tested here;
-# `tests/conformance/emit_error/ambiguous_forwarded_*.spr` carry them.
+# One constraint means one candidate, so that scan cannot pick wrongly. With two
+# same-class constraints the occurrence's variable is named through `@eta_fwdvar`;
+# `tests/conformance/run/eta_two_constraints_*.spr` and `ambiguous_forwarded_*.spr`
+# carry those.
 
 class Make t
   fn from_int(n: Int) -> t

@@ -222,6 +222,13 @@ export fn arity_marker_key(ctor: String) -> String = "@arity:" ++ ctor
 export fn fwd_marker_key(tyvar: String, class_name: String) -> String = fwd_marker_tag ++ tyvar ++ ":" ++ class_name
 export fn eta_fwd_marker_key(tyvar: String, class_name: String) -> String = "@eta_fwd:" ++ tyvar ++ ":" ++ class_name
 export fn eta_fwdvar_marker_key(tyvar: String) -> String = "@eta_fwdvar:" ++ tyvar
+
+# The signature variable an `@eta_fwdvar` marker names for inference variable `v`.
+export fn eta_written_var(v: TyVarId, scheme_env: Dict Scheme) -> Maybe String =
+  let Just scheme = dict_get(eta_fwdvar_marker_key(tyvar_identity(v)), scheme_env) else Nothing
+      TConst prog_var = scheme_type(scheme) else Nothing
+  in Just(type_id_name(prog_var))
+
 export fn super_marker_prefix(class_name: String) -> String = super_marker_tag ++ class_name ++ ":"
 export fn super_marker_key(class_name: String, super_name: String) -> String = super_marker_prefix(class_name) ++ super_name
 export fn rec_fields_prefix(rec_name: String) -> String = rec_marker_tag ++ rec_name ++ ":"
