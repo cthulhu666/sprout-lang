@@ -273,7 +273,7 @@ Each step is its own commit and keeps every gate green.
    - crypto: `crypto_sha256`, `crypto_hmac_sha256`, `crypto_base64_encode`,
      `crypto_base64_decode`, `crypto_bytes_xor`, `crypto_random_bytes`; `crypto_base64_decode`
      takes the String as a word.
-   - bytes: `bytes_empty`, `bytes_slice`, `bytes_append`, `bytes_singleton`, `bytes_from_utf8`,
+   - bytes: `bytes_slice`, `bytes_append`, `bytes_singleton`, `bytes_from_utf8`,
      `bytes_to_utf8`, and the `bytes_builder_*` constructors; `tests/c_runtime/bytes_crypto.c`,
      also under `SPROUT_GC_STRESS=1`.
    - terminal: `term_read_key`, `term_key_utf8`, `term_read_line`, `term_read_avail`,

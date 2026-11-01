@@ -1,0 +1,88 @@
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
+import stdlib.bytes as bytes
+import stdlib.linvec as linvec
+import stdlib.mutable (mutvec_empty, mutvec_len, mutvec_push)
+
+# The empty constructors return fresh state each call (MutVec, LinVec) or an unchanged value
+# (Vec, Bytes, Builder): no use of one empty may show through a later one.
+
+# (label, length) of each empty.
+fn empty_lengths() -> List (String, Int) !{IO} =
+  do
+    m <- mutvec_empty()
+    mutvec_len_m <- mutvec_len(m)
+    let lin = linvec.empty()
+    let lin_len = linvec.length(lin)
+    let _ = linvec.drop(lin)
+    [("Vec", vec_length(vec_empty())),
+     ("MutVec", mutvec_len_m),
+     ("LinVec", lin_len),
+     ("Bytes", bytes.length(bytes.empty())),
+     ("Builder built", bytes.length(bytes.builder_build(bytes.builder_empty())))]
+
+fn check_length(state: TestState, c: (String, Int)) -> Unit !{IO} =
+  let (label, n) = c in
+  assert_eq(state, label ++ " empty has length 0", n, 0)
+
+fn mutvec_fresh(state: TestState) -> Unit !{IO} =
+  do
+    a <- mutvec_empty()
+    b <- mutvec_empty()
+    mutvec_push(a, 1)
+    mutvec_push(a, 2)
+    na <- mutvec_len(a)
+    nb <- mutvec_len(b)
+    c <- mutvec_empty()
+    nc <- mutvec_len(c)
+    assert_eq(state, "MutVec push shows in the pushed vector", na, 2)
+    assert_eq(state, "MutVec push does not show in another empty", nb, 0)
+    assert_eq(state, "MutVec push does not show in a later empty", nc, 0)
+
+fn linvec_fresh(state: TestState) -> Unit !{IO} =
+  let a = linvec.push(2, linvec.push(1, linvec.empty()))
+      b = linvec.empty()
+      na = linvec.length(a)
+      nb = linvec.length(b)
+      _ = linvec.drop(a)
+      _ = linvec.drop(b)
+      c = linvec.empty()
+      nc = linvec.length(c)
+      _ = linvec.drop(c)
+  in
+    do
+      assert_eq(state, "LinVec push shows in the pushed vector", na, 2)
+      assert_eq(state, "LinVec push does not show in another empty", nb, 0)
+      assert_eq(state, "LinVec push does not show in a later empty", nc, 0)
+
+fn bytes_checks(state: TestState) -> Unit !{IO} =
+  let grown = bytes.append(bytes.empty(), bytes.from_string("abc"))
+  in
+    do
+      assert_true(state, "empty equals a zero-length slice",
+                  bytes.empty() == bytes.slice(bytes.from_string("abc"), 1, 0))
+      assert_true(state, "empty equals the empty string as Bytes",
+                  bytes.empty() == bytes.from_string(""))
+      assert_true(state, "empty is not a non-empty Bytes", bytes.empty() != bytes.singleton(0))
+      assert_eq(state, "append onto empty has the appended length", bytes.length(grown), 3)
+      assert_eq(state, "empty is still empty after an append", bytes.length(bytes.empty()), 0)
+
+fn builder_checks(state: TestState) -> Unit !{IO} =
+  let built =
+    bytes.builder_build(bytes.builder_append(bytes.builder_empty(), bytes.builder_byte(7)))
+  in
+    do
+      assert_true(state, "builder append builds the 1-byte result", built == bytes.singleton(7))
+      assert_eq(state, "builder append result has length 1", bytes.length(built), 1)
+      assert_eq(state, "builder_empty is still empty after an append",
+                bytes.length(bytes.builder_build(bytes.builder_empty())), 0)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    lengths <- empty_lengths()
+    list_each(\c -> check_length(state, c), lengths)
+    mutvec_fresh(state)
+    linvec_fresh(state)
+    bytes_checks(state)
+    builder_checks(state)
+    summary(state)

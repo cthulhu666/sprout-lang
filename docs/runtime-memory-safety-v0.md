@@ -100,7 +100,8 @@ Each of the 71 is a primitive other code builds on, a builtin the compiler emits
 | ~~`str_starts_with`~~ | moved: [results](../bench/results-2026-11-01-str-starts-with.md) | 7 |
 | `split_words`, `str_split_lines` | byte scan, `str_slice_bytes` | 69 |
 | ~~`char_to_str`~~ | moved: [results](../bench/results-2026-11-01-char-to-str.md) | 23 |
-| `vector_empty`, `bytes_empty`, `bytes_builder_empty` | one call to another builtin | 3–6 each |
+| ~~`bytes_empty`, `bytes_builder_empty`~~ | moved: [results](../bench/results-2026-11-01-empties.md) | 3–6 each |
+| `vector_empty` | stays: `vector_from_list([])` measured slower, [results](../bench/results-2026-11-01-empties.md) | 3 |
 
 Notes:
 - `regex_find_match` does more than `regex_is_match`: two codepoint counts up to the match end, a
@@ -109,8 +110,8 @@ Notes:
 - `json_stringify` writes floats with `%.17g`; `double_to_string` keeps the first of `%.15g` to
   `%.17g` that reads back. So its output changes (`0.1` prints `0.1`, not `0.10000000000000001`).
 - `bytes_builder_u16_be` and `_u32_be` have no caller in this repo but are used downstream.
-- The seed declares `bytes_builder_u16_be`, `_u32_be`, `split_words`, `str_split_lines`,
-  `vector_empty`, `bytes_empty` and `bytes_builder_empty`: moving any of them needs a reseed.
+- The seed declares `bytes_builder_u16_be`, `_u32_be`, `split_words`, `str_split_lines` and
+  `vector_empty`: moving any of them needs a reseed.
 
 **Blocked on a missing primitive.** Each is the only kind of new builtin this stage may propose
 (AGENTS.md §Builtin vs Stdlib), ranked by what it unlocks:

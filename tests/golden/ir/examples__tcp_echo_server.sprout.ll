@@ -73,7 +73,6 @@ declare i64 @map_nth_value(i64, i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
-declare i64 @bytes_empty()
 declare i64 @bytes_singleton(i64)
 declare i64 @bytes_length(i64)
 declare i64 @bytes_get(i64, i64)
@@ -81,7 +80,6 @@ declare i64 @bytes_slice(i64, i64, i64)
 declare i64 @bytes_append(i64, i64)
 declare i64 @bytes_from_utf8(i64)
 declare i64 @bytes_to_utf8(i64)
-declare i64 @bytes_builder_empty()
 declare i64 @bytes_builder_bytes(i64)
 declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
@@ -137,6 +135,7 @@ declare i64 @term_read_avail(i64, i64)
 @.str.20 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"127.0.0.1\00" }
 @.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 299, column 65)\00" }
 @.str.22 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 299, column 52)\00" }
+@.str.23 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -248,6 +247,8 @@ declare i64 @term_read_avail(i64, i64)
 @pow10_exact_max = private constant i64 22
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+@stdlib.bytes.empty_bytes = global i64 zeroinitializer
+@stdlib.bytes.empty_builder = global i64 zeroinitializer
 @stdlib.net.poll_write = private constant i64 2
 @stdlib.net.poll_read = private constant i64 1
 @stdlib.net.read_chunk = private constant i64 65536
@@ -1403,9 +1404,22 @@ entry:
   call i64 @sprout_gc_register_i64_root(ptr @list_builder_empty)
   %t$1 = bitcast double 10000000000000000000000.0 to i64
   store i64 %t$1, ptr @pow10_exact_unit
-  %t$2 = add i64 0, 27
-  %t$3 = call i64 @char_to_str(i64 %t$2)
-  store i64 %t$3, ptr @stdlib.terminal.esc
+  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  %t$9 = alloca i64
+  store i64 %t$3, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$4 = call i64 @bytes_from_utf8(i64 %t$3)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$4, ptr @stdlib.bytes.empty_bytes
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.bytes.empty_bytes)
+  %t$5 = load i64, ptr @stdlib.bytes.empty_bytes
+  %t$6 = call i64 @bytes_builder_bytes(i64 %t$5)
+  store i64 %t$6, ptr @stdlib.bytes.empty_builder
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.bytes.empty_builder)
+  %t$7 = add i64 0, 27
+  %t$8 = call i64 @char_to_str(i64 %t$7)
+  store i64 %t$8, ptr @stdlib.terminal.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
   ret void
 }

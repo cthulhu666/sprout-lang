@@ -55,10 +55,8 @@ bytes_append
 bytes_builder_append
 bytes_builder_build
 bytes_builder_bytes
-bytes_builder_empty
 bytes_builder_u16_be
 bytes_builder_u32_be
-bytes_empty
 bytes_from_utf8
 bytes_get
 bytes_get_unboxed  # unboxed-return twin of bytes_get; predates the policy

@@ -9559,13 +9559,6 @@ long long map_keys(long long map_h) {
   return result;
 }
 
-long long bytes_empty(void) {
-  BytesVal* out = sprout_alloc_bytes_val("bytes_empty: out of memory");
-  out->len = 0;
-  out->data = NULL;
-  return sprout_ptr_word(out);
-}
-
 long long bytes_length(long long bytes_h) {
   BytesVal* value = (BytesVal*)(uintptr_t)bytes_h;
   if (value == NULL) sprout_fail("bytes_length: null bytes");
@@ -9769,10 +9762,6 @@ static long long sprout_div_floor(long long left, long long right) {
   long long r = left % right;
   if (r != 0 && ((r > 0) != (right > 0))) q -= 1;
   return q;
-}
-
-long long bytes_builder_empty(void) {
-  return sprout_ptr_word(builder_alloc(0, 0));
 }
 
 long long bytes_builder_bytes(long long bytes_h) {

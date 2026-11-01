@@ -1,0 +1,58 @@
+module main
+
+# Cost of the empty constructors, one row each: the immutable empty Vec, the empty MutVec, the
+# empty Bytes and the empty bytes Builder. Each result is consumed, so no call can be dropped.
+#
+# usage: empties_bench <vec|mutvec|bytes|builder> <iterations>
+
+import stdlib.time as time
+import stdlib.argv as argv
+import stdlib.bytes as bytes
+import stdlib.mutable (mutvec_empty, mutvec_len)
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+fn vec_loop(i: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else vec_loop(i - 1, acc + vec_length(vec_empty()))
+
+fn mutvec_loop(i: Int, acc: Int) -> Int !{IO} =
+  if i <= 0 then acc
+  else
+    do
+      v <- mutvec_empty()
+      n <- mutvec_len(v)
+      mutvec_loop(i - 1, acc + n)
+
+fn bytes_loop(i: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else bytes_loop(i - 1, acc + bytes.length(bytes.empty()))
+
+fn builder_loop(i: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else builder_loop(i - 1, acc + bytes.length(bytes.builder_build(bytes.builder_empty())))
+
+fn report(row: String, iters: Int, out: Int, t0: Int, t1: Int) -> Unit !{IO} =
+  let ns_x10 = (t1 - t0) * 10000 / iters
+  in print(`${row} iters=${iters} out=${out} ns_per_call=${ns_x10 / 10}.${rem(ns_x10, 10)}`)
+
+fn timed(row: String, iters: Int, f: Int -> Int !{IO}) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    out <- f(iters)
+    t1 <- time.now_micros()
+    report(row, iters, out, t0, t1)
+
+let usage = "usage: empties_bench <vec|mutvec|bytes|builder> <iterations>"
+
+fn main() -> Unit !{IO} =
+  do
+    let Ok([row, iters_text]) = argv.all() else print(usage)
+    let Just iters = parse_int(iters_text) else print(usage)
+    match row with
+    | "vec" -> timed(row, iters, \n -> vec_loop(n, 0))
+    | "mutvec" -> timed(row, iters, \n -> mutvec_loop(n, 0))
+    | "bytes" -> timed(row, iters, \n -> bytes_loop(n, 0))
+    | "builder" -> timed(row, iters, \n -> builder_loop(n, 0))
+    | _ -> print(usage)

@@ -73,7 +73,6 @@ declare i64 @map_nth_value(i64, i64)
 declare i64 @ref_new(i64)
 declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
-declare i64 @bytes_empty()
 declare i64 @bytes_singleton(i64)
 declare i64 @bytes_length(i64)
 declare i64 @bytes_get(i64, i64)
@@ -81,7 +80,6 @@ declare i64 @bytes_slice(i64, i64, i64)
 declare i64 @bytes_append(i64, i64)
 declare i64 @bytes_from_utf8(i64)
 declare i64 @bytes_to_utf8(i64)
-declare i64 @bytes_builder_empty()
 declare i64 @bytes_builder_bytes(i64)
 declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
@@ -92,7 +90,7 @@ declare i64 @str_slice_bytes(i64, i64, i64)
 declare i64 @str_split_lines(i64)
 declare i64 @split_words(i64)
 declare i64 @env_get_bytes(i64)
-@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 69, column 30)\00" }
+@.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 70, column 30)\00" }
 @__sprout_sclo.__sprout_ir_lambda_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_0 }
 @.str.1 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 240, column 67)\00" }
 @.str.2 = private unnamed_addr constant { i64, [46 x i8] } { i64 737290, [46 x i8] c"Int overflow in unary - (line 245, column 17)\00" }
@@ -111,6 +109,7 @@ declare i64 @env_get_bytes(i64)
 @.str.14 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"reading SPROUT_NAME\00" }
 @.str.15 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"SPROUT_NAME\00" }
 @__sprout_sclo.__sprout_ir_lambda_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_2 }
+@.str.16 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -168,6 +167,8 @@ declare i64 @env_get_bytes(i64)
 @pow10_exact_max = private constant i64 22
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
+@stdlib.bytes.empty_bytes = global i64 zeroinitializer
+@stdlib.bytes.empty_builder = global i64 zeroinitializer
 
 define i64 @result_map(i64 %p$f, i64 %p$r) {
 entry:
@@ -1244,6 +1245,19 @@ entry:
   call i64 @sprout_gc_register_i64_root(ptr @list_builder_empty)
   %t$1 = bitcast double 10000000000000000000000.0 to i64
   store i64 %t$1, ptr @pow10_exact_unit
+  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.16, i64 0, i32 1, i64 0
+  %t$3 = ptrtoint ptr %t$2 to i64
+  %t$7 = alloca i64
+  store i64 %t$3, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$4 = call i64 @bytes_from_utf8(i64 %t$3)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$4, ptr @stdlib.bytes.empty_bytes
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.bytes.empty_bytes)
+  %t$5 = load i64, ptr @stdlib.bytes.empty_bytes
+  %t$6 = call i64 @bytes_builder_bytes(i64 %t$5)
+  store i64 %t$6, ptr @stdlib.bytes.empty_builder
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.bytes.empty_builder)
   ret void
 }
 

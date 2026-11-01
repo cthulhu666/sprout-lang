@@ -75,7 +75,6 @@ declare i64 @ref_read(i64)
 declare i64 @ref_write(i64, i64)
 declare i64 @double_to_bits(i64)
 declare i64 @double_from_bits(i64)
-declare i64 @bytes_empty()
 declare i64 @bytes_singleton(i64)
 declare i64 @bytes_length(i64)
 declare i64 @bytes_get(i64, i64)
@@ -83,7 +82,6 @@ declare i64 @bytes_slice(i64, i64, i64)
 declare i64 @bytes_append(i64, i64)
 declare i64 @bytes_from_utf8(i64)
 declare i64 @bytes_to_utf8(i64)
-declare i64 @bytes_builder_empty()
 declare i64 @bytes_builder_bytes(i64)
 declare i64 @bytes_builder_u16_be(i64)
 declare i64 @bytes_builder_u32_be(i64)
@@ -108,6 +106,7 @@ declare i64 @term_read_avail(i64, i64)
 @.str.4 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c"1 AU in km       : \00" }
 @.str.5 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
 @.str.6 = private unnamed_addr constant { i64, [55 x i8] } { i64 884746, [55 x i8] c"all three mistakes above are rejected at compile time\0A\00" }
+@.str.7 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -233,6 +232,8 @@ declare i64 @term_read_avail(i64, i64)
 @stdlib.math.neg_zero = global i64 zeroinitializer
 @stdlib.math.two52_bits = private constant i64 4841369599423283200
 @stdlib.math.two63 = global i64 zeroinitializer
+@stdlib.bytes.empty_bytes = global i64 zeroinitializer
+@stdlib.bytes.empty_builder = global i64 zeroinitializer
 @stdlib.terminal.esc = global i64 zeroinitializer
 @examples.wrap_phantom_units.km_per_au = global i64 zeroinitializer
 
@@ -1005,12 +1006,25 @@ entry:
   %t$72$fr = fdiv double %t$72$la, %t$72$lb
   %t$72 = bitcast double %t$72$fr to i64
   store i64 %t$72, ptr @stdlib.math.two63
-  %t$73 = add i64 0, 27
-  %t$74 = call i64 @char_to_str(i64 %t$73)
-  store i64 %t$74, ptr @stdlib.terminal.esc
+  %t$73 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.7, i64 0, i32 1, i64 0
+  %t$74 = ptrtoint ptr %t$73 to i64
+  %t$81 = alloca i64
+  store i64 %t$74, ptr %t$81
+  %t$82 = call i64 @sprout_gc_push_i64_root(ptr %t$81)
+  %t$75 = call i64 @bytes_from_utf8(i64 %t$74)
+  %t$83 = call i64 @sprout_gc_pop_roots(i64 1)
+  store i64 %t$75, ptr @stdlib.bytes.empty_bytes
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.bytes.empty_bytes)
+  %t$76 = load i64, ptr @stdlib.bytes.empty_bytes
+  %t$77 = call i64 @bytes_builder_bytes(i64 %t$76)
+  store i64 %t$77, ptr @stdlib.bytes.empty_builder
+  call i64 @sprout_gc_register_i64_root(ptr @stdlib.bytes.empty_builder)
+  %t$78 = add i64 0, 27
+  %t$79 = call i64 @char_to_str(i64 %t$78)
+  store i64 %t$79, ptr @stdlib.terminal.esc
   call i64 @sprout_gc_register_i64_root(ptr @stdlib.terminal.esc)
-  %t$75 = bitcast double 149597870.7 to i64
-  store i64 %t$75, ptr @examples.wrap_phantom_units.km_per_au
+  %t$80 = bitcast double 149597870.7 to i64
+  store i64 %t$80, ptr @examples.wrap_phantom_units.km_per_au
   ret void
 }
 

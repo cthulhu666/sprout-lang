@@ -11,11 +11,6 @@ import stdlib.string as string
 fn rem(a: Int, m: Int) -> Int =
   a - (a / m) * m
 
-# `unit` doubled `times` times.
-fn repeat_doubling(unit: String, times: Int) -> String =
-  if times <= 0 then unit
-  else repeat_doubling(unit ++ unit, times - 1)
-
 # Each result is counted, so no call can be dropped.
 fn loop(s: String, prefix: String, i: Int, hits: Int) -> Int =
   if i <= 0 then hits
@@ -35,7 +30,7 @@ fn main() -> Unit !{IO} =
   do
     let Ok([row, iters_text]) = argv.all() else print(usage)
     let Just iters = parse_int(iters_text) else print(usage)
-    let long = repeat_doubling("a", 13)
+    let long = string.repeat("a", 8192)
     match row with
     | "hit" -> run(row, "hello world", "hello", iters)
     | "miss" -> run(row, "hello world", "x", iters)

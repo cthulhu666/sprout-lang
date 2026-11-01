@@ -8,7 +8,8 @@ import stdlib.string as string
 # THE BUG THIS PINS. `extern fn … -> Bool` lowers to `declare i64 @f(…)`, so the
 # caller reads the full 64-bit return register and treats any nonzero value as
 # true. Four builtins were DEFINED as `_Bool` instead of `long long`:
-# str_starts_with_at_byte, str_starts_with, regex_is_match, term_is_interactive.
+# str_starts_with_at_byte, str_starts_with (now Sprout, over the former), regex_is_match and
+# term_is_interactive.
 # On x86-64 SysV a `_Bool` return lives in AL with the upper 56 bits of RAX
 # UNDEFINED — clang emits `sete %al` and leaves the previous call's return value
 # in the high bytes — so `false` read back as a nonzero i64, i.e. as TRUE.
@@ -69,16 +70,6 @@ fn main() -> Unit !{IO} =
       str_starts_with_at_byte("hello", 0, "xy"))
     assert_false(state, "swab prefix past end is false",
       str_starts_with_at_byte("hello", 5, "x"))
-
-    # --- str_starts_with ---
-    assert_true(state, "starts_with true is canonical",
-      is_canonical(str_starts_with("hello", "he")))
-    assert_true(state, "starts_with false is canonical",
-      is_canonical(str_starts_with("hello", "xy")))
-    assert_true(state, "starts_with true", str_starts_with("hello", "he"))
-    assert_false(state, "starts_with false", str_starts_with("hello", "xy"))
-    assert_false(state, "starts_with longer-than-haystack",
-      str_starts_with("hi", "hello"))
 
     # --- regex_is_match ---
     # Guard the guard: if the pattern failed to compile, `matches` returns false
