@@ -1,5 +1,5 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.string (string_lines)
+import stdlib.string (repeat, string_lines)
 
 # Characterization test for string_lines, pinning its exact splitting contract so the O(n)
 # reimplementation (str_split_lines + post-pass) preserves behavior for its REPL/LSP/compiler
@@ -19,6 +19,7 @@ fn main() -> Unit !{IO} =
       crlf_trail = string_lines("a\r\nb\r\n")
       lone = string_lines("\n")
       final_cr = string_lines("a\nb\r")
+      many = string_lines(repeat("x\n", 50000))
   in run_suite("string_lines", [
     check_eq("empty string -> no lines", vec_length(empty), 0),
 
@@ -50,5 +51,8 @@ fn main() -> Unit !{IO} =
 
     check_eq("final non-terminated line keeps cr: count", vec_length(final_cr), 2),
     check_eq("final cr [0]", nth(final_cr, 0), "a"),
-    check_eq("final cr [1] keeps cr", nth(final_cr, 1), "b\r")
+    check_eq("final cr [1] keeps cr", nth(final_cr, 1), "b\r"),
+
+    check_eq("50000 lines: count", vec_length(many), 50000),
+    check_eq("50000 lines: last", nth(many, 49999), "x")
   ])
