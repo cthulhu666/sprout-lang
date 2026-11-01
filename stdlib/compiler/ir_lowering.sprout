@@ -374,8 +374,8 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ " = call i64 @sprout_tag(i64 " ++ s ++ ")"
   | sprout_ir.IRGetField r s i _kind ->
       "  " ++ r ++ " = call i64 @sprout_field(i64 " ++ s ++ ", i64 " ++ int_to_string(i) ++ ")"
-  # B1 Vector-Double inline access. VectorVal { i64 len@0, i64 cap@8, i64* data@16 };
-  # data lives at i64-index 2. Unchecked: ast_to_ir has already emitted the null +
+  # B1 inline vector access (Double reads, non-heap-scalar stores).
+  # VectorVal { i64 len@0, i64 cap@8, i64* data@16 }; data lives at i64-index 2. Unchecked: ast_to_ir has already emitted the null +
   # bounds guard blocks that dominate these. Temps derive from the unique result SSA.
   | sprout_ir.IRVecLenD r v ->
       "  " ++ r ++ "$vp = inttoptr i64 " ++ v ++ " to ptr\n" ++

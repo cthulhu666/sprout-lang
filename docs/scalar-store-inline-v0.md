@@ -1,6 +1,6 @@
 # Scalar stores through `MutVec` wrappers lower inline, with no barrier — v0
 
-**Status — proposal, 2026-11-01.** Non-normative: an optimisation, with no syntax, typing or
+**Status — step 1 landed 2026-11-01; step 2 next.** Non-normative: an optimisation, with no syntax, typing or
 evaluation-order change, so `spec-v0.md` is untouched. It is
 [gc-generational-v0.md](gc-generational-v0.md) §14.8 step 6, and it replaces the store half of
 [accessor-inliner-design-2026-07-11.md](accessor-inliner-design-2026-07-11.md).
@@ -37,8 +37,8 @@ so its one `vector_mutset` has to keep the barrier. The concrete type exists onl
 **Goals**
 1. A call to a vector-store wrapper whose stored value is typed `Int`, `Bool`, `Char` or `Double`
    lowers to the inline guarded store, with no call and no barrier.
-2. The same holds for a direct `vector_mutset` on any such value. Today only `Vector Double` takes
-   the inline store.
+2. The same holds for a direct `vector_mutset` on any such value.
+   Previously only `Vector Double` took the inline store.
 3. Trap messages and evaluation order are unchanged.
 4. Switchable from one compiler build, for the A/B.
 
@@ -99,12 +99,11 @@ are pure field reads.
 ### 4.2 Lowering
 
 In `ast_to_ir.try_vector_intrinsic`, a `VecSet` takes the inline store when its value argument
-passes `type_is_non_heap_scalar`. Today it does so only when the vector is a `Vector Double`. This
-is the rule `bce.shape_converts` already applies in `$fast` clones.
+passes `type_is_non_heap_scalar`. This is the rule `bce.shape_converts` already applies in `$fast` clones.
 
 `IRVecSetD` is already a plain `store i64`, so no IR op and no runtime entry is added. `VecGet`
 keeps its `Vector Double` test: a read's soundness depends on the element type, and a false
-positive there would leave a heap value unrooted (the comment above `classify_vec_elem`).
+positive there would leave a heap value unrooted (the comment above `vec_read_inlinable`).
 
 **Why the value's type is enough.** A store creates an old-to-young edge only if the word stored is
 a heap pointer. A value whose static type is the prelude's `Int`, `Bool`, `Char` or `Double` is
@@ -206,8 +205,8 @@ not copied.
 
 ## 7. Steps
 
-1. The §4.2 lowering rule with split trap blocks; the `test_bce.spr` check; tests 1 (direct
-   calls) and 2.
+1. ~~The §4.2 lowering rule with split trap blocks; the `test_bce.spr` check; tests 1 (direct
+   calls) and 2.~~
 2. Shared recognisers module; the expansion pass behind `Wsi`; the rest of tests 1 and 3;
    `compiler-internals.md`.
 3. Test 4, and the results file.
