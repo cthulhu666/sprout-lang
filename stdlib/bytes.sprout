@@ -3,7 +3,6 @@ module stdlib.bytes
 export type Utf8Error (..) =
   | Utf8DecodeError String
 
-export extern fn bytes_empty() -> Bytes
 extern fn bytes_singleton(val: Int) -> Bytes
 export extern fn bytes_length(b: Bytes) -> Int
 export extern fn bytes_get(b: Bytes, i: Int) -> Maybe Int
@@ -11,16 +10,18 @@ export extern fn bytes_slice(b: Bytes, start: Int, count: Int) -> Bytes
 extern fn bytes_append(a: Bytes, b: Bytes) -> Bytes
 export extern fn bytes_from_utf8(s: String) -> Bytes
 extern fn bytes_to_utf8(b: Bytes) -> Result Utf8Error String
-extern fn bytes_builder_empty() -> Builder
 extern fn bytes_builder_bytes(b: Bytes) -> Builder
 extern fn bytes_builder_u16_be(val: Int) -> Builder
 extern fn bytes_builder_u32_be(val: Int) -> Builder
 extern fn bytes_builder_append(a: Builder, b: Builder) -> Builder
 extern fn bytes_builder_build(b: Builder) -> Bytes
 
-# O(1): allocates a header with no data buffer.
+# One shared value: no extern mutates a Bytes in place.
+let empty_bytes: Bytes = bytes_from_utf8("")
+
+# O(1): no allocation per call.
 export fn empty() -> Bytes =
-  bytes_empty()
+  empty_bytes
 
 # O(1): allocates a 1-byte buffer. Traps on a value outside 0..255 rather than wrapping.
 export fn singleton(value: Int) -> Bytes =
@@ -103,9 +104,12 @@ export fn to_string_maybe(value: Maybe Bytes) -> Result Utf8Error (Maybe String)
   | Nothing -> Ok(Nothing)
   | Just raw -> result_map(\text -> Just(text), to_string(raw))
 
-# O(1): the builder stores chunk references and the total length.
+# One shared value: no extern mutates a Builder in place.
+let empty_builder: Builder = bytes_builder_bytes(empty_bytes)
+
+# O(1): no allocation per call.
 export fn builder_empty() -> Builder =
-  bytes_builder_empty()
+  empty_builder
 
 # O(1): wraps the existing bytes chunk without flattening.
 export fn builder_bytes(value: Bytes) -> Builder =

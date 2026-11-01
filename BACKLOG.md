@@ -1884,7 +1884,8 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P3` **Expand native ADT lowering.** `docs/native-adt-lowering-v1.md`. The `Nothing` singleton
   and immediate-match optimization for direct constructor-producing scrutinees landed; planned:
   broader constructor forwarding, whole-scrutinee binding, and specialized representations for tiny
-  ADTs.
+  ADTs. A nullary literal such as `[]` still lowers to `sprout_alloc_obj(tag, 0)`, a `find_ctor`
+  lookup per use: it kept `vector_empty` in C (`bench/results-2026-11-01-empties.md`).
 - [ ] `P3` **`wrap` ergonomics follow-ups.** Parameter-level destructuring (`fn f(Foo x) -> …`
   desugaring to a match, useful for all single-constructor types); an auto-generated zero-cost
   accessor; a named-field variant `wrap Foo { inner: T }`; and `opaque type` for Scala 3-style

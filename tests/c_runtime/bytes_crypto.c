@@ -8,7 +8,7 @@
  * function fails to root across its own allocations is freed and fails the byte check. Interned
  * inputs are never freed; bytes_from_utf8 and crypto_base64_decode also get an unrooted one (F).
  *
- * Covered: bytes_empty, bytes_slice (with clamping), bytes_append, bytes_singleton,
+ * Covered: bytes_slice (with clamping), bytes_append, bytes_singleton,
  * bytes_from_utf8, bytes_to_utf8 (Ok text, and the Err(Utf8DecodeError) text), every
  * bytes_builder_* constructor and bytes_builder_build; crypto_sha256, crypto_hmac_sha256,
  * crypto_base64_encode, crypto_base64_decode (Ok, and each Err text), crypto_bytes_xor (Ok and the
@@ -41,6 +41,10 @@ static int builder_is(long long b, size_t len, size_t count) {
 
 static long long B(const char* text) { return bytes_from_utf8(I(text)); }
 
+/* The empty values stdlib/bytes.sprout builds. */
+static long long empty_bytes(void) { return B(""); }
+static long long empty_builder(void) { return bytes_builder_bytes(empty_bytes()); }
+
 /* `r` is Ok(Bytes of `data`). */
 static int ok_bytes(long long r, const void* data, size_t n) {
   return sprout_tag(r) == OK && bytes_is(sprout_field(r, 0), data, n);
@@ -66,8 +70,6 @@ static int hex_is(long long b, const char* want) {
 }
 
 static void run_bytes(void) {
-  check(bytes_is_text(bytes_empty(), ""), "bytes_empty");
-
   check(bytes_is_text(bytes_from_utf8(I("")), ""), "bytes_from_utf8(\"\")");
   check(bytes_is_text(bytes_from_utf8(I("h\xc3\xa9llo")), "h\xc3\xa9llo"), "bytes_from_utf8");
   check(bytes_is_text(bytes_from_utf8(F("unrooted input")), "unrooted input"),
@@ -90,7 +92,7 @@ static void run_bytes(void) {
 
   SPROUT_HANDLE(h_ab, B("ab"));
   SPROUT_HANDLE(h_cd, B("cd"));
-  SPROUT_HANDLE(h_none, bytes_empty());
+  SPROUT_HANDLE(h_none, empty_bytes());
   long long ab = sprout_handle_get(h_ab);
   long long cd = sprout_handle_get(h_cd);
   long long none = sprout_handle_get(h_none);
@@ -116,13 +118,12 @@ static void run_bytes(void) {
 }
 
 static void run_builders(void) {
-  check(builder_is(bytes_builder_empty(), 0, 0), "bytes_builder_empty");
-  check(bytes_is_text(bytes_builder_build(bytes_builder_empty()), ""), "build(empty builder)");
+  check(bytes_is_text(bytes_builder_build(empty_builder()), ""), "build(empty builder)");
 
   check(builder_is(bytes_builder_bytes(B("xy")), 2, 1), "bytes_builder_bytes");
   check(bytes_is_text(bytes_builder_build(bytes_builder_bytes(B("xy"))), "xy"),
         "build(bytes_builder_bytes)");
-  check(builder_is(bytes_builder_bytes(bytes_empty()), 0, 0), "bytes_builder_bytes(empty)");
+  check(builder_is(bytes_builder_bytes(empty_bytes()), 0, 0), "bytes_builder_bytes(empty)");
 
   check(builder_is(bytes_builder_u16_be(0x4142), 2, 1), "bytes_builder_u16_be");
   check(bytes_is_text(bytes_builder_build(bytes_builder_u16_be(0x4142)), "AB"), "build(u16_be)");
@@ -139,7 +140,7 @@ static void run_builders(void) {
 
   SPROUT_HANDLE(h_a, bytes_builder_bytes(bytes_singleton('a')));
   SPROUT_HANDLE(h_bc, bytes_builder_u16_be(('b' << 8) | 'c'));
-  SPROUT_HANDLE(h_none, bytes_builder_empty());
+  SPROUT_HANDLE(h_none, empty_builder());
   long long a = sprout_handle_get(h_a);
   long long bc = sprout_handle_get(h_bc);
   long long none = sprout_handle_get(h_none);
@@ -162,7 +163,7 @@ static void run_crypto(void) {
   check(hex_is(crypto_sha256(abc),
                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
         "crypto_sha256(\"abc\")");
-  check(hex_is(crypto_sha256(bytes_empty()),
+  check(hex_is(crypto_sha256(empty_bytes()),
                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
         "crypto_sha256(\"\")");
 
@@ -177,7 +178,7 @@ static void run_crypto(void) {
   check(is_str(crypto_base64_encode(abc), "YWJj"), "crypto_base64_encode(abc)");
   check(is_str(crypto_base64_encode(B("ab")), "YWI="), "crypto_base64_encode(ab)");
   check(is_str(crypto_base64_encode(B("a")), "YQ=="), "crypto_base64_encode(a)");
-  check(is_str(crypto_base64_encode(bytes_empty()), ""), "crypto_base64_encode(empty)");
+  check(is_str(crypto_base64_encode(empty_bytes()), ""), "crypto_base64_encode(empty)");
   check(is_str(crypto_base64_encode(bytes_builder_build(bytes_builder_u32_be(-1))), "/////w=="),
         "crypto_base64_encode(ff ff ff ff)");
 
@@ -206,7 +207,7 @@ static void run_crypto(void) {
   long long x = sprout_handle_get(h_x);
   long long y = sprout_handle_get(h_y);
   check(ok_bytes(crypto_bytes_xor(x, y), "\xfe\xfd\xfc\xfb", 4), "crypto_bytes_xor");
-  SPROUT_HANDLE(h_none, bytes_empty());
+  SPROUT_HANDLE(h_none, empty_bytes());
   long long none = sprout_handle_get(h_none);
   check(ok_bytes(crypto_bytes_xor(none, none), "", 0), "crypto_bytes_xor(empty, empty)");
   long long m = crypto_bytes_xor(x, sprout_handle_get(h_short));

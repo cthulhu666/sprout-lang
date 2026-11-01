@@ -88,7 +88,7 @@ call the wrapper API:
 | `wall_time_micros() -> Int` | `stdlib.time` | `time.wall_micros()` — realtime, for timestamps |
 | `term_*` | `stdlib.terminal` | `terminal.write(…)`, `terminal.clear()`, … |
 | `vec_make_filled`, `vector_mutset`, `vector_get_direct`, `vector_push`, `vector_truncate` | `stdlib.mutable` | the `MutVec` API; `vec_make_filled` is pure and also backs `LinVec` |
-| `bytes_*` | `stdlib.bytes` | bare name for `bytes_empty`, `bytes_length`, `bytes_get`, `bytes_slice`, `bytes_from_utf8`; the rest are private (`bytes.*` API) |
+| `bytes_*` | `stdlib.bytes` | bare name for `bytes_length`, `bytes_get`, `bytes_slice`, `bytes_from_utf8`; the rest are private (`bytes.*` API) |
 | `crypto_*` | `stdlib.crypto` | private; the `crypto.*` API |
 | `regex_*` | `stdlib.regex` | bare name for `regex_find_match`; the rest are private (`regex.*` API) |
 | `proc_run_vec`, `proc_run_stdin_vec` | `stdlib.process` | `process.proc_run(…)` |
@@ -210,7 +210,6 @@ lowers to a machine instruction, so there is nothing to call:
 
 A shift count of `0..63` shifts as expected; `>= 64` saturates; a negative count
 panics, and a negative *literal* count is a compile error.
-- `bytes_empty() -> Bytes`
 - `bytes_length(value: Bytes) -> Int`
 - `bytes_get(value: Bytes, index: Int) -> Maybe Int`
 - `bytes_slice(value: Bytes, start: Int, count: Int) -> Bytes` (total: a negative `start` or `count` clamps to empty)
@@ -218,7 +217,6 @@ panics, and a negative *literal* count is a compile error.
 - `bytes_singleton(value: Int) -> Bytes`
 - `bytes_from_utf8(raw: String) -> Bytes`
 - `bytes_to_utf8(value: Bytes) -> Result stdlib.bytes.Utf8Error String`
-- `bytes_builder_empty() -> Builder`
 - `bytes_builder_bytes(value: Bytes) -> Builder`
 - `bytes_builder_u16_be(value: Int) -> Builder`
 - `bytes_builder_u32_be(value: Int) -> Builder`
