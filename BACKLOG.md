@@ -639,6 +639,11 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   (documented as a limit in `docs/builtins-reference.md`). **Fix:** park with the remaining
   budget (`scheduler_park_on_unowned_fd_timeout`) and abandon the lookup on expiry the way
   force-drop already does (`docs/async-dns-v0.md` §6), so no thread or fd leaks.
+- [ ] `P3` **Explicit Host override for the HTTP client.** A caller-set `Host` header is rejected
+  today (`reserved header: host`), since the client writes `Host` from the URL. An override has to
+  set the header and the TLS server name (`SSLSetPeerDomainName` in `http_request_tls`) together,
+  and DNS keeps resolving the URL host. Needs a design for the API shape (a named argument or a
+  request record) before any code.
 - [ ] `P3` **`net.listen_on` binds IPv4 only; IPv6 is not supported yet.** An IPv6 literal is
   `Err TcpInvalidArgument` saying so (`tcp_listen` in `runtime/sprout_runtime.c`). Deferred, not
   refused: nothing needs it yet. The open decision is `IPV6_V6ONLY` for `::`: off (dual-stack) by

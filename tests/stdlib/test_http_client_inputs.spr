@@ -1,0 +1,64 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode)
+import stdlib.http_client (http_get, http_post, http_put)
+
+# The client checks its URL and header pairs before any network I/O, so each case here returns Err
+# without opening a socket. The port 1 URL is never dialled.
+fn rendered(r: Result HttpError HttpResponse) -> String =
+  match r with
+  | Ok _ -> "ok"
+  | Err HttpTimeout -> "timeout"
+  | Err (HttpNetwork m) -> `network ${m}`
+  | Err (HttpBadStatus c) -> `status ${to_string(c)}`
+  | Err (HttpDecode m) -> `decode ${m}`
+
+fn get_with(url: String, headers: Vec (String, String)) -> String !{IO} =
+  rendered(http_get(url, headers, 1000))
+
+fn get_header(name: String, value: String) -> String !{IO} =
+  get_with("http://127.0.0.1:1/", [(name, value)])
+
+fn main() -> Unit !{IO} =
+  run_suite("http_client inputs", [
+    # --- url ---
+    check_eq("url with CRLF is rejected", get_with("http://127.0.0.1:1/a\r\nX: 1", []),
+      "decode url contains a space or control byte"),
+    check_eq("url with a space is rejected", get_with("http://127.0.0.1:1/a b", []),
+      "decode url contains a space or control byte"),
+    check_eq("url with DEL is rejected", get_with(`http://127.0.0.1:1/a${char_to_str(127)}`, []),
+      "decode url contains a space or control byte"),
+
+    # --- header values ---
+    check_eq("value with LF is rejected", get_header("X-A", "a\nb"), "decode invalid header value: X-A"),
+    check_eq("value with CR is rejected", get_header("X-A", "a\rb"), "decode invalid header value: X-A"),
+    check_eq("value with DEL is rejected", get_header("X-A", `a${char_to_str(127)}b`), "decode invalid header value: X-A"),
+    check_eq("value with an inner NUL-range byte is rejected", get_header("X-A", `a${char_to_str(1)}b`),
+      "decode invalid header value: X-A"),
+    check_eq("CRLF only at the edge is still rejected", get_header("X-A", "a\r\n"),
+      "decode invalid header value: X-A"),
+
+    # --- header names ---
+    check_eq("name with a space is rejected", get_header("X A", "1"), "decode invalid header name: X A"),
+    check_eq("empty name is rejected", get_header("", "1"), "decode invalid header name: "),
+    check_eq("name with a colon is rejected", get_header("X:A", "1"), "decode invalid header name: X:A"),
+    check_eq("name is not trimmed", get_header(" X-A", "1"), "decode invalid header name:  X-A"),
+
+    # --- reserved names, any case ---
+    check_eq("host is reserved", get_header("Host", "x"), "decode reserved header: host"),
+    check_eq("content-length is reserved", get_header("CoNtEnT-LeNgTh", "1"),
+      "decode reserved header: content-length"),
+    check_eq("transfer-encoding is reserved", get_header("TRANSFER-ENCODING", "chunked"),
+      "decode reserved header: transfer-encoding"),
+    check_eq("connection is reserved", get_header("connection", "keep-alive"),
+      "decode reserved header: connection"),
+
+    # --- checks cover every entry and every verb ---
+    check_eq("a bad second pair is found", get_with("http://127.0.0.1:1/", [("X-A", "1"), ("X-B", "a\nb")]),
+      "decode invalid header value: X-B"),
+    check_eq("post checks headers", rendered(http_post("http://127.0.0.1:1/", [("Host", "x")], "b", 1000)),
+      "decode reserved header: host"),
+    check_eq("put checks headers", rendered(http_put("http://127.0.0.1:1/", [("X A", "1")], "b", 1000)),
+      "decode invalid header name: X A"),
+    check_eq("post checks the url", rendered(http_post("http://127.0.0.1:1/\n", [], "b", 1000)),
+      "decode url contains a space or control byte")
+  ])

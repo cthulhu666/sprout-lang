@@ -172,7 +172,7 @@ fn line(label: String, value: String) -> String =
   string.concat(label, string.concat(": ", string.concat(value, "\n")))
 
 fn report(label: String, url: String) -> Unit !{IO} =
-  match http_get(url, "", 5000) with
+  match http_get(url, [], 5000) with
   | Err _ -> terminal.write(line(label, "REQUEST FAILED"))
   | Ok resp -> terminal.write(line(label, int_to_string(bytes.length(http_response_body(resp)))))
 
@@ -185,7 +185,7 @@ fn body_is_ok(body: Bytes) -> Bool =
 # normally; a valid one is unchanged. Prints "Ok" when the header block holds every string in
 # `wants` and the body is `ok`, else "FAIL" with what arrived.
 fn report_headers(label: String, url: String, wants: List String) -> Unit !{IO} =
-  match http_get(url, "", 5000) with
+  match http_get(url, [], 5000) with
   | Err _ -> terminal.write(line(label, "REQUEST FAILED"))
   | Ok (HttpResponse _ headers body) ->
       if all(\w -> string.contains(headers, w), wants) && body_is_ok(body)

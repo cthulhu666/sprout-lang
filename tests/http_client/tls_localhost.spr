@@ -46,7 +46,7 @@ fn report(elapsed_ms: Int) -> Unit !{IO} =
   else terminal.write(string.concat("tls-scheduler-FROZEN ", string.concat(int_to_string(elapsed_ms), " ms\n")))
 
 fn caller(url: String) -> Unit !{IO} =
-  match http_get(url, "", 5000) with
+  match http_get(url, [], 5000) with
   # The message is printed, not swallowed: the negative-control run asserts on the FAILURE, and a
   # certificate rejection ("tls handshake failed (status=-9807)") has to be distinguishable from a
   # connection that never happened.

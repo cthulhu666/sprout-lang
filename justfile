@@ -3096,7 +3096,13 @@ task-io-smoke: bootstrap-from-seed
     "crlf: 204 headers=() body=0" "mixed1: 200 headers=() body=2" "mixed2: 200 headers=(X-A: 1) body=2" \
     "lfbody: 200 headers=(X-A: 1) body=8" "lfcr: 200 headers=(A: 1) body=9" "bad: Err status 404"
   SPROUT_GC_STRESS=1 run_once "http-client-framing/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing; interleaved; stress-clean)"
+  # (36) The Host line repeats the URL authority (host:port when a port is spelled), caller headers go
+  # out once per pair in the given order, and a tab inside a value is sent after SP/HTAB trimming.
+  build tests/task_io_smoke/http_client_headers.spr
+  run_once "http-client-headers" "done"
+  check_markers "http-client-headers" "host-port: ok" "repeated: ok" "tab-in-value: ok"
+  SPROUT_GC_STRESS=1 run_once "http-client-headers/stress" "done"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

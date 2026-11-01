@@ -366,9 +366,22 @@ handled rather than being decided during the read. Follows Go (`http.Response.Bo
 
 HTTP client convenience module (in `stdlib/http_client.sprout`):
 
-- `http_get(url, headers, timeout_ms) -> Result HttpError HttpResponse`
-- `http_post(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
-- `http_put(url, headers, body, timeout_ms) -> Result HttpError HttpResponse`
+- `http_get(url, headers: Vec (String, String), timeout_ms) -> Result HttpError HttpResponse`
+- `http_post(url, headers: Vec (String, String), body, timeout_ms) -> Result HttpError HttpResponse`
+- `http_put(url, headers: Vec (String, String), body, timeout_ms) -> Result HttpError HttpResponse`
+
+`headers` is `(name, value)` pairs; a list literal works (`[("Accept", "*/*")]`, `[]` for none).
+Inputs are checked before any network I/O, and a failure is `Err(HttpDecode message)`:
+
+- the URL holds no byte 0x00-0x20 or 0x7F;
+- a name is an RFC 9110 token (`is_token`) and is not trimmed;
+- a value is trimmed of leading and trailing SP/HTAB, then holds no control byte but HTAB and no
+  0x7F; empty is allowed;
+- `host`, `content-length`, `transfer-encoding` and `connection` (any case) are reserved, since the
+  client sets them: `reserved header: <lowercased name>`;
+- a repeated name is sent once per pair, in the given order.
+
+`Host` is the URL authority exactly: `host:port` when the URL spells a port, else `host`.
 
 ## stdlib.http_server
 

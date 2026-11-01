@@ -41,7 +41,7 @@ fn report(elapsed_ms: Int) -> Unit !{IO} =
 # The result is intentionally discarded: the assertion is about the SCHEDULER, not about this
 # request, which is expected to end in `Err HttpTimeout` either way.
 fn caller() -> Unit !{IO} =
-  match http_get("http://127.0.0.1:28990/", "", 2000) with
+  match http_get("http://127.0.0.1:28990/", [], 2000) with
   | Ok _ -> terminal.write("")
   | Err _ -> terminal.write("")
 

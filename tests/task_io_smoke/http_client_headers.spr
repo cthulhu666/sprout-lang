@@ -1,0 +1,72 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.http (HttpResponse)
+import stdlib.http_client (http_get)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, read_avail_timeout, write_all)
+import testsupport.listen (listen_or_die)
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# What http_request puts on the wire for the Host line and for caller headers. The server answers
+# every request with its own request head as the body; the client checks the head for the expected
+# bytes. Prints one line per case; the justfile asserts each.
+fn read_head(conn: borrowing TcpConnection, acc: String) -> String !{IO} =
+  if string.contains(acc, "\r\n\r\n") then acc
+  else
+    match read_avail_timeout(conn, 3000) with
+    | Err _ -> acc
+    | Ok chunk ->
+        match bytes.to_string(chunk) with
+        | Err _ -> acc
+        | Ok text -> read_head(conn, string.concat(acc, text))
+
+fn serve_one(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    head <- read_head(conn, "")
+    write_all(conn, bytes.from_string(string.concat("HTTP/1.1 200 OK\r\n\r\n", head)))
+    close(conn)
+
+fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then terminal.write("")
+  else
+    match accept(listener) with
+    | Err _ -> terminal.write("")
+    | Ok conn ->
+        do
+          serve_one(conn)
+          serve_loop(listener, remaining - 1)
+
+fn server(port: Int, n: Int) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(port)
+    serve_loop(listener, n)
+    close_listener(listener)
+
+fn echoed_head(port: Int, headers: Vec (String, String)) -> String !{IO} =
+  match http_get(`http://127.0.0.1:${int_to_string(port)}/`, headers, 3000) with
+  | Ok (HttpResponse _ _ body) ->
+      match bytes.to_string(body) with
+      | Ok text -> text
+      | Err _ -> "non-utf8 body"
+  | Err _ -> "request failed"
+
+fn report(name: String, head: String, expected: String) -> Unit !{IO} =
+  terminal.write(if string.contains(head, expected) then `${name}: ok\n` else `${name}: BAD ${head}\n`)
+
+fn client(port: Int) -> Unit !{IO} =
+  do
+    host_head <- echoed_head(port, [])
+    report("host-port", host_head, string.join("", ["\r\nHost: 127.0.0.1:", int_to_string(port), "\r\n"]))
+    dup_head <- echoed_head(port, [("X-Dup", "1"), ("X-Dup", "2"), ("X-After", "3")])
+    report("repeated", dup_head, "\r\nX-Dup: 1\r\nX-Dup: 2\r\nX-After: 3\r\n")
+    tab_head <- echoed_head(port, [("X-Tab", " \ta\tb \t")])
+    report("tab-in-value", tab_head, "\r\nX-Tab: a\tb\r\n")
+    terminal.write("done\n")
+
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> server(port, 3))
+    task_spawn(s, \_ -> client(port))
+
+fn main() -> Unit !{IO} =
+  with_scope(\s -> run(s, 29010))

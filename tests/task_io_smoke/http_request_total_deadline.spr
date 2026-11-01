@@ -81,7 +81,7 @@ fn accept_and_serve(listener: borrowing TcpListener) -> Unit !{IO} =
 fn client() -> Unit !{IO} =
   do
     t0 <- time.now_micros()
-    http_get("http://127.0.0.1:28985/", "", 400)
+    http_get("http://127.0.0.1:28985/", [], 400)
     t1 <- time.now_micros()
     report((t1 - t0) / 1000)
 
