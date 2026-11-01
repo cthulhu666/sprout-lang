@@ -272,12 +272,13 @@ shape. `lower_value_var` falls through to `try_eta_forwarded_without_class`, whi
 `TFunc` too — so a nullary method passed unapplied under a forwarded dictionary died as
 `ast_to_ir: unbound variable '__eta_unresolved_…'`. That fallback now admits a `TThunk`
 whose result *is* the class variable, keying on that tvar head. A result with the variable
-nested under a constructor (`() -> List a`) has no head to read and declines. So does a
-*second* same-class constraint, which puts the method in both slots while the occurrence's
-own type stays a fresh tvar naming neither — the identity is not recoverable at lowering,
-and taking a slot anyway is right only when the occurrence happens to belong to the first
-constraint. `try_eta_in_class` stays `TFunc`-only, so the peel's unreachability above is
-unchanged.
+nested under a constructor (`() -> List a`) has no head to read and declines. A *second*
+same-class constraint puts the method in both slots; the head is then named by its
+`@eta_fwdvar` marker (`lowering.eta_class_var_name`) before it is compared with the slots'
+written names, so each occurrence takes its own constraint's slot. A head with no marker
+keeps its own identity, matches no slot, and goes to the any-slot scan, which declines
+when the slots carry distinct impls. `try_eta_in_class` stays
+`TFunc`-only, so the peel's unreachability above is unchanged.
 
 `.iface` moves 6 → 7. A v6 file is rejected loudly rather than read leniently: decoded
 under v7 rules every nullary signature would come back as its bare return type, which is

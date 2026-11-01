@@ -737,13 +737,7 @@ fn eta_named_typeexpr(t: types.Type, ctx: LowerCtx) -> ast.TypeExpr =
   | types.TConst name -> ast.TypeName(types.type_id_name(name))
   | types.TApp base arg -> ast.TypeApply(eta_named_typeexpr(base, ctx), eta_named_typeexpr(arg, ctx))
   | types.TTuple items -> ast.TupleType(list_map(\i -> eta_named_typeexpr(i, ctx), items))
-  | types.TVar v ->
-      match dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), ctx.env.scheme_env) with
-      | Just scheme ->
-          match types.scheme_type(scheme) with
-          | types.TConst prog_var -> ast.TypeName(types.type_id_name(prog_var))
-          | _ -> ast.TypeName("_")
-      | Nothing -> ast.TypeName("_")
+  | types.TVar v -> ast.TypeName(maybe_with_default("_", types.eta_written_var(v, ctx.env.scheme_env)))
   | _ -> ast.TypeName("_")
 
 # Returns true if any dict in the list is the __unresolved_* sentinel consume_block
@@ -874,13 +868,20 @@ fn tvar_position(t: types.Type) -> Maybe types.Type =
 
 fn try_eta_forwarded_without_class(name: String, t: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   let Just param = eta_class_position(t) else Nothing
-      Just impl_name = eta_forwarded_impl(name, param, typed_ast.slot_entries(ctx.fwd)) else Nothing
+      Just impl_name = eta_forwarded_impl(name, eta_class_var_name(param, ctx), typed_ast.slot_entries(ctx.fwd)) else Nothing
   in Just(make_eta_lambda(impl_name, t, no_pos()))
+
+# The class-position variable by its written name when `@eta_fwdvar` has one, else
+# by its own identity. Nothing for a position that is not a bare variable.
+fn eta_class_var_name(param: types.Type, ctx: LowerCtx) -> Maybe String =
+  match param with
+  | types.TVar v -> Just(maybe_with_default(types.tyvar_identity(v), types.eta_written_var(v, ctx.env.scheme_env)))
+  | _ -> Nothing
 
 # The forwarded impl for `name`: prefer the tvar-headed slot, else any slot carrying the method.
 # A missing tvar head or a for-tvar miss both fall through to the any-slot scan.
-fn eta_forwarded_impl(name: String, param: types.Type, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
-  let Just tvar_name = types.type_var_name(param) else find_forwarded_method_any(name, entries)
+fn eta_forwarded_impl(name: String, tvar: Maybe String, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
+  let Just tvar_name = tvar else find_forwarded_method_any(name, entries)
       Just impl_name = find_forwarded_method_for_tvar(name, tvar_name, entries) else find_forwarded_method_any(name, entries)
   in Just(impl_name)
 
@@ -895,10 +896,9 @@ fn find_forwarded_method_for_tvar(method_name: String, tvar_name: String, entrie
       else
         find_forwarded_method_for_tvar(method_name, tvar_name, rest)
 
-# Reached when the class position has no tvar head to key on. Only one candidate
-# slot makes the answer certain: which constraint an occurrence belongs to is not
-# recoverable here, since its type is a fresh tvar that no @eta_fwd marker names.
-# With several, any pick runs one instance's code at another's type, so decline and
+# Reached when the class position has no variable to key on, or one no slot names
+# (no `@eta_fwdvar` marker). Only one candidate slot makes the answer certain: with
+# several, any pick runs one instance's code at another's type, so decline and
 # leave the loud __eta_unresolved_ failure.
 fn find_forwarded_method_any(method_name: String, entries: List (typed_ast.SlotKey, Dict String)) -> Maybe String =
   match forwarded_method_impls(method_name, entries) with
@@ -966,35 +966,20 @@ fn eta_fwd_slot_lambda(class_name: String, name: String, class_type: types.Type,
   | Just fwd_slot -> Just(make_eta_lambda(fwd_slot, t, no_pos()))
   | Nothing -> Nothing
 
-# Abstract (tvar) head: forward via the @eta_fwd marker.  @eta_fwd markers (distinct from
-# per-function @fwd:) are threaded into scheme_env during typecheck_decl, keyed
-# "@eta_fwd:{fresh_tvar}:{class_name}" — they map fresh TVar names back to programmer constraint
-# var names (e.g. "b"), enabling exact slot selection when multiple same-class constraints exist.
+# Abstract (tvar) head: the slot the variable's written name keys. `@eta_fwdvar` markers
+# (threaded into scheme_env by infer) name every signature variable, seeded or unified;
+# a variable infer already named by its written name is probed under its own identity first.
 fn eta_in_class_forwarded(class_name: String, name: String, t: types.Type, class_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match types.type_var_name(class_type) with
-  | Just tvar_name -> eta_forwarded_method(name, class_name, tvar_name, t, ctx)
-  | Nothing -> Nothing
-
-fn eta_forwarded_method(method_name: String, class_name: String, tvar_name: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
-  match eta_forwarded_method_for_prog_var(method_name, class_name, tvar_name, method_type, ctx) with
-  | Just expanded -> Just(expanded)
-  | Nothing ->
-      match lookup_eta_fwd_scheme(tvar_name, class_name, ctx) with
-      | Just fwd_scheme ->
-          match types.scheme_type(fwd_scheme) with
-          | types.TConst prog_var ->
-              eta_forwarded_method_for_prog_var(method_name, class_name, types.type_id_name(prog_var), method_type, ctx)
-          | _ -> Nothing
-      | Nothing -> Nothing
+  let Just tvar_name = types.type_var_name(class_type) else Nothing
+  in match eta_forwarded_method_for_prog_var(name, class_name, tvar_name, t, ctx) with
+     | Just expanded -> Just(expanded)
+     | Nothing -> eta_fwd_slot_lambda(class_name, name, class_type, t, ctx)
 
 fn eta_forwarded_method_for_prog_var(method_name: String, class_name: String, prog_var: String, method_type: types.Type, ctx: LowerCtx) -> Maybe typed_ast.TypedExpr =
   match find_fwd_method_for_key(method_name,
           typed_ast.dict_slot_key(class_name, [ast.TypeName(prog_var)]), ctx) with
   | Just impl_name -> Just(make_eta_lambda(impl_name, method_type, no_pos()))
   | Nothing -> Nothing
-
-fn lookup_eta_fwd_scheme(tvar_name: String, class_name: String, ctx: LowerCtx) -> Maybe types.Scheme =
-  dict_get(types.eta_fwd_marker_key(tvar_name, class_name), ctx.env.scheme_env)
 
 # lower_expr_callee: lower the callee of a TCall without eta-expanding TVar class methods.
 # Direct class method calls already have TDict nodes injected by infer; rewriting the

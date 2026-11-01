@@ -815,8 +815,8 @@ fn method_ref_constraint(method: String, class_name: String, t: types.Type,
 fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   | types.TVar v ->
-      match dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), env) with
-      | Just scheme -> typed_ast.type_to_type_expr(types.scheme_type(scheme))
+      match types.eta_written_var(v, env) with
+      | Just written -> ast.TypeName(written)
       | Nothing -> typed_ast.type_to_type_expr(t)
   | types.TApp f x -> ast.TypeApply(named_type_expr(f, env), named_type_expr(x, env))
   | types.TTuple items -> ast.TupleType(list_map(\i -> named_type_expr(i, env), items))

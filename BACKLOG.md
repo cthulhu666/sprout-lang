@@ -1350,21 +1350,22 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `docs/dict-resolution-north-star-plan-2026-06-30.md` for the sentinel-flow map and why M4/M5/M3b
   were parked.
 - [ ] `P1` **An ambiguous class-method reference is diagnosed at codegen, with no source location.**
-  The two `tests/conformance/emit_error/ambiguous_forwarded_*.spr` shapes pass `--phase check`
-  and then fail at emit with `ast_to_ir: unbound variable '__eta_unresolved_<Class>_<method>'` —
+  A class method used as a value whose class variable is an unconstrained free type variable
+  (`ignore_it(apply_int(from_int, 1))`, pinned in
+  `tests/conformance/emit_error/ambiguous_unconstrained_method.spr`) passes `--phase check`
+  and then fails at emit with `ast_to_ir: unbound variable '__eta_unresolved_<Class>_<method>'` —
   a compiler-internal sentinel, no line, no column. So the LSP and every check-phase gate accept
-  the program and the user learns at build time. Both are unresolvable identity (see below).
-  Ambiguity detection belongs where constraints are known, not at slot-selection time. (The
-  cross-class shape is now rejected at its declaration, `docs/qualified-class-methods-v0.md`.)
-- [ ] `P2` **An eta'd class method under two same-class constraints is rejected, not resolved.**
-  The occurrence's type is a fresh tvar that no `@eta_fwd` marker names, so lowering cannot tell
-  which constraint it belongs to; it now declines instead of taking the first slot, which was
-  right only when the occurrence belonged to the first constraint and otherwise ran one
-  instance's code at another's type. Both probes are pinned in `tests/conformance/emit_error/`.
-  The identity gap is upstream: the site's tvar is unified with the constraint's during
-  inference but neither the node type nor `final_subst` records it (verified — forcing
-  `commit_fn_decl`'s substitution unconditionally does not relate them). Same root cause as the
-  M3b entry below, and it wants the same canonicalization; until then the shape is a hard error.
+  the program and the user learns at build time. Nothing names an instance, so the ambiguity
+  belongs where constraints are known, not at slot-selection time. (The cross-class shape is
+  now rejected at its declaration, `docs/qualified-class-methods-v0.md`.)
+- [ ] `P2` **`@eta_fwdvar` names only signature variables: instance headers and unpacks fail.**
+  A method passed as a value under two same-class constraints ends in
+  `__eta_unresolved_<Class>_<method>` when the variables are not a function's own. Two unpacks of
+  `type Pack = | exists a. Pack a where Step a, ToString a` with `app(bump, x)` and `app(bump, y)`
+  fail; so does `instance Make (Pair a b) where Make a, Make b` whose `from_int` passes
+  `from_int` as a value twice. `infer.add_eta_fwdvar` runs for `prog_to_fresh` only, so skolems
+  and instance-header variables name no slot and two distinct impls decline. Fix: write the
+  markers where the unpack and the instance header seed their slots.
 - [ ] `P2` **Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization).**
   Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a second resolution
   authority for one shape: a polymorphic (type-variable-head) forwarded value-position class method.

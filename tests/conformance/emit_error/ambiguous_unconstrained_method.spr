@@ -1,0 +1,20 @@
+module main
+
+# The method's class variable is an unconstrained free variable: `ignore_it`
+# never fixes it, and no `where` clause names it. Nothing says which instance is
+# meant, so the program fails at emit rather than guessing one.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn ignore_it(x: t) -> Int = 0
+
+fn main() -> Unit !{IO} = print(ignore_it(apply_int(from_int, 1)))

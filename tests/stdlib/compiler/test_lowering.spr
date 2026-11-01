@@ -599,9 +599,9 @@ fn main() -> Unit !{IO} =
 
     # `from_int`'s class variable is in its RESULT, so its own type carries no tvar
     # head. An ANNOTATED higher-order parameter still pins it, and these resolve
-    # through eta_class_type rather than the slot scan — the scan needs the method to
-    # arrive through a polymorphic helper, where its type is a fresh tvar, and that
-    # shape is rejected (tests/conformance/emit_error/ambiguous_forwarded_method.spr).
+    # through eta_class_type rather than the slot scan. A method that arrives through a
+    # polymorphic helper has a fresh tvar type, named through `@eta_fwdvar`
+    # (tests/conformance/run/ambiguous_forwarded_method.spr).
     r_pinned_one <- run_lower("class Make a {\n  fn from_int(n: Int) -> a\n}\nfn test(f: (Int -> a) -> Int) -> Int where Make a = f(from_int)")
     assert_true(state, "pinned by annotation, one constraint: lowers ok", is_lower_ok(r_pinned_one))
     assert_true(state, "pinned by annotation, one constraint: resolves to the only slot",

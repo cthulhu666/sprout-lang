@@ -1,0 +1,36 @@
+module main
+
+# The nullary shape: `blank`'s result is the class variable. Used with only the
+# first constraint's type, only the second's, and both, over either instance order.
+# The instances differ in what `blank` returns, so a wrong slot shows in the value.
+
+class Blank t
+  fn blank() -> t
+  fn combine(x: t, y: t) -> t
+
+instance Blank Int
+  fn blank() -> Int = 5
+  fn combine(x: Int, y: Int) -> Int = x + y
+
+instance Blank String
+  fn blank() -> String = "-"
+  fn combine(x: String, y: String) -> String = x ++ y
+
+fn run_thunk(th: () -> a) -> a = th()
+
+fn only_a(x: a, y: b) -> a where Blank a, Blank b = combine(x, run_thunk(blank))
+
+fn only_b(x: a, y: b) -> b where Blank a, Blank b = combine(y, run_thunk(blank))
+
+fn both(x: a, y: b) -> (a, b) where Blank a, Blank b =
+  (combine(x, run_thunk(blank)), combine(y, run_thunk(blank)))
+
+fn main() -> Unit !{IO} = do
+  print(int_to_string(only_a(7, "q")))
+  print(only_b(7, "q"))
+  print(only_a("q", 7))
+  print(int_to_string(only_b("q", 7)))
+  match both(7, "q") with
+  | (m, n) -> print(int_to_string(m) ++ "|" ++ n)
+  match both("q", 7) with
+  | (m, n) -> print(m ++ "|" ++ int_to_string(n))
