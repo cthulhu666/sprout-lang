@@ -785,7 +785,7 @@ a self-compile. That is an estimate; §14.8 measures it.
 - **Goal:** a runtime check that fails when any store path lacks the barrier, so §7's
   list stops being the safety argument.
 - **Goal:** one switch, `SPROUT_GC_MINOR`, for A/B measurement in one binary. Off (`0`, the
-  default until step 4) runs today's collector unchanged: no pre-pass, and the sweep clears the
+  default, which step 4 kept) runs today's collector unchanged: no pre-pass, and the sweep clears the
   colour bit. On (`1`) chooses between minor and major per collection.
 - **Non-goal (stage 2, §14.6):** a minor sweep proportional to the young set. Stage 1
   still walks every slot.
@@ -847,7 +847,8 @@ A major runs:
 - when live after a collection exceeds 2 × live after the last major (CRuby's
   `GC_HEAP_OLDOBJECT_LIMIT_FACTOR`);
 - when `SPROUT_GC_MAJOR_EVERY` minors have run since the last major (Boehm's
-  `GC_full_freq`; start at 19, step 4 sets the default);
+  `GC_full_freq`; 19. In step 4 it never bound: at 19, 50 and 1000 the 2× rule chose every
+  major);
 - for any reason but the allocation trigger. `sprout_gc_collect_with_reason` has two, `threshold`
   (also what `SPROUT_GC_STRESS=1` reports) and `atexit`, so that means `atexit`;
 - always with the mode off.
@@ -865,7 +866,9 @@ major.
 Observed in one self-compile (`compile_driver.sprout`, default settings, one run each): 91
 collections without the mode, 68 with it (55 minor, 13 major), GC time 1585 ms against 917 ms,
 output byte-identical. Most of the 13 majors come from the 2× rule firing while the heap grows
-early in the run, not from the count bound; step 4 decides whether that rule needs a floor.
+early in the run, not from the count bound. Step 4 found the rule needs a floor: with a live set
+of tens of objects the heap doubles over the baseline within a few collections, and a third of
+nqueens' and http_log_middleware's collections are majors.
 
 The count bound is not optional. The 2× rule alone never fires when the live set shrinks:
 1M live at the last major, 10k really live after a phase change, and the count stays above
@@ -1013,3 +1016,14 @@ barrier never sees an old object. Nothing goes red between steps.
    workload regresses beyond run-to-run spread. Then: the barrier rule goes normative in
    `compiler-internals.md`, `SPROUT_DEBUG_GC`'s `marked` and AGEPROF's `marked_total` are
    documented as minor-only counts, and the GENCHECK gate goes into CI.
+
+   **Measured; not flipped** ([bench/results-2026-11-01-gc-minor.md](../bench/results-2026-11-01-gc-minor.md),
+   harness `bench/gc_minor/`). The self-compile gains (CPU 0.83×, GC time 0.56×, RSS 1.36×) and
+   the galaxy client's pause drops (p50 0.36×); nqueens (CPU 1.08×) and http_log_middleware
+   (1.04×) regress outside the spread. Their regression is the 2× rule: a third of their
+   collections are majors, and a major pays `sprout_gc_clear_marks`' extra walk while their minors
+   save nothing. The fixed-threshold arm does not equalise collections, because
+   `SPROUT_GC_THRESHOLD` compares a heap count that after a minor still holds dead old objects; it
+   is read per collection (p50, p90) instead.
+
+5. **A floor under the 2× rule, then re-measure** with `bench/gc_minor/ab.sh`. Not designed.

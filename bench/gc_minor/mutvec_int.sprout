@@ -1,0 +1,49 @@
+module main
+
+# Old `MutVec Int` workload for the minor-collection A/B (docs/gc-generational-v0.md §14.8 step 4).
+#
+# A 1,000,000-element MutVec Int is allocated up front and lives to the end, so after the first
+# collection it is old. Every round scatters writes over it at pseudo-random indices (each write
+# into an old vector takes the write barrier's slow path once per collection, and a remembered
+# scalar MutVec is rescanned in full at the next minor) and then allocates a short-lived list so
+# collections keep happening. Prints a checksum only: both arms must print the same bytes.
+
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_fold)
+
+let size = 1000000
+let rounds = 1200
+let sets_per_round = 4000
+let churn_len = 6000
+
+# Remainder for non-negative operands; `math.int.mod` answers `Maybe` and would add allocation.
+fn modulo(a: Int, b: Int) -> Int =
+  a - (a / b) * b
+
+# 31-bit linear congruential step; the product stays below 2^62.
+fn next_seed(s: Int) -> Int =
+  modulo(s * 1103515245 + 12345, 2147483648)
+
+fn scatter(v: MutVec Int, seed: Int, k: Int) -> Int !{IO} =
+  if k <= 0 then seed
+  else do
+    let s = next_seed(seed)
+    mutvec_set(v, modulo(s, size), s / 65536)
+    scatter(v, s, k - 1)
+
+# Short-lived garbage: a list that dies when the fold returns.
+fn churn(r: Int) -> Int =
+  list_fold(\ (acc, x) -> acc + x * 2 + 1, 0, [i + r for i in 1..churn_len])
+
+fn run(v: MutVec Int, r: Int, seed: Int, acc: Int) -> Int !{IO} =
+  if r > rounds then acc
+  else do
+    s <- scatter(v, seed, sets_per_round)
+    probe <- mutvec_at(v, modulo(s, size))
+    run(v, r + 1, s, modulo(acc + churn(r) + probe, 1000000007))
+
+fn main() -> Unit !{IO} =
+  do
+    v <- mutvec_new(size, 0)
+    acc <- run(v, 1, 12345, 0)
+    total <- mutvec_fold(\ (a, x) -> a + x, 0, v)
+    print(`checksum=${acc} vec_sum=${total}`)
