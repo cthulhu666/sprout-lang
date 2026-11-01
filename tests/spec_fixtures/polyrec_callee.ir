@@ -1,0 +1,10 @@
+# measure (constrained) calls depth (unconstrained, polymorphically recursive at List a).
+# measure is copied at Int; its copy still calls the generic depth, which has no constraint
+# and so no copy.
+on has define i64 @main.measure$spec_Int(
+on body main.measure$spec_Int has call i64 @main.depth(
+on has define i64 @main.depth(
+on lacks @main.depth$spec
+on lacks define i64 @main.measure(
+off has define i64 @main.measure(
+off lacks $spec

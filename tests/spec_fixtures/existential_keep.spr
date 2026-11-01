@@ -1,0 +1,20 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): evidence that is not concrete. `same` is
+# called once at Int, which is copied, and once inside an existential match arm, where the
+# `Eq` dictionary is the one packed in the value (forwarded per arm), so that call is not
+# copied. The generic `same` stays defined for it.
+type EqPair = | exists t. EqPair t t where Eq t
+
+fn same(x: a, y: a) -> Bool where Eq a = eq(x, y)
+
+fn pair_same(p: EqPair) -> Bool =
+  match p with
+  | EqPair x y -> same(x, y)
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- print(same(1, 1))
+    _ <- print(pair_same(EqPair(2, 3)))
+    _ <- print(pair_same(EqPair("a", "a")))
+    print(pair_same(EqPair(true, false)))

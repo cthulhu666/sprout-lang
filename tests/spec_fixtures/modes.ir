@@ -1,0 +1,11 @@
+# A local parameter still lends and a linear argument is still accepted: both functions are
+# copied, with their dictionary parameters gone and their method calls direct.
+on has define i64 @main.count_above$spec_Int(i64 %p$keep, i64 %p$xs, i64 %p$floor)
+on body main.count_above$spec_Int lacks @__cm_Ord_compare
+on has define i64 @main.consume$spec_main_Handle(i64 %p$h)
+on body main.consume$spec_main_Handle has call i64 @__tc_main.Taker_main_Handle_take(i64 %p$h)
+on lacks define i64 @main.count_above(
+on lacks define i64 @main.consume(
+off has define i64 @main.count_above(
+off has define i64 @main.consume(
+off lacks $spec

@@ -1,0 +1,31 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): modes survive the copy. `count_above` takes a
+# `local` function parameter and is handed a lambda that lends; `consume` is `where linear a`
+# and is handed a linear value. Both are copied, and on/off print the same.
+type linear Handle =
+  | Handle Int
+
+class Taker a
+  fn take(x: a) -> Int
+
+instance Taker Handle
+  fn take(x: Handle) -> Int =
+    match x with
+    | Handle n -> n
+
+fn count_above(keep: local a -> Bool, xs: List a, floor: a) -> Int where Ord a =
+  match xs with
+  | Nil -> 0
+  | Cons x rest ->
+    let rest_count = count_above(keep, rest, floor)
+    in if keep(x) && compare(x, floor) > 0 then rest_count + 1 else rest_count
+
+fn consume(h: a) -> Int where linear a, Taker a = take(h)
+
+fn main() -> Unit !{IO} =
+  let limit = 4
+  in
+    do
+      _ <- print(count_above(\x -> x < limit * 3, [1, 5, 9, 13, 2, 7], 3))
+      print(consume(Handle(41)) + 1)

@@ -1,0 +1,17 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): superclass evidence. `max_or_same` is
+# constrained on `Ord a` but calls `same`, which needs `Eq a`; that evidence is Ord's
+# superclass. Both copies exist and neither dispatches dynamically. The prelude's
+# `member` (`Foldable c, Eq a`) is copied at List/Int.
+fn same(x: a, y: a) -> Bool where Eq a = eq(x, y)
+
+fn max_or_same(x: a, y: a) -> a where Ord a =
+  if same(x, y) then x else if compare(x, y) > 0 then x else y
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- print(max_or_same(4, 4))
+    _ <- print(max_or_same(4, 9))
+    _ <- print(member(3, [1, 2, 3]))
+    print(member(8, [1, 2, 3]))

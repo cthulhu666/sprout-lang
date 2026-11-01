@@ -382,6 +382,19 @@ read the diff before staging it, since the off build is the behaviour being pres
 The IR-shape half (what qualifies, what is left alone and why) is `tests/stdlib/compiler/test_bce.spr`.
 Wired into `just ci-fast-gates` as `bce-gate`.
 
+## Specialisation — `just spec-gate`
+
+Compiles each `tests/spec_fixtures/<name>.spr` twice, with `SPROUT_OPT_ON=spec` and with
+`SPROUT_OPT_OFF=spec`, and runs both. They must print the same text and exit with the same
+status, and both must equal `tests/spec_fixtures/expected/<name>.out`. The sidecar
+`tests/spec_fixtures/<name>.ir` holds fixed-string assertions on the emitted IR (`on|off has`,
+`lacks`, `count`, and `body <fn> has|lacks`, scoped to one `define`; the header of
+`scripts/spec_gate.sh` has the format). A sidecar line `stress` runs the fixture under
+`SPROUT_GC_STRESS=1`. Each compile is bounded at 60 s, so a pass that fails to terminate on a
+growing key is a FAIL, not a hang. `scripts/spec_gate.sh --snapshot` rewrites the goldens from
+the pass-off build; read the diff before staging it. Wired into `just ci-fast-gates` as
+`spec-gate`.
+
 ## fmt/lint batching — `just fmt-batch-smoke`
 
 Asserts what the `fmt`, `fmt-check` and `lint` loops rely on: every path in a batch is processed, an

@@ -1,0 +1,11 @@
+# One copy of the prelude's fold at Foldable List serves an Int accumulator and a List
+# accumulator (§4 substitution domain). The accumulator stays heap-rooted in it.
+stress
+on count 1 define i64 @fold$spec_List(
+on has define i64 @fold$spec_List(i64 %p$step, i64 %p$init, i64 %p$xs)
+on body fold$spec_List has call i64 @__tc_Foldable_List_fold_values(
+on body fold$spec_List lacks @__cm_Foldable_fold_values
+on body fold$spec_List has store i64 %p$init
+on lacks define i64 @fold(
+off has define i64 @fold(
+off lacks $spec
