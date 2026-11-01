@@ -872,7 +872,7 @@ with it off. With it on, `marked` counts what that collection marked: a minor's 
 out every old object. The "live after the previous collection" in the second rule is the heap
 count after the sweep, which after a minor still holds the old objects that died since the last
 major. The decision is taken before that sweep, from the predicted count, which equals the
-post-sweep count (`sprout_gc_gen_next_major`).
+post-sweep count (`sprout_gc_gen_record`).
 
 Observed in one self-compile (`compile_driver.sprout`, default settings, one run each): 91
 collections without the mode, 68 with it (55 minor, 13 major), GC time 1585 ms against 917 ms,

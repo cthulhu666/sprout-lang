@@ -2512,23 +2512,30 @@ static void sprout_gc_clear_marks(void) {
 /* Which collection to run.  Major on any reason but the allocation trigger (atexit), and
  * whenever no object is old (`colorless`: the first collection, or the previous sweep cleared
  * the colors because this one was predicted to be a major).  The size and count rules live in
- * sprout_gc_gen_next_major, which decides this collection's kind one sweep early. */
+ * sprout_gc_gen_record, which decides this collection's kind one sweep early. */
 static int sprout_gc_gen_choose_minor(const char* reason) {
   return strcmp(reason, "threshold") == 0 && !g_gen.colorless;
 }
 
-/* Called after the mark, before the sweep: is the NEXT collection a major?  Major when the
- * heap has more than doubled since the last major, and every SPROUT_GC_MAJOR_EVERY minors
- * (the doubling rule alone never fires when the live set shrinks).  The post-sweep heap count
- * is known exactly: a minor frees no old object and a sweep colors every survivor, so it is
- * the old objects (`last_live`) plus the young ones just marked; a major keeps only the marked.
- * `*predicted` returns that count. */
-static int sprout_gc_gen_next_major(int minor, long long* predicted) {
-  long long live = minor ? g_gen.last_live + g_gc_marked_count : g_gc_marked_count;
-  long long baseline = minor ? g_gen.baseline : live;
-  long long minors = minor ? g_gen.minors_since_major + 1 : 0;
-  *predicted = live;
-  return live > 2 * baseline || minors >= g_gen.major_every;
+/* Called after the mark, before the sweep: records this collection in g_gen and returns
+ * whether the NEXT one is a major.  The post-sweep heap count is known exactly: a minor frees
+ * no old object and a sweep colors every survivor, so it is the old objects (`last_live`) plus
+ * the young ones just marked; a major keeps only the marked.  Major next when the heap has
+ * more than doubled since the last major, and every SPROUT_GC_MAJOR_EVERY minors (the doubling
+ * rule alone never fires when the live set shrinks). */
+static int sprout_gc_gen_record(int minor) {
+  if (minor) {
+    g_gen.last_live += g_gc_marked_count;
+    g_gen.minors_since_major++;
+    g_gen.n_minor++;
+  } else {
+    g_gen.last_live = g_gen.baseline = g_gc_marked_count;
+    g_gen.minors_since_major = 0;
+    g_gen.n_major++;
+  }
+  g_gen.colorless = g_gen.last_live > 2 * g_gen.baseline
+                    || g_gen.minors_since_major >= g_gen.major_every;
+  return g_gen.colorless;
 }
 
 /* ── SPROUT_GC_GENCHECK=1 — does a minor collection free anything reachable? ───
@@ -3268,21 +3275,13 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   if (minor) sprout_gc_mark_remembered();
   sprout_gc_drain_marks();
   if (minor && g_gen.check) sprout_gc_gen_verify();
-  long long predicted_live = 0;
-  int next_major = 0;
-  if (gen_on) next_major = sprout_gc_gen_next_major(minor, &predicted_live);
+  int next_major = gen_on && sprout_gc_gen_record(minor);
   sprout_gc_sweep(gen_on && !next_major);
-  if (gen_on) {
-    if (g_gen.check && predicted_live != g_managed_heap_count) {
-      fprintf(stderr, "[sprout] GENCHECK: predicted %lld live objects after the sweep, found %lld\n",
-              predicted_live, g_managed_heap_count);
-      fflush(stderr);
-      abort();
-    }
-    if (minor) { g_gen.minors_since_major++; g_gen.n_minor++; }
-    else { g_gen.baseline = g_managed_heap_count; g_gen.minors_since_major = 0; g_gen.n_major++; }
-    g_gen.last_live = g_managed_heap_count;
-    g_gen.colorless = next_major;
+  if (gen_on && g_gen.check && g_gen.last_live != g_managed_heap_count) {
+    fprintf(stderr, "[sprout] GENCHECK: predicted %lld live objects after the sweep, found %lld\n",
+            g_gen.last_live, g_managed_heap_count);
+    fflush(stderr);
+    abort();
   }
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;
