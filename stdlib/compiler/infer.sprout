@@ -3918,15 +3918,15 @@ fn seed_compound_marker(class_name: String, te: ast.TypeExpr, env: Dict types.Sc
 # collected is not expanded again, which also stops a cycle (rejected elsewhere, but
 # not before this runs).
 fn env_superclasses(class_name: String, entries: List (String, types.Scheme)) -> List String =
-  superclass_closure(direct_superclasses(class_name, entries), entries, Nil)
+  superclass_closure(direct_superclasses(class_name, entries), direct_superclasses(_, entries), Nil)
 
-fn superclass_closure(todo: List String, entries: List (String, types.Scheme),
-                      found: List String) -> List String =
+# `direct` gives a class's direct superclasses; the closure is breadth-first.
+fn superclass_closure(todo: List String, direct: String -> List String, found: List String) -> List String =
   match todo with
   | [] -> found
   | [c | rest] ->
-      if list_member(c, found) then superclass_closure(rest, entries, found)
-      else superclass_closure(list_append(rest, direct_superclasses(c, entries)), entries, Cons(c, found))
+      if list_member(c, found) then superclass_closure(rest, direct, found)
+      else superclass_closure(list_append(rest, direct(c)), direct, Cons(c, found))
 
 fn direct_superclasses(class_name: String, entries: List (String, types.Scheme)) -> List String =
   list_filter_map(\e -> superclass_of(class_name, e), entries)
@@ -4023,12 +4023,17 @@ fn seeded_sig_vars(env: Dict types.Scheme) -> List types.Type =
       types.TTuple vars = types.scheme_type(sch) else Nil
   in vars
 
-# Seed @fwd markers for all superclasses of class_name.
-# Scans env for "@super:{class_name}:{super_name}" entries and adds
-# "@fwd:{fresh_name}:{super_name}" for each.
+# Seed @fwd markers for all superclasses of class_name, transitively: the function's
+# hidden parameters hold a slot per transitive superclass
+# (types.class_with_transitive_supers), so a callee constrained on a grand-superclass
+# (`Functor f` from `Monad m`) must find its marker. Adds "@fwd:{fresh_name}:{s}" for each
+# `s` in `superclasses_in_env`.
 fn seed_superclass_fwd_markers(class_name: String, fresh_name: String, prog_var: String, env: Dict types.Scheme) -> Dict types.Scheme =
   list_fold(set_super_marker(types.fwd_marker_key(fresh_name, _), prog_var, _, _), env,
-            direct_superclasses_in_env(class_name, env))
+            superclasses_in_env(class_name, env))
+
+fn superclasses_in_env(class_name: String, env: Dict types.Scheme) -> List String =
+  superclass_closure(direct_superclasses_in_env(class_name, env), direct_superclasses_in_env(_, env), Nil)
 
 # The direct superclasses `class_name`'s `@super:` markers record, in key order. A
 # prefix scan rather than a walk of every entry: this runs once per class constraint.
@@ -4091,7 +4096,7 @@ fn add_eta_for_constraint(c: ast.TypeConstraint, prog_to_fresh: Dict types.Type,
 # scheme-value content.  See the wrap declarations above.
 fn add_eta_with_supers(class_name: String, fresh_name: FreshTVarName, prog_var: ProgVarName, env: Dict types.Scheme, markers: Dict types.Scheme) -> Dict types.Scheme =
   list_fold(set_super_marker(types.eta_fwd_marker_key(fresh_tvar_str(fresh_name), _), prog_var_str(prog_var), _, _),
-            markers, direct_superclasses_in_env(class_name, env))
+            markers, superclasses_in_env(class_name, env))
 
 # --- Args accumulator ---
 

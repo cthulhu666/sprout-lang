@@ -661,6 +661,13 @@ It was head-only once (`ToString_List`), and then a body declaring `ToString (Li
 answered every `ToString (List …)` request from that slot — a concrete `List String`
 included — and `where Ord (Maybe a), Eq (Maybe b)` had two obligations on one slot.
 
+A variable-headed constraint (`where Monad m`) gets a slot per TRANSITIVE superclass
+(`types.class_with_transitive_supers`), so `infer.superclasses_in_env` seeds `@fwd:` and
+`@eta_fwd:` markers for all of them, not the direct ones. Seeding only `Applicative m` left a call
+of a `Functor f` function from a `Monad m` body without a marker: the dictionary was a hole and
+lowered to the `Functor__` poison thunk (the compound path, `seed_compound_marker`, already
+closed over supers). `tests/conformance/run/superclass_forward_transitive.spr`.
+
 `resolve` groups a body's slots by class and head (`Forwarded`), each with its WRITTEN
 arguments, aliases expanded (`resolve.expand_aliases`, reading the `@aliasty:` markers),
 and `forwarded_slot` picks the one a use means: the exact key, else the one slot whose

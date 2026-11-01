@@ -1,0 +1,52 @@
+# A constraint reaches a function through a superclass two or more levels up:
+# `Monad m` gives `Functor m` by way of `Applicative`. The hidden dictionary slot
+# for the grand-superclass must exist, so a callee constrained on it is passed one.
+module main
+
+fn bump(xs: f Int) -> f Int where Functor f = fmap(\x -> x + 1, xs)
+
+fn bump_both(xs: m Int) -> m Int where Monad m = bump(xs)
+
+fn double_direct(xs: m Int) -> m Int where Monad m = fmap(\x -> x * 2, xs)
+
+fn bump_via_applicative(xs: m Int) -> m Int where Applicative m = bump(xs)
+
+# A user chain three levels deep: `C` gives `A` through `B`, `D` through `C`.
+class A t
+  fn a_val(x: t) -> Int
+
+class B t where A t
+  fn b_val(x: t) -> Int
+
+class C t where B t
+  fn c_val(x: t) -> Int
+
+class D t where C t
+  fn d_val(x: t) -> Int
+
+instance A Int
+  fn a_val(x: Int) -> Int = x + 1
+
+instance B Int
+  fn b_val(x: Int) -> Int = x + 10
+
+instance C Int
+  fn c_val(x: Int) -> Int = x + 100
+
+instance D Int
+  fn d_val(x: Int) -> Int = x + 1000
+
+fn use_a(x: t) -> Int where A t = a_val(x)
+
+fn use_a_from_d(x: t) -> Int where D t = use_a(x)
+
+fn use_b_from_d(x: t) -> Int where D t = b_val(x)
+
+fn main() -> Unit !{IO} =
+  do
+    print(bump_both(Just(1)))
+    print(bump_both([1, 2]))
+    print(bump_via_applicative(Just(5)))
+    print(double_direct([1, 2]))
+    print(use_a_from_d(1))
+    print(use_b_from_d(1))
