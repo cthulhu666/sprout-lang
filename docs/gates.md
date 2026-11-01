@@ -926,8 +926,9 @@ correction from absorbing the thing it exists to detect.
 Runs the write barrier under minor collections ([gc-generational-v0.md](gc-generational-v0.md)
 §14.4, §14.5). One program per barrier site Sprout can drive (`tests/gc_gen/`: `ref_write`,
 `vector_mutset`, `vector_push` past its inline capacity, `linear_reuse`) runs with
-`SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. It must print its known line, run at
-least 20 minor collections, and print the same line with `SPROUT_GC_MINOR=0`. The two static
+`SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. Its stdout must equal its sidecar
+`tests/gc_gen/<name>.out` byte for byte (a missing sidecar is an error), it must run at least 20
+minor collections, and it must print the same output with `SPROUT_GC_MINOR=0`. The two static
 `sprout_analysis_*` helpers cannot be reached without a live analysis service, so
 `tests/c_runtime/analysis_strings.c` covers them under the same switches. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store

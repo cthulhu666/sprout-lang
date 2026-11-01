@@ -16,4 +16,9 @@ static void check(int ok, const char* what) {
   if (!ok) { g_failed = 1; fprintf(stderr, "FAIL: %s\n", what); }
 }
 
+/* True when the object's REMEMBERED header bit is set. */
+static inline int is_remembered(long long word) {
+  return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_REMEMBERED_BIT) != 0;
+}
+
 #endif
