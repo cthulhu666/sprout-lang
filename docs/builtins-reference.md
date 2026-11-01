@@ -179,7 +179,6 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `str_slice(s: String, start: Int, count: Int) -> String` — O(start + count), not O(|s|) (total: a negative `start` or `count` clamps to empty)
 - `str_char_at(s: String, index: Int) -> Maybe Char`
 - `str_find(s: String, needle: String) -> Int` (`-1` when not found)
-- `str_starts_with(s: String, prefix: String) -> Bool`
 - `str_compare(left: String, right: String) -> Int` (`-1`, `0`, `1`)
 
 The list above is the **char-indexed** core, which stays in the prelude. The

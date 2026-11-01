@@ -1,0 +1,25 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+
+# `str_starts_with(s, prefix)` is a byte-wise prefix test.
+
+# (label, s, prefix, expected)
+let cases = [("empty prefix", "abc", "", true),
+             ("empty prefix on empty s", "", "", true),
+             ("empty s, non-empty prefix", "", "a", false),
+             ("prefix equals s", "abc", "abc", true),
+             ("prefix longer than s", "ab", "abc", false),
+             ("mismatch at first byte", "abc", "xbc", false),
+             ("mismatch at last prefix byte", "abcd", "abx", false),
+             ("proper prefix", "hello world", "hello", true),
+             ("multi-byte prefix", "żółw", "żó", true),
+             ("multi-byte mismatch", "żółw", "żo", false)]
+
+fn check(state: TestState, c: (String, String, String, Bool)) -> Unit !{IO} =
+  let (label, s, prefix, expected) = c in
+  assert_eq(state, label, str_starts_with(s, prefix), expected)
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    list_each(\c -> check(state, c), cases)
+    summary(state)

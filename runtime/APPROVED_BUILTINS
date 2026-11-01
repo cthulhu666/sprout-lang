@@ -139,7 +139,6 @@ str_find
 str_len
 str_slice
 str_slice_bytes  # byte-indexed substring; required to avoid two O(N) codepoint->byte conversions per call inside hot compiler loops (codegen.dbg_count_header_lines pattern). Caller responsible for UTF-8 codepoint boundary alignment; runtime panics on mid-codepoint split.
-str_starts_with  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate then grepped `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-level prefix compare (strncmp) over the raw UTF-8 buffer.
 str_starts_with_at_byte  # Pre-existing builtin, not new. Absent until 2026-08-08 only because it was DEFINED `_Bool` while declared `i64`; the gate then grepped `long long <name>(`, so the ABI mismatch also hid it from this allowlist. Cannot be Sprout: byte-offset prefix compare; the whole point is to avoid the O(N) remaining-text slice a Sprout implementation would need.
 str_split_lines
 string_concat_many
