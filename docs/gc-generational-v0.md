@@ -852,7 +852,9 @@ A major runs:
   (also what `SPROUT_GC_STRESS=1` reports) and `atexit`, so that means `atexit`;
 - always with the mode off.
 
-`SPROUT_GC_MAJOR_EVERY=0` makes every collection a major. The cycle line of `SPROUT_DEBUG_GC`
+`SPROUT_GC_MAJOR_EVERY=0` makes every collection a major. A value that is not a non-negative
+integer aborts at the first collection, but only with the mode on: with `SPROUT_GC_MINOR` unset
+or `0`, neither it nor `SPROUT_GC_GENCHECK` is read. The cycle line of `SPROUT_DEBUG_GC`
 gains a trailing `kind=minor|major`, printed only with the mode on, so its output is unchanged
 with it off. With it on, `marked` counts what that collection marked: a minor's figure leaves
 out every old object. The "live after the previous collection" in the second rule is the heap
@@ -938,7 +940,8 @@ A C runtime test (`tests/c_runtime/gen_check.c`, in `just c-runtime-test`) store
 pointer into an old object without the barrier and must see the abort, with the owner and
 field named, so a verifier that checks nothing fails its own test. The same file runs the
 barriered store (no abort, the young object survives and is promoted), a minor that keeps an
-unrooted old object where a major frees it, and `SPROUT_GC_MAJOR_EVERY`.
+unrooted old object where a major frees it, `SPROUT_GC_MAJOR_EVERY`, and a bad
+`SPROUT_GC_MAJOR_EVERY` (abort with the mode on, ignored with it off).
 
 ### 14.6 Stage 2 — bounding the sweep (not designed yet)
 

@@ -4021,9 +4021,10 @@ gc-adapt-check: bootstrap-from-seed
 # §14.4, §14.5; docs/gates.md). One program per barrier site Sprout can drive (tests/gc_gen/), run
 # with SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1: every allocation collects, so a
 # store without its barrier is caught by the verifier within a few allocations. Each program must
-# print its known line, and must have run minor collections. Also run with the mode off, where
-# the line must be the same. The two analysis helpers are static and need a live analysis
-# service to reach from Sprout, so a C case covers them (tests/c_runtime/analysis_strings.c).
+# print the exact stdout in its sidecar tests/gc_gen/<name>.out, and must have run minor
+# collections. Also run with the mode off, where the output must be the same. The two analysis
+# helpers are static and need a live analysis service to reach from Sprout, so a C case covers
+# them (tests/c_runtime/analysis_strings.c).
 [group('test')]
 gc-gen-check: bootstrap-from-seed
   #!/usr/bin/env bash
@@ -4034,20 +4035,11 @@ gc-gen-check: bootstrap-from-seed
     clang -c "$rtsrc" -O2 {{clang_extra}} -o "$TMPD/rtobj/$(basename "$rtsrc" .c).o" 2>"$TMPD/rt.err" \
       || { echo "gc-gen-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
-  expected() {
-    case "$1" in
-      ref_write)      echo "gc-gen ref_write 11202" ;;
-      vector_mutset)  echo "gc-gen vector_mutset 3224" ;;
-      vector_push)    echo "gc-gen vector_push 16740" ;;
-      linear_reuse)   echo "gc-gen linear_reuse 80715" ;;
-      *)              echo "" ;;
-    esac
-  }
   failed=0
   for f in tests/gc_gen/*.spr; do
     name=$(basename "$f" .spr)
-    want=$(expected "$name")
-    [ -n "$want" ] || { echo "gc-gen-check: no expected line for $f; add one to the recipe" >&2; failed=1; continue; }
+    want_file="tests/gc_gen/$name.out"
+    [ -f "$want_file" ] || { echo "gc-gen-check: missing $want_file (the expected stdout of $f)" >&2; failed=1; continue; }
     "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" --package-root "{{justfile_directory()}}" "$f" > "$TMPD/$name.ll" 2>"$TMPD/$name.err" \
       || { echo "gc-gen-check: compile failed: $f" >&2; cat "$TMPD/$name.err" >&2; failed=1; continue; }
     clang "$TMPD/$name.ll" "$TMPD/rtobj"/*.o {{clang_extra}} -o "$TMPD/$name.bin" 2>"$TMPD/$name.err" \
@@ -4055,10 +4047,11 @@ gc-gen-check: bootstrap-from-seed
     SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1 SPROUT_DEBUG_GC=1 \
       "$TMPD/$name.bin" > "$TMPD/$name.out" 2>"$TMPD/$name.gc"
     rc=$?
-    if [ "$rc" != 0 ] || [ "$(cat "$TMPD/$name.out")" != "$want" ]; then
-      echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc, want '$want')" >&2
+    if [ "$rc" != 0 ] || ! cmp -s "$want_file" "$TMPD/$name.out"; then
+      echo "gc-gen-check: $name failed under MINOR=1 GENCHECK=1 STRESS=1 (rc=$rc)" >&2
+      echo "  expected: $(cat "$want_file")" >&2
+      echo "  actual:   $(cat "$TMPD/$name.out")" >&2
       grep -A4 'GENCHECK' "$TMPD/$name.gc" | head -8 >&2
-      tail -3 "$TMPD/$name.out" >&2
       failed=1; continue
     fi
     minors=$(grep -c 'kind=minor' "$TMPD/$name.gc")
@@ -4067,8 +4060,10 @@ gc-gen-check: bootstrap-from-seed
     (( minors >= 20 )) \
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
     SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
-    [ "$(cat "$TMPD/$name.off")" = "$want" ] \
-      || { echo "gc-gen-check: $name differs with SPROUT_GC_MINOR=0: '$(cat "$TMPD/$name.off")'" >&2; failed=1; }
+    cmp -s "$want_file" "$TMPD/$name.off" \
+      || { echo "gc-gen-check: $name differs with SPROUT_GC_MINOR=0" >&2
+           echo "  expected: $(cat "$want_file")" >&2
+           echo "  actual:   $(cat "$TMPD/$name.off")" >&2; failed=1; }
   done
   clang tests/c_runtime/analysis_strings.c runtime/sprout_scheduler.c runtime/sprout_poll.c -O1 -g {{clang_extra}} \
       -o "$TMPD/analysis.bin" 2>"$TMPD/analysis.err" \

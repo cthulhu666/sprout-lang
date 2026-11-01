@@ -806,6 +806,31 @@ static inline uint64_t sprout_hdr_age_bump(uint64_t h) {
   return (h & ~SPROUT_GC_AGE_MASK) | ((uint64_t)(age + 1) << SPROUT_GC_AGE_SHIFT);
 }
 
+/* A growable stack of payload pointers, on the C heap.  Used for the mark worklist, the
+ * GENCHECK worklist and the remembered set. */
+typedef struct {
+  void**  items;
+  size_t  len;
+  size_t  cap;
+} SproutWorklist;
+
+static inline void sprout_wl_push(SproutWorklist* wl, void* p, const char* oom_msg) {
+  if (wl->len >= wl->cap) {
+    size_t new_cap = wl->cap < 1024 ? 1024 : wl->cap * 2;
+    void** grown = (void**)realloc(wl->items, new_cap * sizeof(void*));
+    if (!grown) sprout_fail(oom_msg);
+    wl->items = grown;
+    wl->cap = new_cap;
+  }
+  wl->items[wl->len++] = p;
+}
+
+static inline void sprout_wl_free(SproutWorklist* wl) {
+  free(wl->items);
+  wl->items = NULL;
+  wl->len = wl->cap = 0;
+}
+
 /* ── Generational write barrier (docs/gc-generational-v0.md §14.4) ─────────────
  *
  * The collector state a per-domain heap would own.  The remembered set holds the
@@ -815,11 +840,9 @@ static inline uint64_t sprout_hdr_age_bump(uint64_t h) {
  * is old and the barrier's fast path always exits.  Not thread-safe, like the
  * rest of the heap. */
 typedef struct {
-  void**  remembered;  /* payload pointers */
-  size_t  len;
-  size_t  cap;
+  SproutWorklist remembered;     /* payload pointers */
   int       on;                  /* SPROUT_GC_MINOR=1; -1 until sprout_gc_gen_on reads it */
-  int       check;               /* SPROUT_GC_GENCHECK=1, and only with `on` */
+  int       check;               /* SPROUT_GC_GENCHECK=1; read only when `on` */
   long long major_every;         /* SPROUT_GC_MAJOR_EVERY: minors between majors */
   int       have_major;          /* a major has run */
   long long baseline;            /* heap count after the last major */
@@ -827,14 +850,18 @@ typedef struct {
   long long minors_since_major;
   long long n_minor, n_major;    /* collections run, by kind */
 } SproutGenState;
-static SproutGenState g_gen = { .on = -1, .check = -1, .major_every = 19 };
+static SproutGenState g_gen = { .on = -1, .major_every = 19 };
 
-/* Reads the three generational switches once.  SPROUT_GC_MAJOR_EVERY=0 makes every
- * collection a major. */
+/* Reads the generational switches once.  SPROUT_GC_GENCHECK and SPROUT_GC_MAJOR_EVERY
+ * are read only with SPROUT_GC_MINOR=1, so a bad value is ignored while the mode is off.
+ * SPROUT_GC_MAJOR_EVERY=0 makes every collection a major. */
 static int sprout_gc_gen_on(void) {
   if (g_gen.on >= 0) return g_gen.on;
   const char* m = getenv("SPROUT_GC_MINOR");
+  g_gen.on = (m != NULL && m[0] == '1');
+  if (!g_gen.on) return 0;
   const char* c = getenv("SPROUT_GC_GENCHECK");
+  g_gen.check = (c != NULL && c[0] == '1');
   const char* every = getenv("SPROUT_GC_MAJOR_EVERY");
   if (every != NULL && every[0] != '\0') {
     char* end = NULL;
@@ -843,23 +870,14 @@ static int sprout_gc_gen_on(void) {
       sprout_fail("SPROUT_GC_MAJOR_EVERY: expected non-negative integer");
     g_gen.major_every = parsed;
   }
-  g_gen.check = (m != NULL && m[0] == '1' && c != NULL && c[0] == '1');
-  g_gen.on = (m != NULL && m[0] == '1');
-  return g_gen.on;
+  return 1;
 }
 
 /* Record `payload`, whose header is `h` (color set, REMEMBERED clear). */
 __attribute__((noinline, cold)) static void sprout_gc_remember_slow(void* payload, uint64_t h) {
-  if (g_gen.len >= g_gen.cap) {
-    size_t new_cap = g_gen.cap < 256 ? 256 : g_gen.cap * 2;
-    void** grown = (void**)realloc(g_gen.remembered, new_cap * sizeof(void*));
-    if (!grown) sprout_fail("GC write barrier: out of memory for the remembered set");
-    g_gen.remembered = grown;
-    g_gen.cap = new_cap;
-  }
   h |= SPROUT_GC_REMEMBERED_BIT;
   memcpy((char*)payload - 8, &h, 8);
-  g_gen.remembered[g_gen.len++] = payload;
+  sprout_wl_push(&g_gen.remembered, payload, "GC write barrier: out of memory for the remembered set");
 }
 
 /* Fast path at the C store sites: one header load and one masked compare.
@@ -1982,7 +2000,7 @@ static void sprout_handle_cleanup(SproutHandle* hp) {
  * SPROUT_HANDLE_SET(h, val): update a handle's value in place (required when
  *   the handle holds a mutable accumulator built up in a loop).
  * For raw pointer values (char*, VectorVal*): store as (long long)(uintptr_t)ptr;
- *   mark_roots calls sprout_gc_mark_value which calls sprout_heap_lookup,
+ *   mark_roots visits each root with sprout_gc_mark_ptr, which calls sprout_heap_lookup,
  *   correctly handling both boxed object pointers and unboxed managed CSTRs. */
 #define SPROUT_HANDLE(name, val)   SproutHandle name     __attribute__((cleanup(sprout_handle_cleanup)))     = sprout_handle_new(val)
 #define SPROUT_HANDLE_SET(h, val) sprout_handle_set((h), (val))
@@ -2326,19 +2344,10 @@ static long long sprout_heap_child_value_payload(void* payload, size_t index) {
  * an explicit grey-set worklist on the C heap so mark depth is O(1) stack
  * regardless of heap graph depth.
  */
-static void**  g_gc_mark_worklist = NULL;  /* payload pointers (void*) */
-static size_t  g_gc_mark_wl_len = 0;
-static size_t  g_gc_mark_wl_cap = 0;
+static SproutWorklist g_gc_mark_wl;
 
 static inline void gc_mark_wl_push(void* payload) {
-  if (g_gc_mark_wl_len >= g_gc_mark_wl_cap) {
-    size_t new_cap = g_gc_mark_wl_cap < 1024 ? 1024 : g_gc_mark_wl_cap * 2;
-    void** new_wl = (void**)realloc(g_gc_mark_worklist, new_cap * sizeof(void*));
-    if (!new_wl) sprout_fail("GC mark: out of memory for worklist");
-    g_gc_mark_worklist = new_wl;
-    g_gc_mark_wl_cap = new_cap;
-  }
-  g_gc_mark_worklist[g_gc_mark_wl_len++] = payload;
+  sprout_wl_push(&g_gc_mark_wl, payload, "GC mark: out of memory for worklist");
 }
 
 static void gc_mark_enqueue(void* payload) {
@@ -2360,19 +2369,7 @@ static void gc_mark_enqueue(void* payload) {
   gc_mark_wl_push(payload);
 }
 
-/* GENCHECK's full mark takes the same roots as the collection: while it runs, a root is
- * reported to sprout_gc_check_reach instead of being marked. */
-static int g_gc_check_active = 0;
-static void sprout_gc_check_reach(void* payload, void* owner, long long field);
-
-static void sprout_gc_mark_value(long long value) {
-  if (g_gc_check_active) { sprout_gc_check_reach((void*)(uintptr_t)value, NULL, -1); return; }
-  void* hdr = sprout_heap_lookup((void*)(uintptr_t)value);
-  if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8);
-}
-
 static void sprout_gc_mark_ptr(void* ptr) {
-  if (g_gc_check_active) { sprout_gc_check_reach(ptr, NULL, -1); return; }
   void* hdr = sprout_heap_lookup(ptr);
   if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8);
 }
@@ -2397,8 +2394,8 @@ static int sprout_prof_edge_bucket(void* payload, size_t i) {
  * Must be called after sprout_gc_mark_roots() and before sprout_gc_sweep(). */
 static void sprout_gc_drain_marks(void) {
   SPROUT_PROF_HOT(g_gc_tracing = 1);
-  while (g_gc_mark_wl_len > 0) {
-    void* payload = g_gc_mark_worklist[--g_gc_mark_wl_len];
+  while (g_gc_mark_wl.len > 0) {
+    void* payload = g_gc_mark_wl.items[--g_gc_mark_wl.len];
     size_t child_count = sprout_heap_child_count_payload(payload);
     for (size_t i = 0; i < child_count; i++) {
       long long child_val = sprout_heap_child_value_payload(payload, i);
@@ -2409,10 +2406,7 @@ static void sprout_gc_drain_marks(void) {
     }
   }
   SPROUT_PROF_HOT(g_gc_tracing = 0);
-  free(g_gc_mark_worklist);
-  g_gc_mark_worklist = NULL;
-  g_gc_mark_wl_len = 0;
-  g_gc_mark_wl_cap = 0;
+  sprout_wl_free(&g_gc_mark_wl);
 }
 
 static long long sprout_gc_root_count(void) {
@@ -2424,32 +2418,36 @@ static long long sprout_gc_root_count(void) {
   return count;
 }
 
-static void sprout_gc_mark_root(const RootNode* root) {
+/* Roots are walked with a visitor: the collector passes sprout_gc_mark_ptr, the GENCHECK
+ * verifier its own.  The word is the raw root value; sprout_heap_lookup rejects non-pointers. */
+typedef void (*SproutRootVisit)(void* ptr);
+
+static inline void sprout_gc_mark_root(const RootNode* root, SproutRootVisit visit) {
   if (root->kind == SPROUT_ROOT_I64) {
-    sprout_gc_mark_value(*(long long*)root->slot);
+    visit((void*)(uintptr_t)*(long long*)root->slot);
   } else if (root->kind == SPROUT_ROOT_PTR) {
-    sprout_gc_mark_ptr(*(void**)root->slot);
+    visit(*(void**)root->slot);
   } else {
     for (size_t i = 0; i < root->aux_words; i++) {
       uintptr_t word = 0;
       memcpy(&word, (char*)root->slot + (i * sizeof(uintptr_t)), sizeof(uintptr_t));
-      sprout_gc_mark_ptr((void*)word);
+      visit((void*)word);
     }
   }
 }
 
-static void sprout_gc_mark_roots(void) {
+static inline void sprout_gc_mark_roots(SproutRootVisit visit) {
   for (PermRoot* perm = g_root_nodes; perm != NULL; perm = perm->next)
-    sprout_gc_mark_root(&perm->root);
+    sprout_gc_mark_root(&perm->root, visit);
   /* Temp roots are per task: scan EVERY registered context, so a task suspended
    * at a yield point keeps its roots while another task allocates. Over-rooting
    * a suspended task is safe; under-rooting one frees live values. */
   for (struct SproutRoots* rc = g_roots_registry; rc != NULL; rc = rc->reg_next)
     for (size_t i = 0; i < rc->pool_top; i++)
-      sprout_gc_mark_root(&rc->pool[i]);
+      sprout_gc_mark_root(&rc->pool[i], visit);
   for (int i = 0; i < SPROUT_HANDLE_TABLE_SIZE; i++) {
     if (g_handle_table[i].in_use)
-      sprout_gc_mark_value(g_handle_table[i].value);
+      visit((void*)(uintptr_t)g_handle_table[i].value);
   }
 }
 
@@ -2462,21 +2460,21 @@ static void sprout_gc_mark_roots(void) {
 /* Minor: trace the children of every remembered object, then empty the set.  Pushing the
  * object itself (not its children) lets the ordinary drain expand it. */
 static void sprout_gc_mark_remembered(void) {
-  for (size_t i = 0; i < g_gen.len; i++) {
-    void* payload = g_gen.remembered[i];
+  for (size_t i = 0; i < g_gen.remembered.len; i++) {
+    void* payload = g_gen.remembered.items[i];
     uint64_t h = sprout_hdr_of(payload);
     h &= ~SPROUT_GC_REMEMBERED_BIT;
     memcpy((char*)payload - 8, &h, 8);
     gc_mark_wl_push(payload);
   }
-  g_gen.len = 0;
+  g_gen.remembered.len = 0;
 }
 
 /* Major: clear color and REMEMBERED on every slot, so the mark that follows re-marks the
  * whole live heap.  Same slot walk as the sweep; FREE and POISON slots carry neither bit. */
 static inline size_t sprout_slot_step(uint64_t h);
 static void sprout_gc_clear_marks(void) {
-  g_gen.len = 0;
+  g_gen.remembered.len = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
     SproutRegion* r = &g_regions[ri];
     const uint64_t clear = SPROUT_GC_COLOR_BIT | SPROUT_GC_REMEMBERED_BIT;
@@ -2521,8 +2519,7 @@ static int sprout_gc_gen_choose_minor(const char* reason) {
  * it: report the owner it was reached through (a root, or an object and field) and abort.
  * That is a store that skipped the barrier.  Headers are only read, never written. */
 static uint8_t** g_check_maps = NULL;      /* per region: visited bitmap */
-static void**    g_check_wl = NULL;
-static size_t    g_check_wl_len = 0, g_check_wl_cap = 0;
+static SproutWorklist g_check_wl;
 
 static const char* sprout_gc_kind_name(uint64_t kind) {
   switch (kind) {
@@ -2550,9 +2547,8 @@ static void sprout_gc_check_fail(void* payload, uint64_t h, void* owner, long lo
     fprintf(stderr, "  owner: root\n");
   } else {
     uint64_t oh = sprout_hdr_of(owner);
-    fprintf(stderr, "  owner: kind=%s header=0x%016llx payload=%p field=%lld%s\n",
-            sprout_gc_kind_name(oh & 0xFF), (unsigned long long)oh, owner, field,
-            (oh & SPROUT_GC_REMEMBERED_BIT) ? " (remembered)" : "");
+    fprintf(stderr, "  owner: kind=%s header=0x%016llx payload=%p field=%lld\n",
+            sprout_gc_kind_name(oh & 0xFF), (unsigned long long)oh, owner, field);
   }
   fprintf(stderr, "  a store into an old object skipped sprout_gc_write_barrier\n");
   fflush(stderr);
@@ -2569,15 +2565,10 @@ static void sprout_gc_check_reach(void* payload, void* owner, long long field) {
   map[bit / 8] |= (uint8_t)(1u << (bit % 8));
   uint64_t h; memcpy(&h, hdr, 8);
   if (!(h & SPROUT_GC_COLOR_BIT)) sprout_gc_check_fail(payload, h, owner, field);
-  if (g_check_wl_len >= g_check_wl_cap) {
-    size_t new_cap = g_check_wl_cap < 1024 ? 1024 : g_check_wl_cap * 2;
-    void** grown = (void**)realloc(g_check_wl, new_cap * sizeof(void*));
-    if (!grown) sprout_fail("GENCHECK: out of memory for worklist");
-    g_check_wl = grown;
-    g_check_wl_cap = new_cap;
-  }
-  g_check_wl[g_check_wl_len++] = payload;
+  sprout_wl_push(&g_check_wl, payload, "GENCHECK: out of memory for worklist");
 }
+
+static void sprout_gc_check_root(void* ptr) { sprout_gc_check_reach(ptr, NULL, -1); }
 
 static void sprout_gc_gen_verify(void) {
   g_check_maps = (uint8_t**)calloc(g_region_count > 0 ? g_region_count : 1, sizeof(uint8_t*));
@@ -2586,22 +2577,18 @@ static void sprout_gc_gen_verify(void) {
     g_check_maps[ri] = (uint8_t*)calloc(1, g_regions[ri].is_large ? 1 : SPROUT_SLOTMAP_BYTES);
     if (!g_check_maps[ri]) sprout_fail("GENCHECK: out of memory");
   }
-  g_gc_check_active = 1;
-  sprout_gc_mark_roots();
-  while (g_check_wl_len > 0) {
-    void* payload = g_check_wl[--g_check_wl_len];
+  sprout_gc_mark_roots(sprout_gc_check_root);
+  while (g_check_wl.len > 0) {
+    void* payload = g_check_wl.items[--g_check_wl.len];
     size_t n = sprout_heap_child_count_payload(payload);
     for (size_t i = 0; i < n; i++)
       sprout_gc_check_reach((void*)(uintptr_t)sprout_heap_child_value_payload(payload, i),
                             payload, (long long)i);
   }
-  g_gc_check_active = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) free(g_check_maps[ri]);
   free(g_check_maps);
   g_check_maps = NULL;
-  free(g_check_wl);
-  g_check_wl = NULL;
-  g_check_wl_len = g_check_wl_cap = 0;
+  sprout_wl_free(&g_check_wl);
 }
 
 /* Release extra-allocated storage for a payload (the slot itself is NOT freed;
@@ -3245,7 +3232,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   int gen_on = sprout_gc_gen_on();
   int minor = gen_on && sprout_gc_gen_choose_minor(reason);
   if (gen_on && !minor) sprout_gc_clear_marks();
-  sprout_gc_mark_roots();
+  sprout_gc_mark_roots(sprout_gc_mark_ptr);
   if (minor) sprout_gc_mark_remembered();
   sprout_gc_drain_marks();
   if (minor && g_gen.check) sprout_gc_gen_verify();

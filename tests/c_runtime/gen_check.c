@@ -12,7 +12,10 @@
  *                     promoted, and the remembered set is empty again.
  *   minor_keeps_old — a minor does not free an unrooted old object; a major does.
  *   no_check        — the unbarriered store without GENCHECK is not detected: the verifier is
- *                     what turns the missing barrier into an abort, not the minor itself. */
+ *                     what turns the missing barrier into an abort, not the minor itself.
+ *   bad_every_off   — SPROUT_GC_MAJOR_EVERY=abc with SPROUT_GC_MINOR=0: the mode is off, the bad
+ *                     value is never read, and the collection runs.
+ *   bad_every_on    — the same value with SPROUT_GC_MINOR=1 aborts at the first collection. */
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -21,13 +24,9 @@
 
 static void* g_old;  /* permanent root: the old Ref */
 
-static uint64_t hdr_of(long long word) {
-  uint64_t h;
-  memcpy(&h, (char*)(uintptr_t)word - 8, 8);
-  return h;
+static int is_old(long long word) {
+  return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_COLOR_BIT) != 0;
 }
-static int is_old(long long word) { return (hdr_of(word) & SPROUT_GC_COLOR_BIT) != 0; }
-static int is_remembered(long long word) { return (hdr_of(word) & SPROUT_GC_REMEMBERED_BIT) != 0; }
 static void collect(void) { sprout_gc_collect_with_reason("threshold"); }
 
 /* Root a fresh Ref, run the first collection (a major), and return it, old. */
@@ -54,10 +53,10 @@ static int barrier(void) {
   long long r = make_old_ref();
   long long y = ref_new(7);
   ref_write(r, y);
-  check(is_remembered(r) && g_gen.len == 1, "the barrier remembers the old Ref");
+  check(is_remembered(r) && g_gen.remembered.len == 1, "the barrier remembers the old Ref");
   collect();
   check(g_gen.n_minor == 1, "the second collection is a minor");
-  check(g_gen.len == 0 && !is_remembered(r), "a minor empties the remembered set");
+  check(g_gen.remembered.len == 0 && !is_remembered(r), "a minor empties the remembered set");
   long long got = ref_read(r);
   check(got == y, "the old Ref still holds the young one");
   check(sprout_heap_lookup((void*)(uintptr_t)y) != NULL, "the young Ref survived");
@@ -95,13 +94,30 @@ static int major_every(void) {
   return g_failed;
 }
 
+static int bad_every_off(void) {
+  ref_new(0);
+  collect();
+  check(g_gen.on == 0, "SPROUT_GC_MINOR=0 leaves the mode off");
+  return g_failed;
+}
+
+static int bad_every_on(void) {
+  ref_new(0);
+  collect();  /* aborts: SPROUT_GC_MAJOR_EVERY is read with the mode on */
+  fprintf(stderr, "bad_every_on: no abort\n");
+  return 1;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) return 2;
+  int off = strcmp(argv[1], "bad_every_off") == 0;
   setenv("SPROUT_GC_LINEAGE", "0", 1);
-  setenv("SPROUT_GC_MINOR", "1", 1);
+  setenv("SPROUT_GC_MINOR", off ? "0" : "1", 1);
+  if (strncmp(argv[1], "bad_every_", 10) == 0) setenv("SPROUT_GC_MAJOR_EVERY", "abc", 1);
   if (strcmp(argv[1], "no_check") != 0) setenv("SPROUT_GC_GENCHECK", "1", 1);
   int rc;
   if (strcmp(argv[1], "missing_barrier") == 0) return missing_barrier();
+  if (strcmp(argv[1], "bad_every_on") == 0) return bad_every_on();
   if (strcmp(argv[1], "no_check") == 0) {
     (void)missing_barrier();  /* returns 1: nothing aborted, which is the point */
     printf("gen-check-no_check\n");
@@ -110,6 +126,7 @@ int main(int argc, char** argv) {
   if (strcmp(argv[1], "barrier") == 0) rc = barrier();
   else if (strcmp(argv[1], "minor_keeps_old") == 0) rc = minor_keeps_old();
   else if (strcmp(argv[1], "major_every") == 0) rc = major_every();
+  else if (strcmp(argv[1], "bad_every_off") == 0) rc = bad_every_off();
   else return 2;
   if (rc || g_failed) return 1;
   printf("gen-check-%s\n", argv[1]);

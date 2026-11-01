@@ -517,7 +517,16 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/gc_mb.err" || {
   cat "$TMP_DIR/gc_mb.err" >&2
   exit 1
 }
-for sel in barrier minor_keeps_old major_every no_check; do
+if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" bad_every_on > "$TMP_DIR/gc_be.out" 2> "$TMP_DIR/gc_be.err"; then
+  echo "  a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on" >&2
+  exit 1
+fi
+grep -q "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" "$TMP_DIR/gc_be.err" || {
+  echo "  bad_every_on failed without the MAJOR_EVERY message:" >&2
+  cat "$TMP_DIR/gc_be.out" "$TMP_DIR/gc_be.err" >&2
+  exit 1
+}
+for sel in barrier minor_keeps_old major_every no_check bad_every_off; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
     echo "  gen_check '$sel' failed:" >&2
     cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2
