@@ -11,13 +11,16 @@ import stdlib.string as string
 # variable is set".
 
 fn parsed(off: Maybe String) -> opt_config.OptConfig =
-  opt_config.parse(off, Nothing)
+  opt_config.parse(off, Nothing, Nothing)
+
+fn parsed_on(on: Maybe String, off: Maybe String) -> opt_config.OptConfig =
+  opt_config.parse(off, on, Nothing)
 
 fn unrecognised_of(raw: String) -> String =
   string.join(",", parsed(Just(raw)).unrecognised)
 
 fn stats_of(raw: Maybe String) -> Bool =
-  opt_config.parse(Nothing, raw).stats
+  opt_config.parse(Nothing, Nothing, raw).stats
 
 fn main() -> Unit !{IO} =
   run_suite("opt_config", [
@@ -52,6 +55,22 @@ fn main() -> Unit !{IO} =
     check_true("dle is implemented", opt_config.implemented(opt_config.Dle)),
     check_false("cse is not implemented yet", opt_config.implemented(opt_config.Cse)),
     check_false("licm is not implemented yet", opt_config.implemented(opt_config.Licm)),
+    # Default-off passes: `Spec` runs only when SPROUT_OPT_ON names it; OFF wins.
+    check_false("spec off with no variables", opt_config.enabled(parsed(Nothing), opt_config.Spec)),
+    check_true("spec on with ON=spec", opt_config.enabled(parsed_on(Just("spec"), Nothing), opt_config.Spec)),
+    check_false("OFF wins over ON",
+                opt_config.enabled(parsed_on(Just("spec"), Just("spec")), opt_config.Spec)),
+    check_true("ON=dle leaves dle on", opt_config.enabled(parsed_on(Just("dle"), Nothing), opt_config.Dle)),
+    check_false("ON=dle: OFF=dle still turns it off",
+                opt_config.enabled(parsed_on(Just("dle"), Just("dle")), opt_config.Dle)),
+    check_false("ON=dle does not turn spec on", opt_config.enabled(parsed_on(Just("dle"), Nothing), opt_config.Spec)),
+    check_eq("unknown name in ON is reported",
+             string.join(",", parsed_on(Just("spec,nope"), Nothing).unrecognised), "nope"),
+    check_true("pass_from_name spec", opt_config.pass_from_name("spec") == Just(opt_config.Spec)),
+    check_eq("spec name round-trips", opt_config.pass_name(opt_config.Spec), "spec"),
+    check_true("spec is default-off", opt_config.default_off(opt_config.Spec)),
+    check_false("dle is not default-off", opt_config.default_off(opt_config.Dle)),
+    check_false("spec is not implemented yet", opt_config.implemented(opt_config.Spec)),
     check_true("stats=1 on", stats_of(Just("1"))),
     check_true("stats=yes on", stats_of(Just("yes"))),
     check_false("stats=0 off", stats_of(Just("0"))),

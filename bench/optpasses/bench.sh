@@ -61,7 +61,8 @@ emit() {  # emit <src> <out.ll> <err> [pass-to-disable]
   if [[ -n "$off" ]]; then
     SPROUT_OPT_STATS=1 SPROUT_OPT_OFF="$off" "$CC" --emit-ir stdlib "$src" > "$out" 2> "$err"
   else
-    SPROUT_OPT_STATS=1 "$CC" --emit-ir stdlib "$src" > "$out" 2> "$err"
+    # ON also names the pass, so a default-off pass is actually on; a no-op for the rest.
+    SPROUT_OPT_STATS=1 SPROUT_OPT_ON="$PASS" "$CC" --emit-ir stdlib "$src" > "$out" 2> "$err"
   fi
 }
 
@@ -110,14 +111,15 @@ for entry in "${CORPUS[@]}"; do
 
   nodes=$(stat_field "$TMPD/$label.on.err" nodes)
   removed=$(stat_field "$TMPD/$label.on.err" removed)
-  [[ "${removed:-0}" != "0" ]] && fired=$((fired + 1))
+  added=$(stat_field "$TMPD/$label.on.err" added)
+  [[ "${removed:-0}" != "0" || "${added:-0}" != "0" ]] && fired=$((fired + 1))
 
   on_lines=$(wc -l < "$on_ll" | tr -d ' ')
   off_lines=$(wc -l < "$off_ll" | tr -d ' ')
 
   # Compile time: the pass's own cost, which is the half a runtime benchmark
   # cannot see when the pass turns out to change nothing.
-  cc_on=$(min_elapsed "$CC" --emit-ir stdlib "$src")
+  cc_on=$(min_elapsed env "SPROUT_OPT_ON=$PASS" "$CC" --emit-ir stdlib "$src")
   cc_off=$(min_elapsed env "SPROUT_OPT_OFF=$PASS" "$CC" --emit-ir stdlib "$src")
 
   on_t="-"; off_t="-"
@@ -137,7 +139,7 @@ done
 
 echo
 if (( fired == 0 )); then
-  echo "NOTE: $PASS removed nothing anywhere in this corpus — the ON and OFF columns"
+  echo "NOTE: $PASS removed or added nothing anywhere in this corpus — the ON and OFF columns"
   echo "      are expected to match. That is a result about the pass, not a broken harness;"
   echo "      tests/opt_harness/dead_let.spr is the fixture where it does fire."
 fi
