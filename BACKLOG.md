@@ -1696,13 +1696,14 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P3` **Operator sections (`_ * 2`, `10 - _`), deferred to v2.** The parser represents
   operators as a distinct `BinaryExpr` node, so sections need a second small handler beside
   `desugar_placeholder_call`.
-- [ ] `P3` **Tail recursion modulo constructor (TRMC).** A recursion that rebuilds a node around
+- [ ] `P2` **Tail recursion modulo constructor (TRMC).** A recursion that rebuilds a node around
   its own result (`Node(h, insert(rest))`) keeps a stack frame and two GC roots per node, even
   when reuse writes the node in place. A* under a FIFO tie-break walks 1.25M open-set nodes per
   run: the recursive insert took 13,300 µs/run, the same insert as two tail-recursive loops (walk
   onto an accumulator, then unwind) 4,600 µs, Go 1,510 (M1, 2026-10-24).
   `examples/astar_linvec.sprout` uses the loops. TRMC would compile the recursive form to one loop
   that writes the `next` field: one pass, and the natural form stops costing 2.9×.
+  `stdlib/string.sprout`'s `finalize_lines` was hand-rewritten to an accumulator for long inputs.
 - [ ] `P3` **Span the remaining `no_pos()` error sites: codegen / IR-emit errors (`IrLinesErr`).**
   Everything else is spanned (diagnostics, infer/typed/check/body errors, bundle errors, pattern
   inference, call resolve, the four `typecheck_decls` validators).

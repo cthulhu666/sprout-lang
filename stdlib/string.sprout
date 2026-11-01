@@ -399,17 +399,19 @@ fn strip_trailing_cr(s: String) -> String =
 # every line EXCEPT the final segment, and drop that final segment iff it is empty. So a trailing
 # '\n' (or the empty string) yields no trailing blank line, an interior blank line is preserved, and
 # a final non-newline-terminated line keeps any trailing '\r' — matching the old codepoint scanner.
-fn finalize_lines(xs: List String) -> List String =
+# Walks onto a reversed accumulator and reverses once, so stack depth does not grow with the line
+# count (as in the prelude's `list_map_go`).
+fn finalize_lines(xs: List String, acc: List String) -> List String =
   match xs with
-  | Nil -> Nil
-  | [last] -> if is_empty(last) then Nil else Cons(last, Nil)
-  | [head | rest] -> Cons(strip_trailing_cr(head), finalize_lines(rest))
+  | Nil -> list_reverse(acc)
+  | [last] -> list_reverse(if is_empty(last) then acc else Cons(last, acc))
+  | [head | rest] -> finalize_lines(rest, Cons(strip_trailing_cr(head), acc))
 
-# O(n): str_split_lines is one C-side pass; finalize_lines is one more pass with O(line) CR strips.
-# (The previous pure-Sprout version was O(n^2) — char_at/slice per codepoint index — which made a
-# ~650 KB input grind for many seconds.)
+# O(n): str_split_lines is one C-side pass; finalize_lines is one more pass with O(line) CR strips,
+# at constant stack depth. (The previous pure-Sprout version was O(n^2) — char_at/slice per codepoint
+# index — which made a ~650 KB input grind for many seconds.)
 export fn string_lines(raw: String) -> Vec String =
-  vec_from_list(finalize_lines(str_split_lines(raw)))
+  vec_from_list(finalize_lines(str_split_lines(raw), Nil))
 
 fn digits_loop(b: Bytes, i: Int, n: Int, acc: List Int) -> List Int =
   if i >= n then acc
