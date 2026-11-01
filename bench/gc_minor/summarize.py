@@ -2,8 +2,7 @@
 
 Per workload x setting x arm: median and min-max of each metric. Per pair of arms, the ratio of
 medians (minor / off) and a flag where the two arms' min-max ranges overlap, i.e. the direction
-of the ratio is inside the run-to-run spread. Then the checks: cycle counts per pair in the
-fixed setting, stdout hashes across arms, exit codes.
+of the ratio is inside the run-to-run spread. Then the checks: stdout hashes across arms, exit codes.
 """
 import csv
 import statistics
@@ -18,7 +17,6 @@ METRICS = [
     ("p50 us", lambda r: int(r["gc_us_steady_p50"])),
     ("p90 us", lambda r: int(r["gc_us_steady_p90"])),
     ("rss MB", lambda r: int(r["max_rss_kb"]) / 1024.0),
-    ("cycles", lambda r: int(r["cycles"])),
 ]
 
 
@@ -72,14 +70,14 @@ def main(paths):
         if not wls:
             continue
         title = {
-            "fixed": "fixed: ADAPT_RATIO=0, fixed THRESHOLD (same collections in both arms)",
+            "fixed": "fixed: ADAPT_RATIO=0, fixed THRESHOLD (collection counts differ; compare per-collection p50/p90)",
             "default": "default: no GC env but the arm",
             "every": "every: SPROUT_GC_MAJOR_EVERY sweep, default settings, MINOR=0 baseline",
         }[setting]
         print(f"\n## {title}\n")
         print("Cells: median (min-max). `ratio` = arm / off by medians; `~` = the ranges overlap,")
         print("so the direction is inside the run-to-run spread. cycles = total (minor+major).\n")
-        head = ["workload", "arm", "n"] + [m[0] for m in METRICS[:-1]] + ["cycles (min+maj)"]
+        head = ["workload", "arm", "n"] + [m[0] for m in METRICS] + ["cycles (min+maj)"]
         print("| " + " | ".join(head) + " |")
         print("|" + "|".join(["---"] * len(head)) + "|")
         for w in wls:
@@ -88,7 +86,7 @@ def main(paths):
             for a in arms:
                 rs = groups[(setting, w, a)]
                 cells = [w, arm_label(a), str(len(rs))]
-                cells += [cell([m[1](r) for r in rs]) for m in METRICS[:-1]]
+                cells += [cell([m[1](r) for r in rs]) for m in METRICS]
                 cyc = statistics.median(int(r["cycles"]) for r in rs)
                 mi = statistics.median(int(r["minors"]) for r in rs)
                 ma = statistics.median(int(r["majors"]) for r in rs)
@@ -96,7 +94,7 @@ def main(paths):
                 print("| " + " | ".join(cells) + " |")
                 if a != ("0", "-") and base:
                     ratios = []
-                    for _, get in METRICS[:-1]:
+                    for _, get in METRICS:
                         b, v = [get(r) for r in base], [get(r) for r in rs]
                         mb = statistics.median(b)
                         if mb == 0:
@@ -111,17 +109,6 @@ def main(paths):
 
     print("\n## Checks\n")
     bad = False
-
-    # Fixed setting: both arms must run the same number of collections in each pair.
-    for (setting, w, a), rs in sorted(groups.items()):
-        if setting != "fixed" or a != ("0", "-"):
-            continue
-        on = {r["run"]: r for r in groups.get((setting, w, ("1", "-")), [])}
-        for r in rs:
-            o = on.get(r["run"])
-            if o and r["cycles"] != o["cycles"]:
-                bad = True
-                print(f"- CYCLE MISMATCH (fixed) {w} run {r['run']}: off={r['cycles']} minor={o['cycles']}")
 
     # Stdout is checked across every arm and setting of a workload.
     hashes = defaultdict(set)
@@ -138,7 +125,7 @@ def main(paths):
             print(f"- NONZERO EXIT {r['exit']}: {r['workload']} {r['setting']} minor={r['minor']} run {r['run']}")
 
     if not bad:
-        print("- none: cycle counts match per fixed pair, stdout hashes agree, all exits 0")
+        print("- none: stdout hashes agree, all exits 0")
 
     loads = [float(r["load"]) for r in rows]
     print(f"\nLoad average at run start: median {statistics.median(loads):.2f}, max {max(loads):.2f}")
