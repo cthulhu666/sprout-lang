@@ -1,0 +1,20 @@
+# bigger and isort are called only at Int (docs/specialisation-v0.md §4, §8).
+# The copy has no dictionary parameters, calls the Int instance directly, and does not root x.
+on has define i64 @main.bigger$spec_Int(i64 %p$x, i64 %p$y)
+on body main.bigger$spec_Int lacks @__cm_Ord_compare
+on body main.bigger$spec_Int lacks store i64 %p$x
+on body main.bigger$spec_Int has call i64 @__tc_Ord_Int_compare(i64 %p$x, i64 %p$y)
+# A copy of a copy: isort's copy calls insert's copy, and insert's copy recurses on itself.
+on has define i64 @main.insert$spec_Int(i64 %p$x, i64 %p$xs)
+on has define i64 @main.isort$spec_Int(i64 %p$xs)
+on body main.isort$spec_Int has call i64 @main.insert$spec_Int(
+on body main.insert$spec_Int has call i64 @main.insert$spec_Int(
+# Every caller moved to a copy, so no generic version is emitted.
+on lacks define i64 @main.bigger(
+on lacks define i64 @main.insert(
+on lacks define i64 @main.isort(
+# Pass off: the generic version, with dictionaries, dynamic dispatch and a rooted x.
+off has define i64 @main.bigger(
+off body main.bigger has call i64 @__cm_Ord_compare(
+off body main.bigger has store i64 %p$x
+off lacks $spec

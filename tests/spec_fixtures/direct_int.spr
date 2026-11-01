@@ -1,0 +1,22 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): a generic `bigger` and an insertion sort,
+# each called only at Int. The copies drop the dictionary parameters, call the Int instance
+# directly, and stop rooting `x`. `isort`'s copy calls `insert`'s copy.
+fn bigger(x: a, y: a) -> a where Ord a = if compare(x, y) >= 0 then x else y
+
+fn insert(x: a, xs: List a) -> List a where Ord a =
+  match xs with
+  | Nil -> [x]
+  | Cons y rest -> if compare(x, y) <= 0 then Cons(x, xs) else Cons(y, insert(x, rest))
+
+fn isort(xs: List a) -> List a where Ord a =
+  match xs with
+  | Nil -> []
+  | Cons x rest -> insert(x, isort(rest))
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- print(bigger(3, 7))
+    _ <- print(bigger(9, -2))
+    print(isort([5, 2, 9, 1, 5, 6, -3]))

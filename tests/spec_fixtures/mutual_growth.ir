@@ -1,0 +1,9 @@
+# f at Int calls g at List Int, which calls f at List Int: the growing key is declined.
+# The pass terminates (the gate bounds each compile at 60 s) and the declined call keeps the
+# generic f, so f has both a copy and a generic define.
+on has define i64 @main.f$spec_Int(
+on has define i64 @main.g$spec_List_Int(
+on has define i64 @main.f(
+on lacks @main.f$spec_List_Int
+off has define i64 @main.f(
+off lacks $spec

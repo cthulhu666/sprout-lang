@@ -1,0 +1,15 @@
+# max_or_same needs Ord a; its call to same needs Eq a, which is Ord's superclass.
+# Both functions are copied at Int and neither dispatches dynamically.
+on has define i64 @main.max_or_same$spec_Int(i64 %p$x, i64 %p$y)
+on has define i64 @main.same$spec_Int(i64 %p$x, i64 %p$y)
+on body main.max_or_same$spec_Int lacks @__cm_Ord_compare
+on body main.max_or_same$spec_Int has call i64 @__tc_Ord_Int_compare(
+on body main.max_or_same$spec_Int has call i64 @main.same$spec_Int(i64 %p$x, i64 %p$y)
+on body main.same$spec_Int lacks @__cm_Eq_eq
+on body main.same$spec_Int has call i64 @__tc_Eq_Int_eq(i64 %p$x, i64 %p$y)
+# member has two constraints (Foldable c, Eq a); the copy's key is List_Int.
+on has define i64 @member$spec_List_Int(i64 %p$x, i64 %p$xs)
+on lacks define i64 @member(
+on lacks define i64 @main.same(
+off has define i64 @main.same(
+off lacks $spec

@@ -1,0 +1,13 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): a context instance. `Ord (Maybe a)` takes
+# `Ord a` as hidden parameters, and instance bodies are not copied (docs/specialisation-v0.md
+# §4 Limits). The copy at Maybe Int exists and calls the instance's compare directly, but
+# still passes the context dictionaries into it.
+fn bigger(x: a, y: a) -> a where Ord a = if compare(x, y) >= 0 then x else y
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- print(bigger(Just(3), Just(8)))
+    _ <- print(bigger(Just(5), Nothing))
+    print(bigger(Nothing, Just(1)))

@@ -1,0 +1,6 @@
+# same is called at Int (copied) and inside an existential match arm, where the Eq evidence
+# is the dictionary packed in the value (forwarded, so not copied). Both defines exist.
+on has define i64 @main.same$spec_Int(i64 %p$x, i64 %p$y)
+on has define i64 @main.same(i64 %p$x, i64 %p$y, i64 %p$__tc_Eq_0_eq)
+off has define i64 @main.same(
+off lacks $spec

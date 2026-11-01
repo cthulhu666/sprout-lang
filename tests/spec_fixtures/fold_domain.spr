@@ -1,0 +1,26 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): the substitution domain. The prelude's
+# `fold` is constrained on `Foldable f` only, so one copy at `Foldable List` serves an Int
+# accumulator and a List accumulator. The accumulator `b` must stay heap-rooted in that copy,
+# so the lists below are walked under SPROUT_GC_STRESS=1, which collects at every allocation.
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+fn sum(xs: List Int) -> Int = fold(\ (acc, x) -> acc + x, 0, xs)
+
+fn evens_reversed(xs: List Int) -> List Int =
+  fold(\ (acc, x) -> if rem(x, 2) == 0 then Cons(x, acc) else acc, [], xs)
+
+fn pairs_reversed(xs: List Int) -> List (Int, Int) =
+  fold(\ (acc, x) -> Cons((x, x * x), acc), [], xs)
+
+fn main() -> Unit !{IO} =
+  let xs = range_to_list(range_up(1, 200))
+  in
+    do
+      _ <- print(sum(xs))
+      _ <- print(list_length(evens_reversed(xs)))
+      _ <- print(sum(evens_reversed(xs)))
+      _ <- print(list_length(pairs_reversed(xs)))
+      print(pairs_reversed(range_to_list(range_up(1, 6))))

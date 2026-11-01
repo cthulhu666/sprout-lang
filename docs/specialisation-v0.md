@@ -160,9 +160,10 @@ allocations.
    Forward keys are `typed_ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
    superclass-expanded in `build_hidden_for_constraints` order. Recurse into `EvInstance` children
    and into `TMethodRef` evidence.
-4. Name the copy deterministically from the function name and its constraints' type arguments
-   after substitution, mangled by `lowering`'s `mangle_type_args`, which takes that
-   `List ast.TypeExpr`. Point the call site at it.
+4. Name the copy `<generic IR name>$spec_<mangled args>`, where the args are the type arguments
+   of the declaration's `where` constraints in written order (superclasses not included) after
+   substitution, mangled by `lowering`'s `mangle_type_args`, which takes that `List ast.TypeExpr`:
+   `@main.bigger$spec_Int`, `@member$spec_List_Int`. Point the call site at it.
 
 **A worklist with a cache.** Key: (function, instances of its constrained variables). A copy's
 body may call other constrained functions with evidence that is now concrete; those go on the
@@ -335,8 +336,10 @@ code compares through `Ord`/`Eq`.
   `List` accumulator), sharing one copy, run under `SPROUT_GC_STRESS=1`.
 - For each type-directed choice in §2's obligation (CPR routing, B1, rooting kinds), the generic
   version and a copy give the same result on the same input.
-- An opt-harness fixture (`tests/opt_harness/`): a generic sort at `Int` emits a direct call to the
-  `Ord Int` instance in the copy, with no dictionary parameter and an `Int` parameter unrooted.
+- IR shape and on/off equality: `tests/spec_fixtures/` (one `.spr` and `.ir` sidecar per case) under
+  `just spec-gate`, in place of `tests/opt_harness/`. A generic sort at `Int` emits a direct call
+  to the `Ord Int` instance in the copy, with no dictionary parameter and an `Int` parameter
+  unrooted.
 - The generic version dropped when every call is specialised, and kept when a generic caller
   remains.
 - Superclass evidence (`Ord` brings `Eq`) and context instances (`Ord (Maybe Int)`): correct, and

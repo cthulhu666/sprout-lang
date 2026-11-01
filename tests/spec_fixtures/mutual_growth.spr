@@ -1,0 +1,17 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): termination. `f` calls its peer `g` at
+# `List x`, and `g` calls `f` back at `x`, so a naive worklist makes a new key every lap
+# (`f@Int`, `g@List_Int`, `f@List_Int`, ...). The pass copies the first two, declines the key
+# that grows, and keeps the generic `f` for that call. Output must equal the pass-off build.
+fn f(n: Int, a: x, b: x) -> Bool where Eq x =
+  if n == 0 then eq(a, b) else g(n - 1, [a], [b])
+
+fn g(n: Int, a: x, b: x) -> Bool where Eq x = f(n, a, b)
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- print(f(0, 1, 1))
+    _ <- print(f(2, 1, 2))
+    _ <- print(f(3, 4, 4))
+    print(f(5, 7, 8))

@@ -1,0 +1,11 @@
+# The copy and the generic version agree where lowering depends on the type (CPR for the
+# (a, a) result, the rooting kind for MutVec elements). The output equality is the test; the
+# existence checks keep it from passing with the pass doing nothing. `spread` reaches pair_of
+# through an existential, so that call stays on the generic version.
+stress
+on has define i64 @main.pair_of$spec_Int(
+on has define i64 @main.pair_of$spec_String(
+on has define i64 @main.first_two$spec_Int(
+on has define i64 @main.first_two$spec_String(
+on has define i64 @main.pair_of(
+off lacks $spec

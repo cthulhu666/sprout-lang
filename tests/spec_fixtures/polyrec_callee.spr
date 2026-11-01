@@ -1,0 +1,24 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): a constrained function calling an
+# unconstrained, polymorphically recursive one. `depth` recurses at `List a` on a nested data
+# type; the signature is written, as polymorphic recursion needs. `measure` is copied at Int,
+# its copy still calls the generic `depth`, and `depth` itself is never copied (it has no
+# constraint to key on), so the pass terminates.
+type Nest a =
+  | Flat a
+  | Deeper (Nest (List a))
+
+fn depth(n: Nest a) -> Int =
+  match n with
+  | Flat _ -> 0
+  | Deeper inner -> 1 + depth(inner)
+
+fn measure(n: Nest a, x: a) -> Int where Ord a =
+  if compare(x, x) == 0 then depth(n) else -1
+
+fn main() -> Unit !{IO} =
+  do
+    _ <- print(measure(Flat(1), 2))
+    _ <- print(measure(Deeper (Flat([1, 2])), 3))
+    print(measure(Deeper (Deeper (Flat([[1], [2, 3]]))), 4))

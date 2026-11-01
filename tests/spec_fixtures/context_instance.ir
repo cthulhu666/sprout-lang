@@ -1,0 +1,9 @@
+# bigger at Maybe Int: the Ord (Maybe a) instance takes Ord a as hidden parameters and
+# instance bodies are not copied (§4 Limits). The copy calls the instance's compare directly
+# but still passes context dictionaries into it.
+on has define i64 @main.bigger$spec_Maybe_Int(i64 %p$x, i64 %p$y)
+on body main.bigger$spec_Maybe_Int lacks @__cm_Ord_compare
+on body main.bigger$spec_Maybe_Int has call i64 @__tc_Ord_Maybe_a_compare(i64 %p$x, i64 %p$y, i64 %
+on lacks define i64 @main.bigger(
+off has define i64 @main.bigger(
+off lacks $spec

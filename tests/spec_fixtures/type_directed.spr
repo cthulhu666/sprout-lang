@@ -1,0 +1,62 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
+
+# Specialisation fixture (scripts/spec_gate.sh): the copy and the generic version agree where
+# lowering depends on the type. `pair_of` returns `(a, a)` (CPR routing), `first_two` reads
+# `MutVec a` elements (rooting kind, vector access), and each is called at Int and at String;
+# `spread` keeps `pair_of`'s generic version live. Runs under SPROUT_GC_STRESS=1, so an element
+# unrooted in a copy shows up as a wrong or crashing result. The on/off equality is the test.
+fn pair_of(x: a, y: a) -> (a, a) where Ord a =
+  if compare(x, y) <= 0 then (x, y) else (y, x)
+
+fn first_two(v: MutVec a, i: Int) -> (a, a) !{IO} where Ord a =
+  do
+    p <- mutvec_at(v, i)
+    q <- mutvec_at(v, i + 1)
+    pair_of(p, q)
+
+fn via_generic(x: a, y: a) -> (a, a) where Ord a = pair_of(x, y)
+
+# The Ord evidence here is packed in the value, so this call to pair_of is not copied.
+type OrdPair = | exists t. OrdPair t t where Ord t
+
+fn spread(p: OrdPair) -> Int =
+  match p with
+  | OrdPair x y ->
+    match pair_of(x, y) with
+    | (lo, hi) -> compare(lo, hi)
+
+fn fill_ints(v: MutVec Int, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, (n - i) * 31 - 7)
+      fill_ints(v, i + 1, n)
+
+fn fill_strings(v: MutVec String, i: Int, n: Int) -> Unit !{IO} =
+  if i >= n then ()
+  else
+    do
+      _ <- mutvec_set(v, i, `s${(n - i) * 17}`)
+      fill_strings(v, i + 1, n)
+
+fn churn(n: Int, acc: List String) -> Int =
+  if n == 0 then list_length(acc) else churn(n - 1, Cons(`junk${n}`, acc))
+
+fn main() -> Unit !{IO} =
+  do
+    ints <- mutvec_new(6, 0)
+    strs <- mutvec_new(6, "")
+    _ <- fill_ints(ints, 0, 6)
+    _ <- fill_strings(strs, 0, 6)
+    _ <- print(pair_of(9, 4))
+    _ <- print(pair_of("pear", "apple"))
+    (a, b) <- first_two(ints, 2)
+    _ <- print(churn(150, Nil))
+    (c, d) <- first_two(strs, 1)
+    _ <- print((a, b))
+    _ <- print((c, d))
+    _ <- print(via_generic(3, 1))
+    _ <- print(via_generic("b", "a"))
+    _ <- print(spread(OrdPair(5, 2)))
+    print(spread(OrdPair("a", "b")))
