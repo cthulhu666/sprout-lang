@@ -1,0 +1,27 @@
+module main
+# vector_mutset is an extern owned by stdlib.mutable; the import bundles that module.
+import stdlib.mutable as mutable
+
+# Private to stdlib.mutable, so declared here: these fixtures store into a raw Vector.
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+
+# Scalar-store gate: a direct `vector_mutset` whose VALUE is an Int, Bool, Char or Double
+# lowers to the inline guarded store (no `call @vector_mutset`); a heap value (String) or a
+# value typed `a` keeps the call. The b1-gate checks each function's own IR.
+fn store_int(v: Vector Int, x: Int) -> Unit !{IO} =
+  vector_mutset(v, 0, x)
+
+fn store_bool(v: Vector Bool, x: Bool) -> Unit !{IO} =
+  vector_mutset(v, 0, x)
+
+fn store_char(v: Vector Char, x: Char) -> Unit !{IO} =
+  vector_mutset(v, 0, x)
+
+fn store_double(v: Vector Double, x: Double) -> Unit !{IO} =
+  vector_mutset(v, 0, x)
+
+fn store_string(v: Vector String, x: String) -> Unit !{IO} =
+  vector_mutset(v, 0, x)
+
+fn store_generic(v: Vector a, x: a) -> Unit !{IO} =
+  vector_mutset(v, 0, x)

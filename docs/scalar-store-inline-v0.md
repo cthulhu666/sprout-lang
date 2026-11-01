@@ -122,11 +122,11 @@ because the edge is not a pointer. The chance is a value matching a live young p
 exactly. Removing the false positive needs an element kind in the vector header, which is out of
 scope.
 
-**Trap messages.** `vec_double_guard` panics with one combined text. The C function fails with
-`vector_mutset: null vector` or `vector_mutset: index out of bounds`, and
-`tests/bce_fixtures/expected/*` pins the second. The guard gets two panic blocks carrying the C
-texts. `panic` and `sprout_fail` print the same way, so the trap output does not change. The
-`Vector Double` read and write traps then match the C texts too.
+**Trap messages.** The C function fails with `vector_mutset: null vector` or
+`vector_mutset: index out of bounds`, and `tests/bce_fixtures/expected/*` pins the second. The
+inline guard (`vec_guard`) has two panic blocks carrying the C texts, in the C order. `panic` and
+`sprout_fail` print the same way, so the trap output does not change. The `Vector Double` read
+traps carry the C texts too.
 
 ### 4.3 Why no type substitution
 

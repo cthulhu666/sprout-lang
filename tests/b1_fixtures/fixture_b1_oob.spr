@@ -7,7 +7,7 @@ import stdlib.mutable as mutable
 extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
 
 # B1 trap coverage (finding ④b): a raw out-of-bounds read on a real `Vector Double`
-# must hit the INLINE bounds-check guard (vec_double_guard: `idx uge len` -> IRPanic)
+# must hit the INLINE bounds-check guard (vec_guard:`idx uge len` -> IRPanic)
 # and abort. The b1-gate runs this and asserts a non-zero exit + the trap message.
 # The public kernels never drive this path (their loops are min_int-bounded), so
 # this is the only coverage of the inlined trap.

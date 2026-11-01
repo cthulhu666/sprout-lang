@@ -1,0 +1,44 @@
+import stdlib.test (TestState, new_state, assert_true, assert_eq, summary)
+import stdlib.mutable (vec_make_filled)
+
+# Scalar stores through a raw `vector_mutset` read back correctly. Whether the store is
+# inline (Int, Bool, Char) or a call (String) is the b1-gate's concern; this pins behaviour.
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    vi <- vec_make_filled(3, 0)
+    vector_mutset(vi, 0, 11)
+    vector_mutset(vi, 2, -5)
+    a0 <- vector_get_direct(vi, 0)
+    a1 <- vector_get_direct(vi, 1)
+    a2 <- vector_get_direct(vi, 2)
+    assert_eq(state, "Int: slot 0 written", a0, 11)
+    assert_eq(state, "Int: slot 1 untouched", a1, 0)
+    assert_eq(state, "Int: slot 2 written (negative)", a2, -5)
+
+    vb <- vec_make_filled(2, false)
+    vector_mutset(vb, 1, true)
+    b0 <- vector_get_direct(vb, 0)
+    b1 <- vector_get_direct(vb, 1)
+    assert_true(state, "Bool: slot 0 untouched", b0 == false)
+    assert_true(state, "Bool: slot 1 written", b1 == true)
+
+    vc <- vec_make_filled(2, 'a')
+    vector_mutset(vc, 0, 'z')
+    c0 <- vector_get_direct(vc, 0)
+    c1 <- vector_get_direct(vc, 1)
+    assert_true(state, "Char: slot 0 written", c0 == 'z')
+    assert_true(state, "Char: slot 1 untouched", c1 == 'a')
+
+    vs <- vec_make_filled(2, "x")
+    vector_mutset(vs, 1, "hello")
+    s0 <- vector_get_direct(vs, 0)
+    s1 <- vector_get_direct(vs, 1)
+    assert_eq(state, "String: slot 0 untouched", s0, "x")
+    assert_eq(state, "String: slot 1 written", s1, "hello")
+
+    summary(state)

@@ -108,5 +108,39 @@ else
   echo "  FAIL: could not build the out-of-bounds fixture"; fail=1
 fi
 
+# Scalar stores — a direct `vector_mutset` whose VALUE is Int/Bool/Char/Double lowers inline (guard
+# plus store, no call); a String value, or one typed `a`, keeps the call.
+store_ir="$(emit "$FIX/fixture_b1_store_scalar.spr")"
+for ty in int bool char double; do
+  body="$(fn_body "main\\.store_$ty" <<<"$store_ir")"
+  if [ -n "$body" ] && ! grep -qF '@vector_mutset' <<<"$body" && grep -qF 'vpanic_' <<<"$body"; then
+    echo "  ok: $ty store lowers inline"
+  else
+    echo "  FAIL: $ty store still calls vector_mutset (or has no inline guard)"; fail=1
+  fi
+done
+for fn in string generic; do
+  if fn_body "main\\.store_$fn" <<<"$store_ir" | grep -qF '@vector_mutset'; then
+    echo "  ok: $fn store keeps the call"
+  else
+    echo "  FAIL: $fn store lost its vector_mutset call (barrier skipped on a heap value)"; fail=1
+  fi
+done
+
+# Out-of-range Int store traps at the inline guard with the C runtime's exact text.
+if emit "$FIX/fixture_b1_oob_store.spr" > "$TMP/oobs.ll" 2>/dev/null \
+   && clang "$TMP/oobs.ll" runtime/*.c -O2 \
+        "${CLANG_EXTRA[@]}" -o "$TMP/oobs" 2>/dev/null; then
+  if "$TMP/oobs" > "$TMP/oobs.out" 2>&1; then
+    echo "  FAIL: out-of-bounds Int store did NOT trap"; fail=1
+  elif grep -qxF 'runtime error: vector_mutset: index out of bounds' "$TMP/oobs.out"; then
+    echo "  ok: out-of-bounds store traps with the runtime's text"
+  else
+    echo "  FAIL: out-of-bounds store trapped with the wrong text: $(head -3 "$TMP/oobs.out")"; fail=1
+  fi
+else
+  echo "  FAIL: could not build the out-of-bounds store fixture"; fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then echo "b1-gate: PASS"; else echo "b1-gate: FAIL"; fi
 exit "$fail"

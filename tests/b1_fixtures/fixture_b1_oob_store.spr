@@ -1,0 +1,12 @@
+module main
+import stdlib.mutable as mutable
+
+# Private to stdlib.mutable, so declared here: this fixture stores into a raw Vector.
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+
+# Out-of-range store of an Int: the inline guard must trap with the C runtime's text
+# (`vector_mutset: index out of bounds`). The b1-gate runs this and checks it.
+fn main() -> Unit !{IO} =
+  do
+    v <- vec_make_filled(3, 1)
+    vector_mutset(v, 99, 7)

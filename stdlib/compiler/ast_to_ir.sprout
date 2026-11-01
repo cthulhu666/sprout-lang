@@ -4494,16 +4494,16 @@ fn type_is_vector_double(t: types.Type) -> Bool =
 # B1 inline vector element access, decomposed into two independent axes so the
 # mechanism grows cleanly as B1 generalizes past Double (docs/phase-d-numeric-
 # fastpath-design §B1). VecOp = which OPERATION (from the runtime symbol);
-# VecRep = which element REPRESENTATION is safe to inline (from arg0's type).
-# The name determines the op; the type determines the rep — the same symbol
-# (vector_get_direct) maps to different inline forms as representations multiply,
-# so the two must not be conflated into one name→op enum.
+# VecRep = which inline form is SAFE, from the argument that decides it: a read's
+# vector type, a store's value type. Each inline variant belongs to one op, and
+# classify_vec_elem picks the classifier by op, so a rep never crosses ops.
 type VecOp (..) =
   | VecGet
   | VecSet
 
 type VecRep (..) =
   | RepScalarDouble
+  | RepScalarValue
   | RepUnsupported
 
 # Name → vector element-access operation. The runtime symbols live ONLY here
@@ -4513,19 +4513,36 @@ fn recognize_vector_op(fname: String) -> Maybe VecOp =
   else if fname == "vector_mutset" then Just(VecSet)
   else Nothing
 
-# Representation of arg0's element type — decides which inline form is SAFE.
-# RepScalarDouble: primitive `Vector Double` (unboxed f64 slot) → inline op.
+# Representation that decides which inline form is SAFE.
+# RepScalarDouble: a read of a primitive `Vector Double` (arg0, unboxed f64 slot)
+#   → inline load. Reuses the exact-canonical-name guard `type_is_vector_double`
+#   unchanged; a false positive would inline a heap load ir_rooting never roots
+#   (use-after-free).
+# RepScalarValue : a store whose VALUE (arg2) is Int/Bool/Char/Double, whatever the
+#   vector's type → inline store; a scalar creates no old-to-young edge, so no
+#   write barrier is needed (the rule bce.shape_converts applies).
 # RepUnsupported : anything else (a user `type Double` heap ADT, a Vector of a
-#   non-Double primitive, a Vector of pointers) → keep the runtime call. Reuses
-#   the exact-canonical-name guard `type_is_vector_double` unchanged; a false
-#   positive would inline a heap load ir_rooting never roots (use-after-free).
-fn classify_vec_elem(args: List typed_ast.TypedExpr) -> VecRep =
+#   non-Double primitive read, a pointer store) → keep the runtime call.
+fn classify_vec_elem(op: VecOp, args: List typed_ast.TypedExpr) -> VecRep =
+  match op with
+  | VecGet -> classify_vec_read(args)
+  | VecSet -> classify_vec_store(args)
+
+fn classify_vec_read(args: List typed_ast.TypedExpr) -> VecRep =
   match args with
   | [head | _] ->
       if type_is_vector_double(typed_ast.typed_expr_type(head))
       then RepScalarDouble
       else RepUnsupported
   | Nil -> RepUnsupported
+
+fn classify_vec_store(args: List typed_ast.TypedExpr) -> VecRep =
+  match args with
+  | [_, _, val] ->
+      if type_kind.type_is_non_heap_scalar(typed_ast.typed_expr_type(val))
+      then RepScalarValue
+      else RepUnsupported
+  | _ -> RepUnsupported
 
 # True iff every declared parameter is supplied — the arity comes from the
 # DECLARATION (externs are in fn_arities), NOT a hardcoded literal. An
@@ -4551,57 +4568,63 @@ fn try_vector_intrinsic(fname: String, args: List typed_ast.TypedExpr,
   | Nothing -> Nothing
   | Just op ->
       if is_fully_applied(fname, arg_names, fn_arities) == false then Nothing
-      else match classify_vec_elem(args) with
+      else match classify_vec_elem(op, args) with
            | RepUnsupported -> Nothing
-           | RepScalarDouble ->
-               match op with
-               | VecGet -> Just(finish_vec_get_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
-               | VecSet -> Just(finish_vec_set_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
+           | RepScalarDouble -> Just(finish_vec_get_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
+           | RepScalarValue -> Just(finish_vec_set(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
 
-# Shared null + bounds guard for B1 Vector-Double access. Emits the three blocks
-# (cond / len+bounds / panic) that dominate a fresh continuation block <ok2>, and
-# returns (guard_blocks, ok2_label). The check MUST be built at the IRBlock layer,
+# Shared null + bounds guard for B1 inline vector access. Emits the four blocks
+# (cond / len+bounds / null panic / bounds panic) that dominate a fresh continuation
+# block <ok2>, and returns (guard_blocks, ok2_label). The two panics carry the C
+# runtime's texts, "<op_name>: null vector" and "<op_name>: index out of bounds",
+# checked in the C order. The check MUST be built at the IRBlock layer,
 # not the ir_lowering text layer (mirrors finish_checked_div): a checked op that
 # split blocks via text would leave downstream phi predecessors naming the wrong
-# block. Reserves fresh-name slots idx..idx+4; the caller uses idx+5 for its
-# result and advances idx by 6. Bounds uses one UNSIGNED compare (idx>=len also
+# block. Reserves fresh-name slots idx..idx+6; the caller uses idx+7 for its
+# result and advances idx by 8. Bounds uses one UNSIGNED compare (idx>=len also
 # catches idx<0), matching vector_get_direct/vector_mutset's semantics.
-fn vec_double_guard(cur_lbl: String, cur_ops: ListBuilder sprout_ir.IROp, vec: String, i: String,
-                    msg_text: String, idx: Int)
+fn vec_guard(cur_lbl: String, cur_ops: ListBuilder sprout_ir.IROp, vec: String, i: String,
+             op_name: String, idx: Int)
     -> (List sprout_ir.IRBlock, String) =
-  ([cond_block, ok1_block, panic_block], ok2_lbl)
+  ([cond_block, ok1_block, null_panic_block, oob_panic_block], ok2_lbl)
   where isnull = fresh_name(idx)
         len = fresh_name(idx + 1)
         oob = fresh_name(idx + 2)
-        msg_raw = fresh_name(idx + 3)
-        msg = fresh_name(idx + 4)
+        null_raw = fresh_name(idx + 3)
+        null_msg = fresh_name(idx + 4)
+        oob_raw = fresh_name(idx + 5)
+        oob_msg = fresh_name(idx + 6)
         ok1_lbl = "vok1_" ++ int_to_string(idx)
-        panic_lbl = "vpanic_" ++ int_to_string(idx)
+        null_lbl = "vpanic_null_" ++ int_to_string(idx)
+        oob_lbl = "vpanic_oob_" ++ int_to_string(idx)
         ok2_lbl = "vok2_" ++ int_to_string(idx)
         cond_block = sprout_ir.IRBlock(cur_lbl,
                        list_builder_build(list_builder_extend(Cons(sprout_ir.IRICmp(isnull, "eq", vec, "0"),
-                         Cons(sprout_ir.IRCondBr(isnull, panic_lbl, ok1_lbl), Nil)), cur_ops)))
+                         Cons(sprout_ir.IRCondBr(isnull, null_lbl, ok1_lbl), Nil)), cur_ops)))
         ok1_block = sprout_ir.IRBlock(ok1_lbl,
                       Cons(sprout_ir.IRVecLenD(len, vec),
                       Cons(sprout_ir.IRICmp(oob, "uge", i, len),
-                      Cons(sprout_ir.IRCondBr(oob, panic_lbl, ok2_lbl), Nil))))
-        panic_block = sprout_ir.IRBlock(panic_lbl,
-                        Cons(sprout_ir.IRStrConst(msg, msg_raw, msg_text),
-                        Cons(sprout_ir.IRPanic(msg), Nil)))
+                      Cons(sprout_ir.IRCondBr(oob, oob_lbl, ok2_lbl), Nil))))
+        null_panic_block = sprout_ir.IRBlock(null_lbl,
+                             Cons(sprout_ir.IRStrConst(null_msg, null_raw, op_name ++ ": null vector"),
+                             Cons(sprout_ir.IRPanic(null_msg), Nil)))
+        oob_panic_block = sprout_ir.IRBlock(oob_lbl,
+                            Cons(sprout_ir.IRStrConst(oob_msg, oob_raw, op_name ++ ": index out of bounds"),
+                            Cons(sprout_ir.IRPanic(oob_msg), Nil)))
 
-# B1: guard + inline op for a Vector-Double access. Shared by the get/set finish
-# wrappers below; they build `tail_op` with result = fresh_name(idx+5) (which this
+# B1: guard + inline op for a vector access. Shared by the get/set finish
+# wrappers below; they build `tail_op` with result = fresh_name(idx+7) (which this
 # function also returns — fresh_name is deterministic, so the op's def and the
 # returned result SSA agree). The tail op runs in the guard's ok2 continuation.
 fn emit_vec_access(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
                    cur_ops: ListBuilder sprout_ir.IROp, vec: String, i: String,
-                   tail_op: sprout_ir.IROp, msg_text: String,
+                   tail_op: sprout_ir.IROp, op_name: String,
                    idx: Int) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) =
-  match vec_double_guard(cur_lbl, cur_ops, vec, i, msg_text, idx) with
+  match vec_guard(cur_lbl, cur_ops, vec, i, op_name, idx) with
   | (guard_blocks, ok2_lbl) ->
       Ok((list_append(arg_blocks, guard_blocks), ok2_lbl,
-          list_builder_add(tail_op, list_builder_empty), fresh_name(idx + 5), idx + 6))
+          list_builder_add(tail_op, list_builder_empty), fresh_name(idx + 7), idx + 8))
 
 # B1: `vector_get_direct(vec, i)` on a Vector Double -> guard + inline IRVecGetD.
 fn finish_vec_get_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
@@ -4611,20 +4634,20 @@ fn finish_vec_get_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
   match arg_names with
   | [vec, i] ->
       emit_vec_access(arg_blocks, cur_lbl, cur_ops, vec, i,
-                      sprout_ir.IRVecGetD(fresh_name(idx + 5), vec, i),
-                      "vector_get_direct: null vector or index out of bounds", idx)
+                      sprout_ir.IRVecGetD(fresh_name(idx + 7), vec, i),
+                      "vector_get_direct", idx)
   | _ -> Err("ast_to_ir: vector_get_direct expects 2 arguments")
 
-# B1: `vector_mutset(vec, i, val)` on a Vector Double -> guard + inline IRVecSetD.
-fn finish_vec_set_d(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
-                    cur_ops: ListBuilder sprout_ir.IROp, arg_names: List String,
-                    idx: Int) ->
+# `vector_mutset(vec, i, val)` of a scalar val -> guard + inline IRVecSetD.
+fn finish_vec_set(arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
+                  cur_ops: ListBuilder sprout_ir.IROp, arg_names: List String,
+                  idx: Int) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) =
   match arg_names with
   | [vec, i, val] ->
       emit_vec_access(arg_blocks, cur_lbl, cur_ops, vec, i,
-                      sprout_ir.IRVecSetD(fresh_name(idx + 5), vec, i, val),
-                      "vector_mutset: null vector or index out of bounds", idx)
+                      sprout_ir.IRVecSetD(fresh_name(idx + 7), vec, i, val),
+                      "vector_mutset", idx)
   | _ -> Err("ast_to_ir: vector_mutset expects 3 arguments")
 
 # BCE pseudo-callees (bce.sprout writes them into a `$fast` clone only). Each lowers to
