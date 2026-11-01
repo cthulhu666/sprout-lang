@@ -10,13 +10,13 @@ import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.string as string
 
-# `print_str` and `eprint` are plain externs. An unknown extern is a GC trigger, so each is
-# allow-listed as non-allocating (ir_rooting.is_nonallocating_read): a write-only call does
-# not make a live String a rooting point.
+# `print_str`, `eprint` and `str_starts_with_at_byte` are plain externs. An unknown extern is a
+# GC trigger, so each is allow-listed as non-allocating (ir_rooting.is_nonallocating_read): a
+# write-only or read-only call does not make a live String a rooting point.
 #
 # Two angles. The predicate: a call to each is not a trigger, an unlisted extern is. The IR:
-# a String live across `print_str(s)` / `eprint(s)` is not rooted, while the same program
-# calling an unlisted extern roots it.
+# a String live across `print_str(s)` / `eprint(s)`, or passed to `str_starts_with_at_byte`, is
+# not rooted, while the same program calling an unlisted extern roots it.
 
 fn is_trigger(fname: String) -> Bool =
   ir_rooting.op_triggers_gc_summary(
@@ -60,9 +60,26 @@ fn pushes(sink: String) -> Int !{IO} =
     ir <- get_ir_or_msg("extern fn int_to_string(n: Int) -> String\n" ++ sink_src(sink))
     count(ir, "sprout_gc_push_i64_root")
 
+# `str_starts_with_at_byte` returns a Bool and only reads, so a one-call wrapper over it, the
+# prelude's `str_starts_with`, roots nothing; an unlisted callee roots both params.
+fn starts_with_pushes(callee: String) -> Int !{IO} =
+  do
+    ir <- get_ir_or_msg(
+      "extern fn " ++ callee ++ "(s: String, i: Int, p: String) -> Bool\n" ++
+      "fn probe(s: String, p: String) -> Bool = " ++ callee ++ "(s, 0, p)\n")
+    count(ir, "call i64 @sprout_gc_push_i64_root")
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+    assert_true(
+      state,
+      "str_starts_with_at_byte is not a GC trigger",
+      !is_trigger("str_starts_with_at_byte"))
+    starts_unlisted <- starts_with_pushes("starts_somewhere")
+    starts_listed <- starts_with_pushes("str_starts_with_at_byte")
+    assert_true(state, "the unlisted twin roots both params", starts_unlisted > 0)
+    assert_true(state, "no root across str_starts_with_at_byte", starts_listed == 0)
     assert_true(state, "print_str is not a GC trigger", !is_trigger("print_str"))
     assert_true(state, "eprint is not a GC trigger", !is_trigger("eprint"))
     assert_true(state, "an unlisted extern is a GC trigger", is_trigger("write_somewhere"))

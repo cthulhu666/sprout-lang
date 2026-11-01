@@ -23,6 +23,7 @@ bench/list_sort/bin/
 bench/min_max/bin/
 bench/bytes_builder_byte/bin/
 bench/char_to_str/bin/
+bench/str_starts_with/bin/
 
 # Host-side tool cache for the container-backed Linux gate (`just linux-smoke`):
 # the pinned static-musl `just` binary it runs inside the container. Fetched and

@@ -7,7 +7,6 @@ int_to_string=-7
 to_double=3.0
 char_to_string=z
 char_from_codepoint=B
-str_starts_with=true
 str_starts_with_at_byte=true
 print_str=ok
 floor=complete

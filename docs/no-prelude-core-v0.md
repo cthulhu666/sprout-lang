@@ -94,9 +94,10 @@ the lowerer's untouched. The two were never the same set.
 > with `print_str`. Below, "the floor name `print`" reads `print_str`. The floor is 16
 > again since `str_starts_with_at_byte` joined it: the prelude's `parse_int` and
 > `parse_double` scan by byte offset, and the prelude cannot import `stdlib.string`. The floor is
-> 15 again since `char_to_str` became a prelude function over `char_to_string`.
+> 15 again since `char_to_str` became a prelude function over `char_to_string`, and 14 since
+> `str_starts_with` became one over `str_starts_with_at_byte`.
 > Counts not edited below are left as measured; read a "15" or "16" below as the
-> floor at that time, and 15 as today's.
+> floor at that time, and 14 as today's.
 
 Those sets overlap on 9 names and disagree on 31. Measured on `0e1e6fd2`, in a
 `no_prelude` file:
@@ -289,14 +290,13 @@ Sources: [Rust Reference — Preludes](https://doc.rust-lang.org/reference/names
 ### 4.1 The floor — this is the decision
 
 **The floor is the subset of the prelude's `extern fn` block whose signatures
-mention no prelude-defined type.** 15 of the 40 (16 since `print_str`, 15 after
-`print` left, 16 since `str_starts_with_at_byte`, 15 after `char_to_str` moved to Sprout):
+mention no prelude-defined type.** 14 of the 40 (the note under §1 has how it changed):
 
 ```
 print  eprint  print_str  panic    (`print` is no longer on the floor)
 int_to_string  double_to_string  char_to_string
 char_from_codepoint  to_double
-str_concat  str_len  str_slice  str_find  str_starts_with  str_compare
+str_concat  str_len  str_slice  str_find  str_compare
 str_starts_with_at_byte
 ```
 
@@ -316,7 +316,7 @@ type variables — nothing else. The remaining 25 mention `Maybe`, `List`,
 one.** Three properties fall out of it, and the third is what makes the change
 affordable:
 
-1. **It is type-closed.** A floor of these 15 needs no type declarations at all,
+1. **It is type-closed.** A floor of these 14 needs no type declarations at all,
    so the floor is exactly a list of `extern fn`s — no ADTs, no classes, no
    instances, no ordering constraints against the entry module's own decls.
 2. **It covers what works today.** 8 of the 9 names in §1's first row are in it.
@@ -347,7 +347,7 @@ else … Cons(prelude_mod, name_entry_module(plain_mods, entry_path))
 ```
 
 The `skip` arm becomes "prepend the floor" rather than "prepend nothing": the
-prelude's `ParsedModule` filtered to the 15 `ExternFnDecl`s, with the entry left
+prelude's `ParsedModule` filtered to the 14 `ExternFnDecl`s, with the entry left
 bare (per §4.1 property 3 — the floor introduces no namespace to keep the entry
 out of). Sketch, not final:
 
@@ -359,7 +359,7 @@ else … as today
 Then, **and only then**, the four `load_prelude_pairs` calls that feed an
 already-bundled program can go: `compiler.sprout:339` (`compile_full`), `:417`
 (`compile_phase_effects`), `:435` (`check_bundled`), `:510`
-(`compile_phase_check_with_cache`). The floor supplies the 15 schemes as ordinary
+(`compile_phase_check_with_cache`). The floor supplies the 14 schemes as ordinary
 bundled declarations, so no seeding is needed for them, and every other prelude
 name is correctly absent. That is an 11-line removal plus a decl filter — and it
 continues `bd90e4b5`'s direction (types come from `extern fn` declarations)
@@ -412,7 +412,7 @@ No grammar change. `no_prelude` keeps its spelling and its whole-line match rule
 
 The directive's meaning becomes normative: **`no_prelude` suppresses the standard
 library, not the language's runtime interface.** A file that opts out still has
-the 15 core operations; it does not have `Maybe`, `List`, `Vec`, `Dict`, `Set`,
+the 14 core operations; it does not have `Maybe`, `List`, `Vec`, `Dict`, `Set`,
 `Ref`, the typeclasses, the instances, or any prelude-defined function.
 
 The entry module of a `no_prelude` file stays **bare** (unqualified), unchanged
@@ -424,7 +424,7 @@ None to the type system proper: no new forms, no inference change, no new
 constraint. The change is to which declarations are in scope.
 
 One interaction is a genuine tension in this design, not a detail — see §11.1.
-The floor's 15 names become declared in a `no_prelude` file, so a file defining
+The floor's 14 names become declared in a `no_prelude` file, so a file defining
 its own `str_len` collides where before it did not. Measured on `0e1e6fd2`: in a
 **normal** file, `fn str_len(s: String) -> Int = 99` type-checks fine and the
 environment carries both `str_len : String -> Int` (the prelude's) and
@@ -523,11 +523,12 @@ specification instead of a description.
 
 | fixture | pins |
 |---|---|
-| `run/no_prelude_floor.spr` + `.out` | the matrix — calls all 15 floor names from a `no_prelude` file and runs |
+| `run/no_prelude_floor.spr` + `.out` | the matrix — calls all 14 floor names from a `no_prelude` file and runs |
 | `type_error/no_prelude_calls_prelude_fn` | a prelude *function* is rejected at check (the reported defect; written first, confirmed to report `OK`/exit 0 on `0e1e6fd2`) |
 | `type_error/no_prelude_excludes_vector` | the narrow cut — `vector_*` is out even though `Vector` is a builtin type |
 | `type_error/no_prelude_excludes_argv` | the one deliberate capability removal cannot be undone by accident |
 | `type_error/no_prelude_excludes_char_to_str` | a prelude function is off the floor even when its body uses only floor externs |
+| `type_error/no_prelude_excludes_str_starts_with` | same, for the other floor name that became a prelude function |
 
 **Deliberately not pinned:** redefining a floor name. It fails in the linker
 (`duplicate symbol '_str_len'`), and no conformance gate covers "type-checks then
@@ -684,7 +685,7 @@ corrected the design rather than silently conforming to it.
   bundled in: it is a diagnostics change with its own tests, and shipping it with
   a semantics change would make both harder to review.
 - **The wider floor (§4.3).** Switching `floor_type_names` to
-  `undeclared_type_names` widens the floor from 15 externs to ~32, admitting
+  `undeclared_type_names` widens the floor from 14 externs to ~32, admitting
   the `vector_*` / `map_*` / `native_set_*` / `ref_*` families. It is a one-word
   change, needs no new code, and is arguably the more principled criterion
   ("everything that needs nothing the prelude declares"). Not taken, for the

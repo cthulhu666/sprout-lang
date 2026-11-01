@@ -25,10 +25,10 @@ test fails. A runtime function added or removed must be found in each list by ha
 `linvec_set`, `linvec_push` and `linvec_truncate` left the runtime, nothing flagged their entries
 in `is_nonallocating_read`.
 
-The lists are also short. Rooting trusts 15 runtime functions not to trigger GC (the five vector
-functions, `print_str` and `eprint`, and the eight `_unboxed` reads). Reading the C finds 45
-(§4.2). A call to any other roots every live heap value around it for nothing. §4.5 measures what
-trusting them buys.
+The lists are also short. Rooting trusts 16 runtime functions not to trigger GC (the five vector
+functions, `print_str`, `eprint` and `str_starts_with_at_byte`, and the eight `_unboxed` reads).
+Reading the C finds 45 (§4.2). A call to any other roots every live heap value around it for
+nothing. §4.5 measures what trusting them buys.
 
 ## 2. Goals and non-goals
 

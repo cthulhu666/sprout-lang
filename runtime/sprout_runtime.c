@@ -6835,15 +6835,6 @@ long long str_find(long long haystack_val, long long needle_val) {
   return (long long)count;
 }
 
-/* long long, not _Bool — see the ABI invariant above. */
-long long str_starts_with(long long s_val, long long prefix_val) {
-  const char* s = (const char*)s_val;
-  const char* prefix = (const char*)prefix_val;
-  if (s == NULL || prefix == NULL) sprout_fail("str_starts_with: null input");
-  size_t prefix_len = sprout_cstr_byte_len(prefix);
-  return strncmp(s, prefix, prefix_len) == 0 ? 1 : 0;
-}
-
 long long str_compare(long long left_val, long long right_val) {
   const char* left = (const char*)left_val;
   const char* right = (const char*)right_val;

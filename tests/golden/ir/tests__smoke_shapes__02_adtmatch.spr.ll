@@ -51,7 +51,6 @@ declare i64 @char_from_codepoint(i64)
 declare i64 @to_double(i64)
 declare i64 @str_len(i64)
 declare i64 @str_find(i64, i64)
-declare i64 @str_starts_with(i64, i64)
 declare i64 @str_starts_with_at_byte(i64, i64, i64)
 @.cname.0 = private unnamed_addr constant [4 x i8] c"Red\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"

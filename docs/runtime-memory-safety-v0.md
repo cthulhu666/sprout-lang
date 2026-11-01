@@ -97,7 +97,7 @@ Each of the 71 is a primitive other code builds on, a builtin the compiler emits
 | ~~`bytes_builder_byte`~~ | moved: [results](../bench/results-2026-10-31-bytes-builder-byte.md) | 10 |
 | `crypto_hmac_sha256` | `crypto_sha256`, `bytes_append`, `crypto_bytes_xor` | 41 |
 | `json_stringify` | match on `Json`, byte-scan escape | ≈ 167 |
-| `str_starts_with` | `str_starts_with_at_byte(s, 0, p)` | 7 |
+| ~~`str_starts_with`~~ | moved: [results](../bench/results-2026-11-01-str-starts-with.md) | 7 |
 | `split_words`, `str_split_lines` | byte scan, `str_slice_bytes` | 69 |
 | ~~`char_to_str`~~ | moved: [results](../bench/results-2026-11-01-char-to-str.md) | 23 |
 | `vector_empty`, `bytes_empty`, `bytes_builder_empty` | one call to another builtin | 3–6 each |
@@ -109,9 +109,8 @@ Notes:
 - `json_stringify` writes floats with `%.17g`; `double_to_string` keeps the first of `%.15g` to
   `%.17g` that reads back. So its output changes (`0.1` prints `0.1`, not `0.10000000000000001`).
 - `bytes_builder_u16_be` and `_u32_be` have no caller in this repo but are used downstream.
-- The seed declares `bytes_builder_u16_be`, `_u32_be`, `str_starts_with`, `split_words`,
-  `str_split_lines`, `vector_empty`, `bytes_empty` and `bytes_builder_empty`:
-  moving any of them needs a reseed.
+- The seed declares `bytes_builder_u16_be`, `_u32_be`, `split_words`, `str_split_lines`,
+  `vector_empty`, `bytes_empty` and `bytes_builder_empty`: moving any of them needs a reseed.
 
 **Blocked on a missing primitive.** Each is the only kind of new builtin this stage may propose
 (AGENTS.md §Builtin vs Stdlib), ranked by what it unlocks:

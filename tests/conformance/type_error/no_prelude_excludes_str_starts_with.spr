@@ -1,0 +1,7 @@
+no_prelude
+
+# `str_starts_with` left the floor when it became a prelude function over a floor extern
+# (docs/runtime-memory-safety-v0.md, stage 2). The floor holds externs only, so a
+# `no_prelude` file that wants it writes `str_starts_with_at_byte(s, 0, prefix)`.
+
+fn main() -> Unit !{IO} = print_str(if str_starts_with("prelude", "pre") then "yes" else "no")

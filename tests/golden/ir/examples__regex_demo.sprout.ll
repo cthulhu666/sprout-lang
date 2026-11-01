@@ -54,7 +54,6 @@ declare i64 @string_concat_many(i64)
 declare i64 @str_len(i64)
 declare i64 @str_char_at(i64, i64)
 declare i64 @str_find(i64, i64)
-declare i64 @str_starts_with(i64, i64)
 declare i64 @str_starts_with_at_byte(i64, i64, i64)
 declare i64 @vector_empty()
 declare i64 @vector_length(i64)
@@ -249,6 +248,13 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @str_starts_with(i64 %p$s, i64 %p$prefix) {
+entry:
+  %t$0 = add i64 0, 0
+  %t$1 = call i64 @str_starts_with_at_byte(i64 %p$s, i64 %t$0, i64 %p$prefix)
+  ret i64 %t$1
+}
+
 define i64 @stdlib.regex.raw_pattern(i64 %p$re) {
 entry:
   br label %arm_0_0
@@ -292,35 +298,37 @@ ovfok_5:
 
 define i64 @stdlib.regex.classify_compile_error(i64 %p$msg) {
 entry:
-  %t$8 = alloca [1 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$8, i8 0, i64 8, i1 false)
-  %t$9 = call i64 @sprout_gc_push_scan_root(ptr %t$8, i64 8)
-  %t$8$0 = getelementptr i64, ptr %t$8, i64 0
-  store i64 %p$msg, ptr %t$8$0
   %t$0 = load i64, ptr @stdlib.regex.unsupported_prefix
   %t$1 = call i64 @str_starts_with(i64 %p$msg, i64 %t$0)
   %t$7 = trunc i64 %t$1 to i1
   br i1 %t$7, label %then_2, label %else_2
 then_2:
+  %t$8 = alloca i64
+  store i64 %p$msg, ptr %t$8
+  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
   %t$4 = call i64 @stdlib.regex.unsupported_detail(i64 %p$msg)
-  %t$10 = alloca i64
-  store i64 %t$4, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$11 = alloca i64
+  store i64 %t$4, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
   %t$5 = call i64 @sprout_alloc_obj(i64 17, i64 1)
   %t$5$ptr = inttoptr i64 %t$5 to ptr
   %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
   store i64 %t$4, ptr %t$5$f0
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 else_2:
+  %t$14 = alloca i64
+  store i64 %p$msg, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$6 = call i64 @sprout_alloc_obj(i64 16, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
   store i64 %p$msg, ptr %t$6$f0
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 join_2:
   %t$3 = phi i64 [%t$5, %then_2], [%t$6, %else_2]
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 

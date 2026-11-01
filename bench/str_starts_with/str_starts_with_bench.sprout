@@ -1,0 +1,44 @@
+module main
+
+# Cost of `str_starts_with`, one row per input; `long` (a 4096-byte compare) is the slowest.
+#
+# usage: str_starts_with_bench <hit|miss|long|empty> <iterations>
+
+import stdlib.time as time
+import stdlib.argv as argv
+import stdlib.string as string
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+# `unit` doubled `times` times.
+fn repeat_doubling(unit: String, times: Int) -> String =
+  if times <= 0 then unit
+  else repeat_doubling(unit ++ unit, times - 1)
+
+# Each result is counted, so no call can be dropped.
+fn loop(s: String, prefix: String, i: Int, hits: Int) -> Int =
+  if i <= 0 then hits
+  else loop(s, prefix, i - 1, if str_starts_with(s, prefix) then hits + 1 else hits)
+
+fn run(row: String, s: String, prefix: String, iters: Int) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    let hits = loop(s, prefix, iters, 0)
+    t1 <- time.now_micros()
+    let ns_x10 = (t1 - t0) * 10000 / iters
+    print(`${row} iters=${iters} out=${hits} ns_per_call=${ns_x10 / 10}.${rem(ns_x10, 10)}`)
+
+let usage = "usage: str_starts_with_bench <hit|miss|long|empty> <iterations>"
+
+fn main() -> Unit !{IO} =
+  do
+    let Ok([row, iters_text]) = argv.all() else print(usage)
+    let Just iters = parse_int(iters_text) else print(usage)
+    let long = repeat_doubling("a", 13)
+    match row with
+    | "hit" -> run(row, "hello world", "hello", iters)
+    | "miss" -> run(row, "hello world", "x", iters)
+    | "long" -> run(row, long, str_slice_bytes(long, 0, 4096), iters)
+    | "empty" -> run(row, "hello world", "", iters)
+    | _ -> print(usage)

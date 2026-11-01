@@ -2251,7 +2251,6 @@ extern fn str_len(s: String) -> Int
 extern fn str_slice(s: String, start: Int, count: Int) -> String
 extern fn str_char_at(s: String, i: Int) -> Maybe Char
 extern fn str_find(haystack: String, needle: String) -> Int
-extern fn str_starts_with(s: String, prefix: String) -> Bool
 extern fn str_compare(a: String, b: String) -> Int
 # What stays above is the CHAR-INDEXED core: the operations a beginner reaches for without
 # thinking, which is why they stay globally reachable. The rest of the BYTE-indexed surface
@@ -2276,6 +2275,10 @@ extern fn str_compare(a: String, b: String) -> Int
 # name. Declared here it is on the `no_prelude` floor, since its signature mentions only
 # primitives. It reads in place at a byte offset in O(1) and cannot abort.
 extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
+
+# O(|prefix|). Part of the char-indexed core above, so global, but defined over this extern.
+export fn str_starts_with(s: String, prefix: String) -> Bool =
+  str_starts_with_at_byte(s, 0, prefix)
 
 # Raw vector — the PERSISTENT ops only. These back the immutable `Vec` whose combinators are
 # prelude code below, so they cannot move: the prelude has no imports (bundler.sprout:536) and a
