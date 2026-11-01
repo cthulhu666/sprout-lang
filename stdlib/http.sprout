@@ -83,7 +83,7 @@ export fn is_token(raw: String) -> Bool =
 
 # RFC 9112 §3.2: a request-target holds no SP and no control byte. Bytes >= 0x80 pass; the caller
 # has already decoded the line as UTF-8.
-fn target_byte(byte: Int) -> Bool =
+export fn target_byte(byte: Int) -> Bool =
   byte > 32 && byte != 127
 
 fn digit_byte(byte: Int) -> Bool =

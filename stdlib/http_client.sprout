@@ -1,5 +1,5 @@
 module stdlib.http_client
-import stdlib.http (HttpError, HttpResponse, HttpDecode, is_token)
+import stdlib.http (HttpError, HttpResponse, HttpDecode, is_token, target_byte)
 import stdlib.bytes as bytes
 import stdlib.string as string
 
@@ -10,12 +10,8 @@ type alias HttpResult = Result HttpError HttpResponse
 # Inputs are checked here, before the extern, and a failure is `Err(HttpDecode ...)`. The extern takes
 # the headers as "Name: Value\n" lines, built from the checked pairs; its own line checks are guards.
 
-# RFC 9112 §3.2: a request-target holds no SP, no control byte and no DEL.
-fn url_byte(byte: Int) -> Bool =
-  byte > 32 && byte != 127
-
 fn check_url(url: String) -> Result HttpError Unit =
-  guard(bytes.all_bytes(url_byte, bytes.from_string(url)), HttpDecode("url contains a space or control byte"))
+  guard(bytes.all_bytes(target_byte, bytes.from_string(url)), HttpDecode("url contains a space or control byte"))
 
 # RFC 9110 §5.5: a field value holds no control byte but HTAB, and no DEL.
 fn value_byte(byte: Int) -> Bool =
@@ -29,18 +25,18 @@ fn end_after_ows(encoded: Bytes, end: Int) -> Int =
   if end > 0 && ows_byte(bytes.get_or(encoded, end - 1, 0)) then end_after_ows(encoded, end - 1) else end
 
 # Cuts fall at ASCII bytes, so the slice decodes; the `else` is a total fallback, not an observed path.
-fn trim_ows(raw: String) -> String =
-  let encoded = bytes.from_string(raw)
-      Just start = bytes.find_byte_from(\byte -> !ows_byte(byte), encoded, 0) else ""
+fn trim_ows(encoded: Bytes) -> String =
+  let Just start = bytes.find_byte_from(\byte -> !ows_byte(byte), encoded, 0) else ""
       Ok text = bytes.to_string(bytes.slice_between(encoded, start, end_after_ows(encoded, bytes.length(encoded)))) else ""
   in text
 
+# SP and HTAB pass `value_byte`, so checking the untrimmed bytes gives the same answer as the trimmed.
 fn check_value(name: String, value: String) -> Result HttpError String =
   do
-    _ <- guard(bytes.all_bytes(value_byte, bytes.from_string(trimmed)), HttpDecode(`invalid header value: ${name}`))
-    Ok(trimmed)
+    _ <- guard(bytes.all_bytes(value_byte, encoded), HttpDecode(`invalid header value: ${name}`))
+    Ok(trim_ows(encoded))
 where
-  trimmed = trim_ows(value)
+  encoded = bytes.from_string(value)
 
 # The client writes these itself, so a caller cannot set them.
 fn reserved_name(lowered: String) -> Bool =
