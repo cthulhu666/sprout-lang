@@ -395,7 +395,7 @@ method, use:
   functions above take their own), 65536 header bytes (the server's `max_header_bytes`), 16 MiB
   of body (covers API and JSON payloads). Adjust with record update
 - `http_request_with(config, method: HttpMethod, url, headers, body) -> Result HttpError HttpResponse`
-  — the checks above, then the request. A limit below 1 is `Err(HttpDecode ...)` before any I/O
+  — the checks above, then the request. A `timeout_ms` or limit below 1 is `Err(HttpDecode ...)` before any I/O (`http_get`, `http_post` and `http_put` too)
 
 Response rules, applied while the response is read:
 

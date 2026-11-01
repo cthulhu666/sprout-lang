@@ -70,13 +70,14 @@ fn check_headers(headers: Vec (String, String)) -> Result HttpError String =
     checked <- traverse(check_header, headers)
     Ok(string.join("", vec_map(header_line, checked)))
 
-# A limit below 1 is caller input, so it is an `Err`, like a bad header.
+# A timeout or limit below 1 is caller input, so it is an `Err`, like a bad header.
 fn check_limit(name: String, limit: Int) -> Result HttpError Unit =
   guard(limit >= 1, HttpDecode(`${name} must be at least 1`))
 
 # Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_request_with(config: ClientConfig, method: HttpMethod, url: String, headers: Vec (String, String), body: String) -> HttpResult !{IO} =
-  let _ = try check_limit("max_header_bytes", config.max_header_bytes)
+  let _ = try check_limit("timeout_ms", config.timeout_ms)
+      _ = try check_limit("max_header_bytes", config.max_header_bytes)
       _ = try check_limit("max_body_bytes", config.max_body_bytes)
       _ = try check_url(url)
       block = try check_headers(headers)

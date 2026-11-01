@@ -3125,9 +3125,17 @@ task-io-smoke: bootstrap-from-seed
     "chunk-cut: Err incomplete chunked body ended before the last chunk" \
     "chunk-over: Err decode chunk size too large" "chunk-bad: Err decode invalid chunk size" \
     "te-wins: Ok 200 body=3 text=abc" "split: Ok 200 body=5 text=hello" "head-cl: Ok 200 body=0 text=" "no-body-204: Ok 204 body=0 text=" \
+    "head-gzip: Ok 200 body=0 text=" "head-te: Ok 200 body=0 text=" "304-gzip: Ok 304 body=0 text=" \
     "cl-noclose: Ok 200 body=5 text=hello"
   SPROUT_GC_STRESS=1 run_once "http-client-limits/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits; interleaved; stress-clean)"
+  # (38) Many identical Content-Length lines near the header limit are read in linear time. A scan
+  # that restarts at the head's start for every value would exceed the run_once alarm. No stress
+  # run: it moves a 1.9 MB response through the collector on every allocation, and that is slow
+  # for reasons unrelated to the check.
+  build tests/task_io_smoke/http_client_many_headers.spr
+  run_once "http-client-many-headers" "done"
+  check_markers "http-client-many-headers" "cl-many: Ok 200 body=5 text=hello"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits, http-client-many-headers; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
@@ -4436,7 +4444,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
   for entry in "${GATES[@]}"; do
     label="${entry%%|*}"; cmd="${entry#*|}"
     labels+=("$label")
-    # word-split $cmd deliberately: it is a controlled "recipe text=args" string.
+    # word-split $cmd deliberately: it is a controlled "recipe [args]" string.
     ( s=$SECONDS; $JUST $cmd > "$TMPD/$label.out" 2>&1; echo $? > "$TMPD/$label.status"
       echo $((SECONDS - s)) > "$TMPD/$label.secs" ) &
     pids+=($!); idx=$((idx + 1)); active=$((active + 1))
