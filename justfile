@@ -1299,6 +1299,7 @@ bootstrap-from-seed:
 refresh-seed: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
+  bash scripts/opt_env_guard.sh
   TMPD=$(mktemp -d /tmp/sprout_refresh_XXXXXX)
   trap 'rm -rf "$TMPD"' EXIT
   ITER=0
@@ -1332,6 +1333,7 @@ refresh-seed: bootstrap-from-seed
 verify-bootstrap-fixed-point: bootstrap-from-seed
   #!/usr/bin/env bash
   set -euo pipefail
+  bash scripts/opt_env_guard.sh
   TMP_LL="/tmp/sprout_fp_$$.ll"
   trap 'rm -f "$TMP_LL"' EXIT
   echo "==> Re-emitting IR via stage-1..."
@@ -1579,6 +1581,32 @@ opt-harness-check: bootstrap-from-seed
     > /dev/null 2>"$TMPD/pending.err"
   grep -q 'not implemented yet' "$TMPD/pending.err" \
     || { echo "opt-harness-check: disabling an unimplemented pass looked like it took effect" >&2; exit 1; }
+
+  # SPROUT_OPT_ON: an unknown name warns and changes nothing; a declared but
+  # unimplemented pass says so; the stats line carries `added=`.
+  SPROUT_OPT_ON=nosuchpass "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
+    > "$TMPD/onbogus.ll" 2>"$TMPD/onbogus.err"
+  grep -q 'SPROUT_OPT_ON names no such pass' "$TMPD/onbogus.err" \
+    || { echo "opt-harness-check: an unknown SPROUT_OPT_ON name was accepted silently" >&2; exit 1; }
+  cmp -s "$TMPD/on.ll" "$TMPD/onbogus.ll" \
+    || { echo "opt-harness-check: an unknown SPROUT_OPT_ON name changed the output" >&2; exit 1; }
+  SPROUT_OPT_ON=spec "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
+    > /dev/null 2>"$TMPD/onpending.err"
+  grep -q 'SPROUT_OPT_ON names a pass that is not implemented yet' "$TMPD/onpending.err" \
+    || { echo "opt-harness-check: enabling an unimplemented pass looked like it took effect" >&2; exit 1; }
+  grep -q '^\[opt\] dle on .* added=[0-9]' "$TMPD/on.err" \
+    || { echo "opt-harness-check: the stats line has no added=" >&2; cat "$TMPD/on.err" >&2; exit 1; }
+
+  # The seed guard refuses either variable and passes with neither.
+  for v in SPROUT_OPT_OFF SPROUT_OPT_ON; do
+    if env "$v=x" bash scripts/opt_env_guard.sh 2>"$TMPD/guard.err"; then
+      echo "opt-harness-check: opt_env_guard.sh accepted $v" >&2; exit 1
+    fi
+    grep -q "$v" "$TMPD/guard.err" \
+      || { echo "opt-harness-check: opt_env_guard.sh does not name $v" >&2; exit 1; }
+  done
+  env -u SPROUT_OPT_OFF -u SPROUT_OPT_ON bash scripts/opt_env_guard.sh \
+    || { echo "opt-harness-check: opt_env_guard.sh refused a clean environment" >&2; exit 1; }
 
   echo "==> opt-harness-check ✓ (dle removed $removed nodes; OFF restores them)"
 

@@ -6,6 +6,8 @@ import stdlib.string as string
 # (docs/opt-passes-v0.md §M0).  Two switches, read once per compile:
 #
 #   SPROUT_OPT_OFF=dle,cse    comma list of passes to DISABLE; unset means all on
+#   SPROUT_OPT_ON=spec        comma list of default-off passes to ENABLE (`default_off`);
+#                             OFF wins when both name a pass
 #   SPROUT_OPT_STATS=1        per-pass node-count deltas on stderr
 #
 # The environment carries strings; `parse` turns them into `Pass` values once, so
@@ -21,8 +23,10 @@ export type Pass (..) deriving (Eq, ToString) =
   | Cse
   | Licm
   | Bce
+  | Spec
 
-export type OptConfig (..) = (disabled: List Pass, unrecognised: List String, stats: Bool)
+export type OptConfig (..) =
+  (disabled: List Pass, enabled_on: List Pass, unrecognised: List String, stats: Bool)
 
 export fn pass_name(p: Pass) -> String =
   match p with
@@ -30,6 +34,7 @@ export fn pass_name(p: Pass) -> String =
   | Cse -> "cse"
   | Licm -> "licm"
   | Bce -> "bce"
+  | Spec -> "spec"
 
 export fn pass_from_name(name: String) -> Maybe Pass =
   match name with
@@ -37,10 +42,11 @@ export fn pass_from_name(name: String) -> Maybe Pass =
   | "cse" -> Just(Cse)
   | "licm" -> Just(Licm)
   | "bce" -> Just(Bce)
+  | "spec" -> Just(Spec)
   | _ -> Nothing
 
 export let all_passes =
-  [Dle, Cse, Licm, Bce]
+  [Dle, Cse, Licm, Bce, Spec]
 
 # Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
 # exist because the switch's vocabulary is the roadmap — but disabling one must
@@ -53,29 +59,43 @@ export fn implemented(p: Pass) -> Bool =
   | Cse -> false
   | Licm -> false
   | Bce -> true
+  | Spec -> false
 
-export fn parse(off: Maybe String, stats: Maybe String) -> OptConfig =
-  let names = requested_names(off)
-  in OptConfig(
-    disabled = list_filter_map(pass_from_name, names),
-    unrecognised = list_filter(is_unrecognised, names),
+# A default-off pass runs only when SPROUT_OPT_ON names it.
+export fn default_off(p: Pass) -> Bool =
+  match p with
+  | Dle -> false
+  | Cse -> false
+  | Licm -> false
+  | Bce -> false
+  | Spec -> true
+
+export fn parse(off: Maybe String, on: Maybe String, stats: Maybe String) -> OptConfig =
+  OptConfig(
+    disabled = list_filter_map(pass_from_name, requested_names(off)),
+    enabled_on = list_filter_map(pass_from_name, requested_names(on)),
+    unrecognised = list_filter(is_unrecognised, requested_names(off) ++ requested_names(on)),
     stats = truthy(stats)
   )
 
 export fn from_env() -> OptConfig !{IO} =
   do
-    let cfg = parse(switches.env_switch("SPROUT_OPT_OFF"), switches.env_switch("SPROUT_OPT_STATS"))
-    _ <- warn_unrecognised(cfg.unrecognised)
-    _ <- warn_unimplemented(list_filter(is_pending, cfg.disabled))
+    let off = switches.env_switch("SPROUT_OPT_OFF")
+    let on = switches.env_switch("SPROUT_OPT_ON")
+    let cfg = parse(off, on, switches.env_switch("SPROUT_OPT_STATS"))
+    _ <- warn_unrecognised("SPROUT_OPT_OFF", list_filter(is_unrecognised, requested_names(off)))
+    _ <- warn_unrecognised("SPROUT_OPT_ON", list_filter(is_unrecognised, requested_names(on)))
+    _ <- warn_unimplemented("SPROUT_OPT_OFF", "disabled", list_filter(is_pending, cfg.disabled))
+    _ <- warn_unimplemented("SPROUT_OPT_ON", "enabled", list_filter(is_pending, cfg.enabled_on))
     cfg
 
 export fn enabled(cfg: OptConfig, p: Pass) -> Bool =
-  !list_member(p, cfg.disabled)
+  !list_member(p, cfg.disabled) && (!default_off(p) || list_member(p, cfg.enabled_on))
 
 # For a pass that runs below `compiler.run_opt_passes`, which has already reported
 # any unknown name: reads the switch without repeating the warnings.
 export fn pass_enabled(p: Pass) -> Bool !{IO} =
-  enabled(parse(switches.env_switch_quiet("SPROUT_OPT_OFF"), Nothing), p)
+  enabled(parse(switches.env_switch_quiet("SPROUT_OPT_OFF"), switches.env_switch_quiet("SPROUT_OPT_ON"), Nothing), p)
 
 fn requested_names(off: Maybe String) -> List String =
   match off with
@@ -106,16 +126,16 @@ fn is_truthy_word(v: String) -> Bool =
 fn is_pending(p: Pass) -> Bool =
   !implemented(p)
 
-fn warn_unimplemented(passes: List Pass) -> Unit !{IO} =
+fn warn_unimplemented(var: String, verb: String, passes: List Pass) -> Unit !{IO} =
   match passes with
   | [] -> ()
   | _ ->
-      eprint("[opt] warning: SPROUT_OPT_OFF names a pass that is not implemented yet: "
-             ++ string.join(",", list_map(pass_name, passes)) ++ " — nothing was disabled")
+      eprint("[opt] warning: " ++ var ++ " names a pass that is not implemented yet: "
+             ++ string.join(",", list_map(pass_name, passes)) ++ " — nothing was " ++ verb)
 
-fn warn_unrecognised(names: List String) -> Unit !{IO} =
+fn warn_unrecognised(var: String, names: List String) -> Unit !{IO} =
   match names with
   | [] -> ()
   | _ ->
-      eprint("[opt] warning: SPROUT_OPT_OFF names no such pass: " ++ string.join(",", names)
+      eprint("[opt] warning: " ++ var ++ " names no such pass: " ++ string.join(",", names)
              ++ " (known: " ++ string.join(",", list_map(pass_name, all_passes)) ++ ")")
