@@ -15,7 +15,13 @@
  *                     what turns the missing barrier into an abort, not the minor itself.
  *   bad_every_off   — SPROUT_GC_MAJOR_EVERY=abc with SPROUT_GC_MINOR=0: the mode is off, the bad
  *                     value is never read, and the collection runs.
- *   bad_every_on    — the same value with SPROUT_GC_MINOR=1 aborts at the first collection. */
+ *   bad_every_on    — the same value with SPROUT_GC_MINOR=1 aborts at startup, in
+ *                     sprout_set_argv, before any collection.
+ *   bad_every_late  — the same, where the program's only collection is the atexit one: the abort
+ *                     must come before the program prints anything.
+ *   major_every     — SPROUT_GC_MAJOR_EVERY=3: a major follows every three minors.
+ *
+ * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -24,9 +30,6 @@
 
 static void* g_old;  /* permanent root: the old Ref */
 
-static int is_old(long long word) {
-  return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_COLOR_BIT) != 0;
-}
 static void collect(void) { sprout_gc_collect_with_reason("threshold"); }
 
 /* Root a fresh Ref, run the first collection (a major), and return it, old. */
@@ -85,7 +88,6 @@ static int minor_keeps_old(void) {
 }
 
 static int major_every(void) {
-  setenv("SPROUT_GC_MAJOR_EVERY", "3", 1);
   make_old_ref();
   for (int i = 0; i < 3; i++) collect();
   check(g_gen.n_major == 1 && g_gen.n_minor == 3, "three minors follow a major");
@@ -102,33 +104,56 @@ static int bad_every_off(void) {
 }
 
 static int bad_every_on(void) {
-  ref_new(0);
-  collect();  /* aborts: SPROUT_GC_MAJOR_EVERY is read with the mode on */
+  /* Not reached: sprout_set_argv aborts on the bad SPROUT_GC_MAJOR_EVERY. */
   fprintf(stderr, "bad_every_on: no abort\n");
   return 1;
 }
 
+static int bad_every_late(void) {
+  ref_new(0);
+  printf("after-alloc\n");
+  fflush(stdout);
+  return 0;  /* the atexit collection is the first one */
+}
+
+/* The unbarriered store without GENCHECK is not detected: missing_barrier returns 1 because
+ * nothing aborted, which is the point. */
+static int no_check(void) {
+  (void)missing_barrier();
+  return 0;
+}
+
+typedef struct {
+  const char* name;
+  int (*fn)(void);
+  const char* minor;        /* SPROUT_GC_MINOR */
+  int gencheck;             /* set SPROUT_GC_GENCHECK=1 */
+  const char* major_every;  /* SPROUT_GC_MAJOR_EVERY, or NULL to leave it unset */
+} GenCase;
+
+static const GenCase k_cases[] = {
+  { "missing_barrier", missing_barrier, "1", 1, NULL },
+  { "barrier",         barrier,         "1", 1, NULL },
+  { "minor_keeps_old", minor_keeps_old, "1", 1, NULL },
+  { "major_every",     major_every,     "1", 1, "3" },
+  { "no_check",        no_check,        "1", 0, NULL },
+  { "bad_every_off",   bad_every_off,   "0", 1, "abc" },
+  { "bad_every_on",    bad_every_on,    "1", 1, "abc" },
+  { "bad_every_late",  bad_every_late,  "1", 1, "abc" },
+};
+
 int main(int argc, char** argv) {
   if (argc < 2) return 2;
-  int off = strcmp(argv[1], "bad_every_off") == 0;
+  const GenCase* c = NULL;
+  for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++)
+    if (strcmp(argv[1], k_cases[i].name) == 0) c = &k_cases[i];
+  if (!c) return 2;
   setenv("SPROUT_GC_LINEAGE", "0", 1);
-  setenv("SPROUT_GC_MINOR", off ? "0" : "1", 1);
-  if (strncmp(argv[1], "bad_every_", 10) == 0) setenv("SPROUT_GC_MAJOR_EVERY", "abc", 1);
-  if (strcmp(argv[1], "no_check") != 0) setenv("SPROUT_GC_GENCHECK", "1", 1);
-  int rc;
-  if (strcmp(argv[1], "missing_barrier") == 0) return missing_barrier();
-  if (strcmp(argv[1], "bad_every_on") == 0) return bad_every_on();
-  if (strcmp(argv[1], "no_check") == 0) {
-    (void)missing_barrier();  /* returns 1: nothing aborted, which is the point */
-    printf("gen-check-no_check\n");
-    return 0;
-  }
-  if (strcmp(argv[1], "barrier") == 0) rc = barrier();
-  else if (strcmp(argv[1], "minor_keeps_old") == 0) rc = minor_keeps_old();
-  else if (strcmp(argv[1], "major_every") == 0) rc = major_every();
-  else if (strcmp(argv[1], "bad_every_off") == 0) rc = bad_every_off();
-  else return 2;
-  if (rc || g_failed) return 1;
-  printf("gen-check-%s\n", argv[1]);
+  setenv("SPROUT_GC_MINOR", c->minor, 1);
+  if (c->gencheck) setenv("SPROUT_GC_GENCHECK", "1", 1);
+  if (c->major_every) setenv("SPROUT_GC_MAJOR_EVERY", c->major_every, 1);
+  sprout_set_argv(argc, argv);  /* reads the switches, as a compiled program's main does */
+  if (c->fn() || g_failed) return 1;
+  printf("gen-check-%s\n", c->name);
   return 0;
 }

@@ -13,11 +13,12 @@
 #include "../../runtime/sprout_runtime.c"
 #include "runtime_case.h"
 
-static uint64_t hdr_get(long long word) { return sprout_hdr_of((void*)(uintptr_t)word); }
 static void hdr_put(long long word, uint64_t h) { memcpy((char*)(uintptr_t)word - 8, &h, 8); }
-static void make_old(long long word) { hdr_put(word, hdr_get(word) | SPROUT_GC_COLOR_BIT); }
+static void make_old(long long word) {
+  hdr_put(word, sprout_hdr_of((void*)(uintptr_t)word) | SPROUT_GC_COLOR_BIT);
+}
 static void make_young(long long word) {
-  hdr_put(word, hdr_get(word) & ~(SPROUT_GC_COLOR_BIT | SPROUT_GC_REMEMBERED_BIT));
+  hdr_put(word, sprout_hdr_of((void*)(uintptr_t)word) & ~(SPROUT_GC_COLOR_BIT | SPROUT_GC_REMEMBERED_BIT));
 }
 static void reset_set(void) { g_gen.remembered.len = 0; }
 
@@ -42,7 +43,7 @@ static void old_is_recorded_once(void) {
   sprout_gc_write_barrier((void*)(uintptr_t)r);
   check(is_remembered(r), "an old object gains REMEMBERED");
   check(g_gen.remembered.len == 1 && g_gen.remembered.items[0] == (void*)(uintptr_t)r, "an old object is recorded");
-  check((hdr_get(r) & SPROUT_GC_COLOR_BIT) != 0, "the barrier leaves the colour bit alone");
+  check(is_old(r), "the barrier leaves the colour bit alone");
   sprout_gc_write_barrier((void*)(uintptr_t)r);
   sprout_gc_write_barrier((void*)(uintptr_t)r);
   check(g_gen.remembered.len == 1, "a remembered object is not recorded again");

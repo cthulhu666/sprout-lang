@@ -4036,6 +4036,7 @@ gc-gen-check: bootstrap-from-seed
       || { echo "gc-gen-check: runtime compile failed ($rtsrc)" >&2; cat "$TMPD/rt.err" >&2; exit 1; }
   done
   failed=0
+  min_minors=20  # fewer minor collections than this means the barrier was not exercised
   for f in tests/gc_gen/*.spr; do
     name=$(basename "$f" .spr)
     want_file="tests/gc_gen/$name.out"
@@ -4057,7 +4058,7 @@ gc-gen-check: bootstrap-from-seed
     minors=$(grep -c 'kind=minor' "$TMPD/$name.gc")
     majors=$(grep -c 'kind=major' "$TMPD/$name.gc")
     echo "  $name: ok ($minors minor, $majors major collections)"
-    (( minors >= 20 )) \
+    (( minors >= min_minors )) \
       || { echo "gc-gen-check: $name ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
     SPROUT_GC_MINOR=0 "$TMPD/$name.bin" > "$TMPD/$name.off" 2>/dev/null
     cmp -s "$want_file" "$TMPD/$name.off" \
@@ -4068,15 +4069,17 @@ gc-gen-check: bootstrap-from-seed
   clang tests/c_runtime/analysis_strings.c runtime/sprout_scheduler.c runtime/sprout_poll.c -O1 -g {{clang_extra}} \
       -o "$TMPD/analysis.bin" 2>"$TMPD/analysis.err" \
     || { echo "gc-gen-check: analysis_strings.c failed to build" >&2; cat "$TMPD/analysis.err" >&2; exit 1; }
-  # The case itself fails when fewer than 20 minor collections ran.
-  SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 "$TMPD/analysis.bin" stress > "$TMPD/analysis.out" 2>"$TMPD/analysis.gc"
+  SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_DEBUG_GC=1 "$TMPD/analysis.bin" stress > "$TMPD/analysis.out" 2>"$TMPD/analysis.gc"
   rc=$?
   if [ "$rc" != 0 ] || [ "$(cat "$TMPD/analysis.out")" != "analysis-stress" ]; then
     echo "gc-gen-check: the analysis helpers failed under MINOR=1 GENCHECK=1 (rc=$rc)" >&2
     head -8 "$TMPD/analysis.gc" >&2
     failed=1
   else
-    echo "  analysis helpers (C case): ok"
+    minors=$(grep -c 'kind=minor' "$TMPD/analysis.gc")
+    echo "  analysis helpers (C case): ok ($minors minor collections)"
+    (( minors >= min_minors )) \
+      || { echo "gc-gen-check: the analysis helpers ran only $minors minor collections; the barrier was not exercised" >&2; failed=1; }
   fi
   (( failed == 0 )) || exit 1
   echo "==> gc-gen-check ✓"
