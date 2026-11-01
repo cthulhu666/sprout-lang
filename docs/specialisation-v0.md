@@ -10,11 +10,13 @@ Non-normative. An optimisation only: no syntax, typing-rule or evaluation-order 
 A `where C a` function receives its class dictionaries as hidden parameters
 (`lowering.sprout`, `build_hidden_for_constraints`) and calls every method through them. This holds
 even when every caller passes the same concrete instance. Generic `mutvec_sort` on `Int` takes
-94 / 140 ns per element at n=440 / 100k, against 20 / 42 for a hand-specialised Int copy
-(2026-10-31, min of 7 rounds; `bench/native_runtime/sort_bench.sprout`). The gap is dictionaries
-and a closure together: `mutvec_sort` passes `\ (x, y) -> compare(x, y) < 0` to the unconstrained
-`mutvec_sort_with`, so a copy of it keeps a closure call per comparison. That copy, applied by
-hand, takes 46 / 70: this pass gets 2×, and the rest is the function-values axis below. The
+74.6 / 121.9 ns per element at n=440 / 100k, against 21.1 / 39.6 for a hand-specialised Int copy
+(2026-11-01, median of 7 interleaved rounds, pass off;
+`bench/native_runtime/sort_bench.sprout`). The gap is dictionaries and a closure together:
+`mutvec_sort` passes `\ (x, y) -> compare(x, y) < 0` to the unconstrained `mutvec_sort_with`, so
+a copy of it keeps a closure call per comparison. That copy, `mutvec_sort_with` copied verbatim
+(it allocates its scratch per call, as stdlib does), takes 44.6 / 65.5: this pass gets about
+1.7× / 1.9×, and the rest is the function-values axis below. The
 prelude's generic collection functions pay the same toll per call: `any` on a 4-element `Vec`
 costs 31.4 ns per element against 25.1 for `vec_any`, which has the same closures and no
 dictionaries (`docs/collections-surface-v0.md` §4).
@@ -322,15 +324,26 @@ code compares through `Ord`/`Eq`.
   `just verify-bootstrap-fixed-point` refuse to run while either is set, or a seed built with
   the pass on, or another pass off, gets committed. `SPROUT_OPT_OFF` is read today in
   `run_opt_passes`, after lowering, where this pass has already run; `lower_checked` reads the
-  config once and passes it to both. `report_opt_delta` prints `removed=`, and `bench/optpasses/bench.sh` counts a pass as fired only when that is
-  non-zero; this pass adds nodes, so both learn `added=`. A/B with
-  `just bench-opt spec` and with `bench/native_runtime/bench.sh`. Target: generic `mutvec_sort`
-  near §1's hand-applied copy (46 / 70), not the Int row, which also drops the closure. The bench
-  gains that row as a copy of the closure-taking sort, since `mutvec_sort_with` is private.
+  config once and passes it to both. ~~`report_opt_delta` prints `removed=`, and
+  `bench/optpasses/bench.sh` counts a pass as fired only when that is non-zero; this pass adds
+  nodes, so both learn `added=`.~~ Landed. A/B with `just bench-opt spec` and with
+  `bench/native_runtime/bench.sh`. Target: generic `mutvec_sort` near §1's hand-applied copy
+  (44.6 / 65.5), not the Int row, which also drops the closure. ~~The bench gains that row as a
+  copy of the closure-taking sort, since `mutvec_sort_with` is private.~~ Landed.
   Gates: self-compile time within its noise floor (2.2% in the
   2026-10-18 baseline; it is the GC-heaviest workload), `just rooting-cost-gate`, which prices
   the compiler's own compile, and the emitted binary size of the bench corpus and the compiler,
   within 10%.
+
+  **Measured (2026-11-01, `SPROUT_OPT_ON=spec`).**
+  - Generic `mutvec_sort` takes 44.0 / 64.3 ns per element at n=440 / 100k, against the closure
+    copy's 44.6 / 65.5. It reaches the target.
+  - Self-compile: min +0.5%, median -3.0% over 11 interleaved rounds, inside the 2.2% noise floor.
+  - `just rooting-cost-gate` passes.
+  - Binary size: no binary grew. The largest change was -5.4% (recognizer -5.4%,
+    `http_log_middleware` -4.6%, `compile_driver` -0.28%).
+  - The pass fires on all 6 `bench-opt` programs (4 to 37 nodes added). Run time is flat.
+  - `just test` passes with the pass on.
 - **M2 — turn it on by default**, in its own change: `Spec` leaves the default-off set. From
   here the compiler is built by this pass, so a bug in it miscompiles the compiler that must build
   the fix. Require a 2-step bootstrap fixed point with the pass on (`docs/debugging.md` §2-Step

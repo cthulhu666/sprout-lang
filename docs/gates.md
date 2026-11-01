@@ -388,8 +388,9 @@ Compiles each `tests/spec_fixtures/<name>.spr` twice, with `SPROUT_OPT_ON=spec` 
 `SPROUT_OPT_OFF=spec`, and runs both. They must print the same text and exit with the same
 status, and both must equal `tests/spec_fixtures/expected/<name>.out`. The sidecar
 `tests/spec_fixtures/<name>.ir` holds fixed-string assertions on the emitted IR (`on|off has`,
-`lacks`, `count`, and `body <fn> has|lacks`, scoped to one `define`; the header of
-`scripts/spec_gate.sh` has the format). A sidecar line `stress` runs the fixture under
+`lacks`, `count`, `on trace has` on the pass-on compile's `SPROUT_TRACE_SPEC=1` stderr, and
+`body <fn> has|lacks`, scoped to one `define`; the header of `scripts/spec_gate.sh` has the
+format). A sidecar line `stress` runs the fixture under
 `SPROUT_GC_STRESS=1`. Each compile is bounded at 60 s, so a pass that fails to terminate on a
 growing key is a FAIL, not a hang. `scripts/spec_gate.sh --snapshot` rewrites the goldens from
 the pass-off build; read the diff before staging it. Wired into `just ci-fast-gates` as
