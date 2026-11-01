@@ -46,6 +46,9 @@ fn reply_for(head: String) -> String =
   else if is_path(head, "chunk-bad") then chunked_head ++ "zz\r\nabc\r\n0\r\n\r\n"
   else if is_path(head, "te-wins") then ok_head ++ "Transfer-Encoding: chunked\r\nContent-Length: 999\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
   else if is_path(head, "head-cl") then ok_head ++ "Content-Length: 1000\r\n\r\n"
+  else if is_path(head, "head-gzip") then ok_head ++ "Content-Encoding: gzip\r\nContent-Length: 1000\r\n\r\n"
+  else if is_path(head, "head-te") then ok_head ++ "Transfer-Encoding: gzip\r\nContent-Length: 1000\r\n\r\n"
+  else if is_path(head, "304-gzip") then "HTTP/1.1 304 Not Modified\r\nContent-Encoding: gzip\r\n\r\n"
   else if is_path(head, "no-body-204") then "HTTP/1.1 204 No Content\r\nContent-Length: 10\r\n\r\n"
   else ok_head ++ "\r\nunknown"
 
@@ -123,14 +126,8 @@ fn err_text(e: HttpError) -> String =
 fn small() -> ClientConfig =
   ClientConfig(timeout_ms = 3000, max_header_bytes = 200, max_body_bytes = 100)
 
-fn small_quick() -> ClientConfig =
-  ClientConfig(timeout_ms = 1000, max_header_bytes = 200, max_body_bytes = 100)
-
 fn wide() -> ClientConfig =
   ClientConfig(timeout_ms = 3000, max_header_bytes = 65536, max_body_bytes = 1000000)
-
-fn quick() -> ClientConfig =
-  ClientConfig(timeout_ms = 1000, max_header_bytes = 65536, max_body_bytes = 1000000)
 
 fn text_of(body: Bytes) -> String =
   let Ok text = bytes.to_string(body) else "?"
@@ -159,13 +156,14 @@ fn main() -> Unit !{IO} =
   do
     let cases = [
       ("close-big", Get, small()), ("close-edge", Get, small()), ("close-over1", Get, small()),
-      ("chunk-big", Get, small()), ("chunk-framing", Get, small()), ("cl-big", Get, small_quick()),
+      ("chunk-big", Get, small()), ("chunk-framing", Get, small()), ("cl-big", Get, small() with (timeout_ms = 1000)),
       ("head-big", Get, small()), ("head-open", Get, small()), ("status-big", Get, small()),
       ("cl-short", Get, wide()), ("cl-conflict", Get, wide()), ("cl-list", Get, wide()),
       ("cl-same", Get, wide()), ("cl-same-list", Get, wide()), ("cl-neg", Get, wide()),
       ("cl-nan", Get, wide()), ("cl-huge", Get, wide()), ("cl-extra", Get, wide()),
       ("chunk-ok", Get, wide()), ("chunk-short", Get, wide()), ("chunk-cut", Get, wide()),
       ("chunk-over", Get, wide()), ("chunk-bad", Get, wide()), ("te-wins", Get, wide()), ("split", Get, wide()),
-      ("head-cl", Head, wide()), ("no-body-204", Get, wide()), ("cl-noclose", Get, quick())
+      ("head-cl", Head, wide()), ("no-body-204", Get, wide()), ("head-gzip", Head, wide()),
+      ("head-te", Head, wide()), ("304-gzip", Get, wide()), ("cl-noclose", Get, wide() with (timeout_ms = 1000))
     ]
     with_scope(\s -> run(s, 29030, cases))

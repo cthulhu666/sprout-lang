@@ -14,12 +14,11 @@ fn rendered(r: Result HttpError HttpResponse) -> String =
   | Err (HttpTooLarge n) -> `too large ${to_string(n)}`
   | Err (HttpIncomplete m) -> `incomplete ${m}`
 
-fn max_header_bytes(c: ClientConfig) -> Int = c.max_header_bytes
-fn max_body_bytes(c: ClientConfig) -> Int = c.max_body_bytes
-fn timeout_ms(c: ClientConfig) -> Int = c.timeout_ms
-
 fn config(header_bytes: Int, body_bytes: Int) -> ClientConfig =
   ClientConfig(timeout_ms = 1000, max_header_bytes = header_bytes, max_body_bytes = body_bytes)
+
+fn get_timeout(ms: Int) -> String !{IO} =
+  rendered(http_get("http://127.0.0.1:1/", [], ms))
 
 fn with_config(c: ClientConfig) -> String !{IO} =
   rendered(http_request_with(c, Get, "http://127.0.0.1:1/", [], ""))
@@ -84,6 +83,15 @@ fn main() -> Unit !{IO} =
       "decode max_header_bytes must be at least 1"),
     check_eq("max_header_bytes below 0 is rejected", with_config(config(-1, 100)),
       "decode max_header_bytes must be at least 1"),
+    check_eq("timeout_ms 0 is rejected", with_config(config(100, 100) with (timeout_ms = 0)),
+      "decode timeout_ms must be at least 1"),
+    check_eq("timeout_ms below 0 is rejected", with_config(config(100, 100) with (timeout_ms = -3)),
+      "decode timeout_ms must be at least 1"),
+    check_eq("http_get checks timeout_ms", get_timeout(0), "decode timeout_ms must be at least 1"),
+    check_eq("http_post checks timeout_ms", rendered(http_post("http://127.0.0.1:1/", [], "b", -1)),
+      "decode timeout_ms must be at least 1"),
+    check_eq("http_put checks timeout_ms", rendered(http_put("http://127.0.0.1:1/", [], "b", 0)),
+      "decode timeout_ms must be at least 1"),
     check_eq("request_with checks the url",
       rendered(http_request_with(config(100, 100), Post, "http://127.0.0.1:1/ x", [], "b")),
       "decode url contains a space or control byte"),
@@ -92,9 +100,9 @@ fn main() -> Unit !{IO} =
       "decode reserved header: host"),
 
     # --- defaults: headers match the server's cap, bodies get 16 MiB ---
-    check_eq("default max_header_bytes", max_header_bytes(default_client_config()), 65536),
-    check_eq("default max_body_bytes", max_body_bytes(default_client_config()), 16777216),
-    check_eq("default timeout_ms", timeout_ms(default_client_config()), 30000),
+    check_eq("default max_header_bytes", default_client_config().max_header_bytes, 65536),
+    check_eq("default max_body_bytes", default_client_config().max_body_bytes, 16777216),
+    check_eq("default timeout_ms", default_client_config().timeout_ms, 30000),
 
     # --- wire names ---
     check_eq("GET", method_name(Get), "GET"),

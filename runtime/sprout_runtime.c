@@ -7548,49 +7548,64 @@ static int ascii_contains_token_ci(const char* text, const char* token) {
   return 0;
 }
 
-/* The `nth` (from 0) header line named `key`, case-insensitively, or NULL. A repeated header is
- * several lines, which a Content-Length check needs to see all of. */
-static char* http_header_value_nth_ci(const char* headers, const char* key, size_t nth) {
-  if (headers == NULL || key == NULL) return NULL;
-  size_t key_len = strlen(key);
-  size_t seen = 0;
-  const char* line = headers;
-  while (*line != '\0') {
+/* One "Name: value" line of a header block, name and value trimmed of SP and HTAB. The block is a
+ * pointer and a length, not a C string, so it can be a slice of the response buffer. */
+typedef struct {
+  const char* name;
+  size_t name_len;
+  const char* value;
+  size_t value_len;
+} HttpHeaderLine;
+
+/* Advances `*cursor` over the next line with a colon in [*cursor, stop) and fills `out`. Lines end
+ * at CR or LF, and a run of them counts as one end. Returns 0 when no line is left. A walk is one
+ * pass over the block: each call resumes where the last one stopped. */
+static int http_next_header(const char** cursor, const char* stop, HttpHeaderLine* out) {
+  const char* line = *cursor;
+  while (line < stop) {
     const char* end = line;
-    while (*end != '\0' && *end != '\n' && *end != '\r') end++;
-    const char* colon = NULL;
-    for (const char* p = line; p < end; p++) {
-      if (*p == ':') {
-        colon = p;
-        break;
-      }
-    }
+    while (end < stop && *end != '\n' && *end != '\r') end++;
+    const char* next = end;
+    while (next < stop && (*next == '\r' || *next == '\n')) next++;
+    const char* colon = (const char*)memchr(line, ':', (size_t)(end - line));
     if (colon != NULL) {
-      const char* key_start = line;
-      while (key_start < colon && (*key_start == ' ' || *key_start == '\t')) key_start++;
-      const char* key_end = colon;
-      while (key_end > key_start && (key_end[-1] == ' ' || key_end[-1] == '\t')) key_end--;
-      if ((size_t)(key_end - key_start) == key_len) {
-        size_t i = 0;
-        while (i < key_len && ascii_ieq_char(key_start[i], key[i])) i++;
-        if (i == key_len) {
-          const char* value_start = colon + 1;
-          while (value_start < end && (*value_start == ' ' || *value_start == '\t')) value_start++;
-          const char* value_end = end;
-          while (value_end > value_start && (value_end[-1] == ' ' || value_end[-1] == '\t')) value_end--;
-          if (seen == nth) return dup_slice(value_start, (size_t)(value_end - value_start));
-          seen++;
-        }
-      }
+      const char* name_start = line;
+      while (name_start < colon && (*name_start == ' ' || *name_start == '\t')) name_start++;
+      const char* name_end = colon;
+      while (name_end > name_start && (name_end[-1] == ' ' || name_end[-1] == '\t')) name_end--;
+      const char* value_start = colon + 1;
+      while (value_start < end && (*value_start == ' ' || *value_start == '\t')) value_start++;
+      const char* value_end = end;
+      while (value_end > value_start && (value_end[-1] == ' ' || value_end[-1] == '\t')) value_end--;
+      out->name = name_start;
+      out->name_len = (size_t)(name_end - name_start);
+      out->value = value_start;
+      out->value_len = (size_t)(value_end - value_start);
+      *cursor = next;
+      return 1;
     }
-    while (*end == '\r' || *end == '\n') end++;
-    line = end;
+    line = next;
   }
-  return NULL;
+  *cursor = stop;
+  return 0;
 }
 
-static char* http_header_value_ci(const char* headers, const char* key) {
-  return http_header_value_nth_ci(headers, key, 0);
+static int http_header_is(const HttpHeaderLine* h, const char* key) {
+  size_t key_len = strlen(key);
+  if (h->name_len != key_len) return 0;
+  size_t i = 0;
+  while (i < key_len && ascii_ieq_char(h->name[i], key[i])) i++;
+  return i == key_len;
+}
+
+/* The value of the first header named `key`, case-insensitively, as a malloc'd C string, or NULL. */
+static char* http_header_value_ci(const char* headers, size_t len, const char* key) {
+  const char* cursor = headers;
+  HttpHeaderLine h;
+  while (http_next_header(&cursor, headers + len, &h)) {
+    if (http_header_is(&h, key)) return dup_slice(h.value, h.value_len);
+  }
+  return NULL;
 }
 
 static int hex_digit_value(char ch) {
@@ -7615,6 +7630,13 @@ static int hex_digit_value(char ch) {
  * last chunk, mid size line, mid chunk data or its terminator) sets `*incomplete`, which the caller
  * reports as HttpIncomplete; malformed syntax and a size that overflows size_t leave it clear, for
  * HttpDecode. */
+static char* http_chunk_fail(ByteBuf* out, const char** err, int* incomplete, const char* msg, int ended) {
+  free(out->data);
+  *err = msg;
+  *incomplete = ended;
+  return NULL;
+}
+
 static char* http_decode_chunked_body(const char* body, size_t body_len, size_t* out_len,
                                       const char** err, int* incomplete) {
   static const char* const ended = "chunked body ended before the last chunk";
@@ -7624,42 +7646,20 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
   const char* end = body + body_len;
   while (1) {
     while (cursor < end && (*cursor == '\r' || *cursor == '\n')) cursor++;
-    if (cursor == end) {
-      free(out.data);
-      *err = ended;
-      *incomplete = 1;
-      return NULL;
-    }
+    if (cursor == end) return http_chunk_fail(&out, err, incomplete, ended, 1);
     const char* size_start = cursor;
     while (cursor < end && *cursor != '\r' && *cursor != '\n' && *cursor != ';') cursor++;
     const char* size_end = cursor;
-    if (size_start == size_end) {
-      free(out.data);
-      *err = "invalid chunk size";
-      return NULL;
-    }
+    if (size_start == size_end) return http_chunk_fail(&out, err, incomplete, "invalid chunk size", 0);
     size_t chunk_size = 0;
     for (const char* p = size_start; p < size_end; p++) {
       int digit = hex_digit_value(*p);
-      if (digit < 0) {
-        free(out.data);
-        *err = "invalid chunk size";
-        return NULL;
-      }
-      if (chunk_size > (SIZE_MAX >> 4)) {
-        free(out.data);
-        *err = "chunk size too large";
-        return NULL;
-      }
+      if (digit < 0) return http_chunk_fail(&out, err, incomplete, "invalid chunk size", 0);
+      if (chunk_size > (SIZE_MAX >> 4)) return http_chunk_fail(&out, err, incomplete, "chunk size too large", 0);
       chunk_size = (chunk_size << 4) | (size_t)digit;
     }
     while (cursor < end && *cursor != '\n') cursor++;
-    if (cursor == end) {
-      free(out.data);
-      *err = ended;
-      *incomplete = 1;
-      return NULL;
-    }
+    if (cursor == end) return http_chunk_fail(&out, err, incomplete, ended, 1);
     cursor++;
     if (chunk_size == 0) {
       while (cursor < end && (*cursor == '\r' || *cursor == '\n')) cursor++;
@@ -7667,12 +7667,7 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
     }
     /* Pointer arithmetic against the real end, not strlen: this is the comparison that used to
      * reject a valid body whose chunk data contained a NUL. */
-    if ((size_t)(end - cursor) < chunk_size) {
-      free(out.data);
-      *err = ended;
-      *incomplete = 1;
-      return NULL;
-    }
+    if ((size_t)(end - cursor) < chunk_size) return http_chunk_fail(&out, err, incomplete, ended, 1);
     buf_append_bytes(&out, cursor, chunk_size);
     cursor += chunk_size;
     if (end - cursor >= 2 && cursor[0] == '\r' && cursor[1] == '\n') {
@@ -7680,14 +7675,9 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
     } else if (end - cursor >= 1 && cursor[0] == '\n') {
       cursor += 1;
     } else if (end - cursor == 0 || (end - cursor == 1 && cursor[0] == '\r')) {
-      free(out.data);
-      *err = ended;
-      *incomplete = 1;
-      return NULL;
+      return http_chunk_fail(&out, err, incomplete, ended, 1);
     } else {
-      free(out.data);
-      *err = "invalid chunk terminator";
-      return NULL;
+      return http_chunk_fail(&out, err, incomplete, "invalid chunk terminator", 0);
     }
   }
   *out_len = out.len;
@@ -7804,38 +7794,33 @@ static int http_reader_fail(HttpReader* r, HttpFail kind, const char* msg) {
 /* The Content-Length value: 0 = no such header, 1 = valid (`*out` set), -1 = invalid. Every value,
  * across repeated headers and comma lists, is digits only, fits size_t, and equals the others
  * (RFC 9112 §6.3 item 5). */
-static int http_content_length(const char* headers, size_t* out) {
+static int http_content_length(const char* headers, size_t len, size_t* out) {
   int found = 0;
   size_t value = 0;
-  for (size_t nth = 0;; nth++) {
-    char* raw = http_header_value_nth_ci(headers, "Content-Length", nth);
-    if (raw == NULL) break;
-    const char* p = raw;
+  const char* cursor = headers;
+  HttpHeaderLine h;
+  while (http_next_header(&cursor, headers + len, &h)) {
+    if (!http_header_is(&h, "Content-Length")) continue;
+    const char* p = h.value;
+    const char* stop = h.value + h.value_len;
     while (1) {
-      while (*p == ' ' || *p == '\t') p++;
+      while (p < stop && (*p == ' ' || *p == '\t')) p++;
       const char* digits = p;
       size_t item = 0;
-      while (*p >= '0' && *p <= '9') {
+      while (p < stop && *p >= '0' && *p <= '9') {
         size_t digit = (size_t)(*p - '0');
-        if (item > (SIZE_MAX - digit) / 10) {
-          free(raw);
-          return -1;
-        }
+        if (item > (SIZE_MAX - digit) / 10) return -1;
         item = item * 10 + digit;
         p++;
       }
       int ok = p != digits;
-      while (*p == ' ' || *p == '\t') p++;
-      if (!ok || (*p != ',' && *p != '\0') || (found && item != value)) {
-        free(raw);
-        return -1;
-      }
+      while (p < stop && (*p == ' ' || *p == '\t')) p++;
+      if (!ok || (p < stop && *p != ',') || (found && item != value)) return -1;
       found = 1;
       value = item;
-      if (*p == '\0') break;
+      if (p == stop) break;
       p++;
     }
-    free(raw);
   }
   if (found) *out = value;
   return found;
@@ -7868,9 +7853,17 @@ static int http_reader_parse_head(HttpReader* r, const char* data, size_t blank_
     return 0;
   }
 
-  char* headers = http_headers_to_utf8(data + r->headers_start, r->headers_len);
-  char* content_encoding = http_header_value_ci(headers, "Content-Encoding");
-  char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
+  /* No body, so no encoding or Content-Length to check: whatever the headers say describes a body
+   * that is not sent (RFC 9112 §6.3 item 1). */
+  if (r->head_only || r->status == 204 || r->status == 304) {
+    r->framing = HTTP_FRAME_NONE;
+    return 0;
+  }
+
+  /* The lookups are ASCII names and values, so they read the raw header bytes. */
+  const char* headers = data + r->headers_start;
+  char* content_encoding = http_header_value_ci(headers, r->headers_len, "Content-Encoding");
+  char* transfer_encoding = http_header_value_ci(headers, r->headers_len, "Transfer-Encoding");
   int stop = 0;
   int chunked = 0;
   if (content_encoding != NULL && content_encoding[0] != '\0' && !ascii_contains_token_ci(content_encoding, "identity")) {
@@ -7881,18 +7874,15 @@ static int http_reader_parse_head(HttpReader* r, const char* data, size_t blank_
     stop = http_reader_fail(r, HTTP_FAIL_DECODE, "unsupported transfer encoding");
   }
   if (!stop) {
-    if (r->head_only || r->status == 204 || r->status == 304) {
-      r->framing = HTTP_FRAME_NONE;
-    } else if (chunked) {
+    if (chunked) {
       r->framing = HTTP_FRAME_CHUNKED;
     } else {
-      int cl = http_content_length(headers, &r->content_length);
+      int cl = http_content_length(headers, r->headers_len, &r->content_length);
       if (cl < 0) stop = http_reader_fail(r, HTTP_FAIL_DECODE, "invalid Content-Length");
       else if (cl > 0 && r->content_length > r->max_body_bytes) stop = http_reader_fail(r, HTTP_FAIL_BODY_LIMIT, NULL);
       else r->framing = cl > 0 ? HTTP_FRAME_LENGTH : HTTP_FRAME_CLOSE;
     }
   }
-  free(headers);
   free(content_encoding);
   free(transfer_encoding);
   return stop;
@@ -7969,8 +7959,8 @@ static long long http_reader_failure(const HttpReader* r) {
   }
 }
 
-/* Builds the result from a response the reader accepted (`fail` clear, head parsed). Takes
- * ownership of `response_data`.
+/* The result of a read that has ended, by either path: the reader's failure if it set one, else the
+ * response. Takes ownership of `response_data`, which both outcomes free.
  *
  * `response_len` is the exact byte count the recv loop accumulated, and taking it is the whole of the
  * fix for the truncated-body defect. The buffer was always correct — buf_append_bytes memcpy's, so a
@@ -7978,6 +7968,10 @@ static long long http_reader_failure(const HttpReader* r) {
  * the body to be re-measured with strlen. A response whose body began "AAAA\0BBBB..." arrived as four
  * bytes and an `Ok`. Only the BODY is arbitrary bytes; the head is text. */
 static long long http_response_result(char* response_data, size_t response_len, const HttpReader* reader) {
+  if (reader->fail != HTTP_FAIL_NONE) {
+    free(response_data);
+    return http_reader_failure(reader);
+  }
   if (reader->status >= 400) {
     free(response_data);
     return http_err1(SPROUT_TAG(stdlib$http$HttpBadStatus), reader->status);
@@ -8787,10 +8781,6 @@ static long long http_request_tls(HttpUrl* parsed, ByteBuf* request, const HttpD
       tls_error_message("tls read failed", status, &tls)
     );
   }
-  if (reader->fail != HTTP_FAIL_NONE) {
-    free(response.data);
-    return http_reader_failure(reader);
-  }
   return http_response_result(response.data, response.len, reader);
 }
 #pragma clang diagnostic pop
@@ -8977,10 +8967,6 @@ long long http_request(const char* method, const char* url, const char* headers_
    * The socket is closed on every exit from the read, including a reader that stopped early. */
   close(fd);
   free_http_url(&parsed);
-  if (reader.fail != HTTP_FAIL_NONE) {
-    free(response.data);
-    return http_reader_failure(&reader);
-  }
   return http_response_result(response.data, response.len, &reader);
 }
 

@@ -1,0 +1,68 @@
+import stdlib.task (Scope, with_scope, task_spawn)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, HttpTooLarge, HttpIncomplete, Get)
+import stdlib.http_client (default_client_config, http_request_with)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, read_avail_timeout, write_all)
+import testsupport.listen (listen_or_die)
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# A head of 100000 identical Content-Length lines (about 1.9 MB), read under a 4 MiB header limit,
+# is accepted and costs time linear in the head: each header is visited once. A scan that restarts
+# from the head's start for every Content-Length value takes seconds here and trips the harness
+# alarm. The pass/fail signal is completion plus the marker, not a timing assertion.
+
+fn response() -> String =
+  "HTTP/1.1 200 OK\r\n" ++ string.repeat("Content-Length: 5\r\n", 100000) ++ "\r\nhello"
+
+fn read_head(conn: borrowing TcpConnection, acc: String) -> String !{IO} =
+  if string.contains(acc, "\r\n\r\n") then acc
+  else
+    match read_avail_timeout(conn, 3000) with
+    | Err _ -> acc
+    | Ok chunk ->
+        match bytes.to_string(chunk) with
+        | Err _ -> acc
+        | Ok text -> read_head(conn, string.concat(acc, text))
+
+fn serve(port: Int) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(port)
+    match accept(listener) with
+    | Err _ -> terminal.write("")
+    | Ok conn ->
+        do
+          head <- read_head(conn, "")
+          write_all(conn, bytes.from_string(response()))
+          close(conn)
+    close_listener(listener)
+
+fn err_text(e: HttpError) -> String =
+  match e with
+  | HttpTimeout -> "timeout"
+  | HttpNetwork m -> `network ${m}`
+  | HttpBadStatus c -> `status ${int_to_string(c)}`
+  | HttpDecode m -> `decode ${m}`
+  | HttpTooLarge n -> `too large ${int_to_string(n)}`
+  | HttpIncomplete m -> `incomplete ${m}`
+
+fn text_of(body: Bytes) -> String =
+  let Ok text = bytes.to_string(body) else "?"
+  in text
+
+fn client(port: Int) -> Unit !{IO} =
+  do
+    let config = default_client_config() with (max_header_bytes = 4194304)
+    match http_request_with(config, Get, `http://127.0.0.1:${int_to_string(port)}/`, [], "") with
+    | Ok (HttpResponse code _ body) ->
+        terminal.write(`cl-many: Ok ${int_to_string(code)} body=${int_to_string(bytes.length(body))} text=${text_of(body)}\n`)
+    | Err e -> terminal.write(`cl-many: Err ${err_text(e)}\n`)
+    terminal.write("done\n")
+
+fn run(s: Scope, port: Int) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> serve(port))
+    task_spawn(s, \_ -> client(port))
+
+fn main() -> Unit !{IO} =
+  with_scope(\s -> run(s, 29031))
