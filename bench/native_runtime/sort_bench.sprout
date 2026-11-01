@@ -1,12 +1,13 @@
 module main
 
-# Sprout half of the merge-sort pair (sort_c.c is the C half). Two variants on the
-# same input: the shipped generic `mutvec_sort`, and the same algorithm copied and
-# specialised to Int, so a comparison is `<` and not an `Ord` call. Each prints ns
-# per element for fill+sort minus fill alone, and a checksum sort_c.c must match.
+# Sprout half of the merge-sort pair (sort_c.c is the C half). Three variants on the
+# same input: the shipped generic `mutvec_sort`; the algorithm copied with a closure
+# comparison (`sprout_closure`); and copied and specialised to Int, so a comparison is
+# `<` and not a call (`sprout_int`). Each prints ns per element for fill+sort minus
+# fill alone, and a checksum sort_c.c must match.
 
 import stdlib.time as time
-import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_sort)
+import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_len, mutvec_sort)
 
 let block = 16
 
@@ -104,6 +105,95 @@ fn sort_int(v: MutVec Int, scratch: MutVec Int, n: Int) -> Unit !{IO} =
         in_scratch <- passes(v, scratch, n, block, false)
         if in_scratch then copy(scratch, v, 0, n, 0) else ()
 
+# --- the closure-taking copy of mutvec_sort_with ---
+# Stdlib's private `mutvec_sort_with` (stdlib/mutable.sprout), copied verbatim with a
+# `with_` prefix, except that it goes through the `MutVec` accessors, since the
+# constructor is not exported. Scratch is allocated per call, as there. It differs from
+# what the specialisation pass leaves behind for `mutvec_sort` at `Ord Int` only in
+# being written by hand.
+
+fn with_shift(less: local a -> a -> Bool, vec: MutVec a, x: a, j: Int, lo: Int, prev: a) -> Unit !{IO} =
+  do
+    _ <- mutvec_set(vec, j, prev)
+    with_insert(less, vec, x, j - 1, lo)
+
+fn with_insert(less: local a -> a -> Bool, vec: MutVec a, x: a, j: Int, lo: Int) -> Unit !{IO} =
+  if j <= lo then mutvec_set(vec, j, x)
+  else
+    do
+      prev <- mutvec_at(vec, j - 1)
+      if less(x, prev) then with_shift(less, vec, x, j, lo, prev) else mutvec_set(vec, j, x)
+
+fn with_insertion(less: local a -> a -> Bool, vec: MutVec a, i: Int, lo: Int, hi: Int) -> Unit !{IO} =
+  if i >= hi then ()
+  else
+    do
+      x <- mutvec_at(vec, i)
+      _ <- with_insert(less, vec, x, i, lo)
+      with_insertion(less, vec, i + 1, lo, hi)
+
+fn with_blocks(less: local a -> a -> Bool, vec: MutVec a, lo: Int, n: Int) -> Unit !{IO} =
+  if lo >= n then ()
+  else
+    do
+      _ <- with_insertion(less, vec, lo + 1, lo, smaller(lo + block, n))
+      with_blocks(less, vec, lo + block, n)
+
+fn with_copy(src: MutVec a, dst: MutVec a, i: Int, stop: Int, k: Int) -> Unit !{IO} =
+  if i >= stop then ()
+  else
+    do
+      x <- mutvec_at(src, i)
+      _ <- mutvec_set(dst, k, x)
+      with_copy(src, dst, i + 1, stop, k + 1)
+
+fn with_merge(less: local a -> a -> Bool, src: MutVec a, dst: MutVec a, i: Int, mid: Int, j: Int, hi: Int,
+              k: Int) -> Unit !{IO} =
+  if i >= mid then with_copy(src, dst, j, hi, k)
+  else if j >= hi then with_copy(src, dst, i, mid, k)
+  else
+    do
+      x <- mutvec_at(src, i)
+      y <- mutvec_at(src, j)
+      let right = less(y, x)
+      _ <- mutvec_set(dst, k, if right then y else x)
+      with_merge(less, src, dst, if right then i else i + 1, mid, if right then j + 1 else j, hi,
+                 k + 1)
+
+fn with_pass(less: local a -> a -> Bool, src: MutVec a, dst: MutVec a, lo: Int, n: Int, w: Int) -> Unit !{IO} =
+  if lo >= n then ()
+  else
+    do
+      let mid = smaller(lo + w, n)
+      let hi = smaller(lo + 2 * w, n)
+      _ <- with_merge(less, src, dst, lo, mid, mid, hi, lo)
+      with_pass(less, src, dst, hi, n, w)
+
+fn with_passes(less: local a -> a -> Bool, src: MutVec a, dst: MutVec a, n: Int, w: Int,
+               in_scratch: Bool) -> Bool !{IO} =
+  if w >= n then in_scratch
+  else
+    do
+      _ <- with_pass(less, src, dst, 0, n, w)
+      let swapped = !in_scratch
+      with_passes(less, dst, src, n, w * 2, swapped)
+
+fn with_merge_all(less: local a -> a -> Bool, vec: MutVec a, n: Int) -> Unit !{IO} =
+  do
+    fill <- mutvec_at(vec, 0)
+    scratch <- mutvec_new(n, fill)
+    in_scratch <- with_passes(less, vec, scratch, n, block, false)
+    if in_scratch then with_copy(scratch, vec, 0, n, 0) else ()
+
+fn mutvec_sort_with(less: local a -> a -> Bool, v: MutVec a) -> Unit !{IO} =
+  do
+    n <- mutvec_len(v)
+    _ <- with_blocks(less, v, 0, n)
+    if n <= block then () else with_merge_all(less, v, n)
+
+fn sort_closure(v: MutVec Int) -> Unit !{IO} =
+  mutvec_sort_with(\ (x, y) -> compare(x, y) < 0, v)
+
 # --- harness ---
 
 fn checksum(v: MutVec Int, i: Int, n: Int, prev: Int, acc: Int) -> Int !{IO} =
@@ -128,6 +218,14 @@ fn generic_reps(v: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
       _ <- fill(v, n, 42 + r)
       _ <- mutvec_sort(v)
       generic_reps(v, n, r - 1)
+
+fn closure_reps(v: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
+  if r <= 0 then ()
+  else
+    do
+      _ <- fill(v, n, 42 + r)
+      _ <- sort_closure(v)
+      closure_reps(v, n, r - 1)
 
 fn int_reps(v: MutVec Int, scratch: MutVec Int, n: Int, r: Int) -> Unit !{IO} =
   if r <= 0 then ()
@@ -154,9 +252,13 @@ fn run(n: Int, reps: Int) -> Unit !{IO} =
     t2 <- time.now_micros()
     _ <- report("sprout_generic", n, reps, t1 - t0, t2 - t1, v)
     t3 <- time.now_micros()
-    _ <- int_reps(v, scratch, n, reps)
+    _ <- closure_reps(v, n, reps)
     t4 <- time.now_micros()
-    report("sprout_int", n, reps, t1 - t0, t4 - t3, v)
+    _ <- report("sprout_closure", n, reps, t1 - t0, t4 - t3, v)
+    t5 <- time.now_micros()
+    _ <- int_reps(v, scratch, n, reps)
+    t6 <- time.now_micros()
+    report("sprout_int", n, reps, t1 - t0, t6 - t5, v)
 
 fn main() -> Unit !{IO} =
   do

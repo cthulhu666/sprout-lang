@@ -92,10 +92,10 @@ fi
 
 echo "==> Pass A/B: $PASS  (compiler: $CC, $RUNS runs per timing, minimum reported)"
 echo
-printf '%-22s %9s %8s %9s %9s %8s %8s %8s %8s\n' \
-  program nodes removed "IR-on" "IR-off" "cc-on" "cc-off" "run-on" "run-off"
-printf '%-22s %9s %8s %9s %9s %8s %8s %8s %8s\n' \
-  "----------------------" "---------" "--------" "---------" "---------" "--------" "--------" "--------" "--------"
+printf '%-22s %9s %8s %8s %9s %9s %8s %8s %8s %8s\n' \
+  program nodes removed added "IR-on" "IR-off" "cc-on" "cc-off" "run-on" "run-off"
+printf '%-22s %9s %8s %8s %9s %9s %8s %8s %8s %8s\n' \
+  "----------------------" "---------" "--------" "--------" "---------" "---------" "--------" "--------" "--------" "--------"
 
 fired=0
 for entry in "${CORPUS[@]}"; do
@@ -133,8 +133,8 @@ for entry in "${CORPUS[@]}"; do
     fi
   fi
 
-  printf '%-22s %9s %8s %9s %9s %8s %8s %8s %8s\n' \
-    "$label" "${nodes:-?}" "${removed:-?}" "$on_lines" "$off_lines" "$cc_on" "$cc_off" "$on_t" "$off_t"
+  printf '%-22s %9s %8s %8s %9s %9s %8s %8s %8s %8s\n' \
+    "$label" "${nodes:-?}" "${removed:-?}" "${added:-?}" "$on_lines" "$off_lines" "$cc_on" "$cc_off" "$on_t" "$off_t"
 done
 
 echo
