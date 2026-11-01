@@ -59,7 +59,7 @@ export fn implemented(p: Pass) -> Bool =
   | Cse -> false
   | Licm -> false
   | Bce -> true
-  | Spec -> false
+  | Spec -> true
 
 # A default-off pass runs only when SPROUT_OPT_ON names it.
 export fn default_off(p: Pass) -> Bool =

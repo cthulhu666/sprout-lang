@@ -812,7 +812,7 @@ fn method_ref_constraint(method: String, class_name: String, t: types.Type,
 # The type with each signature variable named as it was declared, through the
 # `@eta_fwdvar` markers, so a slot key built from it (typed_ast.dict_slot_key) is the one the
 # enclosing function's slot is under. Any other variable keeps its identity.
-fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
+export fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   | types.TVar v ->
       match types.eta_written_var(v, env) with

@@ -15,6 +15,7 @@ import stdlib.compiler.resolve as resolve
 import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
+import stdlib.compiler.specialise as specialise
 import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
@@ -612,8 +613,53 @@ fn lower_checked(check_result: typed_ast.TypedResult) -> typed_ast.TypedResult !
   | typed_ast.TypedOk typed_prog env ->
       do
         cfg <- opt_config.from_env()
-        optimised <- run_opt_passes(cfg, lowering.lower_program(typed_prog, env))
-        typed_ast.TypedOk(optimised, env)
+        specialised <- specialise_checked(cfg, typed_prog, env)
+        match specialised with
+        | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
+        | typed_ast.TypedOk spec_prog _ ->
+            do
+              optimised <- run_opt_passes(cfg, lowering.lower_program(spec_prog, env))
+              typed_ast.TypedOk(optimised, env)
+
+# Specialisation (docs/specialisation-v0.md §4) on the resolved program, before dictionary
+# lowering. Each copy is checked again by the dispatch verifier (the rest of the program was
+# checked in `resolve_checked`); a finding is fatal, and names the generic function and the
+# call that produced the copy.
+fn specialise_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
+                      env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
+  if !opt_config.enabled(cfg, opt_config.Spec) then
+    do
+      _ <- report_opt_stats(cfg, opt_config.Spec, false, prog, prog)
+      typed_ast.TypedOk(prog, env)
+  else
+    let out = specialise.run(prog, env)
+    in
+      do
+        _ <- report_opt_stats(cfg, opt_config.Spec, true, prog, out.program)
+        _ <- trace_spec(out.trace)
+        match enforced_dispatch_finding(copy_finding(out, verify_dispatch.verify_added(out.program, out.added))) with
+        | Nothing -> typed_ast.TypedOk(out.program, env)
+        | Just (vpos, vmsg) -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
+
+# SPROUT_TRACE_SPEC=1: one line per copy made or key declined, to stderr.
+fn trace_spec(lines: List String) -> Unit !{IO} =
+  match switches.env_switch("SPROUT_TRACE_SPEC") with
+  | Nothing -> ()
+  | Just _ -> list_each(eprint, lines)
+
+# A finding in a copy is reported against the generic function and the call that made it,
+# not the mangled name. The call's position names no file, so it is placed by the function
+# that holds it: the generic function of the producing copy, or "the program" for a direct call.
+fn copy_finding(out: specialise.Output, found: Maybe (String, source.SourcePos, String))
+    -> Maybe(source.SourcePos, String) =
+  match found with
+  | Nothing -> Nothing
+  | Just (fn_name, pos, msg) ->
+      match dict_get(fn_name, out.origins) with
+      | Nothing -> Just((pos, msg))
+      | Just o ->
+          let holder = maybe_with_default("the program", o.holder)
+          in Just((pos, `${msg} (in the copy of ${o.fn_name} made for the call at ${o.site.line}:${o.site.column} in ${holder})`))
 
 export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_recheck_with_roots(path, stdlib_root, Nil)

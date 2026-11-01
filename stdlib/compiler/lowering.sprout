@@ -643,7 +643,7 @@ fn instance_fn_name(c: ast.TypeConstraint, method_name: String) -> String =
   | ast.TypeConstraint class_name type_args ->
       "__tc_" ++ class_name ++ "_" ++ mangle_type_args(type_args) ++ "_" ++ string.after_last_dot(method_name)
 
-fn mangle_type_args(args: List ast.TypeExpr) -> String =
+export fn mangle_type_args(args: List ast.TypeExpr) -> String =
   string_concat_many(list_reverse(mangle_type_args_rev(args, Nil)))
 
 fn mangle_type_args_rev(args: List ast.TypeExpr, acc: List String) -> List String =

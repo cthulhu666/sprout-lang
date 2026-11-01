@@ -9,6 +9,8 @@ on has define i64 @main.insert$spec_Int(i64 %p$x, i64 %p$xs)
 on has define i64 @main.isort$spec_Int(i64 %p$xs)
 on body main.isort$spec_Int has call i64 @main.insert$spec_Int(
 on body main.insert$spec_Int has call i64 @main.insert$spec_Int(
+# SPROUT_TRACE_SPEC=1 prints one stderr line per copy made.
+on trace has [spec] copy main.bigger$spec_Int of main.bigger for the call at
 # Every caller moved to a copy, so no generic version is emitted.
 on lacks define i64 @main.bigger(
 on lacks define i64 @main.insert(

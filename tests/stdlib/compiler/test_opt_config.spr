@@ -70,7 +70,7 @@ fn main() -> Unit !{IO} =
     check_eq("spec name round-trips", opt_config.pass_name(opt_config.Spec), "spec"),
     check_true("spec is default-off", opt_config.default_off(opt_config.Spec)),
     check_false("dle is not default-off", opt_config.default_off(opt_config.Dle)),
-    check_false("spec is not implemented yet", opt_config.implemented(opt_config.Spec)),
+    check_true("spec is implemented", opt_config.implemented(opt_config.Spec)),
     check_true("stats=1 on", stats_of(Just("1"))),
     check_true("stats=yes on", stats_of(Just("yes"))),
     check_false("stats=0 off", stats_of(Just("0"))),

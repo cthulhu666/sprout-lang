@@ -453,20 +453,12 @@ fn is_rooted_decl(d: typed_ast.TypedDecl) -> Bool =
   | typed_ast.TInstanceDecl _ _ _ -> true
   | typed_ast.TPassThrough _ -> true
 
-fn decl_name_of(d: typed_ast.TypedDecl) -> Maybe String =
-  match d with
-  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
-  | typed_ast.TExternFnDecl name _ _ _ -> Just(name)
-  | typed_ast.TLetDecl name _ -> Just(name)
-  | typed_ast.TInstanceDecl _ _ _ -> Nothing
-  | typed_ast.TPassThrough _ -> Nothing
-
 # name -> declaration, so the worklist resolves an edge in O(log n).
 fn decl_index(decls: List typed_ast.TypedDecl, acc: Dict typed_ast.TypedDecl) -> Dict typed_ast.TypedDecl =
   match decls with
   | Nil -> acc
   | Cons d rest ->
-      match decl_name_of(d) with
+      match typed_ast.decl_name(d) with
       | Nothing -> decl_index(rest, acc)
       | Just name -> decl_index(rest, dict_set(name, d, acc))
 
@@ -494,7 +486,7 @@ fn seed_queue(decls: List typed_ast.TypedDecl, acc: List String) -> List String 
   | Cons d rest ->
       if !is_rooted_decl(d) then seed_queue(rest, acc)
       else
-        match decl_name_of(d) with
+        match typed_ast.decl_name(d) with
         | Nothing -> seed_queue(rest, list_append(set_to_list(refs_decl(d, set_empty())), acc))
         | Just name -> seed_queue(rest, Cons(name, acc))
 
@@ -504,7 +496,7 @@ fn keep_live(decls: List typed_ast.TypedDecl, live: Set) -> List typed_ast.Typed
   | Cons d rest ->
       if is_rooted_decl(d) then Cons(d, keep_live(rest, live))
       else
-        match decl_name_of(d) with
+        match typed_ast.decl_name(d) with
         | Nothing -> Cons(d, keep_live(rest, live))
         | Just name ->
             if set_member(name, live) then Cons(d, keep_live(rest, live))

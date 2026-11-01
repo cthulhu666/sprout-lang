@@ -13,6 +13,8 @@
 #   on|off has <text>             some line of that IR contains <text>
 #   on|off lacks <text>           no line does
 #   on|off count <n> <text>       exactly <n> lines do
+#   on trace has <text>           some line of the pass-on compile's stderr (SPROUT_TRACE_SPEC=1)
+#                                 contains <text>
 #   on|off body <fn> has <text>   inside the `define` of the IR function <fn> (name without
 #   on|off body <fn> lacks <text> the `@`), through its closing `}`. A missing define fails.
 #   stress                        run the fixture under SPROUT_GC_STRESS=1
@@ -51,7 +53,7 @@ build() { # <fixture> <on|off> -> $TMP/<fixture>.<mode>{,.ll}; returns 1 on fail
     SPROUT_OPT_OFF=spec limited "$COMPILE_LIMIT" "$STAGE1" --emit-ir stdlib "$FIX/$fx.spr" \
       > "$ll" 2> "$TMP/$fx.$mode.err"
   else
-    SPROUT_OPT_ON=spec limited "$COMPILE_LIMIT" "$STAGE1" --emit-ir stdlib "$FIX/$fx.spr" \
+    SPROUT_OPT_ON=spec SPROUT_TRACE_SPEC=1 limited "$COMPILE_LIMIT" "$STAGE1" --emit-ir stdlib "$FIX/$fx.spr" \
       > "$ll" 2> "$TMP/$fx.$mode.err"
   fi
   ec=$?
@@ -82,6 +84,11 @@ check_ir() {
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue ;; stress) continue ;; esac
     read -r mode verb rest <<< "$line"
+    if [ "$mode $verb" = "on trace" ]; then
+      if grep -qF -- "${rest#has }" "$TMP/$fx.on.err"; then echo "  ok: $fx: on trace $rest"
+      else echo "  FAIL: $fx: on trace missing: $rest"; fail=1; fi
+      continue
+    fi
     case "$mode" in on|off) ll="$TMP/$fx.$mode.ll" ;; *) echo "  FAIL: $fx: bad directive: $line"; fail=1; continue ;; esac
     case "$verb" in
       has)

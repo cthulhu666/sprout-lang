@@ -120,10 +120,16 @@ Bisect a miscompile against the Sprout-level passes without rebuilding the compi
   ("no such pass") and a name that is declared but not yet implemented — `cse`
   and `licm` today ("not implemented yet … nothing was disabled"). Neither can
   silently "fix" the bug you are chasing.
-- `SPROUT_OPT_ON=spec` — comma list of **default-off** passes to enable (`spec` is the only one;
-  it is not implemented yet and warns so). `SPROUT_OPT_OFF` wins when both name a pass; an
-  unknown name warns, naming the variable. `just refresh-seed` and
-  `just verify-bootstrap-fixed-point` refuse to run while either variable is set.
+- `SPROUT_OPT_ON=spec` — comma list of **default-off** passes to enable (`spec` is the only one:
+  specialisation of constrained functions at concrete instances,
+  [specialisation-v0.md](specialisation-v0.md)). `SPROUT_OPT_OFF` wins when both name a pass; an
+  unknown name warns, naming the variable. A dispatch-verify finding inside a copy names the
+  generic function, the call that made the copy and the function holding that call.
+  `just refresh-seed` and `just verify-bootstrap-fixed-point` refuse to run while either variable is set.
+- `SPROUT_TRACE_SPEC=1` — with `spec` on, one stderr line per copy made
+  (`[spec] copy main.bigger$spec_Int of main.bigger for the call at 12:5`) and per key declined
+  (`[spec] declined main.nest at 3:9: evidence grows on its path`), with the reason: the growth
+  check, a copy-name clash, or a copy that would keep a dictionary no slot fills.
 - `SPROUT_OPT_OFF=bce` — bounds-check elimination (`stdlib/compiler/bce.sprout`). It runs in
   `ir_pipeline`, below the seam, and the switch reaches it. `SPROUT_TRACE_BCE=1` prints one
   `[bce] versioned <fn>` or `[bce] kept <fn>: <reason>` line per loop it looked at, on stderr.
