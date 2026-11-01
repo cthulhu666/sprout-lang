@@ -832,9 +832,19 @@ root floor off bucket 14 instead of 30, and needs > 15 cycles instead of > 31.
 Every survivor is promoted, so after a minor collection no young object exists and no
 old→young edge can remain. That is why the set can be emptied, not aged.
 
-**Major collection.** A pre-pass clears the colour and `REMEMBERED` bits on every slot and
-empties the set; then mark and sweep exactly as a minor. The pre-pass is one more slot
-walk, paid only on majors.
+**Major collection.** Marks the whole heap, which needs every colour bit clear. The sweep
+before it clears them (below), so a threshold major starts with no old object and runs no
+separate walk. Only a major that follows a colour-keeping sweep (`atexit`) runs a pre-pass:
+one slot walk that clears the colour and `REMEMBERED` bits and empties the set.
+
+**Deciding the next kind early.** Each collection decides the kind of the NEXT one before its
+own sweep. When the next is a major, the sweep clears colour (`sprout_gc_sweep(0)`, which
+already touches every slot) and `colorless` is set. Until then nothing is old, so the
+barrier's fast path never remembers anything. The decision needs the post-sweep heap count,
+which is known exactly beforehand: a minor frees no old object and every survivor ends up
+coloured, so the count is `last_live` plus the young objects marked this cycle (after a major,
+just the marked ones). `SPROUT_GC_GENCHECK=1` aborts when the predicted count differs from
+`g_managed_heap_count` after the sweep.
 
 **Trigger.** Minors fire through today's `sprout_gc_maybe_collect_threshold`, but the
 threshold does not stay today's. `sprout_gc_collect_with_reason` re-bases it on
@@ -843,8 +853,8 @@ every old object that has died since the last major. So minors run fewer, larger
 a default-settings A/B cannot isolate per-collection cost (§14.8 says how it is measured).
 
 A major runs:
-- on the first collection (the baseline starts at 0);
-- when live after a collection exceeds 2 × live after the last major (CRuby's
+- on the first collection (`colorless` starts set);
+- when live after the previous collection exceeds 2 × live after the last major (CRuby's
   `GC_HEAP_OLDOBJECT_LIMIT_FACTOR`);
 - when `SPROUT_GC_MAJOR_EVERY` minors have run since the last major (Boehm's
   `GC_full_freq`; 19. In step 4 it never bound: at 19, 50 and 1000 the 2× rule chose every
@@ -861,14 +871,16 @@ gains a trailing `kind=minor|major`, printed only with the mode on, so its outpu
 with it off. With it on, `marked` counts what that collection marked: a minor's figure leaves
 out every old object. The "live after the previous collection" in the second rule is the heap
 count after the sweep, which after a minor still holds the old objects that died since the last
-major.
+major. The decision is taken before that sweep, from the predicted count, which equals the
+post-sweep count (`sprout_gc_gen_next_major`).
 
 Observed in one self-compile (`compile_driver.sprout`, default settings, one run each): 91
 collections without the mode, 68 with it (55 minor, 13 major), GC time 1585 ms against 917 ms,
 output byte-identical. Most of the 13 majors come from the 2× rule firing while the heap grows
-early in the run, not from the count bound. Step 4 found the rule needs a floor: with a live set
-of tens of objects the heap doubles over the baseline within a few collections, and a third of
-nqueens' and http_log_middleware's collections are majors.
+early in the run, not from the count bound. Step 4 found majors costly on small heaps: with a
+live set of tens of objects the heap doubles over the baseline within a few collections, a third
+of nqueens' and http_log_middleware's collections are majors, and each paid the clear walk. The
+fused clear removes that walk.
 
 The count bound is not optional. The 2× rule alone never fires when the live set shrinks:
 1M live at the last major, 10k really live after a phase change, and the count stays above
@@ -1026,4 +1038,7 @@ barrier never sees an old object. Nothing goes red between steps.
    `SPROUT_GC_THRESHOLD` compares a heap count that after a minor still holds dead old objects; it
    is read per collection (p50, p90) instead.
 
-5. **A floor under the 2× rule, then re-measure** with `bench/gc_minor/ab.sh`. Not designed.
+5. **The sweep before a major clears the colour bits**, so a major costs what a mode-off
+   collection does; then re-measure with `bench/gc_minor/ab.sh`. A hand-applied prototype
+   gave GC ms (mode off / stage 1 / fused): nqueens 540 / 657 / 477, http_log 1571 / 1902 /
+   1634, self-compile 1596 / 926 / 886 (machine load ~12, direction only).

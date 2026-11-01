@@ -848,10 +848,11 @@ typedef struct {
   long long major_every;         /* SPROUT_GC_MAJOR_EVERY: minors between majors */
   long long baseline;            /* heap count after the last major */
   long long last_live;           /* heap count after the previous collection */
+  int       colorless;           /* no object is old: the last sweep cleared every color bit */
   long long minors_since_major;
   long long n_minor, n_major;    /* collections run, by kind */
 } SproutGenState;
-static SproutGenState g_gen = { .major_every = 19 };
+static SproutGenState g_gen = { .major_every = 19, .colorless = 1 };
 
 /* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
  * the program runs, not inside the atexit collection.  SPROUT_GC_GENCHECK and
@@ -2461,8 +2462,9 @@ static inline void sprout_gc_mark_roots(SproutRootVisit visit) {
 
 /* ── Minor collections (SPROUT_GC_MINOR=1, docs/gc-generational-v0.md §14.4) ─────
  *
- * Between collections the color bit means OLD.  gc_mark_enqueue stops at a set color bit,
- * so a minor marks only young objects.  An old object that was written to since the last
+ * Between collections the color bit means OLD, except when `colorless` is set (the sweep
+ * cleared it because the next collection is a major).  gc_mark_enqueue stops at a set color
+ * bit, so a minor marks only young objects.  An old object that was written to since the last
  * collection is in the remembered set: its children are traced regardless of its color. */
 
 /* Minor: trace the children of every remembered object, then empty the set.  Pushing the
@@ -2478,8 +2480,9 @@ static void sprout_gc_mark_remembered(void) {
   g_gen.remembered.len = 0;
 }
 
-/* Major: clear color and REMEMBERED on every slot, so the mark that follows re-marks the
- * whole live heap.  Same slot walk as the sweep; FREE and POISON slots carry neither bit. */
+/* Major after a color-keeping sweep (atexit): clear color and REMEMBERED on every slot, so
+ * the mark that follows re-marks the whole live heap.  Same slot walk as the sweep; FREE and
+ * POISON slots carry neither bit.  Skipped when `colorless`. */
 static inline size_t sprout_slot_step(uint64_t h);
 static void sprout_gc_clear_marks(void) {
   g_gen.remembered.len = 0;
@@ -2506,16 +2509,26 @@ static void sprout_gc_clear_marks(void) {
   }
 }
 
-/* Which collection to run.  Major on the first collection, on any reason but the
- * allocation trigger (atexit), when the heap has more than doubled since the last major,
- * and every SPROUT_GC_MAJOR_EVERY minors.  The doubling rule alone never fires when the
- * live set shrinks, which is what the count bound is for. */
+/* Which collection to run.  Major on any reason but the allocation trigger (atexit), and
+ * whenever no object is old (`colorless`: the first collection, or the previous sweep cleared
+ * the colors because this one was predicted to be a major).  The size and count rules live in
+ * sprout_gc_gen_next_major, which decides this collection's kind one sweep early. */
 static int sprout_gc_gen_choose_minor(const char* reason) {
-  if (strcmp(reason, "threshold") != 0) return 0;
-  if (g_gen.n_major == 0) return 0;
-  if (g_gen.last_live > 2 * g_gen.baseline) return 0;
-  if (g_gen.minors_since_major >= g_gen.major_every) return 0;
-  return 1;
+  return strcmp(reason, "threshold") == 0 && !g_gen.colorless;
+}
+
+/* Called after the mark, before the sweep: is the NEXT collection a major?  Major when the
+ * heap has more than doubled since the last major, and every SPROUT_GC_MAJOR_EVERY minors
+ * (the doubling rule alone never fires when the live set shrinks).  The post-sweep heap count
+ * is known exactly: a minor frees no old object and a sweep colors every survivor, so it is
+ * the old objects (`last_live`) plus the young ones just marked; a major keeps only the marked.
+ * `*predicted` returns that count. */
+static int sprout_gc_gen_next_major(int minor, long long* predicted) {
+  long long live = minor ? g_gen.last_live + g_gc_marked_count : g_gc_marked_count;
+  long long baseline = minor ? g_gen.baseline : live;
+  long long minors = minor ? g_gen.minors_since_major + 1 : 0;
+  *predicted = live;
+  return live > 2 * baseline || minors >= g_gen.major_every;
 }
 
 /* ── SPROUT_GC_GENCHECK=1 — does a minor collection free anything reachable? ───
@@ -3244,20 +3257,32 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
   /* SPROUT_GC_MINOR=1: a minor marks only young objects (plus what the remembered set
-     reaches); a major clears every color bit first and marks everything.  Mode off:
-     neither step runs, and the sweep clears the color bit as it always did. */
+     reaches); a major marks everything.  The kind of the NEXT collection is known before
+     the sweep, so when it is a major the sweep clears the color bits itself and that major
+     needs no clear walk.  Only a major after a color-keeping sweep (atexit) clears first.
+     Mode off: none of this runs, and the sweep clears the color bit as it always did. */
   int gen_on = g_gen.on;
   int minor = gen_on && sprout_gc_gen_choose_minor(reason);
-  if (gen_on && !minor) sprout_gc_clear_marks();
+  if (gen_on && !minor && !g_gen.colorless) sprout_gc_clear_marks();
   sprout_gc_mark_roots(sprout_gc_mark_ptr);
   if (minor) sprout_gc_mark_remembered();
   sprout_gc_drain_marks();
   if (minor && g_gen.check) sprout_gc_gen_verify();
-  sprout_gc_sweep(gen_on);
+  long long predicted_live = 0;
+  int next_major = 0;
+  if (gen_on) next_major = sprout_gc_gen_next_major(minor, &predicted_live);
+  sprout_gc_sweep(gen_on && !next_major);
   if (gen_on) {
+    if (g_gen.check && predicted_live != g_managed_heap_count) {
+      fprintf(stderr, "[sprout] GENCHECK: predicted %lld live objects after the sweep, found %lld\n",
+              predicted_live, g_managed_heap_count);
+      fflush(stderr);
+      abort();
+    }
     if (minor) { g_gen.minors_since_major++; g_gen.n_minor++; }
     else { g_gen.baseline = g_managed_heap_count; g_gen.minors_since_major = 0; g_gen.n_major++; }
     g_gen.last_live = g_managed_heap_count;
+    g_gen.colorless = next_major;
   }
   long long finished_us = sprout_now_micros();
   long long elapsed_us = 0;

@@ -20,6 +20,11 @@
  *   bad_every_late  — the same, where the program's only collection is the atexit one: the abort
  *                     must come before the program prints anything.
  *   major_every     — SPROUT_GC_MAJOR_EVERY=3: a major follows every three minors.
+ *   clear_before_major — SPROUT_GC_MAJOR_EVERY=1: the minor's sweep clears every colour bit
+ *                     because the next collection is a major; the barrier then remembers nothing,
+ *                     and the major re-marks everything.
+ *   doubling        — the same when the next collection is a major because the heap more than
+ *                     doubled over the baseline.
  *
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
 #include <stdio.h>
@@ -96,6 +101,53 @@ static int major_every(void) {
   return g_failed;
 }
 
+/* MAJOR_EVERY=1: the first minor is followed by a major, so its sweep clears the colour bits. */
+static int clear_before_major(void) {
+  long long r = make_old_ref();
+  long long y = ref_new(7);
+  ref_write(r, y);
+  collect();
+  check(g_gen.n_minor == 1 && g_gen.n_major == 1, "the second collection is a minor");
+  check(!is_old(r) && !is_old(y), "the sweep before a major clears every colour bit");
+  check(g_gen.remembered.len == 0 && !is_remembered(r), "no object is remembered");
+  check(ref_read(r) == y && ref_read(y) == 7, "both Refs still read back");
+  long long z = ref_new(8);
+  ref_write(r, z);
+  check(!is_remembered(r) && g_gen.remembered.len == 0, "a store into a colourless object is not remembered");
+  collect();
+  check(g_gen.n_major == 2 && g_gen.n_minor == 1, "the third collection is a major");
+  check(ref_read(r) == z && ref_read(z) == 8, "the stored Ref survived the major");
+  check(sprout_heap_lookup((void*)(uintptr_t)y) == NULL, "the overwritten Ref was freed");
+  check(is_old(r) && is_old(z), "survivors of a major are old again");
+  return g_failed;
+}
+
+/* A minor whose survivors more than double the baseline is followed by a major. */
+static int doubling(void) {
+  long long r = make_old_ref();
+  long long n = 2 * g_gen.baseline + 2;
+  long long head = ref_new(0);
+  long long tail = head;
+  for (long long i = 1; i < n; i++) {
+    long long next = ref_new(i);
+    ref_write(tail, next);
+    tail = next;
+  }
+  ref_write(r, head);
+  collect();
+  check(g_gen.n_minor == 1 && g_gen.n_major == 1, "the second collection is a minor");
+  check(!is_old(r) && !is_old(head) && !is_old(tail), "the sweep before a major clears every colour bit");
+  check(g_gen.remembered.len == 0, "no object is remembered");
+  collect();
+  check(g_gen.n_major == 2 && g_gen.n_minor == 1, "the third collection is a major");
+  long long cur = ref_read(r);
+  long long len = 0;
+  while (cur != 0 && sprout_heap_lookup((void*)(uintptr_t)cur) != NULL) { len++; cur = ref_read(cur); }
+  check(len == n, "the whole chain is readable after the major");
+  check(is_old(r) && is_old(head) && is_old(tail), "survivors of a major are old again");
+  return g_failed;
+}
+
 static int bad_every_off(void) {
   ref_new(0);
   collect();
@@ -136,6 +188,8 @@ static const GenCase k_cases[] = {
   { "barrier",         barrier,         "1", 1, NULL },
   { "minor_keeps_old", minor_keeps_old, "1", 1, NULL },
   { "major_every",     major_every,     "1", 1, "3" },
+  { "clear_before_major", clear_before_major, "1", 1, "1" },
+  { "doubling",        doubling,        "1", 1, NULL },
   { "no_check",        no_check,        "1", 0, NULL },
   { "bad_every_off",   bad_every_off,   "0", 1, "abc" },
   { "bad_every_on",    bad_every_on,    "1", 1, "abc" },
