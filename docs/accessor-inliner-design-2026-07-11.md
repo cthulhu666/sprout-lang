@@ -1,6 +1,7 @@
 # Accessor-inliner design (proposal, needs approval)
 
-Status: proposal / design-for-approval (do not implement before sign-off)
+Status: proposal / design-for-approval (do not implement before sign-off). The store half is
+replaced by [scalar-store-inline-v0.md](scalar-store-inline-v0.md).
 Date: 2026-07-11
 Scope: `stdlib/compiler/` (a new typed-AST → typed-AST pass), an optional `@inline` marker.
 Prerequisite for the broad reach of Phase D B1
