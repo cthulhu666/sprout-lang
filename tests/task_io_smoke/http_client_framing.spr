@@ -60,7 +60,7 @@ fn err_text(e: HttpError) -> String =
   | HttpDecode m -> `decode ${m}`
 
 fn probe(port: Int, path: String) -> Unit !{IO} =
-  match http_get(`http://127.0.0.1:${int_to_string(port)}/${path}`, "", 3000) with
+  match http_get(`http://127.0.0.1:${int_to_string(port)}/${path}`, [], 3000) with
   | Ok resp ->
       match resp with
       | HttpResponse code headers body ->

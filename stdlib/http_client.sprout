@@ -1,18 +1,82 @@
 module stdlib.http_client
-import stdlib.http (HttpError, HttpResponse)
+import stdlib.http (HttpError, HttpResponse, HttpDecode, is_token)
+import stdlib.bytes as bytes
+import stdlib.string as string
 
 extern fn http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO}
 
 type alias HttpResult = Result HttpError HttpResponse
 
-# Cost is dominated by `http_request`: request/response size and network latency.
-export fn http_get(url: String, headers: String, timeout_ms: Int) -> HttpResult !{IO} =
-  http_request("GET", url, headers, "", timeout_ms)
+# Inputs are checked here, before the extern, and a failure is `Err(HttpDecode ...)`. The extern takes
+# the headers as "Name: Value\n" lines, built from the checked pairs; its own line checks are guards.
+
+# RFC 9112 §3.2: a request-target holds no SP, no control byte and no DEL.
+fn url_byte(byte: Int) -> Bool =
+  byte > 32 && byte != 127
+
+fn check_url(url: String) -> Result HttpError Unit =
+  guard(bytes.all_bytes(url_byte, bytes.from_string(url)), HttpDecode("url contains a space or control byte"))
+
+# RFC 9110 §5.5: a field value holds no control byte but HTAB, and no DEL.
+fn value_byte(byte: Int) -> Bool =
+  (byte >= 32 || byte == 9) && byte != 127
+
+# RFC 9110 §5.6.3 optional whitespace: SP and HTAB.
+fn ows_byte(byte: Int) -> Bool =
+  byte == 32 || byte == 9
+
+fn end_after_ows(encoded: Bytes, end: Int) -> Int =
+  if end > 0 && ows_byte(bytes.get_or(encoded, end - 1, 0)) then end_after_ows(encoded, end - 1) else end
+
+# Cuts fall at ASCII bytes, so the slice decodes; the `else` is a total fallback, not an observed path.
+fn trim_ows(raw: String) -> String =
+  let encoded = bytes.from_string(raw)
+      Just start = bytes.find_byte_from(\byte -> !ows_byte(byte), encoded, 0) else ""
+      Ok text = bytes.to_string(bytes.slice_between(encoded, start, end_after_ows(encoded, bytes.length(encoded)))) else ""
+  in text
+
+fn check_value(name: String, value: String) -> Result HttpError String =
+  do
+    _ <- guard(bytes.all_bytes(value_byte, bytes.from_string(trimmed)), HttpDecode(`invalid header value: ${name}`))
+    Ok(trimmed)
+where
+  trimmed = trim_ows(value)
+
+# The client writes these itself, so a caller cannot set them.
+fn reserved_name(lowered: String) -> Bool =
+  lowered == "host" || lowered == "content-length" || lowered == "transfer-encoding" || lowered == "connection"
+
+fn check_header(header: (String, String)) -> Result HttpError (String, String) =
+  let (name, value) = header
+      lowered = string.to_lower_ascii(name)
+  in do
+    _ <- guard(is_token(name), HttpDecode(`invalid header name: ${name}`))
+    _ <- guard(!reserved_name(lowered), HttpDecode(`reserved header: ${lowered}`))
+    checked <- check_value(name, value)
+    Ok((name, checked))
+
+fn header_line(header: (String, String)) -> String =
+  let (name, value) = header
+  in `${name}: ${value}\n`
+
+fn check_headers(headers: Vec (String, String)) -> Result HttpError String =
+  do
+    checked <- traverse(check_header, headers)
+    Ok(string.join("", vec_map(header_line, checked)))
+
+fn send(method: String, url: String, headers: Vec (String, String), body: String, timeout_ms: Int) -> HttpResult !{IO} =
+  let _ = try check_url(url)
+      block = try check_headers(headers)
+  in http_request(method, url, block, body, timeout_ms)
 
 # Cost is dominated by `http_request`: request/response size and network latency.
-export fn http_post(url: String, headers: String, body: String, timeout_ms: Int) -> HttpResult !{IO} =
-  http_request("POST", url, headers, body, timeout_ms)
+export fn http_get(url: String, headers: Vec (String, String), timeout_ms: Int) -> HttpResult !{IO} =
+  send("GET", url, headers, "", timeout_ms)
 
 # Cost is dominated by `http_request`: request/response size and network latency.
-export fn http_put(url: String, headers: String, body: String, timeout_ms: Int) -> HttpResult !{IO} =
-  http_request("PUT", url, headers, body, timeout_ms)
+export fn http_post(url: String, headers: Vec (String, String), body: String, timeout_ms: Int) -> HttpResult !{IO} =
+  send("POST", url, headers, body, timeout_ms)
+
+# Cost is dominated by `http_request`: request/response size and network latency.
+export fn http_put(url: String, headers: Vec (String, String), body: String, timeout_ms: Int) -> HttpResult !{IO} =
+  send("PUT", url, headers, body, timeout_ms)

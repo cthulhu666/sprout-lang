@@ -22,8 +22,8 @@ export type IssueLinks (..) =
 export type IssueDetail (..) =
   | IssueDetail IssueIdentity IssueStatusInfo IssueLinks
 
-export fn sentry_auth_header(token: String) -> String =
-  strlib.concat("Authorization: Bearer ", token)
+export fn sentry_auth_header(token: String) -> (String, String) =
+  ("Authorization", strlib.concat("Bearer ", token))
 
 fn concat3(a: String, b: String, c: String) -> String =
   strlib.concat(a, strlib.concat(b, c))
@@ -190,7 +190,7 @@ export fn sentry_http_error_message(err: HttpError) -> String =
   | HttpDecode message -> strlib.concat("decode error: ", message)
 
 export fn sentry_list_issues_json(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
-  match http_get(sentry_issues_url(org, project), sentry_auth_header(token), timeout_ms) with
+  match http_get(sentry_issues_url(org, project), [sentry_auth_header(token)], timeout_ms) with
   | Ok resp -> parse_json_response(resp)
   | Err err -> Err(err)
 
@@ -200,7 +200,7 @@ export fn sentry_list_issues(org: String, project: String, token: String, timeou
   | Err err -> Err(err)
 
 export fn sentry_issue_detail_json(issue_id: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
-  match http_get(sentry_issue_detail_url(issue_id), sentry_auth_header(token), timeout_ms) with
+  match http_get(sentry_issue_detail_url(issue_id), [sentry_auth_header(token)], timeout_ms) with
   | Ok resp -> parse_json_response(resp)
   | Err err -> Err(err)
 

@@ -133,6 +133,8 @@ typedef struct {
   char* port;
   char* path;
   int use_tls;
+  /* The URL spelled a port; `Host` repeats the authority exactly (RFC 9112 §3.2). */
+  int explicit_port;
 } HttpUrl;
 
 static InternBucket* g_intern_table[65537];
@@ -7486,6 +7488,7 @@ static int parse_http_url(const char* url, HttpUrl* out, char** err) {
     }
     out->host = dup_slice(rest, (size_t)(colon - rest));
     out->port = dup_slice(colon + 1, (size_t)(host_end - colon - 1));
+    out->explicit_port = 1;
   } else {
     out->host = dup_slice(rest, (size_t)(host_end - rest));
     out->port = dup_cstr(out->use_tls ? "443" : "80");
@@ -8619,6 +8622,10 @@ long long http_request(const char* method, const char* url, const char* headers_
   buf_append_cstr(&request, parsed.path);
   buf_append_cstr(&request, " HTTP/1.1\r\nHost: ");
   buf_append_cstr(&request, parsed.host);
+  if (parsed.explicit_port) {
+    buf_append_cstr(&request, ":");
+    buf_append_cstr(&request, parsed.port);
+  }
   buf_append_cstr(&request, "\r\nConnection: close\r\n");
   buf_append_bytes(&request, header_block.data == NULL ? "" : header_block.data, header_block.len);
   char content_len[64];

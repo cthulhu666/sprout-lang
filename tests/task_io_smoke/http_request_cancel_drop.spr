@@ -44,7 +44,7 @@ fn attempt() -> Bool !{IO} =
   | Completed _ -> false
 
 fn request_once() -> Bool !{IO} =
-  match http_get(url(), "", 60000) with
+  match http_get(url(), [], 60000) with
   | Ok _ -> true
   | Err _ -> true
 
