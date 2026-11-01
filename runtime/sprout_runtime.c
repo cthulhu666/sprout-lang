@@ -3399,8 +3399,9 @@ static __attribute__((noinline, cold)) long long find_ctor_tag_by_name(const cha
   X(stdlib$fs$FsIoError) X(stdlib$fs$FsIsADirectory) X(stdlib$fs$FsNotADirectory) \
   X(stdlib$fs$FsNotFound) X(stdlib$fs$FsPermissionDenied) X(stdlib$fs$OtherEntry) \
   X(stdlib$fs$SymlinkEntry) \
-  X(stdlib$http$HttpBadStatus) X(stdlib$http$HttpDecode) X(stdlib$http$HttpNetwork) \
-  X(stdlib$http$HttpResponse) X(stdlib$http$HttpTimeout) \
+  X(stdlib$http$HttpBadStatus) X(stdlib$http$HttpDecode) X(stdlib$http$HttpIncomplete) \
+  X(stdlib$http$HttpNetwork) X(stdlib$http$HttpResponse) X(stdlib$http$HttpTimeout) \
+  X(stdlib$http$HttpTooLarge) \
   X(stdlib$net$TcpAcceptFailed) X(stdlib$net$TcpConnectFailed) X(stdlib$net$TcpEndOfStream) \
   X(stdlib$net$TcpInvalidArgument) X(stdlib$net$TcpInvalidHandle) \
   X(stdlib$net$TcpListenFailed) X(stdlib$net$TcpReadFailed) X(stdlib$net$TcpTimeout) \
@@ -7547,9 +7548,12 @@ static int ascii_contains_token_ci(const char* text, const char* token) {
   return 0;
 }
 
-static char* http_header_value_ci(const char* headers, const char* key) {
+/* The `nth` (from 0) header line named `key`, case-insensitively, or NULL. A repeated header is
+ * several lines, which a Content-Length check needs to see all of. */
+static char* http_header_value_nth_ci(const char* headers, const char* key, size_t nth) {
   if (headers == NULL || key == NULL) return NULL;
   size_t key_len = strlen(key);
+  size_t seen = 0;
   const char* line = headers;
   while (*line != '\0') {
     const char* end = line;
@@ -7574,7 +7578,8 @@ static char* http_header_value_ci(const char* headers, const char* key) {
           while (value_start < end && (*value_start == ' ' || *value_start == '\t')) value_start++;
           const char* value_end = end;
           while (value_end > value_start && (value_end[-1] == ' ' || value_end[-1] == '\t')) value_end--;
-          return dup_slice(value_start, (size_t)(value_end - value_start));
+          if (seen == nth) return dup_slice(value_start, (size_t)(value_end - value_start));
+          seen++;
         }
       }
     }
@@ -7582,6 +7587,10 @@ static char* http_header_value_ci(const char* headers, const char* key) {
     line = end;
   }
   return NULL;
+}
+
+static char* http_header_value_ci(const char* headers, const char* key) {
+  return http_header_value_nth_ci(headers, key, 0);
 }
 
 static int hex_digit_value(char ch) {
@@ -7600,20 +7609,33 @@ static int hex_digit_value(char ch) {
  *
  * Every scan is now bounded by `end` instead of by a NUL, and the decoded length is returned through
  * `out_len` rather than being recoverable with strlen. `body_len` is exact: it descends from the
- * ByteBuf that accumulated the recv, which has always tracked a true length. */
-static char* http_decode_chunked_body(const char* body, size_t body_len, size_t* out_len, char** err) {
+ * ByteBuf that accumulated the recv, which has always tracked a true length.
+ *
+ * Failures: `*err` is a static message. Input that ends where more was required (before the
+ * last chunk, mid size line, mid chunk data or its terminator) sets `*incomplete`, which the caller
+ * reports as HttpIncomplete; malformed syntax and a size that overflows size_t leave it clear, for
+ * HttpDecode. */
+static char* http_decode_chunked_body(const char* body, size_t body_len, size_t* out_len,
+                                      const char** err, int* incomplete) {
+  static const char* const ended = "chunked body ended before the last chunk";
   ByteBuf out;
   buf_init(&out);
   const char* cursor = body;
   const char* end = body + body_len;
   while (1) {
     while (cursor < end && (*cursor == '\r' || *cursor == '\n')) cursor++;
+    if (cursor == end) {
+      free(out.data);
+      *err = ended;
+      *incomplete = 1;
+      return NULL;
+    }
     const char* size_start = cursor;
     while (cursor < end && *cursor != '\r' && *cursor != '\n' && *cursor != ';') cursor++;
     const char* size_end = cursor;
     if (size_start == size_end) {
       free(out.data);
-      *err = dup_cstr("invalid chunk size");
+      *err = "invalid chunk size";
       return NULL;
     }
     size_t chunk_size = 0;
@@ -7621,13 +7643,24 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
       int digit = hex_digit_value(*p);
       if (digit < 0) {
         free(out.data);
-        *err = dup_cstr("invalid chunk size");
+        *err = "invalid chunk size";
         return NULL;
       }
-      chunk_size = (chunk_size * 16u) + (size_t)digit;
+      if (chunk_size > (SIZE_MAX >> 4)) {
+        free(out.data);
+        *err = "chunk size too large";
+        return NULL;
+      }
+      chunk_size = (chunk_size << 4) | (size_t)digit;
     }
     while (cursor < end && *cursor != '\n') cursor++;
-    if (cursor < end && *cursor == '\n') cursor++;
+    if (cursor == end) {
+      free(out.data);
+      *err = ended;
+      *incomplete = 1;
+      return NULL;
+    }
+    cursor++;
     if (chunk_size == 0) {
       while (cursor < end && (*cursor == '\r' || *cursor == '\n')) cursor++;
       break;
@@ -7636,7 +7669,8 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
      * reject a valid body whose chunk data contained a NUL. */
     if ((size_t)(end - cursor) < chunk_size) {
       free(out.data);
-      *err = dup_cstr("truncated chunk data");
+      *err = ended;
+      *incomplete = 1;
       return NULL;
     }
     buf_append_bytes(&out, cursor, chunk_size);
@@ -7645,9 +7679,14 @@ static char* http_decode_chunked_body(const char* body, size_t body_len, size_t*
       cursor += 2;
     } else if (end - cursor >= 1 && cursor[0] == '\n') {
       cursor += 1;
+    } else if (end - cursor == 0 || (end - cursor == 1 && cursor[0] == '\r')) {
+      free(out.data);
+      *err = ended;
+      *incomplete = 1;
+      return NULL;
     } else {
       free(out.data);
-      *err = dup_cstr("invalid chunk terminator");
+      *err = "invalid chunk terminator";
       return NULL;
     }
   }
@@ -7700,116 +7739,279 @@ static char* http_headers_to_utf8(const char* src, size_t len) {
   return out;
 }
 
-/* `response_len` is the exact byte count the recv loop accumulated, and taking it is the whole of the
+/* ── Response reading: head scan, limits and body framing ─────────────────────────────────────
+ *
+ * HttpReader is fed the response buffer after every append (`http_reader_step`) and once at EOF
+ * (`http_reader_eof`). The two read loops (plain TCP, TLS) share it, so each limit and framing rule
+ * lives here once. It holds scalars and offsets only, no pointers into the buffer, which realloc
+ * moves, and nothing it owns needs freeing, so a cancel while parked has nothing to release beyond
+ * the HttpInFlight buffers. A rule that fails sets `fail` and stops the read; the caller closes
+ * everything and turns `fail` into an Err with `http_reader_failure`.
+ *
+ * The head is found as bytes arrive: lines are scanned once, resuming at `scan`. That lets
+ * `max_header_bytes` stop a head that never ends, and lets a Content-Length past `max_body_bytes`
+ * fail before any of the body is read. Once the blank line is in, the status line and framing
+ * headers are parsed once (`http_reader_parse_head`).
+ *
+ * Body framing, RFC 9112 §6.3 in order: no body for a HEAD response and for 204 and 304; chunked
+ * (Transfer-Encoding) wins over Content-Length; else Content-Length, all values equal; else the body
+ * runs to EOF. `max_body_bytes` counts raw bytes after the head, so chunk framing counts. */
+typedef enum {
+  HTTP_FRAME_NONE,
+  HTTP_FRAME_LENGTH,
+  HTTP_FRAME_CHUNKED,
+  HTTP_FRAME_CLOSE
+} HttpFraming;
+
+typedef enum {
+  HTTP_FAIL_NONE,
+  HTTP_FAIL_NO_RESPONSE,
+  HTTP_FAIL_DECODE,
+  HTTP_FAIL_INCOMPLETE,
+  HTTP_FAIL_HEADER_LIMIT,
+  HTTP_FAIL_BODY_LIMIT
+} HttpFail;
+
+typedef struct {
+  size_t max_header_bytes;
+  size_t max_body_bytes;
+  int head_only;             /* the request was HEAD */
+  size_t scan;               /* start of the first line not yet scanned */
+  size_t lines;              /* lines scanned; line 0 is the status line */
+  int head_done;
+  long long status;
+  size_t headers_start, headers_len, body_start;
+  HttpFraming framing;
+  size_t content_length;     /* when framing == HTTP_FRAME_LENGTH */
+  HttpFail fail;
+  const char* fail_msg;      /* static text for DECODE and INCOMPLETE */
+} HttpReader;
+
+static void http_reader_init(HttpReader* r, long long max_header_bytes, long long max_body_bytes, int head_only) {
+  memset(r, 0, sizeof(*r));
+  r->max_header_bytes = (size_t)max_header_bytes;
+  r->max_body_bytes = (size_t)max_body_bytes;
+  r->head_only = head_only;
+}
+
+/* Always returns 1 ("stop reading"), so a rule can `return http_reader_fail(...)`. */
+static int http_reader_fail(HttpReader* r, HttpFail kind, const char* msg) {
+  r->fail = kind;
+  r->fail_msg = msg;
+  return 1;
+}
+
+/* The Content-Length value: 0 = no such header, 1 = valid (`*out` set), -1 = invalid. Every value,
+ * across repeated headers and comma lists, is digits only, fits size_t, and equals the others
+ * (RFC 9112 §6.3 item 5). */
+static int http_content_length(const char* headers, size_t* out) {
+  int found = 0;
+  size_t value = 0;
+  for (size_t nth = 0;; nth++) {
+    char* raw = http_header_value_nth_ci(headers, "Content-Length", nth);
+    if (raw == NULL) break;
+    const char* p = raw;
+    while (1) {
+      while (*p == ' ' || *p == '\t') p++;
+      const char* digits = p;
+      size_t item = 0;
+      while (*p >= '0' && *p <= '9') {
+        size_t digit = (size_t)(*p - '0');
+        if (item > (SIZE_MAX - digit) / 10) {
+          free(raw);
+          return -1;
+        }
+        item = item * 10 + digit;
+        p++;
+      }
+      int ok = p != digits;
+      while (*p == ' ' || *p == '\t') p++;
+      if (!ok || (*p != ',' && *p != '\0') || (found && item != value)) {
+        free(raw);
+        return -1;
+      }
+      found = 1;
+      value = item;
+      if (*p == '\0') break;
+      p++;
+    }
+    free(raw);
+  }
+  if (found) *out = value;
+  return found;
+}
+
+/* The blank line is at [blank_start, body_start). Returns 1 to stop reading (`fail` set). */
+static int http_reader_parse_head(HttpReader* r, const char* data, size_t blank_start) {
+  const char* line_end = (const char*)memchr(data, '\n', blank_start);
+  const char* status_end = (line_end > data && line_end[-1] == '\r') ? line_end - 1 : line_end;
+  size_t headers_start = (size_t)(line_end - data) + 1;
+  size_t headers_end = headers_start;
+  if (blank_start > headers_start) {
+    headers_end = blank_start - 1;
+    if (headers_end > headers_start && data[headers_end - 1] == '\r') headers_end--;
+  }
+  r->headers_start = headers_start;
+  r->headers_len = headers_end - headers_start;
+
+  const char* code_start = (const char*)memchr(data, ' ', (size_t)(status_end - data));
+  if (code_start == NULL) return http_reader_fail(r, HTTP_FAIL_DECODE, "invalid status line");
+  code_start++;
+  char* code_end = NULL;
+  r->status = strtoll(code_start, &code_end, 10);
+  if (code_end == code_start || code_end > status_end) {
+    return http_reader_fail(r, HTTP_FAIL_DECODE, "invalid status code");
+  }
+  /* An error status is reported as HttpBadStatus; its body is never read. */
+  if (r->status >= 400) {
+    r->framing = HTTP_FRAME_NONE;
+    return 0;
+  }
+
+  char* headers = http_headers_to_utf8(data + r->headers_start, r->headers_len);
+  char* content_encoding = http_header_value_ci(headers, "Content-Encoding");
+  char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
+  int stop = 0;
+  int chunked = 0;
+  if (content_encoding != NULL && content_encoding[0] != '\0' && !ascii_contains_token_ci(content_encoding, "identity")) {
+    stop = http_reader_fail(r, HTTP_FAIL_DECODE, "unsupported content encoding");
+  } else if (transfer_encoding != NULL && ascii_contains_token_ci(transfer_encoding, "chunked")) {
+    chunked = 1;
+  } else if (transfer_encoding != NULL && transfer_encoding[0] != '\0') {
+    stop = http_reader_fail(r, HTTP_FAIL_DECODE, "unsupported transfer encoding");
+  }
+  if (!stop) {
+    if (r->head_only || r->status == 204 || r->status == 304) {
+      r->framing = HTTP_FRAME_NONE;
+    } else if (chunked) {
+      r->framing = HTTP_FRAME_CHUNKED;
+    } else {
+      int cl = http_content_length(headers, &r->content_length);
+      if (cl < 0) stop = http_reader_fail(r, HTTP_FAIL_DECODE, "invalid Content-Length");
+      else if (cl > 0 && r->content_length > r->max_body_bytes) stop = http_reader_fail(r, HTTP_FAIL_BODY_LIMIT, NULL);
+      else r->framing = cl > 0 ? HTTP_FRAME_LENGTH : HTTP_FRAME_CLOSE;
+    }
+  }
+  free(headers);
+  free(content_encoding);
+  free(transfer_encoding);
+  return stop;
+}
+
+/* Call after every append to `data[0..len)`. Returns 1 when reading should stop: the response is
+ * complete, or a rule failed (`r->fail`). */
+static int http_reader_step(HttpReader* r, const char* data, size_t len) {
+  if (!r->head_done) {
+    /* A line is empty when its content, less a CR before the LF, is empty (RFC 9112 §2.2); line 0
+     * is the status line. A bare LF and CRLF both frame. */
+    size_t blank_start = 0;
+    int found = 0;
+    while (r->scan < len) {
+      const char* nl = (const char*)memchr(data + r->scan, '\n', len - r->scan);
+      if (nl == NULL) break;
+      size_t nl_at = (size_t)(nl - data);
+      size_t content_end = (nl_at > r->scan && data[nl_at - 1] == '\r') ? nl_at - 1 : nl_at;
+      if (r->lines > 0 && content_end == r->scan) {
+        blank_start = r->scan;
+        r->body_start = nl_at + 1;
+        found = 1;
+        break;
+      }
+      r->lines++;
+      r->scan = nl_at + 1;
+    }
+    if (!found) {
+      if (len > r->max_header_bytes) return http_reader_fail(r, HTTP_FAIL_HEADER_LIMIT, NULL);
+      return 0;
+    }
+    if (r->body_start > r->max_header_bytes) return http_reader_fail(r, HTTP_FAIL_HEADER_LIMIT, NULL);
+    if (http_reader_parse_head(r, data, blank_start)) return 1;
+    r->head_done = 1;
+  }
+  size_t got = len - r->body_start;
+  switch (r->framing) {
+    case HTTP_FRAME_NONE:
+      return 1;
+    case HTTP_FRAME_LENGTH:
+      return got >= r->content_length;
+    default:
+      if (got > r->max_body_bytes) return http_reader_fail(r, HTTP_FAIL_BODY_LIMIT, NULL);
+      return 0;
+  }
+}
+
+/* The peer closed after `len` bytes. `tls_unclean`: a TLS stream ended without a closure alert,
+ * which only matters when the body is not framed (RFC 9112 §9.8). */
+static void http_reader_eof(HttpReader* r, size_t len, int tls_unclean) {
+  if (r->fail != HTTP_FAIL_NONE) return;
+  if (!r->head_done) {
+    if (len == 0) http_reader_fail(r, HTTP_FAIL_NO_RESPONSE, NULL);
+    else http_reader_fail(r, HTTP_FAIL_DECODE, "invalid http response");
+  } else if (r->framing == HTTP_FRAME_LENGTH && len - r->body_start < r->content_length) {
+    http_reader_fail(r, HTTP_FAIL_INCOMPLETE, "body shorter than Content-Length");
+  } else if (r->framing == HTTP_FRAME_CLOSE && tls_unclean) {
+    http_reader_fail(r, HTTP_FAIL_INCOMPLETE, "tls closed without closure alert");
+  }
+}
+
+static long long http_reader_failure(const HttpReader* r) {
+  switch (r->fail) {
+    case HTTP_FAIL_HEADER_LIMIT:
+      return http_err1(SPROUT_TAG(stdlib$http$HttpTooLarge), (long long)r->max_header_bytes);
+    case HTTP_FAIL_BODY_LIMIT:
+      return http_err1(SPROUT_TAG(stdlib$http$HttpTooLarge), (long long)r->max_body_bytes);
+    case HTTP_FAIL_NO_RESPONSE:
+      return http_err_text(SPROUT_TAG(stdlib$http$HttpNetwork), "remote closed connection without response");
+    case HTTP_FAIL_INCOMPLETE:
+      return http_err_text(SPROUT_TAG(stdlib$http$HttpIncomplete), r->fail_msg);
+    default:
+      return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), r->fail_msg);
+  }
+}
+
+/* Builds the result from a response the reader accepted (`fail` clear, head parsed). Takes
+ * ownership of `response_data`.
+ *
+ * `response_len` is the exact byte count the recv loop accumulated, and taking it is the whole of the
  * fix for the truncated-body defect. The buffer was always correct — buf_append_bytes memcpy's, so a
  * 0x00 in the payload survives the read — but the length was dropped at this call boundary, leaving
  * the body to be re-measured with strlen. A response whose body began "AAAA\0BBBB..." arrived as four
- * bytes and an `Ok`.
- *
- * The status line and header block are still walked with strchr, and that is deliberate rather than
- * an oversight: those regions must be NUL-free to be valid HTTP at all, so a NUL there is a malformed
- * response and stopping early is an acceptable reading of it. Only the BODY is arbitrary bytes, and
- * only the body's extent is now derived from `response_len`.
- *
- * The head is framed by a single forward scan (see the comment at the scan), not by separate
- * searches for the status line's end and the blank line. Two independent searches could disagree about
- * where the head ends — a header-less response, or a CRLF inside a bare-LF body — and the header
- * block's length was then computed from an inverted window. */
-static long long http_response_result(char* response_data, size_t response_len) {
-  if (response_data == NULL || response_data[0] == '\0') {
+ * bytes and an `Ok`. Only the BODY is arbitrary bytes; the head is text. */
+static long long http_response_result(char* response_data, size_t response_len, const HttpReader* reader) {
+  if (reader->status >= 400) {
     free(response_data);
-    return http_err_text(
-      SPROUT_TAG(stdlib$http$HttpNetwork),
-      "remote closed connection without response"
-    );
+    return http_err1(SPROUT_TAG(stdlib$http$HttpBadStatus), reader->status);
   }
 
-  /* One forward scan over the head. The status line ends at the first LF; each header line ends at
-   * its LF; the first empty line ends the head. A CR before an LF is dropped (RFC 9112 §2.2), so CRLF
-   * and bare LF both frame, and `headers_end` can never precede `headers_start`: a response with no
-   * header lines is valid and gives an empty header block. */
-  const char* line_end = strchr(response_data, '\n');
-  if (line_end == NULL) {
-    free(response_data);
-    return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid http response");
-  }
-  const char* status_end = (line_end > response_data && line_end[-1] == '\r') ? line_end - 1 : line_end;
-  const char* headers_start = line_end + 1;
-  const char* headers_end = headers_start;
-  const char* body_start = NULL;
-  for (const char* cursor = headers_start; body_start == NULL;) {
-    const char* nl = strchr(cursor, '\n');
-    if (nl == NULL) {
-      free(response_data);
-      return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid http response");
-    }
-    const char* content_end = (nl > cursor && nl[-1] == '\r') ? nl - 1 : nl;
-    if (content_end == cursor) body_start = nl + 1;
-    else headers_end = content_end;
-    cursor = nl + 1;
-  }
-
-  const char* code_start = strchr(response_data, ' ');
-  if (code_start == NULL || code_start >= status_end) {
-    free(response_data);
-    return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid status line");
-  }
-  code_start++;
-  char* code_end = NULL;
-  long long status = strtoll(code_start, &code_end, 10);
-  if (code_end == code_start || code_end > status_end) {
-    free(response_data);
-    return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "invalid status code");
-  }
-  if (status >= 400) {
-    free(response_data);
-    return http_err1(SPROUT_TAG(stdlib$http$HttpBadStatus), status);
-  }
-
-  char* headers = http_headers_to_utf8(headers_start, (size_t)(headers_end - headers_start));
-  /* The body runs from just past the blank line to the END OF THE BUFFER — a span computed from
-   * `response_len`, never from strlen. `dup_slice` copies it byte-for-byte (memcpy), so NULs and
-   * invalid UTF-8 both survive; `body_len` is what carries the real extent from here on. */
-  size_t body_len = response_len - (size_t)(body_start - response_data);
-  char* body_out = dup_slice(body_start, body_len);
-  char* transfer_encoding = http_header_value_ci(headers, "Transfer-Encoding");
-  char* content_encoding = http_header_value_ci(headers, "Content-Encoding");
-  if (content_encoding != NULL) {
-    if (content_encoding[0] != '\0' && !ascii_contains_token_ci(content_encoding, "identity")) {
-      free(content_encoding);
-      free(transfer_encoding);
+  char* headers = http_headers_to_utf8(response_data + reader->headers_start, reader->headers_len);
+  /* The body starts just past the blank line; its extent comes from `response_len`, never from
+   * strlen. `dup_slice` copies it byte-for-byte (memcpy), so NULs and invalid UTF-8 both survive;
+   * `body_len` is what carries the real extent from here on. Bytes past a Content-Length body, and
+   * any body of a HEAD, 204 or 304 response, are not part of it. */
+  const char* body_start = response_data + reader->body_start;
+  size_t body_len = response_len - reader->body_start;
+  char* body_out = NULL;
+  if (reader->framing == HTTP_FRAME_CHUNKED) {
+    const char* chunk_err = NULL;
+    int incomplete = 0;
+    size_t decoded_len = 0;
+    body_out = http_decode_chunked_body(body_start, body_len, &decoded_len, &chunk_err, &incomplete);
+    if (body_out == NULL) {
       free(headers);
-      free(body_out);
       free(response_data);
-      return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "unsupported content encoding");
+      return http_err_text(
+        incomplete ? SPROUT_TAG(stdlib$http$HttpIncomplete) : SPROUT_TAG(stdlib$http$HttpDecode),
+        chunk_err
+      );
     }
-    free(content_encoding);
-  }
-  if (transfer_encoding != NULL) {
-    if (ascii_contains_token_ci(transfer_encoding, "chunked")) {
-      char* chunk_err = NULL;
-      size_t decoded_len = 0;
-      char* decoded = http_decode_chunked_body(body_out, body_len, &decoded_len, &chunk_err);
-      free(body_out);
-      body_out = decoded;
-      body_len = decoded_len;
-      if (chunk_err != NULL) {
-        free(transfer_encoding);
-        free(headers);
-        free(response_data);
-        return http_err_cstr(SPROUT_TAG(stdlib$http$HttpDecode), chunk_err);
-      }
-    } else if (transfer_encoding[0] != '\0') {
-      free(transfer_encoding);
-      free(headers);
-      free(body_out);
-      free(response_data);
-      return http_err_text(SPROUT_TAG(stdlib$http$HttpDecode), "unsupported transfer encoding");
-    }
-    free(transfer_encoding);
+    body_len = decoded_len;
+  } else {
+    if (reader->framing == HTTP_FRAME_NONE) body_len = 0;
+    else if (reader->framing == HTTP_FRAME_LENGTH && body_len > reader->content_length) body_len = reader->content_length;
+    body_out = dup_slice(body_start, body_len);
   }
   free(response_data);
-  return http_ok_response(status, headers, body_out, body_len);
+  return http_ok_response(reader->status, headers, body_out, body_len);
 }
 
 /* ── HTTP client: parking, deadlines, and non-blocking connect ────────────────────────────────
@@ -8432,7 +8634,10 @@ static OSStatus tls_write_all(SSLContextRef ctx, TlsConn* conn, const char* data
   return noErr;
 }
 
-static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* response) {
+/* Reads until `reader` says stop or the stream ends; the caller checks `reader->fail`. A stream that
+ * ends without a closure alert (errSSLClosedNoNotify, errSSLClosedAbort) with data received is an
+ * end like any other; `http_reader_eof` decides whether that matters. */
+static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* response, HttpReader* reader) {
   char chunk[4096];
   while (1) {
     size_t chunk_len = sizeof(chunk);
@@ -8441,11 +8646,14 @@ static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* respo
     tls_debug_log("read status=%d chunk_len=%zu errno=%d", (int)status, chunk_len, conn->last_errno);
     if (chunk_len > 0) {
       buf_append_bytes(response, chunk, chunk_len);
+      if (http_reader_step(reader, response->data, response->len)) return noErr;
     }
     if (status == noErr) continue;
     if (tls_status_is_auth_event(status)) continue;
     if (status == errSSLClosedGraceful || status == errSSLClosedNoNotify || status == errSSLClosedAbort) {
-      return response->len > 0 ? noErr : status;
+      if (response->len == 0) return status;
+      http_reader_eof(reader, response->len, status != errSSLClosedGraceful);
+      return noErr;
     }
     if (status == errSSLWouldBlock) {
       /* Same rule as the write side: bytes delivered means retry, nothing delivered means park. */
@@ -8458,7 +8666,7 @@ static OSStatus tls_read_append(SSLContextRef ctx, TlsConn* conn, ByteBuf* respo
 
 /* `request` is borrowed, not owned: the caller frees it on return. It is listed in `in_flight` only
  * so that a cancel WHILE PARKED — which never returns to the caller — still releases it. */
-static long long http_request_tls(HttpUrl* parsed, ByteBuf* request, const HttpDeadline* deadline) {
+static long long http_request_tls(HttpUrl* parsed, ByteBuf* request, const HttpDeadline* deadline, HttpReader* reader) {
   HttpCandidate cand[HTTP_MAX_CANDIDATES];
   int gai = 0;
   int ncand = http_resolve(parsed->host, parsed->port, cand, &gai);
@@ -8565,7 +8773,7 @@ static long long http_request_tls(HttpUrl* parsed, ByteBuf* request, const HttpD
   ByteBuf response;
   buf_init(&response);
   in_flight.response = &response;   /* grows across every read park below */
-  status = tls_read_append(ctx, &tls, &response);
+  status = tls_read_append(ctx, &tls, &response, reader);
   SSLDisposeContext(ctx);
   close(fd);
   if (status == errSSLWouldBlock && tls.timed_out) {
@@ -8579,7 +8787,11 @@ static long long http_request_tls(HttpUrl* parsed, ByteBuf* request, const HttpD
       tls_error_message("tls read failed", status, &tls)
     );
   }
-  return http_response_result(response.data, response.len);
+  if (reader->fail != HTTP_FAIL_NONE) {
+    free(response.data);
+    return http_reader_failure(reader);
+  }
+  return http_response_result(response.data, response.len, reader);
 }
 #pragma clang diagnostic pop
 #endif
@@ -8611,12 +8823,15 @@ static void append_header_block(ByteBuf* out, const char* raw) {
   }
 }
 
-long long http_request(const char* method, const char* url, const char* headers_raw, const char* body, long long timeout_ms) {
+long long http_request(const char* method, const char* url, const char* headers_raw, const char* body, long long timeout_ms,
+                       long long max_header_bytes, long long max_body_bytes) {
   if (method == NULL) sprout_fail("http_request: null method");
   if (url == NULL) sprout_fail("http_request: null url");
   if (headers_raw == NULL) sprout_fail("http_request: null headers");
   if (body == NULL) sprout_fail("http_request: null body");
   if (timeout_ms < 1) sprout_fail("http_request: timeout_ms must be >= 1");
+  if (max_header_bytes < 1) sprout_fail("http_request: max_header_bytes must be >= 1");
+  if (max_body_bytes < 1) sprout_fail("http_request: max_body_bytes must be >= 1");
 
   HttpUrl parsed = {0};
   char* url_err = NULL;
@@ -8632,6 +8847,9 @@ long long http_request(const char* method, const char* url, const char* headers_
   ByteBuf request;
   buf_init(&request);
   char* method_upper = upper_copy(method);
+  /* A HEAD response has no body whatever its headers say. */
+  HttpReader reader;
+  http_reader_init(&reader, max_header_bytes, max_body_bytes, strcmp(method_upper, "HEAD") == 0);
   buf_append_cstr(&request, method_upper);
   buf_append_cstr(&request, " ");
   buf_append_cstr(&request, parsed.path);
@@ -8657,7 +8875,7 @@ long long http_request(const char* method, const char* url, const char* headers_
 
 #ifdef __APPLE__
   if (parsed.use_tls) {
-    long long out = http_request_tls(&parsed, &request, &deadline);
+    long long out = http_request_tls(&parsed, &request, &deadline, &reader);
     free(request.data);
     free_http_url(&parsed);
     return out;
@@ -8717,13 +8935,17 @@ long long http_request(const char* method, const char* url, const char* headers_
   while (1) {
     char chunk[4096];
     ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
-    if (n == 0) break;
+    if (n == 0) {
+      http_reader_eof(&reader, response.len, 0);
+      break;
+    }
     if (n > 0) {
       /* Deliberately NO re-arming of the deadline here. Re-stamping it on progress is what would
        * make this an idle bound, and a peer that drips forever would then hold the request open
        * forever. Confirmed by negative control: with a re-stamp on this line, a 400 ms request
        * against a 3 s drip returns after 3123 ms. */
       buf_append_bytes(&response, chunk, (size_t)n);
+      if (http_reader_step(&reader, response.data, response.len)) break;
       continue;
     }
     if (errno == EINTR) continue;
@@ -8751,10 +8973,15 @@ long long http_request(const char* method, const char* url, const char* headers_
     return http_err_text(SPROUT_TAG(stdlib$http$HttpNetwork), strerror(recv_errno));
   }
   /* No hook to clear: http_park cleared it on the way out of the last park, and nothing below
-   * parks. http_response_result allocates GC objects and takes ownership of the response buffer. */
+   * parks. http_response_result allocates GC objects and takes ownership of the response buffer.
+   * The socket is closed on every exit from the read, including a reader that stopped early. */
   close(fd);
   free_http_url(&parsed);
-  return http_response_result(response.data, response.len);
+  if (reader.fail != HTTP_FAIL_NONE) {
+    free(response.data);
+    return http_reader_failure(&reader);
+  }
+  return http_response_result(response.data, response.len, &reader);
 }
 
 long long vector_empty(void) {

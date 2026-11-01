@@ -23,11 +23,35 @@ import stdlib.string as string
 export type HttpResponse (..) =
   | HttpResponse Int String Bytes
 
+# `HttpTooLarge n` carries the limit that was hit: header bytes or body bytes, whichever it was.
+# `HttpIncomplete` is a response that ended before its framing said it would.
 export type HttpError (..) =
   | HttpTimeout
   | HttpNetwork String
   | HttpBadStatus Int
   | HttpDecode String
+  | HttpTooLarge Int
+  | HttpIncomplete String
+
+# The methods the client sends; `method_name` is the wire name.
+export type HttpMethod (..) =
+  | Get
+  | Head
+  | Post
+  | Put
+  | Patch
+  | Delete
+  | Options
+
+export fn method_name(method: HttpMethod) -> String =
+  match method with
+  | Get -> "GET"
+  | Head -> "HEAD"
+  | Post -> "POST"
+  | Put -> "PUT"
+  | Patch -> "PATCH"
+  | Delete -> "DELETE"
+  | Options -> "OPTIONS"
 
 # A status a server here can send. Closed, so every one has a status line and nothing can ask for
 # one that does not. Each name carries its code, which also keeps `Ok200` apart from `Result`'s `Ok`.

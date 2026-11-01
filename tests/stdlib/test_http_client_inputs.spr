@@ -1,6 +1,6 @@
 import stdlib.test (check_eq, run_suite)
-import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode)
-import stdlib.http_client (http_get, http_post, http_put)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, HttpTooLarge, HttpIncomplete, HttpMethod, Get, Head, Post, Put, Patch, Delete, Options, method_name)
+import stdlib.http_client (ClientConfig, default_client_config, http_get, http_post, http_put, http_request_with)
 
 # The client checks its URL and header pairs before any network I/O, so each case here returns Err
 # without opening a socket. The port 1 URL is never dialled.
@@ -11,6 +11,18 @@ fn rendered(r: Result HttpError HttpResponse) -> String =
   | Err (HttpNetwork m) -> `network ${m}`
   | Err (HttpBadStatus c) -> `status ${to_string(c)}`
   | Err (HttpDecode m) -> `decode ${m}`
+  | Err (HttpTooLarge n) -> `too large ${to_string(n)}`
+  | Err (HttpIncomplete m) -> `incomplete ${m}`
+
+fn max_header_bytes(c: ClientConfig) -> Int = c.max_header_bytes
+fn max_body_bytes(c: ClientConfig) -> Int = c.max_body_bytes
+fn timeout_ms(c: ClientConfig) -> Int = c.timeout_ms
+
+fn config(header_bytes: Int, body_bytes: Int) -> ClientConfig =
+  ClientConfig(timeout_ms = 1000, max_header_bytes = header_bytes, max_body_bytes = body_bytes)
+
+fn with_config(c: ClientConfig) -> String !{IO} =
+  rendered(http_request_with(c, Get, "http://127.0.0.1:1/", [], ""))
 
 fn get_with(url: String, headers: Vec (String, String)) -> String !{IO} =
   rendered(http_get(url, headers, 1000))
@@ -60,5 +72,36 @@ fn main() -> Unit !{IO} =
     check_eq("put checks headers", rendered(http_put("http://127.0.0.1:1/", [("X A", "1")], "b", 1000)),
       "decode invalid header name: X A"),
     check_eq("post checks the url", rendered(http_post("http://127.0.0.1:1/\n", [], "b", 1000)),
-      "decode url contains a space or control byte")
+      "decode url contains a space or control byte"),
+
+    # --- http_request_with: the checks run, and a limit below 1 is caller input ---
+    # Port 1 is never dialled: a zero limit is rejected before any I/O, so no socket is opened.
+    check_eq("max_body_bytes 0 is rejected", with_config(config(100, 0)),
+      "decode max_body_bytes must be at least 1"),
+    check_eq("max_body_bytes below 0 is rejected", with_config(config(100, -5)),
+      "decode max_body_bytes must be at least 1"),
+    check_eq("max_header_bytes 0 is rejected", with_config(config(0, 100)),
+      "decode max_header_bytes must be at least 1"),
+    check_eq("max_header_bytes below 0 is rejected", with_config(config(-1, 100)),
+      "decode max_header_bytes must be at least 1"),
+    check_eq("request_with checks the url",
+      rendered(http_request_with(config(100, 100), Post, "http://127.0.0.1:1/ x", [], "b")),
+      "decode url contains a space or control byte"),
+    check_eq("request_with checks headers",
+      rendered(http_request_with(config(100, 100), Delete, "http://127.0.0.1:1/", [("Host", "x")], "")),
+      "decode reserved header: host"),
+
+    # --- defaults: headers match the server's cap, bodies get 16 MiB ---
+    check_eq("default max_header_bytes", max_header_bytes(default_client_config()), 65536),
+    check_eq("default max_body_bytes", max_body_bytes(default_client_config()), 16777216),
+    check_eq("default timeout_ms", timeout_ms(default_client_config()), 30000),
+
+    # --- wire names ---
+    check_eq("GET", method_name(Get), "GET"),
+    check_eq("HEAD", method_name(Head), "HEAD"),
+    check_eq("POST", method_name(Post), "POST"),
+    check_eq("PUT", method_name(Put), "PUT"),
+    check_eq("PATCH", method_name(Patch), "PATCH"),
+    check_eq("DELETE", method_name(Delete), "DELETE"),
+    check_eq("OPTIONS", method_name(Options), "OPTIONS")
   ])

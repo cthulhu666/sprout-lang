@@ -1,11 +1,21 @@
 module stdlib.http_client
-import stdlib.http (HttpError, HttpResponse, HttpDecode, is_token, target_byte)
+import stdlib.http (HttpError, HttpResponse, HttpDecode, HttpMethod, Get, Post, Put, method_name, is_token, target_byte)
 import stdlib.bytes as bytes
 import stdlib.string as string
 
-extern fn http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int) -> Result HttpError HttpResponse !{IO}
+extern fn http_request(method: String, url: String, headers: String, body: String, timeout_ms: Int, max_header_bytes: Int, max_body_bytes: Int) -> Result HttpError HttpResponse !{IO}
 
 type alias HttpResult = Result HttpError HttpResponse
+
+# `timeout_ms` is the total request budget. `max_header_bytes` caps the status line and headers,
+# `max_body_bytes` the bytes received after them; chunk framing counts toward it.
+export type ClientConfig (..) = (timeout_ms: Int, max_header_bytes: Int, max_body_bytes: Int)
+
+# Headers: 64 KiB, the server's `max_header_bytes`. Body: 16 MiB, enough for API and JSON payloads.
+# A caller that fetches more raises it through `http_request_with`. The 30 s timeout is only the
+# record default; `http_get`, `http_post` and `http_put` take their own.
+export fn default_client_config() -> ClientConfig =
+  ClientConfig(timeout_ms = 30000, max_header_bytes = 65536, max_body_bytes = 16777216)
 
 # Inputs are checked here, before the extern, and a failure is `Err(HttpDecode ...)`. The extern takes
 # the headers as "Name: Value\n" lines, built from the checked pairs; its own line checks are guards.
@@ -60,19 +70,29 @@ fn check_headers(headers: Vec (String, String)) -> Result HttpError String =
     checked <- traverse(check_header, headers)
     Ok(string.join("", vec_map(header_line, checked)))
 
-fn send(method: String, url: String, headers: Vec (String, String), body: String, timeout_ms: Int) -> HttpResult !{IO} =
-  let _ = try check_url(url)
+# A limit below 1 is caller input, so it is an `Err`, like a bad header.
+fn check_limit(name: String, limit: Int) -> Result HttpError Unit =
+  guard(limit >= 1, HttpDecode(`${name} must be at least 1`))
+
+# Cost is dominated by `http_request`: request/response size and network latency.
+export fn http_request_with(config: ClientConfig, method: HttpMethod, url: String, headers: Vec (String, String), body: String) -> HttpResult !{IO} =
+  let _ = try check_limit("max_header_bytes", config.max_header_bytes)
+      _ = try check_limit("max_body_bytes", config.max_body_bytes)
+      _ = try check_url(url)
       block = try check_headers(headers)
-  in http_request(method, url, block, body, timeout_ms)
+  in http_request(method_name(method), url, block, body, config.timeout_ms, config.max_header_bytes, config.max_body_bytes)
+
+fn with_timeout(timeout_ms: Int) -> ClientConfig =
+  default_client_config() with (timeout_ms = timeout_ms)
 
 # Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_get(url: String, headers: Vec (String, String), timeout_ms: Int) -> HttpResult !{IO} =
-  send("GET", url, headers, "", timeout_ms)
+  http_request_with(with_timeout(timeout_ms), Get, url, headers, "")
 
 # Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_post(url: String, headers: Vec (String, String), body: String, timeout_ms: Int) -> HttpResult !{IO} =
-  send("POST", url, headers, body, timeout_ms)
+  http_request_with(with_timeout(timeout_ms), Post, url, headers, body)
 
 # Cost is dominated by `http_request`: request/response size and network latency.
 export fn http_put(url: String, headers: Vec (String, String), body: String, timeout_ms: Int) -> HttpResult !{IO} =
-  send("PUT", url, headers, body, timeout_ms)
+  http_request_with(with_timeout(timeout_ms), Put, url, headers, body)

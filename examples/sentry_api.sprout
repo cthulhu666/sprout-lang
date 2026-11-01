@@ -188,6 +188,8 @@ export fn sentry_http_error_message(err: HttpError) -> String =
   | HttpNetwork message -> strlib.concat("network error: ", message)
   | HttpBadStatus _ -> "unexpected HTTP status"
   | HttpDecode message -> strlib.concat("decode error: ", message)
+  | HttpTooLarge limit -> strlib.concat("response larger than ", strlib.concat(int_to_string(limit), " bytes"))
+  | HttpIncomplete message -> strlib.concat("incomplete response: ", message)
 
 export fn sentry_list_issues_json(org: String, project: String, token: String, timeout_ms: Int) -> Result HttpError Json !{IO} =
   match http_get(sentry_issues_url(org, project), [sentry_auth_header(token)], timeout_ms) with

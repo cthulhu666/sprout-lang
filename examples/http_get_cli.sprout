@@ -15,6 +15,8 @@ fn http_error_message(err: HttpError) -> String =
   | HttpNetwork msg -> "network error: " ++ msg
   | HttpBadStatus _ -> "http error status"
   | HttpDecode msg -> "decode error: " ++ msg
+  | HttpTooLarge limit -> "response larger than " ++ int_to_string(limit) ++ " bytes"
+  | HttpIncomplete msg -> "incomplete response: " ++ msg
 
 fn url_from_argv() -> Result String String !{IO} =
   match argv.get(0) with
