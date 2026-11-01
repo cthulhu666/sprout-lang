@@ -70,8 +70,8 @@ This milestone rejects:
 - `split_first` splits around the first match only.
 - `replace_all_literal` treats the replacement as plain text, not as a capture
   expansion language.
-- `replace_all_literal` leaves a match unreplaced when libc matches half a non-ASCII character, so the
-  result is always valid UTF-8.
+- `replace_all_literal` leaves a match unreplaced when libc matches half a non-ASCII
+  character, so the result is always valid UTF-8.
 - Invalid or unsupported patterns are reported at `compile` time via
   `RegexInvalidPattern` or `RegexUnsupportedFeature`.
 

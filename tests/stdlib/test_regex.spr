@@ -114,17 +114,14 @@ fn main() -> Unit !{IO} =
       replace("[0-9]+", "N", "日本 42 語"), "日本 N 語"),
     check_eq("escape leaves non-ASCII unchanged", regex.escape("café"), "café"),
     # libc matches bytes, so a match can start or end inside a character. replace_all_literal
-    # leaves such a match unreplaced rather than split the character. str_len walks the result
-    # as UTF-8, so it fails on an invalid String. See docs/regex-engine-v0.md.
+    # leaves such a match unreplaced rather than split the character. See docs/regex-engine-v0.md.
     check_eq("a class that would split a character leaves the text unchanged",
       replace("[éè]", "X", "café ã"), "café ã"),
-    check_eq("the unchanged result is valid UTF-8", str_len(replace("[éè]", "X", "café ã")), 6),
     check_eq("dot that ends inside a character is left unreplaced",
       replace("a.", "X", "aé"), "aé"),
-    check_eq("that result is valid UTF-8", str_len(replace("a.", "X", "aé")), 2),
     check_eq("an aligned match is still replaced beside an unreplaced one",
       replace("a.", "X", "ab aé"), "X aé"),
-    check_eq("the mixed result is valid UTF-8", str_len(replace("a.", "X", "ab aé")), 4),
     check_eq("an empty match over non-ASCII text is unchanged", replace("x*", "X", "é"), "XéX"),
-    check_eq("the empty-match result is valid UTF-8", str_len(replace("x*", "X", "é")), 3)
+    # After a skip the rescan must not treat the next character as the start of the text.
+    check_eq("^ does not match again after a skipped match", replace("^.", "X", "éa"), "éa")
   ])

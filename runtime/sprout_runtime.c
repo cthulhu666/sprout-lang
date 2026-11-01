@@ -6145,6 +6145,9 @@ static size_t sprout_utf8_step(const char* s, size_t i) {
   return width;
 }
 
+/* True for a UTF-8 continuation byte (10xxxxxx). */
+static inline int sprout_utf8_is_cont(unsigned char b) { return (b & 0xC0) == 0x80; }
+
 /* Decode the Unicode codepoint of the `width`-byte UTF-8 sequence at s[pos].
  * Mirrors stdlib.compiler.source.decode_codepoint_at. `width` MUST come from
  * sprout_utf8_step (not the bare sprout_utf8_char_width), which guarantees all
@@ -6689,7 +6692,8 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
   buf_init(&out);
   const char* cursor = text_now;
   regmatch_t match;
-  while (regexec(&compiled, cursor, 1, &match, 0) == 0) {
+  int eflags = 0;
+  while (regexec(&compiled, cursor, 1, &match, eflags) == 0) {
     if (match.rm_so < 0 || match.rm_eo < 0) {
       regfree(&compiled);
       sprout_fail("regex_replace_all_literal: regexec failed");
@@ -6700,15 +6704,19 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
      * leave half a character in the result, which is not a valid String. Such a match is left
      * unreplaced: copy up to and including the character it touches, then rescan after it.
      * `cursor` is always on a boundary, so the character starts at `start` rounded down. The
-     * Sprout engine in docs/regex-engine-v0.md matches whole characters and retires this. */
-    if (((unsigned char)cursor[start] & 0xC0) == 0x80 || ((unsigned char)cursor[end] & 0xC0) == 0x80) {
+     * Sprout engine in docs/regex-engine-v0.md matches whole characters and retires this.
+     * REG_NOTBOL on the rescan: the new cursor is mid-text, so `^` must not match there. */
+    if (sprout_utf8_is_cont((unsigned char)cursor[start]) ||
+        sprout_utf8_is_cont((unsigned char)cursor[end])) {
       size_t s = start;
-      while (((unsigned char)cursor[s] & 0xC0) == 0x80) s--;
+      while (sprout_utf8_is_cont((unsigned char)cursor[s])) s--;
       size_t width = sprout_utf8_step(cursor, s);
       buf_append_bytes(&out, cursor, s + width);
       cursor += s + width;
+      eflags = REG_NOTBOL;
       continue;
     }
+    eflags = 0;
     buf_append_bytes(&out, cursor, start);
     buf_append_cstr(&out, replacement_now);
     if (end == 0) {
