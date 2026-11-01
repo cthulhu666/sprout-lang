@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn)
-import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, HttpTooLarge, HttpIncomplete)
 import stdlib.http_client (http_get)
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, read_avail_timeout, write_all)
 import testsupport.listen (listen_or_die)
@@ -58,6 +58,8 @@ fn err_text(e: HttpError) -> String =
   | HttpNetwork m -> `network ${m}`
   | HttpBadStatus c -> `status ${int_to_string(c)}`
   | HttpDecode m -> `decode ${m}`
+  | HttpTooLarge n -> `too large ${int_to_string(n)}`
+  | HttpIncomplete m -> `incomplete ${m}`
 
 fn probe(port: Int, path: String) -> Unit !{IO} =
   match http_get(`http://127.0.0.1:${int_to_string(port)}/${path}`, [], 3000) with

@@ -3102,7 +3102,32 @@ task-io-smoke: bootstrap-from-seed
   run_once "http-client-headers" "done"
   check_markers "http-client-headers" "host-port: ok" "repeated: ok" "tab-in-value: ok"
   SPROUT_GC_STRESS=1 run_once "http-client-headers/stress" "done"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers; interleaved; stress-clean)"
+  # (37) Response size limits and body framing. Size cases run under 200 header / 100 body bytes: a
+  # body or a head past the limit is `HttpTooLarge` (a Content-Length past it fails before the body
+  # is read), and the limit counts raw bytes, so chunk framing counts. Framing cases: a short
+  # Content-Length body and a chunked body without its last chunk are `HttpIncomplete`; a conflicting
+  # or malformed Content-Length and a bad or overflowing chunk size are `HttpDecode`; HEAD and 204
+  # have no body; extra bytes after Content-Length are dropped; the read stops at Content-Length
+  # without waiting for the close (`cl-noclose`).
+  build tests/task_io_smoke/http_client_limits.spr
+  run_once "http-client-limits" "done"
+  check_markers "http-client-limits" \
+    "close-big: Err too large 100" "close-edge: Ok 200 body=100 text=aaaaa" "close-over1: Err too large 100" \
+    "chunk-big: Err too large 100" "chunk-framing: Err too large 100" "cl-big: Err too large 100" \
+    "head-big: Err too large 200" "head-open: Err too large 200" "status-big: Err status 404" \
+    "cl-short: Err incomplete body shorter than Content-Length" \
+    "cl-conflict: Err decode invalid Content-Length" "cl-list: Err decode invalid Content-Length" \
+    "cl-same: Ok 200 body=2 text=hi" "cl-same-list: Ok 200 body=2 text=hi" \
+    "cl-neg: Err decode invalid Content-Length" "cl-nan: Err decode invalid Content-Length" \
+    "cl-huge: Err decode invalid Content-Length" "cl-extra: Ok 200 body=5 text=hello" \
+    "chunk-ok: Ok 200 body=5 text=hello" \
+    "chunk-short: Err incomplete chunked body ended before the last chunk" \
+    "chunk-cut: Err incomplete chunked body ended before the last chunk" \
+    "chunk-over: Err decode chunk size too large" "chunk-bad: Err decode invalid chunk size" \
+    "te-wins: Ok 200 body=3 text=abc" "split: Ok 200 body=5 text=hello" "head-cl: Ok 200 body=0 text=" "no-body-204: Ok 204 body=0 text=" \
+    "cl-noclose: Ok 200 body=5 text=hello"
+  SPROUT_GC_STRESS=1 run_once "http-client-limits/stress" "done"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
@@ -4411,7 +4436,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
   for entry in "${GATES[@]}"; do
     label="${entry%%|*}"; cmd="${entry#*|}"
     labels+=("$label")
-    # word-split $cmd deliberately: it is a controlled "recipe [args]" string.
+    # word-split $cmd deliberately: it is a controlled "recipe text=args" string.
     ( s=$SECONDS; $JUST $cmd > "$TMPD/$label.out" 2>&1; echo $? > "$TMPD/$label.status"
       echo $((SECONDS - s)) > "$TMPD/$label.secs" ) &
     pids+=($!); idx=$((idx + 1)); active=$((active + 1))

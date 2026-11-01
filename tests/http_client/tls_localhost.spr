@@ -1,6 +1,6 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.http_client (http_get)
-import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, http_response_body)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, HttpTooLarge, HttpIncomplete, http_response_body)
 import stdlib.bytes as bytes
 import stdlib.string as string
 import stdlib.terminal as terminal
@@ -59,6 +59,8 @@ fn err_text(e: HttpError) -> String =
   | HttpNetwork msg -> string.concat("network: ", msg)
   | HttpBadStatus code -> string.concat("bad status ", int_to_string(code))
   | HttpDecode msg -> string.concat("decode: ", msg)
+  | HttpTooLarge n -> string.concat("too large: ", int_to_string(n))
+  | HttpIncomplete msg -> string.concat("incomplete: ", msg)
 
 # A zero-length body would mean the read loop returned without delivering anything, which an
 # `Ok` alone would not distinguish from success.

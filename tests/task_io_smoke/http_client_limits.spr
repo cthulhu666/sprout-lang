@@ -1,0 +1,171 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.http (HttpResponse, HttpError, HttpTimeout, HttpNetwork, HttpBadStatus, HttpDecode, HttpTooLarge, HttpIncomplete, HttpMethod, Get, Head)
+import stdlib.http_client (ClientConfig, http_request_with)
+import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, read_avail_timeout, write_all)
+import testsupport.listen (listen_or_die)
+import stdlib.bytes as bytes
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# Response size limits and body framing. The server writes one canned raw response per path and
+# closes; the client prints one line per case and the justfile asserts each. Limits: a small config
+# (200 header bytes, 100 body bytes) for the size cases, a wide one for the framing cases.
+# A template literal has no `\r` escape, so these responses are built with `++`.
+let ok_head: String = "HTTP/1.1 200 OK\r\n"
+let chunked_head: String = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+
+fn a(n: Int) -> String = string.repeat("a", n)
+
+fn is_path(head: String, name: String) -> Bool =
+  string.contains(head, `/${name} HTTP`)
+
+fn reply_for(head: String) -> String =
+  if is_path(head, "close-big") then ok_head ++ "\r\n" ++ a(300)
+  else if is_path(head, "close-edge") then ok_head ++ "\r\n" ++ a(100)
+  else if is_path(head, "close-over1") then ok_head ++ "\r\n" ++ a(101)
+  else if is_path(head, "chunk-big") then chunked_head ++ "96\r\n" ++ a(150) ++ "\r\n96\r\n" ++ a(150) ++ "\r\n0\r\n\r\n"
+  else if is_path(head, "chunk-framing") then chunked_head ++ "5f\r\n" ++ a(95) ++ "\r\n0\r\n\r\n"
+  else if is_path(head, "cl-big") then ok_head ++ "Content-Length: 300\r\n\r\n" ++ a(10)
+  else if is_path(head, "head-big") then ok_head ++ "X-Pad: " ++ a(300) ++ "\r\n\r\n"
+  else if is_path(head, "head-open") then ok_head ++ "X-Pad: " ++ a(300)
+  else if is_path(head, "status-big") then "HTTP/1.1 404 Not Found\r\n\r\n" ++ a(300)
+  else if is_path(head, "cl-short") then ok_head ++ "Content-Length: 1000\r\n\r\n" ++ a(500)
+  else if is_path(head, "cl-conflict") then ok_head ++ "Content-Length: 5\r\nContent-Length: 6\r\n\r\nhello!"
+  else if is_path(head, "cl-list") then ok_head ++ "Content-Length: 5, 6\r\n\r\nhello!"
+  else if is_path(head, "cl-same") then ok_head ++ "Content-Length: 2\r\nContent-Length: 2\r\n\r\nhi"
+  else if is_path(head, "cl-same-list") then ok_head ++ "Content-Length: 2, 2\r\n\r\nhi"
+  else if is_path(head, "cl-neg") then ok_head ++ "Content-Length: -1\r\n\r\nhi"
+  else if is_path(head, "cl-nan") then ok_head ++ "Content-Length: abc\r\n\r\nhi"
+  else if is_path(head, "cl-huge") then ok_head ++ "Content-Length: 99999999999999999999999\r\n\r\nhi"
+  else if is_path(head, "cl-extra") then ok_head ++ "Content-Length: 5\r\n\r\nhelloEXTRA"
+  else if is_path(head, "cl-noclose") then ok_head ++ "Content-Length: 5\r\n\r\nhello"
+  else if is_path(head, "chunk-ok") then chunked_head ++ "5\r\nhello\r\n0\r\n\r\n"
+  else if is_path(head, "chunk-short") then chunked_head ++ "5\r\nhello\r\n"
+  else if is_path(head, "chunk-cut") then chunked_head ++ "ffff\r\nabc"
+  else if is_path(head, "chunk-over") then chunked_head ++ "ffffffffffffffffff\r\nabc\r\n0\r\n\r\n"
+  else if is_path(head, "chunk-bad") then chunked_head ++ "zz\r\nabc\r\n0\r\n\r\n"
+  else if is_path(head, "te-wins") then ok_head ++ "Transfer-Encoding: chunked\r\nContent-Length: 999\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+  else if is_path(head, "head-cl") then ok_head ++ "Content-Length: 1000\r\n\r\n"
+  else if is_path(head, "no-body-204") then "HTTP/1.1 204 No Content\r\nContent-Length: 10\r\n\r\n"
+  else ok_head ++ "\r\nunknown"
+
+fn read_head(conn: borrowing TcpConnection, acc: String) -> String !{IO} =
+  if string.contains(acc, "\r\n\r\n") then acc
+  else
+    match read_avail_timeout(conn, 3000) with
+    | Err _ -> acc
+    | Ok chunk ->
+        match bytes.to_string(chunk) with
+        | Err _ -> acc
+        | Ok text -> read_head(conn, string.concat(acc, text))
+
+# `cl-noclose` sends a complete Content-Length body and `cl-big` a head that declares too much; both
+# then hold the connection open until the CLIENT closes it. The client must stop on its own, at the
+# declared length or at the limit, instead of waiting for the server: if it waits it times out.
+fn hold_until_client_closes(conn: borrowing TcpConnection, head: String) -> Unit !{IO} =
+  if is_path(head, "cl-noclose") || is_path(head, "cl-big") then
+    match read_avail_timeout(conn, 3000) with
+    | _ -> terminal.write("")
+  else terminal.write("")
+
+# `split` arrives in four pieces, cut inside a CRLF and inside the blank line, so the head scan has
+# to resume where the last read stopped.
+fn serve_split(conn: borrowing TcpConnection) -> Unit !{IO} =
+  do
+    write_all(conn, bytes.from_string("HTTP/1.1 200 OK\r\nContent-Length: 5\r"))
+    task_sleep(60)
+    write_all(conn, bytes.from_string("\n\r"))
+    task_sleep(60)
+    write_all(conn, bytes.from_string("\nhe"))
+    task_sleep(60)
+    write_all(conn, bytes.from_string("llo"))
+    terminal.write("")
+
+fn reply(conn: borrowing TcpConnection, head: String) -> Unit !{IO} =
+  if is_path(head, "split") then serve_split(conn)
+  else
+    do
+      write_all(conn, bytes.from_string(reply_for(head)))
+      terminal.write("")
+
+fn serve_one(conn: consuming TcpConnection) -> Unit !{IO} =
+  do
+    head <- read_head(conn, "")
+    reply(conn, head)
+    hold_until_client_closes(conn, head)
+    close(conn)
+
+fn serve_loop(listener: borrowing TcpListener, remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then terminal.write("")
+  else
+    match accept(listener) with
+    | Err _ -> terminal.write("")
+    | Ok conn ->
+        do
+          serve_one(conn)
+          serve_loop(listener, remaining - 1)
+
+fn server(port: Int, n: Int) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(port)
+    serve_loop(listener, n)
+    close_listener(listener)
+
+fn err_text(e: HttpError) -> String =
+  match e with
+  | HttpTimeout -> "timeout"
+  | HttpNetwork m -> `network ${m}`
+  | HttpBadStatus c -> `status ${int_to_string(c)}`
+  | HttpDecode m -> `decode ${m}`
+  | HttpTooLarge n -> `too large ${int_to_string(n)}`
+  | HttpIncomplete m -> `incomplete ${m}`
+
+fn small() -> ClientConfig =
+  ClientConfig(timeout_ms = 3000, max_header_bytes = 200, max_body_bytes = 100)
+
+fn small_quick() -> ClientConfig =
+  ClientConfig(timeout_ms = 1000, max_header_bytes = 200, max_body_bytes = 100)
+
+fn wide() -> ClientConfig =
+  ClientConfig(timeout_ms = 3000, max_header_bytes = 65536, max_body_bytes = 1000000)
+
+fn quick() -> ClientConfig =
+  ClientConfig(timeout_ms = 1000, max_header_bytes = 65536, max_body_bytes = 1000000)
+
+fn text_of(body: Bytes) -> String =
+  let Ok text = bytes.to_string(body) else "?"
+  in text
+
+fn probe(port: Int, name: String, method: HttpMethod, config: ClientConfig) -> Unit !{IO} =
+  match http_request_with(config, method, `http://127.0.0.1:${int_to_string(port)}/${name}`, [], "") with
+  | Ok (HttpResponse code _ body) ->
+      terminal.write(`${name}: Ok ${int_to_string(code)} body=${int_to_string(bytes.length(body))} text=${string.slice(text_of(body), 0, 5)}\n`)
+  | Err e -> terminal.write(`${name}: Err ${err_text(e)}\n`)
+
+fn client(port: Int, cases: List (String, HttpMethod, ClientConfig)) -> Unit !{IO} =
+  match cases with
+  | [] -> terminal.write("done\n")
+  | [(name, method, config) | rest] ->
+      do
+        probe(port, name, method, config)
+        client(port, rest)
+
+fn run(s: Scope, port: Int, cases: List (String, HttpMethod, ClientConfig)) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> server(port, list_length(cases)))
+    task_spawn(s, \_ -> client(port, cases))
+
+fn main() -> Unit !{IO} =
+  do
+    let cases = [
+      ("close-big", Get, small()), ("close-edge", Get, small()), ("close-over1", Get, small()),
+      ("chunk-big", Get, small()), ("chunk-framing", Get, small()), ("cl-big", Get, small_quick()),
+      ("head-big", Get, small()), ("head-open", Get, small()), ("status-big", Get, small()),
+      ("cl-short", Get, wide()), ("cl-conflict", Get, wide()), ("cl-list", Get, wide()),
+      ("cl-same", Get, wide()), ("cl-same-list", Get, wide()), ("cl-neg", Get, wide()),
+      ("cl-nan", Get, wide()), ("cl-huge", Get, wide()), ("cl-extra", Get, wide()),
+      ("chunk-ok", Get, wide()), ("chunk-short", Get, wide()), ("chunk-cut", Get, wide()),
+      ("chunk-over", Get, wide()), ("chunk-bad", Get, wide()), ("te-wins", Get, wide()), ("split", Get, wide()),
+      ("head-cl", Head, wide()), ("no-body-204", Get, wide()), ("cl-noclose", Get, quick())
+    ]
+    with_scope(\s -> run(s, 29030, cases))

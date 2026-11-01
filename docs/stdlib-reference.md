@@ -327,9 +327,13 @@ HTTP stdlib helpers (in `stdlib/http.sprout`):
 
 - uses foundational prelude `Maybe` and `Result`
 - `HttpResponse(status, headers, body)` — `body` is **`Bytes`**, not `String`
-- `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`). A
-  header line that is not valid UTF-8 is read as ISO-8859-1 (each byte 0x80-0xFF becomes
-  U+0080-U+00FF), so the response is still returned
+- `HttpError` variants (`HttpTimeout`, `HttpNetwork`, `HttpBadStatus`, `HttpDecode`,
+  `HttpTooLarge`, `HttpIncomplete`). `HttpTooLarge n` carries the limit that was hit (header or
+  body bytes); `HttpIncomplete message` is a response that ended before its framing said it
+  would. A header line that is not valid UTF-8 is read as ISO-8859-1 (each byte 0x80-0xFF
+  becomes U+0080-U+00FF), so the response is still returned
+- `HttpMethod` — `Get | Head | Post | Put | Patch | Delete | Options`; `method_name(m) -> String`
+  is the wire name (`"GET"`, ...)
 - `HttpStatus` — the statuses a server can send, one constructor each, its code in its name:
   `Ok200`, `Created201`, `Accepted202`, `NoContent204`, `MovedPermanently301`, `Found302`,
   `SeeOther303`, `NotModified304`, `TemporaryRedirect307`, `PermanentRedirect308`,
@@ -382,6 +386,34 @@ Inputs are checked before any network I/O, and a failure is `Err(HttpDecode mess
 - a repeated name is sent once per pair, in the given order.
 
 `Host` is the URL authority exactly: `host:port` when the URL spells a port, else `host`.
+
+`http_get`, `http_post` and `http_put` use the default limits. To set them, or to send another
+method, use:
+
+- `ClientConfig` — record `(timeout_ms, max_header_bytes, max_body_bytes)`
+- `default_client_config() -> ClientConfig` — 30 s timeout (only the record default; the three
+  functions above take their own), 65536 header bytes (the server's `max_header_bytes`), 16 MiB
+  of body (covers API and JSON payloads). Adjust with record update
+- `http_request_with(config, method: HttpMethod, url, headers, body) -> Result HttpError HttpResponse`
+  — the checks above, then the request. A limit below 1 is `Err(HttpDecode ...)` before any I/O
+
+Response rules, applied while the response is read:
+
+- `max_header_bytes` caps the status line and headers, through the blank line. A head that
+  grows past it before the blank line arrives stops the read: `Err(HttpTooLarge max_header_bytes)`;
+- no body for a response to `HEAD`, or with status 204 or 304; `Content-Length` is ignored there
+  (RFC 9112 §6.3);
+- `Transfer-Encoding: chunked` wins over `Content-Length`. Chunk data that ends before the last
+  chunk is `HttpIncomplete`; bad chunk syntax, or a chunk size past `size_t`, is `HttpDecode`;
+- `Content-Length` must be digits and, across repeated headers and comma lists, one value;
+  otherwise `Err(HttpDecode "invalid Content-Length")`. A value past `max_body_bytes` is
+  `HttpTooLarge` as soon as the head is read. The read stops at that many bytes and ignores
+  extra ones. EOF before them is `HttpIncomplete "body shorter than Content-Length"`;
+- with neither, the body runs to EOF. On TLS, EOF without the closure alert is `HttpIncomplete`
+  (a framed body ignores the alert, RFC 9112 §9.8);
+- `max_body_bytes` counts the raw bytes received after the head, so chunk framing counts toward
+  it. Past it: `Err(HttpTooLarge max_body_bytes)`;
+- a status of 400 or more is `HttpBadStatus` and its body is not read.
 
 ## stdlib.http_server
 
