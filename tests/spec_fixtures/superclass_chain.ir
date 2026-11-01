@@ -1,0 +1,9 @@
+# bump_app needs Applicative m and calls bump (Functor f); the Functor dictionary is
+# Applicative's superclass. Both are copied at Maybe and the copies call fmap directly.
+on has define i64 @main.bump_app$spec_Maybe(i64 %p$xs)
+on has define i64 @main.bump$spec_Maybe(i64 %p$xs)
+on body main.bump_app$spec_Maybe has call i64 @main.bump$spec_Maybe(i64 %p$xs)
+on body main.bump$spec_Maybe lacks @__cm_Functor_fmap
+on body main.bump$spec_Maybe has call i64 @__tc_Functor_Maybe_fmap(
+off has define i64 @main.bump_app(
+off lacks $spec

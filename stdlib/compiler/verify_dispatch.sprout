@@ -395,6 +395,21 @@ fn check_one(c: ast.TypeConstraint, dict_head: (String, Maybe String), theta: Di
 export fn verify_program(prog: typed_ast.TypedProgram) -> Maybe(source.SourcePos, String) =
   first_mismatch(collect_program(prog))
 
+# The first mismatch among `added` (declarations a pass appended to `prog`), with the name of
+# the declaration it is in. Callee signatures come from the whole program.
+export fn verify_added(prog: typed_ast.TypedProgram, added: List typed_ast.TypedDecl)
+    -> Maybe (String, source.SourcePos, String) =
+  match prog with
+  | typed_ast.TypedProgram decls -> first_decl_mismatch(added, build_sig_table(decls, dict_empty()))
+
+fn first_decl_mismatch(decls: List typed_ast.TypedDecl, sigs: Dict CalleeSig) -> Maybe (String, source.SourcePos, String) =
+  match decls with
+  | Nil -> Nothing
+  | Cons d rest ->
+      match first_mismatch(list_builder_build(collect_decl(d, sigs, list_builder_empty))) with
+      | Just (pos, msg) -> Just((maybe_with_default("", typed_ast.decl_name(d)), pos, msg))
+      | Nothing -> first_decl_mismatch(rest, sigs)
+
 export fn verify_stats(prog: typed_ast.TypedProgram) -> (Int, Int, Int) =
   tally(collect_program(prog), 0, 0, 0)
 

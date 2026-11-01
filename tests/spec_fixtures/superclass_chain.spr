@@ -1,0 +1,11 @@
+module main
+
+# Specialisation fixture (scripts/spec_gate.sh): a constrained function called through its
+# class's superclass. `bump` needs `Functor f`; `bump_app` is constrained on `Applicative m`,
+# whose superclass is Functor, so the dictionary `bump` gets is the caller's, one level up.
+# Both are copied at Maybe and neither dispatches dynamically.
+fn bump(xs: f Int) -> f Int where Functor f = fmap(\x -> x + 1, xs)
+
+fn bump_app(xs: m Int) -> m Int where Applicative m = bump(xs)
+
+fn main() -> Unit !{IO} = print(bump_app(Just(1)))

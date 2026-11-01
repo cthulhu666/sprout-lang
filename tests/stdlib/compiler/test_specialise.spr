@@ -1,0 +1,439 @@
+import stdlib.test (check_true, check_false, check_eq, run_suite)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.spec_keys as spec_keys
+import stdlib.compiler.specialise as specialise
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.string as string
+
+# Unit tests for the specialisation pass (docs/specialisation-v0.md §4, §8). The program
+# shapes (`tests/spec_fixtures`) are checked end to end by `just spec-gate`; these pin the
+# pieces whose failure the gate would show only as a wrong dictionary or a wrong name:
+# the copy's name, the growth check, and replacing a forwarded dictionary by SLOT KEY.
+
+fn pos() -> source.SourcePos =
+  source.SourcePos(index = 0, line = 1, column = 1)
+
+fn tn(name: String) -> ast.TypeExpr = ast.TypeName(name)
+
+fn tvar(name: String) -> types.Type = types.TVar(types.tyvar_id(name))
+
+fn tcon(name: String) -> types.Type = types.TConst(types.type_id(name))
+
+fn binds(pairs: List (String, ast.TypeExpr)) -> Dict ast.TypeExpr =
+  list_fold(\ (d, kv) -> bind_one(kv, d), dict_empty(), pairs)
+
+fn bind_one(kv: (String, ast.TypeExpr), d: Dict ast.TypeExpr) -> Dict ast.TypeExpr =
+  let (name, te) = kv
+  in dict_set(name, te, d)
+
+fn constraint(cls: String, args: List ast.TypeExpr) -> ast.TypeConstraint = ast.TypeConstraint(cls, args)
+
+fn inst(cls: String, head: String, kids: List typed_ast.Evidence) -> typed_ast.Evidence =
+  typed_ast.EvInstance(cls, typed_ast.instance_key(cls, head), kids)
+
+fn block(cls: String, head: String, kids: List typed_ast.Evidence) -> typed_ast.Evidence =
+  typed_ast.EvClasses([inst(cls, head, kids)])
+
+fn fwd_block(cls: String, args: List ast.TypeExpr) -> typed_ast.Evidence =
+  typed_ast.EvClasses([typed_ast.EvForward(cls, typed_ast.dict_slot_key(cls, args))])
+
+fn name_of(fn_name: String, cs: List ast.TypeConstraint, subs: List (String, ast.TypeExpr)) -> String =
+  spec_keys.copy_name(fn_name, cs, binds(subs))
+
+# --- the growth check ---
+
+fn grows(old: List typed_ast.Evidence, new: List typed_ast.Evidence) -> Bool =
+  spec_keys.ev_list_grows(old, new, false)
+
+# --- a program: `bigger` and `both` are constrained, `main` calls them ---
+
+fn int_t() -> types.Type = tcon("Int")
+
+fn string_t() -> types.Type = tcon("String")
+
+fn tdict(cls: String, args: List ast.TypeExpr, ev: typed_ast.Evidence) -> typed_ast.TypedExpr =
+  typed_ast.TDict(constraint(cls, args), tcon(cls), pos(), ev)
+
+fn call(name: String, t: types.Type, args: List typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar(name, t, pos()), args, t, pos())
+
+fn var_(name: String, t: types.Type) -> typed_ast.TypedExpr = typed_ast.TVar(name, t, pos())
+
+fn param(name: String, ann: String) -> ast.Param = ast.Param(name, Just(tn(ann)), ast.ModeDefault)
+
+# fn bigger(x: a, y: a) -> a where Ord a = compare(x, y)
+fn bigger_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("bigger", [param("x", "a"), param("y", "a")], Just(tn("a")), Nothing,
+                    [constraint("Ord", [tn("a")])],
+                    call("compare", tvar("a"),
+                         [tdict("Ord", [tn("a")], fwd_block("Ord", [tn("a")])),
+                          var_("x", tvar("a")), var_("y", tvar("a"))]))
+
+# fn both(x: a, y: b) -> (a, b) where Eq a, ToString b = (eq(x, x), to_string(y)). One
+# forwarded dictionary per constraint, in different classes.
+fn both_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("both", [param("x", "a"), param("y", "b")], Just(tn("a")), Nothing,
+                    [constraint("Eq", [tn("a")]), constraint("ToString", [tn("b")])],
+                    typed_ast.TTuple(
+                      [call("eq", tvar("a"),
+                            [tdict("Eq", [tn("a")], fwd_block("Eq", [tn("a")])),
+                             var_("x", tvar("a")), var_("x", tvar("a"))]),
+                       call("to_string", tvar("b"),
+                            [tdict("ToString", [tn("b")], fwd_block("ToString", [tn("b")])),
+                             var_("y", tvar("b"))])],
+                      tvar("a"), pos()))
+
+# class ToString t, one method `to_string`, whose scheme `t -> String` aligns the class
+# variable with the method's argument type.
+fn class_decl() -> typed_ast.TypedDecl =
+  typed_ast.TPassThrough(ast.ClassDecl("ToString", ["t"], [], [], pos()))
+
+fn method_env() -> Dict types.Scheme =
+  dict_set("to_string", types.mono(types.TFunc(tvar("t"), string_t(), types.effect_pure, types.OwnConsume)), test_env())
+
+# fn show_it(x: a) -> String where ToString a = <to_string used as a value>, evidence unresolved
+# as the checker leaves it when the class type is a variable.
+fn show_it_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("show_it", [param("x", "a")], Just(tn("String")), Nothing,
+                    [constraint("ToString", [tn("a")])],
+                    typed_ast.TMethodRef("to_string", "ToString",
+                                         types.TFunc(tvar("a"), string_t(), types.effect_pure, types.OwnConsume),
+                                         pos(), typed_ast.EvUnresolved))
+
+fn show_it_at_int() -> typed_ast.TypedExpr =
+  call("show_it", string_t(),
+       [tdict("ToString", [tn("Int")], block("ToString", "Int", [])), int_lit(1)])
+
+fn method_ref_specialised() -> specialise.Output =
+  specialise.run(typed_ast.TypedProgram([class_decl(), show_it_decl(), main_decl(show_it_at_int())]), method_env())
+
+fn method_ref_evidence_text(out: specialise.Output) -> String =
+  match body_of("show_it$spec_Int", out) with
+  | Just (typed_ast.TMethodRef _ _ _ _ ev) -> spec_keys.ev_text(ev)
+  | _ -> "?"
+
+fn generic_method_ref_text(out: specialise.Output) -> String =
+  match body_of("show_it", out) with
+  | Just (typed_ast.TMethodRef _ _ _ _ ev) -> spec_keys.ev_text(ev)
+  | _ -> "?"
+
+fn main_decl(body: typed_ast.TypedExpr) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("main", [], Nothing, Nothing, [], body)
+
+fn int_lit(n: Int) -> typed_ast.TypedExpr = typed_ast.TInt(n, int_t(), pos())
+
+fn str_lit(s: String) -> typed_ast.TypedExpr = typed_ast.TString(s, string_t(), pos())
+
+# bigger(1, 2) at Int
+fn bigger_at_int() -> typed_ast.TypedExpr =
+  call("bigger", int_t(),
+       [tdict("Ord", [tn("Int")], block("Ord", "Int", [])), int_lit(1), int_lit(2)])
+
+# both(1, "s") at Eq Int, ToString String
+fn both_at_int_string() -> typed_ast.TypedExpr =
+  call("both", int_t(),
+       [tdict("Eq", [tn("Int")], block("Eq", "Int", [])),
+        tdict("ToString", [tn("String")], block("ToString", "String", [])),
+        int_lit(1), str_lit("s")])
+
+# bigger at x.y.T, then at x_y.T: both copies would be named bigger$spec_x_y_T
+fn bigger_at(head: String) -> typed_ast.TypedExpr =
+  call("bigger", int_t(),
+       [tdict("Ord", [tn(head)], block("Ord", head, [])), int_lit(1), int_lit(2)])
+
+fn clashing_calls() -> typed_ast.TypedExpr =
+  typed_ast.TTuple([bigger_at("x.y.T"), bigger_at("x_y.T")], int_t(), pos())
+
+# fn nest(x: a) -> a where Eq a = nest(x) with the dictionary for `List a` built from `a`'s:
+# at Int its evidence contains the caller's, so the growth check declines it.
+fn nest_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("nest", [param("x", "a")], Just(tn("a")), Nothing,
+                    [constraint("Eq", [tn("a")])],
+                    call("nest", tvar("a"),
+                         [tdict("Eq", [ast.TypeApply(tn("List"), tn("a"))],
+                                typed_ast.EvClasses([inst("Eq", "List", [fwd_block("Eq", [tn("a")])])])),
+                          var_("x", tvar("a"))]))
+
+fn nest_run() -> specialise.Output =
+  specialise.run(typed_ast.TypedProgram([nest_decl(),
+                                         main_decl(call("nest", int_t(),
+                                                        [tdict("Eq", [tn("Int")], block("Eq", "Int", [])),
+                                                         int_lit(1)]))]),
+                 test_env())
+
+# The callee name and argument count of each call directly under a tuple body.
+fn tuple_calls(out: specialise.Output) -> List (String, Int) =
+  match body_of("main", out) with
+  | Just (typed_ast.TTuple calls _ _) -> list_map(call_shape, calls)
+  | _ -> []
+
+fn call_shape(e: typed_ast.TypedExpr) -> (String, Int) =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar name _ _) args _ _ -> (name, list_length(args))
+  | _ -> ("", -1)
+
+# bigger(1, 2) whose dictionary is forwarded, as inside a generic caller
+fn bigger_forwarded() -> typed_ast.TypedExpr =
+  call("bigger", int_t(),
+       [tdict("Ord", [tn("c")], fwd_block("Ord", [tn("c")])), int_lit(1), int_lit(2)])
+
+# The checker names a body's variables `$tN` and records which signature variable each is
+# (`@eta_fwdvar`); the hand-built nodes above use the written names, so each names itself.
+fn test_env() -> Dict types.Scheme =
+  list_fold(\ (d, v) -> dict_set(types.eta_fwdvar_marker_key(v), types.mono(tcon(v)), d), dict_empty(), ["a", "b", "m"])
+
+# fn bump(xs: f) -> f where Functor f = xs
+fn bump_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("bump", [param("xs", "f")], Just(tn("f")), Nothing, [constraint("Functor", [tn("f")])],
+                    var_("xs", tvar("f")))
+
+# fn bump_both(xs: m) -> m where Monad m = bump(xs). The Functor dictionary is a forward that
+# no slot of the copy holds; its constraint is written over `arg` (`m`, or `_` as `resolve`
+# leaves it for a superclass two levels up).
+fn bump_both_decl(arg: String) -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("bump_both", [param("xs", "m")], Just(tn("m")), Nothing, [constraint("Monad", [tn("m")])],
+                    call("bump", tvar("m"),
+                         [tdict("Functor", [tn(arg)], fwd_block("Functor", [tn(arg)])), var_("xs", tvar("m"))]))
+
+fn bump_both_at_maybe() -> typed_ast.TypedExpr =
+  call("bump_both", int_t(), [tdict("Monad", [tn("Maybe")], block("Monad", "Maybe", [])), int_lit(1)])
+
+fn unfillable_run(arg: String) -> specialise.Output =
+  specialise.run(typed_ast.TypedProgram([bump_decl(), bump_both_decl(arg), main_decl(bump_both_at_maybe())]),
+                 test_env())
+
+let unfillable_trace: List String =
+  ["[spec] declined bump_both at 1:1: its copy keeps a dictionary no slot fills"]
+
+# inner(x) twice in outer's body, at 2:1 and 3:1, both with outer's Eq dictionary.
+fn call_at(line: Int, name: String, t: types.Type, args: List typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  typed_ast.TCall(typed_ast.TVar(name, t, pos()), args, t, source.SourcePos(index = 0, line = line, column = 1))
+
+fn inner_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("inner", [param("x", "a")], Just(tn("a")), Nothing, [constraint("Eq", [tn("a")])],
+                    var_("x", tvar("a")))
+
+fn inner_call(line: Int) -> typed_ast.TypedExpr =
+  call_at(line, "inner", tvar("a"), [tdict("Eq", [tn("a")], fwd_block("Eq", [tn("a")])), var_("x", tvar("a"))])
+
+fn outer_decl() -> typed_ast.TypedDecl =
+  typed_ast.TFnDecl("outer", [param("x", "a")], Just(tn("a")), Nothing, [constraint("Eq", [tn("a")])],
+                    typed_ast.TTuple([inner_call(2), inner_call(3)], tvar("a"), pos()))
+
+fn same_evidence_twice_run() -> specialise.Output =
+  specialise.run(typed_ast.TypedProgram([inner_decl(), outer_decl(),
+                                         main_decl(call("outer", int_t(),
+                                                        [tdict("Eq", [tn("Int")], block("Eq", "Int", [])),
+                                                         int_lit(1)]))]),
+                 test_env())
+
+fn specialised(body: typed_ast.TypedExpr) -> specialise.Output =
+  specialise.run(typed_ast.TypedProgram([bigger_decl(), both_decl(), main_decl(body)]), test_env())
+
+fn decls_of(out: specialise.Output) -> List typed_ast.TypedDecl =
+  match out.program with
+  | typed_ast.TypedProgram decls -> decls
+
+fn decl_name(d: typed_ast.TypedDecl) -> String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> name
+  | typed_ast.TExternFnDecl name _ _ _ -> name
+  | typed_ast.TLetDecl name _ -> name
+  | typed_ast.TInstanceDecl _ _ _ -> ""
+  | typed_ast.TPassThrough _ -> ""
+
+fn find_decl(name: String, out: specialise.Output) -> Maybe typed_ast.TypedDecl =
+  find(\d -> decl_name(d) == name, decls_of(out))
+
+fn has_decl(name: String, out: specialise.Output) -> Bool =
+  match find_decl(name, out) with
+  | Just _ -> true
+  | Nothing -> false
+
+fn body_of(name: String, out: specialise.Output) -> Maybe typed_ast.TypedExpr =
+  match find_decl(name, out) with
+  | Just (typed_ast.TFnDecl _ _ _ _ _ body) -> Just(body)
+  | _ -> Nothing
+
+fn constraints_of(name: String, out: specialise.Output) -> Maybe (List ast.TypeConstraint) =
+  match find_decl(name, out) with
+  | Just (typed_ast.TFnDecl _ _ _ _ cs _) -> Just(cs)
+  | _ -> Nothing
+
+# The callee name of the first call in `main`'s body, and how many arguments it has.
+fn main_call(out: specialise.Output) -> (String, Int) =
+  match body_of("main", out) with
+  | Just (typed_ast.TCall(typed_ast.TVar name _ _) args _ _) -> (name, list_length(args))
+  | _ -> ("", -1)
+
+# The evidence of each TDict in the calls directly under a tuple body, as text.
+fn tuple_evidence(out: specialise.Output, name: String) -> List String =
+  match body_of(name, out) with
+  | Just (typed_ast.TTuple calls _ _) -> list_map(call_dict_text, calls)
+  | _ -> []
+
+fn call_dict_text(e: typed_ast.TypedExpr) -> String =
+  match e with
+  | typed_ast.TCall _ [typed_ast.TDict _ _ _ ev | _] _ _ -> spec_keys.ev_text(ev)
+  | _ -> ""
+
+fn first_param_ann(name: String, out: specialise.Output) -> String =
+  match find_decl(name, out) with
+  | Just (typed_ast.TFnDecl _ [ast.Param _ (Just(ast.TypeName t)) _ | _] _ _ _ _) -> t
+  | _ -> ""
+
+fn node_type_of_first_var(name: String, out: specialise.Output) -> types.Type =
+  match body_of(name, out) with
+  | Just (typed_ast.TCall _ [_, typed_ast.TVar _ t _ | _] _ _) -> t
+  | _ -> tvar("?")
+
+fn main() -> Unit !{IO} =
+  run_suite("specialise", [
+    # --- the copy's name ---
+    check_eq("name: one constraint, one argument",
+             name_of("main.bigger", [constraint("Ord", [tn("a")])], [("a", tn("Int"))]),
+             "main.bigger$spec_Int"),
+    check_eq("name: two constraints, written order",
+             name_of("member", [constraint("Foldable", [tn("c")]), constraint("Eq", [tn("a")])],
+                     [("a", tn("Int")), ("c", tn("List"))]),
+             "member$spec_List_Int"),
+    check_eq("name: a higher-kinded variable bound to a constructor",
+             name_of("fold", [constraint("Foldable", [tn("f")])], [("f", tn("List"))]),
+             "fold$spec_List"),
+    check_eq("name: a variable bound to an applied type",
+             name_of("fmap_all", [constraint("Functor", [tn("f")])],
+                     [("f", ast.TypeApply(tn("Dict"), tn("String")))]),
+             "fmap_all$spec_Dict_String"),
+    check_eq("name: a constraint written over an applied type",
+             name_of("show_all", [constraint("ToString", [ast.TypeApply(tn("List"), tn("a"))])],
+                     [("a", tn("Int"))]),
+             "show_all$spec_List_Int"),
+    check_eq("name: a tuple",
+             name_of("pair", [constraint("Ord", [tn("a")])], [("a", ast.TupleType([tn("Int"), tn("Bool")]))]),
+             "pair$spec_Tuple_Int_Bool"),
+    check_eq("name: a module-qualified type has no dot after the $",
+             name_of("main.consume", [constraint("Taker", [tn("a")])], [("a", tn("main.Handle"))]),
+             "main.consume$spec_main_Handle"),
+    check_eq("name: the part after the generic name is dot-free",
+             string.after_last_dot(
+               name_of("main.consume", [constraint("Taker", [tn("a")])], [("a", tn("some.mod.Handle"))])),
+             "consume$spec_some_mod_Handle"),
+    check_eq("name: only the written constraint arguments, not superclasses",
+             name_of("max_or_same", [constraint("Ord", [tn("a")])], [("a", tn("Int"))]),
+             "max_or_same$spec_Int"),
+
+    # --- the growth check ---
+    check_true("growth: a strict subterm is declined",
+               grows([block("Eq", "Int", [])], [block("Eq", "List", [block("Eq", "Int", [])])])),
+    check_false("growth: an equal-size different key is admitted",
+                grows([block("Eq", "Int", [])], [block("Eq", "Bool", [])])),
+    check_false("growth: the same instances do not grow",
+                grows([block("Eq", "Int", [])], [block("Eq", "Int", [])])),
+    check_false("growth: a smaller key does not grow",
+                grows([block("Eq", "List", [block("Eq", "Int", [])])], [block("Eq", "Int", [])])),
+    check_true("growth: any position growing is enough",
+               grows([block("Eq", "Int", []), block("Ord", "Bool", [])],
+                     [block("Eq", "Int", []), block("Ord", "List", [block("Ord", "Bool", [])])])),
+    check_false("growth: one position growing and another not repeated is not growth",
+                grows([block("Eq", "Int", []), block("Ord", "Bool", [])],
+                      [block("Eq", "List", [block("Eq", "Int", [])]), block("Ord", "Char", [])])),
+
+    # --- forwarded dictionaries are replaced by slot key, not by position ---
+    check_eq("slots: a forward finds the evidence of its own constraint",
+             spec_keys.ev_text(
+               spec_keys.ev_substitute(
+                 fwd_block("ToString", [tn("b")]),
+                 spec_keys.slots_for([constraint("Eq", [tn("a")]), constraint("ToString", [tn("b")])],
+                                     [block("Eq", "Int", []), block("ToString", "String", [])]))),
+             "[ToString_String]"),
+    check_eq("slots: and the first constraint's forward finds the first",
+             spec_keys.ev_text(
+               spec_keys.ev_substitute(
+                 fwd_block("Eq", [tn("a")]),
+                 spec_keys.slots_for([constraint("Eq", [tn("a")]), constraint("ToString", [tn("b")])],
+                                     [block("Eq", "Int", []), block("ToString", "String", [])]))),
+             "[Eq_Int]"),
+    check_eq("slots: a forward no constraint holds stays forwarded",
+             spec_keys.ev_text(
+               spec_keys.ev_substitute(
+                 fwd_block("Eq", [tn("z")]),
+                 spec_keys.slots_for([constraint("Eq", [tn("a")])], [block("Eq", "Int", [])]))),
+             "[fwd:Eq_z]"),
+
+    # --- the pass ---
+    check_eq("run: a concrete call gets a copy", specialised(bigger_at_int()).copies, 1),
+    check_true("run: the copy is defined", has_decl("bigger$spec_Int", specialised(bigger_at_int()))),
+    check_true("run: the generic version is kept for its other users",
+               has_decl("bigger", specialised(bigger_at_int()))),
+    check_eq("run: the call names the copy and drops the dictionary",
+             main_call(specialised(bigger_at_int())), ("bigger$spec_Int", 2)),
+    check_eq("run: the copy has no constraints",
+             maybe_with_default(-1, fmap(list_length, constraints_of("bigger$spec_Int", specialised(bigger_at_int())))),
+             0),
+    check_eq("run: the generic version keeps its constraint",
+             maybe_with_default(-1, fmap(list_length, constraints_of("bigger", specialised(bigger_at_int())))),
+             1),
+    check_eq("run: the copy's written parameter is the instance type",
+             first_param_ann("bigger$spec_Int", specialised(bigger_at_int())), "Int"),
+    check_true("run: the copy's node types are substituted",
+               node_type_of_first_var("bigger$spec_Int", specialised(bigger_at_int())) == int_t()),
+    check_eq("run: the generic version keeps its written parameter",
+             first_param_ann("bigger", specialised(bigger_at_int())), "a"),
+    check_eq("run: a forwarded dictionary makes no copy", specialised(bigger_forwarded()).copies, 0),
+    check_eq("run: and the call keeps its dictionary",
+             main_call(specialised(bigger_forwarded())), ("bigger", 3)),
+    check_eq("run: two constraints: each forward gets its own evidence",
+             tuple_evidence(specialised(both_at_int_string()), "both$spec_Int_String"),
+             ["[Eq_Int]", "[ToString_String]"]),
+    check_eq("run: two constraints: one copy", specialised(both_at_int_string()).copies, 1),
+    check_eq("run: the origin names the generic function",
+             map_origin("bigger$spec_Int", specialised(bigger_at_int())), "bigger"),
+    check_eq("run: a copy-name clash makes one copy", specialised(clashing_calls()).copies, 1),
+    check_eq("run: the first key keeps the copy and the later one keeps its dictionary",
+             tuple_calls(specialised(clashing_calls())), [("bigger$spec_x_y_T", 2), ("bigger", 3)]),
+    check_eq("run: no calls, no copies", specialised(int_lit(1)).copies, 0),
+    check_eq("trace: a copy is reported with its call site",
+             specialised(bigger_at_int()).trace,
+             ["[spec] copy bigger$spec_Int of bigger for the call at 1:1"]),
+    check_eq("trace: a clashing key is reported as declined",
+             specialised(clashing_calls()).trace,
+             ["[spec] copy bigger$spec_x_y_T of bigger for the call at 1:1",
+              "[spec] declined bigger at 1:1: copy name bigger$spec_x_y_T is taken"]),
+    check_eq("trace: a growing key is reported as declined",
+             nest_run().trace,
+             ["[spec] copy nest$spec_Int of nest for the call at 1:1",
+              "[spec] declined nest at 1:1: evidence grows on its path"]),
+    check_eq("trace: no calls, no lines", specialised(int_lit(1)).trace, []),
+    check_eq("unfillable: a key whose copy keeps a dictionary it cannot fill makes no copy",
+             unfillable_run("m").copies, 0),
+    check_eq("unfillable: and its call keeps the dictionary",
+             main_call(unfillable_run("m")), ("bump_both", 2)),
+    check_eq("unfillable: the trace says why", unfillable_run("m").trace, unfillable_trace),
+    check_eq("unfillable: a constraint over `_` is declined too", unfillable_run("_").trace, unfillable_trace),
+    check_eq("unfillable: a forward over an open variable (an existential's) is kept",
+             unfillable_run("t").copies, 1),
+    check_eq("origin: a call in the program has no holder",
+             map_holder("outer$spec_Int", same_evidence_twice_run()), Nothing),
+    check_eq("origin: a call inside a copy is held by that copy's generic function",
+             map_holder("inner$spec_Int", same_evidence_twice_run()), Just("outer")),
+    check_eq("order: of calls with one key inside a copy, the first in source order names it",
+             same_evidence_twice_run().trace,
+             ["[spec] copy outer$spec_Int of outer for the call at 1:1",
+              "[spec] copy inner$spec_Int of inner for the call at 2:1"]),
+    check_eq("run: a method used as a value gets its slot's evidence",
+             method_ref_evidence_text(method_ref_specialised()), "ToString_Int"),
+    check_eq("run: the generic version's method reference stays unresolved",
+             generic_method_ref_text(method_ref_specialised()), "unresolved")
+  ])
+
+fn map_holder(name: String, out: specialise.Output) -> Maybe String =
+  match dict_get(name, out.origins) with
+  | Just o -> o.holder
+  | Nothing -> Just("?")
+
+fn map_origin(name: String, out: specialise.Output) -> String =
+  match dict_get(name, out.origins) with
+  | Just o -> o.fn_name
+  | Nothing -> ""

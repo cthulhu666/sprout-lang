@@ -1,0 +1,572 @@
+module stdlib.compiler.spec_keys
+import stdlib.compiler.ast as ast
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.string as string
+
+# The copies specialisation makes (docs/specialisation-v0.md §4), found without making them.
+# `spec_census` counts them and `specialise` builds them from this one closure, so the count
+# and the pass cannot disagree. Runs on the RESOLVED program, before dictionary lowering,
+# where a call's evidence is still a tree of `EvInstance` / `EvForward`.
+#
+# A KEY is a constrained top-level function and the evidence for each of its constraints.
+# The evidence trees (`ev_text`) fix the instances of the constrained type variables; the
+# key also carries what the copy substitutes for them (`Subst`) and the copy's name.
+#
+# The closure walks a key's callee under its evidence (a copy's body), replacing each
+# forwarded dictionary by the caller's by slot key (`typed_ast.dict_slot_key`), and admits
+# every key that body calls (§4 "A worklist with a cache"). A key is declined, and its calls
+# keep dictionary passing, when its function is already on its path with instances that are a
+# strict subterm (growth), when an earlier key holds its copy name, or when its copy would keep
+# a forwarded dictionary no slot fills for a constraint that has become closed or names no type.
+
+# What a copy substitutes for the constrained variables, as written types and as inferred ones.
+export type Subst (..) = (te: Dict ast.TypeExpr, ty: Dict types.Type)
+
+export fn subst_empty() -> Subst = Subst(te = dict_empty(), ty = dict_empty())
+
+# `text` is the key as one string: the function, then its evidence trees. `name` is the
+# copy's IR name, `site` the call that first produced the key.
+export type Key (..) = (fn_name: String, evs: List typed_ast.Evidence, text: String, name: String,
+                        subst: Subst, site: source.SourcePos)
+
+# A constrained top-level function, as a copy would start from it.
+export type Callee (..) = (constraints: List ast.TypeConstraint, params: List ast.Param,
+                           ret: Maybe ast.TypeExpr, effects: Maybe (List String),
+                           body: typed_ast.TypedExpr, nodes: Int)
+
+# What one body walk finds: the keys of its concrete calls (`found` counts them), its
+# method calls the devirtualiser would not finish, and the dictionaries a copy would keep
+# forwarded (`stuck`).
+export type Sites (..) = (keys: List Key, found: Int, multi: Int, context: Int, stuck: Int)
+
+# What a walk needs: the constrained functions by name, the class methods by name, the
+# concrete evidence to put in each forwarded slot, and the substitution of the copy being
+# walked (both empty for the original program).
+export type Walk (..) = (callees: Dict Callee, methods: Dict Bool,
+                         slots: typed_ast.SlotTable typed_ast.Evidence, subst: Subst)
+
+export fn no_sites() -> Sites = Sites(keys = Nil, found = 0, multi = 0, context = 0, stuck = 0)
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+# Nothing a copy substitutes may be a variable: heads are constructors.
+fn te_closed(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName n -> types.type_id_is_concrete(types.type_id(n))
+  | ast.TypeApply base arg -> te_closed(base) && te_closed(arg)
+  | ast.TupleType items -> all(te_closed, items)
+  | ast.TypeArrow _ _ _ _ -> false
+  | ast.TypeThunk _ _ -> false
+  | ast.TypeEffect _ _ -> false
+
+# The placeholder `_` somewhere in `te`.
+fn te_blank(te: ast.TypeExpr) -> Bool =
+  match te with
+  | ast.TypeName n -> n == "_"
+  | ast.TypeApply base arg -> te_blank(base) || te_blank(arg)
+  | ast.TupleType items -> any(te_blank, items)
+  | ast.TypeArrow _ _ _ _ -> false
+  | ast.TypeThunk _ _ -> false
+  | ast.TypeEffect _ _ -> false
+
+fn te_to_type(te: ast.TypeExpr) -> types.Type =
+  match te with
+  | ast.TypeName n -> types.TConst(types.type_id(n))
+  | ast.TypeApply base arg -> types.TApp(te_to_type(base), te_to_type(arg))
+  | ast.TupleType items -> types.TTuple(list_map(te_to_type, items))
+  | ast.TypeArrow _ _ _ _ -> panic("spec_keys.te_to_type: function type in a closed substitution (internal error)")
+  | ast.TypeThunk _ _ -> panic("spec_keys.te_to_type: thunk type in a closed substitution (internal error)")
+  | ast.TypeEffect _ _ -> panic("spec_keys.te_to_type: effect type in a closed substitution (internal error)")
+
+fn te_text(te: ast.TypeExpr) -> String = lowering.mangle_type_args([te])
+
+# `conc` instantiates `pat`: bind each variable of `pat` (a lowercase name) to the closed
+# type at its place. Nothing when the shapes differ, a variable meets two different types,
+# or a variable would take one that is not closed.
+fn bind_te(pat: ast.TypeExpr, conc: ast.TypeExpr, acc: Dict ast.TypeExpr) -> Maybe (Dict ast.TypeExpr) =
+  match pat with
+  | ast.TypeName n ->
+      if !source.is_lowercase_name(n) then Just(acc)
+      else
+        match dict_get(n, acc) with
+        | Just prev -> if te_text(prev) == te_text(conc) then Just(acc) else Nothing
+        | Nothing -> if te_closed(conc) then Just(dict_set(n, conc, acc)) else Nothing
+  | ast.TypeApply pat_base pat_arg ->
+      match conc with
+      | ast.TypeApply con_base con_arg ->
+          let Just acc1 = bind_te(pat_base, con_base, acc) else Nothing
+          in bind_te(pat_arg, con_arg, acc1)
+      | _ -> Nothing
+  | ast.TupleType pats ->
+      match conc with
+      | ast.TupleType concs -> bind_list(pats, concs, acc)
+      | _ -> Nothing
+  | ast.TypeArrow _ _ _ _ -> Nothing
+  | ast.TypeThunk _ _ -> Nothing
+  | ast.TypeEffect _ _ -> Nothing
+
+fn bind_list(pats: List ast.TypeExpr, concs: List ast.TypeExpr, acc: Dict ast.TypeExpr)
+    -> Maybe (Dict ast.TypeExpr) =
+  match (pats, concs) with
+  | ([], []) -> Just(acc)
+  | ([p | ps], [c | cs]) ->
+      let Just acc1 = bind_te(p, c, acc) else Nothing
+      in bind_list(ps, cs, acc1)
+  | _ -> Nothing
+
+# The substitution a call fixes: each written constraint of the callee against the type
+# its dictionary was made for, `outer` (the walked copy's own substitution) applied first.
+# Constraints and dictionaries pair by position, as `slots_for` pairs them, and must name
+# the same class. Nothing if any constrained variable stays unbound or is not closed.
+fn bind_constraints(constraints: List ast.TypeConstraint, dicts: List ast.TypeConstraint,
+                    outer: Dict ast.TypeExpr, acc: Dict ast.TypeExpr) -> Maybe (Dict ast.TypeExpr) =
+  match (constraints, dicts) with
+  | ([], []) -> Just(acc)
+  | ([ast.TypeConstraint cls pats | cs], [ast.TypeConstraint dcls concs | ds]) ->
+      if string.after_last_dot(cls) != string.after_last_dot(dcls) then Nothing
+      else
+        let Just acc1 = bind_list(pats, list_map(ast.subst_type_expr(outer, _), concs), acc) else Nothing
+        in bind_constraints(cs, ds, outer, acc1)
+  | _ -> Nothing
+
+# The dictionaries' constraints a call carries, in argument order.
+fn dict_constraints(args: List typed_ast.TypedExpr) -> List ast.TypeConstraint =
+  list_filter_map(dict_constraint, args)
+
+fn dict_constraint(a: typed_ast.TypedExpr) -> Maybe ast.TypeConstraint =
+  match a with
+  | typed_ast.TDict c _ _ _ -> Just(c)
+  | _ -> Nothing
+
+export fn sub_constraint(c: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> ast.TypeConstraint =
+  match c with
+  | ast.TypeConstraint cls args -> ast.TypeConstraint(cls, list_map(ast.subst_type_expr(subs, _), args))
+
+export fn sub_param(p: ast.Param, subs: Dict ast.TypeExpr) -> ast.Param =
+  match p with
+  | ast.Param name ann mode -> ast.Param(name, fmap(ast.subst_type_expr(subs, _), ann), mode)
+
+# `t` with each variable the copy substitutes replaced. The body's node types name a signature
+# variable by an inference variable (`$t12`), which the `@eta_fwdvar` markers in `env` map back
+# to the name the signature wrote; `s.ty` is keyed by that name.
+export fn sub_type(t: types.Type, s: Subst, env: Dict types.Scheme) -> types.Type =
+  match t with
+  | types.TVar v -> written_binding(t, v, s, env)
+  | types.TConst _ -> t
+  | types.TApp base arg -> types.TApp(sub_type(base, s, env), sub_type(arg, s, env))
+  | types.TFunc param ret eff own -> types.TFunc(sub_type(param, s, env), sub_type(ret, s, env), eff, own)
+  | types.TThunk ret eff -> types.TThunk(sub_type(ret, s, env), eff)
+  | types.TTuple items -> types.TTuple(list_map(sub_type(_, s, env), items))
+
+fn written_binding(t: types.Type, v: types.TyVarId, s: Subst, env: Dict types.Scheme) -> types.Type =
+  let Just marker = dict_get(types.eta_fwdvar_marker_key(types.tyvar_identity(v)), env) else t
+      types.TConst written = types.scheme_type(marker) else t
+      Just bound = dict_get(types.type_id_name(written), s.ty) else t
+  in bound
+
+fn types_of(te: Dict ast.TypeExpr) -> Dict types.Type =
+  list_fold(\ (d, kv) -> add_type(kv, d), dict_empty(), vec_to_list(dict_entries(te)))
+
+fn add_type(kv: (String, ast.TypeExpr), d: Dict types.Type) -> Dict types.Type =
+  let (name, t) = kv
+  in dict_set(name, te_to_type(t), d)
+
+# `<generic name>$spec_<constraint type arguments in written order, after substitution>`.
+# No dot may follow the `$`: `string.after_last_dot` and its kin would cut the name there.
+export fn copy_name(fn_name: String, constraints: List ast.TypeConstraint, subs: Dict ast.TypeExpr) -> String =
+  fn_name ++ "$spec_"
+    ++ string.replace_all(".", "_", lowering.mangle_type_args(list_flat_map(constraint_args(_, subs), constraints)))
+
+fn constraint_args(c: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> List ast.TypeExpr =
+  match c with
+  | ast.TypeConstraint _ args -> list_map(ast.subst_type_expr(subs, _), args)
+
+# ---------------------------------------------------------------------------
+# Keys
+# ---------------------------------------------------------------------------
+
+# A key's text and copy name, the part `specialise.retarget` needs to find its copy.
+export type KeyId (..) = (text: String, name: String)
+
+fn key_id(fn_name: String, evs: List typed_ast.Evidence, constraints: List ast.TypeConstraint,
+          te: Dict ast.TypeExpr) -> KeyId =
+  KeyId(text = string.join(" ", Cons(fn_name, list_map(ev_text, evs))), name = copy_name(fn_name, constraints, te))
+
+fn make_key(fn_name: String, evs: List typed_ast.Evidence, constraints: List ast.TypeConstraint,
+            te: Dict ast.TypeExpr, site: source.SourcePos) -> Key =
+  let id = key_id(fn_name, evs, constraints, te)
+  in Key(fn_name = fn_name, evs = evs, text = id.text, name = id.name,
+         subst = Subst(te = te, ty = types_of(te)), site = site)
+
+# ---------------------------------------------------------------------------
+# Evidence
+# ---------------------------------------------------------------------------
+
+export fn ev_text(ev: typed_ast.Evidence) -> String = ev_node_text(ev, list_map(ev_text, ev_children(ev)))
+
+# An instance by its key with its context in parentheses, a forwarded slot by name.
+# `kids` are the texts of `ev_children(ev)`.
+fn ev_node_text(ev: typed_ast.Evidence, kids: List String) -> String =
+  match ev with
+  | typed_ast.EvInstance _ key _ -> typed_ast.instance_key_text(key) ++ context_text(kids)
+  | typed_ast.EvClasses _ -> "[" ++ string.join(" ", kids) ++ "]"
+  | typed_ast.EvForward _ slot -> "fwd:" ++ typed_ast.slot_key_text(slot)
+  | typed_ast.EvUnresolved -> "unresolved"
+  | typed_ast.EvMissing _ -> "missing"
+
+fn context_text(kids: List String) -> String =
+  match kids with
+  | Nil -> ""
+  | _ -> "(" ++ string.join(",", kids) ++ ")"
+
+fn ev_children(ev: typed_ast.Evidence) -> List typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> children
+  | typed_ast.EvClasses blocks -> blocks
+  | typed_ast.EvForward _ _ -> Nil
+  | typed_ast.EvUnresolved -> Nil
+  | typed_ast.EvMissing _ -> Nil
+
+# `EvInstance` all the way down.
+export fn ev_concrete(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> all(ev_concrete, children)
+  | typed_ast.EvClasses blocks -> all(ev_concrete, blocks)
+  | typed_ast.EvForward _ _ -> false
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+
+# Some instance inside takes context dictionaries of its own.
+fn ev_has_context(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> list_length(children) > 0
+  | typed_ast.EvClasses blocks -> any(ev_has_context, blocks)
+  | typed_ast.EvForward _ _ -> false
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+
+# Some forwarded dictionary inside.
+fn ev_has_forward(ev: typed_ast.Evidence) -> Bool =
+  match ev with
+  | typed_ast.EvInstance _ _ children -> any(ev_has_forward, children)
+  | typed_ast.EvClasses blocks -> any(ev_has_forward, blocks)
+  | typed_ast.EvForward _ _ -> true
+  | typed_ast.EvUnresolved -> false
+  | typed_ast.EvMissing _ -> false
+
+# `ev` with each forwarded slot that `slots` holds replaced by its evidence. A slot it
+# does not hold (an existential's, or a phantom variable's) stays forwarded.
+export fn ev_substitute(ev: typed_ast.Evidence, slots: typed_ast.SlotTable typed_ast.Evidence)
+    -> typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvForward _ slot -> maybe_with_default(ev, typed_ast.slot_get(slot, slots))
+  | typed_ast.EvInstance cls key children ->
+      typed_ast.EvInstance(cls, key, list_map(ev_substitute(_, slots), children))
+  | typed_ast.EvClasses blocks -> typed_ast.EvClasses(list_map(ev_substitute(_, slots), blocks))
+  | typed_ast.EvUnresolved -> ev
+  | typed_ast.EvMissing _ -> ev
+
+# An evidence tree's text, and whether it or a subtree has the text `needle`. Built
+# bottom-up, so each subtree's text is made once.
+type Found = (text: String, found: Bool)
+
+fn ev_find(ev: typed_ast.Evidence, needle: String) -> Found =
+  let kids = list_map(ev_find(_, needle), ev_children(ev))
+      text = ev_node_text(ev, list_map(\k -> k.text, kids))
+  in Found(text = text, found = text == needle || any(\k -> k.found, kids))
+
+# `new` repeats `old` inside itself, position by position, and differs in at least one.
+export fn ev_list_grows(old: List typed_ast.Evidence, new: List typed_ast.Evidence, differs: Bool) -> Bool =
+  match (old, new) with
+  | ([], []) -> differs
+  | ([o | os], [n | ns]) ->
+      let old_text = ev_text(o)
+          in_new = ev_find(n, old_text)
+      in if in_new.found then ev_list_grows(os, ns, differs || old_text != in_new.text) else false
+  | _ -> false
+
+# The slots a copy fills, one per block of each constraint's evidence. `build_hidden_for_constraints`
+# keys the callee's own slots by each effective class and the constraint's WRITTEN arguments, and
+# a TDict's blocks come in the same class order, so a block's class names its slot.
+export fn slots_for(constraints: List ast.TypeConstraint, evs: List typed_ast.Evidence)
+    -> typed_ast.SlotTable typed_ast.Evidence =
+  match (constraints, evs) with
+  | ([ast.TypeConstraint _ type_args | cs], [typed_ast.EvClasses blocks | es]) ->
+      list_fold(\ (t, b) -> typed_ast.slot_set(typed_ast.dict_slot_key(block_class(b), type_args), b, t),
+                slots_for(cs, es), blocks)
+  | _ -> typed_ast.slot_table_empty()
+
+fn block_class(ev: typed_ast.Evidence) -> String =
+  match ev with
+  | typed_ast.EvInstance cls _ _ -> cls
+  | typed_ast.EvForward cls _ -> cls
+  | typed_ast.EvClasses _ -> ""
+  | typed_ast.EvUnresolved -> ""
+  | typed_ast.EvMissing _ -> ""
+
+# ---------------------------------------------------------------------------
+# One walk
+# ---------------------------------------------------------------------------
+
+# Every call in `e`, with the names bound locally at that point tracked: a local can
+# share a top-level function's or a method's name, and then the call is not to it.
+# Every variant is listed, so a new binding form cannot fall through unbound.
+fn scan(e: typed_ast.TypedExpr, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  match e with
+  | typed_ast.TCall callee args _ pos ->
+      scan_all(typed_ast.children(e), locals, w, note_call(callee, args, pos, locals, w, acc))
+  | typed_ast.TLambda params body _ _ -> scan(body, bind_params(params, locals), w, acc)
+  | typed_ast.TMatch scrut branches _ _ ->
+      list_fold(\ (a, b) -> scan_branch(b, locals, w, a), scan(scrut, locals, w, acc), branches)
+  | typed_ast.TDo steps _ _ -> scan_steps(steps, locals, w, acc)
+  | typed_ast.TVar _ _ _ -> acc
+  | typed_ast.TInt _ _ _ -> acc
+  | typed_ast.TFloat _ _ _ -> acc
+  | typed_ast.TBool _ _ _ -> acc
+  | typed_ast.TString _ _ _ -> acc
+  | typed_ast.TChar _ _ _ -> acc
+  | typed_ast.TUnit _ _ -> acc
+  | typed_ast.TDict c _ _ ev -> note_dict(c, ev, w, acc)
+  | typed_ast.TMethodRef _ _ _ _ _ -> acc
+  | typed_ast.TTuple _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TIf _ _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TBinary _ _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TUnary _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TRange _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TRecord _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TGetField _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+  | typed_ast.TRecordUpdate _ _ _ _ -> scan_all(typed_ast.children(e), locals, w, acc)
+
+fn scan_all(es: List typed_ast.TypedExpr, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  list_fold(\ (a, e) -> scan(e, locals, w, a), acc, es)
+
+fn scan_branch(b: typed_ast.TypedMatchBranch, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  match b with
+  | typed_ast.TypedMatchBranch pat body -> scan(body, bind_names(ast.pattern_names(pat), locals), w, acc)
+
+# A step binds for the steps below it, not for its own value.
+fn scan_steps(steps: List typed_ast.TypedDoStep, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  match steps with
+  | Nil -> acc
+  | Cons s rest -> scan_steps(rest, step_binds(s, locals), w, scan(typed_ast.step_value(s), locals, w, acc))
+
+export fn step_binds(s: typed_ast.TypedDoStep, locals: Dict Bool) -> Dict Bool =
+  match s with
+  | typed_ast.TDoBindStep pat _ _ -> bind_names(ast.pattern_names(pat), locals)
+  | typed_ast.TDoLetStep name _ -> dict_set(name, true, locals)
+  | typed_ast.TDoExprStep _ -> locals
+
+export fn bind_names(names: List String, locals: Dict Bool) -> Dict Bool =
+  list_fold(\ (l, n) -> dict_set(n, true, l), locals, names)
+
+export fn bind_params(params: List ast.Param, locals: Dict Bool) -> Dict Bool =
+  bind_names(ast.param_names(params), locals)
+
+# The dictionaries a call carries, with `w`'s slots filled in, in argument order.
+export fn call_evidence(args: List typed_ast.TypedExpr, w: Walk) -> List typed_ast.Evidence =
+  list_filter_map(\a -> dict_evidence(a, w), args)
+
+fn dict_evidence(a: typed_ast.TypedExpr, w: Walk) -> Maybe typed_ast.Evidence =
+  match a with
+  | typed_ast.TDict _ _ _ ev -> Just(ev_substitute(ev, w.slots))
+  | _ -> Nothing
+
+# What a call to a constrained function (not a local) fixes, when it carries one dictionary
+# per constraint, all concrete, and its constrained variables are all fixed.
+type Fixed = (info: Callee, evs: List typed_ast.Evidence, te: Dict ast.TypeExpr)
+
+fn fixed_call(name: String, args: List typed_ast.TypedExpr, locals: Dict Bool, w: Walk) -> Maybe Fixed =
+  let Nothing = dict_get(name, locals) else Nothing
+      Just info = dict_get(name, w.callees) else Nothing
+      evs = call_evidence(args, w)
+  in
+    if !all(ev_concrete, evs) || list_length(evs) != list_length(info.constraints) then Nothing
+    else
+      let Just te = bind_constraints(info.constraints, dict_constraints(args), w.subst.te, dict_empty()) else Nothing
+      in Just(Fixed(info = info, evs = evs, te = te))
+
+export fn call_key(name: String, args: List typed_ast.TypedExpr, pos: source.SourcePos, locals: Dict Bool,
+                   w: Walk) -> Maybe Key =
+  let Just f = fixed_call(name, args, locals, w) else Nothing
+  in Just(make_key(name, f.evs, f.info.constraints, f.te, pos))
+
+# `call_key`'s text and name alone: no inferred types, no position.
+export fn call_key_id(name: String, args: List typed_ast.TypedExpr, locals: Dict Bool, w: Walk) -> Maybe KeyId =
+  let Just f = fixed_call(name, args, locals, w) else Nothing
+  in Just(key_id(name, f.evs, f.info.constraints, f.te))
+
+fn note_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, pos: source.SourcePos,
+             locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  let typed_ast.TVar name _ _ = callee else acc
+  in
+    match call_key(name, args, pos, locals, w) with
+    | Just k -> acc with (keys = Cons(k, acc.keys), found = acc.found + 1)
+    | Nothing -> note_method(name, args, locals, w, acc)
+
+# A call to a class method: finished by the devirtualiser unless it takes a second
+# dictionary of its own.
+fn note_method(name: String, args: List typed_ast.TypedExpr, locals: Dict Bool, w: Walk, acc: Sites) -> Sites =
+  let Nothing = dict_get(name, locals) else acc
+      Nothing = dict_get(name, w.callees) else acc
+      evs = call_evidence(args, w)
+  in
+    if !all(ev_concrete, evs) || !dict_member(name, w.methods) || list_length(evs) == 0 then acc
+    else acc with (multi = acc.multi + (if list_length(evs) > 1 then 1 else 0),
+                   context = acc.context + (if any(ev_has_context, evs) then 1 else 0))
+
+# A dictionary that stays forwarded in a copy although nothing in the copy can supply it: its
+# constraint is closed by the copy's substitution, or names no variable at all (`_`, which
+# `resolve` leaves for a superclass two levels up). An existential's stays forwarded too, but
+# its constraint names a variable the substitution leaves open.
+fn note_dict(c: ast.TypeConstraint, ev: typed_ast.Evidence, w: Walk, acc: Sites) -> Sites =
+  let ast.TypeConstraint _ args = sub_constraint(c, w.subst.te)
+  in
+    if ev_has_forward(ev_substitute(ev, w.slots)) && (all(te_closed, args) || any(te_blank, args))
+    then acc with (stuck = acc.stuck + 1)
+    else acc
+
+# ---------------------------------------------------------------------------
+# The program
+# ---------------------------------------------------------------------------
+
+fn callee_table(decls: List typed_ast.TypedDecl) -> Dict Callee =
+  list_fold(\ (t, d) -> add_callee(d, t), dict_empty(), decls)
+
+fn add_callee(d: typed_ast.TypedDecl, table: Dict Callee) -> Dict Callee =
+  match d with
+  | typed_ast.TFnDecl name params ret effects (Cons c cs) body ->
+      dict_set(name, Callee(constraints = Cons(c, cs), params = params, ret = ret, effects = effects,
+                            body = body, nodes = typed_ast.decl_node_count(d)), table)
+  | _ -> table
+
+fn method_table(decls: List typed_ast.TypedDecl) -> Dict Bool =
+  list_fold(\ (t, names) -> list_fold(\ (u, n) -> dict_set(n, true, u), t, names), dict_empty(),
+            vec_to_list(dict_values(typed_ast.class_tables(decls).order)))
+
+# Every body of the original program, nothing yet substituted, and for each declaration
+# whether it holds a key (`hits`, last declaration first).
+type Original = (sites: Sites, hits: List Bool)
+
+fn original_sites(decls: List typed_ast.TypedDecl, w: Walk) -> Original =
+  list_fold(\ (o, d) -> original_step(d, w, o), Original(sites = no_sites(), hits = Nil), decls)
+
+fn original_step(d: typed_ast.TypedDecl, w: Walk, o: Original) -> Original =
+  let after = decl_sites(d, w, o.sites)
+  in Original(sites = after, hits = Cons(after.found != o.sites.found, o.hits))
+
+fn decl_sites(d: typed_ast.TypedDecl, w: Walk, acc: Sites) -> Sites =
+  match d with
+  | typed_ast.TFnDecl _ params _ _ _ body -> scan(body, bind_params(params, dict_empty()), w, acc)
+  | typed_ast.TLetDecl _ value -> scan(value, dict_empty(), w, acc)
+  | typed_ast.TInstanceDecl _ _ methods -> list_fold(\ (a, m) -> method_sites(m, w, a), acc, methods)
+  | typed_ast.TExternFnDecl _ _ _ _ -> acc
+  | typed_ast.TPassThrough _ -> acc
+
+fn method_sites(m: typed_ast.TypedInstanceMethod, w: Walk, acc: Sites) -> Sites =
+  match m with
+  | typed_ast.TypedInstanceMethod _ params _ _ _ body -> scan(body, bind_params(params, dict_empty()), w, acc)
+
+# ---------------------------------------------------------------------------
+# The closure
+# ---------------------------------------------------------------------------
+
+# A key seen, and the key that produced it ("" for a direct one): the chain of
+# `parent`s is its path.
+export type Seen (..) = (key: Key, parent: String)
+
+# A key refused, and why.
+export type Declined (..) = (key: Key, why: String)
+
+# `closed_keys` counts `seen`, `declined_keys` counts `declined`. `order` holds the seen
+# keys, last admitted first; `declined_list` the declined ones, last declined first. `names`
+# maps the copy name of each seen key to its text.
+export type Closure (..) = (seen: Dict Seen, order: List Key, pending: List Key, declined: Dict Bool,
+                            declined_list: List Declined, names: Dict String, closed_keys: Int,
+                            declined_keys: Int, nodes: Int, multi: Int, context: Int)
+
+fn closure_empty() -> Closure =
+  Closure(seen = dict_empty(), order = Nil, pending = Nil, declined = dict_empty(), declined_list = Nil,
+          names = dict_empty(), closed_keys = 0, declined_keys = 0, nodes = 0, multi = 0, context = 0)
+
+# `direct` holds distinct keys; they are visited in order.
+fn start(direct: List Key) -> Closure =
+  let cl = list_fold(\ (c, k) -> admit(k, "", c), closure_empty(), direct)
+  in cl with (pending = list_reverse(cl.pending))
+
+# Each key is visited once: its callee's body, walked under its evidence and substitution,
+# gives the keys and devirtualisation blockers of that copy.
+fn drain(cl: Closure, base: Walk) -> Closure =
+  match cl.pending with
+  | Nil -> cl
+  | Cons k rest -> drain(visit(k, cl with (pending = rest), base), base)
+
+fn visit(k: Key, cl: Closure, base: Walk) -> Closure =
+  match dict_get(k.fn_name, base.callees) with
+  | Nothing -> cl
+  | Just info ->
+      let w = base with (slots = slots_for(info.constraints, k.evs), subst = k.subst)
+          found = scan(info.body, bind_params(info.params, dict_empty()), w, no_sites())
+          grown = cl with (nodes = cl.nodes + info.nodes, multi = cl.multi + found.multi,
+                           context = cl.context + found.context)
+      in
+        if found.stuck > 0 then retract(k, "its copy keeps a dictionary no slot fills", cl)
+        else list_fold(\ (c, found_key) -> admit(found_key, k.text, c), grown, list_reverse(found.keys))
+
+# `at` is the text of the key that produced `found` ("" for a direct one).
+fn admit(found: Key, at: String, cl: Closure) -> Closure =
+  if dict_member(found.text, cl.seen) || dict_member(found.text, cl.declined) then cl
+  else
+    match refusal(found, at, cl) with
+    | Just why -> cl with (declined = dict_set(found.text, true, cl.declined),
+                           declined_list = Cons(Declined(key = found, why = why), cl.declined_list),
+                           declined_keys = cl.declined_keys + 1)
+    | Nothing -> cl with (seen = dict_set(found.text, Seen(key = found, parent = at), cl.seen),
+                          order = Cons(found, cl.order), pending = Cons(found, cl.pending),
+                          names = dict_set(found.name, found.text, cl.names), closed_keys = cl.closed_keys + 1)
+
+# Two copies with one name would define one symbol twice, so a later key with another text
+# is declined and its calls keep dictionary passing.
+fn refusal(found: Key, at: String, cl: Closure) -> Maybe String =
+  if grows_on_path(found, at, cl.seen) then Just("evidence grows on its path")
+  else if dict_member(found.name, cl.names) then Just(`copy name ${found.name} is taken`)
+  else Nothing
+
+# A key admitted, then found to need a dictionary its copy cannot fill: declined after the fact.
+# Nothing else came from it, since its callee's keys are admitted only after this check.
+fn retract(k: Key, why: String, cl: Closure) -> Closure =
+  cl with (seen = dict_remove(k.text, cl.seen), order = list_filter(\o -> o.text != k.text, cl.order),
+           names = dict_remove(k.name, cl.names), declined = dict_set(k.text, true, cl.declined),
+           declined_list = Cons(Declined(key = k, why = why), cl.declined_list),
+           closed_keys = cl.closed_keys - 1, declined_keys = cl.declined_keys + 1)
+
+# The same function earlier on the path, at instances `found` strictly contains.
+fn grows_on_path(found: Key, at: String, seen: Dict Seen) -> Bool =
+  match dict_get(at, seen) with
+  | Nothing -> false
+  | Just s ->
+      (s.key.fn_name == found.fn_name && ev_list_grows(s.key.evs, found.evs, false))
+        || grows_on_path(found, s.parent, seen)
+
+# ---------------------------------------------------------------------------
+# Assembly
+# ---------------------------------------------------------------------------
+
+# `hits` has one entry per declaration, in order: whether the declaration holds a key.
+export type Closed (..) = (walk: Walk, direct_sites: Sites, direct: List Key, closure: Closure,
+                           hits: List Bool)
+
+export fn close(decls: List typed_ast.TypedDecl) -> Closed =
+  let base = Walk(callees = callee_table(decls), methods = method_table(decls),
+                  slots = typed_ast.slot_table_empty(), subst = subst_empty())
+      original = original_sites(decls, base)
+      direct = distinct_keys(original.sites.keys)
+  in Closed(walk = base, direct_sites = original.sites, direct = direct,
+            closure = drain(start(direct), base), hits = list_reverse(original.hits))
+
+fn distinct_keys(keys: List Key) -> List Key =
+  vec_to_list(dict_values(list_fold(\ (d, k) -> dict_set(k.text, k, d), dict_empty(), keys)))

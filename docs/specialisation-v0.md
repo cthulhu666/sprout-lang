@@ -156,10 +156,17 @@ allocations.
    constraint, so dropping `where` constraints does not touch it.
 2. Substitute the constrained variables in every node's `types.Type`, and in each `TDict`'s
    constraint, which is an `ast.TypeConstraint` and so needs the same substitution on `TypeExpr`.
+   A node's type names a signature variable by an inference variable (`$t12`), not by the name
+   the signature wrote; the `@eta_fwdvar` markers in the scheme env map one to the other, so the
+   pass takes the env. The substitution comes from the call: each written constraint of the callee
+   against the type its `TDict` was made for (the copy's own substitution applied first), and the
+   call makes no key unless that fixes every constrained variable to a closed type.
 3. Replace each `EvForward` with the caller's concrete evidence, **by key**, not by position.
    Forward keys are `typed_ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
    superclass-expanded in `build_hidden_for_constraints` order. Recurse into `EvInstance` children
-   and into `TMethodRef` evidence.
+   and into `TMethodRef` evidence. A method used as a value in a generic body has `EvUnresolved`
+   (`method_ref_constraint` needs a constructor head) and lowering rebuilds it from hidden
+   parameters, which the copy lacks, so the copy fills it from the slot its class type names.
 4. Name the copy `<generic IR name>$spec_<mangled args>`, where the args are the type arguments
    of the declaration's `where` constraints in written order (superclasses not included) after
    substitution, mangled by `lowering`'s `mangle_type_args`, which takes that `List ast.TypeExpr`:
@@ -168,7 +175,21 @@ allocations.
 **A worklist with a cache.** Key: (function, instances of its constrained variables). A copy's
 body may call other constrained functions with evidence that is now concrete; those go on the
 worklist. Each key is copied once. Each worklist entry records the key that produced it, so a
-key's **path** is the chain of producing keys back to a call in the original program.
+key's **path** is the chain of producing keys back to a call in the original program. The
+closure is `spec_keys.close`; `--phase spec-census` counts it and `specialise` builds from it.
+
+Evidence does not always fix the types: `Eq (Box a)` with no context is `Eq_Box` at `Box Int` and
+at `Box String`. The first call to reach a key (first in source order within a body) names the
+copy; a call whose evidence matches but whose copy name differs keeps dictionary passing. Two keys that would give one copy the same name
+(`T` in module `x.y` and `T` in module `x_y` both mangle to `x_y_T`) never define a symbol twice:
+the later key is declined, and its calls keep dictionary passing. The closure makes this call, so
+the census and the pass agree.
+
+A key is also declined when its copy would keep a forwarded dictionary that no slot of the copy
+fills, for a constraint the substitution closes (or one `resolve` left as `_`, as for a superclass
+two levels above the constrained variable). The copy would dispatch through a dictionary that does
+not exist; the call stays on dictionary passing, as it is with the pass off. An existential's
+forward stays forwarded legitimately: its constraint names a variable the substitution leaves open.
 
 **Why it terminates.** A cache alone is no backstop: growing evidence is a new key every time.
 - A self-call sees the provisional, ungeneralised scheme (`self_binding_scheme`, `infer.sprout`),
@@ -363,8 +384,12 @@ per-function opt-in annotation. That needs syntax, and a keyword, not a pragma s
 - **Syntax, typing, evaluation order:** none.
 - **Diagnostics:** a `verify_dispatch` finding is fatal (`resolve_checked` in `compiler.sprout`).
   One raised inside a copy is reported against the original function and the call site that
-  produced the copy, not the mangled copy name. `--phase lower` and later phases show copies by their mangled
-  names, as they show `__tc_`/`__cm_` names today.
+  produced the copy (placed by the function holding the call, or "the program"), not the mangled
+  copy name. Only the copies are re-verified; the rest of the program was checked before the pass.
+  `--phase lower` and later phases show copies by their mangled
+  names, as they show `__tc_`/`__cm_` names today. `SPROUT_TRACE_SPEC=1` prints one stderr line per
+  copy made and per key declined (growth check, copy-name clash, unfillable dictionary), each with
+  its call site.
 - **ABI:** none. Generic versions keep their names and signatures. Copies are new internal symbols.
 - **Compile cost:** the whole `TypedProgram` is in memory before `ir_pipeline`, so copies add their
   nodes to it. IR is still built one declaration at a time, so the IR side grows only with the

@@ -1,0 +1,218 @@
+module stdlib.compiler.specialise
+import stdlib.compiler.ast as ast
+import stdlib.compiler.resolve as resolve
+import stdlib.compiler.source as source
+import stdlib.compiler.spec_keys as spec_keys
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+
+# Specialisation (docs/specialisation-v0.md §4): a call to a constrained top-level function
+# whose dictionaries are all concrete calls a copy of it instead, with the constrained type
+# variables and the evidence substituted. Dictionary lowering then devirtualises every
+# method call in the copy. Runs on the RESOLVED program, before `lowering.lower_program`,
+# where evidence is still `EvInstance` / `EvForward`.
+#
+# The copies are the ones `spec_keys.close` admits (the census counts the same). This pass
+# only builds them: it rewrites each admitted key's callee under the key's slots and
+# substitution, and retargets every call whose key was admitted. A declined key's call stays
+# on dictionary passing, with its evidence made concrete. The generic version stays; if no
+# `TVar` names it any more, reachability drops it.
+
+# The generic function and the call a copy came from, for diagnostics (§10): `holder` is the
+# generic function whose copy holds the call, Nothing for a call in the program itself.
+export type Origin (..) = (fn_name: String, site: source.SourcePos, holder: Maybe String)
+
+# `origins` is keyed by the copy's name; `added` holds the copies, which `program` ends with.
+export type Output (..) = (program: typed_ast.TypedProgram, added: List typed_ast.TypedDecl,
+                           origins: Dict Origin, copies: Int, trace: List String)
+
+# `typed` is false for the original program, which needs no substitution, only retargeted calls.
+# `env` holds the `@eta_fwdvar` markers that name a node type's variables (`spec_keys.sub_type`).
+type Rw = (w: spec_keys.Walk, seen: Dict spec_keys.Seen, typed: Bool, env: Dict types.Scheme,
+           class_params: Dict String)
+
+export fn run(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Output =
+  match prog with
+  | typed_ast.TypedProgram decls -> run_decls(decls, env)
+
+fn run_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Output =
+  let closed = spec_keys.close(decls)
+      cl = closed.closure
+      keys = list_reverse(cl.order)
+      rw = Rw(w = closed.walk, seen = cl.seen, typed = false, env = env,
+              class_params = typed_ast.class_tables(decls).params)
+      made = list_map(make_copy(_, rw), keys)
+  in Output(
+       program = typed_ast.TypedProgram(list_append(rewrite_decls(decls, closed.hits, rw, []), made)),
+       added = made,
+       origins = list_fold(\ (o, k) -> dict_set(k.name, origin_of(k, cl.seen), o), dict_empty(), keys),
+       copies = list_length(keys),
+       trace = list_map(copy_line, keys) ++ list_map(declined_line, list_reverse(cl.declined_list)))
+
+fn origin_of(k: spec_keys.Key, seen: Dict spec_keys.Seen) -> Origin =
+  Origin(fn_name = k.fn_name, site = k.site, holder = holder_of(k, seen))
+
+# The generic function of the key that produced `k`.
+fn holder_of(k: spec_keys.Key, seen: Dict spec_keys.Seen) -> Maybe String =
+  let Just s = dict_get(k.text, seen) else Nothing
+      Just producer = dict_get(s.parent, seen) else Nothing
+  in Just(producer.key.fn_name)
+
+fn at(k: spec_keys.Key) -> String = `${k.site.line}:${k.site.column}`
+
+# One line per event (`SPROUT_TRACE_SPEC`), copies first.
+fn copy_line(k: spec_keys.Key) -> String = `[spec] copy ${k.name} of ${k.fn_name} for the call at ${at(k)}`
+
+fn declined_line(d: spec_keys.Declined) -> String = `[spec] declined ${d.key.fn_name} at ${at(d.key)}: ${d.why}`
+
+# ---------------------------------------------------------------------------
+# Declarations
+# ---------------------------------------------------------------------------
+
+# Only a declaration that holds a key is rebuilt. Tail recursive: the program is a long list.
+fn rewrite_decls(decls: List typed_ast.TypedDecl, hits: List Bool, rw: Rw,
+                 acc: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
+  match (decls, hits) with
+  | ([d | ds], [h | hs]) -> rewrite_decls(ds, hs, rw, Cons(if h then rewrite_decl(d, rw) else d, acc))
+  | _ -> list_reverse(acc)
+
+fn rewrite_decl(d: typed_ast.TypedDecl, rw: Rw) -> typed_ast.TypedDecl =
+  match d with
+  | typed_ast.TFnDecl name params ret effects cs body ->
+      typed_ast.TFnDecl(name, params, ret, effects, cs, rewrite(body, spec_keys.bind_params(params, dict_empty()), rw))
+  | typed_ast.TLetDecl name value -> typed_ast.TLetDecl(name, rewrite(value, dict_empty(), rw))
+  | typed_ast.TInstanceDecl c ctx methods -> typed_ast.TInstanceDecl(c, ctx, list_map(rewrite_method(_, rw), methods))
+  | typed_ast.TExternFnDecl _ _ _ _ -> d
+  | typed_ast.TPassThrough _ -> d
+
+fn rewrite_method(m: typed_ast.TypedInstanceMethod, rw: Rw) -> typed_ast.TypedInstanceMethod =
+  match m with
+  | typed_ast.TypedInstanceMethod name params ret effects cs body ->
+      typed_ast.TypedInstanceMethod(name, params, ret, effects, cs,
+                                    rewrite(body, spec_keys.bind_params(params, dict_empty()), rw))
+
+# The copy of a key's callee: no `where` constraints, its written signature and every node
+# under the key's substitution, each forwarded dictionary replaced by the caller's.
+fn make_copy(k: spec_keys.Key, rw: Rw) -> typed_ast.TypedDecl =
+  match dict_get(k.fn_name, rw.w.callees) with
+  | Nothing -> panic("specialise.make_copy: a key names no constrained function (internal error)")
+  | Just info ->
+      let te = k.subst.te
+          w = rw.w with (slots = spec_keys.slots_for(info.constraints, k.evs), subst = k.subst)
+          crw = rw with (w = w, typed = true)
+      in typed_ast.TFnDecl(
+           k.name,
+           list_map(spec_keys.sub_param(_, te), info.params),
+           fmap(ast.subst_type_expr(te, _), info.ret),
+           info.effects,
+           [],
+           rewrite(info.body, spec_keys.bind_params(info.params, dict_empty()), crw))
+
+# ---------------------------------------------------------------------------
+# Expressions
+# ---------------------------------------------------------------------------
+
+fn ty(t: types.Type, rw: Rw) -> types.Type =
+  if rw.typed then spec_keys.sub_type(t, rw.w.subst, rw.env) else t
+
+# A method used as a value, in a generic body, has no evidence (`resolve.method_ref_constraint`
+# needs a constructor head): lowering rebuilds it from the hidden parameters, which a copy
+# does not have. The copy knows the dictionary: it is the one in the slot the method's class
+# type names, as for a forwarded dictionary.
+fn method_ref_evidence(method: String, cls: String, t: types.Type, ev: typed_ast.Evidence,
+                       rw: Rw) -> typed_ast.Evidence =
+  match ev with
+  | typed_ast.EvUnresolved ->
+      if rw.typed then maybe_with_default(ev, forwarded_slot_of(method, cls, t, rw)) else ev
+  | _ -> ev_in(ev, rw)
+
+fn forwarded_slot_of(method: String, cls: String, t: types.Type, rw: Rw) -> Maybe typed_ast.Evidence =
+  let class_type = types.eta_class_type(rw.class_params, rw.env, cls, method, t, t)
+  in typed_ast.slot_get(typed_ast.dict_slot_key(cls, [resolve.named_type_expr(class_type, rw.env)]), rw.w.slots)
+
+fn ev_in(ev: typed_ast.Evidence, rw: Rw) -> typed_ast.Evidence =
+  if rw.typed then spec_keys.ev_substitute(ev, rw.w.slots) else ev
+
+fn params_in(params: List ast.Param, rw: Rw) -> List ast.Param =
+  if rw.typed then list_map(spec_keys.sub_param(_, rw.w.subst.te), params) else params
+
+# Rewrites `e`, tracking the names bound locally as `spec_keys.scan` does, so a local that
+# shares a constrained function's name is never retargeted. Every variant is listed.
+fn rewrite(e: typed_ast.TypedExpr, locals: Dict Bool, rw: Rw) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TCall callee args t pos -> rewrite_call(callee, args, t, pos, locals, rw)
+  | typed_ast.TLambda params body t pos ->
+      typed_ast.TLambda(params_in(params, rw), rewrite(body, spec_keys.bind_params(params, locals), rw), ty(t, rw), pos)
+  | typed_ast.TMatch scrut branches t pos ->
+      typed_ast.TMatch(rewrite(scrut, locals, rw), list_map(rewrite_branch(_, locals, rw), branches), ty(t, rw), pos)
+  | typed_ast.TDo steps t pos -> typed_ast.TDo(rewrite_steps(steps, locals, rw), ty(t, rw), pos)
+  | typed_ast.TDict c t pos ev ->
+      typed_ast.TDict(if rw.typed then spec_keys.sub_constraint(c, rw.w.subst.te) else c, ty(t, rw), pos, ev_in(ev, rw))
+  | typed_ast.TMethodRef method cls t pos ev ->
+      typed_ast.TMethodRef(method, cls, ty(t, rw), pos, method_ref_evidence(method, cls, t, ev, rw))
+  # A leaf is rebuilt only for a copy: the original program's keep their node.
+  | typed_ast.TVar name t pos -> if rw.typed then typed_ast.TVar(name, ty(t, rw), pos) else e
+  | typed_ast.TInt n t pos -> if rw.typed then typed_ast.TInt(n, ty(t, rw), pos) else e
+  | typed_ast.TFloat text t pos -> if rw.typed then typed_ast.TFloat(text, ty(t, rw), pos) else e
+  | typed_ast.TBool b t pos -> if rw.typed then typed_ast.TBool(b, ty(t, rw), pos) else e
+  | typed_ast.TString s t pos -> if rw.typed then typed_ast.TString(s, ty(t, rw), pos) else e
+  | typed_ast.TChar c t pos -> if rw.typed then typed_ast.TChar(c, ty(t, rw), pos) else e
+  | typed_ast.TUnit t pos -> if rw.typed then typed_ast.TUnit(ty(t, rw), pos) else e
+  | typed_ast.TTuple items t pos -> typed_ast.TTuple(list_map(rewrite(_, locals, rw), items), ty(t, rw), pos)
+  | typed_ast.TIf c a b t pos ->
+      typed_ast.TIf(rewrite(c, locals, rw), rewrite(a, locals, rw), rewrite(b, locals, rw), ty(t, rw), pos)
+  | typed_ast.TBinary op l r t pos ->
+      typed_ast.TBinary(op, rewrite(l, locals, rw), rewrite(r, locals, rw), ty(t, rw), pos)
+  | typed_ast.TUnary op x t pos -> typed_ast.TUnary(op, rewrite(x, locals, rw), ty(t, rw), pos)
+  | typed_ast.TRange lo hi t pos -> typed_ast.TRange(rewrite(lo, locals, rw), rewrite(hi, locals, rw), ty(t, rw), pos)
+  | typed_ast.TRecord name fields t pos ->
+      typed_ast.TRecord(name, list_map(rewrite_field(_, locals, rw), fields), ty(t, rw), pos)
+  | typed_ast.TGetField base field t pos -> typed_ast.TGetField(rewrite(base, locals, rw), field, ty(t, rw), pos)
+  | typed_ast.TRecordUpdate base fields t pos ->
+      typed_ast.TRecordUpdate(rewrite(base, locals, rw), list_map(rewrite_field(_, locals, rw), fields), ty(t, rw), pos)
+
+fn rewrite_field(f: typed_ast.TypedRecordField, locals: Dict Bool, rw: Rw) -> typed_ast.TypedRecordField =
+  match f with
+  | typed_ast.TypedRecordField name value -> typed_ast.TypedRecordField(name, rewrite(value, locals, rw))
+
+fn rewrite_branch(b: typed_ast.TypedMatchBranch, locals: Dict Bool, rw: Rw) -> typed_ast.TypedMatchBranch =
+  match b with
+  | typed_ast.TypedMatchBranch pat body ->
+      typed_ast.TypedMatchBranch(pat, rewrite(body, spec_keys.bind_names(ast.pattern_names(pat), locals), rw))
+
+# A step binds for the steps below it, not for its own value.
+fn rewrite_steps(steps: List typed_ast.TypedDoStep, locals: Dict Bool, rw: Rw) -> List typed_ast.TypedDoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> Cons(rewrite_step(s, locals, rw), rewrite_steps(rest, spec_keys.step_binds(s, locals), rw))
+
+fn rewrite_step(s: typed_ast.TypedDoStep, locals: Dict Bool, rw: Rw) -> typed_ast.TypedDoStep =
+  match s with
+  | typed_ast.TDoBindStep pat value mode -> typed_ast.TDoBindStep(pat, rewrite(value, locals, rw), mode)
+  | typed_ast.TDoLetStep name value -> typed_ast.TDoLetStep(name, rewrite(value, locals, rw))
+  | typed_ast.TDoExprStep value -> typed_ast.TDoExprStep(rewrite(value, locals, rw))
+
+# A call whose key was admitted names the copy and passes no dictionaries. Any other call
+# keeps its callee and arguments, rewritten.
+fn rewrite_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, t: types.Type,
+                pos: source.SourcePos, locals: Dict Bool, rw: Rw) -> typed_ast.TypedExpr =
+  match retarget(callee, args, locals, rw) with
+  | Just copy ->
+      typed_ast.TCall(copy, list_map(rewrite(_, locals, rw), list_filter(is_value_arg, args)), ty(t, rw), pos)
+  | Nothing ->
+      typed_ast.TCall(rewrite(callee, locals, rw), list_map(rewrite(_, locals, rw), args), ty(t, rw), pos)
+
+# The callee naming the copy. Asks `spec_keys` for the key of `args` as written: the closure
+# saw the same arguments, so the key and its name are the ones it admitted. A key admitted
+# under another name (the same evidence at a different type) is left on dictionary passing.
+fn retarget(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, locals: Dict Bool,
+            rw: Rw) -> Maybe typed_ast.TypedExpr =
+  let typed_ast.TVar name callee_t callee_pos = callee else Nothing
+      Just id = spec_keys.call_key_id(name, args, locals, rw.w) else Nothing
+      Just s = dict_get(id.text, rw.seen) else Nothing
+  in if s.key.name == id.name then Just(typed_ast.TVar(id.name, ty(callee_t, rw), callee_pos)) else Nothing
+
+fn is_value_arg(a: typed_ast.TypedExpr) -> Bool =
+  match a with
+  | typed_ast.TDict _ _ _ _ -> false
+  | _ -> true
