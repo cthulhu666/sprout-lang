@@ -9,6 +9,7 @@ module main
 # collections keep happening. Prints a checksum only: both arms must print the same bytes.
 
 import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set, mutvec_fold)
+import stdlib.rng (rng_next)
 
 let size = 1000000
 let rounds = 1200
@@ -19,14 +20,10 @@ let churn_len = 6000
 fn modulo(a: Int, b: Int) -> Int =
   a - (a / b) * b
 
-# 31-bit linear congruential step; the product stays below 2^62.
-fn next_seed(s: Int) -> Int =
-  modulo(s * 1103515245 + 12345, 2147483648)
-
 fn scatter(v: MutVec Int, seed: Int, k: Int) -> Int !{IO} =
   if k <= 0 then seed
   else do
-    let s = next_seed(seed)
+    let s = rng_next(seed)
     mutvec_set(v, modulo(s, size), s / 65536)
     scatter(v, s, k - 1)
 

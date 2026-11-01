@@ -8,15 +8,17 @@
 #
 # usage: ab.sh [-n runs] [-s fixed|default|both|none] [-w names] [-e every,...] [-o dir] [-B]
 #   -n  runs per arm (6)
-#   -s  fixed:   SPROUT_GC_ADAPT_RATIO=0 + a fixed SPROUT_GC_THRESHOLD per workload, so both arms
-#                run the same number of collections and the per-collection cost is comparable
+#   -s  fixed:   SPROUT_GC_ADAPT_RATIO=0 + a fixed SPROUT_GC_THRESHOLD per workload. Adaptation is
+#                off, but collection counts still differ after minors (the heap count then includes
+#                dead old objects): compare per-collection p50/p90, not totals
 #       default: no GC env besides the arm (CPU, GC time and RSS end to end)
 #       both (default), none. With -e and no -s, only the -e sweep runs.
 #   -w  comma-separated workload names (all)
 #   -e  SPROUT_GC_MAJOR_EVERY values for MINOR=1 at default settings, each round also runs one
 #       MINOR=0 baseline; the run order rotates every round
 #   -o  output dir (/private/tmp/gc_minor_ab/<timestamp>)
-#   -B  reuse binaries already in <dir>/bin
+#   -B  reuse binaries already in <dir>/bin and append to its results.tsv; without -B a
+#       fresh results.tsv is started
 #
 # macOS only: it times with `/usr/bin/time -l`. Run from anywhere; it cds to the repo root.
 set -euo pipefail
@@ -38,6 +40,7 @@ RUN_TIMEOUT="${RUN_TIMEOUT:-300}"   # seconds per run
 RUNS=6
 SETTING=""
 WORKLOADS="$ALL_WORKLOADS"
+WL_NAMED=0
 EVERY=""
 OUT="/private/tmp/gc_minor_ab/$(date +%Y%m%d-%H%M%S)"
 REUSE=0
@@ -46,7 +49,7 @@ while getopts "n:s:w:e:o:B" opt; do
   case "$opt" in
     n) RUNS="$OPTARG" ;;
     s) SETTING="$OPTARG" ;;
-    w) WORKLOADS="${OPTARG//,/ }" ;;
+    w) WORKLOADS="${OPTARG//,/ }"; WL_NAMED=1 ;;
     e) EVERY="${OPTARG//,/ }" ;;
     o) OUT="$OPTARG" ;;
     B) REUSE=1 ;;
@@ -59,6 +62,24 @@ fi
 case "$SETTING" in fixed|default|both|none) ;; *) echo "bad -s: $SETTING" >&2; exit 2 ;; esac
 [[ "$(uname)" == "Darwin" ]] || { echo "ERROR: macOS only (/usr/bin/time -l)" >&2; exit 1; }
 [[ -x "$COMPILER" ]] || { echo "ERROR: $COMPILER missing (run: mise exec -- just bootstrap-from-seed)" >&2; exit 1; }
+
+# galaxy_client needs the game repo, raylib and a catalog: dropped with a warning when it came from
+# the default set, an error when named with -w.
+if [[ " $WORKLOADS " == *" galaxy_client "* ]]; then
+  gc_missing=""
+  for f in "$UNSUNS/game/app.sprout" "$UNSUNS/graphics/raylib-prefix.sh" "$UNSUNS/graphics/sprout_gfx.c" \
+           "$UNSUNS/graphics/sprout_audio.c"; do
+    [[ -f "$f" || -n "$gc_missing" ]] || gc_missing="$f"
+  done
+  [[ -d "$CATALOG" || -n "$gc_missing" ]] || gc_missing="$CATALOG"
+  if [[ -n "$gc_missing" ]]; then
+    if [[ $WL_NAMED == 1 ]]; then
+      echo "ERROR: galaxy_client needs $gc_missing (set UNSUNS / CATALOG)" >&2; exit 1
+    fi
+    echo "WARNING: dropping galaxy_client: $gc_missing missing (set UNSUNS / CATALOG)" >&2
+    WORKLOADS="${WORKLOADS/galaxy_client/}"
+  fi
+fi
 
 mkdir -p "$OUT/bin" "$OUT/runs"
 TSV="$OUT/results.tsv"
@@ -120,6 +141,24 @@ wl_def() {
 }
 
 # ── Build, once ──────────────────────────────────────────────────────────────────────────────
+# patch_galaxy <root> <grep pattern> <sed expr> [import line]: rewrite the loam/game files that match
+# (none is fine); with an import line, add it before the first `import`, else after `module`.
+patch_galaxy() {
+  local f files
+  files="$(grep -rl "$2" "$1/loam" "$1/game" || true)"
+  [[ -z "$files" ]] && return 0
+  while IFS= read -r f; do
+    sed -i '' -E "$3" "$f" || return 1
+    [[ -z "${4:-}" ]] && continue
+    if grep -q '^import' "$f"; then
+      awk -v l="$4" '/^import/ && !d { print l; d = 1 } { print }' "$f" > "$f.new" || return 1
+    else
+      awk -v l="$4" '{ print } /^module/ && !d { print l; d = 1 }' "$f" > "$f.new" || return 1
+    fi
+    mv "$f.new" "$f" || return 1
+  done <<< "$files"
+}
+
 build_galaxy() { # mirrors uncharted-suns' `run-gfx`, minus the run; SPROUT_ROOT is this checkout
   local rl gfx_link root="$UNSUNS"
   rl="$(cd "$UNSUNS" && bash graphics/raylib-prefix.sh)"
@@ -133,15 +172,13 @@ build_galaxy() { # mirrors uncharted-suns' `run-gfx`, minus the run; SPROUT_ROOT
     root="$OUT/galaxy_src"
     rm -rf "$root"; mkdir -p "$root"
     cp -R "$UNSUNS/loam" "$UNSUNS/game" "$root/" || return 1
-    local f
-    grep -rl 'env\.get(' "$root/loam" "$root/game" | xargs sed -i '' -E \
+    patch_galaxy "$root" 'env\.get(' \
       's/env\.get\(([^)]*)\)/(match env.get(\1) with | Ok m -> m | Err _ -> Nothing)/g' || return 1
-    grep -rl 'args\.parse_argv()' "$root/loam" "$root/game" | xargs sed -i '' -E \
+    patch_galaxy "$root" 'args\.parse_argv()' \
       's/args\.parse_argv\(\)/(match args.parse_argv() with | Ok a -> a | Err _ -> args.parse([]))/g' || return 1
-    for f in $(grep -rl 'argv_get(' "$root/loam" "$root/game"); do
-      sed -i '' -E 's/argv_get\(([^)]*)\)/(match argv.get(\1) with | Ok m -> m | Err _ -> Nothing)/g' "$f"
-      awk '/^import/ && !d { print "import stdlib.argv as argv"; d = 1 } { print }' "$f" > "$f.new" && mv "$f.new" "$f"
-    done
+    patch_galaxy "$root" 'argv_get(' \
+      's/argv_get\(([^)]*)\)/(match argv.get(\1) with | Ok m -> m | Err _ -> Nothing)/g' \
+      'import stdlib.argv as argv' || return 1
     "$COMPILER" --emit-ir "$REPO/stdlib" --package-root "$root" "$root/game/app.sprout" > "$OUT/galaxy.ll" || return 1
   fi
   # shellcheck disable=SC2086
@@ -196,8 +233,6 @@ gc_summary() {
     END { printf "%d %d %d %d %d\n", c, mi, ma, t, m }' || echo "0 0 0 0 0"
 }
 
-HASHDIR="$OUT/hashes"; mkdir -p "$HASHDIR"
-
 # run_one <workload> <setting> <minor 0|1> <major_every or -> <run idx>
 run_one() {
   local w="$1" setting="$2" minor="$3" every="$4" idx="$5"
@@ -227,13 +262,10 @@ run_one() {
   local p50 p90; p50="$(pctl "$steady" 50)"; p90="$(pctl "$steady" 90)"
 
   local hash; hash="$(norm < "$rd.out" | shasum | cut -c1-12)"
-  # Stdout must match across arms and settings; the first run of a workload sets the reference.
-  if [[ -f "$HASHDIR/$w" ]]; then
-    if [[ "$(cat "$HASHDIR/$w")" != "$hash" ]]; then
-      echo "!!!!!! STDOUT MISMATCH: $tag hash $hash != $(cat "$HASHDIR/$w") !!!!!!" >&2
-    fi
-  else
-    echo "$hash" > "$HASHDIR/$w"
+  # Stdout must match across arms and settings; the first TSV row of a workload is the reference.
+  local ref; ref="$(awk -F'\t' -v w="$w" '$1 == w { print $18; exit }' "$TSV")"
+  if [[ -n "$ref" && "$ref" != "$hash" ]]; then
+    echo "!!!!!! STDOUT MISMATCH: $tag hash $hash != $ref !!!!!!" >&2
   fi
   [[ $rc != 0 ]] && echo "!!!!!! NONZERO EXIT ($rc): $tag !!!!!!" >&2
 
@@ -272,7 +304,9 @@ run_every() { # <workload>: per round one MINOR=0 baseline and one MINOR=1 run p
 
 # ── Main ─────────────────────────────────────────────────────────────────────────────────────
 START=$SECONDS
-printf 'workload\tsetting\tminor\tmajor_every\trun\tload\treal\tuser\tsys\tmax_rss_kb\tcycles\tminors\tmajors\tgc_us_total\tgc_us_steady_p50\tgc_us_steady_p90\tmarked_total\tstdout_hash\texit\n' > "$TSV"
+if [[ $REUSE == 0 || ! -s "$TSV" ]]; then
+  printf 'workload\tsetting\tminor\tmajor_every\trun\tload\treal\tuser\tsys\tmax_rss_kb\tcycles\tminors\tmajors\tgc_us_total\tgc_us_steady_p50\tgc_us_steady_p90\tmarked_total\tstdout_hash\texit\n' > "$TSV"
+fi
 echo "==> output: $OUT" >&2
 build_all
 for w in $WORKLOADS; do
