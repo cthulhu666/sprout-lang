@@ -266,7 +266,7 @@ accepts. The differential test (§7) holds this. Everything that changes:
 |---|---|---|
 | `.` on non-ASCII | one byte | one code point; `^.$` matches `é` |
 | class on non-ASCII | bytes: `[é]` never matches `é` | code points; `[à-ž]` is a code point range |
-| span inside a character | rounded to whole characters | cannot occur |
+| span inside a character | `find_first` rounds to whole characters; `replace_all_literal` leaves the match unreplaced | cannot occur |
 | `\` before a special character inside `[...]` | literal `\`: `[\.]` is `\` or `.` | escape: `[\.]` is `.`; `[\\]` is `\` (`[\d]`, `[\w]`, `[\s]` and unknown escapes do not change) |
 | `^` in `replace_all_literal` | matches after each replacement: `^a`, `X`, `aaa` gives `XXX` | text start only: `Xaa` |
 | `a**`, `a+*`, `a?+`, `a\|`, empty pattern, `(\|a)` | per platform (§1) | the first three are `a*`; the rest match empty, as on glibc |

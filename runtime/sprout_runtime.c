@@ -6696,6 +6696,19 @@ long long regex_replace_all_literal(long long pattern_i, long long replacement_i
     }
     size_t start = (size_t)match.rm_so;
     size_t end = (size_t)match.rm_eo;
+    /* libc matches bytes, so a match can start or end inside a character. Replacing it would
+     * leave half a character in the result, which is not a valid String. Such a match is left
+     * unreplaced: copy up to and including the character it touches, then rescan after it.
+     * `cursor` is always on a boundary, so the character starts at `start` rounded down. The
+     * Sprout engine in docs/regex-engine-v0.md matches whole characters and retires this. */
+    if (((unsigned char)cursor[start] & 0xC0) == 0x80 || ((unsigned char)cursor[end] & 0xC0) == 0x80) {
+      size_t s = start;
+      while (((unsigned char)cursor[s] & 0xC0) == 0x80) s--;
+      size_t width = sprout_utf8_step(cursor, s);
+      buf_append_bytes(&out, cursor, s + width);
+      cursor += s + width;
+      continue;
+    }
     buf_append_bytes(&out, cursor, start);
     buf_append_cstr(&out, replacement_now);
     if (end == 0) {
