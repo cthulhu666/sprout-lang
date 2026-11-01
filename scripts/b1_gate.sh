@@ -64,11 +64,11 @@ else
   echo "  FAIL: B1 fired on a shadowed heap 'Double' — unrooted heap load (UAF)"; fail=1
 fi
 
-# ①' — an ordinary non-Double PRIMITIVE (Vector Int) stays a call (RepUnsupported).
+# ①' — a read of an ordinary non-Double PRIMITIVE (Vector Int) stays a call.
 if [ "$(emit "$FIX/fixture_b1_nondouble.spr" | fn_body 'main\.read_first' | grep -cEe 'vec_get_d|[$]ep = getelementptr')" -eq 0 ]; then
   echo "  ok: non-Double primitive (Vector Int) stays a call"
 else
-  echo "  FAIL: B1 fired on a Vector Int — only scalar-Double is inlinable today"; fail=1
+  echo "  FAIL: B1 fired on a Vector Int — only Vector Double reads inline"; fail=1
 fi
 
 # ② — under-applied vector_get_direct on Vector Double compiles AND actually builds a
@@ -93,20 +93,28 @@ else
   echo "  FAIL: under-applied vector_get_direct on Vector Double no longer compiles"; fail=1
 fi
 
-# ④b — out-of-bounds Vector Double read traps at the inline guard.
-if emit "$FIX/fixture_b1_oob.spr" > "$TMP/oob.ll" 2>/dev/null \
-   && clang "$TMP/oob.ll" runtime/*.c -O2 \
-        "${CLANG_EXTRA[@]}" -o "$TMP/oob" 2>/dev/null; then
-  if "$TMP/oob" > "$TMP/oob.out" 2>&1; then
-    echo "  FAIL: out-of-bounds Vector Double read did NOT trap"; fail=1
-  elif grep -qi "index out of bounds" "$TMP/oob.out"; then
-    echo "  ok: out-of-bounds read traps at inline guard"
+# check_trap <fixture> <tag> <exact-text> <label> — the fixture builds, runs, exits non-zero
+# and prints <exact-text> as a whole line.
+check_trap() {
+  local fixture="$1" tag="$2" text="$3" label="$4"
+  if emit "$fixture" > "$TMP/$tag.ll" 2>/dev/null \
+     && clang "$TMP/$tag.ll" runtime/*.c -O2 \
+          "${CLANG_EXTRA[@]}" -o "$TMP/$tag" 2>/dev/null; then
+    if "$TMP/$tag" > "$TMP/$tag.out" 2>&1; then
+      echo "  FAIL: $label did NOT trap"; fail=1
+    elif grep -qxF "$text" "$TMP/$tag.out"; then
+      echo "  ok: $label traps with the runtime's text"
+    else
+      echo "  FAIL: $label trapped with the wrong text: $(head -3 "$TMP/$tag.out")"; fail=1
+    fi
   else
-    echo "  FAIL: out-of-bounds read aborted without the expected message"; fail=1
+    echo "  FAIL: could not build the $label fixture"; fail=1
   fi
-else
-  echo "  FAIL: could not build the out-of-bounds fixture"; fail=1
-fi
+}
+
+# ④b — out-of-bounds Vector Double read traps at the inline guard.
+check_trap "$FIX/fixture_b1_oob.spr" oob \
+  'runtime error: vector_get_direct: index out of bounds' 'out-of-bounds read'
 
 # Scalar stores — a direct `vector_mutset` whose VALUE is Int/Bool/Char/Double lowers inline (guard
 # plus store, no call); a String value, or one typed `a`, keeps the call.
@@ -127,20 +135,9 @@ for fn in string generic; do
   fi
 done
 
-# Out-of-range Int store traps at the inline guard with the C runtime's exact text.
-if emit "$FIX/fixture_b1_oob_store.spr" > "$TMP/oobs.ll" 2>/dev/null \
-   && clang "$TMP/oobs.ll" runtime/*.c -O2 \
-        "${CLANG_EXTRA[@]}" -o "$TMP/oobs" 2>/dev/null; then
-  if "$TMP/oobs" > "$TMP/oobs.out" 2>&1; then
-    echo "  FAIL: out-of-bounds Int store did NOT trap"; fail=1
-  elif grep -qxF 'runtime error: vector_mutset: index out of bounds' "$TMP/oobs.out"; then
-    echo "  ok: out-of-bounds store traps with the runtime's text"
-  else
-    echo "  FAIL: out-of-bounds store trapped with the wrong text: $(head -3 "$TMP/oobs.out")"; fail=1
-  fi
-else
-  echo "  FAIL: could not build the out-of-bounds store fixture"; fail=1
-fi
+# Out-of-range Int store traps at the inline guard.
+check_trap "$FIX/fixture_b1_oob_store.spr" oobs \
+  'runtime error: vector_mutset: index out of bounds' 'out-of-bounds store'
 
 if [ "$fail" -eq 0 ]; then echo "b1-gate: PASS"; else echo "b1-gate: FAIL"; fi
 exit "$fail"

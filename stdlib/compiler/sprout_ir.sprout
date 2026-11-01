@@ -401,10 +401,11 @@ export type IROp (..) =
   # @sprout_field is a pure read; no allocation. NOT a GC trigger.
   # field-kind drives ir_rooting heap-vs-scalar classification of <result>.
   | IRGetField String String Int IRType
-  # B1 Vector-Double inline access. These three ops replace `vector_get_direct`
-  # / `vector_mutset` CALLS on statically-`Vector Double` sites (Double-gated in
-  # ast_to_ir; every other element type stays a plain IRCall, so the compiler's
-  # own Vector Int/Token reads — and the bootstrap seed — are byte-identical).
+  # B1 inline vector access. These ops replace `vector_get_direct` / `vector_mutset`
+  # CALLS: IRVecGetD on a statically-`Vector Double` read; IRVecSetD on a store
+  # whose value is a non-heap scalar (Int/Bool/Char/Double), from a scalar-valued
+  # `vector_mutset` or a BCE `$fast` clone. Every other access stays a plain
+  # IRCall, so the compiler's own Vector Int/Token reads are unchanged.
   #
   # They are UNCHECKED straight-line single-block loads/stores: the null + bounds
   # guard is emitted as IRBlocks by ast_to_ir (mirrors finish_checked_div — a
@@ -415,18 +416,17 @@ export type IROp (..) =
   # IRVecLenD <result> <vec-handle> — load v->len (offset 0). Result is an Int
   # scalar. Used by the ast_to_ir bounds check; non-allocating.
   | IRVecLenD String String
-  # IRVecGetD <result> <vec-handle> <idx-value> — load v->data[idx] (unchecked).
-  # <result> is the loaded i64 = Double bit-pattern; the uniform-i64 ABI keeps it
-  # i64 and the downstream bitcast folds to `ldr d` (the fmov the call ABI forced
-  # is gone). The element is scalar (Double), so <result> is NEVER a heap value:
-  # ir_rooting classifies it scalar and never roots it. Non-allocating.
+  # IRVecGetD <result> <vec-handle> <idx-value> — load v->data[idx] (unchecked),
+  # emitted only for `Vector Double`. <result> is the loaded i64 Double bit-pattern;
+  # the downstream bitcast folds to `ldr d`. The element is scalar, so <result> is
+  # NEVER a heap value: ir_rooting classifies it scalar and never roots it.
+  # Non-allocating.
   | IRVecGetD String String String
   # IRVecSetD <result> <vec-handle> <idx-value> <val> — store <val> into
-  # v->data[idx] (unchecked). <val> is a scalar i64 (Double bits); no GC write
-  # barrier is needed for a non-pointer element (pointer-element writes stay at
-  # vector_mutset, the Phase-2 barrier chokepoint). <result> mirrors
-  # vector_mutset's `return 0` so SSA consumers (bound to `_`) are unaffected.
-  # Non-allocating.
+  # v->data[idx] (unchecked). <val> is a non-heap scalar word (Int/Bool/Char/Double
+  # bits), so no GC write barrier is needed; heap-valued stores stay at
+  # vector_mutset, the barrier chokepoint. <result> mirrors vector_mutset's
+  # `return 0` so SSA consumers (bound to `_`) are unaffected. Non-allocating.
   | IRVecSetD String String String String
   # IRVecGetU <result> <vec-handle> <idx-value> <kind> — load v->data[idx], unchecked;
   # emitted only into a bce.sprout `$fast` clone. Unlike IRVecGetD the element may be a

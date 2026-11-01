@@ -4491,20 +4491,12 @@ fn type_is_vector_double(t: types.Type) -> Bool =
       types.type_id_name(vname) == "Vector" && types.type_id_name(ename) == "Double"
   | _ -> false
 
-# B1 inline vector element access, decomposed into two independent axes so the
-# mechanism grows cleanly as B1 generalizes past Double (docs/phase-d-numeric-
-# fastpath-design §B1). VecOp = which OPERATION (from the runtime symbol);
-# VecRep = which inline form is SAFE, from the argument that decides it: a read's
-# vector type, a store's value type. Each inline variant belongs to one op, and
-# classify_vec_elem picks the classifier by op, so a rep never crosses ops.
+# B1 inline vector element access. The operation comes from the runtime symbol
+# (recognize_vector_op); the argument that decides whether inlining is SAFE
+# depends on the op: a read's vector type, a store's value type.
 type VecOp (..) =
   | VecGet
   | VecSet
-
-type VecRep (..) =
-  | RepScalarDouble
-  | RepScalarValue
-  | RepUnsupported
 
 # Name → vector element-access operation. The runtime symbols live ONLY here
 # (mirrors recognize_string_builtin); Nothing for any non-vector-access name.
@@ -4513,36 +4505,21 @@ fn recognize_vector_op(fname: String) -> Maybe VecOp =
   else if fname == "vector_mutset" then Just(VecSet)
   else Nothing
 
-# Representation that decides which inline form is SAFE.
-# RepScalarDouble: a read of a primitive `Vector Double` (arg0, unboxed f64 slot)
-#   → inline load. Reuses the exact-canonical-name guard `type_is_vector_double`
-#   unchanged; a false positive would inline a heap load ir_rooting never roots
-#   (use-after-free).
-# RepScalarValue : a store whose VALUE (arg2) is Int/Bool/Char/Double, whatever the
-#   vector's type → inline store; a scalar creates no old-to-young edge, so no
-#   write barrier is needed (the rule bce.shape_converts applies).
-# RepUnsupported : anything else (a user `type Double` heap ADT, a Vector of a
-#   non-Double primitive read, a pointer store) → keep the runtime call.
-fn classify_vec_elem(op: VecOp, args: List typed_ast.TypedExpr) -> VecRep =
-  match op with
-  | VecGet -> classify_vec_read(args)
-  | VecSet -> classify_vec_store(args)
-
-fn classify_vec_read(args: List typed_ast.TypedExpr) -> VecRep =
+# A read inlines only for a primitive `Vector Double` (arg0, unboxed f64 slot).
+# Keeps the exact-canonical-name guard `type_is_vector_double`: a false positive
+# would inline a heap load ir_rooting never roots (use-after-free).
+fn vec_read_inlinable(args: List typed_ast.TypedExpr) -> Bool =
   match args with
-  | [head | _] ->
-      if type_is_vector_double(typed_ast.typed_expr_type(head))
-      then RepScalarDouble
-      else RepUnsupported
-  | Nil -> RepUnsupported
+  | [head | _] -> type_is_vector_double(typed_ast.typed_expr_type(head))
+  | Nil -> false
 
-fn classify_vec_store(args: List typed_ast.TypedExpr) -> VecRep =
+# A store inlines when its VALUE (arg2) is Int/Bool/Char/Double, whatever the
+# vector's type. A scalar creates no old-to-young edge, so no write barrier is
+# needed (the rule bce.shape_converts applies).
+fn vec_store_inlinable(args: List typed_ast.TypedExpr) -> Bool =
   match args with
-  | [_, _, val] ->
-      if type_kind.type_is_non_heap_scalar(typed_ast.typed_expr_type(val))
-      then RepScalarValue
-      else RepUnsupported
-  | _ -> RepUnsupported
+  | [_, _, val] -> type_kind.type_is_non_heap_scalar(typed_ast.typed_expr_type(val))
+  | _ -> false
 
 # True iff every declared parameter is supplied — the arity comes from the
 # DECLARATION (externs are in fn_arities), NOT a hardcoded literal. An
@@ -4554,11 +4531,8 @@ fn is_fully_applied(fname: String, arg_names: List String, fn_arities: Dict FnIn
   | Nothing -> false
 
 # Recognize + lower an inline vector element access. Nothing = "not an inline
-# vector access here" → the caller uses the general call path. The three gates
-# (operation, full application, element representation) are each a named
-# predicate, so no magic string or arity literal survives in control flow.
-# Adding a VecRep variant forces every match below to handle it (exhaustiveness),
-# so a new representation cannot ship without a conscious lowering + guard.
+# vector access here" → the caller uses the general call path. Gates: the op
+# (from the symbol), full application, then one per-op safety predicate.
 fn try_vector_intrinsic(fname: String, args: List typed_ast.TypedExpr,
                         arg_blocks: List sprout_ir.IRBlock, cur_lbl: String,
                         cur_ops: ListBuilder sprout_ir.IROp, arg_names: List String,
@@ -4568,10 +4542,15 @@ fn try_vector_intrinsic(fname: String, args: List typed_ast.TypedExpr,
   | Nothing -> Nothing
   | Just op ->
       if is_fully_applied(fname, arg_names, fn_arities) == false then Nothing
-      else match classify_vec_elem(op, args) with
-           | RepUnsupported -> Nothing
-           | RepScalarDouble -> Just(finish_vec_get_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
-           | RepScalarValue -> Just(finish_vec_set(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
+      else match op with
+           | VecGet ->
+               if vec_read_inlinable(args)
+               then Just(finish_vec_get_d(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
+               else Nothing
+           | VecSet ->
+               if vec_store_inlinable(args)
+               then Just(finish_vec_set(arg_blocks, cur_lbl, cur_ops, arg_names, idx))
+               else Nothing
 
 # Shared null + bounds guard for B1 inline vector access. Emits the four blocks
 # (cond / len+bounds / null panic / bounds panic) that dominate a fresh continuation
