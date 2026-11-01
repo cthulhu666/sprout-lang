@@ -1042,3 +1042,14 @@ barrier never sees an old object. Nothing goes red between steps.
    collection does; then re-measure with `bench/gc_minor/ab.sh`. A hand-applied prototype
    gave GC ms (mode off / stage 1 / fused): nqueens 540 / 657 / 477, http_log 1571 / 1902 /
    1634, self-compile 1596 / 926 / 886 (machine load ~12, direction only).
+
+   **Measured** ([bench/results-2026-11-01-gc-minor-step5.md](../bench/results-2026-11-01-gc-minor-step5.md)).
+   nqueens (CPU 1.02 ~) and http_log_middleware (0.99 ~) are back inside the spread; the
+   self-compile (0.84) and galaxy client (pause p50 0.39) gains hold. No workload's CPU
+   regresses. astar's pause rises 1.6×: its `MutVec Int` stores take the barrier, so each minor
+   rescans 20,000 scalars.
+
+6. **No barrier on scalar element stores.** `sprout_gc_on_store` runs the barrier on every
+   `vector_mutset`, against §6. Filtering on the stored value at run time costs
+   digit_recognizer 14–16% CPU, so the compiler must call a barrier-free store where the element
+   type is a scalar. Not designed. Then re-measure, and flip if nothing regresses.
