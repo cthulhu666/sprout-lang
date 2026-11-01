@@ -1763,13 +1763,14 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Chunked reads are
   filed in §2.
-- [ ] `P2` **Specialise generic functions at concrete types.** A `where Ord a` function takes the
-  `Ord` and `Eq` dictionaries and makes an indirect `compare` per comparison, so `mutvec_sort` on
-  `Int` runs ~2× slower than a hand-specialised copy. Specialisation would also let `sort` at
-  `Int` reach a primitive sort under its own name. Numbers:
-  `docs/sorting-v0.md`. Related: §5 B4, §7.5 "Deriving/specialization follow-ups", and the
-  "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR entry. Proposal:
-  `docs/specialisation-v0.md`.
+- [ ] `P2` **Specialise generic functions at concrete types.** M1 landed: a call whose
+  dictionaries are all concrete calls a copy, behind `SPROUT_OPT_ON=spec` (off by default). With
+  it on, generic `mutvec_sort` on `Int` takes 44.0 / 64.3 ns per element at n=440 / 100k, against
+  74.6 / 121.9 off. Open is M2, `Spec` on by default: a 2-step bootstrap fixed point with the pass
+  on, and the golden-IR checks (`docs/specialisation-v0.md` §7 M2). Also open: `sort` at `Int`
+  reaching a primitive sort under its own name. Related: §5 B4, §7.5 "Deriving/specialization
+  follow-ups", and the "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR
+  entry. Numbers: `docs/sorting-v0.md`.
 - [ ] `P3` **Specialise context-instance bodies, so tuple keys compare directly.** `Ord (a, b, c,
   d, e) where Ord a, …` reaches each field through a context dictionary, and
   `docs/specialisation-v0.md` §4 *Limits* does not copy instance bodies. A heap keyed on a 5-tuple
