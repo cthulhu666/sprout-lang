@@ -54,5 +54,6 @@ fn main() -> Unit !{IO} =
     check_eq("final cr [1] keeps cr", nth(final_cr, 1), "b\r"),
 
     check_eq("50000 lines: count", vec_length(many), 50000),
+    check_eq("50000 lines: first", nth(many, 0), "x"),
     check_eq("50000 lines: last", nth(many, 49999), "x")
   ])
