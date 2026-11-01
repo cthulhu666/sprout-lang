@@ -1286,6 +1286,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   stops with a pointer to apt.llvm.org instead of adding that repository itself. Revisit when
   Ubuntu's default clang reaches 22: then the distro install works and this entry dies.
 
+**Runtime errors**
+
+- [ ] `P2` **Runtime traps carry no Sprout source position.** Only the compiler's own overflow and
+  division traps say `(line N, column M)` (`ast_to_ir.panic_loc`). A user `panic("boom")` prints
+  `runtime error: boom`, and a builtin's `sprout_fail` names the C function that failed. So
+  `char_to_str(55296)` reports `char_from_codepoint: codepoint out of Unicode range`, a function
+  the caller never wrote, and nothing says which call it was. Each builtin move to Sprout pushes
+  the failing check one call deeper. Fix at the call site, not per builtin: pass the caller's
+  position to the trap, or print a symbolised backtrace as the stack-overflow handler does.
+
 ### 7.5) Type Classes
 
 - [ ] `P2` **Default method bodies.** A class method is a signature only (spec §8.5), so adding a
@@ -2647,10 +2657,10 @@ acting.
   `strlen` is 0. The NUL is *dropped*, not truncated at — `"A" ++ NUL ++ "B"` has byte length 2
   and both letters survive. `SPROUT_GC_HDRCHECK=1` turns it from silent into an abort
   (`HDRCHECK: str_byte_len aux=1 strlen=0`), confirming an invariant violation rather than a
-  documented limitation. Options: reject U+0000 in `char_to_str`/`string_from_char` with a located
-  panic, or make the header the sole authority on length and stop calling `strlen` — wider than
-  this warrants until something needs embedded NULs. Consequence: `unicode.cluster_sizes` is the
-  primary API and `graphemes` is documented lossy for U+0000.
+  documented limitation. Options: reject U+0000 in `char_to_string`/`string_from_char` with a
+  located panic, or make the header the sole authority on length and stop calling `strlen` —
+  wider than this warrants until something needs embedded NULs. Consequence:
+  `unicode.cluster_sizes` is the primary API and `graphemes` is documented lossy for U+0000.
 - [ ] `P2` **A large list/`Vec` literal hits a fixed root-pool ceiling.** N=6,000 `Int`s in one
   literal fails with `GC root pool exhausted` (a fixed `RootNode g_root_pool[131072]`) — in
   `--phase check`, so this is the COMPILER's own root stack recursing over the literal, not emitted

@@ -48,7 +48,6 @@ declare i64 @eprint(i64)
 declare i64 @print_str(i64)
 declare i64 @argv_get_bytes(i64)
 declare i64 @double_to_string(i64)
-declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
 declare i64 @to_double(i64)
 declare i64 @string_concat_many(i64)
@@ -715,6 +714,13 @@ entry:
   %t$2 = call i64 @list_to_string_parts(i64 %p$strs, i64 %t$0, i64 %t$1)
   %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$2
+}
+
+define i64 @char_to_str(i64 %p$codepoint) {
+entry:
+  %t$0 = call i64 @char_from_codepoint(i64 %p$codepoint)
+  %t$1 = call i64 @char_to_string(i64 %t$0)
+  ret i64 %t$1
 }
 
 define i64 @stdlib.linvec.linvec_set(i64 %p$i, i64 %p$x, i64 %p$v) {

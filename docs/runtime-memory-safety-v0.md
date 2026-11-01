@@ -99,7 +99,7 @@ Each of the 71 is a primitive other code builds on, a builtin the compiler emits
 | `json_stringify` | match on `Json`, byte-scan escape | ≈ 167 |
 | `str_starts_with` | `str_starts_with_at_byte(s, 0, p)` | 7 |
 | `split_words`, `str_split_lines` | byte scan, `str_slice_bytes` | 69 |
-| `char_to_str` | `char_to_string(char_from_codepoint(cp))` | 23 |
+| ~~`char_to_str`~~ | moved: [results](../bench/results-2026-11-01-char-to-str.md) | 23 |
 | `vector_empty`, `bytes_empty`, `bytes_builder_empty` | one call to another builtin | 3–6 each |
 
 Notes:
@@ -110,7 +110,7 @@ Notes:
   `%.17g` that reads back. So its output changes (`0.1` prints `0.1`, not `0.10000000000000001`).
 - `bytes_builder_u16_be` and `_u32_be` have no caller in this repo but are used downstream.
 - The seed declares `bytes_builder_u16_be`, `_u32_be`, `str_starts_with`, `split_words`,
-  `str_split_lines`, `char_to_str`, `vector_empty`, `bytes_empty` and `bytes_builder_empty`:
+  `str_split_lines`, `vector_empty`, `bytes_empty` and `bytes_builder_empty`:
   moving any of them needs a reseed.
 
 **Blocked on a missing primitive.** Each is the only kind of new builtin this stage may propose

@@ -50,7 +50,6 @@ fn main() -> Unit !{IO} =
     print_str(str_concat("to_double=", double_to_string(to_double(3))))
     # --- chars
     print_str(str_concat("char_to_string=", char_to_string('z')))
-    print_str(str_concat("char_to_str=", char_to_str(65)))
     print_str(str_concat("char_from_codepoint=", char_to_string(char_from_codepoint(66))))
     # --- Bool through the floor: str_starts_with returns one
     if str_starts_with("prelude", "pre") then print_str("str_starts_with=true")

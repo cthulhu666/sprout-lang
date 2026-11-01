@@ -1,0 +1,7 @@
+no_prelude
+
+# `char_to_str` left the floor when it became a prelude function over two floor externs
+# (docs/runtime-memory-safety-v0.md, stage 2). The floor holds externs only, so a
+# `no_prelude` file that wants it writes `char_to_string(char_from_codepoint(cp))`.
+
+fn main() -> Unit !{IO} = print_str(char_to_str(65))

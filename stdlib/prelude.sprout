@@ -2222,17 +2222,14 @@ export fn parse_double(s: String) -> Maybe Double =
 extern fn int_to_string(n: Int) -> String
 extern fn double_to_string(x: Double) -> String
 extern fn char_to_string(c: Char) -> String
-# The Char conversion trio stays together, and stays here. `char_to_string` is pinned anyway
-# (`instance ToString Char` below is built on it), and homing the other two in stdlib.string
-# was measured and rejected: stdlib.terminal needs exactly one of them —
-# `let esc = char_to_str(27)` for the ANSI escape prefix — and importing stdlib.string for it
-# put 62 unused wrapper bodies into every terminal consumer (examples/tcp_echo_once grew ~12%).
-# An extern belongs in a module its consumers would want anyway, or in a leaf; stdlib.string is
-# neither for a caller that wants one codepoint.
-#
-# Note the near-collision: `char_to_str` takes an Int CODEPOINT, `char_to_string` takes a `Char`.
-extern fn char_to_str(codepoint: Int) -> String
 extern fn char_from_codepoint(cp: Int) -> Char
+
+# O(1): the UTF-8 encoding of one codepoint. Traps on a value outside the Unicode scalar range.
+# Takes an Int CODEPOINT; `char_to_string` takes a `Char`. Kept in the prelude, not
+# stdlib.string: stdlib.terminal needs `char_to_str(27)`, and importing stdlib.string for it put
+# 62 unused wrapper bodies into every terminal consumer (examples/tcp_echo_once grew ~12%).
+export fn char_to_str(codepoint: Int) -> String =
+  char_to_string(char_from_codepoint(codepoint))
 
 # Compiler intrinsic: intercepted in ast_to_ir/codegen and lowered to an inline
 # `sitofp` (an Int value to the equal Double value), NOT a runtime call — there

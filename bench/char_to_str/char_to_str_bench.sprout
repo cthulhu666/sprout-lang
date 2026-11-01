@@ -1,0 +1,42 @@
+module main
+
+# Cost of the prelude's `char_to_str`, one row per UTF-8 length; 4 bytes is the slowest input.
+#
+# usage: char_to_str_bench <utf8-bytes> <iterations>
+
+import stdlib.time as time
+import stdlib.argv as argv
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+# Codepoints of the given UTF-8 length: 'a', 'λ', '€', '😀'.
+fn codepoint_for(width: Int) -> Int =
+  match width with
+  | 1 -> 97
+  | 2 -> 955
+  | 3 -> 8364
+  | _ -> 128512
+
+# Each result is passed on, so no call can be dropped.
+fn loop(cp: Int, i: Int, last: String) -> String =
+  if i <= 0 then last
+  else loop(cp, i - 1, char_to_str(cp))
+
+fn run(width: Int, iters: Int) -> Unit !{IO} =
+  do
+    let cp = codepoint_for(width)
+    t0 <- time.now_micros()
+    let out = loop(cp, iters, "")
+    t1 <- time.now_micros()
+    let ns_x10 = (t1 - t0) * 10000 / iters
+    print(`${int_to_string(width)} iters=${iters} out=${out} ns_per_call=${ns_x10 / 10}.${rem(ns_x10, 10)}`)
+
+let usage = "usage: char_to_str_bench <utf8-bytes> <iterations>"
+
+fn main() -> Unit !{IO} =
+  do
+    let Ok([width_text, iters_text]) = argv.all() else print(usage)
+    let Just width = parse_int(width_text) else print(usage)
+    let Just iters = parse_int(iters_text) else print(usage)
+    run(width, iters)

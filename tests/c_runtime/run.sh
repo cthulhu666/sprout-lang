@@ -146,7 +146,7 @@ for sel in len char_at slice; do
   }
 done
 
-echo "==> c runtime: char_to_str / char_from_codepoint reject invalid codepoints"
+echo "==> c runtime: char_to_string / char_from_codepoint reject invalid codepoints"
 compile char_codepoint_validate.c "$TMP_DIR/char_codepoint_validate" -O0 -g
 for sel in neg toobig surrogate from_neg; do
   if "$TMP_DIR/char_codepoint_validate" "$sel" > "$TMP_DIR/cc.out" 2> "$TMP_DIR/cc.err"; then

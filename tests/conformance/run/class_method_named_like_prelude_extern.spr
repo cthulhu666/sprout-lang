@@ -4,9 +4,9 @@ module main
 # declaration alone.
 
 class Render a
-  fn char_to_str(x: a) -> String
+  fn double_to_string(x: a) -> String
 
 instance Render Int
-  fn char_to_str(x: Int) -> String = "int " ++ int_to_string(x)
+  fn double_to_string(x: Int) -> String = "int " ++ int_to_string(x)
 
-fn main() -> Unit !{IO} = print(char_to_str(7))
+fn main() -> Unit !{IO} = print(double_to_string(7))

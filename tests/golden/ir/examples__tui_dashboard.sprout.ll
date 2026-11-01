@@ -48,7 +48,6 @@ declare i64 @eprint(i64)
 declare i64 @print_str(i64)
 declare i64 @argv_get_bytes(i64)
 declare i64 @double_to_string(i64)
-declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
 declare i64 @to_double(i64)
 declare i64 @string_concat_many(i64)
@@ -2458,6 +2457,13 @@ join_4:
   %t$5 = phi i64 [%t$9, %then_4], [%t$15, %else_4]
   %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$5
+}
+
+define i64 @char_to_str(i64 %p$codepoint) {
+entry:
+  %t$0 = call i64 @char_from_codepoint(i64 %p$codepoint)
+  %t$1 = call i64 @char_to_string(i64 %t$0)
+  ret i64 %t$1
 }
 
 define i64 @stdlib.time.wall_micros() {
