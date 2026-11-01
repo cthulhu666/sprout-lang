@@ -102,7 +102,7 @@ Ordered by evidence-weighted value (biggest lever first). **B before A.**
 > **B1-Double LANDED — 2026-07-12** (branch `worktree-phase-d-b1-double`). Scoped to `Vector Double`
 > sites (commit-1). Three new IR ops in `sprout_ir.sprout`: `IRVecLenD` (load `len@0`), `IRVecGetD`
 > (load `data[i]`), `IRVecSetD` (store `data[i]`) — pure straight-line **unchecked** loads/stores.
-> The null + bounds guard is emitted as **IRBlocks** in `ast_to_ir.sprout` (`vec_double_guard`,
+> The null + bounds guard is emitted as **IRBlocks** in `ast_to_ir.sprout` (`vec_guard`,
 > mirroring `finish_checked_div` — a checked op must split blocks at the IRBlock layer, not the text
 > layer, or downstream phi predecessors name the wrong block). The recognizer (`translate_direct_call`)
 > Double-gates on `arg0_elem_is_double`, which matches the **exact canonical** `type_id_name`

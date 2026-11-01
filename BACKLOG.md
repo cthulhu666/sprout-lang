@@ -2457,10 +2457,10 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
   LCS: no cost when checked at use. Open: the module itself; `BVec` must expose no operation
   that changes the length.
   `docs/persistent-array-v0.md` §5.7.
-- [ ] `P3` **`LinVec Double` writes do not inline.** `ast_to_ir.recognize_vector_op` and
-  `bce.direct_shape` key on `vector_mutset` over a static `Vector Double`. `linvec_set` calls it on
-  a polymorphic `raw` inside `unsafe_pure`, so a `LinVec Double` write stays a call with its bounds
-  check, where a `MutVec Double` write inlines (B1) and loses the check (BCE). Measure first: the
+- [ ] `P3` **`LinVec Double` writes do not inline.** The inline store (B1) and BCE both need the
+  stored value typed as a scalar. `linvec_set` stores an `x: a` through `vector_mutset` inside
+  `unsafe_pure`, so a `LinVec Double` write stays a call with its bounds check, where a direct
+  `Vector Double` write inlines and loses the check (BCE). Measure first: the
   sieve and BFS run within 1.2-1.6x of `MutVec` without it. Versioning over `LinVec` writes breaks
   BCE's premise (`bce.sprout`, above `safe_io_externs`). `docs/persistent-array-v0.md` §5.3.
 - [ ] `P3` **A persistent trie array, `PVec`.** `LinVec` has no old versions, so storing, sharing
