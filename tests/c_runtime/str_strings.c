@@ -8,10 +8,10 @@
  * a function fails to root across its own allocations is freed and fails the byte check. Interned
  * inputs are never freed; the list builders also get an unrooted one (F), which they must root.
  *
- * Covered: int_to_string, double_to_string, char_to_str, str_concat, string_concat_many,
+ * Covered: int_to_string, double_to_string, char_to_string, str_concat, string_concat_many,
  * string_join_newlines, str_slice, str_slice_bytes, str_split_lines, split_words, and
  * sprout_err_string_result (directly, and through analysis_check_source).
- * Not covered: the null-input and out-of-range aborts (sprout_fail), char_to_str(0) (a 1-byte
+ * Not covered: the null-input and out-of-range aborts (sprout_fail), char_to_string(0) (a 1-byte
  * block holding an empty text), and sprout_err_string_result's request-failed fallback text,
  * which needs sprout_run_analysis_service to fail with no error string.
  */
@@ -62,11 +62,11 @@ static void run_scalars(void) {
   check(is_str(double_to_string(bits_of(-INFINITY)), "-inf"), "double_to_string(-inf)");
   check(is_str(double_to_string(0x7ff8000000000000LL), "nan"), "double_to_string(nan)");
 
-  check(is_str(char_to_str('A'), "A"), "char_to_str('A')");
-  check(is_str(char_to_str(0xE9), "\xc3\xa9"), "char_to_str(U+00E9)");
-  check(is_str(char_to_str(0x20AC), "\xe2\x82\xac"), "char_to_str(U+20AC)");
-  check(is_str(char_to_str(0x1F331), "\xf0\x9f\x8c\xb1"), "char_to_str(U+1F331), 4 bytes");
-  check(is_str(char_to_str(0x10FFFF), "\xf4\x8f\xbf\xbf"), "char_to_str(U+10FFFF)");
+  check(is_str(char_to_string('A'), "A"), "char_to_string('A')");
+  check(is_str(char_to_string(0xE9), "\xc3\xa9"), "char_to_string(U+00E9)");
+  check(is_str(char_to_string(0x20AC), "\xe2\x82\xac"), "char_to_string(U+20AC)");
+  check(is_str(char_to_string(0x1F331), "\xf0\x9f\x8c\xb1"), "char_to_string(U+1F331), 4 bytes");
+  check(is_str(char_to_string(0x10FFFF), "\xf4\x8f\xbf\xbf"), "char_to_string(U+10FFFF)");
 }
 
 static void run_concat(void) {

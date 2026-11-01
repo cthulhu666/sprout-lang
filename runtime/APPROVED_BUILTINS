@@ -66,8 +66,7 @@ bytes_length
 bytes_singleton
 bytes_slice
 bytes_to_utf8
-char_from_codepoint  # total Int->Char constructor; the only way to build a Char from a decoded codepoint. char_to_str/char_to_string only produce String, and Char is a distinct builtin primitive (not a String wrap), so a Char cannot be constructed in Sprout. Enables native-Sprout UTF-8 decoding over Bytes (replaces the unsafe str_char_at_byte). See AGENTS.md Builtin vs Stdlib 4-6.
-char_to_str
+char_from_codepoint  # total Int->Char constructor; the only way to build a Char from a decoded codepoint. char_to_string only produces a String, and Char is a distinct builtin primitive (not a String wrap), so a Char cannot be constructed in Sprout. Enables native-Sprout UTF-8 decoding over Bytes (replaces the unsafe str_char_at_byte). See AGENTS.md Builtin vs Stdlib 4-6.
 char_to_string
 crypto_base64_decode
 crypto_base64_encode

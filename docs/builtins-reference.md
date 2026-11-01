@@ -173,7 +173,6 @@ Pure value transforms and runtime-backed persistent data helpers:
 - `parse_int(s: String) -> Int`
 - `int_to_string(value: Int) -> String` (runtime primitive; public formatting should prefer `Show.to_string`)
 - `char_to_string(value: Char) -> String`
-- `char_to_str(codepoint: Int) -> String` (note: an Int codepoint, unlike `char_to_string`)
 - `char_from_codepoint(cp: Int) -> Char`
 - `str_concat(a: String, b: String) -> String`
 - `str_len(s: String) -> Int`

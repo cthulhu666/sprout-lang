@@ -48,7 +48,6 @@ declare i64 @eprint(i64)
 declare i64 @print_str(i64)
 declare i64 @argv_get_bytes(i64)
 declare i64 @double_to_string(i64)
-declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
 declare i64 @to_double(i64)
 declare i64 @string_concat_many(i64)
@@ -254,6 +253,13 @@ declare i64 @term_read_avail(i64, i64)
 @stdlib.net.poll_read = private constant i64 1
 @stdlib.net.read_chunk = private constant i64 65536
 @stdlib.terminal.esc = global i64 zeroinitializer
+
+define i64 @char_to_str(i64 %p$codepoint) {
+entry:
+  %t$0 = call i64 @char_from_codepoint(i64 %p$codepoint)
+  %t$1 = call i64 @char_to_string(i64 %t$0)
+  ret i64 %t$1
+}
 
 define i64 @stdlib.time.now_micros() {
 entry:

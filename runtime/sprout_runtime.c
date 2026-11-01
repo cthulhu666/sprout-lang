@@ -6976,9 +6976,12 @@ static void sprout_validate_codepoint(long long cp, const char* who) {
   if (cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) sprout_fail(who);
 }
 
-long long char_to_str(long long codepoint) {
-  sprout_validate_codepoint(codepoint, "char_to_str: codepoint out of Unicode range");
-  unsigned int cp = (unsigned int)codepoint;
+/* char_to_string: a Char is an immediate i64 Unicode codepoint; encode it to a
+ * fresh UTF-8 heap String. Validated again, so an out-of-range value fails
+ * cleanly instead of minting invalid UTF-8. */
+long long char_to_string(long long ch) {
+  sprout_validate_codepoint(ch, "char_to_string: codepoint out of Unicode range");
+  unsigned int cp = (unsigned int)ch;
   char buf[5];
   size_t len;
   if (cp <= 0x7f) {
@@ -6997,19 +7000,12 @@ long long char_to_str(long long codepoint) {
     buf[3] = (char)(0x80 | (cp & 0x3f)); len = 4;
   }
   sprout_gc_maybe_collect_threshold();
-  return sprout_str_word(sprout_str_dup_slice(buf, len, "char_to_str: out of memory"));
-}
-
-/* char_to_string: a Char is an immediate i64 Unicode codepoint; encode it to a
- * fresh UTF-8 heap String.  (Formerly the identity, when Char and String shared
- * the heap-string representation.) */
-long long char_to_string(long long ch) {
-  return char_to_str(ch);
+  return sprout_str_word(sprout_str_dup_slice(buf, len, "char_to_string: out of memory"));
 }
 
 /* char_from_codepoint: a Char IS its Unicode codepoint (an immediate i64), so
  * this is the identity.  Retained as the typed Int->Char constructor at the
- * Sprout level (char_to_str / char_to_string only produce String). */
+ * Sprout level (char_to_string only produces a String). */
 long long char_from_codepoint(long long codepoint) {
   sprout_validate_codepoint(codepoint, "char_from_codepoint: codepoint out of Unicode range");
   return codepoint;

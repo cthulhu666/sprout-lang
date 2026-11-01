@@ -48,7 +48,6 @@ declare i64 @eprint(i64)
 declare i64 @print_str(i64)
 declare i64 @argv_get_bytes(i64)
 declare i64 @double_to_string(i64)
-declare i64 @char_to_str(i64)
 declare i64 @char_from_codepoint(i64)
 declare i64 @to_double(i64)
 declare i64 @string_concat_many(i64)
@@ -237,6 +236,13 @@ declare i64 @term_read_avail(i64, i64)
 @stdlib.math.two63 = global i64 zeroinitializer
 @stdlib.terminal.esc = global i64 zeroinitializer
 @examples.wrap_phantom_units.km_per_au = global i64 zeroinitializer
+
+define i64 @char_to_str(i64 %p$codepoint) {
+entry:
+  %t$0 = call i64 @char_from_codepoint(i64 %p$codepoint)
+  %t$1 = call i64 @char_to_string(i64 %t$0)
+  ret i64 %t$1
+}
 
 define i64 @stdlib.math.sq(i64 %p$v) {
 entry:
