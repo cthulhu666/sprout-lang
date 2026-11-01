@@ -841,25 +841,24 @@ static inline void sprout_wl_free(SproutWorklist* wl) {
  * rest of the heap. */
 typedef struct {
   SproutWorklist remembered;     /* payload pointers */
-  int       on;                  /* SPROUT_GC_MINOR=1; -1 until sprout_gc_gen_on reads it */
+  int       on;                  /* SPROUT_GC_MINOR=1; set by sprout_gc_gen_init */
   int       check;               /* SPROUT_GC_GENCHECK=1; read only when `on` */
   long long major_every;         /* SPROUT_GC_MAJOR_EVERY: minors between majors */
-  int       have_major;          /* a major has run */
   long long baseline;            /* heap count after the last major */
   long long last_live;           /* heap count after the previous collection */
   long long minors_since_major;
   long long n_minor, n_major;    /* collections run, by kind */
 } SproutGenState;
-static SproutGenState g_gen = { .on = -1, .major_every = 19 };
+static SproutGenState g_gen = { .major_every = 19 };
 
-/* Reads the generational switches once.  SPROUT_GC_GENCHECK and SPROUT_GC_MAJOR_EVERY
- * are read only with SPROUT_GC_MINOR=1, so a bad value is ignored while the mode is off.
- * SPROUT_GC_MAJOR_EVERY=0 makes every collection a major. */
-static int sprout_gc_gen_on(void) {
-  if (g_gen.on >= 0) return g_gen.on;
+/* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
+ * the program runs, not inside the atexit collection.  SPROUT_GC_GENCHECK and
+ * SPROUT_GC_MAJOR_EVERY are read only with SPROUT_GC_MINOR=1, so a bad value is ignored while
+ * the mode is off.  SPROUT_GC_MAJOR_EVERY=0 makes every collection a major. */
+static void sprout_gc_gen_init(void) {
   const char* m = getenv("SPROUT_GC_MINOR");
   g_gen.on = (m != NULL && m[0] == '1');
-  if (!g_gen.on) return 0;
+  if (!g_gen.on) return;
   const char* c = getenv("SPROUT_GC_GENCHECK");
   g_gen.check = (c != NULL && c[0] == '1');
   const char* every = getenv("SPROUT_GC_MAJOR_EVERY");
@@ -870,7 +869,6 @@ static int sprout_gc_gen_on(void) {
       sprout_fail("SPROUT_GC_MAJOR_EVERY: expected non-negative integer");
     g_gen.major_every = parsed;
   }
-  return 1;
 }
 
 /* Record `payload`, whose header is `h` (color set, REMEMBERED clear). */
@@ -1631,10 +1629,12 @@ static void* sprout_realloc_counted(long long* counter, void* ptr, size_t size, 
  * offset p-base is 8 mod 16 (payloads sit at slot+8), AND (c) the slotmap bit
  * for that slot is set (cleared while free or not-yet-allocated). Returns the
  * header address (p-8) if member, NULL otherwise.
- * For is_large entries: member iff p == base+8. O(log region_count). */
-static void* sprout_heap_lookup(void* p) {
+ * For is_large entries: member iff p == base+8. O(log region_count).
+ * `*out` is the region p falls in, or NULL; set even when p is not a member. */
+static inline void* sprout_heap_lookup_region(void* p, SproutRegion** out) {
   SPROUT_PROF_HOT(g_prof_fmp_calls++);
   SproutRegion* r = region_find(p);
+  *out = r;
   if (r == NULL) {
     SPROUT_PROF_HOT(sprout_prof_note_probe(0));
     return NULL;
@@ -1667,6 +1667,12 @@ static void* sprout_heap_lookup(void* p) {
   }
   SPROUT_PROF_HOT(sprout_prof_note_probe(1));
   return (char*)p - 8;  /* header address */
+}
+
+/* sprout_heap_lookup_region without the region, for the callers that only need the header. */
+static void* sprout_heap_lookup(void* p) {
+  SproutRegion* unused;
+  return sprout_heap_lookup_region(p, &unused);
 }
 
 static void register_root_slot(void* slot, SproutRootKind kind, size_t aux_words) {
@@ -2504,7 +2510,7 @@ static void sprout_gc_clear_marks(void) {
  * live set shrinks, which is what the count bound is for. */
 static int sprout_gc_gen_choose_minor(const char* reason) {
   if (strcmp(reason, "threshold") != 0) return 0;
-  if (!g_gen.have_major) return 0;
+  if (g_gen.n_major == 0) return 0;
   if (g_gen.last_live > 2 * g_gen.baseline) return 0;
   if (g_gen.minors_since_major >= g_gen.major_every) return 0;
   return 1;
@@ -2518,7 +2524,8 @@ static int sprout_gc_gen_choose_minor(const char* reason) {
  * whose color bit is clear, that object is unmarked and not old, so the sweep would free
  * it: report the owner it was reached through (a root, or an object and field) and abort.
  * That is a store that skipped the barrier.  Headers are only read, never written. */
-static uint8_t** g_check_maps = NULL;      /* per region: visited bitmap */
+static uint8_t** g_check_maps = NULL;      /* per region index: visited bitmap */
+static size_t g_check_maps_cap = 0;
 static SproutWorklist g_check_wl;
 
 static const char* sprout_gc_kind_name(uint64_t kind) {
@@ -2556,9 +2563,9 @@ static void sprout_gc_check_fail(void* payload, uint64_t h, void* owner, long lo
 }
 
 static void sprout_gc_check_reach(void* payload, void* owner, long long field) {
-  void* hdr = sprout_heap_lookup(payload);
+  SproutRegion* r;
+  void* hdr = sprout_heap_lookup_region(payload, &r);
   if (hdr == NULL) return;
-  SproutRegion* r = region_find(payload);
   size_t bit = r->is_large ? 0 : (size_t)((char*)hdr - r->base) / SPROUT_SLOT_GRAN;
   uint8_t* map = g_check_maps[r - g_regions];
   if ((map[bit / 8] >> (bit % 8)) & 1) return;
@@ -2571,12 +2578,24 @@ static void sprout_gc_check_reach(void* payload, void* owner, long long field) {
 static void sprout_gc_check_root(void* ptr) { sprout_gc_check_reach(ptr, NULL, -1); }
 
 static void sprout_gc_gen_verify(void) {
-  g_check_maps = (uint8_t**)calloc(g_region_count > 0 ? g_region_count : 1, sizeof(uint8_t*));
-  if (!g_check_maps) sprout_fail("GENCHECK: out of memory");
-  for (size_t ri = 0; ri < g_region_count; ri++) {
-    g_check_maps[ri] = (uint8_t*)calloc(1, g_regions[ri].is_large ? 1 : SPROUT_SLOTMAP_BYTES);
-    if (!g_check_maps[ri]) sprout_fail("GENCHECK: out of memory");
+  /* The maps and the worklist are file-static and grow-only: this runs on every minor, and
+     under SPROUT_GC_STRESS=1 that means every allocation.  A region index can change kind
+     between cycles, so every map is sized for a normal region; a large one uses its first byte. */
+  if (g_region_count > g_check_maps_cap) {
+    uint8_t** t = (uint8_t**)realloc(g_check_maps, g_region_count * sizeof(uint8_t*));
+    if (!t) sprout_fail("GENCHECK: out of memory");
+    memset(t + g_check_maps_cap, 0, (g_region_count - g_check_maps_cap) * sizeof(uint8_t*));
+    g_check_maps = t;
+    g_check_maps_cap = g_region_count;
   }
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    if (!g_check_maps[ri]) {
+      g_check_maps[ri] = (uint8_t*)malloc(SPROUT_SLOTMAP_BYTES);
+      if (!g_check_maps[ri]) sprout_fail("GENCHECK: out of memory");
+    }
+    memset(g_check_maps[ri], 0, g_regions[ri].is_large ? 1 : SPROUT_SLOTMAP_BYTES);
+  }
+  g_check_wl.len = 0;
   sprout_gc_mark_roots(sprout_gc_check_root);
   while (g_check_wl.len > 0) {
     void* payload = g_check_wl.items[--g_check_wl.len];
@@ -2585,10 +2604,6 @@ static void sprout_gc_gen_verify(void) {
       sprout_gc_check_reach((void*)(uintptr_t)sprout_heap_child_value_payload(payload, i),
                             payload, (long long)i);
   }
-  for (size_t ri = 0; ri < g_region_count; ri++) free(g_check_maps[ri]);
-  free(g_check_maps);
-  g_check_maps = NULL;
-  sprout_wl_free(&g_check_wl);
 }
 
 /* Release extra-allocated storage for a payload (the slot itself is NOT freed;
@@ -3229,7 +3244,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   /* SPROUT_GC_MINOR=1: a minor marks only young objects (plus what the remembered set
      reaches); a major clears every color bit first and marks everything.  Mode off:
      neither step runs, and the sweep clears the color bit as it always did. */
-  int gen_on = sprout_gc_gen_on();
+  int gen_on = g_gen.on;
   int minor = gen_on && sprout_gc_gen_choose_minor(reason);
   if (gen_on && !minor) sprout_gc_clear_marks();
   sprout_gc_mark_roots(sprout_gc_mark_ptr);
@@ -3239,8 +3254,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   sprout_gc_sweep(gen_on);
   if (gen_on) {
     if (minor) { g_gen.minors_since_major++; g_gen.n_minor++; }
-    else { g_gen.baseline = g_managed_heap_count; g_gen.minors_since_major = 0;
-           g_gen.have_major = 1; g_gen.n_major++; }
+    else { g_gen.baseline = g_managed_heap_count; g_gen.minors_since_major = 0; g_gen.n_major++; }
     g_gen.last_live = g_managed_heap_count;
   }
   long long finished_us = sprout_now_micros();
@@ -3520,6 +3534,7 @@ long long sprout_set_argv(int argc, char** argv) {
   sprout_gc_threshold_maybe_enable();
   sprout_gc_adapt_maybe_enable();
   sprout_gc_livelock_maybe_enable();
+  sprout_gc_gen_init();
   sprout_gc_maybe_register();
   return 0;
 }

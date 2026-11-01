@@ -853,7 +853,8 @@ A major runs:
 - always with the mode off.
 
 `SPROUT_GC_MAJOR_EVERY=0` makes every collection a major. A value that is not a non-negative
-integer aborts at the first collection, but only with the mode on: with `SPROUT_GC_MINOR` unset
+integer aborts at startup (`sprout_gc_gen_init`, called from `sprout_set_argv` with the other
+GC switches), before the program runs, but only with the mode on: with `SPROUT_GC_MINOR` unset
 or `0`, neither it nor `SPROUT_GC_GENCHECK` is read. The cycle line of `SPROUT_DEBUG_GC`
 gains a trailing `kind=minor|major`, printed only with the mode on, so its output is unchanged
 with it off. With it on, `marked` counts what that collection marked: a minor's figure leaves
@@ -941,7 +942,8 @@ pointer into an old object without the barrier and must see the abort, with the 
 field named, so a verifier that checks nothing fails its own test. The same file runs the
 barriered store (no abort, the young object survives and is promoted), a minor that keeps an
 unrooted old object where a major frees it, `SPROUT_GC_MAJOR_EVERY`, and a bad
-`SPROUT_GC_MAJOR_EVERY` (abort with the mode on, ignored with it off).
+`SPROUT_GC_MAJOR_EVERY` (abort at startup with the mode on, before the program prints; ignored
+with it off).
 
 ### 14.6 Stage 2 — bounding the sweep (not designed yet)
 

@@ -21,4 +21,9 @@ static inline int is_remembered(long long word) {
   return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_REMEMBERED_BIT) != 0;
 }
 
+/* True when the object's colour bit is set, i.e. it is old. */
+static inline int is_old(long long word) {
+  return (sprout_hdr_of((void*)(uintptr_t)word) & SPROUT_GC_COLOR_BIT) != 0;
+}
+
 #endif

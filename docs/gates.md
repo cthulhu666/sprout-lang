@@ -925,18 +925,22 @@ correction from absorbing the thing it exists to detect.
 
 Runs the write barrier under minor collections ([gc-generational-v0.md](gc-generational-v0.md)
 §14.4, §14.5). One program per barrier site Sprout can drive (`tests/gc_gen/`: `ref_write`,
-`vector_mutset`, `vector_push` past its inline capacity, `linear_reuse`) runs with
-`SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. Its stdout must equal its sidecar
-`tests/gc_gen/<name>.out` byte for byte (a missing sidecar is an error), it must run at least 20
-minor collections, and it must print the same output with `SPROUT_GC_MINOR=0`. The two static
-`sprout_analysis_*` helpers cannot be reached without a live analysis service, so
-`tests/c_runtime/analysis_strings.c` covers them under the same switches. `just c-runtime-test`
+`vector_mutset`, `vector_push` growing out of an inline buffer while held by an old object,
+`linear_reuse`) runs with `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. Its stdout
+must equal its sidecar `tests/gc_gen/<name>.out` byte for byte (a missing sidecar is an error), it
+must run at least 20 minor collections, and it must print the same output with
+`SPROUT_GC_MINOR=0`. The two static `sprout_analysis_*` helpers cannot be reached without a live
+analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and
+the same 20-minor floor. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store
 must abort with the owner and field named.
 
 **Each site test was confirmed to fail with its barrier removed**, and the fact is the only reason
 to trust the gate: ref_write, vector_mutset, vector_push, each analysis helper, and the barrier
-call `IRReuseCtor` emits (checked by turning `sprout_gc_write_barrier` into a no-op).
+call `IRReuseCtor` emits (checked by turning `sprout_gc_write_barrier` into a no-op). The
+`vector_push` program's inline-growth branch was checked by clearing the colour bit in
+`sprout_vec_release_inline_tail`: the gate then aborts. It does so only for vectors whose growth is
+followed by a minor, not a major, which is why the program grows eight.
 
 **How it is defeated.**
 - It checks only the paths these programs run. A new store site passes it until it gets its own

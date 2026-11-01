@@ -526,6 +526,20 @@ grep -q "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" "$TMP_DIR/gc_be.e
   cat "$TMP_DIR/gc_be.out" "$TMP_DIR/gc_be.err" >&2
   exit 1
 }
+# The bad value must fail at startup, not inside the atexit collection after the program ran.
+if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" bad_every_late > "$TMP_DIR/gc_bl.out" 2> "$TMP_DIR/gc_bl.err"; then
+  echo "  a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on (no collection before exit)" >&2
+  exit 1
+fi
+grep -q "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" "$TMP_DIR/gc_bl.err" || {
+  echo "  bad_every_late failed without the MAJOR_EVERY message:" >&2
+  cat "$TMP_DIR/gc_bl.out" "$TMP_DIR/gc_bl.err" >&2
+  exit 1
+}
+if grep -q "after-alloc" "$TMP_DIR/gc_bl.out"; then
+  echo "  a bad SPROUT_GC_MAJOR_EVERY was reported only at exit, after the program ran" >&2
+  exit 1
+fi
 for sel in barrier minor_keeps_old major_every no_check bad_every_off; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
     echo "  gen_check '$sel' failed:" >&2
