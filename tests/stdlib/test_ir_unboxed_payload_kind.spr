@@ -1,0 +1,199 @@
+import stdlib.test (TestState, new_state, assert_true, assert_false, summary)
+import stdlib.compiler.lexer as lexer
+import stdlib.compiler.parser as parser
+import stdlib.compiler.checker as checker
+import stdlib.compiler.lowering as lowering
+import stdlib.compiler.ast_to_ir as ast_to_ir
+import stdlib.compiler.ir_rooting as ir_rooting
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.string as string
+
+# The payload of an unboxed (tag, payload) producer is a scalar exactly when the producer's type is
+# `Maybe T` with `T` a scalar. An `Int` payload live across an allocation then gets no root push;
+# a heap payload, and every `Result` payload (the do-bind short path rebuilds `Err(val)`), still do.
+#
+# Like the other IR-shape tests, the harness typechecks without the prelude, so each fixture
+# declares its own `Maybe`/`Result`. The peephole keys on the callee name, so the externs carry
+# simplified signatures. `mk` is an unlisted extern: a call to it can collect.
+
+let maybe_decl = "type Maybe a =\n  | Nothing\n  | Just a\n\n"
+
+let result_decl = "type Result e a =\n  | Err e\n  | Ok a\n\n"
+
+let mk_decl = "extern fn mk(n: Int) -> Int\n\n"
+
+fn read_decl(name: String, payload: String) -> String =
+  maybe_decl ++ mk_decl
+    ++ "extern fn " ++ name ++ "(a: String, i: Int) -> Maybe " ++ payload ++ "\n\n"
+
+# The payload `b` is used after `mk(1)`, so it is live across a call that can collect.
+fn match_src(name: String) -> String =
+  read_decl(name, "Int")
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match " ++ name ++ "(a, i) with\n"
+    ++ "  | Just b -> mk(1) + b\n"
+    ++ "  | Nothing -> 0\n"
+
+# The same shape over a String payload (`vector_get` of a `Vector String`).
+fn heap_match_src() -> String =
+  read_decl("vector_get", "String")
+    ++ "extern fn slen(s: String) -> Int\n\n"
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match vector_get(a, i) with\n"
+    ++ "  | Just s -> mk(1) + slen(s)\n"
+    ++ "  | Nothing -> 0\n"
+
+fn do_src(name: String) -> String =
+  read_decl(name, "Int")
+    ++ "fn probe(a: String, i: Int) -> Maybe Int =\n"
+    ++ "  do\n"
+    ++ "    b <- " ++ name ++ "(a, i)\n"
+    ++ "    let n = mk(1)\n"
+    ++ "    Just(n + b)\n"
+
+fn split_src(name: String) -> String =
+  read_decl(name, "Int")
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match (" ++ name ++ "(a, i), " ++ name ++ "(a, 0)) with\n"
+    ++ "  | (Just b, Just c) -> mk(1) + b + c\n"
+    ++ "  | _ -> 0\n"
+
+fn argw_src(name: String) -> String =
+  read_decl(name, "Int")
+    ++ "fn consume(m: Maybe Int) -> Int =\n"
+    ++ "  match m with\n"
+    ++ "  | Just b -> mk(1) + b\n"
+    ++ "  | Nothing -> 0\n\n"
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  consume(" ++ name ++ "(a, i)) + 1\n"
+
+# A program-defined `Maybe` whose `Just` holds a heap `Box`, not the type parameter, so
+# `Maybe Int` says nothing about the payload. The read still routes to the unboxed path.
+fn phantom_maybe_src() -> String =
+  "type Box = (n: Int)\n\n"
+    ++ "type Maybe a =\n  | Nothing\n  | Just Box\n\n"
+    ++ mk_decl
+    ++ "extern fn bytes_get(a: String, i: Int) -> Maybe Int\n\n"
+    ++ "fn probe(a: String, i: Int) -> Int =\n"
+    ++ "  match bytes_get(a, i) with\n"
+    ++ "  | Just b -> mk(1) + b.n\n"
+    ++ "  | Nothing -> 0\n"
+
+# A Tier-2 worker over `Result String Int`: the `Err` arm is rebuilt on the short path.
+fn result_do_src() -> String =
+  maybe_decl ++ result_decl ++ mk_decl
+    ++ "fn fetch(i: Int) -> Result String Int =\n"
+    ++ "  if i < 0 then Err(\"neg\") else Ok(i)\n\n"
+    ++ "fn probe(i: Int) -> Result String Int =\n"
+    ++ "  do\n"
+    ++ "    _ <- fetch(i)\n"
+    ++ "    Ok(mk(1))\n"
+
+# Returns the emitted IR, or a string starting "ERR: ". Not a `Result`, so a fixture that fails to
+# translate fails loudly instead of reading as a clean absence.
+fn translate_or_msg(src: String) -> String !{IO} =
+  match lexer.tokenize(src) with
+  | Err _ -> "ERR: lex"
+  | Ok toks ->
+      match parser.parse_program(toks) with
+      | Err _ -> "ERR: parse"
+      | Ok prog ->
+          do
+            tc <- checker.typecheck_typed(prog, Nil)
+            match tc with
+            | typed_ast.TypedErr _ msg -> "ERR: check: " ++ msg
+            | typed_ast.TypedOk typed_prog env ->
+                match ast_to_ir.translate_program(lowering.lower_program(typed_prog, env)) with
+                | Err msg -> "ERR: ast_to_ir: " ++ msg
+                | Ok pair ->
+                    match pair with
+                    | (ir_prog, idx_map) ->
+                        ir_lowering.lower_program(ir_rooting.insert_roots(ir_prog, idx_map))
+
+fn translated(out: String) -> Bool =
+  !str_starts_with(out, "ERR: ")
+
+fn has(out: String, needle: String) -> Bool =
+  str_find(out, needle) != -1
+
+fn count(out: String, needle: String) -> Int =
+  list_length(string.split(out, needle)) - 1
+
+# The text of the `define` starting at `header`, up to its closing brace, or "".
+fn define_block(out: String, header: String) -> String =
+  let start = str_find(out, header)
+  in
+    if start == -1 then ""
+    else
+      let rest = str_slice(out, start, str_len(out) - start)
+          stop = str_find(rest, "\n}")
+      in if stop == -1 then rest else str_slice(rest, 0, stop)
+
+# Root pushes in one function, or -1 when the module does not translate or the function is
+# missing, so neither the `== 0` nor the `> 0` assertion passes vacuously.
+fn root_pushes_in(src: String, header: String) -> Int !{IO} =
+  do
+    out <- translate_or_msg(src)
+    let body = define_block(out, header)
+    if translated(out) && body != "" then count(body, "call i64 @sprout_gc_push_") else -1
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    let probe_i64 = "define i64 @probe("
+
+    # (a) match: an Int payload is not rooted, for both Int-valued reads.
+    for_bytes <- root_pushes_in(match_src("bytes_get"), probe_i64)
+    for_str <- root_pushes_in(match_src("str_byte_at"), probe_i64)
+    assert_true(state, "match over bytes_get: Int payload not rooted", for_bytes == 0)
+    assert_true(state, "match over str_byte_at: Int payload not rooted", for_str == 0)
+
+    # (b) do bind in a Maybe do-block.
+    dob <- translate_or_msg(do_src("bytes_get"))
+    assert_true(state, "do-bind fixture translates", translated(dob))
+    assert_true(state, "do-bind fixture reaches the unboxed read",
+                has(dob, "call i128 @bytes_get_unboxed"))
+    dos <- root_pushes_in(do_src("bytes_get"), "define i64 @probe(")
+    assert_true(state, "do bind over bytes_get: Int payload not rooted", dos == 0)
+
+    # (c) list-pattern split: each element is its own unboxed call.
+    spl <- translate_or_msg(split_src("bytes_get"))
+    assert_true(state, "split fixture translates", translated(spl))
+    assert_true(state, "split fixture makes two unboxed reads",
+                count(spl, "call i128 @bytes_get_unboxed(") == 2)
+    splp <- root_pushes_in(split_src("bytes_get"), probe_i64)
+    assert_true(state, "split over bytes_get: Int payloads not rooted", splp == 0)
+
+    # (d) `@consume_argw`: its `$val` parameter is an Int.
+    arg <- translate_or_msg(argw_src("bytes_get"))
+    assert_true(state, "argw fixture translates", translated(arg))
+    assert_true(state, "argw fixture calls @consume_argw", has(arg, "call i64 @consume_argw("))
+    argp <- root_pushes_in(argw_src("bytes_get"), "define i64 @consume_argw(")
+    assert_true(state, "argw parameter over bytes_get: Int payload not rooted", argp == 0)
+
+    # (e) Mirror: a String payload (`vector_get` of a `Vector String`) is still rooted.
+    vec <- translate_or_msg(heap_match_src())
+    assert_true(state, "vector_get fixture reaches the unboxed read",
+                has(vec, "call i128 @vector_get_unboxed"))
+    vecp <- root_pushes_in(heap_match_src(), probe_i64)
+    assert_true(state, "match over vector_get: String payload still rooted", vecp > 0)
+
+    # (g) A `Maybe Int` whose `Just` field is not the type parameter keeps its payload unknown.
+    # The prelude-shaped `Maybe Int` (case (a)) still gets none.
+    phn <- translate_or_msg(phantom_maybe_src())
+    assert_true(state, "phantom Maybe fixture translates", translated(phn))
+    assert_true(state, "phantom Maybe fixture reaches the unboxed read",
+                has(phn, "call i128 @bytes_get_unboxed"))
+    phr <- root_pushes_in(phantom_maybe_src(), probe_i64)
+    assert_true(state, "phantom Maybe: Box payload still rooted", phr > 0)
+
+    # (f) Mirror: a `Result String Int` worker in a do bind keeps its payload unknown, so the
+    # `Err(val)` rebuild is rooted.
+    res <- translate_or_msg(result_do_src())
+    assert_true(state, "result fixture translates", translated(res))
+    assert_true(state, "result fixture calls the worker", has(res, "call i128 @fetch_worker("))
+    resp <- root_pushes_in(result_do_src(), "define i64 @probe(")
+    assert_true(state, "Result worker in a do bind: Err payload still rooted", resp > 0)
+
+    summary(state)

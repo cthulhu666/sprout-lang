@@ -2325,9 +2325,9 @@ entry:
 
 define i64 @stdlib.http_client.trim_ows(i64 %p$encoded) {
 entry:
-  %t$21 = alloca [2 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$21, i8 0, i64 16, i1 false)
-  %t$22 = call i64 @sprout_gc_push_scan_root(ptr %t$21, i64 16)
+  %t$21 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$21, i8 0, i64 8, i1 false)
+  %t$22 = call i64 @sprout_gc_push_scan_root(ptr %t$21, i64 8)
   %t$21$0 = getelementptr i64, ptr %t$21, i64 0
   store i64 %p$encoded, ptr %t$21$0
   %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_lambda_6, i64 8) to i64
@@ -2336,8 +2336,6 @@ entry:
   %t$2 = trunc i128 %t$2$st to i64
   %t$2$hi = lshr i128 %t$2$st, 64
   %t$3 = trunc i128 %t$2$hi to i64
-  %t$21$1 = getelementptr i64, ptr %t$21, i64 1
-  store i64 %t$3, ptr %t$21$1
   br label %arm_0_4
 arm_0_4:
   %t$6 = add i64 0, 1

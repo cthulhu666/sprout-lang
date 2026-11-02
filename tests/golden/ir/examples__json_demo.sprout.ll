@@ -468,22 +468,18 @@ arm_0_12:
   %t$15 = icmp eq i64 %t$10, %t$14
   br i1 %t$15, label %body_0_12, label %arm_1_12
 body_0_12:
-  %t$27 = alloca i64
-  store i64 %t$11, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$16 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$16$ptr = inttoptr i64 %t$16 to ptr
   %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
   store i64 %t$11, ptr %t$16$f0
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_12
 arm_1_12:
   %t$17 = add i64 0, 0
   %t$18 = icmp eq i64 %t$10, %t$17
   br i1 %t$18, label %body_1_12, label %arm_2_12
 body_1_12:
-  %t$30 = getelementptr i64, ptr %t$22, i64 1
-  call void @llvm.memset.p0.i64(ptr %t$30, i8 0, i64 8, i1 false)
+  %t$27 = getelementptr i64, ptr %t$22, i64 1
+  call void @llvm.memset.p0.i64(ptr %t$27, i8 0, i64 8, i1 false)
   store i64 %t$9, ptr %t$20
   call void @llvm.stackrestore(ptr %t$21)
   br label %tco_loop
@@ -498,7 +494,7 @@ arm_2_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%t$5, %body_0_1], [%t$13, %join_12]
-  %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
@@ -546,22 +542,18 @@ arm_0_12:
   %t$15 = icmp eq i64 %t$10, %t$14
   br i1 %t$15, label %body_0_12, label %arm_1_12
 body_0_12:
-  %t$27 = alloca i64
-  store i64 %t$11, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
   %t$16 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$16$ptr = inttoptr i64 %t$16 to ptr
   %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
   store i64 %t$11, ptr %t$16$f0
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_12
 arm_1_12:
   %t$17 = add i64 0, 0
   %t$18 = icmp eq i64 %t$10, %t$17
   br i1 %t$18, label %body_1_12, label %arm_2_12
 body_1_12:
-  %t$30 = getelementptr i64, ptr %t$22, i64 1
-  call void @llvm.memset.p0.i64(ptr %t$30, i8 0, i64 8, i1 false)
+  %t$27 = getelementptr i64, ptr %t$22, i64 1
+  call void @llvm.memset.p0.i64(ptr %t$27, i8 0, i64 8, i1 false)
   store i64 %t$9, ptr %t$20
   call void @llvm.stackrestore(ptr %t$21)
   br label %tco_loop
@@ -576,7 +568,7 @@ arm_2_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%t$5, %body_0_1], [%t$13, %join_12]
-  %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
@@ -597,22 +589,18 @@ arm_0_2:
   %t$5 = icmp eq i64 %t$0, %t$4
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
-  %t$14 = alloca i64
-  store i64 %t$1, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$6 = call i64 @sprout_alloc_obj(i64 18, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
   store i64 %t$1, ptr %t$6$f0
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$17 = alloca i64
-  store i64 %t$6, ptr %t$17
-  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$14 = alloca i64
+  store i64 %t$6, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$7 = call i64 @sprout_alloc_obj(i64 8, i64 1)
   %t$7$ptr = inttoptr i64 %t$7 to ptr
   %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
   store i64 %t$6, ptr %t$7$f0
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 arm_1_2:
   %t$8 = add i64 0, 0
@@ -620,21 +608,21 @@ arm_1_2:
   br i1 %t$9, label %body_1_2, label %arm_2_2
 body_1_2:
   %t$10 = call i64 @json_stringify(i64 %p$value)
-  %t$20 = alloca i64
-  store i64 %t$10, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$17 = alloca i64
+  store i64 %t$10, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$11 = call i64 @sprout_alloc_obj(i64 7, i64 1)
   %t$11$ptr = inttoptr i64 %t$11 to ptr
   %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
   store i64 %t$10, ptr %t$11$f0
-  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()
   unreachable
 join_2:
   %t$3 = phi i64 [%t$7, %body_0_2], [%t$11, %body_1_2]
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 
@@ -1210,22 +1198,18 @@ arm_0_2:
   %t$5 = icmp eq i64 %t$0, %t$4
   br i1 %t$5, label %body_0_2, label %arm_1_2
 body_0_2:
-  %t$23 = alloca i64
-  store i64 %t$1, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$6 = call i64 @sprout_alloc_obj(i64 18, i64 1)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
   store i64 %t$1, ptr %t$6$f0
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$26 = alloca i64
-  store i64 %t$6, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$23 = alloca i64
+  store i64 %t$6, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$7 = call i64 @sprout_alloc_obj(i64 8, i64 1)
   %t$7$ptr = inttoptr i64 %t$7 to ptr
   %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
   store i64 %t$6, ptr %t$7$f0
-  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 arm_1_2:
   %t$8 = add i64 0, 0
@@ -1233,14 +1217,14 @@ arm_1_2:
   br i1 %t$9, label %body_1_2, label %arm_2_2
 body_1_2:
   %t$10 = call i64 @json_stringify(i64 %p$value)
-  %t$29 = alloca i64
-  store i64 %t$10, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$26 = alloca i64
+  store i64 %t$10, ptr %t$26
+  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
   %t$11 = call i64 @sprout_alloc_obj(i64 7, i64 1)
   %t$11$ptr = inttoptr i64 %t$11 to ptr
   %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
   store i64 %t$10, ptr %t$11$f0
-  %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_2
 arm_2_2:
   call void @sprout_abort_match()
@@ -1253,7 +1237,7 @@ join_2:
   br i1 %t$14, label %wrepack_hit_13, label %wrepack_next_13
 wrepack_hit_13:
   %t$15 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16$lo = zext i64 %t$12 to i128
   %t$16$hw = zext i64 %t$15 to i128
   %t$16$hi = shl i128 %t$16$hw, 64
@@ -1265,7 +1249,7 @@ wrepack_next_13:
   br i1 %t$18, label %wrepack_hit_17, label %wrepack_next_17
 wrepack_hit_17:
   %t$19 = call i64 @sprout_field(i64 %t$3, i64 0)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$20$lo = zext i64 %t$12 to i128
   %t$20$hw = zext i64 %t$19 to i128
   %t$20$hi = shl i128 %t$20$hw, 64

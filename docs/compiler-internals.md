@@ -329,6 +329,13 @@ On arm64, whole-program linked, the struct kept a base64 loop's reads as calls (
 definition on the host ([gates.md](gates.md)). Sprout's own width-2 workers (Tier-2 and
 tuple CPR) return `i128` too, since `IRCallUnboxed2` calls both kinds.
 
+**The payload's kind comes from the producer's type** (`ast_to_ir.unboxed_payload_kind`):
+`IRTScalar` only for `Maybe T` with a scalar `T` and `Just`'s field the type parameter
+(`field_kinds` `"_"`), so a `Maybe Int` payload is never rooted. Every other width-2 type stays
+`IRTUnknown`, `Result` included: a `do` bind's short path rebuilds `Err(val)` with an allocation,
+and an `Err String` payload must stay rooted across it. `@f_argw`'s `$val` parameter takes the
+same kind from the scrutinee's type.
+
 **Windows x64 does not fit.** MSVC returns a 16-byte struct through `sret` and
 clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so neither
 form matches the declare. Nothing builds the runtime for Windows yet; see `BACKLOG.md`.

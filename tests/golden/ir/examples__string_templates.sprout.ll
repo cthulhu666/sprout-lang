@@ -882,11 +882,7 @@ else_4:
   %t$13$hi = lshr i128 %t$13$st, 64
   %t$14 = trunc i128 %t$13$hi to i64
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23 = alloca i64
-  store i64 %t$14, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$15 = call i64 @positive_from_neg_magnitude_argw(i64 %t$13, i64 %t$14)
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$9, %then_4], [%t$15, %else_4]

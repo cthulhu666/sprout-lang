@@ -2312,10 +2312,9 @@ normative text in `docs/spec-v0.md` §5.8. Deferred, in the order they matter:
 - [ ] `P2` **Inline `Bytes` and `String` byte reads the way B1 inlines `Vector Double`.**
   `bytes_get_unboxed` (and `str_byte_at_unboxed`, `docs/string-byte-read-v0.md`) is a C call per
   byte outside the whole-program link. Needs header- and byte-load IR ops, a `Nothing` edge (B1's
-  `vec_guard` panics), and an arm in each `ir_rooting` op table and `ir_verify`. Also:
-  `emit_unboxed_call` gives the payload `IRTUnknown`, so an `Int` byte is rooted across later
-  allocations. Hand-inlined in a base64 loop: 6.5× C → 2.6×. Phase 3.3 of
-  `docs/native-sprout-runtime-v0.md` needs it. `docs/byte-buffer-v0.md` §3.
+  `vec_guard` panics), and an arm in each `ir_rooting` op table and `ir_verify`. Hand-inlined in
+  a base64 loop: 6.5× C → 2.6×. Phase 3.3 of `docs/native-sprout-runtime-v0.md` needs it.
+  Design: `docs/inline-byte-reads-v0.md`.
 - [ ] `P2` **Move one-byte `str_starts_with_at_byte` probes and byte-scan copies to `str_byte_at`.**
   json.sprout (66 probes), the prelude's `parse_int` and `parse_double` (11), uuid.sprout (4) and
   compiler/source.sprout (4 probes, 5 `bytes_from_utf8` copies, one decoding a single codepoint
