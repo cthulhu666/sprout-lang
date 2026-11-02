@@ -33,6 +33,23 @@ static inline SproutHeapKind sprout_hdr_kind(uint64_t h) {
   return (SproutHeapKind)(h & 0xFF);
 }
 
+/* NOSCAN: a VECTOR whose elements are never heap pointers (docs/pointer-free-vectors-v0.md §4.1).
+ * It is the top aux bit, header bit 63. The aux field's other use for a vector is the inline
+ * element count, so every read of a vector's aux masks with SPROUT_VEC_AUX_COUNT_MASK.
+ * SYNC WITH the flag write the compiler emits inline (stdlib/compiler/ast_to_ir): the same
+ * load, `or` with this bit, store. */
+#define SPROUT_VEC_NOSCAN_BIT ((uint64_t)1 << 63)
+#define SPROUT_VEC_AUX_COUNT_MASK (((unsigned long long)1 << 49) - 1)
+
+static inline int sprout_vec_is_noscan(void* payload) {
+  return (sprout_hdr_of(payload) & SPROUT_VEC_NOSCAN_BIT) != 0;
+}
+
+static inline void sprout_vec_set_noscan(void* payload) {
+  uint64_t h = sprout_hdr_of(payload) | SPROUT_VEC_NOSCAN_BIT;
+  memcpy((char*)payload - 8, &h, 8);
+}
+
 /* A Sprout String whose bytes carry an inline CSTR header at hdr_p - 8. A struct, so clang
  * rejects a char*, a literal or a void* where one is wanted. Only sprout_str_alloc,
  * sprout_str_intern and sprout_str_of_word_in construct one; the gate rejects any other

@@ -1039,9 +1039,9 @@ static long long g_ap_ptr_stores = 0;      /* ...of which stored a heap pointer 
 static long long g_ap_old_to_young = 0;    /* ...of which went old (age >= 1) to young */
 
 /* Price a pointer store into an already-allocated object.  Called from every C
- * barrier site, through sprout_gc_on_store.  old_to_young estimates by age; the
- * barrier itself records by colour bit.  A value that is not a heap pointer is
- * not counted in the denominator. */
+ * barrier site, through sprout_gc_on_store or sprout_gc_on_vec_store.
+ * old_to_young estimates by age; the barrier itself records by colour bit.  A
+ * value that is not a heap pointer is not counted in the denominator. */
 static void sprout_ap_note_ptr_store(long long target, long long value) {
   /* Counted before the lookups so a zero ptr_stores can be told apart from a hook
    * that never ran — "a barrier would be free here" and "we did not measure this"
@@ -1081,6 +1081,13 @@ static inline void sprout_ap_on_store(long long target, long long value) {
 static inline void sprout_gc_on_store(long long target, long long value) {
   sprout_gc_barrier((void*)(uintptr_t)target);
   sprout_ap_on_store(target, value);
+}
+
+/* The same for a store into a vector.  A NOSCAN vector holds no heap pointer, so the barrier
+ * has nothing to record; the AGEPROF store count still runs. */
+static inline void sprout_gc_on_vec_store(long long vec, long long value) {
+  if (!sprout_vec_is_noscan((void*)(uintptr_t)vec)) sprout_gc_barrier((void*)(uintptr_t)vec);
+  sprout_ap_on_store(vec, value);
 }
 
 /* Runs after the atexit full collect (destructors follow atexit handlers), so
@@ -1385,8 +1392,10 @@ static size_t slot_bytes(SproutHeapKind kind, unsigned long long aux) {
      * moves them out (sprout_vec_release_inline_tail). ->cap may exceed it; the
      * slot never does. Bounded so the slot never exceeds SPROUT_LARGE_THRESHOLD
      * (it reaches it exactly at the ceiling), which also keeps aux far inside
-     * the header's 50-bit field. */
-    case SPROUT_HEAP_VECTOR:  payload = sizeof(VectorVal) + (size_t)aux * 8; break;
+     * the header's 50-bit field. The count is the low 49 bits of aux; the top bit
+     * is NOSCAN (SPROUT_VEC_AUX_COUNT_MASK). */
+    case SPROUT_HEAP_VECTOR:
+      payload = sizeof(VectorVal) + (size_t)(aux & SPROUT_VEC_AUX_COUNT_MASK) * 8; break;
     case SPROUT_HEAP_MAP:     payload = sizeof(BSTNode);         break;
     case SPROUT_HEAP_BYTES:   payload = sizeof(BytesVal);        break;
     case SPROUT_HEAP_BUILDER: payload = sizeof(BuilderVal);      break;
@@ -2177,6 +2186,10 @@ _Static_assert(SPROUT_VEC_INLINE_MAX == 508,
                "inline ceiling moved: update the element counts in "
                "tests/stdlib/test_gc_vec_buffer_heap_elems.spr with it");
 
+/* The inline count is written as the whole aux, so it must stay under the NOSCAN bit. */
+_Static_assert(SPROUT_VEC_INLINE_MAX <= SPROUT_VEC_AUX_COUNT_MASK,
+               "inline element count must fit below the NOSCAN bit");
+
 static long long* sprout_alloc_vector_data(size_t count, const char* ctx);
 
 /* One block for the value and its elements whenever they fit, so the common
@@ -2262,7 +2275,8 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
     sprout_fail("vector_push: vector header records no inline elements to release");
   if (r == NULL || r->is_large || r->slotmap == NULL)
     sprout_fail("vector_push: inline vector is not in an ordinary region");
-  h &= ((uint64_t)1 << 14) - 1;                  /* aux := 0, keep kind/color/age/remembered */
+  /* aux count := 0; keep kind/color/age/remembered and NOSCAN */
+  h &= (((uint64_t)1 << 14) - 1) | SPROUT_VEC_NOSCAN_BIT;
   memcpy(hdr_addr, &h, 8);
   size_t rest = old_slot - new_slot;             /* a multiple of 16, >= 16 */
   char* tail = hdr_addr + new_slot;
@@ -2402,7 +2416,9 @@ static size_t sprout_heap_child_count_payload(void* payload) {
     case SPROUT_HEAP_OBJ:     return (size_t)(aux & SPROUT_OBJ_ARITY_MASK);  /* arity */
     case SPROUT_HEAP_CLOSURE: /* n_caps (slot 0 skipped); arity shares aux */
       return (size_t)sprout_closure_ncaps(aux);
-    case SPROUT_HEAP_VECTOR:  return (size_t)((VectorVal*)payload)->len;
+    /* NOSCAN: no element is a heap pointer, so the drain and GENCHECK skip them. */
+    case SPROUT_HEAP_VECTOR:
+      return (h & SPROUT_VEC_NOSCAN_BIT) ? 0 : (size_t)((VectorVal*)payload)->len;
     case SPROUT_HEAP_MAP:     return 4;  /* value, left, right, key */
     case SPROUT_HEAP_BYTES:   return 0;
     case SPROUT_HEAP_BUILDER: return ((BuilderVal*)payload)->count;
@@ -3187,11 +3203,12 @@ static void sprout_gc_sweep(int keep_color) {
       if (hdrcheck_on && kind == SPROUT_HEAP_VECTOR) {
         VectorVal* hv = (VectorVal*)payload;
         int inline_data = vec_data_is_inline(hv);
-        if ((aux != 0) != (inline_data != 0)) {
+        unsigned long long vec_count = aux & SPROUT_VEC_AUX_COUNT_MASK;
+        if ((vec_count != 0) != (inline_data != 0)) {
           fprintf(stderr,
                   "[sprout] HDRCHECK: VECTOR aux/data disagree at sweep: aux=%llu "
                   "data=%p inline=%p len=%lld cap=%lld\n",
-                  aux, (void*)hv->data, (void*)vec_inline_data(hv), hv->len, hv->cap);
+                  vec_count, (void*)hv->data, (void*)vec_inline_data(hv), hv->len, hv->cap);
           abort();
         }
       }
@@ -9446,6 +9463,8 @@ long long vector_set(long long vec, long long index, long long value) {
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) sprout_fail("vector_set: null vector");
   VectorVal* out = sprout_alloc_vector_sized((size_t)src->len, "vector_set: out of memory");
+  /* Same element type as `src`, so the result inherits NOSCAN (also on the empty return). */
+  if (sprout_vec_is_noscan(src)) sprout_vec_set_noscan(out);
   if (src->len == 0) {
     SPROUT_GC_POP_LOCALS(2);
     return sprout_ptr_word(out);
@@ -9469,6 +9488,7 @@ long long vector_append(long long vec, long long value) {
   VectorVal* src = (VectorVal*)(uintptr_t)vec;
   if (src == NULL) sprout_fail("vector_append: null vector");
   VectorVal* out = sprout_alloc_vector_sized((size_t)src->len + 1, "vector_append: out of memory");
+  if (sprout_vec_is_noscan(src)) sprout_vec_set_noscan(out);
   if (src->len > 0) {
     memcpy(out->data, src->data, (size_t)src->len * sizeof(long long));
   }
@@ -9494,6 +9514,8 @@ long long vector_concat(long long a, long long b) {
   /* Re-fetch: the allocation above may have run the collector. */
   va = (VectorVal*)(uintptr_t)rooted_a;
   vb = (VectorVal*)(uintptr_t)rooted_b;
+  /* One scanned input may hold pointers, so the result is NOSCAN only when both are. */
+  if (sprout_vec_is_noscan(va) && sprout_vec_is_noscan(vb)) sprout_vec_set_noscan(out);
   if (na > 0) memcpy(out->data, va->data, (size_t)na * sizeof(long long));
   if (nb > 0) memcpy(out->data + na, vb->data, (size_t)nb * sizeof(long long));
   out->len = na + nb;  /* trails the fill, as in vector_set */
@@ -9518,7 +9540,7 @@ long long vector_mutset(long long vec, long long index, long long value) {
   /* The store lands either in the VectorVal's own slot or in a malloc buffer it
    * owns; neither is a GC object in its own right, so the barrier records the
    * OWNING VectorVal. */
-  sprout_gc_on_store(vec, value);
+  sprout_gc_on_vec_store(vec, value);
   ((struct SproutSlot*)v->data)[index].w = value;
   return 0;
 }
@@ -9555,7 +9577,7 @@ long long vector_push(long long vec, long long value) {
   if (v == NULL) sprout_fail("vector_push: null vector");
   /* Before any growth: the growth below moves the elements out of the object's
    * own slot, and the barrier records the VectorVal, which does not move. */
-  sprout_gc_on_store(vec, value);
+  sprout_gc_on_vec_store(vec, value);
   if (v->len >= v->cap) {
     if (v->cap > (long long)(SIZE_MAX / sizeof(long long)) / 2) sprout_fail("vector_push: vector too large");
     long long new_cap = v->cap <= 0 ? 8 : v->cap * 2;
