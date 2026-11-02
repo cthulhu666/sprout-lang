@@ -1,0 +1,49 @@
+import stdlib.net (TcpListener, accept, close, close_listener, local_port, tcp_error_message)
+import stdlib.process (proc_ok, proc_run, proc_stdout_or)
+import stdlib.string (string_lines)
+import testsupport.http_wire (with_conn)
+import testsupport.listen (listen_or_die)
+import stdlib.terminal as terminal
+
+# A program started by `proc_run` must not inherit the runtime's sockets. Every descriptor the runtime
+# creates is close-on-exec; before that, the child kept the listener, the client socket and the
+# accepted socket open for as long as it ran.
+#
+# `ls /dev/fd` lists the descriptors the child holds. The count is taken once with nothing open, then
+# again with a listener, a client and an accepted connection all open. The two must match; with
+# inheritable descriptors the second is three higher. Loopback connects complete in the kernel
+# backlog, so one task can hold all three without a second task.
+
+fn fd_count() -> Int !{IO} =
+  do
+    r <- proc_run(["ls", "/dev/fd"])
+    if proc_ok(r) then vec_length(string_lines(proc_stdout_or(r, ""))) else -1
+
+fn report(baseline: Int, held: Int) -> Unit !{IO} =
+  if baseline < 3 then
+    terminal.write(`MISMATCH: baseline lists ${int_to_string(baseline)} descriptors\n`)
+  else if held != baseline then
+    terminal.write(`MISMATCH: child sees ${int_to_string(held)} descriptors with sockets open, ${int_to_string(baseline)} without\n`)
+  else
+    terminal.write("proc-run-fds-ok\n")
+
+fn hold_accepted(listener: borrowing TcpListener, baseline: Int) -> Unit !{IO} =
+  match accept(listener) with
+  | Ok server ->
+      do
+        held <- fd_count()
+        report(baseline, held)
+        close(server)
+  | Err e -> terminal.write(`MISMATCH: accept: ${tcp_error_message(e)}\n`)
+
+fn run(baseline: Int) -> Unit !{IO} =
+  do
+    listener <- listen_or_die(0)
+    port <- local_port(listener)
+    with_conn(port, \_ -> hold_accepted(listener, baseline))
+    close_listener(listener)
+
+fn main() -> Unit !{IO} =
+  do
+    baseline <- fd_count()
+    run(baseline)

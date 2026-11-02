@@ -113,6 +113,13 @@ compile sigpipe_ignored.c "$TMP_DIR/sigpipe_ignored" -O0 -g
 "$TMP_DIR/sigpipe_ignored" > "$TMP_DIR/sigpipe_ignored.out"
 test "$(cat "$TMP_DIR/sigpipe_ignored.out")" = "sigpipe-ignored"
 
+echo "==> c runtime: every descriptor the runtime creates is close-on-exec"
+# cloexec_fds.c includes sprout_runtime.c (like str_writers.c), so only the other TUs link.
+clang "$ROOT/tests/c_runtime/cloexec_fds.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$TMP_DIR/cloexec_fds"
+"$TMP_DIR/cloexec_fds" > "$TMP_DIR/cloexec_fds.out"
+test "$(cat "$TMP_DIR/cloexec_fds.out")" = "cloexec-fds"
+
 echo "==> c runtime: sprout_fail is declared noreturn (analyzer-signal guard)"
 # Both sites must carry it: the definition, and the declaration in
 # sprout_scheduler.h that the poll and scheduler TUs compile against.
