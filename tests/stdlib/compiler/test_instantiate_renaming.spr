@@ -117,7 +117,7 @@ fn main() -> Unit !{IO} =
     s3 <- unifier.new_state()
     effects <- unifier.instantiate(s3, fused_effect_scheme())
     s4 <- unifier.new_state()
-    ctor <- unifier.instantiate_ctor_pattern(s4, fused_ctor_scheme())
+    ctor <- unifier.instantiate_ctor_pattern(s4, fused_ctor_scheme(), 0)
     s5 <- unifier.new_state()
     with_vars <- unifier.instantiate_with_vars(s5, fused_var_scheme())
     s6 <- unifier.new_state()
@@ -125,7 +125,7 @@ fn main() -> Unit !{IO} =
     s7 <- unifier.new_state()
     captured_eff <- unifier.instantiate(s7, captured_effect_scheme())
     s8 <- unifier.new_state()
-    captured_ctor <- unifier.instantiate_ctor_pattern(s8, captured_ctor_scheme())
+    captured_ctor <- unifier.instantiate_ctor_pattern(s8, captured_ctor_scheme(), 0)
     run_suite("instantiate_renaming", [
       check_true("two binders stay two variables", sides_distinct(fused)),
       check_true("source-spelled binders are unaffected", sides_distinct(control)),

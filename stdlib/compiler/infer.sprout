@@ -152,7 +152,8 @@ type GroupResult =
 
 # Internal single-method result.
 type InstanceMethodResult =
-  | InstanceMethodOk typed_ast.TypedInstanceMethod
+  | InstanceMethodOk typed_ast.TypedInstanceMethod (Dict types.Scheme)
+  # InstanceMethodOk  method  eta_fwdvar_markers
   | InstanceMethodErr source.SourcePos String
 
 # ---------------------------------------------------------------------------
@@ -5797,7 +5798,7 @@ fn infer_ctor_pattern(
         # Pattern position: existential vars in the ctor scheme become rigid
         # skolems (see instantiate_ctor_pattern), unlike the expression/pack path
         # which hides them as flexible unknowns. docs/gadts-v0.md §6/§7.
-        ctor_type <- unifier.instantiate_ctor_pattern(state, scheme)
+        ctor_type <- unifier.instantiate_ctor_pattern(state, scheme, pos.index)
         record_bounded_unpack(state, name, pos, scheme, ctor_type, env)
         infer_ctor_pattern_typed(pos, state, env, record_existential_skolems(pos, scheme, ctor_type, subst),
                                  eff_subst, expected, name, fields, ctor_type)
@@ -10851,13 +10852,17 @@ fn typecheck_decl(
                                     inst_constraints, methods, global_env_dict(env), subst, eff_subst, env_ftv)
         match r with
         | typed_ast.InstanceMethodsErr pos e -> TypedDeclErr(pos, e)
-        | typed_ast.InstanceMethodsOk typed_methods ->
+        | typed_ast.InstanceMethodsOk typed_methods fwd_markers ->
             # `subst` unchanged: an instance method's inference is NOT merged
             # into the thread. Two instances of one class implement the same
             # method name, so their placeholders would otherwise be forced equal.
             # scheme_from_fn_parts gives them a "#inst/" namespace for the same
-            # reason — the two guards are a pair.
-            TypedDeclOk(typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods), env, env_ftv, subst)
+            # reason — the two guards are a pair. The markers are keyed by fresh
+            # type variables, unique per InferState, so folding them cannot collide;
+            # they enter the env as a FnDecl's do (see commit_fn_decl).
+            TypedDeclOk(typed_ast.TInstanceDecl(constraint, inst_constraints, typed_methods),
+                        fold_fwd_markers(fwd_markers, env),
+                        list_union(unifier.ftv_env(fwd_markers), env_ftv), subst)
 
 # ---------------------------------------------------------------------------
 # apply_subst_typed_expr — walk a typed AST applying a type substitution
@@ -13164,7 +13169,7 @@ fn check_instance_methods(
   eff_subst: Dict types.Effect,
   env_ftv: List String
 ) -> typed_ast.InstanceMethodsResult !{IO} =
-  check_instance_methods_acc(state, head, inst_constraints, methods, env, subst, eff_subst, env_ftv, Nil)
+  check_instance_methods_acc(state, head, inst_constraints, methods, env, subst, eff_subst, env_ftv, Nil, dict_empty())
 
 fn check_instance_methods_acc(
   state: unifier.InferState,
@@ -13175,18 +13180,20 @@ fn check_instance_methods_acc(
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
   env_ftv: List String,
-  acc: List typed_ast.TypedInstanceMethod
+  acc: List typed_ast.TypedInstanceMethod,
+  markers: Dict types.Scheme
 ) -> typed_ast.InstanceMethodsResult !{IO} =
   match methods with
-  | Nil -> typed_ast.InstanceMethodsOk(list_reverse(acc))
+  | Nil -> typed_ast.InstanceMethodsOk(list_reverse(acc), markers)
   | Cons method rest ->
       do
         r <- check_instance_method(state, head, inst_constraints, method, env, subst, eff_subst, env_ftv)
         match r with
         | InstanceMethodErr pos e -> typed_ast.InstanceMethodsErr(pos, e)
-        | InstanceMethodOk typed_method ->
+        | InstanceMethodOk typed_method method_markers ->
             check_instance_methods_acc(state, head, inst_constraints, rest, env, subst, eff_subst, env_ftv,
-                                       Cons(typed_method, acc))
+                                       Cons(typed_method, acc),
+                                       fold_fwd_entries(vec_to_list(dict_entries(method_markers)), markers))
 
 fn check_instance_method(
   state: unifier.InferState,
@@ -13348,7 +13355,7 @@ fn finish_instance_method(name: String, label: MethodLabel, params: List ast.Par
       | Just msg -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), msg)
       | Nothing ->
           finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
-                                         typed_body, method_constraints, gate)
+                                         typed_body, method_constraints, gate, prog_to_fresh)
 
 # docs/linearity-bound-v0.md §11 decision 7: an instance method restates its class
 # method's `where linear`, as it restates a class constraint, under its own names
@@ -13443,7 +13450,8 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
                                   s2: Dict types.Type, inst_type: types.Type,
                                   typed_body: typed_ast.TypedExpr,
                                   method_constraints: List ast.TypeConstraint,
-                                  gate: LinearGate) -> InstanceMethodResult =
+                                  gate: LinearGate,
+                                  prog_to_fresh: Dict types.Type) -> InstanceMethodResult =
   # An instance method is checked alone, so its gate runs here.
   match linear_gates_error([gate], s2) with
   | Just (lp, lm) -> InstanceMethodErr(lp, lm)
@@ -13451,4 +13459,5 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
       InstanceMethodOk(
         typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, method_constraints,
           resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(types.inst_owner_prefix ++ name, params, ret_maybe), s2, body_env),
-            s2, bind_params(params, set_empty()), typed_body)))
+            s2, bind_params(params, set_empty()), typed_body)),
+        eta_fwdvar_markers(prog_to_fresh, s2, dict_empty()))

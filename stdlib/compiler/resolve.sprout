@@ -811,7 +811,8 @@ fn method_ref_constraint(method: String, class_name: String, t: types.Type,
 
 # The type with each signature variable named as it was declared, through the
 # `@eta_fwdvar` markers, so a slot key built from it (typed_ast.dict_slot_key) is the one the
-# enclosing function's slot is under. Any other variable keeps its identity.
+# enclosing function's slot is under. Any other variable keeps its identity; an unpack's
+# skolem is named by its `$ex_` slot head.
 export fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr =
   match t with
   | types.TVar v ->
@@ -820,7 +821,10 @@ export fn named_type_expr(t: types.Type, env: Dict types.Scheme) -> ast.TypeExpr
       | Nothing -> typed_ast.type_to_type_expr(t)
   | types.TApp f x -> ast.TypeApply(named_type_expr(f, env), named_type_expr(x, env))
   | types.TTuple items -> ast.TupleType(list_map(\i -> named_type_expr(i, env), items))
-  | types.TConst _ -> typed_ast.type_to_type_expr(t)
+  | types.TConst id ->
+      match types.skolem_fwd_head(types.type_id_name(id)) with
+      | Just head -> ast.TypeName(head)
+      | Nothing -> typed_ast.type_to_type_expr(t)
   | types.TFunc _ _ _ _ -> typed_ast.type_to_type_expr(t)
   | types.TThunk _ _ -> typed_ast.type_to_type_expr(t)
 

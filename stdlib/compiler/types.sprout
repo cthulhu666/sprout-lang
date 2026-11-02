@@ -156,16 +156,28 @@ instance Eq TypeId
   fn eq(a: TypeId, b: TypeId) -> Bool = type_id_eq(a, b)
 
 # A skolem is a rigid type CONSTANT minted for an unpacked existential var
-# (unifier.instantiate_ctor_pattern); its name is "$sk<n>" and "$" cannot open a
-# user identifier, so this predicate never fires on a real type. Used to rephrase
-# a unification mismatch involving a skolem as an "existential escapes its scope"
-# diagnostic rather than leaking the internal "$sk3" name. See docs/gadts-v0.md.
+# (unifier.instantiate_ctor_pattern); its name is "$sk<n>_<binder>" (the binder is
+# existential_binder's) and "$" cannot open a user identifier, so this predicate never
+# fires on a real type. Used to rephrase a unification mismatch involving a skolem as
+# an "existential escapes its scope" diagnostic rather than leaking the internal name.
+# See docs/gadts-v0.md.
 export fn is_skolem_name(name: String) -> Bool =
   string.starts_with(name, "$sk")
 
 # The counter value inside a skolem's name; skolems number in the order they are minted.
+# The binder after the first `_` is not part of it.
 export fn skolem_index(name: String) -> Maybe Int =
-  if is_skolem_name(name) then parse_int(string.drop(name, 3)) else Nothing
+  let Just rest = string.strip_prefix(name, "$sk") else Nothing
+  in match string.split_once(rest, "_") with
+     | Just (digits, _) -> parse_int(digits)
+     | Nothing -> parse_int(rest)
+
+# The `$ex_` forwarding identity of the existential a skolem stands for, when its name
+# carries a binder. A hand-built `$sk<n>` carries none.
+export fn skolem_fwd_head(name: String) -> Maybe String =
+  let Just rest = string.strip_prefix(name, "$sk") else Nothing
+      Just((_, binder)) = string.split_once(rest, "_") else Nothing
+  in Just(existential_fwd_head(binder))
 
 # Stage 0b: the STABLE forwarding identity for a constrained existential's packed
 # dictionary (docs/gadts-v0.md §5b/§7). The skolem `$sk<n>` that unpacking mints is

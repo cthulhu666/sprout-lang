@@ -1259,16 +1259,17 @@ export fn instantiate_with_vars(state: InferState, scheme: types.Scheme) -> (typ
 # Instantiate a constructor scheme for use in a PATTERN (unpack). A scheme var
 # that does NOT appear in the ctor's result type is existential (a head param
 # always appears in the result; an existential never does) and is instantiated
-# to a fresh rigid skolem TConst ($sk<n>). The existing nominal-unification rule
+# to a fresh rigid skolem TConst ($sk<n>_<binder>). The existing nominal-unification rule
 # (unify(TConst,TConst) succeeds only on name equality) then keeps it abstract
 # for free: unifying a skolem with a concrete type or a distinct skolem fails,
 # which is exactly the existential escape/merge soundness guard. Ordinary type
-# params instantiate to fresh TVars, as in `instantiate`. See docs/gadts-v0.md.
-export fn instantiate_ctor_pattern(state: InferState, scheme: types.Scheme) -> types.Type !{IO} =
+# params instantiate to fresh TVars, as in `instantiate`. `index` is the pattern's
+# source index: it makes the skolem name its binder. See docs/gadts-v0.md.
+export fn instantiate_ctor_pattern(state: InferState, scheme: types.Scheme, index: Int) -> types.Type !{IO} =
   do
     let body = types.scheme_type(scheme)
     let result_ftv = types.ftv(ctor_result_of(body))
-    type_repl <- build_ctor_pattern_repl(state, scheme, result_ftv, dict_empty())
+    type_repl <- build_ctor_pattern_repl(state, scheme, result_ftv, index, dict_empty())
     effect_repl <- build_effect_repl(state, scheme, dict_empty())
     apply_full_subst(type_repl, effect_repl, body)
 
@@ -1288,39 +1289,43 @@ fn effect_repl_domain(scheme: types.Scheme) -> List String =
   list_union(types.scheme_effect_vars(scheme),
     types.scheme_effect_vars_of(types.scheme_type(scheme), types.scheme_effects(scheme)))
 
-fn build_ctor_pattern_repl(state: InferState, scheme: types.Scheme, result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
-  build_ctor_pattern_repl_in(state, types.scheme_vars(scheme), type_repl_domain(scheme), result_ftv, acc)
+fn build_ctor_pattern_repl(state: InferState, scheme: types.Scheme, result_ftv: List String, index: Int,
+                           acc: Dict types.Type) -> Dict types.Type !{IO} =
+  build_ctor_pattern_repl_in(state, types.scheme_vars(scheme), type_repl_domain(scheme), result_ftv, index, acc)
 
 fn build_ctor_pattern_repl_in(state: InferState, vars: List String, domain: List String,
-                              result_ftv: List String, acc: Dict types.Type) -> Dict types.Type !{IO} =
+                              result_ftv: List String, index: Int, acc: Dict types.Type) -> Dict types.Type !{IO} =
   match vars with
   | Nil -> acc
   | Cons v rest ->
       do
-        repl <- fresh_ctor_pattern_var(state, v, domain, result_ftv)
-        build_ctor_pattern_repl_in(state, rest, domain, result_ftv, dict_set(v, repl, acc))
+        repl <- fresh_ctor_pattern_var(state, v, domain, result_ftv, index)
+        build_ctor_pattern_repl_in(state, rest, domain, result_ftv, index, dict_set(v, repl, acc))
 
-fn fresh_ctor_pattern_var(state: InferState, v: String, domain: List String, result_ftv: List String) -> types.Type !{IO} =
-  if list_member(v, result_ftv) then fresh_pattern_tvar(state, domain) else fresh_pattern_skolem(state)
+fn fresh_ctor_pattern_var(state: InferState, v: String, domain: List String, result_ftv: List String,
+                          index: Int) -> types.Type !{IO} =
+  if list_member(v, result_ftv) then fresh_pattern_tvar(state, domain)
+  else fresh_pattern_skolem(state, types.existential_binder(v, index))
 
 fn fresh_pattern_tvar(state: InferState, domain: List String) -> types.Type !{IO} =
   do
     name <- fresh_outside(state, domain)
     types.TVar(types.tyvar_id(name))
 
-fn fresh_pattern_skolem(state: InferState) -> types.Type !{IO} =
+fn fresh_pattern_skolem(state: InferState, binder: String) -> types.Type !{IO} =
   do
-    n <- fresh_skolem(state)
+    n <- fresh_skolem(state, binder)
     types.TConst(types.type_id(n))
 
 # A skolem is a rigid, uniquely-named type CONSTANT (not a variable). "$" cannot
-# open a user identifier, so "$sk<n>" can never name a real type — same
-# no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness.
-fn fresh_skolem(state: InferState) -> String !{IO} =
+# open a user identifier, so "$sk<n>_<binder>" can never name a real type — same
+# no-collision guarantee as `fresh`. Shares the tyvar counter for uniqueness; the
+# binder names the existential it stands for (types.skolem_fwd_head).
+fn fresh_skolem(state: InferState, binder: String) -> String !{IO} =
   do
     n <- ref_read(state.next_type_id)
     ref_write(state.next_type_id, n + 1)
-    "$sk" ++ int_to_string(n)
+    "$sk" ++ int_to_string(n) ++ "_" ++ binder
 
 # Instantiation is a SIMULTANEOUS renaming, but `apply_full_subst` chases: it
 # re-applies the map to its own result. So a target the map still binds is

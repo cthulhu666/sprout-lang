@@ -1,0 +1,26 @@
+module main
+
+# A method used as a value on two unpacked existentials of one constructor. Each
+# occurrence's type is its own pattern's skolem, so each takes its own packed slot.
+
+class Step t
+  fn bump(x: t) -> t
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+
+instance Step String
+  fn bump(x: String) -> String = x ++ "!"
+
+type Pack = | exists a. Pack a where Step a, ToString a
+
+fn app(f: a -> a, v: a) -> a = f(v)
+
+fn both(p: Pack, q: Pack) -> String =
+  match p with
+  | Pack x -> match q with
+    | Pack y -> to_string(app(bump, x)) ++ "|" ++ to_string(app(bump, y))
+
+fn main() -> Unit !{IO} = do
+  print(both(Pack(1), Pack("q")))
+  print(both(Pack("q"), Pack(1)))
