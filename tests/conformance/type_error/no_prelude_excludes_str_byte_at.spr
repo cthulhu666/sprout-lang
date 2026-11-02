@@ -1,0 +1,7 @@
+no_prelude
+
+# `str_byte_at` returns a `Maybe`, which is not a `no_prelude` floor type, so it stays off the
+# floor. A `no_prelude` file reads a byte through `str_starts_with_at_byte` or an import.
+
+fn main() -> Unit !{IO} =
+  print_str(match str_byte_at("prelude", 0) with | Just _ -> "yes" | Nothing -> "no")

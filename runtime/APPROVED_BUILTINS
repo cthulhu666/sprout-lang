@@ -126,6 +126,8 @@ sprout_set_argv
 sprout_tag
 sproutd_self_init
 sproutd_init_with_root  # like sproutd_self_init but takes explicit stdlib_root — setenv/exe-path resolution impossible in Sprout
+str_byte_at  # O(1) bounds-checked byte read; Sprout cannot read a String's bytes without copying it into Bytes. See docs/string-byte-read-v0.md.
+str_byte_at_unboxed  # unboxed-return twin of str_byte_at (Maybe as tag + payload, no allocation); same justification.
 str_byte_len
 str_char_at
 str_char_at_unboxed  # unboxed-return twin of str_char_at; predates the policy

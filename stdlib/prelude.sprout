@@ -2268,13 +2268,19 @@ extern fn str_compare(a: String, b: String) -> Int
 # `str_byte_len`) — an honest dependency for a text parser, and the concrete cost of having no
 # cross-module DCE (BACKLOG §7).
 #
-# The ONE EXCEPTION is `str_starts_with_at_byte`, below. The prelude's own `parse_int` and
-# `parse_double` need a linear scan over their input, `str_char_at` is O(i) per call, and the
-# prelude cannot import stdlib.string. A symbol is declared once (`just check-extern-signatures`),
-# so stdlib.string no longer declares it; its callers there and in stdlib.json use the global
-# name. Declared here it is on the `no_prelude` floor, since its signature mentions only
-# primitives. It reads in place at a byte offset in O(1) and cannot abort.
+# The TWO EXCEPTIONS are `str_starts_with_at_byte` and `str_byte_at`, below. The prelude's own
+# `parse_int` and `parse_double` need a linear scan over their input, `str_char_at` is O(i) per
+# call, and the prelude cannot import stdlib.string. They scan with `str_starts_with_at_byte`
+# today; `str_byte_at` is for moving them, and `str_len` and `str_slice`, onto byte reads
+# (docs/string-byte-read-v0.md §7). A symbol is declared once (`just check-extern-signatures`), so stdlib.string
+# does not declare them; its callers there and in stdlib.json use the global names.
+# `str_starts_with_at_byte` is on the `no_prelude` floor, since its signature mentions only
+# primitives; `str_byte_at` is not, since `Maybe` is not a floor type. Both read in place at a
+# byte offset in O(1), and no offset makes either abort.
 extern fn str_starts_with_at_byte(s: String, byte: Int, prefix: String) -> Bool
+
+# O(1): byte `i` of `s` (0-255), or Nothing when `i` is out of range.
+extern fn str_byte_at(s: String, i: Int) -> Maybe Int
 
 # O(|prefix|). Part of the char-indexed core above, so global, but defined over this extern.
 export fn str_starts_with(s: String, prefix: String) -> Bool =

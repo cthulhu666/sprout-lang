@@ -353,15 +353,16 @@ CI installs clang 22 from apt.llvm.org (`scripts/ci_install_llvm.sh`).
 
 ## Constructor tag fold — `just ctor-tag-fold-check`
 
-Whole-program links `tests/ctor_tag_fold/reads.sprout` (a `Vec` loop, a `Bytes` loop and a
-channel send/recv loop) to optimised IR and checks four things:
+Whole-program links `tests/ctor_tag_fold/reads.sprout` (a `Vec` loop, a `Bytes` loop, a `String`
+loop and a channel send/recv loop) to optimised IR and checks four things:
 
 - Each `@main.*` function calls neither `@find_ctor_tag_by_name` nor `@sprout_ctor_tag_lookup`
   and reads no tag-cache global (any `sprout_tag_cache` name).
   An inlined `_unboxed` read that still carries the lazy tag lookup grows its caller past
   LLVM's inline threshold, and hot loops such as nqueens slow down. The check also fails when a
-  fixture function still calls `@vector_get_unboxed` or `@bytes_get_unboxed`, or when no fixture
-  function is found, because it proves nothing about a read that was never inlined.
+  fixture function still calls `@vector_get_unboxed`, `@bytes_get_unboxed` or
+  `@str_byte_at_unboxed`, or when no fixture function is found, because it proves nothing about
+  a read that was never inlined.
 - Only `@sprout_ctor_tag_lookup` calls `@find_ctor_tag_by_name`. Any other caller scans the
   constructor table by name on every call; the report names each function, capped at 15.
 - `@sprout_chan_make_got` (builds `stdlib.chan.Got`) and `@string_concat_many` (reads `Cons` and

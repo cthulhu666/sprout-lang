@@ -95,7 +95,8 @@ the lowerer's untouched. The two were never the same set.
 > again since `str_starts_with_at_byte` joined it: the prelude's `parse_int` and
 > `parse_double` scan by byte offset, and the prelude cannot import `stdlib.string`. The floor is
 > 15 again since `char_to_str` became a prelude function over `char_to_string`, and 14 since
-> `str_starts_with` became one over `str_starts_with_at_byte`.
+> `str_starts_with` became one over `str_starts_with_at_byte`. `str_byte_at` joined the prelude's
+> externs without joining the floor: its signature mentions `Maybe`.
 > Counts not edited below are left as measured; read a "15" or "16" below as the
 > floor at that time, and 14 as today's.
 
