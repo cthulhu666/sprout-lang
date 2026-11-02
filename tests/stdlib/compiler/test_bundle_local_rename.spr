@@ -31,6 +31,24 @@ fn lambda_params(name: String, decls: List ast.Decl) -> List String =
   | Just (ast.FnDecl _ _ _ _ _ _ (ast.CallExpr _ [ast.LambdaExpr ps _ _ | _] _) _) -> ast.param_names(ps)
   | _ -> ["no lambda argument in: " ++ name]
 
+# The parameters of method `method` of class `class_name`.
+fn class_sig_params(class_name: String, method: String, decls: List ast.Decl) -> List String =
+  match find(class_is(class_name, _), decls) with
+  | Just (ast.ClassDecl _ _ methods _ _) ->
+      match find(method_is(method, _), methods) with
+      | Just (ast.ClassMethodSig _ params _ _ _ _) -> ast.param_names(params)
+      | Nothing -> ["no such method: " ++ method]
+  | _ -> ["no class declaration"]
+
+fn class_is(name: String, d: ast.Decl) -> Bool =
+  match d with
+  | ast.ClassDecl n _ _ _ _ -> n == name
+  | _ -> false
+
+fn method_is(name: String, m: ast.ClassMethodSig) -> Bool =
+  match m with
+  | ast.ClassMethodSig n _ _ _ _ _ -> n == name
+
 fn bundled(src: String, path: String, stdlib_root: String) -> List ast.Decl !{IO} =
   do
     fs.write_text(path, src)
@@ -46,6 +64,8 @@ let source_text: String = string.join("\n", [
   "fn names(vector_mutset: Int, __sprout_vec_get: Int, __tc_ToString_Int_to_string: Int,",
   "         __cm_ToString_to_string: Int, __do3_4: Int, __cmp_acc1_1_0: Int, demo_ext: Int,",
   "         str_len: Int, ordinary: Int, _single: Int, mid__dle: Int) -> Int = 1",
+  "class Sized t",
+  "  fn size(__tc_ToString_1_to_string: t, str_len: Int, ordinary: Int) -> Int",
   "fn plus(a: Int, b: Int) -> Int = a + b",
   "fn holes(xs: List Int) -> List Int = list_map(plus(_, 3), xs)",
   "fn main() -> Unit !{IO} = print(1)",
@@ -69,6 +89,8 @@ fn main() -> Unit !{IO} =
              "$l_str_len", "ordinary", "_single", "mid__dle"])
           assert_eq(state, "an extern's own parameters follow the same rule",
             decl_params("demo_ext", decls), ["$l_demo_ext", "$l_str_len", "plain"])
+          assert_eq(state, "a class method signature's parameters follow the same rule",
+            class_sig_params("demo.Sized", "demo.size", decls), ["$l___tc_ToString_1_to_string", "$l_str_len", "ordinary"])
           assert_eq(state, "a `_`-hole parameter is not renamed",
             lambda_params("demo.holes", decls), ["$ph_0"])
     summary(state)

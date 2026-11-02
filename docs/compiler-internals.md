@@ -256,12 +256,8 @@ its `IRType` kind, and only stores of a non-heap scalar are unchecked. Switches 
 
 ## Names a pass writes after bundling
 
-A pass that writes a name into a user body after bundling writes a top-level's name (a prelude
-value, an extern) or a `__` name (`source.compiler_name_prefix`), nothing else. The bundler
-renames every local with such a name to `$l_<name>`, so none can capture the one a pass writes;
-any other spelling can be captured. A name written before bundling cannot start with `__`
-(`ast.placeholder_param_prefix` is `$ph_`). See
-[prelude-name-identity-v0.md §5](prelude-name-identity-v0.md).
+A pass that writes a name into a user body after bundling writes a top-level's name or a `__`
+name, nothing else; see [prelude-name-identity-v0.md §5](prelude-name-identity-v0.md).
 
 ## Emitted SSA names: LLVM has ONE namespace for locals and block labels
 
