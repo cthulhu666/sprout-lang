@@ -4,28 +4,10 @@ import stdlib.compiler.types as types
 import stdlib.compiler.source as source
 import stdlib.compiler.vec_wrappers as vec_wrappers
 
-# Wrapper store inline (docs/scalar-store-inline-v0.md). A call to a store wrapper such as
-# `mutvec_set(g, i, x)` becomes the direct `vector_mutset(mutvec_raw(g), i, x)` when the
-# stored operand has a non-heap scalar type, so `ast_to_ir` lowers it inline with no call and
-# no write barrier. Any other call is left alone.
-#
-# Order of evaluation: a wrapper uses each parameter once, in order (`vec_wrappers`), so each
-# argument still runs once, left to right. The only added steps are projection calls, which
-# are pure field reads.
-#
-# Why the operand's type suffices: when the wrapper passes a bare parameter as the value, the
-# operand is the caller's own expression with the caller's own type. When it passes anything
-# else (a projection, a sum), `subst` keeps the wrapper's node type, which is the wrapper's
-# type variable, so the type test fails and the call stays.
-#
-# Shadowing needs no scope tracking, for two names. The wrapper's name is a top-level
-# declaration, so the bundler writes it `module.name`; a local binder is a bare identifier
-# and never equals it. The inserted `vector_mutset` is an extern, and the bundler renames any
-# local named like an extern (docs/prelude-name-identity-v0.md §5), so no binder captures it.
-# The fixture's `set_shadowed` and tests/stdlib/test_mutvec_scalar_store.spr pin both.
-#
-# Only a node with a rewrite below it is rebuilt: the pass runs before dead-code removal, so
-# it sees the whole program, and the unchanged rest is shared.
+# Wrapper store inline: a call to a store wrapper (`mutvec_set(g, i, x)`) whose stored value is
+# a non-heap scalar becomes the direct `vector_mutset(mutvec_raw(g), i, x)`, which `ast_to_ir`
+# lowers inline with no call and no write barrier. Design: docs/scalar-store-inline-v0.md.
+# Only a node with a rewrite below it is rebuilt; the rest of the program is shared.
 
 export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
@@ -61,14 +43,24 @@ fn rewrite(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> Maybe t
   let rebuilt = typed_ast.map_children_shared(rewrite(_, stores), e)
   in maybe_or_else(expand_store(maybe_with_default(e, rebuilt), stores), rebuilt)
 
+# Neither name can be captured, so no scope tracking. The wrapper is a top-level, which the
+# bundler writes `module.name`, and a local binder never has a dot. The inserted callee is an
+# extern, and the bundler renames any local named like one (docs/prelude-name-identity-v0.md §5).
+#
 # The new callee keeps the wrapper callee's type `vt`, as `bce` does for its pseudo-callees:
 # lowering reads the name and the argument types, not this one.
+#
+# `keeps_order` guards evaluation order: a wrapper with arithmetic expands only for atomic
+# arguments, so no effect runs after the moved operation that ran before it.
+# `shape_converts` reads the stored operand's type after `subst`: the caller's own for a bare
+# parameter, else the wrapper's node type (a type variable if generic, so the call stays).
 fn expand_store(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> Maybe typed_ast.TypedExpr =
   match e with
   | typed_ast.TCall (typed_ast.TVar f vt vp) args t p ->
-      let Just s = vec_wrappers.shape_at(f, args, stores) else Nothing
+      let Just w = dict_get(f, stores) else Nothing
+          Just s = vec_wrappers.apply_wrapper(w, args) else Nothing
           Just x = s.val else Nothing
-      in if vec_wrappers.shape_converts(s)
+      in if vec_wrappers.shape_converts(s) && vec_wrappers.keeps_order(w, args)
          then Just(typed_ast.TCall(typed_ast.TVar("vector_mutset", vt, vp), [s.vec, s.idx, x], t, p))
          else Nothing
   | _ -> Nothing

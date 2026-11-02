@@ -260,8 +260,12 @@ over its parameters, each used once and in order: `mutvec_set`) is rewritten to 
 `vector_mutset(mutvec_raw(g), i, x)` when the stored operand's type is `Int`, `Bool`, `Char` or
 `Double` (`type_is_non_heap_scalar`). `ast_to_ir` then lowers it to the guard and an inline
 `IRVecSetD`: no call and no write barrier, since a scalar creates no old-to-young edge. A generic
-caller (`x: a`), a heap value, and a wrapper that stores a projection or a sum (the node keeps the
-wrapper's type variable) keep the call. A local binder cannot shadow a wrapper: wrappers are named
+caller (`x: a`) and a heap value keep the call. The rule is the stored operand's static type after
+substitution: the caller's own expression for a bare parameter, else the wrapper's node type. So a
+generic wrapper that stores a sum or projection keeps its call (the type is its type variable), and
+a monomorphic one (`vector_mutset(v, i, x + 1)` over `Int`) expands. A wrapper with arithmetic in an
+operand expands only when every argument is a variable or a literal, so its overflow trap cannot
+run ahead of a later argument's effect. A local binder cannot shadow a wrapper: wrappers are named
 `module.name`, binders have no dot. `SPROUT_OPT_OFF=wsi` disables it; a direct scalar
 `vector_mutset` still lowers inline. IR shape is checked by `scripts/b1_gate.sh`; design:
 [scalar-store-inline-v0.md](scalar-store-inline-v0.md).

@@ -97,13 +97,20 @@ this name either. `tests/stdlib/test_mutvec_scalar_store.spr` pins it with a par
 parameter and a `let` all named `vector_mutset`.
 
 The stored operand is the caller's own expression only when the wrapper passes a bare parameter
-there. `subst` keeps the wrapper's node type on a sum or a projection. So a generic wrapper that
-stores `cell_val(c)` keeps its type `a`, and it does not expand even at a `MutVec Int` call site.
-That is conservative, not unsound.
+there. On a sum or a projection `subst` keeps the wrapper's node type. For a generic wrapper that
+is its type variable: one that stores `cell_val(c)` keeps type `a` and does not expand, even at a
+`MutVec Int` call site. For a monomorphic wrapper it is a concrete type: `put_inc(v, i, x) =
+vector_mutset(v, i, x + 1)` over `Int` stores an `Int` and expands. The rule is that the stored
+operand's static type, after substitution, is a non-heap scalar. Keeping the call is
+conservative, not unsound.
 
-**Evaluation order.** Each argument still runs once, left to right. That holds because the wrapper
-uses every parameter once, in order. The extra steps the expansion adds are projection calls, which
-are pure field reads.
+**Evaluation order.** Each argument still runs once, left to right: the wrapper uses every
+parameter once, in order (`names_in_order`), so substitution keeps the caller's order. The extra
+steps are projection calls, which are pure field reads, and the wrapper's own arithmetic. That
+arithmetic can trap (`i + 1` on overflow), and expansion moves it in among the arguments, ahead of
+a later one that has an effect. So a wrapper with arithmetic in an operand expands only when
+every argument is a variable or a literal (`vec_wrappers.keeps_order`); otherwise the call stays.
+`mutvec_set` has no arithmetic, so it expands whatever its arguments are.
 
 ### 4.2 Lowering
 
@@ -159,6 +166,14 @@ The recognisers live in `vec_wrappers.sprout`, which both passes import. They ar
 Because the pass sees the whole pre-DCE program, it rebuilds only a node with a rewrite below it
 (`typed_ast.map_children_shared`) and returns the original program when no call expands.
 
+The other order, reachability then the pass then reachability again, walks only the reachable
+program but needs the second pass to drop a wrapper left without calls. Allocation counters
+(`SPROUT_DEBUG_ALLOC=1`) on `--emit-ir` of `compile_driver.sprout`, where no store expands:
+40,453,193 objects and 2,378,335,872 arena bytes now, 40,534,488 and 2,388,548,736 reordered
+(+0.2%, +0.4%). On `examples/astar.sprout`, which has stores, it is 1,586,300 and 71,194,256 now,
+1,582,095 and 70,806,480 reordered (-0.3%, -0.5%). The order stays as it is: the self-compile is
+the larger and more frequent run.
+
 ## 5. Impact
 
 - **Syntax, typing, diagnostics:** none. The trap texts are unchanged (§4.2).
@@ -198,11 +213,16 @@ Because the pass sees the whole pre-DCE program, it rebuilds only a node with a 
      expand.
    - A generic wrapper whose stored operand is a projection does not expand at a `MutVec Int`
      call site.
+   - A monomorphic wrapper that stores a sum (`x + 1` over `Int`) expands.
+   - A wrapper with arithmetic expands for variable and literal arguments, and keeps the call
+     when any argument is anything else. `mutvec_set` with an effectful argument still expands.
 2. **Behaviour.**
    - Writes through the expanded form read back correctly.
    - An out-of-range `mutvec_set` on a `MutVec Int` prints
      `runtime error: vector_mutset: index out of bounds`.
    - A null vector prints `vector_mutset: null vector`.
+   - `tests/conformance/run/wsi_wrapper_arith_arg_order.spr`: a wrapper with `i + 1` called with an
+     overflowing index and an effectful later argument prints what it prints with the pass off.
 3. **GC.** `just gc-gen-check` passes; its `vector_mutset` site test stores a `String`, so it
    still exercises the barrier. `just test` passes under `SPROUT_GC_MINOR=1
    SPROUT_GC_GENCHECK=1`.

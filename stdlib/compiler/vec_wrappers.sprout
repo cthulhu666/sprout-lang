@@ -12,16 +12,11 @@ import stdlib.compiler.type_kind as type_kind
 # argument, and the only extra steps are projection calls. `Wrapper` records that shape;
 # `apply_wrapper` instantiates it at a call.
 
-# ---------------------------------------------------------------------------
-# Accesses and the wrappers that reduce to one.
-# ---------------------------------------------------------------------------
-
 # An access with its operands in terms of the enclosing function.
 export type Shape (..) = (is_set: Bool, vec: typed_ast.TypedExpr, idx: typed_ast.TypedExpr,
                    val: Maybe typed_ast.TypedExpr)
 
-# A function whose whole body is one access over its own parameters, each used
-# once and in order, so inlining it neither repeats nor drops an argument.
+# `params` in call order; `shape` is the access, in terms of them.
 export type Wrapper (..) = (params: List String, shape: Shape)
 
 export fn is_pure_decl(eff: Maybe (List String)) -> Bool =
@@ -128,6 +123,36 @@ export fn apply_wrapper(w: Wrapper, args: List typed_ast.TypedExpr) -> Maybe Sha
 export fn shape_at(n: String, args: List typed_ast.TypedExpr, wrappers: Dict Wrapper) -> Maybe Shape =
   let Just w = dict_get(n, wrappers) else Nothing
   in apply_wrapper(w, args)
+
+# Whether substituting `args` for `w`'s parameters keeps what the call runs and in what order.
+# `apply_wrapper` already keeps each argument once and in call order (`names_in_order`); what it
+# cannot keep is a wrapper's own arithmetic (`i + 1`), which can trap and would then run among
+# the arguments, ahead of a later one that has an effect. So a wrapper with arithmetic needs
+# arguments that are all a variable or a literal, which run nothing.
+export fn keeps_order(w: Wrapper, args: List typed_ast.TypedExpr) -> Bool =
+  !shape_traps(w.shape) || all(is_atomic, args)
+
+fn shape_traps(s: Shape) -> Bool =
+  can_trap(s.vec) || can_trap(s.idx) || maybe_with_default(false, fmap(can_trap, s.val))
+
+# `operand_ok` allows only parameters, literals, projection calls and `+ - *`; only the
+# arithmetic traps (overflow).
+fn can_trap(e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TBinary _ _ _ _ _ -> true
+  | typed_ast.TCall _ args _ _ -> any(can_trap, args)
+  | _ -> false
+
+fn is_atomic(e: typed_ast.TypedExpr) -> Bool =
+  match e with
+  | typed_ast.TVar _ _ _ -> true
+  | typed_ast.TInt _ _ _ -> true
+  | typed_ast.TFloat _ _ _ -> true
+  | typed_ast.TBool _ _ _ -> true
+  | typed_ast.TString _ _ _ -> true
+  | typed_ast.TChar _ _ _ -> true
+  | typed_ast.TUnit _ _ -> true
+  | _ -> false
 
 # A store of a non-heap scalar needs no write hook; any other store stays checked.
 export fn shape_converts(s: Shape) -> Bool =

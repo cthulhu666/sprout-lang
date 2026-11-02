@@ -148,7 +148,7 @@ check_trap "$FIX/fixture_b1_oob_store.spr" oobs \
 has_call() { grep -qF "@$1("; }
 
 wrap_ir="$(emit "$FIX/fixture_b1_wrapper_store.spr")"
-for fn in set_int set_bool set_char set_double put_int; do
+for fn in set_int set_bool set_char set_double put_int put_next_atomic put_inc_atomic set_effectful; do
   body="$(fn_body "main\\.$fn" <<<"$wrap_ir")"
   if [ -n "$body" ] && grep -qF 'vpanic_' <<<"$body" \
      && ! has_call vector_mutset <<<"$body" \
@@ -160,12 +160,12 @@ for fn in set_int set_bool set_char set_double put_int; do
   fi
 done
 for entry in set_string:stdlib.mutable.mutvec_set set_generic:stdlib.mutable.mutvec_set \
-             put_twice_int:main.put_twice put_cell_int:main.put_cell; do
+             put_twice_int:main.put_twice put_cell_int:main.put_cell put_next_call:main.put_next; do
   fn="${entry%%:*}"; sym="${entry#*:}"
   if fn_body "main\\.$fn" <<<"$wrap_ir" | has_call "$sym"; then
     echo "  ok: $fn keeps the call to $sym"
   else
-    echo "  FAIL: $fn lost its call to $sym (a store that must keep the barrier was expanded)"; fail=1
+    echo "  FAIL: $fn lost its call to $sym (a store that must stay a call was expanded)"; fail=1
   fi
 done
 # A parameter named `mutvec_set` is the caller's own function: the call goes through the closure.
@@ -188,6 +188,13 @@ fi
 # Out-of-range Int store through the wrapper traps with the runtime's text.
 check_trap "$FIX/fixture_b1_oob_wrapper_store.spr" oobw \
   'runtime error: vector_mutset: index out of bounds' 'out-of-bounds wrapper store'
+# The trap text alone cannot tell the inline guard from the C runtime, which print the same.
+body="$(fn_body '__sprout_user_main' <<<"$(emit "$FIX/fixture_b1_oob_wrapper_store.spr")")"
+if [ -n "$body" ] && grep -qF 'vpanic_' <<<"$body" && ! has_call stdlib.mutable.mutvec_set <<<"$body"; then
+  echo "  ok: the out-of-bounds wrapper store is expanded to the inline guard"
+else
+  echo "  FAIL: the out-of-bounds wrapper store still calls mutvec_set (or has no inline guard)"; fail=1
+fi
 
 if [ "$fail" -eq 0 ]; then echo "b1-gate: PASS"; else echo "b1-gate: FAIL"; fi
 exit "$fail"

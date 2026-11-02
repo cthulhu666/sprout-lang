@@ -310,8 +310,8 @@ fn alloc_summary_or_empty(decls: List typed_ast.TypedDecl, penv: ast_to_ir.ProgE
 
 export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
     Result String String !{IO} =
-  # Reachability elimination comes FIRST, and lives here rather than at either
-  # caller. Two entry points stream IR — `compiler.compile_full_ir` for the
+  # Wrapper store inline, then reachability elimination, run before everything else. Both live
+  # here rather than at either caller. Two entry points stream IR — `compiler.compile_full_ir` for the
   # analysis service and `compile_driver.run_file_use_ir_codegen` for
   # `--emit-ir` — and a pass applied at one of them silently does nothing for
   # the other. This is the seam they share.
@@ -325,8 +325,11 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
     versioned <- version_if(bce_on, dce.elim_unreachable(inline_stores_if(wsi_on, prog)))
     compile_reachable(versioned)
 
-# Wrapper store inline runs before reachability, so a wrapper with no calls left is dropped
-# with the rest of the dead code, and before BCE, which then sees the direct extern.
+# Wrapper store inline runs on the whole program, before reachability: a wrapper with no calls
+# left is then dropped with the rest of the dead code, and BCE, which runs after, sees the
+# direct extern. After reachability it would need a second reachability pass to drop that
+# wrapper, which allocates more than the walk saves when no store expands
+# (docs/scalar-store-inline-v0.md §4.4).
 fn inline_stores_if(on: Bool, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   if on then wsi.expand_program(prog) else prog
 
