@@ -37,7 +37,7 @@ run "$ROOT/runtime"
 [[ "$RC" == 0 ]] || fail "(a) real tree: exit $RC: $OUT"
 echo "ok: (a) real tree passes"
 
-# (b)-(h) one raw call each, appended to a function-free tail of a copy.
+# (b)-(j) one raw call each, appended to a copy. (m)-(o) at the end use the same helper.
 planted() {  # <case> <file> <line> <needle>
   fresh case
   printf '%s\n' "$3" >>"$TMPD/case/$2"
@@ -84,5 +84,11 @@ EOF
 run "$TMPD/after"
 expect_fail "(l) raw call after the wrapper region" 'after_b'
 if grep -qF 'after_a' <<<"$OUT"; then fail "(l) call inside the wrapper region was reported: $OUT"; fi
+
+# (m)-(o) the first argument is not a plain name: a cast, a dereference, or on the next line.
+planted "(m) raw fopen with a cast first argument" sprout_runtime.c 'FILE* planted_j(long long p) { return fopen((const char*)(uintptr_t)p, "rb"); }' 'planted_j'
+planted "(n) raw open with a dereference first argument" sprout_runtime.c 'int planted_k(const char** p) { return open(*p, 0); }' 'planted_k'
+planted "(o) raw socket with the first argument on the next line" sprout_runtime.c 'int planted_l(void) { return socket(
+    AF_INET, SOCK_STREAM, 0); }' 'planted_l'
 
 echo "test-cloexec-gate: ok"

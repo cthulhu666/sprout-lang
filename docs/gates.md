@@ -594,7 +594,8 @@ pipes or files. Every descriptor the runtime creates is close-on-exec from creat
 `cloexec_open` plus `fdopendir`.
 
 `scripts/cloexec_gate.sh` fails on a raw `socket`, `accept`, `pipe`, `open`, `fopen`, `opendir`,
-`dup`, `dup2` and the like in `runtime/*.c`, on `epoll_create1` without `EPOLL_CLOEXEC` and on
+`dup`, `dup2` and the like in `runtime/*.c`, whatever the first argument looks like (a name followed by
+`(` is enough), on `epoll_create1` without `EPOLL_CLOEXEC` and on
 `timerfd_create` without `TFD_CLOEXEC`. Comments and string contents are blanked first, so prose
 such as `accept(2)` does not match, and `freopen` and `fdopen` are not matched.
 

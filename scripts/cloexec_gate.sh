@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
 # Every descriptor the runtime creates is close-on-exec (docs/gates.md §Close-on-exec).
 #
-# Fails on a raw fd-creating call in runtime/*.c. Calls go through the cloexec_* wrappers in
-# sprout_runtime.c, whose bodies sit between these two comment lines and are not scanned:
-#     /* cloexec-gate: begin wrappers */  ...  /* cloexec-gate: end wrappers */
-# A line that carries the comment `cloexec-gate: fork child` is also skipped; the dup2 calls in the
-# fork children use it, since dup2 clears the flag on its target by design.
-#
-# Comments and string contents are blanked first, so prose such as `accept(2)` does not match.
-# Known bypasses: a parenthesised name `(socket)(...)`, a macro or function pointer that hides the
-# name, and a call split from its `(`.
+# Fails on a raw fd-creating call in runtime/*.c outside the cloexec_* wrappers. The markers that
+# exempt the wrapper bodies and the fork-child dup2 lines, and the known bypasses, are in
+# docs/gates.md, section Close-on-exec. Comments and string contents are blanked before matching.
 #
 # usage: cloexec_gate.sh [runtime-dir]   (default: runtime/ beside this script's repo)
 set -euo pipefail
@@ -24,8 +18,8 @@ if [[ ${#files[@]} -eq 0 ]]; then
   exit 1
 fi
 
-# Calls that take an argument. `(^|[^A-Za-z0-9_])` keeps freopen, fdopen and cloexec_open out.
-CALLS='(^|[^A-Za-z0-9_])(socket|socketpair|accept|accept4|pipe|pipe2|open|openat|fopen|opendir|dup|dup2|dup3|mkstemp|mkostemp|eventfd|signalfd|inotify_init|inotify_init1)[[:space:]]*\([[:space:]]*[A-Za-z_&"0-9]'
+# A call is a name followed by `(`. `(^|[^A-Za-z0-9_])` keeps freopen, fdopen and cloexec_open out.
+CALLS='(^|[^A-Za-z0-9_])(socket|socketpair|accept|accept4|pipe|pipe2|open|openat|fopen|opendir|dup|dup2|dup3|mkstemp|mkostemp|eventfd|signalfd|inotify_init|inotify_init1)[[:space:]]*\('
 
 hits=$(CALLS="$CALLS" awk '
   function strip(line,   out, i, n, c, d) {
