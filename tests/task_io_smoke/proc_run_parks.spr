@@ -8,9 +8,10 @@ import stdlib.time as time
 # task, and every timer, for as long as the child lives.
 #
 # One-sided probe, as in dns_resolve_parks.spr. `ticker` runs first and does ten 50 ms sleeps, about
-# 500 ms when the scheduler is free. `child` then runs `sleep 1`. A blocking call never yields to the
+# 500 ms when the scheduler is free. `child` then runs `sleep 3`. A blocking call never yields to the
 # pump, so the ticker's first timer is not serviced until the child is gone: its total is then past
-# 1450 ms. A parked call leaves it near 500 ms. The 900 ms line sits far from both.
+# 3450 ms. A parked call leaves it near 500 ms, though a macOS CI runner's timer slop has stretched
+# it to 968 ms. The 2000 ms line sits far from both.
 fn ticks(remaining: Int) -> Unit !{IO} =
   if remaining <= 0 then ()
   else
@@ -19,7 +20,7 @@ fn ticks(remaining: Int) -> Unit !{IO} =
       ticks(remaining - 1)
 
 fn report(elapsed_ms: Int) -> Unit !{IO} =
-  if elapsed_ms < 900 then terminal.write("scheduler stayed live\n")
+  if elapsed_ms < 2000 then terminal.write("scheduler stayed live\n")
   else terminal.write(`MISMATCH: scheduler frozen, ten 50 ms sleeps took ${int_to_string(elapsed_ms)} ms\n`)
 
 fn ticker() -> Unit !{IO} =
@@ -30,7 +31,7 @@ fn ticker() -> Unit !{IO} =
     report((t1 - t0) / 1000)
 
 fn child() -> Unit !{IO} =
-  match proc_run(["sleep", "1"]) with
+  match proc_run(["sleep", "3"]) with
   | Ok r -> terminal.write(if proc_ok(r) then "child done\n" else "MISMATCH: child failed\n")
   | Err e -> terminal.write(`MISMATCH: ${proc_error_message(e)}\n`)
 
