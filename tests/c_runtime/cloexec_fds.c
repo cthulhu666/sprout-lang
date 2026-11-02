@@ -4,8 +4,8 @@
  * Includes the runtime translation unit (like str_writers.c) to reach its file-static helpers, and
  * run.sh links only the other TUs.
  *
- * Part 1 drives runtime entry points, then requires every open descriptor above stderr to carry
- * FD_CLOEXEC. Part 2 checks each file-static wrapper directly. */
+ * Part 1 drives runtime entry points, then requires every descriptor opened since main started
+ * (above stderr) to carry FD_CLOEXEC. Part 2 checks each file-static wrapper directly. */
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -26,10 +26,20 @@ static void expect_cloexec(int fd, const char* what) {
   }
 }
 
-/* Every open descriptor from 3 up. Nothing here may be inheritable: stdio is 0..2 and the
- * harness's own are close-on-exec or above the range scanned. */
+#define SCAN_FDS 256
+
+/* Descriptors open when main starts: inherited from whatever launched the test (a CI runner may
+ * pass several), so not ours to judge. */
+static char g_inherited[SCAN_FDS];
+
+static void record_inherited(void) {
+  for (int fd = 0; fd < SCAN_FDS; fd++) g_inherited[fd] = fcntl(fd, F_GETFD) >= 0;
+}
+
+/* Every descriptor opened since main started, from 3 up. None may be inheritable. */
 static void expect_all_cloexec(const char* when) {
-  for (int fd = 3; fd < 256; fd++) {
+  for (int fd = 3; fd < SCAN_FDS; fd++) {
+    if (g_inherited[fd]) continue;
     int fl = fcntl(fd, F_GETFD);
     if (fl < 0) continue;
     if (!(fl & FD_CLOEXEC)) {
@@ -40,6 +50,8 @@ static void expect_all_cloexec(const char* when) {
 }
 
 int main(void) {
+  record_inherited();
+
   /* Part 1: runtime entry points. */
   sprout_register_ctor(21, "Err", 1, "p");
   sprout_register_ctor(22, "Ok", 1, "p");
