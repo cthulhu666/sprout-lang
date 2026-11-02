@@ -1,0 +1,78 @@
+module stdlib.compiler.wsi
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.vec_wrappers as vec_wrappers
+
+# Wrapper store inline (docs/scalar-store-inline-v0.md). A call to a store wrapper such as
+# `mutvec_set(g, i, x)` becomes the direct `vector_mutset(mutvec_raw(g), i, x)` when the
+# stored operand has a non-heap scalar type, so `ast_to_ir` lowers it inline with no call and
+# no write barrier. Any other call is left alone.
+#
+# Order of evaluation: a wrapper uses each parameter once, in order (`vec_wrappers`), so each
+# argument still runs once, left to right. The only added steps are projection calls, which
+# are pure field reads.
+#
+# Why the operand's type suffices: when the wrapper passes a bare parameter as the value, the
+# operand is the caller's own expression with the caller's own type. When it passes anything
+# else (a projection, a sum), `subst` keeps the wrapper's node type, which is the wrapper's
+# type variable, so the type test fails and the call stays.
+#
+# Shadowing needs no scope tracking. A wrapper is a top-level declaration, so the bundler
+# names it `module.name`. A local binder (parameter, `let`, pattern or do bind) is a bare
+# identifier with no dot, so it never equals a wrapper's name. The fixture's `set_shadowed`
+# pins this.
+
+export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  match prog with
+  | typed_ast.TypedProgram decls ->
+      let stores = vec_wrappers.store_wrappers(decls, vec_wrappers.projection_set(decls))
+      in if list_length(stores) == 0 then prog
+         else typed_ast.TypedProgram(list_map(rewrite_decl(_, dict_from_list(stores)), decls))
+
+fn rewrite_decl(d: typed_ast.TypedDecl, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedDecl =
+  match d with
+  | typed_ast.TFnDecl name params ret eff cs body ->
+      typed_ast.TFnDecl(name, params, ret, eff, cs, rewrite(body, stores))
+  | typed_ast.TLetDecl name value -> typed_ast.TLetDecl(name, rewrite(value, stores))
+  | typed_ast.TInstanceDecl c cs methods ->
+      typed_ast.TInstanceDecl(c, cs, list_map(rewrite_method(_, stores), methods))
+  | typed_ast.TExternFnDecl _ _ _ _ -> d
+  | typed_ast.TPassThrough _ -> d
+
+fn rewrite_method(m: typed_ast.TypedInstanceMethod, stores: Dict vec_wrappers.Wrapper) ->
+    typed_ast.TypedInstanceMethod =
+  match m with
+  | typed_ast.TypedInstanceMethod name params ret eff cs body ->
+      typed_ast.TypedInstanceMethod(name, params, ret, eff, cs, rewrite(body, stores))
+
+# Bottom-up, so a store nested in an argument of another is rewritten first.
+fn rewrite(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedExpr =
+  rewrite_node(rewrite_children(e, stores), stores)
+
+# The walk cannot fail: `rewrite_ok` always returns `Ok`.
+fn rewrite_children(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedExpr =
+  match typed_ast.traverse_children(rewrite_ok(_, stores), e) with
+  | Ok rebuilt -> rebuilt
+  | Err _ -> e
+
+fn rewrite_ok(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> Result String typed_ast.TypedExpr =
+  Ok(rewrite(e, stores))
+
+fn rewrite_node(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar f vt vp) args t p ->
+      let Just w = dict_get(f, stores) else e
+      in expand_store(w, vt, vp, args, t, p, e)
+  | _ -> e
+
+# The new callee keeps the wrapper callee's type `vt`, as `bce` does for its pseudo-callees:
+# lowering reads the name and the argument types, not this one.
+fn expand_store(w: vec_wrappers.Wrapper, vt: types.Type, vp: source.SourcePos,
+                args: List typed_ast.TypedExpr, t: types.Type, p: source.SourcePos,
+                e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
+  let Just s = vec_wrappers.apply_wrapper(w, args) else e
+      Just x = s.val else e
+  in if vec_wrappers.shape_converts(s)
+     then typed_ast.TCall(typed_ast.TVar("vector_mutset", vt, vp), [s.vec, s.idx, x], t, p)
+     else e

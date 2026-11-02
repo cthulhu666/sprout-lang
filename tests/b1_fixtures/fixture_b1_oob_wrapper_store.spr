@@ -1,0 +1,9 @@
+module main
+import stdlib.mutable (mutvec_new, mutvec_set)
+
+# Out-of-range store of an Int through `mutvec_set`: the expanded inline guard must trap with the
+# C runtime's text (`vector_mutset: index out of bounds`). The b1-gate runs this and checks it.
+fn main() -> Unit !{IO} =
+  do
+    g <- mutvec_new(3, 1)
+    mutvec_set(g, 99, 7)

@@ -24,6 +24,7 @@ export type Pass (..) deriving (Eq, ToString) =
   | Licm
   | Bce
   | Spec
+  | Wsi
 
 export type OptConfig (..) =
   (disabled: List Pass, enabled_on: List Pass, unrecognised: List String, stats: Bool)
@@ -35,6 +36,7 @@ export fn pass_name(p: Pass) -> String =
   | Licm -> "licm"
   | Bce -> "bce"
   | Spec -> "spec"
+  | Wsi -> "wsi"
 
 export fn pass_from_name(name: String) -> Maybe Pass =
   match name with
@@ -43,10 +45,11 @@ export fn pass_from_name(name: String) -> Maybe Pass =
   | "licm" -> Just(Licm)
   | "bce" -> Just(Bce)
   | "spec" -> Just(Spec)
+  | "wsi" -> Just(Wsi)
   | _ -> Nothing
 
 export let all_passes =
-  [Dle, Cse, Licm, Bce, Spec]
+  [Dle, Cse, Licm, Bce, Spec, Wsi]
 
 # Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
 # exist because the switch's vocabulary is the roadmap — but disabling one must
@@ -60,6 +63,7 @@ export fn implemented(p: Pass) -> Bool =
   | Licm -> false
   | Bce -> true
   | Spec -> true
+  | Wsi -> true
 
 # A default-off pass runs only when SPROUT_OPT_ON names it.
 export fn default_off(p: Pass) -> Bool =
@@ -69,6 +73,7 @@ export fn default_off(p: Pass) -> Bool =
   | Licm -> false
   | Bce -> false
   | Spec -> true
+  | Wsi -> false
 
 export fn parse(off: Maybe String, on: Maybe String, stats: Maybe String) -> OptConfig =
   OptConfig(

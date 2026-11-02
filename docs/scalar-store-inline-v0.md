@@ -1,6 +1,6 @@
 # Scalar stores through `MutVec` wrappers lower inline, with no barrier — v0
 
-**Status — step 1 landed 2026-11-01; step 2 next.** Non-normative: an optimisation, with no syntax, typing or
+**Status — steps 1 and 2 landed; step 3 (measurement) next.** Non-normative: an optimisation, with no syntax, typing or
 evaluation-order change, so `spec-v0.md` is untouched. It is
 [gc-generational-v0.md](gc-generational-v0.md) §14.8 step 6, and it replaces the store half of
 [accessor-inliner-design-2026-07-11.md](accessor-inliner-design-2026-07-11.md).
@@ -60,18 +60,19 @@ so its one `vector_mutset` has to keep the barrier. The concrete type exists onl
 `INLINE` pragma, which inlines selected functions and keeps one shared copy, with Rust's
 monomorphisation, which makes a copy per type. Its sources are primary. This design sits on the
 GHC side. It differs from that proposal in how a wrapper is selected: by its shape, not by a list
-of names. `bce.sprout` already selects wrappers this way for loop versioning (`wrapper_of`), and
+of names. `bce.sprout` selects wrappers this way for loop versioning (`vec_wrappers.wrapper_of`), and
 that code is the precedent used here.
 
 ## 4. Design
 
 ### 4.1 Which calls expand
 
-`bce.sprout` already recognises two kinds of declaration:
+`vec_wrappers.sprout`, shared by `bce.sprout` and the new pass, recognises two kinds of
+declaration:
 - `is_projection` matches a pure one-parameter field read, such as `mutvec_raw`'s
   `match v with | MutVec raw -> raw`.
 - `wrapper_of` matches an unconstrained function whose body is one `vector_get_direct` or
-  `vector_mutset` call. Each argument must be an operand that `bce.operand_ok` accepts: a
+  `vector_mutset` call. Each argument must be an operand that `vec_wrappers.operand_ok` accepts: a
   parameter, a small literal, a sum or product of those, or a projection of a parameter. Every
   parameter must be used exactly once, in order.
 
@@ -79,9 +80,11 @@ that code is the precedent used here.
 
 The new pass rewrites a call `f(args)` when three things hold:
 - `f` is such a wrapper, and its shape is a store.
-- No binder in scope shadows `f`. The pass tracks lambda parameters, `let`, match and do
-  binders, as `bce.sprout` does with `ctx.locals` and `dce.sprout` with its `bound` set.
-- After the arguments are substituted (`bce.apply_wrapper`), the stored operand's type passes
+- No binder in scope shadows `f`. This needs no scope tracking: a wrapper is a top-level
+  declaration, so the bundler names it `module.name`, and a local binder is a bare identifier
+  with no dot. A parameter named `mutvec_set` stays `mutvec_set`, and is not the wrapper
+  (`set_shadowed` in `tests/b1_fixtures/fixture_b1_wrapper_store.spr`).
+- After the arguments are substituted (`vec_wrappers.apply_wrapper`), the stored operand's type passes
   `type_is_non_heap_scalar`.
 
 The call becomes the direct `vector_mutset(...)` built from the substituted shape. Nothing else is
@@ -99,7 +102,7 @@ are pure field reads.
 ### 4.2 Lowering
 
 In `ast_to_ir.try_vector_intrinsic`, a `VecSet` takes the inline store when its value argument
-passes `type_is_non_heap_scalar`. This is the rule `bce.shape_converts` already applies in `$fast` clones.
+passes `type_is_non_heap_scalar`. This is the rule `vec_wrappers.shape_converts` already applies in `$fast` clones.
 
 `IRVecSetD` is already a plain `store i64`, so no IR op and no runtime entry is added. `VecGet`
 keeps its `Vector Double` test: a read's soundness depends on the element type, and a false
@@ -145,8 +148,7 @@ The pass is gated by a new `opt_config` switch, `Wsi` (wrapper store inline), on
 turned off with `SPROUT_OPT_OFF=wsi`. With the switch off, the
 inline store still applies to direct calls (§4.2), since that rule needs no new pass.
 
-The recognisers move out of `bce.sprout` into a small module that both passes import. They are
-not copied.
+The recognisers live in `vec_wrappers.sprout`, which both passes import. They are not copied.
 
 ## 5. Impact
 
@@ -207,6 +209,6 @@ not copied.
 
 1. ~~The §4.2 lowering rule with split trap blocks; the `test_bce.spr` check; tests 1 (direct
    calls) and 2.~~
-2. Shared recognisers module; the expansion pass behind `Wsi`; the rest of tests 1 and 3;
-   `compiler-internals.md`.
+2. ~~Shared recognisers module (`vec_wrappers.sprout`); the expansion pass behind `Wsi`
+   (`wsi.sprout`); the rest of tests 1 and 3; `compiler-internals.md`.~~
 3. Test 4, and the results file.

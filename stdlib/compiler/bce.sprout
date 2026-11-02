@@ -3,7 +3,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
-import stdlib.compiler.type_kind as type_kind
+import stdlib.compiler.vec_wrappers as vec_wrappers
 import stdlib.compiler.dce as dce
 
 # Bounds-check elimination by loop versioning (docs/bounds-check-elimination-v0.md).
@@ -175,18 +175,13 @@ fn negated_lit(e: typed_ast.TypedExpr) -> Maybe Int =
   | typed_ast.TInt n _ _ -> if abs_int(n) <= max_konst then Just(0 - n) else Nothing
   | _ -> Nothing
 
-fn is_var(p: String, e: typed_ast.TypedExpr) -> Bool =
-  match e with
-  | typed_ast.TVar n _ _ -> n == p
-  | _ -> false
-
 # `p + c`, `c + p` or `p - c` for a literal `c`.
 fn step_of(p: String, e: typed_ast.TypedExpr) -> Maybe Int =
   match e with
   | typed_ast.TBinary op l r _ _ ->
-      if op == "+" && is_var(p, l) then int_lit(r)
-      else if op == "+" && is_var(p, r) then int_lit(l)
-      else if op == "-" && is_var(p, l) then negate_maybe(int_lit(r))
+      if op == "+" && vec_wrappers.is_var(p, l) then int_lit(r)
+      else if op == "+" && vec_wrappers.is_var(p, r) then int_lit(l)
+      else if op == "-" && vec_wrappers.is_var(p, l) then negate_maybe(int_lit(r))
       else Nothing
   | _ -> Nothing
 
@@ -196,7 +191,7 @@ fn negate_maybe(m: Maybe Int) -> Maybe Int =
   | Nothing -> Nothing
 
 fn observe(p: String, e: typed_ast.TypedExpr) -> Obs =
-  if is_var(p, e) then Obs(tag = 1, step = 0)
+  if vec_wrappers.is_var(p, e) then Obs(tag = 1, step = 0)
   else observe_step(step_of(p, e))
 
 fn observe_step(m: Maybe Int) -> Obs =
@@ -359,155 +354,15 @@ fn facts_false(c: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
 # Accesses and the wrappers that reduce to one.
 # ---------------------------------------------------------------------------
 
-# An access with its operands in terms of the enclosing function.
-type Shape (..) = (is_set: Bool, vec: typed_ast.TypedExpr, idx: typed_ast.TypedExpr,
-                   val: Maybe typed_ast.TypedExpr)
+type Tables (..) = (wrappers: Dict vec_wrappers.Wrapper, projs: Set, fn_names: Set, ext_pure: Dict Bool)
 
-# A function whose whole body is one access over its own parameters, each used
-# once and in order, so inlining it neither repeats nor drops an argument.
-type Wrapper (..) = (params: List String, shape: Shape)
-
-type Tables (..) = (wrappers: Dict Wrapper, projs: Set, fn_names: Set, ext_pure: Dict Bool)
-
-fn is_pure_decl(eff: Maybe (List String)) -> Bool =
-  match eff with
-  | Nothing -> true
-  | Just es -> list_length(es) == 0
-
-# `match v with | C x -> x` or `v.field`: a read of one field of an immutable value.
-fn is_projection(d: typed_ast.TypedDecl) -> Bool =
-  match d with
-  | typed_ast.TFnDecl _ [ast.Param p _ _] _ eff _ body -> is_pure_decl(eff) && projects(p, body)
-  | _ -> false
-
-fn projects(p: String, body: typed_ast.TypedExpr) -> Bool =
-  match body with
-  | typed_ast.TMatch scrut [typed_ast.TypedMatchBranch pat arm] _ _ ->
-      is_var(p, scrut) && is_field_pattern(pat, arm)
-  | typed_ast.TGetField obj _ _ _ -> is_var(p, obj)
-  | _ -> false
-
-fn is_field_pattern(pat: ast.Pattern, arm: typed_ast.TypedExpr) -> Bool =
-  match pat with
-  | ast.ConstructorPattern _ [ast.VarPattern x _] _ -> is_var(x, arm)
-  | _ -> false
-
-fn decl_projection_name(d: typed_ast.TypedDecl) -> Maybe String =
-  match d with
-  | typed_ast.TFnDecl name _ _ _ _ _ -> if is_projection(d) then Just(name) else Nothing
-  | _ -> Nothing
-
-# Operands a wrapper may pass on: its parameters, small literals, sums and
-# products of those, and projections of them.
-fn operand_ok(e: typed_ast.TypedExpr, projs: Set) -> Bool =
-  match e with
-  | typed_ast.TVar _ _ _ -> true
-  | typed_ast.TInt _ _ _ -> true
-  | typed_ast.TBinary op l r _ _ ->
-      (op == "+" || op == "-" || op == "*") && operand_ok(l, projs) && operand_ok(r, projs)
-  | typed_ast.TCall (typed_ast.TVar g _ _) [x] _ _ -> set_member(g, projs) && operand_ok(x, projs)
-  | _ -> false
-
-# Parameter names in the order the operands mention them.
-fn mentions(e: typed_ast.TypedExpr, acc: List String) -> List String =
-  match e with
-  | typed_ast.TVar n _ _ -> Cons(n, acc)
-  | typed_ast.TBinary _ l r _ _ -> mentions(r, mentions(l, acc))
-  | typed_ast.TCall _ args _ _ -> list_fold(\ (a, x) -> mentions(x, a), acc, args)
-  | _ -> acc
-
-fn names_in_order(es: List typed_ast.TypedExpr) -> List String =
-  list_reverse(list_fold(\ (a, x) -> mentions(x, a), Nil, es))
-
-fn same_names(xs: List String, ys: List String) -> Bool =
-  match xs with
-  | Nil -> list_length(ys) == 0
-  | [x | xrest] ->
-      match ys with
-      | Nil -> false
-      | [y | yrest] -> x == y && same_names(xrest, yrest)
-
-fn wrapper_of(d: typed_ast.TypedDecl, projs: Set) -> Maybe (String, Wrapper) =
-  match d with
-  | typed_ast.TFnDecl name params _ _ Nil (typed_ast.TCall(typed_ast.TVar callee _ _) cargs _ _) ->
-      wrapper_from(name, ast.param_names(params), callee, cargs, projs)
-  | _ -> Nothing
-
-fn wrapper_from(name: String, pnames: List String, callee: String,
-                cargs: List typed_ast.TypedExpr, projs: Set) -> Maybe (String, Wrapper) =
-  if !list_all_operands(cargs, projs) || !same_names(names_in_order(cargs), pnames) then Nothing
-  else
-    match direct_shape(callee, cargs) with
-    | Just shape -> Just((name, Wrapper(params = pnames, shape = shape)))
-    | Nothing -> Nothing
-
-fn list_all_operands(es: List typed_ast.TypedExpr, projs: Set) -> Bool =
-  match es with
-  | Nil -> true
-  | [e | rest] -> operand_ok(e, projs) && list_all_operands(rest, projs)
-
-# `vector_get_direct` and `vector_mutset` are externs, so their names are bare and
-# cannot belong to a user function.
-fn direct_shape(callee: String, args: List typed_ast.TypedExpr) -> Maybe Shape =
-  if callee == "vector_get_direct" then get_shape(args)
-  else if callee == "vector_mutset" then set_shape(args)
-  else Nothing
-
-fn get_shape(args: List typed_ast.TypedExpr) -> Maybe Shape =
-  match args with
-  | [v, i] -> Just (Shape(is_set = false, vec = v, idx = i, val = Nothing))
-  | _ -> Nothing
-
-fn set_shape(args: List typed_ast.TypedExpr) -> Maybe Shape =
-  match args with
-  | [v, i, x] -> Just (Shape(is_set = true, vec = v, idx = i, val = Just(x)))
-  | _ -> Nothing
-
-fn subst(e: typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> typed_ast.TypedExpr =
-  match e with
-  | typed_ast.TVar n _ _ -> subst_var(n, e, env)
-  | typed_ast.TBinary op l r t p -> typed_ast.TBinary(op, subst(l, env), subst(r, env), t, p)
-  | typed_ast.TCall callee args t p -> typed_ast.TCall(callee, list_map(subst(_, env), args), t, p)
-  | _ -> e
-
-fn subst_var(n: String, e: typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> typed_ast.TypedExpr =
-  match dict_get(n, env) with
-  | Just arg -> arg
-  | Nothing -> e
-
-fn zip_env(names: List String, es: List typed_ast.TypedExpr) -> List (String, typed_ast.TypedExpr) =
-  match names with
-  | Nil -> Nil
-  | [n | nrest] ->
-      match es with
-      | Nil -> Nil
-      | [e | erest] -> Cons((n, e), zip_env(nrest, erest))
-
-fn apply_wrapper(w: Wrapper, args: List typed_ast.TypedExpr) -> Maybe Shape =
-  if list_length(args) != list_length(w.params) then Nothing
-  else
-    let env = dict_from_list(zip_env(w.params, args))
-    in Just(Shape(is_set = w.shape.is_set, vec = subst(w.shape.vec, env), idx = subst(w.shape.idx, env),
-                  val = subst_val(w.shape.val, env)))
-
-fn subst_val(v: Maybe typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
-  match v with
-  | Just e -> Just(subst(e, env))
-  | Nothing -> Nothing
-
-fn shape_of(n: String, args: List typed_ast.TypedExpr, tables: Tables) -> Maybe Shape =
-  match direct_shape(n, args) with
+fn shape_of(n: String, args: List typed_ast.TypedExpr, tables: Tables) -> Maybe vec_wrappers.Shape =
+  match vec_wrappers.direct_shape(n, args) with
   | Just s -> Just(s)
   | Nothing ->
       match dict_get(n, tables.wrappers) with
-      | Just w -> apply_wrapper(w, args)
+      | Just w -> vec_wrappers.apply_wrapper(w, args)
       | Nothing -> Nothing
-
-# A store of a non-heap scalar needs no write hook; any other store stays checked.
-fn shape_converts(s: Shape) -> Bool =
-  match s.val with
-  | Nothing -> true
-  | Just x -> type_kind.type_is_non_heap_scalar(typed_ast.typed_expr_type(x))
 
 # ---------------------------------------------------------------------------
 # The scan: one walk of a body that finds the self-calls and the accesses, each
@@ -516,7 +371,7 @@ fn shape_converts(s: Shape) -> Bool =
 # lambda (which may run after the vector changed).
 # ---------------------------------------------------------------------------
 
-type Acc (..) = (shape: Shape, facts: List Fact)
+type Acc (..) = (shape: vec_wrappers.Shape, facts: List Fact)
 
 type Call (..) = (args: List typed_ast.TypedExpr, facts: List Fact)
 
@@ -690,7 +545,7 @@ fn range_with(l: Lin, m: Int, dr: Driver) -> Maybe (Lin, Lin, List Req) =
 
 # The conditions that put one access in range, or the reason none can be derived.
 fn derive_access(a: Acc, lp: Loop, projs: Set) -> Result String (List Req) =
-  if !shape_converts(a.shape) then Ok(Nil)
+  if !vec_wrappers.shape_converts(a.shape) then Ok(Nil)
   else if !vec_invariant(a.shape.vec, lp.cls, projs) then
     Err("a vector operand is not an invariant parameter or a projection of one")
   else
@@ -903,7 +758,7 @@ type Node (..) = (name: String, calls: Calls)
 fn decl_node(d: typed_ast.TypedDecl, tables: Tables) -> Maybe Node =
   match d with
   | typed_ast.TFnDecl name params _ eff _ body ->
-      if is_pure_decl(eff) then Nothing
+      if vec_wrappers.is_pure_decl(eff) then Nothing
       else
         Just(Node(name = name,
                   calls = calls_in(body, set_union(collect_binders(body, set_empty()),
@@ -991,7 +846,7 @@ fn analyze_loop(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, e
 fn list_any_converts(accs: List Acc) -> Bool =
   match accs with
   | Nil -> false
-  | [a | rest] -> shape_converts(a.shape) || list_any_converts(rest)
+  | [a | rest] -> vec_wrappers.shape_converts(a.shape) || list_any_converts(rest)
 
 fn finish_cand(name: String, params: List ast.Param, ret: Maybe ast.TypeExpr, eff: Maybe (List String),
                body: typed_ast.TypedExpr, locals: Set, rs: Reqs, tables: Tables) -> Maybe Verdict =
@@ -1081,12 +936,12 @@ fn to_unchecked(n: String, vt: types.Type, vp: source.SourcePos, args: List type
   | Nothing -> e
   | Just s -> unchecked_call(s, vt, vp, t, p, e)
 
-fn unchecked_call(s: Shape, vt: types.Type, vp: source.SourcePos, t: types.Type, p: source.SourcePos,
+fn unchecked_call(s: vec_wrappers.Shape, vt: types.Type, vp: source.SourcePos, t: types.Type, p: source.SourcePos,
                   e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
   match s.val with
   | Nothing -> typed_ast.TCall(typed_ast.TVar(get_callee, vt, vp), [s.vec, s.idx], t, p)
   | Just x ->
-      if shape_converts(s) then typed_ast.TCall(typed_ast.TVar(set_callee, vt, vp), [s.vec, s.idx, x], t, p)
+      if vec_wrappers.shape_converts(s) then typed_ast.TCall(typed_ast.TVar(set_callee, vt, vp), [s.vec, s.idx, x], t, p)
       else e
 
 # ---------------------------------------------------------------------------
@@ -1116,8 +971,8 @@ fn expand(c: Cand, tables: Tables) -> List typed_ast.TypedDecl =
   [entry_decl(c), clone_decl(c, chk_name(c.name), false, tables), clone_decl(c, fast_name(c.name), true, tables)]
 
 fn build_tables(decls: List typed_ast.TypedDecl) -> Tables =
-  let projs = set_from_list(list_filter_map(decl_projection_name, decls))
-  in Tables(wrappers = dict_from_list(list_filter_map(wrapper_of(_, projs), decls)), projs = projs,
+  let projs = vec_wrappers.projection_set(decls)
+  in Tables(wrappers = vec_wrappers.wrapper_table(decls, projs), projs = projs,
             fn_names = set_from_list(list_filter_map(fn_decl_name, decls)),
             ext_pure = dict_from_list(list_filter_map(extern_purity, decls)))
 
@@ -1128,7 +983,7 @@ fn fn_decl_name(d: typed_ast.TypedDecl) -> Maybe String =
 
 fn extern_purity(d: typed_ast.TypedDecl) -> Maybe (String, Bool) =
   match d with
-  | typed_ast.TExternFnDecl name _ _ eff -> Just((name, is_pure_decl(eff)))
+  | typed_ast.TExternFnDecl name _ _ eff -> Just((name, vec_wrappers.is_pure_decl(eff)))
   | _ -> Nothing
 
 fn cand_safe(c: Cand, unsafe_fns: Set) -> Bool =

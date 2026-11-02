@@ -12,6 +12,8 @@
 #          compiles (reaches partial-application, does not hard-Err).
 #   ④b     an out-of-bounds `Vector Double` read hits the inline bounds guard and
 #          aborts (non-zero exit + trap message).
+#   stores a scalar `vector_mutset` lowers inline, directly and through a store
+#          wrapper (`mutvec_set`, the `wsi` pass); any other value keeps the call.
 #
 # Run: mise exec -- just b1-gate   (needs build/compile_driver_bin_stage1)
 set -uo pipefail
@@ -138,6 +140,54 @@ done
 # Out-of-range Int store traps at the inline guard.
 check_trap "$FIX/fixture_b1_oob_store.spr" oobs \
   'runtime error: vector_mutset: index out of bounds' 'out-of-bounds store'
+
+# Wrapper stores — a call to a store wrapper (`mutvec_set`, or a user wrapper of the same shape)
+# whose stored value is a scalar expands to the inline store: no call to the wrapper, none to
+# `vector_mutset`, and the guard is present. Every other shape keeps its wrapper call.
+# `has_call <sym>` reads a function body on stdin.
+has_call() { grep -qF "@$1("; }
+
+wrap_ir="$(emit "$FIX/fixture_b1_wrapper_store.spr")"
+for fn in set_int set_bool set_char set_double put_int; do
+  body="$(fn_body "main\\.$fn" <<<"$wrap_ir")"
+  if [ -n "$body" ] && grep -qF 'vpanic_' <<<"$body" \
+     && ! has_call vector_mutset <<<"$body" \
+     && ! has_call stdlib.mutable.mutvec_set <<<"$body" \
+     && ! has_call main.put <<<"$body"; then
+    echo "  ok: $fn wrapper store expands inline"
+  else
+    echo "  FAIL: $fn still calls its store wrapper (or has no inline guard)"; fail=1
+  fi
+done
+for entry in set_string:stdlib.mutable.mutvec_set set_generic:stdlib.mutable.mutvec_set \
+             put_twice_int:main.put_twice put_cell_int:main.put_cell; do
+  fn="${entry%%:*}"; sym="${entry#*:}"
+  if fn_body "main\\.$fn" <<<"$wrap_ir" | has_call "$sym"; then
+    echo "  ok: $fn keeps the call to $sym"
+  else
+    echo "  FAIL: $fn lost its call to $sym (a store that must keep the barrier was expanded)"; fail=1
+  fi
+done
+# A parameter named `mutvec_set` is the caller's own function: the call goes through the closure.
+body="$(fn_body 'main\.set_shadowed' <<<"$wrap_ir")"
+if [ -n "$body" ] && grep -qF 'sprout_closure_arity_check' <<<"$body" \
+   && ! grep -qF 'vpanic_' <<<"$body" && ! has_call vector_mutset <<<"$body" \
+   && ! has_call stdlib.mutable.mutvec_set <<<"$body"; then
+  echo "  ok: a parameter named like the wrapper is not expanded"
+else
+  echo "  FAIL: a parameter named mutvec_set was treated as the stdlib wrapper"; fail=1
+fi
+# SPROUT_OPT_OFF=wsi keeps the wrapper call.
+off_ir="$(env SPROUT_OPT_OFF=wsi "$STAGE1" --emit-ir stdlib "$FIX/fixture_b1_wrapper_store.spr" 2>/dev/null)"
+if fn_body 'main\.set_int' <<<"$off_ir" | has_call stdlib.mutable.mutvec_set; then
+  echo "  ok: SPROUT_OPT_OFF=wsi keeps the wrapper call"
+else
+  echo "  FAIL: SPROUT_OPT_OFF=wsi did not disable the pass"; fail=1
+fi
+
+# Out-of-range Int store through the wrapper traps with the runtime's text.
+check_trap "$FIX/fixture_b1_oob_wrapper_store.spr" oobw \
+  'runtime error: vector_mutset: index out of bounds' 'out-of-bounds wrapper store'
 
 if [ "$fail" -eq 0 ]; then echo "b1-gate: PASS"; else echo "b1-gate: FAIL"; fi
 exit "$fail"

@@ -133,6 +133,8 @@ Bisect a miscompile against the Sprout-level passes without rebuilding the compi
 - `SPROUT_OPT_OFF=bce` — bounds-check elimination (`stdlib/compiler/bce.sprout`). It runs in
   `ir_pipeline`, below the seam, and the switch reaches it. `SPROUT_TRACE_BCE=1` prints one
   `[bce] versioned <fn>` or `[bce] kept <fn>: <reason>` line per loop it looked at, on stderr.
+- `SPROUT_OPT_OFF=wsi` — wrapper store inline (`stdlib/compiler/wsi.sprout`). A scalar
+  `mutvec_set` then keeps its call to the wrapper and the write barrier. Also in `ir_pipeline`.
 - `SPROUT_OPT_STATS=1` — one `[opt] <pass> on|off nodes=N removed=R added=A` line per
   compile on stderr: the typed-AST node delta the pass produced, split by sign.
 
