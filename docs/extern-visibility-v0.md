@@ -201,7 +201,7 @@ Each of the 111 gets a decision in the migration PR:
 - **A bridge its own module wraps: stays private.** Its module's Sprout wrapper is the API, as
   `read_text` is over `read_file`. Decided by Kuba, 2026-10-24: 56 such externs had no caller
   outside their module, here or in uncharted-suns, repbit or sprout-sqlite. Examples: the `fs_*`,
-  `crypto_*`, `term_*` and `bytes_builder_*` sets, `http_request`, `proc_run_vec`.
+  `crypto_*`, `term_*` and `bytes_builder_*` sets, `http_request`, `proc_run_raw`.
 - **Internal: stays private.** Examples: `vector_mutset`, `vector_push`, `vector_truncate`,
   `vector_get_direct`, `__task_fork`, `__task_await`. A caller in another file declares it itself:
   - The tests under `tests/stdlib/` that call one, as `test_extern_redeclare.spr` already does.

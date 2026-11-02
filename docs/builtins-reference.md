@@ -91,7 +91,7 @@ call the wrapper API:
 | `bytes_*` | `stdlib.bytes` | bare name for `bytes_length`, `bytes_get`, `bytes_slice`, `bytes_from_utf8`; the rest are private (`bytes.*` API) |
 | `crypto_*` | `stdlib.crypto` | private; the `crypto.*` API |
 | `regex_*` | `stdlib.regex` | bare name for `regex_find_match`; the rest are private (`regex.*` API) |
-| `proc_run_vec`, `proc_run_stdin_vec` | `stdlib.process` | `process.proc_run(…)` |
+| `proc_run_raw` | `stdlib.process` | `process.proc_run(…)`, `proc_run_with(…)` — `Result ProcError ProcResult`; see [process-run-v0.md](process-run-v0.md) |
 - **Integer ranges have no builtins.** `IntRange` is an ordinary Sprout ADT declared in
   `stdlib/prelude.sprout` (`IntRange Int Int Int`), and `a..b` lowers to a call to the prelude's
   `range_up`. The five former builtins (`int_range`, `int_range_by`, `int_range_start`,
