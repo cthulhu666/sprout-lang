@@ -3,10 +3,10 @@ module main
 import stdlib.test (TestState, new_state, assert_true, summary)
 import stdlib.compiler.analysis_service_driver as service
 import stdlib.json as json
-import stdlib.process as process
 import stdlib.string as string
 import stdlib.terminal as terminal
 import testsupport.envvar as envvar
+import testsupport.toolchain (clang_available)
 
 # eval_expr_in_source end to end: the service compiles the buffer with a `main` built
 # around the expression, links it and runs it. No binding is added for the expression, so
@@ -33,11 +33,6 @@ fn linear_source() -> String =
     ++ "instance ToString File {\n"
     ++ "  fn to_string(f: File) -> String = match f with | File n -> `File ${int_to_string(n)}`\n"
     ++ "}\n"
-
-fn clang_available() -> Bool !{IO} =
-  match process.proc_run(["clang", "--version"]) with
-  | Ok probe -> process.proc_ok(probe)
-  | Err _ -> false
 
 fn run_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do

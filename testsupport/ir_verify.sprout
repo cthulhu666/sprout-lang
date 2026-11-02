@@ -14,12 +14,7 @@ module testsupport.ir_verify
 
 import stdlib.process as process
 import stdlib.terminal as terminal
-
-# A probe that cannot start (clang absent) reads as unavailable.
-fn clang_probe() -> Bool !{IO} =
-  match process.proc_run(Cons("clang", Cons("--version", Nil))) with
-  | Ok r -> process.proc_ok(r)
-  | Err _ -> false
+import testsupport.toolchain (clang_available)
 
 # Returns true iff `clang` accepts `ir` as a well-formed LLVM IR module.
 # If clang is not installed the assertion auto-passes (CI always has clang; a
@@ -27,7 +22,7 @@ fn clang_probe() -> Bool !{IO} =
 # stderr is echoed to stdout to make the failure diagnosable.
 export fn clang_verifies_ir(ir: String) -> Bool !{IO} =
   do
-    probe <- clang_probe()
+    probe <- clang_available()
     match probe with
     | false ->
         do

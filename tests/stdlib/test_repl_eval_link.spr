@@ -10,28 +10,13 @@
 # This test LINKS (it does not string-match a command): unfixed driver -> Err
 # carrying "Undefined symbols" / scheduler_park_on_fd -> RED; fixed -> Ok -> GREEN.
 import stdlib.test (TestState, new_state, assert_true, summary)
-import stdlib.process as process
-import stdlib.string as string
 import stdlib.compiler.analysis_service_driver as service
 import stdlib.terminal as terminal
 import stdlib.fs as fs
+import testsupport.toolchain (clang_available, is_darwin)
 
 let trivial_main_ir: String =
   "define i64 @main() {\nentry:\n  ret i64 0\n}\n"
-
-fn clang_available() -> Bool !{IO} =
-  match process.proc_run(["clang", "--version"]) with
-  | Ok probe -> process.proc_ok(probe)
-  | Err _ -> false
-
-# Darwin needs -framework Security -framework CoreFoundation to resolve the
-# runtime's TLS/net symbols; detect it the same way the justfile does (uname).
-fn is_darwin() -> Bool !{IO} =
-  match process.proc_run(["uname"]) with
-  | Ok r ->
-      # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
-      string.trim(process.proc_stdout_or(r, "")) == "Darwin"
-  | Err _ -> false
 
 fn main() -> Unit !{IO} =
   do
