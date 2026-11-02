@@ -1027,9 +1027,7 @@ fn extern_facts_of(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
 fn no_externs() -> BundleExterns = BundleExterns(private = Nil, names = set_empty())
 
 fn bundle_externs_of(facts: List ExternFact) -> BundleExterns =
-  BundleExterns(private = private_externs_of(facts), names = set_from_list(list_map(extern_fact_name, facts)))
-
-fn extern_fact_name(f: ExternFact) -> String = f.name
+  BundleExterns(private = private_externs_of(facts), names = set_from_list(list_map(\f -> f.name, facts)))
 
 # The externs a module outside their declarers may not reach. Exportedness is decided
 # per NAME across the build: a name is exported if any module declaring it writes
@@ -1546,16 +1544,6 @@ fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
       | ast.Param name (Just t) mode ->
           Cons(ast.Param(local_name(ctx, name), Just(qualify_type_expr(ctx, t)), mode), qualify_params(ctx, rest))
 
-# A class method signature has no body, and the names the compiler gives its wrapper
-# carry the canonical class name, which no local can spell, so its parameter names stay as
-# written; they reach `--emit-iface` and signature listings.
-fn qualify_param_types(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
-  match params with
-  | [] -> []
-  | [ast.Param name t mode | rest] ->
-      Cons(ast.Param(name, map(\te -> qualify_type_expr(ctx, te), t), mode),
-           qualify_param_types(ctx, rest))
-
 fn qualify_constraints(ctx: ResolveCtx, cs: List ast.TypeConstraint) -> List ast.TypeConstraint =
   match cs with
   | Nil -> Nil
@@ -1728,7 +1716,7 @@ fn local_name(ctx: ResolveCtx, name: String) -> String =
 
 fn is_reserved_local(ctx: ResolveCtx, name: String) -> Bool =
   source.is_compiler_spelling(name) || set_member(name, ctx.extern_names)
-  || is_just(prelude_value(ctx.prelude, name))
+  || dict_member(name, ctx.prelude.values)
 
 # A dotted name no import claims is normally a field chain (`o.inner.n`) or a
 # genuine typo, and is left alone for inference to read. One shape is neither: a
@@ -1923,7 +1911,7 @@ fn qualify_class_methods(ctx: ResolveCtx, methods: List ast.ClassMethodSig) -> L
   | Cons m rest ->
       match m with
       | ast.ClassMethodSig name params ret_type effects constraints bounds ->
-          Cons(ast.ClassMethodSig(dict_get_or(name, ctx.value_locals, name), qualify_param_types(ctx, params),
+          Cons(ast.ClassMethodSig(dict_get_or(name, ctx.value_locals, name), qualify_params(ctx, params),
                                   qualify_type_expr(ctx, ret_type), effects,
                                   qualify_constraints(ctx, constraints), bounds),
                qualify_class_methods(ctx, rest))

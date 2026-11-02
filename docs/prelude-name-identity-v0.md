@@ -71,8 +71,8 @@ names, and `prelude.X` is the qualified spelling.
 
 1. **Bundler hygiene (chosen).** `prelude.X` resolves to the prelude's `X`, and the bundler
    renames a local whose name is a prelude value (and, §5, an extern or a `__` name), so no
-   local equals a name a pass writes after bundling. One pass changes, and every rewrite written after bundling, present or future, is
-   correct by construction.
+   local equals a name a pass writes after bundling. One pass changes, and every rewrite
+   written after bundling, present or future, is correct by construction.
 2. **Qualify the prelude's declarations** (`prelude.Cons` everywhere). The root cause, but it
    moves every type name in messages, every IR symbol, and every place that matches `"Just"`,
    `"Cons"` or `"to_string"` by string.
@@ -93,7 +93,7 @@ Both halves live in the bundler only: a module checked without bundling neither 
 **Locals.** The bundler renames a binder, and every use of it, to `$l_<name>` (§5.1) when its
 name is any of:
 
-1. a prelude value, class method or extern;
+1. a prelude value or class method;
 2. the name of an extern declared anywhere in the bundle. Externs are one global namespace, so
    a bare extern outside the prelude (`vector_mutset` in `stdlib.mutable`) is as reachable as
    a prelude one;
@@ -111,11 +111,12 @@ pass that writes a name after bundling writes a top-level's name or a `__` name,
 
 The rename is a pure function of the name, so nested shadowing keeps its structure and no map
 is needed. Binders: function and lambda parameters, instance-method parameters, extern
-parameters, `VarPattern` in `match`, `let`, `do` and comprehension patterns, `do`-`let` names.
-A dotted name whose head is a renamed local renames the head. An extern's parameters are locals
-because its CPR worker body is `name(p0, ...)` over them. A class method signature has no body
-and keeps its parameter names: the names written for its wrapper carry the canonical class
-name, which has a dot, so no local can spell one.
+parameters, class method signature parameters, `VarPattern` in `match`, `let`, `do` and
+comprehension patterns, `do`-`let` names. A dotted name whose head is a renamed local renames
+the head. An extern's parameters are locals because its CPR worker body is `name(p0, ...)` over
+them. A class method signature's parameters are locals too: the method's `__cm_` wrapper takes
+them beside its `__tc_` dictionary slots, and a prelude constraint class (or `no_prelude`) makes
+a slot name spellable.
 
 The parser writes the `_`-hole parameter before bundling, so it must not start with `__`:
 `ast.placeholder_param_prefix` is `$ph_`, which no identifier can spell and the bundler leaves

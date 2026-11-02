@@ -1,0 +1,14 @@
+module main
+
+# A class method signature parameter spelled like the wrapper's method-constraint
+# dictionary slot is renamed, as every other parameter is.
+
+class Foo t
+  fn foo(__tc_ToString_1_to_string: t, y: a) -> String where ToString a
+
+instance Foo Int
+  fn foo(x: Int, y: a) -> String where ToString a = to_string(y)
+
+fn use_foo(x: t) -> String where Foo t = foo(x, 5)
+
+fn main() -> Unit !{IO} = print(use_foo(3))

@@ -1,0 +1,14 @@
+no_prelude
+
+# Under `no_prelude` the class's own dictionary slot name is bare, so a signature
+# parameter can spell it.
+
+class Foo t
+  fn foo(__tc_Foo_0_foo: t) -> Int
+
+instance Foo Int
+  fn foo(x: Int) -> Int = x
+
+fn use_foo(x: t) -> Int where Foo t = foo(x)
+
+fn main() -> Unit !{IO} = print_str(int_to_string(use_foo(3)))
