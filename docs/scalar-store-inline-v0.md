@@ -90,6 +90,12 @@ The new pass rewrites a call `f(args)` when three things hold:
 The call becomes the direct `vector_mutset(...)` built from the substituted shape. Nothing else is
 rewritten.
 
+The inserted callee is the bare extern name `vector_mutset`, which a local of that name would
+capture. None can: the bundler renames any local named like an extern to `$l_<name>`
+([prelude-name-identity-v0.md §5](prelude-name-identity-v0.md)), so the pass tracks no scope for
+this name either. `tests/stdlib/test_mutvec_scalar_store.spr` pins it with a parameter, a closure
+parameter and a `let` all named `vector_mutset`.
+
 The stored operand is the caller's own expression only when the wrapper passes a bare parameter
 there. `subst` keeps the wrapper's node type on a sum or a projection. So a generic wrapper that
 stores `cell_val(c)` keeps its type `a`, and it does not expand even at a `MutVec Int` call site.
@@ -149,6 +155,9 @@ turned off with `SPROUT_OPT_OFF=wsi`. With the switch off, the
 inline store still applies to direct calls (§4.2), since that rule needs no new pass.
 
 The recognisers live in `vec_wrappers.sprout`, which both passes import. They are not copied.
+
+Because the pass sees the whole pre-DCE program, it rebuilds only a node with a rewrite below it
+(`typed_ast.map_children_shared`) and returns the original program when no call expands.
 
 ## 5. Impact
 

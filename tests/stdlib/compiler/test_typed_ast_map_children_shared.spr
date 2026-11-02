@@ -1,0 +1,99 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.compiler.source as source
+import stdlib.compiler.ast as ast
+import stdlib.string as string
+
+# typed_ast.map_children_shared answers Nothing when its step leaves every child alone, and
+# otherwise rebuilds the node with only the changed children replaced. map_children changes
+# every child. Each sample has distinctly named children, as in test_typed_ast_traverse_children.
+
+fn pos_at(line: Int) -> source.SourcePos = source.SourcePos(index = 0, line = line, column = 1)
+
+fn int_t() -> types.Type = types.TConst(types.type_id("Int"))
+
+fn var_(name: String) -> typed_ast.TypedExpr = typed_ast.TVar(name, int_t(), pos_at(1))
+
+fn name_of(e: typed_ast.TypedExpr) -> String =
+  match e with
+  | typed_ast.TVar name _ _ -> name
+  | _ -> "?"
+
+fn branch(pat: ast.Pattern, body: String) -> typed_ast.TypedMatchBranch = typed_ast.TypedMatchBranch(pat, var_(body))
+
+fn field(name: String, value: String) -> typed_ast.TypedRecordField = typed_ast.TypedRecordField(name, var_(value))
+
+fn leaves() -> List typed_ast.TypedExpr =
+  [
+    var_("v"),
+    typed_ast.TInt(1, int_t(), pos_at(1)),
+    typed_ast.TUnit(int_t(), pos_at(1)),
+    typed_ast.TDict(ast.TypeConstraint("Eq", []), int_t(), pos_at(2), typed_ast.EvUnresolved),
+    typed_ast.TMethodRef("eq", "Eq", int_t(), pos_at(3), typed_ast.EvUnresolved)
+  ]
+
+fn composites() -> List typed_ast.TypedExpr =
+  [
+    typed_ast.TTuple([var_("a"), var_("b")], int_t(), pos_at(10)),
+    typed_ast.TIf(var_("c"), var_("t"), var_("e"), int_t(), pos_at(11)),
+    typed_ast.TMatch(var_("s"), [branch(ast.VarPattern("p", pos_at(1)), "b1"), branch(ast.WildcardPattern(pos_at(1)), "b2")], int_t(), pos_at(12)),
+    typed_ast.TCall(var_("f"), [var_("x"), var_("y")], int_t(), pos_at(13)),
+    typed_ast.TLambda([], var_("body"), int_t(), pos_at(14)),
+    typed_ast.TBinary("+", var_("l"), var_("r"), int_t(), pos_at(15)),
+    typed_ast.TUnary("-", var_("o"), int_t(), pos_at(16)),
+    typed_ast.TRange(var_("lo"), var_("hi"), int_t(), pos_at(17)),
+    typed_ast.TDo([typed_ast.TDoBindStep(ast.WildcardPattern(pos_at(1)), var_("v1"), typed_ast.ResultBind), typed_ast.TDoLetStep("n", var_("v2")), typed_ast.TDoExprStep(var_("v3"))], int_t(), pos_at(18)),
+    typed_ast.TRecord("R", [field("fa", "x1"), field("fb", "x2")], int_t(), pos_at(19)),
+    typed_ast.TGetField(var_("g"), "fa", int_t(), pos_at(20)),
+    typed_ast.TRecordUpdate(var_("base"), [field("fa", "u1"), field("fb", "u2")], int_t(), pos_at(21))
+  ]
+
+fn kids(e: typed_ast.TypedExpr) -> List String = list_map(name_of, typed_ast.children(e))
+
+fn primed(name: String) -> String = name ++ "'"
+
+fn list_str(xs: List String) -> String = string.join(",", xs)
+
+# Primes the child called `target`; leaves any other alone.
+fn prime_only(target: String, c: typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
+  if name_of(c) == target then Just(var_(primed(name_of(c)))) else Nothing
+
+fn kids_after(r: Maybe typed_ast.TypedExpr) -> String =
+  match r with
+  | Nothing -> "unchanged"
+  | Just e -> list_str(kids(e))
+
+fn expected_with(ks: List String, target: String) -> String =
+  list_str(list_map(\k -> if k == target then primed(k) else k, ks))
+
+fn check_one_changed(state: TestState, e: typed_ast.TypedExpr, target: String) -> Unit !{IO} =
+  assert_eq(state, `only ${target} changes`,
+    kids_after(typed_ast.map_children_shared(prime_only(target, _), e)), expected_with(kids(e), target))
+
+fn check_composite(state: TestState, e: typed_ast.TypedExpr) -> Unit !{IO} =
+  do
+    assert_eq(state, `${list_str(kids(e))}: no change is Nothing`,
+      kids_after(typed_ast.map_children_shared(\_ -> Nothing, e)), "unchanged")
+    list_each(check_one_changed(state, e, _), kids(e))
+    assert_eq(state, `${list_str(kids(e))}: map_children changes every child`,
+      list_str(kids(typed_ast.map_children(\c -> var_(primed(name_of(c))), e))), list_str(list_map(primed, kids(e))))
+
+fn check_leaf(state: TestState, e: typed_ast.TypedExpr) -> Unit !{IO} =
+  do
+    assert_eq(state, "a leaf is Nothing, the step never called",
+      kids_after(typed_ast.map_children_shared(\_ -> Just(var_("called")), e)), "unchanged")
+    assert_eq(state, "map_children of a leaf has no children",
+      list_str(kids(typed_ast.map_children(\_ -> var_("called"), e))), "")
+
+fn bump(n: Int) -> Maybe Int = if n == 2 then Just(20) else Nothing
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    list_each(check_leaf(state, _), leaves())
+    list_each(check_composite(state, _), composites())
+    assert_eq(state, "share_list of nothing is Nothing", typed_ast.share_list(bump, []), Nothing)
+    assert_eq(state, "share_list with no hit is Nothing", typed_ast.share_list(bump, [1, 3]), Nothing)
+    assert_eq(state, "share_list keeps order and the unchanged", typed_ast.share_list(bump, [1, 2, 3]), Just([1, 20, 3]))
+    summary(state)

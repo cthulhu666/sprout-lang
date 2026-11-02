@@ -4,9 +4,33 @@ import stdlib.mutable (MutVec, mutvec_new, mutvec_at, mutvec_set)
 # Scalar stores through `mutvec_set` lower inline (scripts/b1_gate.sh checks the IR); these
 # check that each element type reads back what was written, and that a neighbour is untouched.
 
+# Locals named like the extern the `wsi` pass inserts (`vector_mutset`). The bundler renames
+# them (docs/prelude-name-identity-v0.md §5), so the inserted call cannot be captured.
+fn store_with_int_local(g: MutVec Int, vector_mutset: Int) -> Unit !{IO} =
+  mutvec_set(g, 0, vector_mutset)
+
+fn store_with_closure_local(g: MutVec Int, x: Int, vector_mutset: Int -> Int -> Int -> Int) -> Unit !{IO} =
+  mutvec_set(g, 0, x + vector_mutset(1, 2, 3))
+
+fn store_with_let_local(g: MutVec Int, x: Int) -> Unit !{IO} =
+  let vector_mutset = x * 2
+  in mutvec_set(g, 1, vector_mutset)
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
+
+    shadowed <- mutvec_new(2, 0)
+    store_with_int_local(shadowed, 7)
+    store_with_closure_local(shadowed, 5, \ (a, b, c) -> a + b + c)
+    s0 <- mutvec_at(shadowed, 0)
+    assert_eq(state, "closure local not called as the store", s0, 11)
+    store_with_int_local(shadowed, 9)
+    s0b <- mutvec_at(shadowed, 0)
+    assert_eq(state, "Int local named vector_mutset stored", s0b, 9)
+    store_with_let_local(shadowed, 4)
+    s1 <- mutvec_at(shadowed, 1)
+    assert_eq(state, "let local named vector_mutset stored", s1, 8)
 
     ints <- mutvec_new(3, 0)
     mutvec_set(ints, 1, 42)

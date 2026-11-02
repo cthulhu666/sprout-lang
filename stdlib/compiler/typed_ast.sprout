@@ -305,6 +305,101 @@ fn traverse_field(g: TypedExpr -> Result err TypedExpr, f: TypedRecordField) -> 
       x = try g(value)
   in Ok(TypedRecordField(name, x))
 
+# `e` with `g` applied to each of children(e). A pass that rewrites few nodes uses the
+# `_shared` form, which returns `Nothing` when no child changed, so the caller keeps `e`.
+export fn map_children(g: TypedExpr -> TypedExpr, e: TypedExpr) -> TypedExpr =
+  maybe_with_default(e, map_children_shared(\c -> Just(g(c)), e))
+
+# `g` answers `Nothing` for "unchanged". Result is `Nothing` when every child is unchanged;
+# otherwise a rebuilt `e` that shares each unchanged child. Exhaustive like `children`.
+export fn map_children_shared(g: TypedExpr -> Maybe TypedExpr, e: TypedExpr) -> Maybe TypedExpr =
+  match e with
+  | TVar _ _ _ -> Nothing
+  | TInt _ _ _ -> Nothing
+  | TFloat _ _ _ -> Nothing
+  | TBool _ _ _ -> Nothing
+  | TString _ _ _ -> Nothing
+  | TChar _ _ _ -> Nothing
+  | TUnit _ _ -> Nothing
+  | TTuple items t p -> fmap(\xs -> TTuple(xs, t, p), share_list(g, items))
+  | TIf cond then_e else_e t p ->
+      let c = g(cond)
+          a = g(then_e)
+          b = g(else_e)
+      in if is_just(c) || is_just(a) || is_just(b)
+         then Just(TIf(maybe_with_default(cond, c), maybe_with_default(then_e, a),
+                       maybe_with_default(else_e, b), t, p))
+         else Nothing
+  | TMatch scrut branches t p ->
+      let s = g(scrut)
+          bs = share_list(share_branch(g, _), branches)
+      in if is_just(s) || is_just(bs)
+         then Just(TMatch(maybe_with_default(scrut, s), maybe_with_default(branches, bs), t, p))
+         else Nothing
+  | TCall callee args t p ->
+      let f = g(callee)
+          xs = share_list(g, args)
+      in if is_just(f) || is_just(xs)
+         then Just(TCall(maybe_with_default(callee, f), maybe_with_default(args, xs), t, p))
+         else Nothing
+  | TDict _ _ _ _ -> Nothing
+  | TMethodRef _ _ _ _ _ -> Nothing
+  | TLambda params body t p -> fmap(\b -> TLambda(params, b, t, p), g(body))
+  | TBinary op left right t p ->
+      let l = g(left)
+          r = g(right)
+      in if is_just(l) || is_just(r)
+         then Just(TBinary(op, maybe_with_default(left, l), maybe_with_default(right, r), t, p))
+         else Nothing
+  | TUnary op operand t p -> fmap(\x -> TUnary(op, x, t, p), g(operand))
+  | TRange lo hi t p ->
+      let a = g(lo)
+          b = g(hi)
+      in if is_just(a) || is_just(b)
+         then Just(TRange(maybe_with_default(lo, a), maybe_with_default(hi, b), t, p))
+         else Nothing
+  | TDo steps t p -> fmap(\ss -> TDo(ss, t, p), share_list(share_step(g, _), steps))
+  | TRecord name fields t p -> fmap(\fs -> TRecord(name, fs, t, p), share_list(share_field(g, _), fields))
+  | TGetField base fld t p -> fmap(\b -> TGetField(b, fld, t, p), g(base))
+  | TRecordUpdate base fields t p ->
+      let b = g(base)
+          fs = share_list(share_field(g, _), fields)
+      in if is_just(b) || is_just(fs)
+         then Just(TRecordUpdate(maybe_with_default(base, b), maybe_with_default(fields, fs), t, p))
+         else Nothing
+
+# Left to right; `Nothing` when `g` left every element alone. Tail recursive.
+export fn share_list(g: a -> Maybe a, xs: List a) -> Maybe (List a) =
+  share_list_go(g, xs, [], false)
+
+fn share_list_go(g: a -> Maybe a, xs: List a, acc: List a, changed: Bool) -> Maybe (List a) =
+  match xs with
+  | [] -> if changed then Just(list_reverse(acc)) else Nothing
+  | [x | rest] ->
+      match g(x) with
+      | Just y -> share_list_go(g, rest, Cons(y, acc), true)
+      | Nothing -> share_list_go(g, rest, Cons(x, acc), changed)
+
+fn share_branch(g: TypedExpr -> Maybe TypedExpr, b: TypedMatchBranch) -> Maybe TypedMatchBranch =
+  let TypedMatchBranch pat body = b
+  in fmap(\x -> TypedMatchBranch(pat, x), g(body))
+
+fn share_step(g: TypedExpr -> Maybe TypedExpr, s: TypedDoStep) -> Maybe TypedDoStep =
+  match s with
+  | TDoBindStep pat value mode -> fmap(\x -> TDoBindStep(pat, x, mode), g(value))
+  | TDoLetStep name value -> fmap(\x -> TDoLetStep(name, x), g(value))
+  | TDoExprStep value -> fmap(\x -> TDoExprStep(x), g(value))
+
+fn share_field(g: TypedExpr -> Maybe TypedExpr, f: TypedRecordField) -> Maybe TypedRecordField =
+  let TypedRecordField name value = f
+  in fmap(\x -> TypedRecordField(name, x), g(value))
+
+# True when `e` is the variable `name`.
+export fn is_var(name: String, e: TypedExpr) -> Bool =
+  match e with
+  | TVar n _ _ -> n == name
+  | _ -> false
+
 export fn branch_body(b: TypedMatchBranch) -> TypedExpr =
   match b with
   | TypedMatchBranch _ body -> body
