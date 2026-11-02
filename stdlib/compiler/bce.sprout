@@ -179,9 +179,9 @@ fn negated_lit(e: typed_ast.TypedExpr) -> Maybe Int =
 fn step_of(p: String, e: typed_ast.TypedExpr) -> Maybe Int =
   match e with
   | typed_ast.TBinary op l r _ _ ->
-      if op == "+" && vec_wrappers.is_var(p, l) then int_lit(r)
-      else if op == "+" && vec_wrappers.is_var(p, r) then int_lit(l)
-      else if op == "-" && vec_wrappers.is_var(p, l) then negate_maybe(int_lit(r))
+      if op == "+" && typed_ast.is_var(p, l) then int_lit(r)
+      else if op == "+" && typed_ast.is_var(p, r) then int_lit(l)
+      else if op == "-" && typed_ast.is_var(p, l) then negate_maybe(int_lit(r))
       else Nothing
   | _ -> Nothing
 
@@ -191,7 +191,7 @@ fn negate_maybe(m: Maybe Int) -> Maybe Int =
   | Nothing -> Nothing
 
 fn observe(p: String, e: typed_ast.TypedExpr) -> Obs =
-  if vec_wrappers.is_var(p, e) then Obs(tag = 1, step = 0)
+  if typed_ast.is_var(p, e) then Obs(tag = 1, step = 0)
   else observe_step(step_of(p, e))
 
 fn observe_step(m: Maybe Int) -> Obs =
@@ -351,7 +351,7 @@ fn facts_false(c: typed_ast.TypedExpr, cls: Dict Cls) -> List Fact =
   | _ -> Nil
 
 # ---------------------------------------------------------------------------
-# Accesses and the wrappers that reduce to one.
+# The tables the scan and the rewrite read, and the access a call performs.
 # ---------------------------------------------------------------------------
 
 type Tables (..) = (wrappers: Dict vec_wrappers.Wrapper, projs: Set, fn_names: Set, ext_pure: Dict Bool)
@@ -359,10 +359,7 @@ type Tables (..) = (wrappers: Dict vec_wrappers.Wrapper, projs: Set, fn_names: S
 fn shape_of(n: String, args: List typed_ast.TypedExpr, tables: Tables) -> Maybe vec_wrappers.Shape =
   match vec_wrappers.direct_shape(n, args) with
   | Just s -> Just(s)
-  | Nothing ->
-      match dict_get(n, tables.wrappers) with
-      | Just w -> vec_wrappers.apply_wrapper(w, args)
-      | Nothing -> Nothing
+  | Nothing -> vec_wrappers.shape_at(n, args, tables.wrappers)
 
 # ---------------------------------------------------------------------------
 # The scan: one walk of a body that finds the self-calls and the accesses, each
@@ -874,52 +871,8 @@ fn prefer_found(a: types.Type, b: types.Type) -> types.Type = if is_int(a) then 
 
 type Rw (..) = (self: String, to: String, fast: Bool, tables: Tables, locals: Set)
 
-fn map_children(e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
-  match e with
-  | typed_ast.TVar _ _ _ -> e
-  | typed_ast.TInt _ _ _ -> e
-  | typed_ast.TFloat _ _ _ -> e
-  | typed_ast.TBool _ _ _ -> e
-  | typed_ast.TString _ _ _ -> e
-  | typed_ast.TChar _ _ _ -> e
-  | typed_ast.TUnit _ _ -> e
-  | typed_ast.TTuple items t p -> typed_ast.TTuple(map_list(items, rw), t, p)
-  | typed_ast.TIf c th el t p -> typed_ast.TIf(rewrite(c, rw), rewrite(th, rw), rewrite(el, rw), t, p)
-  | typed_ast.TMatch scrut arms t p -> typed_ast.TMatch(rewrite(scrut, rw), map_arms(arms, rw), t, p)
-  | typed_ast.TCall callee args t p -> typed_ast.TCall(rewrite(callee, rw), map_list(args, rw), t, p)
-  | typed_ast.TDict _ _ _ _ -> e
-  | typed_ast.TMethodRef _ _ _ _ _ -> e
-  | typed_ast.TLambda ps body t p -> typed_ast.TLambda(ps, rewrite(body, rw), t, p)
-  | typed_ast.TBinary op l r t p -> typed_ast.TBinary(op, rewrite(l, rw), rewrite(r, rw), t, p)
-  | typed_ast.TUnary op x t p -> typed_ast.TUnary(op, rewrite(x, rw), t, p)
-  | typed_ast.TRange l r t p -> typed_ast.TRange(rewrite(l, rw), rewrite(r, rw), t, p)
-  | typed_ast.TDo steps t p -> typed_ast.TDo(list_map(map_step(_, rw), steps), t, p)
-  | typed_ast.TRecord name fields t p -> typed_ast.TRecord(name, list_map(map_field(_, rw), fields), t, p)
-  | typed_ast.TGetField obj f t p -> typed_ast.TGetField(rewrite(obj, rw), f, t, p)
-  | typed_ast.TRecordUpdate base fields t p ->
-      typed_ast.TRecordUpdate(rewrite(base, rw), list_map(map_field(_, rw), fields), t, p)
-
-fn map_list(es: List typed_ast.TypedExpr, rw: Rw) -> List typed_ast.TypedExpr = list_map(rewrite(_, rw), es)
-
-fn map_arms(arms: List typed_ast.TypedMatchBranch, rw: Rw) -> List typed_ast.TypedMatchBranch =
-  list_map(map_arm(_, rw), arms)
-
-fn map_arm(arm: typed_ast.TypedMatchBranch, rw: Rw) -> typed_ast.TypedMatchBranch =
-  match arm with
-  | typed_ast.TypedMatchBranch pat body -> typed_ast.TypedMatchBranch(pat, rewrite(body, rw))
-
-fn map_field(f: typed_ast.TypedRecordField, rw: Rw) -> typed_ast.TypedRecordField =
-  match f with
-  | typed_ast.TypedRecordField name v -> typed_ast.TypedRecordField(name, rewrite(v, rw))
-
-fn map_step(s: typed_ast.TypedDoStep, rw: Rw) -> typed_ast.TypedDoStep =
-  match s with
-  | typed_ast.TDoBindStep pat e mode -> typed_ast.TDoBindStep(pat, rewrite(e, rw), mode)
-  | typed_ast.TDoLetStep n e -> typed_ast.TDoLetStep(n, rewrite(e, rw))
-  | typed_ast.TDoExprStep e -> typed_ast.TDoExprStep(rewrite(e, rw))
-
 fn rewrite(e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
-  rewrite_node(map_children(e, rw), rw)
+  rewrite_node(typed_ast.map_children(rewrite(_, rw), e), rw)
 
 fn rewrite_node(e: typed_ast.TypedExpr, rw: Rw) -> typed_ast.TypedExpr =
   match e with

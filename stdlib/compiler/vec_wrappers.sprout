@@ -16,11 +16,6 @@ import stdlib.compiler.type_kind as type_kind
 # Accesses and the wrappers that reduce to one.
 # ---------------------------------------------------------------------------
 
-export fn is_var(p: String, e: typed_ast.TypedExpr) -> Bool =
-  match e with
-  | typed_ast.TVar n _ _ -> n == p
-  | _ -> false
-
 # An access with its operands in terms of the enclosing function.
 export type Shape (..) = (is_set: Bool, vec: typed_ast.TypedExpr, idx: typed_ast.TypedExpr,
                    val: Maybe typed_ast.TypedExpr)
@@ -43,13 +38,13 @@ fn is_projection(d: typed_ast.TypedDecl) -> Bool =
 fn projects(p: String, body: typed_ast.TypedExpr) -> Bool =
   match body with
   | typed_ast.TMatch scrut [typed_ast.TypedMatchBranch pat arm] _ _ ->
-      is_var(p, scrut) && is_field_pattern(pat, arm)
-  | typed_ast.TGetField obj _ _ _ -> is_var(p, obj)
+      typed_ast.is_var(p, scrut) && is_field_pattern(pat, arm)
+  | typed_ast.TGetField obj _ _ _ -> typed_ast.is_var(p, obj)
   | _ -> false
 
 fn is_field_pattern(pat: ast.Pattern, arm: typed_ast.TypedExpr) -> Bool =
   match pat with
-  | ast.ConstructorPattern _ [ast.VarPattern x _] _ -> is_var(x, arm)
+  | ast.ConstructorPattern _ [ast.VarPattern x _] _ -> typed_ast.is_var(x, arm)
   | _ -> false
 
 fn decl_projection_name(d: typed_ast.TypedDecl) -> Maybe String =
@@ -79,14 +74,6 @@ fn mentions(e: typed_ast.TypedExpr, acc: List String) -> List String =
 fn names_in_order(es: List typed_ast.TypedExpr) -> List String =
   list_reverse(list_fold(\ (a, x) -> mentions(x, a), Nil, es))
 
-fn same_names(xs: List String, ys: List String) -> Bool =
-  match xs with
-  | Nil -> list_length(ys) == 0
-  | [x | xrest] ->
-      match ys with
-      | Nil -> false
-      | [y | yrest] -> x == y && same_names(xrest, yrest)
-
 fn wrapper_of(d: typed_ast.TypedDecl, projs: Set) -> Maybe (String, Wrapper) =
   match d with
   | typed_ast.TFnDecl name params _ _ Nil (typed_ast.TCall(typed_ast.TVar callee _ _) cargs _ _) ->
@@ -95,16 +82,11 @@ fn wrapper_of(d: typed_ast.TypedDecl, projs: Set) -> Maybe (String, Wrapper) =
 
 fn wrapper_from(name: String, pnames: List String, callee: String,
                 cargs: List typed_ast.TypedExpr, projs: Set) -> Maybe (String, Wrapper) =
-  if !list_all_operands(cargs, projs) || !same_names(names_in_order(cargs), pnames) then Nothing
+  if !all(operand_ok(_, projs), cargs) || names_in_order(cargs) != pnames then Nothing
   else
     match direct_shape(callee, cargs) with
     | Just shape -> Just((name, Wrapper(params = pnames, shape = shape)))
     | Nothing -> Nothing
-
-fn list_all_operands(es: List typed_ast.TypedExpr, projs: Set) -> Bool =
-  match es with
-  | Nil -> true
-  | [e | rest] -> operand_ok(e, projs) && list_all_operands(rest, projs)
 
 # `vector_get_direct` and `vector_mutset` are externs, so their names are bare and
 # cannot belong to a user function.
@@ -135,25 +117,17 @@ fn subst_var(n: String, e: typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -
   | Just arg -> arg
   | Nothing -> e
 
-fn zip_env(names: List String, es: List typed_ast.TypedExpr) -> List (String, typed_ast.TypedExpr) =
-  match names with
-  | Nil -> Nil
-  | [n | nrest] ->
-      match es with
-      | Nil -> Nil
-      | [e | erest] -> Cons((n, e), zip_env(nrest, erest))
-
 export fn apply_wrapper(w: Wrapper, args: List typed_ast.TypedExpr) -> Maybe Shape =
   if list_length(args) != list_length(w.params) then Nothing
   else
-    let env = dict_from_list(zip_env(w.params, args))
+    let env = dict_from_list(zip(w.params, args))
     in Just(Shape(is_set = w.shape.is_set, vec = subst(w.shape.vec, env), idx = subst(w.shape.idx, env),
-                  val = subst_val(w.shape.val, env)))
+                  val = fmap(subst(_, env), w.shape.val)))
 
-fn subst_val(v: Maybe typed_ast.TypedExpr, env: Dict typed_ast.TypedExpr) -> Maybe typed_ast.TypedExpr =
-  match v with
-  | Just e -> Just(subst(e, env))
-  | Nothing -> Nothing
+# The access a call to wrapper `n` performs, if `n` is in `wrappers`.
+export fn shape_at(n: String, args: List typed_ast.TypedExpr, wrappers: Dict Wrapper) -> Maybe Shape =
+  let Just w = dict_get(n, wrappers) else Nothing
+  in apply_wrapper(w, args)
 
 # A store of a non-heap scalar needs no write hook; any other store stays checked.
 export fn shape_converts(s: Shape) -> Bool =

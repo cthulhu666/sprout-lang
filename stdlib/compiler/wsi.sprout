@@ -18,61 +18,57 @@ import stdlib.compiler.vec_wrappers as vec_wrappers
 # else (a projection, a sum), `subst` keeps the wrapper's node type, which is the wrapper's
 # type variable, so the type test fails and the call stays.
 #
-# Shadowing needs no scope tracking. A wrapper is a top-level declaration, so the bundler
-# names it `module.name`. A local binder (parameter, `let`, pattern or do bind) is a bare
-# identifier with no dot, so it never equals a wrapper's name. The fixture's `set_shadowed`
-# pins this.
+# Shadowing needs no scope tracking, for two names. The wrapper's name is a top-level
+# declaration, so the bundler writes it `module.name`; a local binder is a bare identifier
+# and never equals it. The inserted `vector_mutset` is an extern, and the bundler renames any
+# local named like an extern (docs/prelude-name-identity-v0.md §5), so no binder captures it.
+# The fixture's `set_shadowed` and tests/stdlib/test_mutvec_scalar_store.spr pin both.
+#
+# Only a node with a rewrite below it is rebuilt: the pass runs before dead-code removal, so
+# it sees the whole program, and the unchanged rest is shared.
 
 export fn expand_program(prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
   match prog with
   | typed_ast.TypedProgram decls ->
       let stores = vec_wrappers.store_wrappers(decls, vec_wrappers.projection_set(decls))
-      in if list_length(stores) == 0 then prog
-         else typed_ast.TypedProgram(list_map(rewrite_decl(_, dict_from_list(stores)), decls))
+      in if list_length(stores) == 0 then prog else expand_decls(prog, decls, dict_from_list(stores))
 
-fn rewrite_decl(d: typed_ast.TypedDecl, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedDecl =
+fn expand_decls(prog: typed_ast.TypedProgram, decls: List typed_ast.TypedDecl,
+                stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedProgram =
+  match typed_ast.share_list(rewrite_decl(_, stores), decls) with
+  | Just rewritten -> typed_ast.TypedProgram(rewritten)
+  | Nothing -> prog
+
+fn rewrite_decl(d: typed_ast.TypedDecl, stores: Dict vec_wrappers.Wrapper) -> Maybe typed_ast.TypedDecl =
   match d with
   | typed_ast.TFnDecl name params ret eff cs body ->
-      typed_ast.TFnDecl(name, params, ret, eff, cs, rewrite(body, stores))
-  | typed_ast.TLetDecl name value -> typed_ast.TLetDecl(name, rewrite(value, stores))
+      fmap(\b -> typed_ast.TFnDecl(name, params, ret, eff, cs, b), rewrite(body, stores))
+  | typed_ast.TLetDecl name value -> fmap(\v -> typed_ast.TLetDecl(name, v), rewrite(value, stores))
   | typed_ast.TInstanceDecl c cs methods ->
-      typed_ast.TInstanceDecl(c, cs, list_map(rewrite_method(_, stores), methods))
-  | typed_ast.TExternFnDecl _ _ _ _ -> d
-  | typed_ast.TPassThrough _ -> d
+      fmap(\ms -> typed_ast.TInstanceDecl(c, cs, ms), typed_ast.share_list(rewrite_method(_, stores), methods))
+  | typed_ast.TExternFnDecl _ _ _ _ -> Nothing
+  | typed_ast.TPassThrough _ -> Nothing
 
 fn rewrite_method(m: typed_ast.TypedInstanceMethod, stores: Dict vec_wrappers.Wrapper) ->
-    typed_ast.TypedInstanceMethod =
+    Maybe typed_ast.TypedInstanceMethod =
   match m with
   | typed_ast.TypedInstanceMethod name params ret eff cs body ->
-      typed_ast.TypedInstanceMethod(name, params, ret, eff, cs, rewrite(body, stores))
+      fmap(\b -> typed_ast.TypedInstanceMethod(name, params, ret, eff, cs, b), rewrite(body, stores))
 
-# Bottom-up, so a store nested in an argument of another is rewritten first.
-fn rewrite(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedExpr =
-  rewrite_node(rewrite_children(e, stores), stores)
-
-# The walk cannot fail: `rewrite_ok` always returns `Ok`.
-fn rewrite_children(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedExpr =
-  match typed_ast.traverse_children(rewrite_ok(_, stores), e) with
-  | Ok rebuilt -> rebuilt
-  | Err _ -> e
-
-fn rewrite_ok(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> Result String typed_ast.TypedExpr =
-  Ok(rewrite(e, stores))
-
-fn rewrite_node(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> typed_ast.TypedExpr =
-  match e with
-  | typed_ast.TCall (typed_ast.TVar f vt vp) args t p ->
-      let Just w = dict_get(f, stores) else e
-      in expand_store(w, vt, vp, args, t, p, e)
-  | _ -> e
+# Bottom-up, so a store nested in an argument of another is rewritten first. `Nothing` means
+# nothing below or at `e` changed.
+fn rewrite(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> Maybe typed_ast.TypedExpr =
+  let rebuilt = typed_ast.map_children_shared(rewrite(_, stores), e)
+  in maybe_or_else(expand_store(maybe_with_default(e, rebuilt), stores), rebuilt)
 
 # The new callee keeps the wrapper callee's type `vt`, as `bce` does for its pseudo-callees:
 # lowering reads the name and the argument types, not this one.
-fn expand_store(w: vec_wrappers.Wrapper, vt: types.Type, vp: source.SourcePos,
-                args: List typed_ast.TypedExpr, t: types.Type, p: source.SourcePos,
-                e: typed_ast.TypedExpr) -> typed_ast.TypedExpr =
-  let Just s = vec_wrappers.apply_wrapper(w, args) else e
-      Just x = s.val else e
-  in if vec_wrappers.shape_converts(s)
-     then typed_ast.TCall(typed_ast.TVar("vector_mutset", vt, vp), [s.vec, s.idx, x], t, p)
-     else e
+fn expand_store(e: typed_ast.TypedExpr, stores: Dict vec_wrappers.Wrapper) -> Maybe typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TCall (typed_ast.TVar f vt vp) args t p ->
+      let Just s = vec_wrappers.shape_at(f, args, stores) else Nothing
+          Just x = s.val else Nothing
+      in if vec_wrappers.shape_converts(s)
+         then Just(typed_ast.TCall(typed_ast.TVar("vector_mutset", vt, vp), [s.vec, s.idx, x], t, p))
+         else Nothing
+  | _ -> Nothing
