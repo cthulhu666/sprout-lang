@@ -177,6 +177,13 @@ CI is the backstop — `just verify-bootstrap-fixed-point` runs there, so this c
 a confusing red, not a bad merge. Until it is closed: **after any rebase of a branch touching
 `stdlib/compiler/`, reseed before pushing**; do not read a quiet hook as a clean seed.
 
+`just pr-rebase` does this in one command (`scripts/pr_rebase.sh`; tested by `just test-pr-rebase`).
+It rebases onto `origin/master`, reseeds each replayed commit that touches `stdlib/compiler/` or
+the seed (a commit that carries a seed needs one even when only `stdlib/prelude.sprout` changed),
+resolves a conflict confined to the seed by reseeding, and stops on any other conflict. It then
+checks that every commit touching `stdlib/compiler/` also touches the seed, and prints the
+`--force-with-lease` push command. It never pushes. Logs are under the git dir (`pr-rebase/`).
+
 ## Review gate — `scripts/review_gate.py`
 
 Wired as a Stop hook in `.claude/settings.json`. Once per distinct working-tree state it blocks the

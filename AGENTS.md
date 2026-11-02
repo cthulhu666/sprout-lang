@@ -269,4 +269,4 @@ that PR, in that turn (`gh pr merge <n> --rebase`), once CI is green on the curr
 
 - **`gh` is managed by mise**; run `gh auth login` once if unauthenticated. It reads the repo through the git CLI, so it works from a worktree. Merged branches are auto-deleted.
 - **CI runs on GitHub-hosted runners** (`.github/workflows/ci.yml`, `ubuntu-latest`) — no self-hosted worker to provision. Releases (`.github/workflows/release.yml`) build linux x86_64 + aarch64 on tag push.
-- **Seed-staleness merge cascade.** The up-to-date rule means that when `master` moves under an open PR touching `stdlib/compiler/`, you must rebase **and** `just refresh-seed` before the merge unblocks — a pre-merge gate rather than a post-merge surprise.
+- **Seed-staleness merge cascade.** The up-to-date rule means that when `master` moves under an open PR touching `stdlib/compiler/`, you must rebase **and** `just refresh-seed` before the merge unblocks — a pre-merge gate rather than a post-merge surprise. `just pr-rebase` does both: it rebases onto `origin/master` and reseeds each compiler commit, then prints the push command. Run `just dod` after it.
