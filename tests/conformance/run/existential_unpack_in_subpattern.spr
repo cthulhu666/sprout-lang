@@ -1,0 +1,38 @@
+module main
+
+# An existential unpacked by a sub-pattern — inside a tuple, another constructor or a
+# Maybe — binds its packed dictionary like a top-level unpack does.
+
+class Step t
+  fn bump(x: t) -> t
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+
+instance Step String
+  fn bump(x: String) -> String = x ++ "!"
+
+type Pack = | exists a. Pack a where Step a, ToString a
+
+type Two = Two Pack Pack
+
+fn in_tuple(t: (Pack, Pack)) -> String =
+  match t with
+  | (Pack x, Pack y) -> to_string(bump(x)) ++ "|" ++ to_string(bump(y))
+
+fn in_ctor(t: Two) -> String =
+  match t with
+  | Two (Pack x) (Pack y) -> to_string(bump(x)) ++ "|" ++ to_string(bump(y))
+
+fn in_maybe(m: Maybe Pack) -> String =
+  match m with
+  | Just (Pack x) -> to_string(bump(x))
+  | Nothing -> "none"
+
+fn main() -> Unit !{IO} = do
+  print(in_tuple((Pack(1), Pack("q"))))
+  print(in_tuple((Pack("q"), Pack(1))))
+  print(in_ctor(Two (Pack(1), Pack("q"))))
+  print(in_ctor(Two (Pack("q"), Pack(1))))
+  print(in_maybe(Just (Pack(1))))
+  print(in_maybe(Just (Pack("q"))))

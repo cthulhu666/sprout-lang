@@ -1337,7 +1337,10 @@ it is a parse error (it must not constrain a head parameter).
 The packed dictionaries belong to the constructor pattern, so a field may be matched
 by any pattern: a variable, `_`, a tuple or a nested constructor
 (`| Boxed((x, n)) -> take(x) + n`). Each constrained variable keeps its own
-dictionary, including two variables of one constructor.
+dictionary, including two variables of one constructor. The constructor pattern may
+itself be nested, in a tuple or another constructor, in any form that matches
+(`match`, `let`, `<-`, a comprehension generator): each unpack binds its own
+dictionaries (`| (Shown x, Shown y) -> …`).
 
 **Runtime.** The packed dictionary is the class's method function-pointer(s)
 stored as hidden constructor fields (traced by the GC); a method call on the

@@ -201,7 +201,10 @@ strictly smaller, self-contained feature. So:
   the packed dictionaries: infer records each constrained `exists` var's skolem at the
   pattern, and infer and lowering name the dictionary `$ex_<var>_<pattern position>`
   (`types.existential_binder`), so any field sub-pattern (`_`, a tuple, `Just(x)`)
-  works and two vars of one constructor stay distinct. Missing-instance construction (`Shown(NoShow)`) is rejected at the
+  works and two vars of one constructor stay distinct. The existential pattern may
+  itself sit inside a tuple or another constructor (`(Pack x, Pack y)`,
+  `Just(Pack x)`): infer and lowering walk the same sub-patterns, so each nested
+  unpack binds its own dictionaries. Missing-instance construction (`Shown(NoShow)`) is rejected at the
   construction site with the standard "No instance" diagnostic (§8). **Known gap:**
   an *ambiguous* existential construction whose element type is undetermined
   (`Bag([])` — an empty container) currently surfaces as an opaque ctor-arity

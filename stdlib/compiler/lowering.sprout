@@ -1512,7 +1512,7 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
   | Cons b rest ->
       match b with
       | typed_ast.TypedMatchBranch pat body ->
-          match enrich_existential_branch(pat, ctx) with
+          match enrich_existential_pattern(pat, ctx) with
           | (ext_pat, bctx) ->
               Cons(typed_ast.TypedMatchBranch(ext_pat, lower_expr(body, ctx_with_bound(ast.pattern_names(ext_pat), bctx))),
                    lower_branches(rest, ctx))
@@ -1526,21 +1526,42 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
 # `$ex_<binder>` identity infer stored as the @fwd marker value — re-derived here from
 # the constructor pattern and the existential var, so resolve's EvForward key and this
 # seeding agree.
-fn enrich_existential_branch(pat: ast.Pattern, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
+#
+# Walks tuple and constructor sub-patterns and must visit exactly the patterns
+# infer.extend_env_with_existential_givens does: a given infer seeds and this misses has
+# no slot. Each constructor appends to its own fields and seeds under its own position.
+fn enrich_existential_pattern(pat: ast.Pattern, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
   match pat with
   | ast.ConstructorPattern name fields ppos ->
-      match dict_get(name, ctx.env.scheme_env) with
-      | Just scheme -> existential_branch_build(name, fields, ppos, scheme, ctx)
-      | Nothing -> (pat, ctx)
-  | _ -> (pat, ctx)
+      let (fields2, ctx2) = enrich_existential_patterns(fields, ctx)
+      in existential_ctor_build(name, fields2, ppos, ctx2)
+  | ast.TuplePattern pats ppos ->
+      let (pats2, ctx2) = enrich_existential_patterns(pats, ctx)
+      in (ast.TuplePattern(pats2, ppos), ctx2)
+  | ast.WildcardPattern _ -> (pat, ctx)
+  | ast.VarPattern _ _ -> (pat, ctx)
+  | ast.IntPattern _ _ -> (pat, ctx)
+  | ast.BoolPattern _ _ -> (pat, ctx)
+  | ast.StringPattern _ _ -> (pat, ctx)
+  | ast.CharPattern _ _ -> (pat, ctx)
+  | ast.UnitPattern _ -> (pat, ctx)
 
-fn existential_branch_build(name: String, fields: List ast.Pattern, ppos: source.SourcePos, scheme: types.Scheme, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
-  match types.scheme_constraints(scheme) with
-  | Nil -> (ast.ConstructorPattern(name, fields, ppos), ctx)
-  | cons ->
-      (ast.ConstructorPattern(name,
-         list_append(fields, witness_patterns_for(cons, ppos, ctx.env.class_order, ctx.env.super_map)), ppos),
-       ctx_with_fwd(seed_fwd_for_cons(cons, ppos, ctx.fwd, ctx.env.class_order, ctx.env.super_map), ctx))
+fn enrich_existential_patterns(pats: List ast.Pattern, ctx: LowerCtx) -> (List ast.Pattern, LowerCtx) =
+  match pats with
+  | Nil -> (Nil, ctx)
+  | Cons p rest ->
+      let (p2, ctx2) = enrich_existential_pattern(p, ctx)
+          (rest2, ctx3) = enrich_existential_patterns(rest, ctx2)
+      in (Cons(p2, rest2), ctx3)
+
+fn existential_ctor_build(name: String, fields: List ast.Pattern, ppos: source.SourcePos, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
+  let Just scheme = dict_get(name, ctx.env.scheme_env) else (ast.ConstructorPattern(name, fields, ppos), ctx)
+  in match types.scheme_constraints(scheme) with
+     | Nil -> (ast.ConstructorPattern(name, fields, ppos), ctx)
+     | cons ->
+         (ast.ConstructorPattern(name,
+            list_append(fields, witness_patterns_for(cons, ppos, ctx.env.class_order, ctx.env.super_map)), ppos),
+          ctx_with_fwd(seed_fwd_for_cons(cons, ppos, ctx.fwd, ctx.env.class_order, ctx.env.super_map), ctx))
 
 # One appended witness pattern PER SLOT — per method across the constraint's class
 # and its transitive superclasses, in types.witness_slots_for_class order, which

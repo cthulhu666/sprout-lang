@@ -1,0 +1,47 @@
+module main
+
+# An existential unpacked by a sub-pattern in each binding form that means a match:
+# `let`, `let..else`, `<-`, a comprehension generator and `try`.
+
+class Step t
+  fn bump(x: t) -> t
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+
+instance Step String
+  fn bump(x: String) -> String = x ++ "!"
+
+type Pack = | exists a. Pack a where Step a, ToString a
+
+fn let_in(t: (Pack, Pack)) -> String =
+  let (Pack x, Pack y) = t
+  in to_string(bump(x)) ++ "|" ++ to_string(bump(y))
+
+fn let_else(m: Maybe Pack) -> String =
+  let Just(Pack x) = m else "none"
+  in to_string(bump(x))
+
+fn comp(ps: List (Pack, Pack)) -> List String =
+  [to_string(bump(x)) ++ "|" ++ to_string(bump(y)) for (Pack x, Pack y) in ps]
+
+fn tried(r: Result String (Pack, Pack)) -> Result String String =
+  let (Pack x, Pack y) = try r
+  in Ok(to_string(bump(x)) ++ "|" ++ to_string(bump(y)))
+
+fn fetch(t: (Pack, Pack)) -> (Pack, Pack) !{IO} = t
+
+fn arrow(t: (Pack, Pack)) -> Unit !{IO} = do
+  (Pack x, Pack y) <- fetch(t)
+  print(to_string(bump(x)) ++ "|" ++ to_string(bump(y)))
+
+fn main() -> Unit !{IO} = do
+  print(let_in((Pack(1), Pack("q"))))
+  print(let_in((Pack("q"), Pack(1))))
+  print(let_else(Just (Pack(1))))
+  print(let_else(Just (Pack("q"))))
+  print(let_else(Nothing))
+  list_each(print, comp([(Pack(1), Pack("q")), (Pack("q"), Pack(1))]))
+  print(to_string(tried(Ok((Pack(1), Pack("q"))))))
+  print(to_string(tried(Err("bad"))))
+  arrow((Pack("q"), Pack(1)))
