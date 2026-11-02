@@ -46,17 +46,24 @@
 /* cloexec-gate: begin wrappers */
 /* Close-on-exec descriptors. A child started by proc_run or the analysis service must not inherit
  * the runtime's sockets, pipes or files, so every descriptor the runtime creates comes from one of
- * these wrappers (scripts/cloexec_gate.sh rejects a raw call outside them). Linux sets the flag
- * atomically at creation. Elsewhere it is a fcntl right after: that cannot race with our forks,
- * because every descriptor we create and both forks sit on the one scheduler thread, and the only
- * other threads run getaddrinfo. fopen's "e" mode is not used: macOS accepts it and ignores it. */
+ * these wrappers. Linux sets the flag atomically at creation. Elsewhere it is a fcntl right after:
+ * that cannot race with our forks, because every descriptor we create and both forks sit on the one
+ * scheduler thread, and the only other threads run getaddrinfo. The rule, the gate that enforces it
+ * and the fopen "e" mode note are in docs/gates.md, section Close-on-exec. */
+
+/* close(2) that leaves errno as the failure that led here. */
+static void cloexec_discard(int fd) {
+  int saved = errno;
+  close(fd);
+  errno = saved;
+}
+
 #if !defined(__linux__)
+/* Sets FD_CLOEXEC on a fresh fd; on failure closes it and returns -1. */
 static int cloexec_mark(int fd) {
   int fl = fcntl(fd, F_GETFD);
   if (fl < 0 || fcntl(fd, F_SETFD, fl | FD_CLOEXEC) < 0) {
-    int saved = errno;
-    close(fd);
-    errno = saved;
+    cloexec_discard(fd);
     return -1;
   }
   return fd;
@@ -82,15 +89,22 @@ static int cloexec_accept(int fd) {
 #endif
 }
 
+/* On failure both ends are -1, so a caller that closes what it holds closes nothing twice. */
 static int cloexec_pipe(int fds[2]) {
 #if defined(__linux__)
-  return pipe2(fds, O_CLOEXEC);
+  if (pipe2(fds, O_CLOEXEC) == 0) return 0;
 #else
-  if (pipe(fds) < 0) return -1;
-  if (cloexec_mark(fds[0]) < 0) { int saved = errno; close(fds[1]); errno = saved; return -1; }
-  if (cloexec_mark(fds[1]) < 0) { int saved = errno; close(fds[0]); errno = saved; return -1; }
-  return 0;
+  if (pipe(fds) == 0) {
+    if (cloexec_mark(fds[0]) >= 0) {
+      if (cloexec_mark(fds[1]) >= 0) return 0;
+      cloexec_discard(fds[0]);
+    } else {
+      cloexec_discard(fds[1]);
+    }
+  }
 #endif
+  fds[0] = fds[1] = -1;
+  return -1;
 }
 
 static int cloexec_open(const char* path, int flags, int mode) {
@@ -106,7 +120,7 @@ static FILE* cloexec_fopen(const char* path, const char* mode) {
   int fd = cloexec_open(path, flags, 0666);
   if (fd < 0) return NULL;
   FILE* f = fdopen(fd, mode);
-  if (f == NULL) { int saved = errno; close(fd); errno = saved; }
+  if (f == NULL) cloexec_discard(fd);
   return f;
 }
 /* cloexec-gate: end wrappers */
