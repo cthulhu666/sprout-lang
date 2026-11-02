@@ -1728,7 +1728,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_3(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_3(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -1739,7 +1739,7 @@ entry:
   %t$2$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$2$slot_ptr = getelementptr i64, ptr %t$2$env_ptr, i64 3
   %t$2 = load i64, ptr %t$2$slot_ptr
-  %t$3 = call i64 @examples.aoc_2025_day_4.neighbor_is_roll(i64 %t$1, i64 %t$2, i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$3 = call i64 @examples.aoc_2025_day_4.neighbor_is_roll(i64 %t$1, i64 %t$2, i64 %t$0, i64 %p$$ph_0)
   ret i64 %t$3
 }
 
@@ -1820,7 +1820,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_4(i64 %p$env$, i64 %p$__sprout_ph_0, i64 %p$__sprout_ph_1) {
+define i64 @__sprout_ir_lambda_4(i64 %p$env$, i64 %p$$ph_0, i64 %p$$ph_1) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -1829,15 +1829,15 @@ entry:
   %t$1$slot_ptr = getelementptr i64, ptr %t$1$env_ptr, i64 2
   %t$1 = load i64, ptr %t$1$slot_ptr
   %t$3 = alloca i64
-  store i64 %p$__sprout_ph_1, ptr %t$3
+  store i64 %p$$ph_1, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$5
+  store i64 %p$$ph_0, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
   %t$7 = alloca i64
   store i64 %t$0, ptr %t$7
   %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$2 = call i64 @examples.aoc_2025_day_4.add_if_accessible(i64 %t$0, i64 %t$1, i64 %p$__sprout_ph_0, i64 %p$__sprout_ph_1)
+  %t$2 = call i64 @examples.aoc_2025_day_4.add_if_accessible(i64 %t$0, i64 %t$1, i64 %p$$ph_0, i64 %p$$ph_1)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$2
 }

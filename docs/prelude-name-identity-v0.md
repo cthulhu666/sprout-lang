@@ -70,8 +70,8 @@ names, and `prelude.X` is the qualified spelling.
 ## 4. Options
 
 1. **Bundler hygiene (chosen).** `prelude.X` resolves to the prelude's `X`, and the bundler
-   renames a local whose name is a prelude value, so no local equals a prelude name after
-   bundling. One pass changes, and every rewrite written after bundling, present or future, is
+   renames a local whose name is a prelude value (and, §5, an extern or a `__` name), so no
+   local equals a name a pass writes after bundling. One pass changes, and every rewrite written after bundling, present or future, is
    correct by construction.
 2. **Qualify the prelude's declarations** (`prelude.Cons` everywhere). The root cause, but it
    moves every type name in messages, every IR symbol, and every place that matches `"Just"`,
@@ -90,20 +90,43 @@ inference reports it as an unknown name. Under `no_prelude` only the floor's nam
 Both halves live in the bundler only: a module checked without bundling neither resolves
 `prelude.X` nor renames its locals.
 
-**Locals.** The bundler renames a binder whose name is a prelude value, class method or extern,
-and every use of it, to `$l_<name>` (§5.1). The rename is a pure function of the name, so
-nested shadowing keeps its structure and no map is needed. Binders: function and lambda
-parameters, instance-method parameters, `VarPattern` in `match`, `let`, `do` and comprehension
-patterns, `do`-`let` names. A dotted name whose head is a renamed local renames the head.
-Parameters of a declaration with no body, a class method signature or an extern, keep their
-names: nothing the compiler writes can reach them.
+**Locals.** The bundler renames a binder, and every use of it, to `$l_<name>` (§5.1) when its
+name is any of:
+
+1. a prelude value, class method or extern;
+2. the name of an extern declared anywhere in the bundle. Externs are one global namespace, so
+   a bare extern outside the prelude (`vector_mutset` in `stdlib.mutable`) is as reachable as
+   a prelude one;
+3. in the compiler's reserved namespace: it starts with `__` (`source.is_compiler_spelling`).
+
+Rules 2 and 3 cover names passes write after bundling that rule 1 does not: BCE's
+`__sprout_vec_get/set/len/live` pseudo-callees, lowering's `__tc_<Class>_<i>_<m>` dict slots,
+`__tc_<Class>_<types>_<m>` instance functions and `__cm_<Class>_<m>` wrappers, inference's
+`__cmp_*` and `__do<l>_<c>` binders, and the extern a CPR worker calls. A local spelled like
+one used to capture it: a segfault for the BCE, instance-function and wrapper names, a duplicate
+LLVM argument for a dict slot, a type error for a comprehension or `do` binder.
+
+The invariant: after bundling no local equals a top-level a pass may name, or a `__` name. A
+pass that writes a name after bundling writes a top-level's name or a `__` name, nothing else.
+
+The rename is a pure function of the name, so nested shadowing keeps its structure and no map
+is needed. Binders: function and lambda parameters, instance-method parameters, extern
+parameters, `VarPattern` in `match`, `let`, `do` and comprehension patterns, `do`-`let` names.
+A dotted name whose head is a renamed local renames the head. An extern's parameters are locals
+because its CPR worker body is `name(p0, ...)` over them. A class method signature has no body
+and keeps its parameter names: the names written for its wrapper carry the canonical class
+name, which has a dot, so no local can spell one.
+
+The parser writes the `_`-hole parameter before bundling, so it must not start with `__`:
+`ast.placeholder_param_prefix` is `$ph_`, which no identifier can spell and the bundler leaves
+alone.
 
 ### 5.1 The renamed spelling
 
 `$` makes it unforgeable (spec §2: identifiers are `[A-Za-z_][A-Za-z0-9_]*`), as the entry
 module's `$entry` does, and LLVM accepts it. No dot, since a dotted local reads as a field chain
-in inference. Spelling: `$l_<name>`. `source.strip_entry_names`, the render-boundary strip,
-also removes `$l_`, so no diagnostic shows it.
+in inference. Spelling: `$l_<name>`, so `__tc_X` becomes `$l___tc_X`. `source.strip_entry_names`,
+the render-boundary strip, also removes `$l_`, so no diagnostic shows it.
 
 **Not done**, each listed in spec §3.1 and `BACKLOG.md`:
 
@@ -135,3 +158,11 @@ using `prelude.Continue` beside a user `Continue`, a local named `prelude`. Conf
 `prelude.nosuch` rejected; a diagnostic about a renamed local shows its source name; an import
 alias, a top-level value and a local named `prelude` each win, the last two in a pattern too;
 both limits in §5.
+
+`tests/stdlib/compiler/test_bundle_local_rename.spr`, on the bundle: parameters named like a
+non-prelude extern, a `__` name, a prelude extern and the module's own extern are renamed, a
+near miss (`_x`, `a__b`) is not, an extern's parameters follow the same rule, and a `_`-hole
+parameter keeps `$ph_0`. Conformance (`tests/conformance/run/`), one per name family:
+`local_named_like_bce_callee`, `local_named_like_instance_fn`, `local_named_like_dict_slot`,
+`local_named_like_dispatch_wrapper`, `local_named_like_comprehension_binder`,
+`local_named_like_do_temp`, `extern_param_named_like_extern`.

@@ -15,7 +15,7 @@ import stdlib.compiler.dce as dce
 
 # ---------------------------------------------------------------------------
 # Pseudo-callees. `ast_to_ir` lowers each to one inline op; only this pass writes
-# them, and the `__sprout_` prefix is reserved so no program can.
+# them. The bundler renames a local spelled with `__`, so none can capture one.
 # ---------------------------------------------------------------------------
 
 export type BceOp (..) =

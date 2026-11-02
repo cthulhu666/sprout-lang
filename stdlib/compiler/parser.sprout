@@ -1278,8 +1278,8 @@ fn parse_update_postfix(tokens: Vec token.Token, i: Int, base: ast.Expr) -> Resu
 # Package C-b: `_`-placeholder partial application (docs/currying-and-pipe-decision-v1.md §9a).
 # A bare `_` in a call-argument position is a hole. A call carrying >=1 hole
 # desugars to a lambda over the holes, left-to-right, at parse time:
-#   add(_, 3)     -> \__sprout_ph_0 -> add(__sprout_ph_0, 3)
-#   add3(_, _, 3) -> \(__sprout_ph_0, __sprout_ph_1) -> add3(__sprout_ph_0, __sprout_ph_1, 3)
+#   add(_, 3)     -> \$ph_0 -> add($ph_0, 3)
+#   add3(_, _, 3) -> \($ph_0, $ph_1) -> add3($ph_0, $ph_1, 3)
 # The result is an ordinary lambda; the checker and codegen never see `_`.
 fn arg_is_hole(e: ast.Expr) -> Bool =
   match e with

@@ -1,0 +1,16 @@
+module main
+
+# A comprehension elaborates to a fold whose binders are named
+# `__cmp_<tag><line>_<column>_<depth>` after the comprehension's position (here the
+# `[` at 8:3 and 11:3). A parameter spelled like one is renamed by the bundler.
+
+fn plus_outer(xs: List Int, __cmp_acc8_3_0: Int, __cmp_acc8_2_0: Int) -> List Int =
+  [x + __cmp_acc8_3_0 + __cmp_acc8_2_0 for x in xs]
+
+fn plus_outer_pairs(xs: List Int, __cmp_val11_3_0: Int, __cmp_val11_2_0: Int) -> List Int =
+  [x + __cmp_val11_3_0 + __cmp_val11_2_0 for (x, _) in zip(xs, xs)]
+
+fn main() -> Unit !{IO} =
+  do
+    print(to_string(plus_outer([1, 2, 3], 100, 1000)))
+    print(to_string(plus_outer_pairs([1, 2, 3], 100, 1000)))

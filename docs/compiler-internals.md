@@ -254,6 +254,15 @@ its `IRType` kind, and only stores of a non-heap scalar are unchecked. Switches 
 
 `just gc-safety-check` lints `runtime/sprout_runtime.c` for `const char*`/`char*` parameters live across `sprout_gc_maybe_collect_threshold()` calls. Run after editing any C builtin that allocates heap strings. Use `just gc-safety-check --strict` to fail on any finding; the default mode warns only. It finds function bodies by counting braces outside literals and comments, and exits 2 if that count drifts ([gates.md §GC safety linter](gates.md)).
 
+## Names a pass writes after bundling
+
+A pass that writes a name into a user body after bundling writes a top-level's name (a prelude
+value, an extern) or a `__` name (`source.compiler_name_prefix`), nothing else. The bundler
+renames every local with such a name to `$l_<name>`, so none can capture the one a pass writes;
+any other spelling can be captured. A name written before bundling cannot start with `__`
+(`ast.placeholder_param_prefix` is `$ph_`). See
+[prelude-name-identity-v0.md §5](prelude-name-identity-v0.md).
+
 ## Emitted SSA names: LLVM has ONE namespace for locals and block labels
 
 `%x` and `x:` collide in LLVM's textual IR. Every compiler-minted name therefore carries a

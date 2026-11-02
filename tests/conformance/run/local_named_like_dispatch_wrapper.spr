@@ -1,0 +1,8 @@
+module main
+
+# A call through a forwarded dictionary dispatches to the wrapper
+# `__cm_<Class>_<method>`. A parameter spelled like it is renamed by the bundler.
+
+fn show(x: a, __cm_ToString_to_string: Int) -> String where ToString a = to_string(x)
+
+fn main() -> Unit !{IO} = print(show(42, 1))

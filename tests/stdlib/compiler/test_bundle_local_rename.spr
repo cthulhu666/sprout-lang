@@ -1,0 +1,74 @@
+module main
+import stdlib.test (new_state, assert_true, assert_eq, summary)
+import stdlib.compiler.bundler as bundler
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.fs as fs
+import stdlib.string as string
+import testsupport.envvar as envvar
+
+# After bundling no local equals a name a later pass may write: a prelude value, an
+# extern declared anywhere in the bundle, or a `__` name (docs/prelude-name-identity-v0.md
+# §5). Asserted on the bundle, where the rename happens; the runtime consequences are
+# `tests/conformance/run/local_named_like_*.spr`.
+
+fn decl_params(name: String, decls: List ast.Decl) -> List String =
+  match find(\d -> decl_is(name, d), decls) with
+  | Nothing -> ["no such declaration: " ++ name]
+  | Just (ast.FnDecl _ params _ _ _ _ _ _) -> ast.param_names(params)
+  | Just (ast.ExternFnDecl _ params _ _ _ _ _) -> ast.param_names(params)
+  | Just _ -> ["not a function: " ++ name]
+
+fn decl_is(name: String, d: ast.Decl) -> Bool =
+  match d with
+  | ast.FnDecl n _ _ _ _ _ _ _ -> n == name
+  | ast.ExternFnDecl n _ _ _ _ _ _ -> n == name
+  | _ -> false
+
+# The parameters of the lambda that is the first argument of a call in `name`'s body.
+fn lambda_params(name: String, decls: List ast.Decl) -> List String =
+  match find(\d -> decl_is(name, d), decls) with
+  | Just (ast.FnDecl _ _ _ _ _ _ (ast.CallExpr _ [ast.LambdaExpr ps _ _ | _] _) _) -> ast.param_names(ps)
+  | _ -> ["no lambda argument in: " ++ name]
+
+fn bundled(src: String, path: String, stdlib_root: String) -> List ast.Decl !{IO} =
+  do
+    fs.write_text(path, src)
+    r <- bundler.bundle_file(source.FilePath(path), source.StdlibRoot(stdlib_root))
+    match r with
+    | bundler.BundleErr _ _ -> Nil
+    | bundler.BundleOk modules -> ast.flatten_modules(modules)
+
+let source_text: String = string.join("\n", [
+  "module demo",
+  "import stdlib.mutable as mutable",
+  "extern fn demo_ext(demo_ext: Int, str_len: Int, plain: Int) -> Int",
+  "fn names(vector_mutset: Int, __sprout_vec_get: Int, __tc_ToString_Int_to_string: Int,",
+  "         __cm_ToString_to_string: Int, __do3_4: Int, __cmp_acc1_1_0: Int, demo_ext: Int,",
+  "         str_len: Int, ordinary: Int, _single: Int, mid__dle: Int) -> Int = 1",
+  "fn plus(a: Int, b: Int) -> Int = a + b",
+  "fn holes(xs: List Int) -> List Int = list_map(plus(_, 3), xs)",
+  "fn main() -> Unit !{IO} = print(1)",
+  ""
+])
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    match envvar.read("SPROUT_STDLIB_ROOT") with
+    | Nothing ->
+        assert_true(state, "SPROUT_STDLIB_ROOT is set (the suite cannot bundle without it)", false)
+    | Just stdlib_root ->
+        do
+          decls <- bundled(source_text, "/tmp/sprout_bundle_local_rename.spr", stdlib_root)
+          assert_true(state, "the probe module bundles", list_length(decls) > 0)
+          assert_eq(state, "locals named like an extern, a `__` name or a prelude value are renamed",
+            decl_params("demo.names", decls),
+            ["$l_vector_mutset", "$l___sprout_vec_get", "$l___tc_ToString_Int_to_string",
+             "$l___cm_ToString_to_string", "$l___do3_4", "$l___cmp_acc1_1_0", "$l_demo_ext",
+             "$l_str_len", "ordinary", "_single", "mid__dle"])
+          assert_eq(state, "an extern's own parameters follow the same rule",
+            decl_params("demo_ext", decls), ["$l_demo_ext", "$l_str_len", "plain"])
+          assert_eq(state, "a `_`-hole parameter is not renamed",
+            lambda_params("demo.holes", decls), ["$ph_0"])
+    summary(state)
