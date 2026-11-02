@@ -236,9 +236,12 @@ unreachable-but-honoured rather than leaving the contract undefined.
 
 **Sockets only — the limitation that bites, and it is not `WSAPoll`-specific.** `WSAPoll` accepts
 only sockets, where epoll and kqueue accept any descriptor. Sprout depends on that generality in
-exactly one place: **async DNS parks a green task on a `pipe()` read end**
+exactly two places: **async DNS parks a green task on a `pipe()` read end**
 (`async_resolve` in `sprout_runtime.c`), used as the completion signal from the detached
-`getaddrinfo` thread.
+`getaddrinfo` thread, and **`proc_run_raw` does the same** with its helper thread, which drains the
+child's output and reaps it (docs/process-run-v0.md). The process helper also waits on the child
+(`waitid`) and polls the child's output pipes, so a Windows port of it is a `CreateProcess` rewrite
+(BACKLOG), and only its completion pipe is the loopback-pair swap described here.
 No readiness backend on Windows can poll a pipe.
 
 The fix is a **loopback socket pair** — the pipe carries a single completion byte, so a
@@ -302,7 +305,7 @@ later swap the architecture already accommodates.
   copy; if the HTTP server is meant to serve serious concurrency, the calculus changes and AFD
   stops being hypothetical. Whether 2048 is a deliberate ceiling or an arbitrary table size is
   currently unanswered.
-- A need to poll something that is **not a socket and not the DNS pipe**. Both readiness options
+- A need to poll something that is **not a socket and not a completion pipe** (DNS, process). Both readiness options
   fail there, so that is the case that forces **IOCP** — which does reach other handle types
   (named pipes support overlapped I/O) and is what Go and libuv use.
 
@@ -481,9 +484,10 @@ array is legitimately empty.
 This is not a corner case for the motivating consumer: uncharted-suns is a single-player title
 whose poller load is timers, so the empty-socket wait is its *common* path. A timers-only wait
 therefore uses `Sleep(nearest deadline)` instead of `WSAPoll`. That is safe for a reason specific
-to this runtime rather than to `Sleep`: the only cross-thread wakeup the runtime has is the
-detached `getaddrinfo` thread, and a pending DNS park is a socket park once §4.3's loopback pair
-lands — so a wakeup can never arrive while the poller is in a timers-only sleep. Should a second
+to this runtime rather than to `Sleep`: the only cross-thread wakeups the runtime has are the
+detached `getaddrinfo` and process-helper threads, and a pending DNS or process park is a socket
+park once §4.3's loopback pair lands — so a wakeup can never arrive while the poller is in a
+timers-only sleep. Should a second
 cross-thread wakeup source ever appear, this is the line that has to change.
 
 Decisions worth recording:
@@ -607,7 +611,7 @@ absorbed into W3's substitution list:
 1. **POSIX `<regex.h>` has no MSVC equivalent.** One use, `regex_compile_ere`
    (`sprout_runtime.c`). Vendor a small ERE implementation, or narrow a **language-visible**
    feature on Windows? Own BACKLOG entry.
-2. **`proc_run`'s `fork`/`execvp`/`pipe` → `CreateProcess`.** Needed by Milestone B and the game's
+2. **`proc_run`'s `fork`/`execv`/`pipe` and helper thread → `CreateProcess`.** Needed by Milestone B and the game's
    offline bake, *not* by the shipped game — so a loud stub may be the right answer rather than a
    compromise.
 

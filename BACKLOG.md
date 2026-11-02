@@ -1052,7 +1052,7 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   needs a call on whether to keep prelude re-exports. Also the home for `make_temp_file`.
 - [ ] `P2` **`proc_shell(cmd: String) -> ProcResult !{IO}`** in `stdlib.process`, when a concrete
   use case requires pipes, redirects or glob. `proc_run` covers all current needs. Implementation is
-  `argv = ["/bin/sh", "-c", cmd]` forwarded to `sprout_proc_run_impl`.
+  `argv = ["/bin/sh", "-c", cmd]` through `proc_run_with`.
 - [ ] `P3` **A declared `Spec` layer over `stdlib.args`** (fuller argparse flavor): declare expected
   args (name, kind, default, required, help) for `Result`-typed validation of
   unknown/missing/bad-int args and an auto-generated `--help`. The bag-of-args core covers the
@@ -1635,13 +1635,14 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `WSAPoll` decision with the AFD/wepoll and IOCP re-open triggers.
 - [ ] `P2` **POSIX `<regex.h>` has no MSVC equivalent.** `sprout_runtime.c` stops on this include,
   so W3 waits on **A regex engine in Sprout**, which deletes it.
-- [ ] `P2` **`proc_run` on Windows via `CreateProcess`.** `fork`/`execvp`/`pipe` (3/3/7 occurrences)
-  → `CreateProcess` + anonymous pipes, preserving the deadlock-safe separate stdout/stderr
-  capture. Not needed by the shipped game so not a Milestone A blocker; it *is* needed by Milestone
-  B and the game's offline bake. Note `analysis_service_driver.sprout:751` shells out via
-  `["sh", "-c", …]` and there is no `sh` on Windows, so the driver needs its own fix beyond the
-  builtin. **DECISION PENDING (owner):** implement, or ship a loud stub? A stub is a legitimate
-  answer, but that is a product call.
+- [ ] `P2` **`proc_run` on Windows via `CreateProcess`.** `fork`/`execv`/`pipe`, the helper thread
+  and its `waitid` → `CreateProcess` + anonymous pipes, preserving the separate stdout/stderr
+  capture, the output cap, the timeout kill and the process-group kill (a job object). Not needed
+  by the shipped game so not a Milestone A blocker; it *is* needed by Milestone B and the game's
+  offline bake. Note `analysis_service_driver.sprout` shells out via `["sh", "-c", …]` and there is
+  no `sh` on Windows, so the driver needs its own fix beyond the builtin. **DECISION PENDING
+  (owner):** implement, or ship a loud stub? A stub is a legitimate answer, but that is a product
+  call.
 - [ ] `P2` **The CPR `_unboxed` externs have no Windows x64 ABI.** Emitted IR declares
   `i128 @X_unboxed` and gets it back in rax/rdx. MSVC returns a 16-byte struct through `sret`,
   clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so no C form of
