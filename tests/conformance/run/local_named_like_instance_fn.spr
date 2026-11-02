@@ -1,0 +1,9 @@
+module main
+
+# `to_string(x)` at Int lowers to a direct call of `__tc_ToString_Int_to_string`. A
+# parameter spelled like that instance function is renamed by the bundler, so the
+# call reaches the instance, not the parameter.
+
+fn show(__tc_ToString_Int_to_string: Int, x: Int) -> String = to_string(x)
+
+fn main() -> Unit !{IO} = print(show(7, 42))

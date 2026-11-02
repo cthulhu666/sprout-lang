@@ -1,0 +1,10 @@
+module main
+
+# A constrained function takes a hidden dictionary parameter named
+# `__tc_<Class>_<i>_<method>`. A user parameter spelled the same is renamed by the
+# bundler, so the two never share a name.
+
+fn show(x: a, __cm_ToString_to_string: Int, __tc_ToString_0_to_string: Int) -> String where ToString a =
+  to_string(x)
+
+fn main() -> Unit !{IO} = print(show(42, 1, 2))

@@ -317,7 +317,8 @@ instance Propagate Box
 
 A local, an import alias or a top-level value named `prelude` takes precedence, in
 every position, as for any dotted head. `prelude.X` where the prelude has no `X` is
-an unknown name. A compile resolves `prelude.X` and keeps locals off prelude names;
+an unknown name. A compile resolves `prelude.X` and keeps locals off the names the
+compiler writes (prelude values, externs, and names starting with `__`);
 checking one module on its own, without the rest of the program, does neither yet.
 Rationale: `docs/prelude-name-identity-v0.md`.
 

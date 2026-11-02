@@ -1318,18 +1318,18 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_5(i64 %p$env$, i64 %p$__sprout_ph_0, i64 %p$__sprout_ph_1) {
+define i64 @__sprout_ir_lambda_5(i64 %p$env$, i64 %p$$ph_0, i64 %p$$ph_1) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
   %t$2 = alloca i64
-  store i64 %p$__sprout_ph_1, ptr %t$2
+  store i64 %p$$ph_1, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$4
+  store i64 %p$$ph_0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @examples.sieve.cross_out(i64 %t$0, i64 %p$__sprout_ph_0, i64 %p$__sprout_ph_1)
+  %t$1 = call i64 @examples.sieve.cross_out(i64 %t$0, i64 %p$$ph_0, i64 %p$$ph_1)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
@@ -1406,7 +1406,7 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_7(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_7(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -1415,12 +1415,12 @@ entry:
   %t$1$slot_ptr = getelementptr i64, ptr %t$1$env_ptr, i64 2
   %t$1 = load i64, ptr %t$1$slot_ptr
   %t$3 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$3
+  store i64 %p$$ph_0, ptr %t$3
   %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
   %t$5 = alloca i64
   store i64 %t$0, ptr %t$5
   %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$2 = call i64 @examples.sieve.cross_out_mut(i64 %t$1, i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$2 = call i64 @examples.sieve.cross_out_mut(i64 %t$1, i64 %t$0, i64 %p$$ph_0)
   %t$7 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$2
 }

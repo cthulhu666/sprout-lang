@@ -1011,7 +1011,9 @@ export let comp_binder_prefix = "__cmp_"
 # Prefix of the parameters the `_`-hole desugaring invents (parser.ph_param_name).
 # Shared for the same reason as the above: the user wrote `_`, not this name, so a
 # diagnostic about such a parameter must say `_` and never print the binder.
-export let placeholder_param_prefix = "__sprout_ph_"
+# The parser writes it before bundling, so it cannot start with `__`, which the bundler
+# renames in a local (source.compiler_name_prefix). `$` is no identifier character.
+export let placeholder_param_prefix = "$ph_"
 
 # Source-level names of the TemplatePart constructors, used by checker.sprout
 # when lowering a StringTemplateExpr into the StringTemplate ADT.

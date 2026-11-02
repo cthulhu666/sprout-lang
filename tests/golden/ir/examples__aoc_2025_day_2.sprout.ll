@@ -1131,12 +1131,12 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_2(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_2(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
-  %t$1 = call i64 @examples.aoc_2025_day_2.has_period(i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$1 = call i64 @examples.aoc_2025_day_2.has_period(i64 %t$0, i64 %p$$ph_0)
   ret i64 %t$1
 }
 

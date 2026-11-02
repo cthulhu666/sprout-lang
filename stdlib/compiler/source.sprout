@@ -202,10 +202,18 @@ export let entry_main_name: String = entry_module_prefix ++ "main"
 export fn is_entry_main(name: String) -> Bool =
   name == "main" || name == entry_main_name
 
-# The bundler renames a local that shares a prelude value's name to this prefix
-# plus the name (docs/prelude-name-identity-v0.md §5.1). `$` makes it unforgeable,
+# The bundler renames a local whose name a later pass may write to this prefix plus
+# the name (docs/prelude-name-identity-v0.md §5.1). `$` makes it unforgeable,
 # as for `$entry`; no dot, since a dotted local reads as a field chain.
 export let local_rename_prefix: String = "$l_"
+
+# The compiler's own namespace: passes spell the names they invent (`__tc_*`, `__cm_*`,
+# `__sprout_vec_*`, ...) with this prefix. After bundling no local equals a top-level
+# the compiler may name, or a name with this prefix, so any pass may write either.
+export let compiler_name_prefix: String = "__"
+
+export fn is_compiler_spelling(name: String) -> Bool =
+  string.starts_with(name, compiler_name_prefix)
 
 # Remove the synthetic prefixes from text about to be shown to a user.
 #

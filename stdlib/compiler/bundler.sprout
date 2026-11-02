@@ -110,7 +110,8 @@ type ImportBinding =
 # Name-resolution context for qualifying one module's declarations.
 #
 # `prelude` is what the prelude declares, for `prelude.X` and for renaming a local
-# that shares a prelude value's name (`local_name`).
+# that shares a prelude value's name (`local_name`). `extern_names` is every extern
+# the bundle declares, for the same rename.
 #
 # `canonical_names` is the one entry that is not per-module: it is every
 # `<module>.<name>` in the bundle, and it is here so the two `qualify_*_name`
@@ -126,11 +127,15 @@ type ResolveCtx = (value_locals: Dict String, type_locals: Dict String,
                    alias_val_exports: Dict (Dict String),
                    alias_type_exports: Dict (Dict String),
                    canonical_names: Dict String, prelude: PreludeNames,
-                   foreign: Dict PrivateExtern)
+                   foreign: Dict PrivateExtern, extern_names: Set)
 
 # An extern a module may NOT reach unless it declares it too: the module that declares
 # it, and whether its signature writes `local` (which only changes the diagnostic).
 type PrivateExtern = (declarer: String, name: String, writes_local: Bool)
+
+# What the bundle's extern declarations give each module's context: the externs it may
+# not reach, and every extern's name (private or not) for the local rename.
+type BundleExterns = (private: List PrivateExtern, names: Set)
 
 # The prelude's own symbol tables, held as they are, built once per bundle beside
 # `canonical`. `bare` is built from the externs, which are in no value table.
@@ -197,7 +202,7 @@ fn empty_resolve_ctx() -> ResolveCtx =
              unqual_values = dict_empty(), unqual_types = dict_empty(),
              unqual_classes = dict_empty(), alias_val_exports = dict_empty(),
              alias_type_exports = dict_empty(), canonical_names = dict_empty(),
-             prelude = no_prelude_names(), foreign = dict_empty())
+             prelude = no_prelude_names(), foreign = dict_empty(), extern_names = set_empty())
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -986,7 +991,7 @@ fn add_ctors(mod_name: String, ctors: List ast.TypeConstructor, export_ctors: Bo
 
 fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                      extra_roots: List String, canonical: Dict String,
-                     prelude: PreludeNames, externs: List PrivateExtern) -> ResolveCtx =
+                     prelude: PreludeNames, externs: BundleExterns) -> ResolveCtx =
   match mod with
   | ParsedModule mod_name path specs _ _ _ ->
       match dict_get(path, all_symbols) with
@@ -999,7 +1004,8 @@ fn build_resolve_ctx(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_
               class_locals = sym_class_locals(own_syms),
               canonical_names = canonical,
               prelude = prelude_seen_from(path, stdlib_root, prelude),
-              foreign = foreign_externs(own_externs_of(mod_name, sym_extern_names(own_syms)), externs)))
+              foreign = foreign_externs(own_externs_of(mod_name, sym_extern_names(own_syms)), externs.private),
+              extern_names = externs.names))
 
 # One extern declaration. `in_prelude` is the prelude or the `no_prelude` floor, found by
 # path, since a headerless `no_prelude` entry also has module ""; their externs are
@@ -1015,8 +1021,15 @@ fn extern_facts_of(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                    stdlib_root: String, extra_roots: List String, canonical: Dict String,
                    prelude: PreludeNames) -> List ExternFact =
   list_flat_map(extern_facts_in_module(prelude_path(stdlib_root), _, defs, ctx_of), modules)
-  where ctx_of = build_resolve_ctx(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, Nil)
+  where ctx_of = build_resolve_ctx(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, no_externs())
         defs = type_bodies(modules, ctx_of)
+
+fn no_externs() -> BundleExterns = BundleExterns(private = Nil, names = set_empty())
+
+fn bundle_externs_of(facts: List ExternFact) -> BundleExterns =
+  BundleExterns(private = private_externs_of(facts), names = set_from_list(list_map(extern_fact_name, facts)))
+
+fn extern_fact_name(f: ExternFact) -> String = f.name
 
 # The externs a module outside their declarers may not reach. Exportedness is decided
 # per NAME across the build: a name is exported if any module declaring it writes
@@ -1533,9 +1546,9 @@ fn qualify_params(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
       | ast.Param name (Just t) mode ->
           Cons(ast.Param(local_name(ctx, name), Just(qualify_type_expr(ctx, t)), mode), qualify_params(ctx, rest))
 
-# A declaration with no body (a class method signature, an extern) has no use a
-# compiler-written name could capture, so its parameter names stay as written;
-# they reach `--emit-iface` and signature listings.
+# A class method signature has no body, and the names the compiler gives its wrapper
+# carry the canonical class name, which no local can spell, so its parameter names stay as
+# written; they reach `--emit-iface` and signature listings.
 fn qualify_param_types(ctx: ResolveCtx, params: List ast.Param) -> List ast.Param =
   match params with
   | [] -> []
@@ -1706,13 +1719,16 @@ fn claims_prelude_head(ctx: ResolveCtx, name: String) -> Bool =
   | (Nothing, Nothing, Nothing) -> false
   | _ -> true
 
-# A local that shares a prelude value's name is renamed at its binder and at every
-# use, so no name the compiler writes after bundling can reach it. A pure function
-# of the name, so nested shadowing keeps its shape (§5.1 of the same doc).
+# A local that a later pass may name is renamed at its binder and at every use, so
+# nothing the compiler writes after bundling can reach it: a prelude value, an extern
+# declared anywhere in the bundle (externs are one global namespace), or a `__` name.
+# A pure function of the name, so nested shadowing keeps its shape (§5.1 of the same doc).
 fn local_name(ctx: ResolveCtx, name: String) -> String =
-  match prelude_value(ctx.prelude, name) with
-  | Nothing -> name
-  | Just _ -> source.local_rename_prefix ++ name
+  if is_reserved_local(ctx, name) then source.local_rename_prefix ++ name else name
+
+fn is_reserved_local(ctx: ResolveCtx, name: String) -> Bool =
+  source.is_compiler_spelling(name) || set_member(name, ctx.extern_names)
+  || is_just(prelude_value(ctx.prelude, name))
 
 # A dotted name no import claims is normally a field chain (`o.inner.n`) or a
 # genuine typo, and is left alone for inference to read. One shape is neither: a
@@ -2031,7 +2047,8 @@ fn qualify_decl(ctx: ResolveCtx, decl: ast.Decl) -> ast.Decl =
         repr,
         pos)
   | ast.ExternFnDecl name params ret_type effects bounds visibility pos ->
-      ast.ExternFnDecl(name, qualify_param_types(ctx, params), qualify_maybe_type(ctx, ret_type), effects, bounds, visibility, pos)
+      # The CPR worker for an extern is `name(p0, ...)` over its parameters, so they are locals.
+      ast.ExternFnDecl(name, qualify_params(ctx, params), qualify_maybe_type(ctx, ret_type), effects, bounds, visibility, pos)
 
 fn qualify_decls(ctx: ResolveCtx, decls: List ast.Decl) -> List ast.Decl =
   match decls with
@@ -2047,7 +2064,7 @@ type QualifiedModule = (path: String, decls: List ast.Decl)
 # What every check of one bundle reads. Bundle-wide, so built once rather than
 # per module in build_resolve_ctx, which would make it quadratic in modules.
 type BundleNames = (all_symbols: Dict ModuleSymbols, canonical: Dict String, prelude: PreludeNames,
-                    externs: List PrivateExtern, extern_decl_error: Maybe (String, source.SourcePos, String),
+                    externs: BundleExterns, extern_decl_error: Maybe (String, source.SourcePos, String),
                     qualified: List QualifiedModule)
 
 fn bundle_names(modules: List ParsedModule, entry_path: String, stdlib_root: String, extra_roots: List String) -> BundleNames =
@@ -2055,14 +2072,14 @@ fn bundle_names(modules: List ParsedModule, entry_path: String, stdlib_root: Str
       canonical = all_canonical_names(all_symbols)
       prelude = prelude_names(modules, all_symbols, stdlib_root)
       facts = extern_facts_of(modules, all_symbols, stdlib_root, extra_roots, canonical, prelude)
-      externs = private_externs_of(facts)
+      externs = bundle_externs_of(facts)
   in BundleNames(all_symbols = all_symbols, canonical = canonical, prelude = prelude, externs = externs,
                  extern_decl_error = maybe_or_else(unsafe_pure_decl_error(facts), export_local_extern_error(facts)),
                  qualified = list_map(qualify_one(_, all_symbols, stdlib_root, extra_roots, canonical, prelude, externs), modules))
 
 fn qualify_one(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                extra_roots: List String, canonical: Dict String, prelude: PreludeNames,
-               externs: List PrivateExtern) -> QualifiedModule =
+               externs: BundleExterns) -> QualifiedModule =
   let ParsedModule _ path _ _ ctor_types decls = mod
       published = PublishedTypes(in_prelude = path == prelude_path(stdlib_root), ctor_types = ctor_types)
   in QualifiedModule(path = path,
@@ -2591,7 +2608,7 @@ fn first_one_ctor_clash(ctx: ResolveCtx, vocab: TypeVocab,
 # Returns the module's path with the clash, since its position is in THAT file.
 fn find_one_ctor_clash(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                        stdlib_root: String, extra_roots: List String, canonical: Dict String,
-                       prelude: PreludeNames, externs: List PrivateExtern,
+                       prelude: PreludeNames, externs: BundleExterns,
                        vocab: TypeVocab) -> Maybe (String, source.SourcePos, String) =
   match modules with
   | Nil -> Nothing
@@ -2824,7 +2841,7 @@ fn qualify_debug_lines_acc(ctx: ResolveCtx, decls: List ast.Decl, acc: List Stri
 
 fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String,
                        canonical: Dict String, prelude: PreludeNames,
-                       externs: List PrivateExtern) -> List String =
+                       externs: BundleExterns) -> List String =
   match mod with
   | ParsedModule mod_name path _ _ _ decls ->
       Cons(module_header_line(mod_name),
@@ -2837,13 +2854,13 @@ fn dump_qualify_module(mod: ParsedModule, all_symbols: Dict ModuleSymbols, stdli
 # here, not inside the per-module function, or the debug dump is quadratic.
 fn dump_qualify_modules_acc(modules: List ParsedModule, all_symbols: Dict ModuleSymbols, stdlib_root: String) -> List String =
   dump_qualify_modules_with(modules, all_symbols, stdlib_root, canonical, prelude,
-                            private_externs_of(extern_facts_of(modules, all_symbols, stdlib_root, Nil, canonical, prelude)))
+                            bundle_externs_of(extern_facts_of(modules, all_symbols, stdlib_root, Nil, canonical, prelude)))
   where canonical = all_canonical_names(all_symbols)
         prelude = prelude_names(modules, all_symbols, stdlib_root)
 
 fn dump_qualify_modules_with(modules: List ParsedModule, all_symbols: Dict ModuleSymbols,
                              stdlib_root: String, canonical: Dict String,
-                             prelude: PreludeNames, externs: List PrivateExtern) -> List String =
+                             prelude: PreludeNames, externs: BundleExterns) -> List String =
   match modules with
   | Nil -> Nil
   | Cons mod rest ->

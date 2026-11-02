@@ -1,0 +1,13 @@
+module main
+
+# A refutable `<-` binds its value to a temp named `__do<line>_<column>` after the
+# step's position (here 10:5). A parameter spelled like it is renamed by the bundler.
+
+fn xs() -> List Int !{IO} = [1, 2]
+
+fn f(__do10_5: Int) -> Unit !{IO} =
+  do
+    [y | _] <- xs() else print(0)
+    print(y + __do10_5)
+
+fn main() -> Unit !{IO} = f(1000)

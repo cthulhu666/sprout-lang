@@ -12971,18 +12971,18 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_35(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
   %t$2 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$2
+  store i64 %p$$ph_0, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$$ph_0)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
@@ -13188,18 +13188,18 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_36(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
   %t$2 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$2
+  store i64 %p$$ph_0, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$$ph_0)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
@@ -25215,18 +25215,18 @@ wrepack_next_20:
   unreachable
 }
 
-define i64 @__sprout_ir_lambda_68(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_68(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
   %t$2 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$2
+  store i64 %p$$ph_0, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$$ph_0)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }
@@ -25632,18 +25632,18 @@ wrepack_next_16:
   unreachable
 }
 
-define i64 @__sprout_ir_lambda_69(i64 %p$env$, i64 %p$__sprout_ph_0) {
+define i64 @__sprout_ir_lambda_69(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
   %t$0 = load i64, ptr %t$0$slot_ptr
   %t$2 = alloca i64
-  store i64 %p$__sprout_ph_0, ptr %t$2
+  store i64 %p$$ph_0, ptr %t$2
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$4 = alloca i64
   store i64 %t$0, ptr %t$4
   %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$__sprout_ph_0)
+  %t$1 = call i64 @stdlib.http_server.value_for(i64 %t$0, i64 %p$$ph_0)
   %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$1
 }

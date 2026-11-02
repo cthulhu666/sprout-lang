@@ -1,0 +1,18 @@
+module main
+
+# The CPR worker for an extern that returns a `Result` is `name(p0, ...)` over the
+# extern's own parameters. A parameter spelled like the extern is renamed by the
+# bundler, so the worker still calls the extern. The extern is redeclared here and
+# `stdlib.fs` is not imported, so this declaration's parameter names are the ones used.
+
+extern fn read_file(read_file: String) -> Result String String !{IO}
+
+fn probe() -> Int !{IO} =
+  match read_file("/nonexistent/sprout/probe") with
+  | Ok _ -> 1
+  | Err _ -> 2
+
+fn main() -> Unit !{IO} =
+  do
+    n <- probe()
+    print(n)

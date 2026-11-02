@@ -1,0 +1,25 @@
+module main
+import stdlib.mutable as mutable
+
+# BCE versions `copy` and writes `__sprout_vec_*` pseudo-callees into its body. A
+# parameter spelled like one is renamed by the bundler, so the loop still reads its
+# own arguments (docs/prelude-name-identity-v0.md §5).
+
+extern fn vector_get_direct(v: Vector a, i: Int) -> a !{IO}
+extern fn vector_mutset(v: Vector a, i: Int, x: a) -> Unit !{IO}
+
+fn copy(src: Vector Int, dst: Vector Int, i: Int, stop: Int, k: Int, __sprout_vec_get: Int,
+        __sprout_vec_set: Int, __sprout_vec_len: Int, __sprout_vec_live: Int) -> Unit !{IO} =
+  if i >= stop then ()
+  else
+    do
+      x <- vector_get_direct(src, i)
+      _ <- vector_mutset(dst, k, x + __sprout_vec_get + __sprout_vec_set + __sprout_vec_len + __sprout_vec_live)
+      copy(src, dst, i + 1, stop, k + 1, __sprout_vec_get, __sprout_vec_set, __sprout_vec_len, __sprout_vec_live)
+
+fn main() -> Unit !{IO} =
+  do
+    src <- vec_make_filled(3, 5)
+    dst <- vec_make_filled(3, 0)
+    copy(src, dst, 0, 3, 0, 1, 10, 100, 1000)
+    print(vector_get_direct(dst, 2))
