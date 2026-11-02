@@ -649,13 +649,17 @@ fn write_objs_and_ok(objs_dir: String, objs_ref: Ref String) -> Result String St
     ref_write(objs_ref, objs_dir)
     Ok(objs_dir)
 
-fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
-  match process.proc_run(["sh", "-c", runtime_compile_cmd(rt_dir, runtime_objs_dir)]) with
-  | Err e -> Err("runtime compile failed: " ++ process.proc_error_message(e))
+# Runs `argv`: `Ok` on exit 0, else `Err` with `prefix` and the reason (the error, or the stderr).
+fn run_checked(prefix: String, argv: List String) -> Result String Unit !{IO} =
+  match process.proc_run(argv) with
+  | Err e -> Err(prefix ++ ": " ++ process.proc_error_message(e))
   | Ok result ->
-      if process.proc_ok(result)
-      then write_objs_and_ok(runtime_objs_dir, objs_ref)
-      else Err("runtime compile failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
+      if process.proc_ok(result) then Ok(())
+      else Err(prefix ++ ": " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
+
+fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
+  let _ = try run_checked("runtime compile failed", ["sh", "-c", runtime_compile_cmd(rt_dir, runtime_objs_dir)])
+  in write_objs_and_ok(runtime_objs_dir, objs_ref)
 
 fn ensure_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
   do
@@ -673,12 +677,8 @@ export fn compile_runtime_and_link_eval(
   match ensure_runtime_objs(rt_dir, objs_ref) with
   | Err msg -> Err(msg)
   | Ok objs_dir ->
-      match process.proc_run(["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)]) with
-      | Err e -> Err("clang link failed: " ++ process.proc_error_message(e))
-      | Ok result ->
-          if process.proc_ok(result)
-          then Ok(bin_path)
-          else Err("clang link failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
+      let _ = try run_checked("clang link failed", ["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)])
+      in Ok(bin_path)
 
 fn eval_main_for(type_str: String) -> Maybe compiler.EvalMain =
   if string.ends_with(type_str, " !{IO}") then
