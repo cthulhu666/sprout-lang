@@ -371,7 +371,7 @@ static void* poll_untag(void* raw, int* is_timer) {
 }
 
 void sprout_poll_init(void) {
-  g_ep = epoll_create1(0);
+  g_ep = epoll_create1(EPOLL_CLOEXEC);
   if (g_ep < 0) sprout_fail("sprout_poll_init: epoll_create1 failed");
 }
 

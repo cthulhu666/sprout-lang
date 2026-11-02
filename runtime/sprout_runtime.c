@@ -1,3 +1,7 @@
+/* glibc declares accept4 and pipe2 only under this macro, and it must precede every #include. */
+#if defined(__linux__)
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -37,6 +41,74 @@
 #include <Security/SecCertificate.h>
 #include <mach-o/dyld.h>
 #endif
+
+/* Close-on-exec descriptors. A child started by proc_run or the analysis service must not inherit
+ * the runtime's sockets, pipes or files, so every descriptor the runtime creates comes from one of
+ * these wrappers (scripts/cloexec_gate.sh rejects a raw call outside them). Linux sets the flag
+ * atomically at creation. Elsewhere it is a fcntl right after: that cannot race with our forks,
+ * because every descriptor we create and both forks sit on the one scheduler thread, and the only
+ * other threads run getaddrinfo. fopen's "e" mode is not used: macOS accepts it and ignores it. */
+/* cloexec-gate: begin wrappers */
+#if !defined(__linux__)
+static int cloexec_mark(int fd) {
+  int fl = fcntl(fd, F_GETFD);
+  if (fl < 0 || fcntl(fd, F_SETFD, fl | FD_CLOEXEC) < 0) {
+    int saved = errno;
+    close(fd);
+    errno = saved;
+    return -1;
+  }
+  return fd;
+}
+#endif
+
+static int cloexec_socket(int family, int type, int proto) {
+#if defined(__linux__)
+  return socket(family, type | SOCK_CLOEXEC, proto);
+#else
+  int fd = socket(family, type, proto);
+  return fd < 0 ? fd : cloexec_mark(fd);
+#endif
+}
+
+/* Same errno contract as accept: EAGAIN, the retryable set and EMFILE come through unchanged. */
+static int cloexec_accept(int fd) {
+#if defined(__linux__)
+  return accept4(fd, NULL, NULL, SOCK_CLOEXEC);
+#else
+  int c = accept(fd, NULL, NULL);
+  return c < 0 ? c : cloexec_mark(c);
+#endif
+}
+
+static int cloexec_pipe(int fds[2]) {
+#if defined(__linux__)
+  return pipe2(fds, O_CLOEXEC);
+#else
+  if (pipe(fds) < 0) return -1;
+  if (cloexec_mark(fds[0]) < 0) { int saved = errno; close(fds[1]); errno = saved; return -1; }
+  if (cloexec_mark(fds[1]) < 0) { int saved = errno; close(fds[0]); errno = saved; return -1; }
+  return 0;
+#endif
+}
+
+static int cloexec_open(const char* path, int flags, int mode) {
+  return open(path, flags | O_CLOEXEC, mode);
+}
+
+/* Only the modes the runtime uses: "r"/"rb" read, "w"/"wb" create-or-truncate. */
+static FILE* cloexec_fopen(const char* path, const char* mode) {
+  int flags;
+  if (mode[0] == 'r') flags = O_RDONLY;
+  else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
+  else { errno = EINVAL; return NULL; }
+  int fd = cloexec_open(path, flags, 0666);
+  if (fd < 0) return NULL;
+  FILE* f = fdopen(fd, mode);
+  if (f == NULL) { int saved = errno; close(fd); errno = saved; }
+  return f;
+}
+/* cloexec-gate: end wrappers */
 
 typedef enum {
   SPROUT_ROOT_I64 = 1,
@@ -3596,7 +3668,7 @@ long long read_file(long long path_i) {
   if (strcmp(path, "-") == 0) {
     f = stdin;
   } else {
-    f = fopen(path, "rb");
+    f = cloexec_fopen(path, "rb");
     if (f == NULL) return sprout_err_text(strerror(errno), "read_file: out of memory");
     close_after = 1;
   }
@@ -3652,7 +3724,7 @@ long long write_file(long long path_i, long long content_i) {
   const char *content = (const char *)(uintptr_t)content_i;
   if (path == NULL) return sprout_err_text("null path", "write_file: out of memory");
   if (content == NULL) return sprout_err_text("null content", "write_file: out of memory");
-  FILE *f = fopen(path, "wb");
+  FILE *f = cloexec_fopen(path, "wb");
   if (!f) return sprout_err_text(strerror(errno), "write_file: out of memory");
   size_t len = strlen(content);
   if (fwrite(content, 1, len, f) != len) {
@@ -3776,8 +3848,12 @@ long long fs_list_dir(long long path_i) {
   long long rejected;
   if (fs_path_rejected(path, &rejected)) return rejected;
 
-  DIR* dir = opendir(path);
-  if (dir == NULL) return fs_err(errno, path);
+  /* open + fdopendir rather than opendir, so the directory descriptor is close-on-exec. A path that
+   * is not a directory fails the open with ENOTDIR, as opendir did. */
+  int dir_fd = cloexec_open(path, O_RDONLY | O_DIRECTORY, 0);
+  if (dir_fd < 0) return fs_err(errno, path);
+  DIR* dir = fdopendir(dir_fd);
+  if (dir == NULL) { int e = errno; close(dir_fd); return fs_err(e, path); }
 
   long long cons_tag = SPROUT_TAG(Cons);
   SPROUT_HANDLE(h_list, sprout_make0(SPROUT_TAG(Nil)));
@@ -3860,7 +3936,7 @@ long long fs_read_bytes(long long path_i) {
   long long rejected;
   if (fs_path_rejected(path, &rejected)) return rejected;
 
-  int fd = open(path, O_RDONLY);
+  int fd = cloexec_open(path, O_RDONLY, 0);
   if (fd < 0) return fs_err(errno, path);
 
   struct stat st;
@@ -3911,7 +3987,7 @@ long long fs_write_bytes(long long path_i, long long bytes_h) {
   BytesVal* payload = (BytesVal*)(uintptr_t)bytes_h;
   if (payload == NULL) sprout_fail("fs_write_bytes: null payload");
 
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+  int fd = cloexec_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (fd < 0) return fs_err(errno, path);
 
   /* write(2) may transfer fewer bytes than asked for on any descriptor, so the
@@ -4074,8 +4150,8 @@ static long long sprout_proc_run_impl(
   }
   int out_fds[2] = {-1,-1}, err_fds[2] = {-1,-1}, in_fds[2] = {-1,-1};
 
-  if (pipe(out_fds) < 0 || pipe(err_fds) < 0 ||
-      (stdin_data && pipe(in_fds) < 0)) {
+  if (cloexec_pipe(out_fds) < 0 || cloexec_pipe(err_fds) < 0 ||
+      (stdin_data && cloexec_pipe(in_fds) < 0)) {
     if (out_fds[0] >= 0) { close(out_fds[0]); close(out_fds[1]); }
     if (err_fds[0] >= 0) { close(err_fds[0]); close(err_fds[1]); }
     GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
@@ -4094,16 +4170,16 @@ static long long sprout_proc_run_impl(
   }
 
   if (pid == 0) {
-    dup2(out_fds[1], STDOUT_FILENO);
-    dup2(err_fds[1], STDERR_FILENO);
+    dup2(out_fds[1], STDOUT_FILENO);   /* cloexec-gate: fork child */
+    dup2(err_fds[1], STDERR_FILENO);   /* cloexec-gate: fork child */
     close(out_fds[0]); close(out_fds[1]);
     close(err_fds[0]); close(err_fds[1]);
     if (stdin_data) {
-      dup2(in_fds[0], STDIN_FILENO);
+      dup2(in_fds[0], STDIN_FILENO);   /* cloexec-gate: fork child */
       close(in_fds[0]); close(in_fds[1]);
     } else {
-      int dev = open("/dev/null", O_RDONLY);
-      if (dev >= 0) { dup2(dev, STDIN_FILENO); close(dev); }
+      int dev = cloexec_open("/dev/null", O_RDONLY, 0);
+      if (dev >= 0) { dup2(dev, STDIN_FILENO); close(dev); }   /* cloexec-gate: fork child */
     }
     execvp(argv[0], argv);
     _exit(127);
@@ -5154,7 +5230,7 @@ static int sprout_ensure_analysis_service(char** error_out) {
   if (cmd == NULL || *cmd == '\0') cmd = "python3 -m sprout.analysis_service_entrypoint";
   int request_pipe[2] = {-1, -1};
   int response_pipe[2] = {-1, -1};
-  if (pipe(request_pipe) != 0 || pipe(response_pipe) != 0) {
+  if (cloexec_pipe(request_pipe) != 0 || cloexec_pipe(response_pipe) != 0) {
     if (request_pipe[0] >= 0) close(request_pipe[0]);
     if (request_pipe[1] >= 0) close(request_pipe[1]);
     if (response_pipe[0] >= 0) close(response_pipe[0]);
@@ -5172,8 +5248,8 @@ static int sprout_ensure_analysis_service(char** error_out) {
     return 0;
   }
   if (pid == 0) {
-    dup2(request_pipe[0], STDIN_FILENO);
-    dup2(response_pipe[1], STDOUT_FILENO);
+    dup2(request_pipe[0], STDIN_FILENO);   /* cloexec-gate: fork child */
+    dup2(response_pipe[1], STDOUT_FILENO);   /* cloexec-gate: fork child */
     /* The daemon's stdout carries the JSON protocol, so stderr is a free
        diagnostic channel.  Historically it was sent to /dev/null, which
        silently discarded every panic, `sprout_tag: null pointer` abort, and
@@ -5184,6 +5260,8 @@ static int sprout_ensure_analysis_service(char** error_out) {
     const char* log_target = getenv("SPROUT_ANALYSIS_SERVICE_LOG");
     if (log_target == NULL || log_target[0] == '\0')
       log_target = "/tmp/sprout_analysis_service.log";
+    /* Deliberately not close-on-exec: freopen puts the log (or /dev/null) on fd 2, which the exec'd
+       daemon must inherit as its stderr. */
     if (strcmp(log_target, "off") == 0 || freopen(log_target, "a", stderr) == NULL) {
       freopen("/dev/null", "w", stderr);
     } else {
@@ -6048,7 +6126,7 @@ long long repl_reset_session(void) {
 }
 long long read_int_lines(const char* path) {
   if (path == NULL) sprout_fail("read_int_lines: null path");
-  FILE* f = fopen(path, "r");
+  FILE* f = cloexec_fopen(path, "r");
   if (f == NULL) sprout_fail("read_int_lines: cannot open file");
   VectorVal* v = sprout_alloc_vector_val("read_int_lines: out of memory");
   SPROUT_HANDLE(h_v, sprout_ptr_word(v));
@@ -8279,9 +8357,7 @@ static int async_resolve(const char* host, const char* port,
        * carries exactly one completion byte. Kept here so someone editing the DNS path does
        * not have to be reading the Windows design doc to learn this. */
       int pipefds[2] = { -1, -1 };
-      if (pipe(pipefds) == 0) {
-        fcntl(pipefds[0], F_SETFD, FD_CLOEXEC);
-        fcntl(pipefds[1], F_SETFD, FD_CLOEXEC);
+      if (cloexec_pipe(pipefds) == 0) {
         atomic_store(&req->refcount, 2);
         req->write_fd = pipefds[1];
         atomic_fetch_add(&g_dns_threads_inflight, 1);
@@ -8354,7 +8430,7 @@ static HttpConnectOutcome http_connect(const HttpCandidate* cand, int ncand, con
                                        HttpInFlight* f, int* out_fd, const char** out_msg) {
   const char* msg = ncand > 0 ? "connect failed" : "no addresses for host";
   for (int i = 0; i < ncand; i++) {
-    int fd = socket(cand[i].family, cand[i].socktype, cand[i].protocol);
+    int fd = cloexec_socket(cand[i].family, cand[i].socktype, cand[i].protocol);
     if (fd < 0) {
       msg = strerror(errno);   /* e.g. EMFILE — report it rather than "connect failed" */
       continue;
@@ -8419,7 +8495,7 @@ static HttpIoOutcome http_send_all(int fd, const char* data, size_t len, const H
 
 #ifdef __APPLE__
 static unsigned char* read_binary_file(const char* path, size_t* out_len) {
-  FILE* f = fopen(path, "rb");
+  FILE* f = cloexec_fopen(path, "rb");
   if (f == NULL) return NULL;
   if (fseek(f, 0, SEEK_END) != 0) {
     fclose(f);
@@ -10248,7 +10324,7 @@ long long crypto_random_bytes(long long count) {
   out->len = len;
   out->data = sprout_alloc_bytes_data(len, "crypto_random_bytes: out of memory");
   if (len > 0) {
-    FILE* fp = fopen("/dev/urandom", "rb");
+    FILE* fp = cloexec_fopen("/dev/urandom", "rb");
     if (fp == NULL) {
       SPROUT_GC_POP_LOCALS(1);
       return crypto_err1(SPROUT_TAG(stdlib$crypto$CryptoUnavailable), strerror(errno));
@@ -10315,7 +10391,7 @@ long long tcp_listen(const char* host, long long port) {
       : "host must be an IPv4 address such as 127.0.0.1";
     return tcp_net_err1(SPROUT_TAG(stdlib$net$TcpInvalidArgument), why);
   }
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  int fd = cloexec_socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) return tcp_listen_fail(-1, "socket", host, port, strerror(errno));
   int one = 1;
   if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) < 0) {
@@ -10401,7 +10477,7 @@ long long tcp_connect(const char* host, long long port) {
   int fd = -1;
   const char* error_msg = "connect failed";
   for (int i = 0; i < ncand; i++) {
-    fd = socket(cand[i].family, cand[i].socktype, cand[i].protocol);
+    fd = cloexec_socket(cand[i].family, cand[i].socktype, cand[i].protocol);
     if (fd < 0) {
       error_msg = strerror(errno);   /* e.g. EMFILE — report it rather than "connect failed" */
       continue;
@@ -10500,10 +10576,10 @@ static int tcp_accept_errno_is_retryable(int err) {
 /* Arm the reserve descriptor if it is not already open. Called from tcp_listen, when descriptors are
  * plentiful — never lazily under exhaustion, where open() would itself fail. Best-effort: if open
  * fails the reserve stays unarmed and accept_shed_backlog degrades to park-only (still correct, just
- * no longer able to shed). O_CLOEXEC so the reserve does not leak into processes we spawn. */
+ * no longer able to shed). */
 void accept_reserve_arm(void) {
   if (g_accept_reserve_fd < 0)
-    g_accept_reserve_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+    g_accept_reserve_fd = cloexec_open("/dev/null", O_RDONLY, 0);
 }
 
 /* Shed the listener's pending backlog under descriptor exhaustion, returning the count shed.
@@ -10554,7 +10630,7 @@ int accept_shed_backlog(int listener_fd) {
   /* Counts ITERATIONS, not sheds: EINTR is in the retryable set and consumes nothing, so bounding
    * only the successful accepts would leave a signal storm able to spin here unbounded. */
   for (int i = 0; i < ACCEPT_SHED_MAX_PER_CALL; i++) {
-    int c = accept(listener_fd, NULL, NULL);
+    int c = cloexec_accept(listener_fd);
     if (c >= 0) { close(c); shed++; continue; }        /* shed one; slot is free again for the next */
     if (errno == EAGAIN || errno == EWOULDBLOCK) break; /* backlog drained: the real convergence */
     if (tcp_accept_errno_is_retryable(errno)) continue; /* consumed a queued conn; keep draining */
@@ -10563,7 +10639,7 @@ int accept_shed_backlog(int listener_fd) {
   /* Re-arm. A slot is free on every exit path: the loop either stopped on an accept that took none
    * (EAGAIN / a non-drainable errno) or hit the iteration cap right after a close(). If open
    * still fails, leave it unarmed — the next EMFILE degrades to park-only. */
-  g_accept_reserve_fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+  g_accept_reserve_fd = cloexec_open("/dev/null", O_RDONLY, 0);
   return shed;
 }
 
@@ -10624,7 +10700,7 @@ long long tcp_accept(long long listener) {
   int fd;
 retry:
   for (;;) {
-    fd = accept(g_listener_fd[listener], NULL, NULL);
+    fd = cloexec_accept(g_listener_fd[listener]);
     if (fd >= 0) break;
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       accept_park(listener);
