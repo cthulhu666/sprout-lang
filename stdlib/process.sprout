@@ -1,6 +1,13 @@
 module stdlib.process
 
 import stdlib.bytes (Utf8Error, to_string)
+import stdlib.bytes as bytes
+
+# How a child ended: `Exited n` is its exit status, `Signaled n` the signal that killed it. A
+# signal death used to read as exit 1, which a caller could not tell from the child's own failure.
+export type ProcExit (..) =
+  | Exited Int
+  | Signaled Int
 
 # A child process's output is BYTES, not text. The child chooses those bytes, so they can contain a
 # NUL or any invalid UTF-8 sequence, and a Sprout String is normatively neither (docs/spec-v0.md
@@ -13,13 +20,16 @@ import stdlib.bytes (Utf8Error, to_string)
 # D4's single choke point, which rejects a NUL as well as bad UTF-8. Nothing validates at ingestion,
 # because nothing needs to: no illegal value is constructed in the first place.
 export type ProcResult (..) =
-  | ProcResult Int Bytes Bytes
+  | ProcResult ProcExit Bytes Bytes
 
-export fn proc_exit(r: ProcResult) -> Int =
-  match r with | ProcResult c _ _ -> c
+export fn proc_exit(r: ProcResult) -> ProcExit =
+  match r with | ProcResult e _ _ -> e
 
+# True only for a child that exited with status 0. A signal death is not ok.
 export fn proc_ok(r: ProcResult) -> Bool =
-  proc_exit(r) == 0
+  match proc_exit(r) with
+  | Exited 0 -> true
+  | _ -> false
 
 # The lossless accessors. Prefer these whenever the output is, or may be, binary.
 export fn proc_stdout_bytes(r: ProcResult) -> Bytes =
@@ -50,15 +60,89 @@ export fn proc_stderr_or(r: ProcResult, fallback: String) -> String =
   | Ok text -> text
   | Err _ -> fallback
 
-# C ABI bridge: takes Vec String (native array representation). These signatures are UNCHANGED by
-# the Bytes migration — a ProcResult is a heap ADT returned in the same i64 slot either way, so only
-# the types of two of its fields moved and the LLVM boundary cannot see the difference.
-extern fn proc_run_vec(argv: Vec String) -> ProcResult !{IO}
-extern fn proc_run_stdin_vec(argv: Vec String, stdin_data: String) -> ProcResult !{IO}
+# `NewGroup` puts the child in its own process group, so a kill on timeout or output overflow also
+# reaches the processes it started. `InheritGroup` leaves it in the caller's group and kills only
+# the child itself.
+export type ProcGroup (..) =
+  | InheritGroup
+  | NewGroup
 
-# Public API: takes List String so list literals work directly
-export fn proc_run(argv: List String) -> ProcResult !{IO} =
-  proc_run_vec(vec_from_list(argv))
+# `timeout_ms` is the wall-clock budget for the whole run; `Nothing` waits for the child. `max_output_bytes`
+# caps each of stdout and stderr separately. A run that passes either limit kills the child.
+export type ProcConfig (..) = (timeout_ms: Maybe Int, max_output_bytes: Int, group: ProcGroup)
 
-export fn proc_run_stdin(argv: List String, stdin_data: String) -> ProcResult !{IO} =
-  proc_run_stdin_vec(vec_from_list(argv), stdin_data)
+# No timeout, 16 MiB per stream, caller's process group.
+export fn default_proc_config() -> ProcConfig =
+  ProcConfig(timeout_ms = Nothing, max_output_bytes = 16777216, group = InheritGroup)
+
+# `ProcTimedOut` and `ProcOutputTooLarge` carry what the child wrote before it was killed; the
+# overflowing stream of `ProcOutputTooLarge` is cut at the cap, which it carries first.
+export type ProcError (..) =
+  | ProcSpawnFailed String
+  | ProcTimedOut Bytes Bytes
+  | ProcOutputTooLarge Int Bytes Bytes
+  | ProcInvalidArgument String
+
+export fn proc_error_message(e: ProcError) -> String =
+  match e with
+  | ProcSpawnFailed msg -> `could not start the process: ${msg}`
+  | ProcTimedOut _ _ -> "the process timed out and was killed"
+  | ProcOutputTooLarge cap _ _ -> `the process wrote more than ${int_to_string(cap)} bytes to one stream and was killed`
+  | ProcInvalidArgument msg -> `invalid argument: ${msg}`
+
+# The extern's answer, flat so the runtime builds one record and Sprout builds the ADTs. The
+# constructor is matched in `from_raw`, which is what keeps its tag in the program for the runtime
+# to find. `kind`:
+#   0 exited (`code` is the exit status)      1 killed by a signal (`code` is the signal)
+#   2 not started (`message` says why)        3 timed out, output so far in `out` and `err`
+#   4 an output cap was passed, output so far in `out` and `err`
+# `message` is empty unless `kind` is 2.
+type ProcRaw (..) =
+  | ProcRaw Int Int Bytes Bytes String
+
+# The runtime forks and execs on the scheduler thread, then a helper thread collects output and
+# waits for the child while this task is parked, so other tasks keep running. `timeout_ms` 0 means
+# no timeout and `new_group` is 0 or 1; `proc_run_with` checks every limit before the call.
+extern fn proc_run_raw(argv: Vec String, has_stdin: Int, stdin_data: Bytes, timeout_ms: Int, max_output_bytes: Int, new_group: Int) -> ProcRaw !{IO}
+
+fn check_argv(argv: List String) -> Result ProcError Unit =
+  match argv with
+  | Nil -> Err(ProcInvalidArgument("argv is empty"))
+  | _ -> Ok(())
+
+fn check_timeout(timeout_ms: Maybe Int) -> Result ProcError Unit =
+  match timeout_ms with
+  | Just n -> guard(n >= 1, ProcInvalidArgument("timeout_ms must be at least 1"))
+  | Nothing -> Ok(())
+
+fn group_arg(group: ProcGroup) -> Int =
+  match group with
+  | NewGroup -> 1
+  | InheritGroup -> 0
+
+fn stdin_arg(stdin: Maybe Bytes) -> (Int, Bytes) =
+  match stdin with
+  | Just data -> (1, data)
+  | Nothing -> (0, bytes.empty())
+
+fn from_raw(cap: Int, raw: ProcRaw) -> Result ProcError ProcResult =
+  match raw with
+  | ProcRaw 0 code out err _ -> Ok(ProcResult (Exited(code), out, err))
+  | ProcRaw 1 code out err _ -> Ok(ProcResult (Signaled(code), out, err))
+  | ProcRaw 3 _ out err _ -> Err(ProcTimedOut(out, err))
+  | ProcRaw 4 _ out err _ -> Err(ProcOutputTooLarge(cap, out, err))
+  | ProcRaw _ _ _ _ message -> Err(ProcSpawnFailed(message))
+
+# Cost is dominated by the child: the call parks until it ends, is killed or times out.
+export fn proc_run_with(config: ProcConfig, argv: List String, stdin: Maybe Bytes) -> Result ProcError ProcResult !{IO} =
+  let _ = try check_argv(argv)
+      _ = try check_timeout(config.timeout_ms)
+      _ = try guard(config.max_output_bytes >= 1, ProcInvalidArgument("max_output_bytes must be at least 1"))
+      (has_stdin, data) = stdin_arg(stdin)
+  in from_raw(config.max_output_bytes, proc_run_raw(vec_from_list(argv), has_stdin, data, maybe_with_default(0, config.timeout_ms), config.max_output_bytes, group_arg(config.group)))
+
+export fn proc_run(argv: List String) -> Result ProcError ProcResult !{IO} =
+  proc_run_with(default_proc_config(), argv, Nothing)
+
+export fn proc_run_stdin(argv: List String, stdin_data: String) -> Result ProcError ProcResult !{IO} =
+  proc_run_with(default_proc_config(), argv, Just(bytes.from_string(stdin_data)))

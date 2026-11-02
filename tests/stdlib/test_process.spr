@@ -1,6 +1,11 @@
-# native-only: proc_run_vec/proc_run_stdin_vec have no stage-0 interpreter binding
+# native-only: proc_run_raw has no stage-0 interpreter binding
 import stdlib.test (TestState, new_state, assert_eq, assert_true, assert_false, summary)
-import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_exit, proc_stdout_or, proc_stderr_or, proc_ok)
+import stdlib.process (ProcResult, ProcExit, ProcError, ProcConfig, NewGroup, Exited, Signaled, ProcSpawnFailed, ProcTimedOut, ProcOutputTooLarge, ProcInvalidArgument, default_proc_config, proc_run, proc_run_stdin, proc_run_with, proc_exit, proc_ok, proc_stdout_or, proc_stderr_or, proc_stdout_bytes, proc_error_message)
+import stdlib.bytes as bytes
+import stdlib.fs as fs
+import stdlib.string as string
+import stdlib.task (task_sleep)
+import stdlib.time as time
 
 # These cases all run children with known TEXT output, so they decode through the choke point with a
 # marker fallback: if the Bytes→String step ever regressed, the assertion fails showing the marker
@@ -11,52 +16,209 @@ fn out(r: ProcResult) -> String =
 fn err(r: ProcResult) -> String =
   proc_stderr_or(r, "<not-utf8>")
 
+# A run the case expects to start: anything else stops the test with the error named.
+fn run(argv: List String) -> ProcResult !{IO} =
+  match proc_run(argv) with
+  | Ok r -> r
+  | Err e -> panic(`proc_run failed: ${proc_error_message(e)}`)
+
+fn run_stdin(argv: List String, data: String) -> ProcResult !{IO} =
+  match proc_run_stdin(argv, data) with
+  | Ok r -> r
+  | Err e -> panic(`proc_run_stdin failed: ${proc_error_message(e)}`)
+
+fn exit_name(e: ProcExit) -> String =
+  match e with
+  | Exited n -> `exited ${int_to_string(n)}`
+  | Signaled n -> `signaled ${int_to_string(n)}`
+
+fn error_name(e: ProcError) -> String =
+  match e with
+  | ProcSpawnFailed _ -> "spawn_failed"
+  | ProcTimedOut _ _ -> "timed_out"
+  | ProcOutputTooLarge _ _ _ -> "too_large"
+  | ProcInvalidArgument _ -> "invalid"
+
+# One word per outcome, so an assertion names what happened instead of printing a record.
+fn describe(r: Result ProcError ProcResult) -> String =
+  match r with
+  | Ok res -> exit_name(proc_exit(res))
+  | Err e -> error_name(e)
+
+fn timeout_config(ms: Int) -> ProcConfig =
+  default_proc_config() with (timeout_ms = Just(ms))
+
+fn sh(script: String) -> List String =
+  ["sh", "-c", script]
+
+# The stdout of a run that timed out, or a marker.
+fn timed_out_stdout(r: Result ProcError ProcResult) -> String =
+  match r with
+  | Err (ProcTimedOut o _) -> result_with_default("<not-utf8>", bytes.to_string(o))
+  | _ -> "<not timed out>"
+
+# What an output-cap run reports: the cap it carries and the length of stdout.
+fn too_large_shape(r: Result ProcError ProcResult) -> String =
+  match r with
+  | Err(ProcOutputTooLarge cap o _) -> `cap ${int_to_string(cap)}, stdout ${int_to_string(bytes.length(o))}`
+  | _ -> "<not too large>"
+
+fn elapsed_ms(t0: Int) -> Int !{IO} =
+  do
+    t1 <- time.now_micros()
+    (t1 - t0) / 1000
+
+# A pid file is written by the child, and read back to find a process the child started.
+fn read_pid(path: String) -> String !{IO} =
+  match fs.read_text(path) with
+  | Ok text -> string.trim(text)
+  | Err _ -> ""
+
+# Alive means ps lists it and it is not a zombie: a zombie waiting for init is dead for these tests.
+fn is_alive(pid: String) -> Bool !{IO} =
+  match proc_run(sh(`ps -o stat= -p ${pid}`)) with
+  | Ok r ->
+      let stat = string.trim(out(r))
+      in stat != "" && !string.starts_with(stat, "Z")
+  | Err _ -> false
+
+# Polls for up to about two seconds for the process to go away.
+fn gone_within(pid: String, tries: Int) -> Bool !{IO} =
+  if tries <= 0 then false
+  else if is_alive(pid) then
+    do
+      task_sleep(100)
+      gone_within(pid, tries - 1)
+  else true
+
+fn kill_quietly(pid: String) -> Unit !{IO} =
+  let _ = proc_run(sh(`kill -9 ${pid} 2>/dev/null`))
+  in ()
+
+fn binary_round_trips(payload: Bytes) -> Bool !{IO} =
+  match proc_run_with(default_proc_config(), ["cat"], Just(payload)) with
+  | Ok r -> proc_stdout_bytes(r) == payload
+  | Err _ -> false
+
+let tmp_dir: String = "/tmp"
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
 
     # echo returns exit 0 and the given string on stdout
-    r_echo <- proc_run(["echo", "hello world"])
+    r_echo <- run(["echo", "hello world"])
     assert_true(state, "echo ok", proc_ok(r_echo))
-    assert_eq(state, "echo exit", proc_exit(r_echo), 0)
+    assert_eq(state, "echo exit", exit_name(proc_exit(r_echo)), "exited 0")
     assert_eq(state, "echo stdout", out(r_echo), "hello world\n")
     assert_eq(state, "echo stderr", err(r_echo), "")
 
     # false returns exit 1
-    r_false <- proc_run(["false"])
+    r_false <- run(["false"])
     assert_false(state, "false not ok", proc_ok(r_false))
-    assert_eq(state, "false exit", proc_exit(r_false), 1)
+    assert_eq(state, "false exit", exit_name(proc_exit(r_false)), "exited 1")
 
     # cat with stdin data round-trips the input
-    r_cat <- proc_run_stdin(["cat"], "hello from stdin\n")
+    r_cat <- run_stdin(["cat"], "hello from stdin\n")
     assert_true(state, "cat stdin ok", proc_ok(r_cat))
     assert_eq(state, "cat stdin stdout", out(r_cat), "hello from stdin\n")
 
     # stderr is captured separately from stdout
-    r_err <- proc_run(["sh", "-c", "echo err >&2; echo out"])
+    r_err <- run(sh("echo err >&2; echo out"))
     assert_true(state, "stderr capture ok", proc_ok(r_err))
     assert_eq(state, "stderr stdout line", out(r_err), "out\n")
     assert_eq(state, "stderr stderr line", err(r_err), "err\n")
 
     # multi-word argv is passed correctly (no shell splitting)
-    r_argv <- proc_run(["echo", "one", "two", "three"])
+    r_argv <- run(["echo", "one", "two", "three"])
     assert_eq(state, "argv words", out(r_argv), "one two three\n")
 
     # argv_all_bytes collects all argv as a List Bytes without crashing
     let _ = argv_all_bytes()
 
     # empty stdin string must not deadlock — child sees EOF immediately
-    r_empty_stdin <- proc_run_stdin(["cat"], "")
+    r_empty_stdin <- run_stdin(["cat"], "")
     assert_true(state, "empty stdin ok", proc_ok(r_empty_stdin))
     assert_eq(state, "empty stdin stdout", out(r_empty_stdin), "")
 
     # EPIPE regression: child exits after reading 1 byte; writing more must not crash
-    r_epipe <- proc_run_stdin(["head", "-c", "1"], "hello world")
+    r_epipe <- run_stdin(["head", "-c", "1"], "hello world")
     assert_true(state, "epipe ok", proc_ok(r_epipe))
     assert_eq(state, "epipe stdout", out(r_epipe), "h")
 
-    # empty argv must return an error result, not crash or UB
-    r_empty <- proc_run([])
-    assert_false(state, "empty argv not ok", proc_ok(r_empty))
+    # A stdin payload larger than a pipe buffer, from a child that does not read until it has
+    # written: the output must be drained while the input is fed.
+    big <- run_stdin(["cat"], string.repeat("0123456789abcdef", 16384))
+    assert_eq(state, "large stdin round-trips", bytes.length(proc_stdout_bytes(big)), 262144)
+
+    # Invalid configuration is an Err before anything runs.
+    assert_eq(state, "empty argv", describe(proc_run([])), "invalid")
+    assert_eq(state, "timeout 0", describe(proc_run_with(timeout_config(0), ["true"], Nothing)), "invalid")
+    assert_eq(state, "timeout negative", describe(proc_run_with(timeout_config(-5), ["true"], Nothing)), "invalid")
+    assert_eq(state, "cap 0", describe(proc_run_with(default_proc_config() with (max_output_bytes = 0), ["true"], Nothing)), "invalid")
+
+    # Binary stdin, with a NUL and a byte that is not UTF-8, comes back exactly.
+    let payload = bytes.append(bytes.singleton(0), bytes.append(bytes.singleton(255), bytes.from_string("ab")))
+    round_trip <- binary_round_trips(payload)
+    assert_true(state, "binary stdin round-trips", round_trip)
+
+    # Exit status and signal death are different outcomes.
+    assert_eq(state, "exit 3", describe(proc_run(sh("exit 3"))), "exited 3")
+    assert_eq(state, "killed by SIGKILL", describe(proc_run(sh("kill -9 $$"))), "signaled 9")
+
+    # A child starts with SIGPIPE at its default. The runtime ignores SIGPIPE for itself, and an
+    # ignored signal stays ignored across exec; a shell cannot reset a signal that was ignored when
+    # it started, so with an inherited ignore `kill -PIPE $$` would do nothing and exit 0.
+    assert_eq(state, "child SIGPIPE is default", describe(proc_run(sh("trap - PIPE; kill -PIPE $$"))), "signaled 13")
+
+    # Exec failure is a spawn error, not an exit status.
+    assert_eq(state, "missing program", describe(proc_run(["sprout-no-such-program-xyz"])), "spawn_failed")
+    assert_eq(state, "missing absolute path", describe(proc_run(["/nonexistent/dir/prog"])), "spawn_failed")
+    let noexec = `${tmp_dir}/sprout_proc_noexec.txt`
+    let _ = fs.write_text(noexec, "not a program\n")
+    assert_eq(state, "non-executable file", describe(proc_run([noexec])), "spawn_failed")
+    let _ = fs.remove(noexec)
+
+    # A timeout kills the child and returns promptly.
+    t0 <- time.now_micros()
+    let r_sleep = proc_run_with(timeout_config(200), ["sleep", "10"], Nothing)
+    assert_eq(state, "timeout outcome", describe(r_sleep), "timed_out")
+    ms_sleep <- elapsed_ms(t0)
+    assert_true(state, "timeout returns within 2 s", ms_sleep < 2000)
+
+    # The output written before the kill is kept.
+    let r_early = proc_run_with(timeout_config(300) with (group = NewGroup), sh("echo early; sleep 10"), Nothing)
+    assert_eq(state, "timeout keeps stdout", timed_out_stdout(r_early), "early\n")
+
+    # NewGroup: the kill reaches a process the child started.
+    let pidfile = `${tmp_dir}/sprout_proc_group.pid`
+    let r_group = proc_run_with(timeout_config(300) with (group = NewGroup), sh(`sleep 30 & echo $! > ${pidfile}; wait`), Nothing)
+    assert_eq(state, "group timeout outcome", describe(r_group), "timed_out")
+    group_pid <- read_pid(pidfile)
+    assert_true(state, "group pid recorded", group_pid != "")
+    group_gone <- gone_within(group_pid, 20)
+    assert_true(state, "NewGroup kills the grandchild", group_gone)
+    kill_quietly(group_pid)
+    let _ = fs.remove(pidfile)
+
+    # InheritGroup: a grandchild that holds the output pipes open must not hold the call up.
+    let holdfile = `${tmp_dir}/sprout_proc_hold.pid`
+    t1 <- time.now_micros()
+    let r_hold = proc_run_with(timeout_config(200), sh(`sleep 30 & echo $! > ${holdfile}; exec sleep 30`), Nothing)
+    assert_eq(state, "pipe-holding grandchild outcome", describe(r_hold), "timed_out")
+    ms_hold <- elapsed_ms(t1)
+    assert_true(state, "pipe-holding grandchild returns within 2 s", ms_hold < 2000)
+    hold_pid <- read_pid(holdfile)
+    kill_quietly(hold_pid)
+    let _ = fs.remove(holdfile)
+
+    # Output cap: exactly `cap` bytes are kept of the stream that went over.
+    let r_cap = proc_run_with(default_proc_config() with (max_output_bytes = 1048576), ["head", "-c", "2097152", "/dev/zero"], Nothing)
+    assert_eq(state, "output cap outcome", describe(r_cap), "too_large")
+    assert_eq(state, "output cap shape", too_large_shape(r_cap), "cap 1048576, stdout 1048576")
+
+    # Output exactly at the cap is not an overflow.
+    let r_exact = proc_run_with(default_proc_config() with (max_output_bytes = 1000), ["head", "-c", "1000", "/dev/zero"], Nothing)
+    assert_eq(state, "output at the cap", describe(r_exact), "exited 0")
 
     summary(state)

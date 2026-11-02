@@ -48,7 +48,8 @@
  * the runtime's sockets, pipes or files, so every descriptor the runtime creates comes from one of
  * these wrappers. Linux sets the flag atomically at creation. Elsewhere it is a fcntl right after:
  * that cannot race with our forks, because every descriptor we create and both forks sit on the one
- * scheduler thread, and the only other threads run getaddrinfo. The rule, the gate that enforces it
+ * scheduler thread, and the only other threads run getaddrinfo or are process helpers, which create
+ * no descriptor and never fork. The rule, the gate that enforces it
  * and the fopen "e" mode note are in docs/gates.md, section Close-on-exec. */
 
 /* close(2) that leaves errno as the failure that led here. */
@@ -3493,7 +3494,7 @@ static __attribute__((noinline, cold)) long long find_ctor_tag_by_name(const cha
   X(stdlib$net$TcpInvalidArgument) X(stdlib$net$TcpInvalidHandle) \
   X(stdlib$net$TcpListenFailed) X(stdlib$net$TcpReadFailed) X(stdlib$net$TcpTimeout) \
   X(stdlib$net$TcpWouldBlock) X(stdlib$net$TcpWriteFailed) \
-  X(stdlib$process$ProcResult) X(stdlib$regex$Match) \
+  X(stdlib$process$ProcRaw) X(stdlib$regex$Match) \
   X(stdlib$terminal$TermBytes) X(stdlib$terminal$TermEof) X(stdlib$terminal$TermFailed) \
   X(stdlib$terminal$TermIdle) X(stdlib$terminal$TermResized) X(stdlib$terminal$TermSize)
 
@@ -4063,224 +4064,521 @@ long long panic(long long msg_i) {
   sprout_fail(msg ? msg : "panic");
   return 0LL; /* unreachable */
 }
-// ---- stdlib.process: proc_run / proc_run_stdin --------------------------------
+// ---- stdlib.process: proc_run_raw ----------------------------------------------
+//
+// One child per call. The task forks and execs on the scheduler thread, then parks on a completion
+// pipe while a detached helper thread drains the child's output, enforces the output cap and reaps
+// it, so the other green tasks keep running. The Sprout side (stdlib/process.sprout) validates the
+// arguments and turns the flat record built here into ProcResult / ProcError.
 
-typedef struct { char* data; size_t len; size_t cap; } GrowBuf;
+/* A byte buffer for the helper thread. Not GC memory: the helper never touches the GC heap. */
+typedef struct { unsigned char* data; size_t len; size_t cap; } ProcBuf;
 
-static GrowBuf sprout_growbuf_new(void) {
-  GrowBuf b; b.cap = 4096; b.len = 0;
-  b.data = (char*)malloc(b.cap);
-  if (b.data == NULL) sprout_fail("proc_run: out of memory");
-  b.data[0] = '\0';
-  return b;
-}
-
-static void sprout_growbuf_append(GrowBuf* b, const char* p, size_t n) {
-  if (!n) return;
-  if (b->len + n + 1 > b->cap) {
-    if (n > SIZE_MAX - b->len - 1) sprout_fail("proc_run: output too large");
-    size_t needed = b->len + n + 1;
-    size_t new_cap = b->cap;
-    while (needed > new_cap) {
-      if (new_cap > SIZE_MAX / 2) sprout_fail("proc_run: output too large");
+/* 1 on success, 0 when the buffer could not grow (b is left as it was). */
+static int proc_buf_append(ProcBuf* b, const unsigned char* p, size_t n) {
+  if (n == 0) return 1;
+  if (n > SIZE_MAX - b->len) return 0;
+  size_t need = b->len + n;
+  if (need > b->cap) {
+    size_t new_cap = b->cap != 0 ? b->cap : 4096;
+    while (new_cap < need) {
+      if (new_cap > SIZE_MAX / 2) { new_cap = need; break; }
       new_cap *= 2;
     }
-    char* grown = (char*)realloc(b->data, new_cap);
-    if (grown == NULL) sprout_fail("proc_run: out of memory");
+    unsigned char* grown = (unsigned char*)realloc(b->data, new_cap);
+    if (grown == NULL) return 0;
     b->data = grown;
     b->cap = new_cap;
   }
   memcpy(b->data + b->len, p, n);
   b->len += n;
-  b->data[b->len] = '\0';
+  return 1;
 }
 
-// Build a Sprout ProcResult(Int, Bytes, Bytes) ADT value: (exit_code, stdout, stderr).
-// COPIES out->data and err->data into GC memory and frees the malloc'd originals. This is the
-// single ownership hand-off for both buffers — every early-return path in
-// sprout_proc_run_impl routes through here — so the free belongs here and nowhere else.
-//
-// W2 R2 (unvalidated ingestion). These used to be handed to sprout_str_adopt, which stamps
-// the byte count into a CSTR header and returns a String. But a Sprout String is normatively
-// "always valid UTF-8, contains no NUL byte" (docs/spec-v0.md §strings), and a child process's
-// output is neither, by construction. Measured before this fix:
-//   proc_run(["printf", "a\000b"]) default build  -> byte_length 3, length 1: SILENT truncation
-//                                                    at the NUL, direction-dependent.
-//   the same under SPROUT_GC_HDRCHECK=1           -> abort in str_byte_len (aux=3 strlen=1),
-//                                                    and CI runs with HDRCHECK ON.
-//   proc_run(["printf", "a\377b"])                -> `runtime error: str_utf8: invalid UTF-8
-//                                                    lead byte`, exit 1, the moment any
-//                                                    walker touches it. Binary output from a
-//                                                    subprocess was therefore unusable outright.
-// Bytes carries an explicit length and imposes no encoding, so no illegal value is constructed
-// and NO validation is added here. Decoding is the caller's explicit step through
-// bytes.to_string — decision D4's single choke point, which rejects a NUL as well as bad UTF-8.
-static long long sprout_make_proc_result(int exit_code, GrowBuf* out, GrowBuf* err) {
-  sprout_gc_maybe_collect_threshold();
-  // Root each Bytes before the next allocation can collect. Use the ROOTED SLOT afterwards, not
-  // the returned pointer: a collection during the second allocation may move the first value,
-  // and only the slot is updated.
+/* One running child. Ownership of every descriptor and of the request itself:
+ *
+ *   field                  owner   closed by
+ *   ---------------------  ------  ------------------------------------------------------------
+ *   done_rd (completion)   task    the task after it reads the byte; force_drop_task on a cancel
+ *                                  (it is the park's unowned fd). No other code touches it.
+ *   stop_wr                task    the task after completion, or proc_cancel_hook on a cancel
+ *   out_fd, err_fd         helper  the helper, before it reports completion
+ *   in_fd (stdin write)    helper  the helper, when stdin is written, refused, or the helper ends
+ *   stop_rd                helper  the helper, before it reports completion
+ *   done_wr                helper  the helper, after it writes the completion byte
+ *
+ * refcount starts at 2 (task + helper), as DnsRequest does. The last decref frees the output
+ * buffers, the stdin copy, the mutex and the request, and closes NO descriptor.
+ *
+ * `lock` guards `exited` and every kill(2). The helper sets `exited` and reaps under it, so a
+ * kill that sees `!exited` is aimed at a child that is still ours, never at a reused pid.
+ * Everything below `done` is written by the helper before it stores `done` and read by the task
+ * after it, so it needs no lock.
+ *
+ * The helper must NEVER call sprout_fail, allocate on the GC heap or touch a Sprout object. */
+typedef struct {
+  pid_t pid;
+  int new_group;
+  pthread_mutex_t lock;
+  int exited;
+  int done_rd, done_wr, stop_rd, stop_wr, out_fd, err_fd, in_fd;
+  unsigned char* stdin_data;
+  size_t stdin_len;
+  size_t cap;
+  ProcBuf out, err;
+  int overflow;
+  int term_kind;            /* 0 exited, 1 signaled */
+  int term_code;
+  const char* failure;      /* static text, or NULL */
+  atomic_int done;
+  atomic_int refcount;
+} ProcRequest;
+
+static void proc_request_decref(ProcRequest* r) {
+  if (atomic_fetch_sub(&r->refcount, 1) == 1) {
+    free(r->out.data);
+    free(r->err.data);
+    free(r->stdin_data);
+    pthread_mutex_destroy(&r->lock);
+    free(r);
+  }
+}
+
+static void proc_close_fd(int* fd) {
+  if (*fd >= 0) { close(*fd); *fd = -1; }
+}
+
+/* Kill protocol, callable from any thread. Returns 1 if it signalled the child. */
+static int proc_kill(ProcRequest* r) {
+  int sent = 0;
+  pthread_mutex_lock(&r->lock);
+  if (!r->exited) {
+    kill(r->pid, SIGKILL);
+    if (r->new_group) kill(-r->pid, SIGKILL);
+    sent = 1;
+  }
+  pthread_mutex_unlock(&r->lock);
+  return sent;
+}
+
+/* Wakes the helper out of its poll so it stops reading. */
+static void proc_signal_stop(ProcRequest* r) {
+  ssize_t w;
+  do { w = write(r->stop_wr, "1", 1); } while (w < 0 && errno == EINTR);
+  (void)w;
+}
+
+/* Keeps at most `cap` bytes of a stream. Returns 1 when the child was killed because the stream
+ * went past the cap or a buffer could not grow. */
+static int proc_absorb(ProcRequest* r, ProcBuf* b, const unsigned char* p, size_t n) {
+  size_t room = r->cap - b->len;
+  size_t take = n < room ? n : room;
+  if (!proc_buf_append(b, p, take)) {
+    r->failure = "out of memory";
+    proc_kill(r);
+    return 1;
+  }
+  if (take < n) {
+    r->overflow = 1;
+    proc_kill(r);
+    return 1;
+  }
+  return 0;
+}
+
+/* Reads the child's output to EOF and feeds its stdin, until both are done, an output cap is
+ * passed, or the task asks it to stop. */
+static void proc_collect(ProcRequest* r) {
+  unsigned char tmp[16384];
+  size_t in_off = 0;
+  for (;;) {
+    struct pollfd pfds[4];
+    int n = 0, stop_i, out_i = -1, err_i = -1, in_i = -1;
+    pfds[n].fd = r->stop_rd; pfds[n].events = POLLIN; stop_i = n++;
+    if (r->out_fd >= 0) { pfds[n].fd = r->out_fd; pfds[n].events = POLLIN;  out_i = n++; }
+    if (r->err_fd >= 0) { pfds[n].fd = r->err_fd; pfds[n].events = POLLIN;  err_i = n++; }
+    if (r->in_fd  >= 0) { pfds[n].fd = r->in_fd;  pfds[n].events = POLLOUT; in_i  = n++; }
+    if (n == 1) return;
+    int rc = poll(pfds, (nfds_t)n, -1);
+    if (rc < 0) {
+      if (errno == EINTR) continue;
+      r->failure = "poll failed";
+      proc_kill(r);
+      return;
+    }
+    if (pfds[stop_i].revents != 0) return;
+    if (out_i >= 0 && (pfds[out_i].revents & (POLLIN | POLLHUP | POLLERR))) {
+      ssize_t nr = read(r->out_fd, tmp, sizeof(tmp));
+      if (nr > 0) { if (proc_absorb(r, &r->out, tmp, (size_t)nr)) return; }
+      else if (nr == 0 || (errno != EINTR && errno != EAGAIN)) proc_close_fd(&r->out_fd);
+    }
+    if (err_i >= 0 && (pfds[err_i].revents & (POLLIN | POLLHUP | POLLERR))) {
+      ssize_t nr = read(r->err_fd, tmp, sizeof(tmp));
+      if (nr > 0) { if (proc_absorb(r, &r->err, tmp, (size_t)nr)) return; }
+      else if (nr == 0 || (errno != EINTR && errno != EAGAIN)) proc_close_fd(&r->err_fd);
+    }
+    if (in_i >= 0 && (pfds[in_i].revents & (POLLOUT | POLLHUP | POLLERR))) {
+      ssize_t nw = write(r->in_fd, r->stdin_data + in_off, r->stdin_len - in_off);
+      if (nw > 0) {
+        in_off += (size_t)nw;
+        if (in_off >= r->stdin_len) proc_close_fd(&r->in_fd);
+      } else if (nw < 0 && (errno == EINTR || errno == EAGAIN)) {
+        /* try again on the next poll */
+      } else {
+        proc_close_fd(&r->in_fd);   /* EPIPE: the child stopped reading */
+      }
+    }
+  }
+}
+
+/* Waits for the child without reaping it (WNOWAIT), then reaps under the lock so `exited` and the
+ * reap are one step for proc_kill. */
+static void proc_reap(ProcRequest* r) {
+  siginfo_t si;
+  int rc;
+  do { rc = waitid(P_PID, (id_t)r->pid, &si, WEXITED | WNOWAIT); } while (rc < 0 && errno == EINTR);
+  int status = 0, wrc;
+  pthread_mutex_lock(&r->lock);
+  r->exited = 1;
+  do { wrc = waitpid(r->pid, &status, 0); } while (wrc < 0 && errno == EINTR);
+  pthread_mutex_unlock(&r->lock);
+  if (wrc < 0) { r->failure = "could not collect the exit status"; return; }
+  if (WIFSIGNALED(status)) { r->term_kind = 1; r->term_code = WTERMSIG(status); }
+  else                     { r->term_kind = 0; r->term_code = WEXITSTATUS(status); }
+}
+
+/* Detached helper. Never allocates GC memory, never touches g_current_task, creates no descriptor
+ * and never forks. */
+static void* proc_helper_thread(void* arg) {
+  ProcRequest* r = (ProcRequest*)arg;
+  proc_collect(r);
+  proc_reap(r);
+  proc_close_fd(&r->out_fd);
+  proc_close_fd(&r->err_fd);
+  proc_close_fd(&r->in_fd);
+  proc_close_fd(&r->stop_rd);
+  atomic_store_explicit(&r->done, 1, memory_order_release);
+  /* Wake the parked task. EPIPE means it was force-dropped and its read end is closed. */
+  ssize_t w;
+  do { w = write(r->done_wr, "1", 1); } while (w < 0 && errno == EINTR);
+  (void)w;
+  proc_close_fd(&r->done_wr);
+  proc_request_decref(r);
+  return NULL;
+}
+
+/* park_cleanup hook: the task was force-dropped while parked. Kills the child, stops the helper
+ * and drops the task's reference. It must not touch done_rd, which force_drop_task has already
+ * closed, and it allocates nothing. */
+static void proc_cancel_hook(void* arg) {
+  ProcRequest* r = (ProcRequest*)arg;
+  proc_kill(r);
+  proc_signal_stop(r);
+  close(r->stop_wr);
+  proc_request_decref(r);
+}
+
+/* Parks on the completion pipe until it is readable, or until `deadline_us` (a time_now_micros
+ * value; 0 = none). Returns 1 when the pipe is readable, 0 when the park ended on the deadline. */
+static int proc_park(ProcRequest* r, long long deadline_us) {
+  int ready = 1;
+  scheduler_set_park_cleanup(proc_cancel_hook, r);
+  if (deadline_us == 0) {
+    scheduler_park_on_unowned_fd(r->done_rd, SPROUT_POLL_READ);
+  } else {
+    long long left_us = deadline_us - time_now_micros();
+    if (left_us <= 0) ready = 0;
+    else ready = scheduler_park_on_unowned_fd_timeout(r->done_rd, SPROUT_POLL_READ,
+                                                      (left_us + 999) / 1000);
+  }
+  scheduler_set_park_cleanup(NULL, NULL);
+  return ready;
+}
+
+/* The flat record the Sprout side reads: ProcRaw(kind, code, out, err, message). The bytes and the
+ * message are copied. Each GC value is rooted before the next allocation, which may collect. */
+static long long proc_make_raw(long long kind, long long code,
+                               const unsigned char* out, size_t out_len,
+                               const unsigned char* err, size_t err_len,
+                               const char* message) {
+  long long tag = SPROUT_TAG(stdlib$process$ProcRaw);
   long long rooted_out =
-    sprout_ptr_word(bytes_from_chunk_bytes((const unsigned char*)out->data, out->len,
-                                           "proc_run: out of memory"));
-  free(out->data); out->data = NULL;
+    sprout_ptr_word(bytes_from_chunk_bytes(out, out_len, "proc_run: out of memory"));
   SPROUT_GC_PUSH_I64_LOCAL(rooted_out);
   long long rooted_err =
-    sprout_ptr_word(bytes_from_chunk_bytes((const unsigned char*)err->data, err->len,
-                                           "proc_run: out of memory"));
-  free(err->data); err->data = NULL;
+    sprout_ptr_word(bytes_from_chunk_bytes(err, err_len, "proc_run: out of memory"));
   SPROUT_GC_PUSH_I64_LOCAL(rooted_err);
-  long long tag = SPROUT_TAG(stdlib$process$ProcResult);
-  long long obj = sprout_make_registered_obj(3, tag, (long long)exit_code,
-                                             rooted_out, rooted_err,
-                                             "proc_run: out of memory");
-  SPROUT_GC_POP_LOCALS(2);
-  return obj;
+  long long rooted_msg = sprout_str_word(sprout_str_dup(message, "proc_run: out of memory"));
+  SPROUT_GC_PUSH_I64_LOCAL(rooted_msg);
+  long long* payload = (long long*)sprout_alloc_obj_raw(5, "proc_run: out of memory");
+  sprout_obj_write_tag(payload, tag, 5);
+  payload[0] = kind;
+  payload[1] = code;
+  payload[2] = rooted_out;
+  payload[3] = rooted_err;
+  payload[4] = rooted_msg;
+  SPROUT_GC_POP_LOCALS(3);
+  return sprout_ptr_word(payload);
 }
 
-// Convert a Sprout Vec String (i64) to a NULL-terminated char** for execvp.
-// Caller must free() the returned array; the strings themselves are GC-managed.
+static long long proc_not_started(const char* message) {
+  return proc_make_raw(2, 0, NULL, 0, NULL, 0, message);
+}
+
+/* Convert a Sprout Vec String (i64) to a NULL-terminated char** for execv. Caller must free() the
+ * returned array; the strings themselves are GC-managed and must not be used across a park.
+ * NULL on allocation failure. */
 static char** sprout_vec_string_to_argv(long long vec_val) {
   /* vec_val is an OBJ handle; field 0 is the VectorVal* payload handle. */
   VectorVal* vec = (VectorVal*)(uintptr_t)((long long*)(uintptr_t)vec_val)[0];
   long long  n   = vec->len;
   char** argv = (char**)malloc((size_t)(n + 1) * sizeof(char*));
+  if (argv == NULL) return NULL;
   for (long long i = 0; i < n; i++)
     argv[i] = (char*)(uintptr_t)vec->data[i];
   argv[n] = NULL;
   return argv;
 }
 
-// fork+exec with separate stdout/stderr capture via poll().
-// stdin_data=NULL means redirect stdin from /dev/null.
-static long long sprout_proc_run_impl(
-  char**      argv,
-  const char* stdin_data,
-  size_t      stdin_len
-) {
-  if (argv[0] == NULL) {
-    GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
-    sprout_growbuf_append(&e, "proc_run: empty argv", 20);
-    return sprout_make_proc_result(1, &o, &e);
+/* execvp's lookup, done in the parent. glibc marks execvp async-signal-unsafe (it mallocs while it
+ * searches PATH), and a helper thread may hold the malloc lock at the moment of fork, so the child
+ * calls execv on the path found here. A name with a '/' is used as given. An unset PATH falls back
+ * to the system default, as execvp does. Returns a malloc'd path, or NULL if there is none. */
+static char* proc_resolve_path(const char* name) {
+  if (name[0] == '\0') return NULL;
+  if (strchr(name, '/') != NULL) return strdup(name);
+  const char* path = getenv("PATH");
+  char defpath[256];
+  if (path == NULL) {
+    size_t n = confstr(_CS_PATH, defpath, sizeof(defpath));
+    path = (n > 0 && n <= sizeof(defpath)) ? defpath : "/usr/bin:/bin";
   }
-  int out_fds[2] = {-1,-1}, err_fds[2] = {-1,-1}, in_fds[2] = {-1,-1};
+  size_t nlen = strlen(name);
+  const char* p = path;
+  for (;;) {
+    const char* colon = strchr(p, ':');
+    size_t dlen = colon != NULL ? (size_t)(colon - p) : strlen(p);
+    char* cand = (char*)malloc(dlen + 1 + nlen + 1);
+    if (cand == NULL) return NULL;
+    if (dlen == 0) {
+      memcpy(cand, name, nlen + 1);   /* an empty entry is the current directory */
+    } else {
+      memcpy(cand, p, dlen);
+      cand[dlen] = '/';
+      memcpy(cand + dlen + 1, name, nlen + 1);
+    }
+    struct stat st;
+    if (stat(cand, &st) == 0 && S_ISREG(st.st_mode) && access(cand, X_OK) == 0) return cand;
+    free(cand);
+    if (colon == NULL) return NULL;
+    p = colon + 1;
+  }
+}
 
-  if (cloexec_pipe(out_fds) < 0 || cloexec_pipe(err_fds) < 0 ||
-      (stdin_data && cloexec_pipe(in_fds) < 0)) {
-    if (out_fds[0] >= 0) { close(out_fds[0]); close(out_fds[1]); }
-    if (err_fds[0] >= 0) { close(err_fds[0]); close(err_fds[1]); }
-    GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
-    sprout_growbuf_append(&e, "proc_run: pipe() failed", 23);
-    return sprout_make_proc_result(1, &o, &e);
+/* dup2 for the child, which must also clear FD_CLOEXEC when the source already is the target. */
+static void proc_child_dup(int from, int to) {
+  if (from == to) {
+    int fl = fcntl(from, F_GETFD);
+    if (fl >= 0) fcntl(from, F_SETFD, fl & ~FD_CLOEXEC);
+  } else {
+    dup2(from, to);   /* cloexec-gate: fork child */
+  }
+}
+
+/* Runs in the forked child: async-signal-safe calls only (no malloc, no stdio, no locks). On any
+ * failure the errno goes down the close-on-exec error pipe, which exec closes on success. */
+static void proc_child_exec(const char* path, char* const argv[], int in_fd, int out_fd, int err_fd,
+                            int err_pipe_wr, int new_group) {
+  int saved;
+  if (in_fd < 0) {
+    int dev = cloexec_open("/dev/null", O_RDONLY, 0);
+    if (dev < 0) { saved = errno; goto fail; }
+    proc_child_dup(dev, STDIN_FILENO);
+  } else {
+    proc_child_dup(in_fd, STDIN_FILENO);
+  }
+  proc_child_dup(out_fd, STDOUT_FILENO);
+  proc_child_dup(err_fd, STDERR_FILENO);
+  /* The runtime ignores SIGPIPE process-wide, and an ignored signal stays ignored across exec, so
+   * restore the default here or every child would inherit the ignore. */
+  signal(SIGPIPE, SIG_DFL);
+  if (new_group) setpgid(0, 0);
+  execv(path, argv);
+  saved = errno;
+fail:
+  {
+    ssize_t w = write(err_pipe_wr, &saved, sizeof(saved));
+    (void)w;
+  }
+  _exit(127);
+}
+
+static void proc_close_pair(int p[2]) {
+  proc_close_fd(&p[0]);
+  proc_close_fd(&p[1]);
+}
+
+/* A deadline this far past `now` is clamped so the multiplication cannot overflow. */
+static long long proc_deadline(long long timeout_ms) {
+  if (timeout_ms <= 0) return 0;
+  long long now = time_now_micros();
+  if (timeout_ms > (LLONG_MAX - now) / 1000) return LLONG_MAX;
+  return now + timeout_ms * 1000LL;
+}
+
+#define PROC_ARM_SLACK_US 5000   /* a park that ends this close to the deadline did wait for it */
+#define PROC_HELPER_STACK (128 * 1024)
+
+// Sprout extern fn proc_run_raw(argv: Vec String, has_stdin: Int, stdin_data: Bytes, timeout_ms: Int,
+//                               max_output_bytes: Int, new_group: Int) -> ProcRaw !{IO}
+// timeout_ms 0 means no timeout. The Sprout wrapper has already checked every argument.
+long long proc_run_raw(long long argv_val, long long has_stdin, long long stdin_val,
+                       long long timeout_ms, long long max_output_bytes, long long new_group) {
+  char** argv = sprout_vec_string_to_argv(argv_val);
+  if (argv == NULL) return proc_not_started("out of memory");
+  if (argv[0] == NULL) { free(argv); return proc_not_started("argv is empty"); }
+  char* path = proc_resolve_path(argv[0]);
+  if (path == NULL) {
+    char msg[512];
+    snprintf(msg, sizeof(msg), "%.400s: command not found", argv[0]);
+    free(argv);
+    return proc_not_started(msg);
+  }
+
+  /* The payload is copied now: nothing keeps the Sprout object alive while this task is parked. */
+  unsigned char* stdin_copy = NULL;
+  size_t stdin_len = 0;
+  if (has_stdin) {
+    BytesVal* payload = (BytesVal*)(uintptr_t)stdin_val;
+    stdin_len = payload->len;
+    if (stdin_len > 0) {
+      stdin_copy = (unsigned char*)malloc(stdin_len);
+      if (stdin_copy == NULL) { free(argv); free(path); return proc_not_started("out of memory"); }
+      memcpy(stdin_copy, payload->data, stdin_len);
+    }
+  }
+
+  int out_p[2] = {-1, -1}, err_p[2] = {-1, -1}, in_p[2] = {-1, -1};
+  int exec_p[2] = {-1, -1}, done_p[2] = {-1, -1}, stop_p[2] = {-1, -1};
+  if (cloexec_pipe(out_p) < 0 || cloexec_pipe(err_p) < 0 || (has_stdin && cloexec_pipe(in_p) < 0) ||
+      cloexec_pipe(exec_p) < 0 || cloexec_pipe(done_p) < 0 || cloexec_pipe(stop_p) < 0) {
+    int saved = errno;
+    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
+    proc_close_pair(exec_p); proc_close_pair(done_p); proc_close_pair(stop_p);
+    free(argv); free(path); free(stdin_copy);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "could not create pipes: %s", strerror(saved));
+    return proc_not_started(msg);
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    close(out_fds[0]); close(out_fds[1]);
-    close(err_fds[0]); close(err_fds[1]);
-    if (stdin_data) { close(in_fds[0]); close(in_fds[1]); }
-    GrowBuf o = sprout_growbuf_new(), e = sprout_growbuf_new();
-    sprout_growbuf_append(&e, "proc_run: fork() failed", 23);
-    return sprout_make_proc_result(1, &o, &e);
+    int saved = errno;
+    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
+    proc_close_pair(exec_p); proc_close_pair(done_p); proc_close_pair(stop_p);
+    free(argv); free(path); free(stdin_copy);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "fork failed: %s", strerror(saved));
+    return proc_not_started(msg);
+  }
+  if (pid == 0) proc_child_exec(path, argv, in_p[0], out_p[1], err_p[1], exec_p[1], (int)new_group);
+
+  free(argv);
+  free(path);
+  proc_close_fd(&out_p[1]);
+  proc_close_fd(&err_p[1]);
+  proc_close_fd(&in_p[0]);
+  proc_close_fd(&exec_p[1]);
+  if (new_group) setpgid(pid, pid);   /* the child does it too; whichever runs first wins */
+
+  /* exec closes exec_p[1] on success, so this ends at exec or at the child's _exit: short and
+   * bounded, which is why it may block the scheduler thread. */
+  int exec_errno = 0;
+  size_t got = 0;
+  for (;;) {
+    ssize_t nr = read(exec_p[0], (char*)&exec_errno + got, sizeof(exec_errno) - got);
+    if (nr < 0 && errno == EINTR) continue;
+    if (nr <= 0) break;
+    got += (size_t)nr;
+    if (got == sizeof(exec_errno)) break;
+  }
+  proc_close_fd(&exec_p[0]);
+  if (got == sizeof(exec_errno)) {
+    int st;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
+    proc_close_pair(done_p); proc_close_pair(stop_p);
+    free(stdin_copy);
+    return proc_not_started(strerror(exec_errno));
   }
 
-  if (pid == 0) {
-    dup2(out_fds[1], STDOUT_FILENO);   /* cloexec-gate: fork child */
-    dup2(err_fds[1], STDERR_FILENO);   /* cloexec-gate: fork child */
-    close(out_fds[0]); close(out_fds[1]);
-    close(err_fds[0]); close(err_fds[1]);
-    if (stdin_data) {
-      dup2(in_fds[0], STDIN_FILENO);   /* cloexec-gate: fork child */
-      close(in_fds[0]); close(in_fds[1]);
+  ProcRequest* r = (ProcRequest*)calloc(1, sizeof(ProcRequest));
+  int started = 0;
+  if (r != NULL) {
+    pthread_mutex_init(&r->lock, NULL);
+    r->pid = pid;
+    r->new_group = (int)new_group;
+    r->done_rd = done_p[0]; r->done_wr = done_p[1];
+    r->stop_rd = stop_p[0]; r->stop_wr = stop_p[1];
+    r->out_fd = out_p[0];   r->err_fd = err_p[0];
+    r->in_fd = in_p[1];
+    r->stdin_data = stdin_copy;
+    r->stdin_len = stdin_len;
+    r->cap = (size_t)max_output_bytes;
+    atomic_store(&r->refcount, 2);
+    if (r->in_fd >= 0) {
+      if (stdin_len == 0) proc_close_fd(&r->in_fd);   /* EOF right away */
+      else fcntl(r->in_fd, F_SETFL, fcntl(r->in_fd, F_GETFL) | O_NONBLOCK);
+    }
+    pthread_t th;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_attr_setstacksize(&attr, PROC_HELPER_STACK);
+    started = (pthread_create(&th, &attr, proc_helper_thread, r) == 0);
+    pthread_attr_destroy(&attr);
+  }
+  if (!started) {
+    kill(pid, SIGKILL);
+    if (new_group) kill(-pid, SIGKILL);
+    int st;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
+    proc_close_pair(done_p); proc_close_pair(stop_p);
+    free(stdin_copy);
+    if (r != NULL) { pthread_mutex_destroy(&r->lock); free(r); }
+    return proc_not_started("could not start helper thread");
+  }
+
+  long long deadline = proc_deadline(timeout_ms);
+  int timed_out = 0;
+  if (!proc_park(r, deadline)) {
+    if (deadline - time_now_micros() > PROC_ARM_SLACK_US) {
+      /* The deadline is still ahead, so the timer could not be armed. Do not kill. */
+      proc_park(r, 0);
     } else {
-      int dev = cloexec_open("/dev/null", O_RDONLY, 0);
-      if (dev >= 0) { dup2(dev, STDIN_FILENO); close(dev); }   /* cloexec-gate: fork child */
-    }
-    execvp(argv[0], argv);
-    _exit(127);
-  }
-
-  // parent: close write ends of output pipes, read end of stdin pipe
-  close(out_fds[1]); out_fds[1] = -1;
-  close(err_fds[1]); err_fds[1] = -1;
-  if (stdin_data) {
-    close(in_fds[0]); in_fds[0] = -1;
-    // Empty stdin: close the write end immediately so the child sees EOF right
-    // away rather than blocking. Without this, stdin_done is pre-set to 1 but
-    // in_fds[1] stays open, causing a deadlock with any child that reads until
-    // EOF (e.g. cat, wc -c).
-    if (stdin_len == 0) { close(in_fds[1]); in_fds[1] = -1; }
-  }
-
-  GrowBuf out_buf = sprout_growbuf_new(), err_buf = sprout_growbuf_new();
-  char    tmp[4096];
-  size_t  stdin_written = 0;
-  int     stdin_done    = (!stdin_data || stdin_len == 0);
-
-  // Suppress SIGPIPE for the duration of the poll loop so write() returns EPIPE
-  // instead of killing the process if the child closes its stdin end early.
-  // execvp() resets SIG_IGN to SIG_DFL in the child, so subprocess disposition
-  // is unaffected. The suppress is scoped here (not at fork) so early pipe/fork
-  // error returns don't need to restore it.
-  struct sigaction sa_old_pipe;
-  struct sigaction sa_ign_pipe = {0};
-  sa_ign_pipe.sa_handler = SIG_IGN;
-  if (stdin_data) sigaction(SIGPIPE, &sa_ign_pipe, &sa_old_pipe);
-  // poll loop: drain stdout/stderr while optionally writing stdin
-  while (out_fds[0] >= 0 || err_fds[0] >= 0 || !stdin_done) {
-    struct pollfd pfds[3];
-    int n = 0, out_i = -1, err_i = -1, in_i = -1;
-    if (out_fds[0] >= 0) { pfds[n].fd=out_fds[0]; pfds[n].events=POLLIN; out_i=n++; }
-    if (err_fds[0] >= 0) { pfds[n].fd=err_fds[0]; pfds[n].events=POLLIN; err_i=n++; }
-    if (!stdin_done)      { pfds[n].fd=in_fds[1];  pfds[n].events=POLLOUT; in_i=n++; }
-    if (!n) break;
-    if (poll(pfds, (nfds_t)n, -1) < 0) break;
-    if (out_i >= 0 && (pfds[out_i].revents & (POLLIN|POLLHUP|POLLERR))) {
-      ssize_t nr = read(out_fds[0], tmp, sizeof(tmp));
-      if (nr > 0) sprout_growbuf_append(&out_buf, tmp, (size_t)nr);
-      else { close(out_fds[0]); out_fds[0] = -1; }
-    }
-    if (err_i >= 0 && (pfds[err_i].revents & (POLLIN|POLLHUP|POLLERR))) {
-      ssize_t nr = read(err_fds[0], tmp, sizeof(tmp));
-      if (nr > 0) sprout_growbuf_append(&err_buf, tmp, (size_t)nr);
-      else { close(err_fds[0]); err_fds[0] = -1; }
-    }
-    if (in_i >= 0 && (pfds[in_i].revents & (POLLOUT|POLLHUP|POLLERR))) {
-      ssize_t nw = write(in_fds[1], stdin_data + stdin_written,
-                         stdin_len - stdin_written);
-      if (nw > 0) stdin_written += (size_t)nw;
-      else { close(in_fds[1]); in_fds[1] = -1; stdin_done = 1; continue; }
-      if (stdin_written >= stdin_len) {
-        close(in_fds[1]); in_fds[1] = -1; stdin_done = 1;
-      }
+      /* A child that was already reaped finished at the deadline: its result stands. */
+      if (proc_kill(r)) { proc_signal_stop(r); timed_out = 1; }
+      proc_park(r, 0);
     }
   }
-  if (out_fds[0] >= 0) close(out_fds[0]);
-  if (err_fds[0] >= 0) close(err_fds[0]);
-  if (in_fds[1]  >= 0) close(in_fds[1]);
 
-  int wstatus = 0;
-  waitpid(pid, &wstatus, 0);
-  if (stdin_data) sigaction(SIGPIPE, &sa_old_pipe, NULL);
-  int exit_code = WIFEXITED(wstatus) ? WEXITSTATUS(wstatus) : 1;
-  return sprout_make_proc_result(exit_code, &out_buf, &err_buf);
-}
+  char byte;
+  ssize_t nr;
+  do { nr = read(r->done_rd, &byte, 1); } while (nr < 0 && errno == EINTR);
+  (void)atomic_load_explicit(&r->done, memory_order_acquire);
+  close(r->done_rd);
+  close(r->stop_wr);
 
-// Sprout extern fn proc_run_vec(argv: Vec String) -> ProcResult !{IO}
-long long proc_run_vec(long long argv_val) {
-  char** argv = sprout_vec_string_to_argv(argv_val);
-  long long result = sprout_proc_run_impl(argv, NULL, 0);
-  free(argv);
-  return result;
-}
-
-// Sprout extern fn proc_run_stdin_vec(argv: Vec String, stdin_data: String) -> ProcResult !{IO}
-long long proc_run_stdin_vec(long long argv_val, long long stdin_val) {
-  char**      argv       = sprout_vec_string_to_argv(argv_val);
-  const char* stdin_data = (const char*)(uintptr_t)stdin_val;
-  size_t      stdin_len  = strlen(stdin_data);
-  long long   result     = sprout_proc_run_impl(argv, stdin_data, stdin_len);
-  free(argv);
+  long long result;
+  static const unsigned char none = 0;
+  const unsigned char* out = r->out.data != NULL ? r->out.data : &none;
+  const unsigned char* err = r->err.data != NULL ? r->err.data : &none;
+  if (r->failure != NULL)  result = proc_not_started(r->failure);
+  else if (r->overflow)    result = proc_make_raw(4, 0, out, r->out.len, err, r->err.len, "");
+  else if (timed_out)      result = proc_make_raw(3, 0, out, r->out.len, err, r->err.len, "");
+  else result = proc_make_raw(r->term_kind, r->term_code, out, r->out.len, err, r->err.len, "");
+  proc_request_decref(r);
   return result;
 }
 
@@ -8382,9 +8680,10 @@ static int async_resolve(const char* host, const char* port,
     req->write_fd = -1;
     if (req->host != NULL && req->port != NULL &&
         atomic_load(&g_dns_threads_inflight) < SPROUT_DNS_THREAD_CAP) {
-      /* This pipe is the ONE place the runtime parks a green task on something that is not
-       * a socket, and no Windows readiness poller can watch it — neither WSAPoll nor AFD,
-       * which sits beneath Winsock and is equally socket-only. A Windows port replaces it
+      /* This pipe, and the completion pipe of proc_run_raw, are the two places the runtime parks
+       * a green task on something that is not a socket, and no Windows readiness poller can watch
+       * one — neither WSAPoll nor AFD, which sits beneath Winsock and is equally socket-only. A
+       * Windows port replaces each
        * with a self-connected loopback pair (Winsock has no socketpair(); the emulation is
        * bind/listen(1)/getsockname/connect/accept), which is equivalent because the channel
        * carries exactly one completion byte. Kept here so someone editing the DNS path does

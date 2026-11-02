@@ -1,0 +1,81 @@
+import stdlib.task (TimeoutResult, Completed, Expired, with_timeout, task_sleep)
+import stdlib.process (proc_run, proc_stdout_or, proc_error_message)
+import stdlib.fs as fs
+import stdlib.string as string
+import stdlib.terminal as terminal
+
+# Cancelling a task parked in `proc_run` must kill the child and release everything the call held.
+#
+# A cancelled task is dropped without unwinding its C frame, so the call cannot clean up after
+# itself. The runtime registers a park hook that kills the child, tells the helper thread to stop and
+# drops the task's reference, and the scheduler closes the completion pipe. This fixture runs the
+# path two ways.
+#
+#   * Many cancellations under `ulimit -n 64` (the recipe sets it): a descriptor the hook or the
+#     helper failed to close would run the table out part-way, and `proc_run` would then report a
+#     spawn error instead of the deadline winning.
+#   * One cancelled child that records its pid, which must be gone afterwards. `exec sleep 30`
+#     keeps the pid, so the file names the process the kill had to reach.
+let pidfile: String = "/tmp/sprout_proc_cancel_drop.pid"
+
+fn run_once(argv: List String) -> Unit !{IO} =
+  match proc_run(argv) with
+  | Ok _ -> ()
+  | Err e -> terminal.write(`MISMATCH: proc_run: ${proc_error_message(e)}\n`)
+
+fn attempt(argv: List String) -> Bool !{IO} =
+  match with_timeout(50, \_ -> run_once(argv)) with
+  | Expired -> true
+  | Completed _ -> false
+
+fn drive(remaining: Int, expired: Int) -> Int !{IO} =
+  if remaining <= 0 then expired
+  else if attempt(["sleep", "30"]) then drive(remaining - 1, expired + 1)
+  else drive(remaining - 1, expired)
+
+# Alive means ps lists the pid and it is not a zombie.
+fn alive(pid: String) -> Bool !{IO} =
+  match proc_run(["sh", "-c", `ps -o stat= -p ${pid}`]) with
+  | Ok r ->
+      let stat = string.trim(proc_stdout_or(r, ""))
+      in stat != "" && !string.starts_with(stat, "Z")
+  | Err _ -> false
+
+# Up to about two seconds for the kill to take effect.
+fn gone_within(pid: String, tries: Int) -> Bool !{IO} =
+  if tries <= 0 then false
+  else if alive(pid) then
+    do
+      task_sleep(100)
+      gone_within(pid, tries - 1)
+  else true
+
+fn pid_text() -> String !{IO} =
+  match fs.read_text(pidfile) with
+  | Ok text -> string.trim(text)
+  | Err _ -> ""
+
+fn check_child_dead() -> Unit !{IO} =
+  do
+    let pid = pid_text()
+    gone <- gone_within(pid, 20)
+    if pid == "" then terminal.write("MISMATCH: the child wrote no pid\n")
+    else if gone then terminal.write("child-dead\n")
+    else terminal.write(`MISMATCH: child ${pid} still running after the cancel\n`)
+
+# 40 cancellations against a 64-descriptor cap: a per-cancellation leak cannot survive the count.
+let expected: Int = 40
+
+fn report(expired: Int) -> Unit !{IO} =
+  if expired == expected then terminal.write("proc-cancel-ok\n")
+  else terminal.write(`MISMATCH: ${int_to_string(expired)} of ${int_to_string(expected)} cancellations expired\n`)
+
+fn main() -> Unit !{IO} =
+  do
+    expired <- drive(expected, 0)
+    report(expired)
+    let _ = fs.remove(pidfile)
+    cancelled <- attempt(["sh", "-c", `echo $$ > ${pidfile}; exec sleep 30`])
+    if cancelled then check_child_dead() else terminal.write("MISMATCH: the pid-file child was not cancelled\n")
+    let _ = fs.remove(pidfile)
+    terminal.write("done\n")

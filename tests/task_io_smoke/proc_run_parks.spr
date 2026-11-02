@@ -1,0 +1,44 @@
+import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
+import stdlib.process (proc_run, proc_ok, proc_error_message)
+import stdlib.terminal as terminal
+import stdlib.time as time
+
+# While a child runs, `proc_run` must PARK its task, not block the OS thread. The runtime has one
+# scheduler thread, so a call that waits for the child with poll or waitpid freezes every other green
+# task, and every timer, for as long as the child lives.
+#
+# One-sided probe, as in dns_resolve_parks.spr. `ticker` runs first and does ten 50 ms sleeps, about
+# 500 ms when the scheduler is free. `child` then runs `sleep 1`. A blocking call never yields to the
+# pump, so the ticker's first timer is not serviced until the child is gone: its total is then past
+# 1450 ms. A parked call leaves it near 500 ms. The 900 ms line sits far from both.
+fn ticks(remaining: Int) -> Unit !{IO} =
+  if remaining <= 0 then ()
+  else
+    do
+      task_sleep(50)
+      ticks(remaining - 1)
+
+fn report(elapsed_ms: Int) -> Unit !{IO} =
+  if elapsed_ms < 900 then terminal.write("scheduler stayed live\n")
+  else terminal.write(`MISMATCH: scheduler frozen, ten 50 ms sleeps took ${int_to_string(elapsed_ms)} ms\n`)
+
+fn ticker() -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    ticks(10)
+    t1 <- time.now_micros()
+    report((t1 - t0) / 1000)
+
+fn child() -> Unit !{IO} =
+  match proc_run(["sleep", "1"]) with
+  | Ok r -> terminal.write(if proc_ok(r) then "child done\n" else "MISMATCH: child failed\n")
+  | Err e -> terminal.write(`MISMATCH: ${proc_error_message(e)}\n`)
+
+fn run(s: Scope) -> Unit !{IO} =
+  do
+    task_spawn(s, \_ -> ticker())
+    task_spawn(s, \_ -> child())
+
+fn main() -> Unit !{IO} =
+  do
+    with_scope(\s -> run(s))

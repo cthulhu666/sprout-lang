@@ -11,7 +11,7 @@
  * negative, an argument that is not UTF-8, no argv), tcp_read_exact (one byte) and tcp_read_some over a socketpair (data,
  * EOF, invalid handle, bad count, a read error with its strerror text),
  * http_err_cstr and http_ok_response (headers String, binary body with an interior NUL, a headers
- * buffer with an interior NUL, which still stops at it), sprout_make_proc_result (data, empty).
+ * buffer with an interior NUL, which still stops at it), proc_make_raw (data, empty, message).
  * Not covered: the EAGAIN park in tcp_read_exact (needs the scheduler), tcp_read_some's
  * TcpWouldBlock, and the http_err_cstr callers (tls_error_message, parse_http_url, chunk decode).
  */
@@ -23,7 +23,7 @@
 #include "str_check.h"
 
 enum { ERR = 1, OK = 2, JUST = 3, NOTHING = 4, END_OF_STREAM = 5, INVALID_HANDLE = 6,
-       INVALID_ARG = 7, READ_FAILED = 8, HTTP_DECODE = 9, HTTP_RESPONSE = 10, PROC_RESULT = 11 };
+       INVALID_ARG = 7, READ_FAILED = 8, HTTP_DECODE = 9, HTTP_RESPONSE = 10, PROC_RAW = 11 };
 
 static int bytes_is(long long b, const void* data, size_t n) {
   if (b == 0 || sprout_hdr_kind(sprout_hdr_of((void*)(uintptr_t)b)) != SPROUT_HEAP_BYTES) return 0;
@@ -145,22 +145,20 @@ static void run_http(void) {
 }
 
 static void run_proc(void) {
-  GrowBuf out = { malloc(4), 4, 4 };
-  GrowBuf err = { malloc(3), 3, 3 };
-  memcpy(out.data, "o\0t\xfe", 4);
-  memcpy(err.data, "e\0r", 3);
-  long long r = sprout_make_proc_result(7, &out, &err);
-  check(sprout_tag(r) == PROC_RESULT, "sprout_make_proc_result tag");
-  check(sprout_field(r, 0) == 7, "sprout_make_proc_result exit code");
-  check(bytes_is(sprout_field(r, 1), "o\0t\xfe", 4), "sprout_make_proc_result stdout");
-  check(bytes_is(sprout_field(r, 2), "e\0r", 3), "sprout_make_proc_result stderr");
-  check(out.data == NULL && err.data == NULL, "sprout_make_proc_result frees both buffers");
+  long long r = proc_make_raw(1, 9, (const unsigned char*)"o\0t\xfe", 4,
+                              (const unsigned char*)"e\0r", 3, "");
+  check(sprout_tag(r) == PROC_RAW, "proc_make_raw tag");
+  check(sprout_field(r, 0) == 1, "proc_make_raw kind");
+  check(sprout_field(r, 1) == 9, "proc_make_raw code");
+  check(bytes_is(sprout_field(r, 2), "o\0t\xfe", 4), "proc_make_raw stdout");
+  check(bytes_is(sprout_field(r, 3), "e\0r", 3), "proc_make_raw stderr");
+  check(is_str(sprout_field(r, 4), ""), "proc_make_raw empty message");
 
-  GrowBuf none_out = { NULL, 0, 0 };
-  GrowBuf none_err = { NULL, 0, 0 };
-  r = sprout_make_proc_result(0, &none_out, &none_err);
-  check(sprout_field(r, 0) == 0 && bytes_is(sprout_field(r, 1), "", 0) &&
-        bytes_is(sprout_field(r, 2), "", 0), "sprout_make_proc_result empty");
+  r = proc_not_started("fork failed: out of luck");
+  check(sprout_tag(r) == PROC_RAW && sprout_field(r, 0) == 2, "proc_not_started kind");
+  check(bytes_is(sprout_field(r, 2), "", 0) && bytes_is(sprout_field(r, 3), "", 0),
+        "proc_not_started has no output");
+  check(is_str(sprout_field(r, 4), "fork failed: out of luck"), "proc_not_started message");
 }
 
 int main(int argc, char** argv) {
@@ -178,7 +176,7 @@ int main(int argc, char** argv) {
   sprout_register_ctor(READ_FAILED, "stdlib.net.TcpReadFailed", 1, "s");
   sprout_register_ctor(HTTP_DECODE, "stdlib.http.HttpDecode", 1, "s");
   sprout_register_ctor(HTTP_RESPONSE, "stdlib.http.HttpResponse", 3, "isp");
-  sprout_register_ctor(PROC_RESULT, "stdlib.process.ProcResult", 3, "ipp");
+  sprout_register_ctor(PROC_RAW, "stdlib.process.ProcRaw", 5, "iippp");
   run_env_argv();
   run_tcp();
   run_http();
