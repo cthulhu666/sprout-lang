@@ -2,7 +2,7 @@
 # Specialisation gate (docs/specialisation-v0.md §7 M1, §8).
 #
 # Each fixture tests/spec_fixtures/<name>.spr is compiled twice, with the pass on
-# (SPROUT_OPT_ON=spec) and off (SPROUT_OPT_OFF=spec), and both builds are linked and run.
+# (the default) and off (SPROUT_OPT_OFF=spec), and both builds are linked and run.
 # Three things must hold:
 #   - on and off print the same text (stdout + stderr) and exit with the same status;
 #   - both equal the committed golden tests/spec_fixtures/expected/<name>.out;
@@ -41,11 +41,7 @@ else
   CLANG_EXTRA=()
 fi
 
-# <seconds> <command...>: run with a wall-clock limit; exit status 142 means it timed out.
-limited() {
-  local secs="$1"; shift
-  perl -e 'alarm shift; exec @ARGV or exit 127' "$secs" "$@"
-}
+source "$(dirname "${BASH_SOURCE[0]}")/golden_ir_lib.sh"
 
 build() { # <fixture> <on|off> -> $TMP/<fixture>.<mode>{,.ll}; returns 1 on failure, 2 on timeout
   local fx="$1" mode="$2" ll="$TMP/$1.$2.ll" ec
@@ -53,7 +49,7 @@ build() { # <fixture> <on|off> -> $TMP/<fixture>.<mode>{,.ll}; returns 1 on fail
     SPROUT_OPT_OFF=spec limited "$COMPILE_LIMIT" "$STAGE1" --emit-ir stdlib "$FIX/$fx.spr" \
       > "$ll" 2> "$TMP/$fx.$mode.err"
   else
-    SPROUT_OPT_ON=spec SPROUT_TRACE_SPEC=1 limited "$COMPILE_LIMIT" "$STAGE1" --emit-ir stdlib "$FIX/$fx.spr" \
+    SPROUT_TRACE_SPEC=1 limited "$COMPILE_LIMIT" "$STAGE1" --emit-ir stdlib "$FIX/$fx.spr" \
       > "$ll" 2> "$TMP/$fx.$mode.err"
   fi
   ec=$?

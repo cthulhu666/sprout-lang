@@ -12,9 +12,9 @@
 #   0  All included files match their goldens exactly.
 #   1  One or more differences (missing golden, compile regression, or byte diff).
 #
-# Flattened-name scheme (must match ir_golden_snapshot.sh):
+# Flattened-name scheme (flatten_name in golden_ir_lib.sh):
 #   examples/foo.sprout          -> tests/golden/ir/examples__foo.sprout.ll
-#   tests/smoke_shapes/01_x.spr  -> tests/golden/ir/smoke_shapes__01_x.spr.ll
+#   tests/smoke_shapes/01_x.spr  -> tests/golden/ir/tests__smoke_shapes__01_x.spr.ll
 
 set -euo pipefail
 
@@ -22,6 +22,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMPILER="$REPO_ROOT/build/compile_driver_bin_stage1"
 GOLDEN_DIR="$REPO_ROOT/tests/golden/ir"
 OPT="opt"
+
+# shellcheck source=golden_ir_lib.sh
+source "$REPO_ROOT/scripts/golden_ir_lib.sh"
 
 if [[ ! -x "$COMPILER" ]]; then
   echo "ERROR: compiler not found at $COMPILER" >&2
@@ -33,19 +36,6 @@ trap 'rm -rf "$TMPDIR_WORK"' EXIT
 
 differences=0
 checked=0
-
-flatten_name() {
-  local path="$1"
-  local rel
-  rel="${path#"$REPO_ROOT/"}"
-  rel="${rel#./}"
-  local dir_part base_part
-  dir_part="$(dirname "$rel")"
-  base_part="$(basename "$rel")"
-  local flat_dir
-  flat_dir="${dir_part//\//__}"
-  echo "${flat_dir}__${base_part}.ll"
-}
 
 report_diff() {
   local label="$1"

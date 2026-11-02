@@ -124,7 +124,6 @@ declare i64 @split_words(i64)
 @.str.30 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c"\0D\0A\00" }
 @.str.31 = private unnamed_addr constant { i64, [22 x i8] } { i64 344074, [22 x i8] c"\0D\0AConnection: close\0D\0A\00" }
 @.str.32 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"modules work\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_0 }
 @.str.33 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -314,20 +313,6 @@ declare i64 @split_words(i64)
 @pow10_finite_max = private constant i64 308
 @stdlib.bytes.empty_bytes = global i64 zeroinitializer
 @stdlib.bytes.empty_builder = global i64 zeroinitializer
-
-define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$1 = call i64 @print_str(i64 %t$0)
-  ret i64 %t$1
-}
 
 define i64 @stdlib.http.status_code(i64 %p$status) {
 entry:
@@ -1070,37 +1055,24 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_0(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
-  %t$5 = alloca i64
-  store i64 %t$1, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$4 = alloca i64
+  store i64 %t$1, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
   %t$2 = call i64 @stdlib.http.http_ok(i64 %t$1)
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_0, i64 8) to i64
-  %t$8 = alloca i64
-  store i64 %t$2, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$4 = call i64 @print(i64 %t$2, i64 %t$3)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$4
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$3 = call i64 @print$spec_String(i64 %t$2)
+  ret i64 %t$3
 }
 
-define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+define i64 @print$spec_String(i64 %p$value) {
 entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
-  ret i64 %t$0
+  %t$0 = call i64 @__tc_ToString_String_to_string(i64 %p$value)
+  %t$1 = call i64 @print_str(i64 %t$0)
+  ret i64 %t$1
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {

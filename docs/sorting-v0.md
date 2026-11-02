@@ -52,7 +52,7 @@ Apple M3 Pro, `clang -O2`, random Ints in [0, 65536), ns per element.
 
 | option | gain | needs |
 |---|---|---|
-| A. Specialise `where C a` functions at concrete types | ~2× on every generic sort, and on generic code at large | compiler design |
+| ~~A. Specialise `where C a` functions at concrete types~~ | done 2026-11-02: generic `mutvec_sort` on `Int` at the closure copy's speed | `docs/specialisation-v0.md` |
 | ~~B. Inline `MutVec` element access as loads/stores~~ | done 2026-10-18: item 3 | — |
 | C. C sort builtins for primitive vectors (`Int` radix, `Double`) | 50–500× over `vec_sort` | approval for new builtins; a way to reach them (below) |
 | D. Generic C sort calling a Sprout comparator | removes what is left of item 3 (1.2–1.3×), keeps item 1 | a builtin, and C→Sprout callbacks; not checked whether the runtime supports them safely |
@@ -84,6 +84,6 @@ Ship the in-place sort in Sprout now; revisit the rest when a caller needs more.
   and the merge, so equal elements keep their input order.
   `tests/stdlib/test_mutvec_sort.spr` checks it against `sort_by` with repeated keys.
 
-Deferred, each a `BACKLOG.md` entry: specialisation (A), profiling the Sprout-vs-C gap (B) and
-the primitive sort builtins (C). Reworking `vec_sort`'s list sort is done: `stdlib.sort`
+Specialisation (A) has landed. Deferred, each a `BACKLOG.md` entry: profiling the Sprout-vs-C
+gap (B) and the primitive sort builtins (C). Reworking `vec_sort`'s list sort is done: `stdlib.sort`
 replaced it.

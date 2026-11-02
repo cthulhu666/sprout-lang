@@ -197,8 +197,8 @@ needs:
 - Capturing closures at `local` slots allocate; every apply re-checks arity (same section;
   measured small, [static-closures-v0.md](static-closures-v0.md) §7).
 - Tight string-processing loops (same section).
-- Specialise generic functions at concrete types (same section;
-  [specialisation-v0.md](specialisation-v0.md)). It brings generic code down to the
+- ~~Specialise generic functions at concrete types.~~ Done 2026-11-02
+  ([specialisation-v0.md](specialisation-v0.md)). It brings generic code down to the
   Int-specialised level, so it does not move the exit metric; it matters for Phase 3 code written
   against `Ord`/`Eq`.
 

@@ -115,17 +115,15 @@ The last (lowering-discard) motivates the pending IR-level **phase 2b** (BACKLOG
 Bisect a miscompile against the Sprout-level passes without rebuilding the compiler
 (docs/opt-passes-v0.md §M0):
 
-- `SPROUT_OPT_OFF=dle` — comma list of passes to **disable**; unset means all on.
+- `SPROUT_OPT_OFF=dle` — comma list of passes to **disable** (`dle`, `bce`, `spec`, `wsi`); unset means all on.
   Two warnings guard the misdiagnosis this knob invites: an unrecognised name
   ("no such pass") and a name that is declared but not yet implemented — `cse`
   and `licm` today ("not implemented yet … nothing was disabled"). Neither can
   silently "fix" the bug you are chasing.
-- `SPROUT_OPT_ON=spec` — comma list of **default-off** passes to enable (`spec` is the only one:
-  specialisation of constrained functions at concrete instances,
-  [specialisation-v0.md](specialisation-v0.md)). `SPROUT_OPT_OFF` wins when both name a pass; an
-  unknown name warns, naming the variable. A dispatch-verify finding inside a copy names the
+- `SPROUT_OPT_OFF=spec` — turns specialisation of constrained functions at concrete instances
+  ([specialisation-v0.md](specialisation-v0.md)) off. A dispatch-verify finding inside a copy names the
   generic function, the call that made the copy and the function holding that call.
-  `just refresh-seed` and `just verify-bootstrap-fixed-point` refuse to run while either variable is set.
+  `just refresh-seed` and `just verify-bootstrap-fixed-point` refuse to run while it is set.
 - `SPROUT_TRACE_SPEC=1` — with `spec` on, one stderr line per copy made
   (`[spec] copy main.bigger$spec_Int of main.bigger for the call at 12:5`) and per key declined
   (`[spec] declined main.nest at 3:9: evidence grows on its path`), with the reason: the growth
@@ -434,6 +432,22 @@ old `flip-readiness` checked is now covered by `just verify-bootstrap-fixed-poin
    scripts/memwatch.sh 4096 1 -- just refresh-seed
    git add bootstrap/compile_driver.ll
    ```
+
+## Recovering from a miscompiling pass
+
+`SPROUT_OPT_OFF=<pass>` changes what a compiler emits. It cannot repair a compiler the pass
+already miscompiled, and reverting the seed commit lasts only until master reseeds. Rebuild from
+the last good seed instead:
+
+1. `git show <good-commit>:bootstrap/compile_driver.ll > /tmp/good.ll`, then
+   `clang /tmp/good.ll runtime/*.c -O2 -o build/compile_driver_bin_stage1` (on macOS add
+   `-framework Security -framework CoreFoundation`). The binary is newer than the seed and the
+   runtime, so `bootstrap-from-seed` keeps it.
+2. Make `opt_config.enabled` return `false` for the pass.
+3. `just refresh-seed`, then fix the pass and turn it back on.
+
+This needs the good seed to parse today's compiler source. After a parser change since then, use
+the 2-step protocol above with the good seed as its step 1.
 
 ## Builtin-Removal Bridge Protocol
 
