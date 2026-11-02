@@ -182,7 +182,9 @@ It rebases onto `origin/master`, reseeds each replayed commit that touches `stdl
 the seed (a commit that carries a seed needs one even when only `stdlib/prelude.sprout` changed),
 resolves a conflict confined to the seed by reseeding, and stops on any other conflict. It then
 checks that every commit touching `stdlib/compiler/` also touches the seed, and prints the
-`--force-with-lease` push command. It never pushes. Logs are under the git dir (`pr-rebase/`).
+`--force-with-lease` push command, leased on `origin/<branch>` when it exists. After a stop, fix
+the cause and run `just pr-rebase` again: it resumes its own rebase and runs those checks. It never
+pushes. Logs are under the git dir (`pr-rebase/`).
 
 ## Review gate — `scripts/review_gate.py`
 
