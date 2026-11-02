@@ -1,0 +1,34 @@
+module main
+
+# A method used as a value on existentials unpacked by sub-patterns, in a function
+# and in an instance method: each occurrence takes its own packed slot.
+
+class Step t
+  fn bump(x: t) -> t
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+
+instance Step String
+  fn bump(x: String) -> String = x ++ "!"
+
+type Pack = | exists a. Pack a where Step a, ToString a
+
+type Two = Two Pack Pack
+
+fn app(f: a -> a, v: a) -> a = f(v)
+
+fn in_tuple(t: (Pack, Pack)) -> String =
+  match t with
+  | (Pack x, Pack y) -> to_string(app(bump, x)) ++ "|" ++ to_string(app(bump, y))
+
+instance ToString Two
+  fn to_string(t: Two) -> String =
+    match t with
+    | Two (Pack x) (Pack y) -> to_string(app(bump, x)) ++ "|" ++ to_string(app(bump, y))
+
+fn main() -> Unit !{IO} = do
+  print(in_tuple((Pack(1), Pack("q"))))
+  print(in_tuple((Pack("q"), Pack(1))))
+  print(to_string(Two (Pack(1), Pack("q"))))
+  print(to_string(Two (Pack("q"), Pack(1))))
