@@ -797,6 +797,11 @@ test-shell-hooks:
 test-review-ledger:
   bash scripts/test_review_ledger.sh
 
+# Exercise `pr-rebase` against throwaway repos and stub reseed/check commands.
+[group('test')]
+test-pr-rebase:
+  bash scripts/test_pr_rebase.sh
+
 # Validate and test the `/prs` pane plugin. Local only: CI has no `claude` CLI.
 [group('test')]
 test-pr-tracker:
@@ -1347,6 +1352,11 @@ verify-bootstrap-fixed-point: bootstrap-from-seed
     echo "    Run: just refresh-seed   (then stage the updated bootstrap/compile_driver.ll)" >&2
     exit 1
   fi
+
+# Rebase onto origin/master, reseeding each compiler commit; never pushes (scripts/pr_rebase.sh).
+[group('bootstrap')]
+pr-rebase:
+  bash scripts/pr_rebase.sh
 
 # Instant seed-freshness check — no compilation required.
 # Reads the '; seed-fingerprint: <hash>' comment embedded in line 1 of
@@ -4479,6 +4489,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "review-gate|test-review-gate"
     "shell-hooks|test-shell-hooks"
     "review-ledger|test-review-ledger"
+    "pr-rebase|test-pr-rebase"
     "error-line-marker|test-error-line-marker"
     "review-script|test-review-script"
     "setup-dev|test-setup-dev"
