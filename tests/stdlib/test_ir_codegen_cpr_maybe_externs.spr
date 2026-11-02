@@ -7,6 +7,7 @@ import stdlib.compiler.ast_to_ir as ast_to_ir
 import stdlib.compiler.ir_rooting as ir_rooting
 import stdlib.compiler.ir_lowering as ir_lowering
 import stdlib.compiler.typed_ast as typed_ast
+import stdlib.string as string
 
 # Pins the MEMBERSHIP of ast_to_ir.unboxed_maybe_extern_name — the Tier-1 CPR
 # allow-list that decides whether `match <extern>(..)` emits IRCallUnboxed2 (a
@@ -109,6 +110,25 @@ fn translated(out: String) -> Bool =
 fn has(out: String, needle: String) -> Bool =
   str_find(out, needle) != -1
 
+fn count(out: String, needle: String) -> Int =
+  list_length(string.split(out, needle)) - 1
+
+# `a` is live after the call (both arms return it), so a callee that can collect roots it. The
+# non-collecting `_unboxed` read pushes no root, so the whole module has no `call` to the push.
+fn probe_live_string(name: String) -> String =
+  maybe_decl
+    ++ "extern fn " ++ name ++ "(a: String, i: Int) -> Maybe Int\n\n"
+    ++ "fn probe(a: String, i: Int) -> String =\n"
+    ++ "  match " ++ name ++ "(a, i) with\n"
+    ++ "  | Just m -> if m > 0 then a else a\n"
+    ++ "  | Nothing -> a\n"
+
+# -1 when the fixture does not translate, so neither assertion on the count passes vacuously.
+fn root_pushes(src: String) -> Int !{IO} =
+  do
+    out <- translate_or_msg(src)
+    if translated(out) then count(out, "call i64 @sprout_gc_push_i64_root") else -1
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -131,13 +151,13 @@ fn main() -> Unit !{IO} =
     assert_false(state, "term_read_line_unboxed appears nowhere (call or declare)",
                  has(trl, "term_read_line_unboxed"))
 
-    # --- SURVIVORS: all six keep the peephole. -----------------------------
+    # --- SURVIVORS: all seven keep the peephole. ---------------------------
     # These are the hot ones — across the 60-file golden corpus str_char_at has
     # 165 call sites, map_nth_key/map_nth_value 147 each, vector_get 98 — and none
     # can trigger a collection, which is what lets the runtime block assert its
     # strong invariant once the two allocating variants above go.
     #
-    # All six are asserted, deliberately. A first draft covered only four; the
+    # All seven are asserted, deliberately. A first draft covered only four; the
     # header comment and two documents nevertheless described this file as pinning
     # "the survivors", so dropping bytes_get from the allow-list would have
     # left the suite green while three separate places claimed otherwise.
@@ -169,6 +189,20 @@ fn main() -> Unit !{IO} =
     assert_true(state, "bytes_get keeps CPR (non-allocating read)",
                 has(bget, "call i128 @bytes_get_unboxed"))
 
+    sbyte <- translate_or_msg(probe_two_arg("str_byte_at"))
+    assert_true(state, "str_byte_at fixture translates", translated(sbyte))
+    assert_true(state, "str_byte_at keeps CPR (non-allocating read)",
+                has(sbyte, "call i128 @str_byte_at_unboxed"))
+    assert_false(state, "str_byte_at match makes no boxed call",
+                 has(sbyte, "call i64 @str_byte_at("))
+
+    # The root check: `a` is live across the call. An unlisted extern in the same shape roots it
+    # (so the count is a real signal); `str_byte_at_unboxed` is not a GC trigger and roots nothing.
+    live_listed <- root_pushes(probe_live_string("str_byte_at"))
+    live_unlisted <- root_pushes(probe_live_string("some_other_extern"))
+    assert_true(state, "an unlisted extern roots the live String", live_unlisted > 0)
+    assert_true(state, "no GC root pushed around str_byte_at_unboxed", live_listed == 0)
+
     # argv_get and env_get left the list when stdlib.argv and stdlib.env moved to
     # argv_get_bytes and env_get_bytes (a Bytes copy, so no interned entry to hand back); the
     # names now lower like any other extern.
@@ -186,7 +220,7 @@ fn main() -> Unit !{IO} =
     # allow-list — a drift that surfaces at link time, which is the exact failure
     # the "Must stay in sync" comment at ir_lowering.sprout:520 warns about.
     # ir_lowering emits the whole block unconditionally, so ONE fixture's IR
-    # carries all six declares.
+    # carries all seven declares.
     assert_true(state, "declare: vector_get_unboxed",
                 has(eget, "declare i128 @vector_get_unboxed(i64, i64)"))
     assert_true(state, "declare: map_get_unboxed",
@@ -199,6 +233,8 @@ fn main() -> Unit !{IO} =
                 has(eget, "declare i128 @bytes_get_unboxed(i64, i64)"))
     assert_true(state, "declare: str_char_at_unboxed",
                 has(eget, "declare i128 @str_char_at_unboxed(i64, i64)"))
+    assert_true(state, "declare: str_byte_at_unboxed",
+                has(eget, "declare i128 @str_byte_at_unboxed(i64, i64)"))
     assert_false(state, "declare: argv_get_unboxed is gone",
                  has(eget, "declare i128 @argv_get_unboxed"))
     assert_false(state, "declare: env_get_unboxed is gone",

@@ -4,8 +4,8 @@ import stdlib.terminal as terminal
 import stdlib.time as time
 import testsupport.cost (grow)
 
-# Pins the DEFINING property of the two byte-offset string builtins: their cost
-# must not depend on the length of the string being scanned.
+# Pins the DEFINING property of the byte-offset string builtins (`str_byte_at` joined the
+# original two later): their cost must not depend on the length of the string being scanned.
 #
 # `str_slice_bytes` and `str_starts_with_at_byte` exist for exactly one reason —
 # to let a byte-cursor scanner (the lexer via `source.match_string`, the JSON
@@ -52,6 +52,11 @@ fn probe_slice(s: String, n: Int, acc: Int) -> Int =
   if n <= 0 then acc
   else probe_slice(s, n - 1, acc + string.byte_length(str_slice_bytes(s, 0, 2)))
 
+# Reads the last byte, so an O(offset) or O(length) read pays for the whole string.
+fn probe_byte_at(s: String, last: Int, n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else probe_byte_at(s, last, n - 1, acc + string.byte_at_or(s, last, 0))
+
 # Minimum elapsed microseconds over `rounds` runs. A probe that returns the wrong
 # total is folded into the timing as a large penalty, so a probe that silently
 # stopped doing work fails the assertion instead of reporting a fast time.
@@ -74,6 +79,16 @@ fn min_slice_us(s: String, remaining: Int, best: Int) -> Int !{IO} =
       t1 <- time.now_micros()
       let elapsed = if total == iterations * 2 then t1 - t0 else t1 - t0 + 1000000
       min_slice_us(s, remaining - 1, if elapsed < best then elapsed else best)
+
+fn min_byte_at_us(s: String, last: Int, remaining: Int, best: Int) -> Int !{IO} =
+  if remaining <= 0 then best
+  else
+    do
+      t0 <- time.now_micros()
+      let total = probe_byte_at(s, last, iterations, 0)
+      t1 <- time.now_micros()
+      let elapsed = if total == iterations * 98 then t1 - t0 else t1 - t0 + 1000000
+      min_byte_at_us(s, last, remaining - 1, if elapsed < best then elapsed else best)
 
 fn budget_us(baseline: Int) -> Int =
   (if baseline < baseline_floor_us then baseline_floor_us else baseline) * allowed_ratio
@@ -108,6 +123,14 @@ fn main() -> Unit !{IO} =
     _ <- report("str_slice_bytes", short_slice, long_slice)
     assert_true(state, "str_slice_bytes cost is independent of string length",
       long_slice <= budget_us(short_slice))
+
+    # `str_byte_at` reads the LAST byte ('b' = 98) of each string, so a read that scans from the
+    # start, or measures the whole string, costs 1024x more on the long one.
+    short_at <- min_byte_at_us(short_s, 1023, rounds, 1000000000)
+    long_at <- min_byte_at_us(long_s, 1048575, rounds, 1000000000)
+    _ <- report("str_byte_at", short_at, long_at)
+    assert_true(state, "str_byte_at cost is independent of string length",
+      long_at <= budget_us(short_at))
 
     # --- Bounds-branch correctness for str_starts_with_at_byte ---
     # The offset bounds check is the code the cost fix rewrites, so pin every

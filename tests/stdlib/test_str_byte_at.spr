@@ -1,0 +1,39 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+# str_byte_at: O(1) bounds-checked byte read (docs/string-byte-read-v0.md). `string.byte_at_or`
+# matches on it, so it takes the unboxed path; `with_default` and a list take the boxed one.
+fn boxed_or(s: String, i: Int, fallback: Int) -> Int =
+  maybe_with_default(fallback, str_byte_at(s, i))
+
+# The Maybe is stored in a list, so the call is the boxed `str_byte_at`.
+fn stored_or(s: String, i: Int, fallback: Int) -> Int =
+  match [str_byte_at(s, i)] with
+  | [Just b] -> b
+  | _ -> fallback
+
+fn agrees_with_bytes(s: String, i: Int) -> Bool =
+  string.byte_at_or(s, i, -1) == bytes.get_or(bytes.from_string(s), i, -1)
+
+fn main() -> Unit !{IO} =
+  run_suite("str_byte_at", [
+    check_eq("first", string.byte_at_or("abc", 0, -1), 97),
+    check_eq("last", string.byte_at_or("abc", 2, -1), 99),
+    check_eq("negative", string.byte_at_or("abc", -1, -1), -1),
+    check_eq("at length", string.byte_at_or("abc", 3, -1), -1),
+    check_eq("huge offset", string.byte_at_or("abc", 9223372036854775807, -1), -1),
+    check_eq("empty", string.byte_at_or("", 0, -1), -1),
+    check_eq("e-acute first byte", string.byte_at_or("é", 0, -1), 195),
+    check_eq("e-acute second byte", string.byte_at_or("é", 1, -1), 169),
+    check_eq("e-acute past end", string.byte_at_or("é", 2, -1), -1),
+    check_eq("fallback returned as given", string.byte_at_or("abc", -1, 7), 7),
+    check_eq("boxed in range", boxed_or("abc", 1, -1), 98),
+    check_eq("boxed out of range", boxed_or("abc", 3, -1), -1),
+    check_eq("boxed high byte", boxed_or("é", 0, -1), 195),
+    check_eq("stored in range", stored_or("é", 1, -1), 169),
+    check_eq("stored out of range", stored_or("é", 2, -1), -1),
+    check_eq("agrees with bytes_get, ASCII", agrees_with_bytes("hello", 4), true),
+    check_eq("agrees with bytes_get, multibyte", agrees_with_bytes("Cześć", 3), true),
+    check_eq("agrees with bytes_get, past end", agrees_with_bytes("abc", 3), true)
+  ])

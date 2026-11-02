@@ -79,6 +79,7 @@ fn is_nonallocating_read(fname: String) -> Bool =
 #     map_nth_value_unboxed, bytes_get_unboxed — return data[i] / node->key /
 #     node->value directly.
 #   str_char_at_unboxed — returns the decoded codepoint (immediate i64).
+#   str_byte_at_unboxed — returns one byte of the String's data (immediate i64).
 #
 # Line numbers deliberately omitted.  This block used to cite one per name
 # (4342-4437); every one had drifted ~1100 lines out of date by 2026-08-19 while
@@ -99,6 +100,7 @@ fn is_nonallocating_unboxed_read(fname: String) -> Bool =
   || fname == "map_nth_value_unboxed"
   || fname == "bytes_get_unboxed"
   || fname == "str_char_at_unboxed"
+  || fname == "str_byte_at_unboxed"
 
 # Whether `op` can trigger a collection by ITSELF, not counting a direct call:
 # a call is decided by its callee (op_raw_callee, op_triggers_gc_summary), so

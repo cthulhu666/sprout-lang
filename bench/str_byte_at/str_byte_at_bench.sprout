@@ -1,0 +1,204 @@
+module main
+
+# `str_byte_at` against the ways to read a String's bytes without it, one pair of rows per case.
+# Baseline and candidate are separate rows of the same binary. Every result feeds the checksum
+# (`out=`), and each pair must print the same one. docs/string-byte-read-v0.md §6.
+#
+#   probe_num / byte_num              classify every byte of 64 KB: probes against integer compares
+#   copy_sum / byte_sum               sum every byte of 64 KB: bytes_from_utf8 + bytes_get against
+#                                     str_byte_at (the copy is inside the timed region)
+#   c_strlen / byte_strlen            codepoint count of 64 KB: C str_len against a Sprout loop
+#   probe_parse_int / byte_parse_int  the prelude parse_int against a copy that reads via str_byte_at
+#
+# usage: str_byte_at_bench <row> <iterations>
+# Scan rows report ns per byte, parse_int rows ns per call.
+
+import stdlib.time as time
+import stdlib.argv as argv
+import stdlib.bytes as bytes
+import stdlib.string as string
+
+fn rem(a: Int, m: Int) -> Int =
+  a - (a / m) * m
+
+fn frac3(r: Int) -> String =
+  if r < 10 then `00${r}` else if r < 100 then `0${r}` else `${r}`
+
+fn report(row: String, iters: Int, out: Int, units: Int, t0: Int, t1: Int) -> Unit !{IO} =
+  let ns_x1000 = (t1 - t0) * 1000000 / units
+  in print(`${row} iters=${iters} out=${out} ns_per_call=${ns_x1000 / 1000}.${frac3(rem(ns_x1000, 1000))}`)
+
+# --- inputs ---------------------------------------------------------------------------------------
+
+# About 64 KB. The num inputs hold digits, signs, "." and "e"; the mixed ones 2-, 3- and 4-byte
+# codepoints. Each kind has two inputs that differ, and a loop alternates them, so no scan is
+# loop-invariant.
+fn fill_64k(pattern: String) -> String =
+  string.repeat(pattern, 65536 / str_byte_len(pattern) + 1)
+
+fn len_at(a: String, b: String, rep: Int) -> Int =
+  str_byte_len(pick(a, b, rep))
+
+fn pick(a: String, b: String, rep: Int) -> String =
+  if rem(rep, 2) == 0 then a else b
+
+# --- json.is_num_byte_at, verbatim from stdlib/json.sprout ----------------------------------------
+
+fn is_digit_at(s: String, i: Int) -> Bool =
+  str_starts_with_at_byte(s, i, "0") || str_starts_with_at_byte(s, i, "1")
+    || str_starts_with_at_byte(s, i, "2") || str_starts_with_at_byte(s, i, "3")
+    || str_starts_with_at_byte(s, i, "4") || str_starts_with_at_byte(s, i, "5")
+    || str_starts_with_at_byte(s, i, "6") || str_starts_with_at_byte(s, i, "7")
+    || str_starts_with_at_byte(s, i, "8") || str_starts_with_at_byte(s, i, "9")
+
+fn is_num_byte_at(s: String, i: Int) -> Bool =
+  is_digit_at(s, i)
+    || str_starts_with_at_byte(s, i, "-") || str_starts_with_at_byte(s, i, "+")
+    || str_starts_with_at_byte(s, i, ".") || str_starts_with_at_byte(s, i, "e")
+    || str_starts_with_at_byte(s, i, "E")
+
+fn is_num_byte(b: Int) -> Bool =
+  (b >= 48 && b <= 57) || b == 45 || b == 43 || b == 46 || b == 101 || b == 69
+
+fn byte_is_num_at(s: String, i: Int) -> Bool =
+  match str_byte_at(s, i) with
+  | Just b -> is_num_byte(b)
+  | Nothing -> false
+
+fn probe_scan(s: String, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else probe_scan(s, i + 1, n, if is_num_byte_at(s, i) then acc + 1 else acc)
+
+fn byte_scan(s: String, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else byte_scan(s, i + 1, n, if byte_is_num_at(s, i) then acc + 1 else acc)
+
+# Each scan starts at a different offset, so repeats are not identical calls.
+fn probe_num_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else probe_num_loop(a, b, rep + 1, reps, probe_scan(pick(a, b, rep), rem(rep, 7), len_at(a, b, rep), acc))
+
+fn byte_num_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else byte_num_loop(a, b, rep + 1, reps, byte_scan(pick(a, b, rep), rem(rep, 7), len_at(a, b, rep), acc))
+
+# --- byte sum -------------------------------------------------------------------------------------
+
+fn copy_sum_scan(v: Bytes, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else
+    match bytes.get(v, i) with
+    | Just b -> copy_sum_scan(v, i + 1, n, acc + b)
+    | Nothing -> acc
+
+fn str_sum_scan(s: String, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else
+    match str_byte_at(s, i) with
+    | Just b -> str_sum_scan(s, i + 1, n, acc + b)
+    | Nothing -> acc
+
+fn copy_sum_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else
+    let s = pick(a, b, rep)
+    in copy_sum_loop(a, b, rep + 1, reps, copy_sum_scan(bytes.from_string(s), 0, str_byte_len(s), acc))
+
+fn byte_sum_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else byte_sum_loop(a, b, rep + 1, reps, str_sum_scan(pick(a, b, rep), 0, len_at(a, b, rep), acc))
+
+# --- codepoint count ------------------------------------------------------------------------------
+
+fn byte_len_scan(s: String, i: Int, n: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else
+    match str_byte_at(s, i) with
+    | Just b -> byte_len_scan(s, i + 1, n, if b < 128 || b >= 192 then acc + 1 else acc)
+    | Nothing -> acc
+
+fn c_strlen_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else c_strlen_loop(a, b, rep + 1, reps, acc + str_len(pick(a, b, rep)))
+
+fn byte_strlen_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else byte_strlen_loop(a, b, rep + 1, reps, byte_len_scan(pick(a, b, rep), 0, len_at(a, b, rep), acc))
+
+# --- parse_int ------------------------------------------------------------------------------------
+
+let inputs = ["123456789", "-42", "7", "99999999999999999999", "12a", "", "-", "2147483647"]
+
+# Prelude parse_int, with the digit read and the end test going through str_byte_at.
+fn bmin_int() -> Int = 0 - 9223372036854775807 - 1
+
+fn bmin_div10() -> Int = bmin_int() / 10
+
+fn byte_accum(s: String, i: Int, acc: Int, seen: Bool) -> Maybe Int =
+  match str_byte_at(s, i) with
+  | Nothing -> if seen then Just(acc) else Nothing
+  | Just b ->
+      if b < 48 || b > 57 then Nothing
+      else if acc < bmin_div10() then Nothing
+      else if (acc == bmin_div10()) && (b - 48 > 8) then Nothing
+      else byte_accum(s, i + 1, (acc * 10) - (b - 48), true)
+
+fn byte_positive(m: Maybe Int) -> Maybe Int =
+  match m with
+  | Nothing -> Nothing
+  | Just n -> if n == bmin_int() then Nothing else Just(0 - n)
+
+fn byte_parse_int(s: String) -> Maybe Int =
+  match str_byte_at(s, 0) with
+  | Just 45 -> byte_accum(s, 1, 0, false)
+  | _ -> byte_positive(byte_accum(s, 0, 0, false))
+
+let input_vec = vec_from_list(inputs)
+
+fn input_at(k: Int) -> String =
+  vec_get_or(k, "", input_vec)
+
+fn fold_result(m: Maybe Int) -> Int =
+  match m with
+  | Just n -> n
+  | Nothing -> 0 - 1
+
+fn probe_parse_loop(i: Int, k: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else probe_parse_loop(i - 1, rem(k + 1, 8), acc + fold_result(parse_int(input_at(k))))
+
+fn byte_parse_loop(i: Int, k: Int, acc: Int) -> Int =
+  if i <= 0 then acc
+  else byte_parse_loop(i - 1, rem(k + 1, 8), acc + fold_result(byte_parse_int(input_at(k))))
+
+# --- driver ---------------------------------------------------------------------------------------
+
+fn timed(row: String, iters: Int, units: Int, f: Unit -> Int) -> Unit !{IO} =
+  do
+    t0 <- time.now_micros()
+    let out = f(())
+    t1 <- time.now_micros()
+    report(row, iters, out, units, t0, t1)
+
+let usage = "usage: str_byte_at_bench <probe_num|byte_num|copy_sum|byte_sum|c_strlen|byte_strlen|probe_parse_int|byte_parse_int> <iterations>"
+
+fn main() -> Unit !{IO} =
+  do
+    let Ok([row, iters_text]) = argv.all() else print(usage)
+    let Just iters = parse_int(iters_text) else print(usage)
+    let na = fill_64k("12.5e-3,abc 7+x9 -0.5E4;q")
+    let nb = fill_64k("z 0123456789 e+.- hello 42, ")
+    let ma = fill_64k("aé€😀x")
+    let mb = fill_64k("héllo wörld 日本語 🙂 ")
+    let avg_n = (str_byte_len(na) + str_byte_len(nb)) / 2
+    let avg_m = (str_byte_len(ma) + str_byte_len(mb)) / 2
+    match row with
+    | "probe_num" -> timed(row, iters, avg_n * iters, \_ -> probe_num_loop(na, nb, 0, iters, 0))
+    | "byte_num" -> timed(row, iters, avg_n * iters, \_ -> byte_num_loop(na, nb, 0, iters, 0))
+    | "copy_sum" -> timed(row, iters, avg_n * iters, \_ -> copy_sum_loop(na, nb, 0, iters, 0))
+    | "byte_sum" -> timed(row, iters, avg_n * iters, \_ -> byte_sum_loop(na, nb, 0, iters, 0))
+    | "c_strlen" -> timed(row, iters, avg_m * iters, \_ -> c_strlen_loop(ma, mb, 0, iters, 0))
+    | "byte_strlen" -> timed(row, iters, avg_m * iters, \_ -> byte_strlen_loop(ma, mb, 0, iters, 0))
+    | "probe_parse_int" -> timed(row, iters, iters, \_ -> probe_parse_loop(iters, 0, 0))
+    | "byte_parse_int" -> timed(row, iters, iters, \_ -> byte_parse_loop(iters, 0, 0))
+    | _ -> print(usage)

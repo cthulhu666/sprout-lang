@@ -6840,6 +6840,24 @@ SproutUnboxed2 bytes_get_unboxed(long long bytes_h, long long index) {
   return sprout_unboxed2(SPROUT_TAG(Just), (int64_t)value->data[index]);
 }
 
+/* A null String, or one with no CSTR header. Never returns, so a loop of reads holds no call
+ * that could write memory, and LLVM can hoist the header check out of it. */
+__attribute__((noreturn, noinline, cold)) static void str_byte_at_fail(long long s_val) {
+  if (s_val == 0) sprout_fail("str_byte_at: null input");
+  sprout_fail("str_byte_at: String has no header");
+}
+
+/* Byte `i` of a String in O(1). The length is the header's aux, never strlen, so HDRCHECK adds
+ * nothing here. The unsigned cast keeps the byte 0..255 where `char` is signed. No allocation. */
+SproutUnboxed2 str_byte_at_unboxed(long long s_val, long long i) {
+  const char* s = (const char*)(uintptr_t)s_val;
+  if (s == NULL) str_byte_at_fail(s_val);
+  uint64_t h = sprout_hdr_of((void*)s);
+  if (sprout_hdr_kind(h) != SPROUT_HEAP_CSTR) str_byte_at_fail(s_val);
+  if (i < 0 || (unsigned long long)i >= sprout_hdr_aux(h)) return sprout_unboxed2(SPROUT_TAG(Nothing), 0);
+  return sprout_unboxed2(SPROUT_TAG(Just), (int64_t)(unsigned char)s[i]);
+}
+
 /* ── end CPR unboxed extern variants ────────────────────────────────────────*/
 
 /* str_char_at_byte / str_char_width_at_byte removed: replaced by the safe,
@@ -9663,6 +9681,13 @@ long long bytes_get(long long bytes_h, long long index) {
     return sprout_make0(SPROUT_TAG(Nothing));
   }
   return sprout_make1(SPROUT_TAG(Just), (long long)value->data[index]);
+}
+
+/* The boxed form of str_byte_at_unboxed: tag in the low word, byte in the high. */
+long long str_byte_at(long long s_val, long long i) {
+  SproutUnboxed2 r = str_byte_at_unboxed(s_val, i);
+  if ((int64_t)(uint64_t)r != SPROUT_TAG(Just)) return sprout_make0(SPROUT_TAG(Nothing));
+  return sprout_make1(SPROUT_TAG(Just), (long long)(uint64_t)(r >> 64));
 }
 
 long long bytes_slice(long long bytes_h, long long start, long long count) {

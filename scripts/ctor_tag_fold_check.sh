@@ -60,7 +60,7 @@ FOLD_BUILDERS="$FOLD_BUILDERS" perl -ne '
   if ($fixture) {
     print "a|$fn|$call\n" if $call ne "";
     print "a|$fn|$cache\n" if defined $cache;
-    print "a|$fn|VACUOUS:$1\n" if /call\b.*\@(vector_get_unboxed|bytes_get_unboxed)\b/;
+    print "a|$fn|VACUOUS:$1\n" if /call\b.*\@(vector_get_unboxed|bytes_get_unboxed|str_byte_at_unboxed)\b/;
   }
   print "b|$fn|find_ctor_tag_by_name\n"
     if $fn !~ /^sprout_ctor_tag_lookup(\.|$)/ && /call\b.*\@find_ctor_tag_by_name\b/;

@@ -2537,6 +2537,7 @@ fn fresh_body_label(branch_idx: Int, base_idx: Int) -> String =
 fn unboxed_maybe_extern_name(base: String) -> Maybe String =
   if base == "vector_get" || base == "map_get" || base == "map_nth_key"
      || base == "map_nth_value" || base == "bytes_get" || base == "str_char_at"
+     || base == "str_byte_at"
   then Just(base ++ "_unboxed")
   else Nothing
 

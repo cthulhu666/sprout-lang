@@ -116,10 +116,10 @@ Notes:
 **Blocked on a missing primitive.** Each is the only kind of new builtin this stage may propose
 (AGENTS.md §Builtin vs Stdlib), ranked by what it unlocks:
 
-1. An O(1) bounds-checked byte read on a `String`. Today every Sprout byte scan copies the String
-   into `Bytes` first (`str_char_at_byte` was removed). Unlocks `str_len`, `str_char_at` and its
-   twin, `str_slice` and `str_find`, all called from the compiler, and makes the scans above
-   copy-free.
+1. ~~An O(1) bounds-checked byte read on a `String`.~~ Landed as `str_byte_at`
+   ([string-byte-read-v0.md](string-byte-read-v0.md)). The moves of `str_len`, `str_char_at` and
+   its twin, `str_slice` and `str_find` stay open: they wait on inline byte reads (BACKLOG P2,
+   "Inline `Bytes` and `String` byte reads").
 2. `unsafe_pure` for the prelude: a compiler change (`source.unsafe_pure_users` lists only
    `stdlib.linvec`), not a builtin. Unlocks `vector_set`, `vector_append`, `vector_concat`,
    `vector_from_list`, `vector_get` and its twin.

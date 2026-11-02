@@ -52,6 +52,13 @@ export fn length(raw: String) -> Int =
 export fn byte_length(raw: String) -> Int =
   str_byte_len(raw)
 
+# O(1), allocation-free: byte `i` of `s` (0-255), or `fallback` when `i` is out of range. The
+# `match` takes the unboxed read, so no `Maybe` is built. A negative `fallback` never equals a byte.
+export fn byte_at_or(s: String, i: Int, fallback: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just b -> b
+  | Nothing -> fallback
+
 # O(start + count): the builtin walks the UTF-8 sequence to `start`, then `count` further —
 # independent of `|raw|`, so slicing a prefix of a huge string is cheap.
 # A negative `start` or `count` clamps to empty rather than failing.

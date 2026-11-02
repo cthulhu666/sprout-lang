@@ -4,7 +4,7 @@ import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
 import stdlib.task (Scope, with_scope)
 
 # Fixture for scripts/ctor_tag_fold_check.sh: each loop matches a constructor the runtime
-# also names. The Vec and Bytes loops lower to `_unboxed` reads; the channel loop makes the
+# also names. The Vec, Bytes and String loops lower to `_unboxed` reads; the channel loop makes the
 # program register `stdlib.chan.Got`, which `sprout_chan_make_got` builds. Each loop is its
 # own top-level fn so the check can inspect its optimised body.
 
@@ -16,6 +16,11 @@ fn sum_vec(xs: Vec Int, i: Int, acc: Int) -> Int =
 fn sum_bytes(b: Bytes, i: Int, acc: Int) -> Int =
   match bytes.get(b, i) with
   | Just x -> sum_bytes(b, i + 1, acc + x)
+  | Nothing -> acc
+
+fn sum_string(s: String, i: Int, acc: Int) -> Int =
+  match str_byte_at(s, i) with
+  | Just x -> sum_string(s, i + 1, acc + x)
   | Nothing -> acc
 
 fn ping(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
@@ -38,4 +43,4 @@ fn main() -> Unit !{IO} =
   let b = bytes.from_string("the quick brown fox") in
   do
     total <- with_scope(ping_scoped)
-    print(sum_vec(xs, 0, 0) + sum_bytes(b, 0, 0) + total)
+    print(sum_vec(xs, 0, 0) + sum_bytes(b, 0, 0) + sum_string("the quick brown fox", 0, 0) + total)
