@@ -99,10 +99,10 @@ compile ctor_tag_fallback.c "$TMP_DIR/ctor_tag_fallback" -O0 -g
 "$TMP_DIR/ctor_tag_fallback" > "$TMP_DIR/ctor_tag_fallback.out"
 test "$(cat "$TMP_DIR/ctor_tag_fallback.out")" = "ctor-tag-fallback"
 
-echo "==> c runtime: process grow buffer keeps old pointer on realloc failure"
-grep -q 'char\* grown = (char\*)realloc' "$ROOT/runtime/sprout_runtime.c"
-if grep -q 'b->data = (char\*)realloc' "$ROOT/runtime/sprout_runtime.c"; then
-  echo "sprout_growbuf_append overwrites b->data with unchecked realloc" >&2
+echo "==> c runtime: process buffer keeps old pointer on realloc failure"
+grep -q 'unsigned char\* grown = (unsigned char\*)realloc' "$ROOT/runtime/sprout_runtime.c"
+if grep -q 'b->data = (unsigned char\*)realloc' "$ROOT/runtime/sprout_runtime.c"; then
+  echo "proc_buf_append overwrites b->data with unchecked realloc" >&2
   exit 1
 fi
 

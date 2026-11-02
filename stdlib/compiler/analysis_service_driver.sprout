@@ -650,12 +650,12 @@ fn write_objs_and_ok(objs_dir: String, objs_ref: Ref String) -> Result String St
     Ok(objs_dir)
 
 fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
-  do
-    let objs_dir = runtime_objs_dir
-    result <- process.proc_run(["sh", "-c", runtime_compile_cmd(rt_dir, objs_dir)])
-    if process.proc_ok(result)
-    then write_objs_and_ok(objs_dir, objs_ref)
-    else Err("runtime compile failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
+  match process.proc_run(["sh", "-c", runtime_compile_cmd(rt_dir, runtime_objs_dir)]) with
+  | Err e -> Err("runtime compile failed: " ++ process.proc_error_message(e))
+  | Ok result ->
+      if process.proc_ok(result)
+      then write_objs_and_ok(runtime_objs_dir, objs_ref)
+      else Err("runtime compile failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
 fn ensure_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
   do
@@ -673,11 +673,12 @@ export fn compile_runtime_and_link_eval(
   match ensure_runtime_objs(rt_dir, objs_ref) with
   | Err msg -> Err(msg)
   | Ok objs_dir ->
-      do
-        result <- process.proc_run(["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)])
-        if process.proc_ok(result)
-        then Ok(bin_path)
-        else Err("clang link failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
+      match process.proc_run(["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)]) with
+      | Err e -> Err("clang link failed: " ++ process.proc_error_message(e))
+      | Ok result ->
+          if process.proc_ok(result)
+          then Ok(bin_path)
+          else Err("clang link failed: " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
 fn eval_main_for(type_str: String) -> Maybe compiler.EvalMain =
   if string.ends_with(type_str, " !{IO}") then
@@ -692,9 +693,14 @@ fn vec_strings_to_json_array(lines: Vec String) -> json.Json =
 fn eval_output_lines(output: String) -> Vec String =
   if output == "" then vec_empty() else string.string_lines(output)
 
+fn exit_text(e: process.ProcExit) -> String =
+  match e with
+  | process.Exited code -> "exit " ++ int_to_string(code)
+  | process.Signaled sig -> "signal " ++ int_to_string(sig)
+
 fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
   if process.proc_ok(run_result) == false then
-    error_response("eval_expr_in_source: runtime error (exit " ++ int_to_string(process.proc_exit(run_result)) ++ "): " ++ process.proc_stderr_or(run_result, "<stderr was not valid UTF-8>"))
+    error_response("eval_expr_in_source: runtime error (" ++ exit_text(process.proc_exit(run_result)) ++ "): " ++ process.proc_stderr_or(run_result, "<stderr was not valid UTF-8>"))
   else
     # The evaluated program's stdout is USER-CONTROLLED, so it can legitimately not be text. It used
     # to be minted as a String, which took the whole analysis service down when a walker touched it;
@@ -702,9 +708,9 @@ fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
     ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout_or(run_result, "<eval output was not valid UTF-8>")))))
 
 fn run_eval_binary() -> json.Json !{IO} =
-  do
-    run_result <- process.proc_run([eval_bin_path])
-    collect_eval_output(run_result)
+  match process.proc_run([eval_bin_path]) with
+  | Ok run_result -> collect_eval_output(run_result)
+  | Err e -> error_response("eval_expr_in_source: could not run the eval binary: " ++ process.proc_error_message(e))
 
 # SPROUT_DARWIN_FRAMEWORKS changes the link line, and so what eval can do, so an invalid value is
 # an error for the request rather than something to ignore.
@@ -713,10 +719,11 @@ fn env_forces_frameworks() -> Result String Bool !{IO} =
                    result_map(is_just, env.get("SPROUT_DARWIN_FRAMEWORKS")))
 
 fn uname_is_darwin() -> Bool !{IO} =
-  do
-    r <- process.proc_run(["uname"])
-    # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
-    string.trim(process.proc_stdout_or(r, "")) == "Darwin"
+  match process.proc_run(["uname"]) with
+  | Ok r ->
+      # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
+      string.trim(process.proc_stdout_or(r, "")) == "Darwin"
+  | Err _ -> false
 
 # True when the eval binary must link the macOS Security/CoreFoundation
 # frameworks (the runtime's TLS/net code needs them).  Detect the platform at

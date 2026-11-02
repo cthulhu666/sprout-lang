@@ -2796,6 +2796,20 @@ task-io-smoke: bootstrap-from-seed
   # client and an accepted socket open than without them (every runtime descriptor is close-on-exec).
   build tests/task_io_smoke/proc_run_fds.spr
   run_once "proc-run-fds" "proc-run-fds-ok"
+  # (18a2) proc_run parks: while a child runs, a sibling task's timers keep firing (ten 50 ms sleeps
+  # finish near 500 ms, not after the 1 s child). RED against the blocking proc_run: it freezes the
+  # scheduler thread in poll/waitpid, so the sibling finishes after the child.
+  build tests/task_io_smoke/proc_run_parks.spr
+  run_once "proc-run-parks" "scheduler stayed live"
+  check_markers "proc-run-parks" "child done"
+  # (18a3) proc_run cancel: with_timeout force-drops a task parked in proc_run; the park hook kills
+  # the child and every descriptor is released. 40 cancels under a 64-descriptor cap give the leak
+  # check teeth; the child's pid must be gone afterwards. RED against the blocking proc_run: with_timeout
+  # cannot cancel a call that never parks, so the first `sleep 30` outlives the 15 s alarm.
+  build tests/task_io_smoke/proc_run_cancel_drop.spr
+  ( ulimit -n 64; run_once "proc-run-cancel" "proc-cancel-ok" )
+  check_markers "proc-run-cancel" child-dead done
+  ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "proc-run-cancel/stress" "proc-cancel-ok" )
   # (18b) listen-backlog: a listener that never accepts must queue 100 connects. The backlog was 16,
   # so connect #17 was dropped and waited out a ~1 s SYN retransmit — behind nginx, the p99 tail.
   build tests/task_io_smoke/listen_backlog.spr

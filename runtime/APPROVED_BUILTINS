@@ -98,8 +98,7 @@ map_set
 map_size
 panic  # Declared PURE (`panic : String -> a`), despite writing to stderr and calling exit(1) via sprout_fail. Not an oversight, and not a carve-out: ~187 sprout_fail sites already sit behind builtins declared pure (vector_length aborts on a null vector), so aborting-is-not-an-effect was the de facto rule and panic — the only builtin whose sole purpose is to abort — was the lone inconsistency. An abort has no continuation, so nothing downstream can observe the write, and the bottom-shaped return type already says it does not come back. Decided 2026-08-16; normative in spec §6, survey in docs/effect-enforcement-v0.md §6, pinned by tests/effects/canaries.spr `unreachable_arm`.
 print_str
-proc_run_stdin_vec
-proc_run_vec
+proc_run_raw  # Replaces proc_run_vec and proc_run_stdin_vec (net -1 builtin). fork/exec/pipe/poll/waitid have no Sprout equivalent, and the call has to park only the calling task while a helper OS thread drains the child's output and reaps it, which needs a pthread and the scheduler's park API. Takes a timeout, a per-stream output cap and a process-group flag, so the kill protocol (pid-reuse safe) stays in one place. Returns a flat record; stdlib/process.sprout builds ProcResult and ProcError from it. Design: docs/process-run-v0.md.
 read_file
 ref_new
 ref_read
