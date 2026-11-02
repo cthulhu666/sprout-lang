@@ -51,9 +51,10 @@ fn update(m: Msg,
   app.done(w, app.Quit)
 
 # `proc_run` fork+execs directly, so `sh`'s parent is this process.
-fn raise_winch() -> Unit !{IO} = do
-  r <- process.proc_run(["sh", "-c", "kill -WINCH $PPID"])
-  ()
+fn raise_winch() -> Unit !{IO} =
+  match process.proc_run(["sh", "-c", "kill -WINCH $PPID"]) with
+  | Ok _ -> ()
+  | Err _ -> ()
 
 fn signalled(winch: Bool) -> Unit !{IO} =
   if winch then raise_winch() else ()

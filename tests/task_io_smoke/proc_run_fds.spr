@@ -15,9 +15,9 @@ import stdlib.terminal as terminal
 # backlog, so one task can hold all three without a second task.
 
 fn fd_count() -> Int !{IO} =
-  do
-    r <- proc_run(["ls", "/dev/fd"])
-    if proc_ok(r) then vec_length(string_lines(proc_stdout_or(r, ""))) else -1
+  match proc_run(["ls", "/dev/fd"]) with
+  | Ok r -> if proc_ok(r) then vec_length(string_lines(proc_stdout_or(r, ""))) else -1
+  | Err _ -> -1
 
 fn report(baseline: Int, held: Int) -> Unit !{IO} =
   if baseline < 3 then

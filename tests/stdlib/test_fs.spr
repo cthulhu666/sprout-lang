@@ -210,7 +210,7 @@ fn main() -> Unit !{IO} =
     # loudly instead of silently skipping the four assertions below.
     let link = root ++ "/link_to_sub"
     assert_true(state, "ln -s builds the symlink fixture",
-      process.proc_ok(process.proc_run(["ln", "-s", sub, link])))
+      result_with_default(false, result_map(process.proc_ok, process.proc_run(["ln", "-s", sub, link]))))
 
     assert_eq(state, "symlink_stat reports the link itself",
       kind_of(fs.symlink_stat(link)), "symlink")

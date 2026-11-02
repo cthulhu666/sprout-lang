@@ -1,28 +1,36 @@
 module examples.process_demo
-import stdlib.process (ProcResult, proc_run, proc_run_stdin, proc_ok, proc_stdout_or, proc_exit)
+import stdlib.process (ProcResult, ProcError, ProcExit, proc_run, proc_run_stdin, proc_run_with, default_proc_config, proc_exit, proc_stdout_or, proc_error_message)
 
 # Demonstrates stdlib.process: running subprocesses and capturing their output.
+# A run returns `Result ProcError ProcResult`: `Err` means the child could not be run to completion
+# (not started, timed out, too much output); a child that ran and failed is still `Ok`.
 #
 # Run:
 #   mise exec -- just run examples/process_demo.sprout
 
-fn status_line(ok: Bool) -> String =
-  if ok then "OK" else "FAILED"
+fn exit_line(r: ProcResult) -> String =
+  match proc_exit(r) with
+  | Exited 0 -> "OK"
+  | Exited n -> `FAILED exit=${int_to_string(n)}`
+  | Signaled n -> `KILLED signal=${int_to_string(n)}`
 
-fn show_result(label: String, r: ProcResult) -> Unit !{IO} =
-  do
-    print(label ++ " [" ++ status_line(proc_ok(r)) ++ "] exit=" ++ to_string(proc_exit(r)))
-    # A child chooses its own output bytes, so decoding can fail; the fallback is named at the
-    # call site rather than hidden in a lossy decoder.
-    print("  stdout: " ++ proc_stdout_or(r, "<not valid UTF-8>"))
+fn show(label: String, run: Result ProcError ProcResult) -> Unit !{IO} =
+  match run with
+  | Ok r ->
+      do
+        print(label ++ " [" ++ exit_line(r) ++ "]")
+        # A child chooses its own output bytes, so decoding can fail; the fallback is named at the
+        # call site rather than hidden in a lossy decoder.
+        print("  stdout: " ++ proc_stdout_or(r, "<not valid UTF-8>"))
+  | Err e -> print(label ++ " [ERROR] " ++ proc_error_message(e))
 
 fn main() -> Unit !{IO} =
   do
-    r1 <- proc_run(["uname", "-s"])
-    show_result("uname -s", r1)
+    show("uname -s", proc_run(["uname", "-s"]))
+    show("wc -w (via stdin)", proc_run_stdin(["wc", "-w"], "the quick brown fox jumps over the lazy dog"))
+    show("false (expect FAILED)", proc_run(["false"]))
+    show("no such program (expect ERROR)", proc_run(["no-such-program-xyz"]))
 
-    r2 <- proc_run_stdin(["wc", "-w"], "the quick brown fox jumps over the lazy dog")
-    show_result("wc -w (via stdin)", r2)
-
-    r3 <- proc_run(["false"])
-    show_result("false (expect FAILED)", r3)
+    # A wall-clock budget: the child is killed after 200 ms and the run is an `Err`.
+    let limited = default_proc_config() with (timeout_ms = Just(200))
+    show("sleep 5 with a 200 ms timeout (expect ERROR)", proc_run_with(limited, ["sleep", "5"], Nothing))
