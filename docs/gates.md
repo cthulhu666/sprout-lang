@@ -394,7 +394,7 @@ Wired into `just ci-fast-gates` as `bce-gate`.
 
 ## Specialisation — `just spec-gate`
 
-Compiles each `tests/spec_fixtures/<name>.spr` twice, with `SPROUT_OPT_ON=spec` and with
+Compiles each `tests/spec_fixtures/<name>.spr` twice, by default and with
 `SPROUT_OPT_OFF=spec`, and runs both. They must print the same text and exit with the same
 status, and both must equal `tests/spec_fixtures/expected/<name>.out`. The sidecar
 `tests/spec_fixtures/<name>.ir` holds fixed-string assertions on the emitted IR (`on|off has`,
@@ -405,6 +405,16 @@ format). A sidecar line `stress` runs the fixture under
 growing key is a FAIL, not a hang. `scripts/spec_gate.sh --snapshot` rewrites the goldens from
 the pass-off build; read the diff before staging it. Wired into `just ci-fast-gates` as
 `spec-gate`.
+
+`just spec-corpus-check` runs the pass over the golden IR corpus (`examples/`, `tests/smoke_shapes/`),
+on and off. Check A: the off output equals the golden at `--off-golden-ref <ref>`, so the change
+that turns the pass on can show it left the off path alone. Check B: every added define is a
+`$spec_` clone of an off define or a lambda/eta wrapper, and no removed define is still referenced.
+Check C: each program in `tests/spec_corpus_run.txt` prints the same and exits the same on and off.
+That list leaves out timing benchmarks, servers and network clients, whose output differs run to
+run. It fails when no file gets a copy: on and off were then the same compiler. In `just gate`;
+CI runs it nightly (`spec-off-nightly`, ~2 min), beside the conformance suite with
+`SPROUT_OPT_OFF=spec`, so the escape hatch from a miscompiling pass keeps working.
 
 ## fmt/lint batching — `just fmt-batch-smoke`
 

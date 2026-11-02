@@ -9,8 +9,8 @@
 #
 # Flattened-name scheme:
 #   examples/foo.sprout          -> tests/golden/ir/examples__foo.sprout.ll
-#   tests/smoke_shapes/01_x.spr  -> tests/golden/ir/smoke_shapes__01_x.spr.ll
-# (Drop leading dir segment, replace all remaining "/" with "__", append ".ll")
+#   tests/smoke_shapes/01_x.spr  -> tests/golden/ir/tests__smoke_shapes__01_x.spr.ll
+# (Replace every "/" with "__", append ".ll"; the first path component is kept.)
 
 set -euo pipefail
 
@@ -18,6 +18,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 COMPILER="$REPO_ROOT/build/compile_driver_bin_stage1"
 GOLDEN_DIR="$REPO_ROOT/tests/golden/ir"
 OPT="opt"
+
+# shellcheck source=golden_ir_lib.sh
+source "$REPO_ROOT/scripts/golden_ir_lib.sh"
 
 if [[ ! -x "$COMPILER" ]]; then
   echo "ERROR: compiler not found at $COMPILER" >&2
@@ -31,23 +34,6 @@ mkdir -p "$GOLDEN_DIR"
 
 snapshotted=0
 skipped=0
-
-flatten_name() {
-  local path="$1"
-  # Remove leading "examples/" or "tests/smoke_shapes/" prefix segment
-  # then join remaining parts with "__"
-  local rel
-  rel="${path#"$REPO_ROOT/"}"    # strip repo root if absolute
-  rel="${rel#./}"                 # strip leading ./
-  # Extract the meaningful suffix: drop the first path component
-  local dir_part base_part
-  dir_part="$(dirname "$rel")"
-  base_part="$(basename "$rel")"
-  # Replace remaining "/" in dir_part with "__" and combine
-  local flat_dir
-  flat_dir="${dir_part//\//__}"
-  echo "${flat_dir}__${base_part}.ll"
-}
 
 process_file() {
   local src="$1"

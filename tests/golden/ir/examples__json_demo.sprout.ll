@@ -98,9 +98,7 @@ declare i64 @json_stringify(i64)
 @.str.3 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"count\00" }
 @.str.4 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"items\00" }
 @.str.5 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"a\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0 }
 @.str.6 = private unnamed_addr constant { i64, [10 x i8] } { i64 147466, [10 x i8] c"refused: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_String_to_string_1 }
 @.str.7 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
@@ -277,20 +275,6 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$1 = call i64 @print_str(i64 %t$0)
-  ret i64 %t$1
-}
-
 define i64 @stdlib.json.bool(i64 %p$value) {
 entry:
   %t$0 = call i64 @sprout_alloc_obj(i64 20, i64 1)
@@ -319,19 +303,6 @@ entry:
   %t$0$f0 = getelementptr i64, ptr %t$0$ptr, i64 0
   store i64 %p$value, ptr %t$0$f0
   %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$0
-}
-
-define i64 @stdlib.json.encode(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$value, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$3 = alloca i64
-  store i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @__cm_stdlib.json.JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json)
-  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$0
 }
 
@@ -788,261 +759,149 @@ entry:
   ret i64 %t$3
 }
 
-define i64 @stdlib.json.json_object_encoded(i64 %p$pairs$in, i64 %p$obj$in, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json$in) {
-entry:
-  %t$18 = alloca [3 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$18, i8 0, i64 24, i1 false)
-  %t$19 = call i64 @sprout_gc_push_scan_root(ptr %t$18, i64 24)
-  %t$14 = getelementptr i64, ptr %t$18, i64 0
-  store i64 %p$pairs$in, ptr %t$14
-  %t$15 = getelementptr i64, ptr %t$18, i64 1
-  store i64 %p$obj$in, ptr %t$15
-  %t$16 = getelementptr i64, ptr %t$18, i64 2
-  store i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json$in, ptr %t$16
-
-  %t$17 = call ptr @llvm.stacksave()
-  br label %tco_loop
-tco_loop:
-  %p$pairs = load i64, ptr %t$14
-  %p$obj = load i64, ptr %t$15
-  %p$__tc_stdlib.json.JsonEncode_0_encode_json = load i64, ptr %t$16
-  %t$0 = call i64 @sprout_tag(i64 %p$pairs)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 5
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  br label %join_1
-arm_1_1:
-  %t$5 = add i64 0, 6
-  %t$6 = icmp eq i64 %t$0, %t$5
-  br i1 %t$6, label %body_1_1, label %arm_2_1
-body_1_1:
-  %t$7 = call i64 @sprout_field(i64 %p$pairs, i64 0)
-  %t$8$ptr = inttoptr i64 %t$7 to ptr
-  %t$8$gep = getelementptr i64, ptr %t$8$ptr, i64 0
-  %t$8 = load i64, ptr %t$8$gep
-  %t$9$ptr = inttoptr i64 %t$7 to ptr
-  %t$9$gep = getelementptr i64, ptr %t$9$ptr, i64 1
-  %t$9 = load i64, ptr %t$9$gep
-  %t$10 = call i64 @sprout_field(i64 %p$pairs, i64 1)
-  %t$20 = alloca i64
-  store i64 %t$8, ptr %t$20
-  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
-  %t$22 = alloca i64
-  store i64 %t$9, ptr %t$22
-  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
-  %t$24 = alloca i64
-  store i64 %t$10, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$11 = call i64 @stdlib.json.encode(i64 %t$9, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json)
-  %t$26 = alloca i64
-  store i64 %t$11, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$12 = call i64 @sprout_alloc_obj(i64 28, i64 3)
-  %t$12$ptr = inttoptr i64 %t$12 to ptr
-  %t$12$f0 = getelementptr i64, ptr %t$12$ptr, i64 0
-  store i64 %t$8, ptr %t$12$f0
-  %t$12$f1 = getelementptr i64, ptr %t$12$ptr, i64 1
-  store i64 %t$11, ptr %t$12$f1
-  %t$12$f2 = getelementptr i64, ptr %t$12$ptr, i64 2
-  store i64 %p$obj, ptr %t$12$f2
-  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 3)
-  store i64 %t$10, ptr %t$14
-  store i64 %t$12, ptr %t$15
-  store i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, ptr %t$16
-  call void @llvm.stackrestore(ptr %t$17)
-  br label %tco_loop
-arm_2_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%p$obj, %body_0_1]
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$2
-}
-
-define i64 @stdlib.json.object_from_pairs(i64 %p$items, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json) {
-entry:
-  %t$4 = alloca i64
-  store i64 %p$items, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$0 = call i64 @list_reverse(i64 %p$items)
-  %t$8 = alloca i64
-  store i64 %t$0, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$1 = call i64 @sprout_alloc_obj(i64 29, i64 0)
-  %t$10 = alloca i64
-  store i64 %t$1, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$2 = call i64 @stdlib.json.json_object_encoded(i64 %t$0, i64 %t$1, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$13 = alloca i64
-  store i64 %t$2, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
-  %t$3 = call i64 @sprout_alloc_obj(i64 25, i64 1)
-  %t$3$ptr = inttoptr i64 %t$3 to ptr
-  %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
-  store i64 %t$2, ptr %t$3$f0
-  %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$3
-}
-
-define i64 @__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @examples.json_demo.payload() {
 entry:
   %t$0 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.1, i64 0, i32 1, i64 0
   %t$1 = ptrtoint ptr %t$0 to i64
   %t$2 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.2, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
-  %t$29 = alloca i64
-  store i64 %t$1, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
-  %t$31 = alloca i64
-  store i64 %t$3, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$28 = alloca i64
+  store i64 %t$1, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %t$3, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
   %t$4 = call i64 @stdlib.json.string(i64 %t$3)
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$34 = alloca i64
-  store i64 %t$4, ptr %t$34
-  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$33 = alloca i64
+  store i64 %t$4, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$5 = call i64 @sprout_alloc_tuple_blob(i64 16)
   %t$5$ptr = inttoptr i64 %t$5 to ptr
   %t$5$s0 = getelementptr i64, ptr %t$5$ptr, i64 0
   store i64 %t$1, ptr %t$5$s0
   %t$5$s1 = getelementptr i64, ptr %t$5$ptr, i64 1
   store i64 %t$4, ptr %t$5$s1
-  %t$36 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$6 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.3, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   %t$8 = add i64 0, 2
-  %t$37 = alloca i64
-  store i64 %t$5, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
-  %t$39 = alloca i64
-  store i64 %t$7, ptr %t$39
-  %t$40 = call i64 @sprout_gc_push_i64_root(ptr %t$39)
+  %t$36 = alloca i64
+  store i64 %t$5, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$38 = alloca i64
+  store i64 %t$7, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$9 = call i64 @stdlib.json.int(i64 %t$8)
-  %t$41 = alloca i64
-  store i64 %t$9, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$40 = alloca i64
+  store i64 %t$9, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
   %t$10 = call i64 @sprout_alloc_tuple_blob(i64 16)
   %t$10$ptr = inttoptr i64 %t$10 to ptr
   %t$10$s0 = getelementptr i64, ptr %t$10$ptr, i64 0
   store i64 %t$7, ptr %t$10$s0
   %t$10$s1 = getelementptr i64, ptr %t$10$ptr, i64 1
   store i64 %t$9, ptr %t$10$s1
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$11 = getelementptr inbounds { i64, [6 x i8] }, ptr @.str.4, i64 0, i32 1, i64 0
   %t$12 = ptrtoint ptr %t$11 to i64
   %t$13 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.5, i64 0, i32 1, i64 0
   %t$14 = ptrtoint ptr %t$13 to i64
-  %t$44 = alloca i64
-  store i64 %t$10, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
-  %t$46 = alloca i64
-  store i64 %t$12, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
-  %t$48 = alloca i64
-  store i64 %t$14, ptr %t$48
-  %t$49 = call i64 @sprout_gc_push_i64_root(ptr %t$48)
+  %t$43 = alloca i64
+  store i64 %t$10, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$45 = alloca i64
+  store i64 %t$12, ptr %t$45
+  %t$46 = call i64 @sprout_gc_push_i64_root(ptr %t$45)
+  %t$47 = alloca i64
+  store i64 %t$14, ptr %t$47
+  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
   %t$15 = call i64 @stdlib.json.string(i64 %t$14)
-  %t$50 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 1
-  %t$51 = alloca i64
-  store i64 %t$15, ptr %t$51
-  %t$52 = call i64 @sprout_gc_push_i64_root(ptr %t$51)
+  %t$50 = alloca i64
+  store i64 %t$15, ptr %t$50
+  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
   %t$17 = call i64 @stdlib.json.bool(i64 %t$16)
-  %t$53 = alloca i64
-  store i64 %t$17, ptr %t$53
-  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
+  %t$52 = alloca i64
+  store i64 %t$17, ptr %t$52
+  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
   %t$18 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$55 = alloca i64
-  store i64 %t$18, ptr %t$55
-  %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
+  %t$54 = alloca i64
+  store i64 %t$18, ptr %t$54
+  %t$55 = call i64 @sprout_gc_push_i64_root(ptr %t$54)
   %t$19 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$19$ptr = inttoptr i64 %t$19 to ptr
   %t$19$f0 = getelementptr i64, ptr %t$19$ptr, i64 0
   store i64 %t$17, ptr %t$19$f0
   %t$19$f1 = getelementptr i64, ptr %t$19$ptr, i64 1
   store i64 %t$18, ptr %t$19$f1
-  %t$57 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$58 = alloca i64
-  store i64 %t$19, ptr %t$58
-  %t$59 = call i64 @sprout_gc_push_i64_root(ptr %t$58)
+  %t$56 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$57 = alloca i64
+  store i64 %t$19, ptr %t$57
+  %t$58 = call i64 @sprout_gc_push_i64_root(ptr %t$57)
   %t$20 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$20$ptr = inttoptr i64 %t$20 to ptr
   %t$20$f0 = getelementptr i64, ptr %t$20$ptr, i64 0
   store i64 %t$15, ptr %t$20$f0
   %t$20$f1 = getelementptr i64, ptr %t$20$ptr, i64 1
   store i64 %t$19, ptr %t$20$f1
-  %t$60 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$61 = alloca i64
-  store i64 %t$20, ptr %t$61
-  %t$62 = call i64 @sprout_gc_push_i64_root(ptr %t$61)
+  %t$59 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$60 = alloca i64
+  store i64 %t$20, ptr %t$60
+  %t$61 = call i64 @sprout_gc_push_i64_root(ptr %t$60)
   %t$21 = call i64 @stdlib.json.array_from_list(i64 %t$20)
-  %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$64 = alloca i64
-  store i64 %t$21, ptr %t$64
-  %t$65 = call i64 @sprout_gc_push_i64_root(ptr %t$64)
+  %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$63 = alloca i64
+  store i64 %t$21, ptr %t$63
+  %t$64 = call i64 @sprout_gc_push_i64_root(ptr %t$63)
   %t$22 = call i64 @sprout_alloc_tuple_blob(i64 16)
   %t$22$ptr = inttoptr i64 %t$22 to ptr
   %t$22$s0 = getelementptr i64, ptr %t$22$ptr, i64 0
   store i64 %t$12, ptr %t$22$s0
   %t$22$s1 = getelementptr i64, ptr %t$22$ptr, i64 1
   store i64 %t$21, ptr %t$22$s1
-  %t$66 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$67 = alloca i64
-  store i64 %t$22, ptr %t$67
-  %t$68 = call i64 @sprout_gc_push_i64_root(ptr %t$67)
+  %t$65 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$66 = alloca i64
+  store i64 %t$22, ptr %t$66
+  %t$67 = call i64 @sprout_gc_push_i64_root(ptr %t$66)
   %t$23 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$69 = alloca i64
-  store i64 %t$23, ptr %t$69
-  %t$70 = call i64 @sprout_gc_push_i64_root(ptr %t$69)
+  %t$68 = alloca i64
+  store i64 %t$23, ptr %t$68
+  %t$69 = call i64 @sprout_gc_push_i64_root(ptr %t$68)
   %t$24 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$24$ptr = inttoptr i64 %t$24 to ptr
   %t$24$f0 = getelementptr i64, ptr %t$24$ptr, i64 0
   store i64 %t$22, ptr %t$24$f0
   %t$24$f1 = getelementptr i64, ptr %t$24$ptr, i64 1
   store i64 %t$23, ptr %t$24$f1
-  %t$71 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$72 = alloca i64
-  store i64 %t$24, ptr %t$72
-  %t$73 = call i64 @sprout_gc_push_i64_root(ptr %t$72)
+  %t$70 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$71 = alloca i64
+  store i64 %t$24, ptr %t$71
+  %t$72 = call i64 @sprout_gc_push_i64_root(ptr %t$71)
   %t$25 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$25$ptr = inttoptr i64 %t$25 to ptr
   %t$25$f0 = getelementptr i64, ptr %t$25$ptr, i64 0
   store i64 %t$10, ptr %t$25$f0
   %t$25$f1 = getelementptr i64, ptr %t$25$ptr, i64 1
   store i64 %t$24, ptr %t$25$f1
-  %t$74 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$75 = alloca i64
-  store i64 %t$25, ptr %t$75
-  %t$76 = call i64 @sprout_gc_push_i64_root(ptr %t$75)
+  %t$73 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$74 = alloca i64
+  store i64 %t$25, ptr %t$74
+  %t$75 = call i64 @sprout_gc_push_i64_root(ptr %t$74)
   %t$26 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$26$ptr = inttoptr i64 %t$26 to ptr
   %t$26$f0 = getelementptr i64, ptr %t$26$ptr, i64 0
   store i64 %t$5, ptr %t$26$f0
   %t$26$f1 = getelementptr i64, ptr %t$26$ptr, i64 1
   store i64 %t$25, ptr %t$26$f1
-  %t$77 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$27 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json_0, i64 8) to i64
-  %t$78 = alloca i64
-  store i64 %t$26, ptr %t$78
-  %t$79 = call i64 @sprout_gc_push_i64_root(ptr %t$78)
-  %t$28 = call i64 @stdlib.json.object_from_pairs(i64 %t$26, i64 %t$27)
-  %t$80 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$28
+  %t$76 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$77 = alloca i64
+  store i64 %t$26, ptr %t$77
+  %t$78 = call i64 @sprout_gc_push_i64_root(ptr %t$77)
+  %t$27 = call i64 @stdlib.json.object_from_pairs$spec_stdlib_json_Json(i64 %t$26)
+  %t$79 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$27
 }
 
 define i64 @examples.json_demo.unwritable() {
@@ -1105,56 +964,129 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_String_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %ret = call i64 @__tc_ToString_String_to_string(i64 %p$a0)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @examples.json_demo.payload()
-  %t$8 = alloca i64
-  store i64 %t$0, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$6 = alloca i64
+  store i64 %t$0, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$1 = call i64 @examples.json_demo.render(i64 %t$0)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
-  %t$11 = alloca i64
-  store i64 %t$1, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$3 = call i64 @print(i64 %t$1, i64 %t$2)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$4 = call i64 @examples.json_demo.unwritable()
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$2 = call i64 @print$spec_String(i64 %t$1)
+  %t$3 = call i64 @examples.json_demo.unwritable()
+  %t$9 = alloca i64
+  store i64 %t$3, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$4 = call i64 @examples.json_demo.render(i64 %t$3)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$5 = call i64 @print$spec_String(i64 %t$4)
+  ret i64 %t$5
+}
+
+define i64 @print$spec_String(i64 %p$value) {
+entry:
+  %t$0 = call i64 @__tc_ToString_String_to_string(i64 %p$value)
+  %t$1 = call i64 @print_str(i64 %t$0)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.json.object_from_pairs$spec_stdlib_json_Json(i64 %p$items) {
+entry:
+  %t$4 = alloca i64
+  store i64 %p$items, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$0 = call i64 @list_reverse(i64 %p$items)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$7 = alloca i64
+  store i64 %t$0, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$1 = call i64 @sprout_alloc_obj(i64 29, i64 0)
+  %t$9 = alloca i64
+  store i64 %t$1, ptr %t$9
+  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
+  %t$2 = call i64 @stdlib.json.json_object_encoded$spec_stdlib_json_Json(i64 %t$0, i64 %t$1)
+  %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$12 = alloca i64
+  store i64 %t$2, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$3 = call i64 @sprout_alloc_obj(i64 25, i64 1)
+  %t$3$ptr = inttoptr i64 %t$3 to ptr
+  %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
+  store i64 %t$2, ptr %t$3$f0
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$3
+}
+
+define i64 @stdlib.json.json_object_encoded$spec_stdlib_json_Json(i64 %p$pairs$in, i64 %p$obj$in) {
+entry:
   %t$14 = alloca i64
-  store i64 %t$4, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$5 = call i64 @examples.json_demo.render(i64 %t$4)
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$6 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_String_to_string_1, i64 8) to i64
+  store i64 %p$pairs$in, ptr %t$14
+  %t$15 = alloca i64
+  store i64 %p$obj$in, ptr %t$15
+  %t$16 = call ptr @llvm.stacksave()
+  br label %tco_loop
+tco_loop:
+  %p$pairs = load i64, ptr %t$14
+  %p$obj = load i64, ptr %t$15
+  %t$0 = call i64 @sprout_tag(i64 %p$pairs)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 5
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  br label %join_1
+arm_1_1:
+  %t$5 = add i64 0, 6
+  %t$6 = icmp eq i64 %t$0, %t$5
+  br i1 %t$6, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$7 = call i64 @sprout_field(i64 %p$pairs, i64 0)
+  %t$8$ptr = inttoptr i64 %t$7 to ptr
+  %t$8$gep = getelementptr i64, ptr %t$8$ptr, i64 0
+  %t$8 = load i64, ptr %t$8$gep
+  %t$9$ptr = inttoptr i64 %t$7 to ptr
+  %t$9$gep = getelementptr i64, ptr %t$9$ptr, i64 1
+  %t$9 = load i64, ptr %t$9$gep
+  %t$10 = call i64 @sprout_field(i64 %p$pairs, i64 1)
+  %t$11 = call i64 @stdlib.json.encode$spec_stdlib_json_Json(i64 %t$9)
   %t$17 = alloca i64
-  store i64 %t$5, ptr %t$17
+  store i64 %p$obj, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
-  %t$7 = call i64 @print(i64 %t$5, i64 %t$6)
-  %t$19 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$7
+  %t$19 = alloca i64
+  store i64 %t$8, ptr %t$19
+  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
+  %t$21 = alloca i64
+  store i64 %t$10, ptr %t$21
+  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$23 = alloca i64
+  store i64 %t$11, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$12 = call i64 @sprout_alloc_obj(i64 28, i64 3)
+  %t$12$ptr = inttoptr i64 %t$12 to ptr
+  %t$12$f0 = getelementptr i64, ptr %t$12$ptr, i64 0
+  store i64 %t$8, ptr %t$12$f0
+  %t$12$f1 = getelementptr i64, ptr %t$12$ptr, i64 1
+  store i64 %t$11, ptr %t$12$f1
+  %t$12$f2 = getelementptr i64, ptr %t$12$ptr, i64 2
+  store i64 %p$obj, ptr %t$12$f2
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 3)
+  store i64 %t$10, ptr %t$14
+  store i64 %t$12, ptr %t$15
+  call void @llvm.stackrestore(ptr %t$16)
+  br label %tco_loop
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%p$obj, %body_0_1]
+  ret i64 %t$2
 }
 
-define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+define i64 @stdlib.json.encode$spec_stdlib_json_Json(i64 %p$value) {
 entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
-  ret i64 %t$0
-}
-
-define i64 @__cm_stdlib.json.JsonEncode_encode_json(i64 %p$value, i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json) {
-entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_stdlib.json.JsonEncode_0_encode_json, i64 %p$value)
+  %t$0 = call i64 @__tc_stdlib.json.JsonEncode_stdlib_json_Json_encode_json(i64 %p$value)
   ret i64 %t$0
 }
 

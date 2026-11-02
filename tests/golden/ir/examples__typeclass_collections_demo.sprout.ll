@@ -78,11 +78,8 @@ declare i64 @ref_write(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 417, column 67)\00" }
 @.str.1 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 23, column 43)\00" }
 @.str.2 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 25, column 61)\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values_0 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values_0 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_1 }
-@__sprout_sclo.__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values_2 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values_2 }
-@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_3 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_3 }
-@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4 }
+@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_0 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_0 }
+@__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_1 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_1 }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -292,20 +289,6 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$1 = call i64 @print_str(i64 %t$0)
-  ret i64 %t$1
-}
-
 define i64 @examples.typeclass_collections_demo.add(i64 %p$acc, i64 %p$value) {
 entry:
   %t$0$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$acc, i64 %p$value)
@@ -345,180 +328,142 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @examples.typeclass_collections_demo.sum_any(i64 %p$values, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$values, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$3 = alloca i64
-  store i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$0 = call i64 @__cm_examples.typeclass_collections_demo.Summable_sum_values(i64 %p$values, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values)
-  %t$5 = call i64 @sprout_gc_pop_roots(i64 2)
-  ret i64 %t$0
-}
-
-define i64 @__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values_0(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values_2(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = add i64 0, 3
   %t$1 = add i64 0, 4
   %t$2 = add i64 0, 5
   %t$3 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$26 = alloca i64
-  store i64 %t$3, ptr %t$26
-  %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
+  %t$22 = alloca i64
+  store i64 %t$3, ptr %t$22
+  %t$23 = call i64 @sprout_gc_push_i64_root(ptr %t$22)
   %t$4 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
   store i64 %t$2, ptr %t$4$f0
   %t$4$f1 = getelementptr i64, ptr %t$4$ptr, i64 1
   store i64 %t$3, ptr %t$4$f1
-  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$29 = alloca i64
-  store i64 %t$4, ptr %t$29
-  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
+  %t$24 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$25 = alloca i64
+  store i64 %t$4, ptr %t$25
+  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
   %t$5 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$5$ptr = inttoptr i64 %t$5 to ptr
   %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
   store i64 %t$1, ptr %t$5$f0
   %t$5$f1 = getelementptr i64, ptr %t$5$ptr, i64 1
   store i64 %t$4, ptr %t$5$f1
-  %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = alloca i64
-  store i64 %t$5, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
+  %t$27 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$28 = alloca i64
+  store i64 %t$5, ptr %t$28
+  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$6 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
   store i64 %t$0, ptr %t$6$f0
   %t$6$f1 = getelementptr i64, ptr %t$6$ptr, i64 1
   store i64 %t$5, ptr %t$6$f1
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$35 = alloca i64
-  store i64 %t$6, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
+  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$31 = alloca i64
+  store i64 %t$6, ptr %t$31
+  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
   %t$7 = call i64 @vec_from_list(i64 %t$6)
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$38 = alloca i64
-  store i64 %t$7, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$34 = alloca i64
+  store i64 %t$7, ptr %t$34
+  %t$35 = call i64 @sprout_gc_push_i64_root(ptr %t$34)
   %t$8 = call i64 @sprout_alloc_obj(i64 16, i64 1)
   %t$8$ptr = inttoptr i64 %t$8 to ptr
   %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
   store i64 %t$7, ptr %t$8$f0
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values_0, i64 8) to i64
-  %t$41 = alloca i64
-  store i64 %t$8, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
-  %t$10 = call i64 @examples.typeclass_collections_demo.sum_any(i64 %t$8, i64 %t$9)
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$11 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
-  %t$12 = call i64 @print(i64 %t$10, i64 %t$11)
+  %t$36 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$37 = alloca i64
+  store i64 %t$8, ptr %t$37
+  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
+  %t$9 = call i64 @examples.typeclass_collections_demo.sum_any$spec_examples_typeclass_collections_demo_IntVec(i64 %t$8)
+  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$10 = call i64 @print$spec_Int(i64 %t$9)
+  %t$11 = add i64 0, 1
+  %t$12 = add i64 0, 0
   %t$13 = add i64 0, 1
-  %t$14 = add i64 0, 0
-  %t$15 = add i64 0, 1
-  %t$16 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$44 = alloca i64
-  store i64 %t$16, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$14 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$40 = alloca i64
+  store i64 %t$14, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$15 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$15$ptr = inttoptr i64 %t$15 to ptr
+  %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
+  store i64 %t$13, ptr %t$15$f0
+  %t$15$f1 = getelementptr i64, ptr %t$15$ptr, i64 1
+  store i64 %t$14, ptr %t$15$f1
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$43 = alloca i64
+  store i64 %t$15, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$16 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$16$ptr = inttoptr i64 %t$16 to ptr
+  %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
+  store i64 %t$12, ptr %t$16$f0
+  %t$16$f1 = getelementptr i64, ptr %t$16$ptr, i64 1
+  store i64 %t$15, ptr %t$16$f1
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$46 = alloca i64
+  store i64 %t$16, ptr %t$46
+  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$17$ptr = inttoptr i64 %t$17 to ptr
   %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
-  store i64 %t$15, ptr %t$17$f0
+  store i64 %t$11, ptr %t$17$f0
   %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
   store i64 %t$16, ptr %t$17$f1
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$47 = alloca i64
-  store i64 %t$17, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
-  %t$18 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$18$ptr = inttoptr i64 %t$18 to ptr
-  %t$18$f0 = getelementptr i64, ptr %t$18$ptr, i64 0
-  store i64 %t$14, ptr %t$18$f0
-  %t$18$f1 = getelementptr i64, ptr %t$18$ptr, i64 1
-  store i64 %t$17, ptr %t$18$f1
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$50 = alloca i64
-  store i64 %t$18, ptr %t$50
-  %t$51 = call i64 @sprout_gc_push_i64_root(ptr %t$50)
-  %t$19 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$49 = alloca i64
+  store i64 %t$17, ptr %t$49
+  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
+  %t$18 = call i64 @vec_from_list(i64 %t$17)
+  %t$51 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$52 = alloca i64
+  store i64 %t$18, ptr %t$52
+  %t$53 = call i64 @sprout_gc_push_i64_root(ptr %t$52)
+  %t$19 = call i64 @sprout_alloc_obj(i64 17, i64 1)
   %t$19$ptr = inttoptr i64 %t$19 to ptr
   %t$19$f0 = getelementptr i64, ptr %t$19$ptr, i64 0
-  store i64 %t$13, ptr %t$19$f0
-  %t$19$f1 = getelementptr i64, ptr %t$19$ptr, i64 1
-  store i64 %t$18, ptr %t$19$f1
-  %t$52 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$53 = alloca i64
-  store i64 %t$19, ptr %t$53
-  %t$54 = call i64 @sprout_gc_push_i64_root(ptr %t$53)
-  %t$20 = call i64 @vec_from_list(i64 %t$19)
-  %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$56 = alloca i64
-  store i64 %t$20, ptr %t$56
-  %t$57 = call i64 @sprout_gc_push_i64_root(ptr %t$56)
-  %t$21 = call i64 @sprout_alloc_obj(i64 17, i64 1)
-  %t$21$ptr = inttoptr i64 %t$21 to ptr
-  %t$21$f0 = getelementptr i64, ptr %t$21$ptr, i64 0
-  store i64 %t$20, ptr %t$21$f0
-  %t$58 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$22 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values_2, i64 8) to i64
-  %t$59 = alloca i64
-  store i64 %t$21, ptr %t$59
-  %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
-  %t$23 = call i64 @examples.typeclass_collections_demo.sum_any(i64 %t$21, i64 %t$22)
-  %t$61 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
-  %t$25 = call i64 @print(i64 %t$23, i64 %t$24)
-  ret i64 %t$25
+  store i64 %t$18, ptr %t$19$f0
+  %t$54 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$55 = alloca i64
+  store i64 %t$19, ptr %t$55
+  %t$56 = call i64 @sprout_gc_push_i64_root(ptr %t$55)
+  %t$20 = call i64 @examples.typeclass_collections_demo.sum_any$spec_examples_typeclass_collections_demo_BoolVec(i64 %t$19)
+  %t$57 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$21 = call i64 @print$spec_Int(i64 %t$20)
+  ret i64 %t$21
 }
 
-define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+define i64 @examples.typeclass_collections_demo.sum_any$spec_examples_typeclass_collections_demo_BoolVec(i64 %p$values) {
 entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
+  %t$1 = alloca i64
+  store i64 %p$values, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @__tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_BoolVec_sum_values(i64 %p$values)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
-define i64 @__cm_examples.typeclass_collections_demo.Summable_sum_values(i64 %p$xs, i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values) {
+define i64 @examples.typeclass_collections_demo.sum_any$spec_examples_typeclass_collections_demo_IntVec(i64 %p$values) {
 entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_examples.typeclass_collections_demo.Summable_0_sum_values, i64 %p$xs)
+  %t$1 = alloca i64
+  store i64 %p$values, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @__tc_examples.typeclass_collections_demo.Summable_examples_typeclass_collections_demo_IntVec_sum_values(i64 %p$values)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
+}
+
+define i64 @print$spec_Int(i64 %p$value) {
+entry:
+  %t$0 = call i64 @__tc_ToString_Int_to_string(i64 %p$value)
+  %t$1 = call i64 @print_str(i64 %t$0)
+  ret i64 %t$1
 }
 
 define i64 @__tc_ToString_Int_to_string(i64 %p$value) {
@@ -527,7 +472,7 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_3(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_0(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @examples.typeclass_collections_demo.add(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
@@ -538,7 +483,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_3, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_0, i64 8) to i64
   %t$4 = add i64 0, 0
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6
@@ -554,7 +499,7 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_1(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @examples.typeclass_collections_demo.add_flag(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
@@ -565,7 +510,7 @@ entry:
   br label %arm_0_0
 arm_0_0:
   %t$2 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_4, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.typeclass_collections_demo.add_flag_1, i64 8) to i64
   %t$4 = add i64 0, 0
   %t$6 = alloca i64
   store i64 %t$2, ptr %t$6

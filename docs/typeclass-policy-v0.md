@@ -76,6 +76,7 @@ restrictive.
 | Orphan rule | **None** | `spec-v0.md:1273` |
 | Ambiguity | Rejected, never defaulted — no numeric defaulting exists | `spec-v0.md:2795` |
 | Dictionary cost at concrete instances | Devirtualized to a direct call | `docs/devirtualization-v0.md` (LANDED) |
+| Dictionary cost in a `where C a` function called at concrete instances | A copy per concrete dictionary set, with the methods called directly | `docs/specialisation-v0.md` (LANDED) |
 | Fundeps / overlapping / quantified constraints / undecidable superclasses | Absent | — |
 
 **The orphan-rule blast radius, measured.** Across `stdlib/`, `ide/`, `examples/` and `tests/`:

@@ -61,8 +61,7 @@ emit() {  # emit <src> <out.ll> <err> [pass-to-disable]
   if [[ -n "$off" ]]; then
     SPROUT_OPT_STATS=1 SPROUT_OPT_OFF="$off" "$CC" --emit-ir stdlib "$src" > "$out" 2> "$err"
   else
-    # ON also names the pass, so a default-off pass is actually on; a no-op for the rest.
-    SPROUT_OPT_STATS=1 SPROUT_OPT_ON="$PASS" "$CC" --emit-ir stdlib "$src" > "$out" 2> "$err"
+    SPROUT_OPT_STATS=1 "$CC" --emit-ir stdlib "$src" > "$out" 2> "$err"
   fi
 }
 
@@ -119,7 +118,7 @@ for entry in "${CORPUS[@]}"; do
 
   # Compile time: the pass's own cost, which is the half a runtime benchmark
   # cannot see when the pass turns out to change nothing.
-  cc_on=$(min_elapsed env "SPROUT_OPT_ON=$PASS" "$CC" --emit-ir stdlib "$src")
+  cc_on=$(min_elapsed "$CC" --emit-ir stdlib "$src")
   cc_off=$(min_elapsed env "SPROUT_OPT_OFF=$PASS" "$CC" --emit-ir stdlib "$src")
 
   on_t="-"; off_t="-"

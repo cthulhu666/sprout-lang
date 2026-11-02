@@ -94,7 +94,6 @@ declare i64 @ref_write(i64, i64)
 @.str.16 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 59, column 22)\00" }
 @.str.17 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 60, column 26)\00" }
 @__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_1.apply_0 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.aoc_2025_day_1.apply_0 }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_1_Answers_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_1_Answers_to_string_1 }
 @.str.18 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"Answers(\00" }
 @.str.19 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
 @.str.20 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c")\00" }
@@ -232,20 +231,6 @@ entry:
   %t$0 = call i64 @list_fold_go(i64 %p$step, i64 %p$init, i64 %p$xs)
   %t$7 = call i64 @sprout_gc_pop_roots(i64 3)
   ret i64 %t$0
-}
-
-define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$1 = call i64 @print_str(i64 %t$0)
-  ret i64 %t$1
 }
 
 define i64 @examples.aoc_2025_day_1.on_dial(i64 %p$n) {
@@ -687,36 +672,27 @@ join_6:
   ret i64 %t$7
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_1_Answers_to_string_1(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_examples_aoc_2025_day_1_Answers_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = load i64, ptr @examples.aoc_2025_day_1.sample_rotations
   %t$1 = call i64 @examples.aoc_2025_day_1.solve(i64 %t$0)
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_1_Answers_to_string_1, i64 8) to i64
-  %t$4 = alloca i64
-  store i64 %t$1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$3 = call i64 @print(i64 %t$1, i64 %t$2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$3
+  %t$3 = alloca i64
+  store i64 %t$1, ptr %t$3
+  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
+  %t$2 = call i64 @print$spec_examples_aoc_2025_day_1_Answers(i64 %t$1)
+  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$2
 }
 
-define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+define i64 @print$spec_examples_aoc_2025_day_1_Answers(i64 %p$value) {
 entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
-  ret i64 %t$0
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @__tc_ToString_examples_aoc_2025_day_1_Answers_to_string(i64 %p$value)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$1 = call i64 @print_str(i64 %t$0)
+  ret i64 %t$1
 }
 
 define i64 @__tc_Semigroup_String_append(i64 %p$left, i64 %p$right) {

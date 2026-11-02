@@ -553,6 +553,12 @@ bce-gate: bootstrap-from-seed
 spec-gate: bootstrap-from-seed
   SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/spec_gate.sh
 
+# Check the specialisation pass across the golden IR corpus: defines, and run output on vs off.
+# Usage: just spec-corpus-check [--off-golden-ref <ref>]. See scripts/spec_corpus_check.sh.
+[group('test')]
+spec-corpus-check *args: bootstrap-from-seed
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/spec_corpus_check.sh {{args}}
+
 # Byte-diff --use-ir-codegen output for the whole example + smoke-shape corpus
 # against the committed goldens in tests/golden/ir/ (57 files, ~55s serial).
 #
@@ -1592,38 +1598,31 @@ opt-harness-check: bootstrap-from-seed
   grep -q 'not implemented yet' "$TMPD/pending.err" \
     || { echo "opt-harness-check: disabling an unimplemented pass looked like it took effect" >&2; exit 1; }
 
-  # SPROUT_OPT_ON: an unknown name warns and changes nothing; a default-off pass it
-  # names runs (`print` is constrained, so spec fires on the fixture); the stats line
-  # carries `added=`.
-  SPROUT_OPT_ON=nosuchpass "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
-    > "$TMPD/onbogus.ll" 2>"$TMPD/onbogus.err"
-  grep -q 'SPROUT_OPT_ON names no such pass' "$TMPD/onbogus.err" \
-    || { echo "opt-harness-check: an unknown SPROUT_OPT_ON name was accepted silently" >&2; exit 1; }
-  cmp -s "$TMPD/on.ll" "$TMPD/onbogus.ll" \
-    || { echo "opt-harness-check: an unknown SPROUT_OPT_ON name changed the output" >&2; exit 1; }
-  SPROUT_OPT_STATS=1 SPROUT_OPT_ON=spec "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
-    > "$TMPD/spec.ll" 2>"$TMPD/spec.err"
-  grep -q '^\[opt\] spec on ' "$TMPD/spec.err" \
-    || { echo "opt-harness-check: SPROUT_OPT_ON=spec did not turn the pass on" >&2; cat "$TMPD/spec.err" >&2; exit 1; }
-  spec_added=$(sed -n 's/^\[opt\] spec on .*added=\([0-9]\{1,\}\).*/\1/p' "$TMPD/spec.err")
+  # Specialisation runs by default (`print` is constrained, so it fires on the
+  # fixture); the stats line carries `added=`; SPROUT_OPT_OFF=spec must reach codegen.
+  grep -q '^\[opt\] spec on ' "$TMPD/on.err" \
+    || { echo "opt-harness-check: spec is not on by default" >&2; cat "$TMPD/on.err" >&2; exit 1; }
+  spec_added=$(sed -n 's/^\[opt\] spec on .*added=\([0-9]\{1,\}\).*/\1/p' "$TMPD/on.err")
   [ "${spec_added:-0}" -gt 0 ] \
     || { echo "opt-harness-check: spec added $spec_added nodes to the fixture — it no longer fires" >&2; exit 1; }
-  if cmp -s "$TMPD/on.ll" "$TMPD/spec.ll"; then
-    echo "opt-harness-check: SPROUT_OPT_ON=spec emits the default IR — the switch does not reach codegen" >&2
+  SPROUT_OPT_STATS=1 SPROUT_OPT_OFF=spec "{{build_dir}}/compile_driver_bin_stage1" --emit-ir "{{stdlib_root}}" "$F" \
+    > "$TMPD/nospec.ll" 2>"$TMPD/nospec.err"
+  grep -q '^\[opt\] spec off ' "$TMPD/nospec.err" \
+    || { echo "opt-harness-check: SPROUT_OPT_OFF=spec did not turn the pass off" >&2; cat "$TMPD/nospec.err" >&2; exit 1; }
+  if cmp -s "$TMPD/on.ll" "$TMPD/nospec.ll"; then
+    echo "opt-harness-check: SPROUT_OPT_OFF=spec emits the default IR — the switch does not reach codegen" >&2
     exit 1
   fi
   grep -q '^\[opt\] dle on .* added=[0-9]' "$TMPD/on.err" \
     || { echo "opt-harness-check: the stats line has no added=" >&2; cat "$TMPD/on.err" >&2; exit 1; }
 
-  # The seed guard refuses either variable and passes with neither.
-  for v in SPROUT_OPT_OFF SPROUT_OPT_ON; do
-    if env "$v=x" bash scripts/opt_env_guard.sh 2>"$TMPD/guard.err"; then
-      echo "opt-harness-check: opt_env_guard.sh accepted $v" >&2; exit 1
-    fi
-    grep -q "$v" "$TMPD/guard.err" \
-      || { echo "opt-harness-check: opt_env_guard.sh does not name $v" >&2; exit 1; }
-  done
-  env -u SPROUT_OPT_OFF -u SPROUT_OPT_ON bash scripts/opt_env_guard.sh \
+  # The seed guard refuses SPROUT_OPT_OFF and passes without it.
+  if SPROUT_OPT_OFF=x bash scripts/opt_env_guard.sh 2>"$TMPD/guard.err"; then
+    echo "opt-harness-check: opt_env_guard.sh accepted SPROUT_OPT_OFF" >&2; exit 1
+  fi
+  grep -q SPROUT_OPT_OFF "$TMPD/guard.err" \
+    || { echo "opt-harness-check: opt_env_guard.sh does not name SPROUT_OPT_OFF" >&2; exit 1; }
+  env -u SPROUT_OPT_OFF bash scripts/opt_env_guard.sh \
     || { echo "opt-harness-check: opt_env_guard.sh refused a clean environment" >&2; exit 1; }
 
   echo "==> opt-harness-check ✓ (dle removed $removed nodes; OFF restores them)"
@@ -4775,7 +4774,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate spec-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."
@@ -4917,6 +4916,8 @@ gate-audit:
     grep -q "$b" justfile && continue
     grep -rq "$b" .github/workflows/ && continue
     grep -rq "$b" .claude/ 2>/dev/null && continue
+    # A sourced library runs with the scripts that source it, which are audited themselves.
+    grep -qE "^[[:space:]]*(source|\.) .*/$b\"?\$" scripts/*.sh && continue
     unreachable="$unreachable $b"
   done
   shopt -u nullglob

@@ -127,32 +127,32 @@ declare i64 @unsafe_pure(i64)
 @.str.19 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in * (line 120, column 26)\00" }
 @.str.20 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 136, column 29)\00" }
 @.str.21 = private unnamed_addr constant { i64, [40 x i8] } { i64 638986, [40 x i8] c"Int overflow in + (line 144, column 24)\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_1 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_1 }
-@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_2 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_2 }
 @.str.22 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 32, column 25)\00" }
-@.str.23 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 56, column 42)\00" }
-@.str.24 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 61, column 24)\00" }
-@.str.25 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
-@.str.26 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 61, column 30)\00" }
-@.str.27 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 61, column 18)\00" }
-@.str.28 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 66, column 64)\00" }
-@.str.29 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 67, column 42)\00" }
-@.str.30 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"absent\00" }
-@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_3 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_4 }
-@.str.31 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"primes    : \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_5 }
-@.str.32 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@.str.33 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"merged    : \00" }
-@.str.34 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@.str.35 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"smallest  : \00" }
-@.str.36 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@.str.37 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"largest   : \00" }
-@.str.38 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@.str.39 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 6: \00" }
-@.str.40 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
-@.str.41 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 9: \00" }
-@.str.42 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.23 = private unnamed_addr constant { i64, [7 x i8] } { i64 98314, [7 x i8] c"absent\00" }
+@.str.24 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"primes    : \00" }
+@__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_Int_to_string_1 }
+@.str.25 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.26 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"merged    : \00" }
+@.str.27 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.28 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"smallest  : \00" }
+@.str.29 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.30 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"largest   : \00" }
+@.str.31 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.32 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 6: \00" }
+@.str.33 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.34 = private unnamed_addr constant { i64, [13 x i8] } { i64 196618, [13 x i8] c"index of 9: \00" }
+@.str.35 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"\0A\00" }
+@.str.36 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 56, column 42)\00" }
+@.str.37 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 61, column 24)\00" }
+@.str.38 = private unnamed_addr constant { i64, [17 x i8] } { i64 262154, [17 x i8] c"division by zero\00" }
+@.str.39 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in / (line 61, column 30)\00" }
+@.str.40 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 61, column 18)\00" }
+@.str.41 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in + (line 66, column 64)\00" }
+@.str.42 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 67, column 42)\00" }
+@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_2 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_2 }
+@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_3 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_3 }
+@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_4 }
+@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_5 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_5 }
 @.str.43 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1230, column 26)\00" }
 @.str.44 = private unnamed_addr constant { i64, [8 x i8] } { i64 114698, [8 x i8] c"Nothing\00" }
 @.str.45 = private unnamed_addr constant { i64, [6 x i8] } { i64 81930, [6 x i8] c"Just(\00" }
@@ -483,50 +483,6 @@ ovfok_2:
   ret i64 %t$6
 }
 
-define i64 @ord_lt(i64 %p$x, i64 %p$y, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {
-entry:
-  %t$4 = alloca i64
-  store i64 %p$y, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$x, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$8 = alloca i64
-  store i64 %p$__tc_Ord_0_compare, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$10 = alloca i64
-  store i64 %p$__tc_Eq_0_eq, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0 = call i64 @__cm_Ord_compare(i64 %p$x, i64 %p$y, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$1 = add i64 0, 0
-  %t$2 = icmp slt i64 %t$0, %t$1
-  %t$3 = zext i1 %t$2 to i64
-  ret i64 %t$3
-}
-
-define i64 @ord_lte(i64 %p$x, i64 %p$y, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {
-entry:
-  %t$4 = alloca i64
-  store i64 %p$y, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$x, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %t$8 = alloca i64
-  store i64 %p$__tc_Ord_0_compare, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
-  %t$10 = alloca i64
-  store i64 %p$__tc_Eq_0_eq, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$0 = call i64 @__cm_Ord_compare(i64 %p$x, i64 %p$y, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$1 = add i64 0, 0
-  %t$2 = icmp sle i64 %t$0, %t$1
-  %t$3 = zext i1 %t$2 to i64
-  ret i64 %t$3
-}
-
 define i64 @list_reverse_go(i64 %p$xs$in, i64 %p$acc$in) {
 entry:
   %t$11 = alloca i64
@@ -849,28 +805,6 @@ arm_1_1:
 join_1:
   %t$2 = phi i64 [%t$3, %arm_0_1]
   ret i64 %t$2
-}
-
-define i64 @stdlib.sort.sort(i64 %p$xs, i64 %p$__tc_stdlib.sort.Sort_0_sort_values, i64 %p$__tc_stdlib.sort.Sort_0_sort_by_values, i64 %p$__tc_Ord_1_compare, i64 %p$__tc_Eq_1_eq) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$xs, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$3 = alloca i64
-  store i64 %p$__tc_stdlib.sort.Sort_0_sort_values, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$5 = alloca i64
-  store i64 %p$__tc_stdlib.sort.Sort_0_sort_by_values, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$7 = alloca i64
-  store i64 %p$__tc_Ord_1_compare, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$9 = alloca i64
-  store i64 %p$__tc_Eq_1_eq, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$0 = call i64 @__cm_stdlib.sort.Sort_sort_values(i64 %p$xs, i64 %p$__tc_stdlib.sort.Sort_0_sort_values, i64 %p$__tc_stdlib.sort.Sort_0_sort_by_values, i64 %p$__tc_Ord_1_compare, i64 %p$__tc_Eq_1_eq)
-  %t$11 = call i64 @sprout_gc_pop_roots(i64 5)
-  ret i64 %t$0
 }
 
 define i64 @stdlib.sort.min_int(i64 %p$a, i64 %p$b) {
@@ -1857,59 +1791,6 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_1(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_2(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_by_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
-define i64 @examples.wrap_sorted_vec.sort_of(i64 %p$xs, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {
-entry:
-  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_1, i64 8) to i64
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_2, i64 8) to i64
-  %t$3 = alloca i64
-  store i64 %p$xs, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$5 = alloca i64
-  store i64 %p$__tc_Ord_0_compare, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$7 = alloca i64
-  store i64 %p$__tc_Eq_0_eq, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$2 = call i64 @stdlib.sort.sort(i64 %p$xs, i64 %t$0, i64 %t$1, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
-  %t$9 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %t$2
-}
-
 define i64 @examples.wrap_sorted_vec.as_vec(i64 %p$s) {
 entry:
   br label %arm_0_0
@@ -1969,24 +1850,571 @@ join_1:
   ret i64 %t$2
 }
 
-define i64 @examples.wrap_sorted_vec.merge(i64 %p$left, i64 %p$right, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {
+define i64 @examples.wrap_sorted_vec.show_pos(i64 %p$m) {
 entry:
-  %t$10 = alloca [4 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$10, i8 0, i64 32, i1 false)
-  %t$11 = call i64 @sprout_gc_push_scan_root(ptr %t$10, i64 32)
+  %t$0 = call i64 @sprout_tag(i64 %p$m)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 1
+  %t$4 = icmp eq i64 %t$0, %t$3
+  br i1 %t$4, label %body_0_1, label %arm_1_1
+body_0_1:
+  %t$5 = call i64 @sprout_field(i64 %p$m, i64 0)
+  %t$11 = alloca i64
+  store i64 %t$5, ptr %t$11
+  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
+  %t$6 = call i64 @__tc_ToString_Int_to_string(i64 %t$5)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  %t$7 = add i64 0, 0
+  %t$8 = icmp eq i64 %t$0, %t$7
+  br i1 %t$8, label %body_1_1, label %arm_2_1
+body_1_1:
+  %t$9 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
+  %t$10 = ptrtoint ptr %t$9 to i64
+  br label %join_1
+arm_2_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$6, %body_0_1], [%t$10, %body_1_1]
+  ret i64 %t$2
+}
+
+define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_1(i64 %p$env$, i64 %p$a0) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a0, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
+  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %ret
+}
+
+define i64 @__sprout_user_main() {
+entry:
+  %t$0 = add i64 0, 7
+  %t$1 = add i64 0, 2
+  %t$2 = add i64 0, 5
+  %t$3 = add i64 0, 3
+  %t$4 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$111 = alloca i64
+  store i64 %t$4, ptr %t$111
+  %t$112 = call i64 @sprout_gc_push_i64_root(ptr %t$111)
+  %t$5 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$5$ptr = inttoptr i64 %t$5 to ptr
+  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
+  store i64 %t$3, ptr %t$5$f0
+  %t$5$f1 = getelementptr i64, ptr %t$5$ptr, i64 1
+  store i64 %t$4, ptr %t$5$f1
+  %t$113 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$114 = alloca i64
+  store i64 %t$5, ptr %t$114
+  %t$115 = call i64 @sprout_gc_push_i64_root(ptr %t$114)
+  %t$6 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$6$ptr = inttoptr i64 %t$6 to ptr
+  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
+  store i64 %t$2, ptr %t$6$f0
+  %t$6$f1 = getelementptr i64, ptr %t$6$ptr, i64 1
+  store i64 %t$5, ptr %t$6$f1
+  %t$116 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$117 = alloca i64
+  store i64 %t$6, ptr %t$117
+  %t$118 = call i64 @sprout_gc_push_i64_root(ptr %t$117)
+  %t$7 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$1, ptr %t$7$f0
+  %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
+  store i64 %t$6, ptr %t$7$f1
+  %t$119 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$120 = alloca i64
+  store i64 %t$7, ptr %t$120
+  %t$121 = call i64 @sprout_gc_push_i64_root(ptr %t$120)
+  %t$8 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$8$ptr = inttoptr i64 %t$8 to ptr
+  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
+  store i64 %t$0, ptr %t$8$f0
+  %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
+  store i64 %t$7, ptr %t$8$f1
+  %t$122 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$123 = alloca i64
+  store i64 %t$8, ptr %t$123
+  %t$124 = call i64 @sprout_gc_push_i64_root(ptr %t$123)
+  %t$9 = call i64 @vec_from_list(i64 %t$8)
+  %t$125 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$126 = alloca i64
+  store i64 %t$9, ptr %t$126
+  %t$127 = call i64 @sprout_gc_push_i64_root(ptr %t$126)
+  %t$10 = call i64 @examples.wrap_sorted_vec.sort_of$spec_Int(i64 %t$9)
+  %t$128 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$11 = add i64 0, 8
+  %t$12 = add i64 0, 4
+  %t$13 = add i64 0, 6
+  %t$129 = alloca i64
+  store i64 %t$10, ptr %t$129
+  %t$130 = call i64 @sprout_gc_push_i64_root(ptr %t$129)
+  %t$14 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$131 = alloca i64
+  store i64 %t$14, ptr %t$131
+  %t$132 = call i64 @sprout_gc_push_i64_root(ptr %t$131)
+  %t$15 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$15$ptr = inttoptr i64 %t$15 to ptr
+  %t$15$f0 = getelementptr i64, ptr %t$15$ptr, i64 0
+  store i64 %t$13, ptr %t$15$f0
+  %t$15$f1 = getelementptr i64, ptr %t$15$ptr, i64 1
+  store i64 %t$14, ptr %t$15$f1
+  %t$133 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$134 = alloca i64
+  store i64 %t$15, ptr %t$134
+  %t$135 = call i64 @sprout_gc_push_i64_root(ptr %t$134)
+  %t$16 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$16$ptr = inttoptr i64 %t$16 to ptr
+  %t$16$f0 = getelementptr i64, ptr %t$16$ptr, i64 0
+  store i64 %t$12, ptr %t$16$f0
+  %t$16$f1 = getelementptr i64, ptr %t$16$ptr, i64 1
+  store i64 %t$15, ptr %t$16$f1
+  %t$136 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$137 = alloca i64
+  store i64 %t$16, ptr %t$137
+  %t$138 = call i64 @sprout_gc_push_i64_root(ptr %t$137)
+  %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$17$ptr = inttoptr i64 %t$17 to ptr
+  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
+  store i64 %t$11, ptr %t$17$f0
+  %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
+  store i64 %t$16, ptr %t$17$f1
+  %t$139 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$140 = alloca i64
+  store i64 %t$17, ptr %t$140
+  %t$141 = call i64 @sprout_gc_push_i64_root(ptr %t$140)
+  %t$18 = call i64 @vec_from_list(i64 %t$17)
+  %t$142 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$143 = alloca i64
+  store i64 %t$18, ptr %t$143
+  %t$144 = call i64 @sprout_gc_push_i64_root(ptr %t$143)
+  %t$19 = call i64 @examples.wrap_sorted_vec.sort_of$spec_Int(i64 %t$18)
+  %t$145 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$146 = alloca i64
+  store i64 %t$19, ptr %t$146
+  %t$147 = call i64 @sprout_gc_push_i64_root(ptr %t$146)
+  %t$20 = call i64 @examples.wrap_sorted_vec.merge$spec_Int(i64 %t$10, i64 %t$19)
+  %t$148 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$21 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.24, i64 0, i32 1, i64 0
+  %t$22 = ptrtoint ptr %t$21 to i64
+  %t$23 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %t$10)
+  %t$149 = alloca i64
+  store i64 %t$20, ptr %t$149
+  %t$150 = call i64 @sprout_gc_push_i64_root(ptr %t$149)
+  %t$151 = alloca i64
+  store i64 %t$22, ptr %t$151
+  %t$152 = call i64 @sprout_gc_push_i64_root(ptr %t$151)
+  %t$153 = alloca i64
+  store i64 %t$23, ptr %t$153
+  %t$154 = call i64 @sprout_gc_push_i64_root(ptr %t$153)
+  %t$24 = call i64 @vec_to_list(i64 %t$23)
+  %t$155 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
+  %t$156 = alloca i64
+  store i64 %t$24, ptr %t$156
+  %t$157 = call i64 @sprout_gc_push_i64_root(ptr %t$156)
+  %t$26 = call i64 @__tc_ToString_List_a_to_string(i64 %t$24, i64 %t$25)
+  %t$158 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$27 = call i64 @__tc_ToString_String_to_string(i64 %t$26)
+  %t$28 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
+  %t$29 = ptrtoint ptr %t$28 to i64
+  %t$159 = alloca i64
+  store i64 %t$27, ptr %t$159
+  %t$160 = call i64 @sprout_gc_push_i64_root(ptr %t$159)
+  %t$161 = alloca i64
+  store i64 %t$29, ptr %t$161
+  %t$162 = call i64 @sprout_gc_push_i64_root(ptr %t$161)
+  %t$30 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$163 = alloca i64
+  store i64 %t$30, ptr %t$163
+  %t$164 = call i64 @sprout_gc_push_i64_root(ptr %t$163)
+  %t$31 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$31$ptr = inttoptr i64 %t$31 to ptr
+  %t$31$f0 = getelementptr i64, ptr %t$31$ptr, i64 0
+  store i64 %t$29, ptr %t$31$f0
+  %t$31$f1 = getelementptr i64, ptr %t$31$ptr, i64 1
+  store i64 %t$30, ptr %t$31$f1
+  %t$165 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$166 = alloca i64
+  store i64 %t$31, ptr %t$166
+  %t$167 = call i64 @sprout_gc_push_i64_root(ptr %t$166)
+  %t$32 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$32$ptr = inttoptr i64 %t$32 to ptr
+  %t$32$f0 = getelementptr i64, ptr %t$32$ptr, i64 0
+  store i64 %t$27, ptr %t$32$f0
+  %t$32$f1 = getelementptr i64, ptr %t$32$ptr, i64 1
+  store i64 %t$31, ptr %t$32$f1
+  %t$168 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$169 = alloca i64
+  store i64 %t$32, ptr %t$169
+  %t$170 = call i64 @sprout_gc_push_i64_root(ptr %t$169)
+  %t$33 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$33$ptr = inttoptr i64 %t$33 to ptr
+  %t$33$f0 = getelementptr i64, ptr %t$33$ptr, i64 0
+  store i64 %t$22, ptr %t$33$f0
+  %t$33$f1 = getelementptr i64, ptr %t$33$ptr, i64 1
+  store i64 %t$32, ptr %t$33$f1
+  %t$171 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$172 = alloca i64
+  store i64 %t$33, ptr %t$172
+  %t$173 = call i64 @sprout_gc_push_i64_root(ptr %t$172)
+  %t$34 = call i64 @string_concat_many(i64 %t$33)
+  %t$174 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$175 = alloca i64
+  store i64 %t$34, ptr %t$175
+  %t$176 = call i64 @sprout_gc_push_i64_root(ptr %t$175)
+  %t$35 = call i64 @term_write(i64 %t$34)
+  %t$177 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$36 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.26, i64 0, i32 1, i64 0
+  %t$37 = ptrtoint ptr %t$36 to i64
+  %t$38 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %t$20)
+  %t$178 = alloca i64
+  store i64 %t$37, ptr %t$178
+  %t$179 = call i64 @sprout_gc_push_i64_root(ptr %t$178)
+  %t$180 = alloca i64
+  store i64 %t$38, ptr %t$180
+  %t$181 = call i64 @sprout_gc_push_i64_root(ptr %t$180)
+  %t$39 = call i64 @vec_to_list(i64 %t$38)
+  %t$182 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$40 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
+  %t$183 = alloca i64
+  store i64 %t$39, ptr %t$183
+  %t$184 = call i64 @sprout_gc_push_i64_root(ptr %t$183)
+  %t$41 = call i64 @__tc_ToString_List_a_to_string(i64 %t$39, i64 %t$40)
+  %t$185 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$42 = call i64 @__tc_ToString_String_to_string(i64 %t$41)
+  %t$43 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
+  %t$44 = ptrtoint ptr %t$43 to i64
+  %t$186 = alloca i64
+  store i64 %t$42, ptr %t$186
+  %t$187 = call i64 @sprout_gc_push_i64_root(ptr %t$186)
+  %t$188 = alloca i64
+  store i64 %t$44, ptr %t$188
+  %t$189 = call i64 @sprout_gc_push_i64_root(ptr %t$188)
+  %t$45 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$190 = alloca i64
+  store i64 %t$45, ptr %t$190
+  %t$191 = call i64 @sprout_gc_push_i64_root(ptr %t$190)
+  %t$46 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$46$ptr = inttoptr i64 %t$46 to ptr
+  %t$46$f0 = getelementptr i64, ptr %t$46$ptr, i64 0
+  store i64 %t$44, ptr %t$46$f0
+  %t$46$f1 = getelementptr i64, ptr %t$46$ptr, i64 1
+  store i64 %t$45, ptr %t$46$f1
+  %t$192 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$193 = alloca i64
+  store i64 %t$46, ptr %t$193
+  %t$194 = call i64 @sprout_gc_push_i64_root(ptr %t$193)
+  %t$47 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$47$ptr = inttoptr i64 %t$47 to ptr
+  %t$47$f0 = getelementptr i64, ptr %t$47$ptr, i64 0
+  store i64 %t$42, ptr %t$47$f0
+  %t$47$f1 = getelementptr i64, ptr %t$47$ptr, i64 1
+  store i64 %t$46, ptr %t$47$f1
+  %t$195 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$196 = alloca i64
+  store i64 %t$47, ptr %t$196
+  %t$197 = call i64 @sprout_gc_push_i64_root(ptr %t$196)
+  %t$48 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$48$ptr = inttoptr i64 %t$48 to ptr
+  %t$48$f0 = getelementptr i64, ptr %t$48$ptr, i64 0
+  store i64 %t$37, ptr %t$48$f0
+  %t$48$f1 = getelementptr i64, ptr %t$48$ptr, i64 1
+  store i64 %t$47, ptr %t$48$f1
+  %t$198 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$199 = alloca i64
+  store i64 %t$48, ptr %t$199
+  %t$200 = call i64 @sprout_gc_push_i64_root(ptr %t$199)
+  %t$49 = call i64 @string_concat_many(i64 %t$48)
+  %t$201 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$202 = alloca i64
+  store i64 %t$49, ptr %t$202
+  %t$203 = call i64 @sprout_gc_push_i64_root(ptr %t$202)
+  %t$50 = call i64 @term_write(i64 %t$49)
+  %t$204 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$51 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
+  %t$52 = ptrtoint ptr %t$51 to i64
+  %t$53$st = call i128 @examples.wrap_sorted_vec.smallest_worker(i64 %t$20)
+  %t$53 = trunc i128 %t$53$st to i64
+  %t$53$hi = lshr i128 %t$53$st, 64
+  %t$54 = trunc i128 %t$53$hi to i64
+  %t$55 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
+  %t$205 = alloca i64
+  store i64 %t$52, ptr %t$205
+  %t$206 = call i64 @sprout_gc_push_i64_root(ptr %t$205)
+  %t$207 = alloca i64
+  store i64 %t$54, ptr %t$207
+  %t$208 = call i64 @sprout_gc_push_i64_root(ptr %t$207)
+  %t$56 = call i64 @__tc_ToString_Maybe_a_to_string_argw(i64 %t$53, i64 %t$54, i64 %t$55)
+  %t$209 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$57 = call i64 @__tc_ToString_String_to_string(i64 %t$56)
+  %t$58 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
+  %t$59 = ptrtoint ptr %t$58 to i64
+  %t$210 = alloca i64
+  store i64 %t$57, ptr %t$210
+  %t$211 = call i64 @sprout_gc_push_i64_root(ptr %t$210)
+  %t$212 = alloca i64
+  store i64 %t$59, ptr %t$212
+  %t$213 = call i64 @sprout_gc_push_i64_root(ptr %t$212)
+  %t$60 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$214 = alloca i64
+  store i64 %t$60, ptr %t$214
+  %t$215 = call i64 @sprout_gc_push_i64_root(ptr %t$214)
+  %t$61 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$61$ptr = inttoptr i64 %t$61 to ptr
+  %t$61$f0 = getelementptr i64, ptr %t$61$ptr, i64 0
+  store i64 %t$59, ptr %t$61$f0
+  %t$61$f1 = getelementptr i64, ptr %t$61$ptr, i64 1
+  store i64 %t$60, ptr %t$61$f1
+  %t$216 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$217 = alloca i64
+  store i64 %t$61, ptr %t$217
+  %t$218 = call i64 @sprout_gc_push_i64_root(ptr %t$217)
+  %t$62 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$62$ptr = inttoptr i64 %t$62 to ptr
+  %t$62$f0 = getelementptr i64, ptr %t$62$ptr, i64 0
+  store i64 %t$57, ptr %t$62$f0
+  %t$62$f1 = getelementptr i64, ptr %t$62$ptr, i64 1
+  store i64 %t$61, ptr %t$62$f1
+  %t$219 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$220 = alloca i64
+  store i64 %t$62, ptr %t$220
+  %t$221 = call i64 @sprout_gc_push_i64_root(ptr %t$220)
+  %t$63 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$63$ptr = inttoptr i64 %t$63 to ptr
+  %t$63$f0 = getelementptr i64, ptr %t$63$ptr, i64 0
+  store i64 %t$52, ptr %t$63$f0
+  %t$63$f1 = getelementptr i64, ptr %t$63$ptr, i64 1
+  store i64 %t$62, ptr %t$63$f1
+  %t$222 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$223 = alloca i64
+  store i64 %t$63, ptr %t$223
+  %t$224 = call i64 @sprout_gc_push_i64_root(ptr %t$223)
+  %t$64 = call i64 @string_concat_many(i64 %t$63)
+  %t$225 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$226 = alloca i64
+  store i64 %t$64, ptr %t$226
+  %t$227 = call i64 @sprout_gc_push_i64_root(ptr %t$226)
+  %t$65 = call i64 @term_write(i64 %t$64)
+  %t$228 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$66 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
+  %t$67 = ptrtoint ptr %t$66 to i64
+  %t$229 = alloca i64
+  store i64 %t$67, ptr %t$229
+  %t$230 = call i64 @sprout_gc_push_i64_root(ptr %t$229)
+  %t$68$st = call i128 @examples.wrap_sorted_vec.largest_worker(i64 %t$20)
+  %t$68 = trunc i128 %t$68$st to i64
+  %t$68$hi = lshr i128 %t$68$st, 64
+  %t$69 = trunc i128 %t$68$hi to i64
+  %t$70 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_1, i64 8) to i64
+  %t$231 = alloca i64
+  store i64 %t$69, ptr %t$231
+  %t$232 = call i64 @sprout_gc_push_i64_root(ptr %t$231)
+  %t$71 = call i64 @__tc_ToString_Maybe_a_to_string_argw(i64 %t$68, i64 %t$69, i64 %t$70)
+  %t$233 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$72 = call i64 @__tc_ToString_String_to_string(i64 %t$71)
+  %t$73 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
+  %t$74 = ptrtoint ptr %t$73 to i64
+  %t$234 = alloca i64
+  store i64 %t$72, ptr %t$234
+  %t$235 = call i64 @sprout_gc_push_i64_root(ptr %t$234)
+  %t$236 = alloca i64
+  store i64 %t$74, ptr %t$236
+  %t$237 = call i64 @sprout_gc_push_i64_root(ptr %t$236)
+  %t$75 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$238 = alloca i64
+  store i64 %t$75, ptr %t$238
+  %t$239 = call i64 @sprout_gc_push_i64_root(ptr %t$238)
+  %t$76 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$76$ptr = inttoptr i64 %t$76 to ptr
+  %t$76$f0 = getelementptr i64, ptr %t$76$ptr, i64 0
+  store i64 %t$74, ptr %t$76$f0
+  %t$76$f1 = getelementptr i64, ptr %t$76$ptr, i64 1
+  store i64 %t$75, ptr %t$76$f1
+  %t$240 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$241 = alloca i64
+  store i64 %t$76, ptr %t$241
+  %t$242 = call i64 @sprout_gc_push_i64_root(ptr %t$241)
+  %t$77 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$77$ptr = inttoptr i64 %t$77 to ptr
+  %t$77$f0 = getelementptr i64, ptr %t$77$ptr, i64 0
+  store i64 %t$72, ptr %t$77$f0
+  %t$77$f1 = getelementptr i64, ptr %t$77$ptr, i64 1
+  store i64 %t$76, ptr %t$77$f1
+  %t$243 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$244 = alloca i64
+  store i64 %t$77, ptr %t$244
+  %t$245 = call i64 @sprout_gc_push_i64_root(ptr %t$244)
+  %t$78 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$78$ptr = inttoptr i64 %t$78 to ptr
+  %t$78$f0 = getelementptr i64, ptr %t$78$ptr, i64 0
+  store i64 %t$67, ptr %t$78$f0
+  %t$78$f1 = getelementptr i64, ptr %t$78$ptr, i64 1
+  store i64 %t$77, ptr %t$78$f1
+  %t$246 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$247 = alloca i64
+  store i64 %t$78, ptr %t$247
+  %t$248 = call i64 @sprout_gc_push_i64_root(ptr %t$247)
+  %t$79 = call i64 @string_concat_many(i64 %t$78)
+  %t$249 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$250 = alloca i64
+  store i64 %t$79, ptr %t$250
+  %t$251 = call i64 @sprout_gc_push_i64_root(ptr %t$250)
+  %t$80 = call i64 @term_write(i64 %t$79)
+  %t$252 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$81 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
+  %t$82 = ptrtoint ptr %t$81 to i64
+  %t$83 = add i64 0, 6
+  %t$253 = alloca i64
+  store i64 %t$82, ptr %t$253
+  %t$254 = call i64 @sprout_gc_push_i64_root(ptr %t$253)
+  %t$84$st = call i128 @examples.wrap_sorted_vec.position_of$spec_Int_Int_worker(i64 %t$20, i64 %t$83)
+  %t$84 = trunc i128 %t$84$st to i64
+  %t$84$hi = lshr i128 %t$84$st, 64
+  %t$85 = trunc i128 %t$84$hi to i64
+  %t$255 = alloca i64
+  store i64 %t$85, ptr %t$255
+  %t$256 = call i64 @sprout_gc_push_i64_root(ptr %t$255)
+  %t$86 = call i64 @examples.wrap_sorted_vec.show_pos_argw(i64 %t$84, i64 %t$85)
+  %t$257 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$87 = call i64 @__tc_ToString_String_to_string(i64 %t$86)
+  %t$88 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
+  %t$89 = ptrtoint ptr %t$88 to i64
+  %t$258 = alloca i64
+  store i64 %t$87, ptr %t$258
+  %t$259 = call i64 @sprout_gc_push_i64_root(ptr %t$258)
+  %t$260 = alloca i64
+  store i64 %t$89, ptr %t$260
+  %t$261 = call i64 @sprout_gc_push_i64_root(ptr %t$260)
+  %t$90 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$262 = alloca i64
+  store i64 %t$90, ptr %t$262
+  %t$263 = call i64 @sprout_gc_push_i64_root(ptr %t$262)
+  %t$91 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$91$ptr = inttoptr i64 %t$91 to ptr
+  %t$91$f0 = getelementptr i64, ptr %t$91$ptr, i64 0
+  store i64 %t$89, ptr %t$91$f0
+  %t$91$f1 = getelementptr i64, ptr %t$91$ptr, i64 1
+  store i64 %t$90, ptr %t$91$f1
+  %t$264 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$265 = alloca i64
+  store i64 %t$91, ptr %t$265
+  %t$266 = call i64 @sprout_gc_push_i64_root(ptr %t$265)
+  %t$92 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$92$ptr = inttoptr i64 %t$92 to ptr
+  %t$92$f0 = getelementptr i64, ptr %t$92$ptr, i64 0
+  store i64 %t$87, ptr %t$92$f0
+  %t$92$f1 = getelementptr i64, ptr %t$92$ptr, i64 1
+  store i64 %t$91, ptr %t$92$f1
+  %t$267 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$268 = alloca i64
+  store i64 %t$92, ptr %t$268
+  %t$269 = call i64 @sprout_gc_push_i64_root(ptr %t$268)
+  %t$93 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$93$ptr = inttoptr i64 %t$93 to ptr
+  %t$93$f0 = getelementptr i64, ptr %t$93$ptr, i64 0
+  store i64 %t$82, ptr %t$93$f0
+  %t$93$f1 = getelementptr i64, ptr %t$93$ptr, i64 1
+  store i64 %t$92, ptr %t$93$f1
+  %t$270 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$271 = alloca i64
+  store i64 %t$93, ptr %t$271
+  %t$272 = call i64 @sprout_gc_push_i64_root(ptr %t$271)
+  %t$94 = call i64 @string_concat_many(i64 %t$93)
+  %t$273 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$274 = alloca i64
+  store i64 %t$94, ptr %t$274
+  %t$275 = call i64 @sprout_gc_push_i64_root(ptr %t$274)
+  %t$95 = call i64 @term_write(i64 %t$94)
+  %t$276 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$96 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
+  %t$97 = ptrtoint ptr %t$96 to i64
+  %t$98 = add i64 0, 9
+  %t$277 = alloca i64
+  store i64 %t$97, ptr %t$277
+  %t$278 = call i64 @sprout_gc_push_i64_root(ptr %t$277)
+  %t$99$st = call i128 @examples.wrap_sorted_vec.position_of$spec_Int_Int_worker(i64 %t$20, i64 %t$98)
+  %t$99 = trunc i128 %t$99$st to i64
+  %t$99$hi = lshr i128 %t$99$st, 64
+  %t$100 = trunc i128 %t$99$hi to i64
+  %t$279 = alloca i64
+  store i64 %t$100, ptr %t$279
+  %t$280 = call i64 @sprout_gc_push_i64_root(ptr %t$279)
+  %t$101 = call i64 @examples.wrap_sorted_vec.show_pos_argw(i64 %t$99, i64 %t$100)
+  %t$281 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$102 = call i64 @__tc_ToString_String_to_string(i64 %t$101)
+  %t$103 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
+  %t$104 = ptrtoint ptr %t$103 to i64
+  %t$282 = alloca i64
+  store i64 %t$102, ptr %t$282
+  %t$283 = call i64 @sprout_gc_push_i64_root(ptr %t$282)
+  %t$284 = alloca i64
+  store i64 %t$104, ptr %t$284
+  %t$285 = call i64 @sprout_gc_push_i64_root(ptr %t$284)
+  %t$105 = call i64 @sprout_alloc_obj(i64 5, i64 0)
+  %t$286 = alloca i64
+  store i64 %t$105, ptr %t$286
+  %t$287 = call i64 @sprout_gc_push_i64_root(ptr %t$286)
+  %t$106 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$106$ptr = inttoptr i64 %t$106 to ptr
+  %t$106$f0 = getelementptr i64, ptr %t$106$ptr, i64 0
+  store i64 %t$104, ptr %t$106$f0
+  %t$106$f1 = getelementptr i64, ptr %t$106$ptr, i64 1
+  store i64 %t$105, ptr %t$106$f1
+  %t$288 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$289 = alloca i64
+  store i64 %t$106, ptr %t$289
+  %t$290 = call i64 @sprout_gc_push_i64_root(ptr %t$289)
+  %t$107 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$107$ptr = inttoptr i64 %t$107 to ptr
+  %t$107$f0 = getelementptr i64, ptr %t$107$ptr, i64 0
+  store i64 %t$102, ptr %t$107$f0
+  %t$107$f1 = getelementptr i64, ptr %t$107$ptr, i64 1
+  store i64 %t$106, ptr %t$107$f1
+  %t$291 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$292 = alloca i64
+  store i64 %t$107, ptr %t$292
+  %t$293 = call i64 @sprout_gc_push_i64_root(ptr %t$292)
+  %t$108 = call i64 @sprout_alloc_obj(i64 6, i64 2)
+  %t$108$ptr = inttoptr i64 %t$108 to ptr
+  %t$108$f0 = getelementptr i64, ptr %t$108$ptr, i64 0
+  store i64 %t$97, ptr %t$108$f0
+  %t$108$f1 = getelementptr i64, ptr %t$108$ptr, i64 1
+  store i64 %t$107, ptr %t$108$f1
+  %t$294 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$295 = alloca i64
+  store i64 %t$108, ptr %t$295
+  %t$296 = call i64 @sprout_gc_push_i64_root(ptr %t$295)
+  %t$109 = call i64 @string_concat_many(i64 %t$108)
+  %t$297 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$298 = alloca i64
+  store i64 %t$109, ptr %t$298
+  %t$299 = call i64 @sprout_gc_push_i64_root(ptr %t$298)
+  %t$110 = call i64 @term_write(i64 %t$109)
+  %t$300 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$110
+}
+
+define i64 @examples.wrap_sorted_vec.merge$spec_Int(i64 %p$left, i64 %p$right) {
+entry:
+  %t$10 = alloca [2 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$10, i8 0, i64 16, i1 false)
+  %t$11 = call i64 @sprout_gc_push_scan_root(ptr %t$10, i64 16)
   %t$10$0 = getelementptr i64, ptr %t$10, i64 0
   store i64 %p$right, ptr %t$10$0
-  %t$10$1 = getelementptr i64, ptr %t$10, i64 1
-  store i64 %p$__tc_Ord_0_compare, ptr %t$10$1
-  %t$10$2 = getelementptr i64, ptr %t$10, i64 2
-  store i64 %p$__tc_Eq_0_eq, ptr %t$10$2
   %t$0 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %p$left)
   %t$12 = alloca i64
   store i64 %t$0, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$1 = call i64 @vec_to_list(i64 %t$0)
-  %t$10$3 = getelementptr i64, ptr %t$10, i64 3
-  store i64 %t$1, ptr %t$10$3
+  %t$10$1 = getelementptr i64, ptr %t$10, i64 1
+  store i64 %t$1, ptr %t$10$1
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_2
 arm_0_2:
@@ -2001,7 +2429,7 @@ arm_0_6:
   %t$18 = alloca i64
   store i64 %t$5, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
-  %t$8 = call i64 @examples.wrap_sorted_vec.merge_lists(i64 %t$1, i64 %t$5, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
+  %t$8 = call i64 @examples.wrap_sorted_vec.merge_lists$spec_Int(i64 %t$1, i64 %t$5)
   %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$21 = alloca i64
   store i64 %t$8, ptr %t$21
@@ -2024,19 +2452,53 @@ join_2:
   ret i64 %t$3
 }
 
-define i64 @examples.wrap_sorted_vec.merge_lists(i64 %p$xs, i64 %p$ys, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {
+define i64 @examples.wrap_sorted_vec.position_of$spec_Int_Int(i64 %p$s, i64 %p$target) {
 entry:
-  %t$26 = alloca [8 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$26, i8 0, i64 64, i1 false)
-  %t$27 = call i64 @sprout_gc_push_scan_root(ptr %t$26, i64 64)
-  %t$26$0 = getelementptr i64, ptr %t$26, i64 0
-  store i64 %p$xs, ptr %t$26$0
-  %t$26$1 = getelementptr i64, ptr %t$26, i64 1
-  store i64 %p$ys, ptr %t$26$1
-  %t$26$2 = getelementptr i64, ptr %t$26, i64 2
-  store i64 %p$__tc_Ord_0_compare, ptr %t$26$2
-  %t$26$3 = getelementptr i64, ptr %t$26, i64 3
-  store i64 %p$__tc_Eq_0_eq, ptr %t$26$3
+  %t$0 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %p$s)
+  br label %arm_0_1
+arm_0_1:
+  %t$3 = add i64 0, 0
+  %t$4 = call i64 @vec_length(i64 %t$0)
+  %t$5 = add i64 0, 1
+  %t$6$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$4, i64 %t$5)
+  %t$6 = extractvalue { i64, i1 } %t$6$agg, 0
+  %t$6$ovf = extractvalue { i64, i1 } %t$6$agg, 1
+  br i1 %t$6$ovf, label %ovfpanic_6, label %ovfok_6
+ovfpanic_6:
+  %t$7 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
+  %t$8 = ptrtoint ptr %t$7 to i64
+  call i64 @panic(i64 %t$8)
+  unreachable
+ovfok_6:
+  %t$10 = alloca i64
+  store i64 %t$0, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
+  %t$9 = call i64 @examples.wrap_sorted_vec.bsearch$spec_Int_Int(i64 %t$0, i64 %p$target, i64 %t$3, i64 %t$6)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_1
+arm_1_1:
+  call void @sprout_abort_match()
+  unreachable
+join_1:
+  %t$2 = phi i64 [%t$9, %ovfok_6]
+  ret i64 %t$2
+}
+
+define i64 @examples.wrap_sorted_vec.sort_of$spec_Int(i64 %p$xs) {
+entry:
+  %t$1 = alloca i64
+  store i64 %p$xs, ptr %t$1
+  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
+  %t$0 = call i64 @stdlib.sort.sort$spec_Vec_Int(i64 %p$xs)
+  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$0
+}
+
+define i64 @examples.wrap_sorted_vec.merge_lists$spec_Int(i64 %p$xs, i64 %p$ys) {
+entry:
+  %t$26 = alloca [2 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$26, i8 0, i64 16, i1 false)
+  %t$27 = call i64 @sprout_gc_push_scan_root(ptr %t$26, i64 16)
   %t$0 = call i64 @sprout_tag(i64 %p$xs)
   br label %arm_0_1
 arm_0_1:
@@ -2051,11 +2513,9 @@ arm_1_1:
   br i1 %t$6, label %body_1_1, label %arm_2_1
 body_1_1:
   %t$7 = call i64 @sprout_field(i64 %p$xs, i64 0)
-  %t$26$4 = getelementptr i64, ptr %t$26, i64 4
-  store i64 %t$7, ptr %t$26$4
+  %t$26$0 = getelementptr i64, ptr %t$26, i64 0
+  store i64 %t$7, ptr %t$26$0
   %t$8 = call i64 @sprout_field(i64 %p$xs, i64 1)
-  %t$26$5 = getelementptr i64, ptr %t$26, i64 5
-  store i64 %t$8, ptr %t$26$5
   %t$9 = call i64 @sprout_tag(i64 %p$ys)
   br label %arm_0_10
 arm_0_10:
@@ -2070,39 +2530,51 @@ arm_1_10:
   br i1 %t$15, label %body_1_10, label %arm_2_10
 body_1_10:
   %t$16 = call i64 @sprout_field(i64 %p$ys, i64 0)
-  %t$26$6 = getelementptr i64, ptr %t$26, i64 6
-  store i64 %t$16, ptr %t$26$6
+  %t$26$1 = getelementptr i64, ptr %t$26, i64 1
+  store i64 %t$16, ptr %t$26$1
   %t$17 = call i64 @sprout_field(i64 %p$ys, i64 1)
-  %t$26$7 = getelementptr i64, ptr %t$26, i64 7
-  store i64 %t$17, ptr %t$26$7
-  %t$18 = call i64 @ord_lte(i64 %t$7, i64 %t$16, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
+  %t$18 = call i64 @ord_lte$spec_Int(i64 %t$7, i64 %t$16)
   %t$25 = trunc i64 %t$18 to i1
   br i1 %t$25, label %then_19, label %else_19
 then_19:
-  %t$21 = call i64 @examples.wrap_sorted_vec.merge_lists(i64 %t$8, i64 %p$ys, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
   %t$28 = alloca i64
-  store i64 %t$21, ptr %t$28
+  store i64 %t$8, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
+  %t$30 = alloca i64
+  store i64 %p$ys, ptr %t$30
+  %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
+  %t$21 = call i64 @examples.wrap_sorted_vec.merge_lists$spec_Int(i64 %t$8, i64 %p$ys)
+  %t$32 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$33 = alloca i64
+  store i64 %t$21, ptr %t$33
+  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
   %t$22 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$22$ptr = inttoptr i64 %t$22 to ptr
   %t$22$f0 = getelementptr i64, ptr %t$22$ptr, i64 0
   store i64 %t$7, ptr %t$22$f0
   %t$22$f1 = getelementptr i64, ptr %t$22$ptr, i64 1
   store i64 %t$21, ptr %t$22$f1
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_19
 else_19:
-  %t$23 = call i64 @examples.wrap_sorted_vec.merge_lists(i64 %p$xs, i64 %t$17, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq)
-  %t$31 = alloca i64
-  store i64 %t$23, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
+  %t$36 = alloca i64
+  store i64 %t$17, ptr %t$36
+  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
+  %t$38 = alloca i64
+  store i64 %p$xs, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$23 = call i64 @examples.wrap_sorted_vec.merge_lists$spec_Int(i64 %p$xs, i64 %t$17)
+  %t$40 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$41 = alloca i64
+  store i64 %t$23, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$24 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$24$ptr = inttoptr i64 %t$24 to ptr
   %t$24$f0 = getelementptr i64, ptr %t$24$ptr, i64 0
   store i64 %t$16, ptr %t$24$f0
   %t$24$f1 = getelementptr i64, ptr %t$24$ptr, i64 1
   store i64 %t$23, ptr %t$24$f1
-  %t$33 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_19
 join_19:
   %t$20 = phi i64 [%t$22, %then_19], [%t$24, %else_19]
@@ -2118,66 +2590,25 @@ arm_2_1:
   unreachable
 join_1:
   %t$2 = phi i64 [%p$ys, %body_0_1], [%t$11, %join_10]
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$2
 }
 
-define i64 @examples.wrap_sorted_vec.position_of(i64 %p$s, i64 %p$target, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq, i64 %p$__tc_Eq_1_eq) {
+define i64 @ord_lte$spec_Int(i64 %p$x, i64 %p$y) {
 entry:
-  %t$0 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %p$s)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 0
-  %t$4 = call i64 @vec_length(i64 %t$0)
-  %t$5 = add i64 0, 1
-  %t$6$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %t$4, i64 %t$5)
-  %t$6 = extractvalue { i64, i1 } %t$6$agg, 0
-  %t$6$ovf = extractvalue { i64, i1 } %t$6$agg, 1
-  br i1 %t$6$ovf, label %ovfpanic_6, label %ovfok_6
-ovfpanic_6:
-  %t$7 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.23, i64 0, i32 1, i64 0
-  %t$8 = ptrtoint ptr %t$7 to i64
-  call i64 @panic(i64 %t$8)
-  unreachable
-ovfok_6:
-  %t$10 = alloca i64
-  store i64 %t$0, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
-  %t$12 = alloca i64
-  store i64 %p$target, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$14 = alloca i64
-  store i64 %p$__tc_Ord_0_compare, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
-  %t$16 = alloca i64
-  store i64 %p$__tc_Eq_1_eq, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$9 = call i64 @examples.wrap_sorted_vec.bsearch(i64 %t$0, i64 %p$target, i64 %t$3, i64 %t$6, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_1_eq, i64 %p$__tc_Eq_1_eq)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 4)
-  br label %join_1
-arm_1_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$9, %ovfok_6]
-  ret i64 %t$2
+  %t$0 = call i64 @__tc_Ord_Int_compare(i64 %p$x, i64 %p$y)
+  %t$1 = add i64 0, 0
+  %t$2 = icmp sle i64 %t$0, %t$1
+  %t$3 = zext i1 %t$2 to i64
+  ret i64 %t$3
 }
 
-define i64 @examples.wrap_sorted_vec.bsearch(i64 %p$v$in, i64 %p$target$in, i64 %p$lo$in, i64 %p$hi$in, i64 %p$__tc_Ord_0_compare$in, i64 %p$__tc_Eq_0_eq$in, i64 %p$__tc_Eq_1_eq$in) {
+define i64 @examples.wrap_sorted_vec.bsearch$spec_Int_Int(i64 %p$v$in, i64 %p$target$in, i64 %p$lo$in, i64 %p$hi$in) {
 entry:
-  %t$59 = alloca [6 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$59, i8 0, i64 48, i1 false)
-  %t$60 = call i64 @sprout_gc_push_scan_root(ptr %t$59, i64 48)
-  %t$51 = getelementptr i64, ptr %t$59, i64 0
+  %t$51 = alloca i64
   store i64 %p$v$in, ptr %t$51
-  %t$52 = getelementptr i64, ptr %t$59, i64 1
+  %t$52 = alloca i64
   store i64 %p$target$in, ptr %t$52
-  %t$55 = getelementptr i64, ptr %t$59, i64 2
-  store i64 %p$__tc_Ord_0_compare$in, ptr %t$55
-  %t$56 = getelementptr i64, ptr %t$59, i64 3
-  store i64 %p$__tc_Eq_0_eq$in, ptr %t$56
-  %t$57 = getelementptr i64, ptr %t$59, i64 4
-  store i64 %p$__tc_Eq_1_eq$in, ptr %t$57
   %t$53 = alloca i64
   store i64 %p$lo$in, ptr %t$53
   %t$54 = alloca i64
@@ -2188,9 +2619,6 @@ tco_loop:
   %p$target = load i64, ptr %t$52
   %p$lo = load i64, ptr %t$53
   %p$hi = load i64, ptr %t$54
-  %p$__tc_Ord_0_compare = load i64, ptr %t$55
-  %p$__tc_Eq_0_eq = load i64, ptr %t$56
-  %p$__tc_Eq_1_eq = load i64, ptr %t$57
   %t$0 = icmp sgt i64 %p$lo, %p$hi
   %t$1 = zext i1 %t$0 to i64
   %t$50 = trunc i64 %t$1 to i1
@@ -2204,7 +2632,7 @@ else_2:
   %t$5$ovf = extractvalue { i64, i1 } %t$5$agg, 1
   br i1 %t$5$ovf, label %ovfpanic_5, label %ovfok_5
 ovfpanic_5:
-  %t$6 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.24, i64 0, i32 1, i64 0
+  %t$6 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.37, i64 0, i32 1, i64 0
   %t$7 = ptrtoint ptr %t$6 to i64
   call i64 @panic(i64 %t$7)
   unreachable
@@ -2213,7 +2641,7 @@ ovfok_5:
   %t$9 = icmp eq i64 %t$8, 0
   br i1 %t$9, label %divpanic_9, label %divchk2_9
 divpanic_9:
-  %t$10 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
+  %t$10 = getelementptr inbounds { i64, [17 x i8] }, ptr @.str.38, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
   call i64 @panic(i64 %t$11)
   unreachable
@@ -2224,7 +2652,7 @@ divovfchk_9:
   %t$13 = icmp eq i64 %t$5, -9223372036854775808
   br i1 %t$13, label %divovfpanic_9, label %divok_9
 divovfpanic_9:
-  %t$14 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.26, i64 0, i32 1, i64 0
+  %t$14 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.39, i64 0, i32 1, i64 0
   %t$15 = ptrtoint ptr %t$14 to i64
   call i64 @panic(i64 %t$15)
   unreachable
@@ -2235,7 +2663,7 @@ divok_9:
   %t$17$ovf = extractvalue { i64, i1 } %t$17$agg, 1
   br i1 %t$17$ovf, label %ovfpanic_17, label %ovfok_17
 ovfpanic_17:
-  %t$18 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.27, i64 0, i32 1, i64 0
+  %t$18 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.40, i64 0, i32 1, i64 0
   %t$19 = ptrtoint ptr %t$18 to i64
   call i64 @panic(i64 %t$19)
   unreachable
@@ -2246,8 +2674,6 @@ arm_0_20:
   %t$22 = trunc i128 %t$22$st to i64
   %t$22$hi = lshr i128 %t$22$st, 64
   %t$23 = trunc i128 %t$22$hi to i64
-  %t$59$5 = getelementptr i64, ptr %t$59, i64 5
-  store i64 %t$23, ptr %t$59$5
   br label %arm_0_24
 arm_0_24:
   %t$26 = add i64 0, 0
@@ -2261,7 +2687,7 @@ arm_1_24:
   %t$30 = icmp eq i64 %t$22, %t$29
   br i1 %t$30, label %body_1_24, label %arm_2_24
 body_1_24:
-  %t$31 = call i64 @__cm_Eq_eq(i64 %t$23, i64 %p$target, i64 %p$__tc_Eq_1_eq)
+  %t$31 = call i64 @__tc_Eq_Int_eq(i64 %t$23, i64 %p$target)
   %t$49 = trunc i64 %t$31 to i1
   br i1 %t$49, label %then_32, label %else_32
 then_32:
@@ -2271,7 +2697,7 @@ then_32:
   store i64 %t$17, ptr %t$34$f0
   br label %join_32
 else_32:
-  %t$35 = call i64 @ord_lt(i64 %t$23, i64 %p$target, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_1_eq)
+  %t$35 = call i64 @ord_lt$spec_Int(i64 %t$23, i64 %p$target)
   %t$48 = trunc i64 %t$35 to i1
   br i1 %t$48, label %then_36, label %else_36
 then_36:
@@ -2281,20 +2707,15 @@ then_36:
   %t$39$ovf = extractvalue { i64, i1 } %t$39$agg, 1
   br i1 %t$39$ovf, label %ovfpanic_39, label %ovfok_39
 ovfpanic_39:
-  %t$40 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.28, i64 0, i32 1, i64 0
+  %t$40 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.41, i64 0, i32 1, i64 0
   %t$41 = ptrtoint ptr %t$40 to i64
   call i64 @panic(i64 %t$41)
   unreachable
 ovfok_39:
-  %t$61 = getelementptr i64, ptr %t$59, i64 5
-  call void @llvm.memset.p0.i64(ptr %t$61, i8 0, i64 8, i1 false)
   store i64 %p$v, ptr %t$51
   store i64 %p$target, ptr %t$52
   store i64 %t$39, ptr %t$53
   store i64 %p$hi, ptr %t$54
-  store i64 %p$__tc_Ord_0_compare, ptr %t$55
-  store i64 %p$__tc_Eq_1_eq, ptr %t$56
-  store i64 %p$__tc_Eq_1_eq, ptr %t$57
   br label %tco_loop
 else_36:
   %t$43 = add i64 0, 1
@@ -2303,20 +2724,15 @@ else_36:
   %t$44$ovf = extractvalue { i64, i1 } %t$44$agg, 1
   br i1 %t$44$ovf, label %ovfpanic_44, label %ovfok_44
 ovfpanic_44:
-  %t$45 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.29, i64 0, i32 1, i64 0
+  %t$45 = getelementptr inbounds { i64, [39 x i8] }, ptr @.str.42, i64 0, i32 1, i64 0
   %t$46 = ptrtoint ptr %t$45 to i64
   call i64 @panic(i64 %t$46)
   unreachable
 ovfok_44:
-  %t$62 = getelementptr i64, ptr %t$59, i64 5
-  call void @llvm.memset.p0.i64(ptr %t$62, i8 0, i64 8, i1 false)
   store i64 %p$v, ptr %t$51
   store i64 %p$target, ptr %t$52
   store i64 %p$lo, ptr %t$53
   store i64 %t$44, ptr %t$54
-  store i64 %p$__tc_Ord_0_compare, ptr %t$55
-  store i64 %p$__tc_Eq_1_eq, ptr %t$56
-  store i64 %p$__tc_Eq_1_eq, ptr %t$57
   br label %tco_loop
 join_32:
   %t$33 = phi i64 [%t$34, %then_32]
@@ -2335,592 +2751,77 @@ join_20:
   br label %join_2
 join_2:
   %t$3 = phi i64 [%t$4, %then_2], [%t$21, %join_20]
-  %t$63 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$3
 }
 
-define i64 @examples.wrap_sorted_vec.show_pos(i64 %p$m) {
+define i64 @ord_lt$spec_Int(i64 %p$x, i64 %p$y) {
 entry:
-  %t$0 = call i64 @sprout_tag(i64 %p$m)
-  br label %arm_0_1
-arm_0_1:
-  %t$3 = add i64 0, 1
-  %t$4 = icmp eq i64 %t$0, %t$3
-  br i1 %t$4, label %body_0_1, label %arm_1_1
-body_0_1:
-  %t$5 = call i64 @sprout_field(i64 %p$m, i64 0)
-  %t$11 = alloca i64
-  store i64 %t$5, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$6 = call i64 @__tc_ToString_Int_to_string(i64 %t$5)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_1
-arm_1_1:
-  %t$7 = add i64 0, 0
-  %t$8 = icmp eq i64 %t$0, %t$7
-  br i1 %t$8, label %body_1_1, label %arm_2_1
-body_1_1:
-  %t$9 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.30, i64 0, i32 1, i64 0
-  %t$10 = ptrtoint ptr %t$9 to i64
-  br label %join_1
-arm_2_1:
-  call void @sprout_abort_match()
-  unreachable
-join_1:
-  %t$2 = phi i64 [%t$6, %body_0_1], [%t$10, %body_1_1]
-  ret i64 %t$2
+  %t$0 = call i64 @__tc_Ord_Int_compare(i64 %p$x, i64 %p$y)
+  %t$1 = add i64 0, 0
+  %t$2 = icmp slt i64 %t$0, %t$1
+  %t$3 = zext i1 %t$2 to i64
+  ret i64 %t$3
 }
 
-define i64 @__sprout_ir_eta___tc_Ord_Int_compare_3(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_2(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a2, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %p$a1, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$a0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_3(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a3, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %p$a2, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$a1, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %p$a0, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_by_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_Ord_Int_compare_4(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_4(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta___tc_Eq_Int_eq_5(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_Int_to_string_5(i64 %p$env$, i64 %p$a0) {
+define i64 @stdlib.sort.sort$spec_Vec_Int(i64 %p$xs) {
 entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_Int_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_user_main() {
-entry:
-  %t$0 = add i64 0, 7
-  %t$1 = add i64 0, 2
-  %t$2 = add i64 0, 5
-  %t$3 = add i64 0, 3
-  %t$4 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$123 = alloca i64
-  store i64 %t$4, ptr %t$123
-  %t$124 = call i64 @sprout_gc_push_i64_root(ptr %t$123)
-  %t$5 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$5$ptr = inttoptr i64 %t$5 to ptr
-  %t$5$f0 = getelementptr i64, ptr %t$5$ptr, i64 0
-  store i64 %t$3, ptr %t$5$f0
-  %t$5$f1 = getelementptr i64, ptr %t$5$ptr, i64 1
-  store i64 %t$4, ptr %t$5$f1
-  %t$125 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$126 = alloca i64
-  store i64 %t$5, ptr %t$126
-  %t$127 = call i64 @sprout_gc_push_i64_root(ptr %t$126)
-  %t$6 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$6$ptr = inttoptr i64 %t$6 to ptr
-  %t$6$f0 = getelementptr i64, ptr %t$6$ptr, i64 0
-  store i64 %t$2, ptr %t$6$f0
-  %t$6$f1 = getelementptr i64, ptr %t$6$ptr, i64 1
-  store i64 %t$5, ptr %t$6$f1
-  %t$128 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$129 = alloca i64
-  store i64 %t$6, ptr %t$129
-  %t$130 = call i64 @sprout_gc_push_i64_root(ptr %t$129)
-  %t$7 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$7$ptr = inttoptr i64 %t$7 to ptr
-  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
-  store i64 %t$1, ptr %t$7$f0
-  %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
-  store i64 %t$6, ptr %t$7$f1
-  %t$131 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$132 = alloca i64
-  store i64 %t$7, ptr %t$132
-  %t$133 = call i64 @sprout_gc_push_i64_root(ptr %t$132)
-  %t$8 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$8$ptr = inttoptr i64 %t$8 to ptr
-  %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
-  store i64 %t$0, ptr %t$8$f0
-  %t$8$f1 = getelementptr i64, ptr %t$8$ptr, i64 1
-  store i64 %t$7, ptr %t$8$f1
-  %t$134 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$135 = alloca i64
-  store i64 %t$8, ptr %t$135
-  %t$136 = call i64 @sprout_gc_push_i64_root(ptr %t$135)
-  %t$9 = call i64 @vec_from_list(i64 %t$8)
-  %t$137 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$10 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3, i64 8) to i64
-  %t$11 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$138 = alloca i64
-  store i64 %t$9, ptr %t$138
-  %t$139 = call i64 @sprout_gc_push_i64_root(ptr %t$138)
-  %t$12 = call i64 @examples.wrap_sorted_vec.sort_of(i64 %t$9, i64 %t$10, i64 %t$11)
-  %t$140 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$13 = add i64 0, 8
-  %t$14 = add i64 0, 4
-  %t$15 = add i64 0, 6
-  %t$141 = alloca i64
-  store i64 %t$12, ptr %t$141
-  %t$142 = call i64 @sprout_gc_push_i64_root(ptr %t$141)
-  %t$16 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$143 = alloca i64
-  store i64 %t$16, ptr %t$143
-  %t$144 = call i64 @sprout_gc_push_i64_root(ptr %t$143)
-  %t$17 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$17$ptr = inttoptr i64 %t$17 to ptr
-  %t$17$f0 = getelementptr i64, ptr %t$17$ptr, i64 0
-  store i64 %t$15, ptr %t$17$f0
-  %t$17$f1 = getelementptr i64, ptr %t$17$ptr, i64 1
-  store i64 %t$16, ptr %t$17$f1
-  %t$145 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$146 = alloca i64
-  store i64 %t$17, ptr %t$146
-  %t$147 = call i64 @sprout_gc_push_i64_root(ptr %t$146)
-  %t$18 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$18$ptr = inttoptr i64 %t$18 to ptr
-  %t$18$f0 = getelementptr i64, ptr %t$18$ptr, i64 0
-  store i64 %t$14, ptr %t$18$f0
-  %t$18$f1 = getelementptr i64, ptr %t$18$ptr, i64 1
-  store i64 %t$17, ptr %t$18$f1
-  %t$148 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$149 = alloca i64
-  store i64 %t$18, ptr %t$149
-  %t$150 = call i64 @sprout_gc_push_i64_root(ptr %t$149)
-  %t$19 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$19$ptr = inttoptr i64 %t$19 to ptr
-  %t$19$f0 = getelementptr i64, ptr %t$19$ptr, i64 0
-  store i64 %t$13, ptr %t$19$f0
-  %t$19$f1 = getelementptr i64, ptr %t$19$ptr, i64 1
-  store i64 %t$18, ptr %t$19$f1
-  %t$151 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$152 = alloca i64
-  store i64 %t$19, ptr %t$152
-  %t$153 = call i64 @sprout_gc_push_i64_root(ptr %t$152)
-  %t$20 = call i64 @vec_from_list(i64 %t$19)
-  %t$154 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$21 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3, i64 8) to i64
-  %t$22 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$155 = alloca i64
-  store i64 %t$20, ptr %t$155
-  %t$156 = call i64 @sprout_gc_push_i64_root(ptr %t$155)
-  %t$23 = call i64 @examples.wrap_sorted_vec.sort_of(i64 %t$20, i64 %t$21, i64 %t$22)
-  %t$157 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$24 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3, i64 8) to i64
-  %t$25 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$158 = alloca i64
-  store i64 %t$23, ptr %t$158
-  %t$159 = call i64 @sprout_gc_push_i64_root(ptr %t$158)
-  %t$26 = call i64 @examples.wrap_sorted_vec.merge(i64 %t$12, i64 %t$23, i64 %t$24, i64 %t$25)
-  %t$160 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$27 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.31, i64 0, i32 1, i64 0
-  %t$28 = ptrtoint ptr %t$27 to i64
-  %t$29 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %t$12)
-  %t$161 = alloca i64
-  store i64 %t$26, ptr %t$161
-  %t$162 = call i64 @sprout_gc_push_i64_root(ptr %t$161)
-  %t$163 = alloca i64
-  store i64 %t$28, ptr %t$163
-  %t$164 = call i64 @sprout_gc_push_i64_root(ptr %t$163)
-  %t$165 = alloca i64
-  store i64 %t$29, ptr %t$165
-  %t$166 = call i64 @sprout_gc_push_i64_root(ptr %t$165)
-  %t$30 = call i64 @vec_to_list(i64 %t$29)
-  %t$167 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$31 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5, i64 8) to i64
-  %t$168 = alloca i64
-  store i64 %t$30, ptr %t$168
-  %t$169 = call i64 @sprout_gc_push_i64_root(ptr %t$168)
-  %t$32 = call i64 @__tc_ToString_List_a_to_string(i64 %t$30, i64 %t$31)
-  %t$170 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$33 = call i64 @__tc_ToString_String_to_string(i64 %t$32)
-  %t$34 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.32, i64 0, i32 1, i64 0
-  %t$35 = ptrtoint ptr %t$34 to i64
-  %t$171 = alloca i64
-  store i64 %t$33, ptr %t$171
-  %t$172 = call i64 @sprout_gc_push_i64_root(ptr %t$171)
-  %t$173 = alloca i64
-  store i64 %t$35, ptr %t$173
-  %t$174 = call i64 @sprout_gc_push_i64_root(ptr %t$173)
-  %t$36 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$175 = alloca i64
-  store i64 %t$36, ptr %t$175
-  %t$176 = call i64 @sprout_gc_push_i64_root(ptr %t$175)
-  %t$37 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$37$ptr = inttoptr i64 %t$37 to ptr
-  %t$37$f0 = getelementptr i64, ptr %t$37$ptr, i64 0
-  store i64 %t$35, ptr %t$37$f0
-  %t$37$f1 = getelementptr i64, ptr %t$37$ptr, i64 1
-  store i64 %t$36, ptr %t$37$f1
-  %t$177 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$178 = alloca i64
-  store i64 %t$37, ptr %t$178
-  %t$179 = call i64 @sprout_gc_push_i64_root(ptr %t$178)
-  %t$38 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$38$ptr = inttoptr i64 %t$38 to ptr
-  %t$38$f0 = getelementptr i64, ptr %t$38$ptr, i64 0
-  store i64 %t$33, ptr %t$38$f0
-  %t$38$f1 = getelementptr i64, ptr %t$38$ptr, i64 1
-  store i64 %t$37, ptr %t$38$f1
-  %t$180 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$181 = alloca i64
-  store i64 %t$38, ptr %t$181
-  %t$182 = call i64 @sprout_gc_push_i64_root(ptr %t$181)
-  %t$39 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$39$ptr = inttoptr i64 %t$39 to ptr
-  %t$39$f0 = getelementptr i64, ptr %t$39$ptr, i64 0
-  store i64 %t$28, ptr %t$39$f0
-  %t$39$f1 = getelementptr i64, ptr %t$39$ptr, i64 1
-  store i64 %t$38, ptr %t$39$f1
-  %t$183 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$184 = alloca i64
-  store i64 %t$39, ptr %t$184
-  %t$185 = call i64 @sprout_gc_push_i64_root(ptr %t$184)
-  %t$40 = call i64 @string_concat_many(i64 %t$39)
-  %t$186 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$187 = alloca i64
-  store i64 %t$40, ptr %t$187
-  %t$188 = call i64 @sprout_gc_push_i64_root(ptr %t$187)
-  %t$41 = call i64 @term_write(i64 %t$40)
-  %t$189 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$42 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.33, i64 0, i32 1, i64 0
-  %t$43 = ptrtoint ptr %t$42 to i64
-  %t$44 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %t$26)
-  %t$190 = alloca i64
-  store i64 %t$43, ptr %t$190
-  %t$191 = call i64 @sprout_gc_push_i64_root(ptr %t$190)
-  %t$192 = alloca i64
-  store i64 %t$44, ptr %t$192
-  %t$193 = call i64 @sprout_gc_push_i64_root(ptr %t$192)
-  %t$45 = call i64 @vec_to_list(i64 %t$44)
-  %t$194 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$46 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5, i64 8) to i64
-  %t$195 = alloca i64
-  store i64 %t$45, ptr %t$195
-  %t$196 = call i64 @sprout_gc_push_i64_root(ptr %t$195)
-  %t$47 = call i64 @__tc_ToString_List_a_to_string(i64 %t$45, i64 %t$46)
-  %t$197 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$48 = call i64 @__tc_ToString_String_to_string(i64 %t$47)
-  %t$49 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.34, i64 0, i32 1, i64 0
-  %t$50 = ptrtoint ptr %t$49 to i64
-  %t$198 = alloca i64
-  store i64 %t$48, ptr %t$198
-  %t$199 = call i64 @sprout_gc_push_i64_root(ptr %t$198)
-  %t$200 = alloca i64
-  store i64 %t$50, ptr %t$200
-  %t$201 = call i64 @sprout_gc_push_i64_root(ptr %t$200)
-  %t$51 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$202 = alloca i64
-  store i64 %t$51, ptr %t$202
-  %t$203 = call i64 @sprout_gc_push_i64_root(ptr %t$202)
-  %t$52 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$52$ptr = inttoptr i64 %t$52 to ptr
-  %t$52$f0 = getelementptr i64, ptr %t$52$ptr, i64 0
-  store i64 %t$50, ptr %t$52$f0
-  %t$52$f1 = getelementptr i64, ptr %t$52$ptr, i64 1
-  store i64 %t$51, ptr %t$52$f1
-  %t$204 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$205 = alloca i64
-  store i64 %t$52, ptr %t$205
-  %t$206 = call i64 @sprout_gc_push_i64_root(ptr %t$205)
-  %t$53 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$53$ptr = inttoptr i64 %t$53 to ptr
-  %t$53$f0 = getelementptr i64, ptr %t$53$ptr, i64 0
-  store i64 %t$48, ptr %t$53$f0
-  %t$53$f1 = getelementptr i64, ptr %t$53$ptr, i64 1
-  store i64 %t$52, ptr %t$53$f1
-  %t$207 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$208 = alloca i64
-  store i64 %t$53, ptr %t$208
-  %t$209 = call i64 @sprout_gc_push_i64_root(ptr %t$208)
-  %t$54 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$54$ptr = inttoptr i64 %t$54 to ptr
-  %t$54$f0 = getelementptr i64, ptr %t$54$ptr, i64 0
-  store i64 %t$43, ptr %t$54$f0
-  %t$54$f1 = getelementptr i64, ptr %t$54$ptr, i64 1
-  store i64 %t$53, ptr %t$54$f1
-  %t$210 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$211 = alloca i64
-  store i64 %t$54, ptr %t$211
-  %t$212 = call i64 @sprout_gc_push_i64_root(ptr %t$211)
-  %t$55 = call i64 @string_concat_many(i64 %t$54)
-  %t$213 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$214 = alloca i64
-  store i64 %t$55, ptr %t$214
-  %t$215 = call i64 @sprout_gc_push_i64_root(ptr %t$214)
-  %t$56 = call i64 @term_write(i64 %t$55)
-  %t$216 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$57 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.35, i64 0, i32 1, i64 0
-  %t$58 = ptrtoint ptr %t$57 to i64
-  %t$59$st = call i128 @examples.wrap_sorted_vec.smallest_worker(i64 %t$26)
-  %t$59 = trunc i128 %t$59$st to i64
-  %t$59$hi = lshr i128 %t$59$st, 64
-  %t$60 = trunc i128 %t$59$hi to i64
-  %t$61 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5, i64 8) to i64
-  %t$217 = alloca i64
-  store i64 %t$58, ptr %t$217
-  %t$218 = call i64 @sprout_gc_push_i64_root(ptr %t$217)
-  %t$219 = alloca i64
-  store i64 %t$60, ptr %t$219
-  %t$220 = call i64 @sprout_gc_push_i64_root(ptr %t$219)
-  %t$62 = call i64 @__tc_ToString_Maybe_a_to_string_argw(i64 %t$59, i64 %t$60, i64 %t$61)
-  %t$221 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$63 = call i64 @__tc_ToString_String_to_string(i64 %t$62)
-  %t$64 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.36, i64 0, i32 1, i64 0
-  %t$65 = ptrtoint ptr %t$64 to i64
-  %t$222 = alloca i64
-  store i64 %t$63, ptr %t$222
-  %t$223 = call i64 @sprout_gc_push_i64_root(ptr %t$222)
-  %t$224 = alloca i64
-  store i64 %t$65, ptr %t$224
-  %t$225 = call i64 @sprout_gc_push_i64_root(ptr %t$224)
-  %t$66 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$226 = alloca i64
-  store i64 %t$66, ptr %t$226
-  %t$227 = call i64 @sprout_gc_push_i64_root(ptr %t$226)
-  %t$67 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$67$ptr = inttoptr i64 %t$67 to ptr
-  %t$67$f0 = getelementptr i64, ptr %t$67$ptr, i64 0
-  store i64 %t$65, ptr %t$67$f0
-  %t$67$f1 = getelementptr i64, ptr %t$67$ptr, i64 1
-  store i64 %t$66, ptr %t$67$f1
-  %t$228 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$229 = alloca i64
-  store i64 %t$67, ptr %t$229
-  %t$230 = call i64 @sprout_gc_push_i64_root(ptr %t$229)
-  %t$68 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$68$ptr = inttoptr i64 %t$68 to ptr
-  %t$68$f0 = getelementptr i64, ptr %t$68$ptr, i64 0
-  store i64 %t$63, ptr %t$68$f0
-  %t$68$f1 = getelementptr i64, ptr %t$68$ptr, i64 1
-  store i64 %t$67, ptr %t$68$f1
-  %t$231 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$232 = alloca i64
-  store i64 %t$68, ptr %t$232
-  %t$233 = call i64 @sprout_gc_push_i64_root(ptr %t$232)
-  %t$69 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$69$ptr = inttoptr i64 %t$69 to ptr
-  %t$69$f0 = getelementptr i64, ptr %t$69$ptr, i64 0
-  store i64 %t$58, ptr %t$69$f0
-  %t$69$f1 = getelementptr i64, ptr %t$69$ptr, i64 1
-  store i64 %t$68, ptr %t$69$f1
-  %t$234 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$235 = alloca i64
-  store i64 %t$69, ptr %t$235
-  %t$236 = call i64 @sprout_gc_push_i64_root(ptr %t$235)
-  %t$70 = call i64 @string_concat_many(i64 %t$69)
-  %t$237 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$238 = alloca i64
-  store i64 %t$70, ptr %t$238
-  %t$239 = call i64 @sprout_gc_push_i64_root(ptr %t$238)
-  %t$71 = call i64 @term_write(i64 %t$70)
-  %t$240 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$72 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.37, i64 0, i32 1, i64 0
-  %t$73 = ptrtoint ptr %t$72 to i64
-  %t$241 = alloca i64
-  store i64 %t$73, ptr %t$241
-  %t$242 = call i64 @sprout_gc_push_i64_root(ptr %t$241)
-  %t$74$st = call i128 @examples.wrap_sorted_vec.largest_worker(i64 %t$26)
-  %t$74 = trunc i128 %t$74$st to i64
-  %t$74$hi = lshr i128 %t$74$st, 64
-  %t$75 = trunc i128 %t$74$hi to i64
-  %t$76 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_Int_to_string_5, i64 8) to i64
-  %t$243 = alloca i64
-  store i64 %t$75, ptr %t$243
-  %t$244 = call i64 @sprout_gc_push_i64_root(ptr %t$243)
-  %t$77 = call i64 @__tc_ToString_Maybe_a_to_string_argw(i64 %t$74, i64 %t$75, i64 %t$76)
-  %t$245 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$78 = call i64 @__tc_ToString_String_to_string(i64 %t$77)
-  %t$79 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.38, i64 0, i32 1, i64 0
-  %t$80 = ptrtoint ptr %t$79 to i64
-  %t$246 = alloca i64
-  store i64 %t$78, ptr %t$246
-  %t$247 = call i64 @sprout_gc_push_i64_root(ptr %t$246)
-  %t$248 = alloca i64
-  store i64 %t$80, ptr %t$248
-  %t$249 = call i64 @sprout_gc_push_i64_root(ptr %t$248)
-  %t$81 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$250 = alloca i64
-  store i64 %t$81, ptr %t$250
-  %t$251 = call i64 @sprout_gc_push_i64_root(ptr %t$250)
-  %t$82 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$82$ptr = inttoptr i64 %t$82 to ptr
-  %t$82$f0 = getelementptr i64, ptr %t$82$ptr, i64 0
-  store i64 %t$80, ptr %t$82$f0
-  %t$82$f1 = getelementptr i64, ptr %t$82$ptr, i64 1
-  store i64 %t$81, ptr %t$82$f1
-  %t$252 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$253 = alloca i64
-  store i64 %t$82, ptr %t$253
-  %t$254 = call i64 @sprout_gc_push_i64_root(ptr %t$253)
-  %t$83 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$83$ptr = inttoptr i64 %t$83 to ptr
-  %t$83$f0 = getelementptr i64, ptr %t$83$ptr, i64 0
-  store i64 %t$78, ptr %t$83$f0
-  %t$83$f1 = getelementptr i64, ptr %t$83$ptr, i64 1
-  store i64 %t$82, ptr %t$83$f1
-  %t$255 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$256 = alloca i64
-  store i64 %t$83, ptr %t$256
-  %t$257 = call i64 @sprout_gc_push_i64_root(ptr %t$256)
-  %t$84 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$84$ptr = inttoptr i64 %t$84 to ptr
-  %t$84$f0 = getelementptr i64, ptr %t$84$ptr, i64 0
-  store i64 %t$73, ptr %t$84$f0
-  %t$84$f1 = getelementptr i64, ptr %t$84$ptr, i64 1
-  store i64 %t$83, ptr %t$84$f1
-  %t$258 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$259 = alloca i64
-  store i64 %t$84, ptr %t$259
-  %t$260 = call i64 @sprout_gc_push_i64_root(ptr %t$259)
-  %t$85 = call i64 @string_concat_many(i64 %t$84)
-  %t$261 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$262 = alloca i64
-  store i64 %t$85, ptr %t$262
-  %t$263 = call i64 @sprout_gc_push_i64_root(ptr %t$262)
-  %t$86 = call i64 @term_write(i64 %t$85)
-  %t$264 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$87 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.39, i64 0, i32 1, i64 0
-  %t$88 = ptrtoint ptr %t$87 to i64
-  %t$89 = add i64 0, 6
-  %t$90 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3, i64 8) to i64
-  %t$91 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$92 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$265 = alloca i64
-  store i64 %t$88, ptr %t$265
-  %t$266 = call i64 @sprout_gc_push_i64_root(ptr %t$265)
-  %t$93$st = call i128 @examples.wrap_sorted_vec.position_of_worker(i64 %t$26, i64 %t$89, i64 %t$90, i64 %t$91, i64 %t$92)
-  %t$93 = trunc i128 %t$93$st to i64
-  %t$93$hi = lshr i128 %t$93$st, 64
-  %t$94 = trunc i128 %t$93$hi to i64
-  %t$267 = alloca i64
-  store i64 %t$94, ptr %t$267
-  %t$268 = call i64 @sprout_gc_push_i64_root(ptr %t$267)
-  %t$95 = call i64 @examples.wrap_sorted_vec.show_pos_argw(i64 %t$93, i64 %t$94)
-  %t$269 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$96 = call i64 @__tc_ToString_String_to_string(i64 %t$95)
-  %t$97 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.40, i64 0, i32 1, i64 0
-  %t$98 = ptrtoint ptr %t$97 to i64
-  %t$270 = alloca i64
-  store i64 %t$96, ptr %t$270
-  %t$271 = call i64 @sprout_gc_push_i64_root(ptr %t$270)
-  %t$272 = alloca i64
-  store i64 %t$98, ptr %t$272
-  %t$273 = call i64 @sprout_gc_push_i64_root(ptr %t$272)
-  %t$99 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$274 = alloca i64
-  store i64 %t$99, ptr %t$274
-  %t$275 = call i64 @sprout_gc_push_i64_root(ptr %t$274)
-  %t$100 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$100$ptr = inttoptr i64 %t$100 to ptr
-  %t$100$f0 = getelementptr i64, ptr %t$100$ptr, i64 0
-  store i64 %t$98, ptr %t$100$f0
-  %t$100$f1 = getelementptr i64, ptr %t$100$ptr, i64 1
-  store i64 %t$99, ptr %t$100$f1
-  %t$276 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$277 = alloca i64
-  store i64 %t$100, ptr %t$277
-  %t$278 = call i64 @sprout_gc_push_i64_root(ptr %t$277)
-  %t$101 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$101$ptr = inttoptr i64 %t$101 to ptr
-  %t$101$f0 = getelementptr i64, ptr %t$101$ptr, i64 0
-  store i64 %t$96, ptr %t$101$f0
-  %t$101$f1 = getelementptr i64, ptr %t$101$ptr, i64 1
-  store i64 %t$100, ptr %t$101$f1
-  %t$279 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$280 = alloca i64
-  store i64 %t$101, ptr %t$280
-  %t$281 = call i64 @sprout_gc_push_i64_root(ptr %t$280)
-  %t$102 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$102$ptr = inttoptr i64 %t$102 to ptr
-  %t$102$f0 = getelementptr i64, ptr %t$102$ptr, i64 0
-  store i64 %t$88, ptr %t$102$f0
-  %t$102$f1 = getelementptr i64, ptr %t$102$ptr, i64 1
-  store i64 %t$101, ptr %t$102$f1
-  %t$282 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$283 = alloca i64
-  store i64 %t$102, ptr %t$283
-  %t$284 = call i64 @sprout_gc_push_i64_root(ptr %t$283)
-  %t$103 = call i64 @string_concat_many(i64 %t$102)
-  %t$285 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$286 = alloca i64
-  store i64 %t$103, ptr %t$286
-  %t$287 = call i64 @sprout_gc_push_i64_root(ptr %t$286)
-  %t$104 = call i64 @term_write(i64 %t$103)
-  %t$288 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$105 = getelementptr inbounds { i64, [13 x i8] }, ptr @.str.41, i64 0, i32 1, i64 0
-  %t$106 = ptrtoint ptr %t$105 to i64
-  %t$107 = add i64 0, 9
-  %t$108 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_3, i64 8) to i64
-  %t$109 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$110 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_4, i64 8) to i64
-  %t$289 = alloca i64
-  store i64 %t$106, ptr %t$289
-  %t$290 = call i64 @sprout_gc_push_i64_root(ptr %t$289)
-  %t$111$st = call i128 @examples.wrap_sorted_vec.position_of_worker(i64 %t$26, i64 %t$107, i64 %t$108, i64 %t$109, i64 %t$110)
-  %t$111 = trunc i128 %t$111$st to i64
-  %t$111$hi = lshr i128 %t$111$st, 64
-  %t$112 = trunc i128 %t$111$hi to i64
-  %t$291 = alloca i64
-  store i64 %t$112, ptr %t$291
-  %t$292 = call i64 @sprout_gc_push_i64_root(ptr %t$291)
-  %t$113 = call i64 @examples.wrap_sorted_vec.show_pos_argw(i64 %t$111, i64 %t$112)
-  %t$293 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$114 = call i64 @__tc_ToString_String_to_string(i64 %t$113)
-  %t$115 = getelementptr inbounds { i64, [2 x i8] }, ptr @.str.42, i64 0, i32 1, i64 0
-  %t$116 = ptrtoint ptr %t$115 to i64
-  %t$294 = alloca i64
-  store i64 %t$114, ptr %t$294
-  %t$295 = call i64 @sprout_gc_push_i64_root(ptr %t$294)
-  %t$296 = alloca i64
-  store i64 %t$116, ptr %t$296
-  %t$297 = call i64 @sprout_gc_push_i64_root(ptr %t$296)
-  %t$117 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$298 = alloca i64
-  store i64 %t$117, ptr %t$298
-  %t$299 = call i64 @sprout_gc_push_i64_root(ptr %t$298)
-  %t$118 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$118$ptr = inttoptr i64 %t$118 to ptr
-  %t$118$f0 = getelementptr i64, ptr %t$118$ptr, i64 0
-  store i64 %t$116, ptr %t$118$f0
-  %t$118$f1 = getelementptr i64, ptr %t$118$ptr, i64 1
-  store i64 %t$117, ptr %t$118$f1
-  %t$300 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$301 = alloca i64
-  store i64 %t$118, ptr %t$301
-  %t$302 = call i64 @sprout_gc_push_i64_root(ptr %t$301)
-  %t$119 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$119$ptr = inttoptr i64 %t$119 to ptr
-  %t$119$f0 = getelementptr i64, ptr %t$119$ptr, i64 0
-  store i64 %t$114, ptr %t$119$f0
-  %t$119$f1 = getelementptr i64, ptr %t$119$ptr, i64 1
-  store i64 %t$118, ptr %t$119$f1
-  %t$303 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$304 = alloca i64
-  store i64 %t$119, ptr %t$304
-  %t$305 = call i64 @sprout_gc_push_i64_root(ptr %t$304)
-  %t$120 = call i64 @sprout_alloc_obj(i64 6, i64 2)
-  %t$120$ptr = inttoptr i64 %t$120 to ptr
-  %t$120$f0 = getelementptr i64, ptr %t$120$ptr, i64 0
-  store i64 %t$106, ptr %t$120$f0
-  %t$120$f1 = getelementptr i64, ptr %t$120$ptr, i64 1
-  store i64 %t$119, ptr %t$120$f1
-  %t$306 = call i64 @sprout_gc_pop_roots(i64 4)
-  %t$307 = alloca i64
-  store i64 %t$120, ptr %t$307
-  %t$308 = call i64 @sprout_gc_push_i64_root(ptr %t$307)
-  %t$121 = call i64 @string_concat_many(i64 %t$120)
-  %t$309 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$310 = alloca i64
-  store i64 %t$121, ptr %t$310
-  %t$311 = call i64 @sprout_gc_push_i64_root(ptr %t$310)
-  %t$122 = call i64 @term_write(i64 %t$121)
-  %t$312 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$122
-}
-
-define i64 @__cm_Eq_eq(i64 %p$left, i64 %p$right, i64 %p$__tc_Eq_0_eq) {
-entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_Eq_0_eq, i64 2)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_Eq_0_eq to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64, i64) %t$0$code(i64 %p$__tc_Eq_0_eq, i64 %p$left, i64 %p$right)
-  ret i64 %t$0
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_2, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_3, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_4, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_5, i64 8) to i64
+  %t$5 = alloca i64
+  store i64 %p$xs, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$4 = call i64 @__cm_stdlib.sort.Sort_sort_values(i64 %p$xs, i64 %t$0, i64 %t$1, i64 %t$2, i64 %t$3)
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$4
 }
 
 define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
@@ -3367,7 +3268,7 @@ wrepack_next_14:
   unreachable
 }
 
-define i128 @examples.wrap_sorted_vec.position_of_worker(i64 %p$s, i64 %p$target, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq, i64 %p$__tc_Eq_1_eq) {
+define i128 @examples.wrap_sorted_vec.position_of$spec_Int_Int_worker(i64 %p$s, i64 %p$target) {
 entry:
   %t$0 = call i64 @examples.wrap_sorted_vec.as_vec(i64 %p$s)
   br label %arm_0_1
@@ -3388,17 +3289,8 @@ ovfok_6:
   %t$19 = alloca i64
   store i64 %t$0, ptr %t$19
   %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$21 = alloca i64
-  store i64 %p$target, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$23 = alloca i64
-  store i64 %p$__tc_Ord_0_compare, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
-  %t$25 = alloca i64
-  store i64 %p$__tc_Eq_1_eq, ptr %t$25
-  %t$26 = call i64 @sprout_gc_push_i64_root(ptr %t$25)
-  %t$9 = call i64 @examples.wrap_sorted_vec.bsearch(i64 %t$0, i64 %p$target, i64 %t$3, i64 %t$6, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_1_eq, i64 %p$__tc_Eq_1_eq)
-  %t$27 = call i64 @sprout_gc_pop_roots(i64 4)
+  %t$9 = call i64 @examples.wrap_sorted_vec.bsearch$spec_Int_Int(i64 %t$0, i64 %p$target, i64 %t$3, i64 %t$6)
+  %t$21 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_1
 arm_1_1:
   call void @sprout_abort_match()

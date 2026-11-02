@@ -1763,21 +1763,12 @@ deferral happened, not for current behaviour. Still open:
 - [ ] `P2` **Stronger server-side runtime models — multi-reactor as the next target.** Native TCP
   handle-slot reuse and the `stdlib.http_server` helper layer are the groundwork. Chunked reads are
   filed in §2.
-- [ ] `P2` **Specialise generic functions at concrete types.** M1 landed: a call whose
-  dictionaries are all concrete calls a copy, behind `SPROUT_OPT_ON=spec` (off by default). With
-  it on, generic `mutvec_sort` on `Int` takes 44.0 / 64.3 ns per element at n=440 / 100k, against
-  74.6 / 121.9 off. Open is M2, `Spec` on by default: a 2-step bootstrap fixed point with the pass
-  on, and the golden-IR checks (`docs/specialisation-v0.md` §7 M2). Also open: `sort` at `Int`
-  reaching a primitive sort under its own name. Related: §5 B4, §7.5 "Deriving/specialization
-  follow-ups", and the "specialize per instantiated head" lever in the withdrawn bare-tyvar CPR
-  entry. Numbers: `docs/sorting-v0.md`.
 - [ ] `P3` **Specialise context-instance bodies, so tuple keys compare directly.** `Ord (a, b, c,
   d, e) where Ord a, …` reaches each field through a context dictionary, and
   `docs/specialisation-v0.md` §4 *Limits* does not copy instance bodies. A heap keyed on a 5-tuple
   of `Int` makes ~2.5× the indirect calls of one keyed on a type that derives `Ord` (19.2M vs 7.8M
-  `closure_apply` per 100 A* runs) and runs ~2.5× slower (`docs/linheap-v0.md` §5). After
-  *Specialise generic functions at concrete types*: copying an instance at concrete context types
-  would make the tuple key as cheap as the derived one.
+  `closure_apply` per 100 A* runs) and runs ~2.5× slower (`docs/linheap-v0.md` §5). Copying an
+  instance at concrete context types would make the tuple key as cheap as the derived one.
 - [ ] `P2` **Calls to Sprout functions root their operands, though the callee roots what it
   needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots every call's heap operands, for
   runtime builtins that allocate before reading them; for a call to a Sprout function the pushes

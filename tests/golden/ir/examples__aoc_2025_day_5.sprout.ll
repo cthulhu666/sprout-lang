@@ -179,15 +179,14 @@ declare i64 @unsafe_pure(i64)
 @.str.69 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_5.parse_line_4 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.aoc_2025_day_5.parse_line_4 }
 @__sprout_sclo.__sprout_ir_eta_range_start_5 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_range_start_5 }
-@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_6 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_6 }
-@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_7 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_7 }
-@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_8 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_8 }
-@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_9 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_9 }
-@__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_5.absorb_10 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.aoc_2025_day_5.absorb_10 }
-@__sprout_sclo.__sprout_ir_eta_range_count_13 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_range_count_13 }
+@__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_5.absorb_6 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta_examples.aoc_2025_day_5.absorb_6 }
+@__sprout_sclo.__sprout_ir_eta_range_count_9 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta_range_count_9 }
 @.str.70 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
 @.str.71 = private unnamed_addr constant { i64, [12 x i8] } { i64 180234, [12 x i8] c"read_file: \00" }
-@__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_5_Answers_to_string_14 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_5_Answers_to_string_14 }
+@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_10 = private unnamed_addr constant { i64, ptr } { i64 211106232532994, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_10 }
+@__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_11 = private unnamed_addr constant { i64, ptr } { i64 281474976710658, ptr @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_11 }
+@__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_12 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Ord_Int_compare_12 }
+@__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_13 = private unnamed_addr constant { i64, ptr } { i64 140737488355330, ptr @__sprout_ir_eta___tc_Eq_Int_eq_13 }
 @.str.72 = private unnamed_addr constant { i64, [47 x i8] } { i64 753674, [47 x i8] c"Int overflow in unary - (line 1230, column 26)\00" }
 @.str.73 = private unnamed_addr constant { i64, [9 x i8] } { i64 131082, [9 x i8] c"Answers(\00" }
 @.str.74 = private unnamed_addr constant { i64, [3 x i8] } { i64 32778, [3 x i8] c", \00" }
@@ -1217,20 +1216,6 @@ arm_2_1:
 join_1:
   %t$2 = phi i64 [%t$5, %body_0_1], [%p$fallback, %body_1_1]
   ret i64 %t$2
-}
-
-define i64 @print(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$value, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$__tc_ToString_0_to_string, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$0 = call i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$1 = call i64 @print_str(i64 %t$0)
-  ret i64 %t$1
 }
 
 define i64 @digit_at(i64 %p$s, i64 %p$i) {
@@ -2610,31 +2595,6 @@ arm_1_1:
 join_1:
   %t$2 = phi i64 [%t$3, %arm_0_1]
   ret i64 %t$2
-}
-
-define i64 @stdlib.sort.sort_by(i64 %p$key, i64 %p$xs, i64 %p$__tc_stdlib.sort.Sort_0_sort_values, i64 %p$__tc_stdlib.sort.Sort_0_sort_by_values, i64 %p$__tc_Ord_1_compare, i64 %p$__tc_Eq_1_eq) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$xs, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$3 = alloca i64
-  store i64 %p$key, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$5 = alloca i64
-  store i64 %p$__tc_stdlib.sort.Sort_0_sort_values, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$7 = alloca i64
-  store i64 %p$__tc_stdlib.sort.Sort_0_sort_by_values, ptr %t$7
-  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
-  %t$9 = alloca i64
-  store i64 %p$__tc_Ord_1_compare, ptr %t$9
-  %t$10 = call i64 @sprout_gc_push_i64_root(ptr %t$9)
-  %t$11 = alloca i64
-  store i64 %p$__tc_Eq_1_eq, ptr %t$11
-  %t$12 = call i64 @sprout_gc_push_i64_root(ptr %t$11)
-  %t$0 = call i64 @__cm_stdlib.sort.Sort_sort_by_values(i64 %p$key, i64 %p$xs, i64 %p$__tc_stdlib.sort.Sort_0_sort_values, i64 %p$__tc_stdlib.sort.Sort_0_sort_by_values, i64 %p$__tc_Ord_1_compare, i64 %p$__tc_Eq_1_eq)
-  %t$13 = call i64 @sprout_gc_pop_roots(i64 6)
-  ret i64 %t$0
 }
 
 define i64 @stdlib.sort.min_int(i64 %p$a, i64 %p$b) {
@@ -4120,54 +4080,7 @@ entry:
   ret i64 %ret
 }
 
-define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_6(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a2, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a1, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a0, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
-  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_7(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a3, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %t$2 = alloca i64
-  store i64 %p$a2, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$4 = alloca i64
-  store i64 %p$a1, ptr %t$4
-  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
-  %t$6 = alloca i64
-  store i64 %p$a0, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
-  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_by_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
-  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Ord_Int_compare_8(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta___tc_Eq_Int_eq_9(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
-entry:
-  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
-  ret i64 %ret
-}
-
-define i64 @__sprout_ir_eta_examples.aoc_2025_day_5.absorb_10(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+define i64 @__sprout_ir_eta_examples.aoc_2025_day_5.absorb_6(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
 entry:
   %t$0 = alloca i64
   store i64 %p$a1, ptr %t$0
@@ -4182,60 +4095,56 @@ entry:
 
 define i64 @examples.aoc_2025_day_5.normalized_ranges(i64 %p$ranges) {
 entry:
-  %t$14 = alloca [1 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$14, i8 0, i64 8, i1 false)
-  %t$15 = call i64 @sprout_gc_push_scan_root(ptr %t$14, i64 8)
+  %t$10 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$10, i8 0, i64 8, i1 false)
+  %t$11 = call i64 @sprout_gc_push_scan_root(ptr %t$10, i64 8)
   %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_range_start_5, i64 8) to i64
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_6, i64 8) to i64
-  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_7, i64 8) to i64
-  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_8, i64 8) to i64
-  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_9, i64 8) to i64
-  %t$16 = alloca i64
-  store i64 %p$ranges, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$5 = call i64 @stdlib.sort.sort_by(i64 %t$0, i64 %p$ranges, i64 %t$1, i64 %t$2, i64 %t$3, i64 %t$4)
-  %t$14$0 = getelementptr i64, ptr %t$14, i64 0
-  store i64 %t$5, ptr %t$14$0
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %arm_0_6
-arm_0_6:
-  %t$8 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_5.absorb_10, i64 8) to i64
-  %t$9 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  %t$19 = alloca i64
-  store i64 %t$9, ptr %t$19
-  %t$20 = call i64 @sprout_gc_push_i64_root(ptr %t$19)
-  %t$10 = call i64 @vec_empty()
-  %t$21 = alloca i64
-  store i64 %t$10, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
-  %t$11 = call i64 @sprout_alloc_obj(i64 35, i64 2)
-  %t$11$ptr = inttoptr i64 %t$11 to ptr
-  %t$11$f0 = getelementptr i64, ptr %t$11$ptr, i64 0
-  store i64 %t$9, ptr %t$11$f0
-  %t$11$f1 = getelementptr i64, ptr %t$11$ptr, i64 1
-  store i64 %t$10, ptr %t$11$f1
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$24 = alloca i64
-  store i64 %t$11, ptr %t$24
-  %t$25 = call i64 @sprout_gc_push_i64_root(ptr %t$24)
-  %t$12 = call i64 @vec_fold(i64 %t$8, i64 %t$11, i64 %t$5)
-  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$27 = alloca i64
-  store i64 %t$12, ptr %t$27
-  %t$28 = call i64 @sprout_gc_push_i64_root(ptr %t$27)
-  %t$13 = call i64 @examples.aoc_2025_day_5.close_sweep(i64 %t$12)
-  %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
-  br label %join_6
-arm_1_6:
+  %t$12 = alloca i64
+  store i64 %p$ranges, ptr %t$12
+  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
+  %t$1 = call i64 @stdlib.sort.sort_by$spec_Vec_Int(i64 %t$0, i64 %p$ranges)
+  %t$10$0 = getelementptr i64, ptr %t$10, i64 0
+  store i64 %t$1, ptr %t$10$0
+  %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %arm_0_2
+arm_0_2:
+  %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_examples.aoc_2025_day_5.absorb_6, i64 8) to i64
+  %t$5 = call i64 @sprout_alloc_obj(i64 0, i64 0)
+  %t$15 = alloca i64
+  store i64 %t$5, ptr %t$15
+  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$6 = call i64 @vec_empty()
+  %t$17 = alloca i64
+  store i64 %t$6, ptr %t$17
+  %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
+  %t$7 = call i64 @sprout_alloc_obj(i64 35, i64 2)
+  %t$7$ptr = inttoptr i64 %t$7 to ptr
+  %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
+  store i64 %t$5, ptr %t$7$f0
+  %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
+  store i64 %t$6, ptr %t$7$f1
+  %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$20 = alloca i64
+  store i64 %t$7, ptr %t$20
+  %t$21 = call i64 @sprout_gc_push_i64_root(ptr %t$20)
+  %t$8 = call i64 @vec_fold(i64 %t$4, i64 %t$7, i64 %t$1)
+  %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$23 = alloca i64
+  store i64 %t$8, ptr %t$23
+  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
+  %t$9 = call i64 @examples.aoc_2025_day_5.close_sweep(i64 %t$8)
+  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
+  br label %join_2
+arm_1_2:
   call void @sprout_abort_match()
   unreachable
-join_6:
-  %t$7 = phi i64 [%t$13, %arm_0_6]
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$7
+join_2:
+  %t$3 = phi i64 [%t$9, %arm_0_2]
+  %t$26 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$3
 }
 
-define i64 @__sprout_ir_lambda_11(i64 %p$env$, i64 %p$$ph_0) {
+define i64 @__sprout_ir_lambda_7(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -4251,7 +4160,7 @@ entry:
   %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
   %t$0 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$0$raw = inttoptr i64 %t$0 to ptr
-  store ptr @__sprout_ir_lambda_11, ptr %t$0$raw
+  store ptr @__sprout_ir_lambda_7, ptr %t$0$raw
   %t$0$raw$slot$1 = getelementptr i64, ptr %t$0$raw, i64 1
   store i64 %p$ingredient, ptr %t$0$raw$slot$1
   %t$4 = alloca i64
@@ -4262,7 +4171,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_lambda_12(i64 %p$env$, i64 %p$$ph_0) {
+define i64 @__sprout_ir_lambda_8(i64 %p$env$, i64 %p$$ph_0) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -4278,7 +4187,7 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @__sprout_ir_eta_range_count_13(i64 %p$env$, i64 %p$a0) {
+define i64 @__sprout_ir_eta_range_count_9(i64 %p$env$, i64 %p$a0) {
 entry:
   %ret = call i64 @range_count(i64 %p$a0)
   ret i64 %ret
@@ -4303,7 +4212,7 @@ entry:
 arm_0_2:
   %t$4 = call i64 @sprout_alloc_closure(i64 16, i64 1)
   %t$4$raw = inttoptr i64 %t$4 to ptr
-  store ptr @__sprout_ir_lambda_12, ptr %t$4$raw
+  store ptr @__sprout_ir_lambda_8, ptr %t$4$raw
   %t$4$raw$slot$1 = getelementptr i64, ptr %t$4$raw, i64 1
   store i64 %t$1, ptr %t$4$raw$slot$1
   %t$5 = call i64 @sprout_field(i64 %p$db, i64 1)
@@ -4315,7 +4224,7 @@ arm_0_2:
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
   %t$6 = call i64 @vec_count(i64 %t$4, i64 %t$5)
   %t$19 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_range_count_13, i64 8) to i64
+  %t$7 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_range_count_9, i64 8) to i64
   %t$8 = call i64 @vec_sum_by(i64 %t$7, i64 %t$1)
   %t$9 = call i64 @sprout_alloc_obj(i64 32, i64 2)
   %t$9$ptr = inttoptr i64 %t$9 to ptr
@@ -4391,35 +4300,90 @@ join_4:
   ret i64 %t$5
 }
 
-define i64 @__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_5_Answers_to_string_14(i64 %p$env$, i64 %p$a0) {
-entry:
-  %t$0 = alloca i64
-  store i64 %p$a0, ptr %t$0
-  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
-  %ret = call i64 @__tc_ToString_examples_aoc_2025_day_5_Answers_to_string(i64 %p$a0)
-  %t$2 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %ret
-}
-
 define i64 @__sprout_user_main() {
 entry:
   %t$0 = call i64 @examples.aoc_2025_day_5.solve_stdin()
-  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_ToString_examples_aoc_2025_day_5_Answers_to_string_14, i64 8) to i64
-  %t$3 = alloca i64
-  store i64 %t$0, ptr %t$3
-  %t$4 = call i64 @sprout_gc_push_i64_root(ptr %t$3)
-  %t$2 = call i64 @print(i64 %t$0, i64 %t$1)
-  %t$5 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$2
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @print$spec_examples_aoc_2025_day_5_Answers(i64 %t$0)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
 }
 
-define i64 @__cm_ToString_to_string(i64 %p$value, i64 %p$__tc_ToString_0_to_string) {
+define i64 @print$spec_examples_aoc_2025_day_5_Answers(i64 %p$value) {
 entry:
-  call void @sprout_closure_arity_check(i64 %p$__tc_ToString_0_to_string, i64 1)
-  %t$0$env_ptr = inttoptr i64 %p$__tc_ToString_0_to_string to ptr
-  %t$0$code = load ptr, ptr %t$0$env_ptr
-  %t$0 = call i64 (i64, i64) %t$0$code(i64 %p$__tc_ToString_0_to_string, i64 %p$value)
-  ret i64 %t$0
+  %t$2 = alloca i64
+  store i64 %p$value, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @__tc_ToString_examples_aoc_2025_day_5_Answers_to_string(i64 %p$value)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$1 = call i64 @print_str(i64 %t$0)
+  ret i64 %t$1
+}
+
+define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_10(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a2, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %p$a1, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$a0, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_values(i64 %p$a0, i64 %p$a1, i64 %p$a2)
+  %t$6 = call i64 @sprout_gc_pop_roots(i64 3)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_11(i64 %p$env$, i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3) {
+entry:
+  %t$0 = alloca i64
+  store i64 %p$a3, ptr %t$0
+  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)
+  %t$2 = alloca i64
+  store i64 %p$a2, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$4 = alloca i64
+  store i64 %p$a1, ptr %t$4
+  %t$5 = call i64 @sprout_gc_push_i64_root(ptr %t$4)
+  %t$6 = alloca i64
+  store i64 %p$a0, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
+  %ret = call i64 @__tc_stdlib.sort.Sort_Vec_sort_by_values(i64 %p$a0, i64 %p$a1, i64 %p$a2, i64 %p$a3)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 4)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_Ord_Int_compare_12(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+entry:
+  %ret = call i64 @__tc_Ord_Int_compare(i64 %p$a0, i64 %p$a1)
+  ret i64 %ret
+}
+
+define i64 @__sprout_ir_eta___tc_Eq_Int_eq_13(i64 %p$env$, i64 %p$a0, i64 %p$a1) {
+entry:
+  %ret = call i64 @__tc_Eq_Int_eq(i64 %p$a0, i64 %p$a1)
+  ret i64 %ret
+}
+
+define i64 @stdlib.sort.sort_by$spec_Vec_Int(i64 %p$key, i64 %p$xs) {
+entry:
+  %t$0 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_values_10, i64 8) to i64
+  %t$1 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_stdlib.sort.Sort_Vec_sort_by_values_11, i64 8) to i64
+  %t$2 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Ord_Int_compare_12, i64 8) to i64
+  %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_13, i64 8) to i64
+  %t$5 = alloca i64
+  store i64 %p$xs, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$7 = alloca i64
+  store i64 %p$key, ptr %t$7
+  %t$8 = call i64 @sprout_gc_push_i64_root(ptr %t$7)
+  %t$4 = call i64 @__cm_stdlib.sort.Sort_sort_by_values(i64 %p$key, i64 %p$xs, i64 %t$0, i64 %t$1, i64 %t$2, i64 %t$3)
+  %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
+  ret i64 %t$4
 }
 
 define i64 @__cm_Ord_compare(i64 %p$left, i64 %p$right, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {
@@ -4522,7 +4486,7 @@ entry:
   ret i64 %t$2
 }
 
-define i64 @__sprout_ir_lambda_15(i64 %p$env$, i64 %p$__eta_x0, i64 %p$__eta_x1) {
+define i64 @__sprout_ir_lambda_14(i64 %p$env$, i64 %p$__eta_x0, i64 %p$__eta_x1) {
 entry:
   %t$0$env_ptr = inttoptr i64 %p$env$ to ptr
   %t$0$slot_ptr = getelementptr i64, ptr %t$0$env_ptr, i64 1
@@ -4597,7 +4561,7 @@ arm_0_10:
 arm_0_14:
   %t$16 = call i64 @sprout_alloc_closure(i64 24, i64 2)
   %t$16$raw = inttoptr i64 %t$16 to ptr
-  store ptr @__sprout_ir_lambda_15, ptr %t$16$raw
+  store ptr @__sprout_ir_lambda_14, ptr %t$16$raw
   %t$16$raw$slot$1 = getelementptr i64, ptr %t$16$raw, i64 1
   store i64 %p$__tc_Eq_0_eq, ptr %t$16$raw$slot$1
   %t$16$raw$slot$2 = getelementptr i64, ptr %t$16$raw, i64 2

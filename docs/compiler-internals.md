@@ -445,6 +445,11 @@ width-2 arms and `p_k` occurs in no arm, lowers to `IRCallUnboxed2` for `g` and 
 Design + status: `docs/devirtualization-v0.md` (LANDED). A related but distinct optimization in
 `lowering.sprout` (the dictionary-passing pass), not `ast_to_ir.sprout`.
 
+Specialisation (`specialise.sprout`, `docs/specialisation-v0.md`) extends it to calls of a
+`where C a` function: when every dictionary is concrete, the call goes to a copy
+`<fn>$spec_<Type>` with the dictionaries filled in, so the method calls inside it devirtualize too.
+On by default; `SPROUT_OPT_OFF=spec` turns it off.
+
 - **What.** A class-method call whose dispatch dictionary is a **statically-known concrete instance**
   is lowered to a **direct call** of the concrete `__tc_{Class}_{Type}_{method}` fn, dropping the
   runtime dictionary — no `sprout_alloc_closure`, no generic `__cm_` wrapper indirection. Before,

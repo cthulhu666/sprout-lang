@@ -470,8 +470,8 @@ fn report_verify_stats(prog: typed_ast.TypedProgram) -> Unit !{IO} =
                  ++ " skipped=" ++ int_to_string(sk) ++ " mismatched=" ++ int_to_string(mm))
 
 # The optimisation pipeline over the lowered typed AST (docs/opt-passes-v0.md §M0).
-# Every pass is ON unless SPROUT_OPT_OFF names it, except default-off ones, which
-# need SPROUT_OPT_ON. `lower_checked` reads the config once; the passes stay pure.
+# Every pass is ON unless SPROUT_OPT_OFF names it. `lower_checked` reads the config once;
+# the passes stay pure.
 fn run_opt_passes(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram !{IO} =
   do
     let dle_on = opt_config.enabled(cfg, opt_config.Dle)

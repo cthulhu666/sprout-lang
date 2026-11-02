@@ -1,7 +1,6 @@
 # Specialising constrained functions at known instances — v0
 
-**Status — approved 2026-10-31; M0 next. Its prerequisite, the `print` redesign, has landed
-(§2).**
+**Status — landed 2026-11-02: on by default (§7 M2); `SPROUT_OPT_OFF=spec` turns it off.**
 Non-normative. An optimisation only: no syntax, typing-rule or evaluation-order change, so
 `spec-v0.md` is untouched. Diagnostics change in one place (§10).
 
@@ -318,8 +317,9 @@ code compares through `Ord`/`Eq`.
     reach the same rooting and B1 gain.
 
   The counts show reach, not time. Each lever still needs its own A/B before it lands.
-- **M1 — the pass, behind a switch.** Add `Spec` to `opt_config.Pass`, implemented and off by
-  default: a default-off set holds it, and `SPROUT_OPT_ON=spec` turns it on. `SPROUT_OPT_OFF`
+- **M1 — the pass, behind a switch. Landed 2026-11-01.** Add `Spec` to `opt_config.Pass`,
+  implemented and off by default: a default-off set holds it, and `SPROUT_OPT_ON=spec` turns it
+  on (both removed in M2). `SPROUT_OPT_OFF`
   wins when both name it, and an unknown name warns as it does there. `just refresh-seed` and
   `just verify-bootstrap-fixed-point` refuse to run while either is set, or a seed built with
   the pass on, or another pass off, gets committed. `SPROUT_OPT_OFF` is read today in
@@ -344,19 +344,28 @@ code compares through `Ord`/`Eq`.
     `http_log_middleware` -4.6%, `compile_driver` -0.28%).
   - The pass fires on all 6 `bench-opt` programs (4 to 37 nodes added). Run time is flat.
   - `just test` passes with the pass on.
-- **M2 — turn it on by default**, in its own change: `Spec` leaves the default-off set. From
-  here the compiler is built by this pass, so a bug in it miscompiles the compiler that must build
-  the fix. Require a 2-step bootstrap fixed point with the pass on (`docs/debugging.md` §2-Step
-  Bootstrap Protocol). `SPROUT_OPT_OFF=spec` changes what a compiler emits; it cannot repair a
-  seed the pass miscompiled, so the way back is reverting the seed commit. Then reseed; M1's
-  guard keeps a pass-off seed out.
+- **M2 — on by default. Landed 2026-11-02.** `Spec` runs unless `SPROUT_OPT_OFF=spec`.
+  `SPROUT_OPT_ON` and the default-off set are gone: with no pass left in the set, nothing could
+  test them. The compiler is now built by this pass, so a bug in it miscompiles the compiler that
+  must build the fix; `docs/debugging.md` §Recovering from a miscompiling pass has the way back.
 
-  **Golden IR.** `print` is a `ToString`-constrained function, so every snapshot that prints moves,
-  and the diff is too large to read (`docs/gates.md` §Golden IR, "When the diff is too large to
-  read"). The checks instead: with `SPROUT_OPT_OFF=spec` the IR is byte-identical to the pre-change
-  snapshots; with the pass on, every `define` removed is a generic version whose callers all moved
-  to copies, and every `define` added is a copy name; and every corpus file compiles and runs
-  under both, with the same stdout and exit status.
+  **Checked before the seed changed.**
+  - The seed-built compiler and the pass-built one emit the same compiler IR with the pass on,
+    and the pass-built one with the pass off re-emits the old seed byte for byte.
+  - `just refresh-seed` converged at iteration 3: the old seed emits the new source with the pass
+    off, that build emits it with the pass on, and the pass-built compiler agrees.
+  - `print` is `ToString`-constrained, so most goldens move and the diff is too large to read
+    (`docs/gates.md` §Golden IR). `just spec-corpus-check --off-golden-ref <pre-flip>` checks
+    instead: pass-off IR equals all 75 old goldens; every added define is a `$spec_` copy of an
+    existing function or a renumbered lambda/eta wrapper; no removed define is still referenced;
+    the 64 programs of `tests/spec_corpus_run.txt` print and exit the same on and off. The 64
+    goldens that changed are exactly the files with a copy.
+  - `just gate` and `just asan-self-compile` pass.
+
+  **Measured (2026-11-02).** Compiler binary −0.47%. Self-compile, pass-built against seed-built:
+  min −1.2%, median −1.1% over 7 interleaved rounds, inside the 2.2% floor. `compile_driver`
+  holds 36 copies. `just test-stdlib-compiler-stage1`: 109–110 s off and 111–126 s on over 3
+  interleaved rounds (median +6%), the pass's own cost on compiler-sized programs.
 
 ## 8. Tests
 
@@ -383,8 +392,9 @@ code compares through `Ord`/`Eq`.
 - Termination: mutually recursive constrained functions, one calling the other at a larger type
   (the backstop declines the key; the pass terminates and the output equals `SPROUT_OPT_OFF=spec`);
   a constrained function calling a constraint-free, polymorphically recursive one.
-- Same behaviour with the pass on and off: `just test` under `SPROUT_OPT_OFF=spec` as well as with
-  it enabled.
+- Same behaviour with the pass on and off: `just spec-corpus-check` on the golden corpus (in
+  `just gate`), and a nightly CI job that runs it and then the conformance suite with
+  `SPROUT_OPT_OFF=spec`.
 
 ## 9. Open question
 

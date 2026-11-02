@@ -273,6 +273,30 @@ jobs:
       - name: Run compiler tests (stage-1, shard 2/2)
         run: SPROUT_TEST_SHARD=2/2 just test-stdlib-compiler-stage1
 
+  # Nightly, or by hand (workflow_dispatch). `SPROUT_OPT_OFF=spec` is the way out of a
+  # miscompiling specialisation pass (docs/debugging.md §Recovering from a miscompiling pass).
+  # PR jobs use it only in spec-gate and opt-harness-check, so this job runs the golden corpus
+  # and the conformance suite with it. Not in the `test` verdict: a failure shows on the
+  # nightly run.
+  spec-off-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env: *invariant-env
+    steps:
+      - *checkout
+      - *install-mise
+      - *install-llvm
+      - *cache-stage1
+      - *bootstrap
+
+      - name: Specialisation on vs off over the golden corpus
+        run: just spec-corpus-check
+
+      - name: Conformance suite with specialisation off
+        # Runs even when the corpus check failed: a divergence is when the off switch matters.
+        if: ${{ !cancelled() }}
+        run: SPROUT_OPT_OFF=spec just test-conformance-run
+
   # The ASan gate (docs/gates.md): the suites and the C runtime tests against an ASan+UBSan
   # runtime, sharded like the plain suites so no job outlasts test-gates. The libclang-rt
   # install is in *install-llvm; without it the sanitized link fails and `c-runtime-test-asan`
