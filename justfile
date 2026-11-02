@@ -4163,7 +4163,7 @@ gc-gen-check: bootstrap-from-seed
            echo "  expected: $(cat "$want_file")" >&2
            echo "  actual:   $(cat "$TMPD/$name.off")" >&2; failed=1; }
   done
-  clang tests/c_runtime/analysis_strings.c runtime/sprout_scheduler.c runtime/sprout_poll.c -O1 -g {{clang_extra}} \
+  clang tests/c_runtime/analysis_strings.c runtime/sprout_scheduler.c runtime/sprout_poll.c -O1 -g -D_GNU_SOURCE {{clang_extra}} \
       -o "$TMPD/analysis.bin" 2>"$TMPD/analysis.err" \
     || { echo "gc-gen-check: analysis_strings.c failed to build" >&2; cat "$TMPD/analysis.err" >&2; exit 1; }
   SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_DEBUG_GC=1 "$TMPD/analysis.bin" stress > "$TMPD/analysis.out" 2>"$TMPD/analysis.gc"

@@ -1,5 +1,6 @@
-/* glibc declares accept4 and pipe2 only under this macro, and it must precede every #include. */
-#if defined(__linux__)
+/* glibc declares accept4 and pipe2 only under this macro, and it must precede every #include. The C
+ * tests that include this file after their own headers pass -D_GNU_SOURCE instead (tests/c_runtime). */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
 #endif
 #include <stdio.h>
@@ -42,13 +43,13 @@
 #include <mach-o/dyld.h>
 #endif
 
+/* cloexec-gate: begin wrappers */
 /* Close-on-exec descriptors. A child started by proc_run or the analysis service must not inherit
  * the runtime's sockets, pipes or files, so every descriptor the runtime creates comes from one of
  * these wrappers (scripts/cloexec_gate.sh rejects a raw call outside them). Linux sets the flag
  * atomically at creation. Elsewhere it is a fcntl right after: that cannot race with our forks,
  * because every descriptor we create and both forks sit on the one scheduler thread, and the only
  * other threads run getaddrinfo. fopen's "e" mode is not used: macOS accepts it and ignores it. */
-/* cloexec-gate: begin wrappers */
 #if !defined(__linux__)
 static int cloexec_mark(int fd) {
   int fl = fcntl(fd, F_GETFD);
