@@ -1,0 +1,21 @@
+module testsupport.toolchain
+
+import stdlib.process as process
+import stdlib.string as string
+
+# Probes of the host toolchain for tests that compile and link a program.
+
+# True when `clang` starts and exits 0. A probe that cannot start reads as unavailable.
+export fn clang_available() -> Bool !{IO} =
+  match process.proc_run(["clang", "--version"]) with
+  | Ok probe -> process.proc_ok(probe)
+  | Err _ -> false
+
+# Darwin needs -framework Security -framework CoreFoundation to link the runtime; detect it the way
+# the justfile does (uname).
+export fn is_darwin() -> Bool !{IO} =
+  match process.proc_run(["uname"]) with
+  | Ok r ->
+      # `uname` output is ASCII; a child that somehow emitted non-UTF-8 is simply not Darwin.
+      string.trim(process.proc_stdout_or(r, "")) == "Darwin"
+  | Err _ -> false
