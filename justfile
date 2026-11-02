@@ -2331,6 +2331,17 @@ runtime-word-casts:
 test-runtime-word-casts:
   bash scripts/test_runtime_word_casts.sh
 
+# Every descriptor the runtime creates is close-on-exec: no raw socket/accept/pipe/open/fopen/opendir
+# call in runtime/*.c outside the cloexec_* wrappers (docs/gates.md §Close-on-exec).
+[group('smoke')]
+cloexec-gate:
+  bash scripts/cloexec_gate.sh
+
+# cloexec_gate.sh against copies of runtime/ with one raw call planted at a time, and lookalikes.
+[group('smoke')]
+test-cloexec-gate:
+  bash scripts/test_cloexec_gate.sh
+
 # runtime/*.c under -Wall -Wextra; -Werror only on the clang major CI pins (docs/gates.md
 # §Runtime warnings).
 [group('smoke')]
@@ -2772,6 +2783,10 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/connect_park.spr
   ( ulimit -n 64; run_once "connect-park" "connect-park-ok" )
   ( ulimit -n 64; SPROUT_GC_STRESS=1 run_once "connect-park/stress" "connect-park-ok" )
+  # (18a) proc_run-fds: a child started by proc_run holds no more descriptors with a listener, a
+  # client and an accepted socket open than without them (every runtime descriptor is close-on-exec).
+  build tests/task_io_smoke/proc_run_fds.spr
+  run_once "proc-run-fds" "proc-run-fds-ok"
   # (18b) listen-backlog: a listener that never accepts must queue 100 connects. The backlog was 16,
   # so connect #17 was dropped and waited out a ~1 s SYN retransmit — behind nginx, the p99 tail.
   build tests/task_io_smoke/listen_backlog.spr
@@ -3178,7 +3193,7 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_client_many_headers.spr
   run_once "http-client-many-headers" "done"
   check_markers "http-client-many-headers" "cl-many: Ok 200 body=5 text=hello"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits, http-client-many-headers; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, proc-run-fds, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits, http-client-many-headers; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #
@@ -4482,6 +4497,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "test-runtime-warnings|test-runtime-warnings"
     # Includes the real-tree check, so `runtime-word-casts` is not listed on its own.
     "test-runtime-word-casts|test-runtime-word-casts"
+    "cloexec-gate|cloexec-gate"
+    "test-cloexec-gate|test-cloexec-gate"
   )
   declare -a pids=() labels=()
   idx=0; active=0
@@ -4747,7 +4764,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate spec-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate spec-gate check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

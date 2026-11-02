@@ -584,6 +584,35 @@ sites. A site is either
 `__APPLE__` or Linux only is counted on that host alone. Tag its `ADDRESS_CASTS` entry with that
 host; an untagged entry is stale on the other. `just linux-run runtime-word-casts` checks Linux.
 
+## Close-on-exec — `just cloexec-gate`
+
+A program started by `proc_run`, or the analysis service, must not inherit the runtime's sockets,
+pipes or files. Every descriptor the runtime creates is close-on-exec from creation, through the
+`cloexec_*` wrappers in `runtime/sprout_runtime.c` (`cloexec_socket`, `cloexec_accept`,
+`cloexec_pipe`, `cloexec_open`, `cloexec_fopen`), and `sprout_poll_init` uses `EPOLL_CLOEXEC`.
+`fopen`'s `"e"` mode is not used: macOS accepts it and ignores it. Directories go through
+`cloexec_open` plus `fdopendir`.
+
+`scripts/cloexec_gate.sh` fails on a raw `socket`, `accept`, `pipe`, `open`, `fopen`, `opendir`,
+`dup`, `dup2` and the like in `runtime/*.c`, on `epoll_create1` without `EPOLL_CLOEXEC` and on
+`timerfd_create` without `TFD_CLOEXEC`. Comments and string contents are blanked first, so prose
+such as `accept(2)` does not match, and `freopen` and `fdopen` are not matched.
+
+- The wrapper bodies sit between `/* cloexec-gate: begin wrappers */` and
+  `/* cloexec-gate: end wrappers */`; lines between them are not scanned.
+- A line ending in `/* cloexec-gate: fork child */` is skipped. The `dup2` calls in the two fork
+  children use it: `dup2` clears the flag on its target by design.
+- `freopen(..., stderr)` in the analysis-service child stays inheritable, since it puts the log on
+  fd 2 for the exec'd daemon.
+
+Known bypasses: a parenthesised name `(socket)(...)`, a macro or function pointer that hides the
+name, and a call whose `(` is on the next line. kqueue is not inherited across fork and is not
+checked.
+
+`just test-cloexec-gate` plants one raw call at a time in copies of `runtime/` and runs lookalikes
+that must pass. `tests/c_runtime/cloexec_fds.c` checks each wrapper and every open descriptor
+after `tcp_listen`, and `tests/task_io_smoke/proc_run_fds.spr` counts what a child sees.
+
 ## GC safety linter — `just gc-safety-check --strict`
 
 `scripts/gc_safety_check.sh` finds a function body by counting braces, so a miscount hides every
