@@ -26,9 +26,10 @@ fn stdlib_root() -> String !{IO} =
 # Module leaves on disk, minus `prelude` (always in scope, never imported by name).
 # `sh -c` because proc_run is argv-based and does not expand the glob itself.
 fn modules_on_disk(root: String) -> List String !{IO} =
-  do
-    result <- process.proc_run(["sh", "-c", "ls " ++ root ++ "/*.sprout"])
-    leaves_of_lines(string.string_lines(process.proc_stdout_or(result, "")), 0, root ++ "/", Nil)
+  match process.proc_run(["sh", "-c", "ls " ++ root ++ "/*.sprout"]) with
+  | Ok result ->
+      leaves_of_lines(string.string_lines(process.proc_stdout_or(result, "")), 0, root ++ "/", Nil)
+  | Err e -> panic(process.proc_error_message(e))
 
 fn leaves_of_lines(lines: Vec String, index: Int, prefix: String, acc: List String) -> List String =
   match vec_get(index, lines) with

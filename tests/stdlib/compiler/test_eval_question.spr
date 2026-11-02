@@ -35,9 +35,9 @@ fn linear_source() -> String =
     ++ "}\n"
 
 fn clang_available() -> Bool !{IO} =
-  do
-    probe <- process.proc_run(["clang", "--version"])
-    process.proc_ok(probe)
+  match process.proc_run(["clang", "--version"]) with
+  | Ok probe -> process.proc_ok(probe)
+  | Err _ -> false
 
 fn run_cases(test: TestState, state: service.StartupState) -> Unit !{IO} =
   do
