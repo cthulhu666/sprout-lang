@@ -39,6 +39,13 @@ fn error_name(e: ProcError) -> String =
   | ProcOutputTooLarge _ _ _ -> "too_large"
   | ProcInvalidArgument _ -> "invalid"
 
+# The "not found" message names the program, cut at a character boundary: it is a String, and a cut
+# inside a UTF-8 sequence would make it invalid. Counting its characters walks it.
+fn not_found_text_ok(r: Result ProcError ProcResult) -> Bool =
+  match r with
+  | Err (ProcSpawnFailed msg) -> string.length(msg) == 399 + string.length(": command not found")
+  | _ -> false
+
 # One word per outcome, so an assertion names what happened instead of printing a record.
 fn describe(r: Result ProcError ProcResult) -> String =
   match r with
@@ -174,6 +181,9 @@ fn main() -> Unit !{IO} =
     # Exec failure is a spawn error, not an exit status.
     assert_eq(state, "missing program", describe(proc_run(["sprout-no-such-program-xyz"])), "spawn_failed")
     assert_eq(state, "missing absolute path", describe(proc_run(["/nonexistent/dir/prog"])), "spawn_failed")
+    # 399 ASCII bytes and an "é" put the 400-byte cut inside the "é".
+    let long_name = string.repeat("a", 399) ++ "é"
+    assert_true(state, "long non-ASCII program name", not_found_text_ok(proc_run([long_name])))
     let noexec = `${tmp_dir}/sprout_proc_noexec.txt`
     let _ = fs.write_text(noexec, "not a program\n")
     assert_eq(state, "non-executable file", describe(proc_run([noexec])), "spawn_failed")
