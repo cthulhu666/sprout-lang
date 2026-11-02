@@ -3181,11 +3181,7 @@ else_4:
   %t$13$hi = lshr i128 %t$13$st, 64
   %t$14 = trunc i128 %t$13$hi to i64
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23 = alloca i64
-  store i64 %t$14, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$15 = call i64 @positive_from_neg_magnitude_argw(i64 %t$13, i64 %t$14)
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$9, %then_4], [%t$15, %else_4]
@@ -4813,9 +4809,9 @@ entry:
 
 define i64 @stdlib.string.split_once(i64 %p$raw, i64 %p$sep) {
 entry:
-  %t$22 = alloca [4 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$22, i8 0, i64 32, i1 false)
-  %t$23 = call i64 @sprout_gc_push_scan_root(ptr %t$22, i64 32)
+  %t$22 = alloca [3 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$22, i8 0, i64 24, i1 false)
+  %t$23 = call i64 @sprout_gc_push_scan_root(ptr %t$22, i64 24)
   %t$22$0 = getelementptr i64, ptr %t$22, i64 0
   store i64 %p$raw, ptr %t$22$0
   %t$22$1 = getelementptr i64, ptr %t$22, i64 1
@@ -4831,8 +4827,6 @@ else_1:
   %t$4 = trunc i128 %t$4$st to i64
   %t$4$hi = lshr i128 %t$4$st, 64
   %t$5 = trunc i128 %t$4$hi to i64
-  %t$22$2 = getelementptr i64, ptr %t$22, i64 2
-  store i64 %t$5, ptr %t$22$2
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -4847,8 +4841,8 @@ arm_1_6:
   br i1 %t$12, label %body_1_6, label %arm_2_6
 body_1_6:
   %t$13 = call i64 @stdlib.string.take(i64 %p$raw, i64 %t$5)
-  %t$22$3 = getelementptr i64, ptr %t$22, i64 3
-  store i64 %t$13, ptr %t$22$3
+  %t$22$2 = getelementptr i64, ptr %t$22, i64 2
+  store i64 %t$13, ptr %t$22$2
   %t$14 = call i64 @stdlib.string.length(i64 %p$sep)
   %t$15$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$5, i64 %t$14)
   %t$15 = extractvalue { i64, i1 } %t$15$agg, 0
@@ -7792,22 +7786,18 @@ ovfpanic_21:
   call i64 @panic(i64 %t$23)
   unreachable
 ovfok_21:
-  %t$35 = alloca i64
-  store i64 %t$5, ptr %t$35
-  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$24 = call i64 @stdlib.bytes.builder_byte(i64 %t$5) noinline
-  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$38 = alloca i64
-  store i64 %t$24, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$35 = alloca i64
+  store i64 %t$24, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$25 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$25$ptr = inttoptr i64 %t$25 to ptr
   %t$25$f0 = getelementptr i64, ptr %t$25$ptr, i64 0
   store i64 %t$24, ptr %t$25$f0
   %t$25$f1 = getelementptr i64, ptr %t$25$ptr, i64 1
   store i64 %p$parts, ptr %t$25$f1
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$38 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$26 = musttail call i64 @stdlib.url.decode_bytes$u(i64 %p$input, i64 %t$17, i64 %p$total, i64 %p$plus_space, i64 %t$21, i64 %t$25) noinline
   ret i64 %t$26
 arm_2_6:
@@ -7815,7 +7805,7 @@ arm_2_6:
   unreachable
 join_6:
   %t$7 = phi i64 [%t$13, %body_0_6]
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$7
 }
 
@@ -9112,11 +9102,8 @@ else_23:
   %t$32 = trunc i128 %t$32$st to i64
   %t$32$hi = lshr i128 %t$32$st, 64
   %t$33 = trunc i128 %t$32$hi to i64
-  %t$59 = alloca i64
-  store i64 %t$33, ptr %t$59
-  %t$60 = call i64 @sprout_gc_push_i64_root(ptr %t$59)
   %t$34 = call i64 @result_from_maybe_argw(i64 %t$31, i64 %t$32, i64 %t$33)
-  %t$61 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$59 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_23
 join_23:
   %t$24 = phi i64 [%t$28, %then_23], [%t$34, %else_23]
@@ -9129,15 +9116,15 @@ arm_2_4:
   unreachable
 join_4:
   %t$5 = phi i64 [%t$9, %body_0_4], [%t$14, %join_13]
-  %t$62 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$60 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$5
 }
 
 define i64 @stdlib.http_server.request_head(i64 %p$raw, i64 %p$start, i64 %p$body_start) {
 entry:
-  %t$64 = alloca [6 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$64, i8 0, i64 48, i1 false)
-  %t$65 = call i64 @sprout_gc_push_scan_root(ptr %t$64, i64 48)
+  %t$64 = alloca [5 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$64, i8 0, i64 40, i1 false)
+  %t$65 = call i64 @sprout_gc_push_scan_root(ptr %t$64, i64 40)
   %t$64$0 = getelementptr i64, ptr %t$64, i64 0
   store i64 %p$raw, ptr %t$64$0
   %t$0 = call i64 @stdlib.http_server.crlf()
@@ -9148,8 +9135,6 @@ entry:
   %t$1 = trunc i128 %t$1$st to i64
   %t$1$hi = lshr i128 %t$1$st, 64
   %t$2 = trunc i128 %t$1$hi to i64
-  %t$64$1 = getelementptr i64, ptr %t$64, i64 1
-  store i64 %t$2, ptr %t$64$1
   %t$68 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -9189,8 +9174,8 @@ body_1_3:
   %t$14 = trunc i128 %t$14$st to i64
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
-  %t$64$2 = getelementptr i64, ptr %t$64, i64 2
-  store i64 %t$15, ptr %t$64$2
+  %t$64$1 = getelementptr i64, ptr %t$64, i64 1
+  store i64 %t$15, ptr %t$64$1
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -9232,8 +9217,8 @@ ovfok_25:
   %t$29 = trunc i128 %t$29$st to i64
   %t$29$hi = lshr i128 %t$29$st, 64
   %t$30 = trunc i128 %t$29$hi to i64
-  %t$64$3 = getelementptr i64, ptr %t$64, i64 3
-  store i64 %t$30, ptr %t$64$3
+  %t$64$2 = getelementptr i64, ptr %t$64, i64 2
+  store i64 %t$30, ptr %t$64$2
   %t$80 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -9266,8 +9251,8 @@ do_cont_31:
   %t$39 = trunc i128 %t$39$st to i64
   %t$39$hi = lshr i128 %t$39$st, 64
   %t$40 = trunc i128 %t$39$hi to i64
-  %t$64$4 = getelementptr i64, ptr %t$64, i64 4
-  store i64 %t$40, ptr %t$64$4
+  %t$64$3 = getelementptr i64, ptr %t$64, i64 3
+  store i64 %t$40, ptr %t$64$3
   %t$88 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -9283,8 +9268,8 @@ do_cont_41:
   %t$45 = trunc i128 %t$45$st to i64
   %t$45$hi = lshr i128 %t$45$st, 64
   %t$46 = trunc i128 %t$45$hi to i64
-  %t$64$5 = getelementptr i64, ptr %t$64, i64 5
-  store i64 %t$46, ptr %t$64$5
+  %t$64$4 = getelementptr i64, ptr %t$64, i64 4
+  store i64 %t$46, ptr %t$64$4
   %t$47 = add i64 0, 8
   %t$48 = icmp eq i64 %t$45, %t$47
   br i1 %t$48, label %do_short_47, label %do_cont_47
@@ -9701,9 +9686,9 @@ entry:
 
 define i64 @stdlib.http_server.scan_for_terminator$u(i64 %p$conn, i64 %p$parts, i64 %p$total, i64 %p$overlap, i64 %p$chunk, i64 %p$deadline, i64 %p$max_bytes) {
 entry:
-  %t$40 = alloca [9 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$40, i8 0, i64 72, i1 false)
-  %t$41 = call i64 @sprout_gc_push_scan_root(ptr %t$40, i64 72)
+  %t$40 = alloca [8 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$40, i8 0, i64 64, i1 false)
+  %t$41 = call i64 @sprout_gc_push_scan_root(ptr %t$40, i64 64)
   %t$40$0 = getelementptr i64, ptr %t$40, i64 0
   store i64 %p$conn, ptr %t$40$0
   %t$40$1 = getelementptr i64, ptr %t$40, i64 1
@@ -9746,8 +9731,6 @@ arm_0_9:
   %t$12 = trunc i128 %t$12$st to i64
   %t$12$hi = lshr i128 %t$12$st, 64
   %t$13 = trunc i128 %t$12$hi to i64
-  %t$40$7 = getelementptr i64, ptr %t$40, i64 7
-  store i64 %t$13, ptr %t$40$7
   %t$47 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_14
 arm_0_14:
@@ -9756,8 +9739,8 @@ arm_0_14:
   br i1 %t$17, label %body_0_14, label %arm_1_14
 body_0_14:
   %t$18 = call i64 @stdlib.http_server.build_chunks(i64 %t$4) noinline
-  %t$40$8 = getelementptr i64, ptr %t$40, i64 8
-  store i64 %t$18, ptr %t$40$8
+  %t$40$7 = getelementptr i64, ptr %t$40, i64 7
+  store i64 %t$18, ptr %t$40$7
   %t$19 = call i64 @stdlib.bytes.length(i64 %p$overlap) noinline
   %t$20$agg = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %p$total, i64 %t$19)
   %t$20 = extractvalue { i64, i1 } %t$20$agg, 0
@@ -16266,9 +16249,9 @@ join_2:
 
 define i64 @stdlib.log.find_seq(i64 %p$single$in, i64 %p$b$in, i64 %p$i$in) {
 entry:
-  %t$37 = alloca [3 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$37, i8 0, i64 24, i1 false)
-  %t$38 = call i64 @sprout_gc_push_scan_root(ptr %t$37, i64 24)
+  %t$37 = alloca [2 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$37, i8 0, i64 16, i1 false)
+  %t$38 = call i64 @sprout_gc_push_scan_root(ptr %t$37, i64 16)
   %t$33 = getelementptr i64, ptr %t$37, i64 0
   store i64 %p$single$in, ptr %t$33
   %t$34 = getelementptr i64, ptr %t$37, i64 1
@@ -16293,8 +16276,6 @@ tco_loop:
   %t$1 = trunc i128 %t$1$st to i64
   %t$1$hi = lshr i128 %t$1$st, 64
   %t$2 = trunc i128 %t$1$hi to i64
-  %t$37$2 = getelementptr i64, ptr %t$37, i64 2
-  store i64 %t$2, ptr %t$37$2
   %t$41 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -16344,8 +16325,6 @@ ovfpanic_26:
   call i64 @panic(i64 %t$28)
   unreachable
 ovfok_26:
-  %t$42 = getelementptr i64, ptr %t$37, i64 2
-  call void @llvm.memset.p0.i64(ptr %t$42, i8 0, i64 8, i1 false)
   store i64 %p$single, ptr %t$33
   store i64 %p$b, ptr %t$34
   store i64 %t$26, ptr %t$35
@@ -16358,14 +16337,14 @@ else_23:
   store i64 %t$2, ptr %t$30$s0
   %t$30$s1 = getelementptr i64, ptr %t$30$ptr, i64 1
   store i64 %t$14, ptr %t$30$s1
-  %t$43 = alloca i64
-  store i64 %t$30, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$42 = alloca i64
+  store i64 %t$30, ptr %t$42
+  %t$43 = call i64 @sprout_gc_push_i64_root(ptr %t$42)
   %t$31 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$31$ptr = inttoptr i64 %t$31 to ptr
   %t$31$f0 = getelementptr i64, ptr %t$31$ptr, i64 0
   store i64 %t$30, ptr %t$31$f0
-  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$44 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_23
 join_23:
   %t$24 = phi i64 [%t$31, %else_23]
@@ -16381,7 +16360,7 @@ arm_2_3:
   unreachable
 join_3:
   %t$4 = phi i64 [%t$7, %body_0_3], [%t$19, %join_18]
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
 }
 
@@ -17932,59 +17911,50 @@ entry:
   %t$5 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.374, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$26 = alloca i64
-  store i64 %t$3, ptr %t$26
+  store i64 %t$6, ptr %t$26
   %t$27 = call i64 @sprout_gc_push_i64_root(ptr %t$26)
-  %t$28 = alloca i64
-  store i64 %t$6, ptr %t$28
-  %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
   %t$7$st = call i128 @stdlib.template.find_from_worker(i64 %p$src, i64 %t$6, i64 %p$pos)
   %t$7 = trunc i128 %t$7$st to i64
   %t$7$hi = lshr i128 %t$7$st, 64
   %t$8 = trunc i128 %t$7$hi to i64
-  %t$30 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9 = add i64 0, 1
   %t$10 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.375, i64 0, i32 1, i64 0
   %t$11 = ptrtoint ptr %t$10 to i64
-  %t$31 = alloca i64
-  store i64 %t$8, ptr %t$31
-  %t$32 = call i64 @sprout_gc_push_i64_root(ptr %t$31)
-  %t$33 = alloca i64
-  store i64 %t$11, ptr %t$33
-  %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
+  %t$29 = alloca i64
+  store i64 %t$11, ptr %t$29
+  %t$30 = call i64 @sprout_gc_push_i64_root(ptr %t$29)
   %t$12$st = call i128 @stdlib.template.find_from_worker(i64 %p$src, i64 %t$11, i64 %p$pos)
   %t$12 = trunc i128 %t$12$st to i64
   %t$12$hi = lshr i128 %t$12$st, 64
   %t$13 = trunc i128 %t$12$hi to i64
-  %t$35 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$31 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$14 = add i64 0, 2
-  %t$36 = alloca i64
-  store i64 %t$13, ptr %t$36
-  %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
   %t$15 = call i64 @sprout_alloc_obj(i64 5, i64 0)
-  %t$38 = alloca i64
-  store i64 %t$15, ptr %t$38
-  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
+  %t$32 = alloca i64
+  store i64 %t$15, ptr %t$32
+  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$16 = call i64 @stdlib.template.opt_cons_argw(i64 %t$12, i64 %t$13, i64 %t$14, i64 %t$15)
-  %t$40 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$41 = alloca i64
-  store i64 %t$16, ptr %t$41
-  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
+  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$35 = alloca i64
+  store i64 %t$16, ptr %t$35
+  %t$36 = call i64 @sprout_gc_push_i64_root(ptr %t$35)
   %t$17 = call i64 @stdlib.template.opt_cons_argw(i64 %t$7, i64 %t$8, i64 %t$9, i64 %t$16)
-  %t$43 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$44 = alloca i64
-  store i64 %t$17, ptr %t$44
-  %t$45 = call i64 @sprout_gc_push_i64_root(ptr %t$44)
+  %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$38 = alloca i64
+  store i64 %t$17, ptr %t$38
+  %t$39 = call i64 @sprout_gc_push_i64_root(ptr %t$38)
   %t$18 = call i64 @stdlib.template.opt_cons_argw(i64 %t$2, i64 %t$3, i64 %t$4, i64 %t$17)
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 3)
-  %t$47 = alloca i64
-  store i64 %t$18, ptr %t$47
-  %t$48 = call i64 @sprout_gc_push_i64_root(ptr %t$47)
+  %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$41 = alloca i64
+  store i64 %t$18, ptr %t$41
+  %t$42 = call i64 @sprout_gc_push_i64_root(ptr %t$41)
   %t$19 = call i64 @sprout_alloc_obj(i64 0, i64 0)
-  %t$49 = alloca i64
-  store i64 %t$19, ptr %t$49
-  %t$50 = call i64 @sprout_gc_push_i64_root(ptr %t$49)
+  %t$43 = alloca i64
+  store i64 %t$19, ptr %t$43
+  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
   %t$20 = call i64 @stdlib.template.earliest(i64 %t$18, i64 %t$19)
-  %t$51 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$20
 }
 
@@ -18508,9 +18478,9 @@ join_8:
 
 define i64 @stdlib.template.parse_interp_tag(i64 %p$src, i64 %p$tagpos) {
 entry:
-  %t$36 = alloca [2 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$36, i8 0, i64 16, i1 false)
-  %t$37 = call i64 @sprout_gc_push_scan_root(ptr %t$36, i64 16)
+  %t$36 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$36, i8 0, i64 8, i1 false)
+  %t$37 = call i64 @sprout_gc_push_scan_root(ptr %t$36, i64 8)
   %t$36$0 = getelementptr i64, ptr %t$36, i64 0
   store i64 %p$src, ptr %t$36$0
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.384, i64 0, i32 1, i64 0
@@ -18533,8 +18503,6 @@ ovfok_3:
   %t$6 = trunc i128 %t$6$st to i64
   %t$6$hi = lshr i128 %t$6$st, 64
   %t$7 = trunc i128 %t$6$hi to i64
-  %t$36$1 = getelementptr i64, ptr %t$36, i64 1
-  store i64 %t$7, ptr %t$36$1
   %t$40 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_8
 arm_0_8:
@@ -18876,28 +18844,24 @@ ovfpanic_23:
   call i64 @panic(i64 %t$25)
   unreachable
 ovfok_23:
-  %t$40 = alloca i64
-  store i64 %t$7, ptr %t$40
-  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
   %t$26 = call i64 @stdlib.string.slice_between(i64 %p$src, i64 %t$23, i64 %t$7)
+  %t$40 = alloca i64
+  store i64 %t$26, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$27 = call i64 @stdlib.string.trim(i64 %t$26)
   %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$43 = alloca i64
-  store i64 %t$26, ptr %t$43
+  store i64 %t$27, ptr %t$43
   %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
-  %t$27 = call i64 @stdlib.string.trim(i64 %t$26)
-  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$46 = alloca i64
-  store i64 %t$27, ptr %t$46
-  %t$47 = call i64 @sprout_gc_push_i64_root(ptr %t$46)
   %t$28 = call i64 @stdlib.template.parse_stmt(i64 %p$src, i64 %t$19, i64 %p$total, i64 %t$27)
-  %t$48 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_8
 arm_2_8:
   call void @sprout_abort_match()
   unreachable
 join_8:
   %t$9 = phi i64 [%t$15, %body_0_8], [%t$28, %ovfok_23]
-  %t$49 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$9
 }
 
@@ -21518,9 +21482,9 @@ entry:
 
 define i64 @examples.http_web_server.handle_edit(i64 %p$form_tmpl, i64 %p$store, i64 %p$req) {
 entry:
-  %t$28 = alloca [3 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$28, i8 0, i64 24, i1 false)
-  %t$29 = call i64 @sprout_gc_push_scan_root(ptr %t$28, i64 24)
+  %t$28 = alloca [2 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$28, i8 0, i64 16, i1 false)
+  %t$29 = call i64 @sprout_gc_push_scan_root(ptr %t$28, i64 16)
   %t$28$0 = getelementptr i64, ptr %t$28, i64 0
   store i64 %p$form_tmpl, ptr %t$28$0
   %t$28$1 = getelementptr i64, ptr %t$28, i64 1
@@ -21542,8 +21506,6 @@ entry:
   %t$3 = trunc i128 %t$3$st to i64
   %t$3$hi = lshr i128 %t$3$st, 64
   %t$4 = trunc i128 %t$3$hi to i64
-  %t$28$2 = getelementptr i64, ptr %t$28, i64 2
-  store i64 %t$4, ptr %t$28$2
   %t$37 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_5
 arm_0_5:
@@ -21709,9 +21671,9 @@ join_6:
 
 define i64 @examples.http_web_server.handle_update(i64 %p$store, i64 %p$req) {
 entry:
-  %t$40 = alloca [4 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$40, i8 0, i64 32, i1 false)
-  %t$41 = call i64 @sprout_gc_push_scan_root(ptr %t$40, i64 32)
+  %t$40 = alloca [3 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$40, i8 0, i64 24, i1 false)
+  %t$41 = call i64 @sprout_gc_push_scan_root(ptr %t$40, i64 24)
   %t$40$0 = getelementptr i64, ptr %t$40, i64 0
   store i64 %p$store, ptr %t$40$0
   %t$40$1 = getelementptr i64, ptr %t$40, i64 1
@@ -21751,8 +21713,6 @@ arm_0_6:
   %t$11 = trunc i128 %t$11$st to i64
   %t$11$hi = lshr i128 %t$11$st, 64
   %t$12 = trunc i128 %t$11$hi to i64
-  %t$40$3 = getelementptr i64, ptr %t$40, i64 3
-  store i64 %t$12, ptr %t$40$3
   %t$55 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_13
 arm_0_13:
@@ -21840,9 +21800,9 @@ join_6:
 
 define i64 @examples.http_web_server.handle_delete(i64 %p$store, i64 %p$req) {
 entry:
-  %t$20 = alloca [2 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$20, i8 0, i64 16, i1 false)
-  %t$21 = call i64 @sprout_gc_push_scan_root(ptr %t$20, i64 16)
+  %t$20 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$20, i8 0, i64 8, i1 false)
+  %t$21 = call i64 @sprout_gc_push_scan_root(ptr %t$20, i64 8)
   %t$20$0 = getelementptr i64, ptr %t$20, i64 0
   store i64 %p$store, ptr %t$20$0
   %t$0 = getelementptr inbounds { i64, [3 x i8] }, ptr @.str.463, i64 0, i32 1, i64 0
@@ -21862,8 +21822,6 @@ entry:
   %t$3 = trunc i128 %t$3$st to i64
   %t$3$hi = lshr i128 %t$3$st, 64
   %t$4 = trunc i128 %t$3$hi to i64
-  %t$20$1 = getelementptr i64, ptr %t$20, i64 1
-  store i64 %t$4, ptr %t$20$1
   %t$29 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_5
 arm_0_5:
@@ -24163,11 +24121,7 @@ else_4:
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = alloca i64
-  store i64 %t$15, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$16 = call i64 @positive_from_neg_magnitude_argw(i64 %t$14, i64 %t$15)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = call i64 @sprout_tag(i64 %t$16)
   %t$18 = add i64 0, 0
   %t$19 = icmp eq i64 %t$17, %t$18
@@ -25453,9 +25407,9 @@ entry:
 
 define i128 @stdlib.http_server.request_head_worker(i64 %p$raw, i64 %p$start, i64 %p$body_start) {
 entry:
-  %t$73 = alloca [6 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$73, i8 0, i64 48, i1 false)
-  %t$74 = call i64 @sprout_gc_push_scan_root(ptr %t$73, i64 48)
+  %t$73 = alloca [5 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$73, i8 0, i64 40, i1 false)
+  %t$74 = call i64 @sprout_gc_push_scan_root(ptr %t$73, i64 40)
   %t$73$0 = getelementptr i64, ptr %t$73, i64 0
   store i64 %p$raw, ptr %t$73$0
   %t$0 = call i64 @stdlib.http_server.crlf()
@@ -25466,8 +25420,6 @@ entry:
   %t$1 = trunc i128 %t$1$st to i64
   %t$1$hi = lshr i128 %t$1$st, 64
   %t$2 = trunc i128 %t$1$hi to i64
-  %t$73$1 = getelementptr i64, ptr %t$73, i64 1
-  store i64 %t$2, ptr %t$73$1
   %t$77 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -25507,8 +25459,8 @@ body_1_3:
   %t$14 = trunc i128 %t$14$st to i64
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
-  %t$73$2 = getelementptr i64, ptr %t$73, i64 2
-  store i64 %t$15, ptr %t$73$2
+  %t$73$1 = getelementptr i64, ptr %t$73, i64 1
+  store i64 %t$15, ptr %t$73$1
   %t$86 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$16 = add i64 0, 8
   %t$17 = icmp eq i64 %t$14, %t$16
@@ -25550,8 +25502,8 @@ ovfok_25:
   %t$29 = trunc i128 %t$29$st to i64
   %t$29$hi = lshr i128 %t$29$st, 64
   %t$30 = trunc i128 %t$29$hi to i64
-  %t$73$3 = getelementptr i64, ptr %t$73, i64 3
-  store i64 %t$30, ptr %t$73$3
+  %t$73$2 = getelementptr i64, ptr %t$73, i64 2
+  store i64 %t$30, ptr %t$73$2
   %t$89 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$31 = add i64 0, 8
   %t$32 = icmp eq i64 %t$29, %t$31
@@ -25584,8 +25536,8 @@ do_cont_31:
   %t$39 = trunc i128 %t$39$st to i64
   %t$39$hi = lshr i128 %t$39$st, 64
   %t$40 = trunc i128 %t$39$hi to i64
-  %t$73$4 = getelementptr i64, ptr %t$73, i64 4
-  store i64 %t$40, ptr %t$73$4
+  %t$73$3 = getelementptr i64, ptr %t$73, i64 3
+  store i64 %t$40, ptr %t$73$3
   %t$97 = call i64 @sprout_gc_pop_roots(i64 2)
   %t$41 = add i64 0, 8
   %t$42 = icmp eq i64 %t$39, %t$41
@@ -25601,8 +25553,8 @@ do_cont_41:
   %t$45 = trunc i128 %t$45$st to i64
   %t$45$hi = lshr i128 %t$45$st, 64
   %t$46 = trunc i128 %t$45$hi to i64
-  %t$73$5 = getelementptr i64, ptr %t$73, i64 5
-  store i64 %t$46, ptr %t$73$5
+  %t$73$4 = getelementptr i64, ptr %t$73, i64 4
+  store i64 %t$46, ptr %t$73$4
   %t$47 = add i64 0, 8
   %t$48 = icmp eq i64 %t$45, %t$47
   br i1 %t$48, label %do_short_47, label %do_cont_47
@@ -26723,9 +26675,9 @@ join_2:
 
 define i128 @stdlib.log.find_seq_worker(i64 %p$single, i64 %p$b, i64 %p$i) {
 entry:
-  %t$42 = alloca [3 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$42, i8 0, i64 24, i1 false)
-  %t$43 = call i64 @sprout_gc_push_scan_root(ptr %t$42, i64 24)
+  %t$42 = alloca [2 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$42, i8 0, i64 16, i1 false)
+  %t$43 = call i64 @sprout_gc_push_scan_root(ptr %t$42, i64 16)
   %t$42$0 = getelementptr i64, ptr %t$42, i64 0
   store i64 %p$single, ptr %t$42$0
   %t$42$1 = getelementptr i64, ptr %t$42, i64 1
@@ -26742,8 +26694,6 @@ entry:
   %t$1 = trunc i128 %t$1$st to i64
   %t$1$hi = lshr i128 %t$1$st, 64
   %t$2 = trunc i128 %t$1$hi to i64
-  %t$42$2 = getelementptr i64, ptr %t$42, i64 2
-  store i64 %t$2, ptr %t$42$2
   %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_3
 arm_0_3:
@@ -27123,9 +27073,9 @@ wrepack_next_16:
 
 define i128 @stdlib.string.split_once_worker(i64 %p$raw, i64 %p$sep) {
 entry:
-  %t$29 = alloca [4 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$29, i8 0, i64 32, i1 false)
-  %t$30 = call i64 @sprout_gc_push_scan_root(ptr %t$29, i64 32)
+  %t$29 = alloca [3 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$29, i8 0, i64 24, i1 false)
+  %t$30 = call i64 @sprout_gc_push_scan_root(ptr %t$29, i64 24)
   %t$29$0 = getelementptr i64, ptr %t$29, i64 0
   store i64 %p$raw, ptr %t$29$0
   %t$29$1 = getelementptr i64, ptr %t$29, i64 1
@@ -27145,8 +27095,6 @@ else_1:
   %t$3 = trunc i128 %t$3$st to i64
   %t$3$hi = lshr i128 %t$3$st, 64
   %t$4 = trunc i128 %t$3$hi to i64
-  %t$29$2 = getelementptr i64, ptr %t$29, i64 2
-  store i64 %t$4, ptr %t$29$2
   br label %arm_0_5
 arm_0_5:
   %t$7 = add i64 0, 0
@@ -27161,8 +27109,8 @@ arm_1_5:
   br i1 %t$11, label %body_1_5, label %arm_2_5
 body_1_5:
   %t$12 = call i64 @stdlib.string.take(i64 %p$raw, i64 %t$4)
-  %t$29$3 = getelementptr i64, ptr %t$29, i64 3
-  store i64 %t$12, ptr %t$29$3
+  %t$29$2 = getelementptr i64, ptr %t$29, i64 2
+  store i64 %t$12, ptr %t$29$2
   %t$13 = call i64 @stdlib.string.length(i64 %p$sep)
   %t$14$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$4, i64 %t$13)
   %t$14 = extractvalue { i64, i1 } %t$14$agg, 0
@@ -28764,33 +28712,29 @@ arm_1_0:
   %t$5 = icmp eq i64 %p$m$tag, %t$4
   br i1 %t$5, label %body_1_0, label %arm_2_0
 body_1_0:
-  %t$10 = alloca i64
-  store i64 %p$m$val, ptr %t$10
-  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$6 = call i64 @sprout_alloc_tuple_blob(i64 16)
   %t$6$ptr = inttoptr i64 %t$6 to ptr
   %t$6$s0 = getelementptr i64, ptr %t$6$ptr, i64 0
   store i64 %p$m$val, ptr %t$6$s0
   %t$6$s1 = getelementptr i64, ptr %t$6$ptr, i64 1
   store i64 %p$kind, ptr %t$6$s1
-  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$13 = alloca i64
-  store i64 %t$6, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
+  %t$10 = alloca i64
+  store i64 %t$6, ptr %t$10
+  %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
   %t$7 = call i64 @sprout_alloc_obj(i64 6, i64 2)
   %t$7$ptr = inttoptr i64 %t$7 to ptr
   %t$7$f0 = getelementptr i64, ptr %t$7$ptr, i64 0
   store i64 %t$6, ptr %t$7$f0
   %t$7$f1 = getelementptr i64, ptr %t$7$ptr, i64 1
   store i64 %p$tail, ptr %t$7$f1
-  %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_0
 arm_2_0:
   call void @sprout_abort_match()
   unreachable
 join_0:
   %t$1 = phi i64 [%p$tail, %body_0_0], [%t$7, %body_1_0]
-  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$13 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 

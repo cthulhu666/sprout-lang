@@ -661,11 +661,7 @@ else_4:
   %t$13$hi = lshr i128 %t$13$st, 64
   %t$14 = trunc i128 %t$13$hi to i64
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23 = alloca i64
-  store i64 %t$14, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$15 = call i64 @positive_from_neg_magnitude_argw(i64 %t$13, i64 %t$14)
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$9, %then_4], [%t$15, %else_4]
@@ -872,25 +868,21 @@ arm_0_14:
   %t$17 = icmp eq i64 %t$12, %t$16
   br i1 %t$17, label %body_0_14, label %arm_1_14
 body_0_14:
-  %t$37 = alloca i64
-  store i64 %t$13, ptr %t$37
-  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
   %t$18$st = call i128 @examples.result_demo.compute_worker(i64 %t$13)
   %t$18 = trunc i128 %t$18$st to i64
   %t$18$hi = lshr i128 %t$18$st, 64
   %t$19 = trunc i128 %t$18$hi to i64
-  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %arm_0_20
 arm_0_20:
   %t$22 = add i64 0, 7
   %t$23 = icmp eq i64 %t$18, %t$22
   br i1 %t$23, label %body_0_20, label %arm_1_20
 body_0_20:
-  %t$40 = alloca i64
-  store i64 %t$19, ptr %t$40
-  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
+  %t$37 = alloca i64
+  store i64 %t$19, ptr %t$37
+  %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)
   %t$24 = call i64 @print$spec_Int(i64 %t$19)
-  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$39 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_20
 arm_1_20:
   %t$25 = add i64 0, 8
@@ -908,11 +900,11 @@ join_20:
 arm_1_14:
   %t$28 = getelementptr inbounds { i64, [15 x i8] }, ptr @.str.25, i64 0, i32 1, i64 0
   %t$29 = ptrtoint ptr %t$28 to i64
-  %t$43 = alloca i64
-  store i64 %t$29, ptr %t$43
-  %t$44 = call i64 @sprout_gc_push_i64_root(ptr %t$43)
+  %t$40 = alloca i64
+  store i64 %t$29, ptr %t$40
+  %t$41 = call i64 @sprout_gc_push_i64_root(ptr %t$40)
   %t$30 = call i64 @__tc_Semigroup_String_append(i64 %t$29, i64 %t$11)
-  %t$45 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$42 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$31 = call i64 @print$spec_String(i64 %t$30)
   br label %join_14
 arm_2_14:
@@ -931,7 +923,7 @@ arm_2_3:
   unreachable
 join_3:
   %t$4 = phi i64 [%t$15, %join_14], [%t$34, %arm_1_3]
-  %t$46 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$43 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
 }
 
@@ -1276,11 +1268,7 @@ else_4:
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = alloca i64
-  store i64 %t$15, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$16 = call i64 @positive_from_neg_magnitude_argw(i64 %t$14, i64 %t$15)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = call i64 @sprout_tag(i64 %t$16)
   %t$18 = add i64 0, 0
   %t$19 = icmp eq i64 %t$17, %t$18

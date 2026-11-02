@@ -1451,17 +1451,21 @@ fn prelude_ctor_tag(name: String, ctors: Dict sprout_ir.CtorInfo) -> Int =
 # The unbox target (`@f_worker` for a top-level fn, `@f_unboxed` for a
 # Maybe/Result C extern) a `pat <- f(..)` do-bind routes to, or Nothing (boxed).
 # Local, like translate_match's router — the worker is guaranteed to exist because
-# scan_workers scans do-binds (collect_wc_do_bind_callee).
+# scan_workers scans do-binds (collect_wc_do_bind_callee). Also returns the call's arguments and
+# the payload kind.
 fn do_bind_unbox_target(e: typed_ast.TypedExpr, params: List String, captures: Dict String,
                         penv: ProgEnv) ->
-    Maybe String =
-  let typed_ast.TCall(typed_ast.TVar name _ _) _ _ _ = e else Nothing
+    Maybe(String, List typed_ast.TypedExpr, sprout_ir.IRType) =
+  let typed_ast.TCall(typed_ast.TVar name _ _) args call_ty _ = e else Nothing
+      kind = unboxed_payload_kind(call_ty, penv)
   in
     match unboxed_maybe_extern_name(name) with
-    | Just ufn -> if callee_name_shadowed(name, params, captures, penv) then Nothing else Just(ufn)
+    | Just ufn ->
+        if callee_name_shadowed(name, params, captures, penv) then Nothing
+        else Just((ufn, args, kind))
     | Nothing ->
         if worker_callee_routable(name, params, captures, penv)
-        then Just(name ++ "_worker") else Nothing
+        then Just((name ++ "_worker", args, kind)) else Nothing
 
 # Lower a wrapper-strip `pat <- e`: `e` yields Maybe (MaybeBind) or Result
 # (ResultBind), `pat` binds the payload, and Nothing / Err short-circuits as
@@ -1481,12 +1485,9 @@ fn translate_do_bind_short(kind: ShortCircuit, pat: ast.Pattern, e: typed_ast.Ty
                            captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   match do_bind_unbox_target(e, params, captures, env.prog) with
-  | Just target ->
-      match e with
-      | typed_ast.TCall _ eargs _ _ ->
-          translate_do_bind_unboxed(kind, pat, target, eargs, rest, params, env, idx,
-                                    cur_label, cur_ops, captures)
-      | _ -> Err("ast_to_ir: do-bind unbox target on non-call (internal error)")
+  | Just (target, eargs, payload_kind) ->
+      translate_do_bind_unboxed(kind, pat, target, eargs, payload_kind,
+                                rest, params, env, idx, cur_label, cur_ops, captures)
   | Nothing ->
       do
         (eblocks, elbl, eops, ename, eidx) <-
@@ -1520,14 +1521,15 @@ fn finish_do_bind_boxed(kind: ShortCircuit, pat: ast.Pattern, rest: List typed_a
 # propagate, so the short branch rebuilds Nothing, or Err(val). val is 0 on
 # the Nothing path, never dereferenced.
 fn translate_do_bind_unboxed(kind: ShortCircuit, pat: ast.Pattern, target: String,
-                             eargs: List typed_ast.TypedExpr, rest: List typed_ast.TypedDoStep,
+                             eargs: List typed_ast.TypedExpr, payload_kind: sprout_ir.IRType,
+                             rest: List typed_ast.TypedDoStep,
                              params: List String, env: TxEnv,
                              idx: Int, cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
                              captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
     (ablocks, albl, call_ops, tag_ssa, val_ssa, eidx) <-
-      emit_unboxed_call(target, eargs, params, env, idx, cur_label, cur_ops, captures)
+      emit_unboxed_call(target, eargs, payload_kind, params, env, idx, cur_label, cur_ops, captures)
     let tag = prelude_ctor_tag(short_ctor(kind), env.prog.ctors)
     finish_do_short_circuit(pat, rest, ablocks,
                             short_circuit_test(albl, call_ops, Nil, tag_ssa, tag, eidx, eidx),
@@ -2644,13 +2646,27 @@ fn tier2_worker_shape(name: String, arms: List typed_ast.TypedMatchBranch,
 fn maybe_unboxable(ty: types.Type, penv: ProgEnv) -> Bool =
   is_maybe_type(ty) && dict_member("Just", penv.ctors) && dict_member("Nothing", penv.ctors)
 
+# The kind of an unboxed producer's payload SSA: a scalar only for `Maybe T` with `T` a scalar and
+# `Just`'s field the type parameter (field_kinds "_"), so a `Maybe` that holds something else says
+# nothing about it. `Result` stays unknown: the do-bind short path rebuilds `Err(val)` with an
+# allocation, so an `Err String` payload must stay rooted. Every other type is unknown too.
+fn unboxed_payload_kind(t: types.Type, penv: ProgEnv) -> sprout_ir.IRType =
+  let types.TApp _ payload = t else sprout_ir.IRTUnknown
+      Just just_info = dict_get("Just", penv.ctors) else sprout_ir.IRTUnknown
+  in
+    if maybe_unboxable(t, penv) && just_info.field_kinds == "_"
+    then ret_irtype(payload)
+    else sprout_ir.IRTUnknown
+
+# `(callee symbol, args, payload kind)` of a call a match unboxes, or Nothing.
 fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
                               arms: List typed_ast.TypedMatchBranch,
                               params: List String, captures: Dict String,
                               penv: ProgEnv) ->
-    Maybe(String, List typed_ast.TypedExpr) =
+    Maybe(String, List typed_ast.TypedExpr, sprout_ir.IRType) =
   let typed_ast.TCall callee args call_ty _ = scrut else Nothing
       typed_ast.TVar name _ _ = callee else Nothing
+      kind = unboxed_payload_kind(call_ty, penv)
   in
     # Test the O(1) extern-name allowlist first — the most selective check —
     # so the common (non-extern) match skips the O(arms) arm walk below.
@@ -2659,7 +2675,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
         # Tier-1: direct Maybe-returning C extern with a runtime `_unboxed`.
         if maybe_unboxable(call_ty, penv) && all_arms_simple_maybe(arms)
            && !callee_name_shadowed(name, params, captures, penv)
-        then Just((ufn, args))
+        then Just((ufn, args, kind))
         else Nothing
     | Nothing ->
         # Tier-2: direct call to a top-level Sprout fn returning a width-2
@@ -2672,7 +2688,7 @@ fn unboxed_maybe_match_target(scrut: typed_ast.TypedExpr,
         # identical here while its worker cannot know the representation.
         if worker_callee_routable(name, params, captures, penv)
            && tier2_worker_shape(name, arms, penv.ctors)
-        then Just((name ++ "_worker", args))
+        then Just((name ++ "_worker", args, kind))
         else Nothing
 
 # Bind the `Just x` payload variable to the extracted val SSA (no IRGetField).
@@ -2777,7 +2793,7 @@ fn translate_unboxed_maybe_arms(arms: List typed_ast.TypedMatchBranch,
 # mirror translate_match_dispatch (base = dispatch namespace; arms at base+2; phi
 # at base+1; join at base).
 fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExpr,
-                                 arms: List typed_ast.TypedMatchBranch,
+                                 kind: sprout_ir.IRType, arms: List typed_ast.TypedMatchBranch,
                                  match_ty: types.Type, params: List String,
                                  env: TxEnv, idx: Int,
                                  cur_label: String, cur_ops: ListBuilder sprout_ir.IROp,
@@ -2785,14 +2801,14 @@ fn translate_unboxed_maybe_match(ufn: String, call_args: List typed_ast.TypedExp
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) !{IO} =
   do
     (arg_blocks, arg_cur_lbl, call_ops, tag_ssa, val_ssa, base) <-
-      emit_unboxed_call(ufn, call_args, params, env, idx, cur_label, cur_ops, captures)
+      emit_unboxed_call(ufn, call_args, kind, params, env, idx, cur_label, cur_ops, captures)
     translate_unboxed_maybe_dispatch(tag_ssa, val_ssa, base, arg_blocks, arg_cur_lbl, call_ops,
                                      arms, match_ty, params, env, captures)
 
-# Translate `call_args`, then call `ufn` unboxed into a fresh (tag, payload) pair. Returns
-# (blocks, open label, open ops, tag, payload, next idx).
-fn emit_unboxed_call(ufn: String, call_args: List typed_ast.TypedExpr, params: List String,
-                     env: TxEnv, idx: Int, cur_label: String,
+# Translate `call_args`, then call `ufn` unboxed into a fresh (tag, payload) pair whose payload
+# has kind `kind`. Returns (blocks, open label, open ops, tag, payload, next idx).
+fn emit_unboxed_call(ufn: String, call_args: List typed_ast.TypedExpr, kind: sprout_ir.IRType,
+                     params: List String, env: TxEnv, idx: Int, cur_label: String,
                      cur_ops: ListBuilder sprout_ir.IROp, captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, String, Int) !{IO} =
   do
@@ -2801,8 +2817,7 @@ fn emit_unboxed_call(ufn: String, call_args: List typed_ast.TypedExpr, params: L
     let tag_ssa = fresh_name(idx1)
     let val_ssa = fresh_name(idx1 + 1)
     Ok((blocks, lbl,
-        list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown, ufn,
-                                                  arg_names), ops),
+        list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, kind, ufn, arg_names), ops),
         tag_ssa, val_ssa, idx1 + 2))
 
 # Seal the scrutinee block `scrut_lbl` (it holds the (tag, payload) in `tag_ssa`, `val_ssa`), dispatch
@@ -2884,7 +2899,8 @@ type ArgwProducer =
   | WorkerProducer
 
 # `g` fills parameter `k` of the call `f(..)`, and `g(..)` can arrive as (tag, payload).
-type ArgwSite = (k: Int, producer: String, kind: ArgwProducer, pargs: List typed_ast.TypedExpr)
+type ArgwSite = (k: Int, producer: String, kind: ArgwProducer, pargs: List typed_ast.TypedExpr,
+                 payload_kind: sprout_ir.IRType)
 
 # Shape only, shadow-free: collection asks this, and the router adds the shadow and group
 # rules (the split worker_callee_routable documents), so a routed call names only emitted symbols.
@@ -2897,7 +2913,8 @@ fn argw_shape(fname: String, args: List typed_ast.TypedExpr, penv: ProgEnv) -> M
       Just kind = argw_producer(g, gty, penv) else Nothing
   in
     if info.arity == list_length(args) && !set_member(fname ++ "_argw", penv.top_level)
-    then Just(ArgwSite(k = k, producer = g, kind = kind, pargs = pargs))
+    then Just(ArgwSite(k = k, producer = g, kind = kind, pargs = pargs,
+                       payload_kind = unboxed_payload_kind(gty, penv)))
     else Nothing
 
 # A Tier-1 `_unboxed` extern, or a top-level fn whose result worker can be lowered and named.
@@ -2950,7 +2967,7 @@ fn translate_argw_call(fname: String, site: ArgwSite, args: List typed_ast.Typed
           translate_args(site.pargs, params, env, idx1, l1, o1, b1, Nil, captures)
         let tag_ssa = fresh_name(idx2)
         let val_ssa = fresh_name(idx2 + 1)
-        let unboxed_call = sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, sprout_ir.IRTUnknown,
+        let unboxed_call = sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, site.payload_kind,
                                                     argw_producer_symbol(site), producer_names)
         (b3, l3, o3, after_names, idx3) <-
           translate_args(after, params, env, idx2 + 2, l2, list_builder_add(unboxed_call, o2), b2, Nil, captures)
@@ -3319,11 +3336,9 @@ fn translate_match(scrut: typed_ast.TypedExpr, arms: List typed_ast.TypedMatchBr
   # Tier-1 CPR peephole: a `match` over a Maybe-returning C extern with an
   # `_unboxed` variant + simple arms skips the boxed scrutinee entirely.
   match unboxed_maybe_match_target(scrut, arms, params, captures, env.prog) with
-  | Just tgt ->
-      match tgt with
-      | (ufn, call_args) ->
-          translate_unboxed_maybe_match(ufn, call_args, arms, match_ty, params, env, idx,
-                                        cur_label, cur_ops, captures)
+  | Just (ufn, call_args, kind) ->
+      translate_unboxed_maybe_match(ufn, call_args, kind, arms, match_ty, params, env, idx,
+                                    cur_label, cur_ops, captures)
   | Nothing ->
       # Tuple-CPR peephole: `match f(args) with (a,b) ->` over a scalar-2-tuple-returning top-level
       # fn routes to `@f_worker` returning i128 — the tuple never touches the heap.
@@ -3404,10 +3419,10 @@ fn translate_split_elem(item: typed_ast.TypedExpr, column: List typed_ast.TypedM
                         cur_ops: ListBuilder sprout_ir.IROp, captures: Dict String) ->
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, SplitElem, Int) !{IO} =
   match unboxed_maybe_match_target(item, column, params, captures, env.prog) with
-  | Just (ufn, call_args) ->
+  | Just (ufn, call_args, kind) ->
       do
         (blocks, lbl, ops, tag_ssa, val_ssa, idx1) <-
-          emit_unboxed_call(ufn, call_args, params, env, idx, cur_label, cur_ops, captures)
+          emit_unboxed_call(ufn, call_args, kind, params, env, idx, cur_label, cur_ops, captures)
         Ok((blocks, lbl, ops, UnboxedElem(tag_ssa, val_ssa), idx1))
   | Nothing ->
       do
@@ -7054,7 +7069,7 @@ fn emit_worker_for(name: String, plan: WorkerPlan, penv: ProgEnv) ->
 fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.TypedExpr,
                 penv: ProgEnv) ->
     Result String (sprout_ir.IRFunction, Int, List sprout_ir.IRFunction) !{IO} =
-  let typed_ast.TMatch _ arms match_ty _ = body
+  let typed_ast.TMatch scrut arms match_ty _ = body
       else Err("ast_to_ir: argument worker for '" ++ name ++ "' needs a match body (internal error)")
       (before, [matched | after]) = list.split_at(k, params)
       else Err("ast_to_ir: argument worker for '" ++ name ++ "' has no parameter " ++ int_to_string(k)
@@ -7064,6 +7079,8 @@ fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.Ty
       let others = list_append(before, after)
       let tag_name = ast.param_name(matched) ++ "$tag"
       let val_name = ast.param_name(matched) ++ "$val"
+      # The matched parameter's type is the scrutinee's, so a `Maybe Int` parameter has a scalar payload.
+      let val_kind = unboxed_payload_kind(typed_ast.typed_expr_type(scrut), penv)
       lifted_ref <- ref_new(Nil)
       env <- new_tx_env(penv, lifted_ref, owned_param_ssas(others), group_of(name, penv))
       (blocks, join_lbl, join_ops, result, next_idx) <-
@@ -7073,7 +7090,7 @@ fn emit_argw_fn(name: String, k: Int, params: List ast.Param, body: typed_ast.Ty
       lifted <- ref_read(lifted_ref)
       Ok((sprout_ir.IRFunction(name ++ "_argw",
             list_append(ast_params_to_irtype_pairs(before),
-              Cons((tag_name, ctor_tag_kind), Cons((val_name, sprout_ir.IRTUnknown),
+              Cons((tag_name, ctor_tag_kind), Cons((val_name, val_kind),
                 ast_params_to_irtype_pairs(after)))),
             llvm_ret_type(match_ty),
             list_append(blocks,

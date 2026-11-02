@@ -469,11 +469,7 @@ entry:
   %t$5 = trunc i128 %t$5$st to i64
   %t$5$hi = lshr i128 %t$5$st, 64
   %t$6 = trunc i128 %t$5$hi to i64
-  %t$18 = alloca i64
-  store i64 %t$6, ptr %t$18
-  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$7 = call i64 @examples.do_notation_demo.render_maybe_argw(i64 %t$5, i64 %t$6)
-  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$8 = call i64 @print$spec_String(i64 %t$7)
   %t$9 = add i64 0, 4
   %t$10 = add i64 0, 1
@@ -491,11 +487,11 @@ ovfok_11:
   %t$14 = trunc i128 %t$14$st to i64
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
-  %t$21 = alloca i64
-  store i64 %t$15, ptr %t$21
-  %t$22 = call i64 @sprout_gc_push_i64_root(ptr %t$21)
+  %t$18 = alloca i64
+  store i64 %t$15, ptr %t$18
+  %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$16 = call i64 @examples.do_notation_demo.render_result_argw(i64 %t$14, i64 %t$15)
-  %t$23 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$20 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = call i64 @print$spec_String(i64 %t$16)
   ret i64 %t$17
 }
@@ -786,17 +782,14 @@ body_0_0:
   %t$4 = getelementptr inbounds { i64, [7 x i8] }, ptr @.str.22, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$12 = alloca i64
-  store i64 %p$value$val, ptr %t$12
+  store i64 %t$5, ptr %t$12
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
-  %t$14 = alloca i64
-  store i64 %t$5, ptr %t$14
-  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$6 = call i64 @__tc_ToString_Int_to_string(i64 %p$value$val)
-  %t$16 = alloca i64
-  store i64 %t$6, ptr %t$16
-  %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
+  %t$14 = alloca i64
+  store i64 %t$6, ptr %t$14
+  %t$15 = call i64 @sprout_gc_push_i64_root(ptr %t$14)
   %t$7 = call i64 @__tc_Semigroup_String_append(i64 %t$5, i64 %t$6)
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 3)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 2)
   br label %join_0
 arm_1_0:
   %t$8 = add i64 0, 0

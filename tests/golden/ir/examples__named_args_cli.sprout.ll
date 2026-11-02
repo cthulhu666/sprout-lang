@@ -1017,11 +1017,7 @@ else_4:
   %t$13$hi = lshr i128 %t$13$st, 64
   %t$14 = trunc i128 %t$13$hi to i64
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23 = alloca i64
-  store i64 %t$14, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$15 = call i64 @positive_from_neg_magnitude_argw(i64 %t$13, i64 %t$14)
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$9, %then_4], [%t$15, %else_4]
@@ -1232,9 +1228,9 @@ join_1:
 
 define i64 @stdlib.string.split_once(i64 %p$raw, i64 %p$sep) {
 entry:
-  %t$22 = alloca [4 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$22, i8 0, i64 32, i1 false)
-  %t$23 = call i64 @sprout_gc_push_scan_root(ptr %t$22, i64 32)
+  %t$22 = alloca [3 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$22, i8 0, i64 24, i1 false)
+  %t$23 = call i64 @sprout_gc_push_scan_root(ptr %t$22, i64 24)
   %t$22$0 = getelementptr i64, ptr %t$22, i64 0
   store i64 %p$raw, ptr %t$22$0
   %t$22$1 = getelementptr i64, ptr %t$22, i64 1
@@ -1250,8 +1246,6 @@ else_1:
   %t$4 = trunc i128 %t$4$st to i64
   %t$4$hi = lshr i128 %t$4$st, 64
   %t$5 = trunc i128 %t$4$hi to i64
-  %t$22$2 = getelementptr i64, ptr %t$22, i64 2
-  store i64 %t$5, ptr %t$22$2
   br label %arm_0_6
 arm_0_6:
   %t$8 = add i64 0, 0
@@ -1266,8 +1260,8 @@ arm_1_6:
   br i1 %t$12, label %body_1_6, label %arm_2_6
 body_1_6:
   %t$13 = call i64 @stdlib.string.take(i64 %p$raw, i64 %t$5)
-  %t$22$3 = getelementptr i64, ptr %t$22, i64 3
-  store i64 %t$13, ptr %t$22$3
+  %t$22$2 = getelementptr i64, ptr %t$22, i64 2
+  store i64 %t$13, ptr %t$22$2
   %t$14 = call i64 @stdlib.string.length(i64 %p$sep)
   %t$15$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %t$5, i64 %t$14)
   %t$15 = extractvalue { i64, i1 } %t$15$agg, 0
@@ -2441,11 +2435,7 @@ else_4:
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = alloca i64
-  store i64 %t$15, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$16 = call i64 @positive_from_neg_magnitude_argw(i64 %t$14, i64 %t$15)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = call i64 @sprout_tag(i64 %t$16)
   %t$18 = add i64 0, 0
   %t$19 = icmp eq i64 %t$17, %t$18

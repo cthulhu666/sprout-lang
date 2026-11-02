@@ -580,19 +580,16 @@ entry:
   %t$0$hi = lshr i128 %t$0$st, 64
   %t$1 = trunc i128 %t$0$hi to i64
   %t$2 = add i64 0, 0
-  %t$6 = alloca i64
-  store i64 %t$1, ptr %t$6
-  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$3 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$3$ptr = inttoptr i64 %t$3 to ptr
   %t$3$f0 = getelementptr i64, ptr %t$3$ptr, i64 0
   store i64 %t$2, ptr %t$3$f0
   %t$4 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Int_eq_0, i64 8) to i64
-  %t$8 = alloca i64
-  store i64 %t$3, ptr %t$8
-  %t$9 = call i64 @sprout_gc_push_i64_root(ptr %t$8)
+  %t$6 = alloca i64
+  store i64 %t$3, ptr %t$6
+  %t$7 = call i64 @sprout_gc_push_i64_root(ptr %t$6)
   %t$5 = call i64 @__tc_Eq_Maybe_a_eq_argw(i64 %t$0, i64 %t$1, i64 %t$3, i64 %t$4)
-  %t$10 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$8 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$5
 }
 

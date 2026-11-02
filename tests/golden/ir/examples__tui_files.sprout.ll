@@ -2510,11 +2510,7 @@ else_4:
   %t$13$hi = lshr i128 %t$13$st, 64
   %t$14 = trunc i128 %t$13$hi to i64
   %t$22 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$23 = alloca i64
-  store i64 %t$14, ptr %t$23
-  %t$24 = call i64 @sprout_gc_push_i64_root(ptr %t$23)
   %t$15 = call i64 @positive_from_neg_magnitude_argw(i64 %t$13, i64 %t$14)
-  %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %join_4
 join_4:
   %t$5 = phi i64 [%t$9, %then_4], [%t$15, %else_4]
@@ -7423,11 +7419,8 @@ entry:
   %t$2$hi = lshr i128 %t$2$st, 64
   %t$3 = trunc i128 %t$2$hi to i64
   %t$11 = call i64 @sprout_gc_pop_roots(i64 2)
-  %t$12 = alloca i64
-  store i64 %t$3, ptr %t$12
-  %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$4 = call i64 @stdlib.tui.keys.paste_at_argw(i64 %p$b, i64 %p$start, i64 %t$2, i64 %t$3)
-  %t$14 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$12 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$4
 }
 
@@ -32887,11 +32880,7 @@ else_4:
   %t$14$hi = lshr i128 %t$14$st, 64
   %t$15 = trunc i128 %t$14$hi to i64
   %t$31 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$32 = alloca i64
-  store i64 %t$15, ptr %t$32
-  %t$33 = call i64 @sprout_gc_push_i64_root(ptr %t$32)
   %t$16 = call i64 @positive_from_neg_magnitude_argw(i64 %t$14, i64 %t$15)
-  %t$34 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$17 = call i64 @sprout_tag(i64 %t$16)
   %t$18 = add i64 0, 0
   %t$19 = icmp eq i64 %t$17, %t$18
@@ -34705,11 +34694,9 @@ join_0:
 
 define i64 @stdlib.tui.keys.paste_at_argw(i64 %p$b, i64 %p$start, i64 %p$found$tag, i64 %p$found$val) {
 entry:
-  %t$18 = alloca [2 x i64]
-  call void @llvm.memset.p0.i64(ptr %t$18, i8 0, i64 16, i1 false)
-  %t$19 = call i64 @sprout_gc_push_scan_root(ptr %t$18, i64 16)
-  %t$18$0 = getelementptr i64, ptr %t$18, i64 0
-  store i64 %p$found$val, ptr %t$18$0
+  %t$18 = alloca [1 x i64]
+  call void @llvm.memset.p0.i64(ptr %t$18, i8 0, i64 8, i1 false)
+  %t$19 = call i64 @sprout_gc_push_scan_root(ptr %t$18, i64 8)
   br label %arm_0_0
 arm_0_0:
   %t$2 = add i64 0, 0
@@ -34735,8 +34722,8 @@ body_1_0:
   %t$8$ptr = inttoptr i64 %t$8 to ptr
   %t$8$f0 = getelementptr i64, ptr %t$8$ptr, i64 0
   store i64 %t$7, ptr %t$8$f0
-  %t$18$1 = getelementptr i64, ptr %t$18, i64 1
-  store i64 %t$8, ptr %t$18$1
+  %t$18$0 = getelementptr i64, ptr %t$18, i64 0
+  store i64 %t$8, ptr %t$18$0
   %t$25 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$9$agg = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %p$start, i64 %p$found$val)
   %t$9 = extractvalue { i64, i1 } %t$9$agg, 0

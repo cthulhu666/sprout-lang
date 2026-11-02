@@ -1193,19 +1193,16 @@ entry:
   %t$1$hi = lshr i128 %t$1$st, 64
   %t$2 = trunc i128 %t$1$hi to i64
   %t$3 = add i64 0, 0
-  %t$13 = alloca i64
-  store i64 %t$2, ptr %t$13
-  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$4 = call i64 @sprout_alloc_obj(i64 1, i64 1)
   %t$4$ptr = inttoptr i64 %t$4 to ptr
   %t$4$f0 = getelementptr i64, ptr %t$4$ptr, i64 0
   store i64 %t$3, ptr %t$4$f0
   %t$5 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta___tc_Eq_Bool_eq_3, i64 8) to i64
-  %t$15 = alloca i64
-  store i64 %t$4, ptr %t$15
-  %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
+  %t$13 = alloca i64
+  store i64 %t$4, ptr %t$13
+  %t$14 = call i64 @sprout_gc_push_i64_root(ptr %t$13)
   %t$6 = call i64 @__tc_Eq_Maybe_a_eq_argw(i64 %t$1, i64 %t$2, i64 %t$4, i64 %t$5)
-  %t$17 = call i64 @sprout_gc_pop_roots(i64 2)
+  %t$15 = call i64 @sprout_gc_pop_roots(i64 1)
   %t$10 = trunc i64 %t$6 to i1
   br i1 %t$10, label %then_7, label %else_7
 then_7:
@@ -1220,7 +1217,7 @@ else_7:
   br label %join_7
 join_7:
   %t$8 = phi i64 [%t$9, %then_7], [%p$__cmp_acc33_15_0, %else_7]
-  %t$18 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$16 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$8
 }
 
