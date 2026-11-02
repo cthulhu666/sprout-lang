@@ -1,0 +1,21 @@
+module main
+import stdlib.mutable as mutable
+
+# `put_next` does checked arithmetic on its index. Inlining it would run `i + 1` before the
+# caller's later argument `logged(5)`, so the overflow trap would fire first and "value computed"
+# would never print. The pass keeps the call unless every argument is atomic.
+
+extern fn vector_mutset(v: Vector a, i: Int, x: a) -> Unit !{IO}
+
+fn put_next(v: Vector a, i: Int, x: a) -> Unit !{IO} =
+  vector_mutset(v, i + 1, x)
+
+fn logged(x: Int) -> Int !{IO} =
+  do
+    print("value computed")
+    x
+
+fn main() -> Unit !{IO} =
+  do
+    v <- vec_make_filled(3, 0)
+    put_next(v, 9223372036854775807, logged(5))

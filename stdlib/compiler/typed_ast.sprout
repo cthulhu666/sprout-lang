@@ -323,50 +323,36 @@ export fn map_children_shared(g: TypedExpr -> Maybe TypedExpr, e: TypedExpr) -> 
   | TUnit _ _ -> Nothing
   | TTuple items t p -> fmap(\xs -> TTuple(xs, t, p), share_list(g, items))
   | TIf cond then_e else_e t p ->
-      let c = g(cond)
-          a = g(then_e)
-          b = g(else_e)
-      in if is_just(c) || is_just(a) || is_just(b)
-         then Just(TIf(maybe_with_default(cond, c), maybe_with_default(then_e, a),
-                       maybe_with_default(else_e, b), t, p))
-         else Nothing
+      share3(cond, g(cond), then_e, g(then_e), else_e, g(else_e), \ (c, a, b) -> TIf(c, a, b, t, p))
   | TMatch scrut branches t p ->
-      let s = g(scrut)
-          bs = share_list(share_branch(g, _), branches)
-      in if is_just(s) || is_just(bs)
-         then Just(TMatch(maybe_with_default(scrut, s), maybe_with_default(branches, bs), t, p))
-         else Nothing
+      share2(scrut, g(scrut), branches, share_list(share_branch(g, _), branches),
+             \ (s, bs) -> TMatch(s, bs, t, p))
   | TCall callee args t p ->
-      let f = g(callee)
-          xs = share_list(g, args)
-      in if is_just(f) || is_just(xs)
-         then Just(TCall(maybe_with_default(callee, f), maybe_with_default(args, xs), t, p))
-         else Nothing
+      share2(callee, g(callee), args, share_list(g, args), \ (f, xs) -> TCall(f, xs, t, p))
   | TDict _ _ _ _ -> Nothing
   | TMethodRef _ _ _ _ _ -> Nothing
   | TLambda params body t p -> fmap(\b -> TLambda(params, b, t, p), g(body))
   | TBinary op left right t p ->
-      let l = g(left)
-          r = g(right)
-      in if is_just(l) || is_just(r)
-         then Just(TBinary(op, maybe_with_default(left, l), maybe_with_default(right, r), t, p))
-         else Nothing
+      share2(left, g(left), right, g(right), \ (l, r) -> TBinary(op, l, r, t, p))
   | TUnary op operand t p -> fmap(\x -> TUnary(op, x, t, p), g(operand))
-  | TRange lo hi t p ->
-      let a = g(lo)
-          b = g(hi)
-      in if is_just(a) || is_just(b)
-         then Just(TRange(maybe_with_default(lo, a), maybe_with_default(hi, b), t, p))
-         else Nothing
+  | TRange lo hi t p -> share2(lo, g(lo), hi, g(hi), \ (a, b) -> TRange(a, b, t, p))
   | TDo steps t p -> fmap(\ss -> TDo(ss, t, p), share_list(share_step(g, _), steps))
   | TRecord name fields t p -> fmap(\fs -> TRecord(name, fs, t, p), share_list(share_field(g, _), fields))
   | TGetField base fld t p -> fmap(\b -> TGetField(b, fld, t, p), g(base))
   | TRecordUpdate base fields t p ->
-      let b = g(base)
-          fs = share_list(share_field(g, _), fields)
-      in if is_just(b) || is_just(fs)
-         then Just(TRecordUpdate(maybe_with_default(base, b), maybe_with_default(fields, fs), t, p))
-         else Nothing
+      share2(base, g(base), fields, share_list(share_field(g, _), fields),
+             \ (b, fs) -> TRecordUpdate(b, fs, t, p))
+
+# `build` applied to each part, or its changed replacement; `Nothing` when no part changed.
+fn share2(a: a, ma: Maybe a, b: b, mb: Maybe b, build: a -> b -> r) -> Maybe r =
+  if is_just(ma) || is_just(mb)
+  then Just(build(maybe_with_default(a, ma), maybe_with_default(b, mb)))
+  else Nothing
+
+fn share3(a: a, ma: Maybe a, b: b, mb: Maybe b, c: c, mc: Maybe c, build: a -> b -> c -> r) -> Maybe r =
+  if is_just(ma) || is_just(mb) || is_just(mc)
+  then Just(build(maybe_with_default(a, ma), maybe_with_default(b, mb), maybe_with_default(c, mc)))
+  else Nothing
 
 # Left to right; `Nothing` when `g` left every element alone. Tail recursive.
 export fn share_list(g: a -> Maybe a, xs: List a) -> Maybe (List a) =

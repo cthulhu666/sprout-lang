@@ -372,7 +372,7 @@ The writes are also write-barrier sites for a generational collector, as `vector
 or every live pointer is rooted around each write (landed; `vector_push` and `vector_truncate`
 are listed too: `vector_push` reaches only malloc and realloc, never the collector); the barrier
 sites of gc-generational-v0.md §7, with the `sprout_ap_on_store` call `vector_mutset` makes
-(landed); and B1's `ast_to_ir.recognize_vector_op` with `bce.direct_shape`, so a `LinVec Double`
+(landed); and B1's `ast_to_ir.recognize_vector_op` with `vec_wrappers.direct_shape`, so a `LinVec Double`
 write inlines and loses its bounds check as a `MutVec` one does. The third is out of the first
 landing (§12 step 14), and stays a BACKLOG entry: a `LinVec` write now calls `vector_mutset`
 inside `unsafe_pure`, and `recognize_vector_op` needs a static `Vector Double`, which linvec's
