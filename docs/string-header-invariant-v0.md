@@ -285,7 +285,7 @@ Each step is its own commit and keeps every gate green.
      `SPROUT_GC_STRESS=1`.
    - I/O edge (net and http): `tcp_read_exact`, `tcp_read_some`, `http_err_cstr`,
      `http_ok_response`, `env_get` and `env_get_unboxed`, `argv_get` and `argv_get_unboxed`,
-     `sprout_make_proc_result`; `tests/c_runtime/io_edge_strings.c`.
+     `proc_make_raw`; `tests/c_runtime/io_edge_strings.c`.
    - json and regex: `json_stringify`, the json string-array helpers (the C `json_parse`
      tree-parser was dead and is deleted), `regex_escape`, `regex_replace_all_literal`, `regex_validate`;
      `tests/c_runtime/json_regex_strings.c`.

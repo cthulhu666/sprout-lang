@@ -1,4 +1,4 @@
-# native-only: proc_run_vec has no stage-0 interpreter binding
+# native-only: proc_run_raw has no stage-0 interpreter binding
 #
 # REGRESSION (W2 R2, `proc_run` half). A child process's output must not become a Sprout String.
 #
