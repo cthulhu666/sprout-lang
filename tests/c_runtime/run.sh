@@ -9,6 +9,11 @@ CLANG_EXTRA=()
 if [[ "$(uname)" == "Darwin" ]]; then
   CLANG_EXTRA=(-framework Security -framework CoreFoundation)
 fi
+# Cases that #include runtime/sprout_runtime.c pull in libc headers first, too late for the
+# runtime's own _GNU_SOURCE (accept4, pipe2).
+if [[ "$(uname)" == "Linux" ]]; then
+  CLANG_EXTRA=(-D_GNU_SOURCE)
+fi
 
 # SPROUT_C_RUNTIME_SANITIZE=1 builds every case with ASan+UBSan, runs it with halt_on_error, and
 # turns the "sanitizer build unavailable" fallbacks into failures. `just c-runtime-test-asan`.
