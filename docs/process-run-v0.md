@@ -51,7 +51,11 @@ above, so the runtime builds no ADT but that one.
 4. A detached helper thread (128 KiB stack) polls the child's stdout and stderr, feeds stdin, enforces
    the cap, waits for the child with `waitid(WNOWAIT)` and reaps it. The task parks on the helper's
    completion pipe, so every other green task keeps running.
-5. A timeout, an overflow or a cancel kills the child. The kill runs under a mutex that the helper
+5. A timeout, an overflow or a cancel kills the child. When the poller cannot arm the timer (the
+   Linux backend spends a descriptor on each one), the park reports the deadline as passed without
+   waiting, and the call reports a timeout early and kills the child. The HTTP client does the same;
+   `scheduler_park_on_fd_timeout` documents the rule. A child that is already reaped at the
+   deadline finished in time, and its result is returned. The kill runs under a mutex that the helper
    also takes to set `exited` and reap, so it is never aimed at a pid that was reaped and reused.
 6. `with_timeout` or `scope_cancel` on a parked task runs a park hook: kill, stop the helper, drop the
    task's reference. The completion pipe's read end is the park's unowned fd, which the scheduler

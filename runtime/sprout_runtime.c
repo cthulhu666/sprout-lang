@@ -126,6 +126,14 @@ static FILE* cloexec_fopen(const char* path, const char* mode) {
 }
 /* cloexec-gate: end wrappers */
 
+/* Writes one wake-up byte to a pipe, retrying on EINTR. A failure is ignored: EPIPE means the
+ * reader was force-dropped and closed its end. */
+static void pipe_wake_byte(int fd) {
+  ssize_t w;
+  do { w = write(fd, "1", 1); } while (w < 0 && errno == EINTR);
+  (void)w;
+}
+
 typedef enum {
   SPROUT_ROOT_I64 = 1,
   SPROUT_ROOT_PTR = 2,
@@ -4163,9 +4171,7 @@ static int proc_kill(ProcRequest* r) {
 
 /* Wakes the helper out of its poll so it stops reading. */
 static void proc_signal_stop(ProcRequest* r) {
-  ssize_t w;
-  do { w = write(r->stop_wr, "1", 1); } while (w < 0 && errno == EINTR);
-  (void)w;
+  pipe_wake_byte(r->stop_wr);
 }
 
 /* Keeps at most `cap` bytes of a stream. Returns 1 when the child was killed because the stream
@@ -4258,10 +4264,8 @@ static void* proc_helper_thread(void* arg) {
   proc_close_fd(&r->in_fd);
   proc_close_fd(&r->stop_rd);
   atomic_store_explicit(&r->done, 1, memory_order_release);
-  /* Wake the parked task. EPIPE means it was force-dropped and its read end is closed. */
-  ssize_t w;
-  do { w = write(r->done_wr, "1", 1); } while (w < 0 && errno == EINTR);
-  (void)w;
+  /* Wake the parked task. */
+  pipe_wake_byte(r->done_wr);
   proc_close_fd(&r->done_wr);
   proc_request_decref(r);
   return NULL;
@@ -4413,9 +4417,50 @@ fail:
   _exit(127);
 }
 
-static void proc_close_pair(int p[2]) {
-  proc_close_fd(&p[0]);
-  proc_close_fd(&p[1]);
+/* Every pipe one call creates. proc_close_fd is idempotent, so a teardown may close the lot. */
+typedef struct { int out[2], err[2], in[2], exec[2], done[2], stop[2]; } ProcPipes;
+
+static void proc_pipes_close(ProcPipes* p) {
+  int* all[6] = { p->out, p->err, p->in, p->exec, p->done, p->stop };
+  for (int i = 0; i < 6; i++) { proc_close_fd(&all[i][0]); proc_close_fd(&all[i][1]); }
+}
+
+/* Gives every end the request now owns to the request: the arrays must not close them again. */
+static void proc_pipes_release(ProcPipes* p) {
+  p->out[0] = p->err[0] = p->in[1] = -1;
+  p->done[0] = p->done[1] = p->stop[0] = p->stop[1] = -1;
+}
+
+/* The one exit for a call that fails before the helper owns anything: closes what is still open,
+ * frees the stdin copy, kills and reaps `pid` (if > 0) and returns the not-started record. */
+static long long proc_abort(ProcPipes* p, unsigned char* stdin_copy, pid_t pid, int new_group,
+                            const char* message) {
+  if (pid > 0) {
+    kill(pid, SIGKILL);
+    if (new_group) kill(-pid, SIGKILL);
+    int st;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+  }
+  proc_pipes_close(p);
+  free(stdin_copy);
+  return proc_not_started(message);
+}
+
+/* A not-started message from `prefix` and an errno text. */
+static long long proc_abort_errno(ProcPipes* p, unsigned char* stdin_copy, pid_t pid, int new_group,
+                                  const char* prefix, int err) {
+  char msg[128];
+  snprintf(msg, sizeof(msg), "%s: %s", prefix, strerror(err));
+  return proc_abort(p, stdin_copy, pid, new_group, msg);
+}
+
+/* Length of the longest prefix of `s` of at most `max` bytes that ends on a character boundary. */
+static size_t proc_utf8_prefix_len(const char* s, size_t max) {
+  size_t n = strlen(s);
+  if (n <= max) return n;
+  n = max;
+  while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80) n--;
+  return n;
 }
 
 /* A deadline this far past `now` is clamped so the multiplication cannot overflow. */
@@ -4426,7 +4471,6 @@ static long long proc_deadline(long long timeout_ms) {
   return now + timeout_ms * 1000LL;
 }
 
-#define PROC_ARM_SLACK_US 5000   /* a park that ends this close to the deadline did wait for it */
 #define PROC_HELPER_STACK (128 * 1024)
 
 // Sprout extern fn proc_run_raw(argv: Vec String, has_stdin: Int, stdin_data: Bytes, timeout_ms: Int,
@@ -4436,11 +4480,12 @@ long long proc_run_raw(long long argv_val, long long has_stdin, long long stdin_
                        long long timeout_ms, long long max_output_bytes, long long new_group) {
   char** argv = sprout_vec_string_to_argv(argv_val);
   if (argv == NULL) return proc_not_started("out of memory");
-  if (argv[0] == NULL) { free(argv); return proc_not_started("argv is empty"); }
+  if (argv[0] == NULL) sprout_fail("proc_run_raw: empty argv");   /* proc_run_with rejects it */
   char* path = proc_resolve_path(argv[0]);
   if (path == NULL) {
     char msg[512];
-    snprintf(msg, sizeof(msg), "%.400s: command not found", argv[0]);
+    snprintf(msg, sizeof(msg), "%.*s: command not found",
+             (int)proc_utf8_prefix_len(argv[0], 400), argv[0]);
     free(argv);
     return proc_not_started(msg);
   }
@@ -4458,59 +4503,44 @@ long long proc_run_raw(long long argv_val, long long has_stdin, long long stdin_
     }
   }
 
-  int out_p[2] = {-1, -1}, err_p[2] = {-1, -1}, in_p[2] = {-1, -1};
-  int exec_p[2] = {-1, -1}, done_p[2] = {-1, -1}, stop_p[2] = {-1, -1};
-  if (cloexec_pipe(out_p) < 0 || cloexec_pipe(err_p) < 0 || (has_stdin && cloexec_pipe(in_p) < 0) ||
-      cloexec_pipe(exec_p) < 0 || cloexec_pipe(done_p) < 0 || cloexec_pipe(stop_p) < 0) {
+  ProcPipes pp = { {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1} };
+  if (cloexec_pipe(pp.out) < 0 || cloexec_pipe(pp.err) < 0 || (has_stdin && cloexec_pipe(pp.in) < 0) ||
+      cloexec_pipe(pp.exec) < 0 || cloexec_pipe(pp.done) < 0 || cloexec_pipe(pp.stop) < 0) {
     int saved = errno;
-    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
-    proc_close_pair(exec_p); proc_close_pair(done_p); proc_close_pair(stop_p);
-    free(argv); free(path); free(stdin_copy);
-    char msg[128];
-    snprintf(msg, sizeof(msg), "could not create pipes: %s", strerror(saved));
-    return proc_not_started(msg);
+    free(argv); free(path);
+    return proc_abort_errno(&pp, stdin_copy, 0, 0, "could not create pipes", saved);
   }
 
   pid_t pid = fork();
   if (pid < 0) {
     int saved = errno;
-    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
-    proc_close_pair(exec_p); proc_close_pair(done_p); proc_close_pair(stop_p);
-    free(argv); free(path); free(stdin_copy);
-    char msg[128];
-    snprintf(msg, sizeof(msg), "fork failed: %s", strerror(saved));
-    return proc_not_started(msg);
+    free(argv); free(path);
+    return proc_abort_errno(&pp, stdin_copy, 0, 0, "fork failed", saved);
   }
-  if (pid == 0) proc_child_exec(path, argv, in_p[0], out_p[1], err_p[1], exec_p[1], (int)new_group);
+  if (pid == 0) proc_child_exec(path, argv, pp.in[0], pp.out[1], pp.err[1], pp.exec[1], (int)new_group);
 
   free(argv);
   free(path);
-  proc_close_fd(&out_p[1]);
-  proc_close_fd(&err_p[1]);
-  proc_close_fd(&in_p[0]);
-  proc_close_fd(&exec_p[1]);
+  proc_close_fd(&pp.out[1]);
+  proc_close_fd(&pp.err[1]);
+  proc_close_fd(&pp.in[0]);
+  proc_close_fd(&pp.exec[1]);
   if (new_group) setpgid(pid, pid);   /* the child does it too; whichever runs first wins */
 
-  /* exec closes exec_p[1] on success, so this ends at exec or at the child's _exit: short and
+  /* exec closes pp.exec[1] on success, so this ends at exec or at the child's _exit: short and
    * bounded, which is why it may block the scheduler thread. */
   int exec_errno = 0;
   size_t got = 0;
   for (;;) {
-    ssize_t nr = read(exec_p[0], (char*)&exec_errno + got, sizeof(exec_errno) - got);
+    ssize_t nr = read(pp.exec[0], (char*)&exec_errno + got, sizeof(exec_errno) - got);
     if (nr < 0 && errno == EINTR) continue;
     if (nr <= 0) break;
     got += (size_t)nr;
     if (got == sizeof(exec_errno)) break;
   }
-  proc_close_fd(&exec_p[0]);
-  if (got == sizeof(exec_errno)) {
-    int st;
-    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
-    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
-    proc_close_pair(done_p); proc_close_pair(stop_p);
-    free(stdin_copy);
-    return proc_not_started(strerror(exec_errno));
-  }
+  proc_close_fd(&pp.exec[0]);
+  if (got == sizeof(exec_errno))
+    return proc_abort(&pp, stdin_copy, pid, (int)new_group, strerror(exec_errno));
 
   ProcRequest* r = (ProcRequest*)calloc(1, sizeof(ProcRequest));
   int started = 0;
@@ -4518,10 +4548,11 @@ long long proc_run_raw(long long argv_val, long long has_stdin, long long stdin_
     pthread_mutex_init(&r->lock, NULL);
     r->pid = pid;
     r->new_group = (int)new_group;
-    r->done_rd = done_p[0]; r->done_wr = done_p[1];
-    r->stop_rd = stop_p[0]; r->stop_wr = stop_p[1];
-    r->out_fd = out_p[0];   r->err_fd = err_p[0];
-    r->in_fd = in_p[1];
+    r->done_rd = pp.done[0]; r->done_wr = pp.done[1];
+    r->stop_rd = pp.stop[0]; r->stop_wr = pp.stop[1];
+    r->out_fd = pp.out[0];   r->err_fd = pp.err[0];
+    r->in_fd = pp.in[1];
+    proc_pipes_release(&pp);   /* from here the request closes them */
     r->stdin_data = stdin_copy;
     r->stdin_len = stdin_len;
     r->cap = (size_t)max_output_bytes;
@@ -4539,28 +4570,25 @@ long long proc_run_raw(long long argv_val, long long has_stdin, long long stdin_
     pthread_attr_destroy(&attr);
   }
   if (!started) {
-    kill(pid, SIGKILL);
-    if (new_group) kill(-pid, SIGKILL);
-    int st;
-    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
-    proc_close_pair(out_p); proc_close_pair(err_p); proc_close_pair(in_p);
-    proc_close_pair(done_p); proc_close_pair(stop_p);
-    free(stdin_copy);
-    if (r != NULL) { pthread_mutex_destroy(&r->lock); free(r); }
-    return proc_not_started("could not start helper thread");
+    if (r != NULL) {
+      proc_close_fd(&r->done_rd); proc_close_fd(&r->done_wr);
+      proc_close_fd(&r->stop_rd); proc_close_fd(&r->stop_wr);
+      proc_close_fd(&r->out_fd);  proc_close_fd(&r->err_fd);
+      proc_close_fd(&r->in_fd);
+      pthread_mutex_destroy(&r->lock);
+      free(r);
+    }
+    return proc_abort(&pp, stdin_copy, pid, (int)new_group, "could not start helper thread");
   }
 
   long long deadline = proc_deadline(timeout_ms);
   int timed_out = 0;
   if (!proc_park(r, deadline)) {
-    if (deadline - time_now_micros() > PROC_ARM_SLACK_US) {
-      /* The deadline is still ahead, so the timer could not be armed. Do not kill. */
-      proc_park(r, 0);
-    } else {
-      /* A child that was already reaped finished at the deadline: its result stands. */
-      if (proc_kill(r)) { proc_signal_stop(r); timed_out = 1; }
-      proc_park(r, 0);
-    }
+    /* The deadline passed, or the timer could not be armed: scheduler_park_on_fd_timeout reports
+     * both as 0, and both are a timeout, as for the HTTP client. A child that was already reaped
+     * finished at the deadline, so its result stands. */
+    if (proc_kill(r)) { proc_signal_stop(r); timed_out = 1; }
+    proc_park(r, 0);
   }
 
   char byte;
@@ -4571,13 +4599,10 @@ long long proc_run_raw(long long argv_val, long long has_stdin, long long stdin_
   close(r->stop_wr);
 
   long long result;
-  static const unsigned char none = 0;
-  const unsigned char* out = r->out.data != NULL ? r->out.data : &none;
-  const unsigned char* err = r->err.data != NULL ? r->err.data : &none;
-  if (r->failure != NULL)  result = proc_not_started(r->failure);
-  else if (r->overflow)    result = proc_make_raw(4, 0, out, r->out.len, err, r->err.len, "");
-  else if (timed_out)      result = proc_make_raw(3, 0, out, r->out.len, err, r->err.len, "");
-  else result = proc_make_raw(r->term_kind, r->term_code, out, r->out.len, err, r->err.len, "");
+  if (r->failure != NULL) result = proc_not_started(r->failure);
+  else if (r->overflow)   result = proc_make_raw(4, 0, r->out.data, r->out.len, r->err.data, r->err.len, "");
+  else if (timed_out)     result = proc_make_raw(3, 0, r->out.data, r->out.len, r->err.data, r->err.len, "");
+  else result = proc_make_raw(r->term_kind, r->term_code, r->out.data, r->out.len, r->err.data, r->err.len, "");
   proc_request_decref(r);
   return result;
 }
@@ -8615,10 +8640,8 @@ static void* dns_resolver_thread(void* arg) {
   req->naddrs = dns_blocking_resolve(req->host, req->port, req->addrs, HTTP_MAX_CANDIDATES, &req->gai);
   /* Publish the results (release) BEFORE signalling, so the acquiring task sees them. */
   atomic_store_explicit(&req->ready, 1, memory_order_release);
-  /* Wake the parked green task. Ignore EPIPE: the task was force-dropped and closed the read end. */
-  ssize_t w;
-  do { w = write(req->write_fd, "1", 1); } while (w < 0 && errno == EINTR);
-  (void)w;
+  /* Wake the parked green task. */
+  pipe_wake_byte(req->write_fd);
   close(req->write_fd);
   atomic_fetch_sub(&g_dns_threads_inflight, 1);
   dns_request_decref(req);
