@@ -249,6 +249,22 @@ accesses are the pseudo-callees `__sprout_vec_get`/`__sprout_vec_set`, lowered b
 All are non-allocating, so `ir_rooting` treats them like the B1 ops: `IRVecGetU`'s result is rooted by
 its `IRType` kind, and only stores of a non-heap scalar are unchecked. Switches and trace:
 [debugging.md](debugging.md); design and numbers: [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md).
+The wrapper and projection recognisers (`wrapper_of`, `apply_wrapper`, `shape_converts`) live in
+`stdlib/compiler/vec_wrappers.sprout`, shared with the next pass.
+
+### Wrapper store inline — `stdlib/compiler/wsi.sprout`
+
+A typed-AST pass in `ir_pipeline.compile_program_streaming`, before `dce.elim_unreachable` and so
+before BCE. A call to a store wrapper (an unconstrained function whose body is one `vector_mutset`
+over its parameters, each used once and in order: `mutvec_set`) is rewritten to the direct
+`vector_mutset(mutvec_raw(g), i, x)` when the stored operand's type is `Int`, `Bool`, `Char` or
+`Double` (`type_is_non_heap_scalar`). `ast_to_ir` then lowers it to the guard and an inline
+`IRVecSetD`: no call and no write barrier, since a scalar creates no old-to-young edge. A generic
+caller (`x: a`), a heap value, and a wrapper that stores a projection or a sum (the node keeps the
+wrapper's type variable) keep the call. A local binder cannot shadow a wrapper: wrappers are named
+`module.name`, binders have no dot. `SPROUT_OPT_OFF=wsi` disables it; a direct scalar
+`vector_mutset` still lowers inline. IR shape is checked by `scripts/b1_gate.sh`; design:
+[scalar-store-inline-v0.md](scalar-store-inline-v0.md).
 
 ### GC safety linter
 

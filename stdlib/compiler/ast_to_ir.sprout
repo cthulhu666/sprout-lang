@@ -4515,7 +4515,7 @@ fn vec_read_inlinable(args: List typed_ast.TypedExpr) -> Bool =
 
 # A store inlines when its VALUE (arg2) is Int/Bool/Char/Double, whatever the
 # vector's type. A scalar creates no old-to-young edge, so no write barrier is
-# needed (the rule bce.shape_converts applies).
+# needed (the rule vec_wrappers.shape_converts applies).
 fn vec_store_inlinable(args: List typed_ast.TypedExpr) -> Bool =
   match args with
   | [_, _, val] -> type_kind.type_is_non_heap_scalar(typed_ast.typed_expr_type(val))

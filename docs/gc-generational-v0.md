@@ -1052,4 +1052,6 @@ barrier never sees an old object. Nothing goes red between steps.
 6. **No barrier on scalar element stores.** `sprout_gc_on_store` runs the barrier on every
    `vector_mutset`, against §6. Filtering on the stored value at run time costs
    digit_recognizer 14–16% CPU, so the compiler must call a barrier-free store where the element
-   type is a scalar. Not designed. Then re-measure, and flip if nothing regresses.
+   type is a scalar. Designed and landed in [scalar-store-inline-v0.md](scalar-store-inline-v0.md):
+   `ast_to_ir` lowers a scalar `vector_mutset` inline, and the `wsi` pass expands a store
+   wrapper such as `mutvec_set` to it. The re-measure and the flip are that doc's step 3.

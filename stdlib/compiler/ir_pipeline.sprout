@@ -8,6 +8,7 @@ import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.source as source
 import stdlib.compiler.dce as dce
 import stdlib.compiler.bce as bce
+import stdlib.compiler.wsi as wsi
 import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.switches as switches
 
@@ -319,9 +320,15 @@ export fn compile_program_streaming(prog: typed_ast.TypedProgram) ->
   # alloc summary would otherwise each walk the ~98% of declarations that are
   # about to be discarded.
   do
+    wsi_on <- opt_config.pass_enabled(opt_config.Wsi)
     bce_on <- opt_config.pass_enabled(opt_config.Bce)
-    versioned <- version_if(bce_on, dce.elim_unreachable(prog))
+    versioned <- version_if(bce_on, dce.elim_unreachable(inline_stores_if(wsi_on, prog)))
     compile_reachable(versioned)
+
+# Wrapper store inline runs before reachability, so a wrapper with no calls left is dropped
+# with the rest of the dead code, and before BCE, which then sees the direct extern.
+fn inline_stores_if(on: Bool, prog: typed_ast.TypedProgram) -> typed_ast.TypedProgram =
+  if on then wsi.expand_program(prog) else prog
 
 # Bounds-check elimination runs on the reachable program, before Phase B: the
 # clones it adds are ordinary self-tail-recursive functions to everything below.

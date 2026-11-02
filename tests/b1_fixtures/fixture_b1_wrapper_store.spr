@@ -1,0 +1,59 @@
+module main
+import stdlib.mutable (MutVec, mutvec_set)
+
+# Private to stdlib.mutable, so declared here: the user wrappers below store into a raw Vector.
+extern fn vector_mutset(v: Vector a, i: Int, val: a) -> Unit !{IO}
+
+# Wrapper-store-inline gate: a call to a store wrapper (`mutvec_set`, or a user wrapper of the
+# same shape) whose stored value is an Int, Bool, Char or Double lowers to the inline guarded
+# store, with no call to the wrapper or to `vector_mutset`. The b1-gate checks each function's
+# own IR.
+fn set_int(g: MutVec Int, x: Int) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+fn set_bool(g: MutVec Bool, x: Bool) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+fn set_char(g: MutVec Char, x: Char) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+fn set_double(g: MutVec Double, x: Double) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+# A heap value and a value typed `a` keep the wrapper call.
+fn set_string(g: MutVec String, x: String) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+fn set_generic(g: MutVec a, x: a) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+# A user wrapper of the same shape expands.
+fn put(v: Vector a, i: Int, x: a) -> Unit !{IO} =
+  vector_mutset(v, i, x)
+
+fn put_int(v: Vector Int, x: Int) -> Unit !{IO} =
+  put(v, 0, x)
+
+# A wrapper that uses a parameter twice does not expand.
+fn put_twice(v: Vector a, i: Int, x: a) -> Unit !{IO} =
+  vector_mutset(v, i + i, x)
+
+fn put_twice_int(v: Vector Int, x: Int) -> Unit !{IO} =
+  put_twice(v, 0, x)
+
+# A parameter named like the wrapper is the caller's own function, not the import.
+fn set_shadowed(g: MutVec Int, x: Int, mutvec_set: MutVec Int -> Int -> Int -> Unit !{IO}) -> Unit !{IO} =
+  mutvec_set(g, 0, x)
+
+# A generic wrapper that stores a projection of a parameter keeps the type `a` on that operand,
+# so it does not expand even at an `Int` call site.
+type Cell a = Cell(a)
+
+fn cell_val(c: Cell a) -> a =
+  match c with | Cell x -> x
+
+fn put_cell(v: Vector a, i: Int, c: Cell a) -> Unit !{IO} =
+  vector_mutset(v, i, cell_val(c))
+
+fn put_cell_int(v: Vector Int, c: Cell Int) -> Unit !{IO} =
+  put_cell(v, 0, c)
