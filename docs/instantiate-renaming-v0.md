@@ -83,7 +83,7 @@ With range ∩ domain = ∅ every lookup terminates in one step, and chasing the
 only rises and the domain is finite.
 
 Skolems are unaffected: `instantiate_ctor_pattern` maps an existential binder to a
-`TConst` named `$sk<n>`, which `apply_full_subst` never looks up.
+`TConst` named `$sk<n>_<binder>`, which `apply_full_subst` never looks up.
 
 ### Alternatives rejected
 

@@ -165,8 +165,8 @@ allocations.
 3. Replace each `EvForward` with the caller's concrete evidence, **by key**, not by position.
    Forward keys are `typed_ast.dict_slot_key(class, type_args)` (`resolve.sprout`, `forwarded_slot`),
    superclass-expanded in `build_hidden_for_constraints` order. Recurse into `EvInstance` children
-   and into `TMethodRef` evidence. A method used as a value in a generic body has `EvUnresolved`
-   (`method_ref_constraint` needs a constructor head) and lowering rebuilds it from hidden
+   and into `TMethodRef` evidence. A method used as a value at a signature variable has
+   `EvUnresolved` (`method_ref_constraint` needs a constructor head) and lowering rebuilds it from hidden
    parameters, which the copy lacks, so the copy fills it from the slot its class type names.
 4. Name the copy `<generic IR name>$spec_<mangled args>`, where the args are the type arguments
    of the declaration's `where` constraints in written order (superclasses not included) after
@@ -396,11 +396,11 @@ code compares through `Ord`/`Eq`.
   `just gate`), and a nightly CI job that runs it and then the conformance suite with
   `SPROUT_OPT_OFF=spec`.
 
-## 9. Open question
+## 9. Automatic or annotated
 
-**Automatic or annotated?** v0 proposes automatic (GHC's `-fspecialise` model) because the program
-is whole and the evidence is explicit. If M0 shows large code growth, the alternative is a
-per-function opt-in annotation. That needs syntax, and a keyword, not a pragma sigil.
+Automatic (GHC's `-fspecialise` model), because the program is whole and the evidence is explicit.
+A per-function opt-in annotation was the fallback if copies grew the code; they did not: with the
+pass on, the compiler binary is 0.47% smaller (M2). No annotation, so no syntax.
 
 ## 10. Impact
 

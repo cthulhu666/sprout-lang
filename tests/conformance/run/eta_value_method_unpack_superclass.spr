@@ -1,0 +1,37 @@
+module main
+
+# The packed constraint is on a subclass; the method used as a value belongs to its
+# superclass, whose slot the unpack also binds.
+
+class Make t
+  fn from_int(n: Int) -> t
+
+class Make2 t where Make t
+  fn name2(x: t) -> String
+
+instance Make Int
+  fn from_int(n: Int) -> Int = n + 100
+
+instance Make String
+  fn from_int(n: Int) -> String = "made"
+
+instance Make2 Int
+  fn name2(x: Int) -> String = "int"
+
+instance Make2 String
+  fn name2(x: String) -> String = "string"
+
+type Pack = | exists a. Pack a where Make2 a, ToString a
+
+fn apply_int(f: Int -> a, n: Int) -> a = f(n)
+
+fn like(x: a, y: a) -> a = y
+
+fn both(p: Pack, q: Pack) -> String =
+  match p with
+  | Pack x -> match q with
+    | Pack y -> to_string(like(x, apply_int(from_int, 1))) ++ "|" ++ to_string(like(y, apply_int(from_int, 2)))
+
+fn main() -> Unit !{IO} = do
+  print(both(Pack(0), Pack("q")))
+  print(both(Pack("q"), Pack(0)))

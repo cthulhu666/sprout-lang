@@ -463,7 +463,8 @@ export type TypedResult (..) =
   | TypedErr source.SourcePos String
 
 export type InstanceMethodsResult (..) =
-  | InstanceMethodsOk (List TypedInstanceMethod)
+  | InstanceMethodsOk (List TypedInstanceMethod) (Dict types.Scheme)
+  # InstanceMethodsOk  methods  eta_fwdvar_markers (all methods')
   | InstanceMethodsErr source.SourcePos String
 
 # ---------------------------------------------------------------------------

@@ -332,7 +332,7 @@ deprecated DatatypeContexts).
 ## 7. Type-system impact
 
 - Introduces Sprout's **first rigid/skolem types**. **As implemented (Stage 0a),
-  a skolem is a fresh, uniquely-named rigid `TConst` (`$sk<n>`)** minted on the
+  a skolem is a fresh, uniquely-named rigid `TConst` (`$sk<n>_<binder>`)** minted on the
   pattern/unpack path (`unifier.instantiate_ctor_pattern`) — *not* a marked
   `TVar`. This is the key simplification over the original sketch: because the
   existing unifier already treats two `TConst`s as equal only on name identity,

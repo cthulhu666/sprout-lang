@@ -1364,14 +1364,16 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   the program and the user learns at build time. Nothing names an instance, so the ambiguity
   belongs where constraints are known, not at slot-selection time. (The cross-class shape is
   now rejected at its declaration, `docs/qualified-class-methods-v0.md`.)
-- [ ] `P2` **`@eta_fwdvar` names only signature variables: instance headers and unpacks fail.**
-  A method passed as a value under two same-class constraints ends in
-  `__eta_unresolved_<Class>_<method>` when the variables are not a function's own. Two unpacks of
-  `type Pack = | exists a. Pack a where Step a, ToString a` with `app(bump, x)` and `app(bump, y)`
-  fail; so does `instance Make (Pair a b) where Make a, Make b` whose `from_int` passes
-  `from_int` as a value twice. `infer.add_eta_fwdvar` runs for `prog_to_fresh` only, so skolems
-  and instance-header variables name no slot and two distinct impls decline. Fix: write the
-  markers where the unpack and the instance header seed their slots.
+- [ ] `P2` **A method used as a value on an unpacked existential the class does not pack fails at
+  codegen.** `app(bump, x)` where `x` unpacks `exists a. Pack a where ToString a` (no `Step a`)
+  passes `--phase check` and dies in `ast_to_ir` on `__eta_unresolved_Step_bump`, no location.
+  `resolve.check_constraint` accepts any head that is neither forwarded nor concrete, and `$ex_`
+  heads are neither. Same family as the ambiguous-reference entry above; a direct `bump(x)` is
+  rejected at check.
+- [ ] `P4` **`@eta_fwd:<tyvar>:<class>` markers are written and never read.**
+  `infer.compute_eta_fwd_markers` puts them in the global env through `fold_fwd_markers`; nothing
+  reads `types.eta_fwd_marker_key`. Lowering reads `@eta_fwdvar:` only. Delete the family, or
+  find the reader it was meant for.
 - [ ] `P2` **Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization).**
   Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a second resolution
   authority for one shape: a polymorphic (type-variable-head) forwarded value-position class method.

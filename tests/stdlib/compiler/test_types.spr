@@ -173,5 +173,12 @@ fn main() -> Unit !{IO} =
     check_eq("a monomorphic scheme renders no where clause",
       types.scheme_to_string(types.scheme_quantified(Nil, types.type_int(), types.EffectPure,
         Cons(("Int", "ToString"), Nil))),
-      "Int")
+      "Int"),
+    check_eq("skolem_index: hand-built name", types.skolem_index("$sk7"), Just(7)),
+    check_eq("skolem_index: stops at the binder", types.skolem_index("$sk12_a_b_340"), Just(12)),
+    check_eq("skolem_index: not a skolem", types.skolem_index("Int"), Nothing),
+    check_eq("skolem_fwd_head: the binder's slot head", types.skolem_fwd_head("$sk12_a_b_340"),
+      Just(types.existential_fwd_head(types.existential_binder("a_b", 340)))),
+    check_eq("skolem_fwd_head: no binder", types.skolem_fwd_head("$sk7"), Nothing),
+    check_eq("skolem_fwd_head: not a skolem", types.skolem_fwd_head("$ex_a_3"), Nothing)
   ])
