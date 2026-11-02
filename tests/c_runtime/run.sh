@@ -561,6 +561,20 @@ for sel in barrier minor_keeps_old major_every clear_before_major doubling no_ch
   test "$(cat "$TMP_DIR/gc_$sel.out")" = "gen-check-$sel"
 done
 
+echo "==> c runtime: NOSCAN vectors are not scanned, keep the bit through set/append/concat/push, and skip the barrier"
+# vec_noscan.c includes sprout_runtime.c (like gen_check.c). Each case is its own process.
+VN="$TMP_DIR/vec_noscan"
+clang "$ROOT/tests/c_runtime/vec_noscan.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$VN"
+for sel in retention inherit empty_set push_out barrier_noscan barrier_scan; do
+  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$VN" "$sel" > "$TMP_DIR/vn_$sel.out" 2> "$TMP_DIR/vn_$sel.err" || {
+    echo "  vec_noscan '$sel' failed:" >&2
+    cat "$TMP_DIR/vn_$sel.out" "$TMP_DIR/vn_$sel.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/vn_$sel.out")" = "vec-noscan-$sel"
+done
+
 if [[ "${SPROUT_C_RUNTIME_SANITIZE:-}" == 1 ]]; then
   echo "==> c runtime: the sanitizer is live (a headerless String read by str_eq is reported)"
   # Positive control. Unsanitized, asan_control exits 0, so only a live ASan can fail it. Without
