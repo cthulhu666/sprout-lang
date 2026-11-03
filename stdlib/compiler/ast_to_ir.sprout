@@ -4595,23 +4595,9 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
                                    fname, arg_names)
 
 # NOSCAN (docs/pointer-free-vectors-v0.md §4.2). The result of a creating extern is a fresh
-# vector, so flagging it touches no other value. The runtime symbols live ONLY here
-# (mirrors recognize_vector_op); the type is the call's own result type.
+# vector, so flagging it touches no other value. The type is the call's own result type.
 fn noscan_creation(fname: String, call_ty: types.Type) -> Bool =
-  is_vector_creator(fname) && type_is_noscan_vector(call_ty)
-
-fn is_vector_creator(fname: String) -> Bool =
-  fname == "vector_empty" || fname == "vector_from_list" || fname == "vec_make_filled"
-
-# `Vector T` with T exactly Int, Bool, Char or Double (type_kind matches the canonical name, so
-# a `wrap` over Int or a user `type Int` does not match), as type_is_vector_double does. A false
-# negative only forgoes the flag; a false positive is a use-after-free, since the collector
-# never reads a flagged vector's elements.
-fn type_is_noscan_vector(t: types.Type) -> Bool =
-  match t with
-  | types.TApp (types.TConst vname) elem ->
-      types.type_id_name(vname) == "Vector" && type_kind.type_is_non_heap_scalar(elem)
-  | _ -> false
+  type_kind.is_vector_creator(fname) && type_kind.type_is_noscan_vector(call_ty)
 
 # The general (non-intrinsic) call path: under-applied a known-arity fn → loud
 # internal error (inference should have rejected it); fully applied (or unknown

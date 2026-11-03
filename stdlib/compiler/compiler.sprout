@@ -16,6 +16,7 @@ import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
 import stdlib.compiler.specialise as specialise
+import stdlib.compiler.scalar_copies as scalar_copies
 import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
@@ -618,8 +619,31 @@ fn lower_checked(check_result: typed_ast.TypedResult) -> typed_ast.TypedResult !
         | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
         | typed_ast.TypedOk spec_prog _ ->
             do
-              optimised <- run_opt_passes(cfg, lowering.lower_program(spec_prog, env))
+              scalar_prog <- scalar_checked(cfg, spec_prog, env)
+              optimised <- run_opt_passes(cfg, lowering.lower_program(scalar_prog, env))
               typed_ast.TypedOk(optimised, env)
+
+# Scalar copies (docs/pointer-free-vectors-v0.md §4.3), after `specialise` so its copies are
+# candidates too. A dry run: it reports the copies it would make and returns the program as it is.
+fn scalar_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
+                  env: Dict types.Scheme) -> typed_ast.TypedProgram !{IO} =
+  if !opt_config.enabled(cfg, opt_config.Scalar) then
+    do
+      _ <- report_opt_stats(cfg, opt_config.Scalar, false, prog, prog)
+      prog
+  else
+    let out = scalar_copies.run(prog, env)
+    in
+      do
+        _ <- report_opt_stats(cfg, opt_config.Scalar, true, prog, out.program)
+        _ <- trace_scalar(out.trace)
+        out.program
+
+# SPROUT_TRACE_SCALAR=1: one line per key, then the totals, to stderr.
+fn trace_scalar(lines: List String) -> Unit !{IO} =
+  match switches.env_switch("SPROUT_TRACE_SCALAR") with
+  | Nothing -> ()
+  | Just _ -> list_each(eprint, lines)
 
 # Specialisation (docs/specialisation-v0.md §4) on the resolved program, before dictionary
 # lowering. Each copy is checked again by the dispatch verifier (the rest of the program was

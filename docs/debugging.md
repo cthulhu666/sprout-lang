@@ -133,6 +133,12 @@ Bisect a miscompile against the Sprout-level passes without rebuilding the compi
   `[bce] versioned <fn>` or `[bce] kept <fn>: <reason>` line per loop it looked at, on stderr.
 - `SPROUT_OPT_OFF=wsi` — wrapper store inline (`stdlib/compiler/wsi.sprout`). A scalar
   `mutvec_set` then keeps its call to the wrapper and the write barrier. Also in `ir_pipeline`.
+- `SPROUT_OPT_OFF=scalar` — scalar copies ([pointer-free-vectors-v0.md](pointer-free-vectors-v0.md)
+  §4.3, `stdlib/compiler/scalar_copies.sprout`). It currently only reports the copies it would make
+  and changes no program. `SPROUT_TRACE_SCALAR=1` prints one `[scalar] copy <name> of <fn> for the
+  call at <line>:<col> in <holder> nodes=<n>` line per key on stderr, then
+  `[scalar] keys=<k> nodes=<total>`: the copies and the nodes they would add. It runs before
+  dead-code elimination, so the keys of an unreachable prelude function count.
 - `SPROUT_OPT_STATS=1` — one `[opt] <pass> on|off nodes=N removed=R added=A` line per
   compile on stderr: the typed-AST node delta the pass produced, split by sign.
 
