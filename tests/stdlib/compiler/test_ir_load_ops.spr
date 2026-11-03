@@ -1,0 +1,140 @@
+import stdlib.test (check_eq, check_true, check_false, run_suite)
+import stdlib.compiler.sprout_ir as sprout_ir
+import stdlib.compiler.ir_lowering as ir_lowering
+import stdlib.compiler.ir_rooting as ir_rooting
+import testsupport.ir_verify (clang_verifies_ir)
+import testsupport.ir_fixtures (scalar)
+
+# ---------------------------------------------------------------------------
+# IRLoadWord / IRLoadU8: unchecked, non-allocating raw loads.
+# See docs/inline-byte-reads-v0.md §4.1.
+
+fn contains(haystack: String, needle: String) -> Bool =
+  str_find(haystack, needle) != -1
+
+fn count_substrs(haystack: String, needle: String, acc: Int) -> Int =
+  if pos == -1 then acc
+  else count_substrs(str_slice(haystack, pos + str_len(needle), str_len(haystack)),
+                     needle, acc + 1)
+  where pos = str_find(haystack, needle)
+
+fn count(haystack: String, needle: String) -> Int =
+  count_substrs(haystack, needle, 0)
+
+fn sc(r: String) -> sprout_ir.IROp =
+  sprout_ir.IRStrConst(r, r ++ "_raw", "s")
+
+fn program_of(f: sprout_ir.IRFunction) -> sprout_ir.IRProgram =
+  sprout_ir.IRProgram(Cons(f, Nil), Nil, Nil, Nil)
+
+fn lower_plain(prog: sprout_ir.IRProgram) -> String =
+  ir_lowering.lower_program(prog)
+
+fn lower_rooted(prog: sprout_ir.IRProgram) -> String =
+  ir_lowering.lower_program(ir_rooting.insert_roots(prog, dict_empty()))
+
+# ---------------------------------------------------------------------------
+# Lowering: base from an arg; offsets -8 and 0; a byte read at an index arg.
+
+fn lowering_program() -> sprout_ir.IRProgram =
+  program_of(
+    sprout_ir.IRFunction("loads", [("s", sprout_ir.IRTHeap), ("i", scalar())], "i64", [
+      sprout_ir.IRBlock("entry", [
+        sprout_ir.IRLoadWord("%h", sprout_ir.param_ssa("s"), -8),
+        sprout_ir.IRLoadWord("%d", sprout_ir.param_ssa("s"), 0),
+        sprout_ir.IRLoadU8("%b", sprout_ir.param_ssa("s"), sprout_ir.param_ssa("i")),
+        sprout_ir.IRIAdd("%x", "%h", "%d"),
+        sprout_ir.IRIAdd("%y", "%x", "%b"),
+        sprout_ir.IRRet("%y")])]))
+
+# ---------------------------------------------------------------------------
+# Rooting: %w (word) and %b (byte) are defined before an allocating concat and used after it.
+
+fn rooting_program() -> sprout_ir.IRProgram =
+  program_of(
+    sprout_ir.IRFunction("across", [("p", sprout_ir.IRTHeap), ("i", scalar())], "i64", [
+      sprout_ir.IRBlock("entry", [
+        sprout_ir.IRLoadWord("%w", sprout_ir.param_ssa("p"), 8),
+        sprout_ir.IRLoadU8("%b", sprout_ir.param_ssa("p"), sprout_ir.param_ssa("i")),
+        sc("%s1"), sc("%s2"),
+        sprout_ir.IRStrConcat("%c", "%s1", "%s2"),
+        sprout_ir.IRIAdd("%r", "%w", "%b"),
+        sprout_ir.IRRet("%r")])]))
+
+# The same shape, but the heap base `p` is read again by a byte load after the concat, so it is
+# live across it and must be rooted.
+fn base_live_program() -> sprout_ir.IRProgram =
+  program_of(
+    sprout_ir.IRFunction("across", [("p", sprout_ir.IRTHeap), ("i", scalar())], "i64", [
+      sprout_ir.IRBlock("entry", [
+        sprout_ir.IRLoadWord("%w", sprout_ir.param_ssa("p"), 8),
+        sc("%s1"), sc("%s2"),
+        sprout_ir.IRStrConcat("%c", "%s1", "%s2"),
+        sprout_ir.IRLoadU8("%b", sprout_ir.param_ssa("p"), sprout_ir.param_ssa("i")),
+        sprout_ir.IRIAdd("%r", "%w", "%b"),
+        sprout_ir.IRRet("%r")])]))
+
+fn pushes(ir: String) -> Int =
+  count(ir, "call i64 @sprout_gc_push_i64_root") + count(ir, "call i64 @sprout_gc_push_scan_root")
+
+fn main() -> Unit !{IO} =
+  do
+    plain_ok <- clang_verifies_ir(lower_plain(lowering_program()))
+    rooted_ok <- clang_verifies_ir(lower_rooted(rooting_program()))
+    live_ok <- clang_verifies_ir(lower_rooted(base_live_program()))
+    run_suite("ir_load_ops", [
+      # op_def / op_uses
+      check_eq("op_def IRLoadWord is its result",
+               ir_rooting.op_def(sprout_ir.IRLoadWord("%w", "%b", -8)), Just("%w")),
+      check_eq("op_def IRLoadU8 is its result",
+               ir_rooting.op_def(sprout_ir.IRLoadU8("%u", "%b", "%i")), Just("%u")),
+      check_eq("op_uses IRLoadWord is the base",
+               ir_rooting.op_uses(sprout_ir.IRLoadWord("%w", "%b", -8)), ["%b"]),
+      check_eq("op_uses IRLoadU8 is base then index",
+               ir_rooting.op_uses(sprout_ir.IRLoadU8("%u", "%b", "%i")), ["%b", "%i"]),
+      check_false("op_exposes_operands IRLoadWord",
+                  ir_rooting.op_exposes_operands(sprout_ir.IRLoadWord("%w", "%b", 0))),
+      check_false("op_exposes_operands IRLoadU8",
+                  ir_rooting.op_exposes_operands(sprout_ir.IRLoadU8("%u", "%b", "%i"))),
+      check_eq("op_direct_callee IRLoadWord",
+               sprout_ir.op_direct_callee(sprout_ir.IRLoadWord("%w", "%b", 0)), Nothing),
+      check_eq("op_direct_callee IRLoadU8",
+               sprout_ir.op_direct_callee(sprout_ir.IRLoadU8("%u", "%b", "%i")), Nothing),
+      check_eq("print_op IRLoadWord",
+               sprout_ir.print_op(sprout_ir.IRLoadWord("%w", "%b", -8)),
+               "    %w = load_word %b, -8"),
+      check_eq("print_op IRLoadU8",
+               sprout_ir.print_op(sprout_ir.IRLoadU8("%u", "%b", "%i")),
+               "    %u = load_u8 %b, %i"),
+
+      # Lowering
+      check_true("word at -8: inttoptr of the base",
+                 contains(lower_plain(lowering_program()), "%h$p = inttoptr i64 %p$s to ptr")),
+      check_true("word at -8: gep i8 with a negative literal",
+                 contains(lower_plain(lowering_program()), "%h$ep = getelementptr i8, ptr %h$p, i64 -8")),
+      check_true("word at -8: load i64 align 8",
+                 contains(lower_plain(lowering_program()), "%h = load i64, ptr %h$ep, align 8")),
+      check_true("word at 0: gep i8 offset 0",
+                 contains(lower_plain(lowering_program()), "%d$ep = getelementptr i8, ptr %d$p, i64 0")),
+      check_true("byte: inttoptr of the base",
+                 contains(lower_plain(lowering_program()), "%b$p = inttoptr i64 %p$s to ptr")),
+      check_true("byte: gep i8 by the index",
+                 contains(lower_plain(lowering_program()), "%b$bp = getelementptr i8, ptr %b$p, i64 %p$i")),
+      check_true("byte: load i8", contains(lower_plain(lowering_program()), "%b$b = load i8, ptr %b$bp")),
+      check_true("byte: zext to i64", contains(lower_plain(lowering_program()), "%b = zext i8 %b$b to i64")),
+      check_true("lowered module is accepted by clang", plain_ok),
+
+      # Rooting: neither op allocates, and their results are scalar, so they need no root.
+      check_eq("word and byte live across an allocating op: no root push",
+               pushes(lower_rooted(rooting_program())), 0),
+      check_true("rooted module is accepted by clang", rooted_ok),
+
+      # Mirror: the counter sees a push when a heap base is live across the concat, and the
+      # slot that is pushed holds that base.
+      check_eq("heap base live across an allocating op: one root push",
+               pushes(lower_rooted(base_live_program())), 1),
+      check_true("the pushed slot holds the base",
+                 contains(lower_rooted(base_live_program()),
+                          "store i64 %p$p, ptr %t$0\n  %t$1 = call i64 @sprout_gc_push_i64_root(ptr %t$0)")),
+      check_true("rooted base-live module is accepted by clang", live_ok)
+    ])

@@ -336,6 +336,14 @@ tuple CPR) return `i128` too, since `IRCallUnboxed2` calls both kinds.
 and an `Err String` payload must stay rooted across it. `@f_argw`'s `$val` parameter takes the
 same kind from the scrutinee's type.
 
+**`bytes_get` and `str_byte_at` lower inline, not to a call.** Under a scalar payload kind,
+`emit_unboxed_producer` builds the C body's checks as blocks (`ast_to_ir.emit_inline_byte_read`),
+with `IRLoadWord` and `IRLoadU8`: unchecked, non-allocating loads whose scalar result `ir_rooting` never
+roots. A worker whose tail is the read does the same. The `Bytes` data load
+and the byte load are adjacent: nothing that can allocate sits between them, so the buffer cannot be
+freed in between (`tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr`). The other CPR externs stay
+`IRCallUnboxed2`. Design: [inline-byte-reads-v0.md](inline-byte-reads-v0.md).
+
 **Windows x64 does not fit.** MSVC returns a 16-byte struct through `sret` and
 clang returns `__int128` in XMM0 there, and `cl.exe` has no `__int128`, so neither
 form matches the declare. Nothing builds the runtime for Windows yet; see `BACKLOG.md`.

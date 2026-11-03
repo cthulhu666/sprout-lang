@@ -13,6 +13,28 @@ fn stored_or(s: String, i: Int, fallback: Int) -> Int =
   | [Just b] -> b
   | _ -> fallback
 
+# The other unboxed shapes: a tuple split, a do bind and an argument worker. Each lowers the read
+# inline (docs/inline-byte-reads-v0.md §4.2).
+fn pair_sum(s: String, i: Int, j: Int) -> Int =
+  match (str_byte_at(s, i), str_byte_at(s, j)) with
+  | (Just a, Just b) -> a + b
+  | _ -> -1
+
+fn bind_sum(s: String, i: Int) -> Maybe Int =
+  do
+    a <- str_byte_at(s, i)
+    b <- str_byte_at(s, i + 1)
+    Just(a + b)
+
+fn add_byte(acc: Int, m: Maybe Int) -> Int =
+  match m with
+  | Just b -> acc + b
+  | Nothing -> acc
+
+fn fold_bytes(s: String, i: Int, acc: Int) -> Int =
+  if i >= str_byte_len(s) then acc
+  else fold_bytes(s, i + 1, add_byte(acc, str_byte_at(s, i)))
+
 fn agrees_with_bytes(s: String, i: Int) -> Bool =
   string.byte_at_or(s, i, -1) == bytes.get_or(bytes.from_string(s), i, -1)
 
@@ -33,6 +55,16 @@ fn main() -> Unit !{IO} =
     check_eq("boxed high byte", boxed_or("é", 0, -1), 195),
     check_eq("stored in range", stored_or("é", 1, -1), 169),
     check_eq("stored out of range", stored_or("é", 2, -1), -1),
+    check_eq("four-byte scalar, first byte", string.byte_at_or("😀", 0, -1), 240),
+    check_eq("four-byte scalar, last byte", string.byte_at_or("😀", 3, -1), 128),
+    check_eq("four-byte scalar, past end", string.byte_at_or("😀", 4, -1), -1),
+    check_eq("split, both in range", pair_sum("é", 0, 1), 364),
+    check_eq("split, second past end", pair_sum("é", 0, 2), -1),
+    check_eq("split, negative first", pair_sum("é", -1, 1), -1),
+    check_eq("do bind, in range", maybe_with_default(-1, bind_sum("é", 0)), 364),
+    check_eq("do bind, second past end", maybe_with_default(-1, bind_sum("é", 1)), -1),
+    check_eq("argument worker sums every byte", fold_bytes("héllo", 0, 0), 795),
+    check_eq("argument worker over empty", fold_bytes("", 0, 5), 5),
     check_eq("agrees with bytes_get, ASCII", agrees_with_bytes("hello", 4), true),
     check_eq("agrees with bytes_get, multibyte", agrees_with_bytes("Cześć", 3), true),
     check_eq("agrees with bytes_get, past end", agrees_with_bytes("abc", 3), true)

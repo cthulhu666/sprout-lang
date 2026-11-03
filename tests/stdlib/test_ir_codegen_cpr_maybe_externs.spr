@@ -123,6 +123,22 @@ fn probe_live_string(name: String) -> String =
     ++ "  | Just m -> if m > 0 then a else a\n"
     ++ "  | Nothing -> a\n"
 
+# The inline Bytes read's hit block: the data word is loaded, then the byte, and nothing that can
+# allocate (a call) sits between. docs/inline-byte-reads-v0.md §4.2.
+fn hit_block(out: String) -> String =
+  let start = str_find(out, "ibr_hit_")
+  in
+    if start == -1 then ""
+    else
+      let tail = str_slice(out, start, str_len(out) - start)
+          stop = str_find(tail, "ibr_miss_")
+      in if stop == -1 then tail else str_slice(tail, 0, stop)
+
+fn data_then_byte_load(block: String) -> Bool =
+  let word = str_find(block, "load i64")
+      byte = str_find(block, "load i8")
+  in word != -1 && byte > word && !has(str_slice(block, word, byte - word), "call ")
+
 # -1 when the fixture does not translate, so neither assertion on the count passes vacuously.
 fn root_pushes(src: String) -> Int !{IO} =
   do
@@ -186,22 +202,36 @@ fn main() -> Unit !{IO} =
                 has(mnv, "call i128 @map_nth_value_unboxed"))
 
     bget <- translate_or_msg(probe_two_arg("bytes_get"))
-    assert_true(state, "bytes_get keeps CPR (non-allocating read)",
-                has(bget, "call i128 @bytes_get_unboxed"))
+    assert_true(state, "bytes_get keeps CPR (non-allocating read), read inline",
+                has(bget, "load i8") && !has(bget, "call i128 @bytes_get_unboxed("))
+    assert_true(state, "bytes_get inline read keeps the C null-bytes panic text",
+                has(bget, "bytes_get_unboxed: null bytes"))
 
     sbyte <- translate_or_msg(probe_two_arg("str_byte_at"))
     assert_true(state, "str_byte_at fixture translates", translated(sbyte))
-    assert_true(state, "str_byte_at keeps CPR (non-allocating read)",
-                has(sbyte, "call i128 @str_byte_at_unboxed"))
+    assert_true(state, "str_byte_at keeps CPR (non-allocating read), read inline",
+                has(sbyte, "load i8") && !has(sbyte, "call i128 @str_byte_at_unboxed("))
+    assert_true(state, "str_byte_at inline read keeps the C null-input panic text",
+                has(sbyte, "str_byte_at: null input"))
+    assert_true(state, "str_byte_at inline read keeps the C no-header panic text",
+                has(sbyte, "str_byte_at: String has no header"))
     assert_false(state, "str_byte_at match makes no boxed call",
                  has(sbyte, "call i64 @str_byte_at("))
 
-    # The root check: `a` is live across the call. An unlisted extern in the same shape roots it
-    # (so the count is a real signal); `str_byte_at_unboxed` is not a GC trigger and roots nothing.
+    # The root check: `a` is live across the read. An unlisted extern in the same shape roots it
+    # (so the count is a real signal); the inline reads load and branch only, so they root nothing
+    # (the adjacency premise of docs/inline-byte-reads-v0.md §4.2: no GC trigger between the data
+    # load and the byte load).
     live_listed <- root_pushes(probe_live_string("str_byte_at"))
+    live_bytes <- root_pushes(probe_live_string("bytes_get"))
     live_unlisted <- root_pushes(probe_live_string("some_other_extern"))
     assert_true(state, "an unlisted extern roots the live String", live_unlisted > 0)
-    assert_true(state, "no GC root pushed around str_byte_at_unboxed", live_listed == 0)
+    assert_true(state, "no GC root pushed around the inline str_byte_at read", live_listed == 0)
+    assert_true(state, "no GC root pushed around the inline bytes_get read", live_bytes == 0)
+
+    # The data load and the byte load are adjacent: nothing sits between them.
+    assert_true(state, "bytes_get: the byte load follows the data load directly",
+                data_then_byte_load(hit_block(bget)))
 
     # argv_get and env_get left the list when stdlib.argv and stdlib.env moved to
     # argv_get_bytes and env_get_bytes (a Bytes copy, so no interned entry to hand back); the

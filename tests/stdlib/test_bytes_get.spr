@@ -1,0 +1,67 @@
+import stdlib.test (check_eq, run_suite)
+import stdlib.bytes as bytes
+
+# `bytes.get` over every unboxed shape. Each lowers the read inline
+# (docs/inline-byte-reads-v0.md §4.2): length and data are loaded from the object, the index is
+# one unsigned compare, and an empty buffer is never dereferenced because the bounds check runs
+# first.
+
+fn of(raw: String) -> Bytes =
+  bytes.from_string(raw)
+
+fn direct(b: Bytes, i: Int) -> Int =
+  match bytes.get(b, i) with
+  | Just v -> v
+  | Nothing -> -1
+
+fn pair_sum(b: Bytes, i: Int, j: Int) -> Int =
+  match (bytes.get(b, i), bytes.get(b, j)) with
+  | (Just x, Just y) -> x + y
+  | _ -> -1
+
+fn bind_sum(b: Bytes, i: Int) -> Maybe Int =
+  do
+    x <- bytes.get(b, i)
+    y <- bytes.get(b, i + 1)
+    Just(x + y)
+
+fn add_byte(acc: Int, m: Maybe Int) -> Int =
+  match m with
+  | Just v -> acc + v
+  | Nothing -> acc
+
+fn fold_bytes(b: Bytes, i: Int, acc: Int) -> Int =
+  if i >= bytes.length(b) then acc
+  else fold_bytes(b, i + 1, add_byte(acc, bytes.get(b, i)))
+
+fn main() -> Unit !{IO} =
+  run_suite("bytes_get", [
+    check_eq("first", direct(of("abc"), 0), 97),
+    check_eq("last", direct(of("abc"), 2), 99),
+    check_eq("at length", direct(of("abc"), 3), -1),
+    check_eq("negative", direct(of("abc"), -1), -1),
+    check_eq("huge offset", direct(of("abc"), 9223372036854775807), -1),
+    check_eq("minimum offset", direct(of("abc"), -9223372036854775807 - 1), -1),
+    check_eq("empty", direct(bytes.empty(), 0), -1),
+    check_eq("empty, negative", direct(bytes.empty(), -1), -1),
+    check_eq("from an empty string", direct(of(""), 0), -1),
+    check_eq("sliced to empty", direct(bytes.slice(of("abc"), 1, 0), 0), -1),
+    check_eq("slice reads its own window", direct(bytes.slice(of("abc"), 1, 2), 0), 98),
+    check_eq("slice stops at its own end", direct(bytes.slice(of("abc"), 1, 1), 1), -1),
+    check_eq("zero byte", direct(bytes.singleton(0), 0), 0),
+    check_eq("byte 255 reads unsigned", direct(bytes.singleton(255), 0), 255),
+    check_eq("byte 128 reads unsigned", direct(bytes.singleton(128), 0), 128),
+    check_eq("multibyte String, lead byte", direct(of("é"), 0), 195),
+    check_eq("multibyte String, trail byte", direct(of("é"), 1), 169),
+    check_eq("get_or hit", bytes.get_or(of("abc"), 1, -1), 98),
+    check_eq("get_or past end", bytes.get_or(of("abc"), 3, 7), 7),
+    check_eq("get_or empty", bytes.get_or(bytes.empty(), 0, 7), 7),
+    check_eq("get_or negative", bytes.get_or(of("abc"), -1, 7), 7),
+    check_eq("split, both in range", pair_sum(of("abc"), 0, 2), 196),
+    check_eq("split, second past end", pair_sum(of("abc"), 0, 3), -1),
+    check_eq("split, over empty", pair_sum(bytes.empty(), 0, 0), -1),
+    check_eq("do bind, in range", maybe_with_default(-1, bind_sum(of("abc"), 0)), 195),
+    check_eq("do bind, second past end", maybe_with_default(-1, bind_sum(of("abc"), 2)), -1),
+    check_eq("argument worker sums every byte", fold_bytes(of("abc"), 0, 0), 294),
+    check_eq("argument worker over empty", fold_bytes(bytes.empty(), 0, 5), 5)
+  ])

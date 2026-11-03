@@ -7,6 +7,8 @@ module main
 #   probe_num / byte_num              classify every byte of 64 KB: probes against integer compares
 #   copy_sum / byte_sum               sum every byte of 64 KB: bytes_from_utf8 + bytes_get against
 #                                     str_byte_at (the copy is inside the timed region)
+#   bytes_sum                         the bytes_get loop alone, the copy made before timing; no pair,
+#                                     it compares one row across two compilers
 #   c_strlen / byte_strlen            codepoint count of 64 KB: C str_len against a Sprout loop
 #   probe_parse_int / byte_parse_int  the prelude parse_int against a copy that reads via str_byte_at
 #
@@ -104,6 +106,12 @@ fn copy_sum_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
     let s = pick(a, b, rep)
     in copy_sum_loop(a, b, rep + 1, reps, copy_sum_scan(bytes.from_string(s), 0, str_byte_len(s), acc))
 
+fn bytes_sum_loop(a: Bytes, b: Bytes, rep: Int, reps: Int, acc: Int) -> Int =
+  if rep >= reps then acc
+  else
+    let v = if rem(rep, 2) == 0 then a else b
+    in bytes_sum_loop(a, b, rep + 1, reps, copy_sum_scan(v, 0, bytes.length(v), acc))
+
 fn byte_sum_loop(a: String, b: String, rep: Int, reps: Int, acc: Int) -> Int =
   if rep >= reps then acc
   else byte_sum_loop(a, b, rep + 1, reps, str_sum_scan(pick(a, b, rep), 0, len_at(a, b, rep), acc))
@@ -180,7 +188,7 @@ fn timed(row: String, iters: Int, units: Int, f: Unit -> Int) -> Unit !{IO} =
     t1 <- time.now_micros()
     report(row, iters, out, units, t0, t1)
 
-let usage = "usage: str_byte_at_bench <probe_num|byte_num|copy_sum|byte_sum|c_strlen|byte_strlen|probe_parse_int|byte_parse_int> <iterations>"
+let usage = "usage: str_byte_at_bench <probe_num|byte_num|copy_sum|bytes_sum|byte_sum|c_strlen|byte_strlen|probe_parse_int|byte_parse_int> <iterations>"
 
 fn main() -> Unit !{IO} =
   do
@@ -196,6 +204,10 @@ fn main() -> Unit !{IO} =
     | "probe_num" -> timed(row, iters, avg_n * iters, \_ -> probe_num_loop(na, nb, 0, iters, 0))
     | "byte_num" -> timed(row, iters, avg_n * iters, \_ -> byte_num_loop(na, nb, 0, iters, 0))
     | "copy_sum" -> timed(row, iters, avg_n * iters, \_ -> copy_sum_loop(na, nb, 0, iters, 0))
+    | "bytes_sum" ->
+        let va = bytes.from_string(na)
+            vb = bytes.from_string(nb)
+        in timed(row, iters, avg_n * iters, \_ -> bytes_sum_loop(va, vb, 0, iters, 0))
     | "byte_sum" -> timed(row, iters, avg_n * iters, \_ -> byte_sum_loop(na, nb, 0, iters, 0))
     | "c_strlen" -> timed(row, iters, avg_m * iters, \_ -> c_strlen_loop(ma, mb, 0, iters, 0))
     | "byte_strlen" -> timed(row, iters, avg_m * iters, \_ -> byte_strlen_loop(ma, mb, 0, iters, 0))
