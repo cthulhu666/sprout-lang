@@ -78,6 +78,7 @@ fn suite(l: Loaded) -> Unit !{IO} =
     check_true("key: vec_map at Double", has_key(l, "vec_map$Double")),
     check_true("key: the helper vec_map reaches", has_key(l, "vec_map_indexed$Double")),
     check_true("key: the creator vec_map_indexed reaches", has_key(l, "vec_from_list$Double")),
+    check_eq("key: names are unique", list_length(dedupe(key_names(l))), list_length(key_names(l))),
     check_false("key: vec_map is keyed by its result variable alone", has_key(l, "vec_map$Int")),
     check_true("key: two variables, written order", has_key(l, "$entry.pair_up$Int_Double")),
     check_true("key: signature order, not alphabetical", has_key(l, "$entry.swap_up$Double_Int")),

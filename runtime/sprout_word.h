@@ -36,8 +36,8 @@ static inline SproutHeapKind sprout_hdr_kind(uint64_t h) {
 /* NOSCAN: a VECTOR whose elements are never heap pointers (docs/pointer-free-vectors-v0.md §4.1).
  * It is the top aux bit, header bit 63. The aux field's other use for a vector is the inline
  * element count, so every read of a vector's aux masks with SPROUT_VEC_AUX_COUNT_MASK.
- * SYNC WITH the flag write the compiler emits inline (stdlib/compiler/ast_to_ir): the same
- * load, `or` with this bit, store. */
+ * SYNC WITH the flag write the compiler emits inline (ir_lowering.lower_vec_noscan): the same
+ * load, `or` with this bit, store. scripts/noscan_gate.sh holds the bit as an LLVM literal. */
 #define SPROUT_VEC_NOSCAN_BIT ((uint64_t)1 << 63)
 #define SPROUT_VEC_AUX_COUNT_MASK (((unsigned long long)1 << 49) - 1)
 

@@ -157,7 +157,7 @@ if ((${#roots[@]})); then
       }
       close ARGV if eof;
     }
-    print STDERR "no C definition: $_\n" for @nodef;
+    print STDERR "no C definition: $_\n" for ($ENV{EXT_VERBOSE} ? @nodef : ());
     ' | sort)
 fi
 

@@ -499,7 +499,7 @@ fn fn_sig(params: List ast.Param, ret: Maybe ast.TypeExpr, constraints: List ast
       | Nothing -> Nothing
       | Just tes -> Just(SigFn(tes, ret, constraints))
 
-fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
+export fn all_annotated(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
   match params with
   | Nil -> Just(Nil)
   | Cons p rest ->

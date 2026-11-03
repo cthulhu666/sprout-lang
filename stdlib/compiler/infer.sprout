@@ -545,7 +545,7 @@ fn collect_param_type_vars(params: List ast.Param, acc: List String) -> List Str
           | Nothing -> collect_param_type_vars(rest, acc)
           | Just te -> collect_param_type_vars(rest, collect_te_vars(te, acc))
 
-fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
+export fn collect_te_vars(te: ast.TypeExpr, acc: List String) -> List String =
   match te with
   | ast.TypeName name ->
       if source.is_lowercase_name(name) then list_add_unique(name, acc) else acc

@@ -1,10 +1,12 @@
 module stdlib.compiler.scalar_copies
 import stdlib.compiler.ast as ast
+import stdlib.compiler.infer as infer
 import stdlib.compiler.source as source
 import stdlib.compiler.spec_keys as spec_keys
 import stdlib.compiler.type_kind as type_kind
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.compiler.types as types
+import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.string as string
 
 # Scalar copies, dry run (docs/pointer-free-vectors-v0.md §4.3): finds the copies of generic
@@ -70,31 +72,15 @@ type Cand = (sig: Sig, decl: typed_ast.TypedDecl)
 type Ctx = (cands: Dict Cand, creators: Dict Sig, env: Dict types.Scheme)
 
 fn make_sig(params: List ast.TypeExpr, ret: ast.TypeExpr) -> Sig =
-  Sig(params = params, ret = ret, vars = te_vars(ret, list_fold(\ (acc, te) -> te_vars(te, acc), [], params)))
-
-fn te_vars(te: ast.TypeExpr, acc: List String) -> List String =
-  match te with
-  | ast.TypeName n -> if source.is_lowercase_name(n) && !list_member(n, acc) then list_append(acc, [n]) else acc
-  | ast.TypeApply base arg -> te_vars(arg, te_vars(base, acc))
-  | ast.TypeArrow param ret _ _ -> te_vars(ret, te_vars(param, acc))
-  | ast.TypeThunk ret _ -> te_vars(ret, acc)
-  | ast.TypeEffect inner _ -> te_vars(inner, acc)
-  | ast.TupleType items -> list_fold(\ (a, t) -> te_vars(t, a), acc, items)
-
-fn param_types(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
-  match params with
-  | [] -> Just([])
-  | [ast.Param _ (Just te) _ | rest] ->
-      let Just tes = param_types(rest) else Nothing
-      in Just(Cons(te, tes))
-  | _ -> Nothing
+  Sig(params = params, ret = ret,
+      vars = infer.collect_te_vars(ret, list_fold(\ (acc, te) -> infer.collect_te_vars(te, acc), [], params)))
 
 fn cand_table(decls: List typed_ast.TypedDecl) -> Dict Cand =
   list_fold(\ (table, d) -> add_cand(d, table), dict_empty(), decls)
 
 fn add_cand(d: typed_ast.TypedDecl, table: Dict Cand) -> Dict Cand =
   let typed_ast.TFnDecl name params (Just ret) _ [] _ = d else table
-      Just tes = param_types(params) else table
+      Just tes = verify_dispatch.all_annotated(params) else table
   in dict_set(name, Cand(sig = make_sig(tes, ret), decl = d), table)
 
 fn creator_table(decls: List typed_ast.TypedDecl) -> Dict Sig =
@@ -102,7 +88,7 @@ fn creator_table(decls: List typed_ast.TypedDecl) -> Dict Sig =
 
 fn add_creator(d: typed_ast.TypedDecl, table: Dict Sig) -> Dict Sig =
   let typed_ast.TExternFnDecl name params (Just ret) _ = d else table
-      Just tes = param_types(params) else table
+      Just tes = verify_dispatch.all_annotated(params) else table
   in if type_kind.is_vector_creator(name) then dict_set(name, make_sig(tes, ret), table) else table
 
 # A creating extern's creating variable is its result's element: `Vector a`.
@@ -176,8 +162,9 @@ fn instantiate(sig: Sig, params: List types.Type, ret: types.Type) -> Dict types
 # Sites
 # ---------------------------------------------------------------------------
 
-# A call to, or a reference to, a candidate or a creating extern: the types at the node.
-type Site = (callee: String, params: List types.Type, ret: types.Type, pos: source.SourcePos)
+# A call to, or a reference to, a candidate or a creating extern: the callee's signature
+# variables instantiated at the node (`instantiate`, computed once when the site is built).
+type Site = (callee: String, theta: Dict types.Type, pos: source.SourcePos)
 
 # A body to sweep. `owner` is the function whose body it is.
 type Body = (holder: String, owner: Maybe String, locals: Dict Bool, expr: typed_ast.TypedExpr)
@@ -252,9 +239,10 @@ fn gather_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, t: t
 
 fn note_call(name: String, args: List typed_ast.TypedExpr, t: types.Type, pos: source.SourcePos,
              locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
-  if (dict_member(name, ctx.cands) || dict_member(name, ctx.creators)) && !dict_member(name, locals)
-  then Cons(Site(callee = name, params = list_filter_map(value_arg_type, args), ret = t, pos = pos), acc)
-  else acc
+  let Nothing = dict_get(name, locals) else acc
+      Just sig = callee_sig(name, ctx) else acc
+      theta = instantiate(sig, list_filter_map(value_arg_type, args), t)
+  in Cons(Site(callee = name, theta = theta, pos = pos), acc)
 
 fn value_arg_type(a: typed_ast.TypedExpr) -> Maybe types.Type =
   match a with
@@ -268,7 +256,7 @@ fn note_ref(name: String, t: types.Type, pos: source.SourcePos, locals: Dict Boo
   let Just cand = dict_get(name, ctx.cands) else acc
       Nothing = dict_get(name, locals) else acc
       Just(params, ret) = peel(list_length(cand.sig.params), t) else acc
-  in Cons(Site(callee = name, params = params, ret = ret, pos = pos), acc)
+  in Cons(Site(callee = name, theta = instantiate(cand.sig, params, ret), pos = pos), acc)
 
 # The `n` parameter types and the result of a curried function type; a zero-parameter function
 # is a thunk.
@@ -311,9 +299,7 @@ fn grow(s: Swept, ctx: Ctx, creating: Dict (List String)) -> Dict (List String) 
 # instantiation is a variable of `own`.
 fn site_vars(site: Site, own: Sig, ctx: Ctx, creating: Dict (List String)) -> List String =
   let Just vars = dict_get(site.callee, creating) else []
-      Just sig = callee_sig(site.callee, ctx) else []
-      theta = instantiate(sig, site.params, site.ret)
-  in list_filter_map(\v -> own_var(dict_get(v, theta), own, ctx.env), vars)
+  in list_filter_map(\v -> own_var(dict_get(v, site.theta), own, ctx.env), vars)
 
 # The written name, in `own`, of the type variable `bound` is, through its `@eta_fwdvar` marker.
 fn own_var(bound: Maybe types.Type, own: Sig, env: Dict types.Scheme) -> Maybe String =
@@ -334,9 +320,9 @@ fn edge_up(s: Swept, ctx: Ctx, creating: Dict (List String)) -> Edged =
   Edged(owner = s.owner, holder = s.holder, edges = list_filter_map(site_edge(_, ctx, creating), s.sites))
 
 fn site_edge(site: Site, ctx: Ctx, creating: Dict (List String)) -> Maybe Edge =
-  let Just cand = dict_get(site.callee, ctx.cands) else Nothing
+  let Just _ = dict_get(site.callee, ctx.cands) else Nothing
       Just _ = dict_get(site.callee, creating) else Nothing
-  in Just(Edge(callee = site.callee, theta = instantiate(cand.sig, site.params, site.ret), pos = site.pos))
+  in Just(Edge(callee = site.callee, theta = site.theta, pos = site.pos))
 
 # A candidate's edges, for the walk of a copy's body.
 fn edges_by_fn(edged: List Edged, ctx: Ctx) -> Dict (List Edge) =

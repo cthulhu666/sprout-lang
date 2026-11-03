@@ -623,6 +623,8 @@ fn lower_checked(check_result: typed_ast.TypedResult) -> typed_ast.TypedResult !
               optimised <- run_opt_passes(cfg, lowering.lower_program(scalar_prog, env))
               typed_ast.TypedOk(optimised, env)
 
+let scalar_trace_var = "SPROUT_TRACE_SCALAR"
+
 # Scalar copies (docs/pointer-free-vectors-v0.md §4.3), after `specialise` so its copies are
 # candidates too. A dry run: it reports the copies it would make and returns the program as it is.
 fn scalar_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
@@ -632,16 +634,22 @@ fn scalar_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
       _ <- report_opt_stats(cfg, opt_config.Scalar, false, prog, prog)
       prog
   else
-    let out = scalar_copies.run(prog, env)
-    in
-      do
-        _ <- report_opt_stats(cfg, opt_config.Scalar, true, prog, out.program)
-        _ <- trace_scalar(out.trace)
-        out.program
+    # The analysis is report-only until the copies land, so it runs only when it is read.
+    if cfg.stats || is_just(switches.env_switch_quiet(scalar_trace_var)) then scalar_dry_run(cfg, prog, env)
+    else prog
 
-# SPROUT_TRACE_SCALAR=1: one line per key, then the totals, to stderr.
-fn trace_scalar(lines: List String) -> Unit !{IO} =
-  match switches.env_switch("SPROUT_TRACE_SCALAR") with
+fn scalar_dry_run(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
+                  env: Dict types.Scheme) -> typed_ast.TypedProgram !{IO} =
+  let out = scalar_copies.run(prog, env)
+  in
+    do
+      _ <- report_opt_stats(cfg, opt_config.Scalar, true, prog, out.program)
+      _ <- trace_switch(scalar_trace_var, out.trace)
+      out.program
+
+# When `var` is set, one line per entry to stderr.
+fn trace_switch(var: String, lines: List String) -> Unit !{IO} =
+  match switches.env_switch(var) with
   | Nothing -> ()
   | Just _ -> list_each(eprint, lines)
 
@@ -660,16 +668,10 @@ fn specialise_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
     in
       do
         _ <- report_opt_stats(cfg, opt_config.Spec, true, prog, out.program)
-        _ <- trace_spec(out.trace)
+        _ <- trace_switch("SPROUT_TRACE_SPEC", out.trace)
         match enforced_dispatch_finding(copy_finding(out, verify_dispatch.verify_added(out.program, out.added))) with
         | Nothing -> typed_ast.TypedOk(out.program, env)
         | Just (vpos, vmsg) -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
-
-# SPROUT_TRACE_SPEC=1: one line per copy made or key declined, to stderr.
-fn trace_spec(lines: List String) -> Unit !{IO} =
-  match switches.env_switch("SPROUT_TRACE_SPEC") with
-  | Nothing -> ()
-  | Just _ -> list_each(eprint, lines)
 
 # A finding in a copy is reported against the generic function and the call that made it,
 # not the mangled name. The call's position names no file, so it is placed by the function
