@@ -26,8 +26,8 @@ fn check(name: String) -> Result String String =
 
 fn greet(r: Result String String) -> String =
   match r with
-  | Ok name -> string.concat("Hello, ", name)
-  | Err e   -> string.concat("skipped: ", e)
+  | Ok name -> `Hello, ${name}`
+  | Err e   -> `skipped: ${e}`
 
 fn main() -> Unit !{IO} =
   match env.get("USER") with
@@ -104,7 +104,8 @@ parses but is deprecated and reported by the linter as `deprecated-brace-body`.
 
 ## Quick start
 
-On macOS or Linux, clone the repository and run the development setup:
+There are no prebuilt binaries yet, so the compiler is built from source. On macOS or
+Linux, clone the repository and run the development setup:
 
 ```
 ./scripts/setup-dev.sh
@@ -292,9 +293,7 @@ See also [spec §5.10](docs/spec-v0.md) and
 [docs/list-comprehensions-v0.md](docs/list-comprehensions-v0.md).
 
 `IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is
-`range_up(0, n - 1)` — including at `n == 0`, which needs **no guard**. A range is
-empty when its end lies past its start in the direction of travel, so `range_up(0, -1)`
-iterates zero times.
+`range_up(0, n - 1)` — including at `n == 0`, which needs **no guard**.
 
 Ranges are built by one of two peer constructors, and neither is the default spelling:
 
@@ -331,7 +330,7 @@ body into a named helper and pass it via a single-expression lambda:
 fn print_line(items: Vec String, i: Int) -> Unit !{IO} =
   match vec_get(i, items) with | Just s -> print(s) | Nothing -> ()
 
-range_each(\i -> print_line(items, i), range(0, vec_length(items) - 1))
+range_each(\i -> print_line(items, i), range_up(0, vec_length(items) - 1))
 ```
 
 ## Backlog
