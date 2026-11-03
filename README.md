@@ -50,9 +50,10 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
   effectful ones carry `!{IO}` (with singleton effect variables `!{e}` for
   higher-order helpers). A body that performs IO under a pure signature is a
   compile error, and so is passing an `!{IO}` function where a pure one is
-  expected. One gap remains: a call through a parameter typed with an effect
-  variable (`g: Int -> Int !{e}`) is not checked against a pure signature
-  (spec §7, enforcement note). Over-declaring is fine — the rule is
+  expected. One gap remains: a function's own effect variable is not checked in
+  its body, so a call through a parameter `g: Int -> Int !{e}` under a pure
+  signature is accepted, and so is a function declared `!{e}` whose body does
+  IO (spec §7, enforcement note). Over-declaring is fine — the rule is
   *inferred ⊑ declared*, not equality. Open effect rows are not supported yet. Aborting is *not* an effect:
   `panic` is pure, so an unreachable-by-invariant arm does not make its function
   effectful ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
