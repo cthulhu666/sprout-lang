@@ -177,6 +177,8 @@ and `Double` against its generic result.
   `mutvec_new`, `mutvec_empty` or `vec_from_list` are still flagged.
 - A creating function without a full written signature, and every caller that reaches the
   creator only through one.
+- A creating extern used as a value (`list_map(vector_from_list, xss)`): it goes through an
+  eta wrapper with no element type. Its generic wrapper (`vec_from_list`) is retargeted instead.
 - A vector `read_int_lines` builds in C (it has no Sprout caller).
 - With `SPROUT_OPT_OFF=scalar`, everything but direct calls (§4.2).
 
@@ -255,8 +257,10 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
 
 ## 7. Steps
 
-1. Runtime: the flag, its mask helper, marking, inheritance, barrier; C tests.
-2. Emission (§4.2) for direct calls; IR tests; reseed; golden IR.
+1. ~~Runtime: the flag, its mask helper, marking, inheritance, barrier; C tests.~~ Landed
+   (`tests/c_runtime/vec_noscan.c`).
+2. ~~Emission (§4.2) for direct calls; IR tests; reseed; golden IR.~~ Landed (`IRVecNoscan`,
+   `just noscan-gate`, `tests/stdlib/test_vec_noscan.spr`).
 3. `check_extern_signatures.sh` gains premise 1's two rules.
 4. The scalar-copy pass; IR and behaviour tests; reseed; golden IR; the measurements of §6.5.
 5. Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the

@@ -392,6 +392,19 @@ read the diff before staging it, since the off build is the behaviour being pres
 The IR-shape half (what qualifies, what is left alone and why) is `tests/stdlib/compiler/test_bce.spr`.
 Wired into `just ci-fast-gates` as `bce-gate`.
 
+## NOSCAN emission — `just noscan-gate`
+
+Reads the emitted IR of each function in `tests/noscan_fixtures/fixture_noscan.spr` (behaviour
+cannot see a missing flag: the program prints the same either way). A direct call to
+`vector_empty`, `vector_from_list` or `vec_make_filled` at `Vector Int/Bool/Char/Double` must be
+followed by the header `or` with bit 63. At `Vector String`, a record, a `wrap` over `Int`,
+`Vector (Vector Int)` and a type variable it must not: a flag on a vector that can hold a heap
+pointer is a use-after-free that neither the mark nor GENCHECK can see. The flagged IR must also
+assemble. Design: [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md) §4.2. The recipe runs
+the stage-1 binary, so an emitter change shows here only after `just refresh-seed`. The runtime
+side is `tests/stdlib/test_vec_noscan.spr`, also in `test-stress`.
+Wired into `just ci-fast-gates` as `noscan-gate`.
+
 ## Specialisation — `just spec-gate`
 
 Compiles each `tests/spec_fixtures/<name>.spr` twice, by default and with

@@ -1006,6 +1006,21 @@ fn fr_tco_load_program() -> sprout_ir.IRProgram =
     blk("body", [sprout_ir.IRTcoBack([("%slot_x", "i64", "%t")], "%sp", "tco_loop")]),
     blk("done", [sprout_ir.IRRet("%t")])])
 
+# IRVecNoscan writes a vector's header word: it uses the vector and triggers nothing. So a
+# vector live across a later trigger is rooted, and one that is only flagged and returned is not.
+fn noscan_live_program() -> sprout_ir.IRProgram =
+  one_fn("ns_live", Nil, [
+    blk("entry", [sprout_ir.IRCall("%v", sprout_ir.IRTHeap, "vector_empty", Nil),
+                  sprout_ir.IRVecNoscan("%v"), sc("%z1"), sc("%z2"), cc("%z", "%z1", "%z2"),
+                  cc("%r", "%v", "%z"), sprout_ir.IRRet("%r")])])
+
+fn noscan_alone_program() -> sprout_ir.IRProgram =
+  one_fn("ns_alone", Nil, [
+    blk("entry", [sprout_ir.IRCall("%v", sprout_ir.IRTHeap, "vector_empty", Nil),
+                  sprout_ir.IRVecNoscan("%v"), sprout_ir.IRRet("%v")])])
+
+fn root_pushes(ir: String) -> Int = scan_pushes(ir) + i64_pushes(ir)
+
 fn main() -> Unit !{IO} =
   do
     # Substring checks are blind to whole-module malformation; verify a
@@ -1021,6 +1036,20 @@ fn main() -> Unit !{IO} =
     fr_tco_dead_compiles <- clang_verifies_ir(lower(fr_tco_dead_program()))
     fr_tco_load_compiles <- clang_verifies_ir(lower(fr_tco_load_program()))
     run_suite("ir_rooting", [
+    # --- IRVecNoscan: a header write, not a trigger; the vector is a use.
+    check_eq("NS1: a vector flagged then live across a concat is rooted once",
+              root_pushes(lower(noscan_live_program())), 1),
+    check_true("NS1: the header write follows the creating call",
+               before(lower(noscan_live_program()), "call i64 @vector_empty",
+                      "or i64 %v$nsh0, -9223372036854775808")),
+    check_true("NS1: and runs before the concat that triggers a collection",
+               before(lower(noscan_live_program()), "or i64 %v$nsh0, -9223372036854775808",
+                      "call i64 @str_concat")),
+    check_eq("NS2: a flagged vector that is only returned is not rooted",
+              root_pushes(lower(noscan_alone_program())), 0),
+    check_eq("NS2: and the header word is written exactly once",
+              count(lower(noscan_alone_program()), "store i64 %v$nsh1, ptr %v$nshp"), 1),
+
     # --- Test 13: long-block live_after characterization (push count locked).
     check_eq("T13: long block push count (coalesced O(N): 5 values, 5 pushes)",
               count(lower(test13_program()), "call i64 @sprout_gc_push_i64_root"), 5),

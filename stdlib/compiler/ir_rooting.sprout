@@ -155,6 +155,8 @@ fn op_triggers_gc(op: sprout_ir.IROp) -> Bool =
   # Raw loads: no allocation.
   | sprout_ir.IRLoadWord _ _ _ -> false
   | sprout_ir.IRLoadU8 _ _ _ -> false
+  # IRVecNoscan is a load, `or` and store on a header word; no allocation.
+  | sprout_ir.IRVecNoscan _ -> false
   | sprout_ir.IRAbortMatch -> false
   # IRPanic calls @panic then `unreachable`; panic exits, so no GC.
   | sprout_ir.IRPanic _ -> false
@@ -288,6 +290,7 @@ fn op_produces_simple_heap(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRVecLenD _ _ -> Nothing
   | sprout_ir.IRVecGetD _ _ _ -> Nothing
   | sprout_ir.IRVecSetD _ _ _ _ -> Nothing
+  | sprout_ir.IRVecNoscan _ -> Nothing
   # BCE: a read of a heap element is a heap value like any call result; the kind
   # (set from the element type) decides, as for IRGetField.
   | sprout_ir.IRVecGetU r _ _ kind ->
@@ -527,6 +530,8 @@ export fn op_uses(op: sprout_ir.IROp) -> List String =
   # The base (and index) stay live across the load, as for the vec ops.
   | sprout_ir.IRLoadWord _ b _ -> [b]
   | sprout_ir.IRLoadU8 _ b i -> [b, i]
+  # The vec handle is a use: it must stay live up to the header write.
+  | sprout_ir.IRVecNoscan v -> Cons(v, Nil)
   | sprout_ir.IRAbortMatch -> Nil
   # IRPanic reads its message operand (keep it live for the @panic call).
   | sprout_ir.IRPanic msg -> Cons(msg, Nil)
@@ -617,6 +622,8 @@ export fn op_def(op: sprout_ir.IROp) -> Maybe String =
   | sprout_ir.IRVecGetU r _ _ _ -> Just(r)
   | sprout_ir.IRLoadWord r _ _ -> Just(r)
   | sprout_ir.IRLoadU8 r _ _ -> Just(r)
+  # IRVecNoscan defines no value.
+  | sprout_ir.IRVecNoscan _ -> Nothing
   # IRAbortMatch no longer defines anything (/code-review fix #15).
   | sprout_ir.IRZextI1ToI64 r _ -> Just(r)
   | sprout_ir.IRTruncI64ToI1 r _ -> Just(r)
@@ -1151,6 +1158,7 @@ export fn op_exposes_operands(op: sprout_ir.IROp) -> Bool =
   | sprout_ir.IRVecGetU _ _ _ _ -> false
   | sprout_ir.IRLoadWord _ _ _ -> false
   | sprout_ir.IRLoadU8 _ _ _ -> false
+  | sprout_ir.IRVecNoscan _ -> false
   | sprout_ir.IRAbortMatch -> false
   # IRPanic does not trigger GC (panic exits), so it exposes no operands.
   | sprout_ir.IRPanic _ -> false

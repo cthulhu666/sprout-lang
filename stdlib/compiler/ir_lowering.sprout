@@ -401,6 +401,8 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
       "  " ++ r ++ "$bp = getelementptr i8, ptr " ++ r ++ "$p, i64 " ++ i ++ "\n" ++
       "  " ++ r ++ "$b = load i8, ptr " ++ r ++ "$bp\n" ++
       "  " ++ r ++ " = zext i8 " ++ r ++ "$b to i64"
+  | sprout_ir.IRVecNoscan v ->
+      lower_vec_noscan(v)
   | sprout_ir.IRAbortMatch ->
       "  call void @sprout_abort_match()\n  unreachable"
   # W7/F-DIV: reuses the existing `panic` builtin. The call result is unused
@@ -516,6 +518,15 @@ fn lower_reuse_header(r: String, tag: Int, arity: Int) -> String =
   "  " ++ r ++ "$h1 = and i64 " ++ r ++ "$h0, " ++ int_to_string(hdr_aux_unit - 1) ++ "\n" ++
   "  " ++ r ++ "$h2 = or i64 " ++ r ++ "$h1, " ++ int_to_string((tag * 256 + arity) * hdr_aux_unit) ++ "\n" ++
   "  store i64 " ++ r ++ "$h2, ptr " ++ r ++ "$hp"
+
+# Set the NOSCAN bit (header bit 63, as an i64 literal) in a vector's header word at payload - 8.
+# SYNC WITH SPROUT_VEC_NOSCAN_BIT in runtime/sprout_word.h.
+fn lower_vec_noscan(v: String) -> String =
+  "  " ++ v ++ "$nsp = inttoptr i64 " ++ v ++ " to ptr\n" ++
+  "  " ++ v ++ "$nshp = getelementptr i8, ptr " ++ v ++ "$nsp, i64 -8\n" ++
+  "  " ++ v ++ "$nsh0 = load i64, ptr " ++ v ++ "$nshp\n" ++
+  "  " ++ v ++ "$nsh1 = or i64 " ++ v ++ "$nsh0, -9223372036854775808\n" ++
+  "  store i64 " ++ v ++ "$nsh1, ptr " ++ v ++ "$nshp"
 
 # Emit per-field store instructions for an IRMakeCtor (`tag` "$f") or IRMakeTuple
 # (`tag` "$s") expansion.  Field `idx` lands at word offset `idx`, matching the

@@ -440,6 +440,10 @@ export type IROp (..) =
   # IRLoadU8 <result> <base> <index> — the byte at <base> + <index>, zero-extended to i64.
   # Always scalar. Unchecked; non-allocating, never triggers GC.
   | IRLoadU8 String String String
+  # IRVecNoscan <vec-handle> — set the NOSCAN bit in <vec-handle>'s header word. No result.
+  # Emitted after a creating call whose result is a Vector of Int/Bool/Char/Double.
+  # A load, `or` and store on the header word; allocates nothing: NOT a GC trigger.
+  | IRVecNoscan String
   # IRAbortMatch
   # Lowers to:
   #   call void @sprout_abort_match()
@@ -641,6 +645,7 @@ export fn op_direct_callee(op: IROp) -> Maybe String =
   | IRVecGetU _ _ _ _ -> Nothing
   | IRLoadWord _ _ _ -> Nothing
   | IRLoadU8 _ _ _ -> Nothing
+  | IRVecNoscan _ -> Nothing
   | IRAbortMatch -> Nothing
   | IRPanic _ -> Nothing
   | IRZextI1ToI64 _ _ -> Nothing
@@ -849,6 +854,8 @@ export fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = load_word " ++ b ++ ", " ++ int_to_string(off)
   | IRLoadU8 r b i ->
       "    " ++ r ++ " = load_u8 " ++ b ++ ", " ++ i
+  | IRVecNoscan v ->
+      "    vec_noscan " ++ v
   | IRAbortMatch ->
       "    abort_match; unreachable"
   | IRPanic msg ->

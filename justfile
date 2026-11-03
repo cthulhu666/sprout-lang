@@ -540,6 +540,13 @@ test-conformance-run: bootstrap-from-seed
 b1-gate: bootstrap-from-seed
   SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/b1_gate.sh
 
+# NOSCAN emission gate (docs/pointer-free-vectors-v0.md §4.2): a direct creating-extern call at
+# `Vector Int/Bool/Char/Double` is followed by the header-bit write; every other element type is not.
+# See scripts/noscan_gate.sh.
+[group('test')]
+noscan-gate: bootstrap-from-seed
+  SPROUT_STAGE1="{{build_dir}}/compile_driver_bin_stage1" bash scripts/noscan_gate.sh
+
 # Bounds-check elimination gate: the pass fires on its fixtures, and a failing entry test
 # reaches the original body, which panics where it always did. See scripts/bce_gate.sh.
 [group('test')]
@@ -3788,7 +3795,9 @@ test-stress: bootstrap-from-seed
   # bound in an arm are held only by their own SSA values across the arm's allocations.
   # test_frame_slot_rooting: frame slots (docs/frame-slot-rooting-v0.md) under an awaited task, a task
   # parked with its frame values while another allocates, deep recursion and a TCO loop.
-  STRESS_FILES="tests/stdlib/test_frame_slot_rooting.spr tests/stdlib/test_linear_reuse.spr tests/stdlib/test_match_tuple_scrutinee.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_gc_phi_of_params.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_cpr_argw_behaviour.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
+  # test_vec_noscan: a directly built Vector String must keep every string, and `vector_empty()`
+  # at Int and at String in one body must not share a flagged vector (pointer-free-vectors-v0 §4.5).
+  STRESS_FILES="tests/stdlib/test_vec_noscan.spr tests/stdlib/test_frame_slot_rooting.spr tests/stdlib/test_linear_reuse.spr tests/stdlib/test_match_tuple_scrutinee.spr tests/stdlib/test_gc_vec_buffer_heap_elems.spr tests/stdlib/test_gc_freelist_reuse.spr tests/stdlib/test_ir_rooting.spr tests/stdlib/test_gc_phi_of_params.spr tests/stdlib/test_ir_codegen_ctors.spr tests/stdlib/test_ir_codegen_match.spr tests/stdlib/test_ir_codegen_closures.spr tests/stdlib/test_ir_codegen_char_rooting.spr tests/stdlib/test_stress_global_roots.spr tests/stdlib/test_stress_unboxed_maybe_heap_payload.spr tests/stdlib/test_stress_cpr_tier2_worker.spr tests/stdlib/test_cpr_argw_behaviour.spr tests/stdlib/test_stress_records_heap.spr tests/stdlib/test_task_cooperative.spr tests/stdlib/test_task_nested_scope.spr tests/stdlib/test_gc_root_cross_task.spr tests/stdlib/test_chan.spr tests/stdlib/test_chan_close.spr tests/stdlib/test_chan_rendezvous.spr tests/stdlib/test_chan_select.spr"
   # Known-failing under stress — false-green at the default threshold, FOUND BY
   # THIS PASS (residual typed-codegen rooting UAF, GC-confirmed via
   # SPROUT_GC_DISABLE).  Tracked in BACKLOG.md; warn-only here.  Promote to
@@ -4442,6 +4451,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "c-runtime-test|c-runtime-test"
     "b1-gate|b1-gate"
     "bce-gate|bce-gate"
+    "noscan-gate|noscan-gate"
     "spec-gate|spec-gate"
     "approved-builtins|check-approved-builtins"
     "test-approved-builtins|test-approved-builtins"
@@ -4784,7 +4794,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate noscan-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

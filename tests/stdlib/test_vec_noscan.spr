@@ -1,0 +1,107 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.mutable (vec_make_filled)
+
+# The compiler flags a vector NOSCAN (docs/pointer-free-vectors-v0.md §4.2) when a creating
+# extern is called directly at `Vector Int/Bool/Char/Double`. The collector then skips its
+# elements, so a flag on a vector that holds a heap pointer is a use-after-free. These tests
+# call the raw `vector_*` externs, the only place step 2 flags, and force collections between
+# the build and the read. They also run under SPROUT_GC_STRESS=1.
+#
+#   §4.5 premise 2  set, append and concat of a flagged vector read back correctly
+#   §4.5 premise 4  a directly built Vector String keeps every string
+#   §4.5 premise 5  vector_empty() at Int and at String in one body: the strings survive
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + vector_length(vector_from_list(["a" ++ int_to_string(n), "b"])))
+
+fn labels(n: Int) -> List String = ["s" ++ int_to_string(i) for i in 1..n]
+
+fn ints(n: Int) -> List Int = [i * 10 for i in 1..n]
+
+fn doubles(n: Int) -> List Double = [to_double(i) + 0.5 for i in 1..n]
+
+fn int_at(v: Vector Int, i: Int) -> Int = maybe_with_default(-1, vector_get(v, i))
+
+fn double_at(v: Vector Double, i: Int) -> Double = maybe_with_default(-1.0, vector_get(v, i))
+
+fn str_at(v: Vector String, i: Int) -> String = maybe_with_default("?", vector_get(v, i))
+
+# The 600 and 700 element vectors are past the inline ceiling (508): their elements live in
+# a malloc'd buffer, a different path from the 3-element ones.
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ── Premise 2: inheriting ops on a flagged Vector Int ─────────────────────
+    let small = vector_from_list(ints(3))
+    let big = vector_from_list(ints(600))
+    let filled = vec_make_filled(5, 7)
+    let set_small = vector_set(small, 1, 99)
+    let set_big = vector_set(big, 599, 98)
+    let appended = vector_append(small, 40)
+    let appended_big = vector_append(big, 6010)
+    let joined = vector_concat(small, filled)
+    let joined_big = vector_concat(big, big)
+    let set_empty = vector_set(vector_empty(), 0, 1)
+    let from_empty = vector_append(vector_empty(), 5)
+
+    # ── The same on a flagged Vector Double ───────────────────────────────────
+    let dsmall = vector_from_list(doubles(3))
+    let dset = vector_set(dsmall, 0, 9.25)
+    let dappended = vector_append(dsmall, 4.5)
+    let djoined = vector_concat(dsmall, dsmall)
+
+    # ── Premise 4: a Vector String built directly, never flagged ──────────────
+    let strs = vector_from_list(labels(700))
+    let strs_set = vector_set(strs, 0, "first")
+    let strs_appended = vector_append(strs, "tail")
+
+    # ── Premise 5: vector_empty() at Int and at String in one body ────────────
+    let empty_ints = vector_append(vector_empty(), 7)
+    let empty_strs = vector_append(vector_append(vector_empty(), "one" ++ int_to_string(1)), "two")
+
+    let churned = churn(3000, 0)
+    assert_eq(state, "churn ran", churned, 6000)
+
+    assert_eq(state, "set (small): changed", int_at(set_small, 1), 99)
+    assert_eq(state, "set (small): source untouched", int_at(small, 1), 20)
+    assert_eq(state, "set (small): neighbour", int_at(set_small, 2), 30)
+    assert_eq(state, "set (out of line): changed", int_at(set_big, 599), 98)
+    assert_eq(state, "set (out of line): interior", int_at(set_big, 300), 3010)
+    assert_eq(state, "set on an empty vector: length", vector_length(set_empty), 0)
+    assert_eq(state, "append to an empty vector: length", vector_length(from_empty), 1)
+    assert_eq(state, "append to an empty vector: element", int_at(from_empty, 0), 5)
+    assert_eq(state, "append (small): length", vector_length(appended), 4)
+    assert_eq(state, "append (small): new element", int_at(appended, 3), 40)
+    assert_eq(state, "append (small): old element", int_at(appended, 0), 10)
+    assert_eq(state, "append (out of line): new element", int_at(appended_big, 600), 6010)
+    assert_eq(state, "append (out of line): old element", int_at(appended_big, 599), 6000)
+    assert_eq(state, "concat: length", vector_length(joined), 8)
+    assert_eq(state, "concat: left element", int_at(joined, 2), 30)
+    assert_eq(state, "concat: right element", int_at(joined, 7), 7)
+    assert_eq(state, "concat (out of line): length", vector_length(joined_big), 1200)
+    assert_eq(state, "concat (out of line): second half", int_at(joined_big, 1199), 6000)
+
+    assert_eq(state, "double set: changed", double_at(dset, 0), 9.25)
+    assert_eq(state, "double set: neighbour", double_at(dset, 1), 2.5)
+    assert_eq(state, "double append: new element", double_at(dappended, 3), 4.5)
+    assert_eq(state, "double append: old element", double_at(dappended, 2), 3.5)
+    assert_eq(state, "double concat: length", vector_length(djoined), 6)
+    assert_eq(state, "double concat: right element", double_at(djoined, 5), 3.5)
+
+    assert_eq(state, "Vector String: length", vector_length(strs), 700)
+    assert_eq(state, "Vector String: first", str_at(strs, 0), "s1")
+    assert_eq(state, "Vector String: interior", str_at(strs, 350), "s351")
+    assert_eq(state, "Vector String: last", str_at(strs, 699), "s700")
+    assert_eq(state, "Vector String set: changed", str_at(strs_set, 0), "first")
+    assert_eq(state, "Vector String set: interior", str_at(strs_set, 699), "s700")
+    assert_eq(state, "Vector String append: new element", str_at(strs_appended, 700), "tail")
+    assert_eq(state, "Vector String append: old element", str_at(strs_appended, 699), "s700")
+
+    assert_eq(state, "empty at Int: element", int_at(empty_ints, 0), 7)
+    assert_eq(state, "empty at String: length", vector_length(empty_strs), 2)
+    assert_eq(state, "empty at String: first", str_at(empty_strs, 0), "one1")
+    assert_eq(state, "empty at String: second", str_at(empty_strs, 1), "two")
+
+    summary(state)

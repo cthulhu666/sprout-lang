@@ -1,0 +1,64 @@
+module main
+# vec_make_filled is exported by stdlib.mutable; the raw vector_* creators are in the prelude.
+import stdlib.mutable (vec_make_filled)
+
+# NOSCAN gate (docs/pointer-free-vectors-v0.md §4.2): a direct call to a creating extern whose
+# result is `Vector T`, with T exactly Int, Bool, Char or Double, is followed by the inline
+# flag write. Every other result type keeps the bare call. The noscan-gate checks each
+# function's own IR.
+wrap Age = Int
+
+type Pt = (x: Int, y: Int)
+
+# Flagged.
+fn from_list_int(xs: List Int) -> Vector Int =
+  vector_from_list(xs)
+
+fn from_list_double(xs: List Double) -> Vector Double =
+  vector_from_list(xs)
+
+fn from_list_char(xs: List Char) -> Vector Char =
+  vector_from_list(xs)
+
+fn filled_int(n: Int, x: Int) -> Vector Int =
+  vec_make_filled(n, x)
+
+fn empty_bool() -> Vector Bool =
+  vector_empty()
+
+# The call is not the function's last expression.
+fn from_list_then_length(xs: List Int) -> Int =
+  let v = vector_from_list(xs)
+  in vector_length(v)
+
+# Not flagged.
+fn from_list_string(xs: List String) -> Vector String =
+  vector_from_list(xs)
+
+fn filled_string(n: Int, x: String) -> Vector String =
+  vec_make_filled(n, x)
+
+fn empty_string() -> Vector String =
+  vector_empty()
+
+fn from_list_record(xs: List Pt) -> Vector Pt =
+  vector_from_list(xs)
+
+fn from_list_wrap(xs: List Age) -> Vector Age =
+  vector_from_list(xs)
+
+fn from_list_nested(xs: List (Vector Int)) -> Vector (Vector Int) =
+  vector_from_list(xs)
+
+fn from_list_generic(xs: List a) -> Vector a =
+  vector_from_list(xs)
+
+fn filled_generic(n: Int, x: a) -> Vector a =
+  vec_make_filled(n, x)
+
+fn empty_generic() -> Vector a =
+  vector_empty()
+
+# Inheriting ops are not creators: no write after them.
+fn append_int(v: Vector Int, x: Int) -> Vector Int =
+  vector_append(v, x)
