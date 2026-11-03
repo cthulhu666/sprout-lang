@@ -4648,9 +4648,8 @@ fn translate_general_call(fname: String, call_ty: types.Type,
 # canonical names, so exact match fires on them and only them. A false negative
 # merely forgoes the optimization; a false positive on a heap element is unsafe.
 fn type_is_vector_double(t: types.Type) -> Bool =
-  match t with
-  | types.TApp (types.TConst vname)(types.TConst ename) ->
-      types.type_id_name(vname) == "Vector" && types.type_id_name(ename) == "Double"
+  match type_kind.vector_elem(t) with
+  | Just (types.TConst ename) -> types.type_id_name(ename) == "Double"
   | _ -> false
 
 # B1 inline vector element access. The operation comes from the runtime symbol

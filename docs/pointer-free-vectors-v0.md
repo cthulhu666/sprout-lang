@@ -268,6 +268,7 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
 4. The scalar-copy pass; IR and behaviour tests; reseed; golden IR; the measurements of §6.5.
    - 4a, landed: `scalar_copies` as a dry run (`just test`'s `test_scalar_copies.spr`,
      `SPROUT_TRACE_SCALAR=1`). It finds keys and reports; the program is unchanged.
-   - 4b: the copies, retargeting, `verify_added`, the flag on by default.
+   - 4b: the copies, retargeting, `verify_added`, the flag on by default, and flipping
+     `opt_config.implemented(Scalar)` so `SPROUT_OPT_OFF=scalar` stops warning.
 5. Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the
    flip.

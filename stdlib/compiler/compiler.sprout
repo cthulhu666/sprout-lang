@@ -635,16 +635,17 @@ fn scalar_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
       prog
   else
     # The analysis is report-only until the copies land, so it runs only when it is read.
-    if cfg.stats || is_just(switches.env_switch_quiet(scalar_trace_var)) then scalar_dry_run(cfg, prog, env)
-    else prog
+    do
+      let traced = is_just(switches.env_switch(scalar_trace_var))
+      if cfg.stats || traced then scalar_dry_run(cfg, traced, prog, env) else prog
 
-fn scalar_dry_run(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
+fn scalar_dry_run(cfg: opt_config.OptConfig, traced: Bool, prog: typed_ast.TypedProgram,
                   env: Dict types.Scheme) -> typed_ast.TypedProgram !{IO} =
   let out = scalar_copies.run(prog, env)
   in
     do
       _ <- report_opt_stats(cfg, opt_config.Scalar, true, prog, out.program)
-      _ <- trace_switch(scalar_trace_var, out.trace)
+      _ <- if traced then list_each(eprint, out.trace) else ()
       out.program
 
 # When `var` is set, one line per entry to stderr.

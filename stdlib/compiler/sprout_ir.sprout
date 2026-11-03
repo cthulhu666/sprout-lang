@@ -1,5 +1,6 @@
 module stdlib.compiler.sprout_ir
 
+import stdlib.bits
 import stdlib.compiler.type_kind as type_kind
 
 # ---------------------------------------------------------------------------
@@ -933,3 +934,7 @@ export let hdr_kind_cstr: Int = 10
 
 # Shift from a header word to its aux field. SYNC WITH runtime/sprout_runtime.c sprout_hdr_aux.
 export let hdr_aux_shift: Int = 14
+
+# A vector header's NOSCAN flag: bit 63, which prints as the i64 literal -9223372036854775808.
+# SYNC WITH SPROUT_VEC_NOSCAN_BIT in runtime/sprout_word.h.
+export let vec_noscan_bit: Int = bit_shl(1, 63)

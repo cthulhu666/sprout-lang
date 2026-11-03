@@ -135,7 +135,8 @@ Bisect a miscompile against the Sprout-level passes without rebuilding the compi
   `mutvec_set` then keeps its call to the wrapper and the write barrier. Also in `ir_pipeline`.
 - `SPROUT_OPT_OFF=scalar` — scalar copies ([pointer-free-vectors-v0.md](pointer-free-vectors-v0.md)
   §4.3, `stdlib/compiler/scalar_copies.sprout`). It currently only reports the copies it would make
-  and changes no program. `SPROUT_TRACE_SCALAR=1` prints one `[scalar] copy <name> of <fn> for the
+  and changes no program, so the switch warns "not implemented yet — nothing was disabled" (it
+  does skip the report). `SPROUT_TRACE_SCALAR=1` prints one `[scalar] copy <name> of <fn> for the
   call at <line>:<col> in <holder> nodes=<n>` line per key on stderr, then
   `[scalar] keys=<k> nodes=<total>`: the copies and the nodes they would add. It runs before
   dead-code elimination, so the keys of an unreachable prelude function count.
