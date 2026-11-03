@@ -131,9 +131,10 @@ write `range_down(5, 1)`
 - **Packages** — no package manager. A dotted import outside `stdlib/` needs one
   `--package-root <dir>`, and without it the import fails silently: the error surfaces
   later as `Unknown variable` ([packaging-v0.md](./docs/packaging-v0.md) §10).
-- **Effects** — a call through a parameter typed with an effect variable
-  (`g: Int -> Int !{e}`) is not checked against a pure signature (spec §7, enforcement
-  note). Open effect rows are not supported.
+- **Effects** — a function's own effect variable is not checked in its body. A call
+  through a parameter `g: Int -> Int !{e}` under a pure signature is accepted, and so
+  is a function declared `!{e}` whose body does IO (spec §7, enforcement note). Open
+  effect rows are not supported.
 - **Concurrency** — `select` takes receive cases only, over channels of one type.
 - **Syntax** — no operator sections (write `\x -> x * 2`, not `_ * 2`), and a
   lambda body cannot be a multi-statement `do` block.
