@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope)
-import stdlib.chan (Chan, chan_new, chan_send, chan_close)
+import stdlib.chan (Chan, chan_new, chan_error_message, chan_send, chan_close)
 import stdlib.terminal as terminal
 
 # L0.9 close guard: sending into a CLOSED channel must LOUD-FAIL (Go/Kotlin treat send-after-close
@@ -7,7 +7,7 @@ import stdlib.terminal as terminal
 # broken guard would buffer or hand off the value, letting the program reach the line after.
 fn producer(s: Scope) -> Unit !{IO} =
   do
-    ch <- chan_new(s, 2)
+    let Ok ch = chan_new(s, 2) else Err e -> panic(chan_error_message(e))
     chan_close(ch)
     chan_send(ch, 1)  # rejected: send on closed channel
     terminal.write("should-not-reach\n")

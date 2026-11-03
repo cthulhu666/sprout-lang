@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close, chan_select)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv, chan_close, chan_select)
 import stdlib.string as string
 
 # Channel select (L0.11, EXPERIMENTAL). `chan_select(chans)` waits on several same-typed channels
@@ -49,9 +49,9 @@ fn drain_select(cs: List (Chan Int), n: Int, acc: Int) -> Int !{IO} =
 
 fn fan_in(s: Scope) -> Int !{IO} =
   do
-    a <- chan_new(s, 0)  # rendezvous
-    b <- chan_new(s, 1)
-    c <- chan_new(s, 1)
+    let Ok a = chan_new(s, 0) else Err e -> panic(chan_error_message(e))  # rendezvous
+    let Ok b = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
+    let Ok c = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     task_spawn(s, \_ -> produce_one(a, 100))
     task_spawn(s, \_ -> produce_one(b, 20))
     task_spawn(s, \_ -> produce_one(c, 3))  # 100 + 20 + 3 = 123
@@ -62,8 +62,8 @@ fn fan_in(s: Scope) -> Int !{IO} =
 # value. On a highest-index or arbitrary rule this would differ — that is the whole discriminator. ---
 fn tie_break(s: Scope) -> Int !{IO} =
   do
-    x <- chan_new(s, 1)
-    y <- chan_new(s, 1)
+    let Ok x = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
+    let Ok y = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     chan_send(x, 10)  # both buffered and ready at select entry
     chan_send(y, 20)
     match chan_select([x, y]) with
@@ -77,8 +77,8 @@ fn tie_break(s: Scope) -> Int !{IO} =
 # continues past a not-ready channel and that a closed channel is selectable. ---
 fn closed_ready(s: Scope) -> Int !{IO} =
   do
-    open_empty <- chan_new(s, 1)
-    shut <- chan_new(s, 1)
+    let Ok open_empty = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
+    let Ok shut = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     chan_close(shut)
     match chan_select([open_empty, shut]) with
     | (i, r) ->
@@ -95,7 +95,7 @@ fn select_one_str(ch: Chan String) -> String !{IO} =
 
 fn heap_select(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     h <- task_fork(s, \_ -> select_one_str(ch))
     task_yield()  # let the selector reach chan_select and park
     chan_send(ch, "wor" ++ "ld")  # delivers into the parked selector's chan_pending

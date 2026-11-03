@@ -1,6 +1,6 @@
 module main
 import stdlib.bytes as bytes
-import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv)
 import stdlib.task (Scope, with_scope)
 
 # Fixture for scripts/ctor_tag_fold_check.sh: each loop matches a constructor the runtime
@@ -35,7 +35,7 @@ fn ping(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
 
 fn ping_scoped(s: Scope) -> Int !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     ping(ch, 1000, 0)
 
 fn main() -> Unit !{IO} =

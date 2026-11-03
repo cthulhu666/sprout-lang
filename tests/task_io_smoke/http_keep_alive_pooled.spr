@@ -2,7 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
 import stdlib.net (TcpConnection, local_port, write_all_utf8)
 import testsupport.listen (listen_or_die)
 import testsupport.http_wire (mark, read_response, says_close, with_conn)
-import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_pooled_n_with)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServePoolError, default_config, ok, request_path, serve_pool_error_message, serve_pooled_n_with)
 import stdlib.time as time
 import stdlib.terminal as terminal
 
@@ -72,11 +72,17 @@ fn hold_c(port: Int, c: borrowing TcpConnection) -> Unit !{IO} =
 fn clients(port: Int) -> Unit !{IO} =
   with_conn(port, \a -> hold_a(port, a))
 
+# A refused start must fail the run, not leave a server that never answers.
+fn served(r: Result ServePoolError Unit) -> Unit =
+  match r with
+  | Ok done -> done
+  | Err e -> panic(serve_pool_error_message(e))
+
 fn run(s: Scope) -> Unit !{IO} =
   do
     listener <- listen_or_die(0)
     port <- local_port(listener)
-    task_spawn(s, \_ -> serve_pooled_n_with(config, listener, 4, 8, 6, handle))
+    task_spawn(s, \_ -> served(serve_pooled_n_with(config, listener, 4, 8, 6, handle)))
     task_spawn(s, \_ -> clients(port))
 where
   config = default_config() with (idle_ms = 3000)

@@ -1,6 +1,6 @@
-import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, ChanError, ChanNegativeCapacity, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv)
 import stdlib.string as string
 import stdlib.terminal as terminal
 
@@ -27,7 +27,7 @@ fn recv_str(ch: Chan String) -> String !{IO} =
 # then two recvs. The simplest happy path — no parking involved. ---
 fn roundtrip(s: Scope) -> Int !{IO} =
   do
-    ch <- chan_new(s, 4)
+    let Ok ch = chan_new(s, 4) else Err e -> panic(chan_error_message(e))
     chan_send(ch, 10)
     chan_send(ch, 20)
     a <- recv_int(ch)
@@ -56,7 +56,7 @@ fn consume(ch: Chan Int, n: Int, acc: Int) -> Int !{IO} =
 
 fn backpressure(s: Scope) -> Int !{IO} =
   do
-    ch <- chan_new(s, 2)
+    let Ok ch = chan_new(s, 2) else Err e -> panic(chan_error_message(e))
     task_spawn(s, \_ -> produce(ch, 4, 1))  # sends 1,2,3,4; parks at the fill line
     consume(ch, 4, 0)  # 1+2+3+4 = 10
 
@@ -66,7 +66,7 @@ fn backpressure(s: Scope) -> Int !{IO} =
 # through the scheduler. ---
 fn fan_in(s: Scope) -> Int !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     task_spawn(s, \_ -> chan_send(ch, 100))
     task_spawn(s, \_ -> chan_send(ch, 20))
     task_spawn(s, \_ -> chan_send(ch, 3))
@@ -84,7 +84,7 @@ fn churn(n: Int, acc: String) -> String =
 
 fn heap_rooting(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 3)
+    let Ok ch = chan_new(s, 3) else Err e -> panic(chan_error_message(e))
     chan_send(ch, "al" ++ "pha")
     chan_send(ch, "be" ++ "ta")
     let noise = churn(200, "")
@@ -96,7 +96,7 @@ fn heap_rooting(s: Scope) -> String !{IO} =
 # commutative sums above) so a head/tail ring regression is caught. ---
 fn fifo(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 3)
+    let Ok ch = chan_new(s, 3) else Err e -> panic(chan_error_message(e))
     chan_send(ch, "a")
     chan_send(ch, "b")
     chan_send(ch, "c")
@@ -125,7 +125,7 @@ fn parked_recv_heap_on(s: Scope, ch: Chan String) -> String !{IO} =
 
 fn parked_recv_heap_driver(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     parked_recv_heap_on(s, ch)
 
 # --- send-park with heap values (behavioral): a producer sends 3 heap strings into a cap-1
@@ -153,7 +153,7 @@ fn drain_heap(ch: Chan String, n: Int, acc: String) -> String !{IO} =
 
 fn sendpark_heap(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     task_spawn(s, \_ -> produce_heap(ch, "v", 1, 3))
     drain_heap(ch, 3, "")
 
@@ -161,9 +161,124 @@ fn sendpark_heap(s: Scope) -> String !{IO} =
 # enclosing scope's channel, since the outer scope is still open when the inner one joins. ---
 fn nested_use(s: Scope) -> Int !{IO} =
   do
-    ch <- chan_new(s, 4)
+    let Ok ch = chan_new(s, 4) else Err e -> panic(chan_error_message(e))
     with_scope(\inner -> task_spawn(inner, \_ -> chan_send(ch, 5)))
     recv_int(ch)
+
+# --- the capacity is a bound, not an allocation: the buffer starts small and grows on demand. ---
+
+# Send i, i+1, .. n. Parks once the bound is reached, as any send does.
+fn send_range(ch: Chan Int, i: Int, n: Int) -> Unit !{IO} =
+  if i > n then
+    terminal.write("")
+  else
+    do
+      chan_send(ch, i)
+      send_range(ch, i + 1, n)
+
+# Receive n - i + 1 values and check they are exactly i, i+1, .. n in that order.
+fn recv_range(ch: Chan Int, i: Int, n: Int) -> Bool !{IO} =
+  if i > n then
+    true
+  else
+    do
+      v <- recv_int(ch)
+      if v == i then recv_range(ch, i + 1, n) else false
+
+# A capacity far beyond anything allocatable: creating the channel costs nothing, and 40 sends
+# (past the initial buffer, so it grows) come back in order with no receiver in between.
+fn huge_capacity(s: Scope, cap: Int) -> Bool !{IO} =
+  do
+    let Ok ch = chan_new(s, cap) else Err e -> panic(chan_error_message(e))
+    send_range(ch, 1, 40)
+    recv_range(ch, 1, 40)
+
+# Grow while the ring is wrapped: 10 in, 5 out leaves the head mid-buffer, then enough sends to
+# wrap the tail and force several growths. FIFO order must survive each copy.
+fn grow_wrapped(s: Scope) -> Bool !{IO} =
+  do
+    let Ok ch = chan_new(s, 100) else Err e -> panic(chan_error_message(e))
+    send_range(ch, 1, 10)
+    first <- recv_range(ch, 1, 5)
+    send_range(ch, 11, 70)
+    rest <- recv_range(ch, 6, 70)
+    first && rest
+
+fn flag_then_recv(ran: Ref Bool, ch: Chan Int) -> Bool !{IO} =
+  do
+    ref_write(ran, true)
+    recv_range(ch, 1, 21)
+
+# The bound holds after the buffer has grown to it: 20 sends buffer without parking, the 21st
+# parks until the consumer runs (the flag is set by the consumer, which only runs once the owner
+# parks), and the consumer then sees all 21 in order.
+fn bound_after_growth(s: Scope) -> (Bool, Bool) !{IO} =
+  do
+    let Ok ch = chan_new(s, 20) else Err e -> panic(chan_error_message(e))
+    ran <- ref_new(false)
+    send_range(ch, 1, 20)
+    before <- ref_read(ran)
+    h <- task_fork(s, \_ -> flag_then_recv(ran, ch))
+    chan_send(ch, 21)  # full: parks, so the consumer gets to run
+    after <- ref_read(ran)
+    in_order <- task_await(h)
+    (!before && after, in_order)
+
+# Heap values buffered across several growths stay intact (SPROUT_GC_STRESS collects on every
+# allocation, so a buffer that is not scanned through a growth loses them).
+fn grow_heap_strings(s: Scope) -> String !{IO} =
+  do
+    let Ok ch = chan_new(s, 64) else Err e -> panic(chan_error_message(e))
+    send_strings(ch, 1, 40)
+    drain_strings(ch, 40, "")
+
+fn send_strings(ch: Chan String, i: Int, n: Int) -> Unit !{IO} =
+  if i > n then
+    terminal.write("")
+  else
+    do
+      chan_send(ch, `s${i}`)
+      send_strings(ch, i + 1, n)
+
+fn drain_strings(ch: Chan String, n: Int, acc: String) -> String !{IO} =
+  if n <= 0 then
+    acc
+  else
+    do
+      v <- recv_str(ch)
+      drain_strings(ch, n - 1, `${acc}${v},`)
+
+fn send_lists(ch: Chan (List Int), i: Int, n: Int) -> Unit !{IO} =
+  if i > n then
+    terminal.write("")
+  else
+    do
+      chan_send(ch, [i, i + 1, i + 2])
+      send_lists(ch, i + 1, n)
+
+fn recv_list_sum(ch: Chan (List Int), n: Int, acc: Int) -> Int !{IO} =
+  if n <= 0 then
+    acc
+  else
+    match chan_recv(ch) with
+    | Got xs -> recv_list_sum(ch, n - 1, acc * 1000 + list_fold(\ (a, x) -> a + x, 0, xs))
+    | Closed -> -1
+
+fn grow_heap_lists(s: Scope) -> Int !{IO} =
+  do
+    let Ok ch = chan_new(s, 64) else Err e -> panic(chan_error_message(e))
+    send_lists(ch, 1, 20)
+    recv_list_sum(ch, 3, 0)  # the first three lists: sums 6, 9, 12
+
+fn negative_capacity_value(s: Scope) -> Int !{IO} =
+  match chan_new(s, -1) with
+  | Err (ChanNegativeCapacity n) -> n
+  | Ok _ -> 0
+
+fn negative_capacity_message(s: Scope) -> String !{IO} =
+  match chan_new(s, -1) with
+  | Err e -> chan_error_message(e)
+  | Ok _ -> ""
 
 fn main() -> Unit !{IO} =
   do
@@ -184,4 +299,20 @@ fn main() -> Unit !{IO} =
     assert_eq(state, "send-parked heap values drain in order under GC", r7, "v1v2v3")
     r8 <- with_scope(\s -> nested_use(s))
     assert_eq(state, "outer-scope channel is usable by a task of a nested scope", r8, 5)
+    h1 <- with_scope(\s -> huge_capacity(s, 2305843009213693952))
+    assert_true(state, "capacity 2^61: creating it costs nothing, 40 sends buffer and drain in order", h1)
+    h2 <- with_scope(\s -> huge_capacity(s, 9223372036854775807))
+    assert_true(state, "capacity Int max: creating it costs nothing, 40 sends buffer and drain in order", h2)
+    g1 <- with_scope(\s -> grow_wrapped(s))
+    assert_true(state, "buffer growth on a wrapped ring keeps FIFO order", g1)
+    g2 <- with_scope(\s -> bound_after_growth(s))
+    assert_eq(state, "send past a grown buffer's bound parks until a consumer drains it", g2, (true, true))
+    g3 <- with_scope(\s -> grow_heap_strings(s))
+    assert_eq(state, "heap strings buffered across growth come back intact", g3, "s1,s2,s3,s4,s5,s6,s7,s8,s9,s10,s11,s12,s13,s14,s15,s16,s17,s18,s19,s20,s21,s22,s23,s24,s25,s26,s27,s28,s29,s30,s31,s32,s33,s34,s35,s36,s37,s38,s39,s40,")
+    g4 <- with_scope(\s -> grow_heap_lists(s))
+    assert_eq(state, "heap lists buffered across growth come back intact", g4, 6009012)
+    n1 <- with_scope(\s -> negative_capacity_value(s))
+    assert_eq(state, "chan_new with a negative capacity is Err (ChanNegativeCapacity n)", n1, -1)
+    n2 <- with_scope(\s -> negative_capacity_message(s))
+    assert_eq(state, "chan_error_message names the bad capacity", n2, "channel capacity must be >= 0 (0 = rendezvous / unbuffered), got -1")
     summary(state)

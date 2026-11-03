@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>    /* snprintf — stale-handle messages name the operation */
 #include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
@@ -143,18 +144,22 @@ enum { PARK_NONE = 0, PARK_FD = 1, PARK_TIMER = 2, PARK_CHAN = 3, PARK_SELECT = 
        PARK_FD_TIMER = 5 };
 
 /* L0.8 channel: a bounded buffered FIFO ring shared between tasks. Non-moving malloc, named by
- * a generation-checked handle (below) — the Int the Sprout `Chan a` value wraps. Owns a
- * SproutRoots context that roots every buffer slot (registered → the collector scans buffered
- * heap values). Freed at the owning scope's __scope_join, which refuses to free a channel a
- * task is still parked on. */
+ * a generation-checked handle (below) — the Int the Sprout `Chan a` value wraps. `cap` is the
+ * bound (how many values may be buffered); `slots` is how much ring is allocated, which starts
+ * small and doubles on demand up to `cap` (chan_grow). Nothing is ever sized by `cap` itself.
+ * Owns a SproutRoots context holding ONE scan root over the whole ring (registered → the
+ * collector scans buffered heap values). Freed at the owning scope's __scope_join, which refuses
+ * to free a channel a task is still parked on. */
 struct Chan {
   long long    handle;     /* this channel's entry in the handle table (released at join) */
-  long long*   buffer;     /* ring of `cap` slots; each slot address rooted via `roots` */
-  long long    cap;
+  long long*   buffer;     /* ring of `slots` slots (NULL while slots == 0); scanned via `roots` */
+  long long    cap;        /* the bound: at most `cap` values buffered (0 = rendezvous) */
+  long long    slots;      /* allocated ring length; count <= slots <= cap; ring math is % slots */
   long long    count;      /* occupied slots */
-  long long    head;       /* dequeue index */
-  long long    tail;       /* enqueue index */
-  SproutRoots* roots;      /* roots buffer[0..cap) so buffered heap values survive collection */
+  long long    head;       /* dequeue index, < slots */
+  long long    tail;       /* enqueue index, < slots */
+  SproutRoots* roots;      /* one scan root over buffer[0..slots) so buffered heap values survive
+                            * collection; re-pointed by chan_grow when the ring is replaced */
   Task*        send_head;  /* FIFO of send-parked tasks (buffer full), linked via chan_* */
   Task*        send_tail;
   Task*        recv_head;  /* FIFO of recv-parked tasks (buffer empty) */
@@ -327,6 +332,13 @@ static void select_fire(Task* t, long long fired_index) {
   rq_push(t);
 }
 
+/* Next ring index after `i`. Every ring step goes through here so `% slots` is never taken with
+ * slots == 0 (a cap-0 channel has no ring and never reaches a buffered path). */
+static long long chan_ring_next(const Chan* ch, long long i) {
+  if (ch->slots <= 0) sprout_fail("chan_ring_next: channel has no buffer");
+  return (i + 1) % ch->slots;
+}
+
 /* Try to take a ready value from `ch` WITHOUT parking. Returns 1 (and sets *out_v / *out_closed)
  * when the channel is ready — a buffered element (draining a parked sender into the freed slot), a
  * rendezvous sender parked with a value, or closed-and-empty — else 0 (empty + open: caller parks).
@@ -336,14 +348,15 @@ static int chan_poll_take(Chan* ch, long long* out_v, int* out_closed) {
   if (ch->count > 0) {
     long long v = ch->buffer[ch->head];
     ch->buffer[ch->head] = 0;             /* clear so a drained slot pins nothing */
-    ch->head = (ch->head + 1) % ch->cap;
+    ch->head = chan_ring_next(ch, ch->head);
     ch->count--;
-    /* A parked sender (buffer was full): move its value into the slot we just freed, FIFO. */
+    /* A parked sender (buffer was full, so slots == cap): move its value into the slot we just
+     * freed, FIFO. */
     Task* sdr = chan_q_pop(&ch->send_head, &ch->send_tail);
     if (sdr != NULL) {
       ch->buffer[ch->tail] = sdr->chan_pending;
       sdr->chan_pending = 0;
-      ch->tail = (ch->tail + 1) % ch->cap;
+      ch->tail = chan_ring_next(ch, ch->tail);
       ch->count++;
       chan_wake(sdr);
     }
@@ -1225,7 +1238,8 @@ long long __task_sleep(long long ms) {
  * across a park stays live. See docs/concurrency-channels-design-2026-07-16.md §5, §11.
  *
  * Invariants (send-parked and recv-parked never coexist on one chan):
- *   send_waiters non-empty  =>  count == cap  (a sender parks only on a full buffer)
+ *   send_waiters non-empty  =>  count == cap  (a sender parks only on a full buffer; the ring
+ *                                              has then grown to slots == cap)
  *   recv_waiters non-empty  =>  count == 0    (a receiver parks only on an empty buffer)
  * For cap >= 1 these follow from the counts. For cap == 0 (rendezvous, L0.10) both read as
  * count == 0 and the non-coexistence comes from the handoff order instead: __chan_send pops a
@@ -1233,8 +1247,54 @@ long long __task_sleep(long long ms) {
  * side arrives second never reaches its park at all.
  */
 
-/* Create a cap-slot channel in `scope`. cap == 0 is rendezvous (unbuffered): no ring, every value
- * handed sender-to-receiver directly. cap >= 1 buffers. */
+/* Ring slots allocated up front. A channel holds at most `cap` values but starts with
+ * min(cap, CHAN_INITIAL_SLOTS) slots and doubles on demand (chan_grow), so creating a channel
+ * costs the same at any capacity. */
+#define CHAN_INITIAL_SLOTS 16
+
+/* Allocate a zeroed ring of `n` slots (n >= 1). The multiplication is checked: a size that does
+ * not fit is reported as out of memory instead of wrapping to a small block. */
+static long long* chan_ring_alloc(long long n, const char* who) {
+  if (n < 1 || (unsigned long long)n > SIZE_MAX / sizeof(long long)) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "%s: out of memory (channel buffer)", who);
+    sprout_fail(msg);
+  }
+  long long* ring = (long long*)calloc((size_t)n, sizeof(long long));
+  if (ring == NULL) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "%s: out of memory (channel buffer)", who);
+    sprout_fail(msg);
+  }
+  return ring;
+}
+
+/* Grow a full ring (count == slots < cap) to min(cap, 2 * slots). The count buffered values are
+ * copied in FIFO order from head into a fresh zeroed block, so head restarts at 0 and tail at
+ * count; the scan root is re-pointed before the old block is freed. Allocates only from malloc
+ * (never the GC heap), so no collection can run while the old and new rings differ. */
+static void chan_grow(Chan* ch) {
+  if (ch->slots < 1 || ch->slots > ch->cap || ch->count != ch->slots)
+    sprout_fail("chan_grow: channel is not a full ring below its bound");
+  long long want = (ch->slots > LLONG_MAX / 2) ? ch->cap : ch->slots * 2;
+  if (want > ch->cap) want = ch->cap;
+  long long* ring = chan_ring_alloc(want, "chan_grow");
+  for (long long i = 0; i < ch->count; i++)
+    ring[i] = ch->buffer[(ch->head + i) % ch->slots];
+  long long* old = ch->buffer;
+  ch->buffer = ring;
+  ch->slots  = want;
+  ch->head   = 0;
+  ch->tail   = ch->count;       /* count < want, so tail is a valid index */
+  sprout_roots_set_scan(ch->roots, ch->buffer, (size_t)ch->slots);
+  free(old);
+}
+
+/* Create a channel in `scope` that buffers at most `capacity` values. capacity == 0 is
+ * rendezvous (unbuffered): no ring, every value handed sender-to-receiver directly.
+ * capacity >= 1 buffers, with a ring that starts at min(capacity, CHAN_INITIAL_SLOTS) slots and
+ * grows on demand. Stdlib rejects a negative capacity before calling; the check here is an
+ * internal assert. */
 long long __chan_new(long long scope_handle, long long capacity) {
   Scope* s = scope_of(scope_handle, "__chan_new");
   if (capacity < 0)
@@ -1242,32 +1302,27 @@ long long __chan_new(long long scope_handle, long long capacity) {
   Chan* ch = (Chan*)malloc(sizeof(Chan));
   if (ch == NULL) sprout_fail("__chan_new: out of memory (channel record)");
   ch->cap   = capacity;
+  ch->slots = 0;
   ch->count = 0;
   ch->head  = 0;
   ch->tail  = 0;
+  ch->buffer = NULL;
   ch->send_head = ch->send_tail = NULL;
   ch->recv_head = ch->recv_tail = NULL;
   ch->select_head = ch->select_tail = NULL;
   ch->closed = 0;
   ch->scope = s;
-  if (capacity == 0) {
-    /* Rendezvous: no buffer — every value is handed directly from a sender to a receiver, so
-     * there is nothing to root. Keep an empty (registered) roots context so the free path at
-     * __scope_join stays uniform, and avoid malloc(0) (implementation-defined, may return NULL
-     * which the OOM checks would misread). The pending value lives in the parked task's own
-     * `chan_pending`, already rooted by that task's root context. */
-    ch->buffer = NULL;
-    ch->roots  = sprout_roots_new(1);
-  } else {
-    ch->buffer = (long long*)malloc((size_t)capacity * sizeof(long long));
-    if (ch->buffer == NULL) sprout_fail("__chan_new: out of memory (channel buffer)");
-    /* Root every buffer slot once (addresses are stable — the buffer is a fixed malloc). Empty
-     * slots hold 0; the mark path is membership-guarded, so a scalar/0 slot is a safe no-op. */
-    ch->roots = sprout_roots_new((size_t)capacity);
-    for (long long i = 0; i < capacity; i++) {
-      ch->buffer[i] = 0;
-      sprout_roots_push_ptr(ch->roots, &ch->buffer[i]);
-    }
+  /* One root node, whatever the capacity: it scans the whole ring and is re-pointed on growth.
+   * Rendezvous (cap 0) keeps the context too (empty) so the free path at __scope_join stays
+   * uniform. Its pending value lives in the parked task's own `chan_pending`, already rooted by
+   * that task's root context. */
+  ch->roots = sprout_roots_new(1);
+  if (capacity > 0) {
+    ch->slots  = capacity < CHAN_INITIAL_SLOTS ? capacity : CHAN_INITIAL_SLOTS;
+    ch->buffer = chan_ring_alloc(ch->slots, "__chan_new");
+    /* Empty slots hold 0; the mark path is membership-guarded, so a scalar/0 slot is a safe
+     * no-op. */
+    sprout_roots_set_scan(ch->roots, ch->buffer, (size_t)ch->slots);
   }
   all_chans_push(ch);
   ch->handle = handle_alloc(HANDLE_CHAN, ch);
@@ -1301,10 +1356,12 @@ long long __chan_send(long long chan_handle, long long value) {
     select_fire(st, sw->sel_index);
     return 0;
   }
-  /* Space in the buffer: enqueue at the tail. */
+  /* Below the bound: enqueue at the tail, growing the ring first if it is full but still smaller
+   * than the bound. */
   if (ch->count < ch->cap) {
+    if (ch->count == ch->slots) chan_grow(ch);
     ch->buffer[ch->tail] = value;
-    ch->tail = (ch->tail + 1) % ch->cap;
+    ch->tail = chan_ring_next(ch, ch->tail);
     ch->count++;
     return 0;
   }

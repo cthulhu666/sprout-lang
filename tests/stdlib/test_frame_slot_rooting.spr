@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, assert_true, summary)
 import stdlib.task (Scope, with_scope, task_spawn, task_fork, task_await, task_yield)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv)
 
 # Frame-slot rooting (docs/frame-slot-rooting-v0.md): a function whose heap values live
 # into a later block registers ONE frame of root slots at entry and pops it at every
@@ -59,7 +59,7 @@ fn churner(burned: Ref Int) -> Unit !{IO} =
 
 fn run_parkers(s: Scope, log: Ref String, burned: Ref Int) -> Unit !{IO} =
   do
-    ch <- chan_new(s, 2)
+    let Ok ch = chan_new(s, 2) else Err e -> panic(chan_error_message(e))
     task_spawn(s, \_ -> parker(ch, log, "A", true))
     task_spawn(s, \_ -> parker(ch, log, "B", false))
     task_spawn(s, \_ -> churner(burned))

@@ -135,11 +135,21 @@ nested inside `s` and of enclosing scopes.
 ## 5. GC rooting
 
 A buffered value may be a heap pointer; the collector must find it. The `Chan` owns its own
-`SproutRoots` context (registered → scanned by `mark_roots` via the registry). At creation, each
-of the `capacity` buffer-slot **addresses** is `push_ptr`'d once (the buffer is a fixed
-non-moving malloc, so slot addresses are stable for the channel's life). Empty slots hold `0`;
-the mark path is membership-guarded, so rooting a slot that currently holds a scalar (an `Int`
-value, or `0`) is a safe no-op — the exact pattern the trampoline uses for `&t->result`.
+`SproutRoots` context (registered → scanned by `mark_roots` via the registry). The context holds
+**one** scan root over the whole ring (base address, length `slots`), set at creation and
+re-pointed by `chan_grow` when the ring is replaced. Empty slots hold `0`; the mark path is
+membership-guarded, so scanning a slot that currently holds a scalar (an `Int` value, or `0`) is a
+safe no-op.
+
+`capacity` is a bound, not an allocation. A channel starts with `min(capacity, 16)` slots; when a
+send must buffer and the ring is full but smaller than the bound, `chan_grow` allocates a zeroed
+ring of `min(capacity, 2 * slots)`, copies the buffered values in FIFO order from `head`, resets
+`head`/`tail`, re-points the root, then frees the old ring. Growth uses `malloc` only, never the GC
+heap, so no collection runs between the copy and the root update. Sizes are overflow-checked
+and reported as out of memory. Ring arithmetic is modulo `slots`; fullness is `count == capacity`,
+so a parked sender still implies `count == capacity` and, since the ring only grows when a send
+needs room, `slots == capacity`. `chan_new` returns `Result ChanError (Chan a)`: a negative
+capacity is `Err (ChanNegativeCapacity n)`, and the runtime keeps its own check as an internal assert.
 
 - **Dequeue clears the slot to `0`** after the value is read out, so a drained slot never keeps a
   stale pointer alive (no bounded leak).
@@ -215,9 +225,11 @@ export type Chan a =
 fn __chan_new(...)   # internal externs, called unqualified in-module
 ...
 
-export fn chan_new(scope: Scope, capacity: Int) -> Chan a !{IO} =
-  match scope with
-  | Scope sid -> Chan(__chan_new(sid, capacity))
+export fn chan_new(scope: Scope, capacity: Int) -> Result ChanError (Chan a) !{IO} =
+  if capacity < 0 then Err(ChanNegativeCapacity(capacity))
+  else
+    match scope with
+    | Scope sid -> Ok(Chan(__chan_new(sid, capacity)))
 
 export fn chan_send(ch: Chan a, value: a) -> Unit !{IO} =
   match ch with
@@ -242,7 +254,7 @@ shape-identical to the proven `Task a`. The externs are internal (never accessed
    only new mechanism is the symmetric recv-side branch — on an empty channel with a parked sender,
    take the sender's value directly and wake it — which is provably unreachable for cap ≥ 1 (a
    sender parks only when `count == cap ≥ 1`, so `count == 0` ⇒ no send-waiters). `__chan_new` now
-   accepts 0 (no buffer: `buffer = NULL`, empty roots context; `< 0` still loud-fails). The
+   accepts 0 (no buffer: `buffer = NULL`, empty roots context; `< 0` is refused by `stdlib.chan` as an `Err`, with the runtime check kept as an assert). The
    deadlock-panic (§6.3) stays correct: send checks `recv_waiters` and recv checks `send_waiters`
    before either parks, so a cap-0 channel never holds both a parked sender and a parked receiver.
    Tests: `tests/stdlib/test_chan_rendezvous.spr` (send-blocks-until-received value oracle, FIFO
@@ -289,9 +301,11 @@ themselves touch no fd.
 
 ```c
 typedef struct Chan {
-  long long*   buffer;      /* ring of `cap` slots; each rooted via `roots` */
-  long long    cap, count, head, tail;
-  SproutRoots* roots;       /* roots every buffer slot (registered, scanned) */
+  long long*   buffer;      /* ring of `slots` slots, scanned via `roots` */
+  long long    cap;         /* the bound: at most `cap` values buffered */
+  long long    slots;       /* allocated ring length, count <= slots <= cap */
+  long long    count, head, tail;
+  SproutRoots* roots;       /* one scan root over buffer[0..slots) (registered, scanned) */
   Task*        send_head; Task* send_tail;   /* FIFO of send-parked tasks (full)  */
   Task*        recv_head; Task* recv_tail;   /* FIFO of recv-parked tasks (empty) */
   Scope*       scope;

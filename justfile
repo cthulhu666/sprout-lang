@@ -2728,11 +2728,7 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/timeout_chan_drop.spr
   run_once "timeout-chan-drop" "done"
   SPROUT_GC_STRESS=1 run_once "timeout-chan-drop/stress" "done"
-  # (10) channel capacity guard (L0.10): chan_new with a NEGATIVE capacity must LOUD-FAIL. Cap 0 is
-  # now valid (rendezvous / unbuffered); only a nonsensical (< 0) capacity is rejected.
-  build tests/task_io_smoke/chan_negative_cap_fails.spr
-  run_expect_fail "chan-negative-cap" "capacity must be >= 0"
-  # (10b) rendezvous send-park drop (L0.10): scope_cancel force-drops a task parked in chan_send on
+  # (10) rendezvous send-park drop (L0.10): scope_cancel force-drops a task parked in chan_send on
   # a cap-0 channel nobody receives from (both fork + spawn). The buffered fixtures only drop RECV-
   # parked tasks, so this covers the send_waiters force-drop path. "done" proves it; broken = panic.
   build tests/task_io_smoke/cancel_rendezvous_send_drop.spr
@@ -3216,7 +3212,7 @@ task-io-smoke: bootstrap-from-seed
   build tests/task_io_smoke/http_client_many_headers.spr
   run_once "http-client-many-headers" "done"
   check_markers "http-client-many-headers" "cl-many: Ok 200 body=5 text=hello"
-  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, chan-negative-cap-guard, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, proc-run-fds, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits, http-client-many-headers; interleaved; stress-clean)"
+  echo "==> task-io-smoke ✓ (read-park, accept-park, re-arm, http-serve-concurrency, http-conn-error-isolation, tcp-read-some-bad-args, write, cancel-drop, await-guard, timer-drop, timeout-drop, timeout-lend-conn, timeout-nested-guard, chan-cancel-drop, chan-timeout-drop, rendezvous-send-drop, send-on-closed-guard, double-close-guard, send-parked-close-guard, stale-handle-guards, select-cancel-drop, select-timeout-drop, connect-park, proc-run-fds, listen-backlog, http-idle-timeout, http-header-flood, http-write-timeout, http-body-timeout, http-body-bounds, http-pooled-serve, read-poll-once, read-deadline-loses-to-data, read-exact-by, read-exact, stdin-read-bytes, http-utf8-body, http-binary-body, tcp-accept-bad-handle, http-accept-exhaustion, tcp-nul-payload, http-request-parks, http-request-total-deadline, http-cancel-drop, http-header-lower-parks, dns-resolve-parks, dns-cancel-drop, stdin-park, stdin-two-readers, stdin-cancel-keeps-fd, http-client-framing, http-client-headers, http-client-limits, http-client-many-headers; interleaved; stress-clean)"
 
 # ── Linux gate (local, container-backed) ──────────────────────────────────────
 #

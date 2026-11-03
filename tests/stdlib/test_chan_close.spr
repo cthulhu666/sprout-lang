@@ -1,6 +1,6 @@
 import stdlib.test (TestState, new_state, assert_eq, summary)
 import stdlib.task (Scope, with_scope, task_fork, task_await, task_yield)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv, chan_close)
 import stdlib.string as string
 
 # L0.9 channel close + recv-on-closed (EXPERIMENTAL). `chan_close(ch)` signals end-of-stream;
@@ -20,7 +20,7 @@ fn recv_str(ch: Chan String) -> String !{IO} =
 # closed channel — returns `Closed`. Order-sensitive. ---
 fn drain_then_closed(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 4)
+    let Ok ch = chan_new(s, 4) else Err e -> panic(chan_error_message(e))
     chan_send(ch, "a")
     chan_send(ch, "b")
     chan_close(ch)
@@ -39,7 +39,7 @@ fn recv_marker(ch: Chan String) -> String !{IO} =
 
 fn close_wakes_receiver(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     h <- task_fork(s, \_ -> recv_marker(ch))
     task_yield()  # let the receiver reach chan_recv and park on the empty buffer
     chan_close(ch)  # wakes the parked receiver -> Closed
@@ -54,7 +54,7 @@ fn churn(n: Int, acc: String) -> String =
 
 fn heap_close(s: Scope) -> String !{IO} =
   do
-    ch <- chan_new(s, 3)
+    let Ok ch = chan_new(s, 3) else Err e -> panic(chan_error_message(e))
     chan_send(ch, "al" ++ "pha")
     chan_send(ch, "be" ++ "ta")
     chan_close(ch)

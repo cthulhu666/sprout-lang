@@ -303,7 +303,9 @@ tail simply because task creation throttles it to ~7k req/s, so it never opens e
 - **A1 — the over-strict do-bind edge was in the way, and had to be routed around.**
   *Superseded:* an effect bind now binds the whole value (`typed_ast.bind_bound_type`), so
   `ch <- chan_new(s, cap)` in an `!{IO}` block is accepted, and `stdlib/http_server.sprout`
-  already uses it. See [linearity-virality-v0.md](./linearity-virality-v0.md). The text below is
+  already uses it. See [linearity-virality-v0.md](./linearity-virality-v0.md). `chan_new` now
+  returns a `Result`, and `<-` unwraps a `Result`, so the accepted forms are now
+  `let Ok ch = chan_new(s, cap) else Err e -> …` or matching the call. The text below is
   the original finding: `ch <- chan_new(s, cap)` was rejected for a container-of-linear payload
   (§7.1), and the prototype threaded the channel as a parameter.
 - **A2 — worker count is now a capacity decision**, exposed in the public API and needing a
@@ -575,6 +577,11 @@ unbounded per-connection occupancy from a memory cost into a total-availability 
 `tests/task_io_smoke/http_pooled_serve.spr`. Gotcha A3 is moot for `panic`: it ends the whole
 process (`panic` → `sprout_fail` → `exit(1)`) under either serving mode, so neither contains it.
 Containing it is task-boundary panic isolation (`BACKLOG.md` §2).
+
+`serve_pooled_with` and `serve_pooled_n_with` return `Result ServePoolError Unit`: `workers < 1`
+is `Err (PoolNoWorkers n)` and `queue_depth < 0` is `Err (PoolNegativeQueue n)`, checked before the
+scope opens, with the listener closed. A pool of no workers used to accept connections nothing
+served, so the server hung.
 
 **Experimental.** L0 concurrency is not part of normative v0, so neither design changes normative
 text. §7.4's hole *does* touch `docs/spec-v0.md` §5.8's enforcement bullets, which state the

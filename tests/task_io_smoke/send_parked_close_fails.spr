@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
-import stdlib.chan (Chan, chan_new, chan_send, chan_close)
+import stdlib.chan (Chan, chan_new, chan_error_message, chan_send, chan_close)
 import stdlib.terminal as terminal
 
 # L0.9 close guard, send-PARK path (distinct from send_on_closed_fails, which hits the send ENTRY
@@ -15,7 +15,7 @@ fn producer(ch: Chan Int) -> Unit !{IO} =
 
 fn body(s: Scope) -> Unit !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     task_spawn(s, \_ -> producer(ch))
     task_yield()  # let the producer buffer 1 then park on the full channel at send 2
     chan_close(ch)  # wakes the parked sender -> it aborts on resume

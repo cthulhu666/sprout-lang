@@ -2,7 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
 import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, serve_n_with)
-import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv)
 import stdlib.string as string
 import stdlib.terminal as terminal
 
@@ -115,7 +115,7 @@ fn run(s: Scope, port: Int, done: Chan Int) -> Unit !{IO} =
 
 fn body(s: Scope) -> Unit !{IO} =
   do
-    done <- chan_new(s, 1)
+    let Ok done = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     run(s, 28991, done)
 
 fn main() -> Unit !{IO} =

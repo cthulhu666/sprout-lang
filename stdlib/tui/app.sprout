@@ -10,7 +10,7 @@ module stdlib.tui.app
 # scheduler: deciding to read a file is a value, and only running it is not.
 
 import stdlib.bytes as bytes
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv, chan_close)
 import stdlib.task (Scope, with_scope, task_spawn, task_cancelled, scope_cancel)
 import stdlib.terminal as terminal
 import stdlib.tui.event as event
@@ -143,7 +143,8 @@ fn run_in(scope: Scope, spec: App m) -> Unit !{IO} = do
   terminal.raw_enter()
   terminal.enter_alt_screen()
   terminal.hide_cursor()
-  ch <- chan_new(scope, 64)
+  # A depth of 64 is valid, so the `Err` arm cannot happen unless there is a bug here.
+  let Ok ch = chan_new(scope, 64) else Err e -> panic(chan_error_message(e))
   task_spawn(scope, \_ -> input_task(ch, spec.tick_ms))
   spec.boot(scope, ch)
   size <- current_size()

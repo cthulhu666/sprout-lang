@@ -1800,8 +1800,8 @@ fn eat(l: L) -> Int = match l with | L n -> n
 
 fn first_ready(s: task.Scope) -> Int !{IO} =
   do
-    a <- chan.chan_new(s, 1)
-    b <- chan.chan_new(s, 1)
+    let Ok a = chan.chan_new(s, 1) else Err e -> panic(chan.chan_error_message(e))
+    let Ok b = chan.chan_new(s, 1) else Err e -> panic(chan.chan_error_message(e))
     chan.chan_send(b, L(5))
     chan.chan_close(a)
     match chan.chan_select([b, a]) with

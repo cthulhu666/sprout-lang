@@ -1,7 +1,7 @@
 module app.main
 
 import stdlib.bytes as bytes
-import stdlib.chan (Chan, Got, Closed, chan_new, chan_send, chan_recv)
+import stdlib.chan (Chan, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv)
 import stdlib.env as env
 import stdlib.json (JsonString, json_parse, json_get_field, json_stringify)
 import stdlib.net (TcpConnection, TcpListener, accept, close, close_listener, listen_on, read_avail_timeout, write_all_utf8_by, tcp_error_message)
@@ -294,7 +294,13 @@ fn run(db_path: String, secret: String, host: String, port: String) -> Unit !{IO
 # The server runs until the process is killed, so the pooled handle is never
 # closed.
 fn serve(cfg: Config, scope: Scope, db: consuming SqliteDb, listener: consuming TcpListener) -> Unit !{IO} =
-  do
-    pool <- chan_new(scope, 1)
-    chan_send(pool, db)
-    accept_loop(cfg, scope, pool, listener)
+  match chan_new(scope, 1) with
+  | Err e ->
+      do
+        sqlite_close(db)
+        close_listener(listener)
+        panic(chan_error_message(e))
+  | Ok pool ->
+      do
+        chan_send(pool, db)
+        accept_loop(cfg, scope, pool, listener)
