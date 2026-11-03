@@ -245,7 +245,7 @@ publish lessons from their own work. Search it before a long unaided investigati
 
 ## Known Limitations
 
-See [README.md §Not Yet Supported](./README.md#not-yet-supported-common-gotchas) for current syntax and naming gotchas (e.g. the word `not` is not an operator — use the `!` prefix), along with the idiomatic form for each. (Prefix `!` and `-` negation and effectful list iteration via `list_each`/`list_fold` all work now; a `let..in` block — including refutable `<pat> = <e> else <fb>` bindings — works as a pure function body, e.g. `tests/stdlib/test_let_else.spr`.)
+See [README.md §Limits (v0)](./README.md#limits-v0) for current gaps, and [idiomatic-sprout.md §Rules that surprise newcomers](docs/idiomatic-sprout.md#rules-that-surprise-newcomers) for syntax and naming gotchas (e.g. the word `not` is not an operator — use the `!` prefix), along with the idiomatic form for each. (Prefix `!` and `-` negation and effectful list iteration via `list_each`/`list_fold` all work now; a `let..in` block — including refutable `<pat> = <e> else <fb>` bindings — works as a pure function body, e.g. `tests/stdlib/test_let_else.spr`.)
 
 ## Pull Requests (GitHub)
 
