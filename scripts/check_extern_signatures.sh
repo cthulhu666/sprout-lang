@@ -30,7 +30,8 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "${SPROUT_EXTERN_CHECK_ROOT:-$(dirname "$0")/..}"
+status=0
 
 decls=$(find stdlib -name '*.sprout' -print0 \
   | xargs -0 perl -ne '
@@ -68,7 +69,124 @@ if [[ -n "$report" ]]; then
   echo >&2
   echo "  Fix: keep ONE declaration, in the module that owns the symbol, verified against" >&2
   echo "  its C definition in runtime/sprout_runtime.c. Consumers import that module." >&2
-  exit 1
+  status=1
 fi
+
+# Premise 1 of docs/pointer-free-vectors-v0.md §4.5: a NOSCAN vector's elements are never
+# scanned, so an extern whose declared type lies is a use-after-free no debug mode sees.
+#
+# Rule A: an extern whose signature names Vector/Vec/MutVec/LinVec must be on this list. An
+# entry claims the C side never stores a heap pointer into a vector whose element type is a
+# non-heap scalar, nor reinterprets one vector type as another (§4.5).
+# Rule B: an extern declared `-> Int|Double|Char|Bool` (effect row ignored) whose C definition
+# in runtime/*.c returns sprout_ptr_word(...) or sprout_str_word(...) returns a heap pointer
+# typed as a scalar. An extern with no C definition (a compiler-lowered builtin) is skipped;
+# SPROUT_EXTERN_CHECK_VERBOSE=1 lists them on stderr.
+export EXT_ALLOW="
+stdlib/prelude.sprout:vector_empty
+stdlib/prelude.sprout:vector_length
+stdlib/prelude.sprout:vector_get
+stdlib/prelude.sprout:vector_set
+stdlib/prelude.sprout:vector_append
+stdlib/prelude.sprout:vector_concat
+stdlib/prelude.sprout:vector_from_list
+stdlib/mutable.sprout:vec_make_filled
+stdlib/mutable.sprout:vector_mutset
+stdlib/mutable.sprout:vector_get_direct
+stdlib/mutable.sprout:vector_push
+stdlib/mutable.sprout:vector_truncate
+stdlib/linvec.sprout:vector_mutset
+stdlib/linvec.sprout:vector_push
+stdlib/linvec.sprout:vector_truncate
+stdlib/process.sprout:proc_run_raw
+stdlib/compiler.sprout:analysis_session_eval
+stdlib/compiler.sprout:analysis_session_diagnostics
+"
+export EXT_VERBOSE="${SPROUT_EXTERN_CHECK_VERBOSE:-}"
+
+roots=()
+for d in stdlib ide examples; do
+  if [[ -d "$d" ]]; then roots+=("$d"); fi
+done
+shopt -s nullglob
+EXT_CSRC="$(printf '%s\n' runtime/*.c)"
+shopt -u nullglob
+export EXT_CSRC
+
+premise_report=""
+if ((${#roots[@]})); then
+  premise_report=$(find "${roots[@]}" -name '*.sprout' -print0 | xargs -0 perl -e '
+    my %allow = map { $_ => 1 } grep { length } split /\n/, $ENV{EXT_ALLOW};
+    my $clean = "";
+    for my $f (grep { length } split /\n/, $ENV{EXT_CSRC}) {
+      open(my $fh, "<", $f) or die "$f: $!";
+      local $/;
+      $clean .= <$fh> . "\n";
+    }
+    $clean =~ s{/\*.*?\*/}{ }gs;
+    $clean =~ s{//[^\n]*}{ }g;
+    $clean =~ s{"(?:\\.|[^"\\\n])*"}{""}g;
+    $clean =~ s{\x27(?:\\.|[^\x27\\\n])*\x27}{\x27\x27}g;
+    # The body of file-scope C function $n, or undef when none is defined.
+    sub body {
+      my $n = shift;
+      $clean =~ /^[A-Za-z_][^\n;{}()]*\b\Q$n\E\s*\([^;{}]*\)\s*\{/m or return undef;
+      my $start = $+[0];
+      my ($i, $depth) = ($start, 1);
+      while ($depth > 0 && $i < length $clean) {
+        my $ch = substr($clean, $i++, 1);
+        if ($ch eq "{") { $depth++ } elsif ($ch eq "}") { $depth-- }
+      }
+      return substr($clean, $start, $i - $start);
+    }
+    my @nodef;
+    while (<>) {
+      if (/^\s*(?:export\s+)?extern\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*(\(.*?)\s*$/) {
+        my ($name, $sig) = ($1, $2);
+        $sig =~ s/\s+/ /g;
+        if ($sig =~ /\b(?:Vector|Vec|MutVec|LinVec)\b/ && !$allow{"$ARGV:$name"}) {
+          print "A\t$ARGV:$.\t$name\t$sig\n";
+        }
+        if ($sig =~ /->\s*(?:Int|Double|Char|Bool)\s*(?:!\s*\{[^}]*\})?\s*$/) {
+          my $b = body($name);
+          if (!defined $b) { push @nodef, $name }
+          elsif ($b =~ /\breturn\s+(?:\([^)]*\)\s*)?(sprout_(?:ptr|str)_word)\s*\(/) {
+            print "B\t$ARGV:$.\t$name\t$sig\t$1\n";
+          }
+        }
+      }
+      close ARGV if eof;
+    }
+    print STDERR "no C definition: $_\n" for @nodef;
+    ' | sort)
+fi
+
+report_a=$(printf '%s\n' "$premise_report" | awk -F'\t' '$1 == "A" { printf "  %s  %s\n      %s\n", $3, $2, $4 }')
+report_b=$(printf '%s\n' "$premise_report" | awk -F'\t' '$1 == "B" { printf "  %s  %s\n      %s\n      C body returns %s(...)\n", $3, $2, $4, $5 }')
+
+if [[ -n "$report_a" ]]; then
+  echo "check-extern-signatures: these externs take or return a vector type and are not on the allowlist." >&2
+  echo >&2
+  printf '%s\n' "$report_a" >&2
+  echo "  A NOSCAN vector's elements are never scanned (docs/pointer-free-vectors-v0.md §4.5," >&2
+  echo "  premise 1). Verify the C side never stores a heap pointer into a vector whose element" >&2
+  echo "  type is a non-heap scalar, nor reinterprets one vector type as another; then add" >&2
+  echo "  file:name to EXT_ALLOW in scripts/check_extern_signatures.sh." >&2
+  echo >&2
+  status=1
+fi
+
+if [[ -n "$report_b" ]]; then
+  echo "check-extern-signatures: these externs are declared to return a scalar but their C body returns a heap pointer." >&2
+  echo >&2
+  printf '%s\n' "$report_b" >&2
+  echo "  A heap pointer typed Int/Double/Char/Bool is invisible to the GC, and a NOSCAN" >&2
+  echo "  vector would hold it unscanned (docs/pointer-free-vectors-v0.md §4.5, premise 1)." >&2
+  echo "  Fix the declared return type." >&2
+  echo >&2
+  status=1
+fi
+
+if ((status != 0)); then exit 1; fi
 
 echo "==> check-extern-signatures ✓"

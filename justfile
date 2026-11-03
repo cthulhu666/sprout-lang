@@ -2301,6 +2301,11 @@ test-approved-builtins:
 check-extern-signatures:
   ./scripts/check_extern_signatures.sh
 
+# check_extern_signatures.sh against throwaway fixture roots.
+[group('smoke')]
+test-check-extern-signatures:
+  bash scripts/test_check_extern_signatures.sh
+
 # AGENTS.md "Backlog Discipline" rules 1 and 2: BACKLOG.md wraps at 100 columns,
 # no entry exceeds 10 lines, and a landed entry is deleted rather than ticked.
 # The column check is what makes the line budget mean anything — without it one
@@ -4455,6 +4460,7 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "spec-gate|spec-gate"
     "approved-builtins|check-approved-builtins"
     "test-approved-builtins|test-approved-builtins"
+    "test-check-extern-signatures|test-check-extern-signatures"
     "smoke-shapes|smoke-shapes"
     "o2-codegen-smoke|o2-codegen-smoke"
     "linvec-smoke|linvec-smoke"
@@ -4794,7 +4800,7 @@ dod: verify-bootstrap-fixed-point gate-quick rooting-cost-gate scc-cost-gate run
 # advisory), so it runs in the body rather than as an arg-less dependency.
 # Full CI-parity battery (slow, ~15-25m); a green run means CI will not surprise you.
 [group('gate')]
-gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate noscan-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
+gate: seed-dep-check fmt-check fmt-batch-smoke smoke-shapes bundle-smoke tui-files-smoke ide-smoke render-cost-gate rooting-cost-gate scc-cost-gate verify-roots loud-fail-smoke diagnostic-stream-smoke argv-smoke trace-dispatch-smoke verify-dispatch-smoke div-by-zero-smoke stack-overflow-smoke flush-on-crash-smoke tco-runtime-smoke c-runtime-test b1-gate bce-gate noscan-gate spec-gate spec-corpus-check check-approved-builtins test-approved-builtins test-check-extern-signatures check-extern-signatures cpr-declare-check ctor-tag-fold-check backlog-shape test-runtime-word-casts cloexec-gate test-cloexec-gate test-gc-safety-check linear-grid-drift verify-bootstrap-fixed-point ir-golden-diff windows-ir-gate compile-examples-stage1 compile-bench run-example-canary test test-asan lsp-smoke repl-smoke task-io-smoke http-client-binary-gate twelve-dollar-example http-tls-gate test-stress
   #!/usr/bin/env bash
   set -euo pipefail
   echo "==> gate: gc-safety-check --strict..."

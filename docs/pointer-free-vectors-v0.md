@@ -193,10 +193,11 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
 1. **Static types are true.** An `extern fn` that misstates its type breaks this, as it already
    breaks rooting (BACKLOG **Compare each `extern fn`'s C definition against the emitted
    `declare`**). Two cases matter: an extern over a vector type that stores into it, and an
-   extern typed to return a scalar whose C body returns a heap pointer. Today 18 declarations take or
-   return a vector type: 7 in the prelude, 5 in `stdlib/mutable.sprout`, 3 in
-   `stdlib/linvec.sprout` (redeclarations), and `proc_run_vec`, `proc_run_stdin_vec` and
-   `analysis_session_eval` over `Vec String`. Test: `scripts/check_extern_signatures.sh` fails on
+   extern typed to return a scalar whose C body returns a heap pointer. Today 18 declarations take
+   or return a vector type: 7 in the prelude, 5 in `stdlib/mutable.sprout`, 3 in
+   `stdlib/linvec.sprout` (redeclarations), `proc_run_raw` and `analysis_session_eval` over
+   `Vec String`, and `analysis_session_diagnostics` over a `Vec` of
+   tuples. Test: `scripts/check_extern_signatures.sh` fails on
    an extern over a vector type outside an allowlist, and on an extern returning
    `Int`/`Double`/`Char`/`Bool` whose C definition returns `sprout_ptr_word` or `sprout_str_word`.
 2. **Inheriting ops keep the element type.** True of the three signatures in §4.1. Test: each
@@ -261,7 +262,8 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
    (`tests/c_runtime/vec_noscan.c`).
 2. ~~Emission (§4.2) for direct calls; IR tests; reseed; golden IR.~~ Landed (`IRVecNoscan`,
    `just noscan-gate`, `tests/stdlib/test_vec_noscan.spr`).
-3. `check_extern_signatures.sh` gains premise 1's two rules.
+3. ~~`check_extern_signatures.sh` gains premise 1's two rules.~~ Landed (`just check-extern-signatures`,
+   [gates.md](gates.md) §Extern signatures).
 4. The scalar-copy pass; IR and behaviour tests; reseed; golden IR; the measurements of §6.5.
 5. Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the
    flip.
