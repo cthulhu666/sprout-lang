@@ -183,6 +183,8 @@ fn main() -> Unit !{IO} =
     check_eq("skolem_index: not a skolem", types.skolem_index("Int"), Nothing),
     check_eq("skolem_fwd_head: the binder's slot head", types.skolem_fwd_head("$sk12_a_b_340"),
       Just(types.existential_fwd_head(types.existential_binder("a_b", 340)))),
+    check_eq("skolem_fwd_head: agrees with the pattern's binder for a plain variable",
+      types.skolem_fwd_head("$sk3_x_9"), Just(types.existential_fwd_head(types.existential_binder("x", 9)))),
     check_eq("skolem_fwd_head: no binder", types.skolem_fwd_head("$sk7"), Nothing),
     check_eq("skolem_fwd_head: not a skolem", types.skolem_fwd_head("$ex_a_3"), Nothing)
   ])
