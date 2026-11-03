@@ -301,13 +301,12 @@ tail simply because task creation throttles it to ~7k req/s, so it never opens e
 ### 5.4 Gotchas for design A
 
 - **A1 — the over-strict do-bind edge was in the way, and had to be routed around.**
-  *Superseded:* an effect bind now binds the whole value (`typed_ast.bind_bound_type`), so
-  `ch <- chan_new(s, cap)` in an `!{IO}` block is accepted, and `stdlib/http_server.sprout`
-  already uses it. See [linearity-virality-v0.md](./linearity-virality-v0.md). `chan_new` now
-  returns a `Result`, and `<-` unwraps a `Result`, so the accepted forms are now
-  `let Ok ch = chan_new(s, cap) else Err e -> …` or matching the call. The text below is
-  the original finding: `ch <- chan_new(s, cap)` was rejected for a container-of-linear payload
-  (§7.1), and the prototype threaded the channel as a parameter.
+  *Superseded:* the original finding was that `ch <- chan_new(s, cap)` was rejected for a
+  container-of-linear payload (§7.1), so the prototype threaded the channel as a parameter. An
+  effect bind now binds the whole value (`typed_ast.bind_bound_type`), and `Chan a` stores no `a`,
+  so binding one carries no obligation. `chan_new` returns a `Result`, and `<-` on a `Result` in a
+  `do` block unwraps it (spec §5.9), so `pooled_run` in `stdlib/http_server.sprout` matches the
+  call instead. See [linearity-virality-v0.md](./linearity-virality-v0.md).
 - **A2 — worker count is now a capacity decision**, exposed in the public API and needing a
   documented default and tuning guidance.
 - **A3 — a panicking/failing handler must not kill a worker permanently.** Today a task dies per

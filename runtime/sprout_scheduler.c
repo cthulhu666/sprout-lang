@@ -28,7 +28,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <limits.h>
 #include <stdio.h>    /* snprintf — stale-handle messages name the operation */
 #include <unistd.h>   /* close() — force-dropping an unowned-fd park closes the socket */
 #include "sprout_scheduler.h"
@@ -1255,12 +1254,9 @@ long long __task_sleep(long long ms) {
 /* Allocate a zeroed ring of `n` slots (n >= 1). The multiplication is checked: a size that does
  * not fit is reported as out of memory instead of wrapping to a small block. */
 static long long* chan_ring_alloc(long long n, const char* who) {
-  if (n < 1 || (unsigned long long)n > SIZE_MAX / sizeof(long long)) {
-    char msg[96];
-    snprintf(msg, sizeof msg, "%s: out of memory (channel buffer)", who);
-    sprout_fail(msg);
-  }
-  long long* ring = (long long*)calloc((size_t)n, sizeof(long long));
+  long long* ring = NULL;
+  if (n >= 1 && (unsigned long long)n <= SIZE_MAX / sizeof(long long))
+    ring = (long long*)calloc((size_t)n, sizeof(long long));
   if (ring == NULL) {
     char msg[96];
     snprintf(msg, sizeof msg, "%s: out of memory (channel buffer)", who);
@@ -1276,8 +1272,7 @@ static long long* chan_ring_alloc(long long n, const char* who) {
 static void chan_grow(Chan* ch) {
   if (ch->slots < 1 || ch->slots > ch->cap || ch->count != ch->slots)
     sprout_fail("chan_grow: channel is not a full ring below its bound");
-  long long want = (ch->slots > LLONG_MAX / 2) ? ch->cap : ch->slots * 2;
-  if (want > ch->cap) want = ch->cap;
+  long long want = ch->slots > ch->cap / 2 ? ch->cap : ch->slots * 2;
   long long* ring = chan_ring_alloc(want, "chan_grow");
   for (long long i = 0; i < ch->count; i++)
     ring[i] = ch->buffer[(ch->head + i) % ch->slots];

@@ -24,33 +24,27 @@ fn port_is_free(port: Int) -> String !{IO} =
         "free"
   | Err e -> tcp_error_message(e)
 
-fn refuse_with(state: TestState, label: String, workers: Int, queue: Int, want: String) -> Unit !{IO} =
+# `bounded` picks serve_pooled_n_with (one connection) over serve_pooled_with.
+fn refuse_with(state: TestState, label: String, bounded: Bool, workers: Int, queue: Int, want: String) -> Unit !{IO} =
   match listen_local(0) with
   | Err e -> assert_eq(state, `${label}: listen_local(0) succeeds`, tcp_error_message(e), "")
   | Ok listener ->
       do
         let port = local_port(listener)
-        assert_eq(state, `${label}: serve_pooled_with`, describe(serve_pooled_with(default_config(), listener, workers, queue, handle)), want)
-        assert_eq(state, `${label}: the listener was closed`, port_is_free(port), "free")
-
-fn refuse_n_with(state: TestState, label: String, workers: Int, queue: Int, want: String) -> Unit !{IO} =
-  match listen_local(0) with
-  | Err e -> assert_eq(state, `${label}: listen_local(0) succeeds`, tcp_error_message(e), "")
-  | Ok listener ->
-      do
-        let port = local_port(listener)
-        assert_eq(state, `${label}: serve_pooled_n_with`, describe(serve_pooled_n_with(default_config(), listener, workers, queue, 1, handle)), want)
+        let result = if bounded then serve_pooled_n_with(default_config(), listener, workers, queue, 1, handle)
+                     else serve_pooled_with(default_config(), listener, workers, queue, handle)
+        assert_eq(state, `${label}: the start is refused`, describe(result), want)
         assert_eq(state, `${label}: the listener was closed`, port_is_free(port), "free")
 
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
-    refuse_with(state, "zero workers", 0, 8, "no-workers 0")
-    refuse_with(state, "negative workers", -3, 8, "no-workers -3")
-    refuse_with(state, "negative queue", 2, -1, "negative-queue -1")
-    refuse_with(state, "no workers outranks a negative queue", 0, -1, "no-workers 0")
-    refuse_n_with(state, "zero workers", 0, 8, "no-workers 0")
-    refuse_n_with(state, "negative queue", 2, -1, "negative-queue -1")
+    refuse_with(state, "zero workers", false, 0, 8, "no-workers 0")
+    refuse_with(state, "negative workers", false, -3, 8, "no-workers -3")
+    refuse_with(state, "negative queue", false, 2, -1, "negative-queue -1")
+    refuse_with(state, "no workers outranks a negative queue", false, 0, -1, "no-workers 0")
+    refuse_with(state, "bounded: zero workers", true, 0, 8, "no-workers 0")
+    refuse_with(state, "bounded: negative queue", true, 2, -1, "negative-queue -1")
     assert_eq(state, "no-workers message", serve_pool_error_message(PoolNoWorkers(0)), "a pooled server needs at least 1 worker, got 0")
     assert_eq(state, "negative-queue message", serve_pool_error_message(PoolNegativeQueue(-1)), "a pooled server needs a queue depth >= 0, got -1")
     summary(state)
