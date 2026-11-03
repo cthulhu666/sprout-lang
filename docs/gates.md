@@ -405,6 +405,24 @@ the stage-1 binary, so an emitter change shows here only after `just refresh-see
 side is `tests/stdlib/test_vec_noscan.spr`, also in `test-stress`.
 Wired into `just ci-fast-gates` as `noscan-gate`.
 
+## Extern signatures — `just check-extern-signatures`
+
+Three rules over every `extern fn` in `stdlib/`, `ide/` and `examples/` (the duplicate rule still
+reads `stdlib/` only). **One symbol, one declaration**: externs are never module-scoped, so a
+second declaration with another parameter order typechecks and silently wins at some call site
+(the allowed exception is `stdlib/linvec.sprout`'s three redeclarations). **Vector allowlist**: an
+extern whose signature names `Vector`, `Vec`, `MutVec` or `LinVec` must be listed in the script
+by `file:name`. An entry claims the C side never stores a heap pointer into a vector whose
+element type is a non-heap scalar, nor reinterprets one vector type as another. **Scalar
+return**: an extern declared `-> Int|Double|Char|Bool` (effect row ignored) fails when its
+`runtime/*.c` definition returns `sprout_ptr_word(...)` or `sprout_str_word(...)`. An extern with
+no C definition there is skipped; `SPROUT_EXTERN_CHECK_VERBOSE=1` lists them. The last two guard
+premise 1 of [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md) §4.5: a NOSCAN vector's
+elements are never scanned, so a lying extern type is an invisible use-after-free. The scalar rule
+reads `return` statements, so a pointer held in a variable first is not seen. Fixtures:
+`just test-check-extern-signatures` (`SPROUT_EXTERN_CHECK_ROOT` points the script at one).
+Wired into `just ci-fast-gates` as `extern-signatures` and `test-check-extern-signatures`.
+
 ## Specialisation — `just spec-gate`
 
 Compiles each `tests/spec_fixtures/<name>.spr` twice, by default and with
