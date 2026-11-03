@@ -1366,7 +1366,8 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   now rejected at its declaration, `docs/qualified-class-methods-v0.md`.)
 - [ ] `P2` **A method used as a value on an unpacked existential the class does not pack fails at
   codegen.** `app(bump, x)` where `x` unpacks `exists a. Pack a where ToString a` (no `Step a`)
-  passes `--phase check` and dies in `ast_to_ir` on `__eta_unresolved_Step_bump`, no location.
+  passes `--phase check` and dies in lowering on the internal-error panic
+  "existential witness `$ex_a_<n>` has no slot", with a line:column but no diagnostic.
   `resolve.check_constraint` accepts any head that is neither forwarded nor concrete, and `$ex_`
   heads are neither. Same family as the ambiguous-reference entry above; a direct `bump(x)` is
   rejected at check.
@@ -1374,6 +1375,12 @@ Its own section because `ide/` lifts out of this repo whole, as `loam/` did. Des
   `infer.compute_eta_fwd_markers` puts them in the global env through `fold_fwd_markers`; nothing
   reads `types.eta_fwd_marker_key`. Lowering reads `@eta_fwdvar:` only. Delete the family, or
   find the reader it was meant for.
+- [ ] `P4` **Lowering works out an existential's witness fields again from the pattern.** Infer
+  seeds givens and lowering appends `$wtns_` fields through one walk
+  (`ast.map_accum_ctor_patterns`), but in two passes that must agree. Infer's resolve pass
+  (`resolve_dispatch_typed_expr`'s TMatch arm) could append the fields itself, as GHC's
+  `ConPatTc` carries `cpt_dicts`, and lowering would read them. First audit the passes after
+  resolve that would see the binders: `verify_dispatch`, `linear_check`, `specialise`, `dce`, `bce`.
 - [ ] `P2` **Complete the M3b eta→single-authority collapse (blocked on tyvar canonicalization).**
   Lowering's `try_eta_in_class`/`try_eta_forwarded_without_class` remain a second resolution
   authority for one shape: a polymorphic (type-variable-head) forwarded value-position class method.

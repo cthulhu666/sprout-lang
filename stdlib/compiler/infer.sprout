@@ -153,7 +153,7 @@ type GroupResult =
 # Internal single-method result.
 type InstanceMethodResult =
   | InstanceMethodOk typed_ast.TypedInstanceMethod (Dict types.Scheme)
-  # InstanceMethodOk  method  eta_fwdvar_markers
+  # InstanceMethodOk  method  eta_fwdvar_markers (the caller's accumulator plus this method's)
   | InstanceMethodErr source.SourcePos String
 
 # ---------------------------------------------------------------------------
@@ -5901,7 +5901,12 @@ export fn extend_env_from_pattern(pat: ast.Pattern, subst: Dict types.Type, env:
       bind_local_scheme(name, types.mono(unifier.apply_subst(subst, types.TVar(types.tyvar_id(name)))), env)
   | ast.TuplePattern pats _ -> extend_env_from_pattern_list(pats, subst, env)
   | ast.ConstructorPattern _ fields _ -> extend_env_from_pattern_list(fields, subst, env)
-  | _ -> env
+  | ast.WildcardPattern _ -> env
+  | ast.IntPattern _ _ -> env
+  | ast.BoolPattern _ _ -> env
+  | ast.StringPattern _ _ -> env
+  | ast.CharPattern _ _ -> env
+  | ast.UnitPattern _ -> env
 
 fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match pats with
@@ -5910,26 +5915,22 @@ fn extend_env_from_pattern_list(pats: List ast.Pattern, subst: Dict types.Type, 
 
 # Stage 0b: seed the pattern-provided "given" dictionaries for a constrained
 # existential (docs/gadts-v0.md §5b/§7). Unpacking `Shown x` (from `Shown (any
-# ToString)`) binds `x` at a rigid skolem `$sk<n>` that has no global ToString
+# ToString)`) binds `x` at a rigid skolem `$sk<n>_<binder>` that has no global ToString
 # instance; the witness travels INSIDE the box. We read the skolem off `subst`
 # (recorded at the pattern by record_existential_skolems) and seed
 # `@fwd:{skolem}:{class}` — the identical marker a `where C a` function seeds via
 # seed_forward_markers — so `to_string(x)` in the branch resolves the packed
 # witness through the standard forward path. The constructor pattern owns the
-# dictionary, so its field sub-patterns may be anything. Recurses into tuple/ctor
-# sub-patterns so `(Shown x, ...)` is handled; a nested existential reads its own
-# pattern's recorded skolem from the same subst.
+# dictionary, so its field sub-patterns may be anything. Walks tuple/ctor
+# sub-patterns with ast.map_accum_ctor_patterns (shared with lowering) so `(Shown x, ...)`
+# is handled; a nested existential reads its own pattern's recorded skolem from the same subst.
 fn extend_env_with_existential_givens(pat: ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  match pat with
-  | ast.ConstructorPattern name fields pos ->
-      extend_env_givens_list(fields, subst, seed_ctor_givens(name, pos, subst, env))
-  | ast.TuplePattern pats _ -> extend_env_givens_list(pats, subst, env)
-  | _ -> env
+  let (_, env2) = ast.map_accum_ctor_patterns(pat, env, seed_givens_at_ctor(subst, _, _, _, _))
+  in env2
 
-fn extend_env_givens_list(pats: List ast.Pattern, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
-  match pats with
-  | Nil -> env
-  | Cons h t -> extend_env_givens_list(t, subst, extend_env_with_existential_givens(h, subst, env))
+fn seed_givens_at_ctor(subst: Dict types.Type, name: String, fields: List ast.Pattern, pos: source.SourcePos,
+                       env: Dict types.Scheme) -> (ast.Pattern, Dict types.Scheme) =
+  (ast.ConstructorPattern(name, fields, pos), seed_ctor_givens(name, pos, subst, env))
 
 fn seed_ctor_givens(name: String, pos: source.SourcePos, subst: Dict types.Type, env: Dict types.Scheme) -> Dict types.Scheme =
   match dict_get(name, env) with
@@ -12508,7 +12509,7 @@ fn finish_let_decl(name: String, expr: ast.Expr, typed_expr: typed_ast.TypedExpr
       # free type variables and the value restriction's ftv test below reads it
       # as "fully resolved, nothing to generalize" and binds it monomorphically.
       # `let leaked = match Boxed("hi") with | Boxed x -> x` was accepted as
-      # `main.leaked : $sk<n>` on exactly that route.
+      # `main.leaked : $sk<n>_<binder>` on exactly that route.
       if types.type_mentions_skolem(unifier.apply_subst(s1, typed_ast.typed_expr_type(typed_expr)))
       then TypedDeclErr(let_pos, skolem_escape_let_msg(name))
       else
@@ -13187,13 +13188,12 @@ fn check_instance_methods_acc(
   | Nil -> typed_ast.InstanceMethodsOk(list_reverse(acc), markers)
   | Cons method rest ->
       do
-        r <- check_instance_method(state, head, inst_constraints, method, env, subst, eff_subst, env_ftv)
+        r <- check_instance_method(state, head, inst_constraints, method, env, subst, eff_subst, env_ftv, markers)
         match r with
         | InstanceMethodErr pos e -> typed_ast.InstanceMethodsErr(pos, e)
-        | InstanceMethodOk typed_method method_markers ->
+        | InstanceMethodOk typed_method markers2 ->
             check_instance_methods_acc(state, head, inst_constraints, rest, env, subst, eff_subst, env_ftv,
-                                       Cons(typed_method, acc),
-                                       fold_fwd_entries(vec_to_list(dict_entries(method_markers)), markers))
+                                       Cons(typed_method, acc), markers2)
 
 fn check_instance_method(
   state: unifier.InferState,
@@ -13203,7 +13203,8 @@ fn check_instance_method(
   env: Dict types.Scheme,
   subst: Dict types.Type,
   eff_subst: Dict types.Effect,
-  env_ftv: List String
+  env_ftv: List String,
+  markers: Dict types.Scheme
 ) -> InstanceMethodResult !{IO} =
   match method with
   | ast.InstanceMethodImpl name params ret_maybe eff_maybe method_constraints bounds body ->
@@ -13254,7 +13255,7 @@ fn check_instance_method(
             # return-type unify — same ordering and same reasons as check_fn_body.
             instance_method_checked(state, name, label, params, ret_maybe, eff_maybe,
               body_env, s1, es1, inst_type, typed_body0, body_eff, env, decl_scheme,
-              inst_constraints, method_constraints, bounds, head, prog_to_fresh, env_ftv)
+              inst_constraints, method_constraints, bounds, head, prog_to_fresh, env_ftv, markers)
 
 # Two instances of one class define the same method name, so the bare name would
 # collapse them into a single census entry. The instance HEAD is not in scope here
@@ -13287,7 +13288,8 @@ fn instance_method_checked(
   bounds: List String,
   head: InstanceHead,
   prog_to_fresh: Dict types.Type,
-  env_ftv: List String
+  env_ftv: List String,
+  markers: Dict types.Scheme
 ) -> InstanceMethodResult !{IO} =
   match unifier.unify_actual_expected(s1, es1, typed_ast.typed_expr_type(typed_body0), fn_return_type(inst_type, list_length(params))) with
   | unifier.UnifyErr e -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body0), "Return type mismatch in instance method " ++ label_text(label) ++ ": " ++ e)
@@ -13317,7 +13319,7 @@ fn instance_method_checked(
                            params = params, ret_te = ret_maybe, inst_type = inst_type, typed_body = typed_body,
                            fn_pos = typed_ast.typed_expr_pos(typed_body), env = with_try_markers(tries, env),
                            lin = lin),
-                prog_to_fresh, types.scheme_vars(decl_scheme), env_ftv)
+                prog_to_fresh, types.scheme_vars(decl_scheme), env_ftv, markers)
 
 fn instance_method_err(label: MethodLabel, pos: source.SourcePos, msg: String) -> InstanceMethodResult =
   # Previously: lenient short-circuit that returned a `dummy_unit()`-bodied
@@ -13336,7 +13338,8 @@ fn finish_instance_method(name: String, label: MethodLabel, params: List ast.Par
                           gate: LinearGate,
                           prog_to_fresh: Dict types.Type,
                           sig_vars: List String,
-                          env_ftv: List String) -> InstanceMethodResult =
+                          env_ftv: List String,
+                          markers: Dict types.Scheme) -> InstanceMethodResult =
   match maybe_or_else(maybe_or_else(class_method_mode_error(name, params, unifier.apply_subst(s2, inst_type),
                                                             with_bound_marks(bound_marks(gate, s2), env), gate.lin),
                                     class_method_constraints_error(name, label, method_constraints, env)),
@@ -13355,7 +13358,7 @@ fn finish_instance_method(name: String, label: MethodLabel, params: List ast.Par
       | Just msg -> InstanceMethodErr(typed_ast.typed_expr_pos(typed_body), msg)
       | Nothing ->
           finish_instance_method_checked(name, params, ret_maybe, eff_maybe, body_env, s2, inst_type,
-                                         typed_body, method_constraints, gate, prog_to_fresh)
+                                         typed_body, method_constraints, gate, prog_to_fresh, markers)
 
 # docs/linearity-bound-v0.md §11 decision 7: an instance method restates its class
 # method's `where linear`, as it restates a class constraint, under its own names
@@ -13451,7 +13454,8 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
                                   typed_body: typed_ast.TypedExpr,
                                   method_constraints: List ast.TypeConstraint,
                                   gate: LinearGate,
-                                  prog_to_fresh: Dict types.Type) -> InstanceMethodResult =
+                                  prog_to_fresh: Dict types.Type,
+                                  markers: Dict types.Scheme) -> InstanceMethodResult =
   # An instance method is checked alone, so its gate runs here.
   match linear_gates_error([gate], s2) with
   | Just (lp, lm) -> InstanceMethodErr(lp, lm)
@@ -13460,4 +13464,4 @@ fn finish_instance_method_checked(name: String, params: List ast.Param, ret_mayb
         typed_ast.TypedInstanceMethod(name, params, ret_maybe, eff_maybe, method_constraints,
           resolve_dispatch_typed_expr(seed_unann_inner_names(own_unann_vars(types.inst_owner_prefix ++ name, params, ret_maybe), s2, body_env),
             s2, bind_params(params, set_empty()), typed_body)),
-        eta_fwdvar_markers(prog_to_fresh, s2, dict_empty()))
+        eta_fwdvar_markers(prog_to_fresh, s2, markers))

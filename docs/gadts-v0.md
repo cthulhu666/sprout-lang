@@ -203,8 +203,9 @@ strictly smaller, self-contained feature. So:
   (`types.existential_binder`), so any field sub-pattern (`_`, a tuple, `Just(x)`)
   works and two vars of one constructor stay distinct. The existential pattern may
   itself sit inside a tuple or another constructor (`(Pack x, Pack y)`,
-  `Just(Pack x)`): infer and lowering walk the same sub-patterns, so each nested
-  unpack binds its own dictionaries. Missing-instance construction (`Shown(NoShow)`) is rejected at the
+  `Just(Pack x)`): infer and lowering share one walk (`ast.map_accum_ctor_patterns`), so
+  each nested unpack binds its own dictionaries, and an `$ex_` slot lowering lacks is a
+  compile-time internal error rather than a null dictionary. Missing-instance construction (`Shown(NoShow)`) is rejected at the
   construction site with the standard "No instance" diagnostic (§8). **Known gap:**
   an *ambiguous* existential construction whose element type is undetermined
   (`Bag([])` — an empty container) currently surfaces as an opaque ctor-arity

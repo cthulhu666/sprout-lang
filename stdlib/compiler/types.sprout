@@ -164,29 +164,33 @@ instance Eq TypeId
 export fn is_skolem_name(name: String) -> Bool =
   string.starts_with(name, "$sk")
 
-# The counter value inside a skolem's name; skolems number in the order they are minted.
-# The binder after the first `_` is not part of it.
-export fn skolem_index(name: String) -> Maybe Int =
+# A skolem's name split into its counter digits and its binder, the text after the first
+# `_`; a hand-built `$sk<n>` has no binder. Nothing for a name that is not a skolem's.
+export fn skolem_parts(name: String) -> Maybe (String, Maybe String) =
   let Just rest = string.strip_prefix(name, "$sk") else Nothing
   in match string.split_once(rest, "_") with
-     | Just (digits, _) -> parse_int(digits)
-     | Nothing -> parse_int(rest)
+     | Just (digits, binder) -> Just((digits, Just(binder)))
+     | Nothing -> Just((rest, Nothing))
+
+# The counter value inside a skolem's name; skolems number in the order they are minted.
+export fn skolem_index(name: String) -> Maybe Int =
+  let Just((digits, _)) = skolem_parts(name) else Nothing
+  in parse_int(digits)
 
 # The `$ex_` forwarding identity of the existential a skolem stands for, when its name
 # carries a binder. A hand-built `$sk<n>` carries none.
 export fn skolem_fwd_head(name: String) -> Maybe String =
-  let Just rest = string.strip_prefix(name, "$sk") else Nothing
-      Just((_, binder)) = string.split_once(rest, "_") else Nothing
+  let Just((_, Just(binder))) = skolem_parts(name) else Nothing
   in Just(existential_fwd_head(binder))
 
 # Stage 0b: the STABLE forwarding identity for a constrained existential's packed
-# dictionary (docs/gadts-v0.md §5b/§7). The skolem `$sk<n>` that unpacking mints is
-# fresh-per-instantiation and unknown to codegen, so it cannot key the dict
-# forwarding. This name is instead derived from the constructor pattern and the
-# existential variable — which BOTH infer (seeds the @fwd marker's value) and
-# lowering (seeds ctx_fwd) can see — so the two ends agree by construction. The `$`
-# prefix makes resolve treat it as a non-concrete head (→ EvForward), and marks it
-# reserved (no source-name collision).
+# dictionary (docs/gadts-v0.md §5b/§7). Lowering works from the pattern and its position
+# and never sees a skolem, whose counter it cannot know, so the slot key must be derivable
+# from the pattern: the constructor pattern and the existential variable, which BOTH infer
+# (seeds the @fwd marker's value) and lowering (seeds ctx_fwd) can see. The skolem carries
+# the binder so resolve can map back to it (skolem_fwd_head). The `$` prefix makes resolve
+# treat it as a non-concrete head (→ EvForward), and marks it reserved (no source-name
+# collision).
 export let existential_head_prefix: String = "$ex_"
 
 export fn existential_fwd_head(binder: String) -> String =
