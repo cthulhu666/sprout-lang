@@ -2,19 +2,33 @@
 
 # Sprout
 
-A statically typed, functional-first programming language aimed at strong safety
-with beginner-friendly ergonomics. The compiler is **self-hosted** — written in
-Sprout, it compiles itself and emits native binaries via LLVM IR + clang.
+[![CI](https://github.com/cthulhu666/sprout-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/cthulhu666/sprout-lang/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 
-> **Status: v0.** The compiler is self-hosting.
-> [`docs/spec-v0.md`](./docs/spec-v0.md) is normative; a feature it does not
-> specify may still change.
+A statically typed, functional-first programming language aimed at strong safety
+with beginner-friendly ergonomics. Sprout compiles to native binaries via LLVM, and
+its compiler is written in Sprout.
+
+> **Status: v0.** [`docs/spec-v0.md`](./docs/spec-v0.md) is normative; a feature it
+> does not specify may still change.
+
+## Why Sprout
+
+- **Types you rarely write.** Hindley–Milner inference with typeclasses. Exhaustive
+  matching, and `Maybe`/`Result` in place of null and exceptions.
+- **Purity the compiler checks.** Effects are part of a function's type and are checked:
+  IO under a pure signature does not compile, nor does passing an IO function where
+  a pure one is expected.
+- **Resources released exactly once.** Linear types with `consuming` and `borrowing`
+  parameter modes: the compiler checks that a socket or task handle is closed once,
+  and never used after.
+- **Native and small.** One binary per program, a small C runtime with a GC, and green
+  tasks for concurrency. No VM.
 
 ## A taste
 
 Read a value, clean and validate it, then respond — with `|>` pipelines and the
-two safety idioms `Maybe` (might be absent) and `Result` (might be invalid). No
-exceptions, no null:
+two safety idioms `Maybe` (might be absent) and `Result` (might be invalid):
 
 ```sprout
 module main
@@ -36,71 +50,46 @@ fn main() -> Unit !{IO} =
   | Err _          -> print("USER is not valid UTF-8")
 ```
 
-Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examples/).
+Running with `USER="  Ada  "` prints `Hello, Ada`.
 
-## Highlights
+## The language
 
-- **Full type inference** — Hindley–Milner; most code needs no annotations.
-- **Functional core** — algebraic data types, exhaustive pattern matching,
-  immutable values, `Int`/`Double` numerics (with `0x`/`0b` literals and
-  `stdlib.bits`), `Maybe`/`Result` for optionality and failure.
-- **Typeclasses** — dictionary-passing (`Eq`, `Ord`, `ToString`, `Semigroup`,
-  `Monoid`, …), including return-type dispatch.
-- **Effects in types, and they are checked** — pure functions are unannotated;
-  effectful ones carry `!{IO}` (with singleton effect variables `!{e}` for
-  higher-order helpers). A body that performs IO under a pure signature is a
-  compile error, and so is passing an `!{IO}` function where a pure one is
-  expected. One gap remains: a function's own effect variable is not checked in
-  its body, so a call through a parameter `g: Int -> Int !{e}` under a pure
-  signature is accepted, and so is a function declared `!{e}` whose body does
-  IO (spec §7, enforcement note). Over-declaring is fine — the rule is
-  *inferred ⊑ declared*, not equality. Open effect rows are not supported yet. Aborting is *not* an effect:
-  `panic` is pure, so an unreachable-by-invariant arm does not make its function
-  effectful ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
-- **Zero-cost `wrap` newtypes**, abstract across a module boundary unless declared
-  `export wrap Name (..)`, so one can carry an invariant its inner type cannot.
-  Type parameters are erased, so `wrap Tagged u = Int` gives compile-time indices
-  (units, typed handles) for no runtime cost.
-  Plus first-class **tuples** and function-local `where` blocks (normative v0).
-- **Self-hosted compiler** — parser, typechecker, and codegen written in Sprout;
-  native binaries via LLVM IR + clang; a small C runtime with a mark-sweep GC.
-- **Beginner-friendly diagnostics** — `line:col` errors, exhaustiveness checks,
-  unknown-name and missing-instance reporting.
-- **Editor and REPL tooling** — `sproutd` serves LSP (diagnostics, go-to-definition,
-  hover, completion) and an interactive REPL (`just build-sproutd && just repl`); a JetBrains
-  plugin lives in [`editors/intellij`](./editors/intellij).
+- **Functional core** — algebraic data types, exhaustive pattern matching, immutable
+  values, tuples, records (`p.name`, `p with (name = …)`), function-local `where`
+  blocks, `Int`/`Double` with `0x`/`0b` literals.
+- **Typeclasses** — `Eq`, `Ord`, `ToString`, `Semigroup`, `Monoid`, `Functor`,
+  `Foldable`, … with return-type dispatch and `deriving`. Existential constructors
+  (`(any C)`) give trait objects and heterogeneous collections.
+- **Effects** — pure functions are unannotated; effectful ones carry `!{IO}`, and
+  higher-order helpers take an effect variable `!{e}`. Over-declaring is fine: the
+  rule is *inferred ⊑ declared*. `panic` is pure
+  ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
+- **Linear types** — `consuming`, `borrowing`, `once` and `local` parameter modes.
+- **`wrap` newtypes** — zero cost and abstract across a module boundary, so one can
+  carry an invariant its inner type cannot. Erased type parameters give units and
+  typed handles for free ([guide](./docs/wrap-type-params-v0.md)).
+- **Sugar** — `|>`, partial application with `_` holes (`add(_, 1)`), list
+  comprehensions (`[x * x for x in 1..n if x > 2]`), `do` for
+  `Maybe`/`Result`/`IO`, `let..else`, `try`, template literals.
 
-**Also in the spec:** modules, records (`type User = (name: String)` — parametric,
-with `p.x` access and `p with (name = …)` update), integer ranges (`a..b`),
-list comprehensions (`[e for x in xs if p]`, over `List` and `IntRange`),
-`do` notation for `Maybe`/`Result`/`IO`, `try`, template literals,
-existential constructors (`| exists a. Cell a where ToString a`, and its `(any C)`
-sugar — trait objects / heterogeneous collections), linear types with
-`consuming`/`borrowing`/`once`/`local` parameter modes, and `deriving`.
+Implemented but not yet in the spec: green-task concurrency with channels and
+`select`, `Char`/Unicode text, `stdlib.regex`, growable `MutVec`.
 
-**Implemented, not yet in the spec:** `Char`/Unicode text, `stdlib.regex`, growable
-`MutVec` (`mutvec_push`), green-task concurrency with channels and a recv-only
-`select`, and `#@unstable`/`#@wip`-style declaration annotations. See the design
-drafts below.
+## Examples
 
-`class` and `instance` bodies use the layout (indentation) form; the brace form still
-parses but is deprecated and reported by the linter as `deprecated-brace-body`.
+| Example | What it shows |
+|---|---|
+| [`http_web_server`](./examples/http_web_server.sprout) | Routes and logging middleware on `stdlib.http_server` |
+| [`concurrent_fetch`](./examples/concurrent_fetch.sprout) | Three tasks in one scope finish in the time of the slowest |
+| [`linear_resources`](./examples/linear_resources.sprout) | A handle the compiler makes you release exactly once |
+| [`wrap_typed_money`](./examples/wrap_typed_money.sprout) | Zero-cost distinct types for account ids and cents |
+| [`existential_shapes`](./examples/existential_shapes.sprout) | A user-defined interface used as a trait object |
+| [`json_demo`](./examples/json_demo.sprout) | Parsing and printing JSON |
+| [`digit_recognizer`](./examples/digit_recognizer/) | A neural network that learns handwritten digits (~90% test accuracy) |
+| [`aoc_2025_day_1`](./examples/aoc_2025_day_1.sprout) | Advent of Code 2025, day 1 |
 
-## Documentation
-
-- **[Language spec (v0, normative)](./docs/spec-v0.md)** — the stable core.
-- **[Idiomatic Sprout](./docs/idiomatic-sprout.md)** — how to write clean, flat, idiomatic code.
-- [Parameterized `wrap`](./docs/wrap-type-params-v0.md) — units, typed handles, protocol state, and when a parameter is the wrong choice.
-- [Language design](./docs/language-design-v0.md) · [design best practices](./docs/language-design-best-practices.md)
-- [Style guide](./docs/style-guide-v0.md) · [stdlib/compiler guidelines](./docs/guidelines.md)
-- [HM typechecker guide](./docs/hm-typechecker.md) · [effect enforcement](./docs/effect-enforcement-v0.md) · [records](./docs/records-v0.md)
-- [Compiler internals](./docs/compiler-internals.md) · [packaging](./docs/packaging-v0.md) · [language server](./docs/language-server-roadmap.md)
-- [Stdlib reference](./docs/stdlib-reference.md) — the `stdlib.*` modules, one section each.
-- [Builtins reference](./docs/builtins-reference.md) — host builtins (`extern fn`).
-- [Toolchain, build & implementation status](./docs/development.md)
-- [Debugging](./docs/debugging.md) · [Gates](./docs/gates.md) · [Bootstrap chain](./docs/bootstrap-chain.md)
-- [Backlog & roadmap](./BACKLOG.md)
-- Design drafts: [effect system](./docs/effect-system-v0-plan.md) ([v1](./docs/effect-system-v1-draft.md)) · [int ranges](./docs/int-ranges-v1-draft.md) · [char & text](./docs/char-text-v1-draft.md) · [sequencing sugar](./docs/sequencing-sugar-v1-draft.md)
+The largest Sprout program is the compiler itself, in [`stdlib/compiler/`](./stdlib/compiler/).
+All examples: [`examples/`](./examples/).
 
 ## Quick start
 
@@ -118,195 +107,17 @@ The setup installs the system and repository-managed toolchain, configures Git h
 bootstraps the self-hosted compiler. It supports Homebrew and the APT, DNF, Pacman, and Zypper
 Linux families; on Debian and Ubuntu it installs the required LLVM/Clang 22 from apt.llvm.org.
 WSL follows the Linux path. Use `./scripts/setup-dev.sh --print-plan` to inspect what it would
-install. Once `just` is available, `mise exec -- just install-deps` upgrades dependencies without
-reconfiguring hooks or bootstrapping the compiler.
+install. Full toolchain, tasks, driver CLI and platform support:
+[docs/development.md](./docs/development.md).
 
-Full toolchain, tasks, driver CLI, and platform support live in
-[docs/development.md](./docs/development.md). Run the test suite with
-`mise exec -- just test`.
+## Tooling
 
-## Repository layout
-
-- `docs/` — design and process documents
-- `examples/` — sample source files
-- `stdlib/` — standard library (`prelude.sprout`) plus protocol helpers
-- `stdlib/compiler/` — self-hosted compiler (`parser`, `infer`/`checker`, `ast_to_ir`/`ir_lowering`, `compile_driver`)
-- `runtime/` — C runtime, GC, poller and scheduler (`sprout_runtime.c`, `sprout_poll.c`, `sprout_scheduler.c`)
-- `ide/` — the Sprout IDE, written in Sprout on `stdlib.tui` ([`docs/ide-v0.md`](docs/ide-v0.md))
-- `tests/` — test suites (native Sprout tests under `tests/stdlib/`, the IDE's under `tests/ide/`)
-- `tests/conformance/` — executable behavior fixtures (`run`, `parse_error`, `type_error`, `executable_error`)
-- `bootstrap/` — committed LLVM IR seed for stage-1 bootstrap
-- `mise.toml` / `justfile` — pinned toolchain and common commands
-
-Two v0 rules to know: top-level `let` bindings must be pure, and effectful work
-lives in functions, with `main` as the entrypoint.
-
-## Not Yet Supported (Common Gotchas)
-
-A few naming and syntax gotchas, each with the idiomatic form to use instead.
-
-**Boolean negation is `!expr`, not `not`**
-Use the prefix `!` operator to negate a `Bool`; prefix `-` negates a number.
-The *word* `not` is not an operator and is a parse error.
-```sprout
-if !is_valid(x) then handle_error() else proceed()   # ! negates a Bool
-let below = -temperature                              # - negates a number
-# `not is_valid(x)` does NOT parse — use `!is_valid(x)`
-```
-
-**An instance head takes type variables, not concrete arguments**
-`instance C (List Int)` is rejected; the head must be a type constructor applied to
-*distinct* type variables (spec §8.5, following Haskell 2010 §4.3.2). Instance
-selection keys on the head constructor alone, so a `List Int` instance would also
-answer for `List String` — and run its `Int` code on it. To get an instance at one
-specific argument type, give that instantiation a type of its own.
-```sprout
-instance Summable (Vec Int)              # rejected: `Int` is a concrete type
-instance Summable (Vec a)                # ok — a distinct type variable
-
-type IntVec =                            # the idiom for a specific element type
-  | MkIntVec (Vec Int)
-instance Summable IntVec                 # ok — `IntVec` is its own head
-```
-
-**An alias needs `alias`**
-Without it, `type T = …` declares a new type and the first word is a constructor name.
-When that type has one constructor named after a type in scope, it is rejected (spec §5.6).
-```sprout
-type Pairs = List (String, Int)          # rejected: a constructor named `List`
-type alias Pairs = List (String, Int)    # ok — the same type as List (String, Int)
-wrap Pairs = List (String, Int)          # ok — a distinct type over it
-```
-
-**A dotted import outside `stdlib/` needs `--package-root`, and fails silently without it**
-The default search path resolves only `stdlib.<name>` imports and single-segment
-dotless names. Any *other* dotted import (e.g. `import myapp.util`) resolves under an
-extra package root, registered by passing `--package-root <dir>` right after the
-stdlib root. Omit the flag and the import resolves to nothing **silently** — there is
-no error at import time; the symbols never bind, surfacing later as an
-`Unknown variable` at the use site.
-```
-compile_driver_bin_stage1 --emit-ir stdlib --package-root ./lib app.sprout
-```
-One extra root, in that fixed position — the walking-skeleton surface
-([packaging-v0.md](./docs/packaging-v0.md) §10). Both directions are gated by
-`just test-package-resolution`.
-
-**Every file gets the prelude; opt out with `no_prelude`**
-The prelude is unconditional — a file with no `module` header gets it too
-([prelude-scope-v0.md](./docs/prelude-scope-v0.md)). Redefining a prelude name is fine
-and shadows it (`examples/maybe_map.sprout` redefines `Maybe` and `map`), because a
-headerless file gets its own namespace rather than sharing the prelude's.
-
-To opt out, put `no_prelude` on its own line in the header block:
-
-```sprout
-no_prelude
-
-fn twice(n: Int) -> Int = n + n
-```
-
-Two things to know about opting out. A `no_prelude` file stays *unqualified*, which is
-what lets it redefine `Maybe` and bind it with `<-`, or declare its own `class Eq` —
-both of those resolve by unqualified name, so they only work without a prelude to
-collide with. And what is left is the **floor**: the 16 `extern fn`s whose signatures
-mention only primitive types (`print_str`, `eprint`, `panic`, `str_concat`, …). Naming
-anything else the prelude declares is a checked error with a source position
-(`Unknown variable: argv_get_bytes`), not a link failure. `examples/no_prelude_core.sprout`
-is a whole program written against that floor;
-[no-prelude-core-v0.md](./docs/no-prelude-core-v0.md) §4.1 lists the 16 and says why
-the cut falls there.
-
-An **imported** file must declare a `module` header — only the entry may be headerless.
-
-**An import list takes bare names — no `(..)`.** `import demo.shapes (Shape(..))`
-is the Haskell reflex and is rejected, spaced (`Shape (..)`) or not; write
-`import demo.shapes (Shape)`. Naming a
-type already imports its constructors, and `(..)` belongs on the type's
-*declaration*, where it decides whether they are published at all.
-
-**A module path is not a name.** `demo.sealed.unseal(v)` is rejected even where
-`import demo.sealed as sealed` is in scope: import the module and use the alias
-(`sealed.unseal(v)`). Sprout follows Haskell and Go here, not Java or Rust — those
-full-path spellings reached private bindings, so `export` guarded nothing against a
-caller who knew the convention.
-
-## Partial Application with `_`
-
-Leave arguments as holes with `_`, and a call becomes a function of the holes —
-in **any** position, not just left-to-right:
-
-```sprout
-add(_, 1)              # \x -> add(x, 1)   — increment
-add(10, _)             # \x -> add(10, x)
-map(add(_, 100), xs)   # add 100 to every element
-
-# multiple holes -> a multi-argument function, filled left-to-right
-add3(_, _, 3)          # \(a, b) -> add3(a, b, 3)
-```
-
-A `_` binds to the innermost enclosing call, so in `f(g(_), 3)` the hole belongs
-to `g`. Operator sections (`_ * 2`) are not yet supported — write `\x -> x * 2`.
-
-## Iteration Combinators
-
-The prelude provides effect-polymorphic iteration combinators — use these instead
-of hand-rolling counter recursion. Each takes an effect-polymorphic step (`!{e}`),
-so the same function serves both pure and `!{IO}` code, and all follow the
-data-last argument convention (the collection is the final argument).
-
-```sprout
-range_each(f: local Int -> Unit !{e}, r: IntRange) -> Unit !{e}    # imperative loop
-range_fold(step: local b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e}
-list_each (f: local a -> Unit !{e}, xs: List a)  -> Unit !{e}      # traverse for effect
-list_fold (step: local b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
-```
-
-`local` promises the combinator does not keep the function past the call, so a lambda
-passed to it (or to `fold`, `any`, `find` and the other `Foldable` functions) may read a
-borrowed linear value. `map`, `filter` and `and_then` do not make that promise.
-
-To *build* a list rather than loop for effect, prefer a comprehension. It reads in
-the order the data flows, works over either source type, and runs in constant
-stack space — it elaborates to exactly the `list_fold`/`range_fold` you would have
-written, accumulating in reverse and reversing once at the end:
-
-```sprout
-[i * i for i in 1..n]                            # over an IntRange
-[name for (name, age) in people if age > 18]     # destructure, then filter
-[(x, y) for x in xs, y in ys]                    # nested: leftmost is outermost
-```
-
-Generators are comma-separated; a guard attaches to the generator on its left with
-no comma, and there may be several. The pattern must be irrefutable — `Just x` is
-rejected rather than silently skipping non-matches, so use `list_filter_map` when
-dropping elements is what you mean.
-
-In a `Vec`-expected position a comprehension needs no conversion — it lowers to
-`vec_from_list(…)`, the same rule a list literal gets ([spec §5.5.1](docs/spec-v0.md)):
-
-```sprout
-fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]
-```
-
-Runnable tour: [`examples/comprehension_demo.sprout`](examples/comprehension_demo.sprout).
-See also [spec §5.10](docs/spec-v0.md) and
-[docs/list-comprehensions-v0.md](docs/list-comprehensions-v0.md).
-
-`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is
-`range_up(0, n - 1)` — including at `n == 0`, which needs **no guard**.
-
-Ranges are built by one of two peer constructors, and neither is the default spelling:
-
-```sprout
-range_up(1, 5)      # 1 2 3 4 5      1..5 is the same thing
-range_down(5, 1)    # 5 4 3 2 1
-```
-
-Emptiness is direction-relative: a range is empty when its end lies past its start
-*in the direction of travel*, so `range_up(hi, lo)` with `hi > lo` yields nothing, and
-so does `range_down(lo, hi)` with `lo < hi`. Both are spelled with **computed** bounds
-above on purpose — written with constant ones they are rejected at compile time:
+- **Formatter and linter** — `just fmt-file <file>` and `just lint-file <file>`.
+- **Language server** — `sproutd` serves LSP: diagnostics, go-to-definition, hover,
+  completion. A JetBrains plugin lives in [`editors/intellij`](./editors/intellij).
+- **REPL** — `just build-sproutd && just repl`.
+- **Diagnostics** — errors carry `line:col`, check exhaustiveness, report unknown
+  names and missing instances, and many say how to fix the code:
 
 ```
 ERROR: check: range `range_up(5, 1)` is empty, so it yields no values: the start
@@ -314,34 +125,51 @@ bound 5 is above the end bound 1, and it counts upward only. To count downward
 write `range_down(5, 1)`
 ```
 
-An empty range is what you want from `range_up(0, n - 1)` at `n == 0`; an empty range
-you *wrote out in full* is a typo, and the two are distinguishable because only the
-second has literal bounds.
+## Limits (v0)
 
-Direction lives in the range itself (`range_step` reports `+1` or `-1`), so every
-combinator takes either one unchanged. The `a..b` literal is **ascending only** —
-there is no descending literal, so a reversed one is an *empty ascending* range rather
-than a descending one, and the same literal-bounds rule rejects it. See
-[docs/ranges-v0.md](docs/ranges-v0.md).
+- **Diagnostics** show `line:col` only: no file path and no source excerpt yet.
+- **Packages** — no package manager. A dotted import outside `stdlib/` needs one
+  `--package-root <dir>`, and without it the import fails silently: the error surfaces
+  later as `Unknown variable` ([packaging-v0.md](./docs/packaging-v0.md) §10).
+- **Effects** — a call through a parameter typed with an effect variable
+  (`g: Int -> Int !{e}`) is not checked against a pure signature (spec §7, enforcement
+  note). Open effect rows are not supported.
+- **Concurrency** — `select` takes receive cases only, over channels of one type.
+- **Syntax** — no operator sections (write `\x -> x * 2`, not `_ * 2`), and a
+  lambda body cannot be a multi-statement `do` block.
 
-Because inline multi-statement `do`-lambdas do not yet parse, lift a multi-line step
-body into a named helper and pass it via a single-expression lambda:
+Coming from Haskell, Rust or Go? Read
+[Rules that surprise newcomers](./docs/idiomatic-sprout.md#rules-that-surprise-newcomers).
 
-```sprout
-fn print_line(items: Vec String, i: Int) -> Unit !{IO} =
-  match vec_get(i, items) with | Just s -> print(s) | Nothing -> ()
+## Documentation
 
-range_each(\i -> print_line(items, i), range_up(0, vec_length(items) - 1))
-```
+- **[Language spec (v0, normative)](./docs/spec-v0.md)** — the stable core.
+- **[Idiomatic Sprout](./docs/idiomatic-sprout.md)** — start here to write Sprout.
+- [Stdlib reference](./docs/stdlib-reference.md) — the `stdlib.*` modules, one section each.
+- [Builtins reference](./docs/builtins-reference.md) — host builtins (`extern fn`).
+- [Style guide](./docs/style-guide-v0.md) · [stdlib/compiler guidelines](./docs/guidelines.md)
+- [Language design](./docs/language-design-v0.md) · [design best practices](./docs/language-design-best-practices.md)
+- [HM typechecker guide](./docs/hm-typechecker.md) · [effect enforcement](./docs/effect-enforcement-v0.md) · [records](./docs/records-v0.md)
+- [Compiler internals](./docs/compiler-internals.md) · [packaging](./docs/packaging-v0.md) · [language server](./docs/language-server-roadmap.md)
+- [Toolchain and build](./docs/development.md) · [debugging](./docs/debugging.md) · [gates](./docs/gates.md) · [bootstrap chain](./docs/bootstrap-chain.md)
+- Design drafts: [effect system](./docs/effect-system-v0-plan.md) ([v1](./docs/effect-system-v1-draft.md)) · [int ranges](./docs/int-ranges-v1-draft.md) · [char & text](./docs/char-text-v1-draft.md) · [sequencing sugar](./docs/sequencing-sugar-v1-draft.md)
+- [Backlog & roadmap](./BACKLOG.md)
 
-## Backlog
+## Repository layout
 
-See [BACKLOG.md](./BACKLOG.md) for the current roadmap and follow-up work (the
-"Design Roadmap" section holds the forward-looking priorities and V1 candidates).
+- `docs/` — design and process documents
+- `examples/` — sample programs
+- `stdlib/` — standard library (`prelude.sprout` and the `stdlib.*` modules)
+- `stdlib/compiler/` — the self-hosted compiler (`parser`, `infer`/`checker`, `ast_to_ir`/`ir_lowering`, `compile_driver`)
+- `runtime/` — C runtime, GC, poller and scheduler
+- `tests/` — native Sprout tests (`tests/stdlib/`) and behavior fixtures (`tests/conformance/`)
+- `bootstrap/` — committed LLVM IR seed for the stage-1 bootstrap
+- `mise.toml` / `justfile` — pinned toolchain and common commands
 
 ## Contributing
 
-See [AGENTS.md](./AGENTS.md) for project collaboration and change rules.
+See [AGENTS.md](./AGENTS.md) for collaboration and change rules. Run the test suite
+with `mise exec -- just test`.
 
 ## License
 

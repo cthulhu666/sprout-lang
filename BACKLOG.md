@@ -607,6 +607,12 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
 
 **Runtime and diagnostics**
 
+- [ ] `P2` **Diagnostics show no file path or source excerpt.** An error prints as
+  `1:25: ERROR: check: …`: no file name, no offending line, no caret under the span. With
+  several modules the reader cannot tell which file `1:25` is in, and a beginner has to find
+  the column by hand. Gleam, for one, prints `path:line:col`, the source line and an
+  underline. The README lists this under Limits.
+
 - [ ] `P2` **Task-boundary panic isolation ("let it crash" at task granularity).** A panic in any
   green task reaches the process-fatal path, so one bad request kills the whole server. Give the
   scheduler a per-task panic boundary: unwind to the spawning `with_scope`/`task_spawn` frame, mark

@@ -276,6 +276,67 @@ do
   list_each(\body -> mut.mutvec_push(log, body), bodies)   # grows as needed
 ```
 
+## Loop for effect with list_each and range_each
+
+Use the prelude's iteration combinators instead of hand-rolling counter recursion. Each
+takes an effect-polymorphic step (`!{e}`), so the same function serves pure and `!{IO}`
+code. All follow the data-last convention: the collection is the final argument.
+
+```sprout
+range_each(f: local Int -> Unit !{e}, r: IntRange) -> Unit !{e}    # imperative loop
+range_fold(step: local b -> Int -> b !{e}, init: b, r: IntRange) -> b !{e}
+list_each (f: local a -> Unit !{e}, xs: List a)  -> Unit !{e}      # traverse for effect
+list_fold (step: local b -> a -> b !{e}, init: b, xs: List a) -> b !{e}
+```
+
+`local` promises the combinator does not keep the function past the call, so a lambda
+passed to it (or to `fold`, `any`, `find` and the other `Foldable` functions) may read a
+borrowed linear value. `map`, `filter` and `and_then` do not make that promise.
+
+Inline multi-statement `do`-lambdas do not yet parse. Lift a multi-line step body into a
+named helper and pass it through a single-expression lambda:
+
+```sprout
+# A named helper, called from a one-line lambda
+fn print_line(items: Vec String, i: Int) -> Unit !{IO} =
+  match vec_get(i, items) with | Just s -> print(s) | Nothing -> ()
+
+range_each(\i -> print_line(items, i), range_up(0, vec_length(items) - 1))
+```
+
+## Count with a range
+
+`IntRange` is inclusive of both ends, so a half-open `[0, n)` loop is
+`range_up(0, n - 1)` — including at `n == 0`, which needs **no guard**.
+
+Ranges are built by one of two peer constructors, and neither is the default spelling:
+
+```sprout
+range_up(1, 5)      # 1 2 3 4 5      1..5 is the same thing
+range_down(5, 1)    # 5 4 3 2 1
+```
+
+Emptiness is direction-relative: a range is empty when its end lies past its start
+*in the direction of travel*, so `range_up(hi, lo)` with `hi > lo` yields nothing, and
+so does `range_down(lo, hi)` with `lo < hi`. Both are spelled with **computed** bounds
+above on purpose — written with constant ones they are rejected at compile time:
+
+```
+ERROR: check: range `range_up(5, 1)` is empty, so it yields no values: the start
+bound 5 is above the end bound 1, and it counts upward only. To count downward
+write `range_down(5, 1)`
+```
+
+An empty range is what you want from `range_up(0, n - 1)` at `n == 0`; an empty range
+you *wrote out in full* is a typo, and the two are distinguishable because only the
+second has literal bounds.
+
+Direction lives in the range itself (`range_step` reports `+1` or `-1`), so every
+combinator takes either one unchanged. The `a..b` literal is **ascending only** —
+there is no descending literal, so a reversed one is an *empty ascending* range rather
+than a descending one, and the same literal-bounds rule rejects it. See
+[ranges-v0.md](./ranges-v0.md).
+
 ## Writing at an index
 
 `vec_set` copies the whole vector, so a fold of `vec_set` over n elements costs O(n) per write.
@@ -346,6 +407,13 @@ step, which is the shape a fold wants:
 list_fold(merge_into(sep, _, _), Nil, rows)   # ≡ \ (acc, r) -> merge_into(sep, acc, r)
 ```
 
+A hole works in **any** position, not just the last: `add(10, _)` is `\x -> add(10, x)`.
+Several holes give a multi-argument function, filled left to right: `add3(_, _, 3)` is
+`\ (a, b) -> add3(a, b, 3)`.
+
+A `_` binds to the innermost enclosing call, so in `f(g(_), 3)` the hole belongs to `g`.
+Operator sections (`_ * 2`) are not supported — write `\x -> x * 2`.
+
 **One trap.** Non-hole arguments in a placeholder are captured *by expression* and
 re-evaluated on every call, so a computed value belongs in a `where` binding, not
 inline:
@@ -408,6 +476,16 @@ list_map(\n -> n * 2, list_filter(\n -> n > 0, ns))     # same thing, read insid
 # Nor does a Vec result — the comprehension is wrapped for you.
 fn squares(n: Int) -> Vec Int = [i * i for i in 1..n]
 ```
+
+Generators are comma-separated, and the leftmost is the outermost loop. A guard attaches
+to the generator on its left with no comma, and there may be several.
+
+It runs in constant stack space: it elaborates to the `list_fold`/`range_fold` you would
+have written, accumulating in reverse and reversing once at the end. In a `Vec`-expected
+position it lowers to `vec_from_list(…)`, the same rule a list literal gets
+([spec-v0.md §5.5.1](./spec-v0.md)). See also [spec-v0.md §5.10](./spec-v0.md),
+[list-comprehensions-v0.md](./list-comprehensions-v0.md) and the runnable tour
+[comprehension_demo.sprout](../examples/comprehension_demo.sprout).
 
 Three places to *not* reach for one:
 
@@ -951,6 +1029,116 @@ linear: unpack each box once.
 Reach for this when a type has a release operation. For plain data with no
 release, `linear` only gets in the way — see
 [spec-v0.md §5.8](./spec-v0.md).
+
+## Rules that surprise newcomers
+
+Each rule below is a reflex from another language that Sprout rejects. Each has the form
+to use instead.
+
+### Negate with `!`, not `not`
+
+Use the prefix `!` operator to negate a `Bool`; prefix `-` negates a number. The *word*
+`not` is not an operator and is a parse error.
+
+```sprout
+if !is_valid(x) then handle_error() else proceed()   # ! negates a Bool
+let below = -temperature                              # - negates a number
+# `not is_valid(x)` does NOT parse — use `!is_valid(x)`
+```
+
+### Give an instance head distinct type variables
+
+`instance C (List Int)` is rejected. The head must be a type constructor applied to
+*distinct* type variables (spec §8.5, following Haskell 2010 §4.3.2). Instance selection
+keys on the head constructor alone, so a `List Int` instance would also answer for
+`List String` — and run its `Int` code on it. To get an instance at one specific argument
+type, give that instantiation a type of its own.
+
+```sprout
+instance Summable (Vec Int)              # rejected: `Int` is a concrete type
+instance Summable (Vec a)                # ok — a distinct type variable
+
+type IntVec =                            # the idiom for a specific element type
+  | MkIntVec (Vec Int)
+instance Summable IntVec                 # ok — `IntVec` is its own head
+```
+
+### Write `type alias` for an alias
+
+Without `alias`, `type T = …` declares a new type and the first word is a constructor
+name. When that type has one constructor named after a type in scope, it is rejected
+(spec §5.6).
+
+```sprout
+type Pairs = List (String, Int)          # rejected: a constructor named `List`
+type alias Pairs = List (String, Int)    # ok — the same type as List (String, Int)
+wrap Pairs = List (String, Int)          # ok — a distinct type over it
+```
+
+### Pass `--package-root` for a dotted import
+
+The default search path resolves only `stdlib.<name>` imports and single-segment dotless
+names. Any *other* dotted import (e.g. `import myapp.util`) resolves under an extra
+package root, registered by passing `--package-root <dir>` right after the stdlib root.
+Omit the flag and the import resolves to nothing **silently**: there is no error at
+import time. The symbols never bind, and it surfaces later as an `Unknown variable` at
+the use site.
+
+```
+compile_driver_bin_stage1 --emit-ir stdlib --package-root ./lib app.sprout
+```
+
+There is one extra root, in that fixed position ([packaging-v0.md](./packaging-v0.md) §10).
+
+### Expect the prelude in every file; opt out with `no_prelude`
+
+The prelude is unconditional — a file with no `module` header gets it too
+([prelude-scope-v0.md](./prelude-scope-v0.md)). Redefining a prelude name is fine and
+shadows it (`examples/maybe_map.sprout` redefines `Maybe` and `map`), because a headerless
+file gets its own namespace rather than sharing the prelude's.
+
+To opt out, put `no_prelude` on its own line in the header block:
+
+```sprout
+no_prelude
+
+fn twice(n: Int) -> Int = n + n
+```
+
+A `no_prelude` file stays *unqualified*, which is what lets it redefine `Maybe` and bind
+it with `<-`, or declare its own `class Eq`. Both resolve by unqualified name, so they
+only work without a prelude to collide with. What is left is the **floor**: the 16
+`extern fn`s whose signatures mention only primitive types (`print_str`, `eprint`,
+`panic`, `str_concat`, …). Naming anything else the prelude declares is a checked error
+with a source position (`Unknown variable: argv_get_bytes`), not a link failure.
+[no_prelude_core.sprout](../examples/no_prelude_core.sprout) is a whole program written
+against that floor; [no-prelude-core-v0.md](./no-prelude-core-v0.md) §4.1 lists the 16 and
+says why the cut falls there.
+
+### Give an imported file a `module` header
+
+An **imported** file must declare a `module` header. Only the entry may be headerless.
+
+### Import bare names, not `(..)`
+
+`import demo.shapes (Shape(..))` is the Haskell reflex and is rejected, spaced
+(`Shape (..)`) or not. Write `import demo.shapes (Shape)`. Naming a type already imports
+its constructors, and `(..)` belongs on the type's *declaration*, where it decides
+whether they are published at all.
+
+### Use the alias, not the module path
+
+A module path is not a name. `demo.sealed.unseal(v)` is rejected even where
+`import demo.sealed as sealed` is in scope: import the module and use the alias
+(`sealed.unseal(v)`). Sprout follows Haskell and Go here, not Java or Rust. Those
+full-path spellings reached private bindings, so `export` guarded nothing against a
+caller who knew the convention.
+
+### Keep top-level `let` pure; start at `main`
+
+Top-level `let` bindings must be pure. Effectful work lives in functions, with `main` as
+the entrypoint. See also [Bind a constant with a top-level
+`let`](#bind-a-constant-with-a-top-level-let-not-a-nullary-fn).
 
 ---
 
