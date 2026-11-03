@@ -5,7 +5,7 @@ import stdlib.net (TcpConnection, TcpListener, TcpTimeout, TcpEndOfStream, TcpEr
 import stdlib.string as string
 import stdlib.bytes as bytes
 import stdlib.crypto as crypto
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv, chan_close)
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
 import stdlib.url (parse_query)
 import stdlib.time as time
@@ -1514,28 +1514,70 @@ fn pooled_accept_loop(ch: Chan TcpConnection, adm: Admission, listener: consumin
 # before `spawn_pool`. `Chan a` stores an Int handle and not an `a`, so binding one carries no
 # consume obligation even at `Chan TcpConnection` — spec §5.8, "Containment reads the declaration,
 # not the type application".
+#
+# `chan_new` fails only on a negative depth, which `serve_pooled_with` has already refused, so its
+# `Err` arm cannot happen unless this module has a bug. It still closes the listener it owns, since
+# the listener is linear and every arm must consume it.
 fn pooled_run(scope: Scope, config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  do
-    ch <- chan_new(scope, queue_depth)
-    idle <- ref_new(0)
-    queued <- ref_new(0)
-    let adm = Pooled(idle, queued, keep_cap(workers))
-    spawn_pool(scope, ch, config, adm, handler, workers)
-    pooled_accept_loop(ch, adm, listener, remaining)
+  match chan_new(scope, queue_depth) with
+  | Err e ->
+      do
+        close_listener(listener)
+        panic(chan_error_message(e))
+  | Ok ch ->
+      do
+        idle <- ref_new(0)
+        queued <- ref_new(0)
+        let adm = Pooled(idle, queued, keep_cap(workers))
+        spawn_pool(scope, ch, config, adm, handler, workers)
+        pooled_accept_loop(ch, adm, listener, remaining)
+
+# Why a pooled `serve*` refused to start.
+export type ServePoolError (..) =
+  | PoolNoWorkers Int
+  | PoolNegativeQueue Int
+
+export fn serve_pool_error_message(e: ServePoolError) -> String =
+  match e with
+  | PoolNoWorkers n -> `a pooled server needs at least 1 worker, got ${n}`
+  | PoolNegativeQueue n -> `a pooled server needs a queue depth >= 0, got ${n}`
+
+fn pool_shape_error(workers: Int, queue_depth: Int) -> Maybe ServePoolError =
+  if workers < 1 then Just(PoolNoWorkers(workers))
+  else if queue_depth < 0 then Just(PoolNegativeQueue(queue_depth))
+  else Nothing
+
+# The shape is checked BEFORE the scope opens: a pool of no workers would accept connections that
+# nothing serves, and the server would hang. A refused start closes the listener it was handed.
+fn pooled_checked(config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, remaining: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Result ServePoolError Unit !{IO} =
+  match pool_shape_error(workers, queue_depth) with
+  | Just err ->
+      do
+        close_listener(listener)
+        Err(err)
+  | Nothing ->
+      do
+        with_scope(\s -> pooled_run(s, config, listener, workers, queue_depth, remaining, handler))
+        Ok(())
 
 # 8 workers and a queue 64 deep. Worker count is a CAPACITY decision the deployment owns: throughput
 # is flat from 2 to 256 (the server is accept-bound), so 8 is chosen for headroom against handlers
 # doing real work rather than for throughput, and a deployment whose handlers block on a database
 # should raise it. The queue depth bounds how many accepted-but-unserved connections may be held.
 export fn serve_pooled(listener: consuming TcpListener, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  serve_pooled_with(default_config(), listener, 8, 64, handler)
+  match serve_pooled_with(default_config(), listener, 8, 64, handler) with
+  | Ok done -> done
+  # Cannot happen: 8 workers and a depth of 64 are valid, so only a bug here reaches this arm.
+  | Err e -> panic(`serve_pooled: ${serve_pool_error_message(e)}`)
 
-# `serve_pooled` with explicit budgets, worker count and queue depth.
-export fn serve_pooled_with(config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> pooled_run(s, config, listener, workers, queue_depth, -1, handler))
+# `serve_pooled` with explicit budgets, worker count and queue depth. `workers < 1` is
+# `Err (PoolNoWorkers workers)` and `queue_depth < 0` is `Err (PoolNegativeQueue queue_depth)`;
+# either way the listener is closed and nothing is served.
+export fn serve_pooled_with(config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Result ServePoolError Unit !{IO} =
+  pooled_checked(config, listener, workers, queue_depth, -1, handler)
 
 # Bounded counterpart, for tests and bounded runs: serves exactly `max_connections` and returns.
 # `max_connections` counts connections ACCEPTED, not fully served; the scope join waits for the
 # workers, which the channel close releases.
-export fn serve_pooled_n_with(config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Unit !{IO} =
-  with_scope(\s -> pooled_run(s, config, listener, workers, queue_depth, max_connections, handler))
+export fn serve_pooled_n_with(config: ServerConfig, listener: consuming TcpListener, workers: Int, queue_depth: Int, max_connections: Int, handler: HttpRequest -> HttpServerResponse !{IO}) -> Result ServePoolError Unit !{IO} =
+  pooled_checked(config, listener, workers, queue_depth, max_connections, handler)

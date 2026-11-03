@@ -1,0 +1,56 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.net (TcpError, TcpListener, close_listener, listen_local, local_port, tcp_error_message)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServePoolError, PoolNoWorkers, PoolNegativeQueue, default_config, ok, serve_pool_error_message, serve_pooled_n_with, serve_pooled_with)
+
+# The pooled `serve*` forms check the pool shape before they open a scope: a pool of no workers
+# would accept connections that nothing serves, and a negative queue depth is not a depth. Each
+# refused start is an `Err` and closes the listener it was handed, which the last check in each
+# case reads off by binding the same port again.
+
+fn handle(req: HttpRequest) -> HttpServerResponse !{IO} = ok("unused")
+
+fn describe(r: Result ServePoolError Unit) -> String =
+  match r with
+  | Ok _ -> "ok"
+  | Err (PoolNoWorkers n) -> `no-workers ${n}`
+  | Err (PoolNegativeQueue n) -> `negative-queue ${n}`
+
+# Re-listening on `port` succeeds only once the refused call has closed its listener.
+fn port_is_free(port: Int) -> String !{IO} =
+  match listen_local(port) with
+  | Ok l ->
+      do
+        close_listener(l)
+        "free"
+  | Err e -> tcp_error_message(e)
+
+fn refuse_with(state: TestState, label: String, workers: Int, queue: Int, want: String) -> Unit !{IO} =
+  match listen_local(0) with
+  | Err e -> assert_eq(state, `${label}: listen_local(0) succeeds`, tcp_error_message(e), "")
+  | Ok listener ->
+      do
+        let port = local_port(listener)
+        assert_eq(state, `${label}: serve_pooled_with`, describe(serve_pooled_with(default_config(), listener, workers, queue, handle)), want)
+        assert_eq(state, `${label}: the listener was closed`, port_is_free(port), "free")
+
+fn refuse_n_with(state: TestState, label: String, workers: Int, queue: Int, want: String) -> Unit !{IO} =
+  match listen_local(0) with
+  | Err e -> assert_eq(state, `${label}: listen_local(0) succeeds`, tcp_error_message(e), "")
+  | Ok listener ->
+      do
+        let port = local_port(listener)
+        assert_eq(state, `${label}: serve_pooled_n_with`, describe(serve_pooled_n_with(default_config(), listener, workers, queue, 1, handle)), want)
+        assert_eq(state, `${label}: the listener was closed`, port_is_free(port), "free")
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+    refuse_with(state, "zero workers", 0, 8, "no-workers 0")
+    refuse_with(state, "negative workers", -3, 8, "no-workers -3")
+    refuse_with(state, "negative queue", 2, -1, "negative-queue -1")
+    refuse_with(state, "no workers outranks a negative queue", 0, -1, "no-workers 0")
+    refuse_n_with(state, "zero workers", 0, 8, "no-workers 0")
+    refuse_n_with(state, "negative queue", 2, -1, "negative-queue -1")
+    assert_eq(state, "no-workers message", serve_pool_error_message(PoolNoWorkers(0)), "a pooled server needs at least 1 worker, got 0")
+    assert_eq(state, "negative-queue message", serve_pool_error_message(PoolNegativeQueue(-1)), "a pooled server needs a queue depth >= 0, got -1")
+    summary(state)

@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, with_timeout, TimeoutResult, Completed, Expired)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_select)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_select)
 import stdlib.terminal as terminal
 
 # L0.11 with_timeout over a chan_select body (EXPERIMENTAL). A timed body parked in chan_select on
@@ -25,8 +25,8 @@ fn timed_select(a: Chan Int, b: Chan Int) -> Int !{IO} =
 
 fn run(s: Scope) -> Unit !{IO} =
   do
-    a <- chan_new(s, 1)
-    b <- chan_new(s, 1)
+    let Ok a = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
+    let Ok b = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     let result = with_timeout(50, \_ -> timed_select(a, b))
     match result with
     | Completed v -> terminal.write("completed\n")

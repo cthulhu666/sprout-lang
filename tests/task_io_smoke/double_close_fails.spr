@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope)
-import stdlib.chan (Chan, chan_new, chan_close)
+import stdlib.chan (Chan, chan_new, chan_error_message, chan_close)
 import stdlib.terminal as terminal
 
 # L0.9 close guard: closing an ALREADY-CLOSED channel must LOUD-FAIL (Go panics on double-close —
@@ -7,7 +7,7 @@ import stdlib.terminal as terminal
 # masking the bug and letting the program reach the line after.
 fn producer(s: Scope) -> Unit !{IO} =
   do
-    ch <- chan_new(s, 2)
+    let Ok ch = chan_new(s, 2) else Err e -> panic(chan_error_message(e))
     chan_close(ch)
     chan_close(ch)  # rejected: channel already closed
     terminal.write("should-not-reach\n")

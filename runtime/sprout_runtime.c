@@ -1986,6 +1986,10 @@ void sprout_roots_switch(SproutRoots* r) { g_current_roots = r; }
 SproutRoots* sprout_roots_new(size_t pool_slots) {
   struct SproutRoots* rc = (struct SproutRoots*)malloc(sizeof(*rc));
   if (rc == NULL) sprout_fail("sprout_roots_new: out of memory");
+  if (pool_slots > SIZE_MAX / sizeof(RootNode)) {
+    free(rc);
+    sprout_fail("sprout_roots_new: out of memory (pool size)");
+  }
   rc->pool = (RootNode*)malloc(pool_slots * sizeof(RootNode));
   if (rc->pool == NULL) sprout_fail("sprout_roots_new: out of memory (pool)");
   rc->pool_size = pool_slots;
@@ -2003,6 +2007,15 @@ void sprout_roots_push_ptr(SproutRoots* r, void* slot) {
   node->slot = slot;
   node->kind = SPROUT_ROOT_PTR;
   node->aux_words = 0;
+}
+
+void sprout_roots_set_scan(SproutRoots* r, void* base, size_t words) {
+  if (r->pool_size < 1) sprout_fail("sprout_roots_set_scan: pool has no slot");
+  RootNode* node = &r->pool[0];
+  node->slot = base;
+  node->kind = SPROUT_ROOT_SCAN;
+  node->aux_words = words;
+  r->pool_top = 1;
 }
 
 void sprout_roots_free(SproutRoots* r) {

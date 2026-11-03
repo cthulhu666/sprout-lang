@@ -411,7 +411,8 @@ what a reviewer should be asked to distrust.
 **The workaround it retires (2026-09-22).** `stdlib/http_server.sprout` and
 `bench/http_worker_pool/pool_server.sprout` threaded the channel as a parameter because
 `ch <- chan_new(scope, depth)` did not compile, and said so in a comment telling readers not to
-"simplify" it. Both now bind it next to its uses. What is left of the old edge is a diagnostic
+"simplify" it. Both now bind it next to its uses (since `chan_new` returns a `Result`, by
+`let Ok ch = chan_new(..) else Err e -> ..` or a match, as a plain `<-` would unwrap the `Result`). What is left of the old edge is a diagnostic
 split, not a rejection: an effect bind of a container that genuinely *stores* its parameter is
 still tracked as the payload, so leaking one names the payload where a parameter would name the
 container. `BACKLOG.md` carries that as `P3`.

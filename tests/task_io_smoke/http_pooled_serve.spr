@@ -2,7 +2,7 @@ import stdlib.task (Scope, with_scope, task_spawn)
 import stdlib.net (TcpConnection, connect, close, write_all_utf8, read_exact_utf8)
 import testsupport.listen (listen_or_die)
 import stdlib.http (InternalServerError500)
-import stdlib.http_server (HttpRequest, HttpServerResponse, default_config, ok, request_path, response, serve_pooled_n_with)
+import stdlib.http_server (HttpRequest, HttpServerResponse, ServePoolError, default_config, ok, request_path, response, serve_pool_error_message, serve_pooled_n_with)
 import stdlib.terminal as terminal
 
 # `serve_pooled`: a FIXED pool of long-lived workers pulling owned connections off a channel, instead
@@ -52,14 +52,20 @@ fn clients(port: Int) -> Unit !{IO} =
     one_request(port, "/four", "HTTP/1.1 200", "pooled-4-200")
     one_request(port, "/five", "HTTP/1.1 200", "pooled-5-200")
 
+# A refused start must fail the run, not leave a server that never answers.
+fn served(r: Result ServePoolError Unit) -> Unit =
+  match r with
+  | Ok done -> done
+  | Err e -> panic(serve_pool_error_message(e))
+
 # Two workers, queue depth two, five connections — deliberately fewer workers than connections and a
 # queue shallower than the run, so the accept loop must also block and resume on `chan_send`.
 fn run(s: Scope, port: Int) -> Unit !{IO} =
   do
-    task_spawn(s, \_ -> serve_pooled_n_with(
+    task_spawn(s, \_ -> served(serve_pooled_n_with(
       default_config() with (header_ms = 2000, body_ms = 2000, write_ms = 2000,
                    max_body_bytes = 65536, min_rate_bps = 1000, idle_ms = 2000),
-      listen_or_die(port), 2, 2, 5, handle))
+      listen_or_die(port), 2, 2, 5, handle)))
     # Spawned, not called: a direct call runs the first client before the server task has been
     # scheduled at all, so it connects before `listen_or_die` has bound and the run then hangs waiting
     # for a connection that was never made.

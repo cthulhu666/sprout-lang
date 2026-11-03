@@ -167,7 +167,7 @@ fn chan_recv_timeout(log: Ref String) -> task.TimeoutResult Int !{IO} =
 
 fn chan_recv_timeout_in(s: task.Scope, log: Ref String) -> task.TimeoutResult Int !{IO} =
   do
-    ch <- chan.chan_new(s, 1)
+    let Ok ch = chan.chan_new(s, 1) else Err e -> panic(chan.chan_error_message(e))
     task.with_timeout(30, \_ -> recv_forever(ch, log))
 
 # Same ancestor-scope ownership as chan_recv_timeout, over two channels so the select parks
@@ -177,6 +177,6 @@ fn select_timeout(log: Ref String) -> task.TimeoutResult Int !{IO} =
 
 fn select_timeout_in(s: task.Scope, log: Ref String) -> task.TimeoutResult Int !{IO} =
   do
-    a <- chan.chan_new(s, 1)
-    b <- chan.chan_new(s, 1)
+    let Ok a = chan.chan_new(s, 1) else Err e -> panic(chan.chan_error_message(e))
+    let Ok b = chan.chan_new(s, 1) else Err e -> panic(chan.chan_error_message(e))
     task.with_timeout(30, \_ -> select_forever([a, b], log))

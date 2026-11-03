@@ -1,0 +1,49 @@
+module main
+
+import stdlib.task as task
+import stdlib.chan as chan
+
+# `chan_new` returns a `Result`. Each way of unwrapping it works at a linear element type: the
+# call matched directly, a refutable `let`, and `<- try`. (A plain `r <- chan_new(..)` unwraps
+# the Result itself, so it is not a way to get at the `Result`.)
+
+type linear L = L Int
+
+fn eat(l: L) -> Int = match l with | L n -> n
+
+fn direct(s: task.Scope) -> Int !{IO} =
+  match chan.chan_new(s, 1) with
+  | Ok ch ->
+      do
+        chan.chan_send(ch, L(1))
+        match chan.chan_recv(ch) with
+        | chan.Got l -> eat(l)
+        | chan.Closed -> -1
+  | Err _ -> -2
+
+fn refutable(s: task.Scope) -> Int !{IO} =
+  do
+    let Ok ch = chan.chan_new(s, 1) else Err _ -> -2
+    chan.chan_send(ch, L(20))
+    match chan.chan_recv(ch) with
+    | chan.Got l -> eat(l)
+    | chan.Closed -> -1
+
+fn tried(s: task.Scope) -> Result chan.ChanError Int !{IO} =
+  do
+    ch <- try chan.chan_new(s, 1)
+    chan.chan_send(ch, L(300))
+    match chan.chan_recv(ch) with
+    | chan.Got l -> Ok(eat(l))
+    | chan.Closed -> Ok(-1)
+
+fn run(s: task.Scope) -> Int !{IO} =
+  do
+    a <- direct(s)
+    b <- refutable(s)
+    c <- match tried(s) with
+         | Ok n -> n
+         | Err _ -> -3
+    a + b + c
+
+fn main() -> Unit !{IO} = print(int_to_string(task.with_scope(run)))

@@ -3,7 +3,9 @@ module stdlib.chan
 import stdlib.task (Scope, scope_handle)
 
 # Layer-0 channels (EXPERIMENTAL): FIFO queues for streaming values between cooperative green
-# tasks (see stdlib.task). A channel has a fixed capacity of `>= 0` slots. With capacity `>= 1`
+# tasks (see stdlib.task). A channel has a capacity of `>= 0`, which is a BOUND on how many values
+# it buffers, not an allocation: the buffer starts small and grows on demand up to the bound, so a
+# large capacity costs nothing until values are queued. With capacity `>= 1`
 # it is BOUNDED BUFFERED: `chan_send` parks the current task when the buffer is full, `chan_recv`
 # parks it when the buffer is empty. With capacity `0` it is a RENDEZVOUS (unbuffered) channel:
 # there is no buffer, so a send always parks until a receiver takes the value directly, and a
@@ -50,13 +52,25 @@ extern fn __chan_recv(chan_id: Int) -> Recv a !{IO} where linear a
 extern fn __chan_close(chan_id: Int) -> Unit !{IO}
 extern fn __chan_select(chan_ids: List Int) -> Selected a !{IO} where linear a
 
-# Create a `capacity`-slot channel belonging to `scope`, freed when the scope closes.
-# `capacity >= 1` is bounded buffered; `capacity == 0` is a rendezvous (unbuffered) channel
-# (direct sender→receiver hand-off). `capacity < 0` loud-fails.
+# Why `chan_new` refused to make a channel.
+export type ChanError (..) =
+  | ChanNegativeCapacity Int
+
+export fn chan_error_message(e: ChanError) -> String =
+  match e with
+  | ChanNegativeCapacity n -> `channel capacity must be >= 0 (0 = rendezvous / unbuffered), got ${n}`
+
+# Create a channel belonging to `scope` that buffers at most `capacity` values, freed when the
+# scope closes. `capacity >= 1` is bounded buffered; `capacity == 0` is a rendezvous (unbuffered)
+# channel (direct sender→receiver hand-off). `capacity < 0` is `Err (ChanNegativeCapacity n)`.
+# Unwrap it by matching the call, `let Ok ch = chan_new(..) else Err e -> ..`, or `ch <- try
+# chan_new(..)`; all work for a linear element type, since `Chan a` holds no `a`. A plain
+# `r <- chan_new(..)` already unwraps the `Result` (spec §5.9), so `r` is the channel.
 # `scope_handle` (from stdlib.task) reads the scope's raw scheduler handle without exposing
 # the opaque `Scope` constructor to this module — `chan_new` never destructures a `Scope`.
-export fn chan_new(scope: Scope, capacity: Int) -> Chan a !{IO} where linear a =
-  Chan(__chan_new(scope_handle(scope), capacity))
+export fn chan_new(scope: Scope, capacity: Int) -> Result ChanError (Chan a) !{IO} where linear a =
+  if capacity < 0 then Err(ChanNegativeCapacity(capacity))
+  else Ok(Chan(__chan_new(scope_handle(scope), capacity)))
 
 # Send `value` into `ch`. Returns once the value is buffered (or handed directly to a waiting
 # receiver). If the buffer is full — or the channel is rendezvous (capacity 0, no buffer) with no

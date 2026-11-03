@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_yield)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_send, chan_recv, chan_close)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_send, chan_recv, chan_close)
 import stdlib.net (TcpListener, TcpConnection, listen_local, accept, close, close_listener, read_avail_timeout, write_all_utf8, tcp_error_message)
 
 # The bind cannot be recovered from here, so a failure ends the run with its full error.
@@ -67,7 +67,7 @@ fn accept_loop(ch: Chan TcpConnection, listener: consuming TcpListener) -> Unit 
 
 fn run(s: Scope) -> Unit !{IO} =
   do
-    ch <- chan_new(s, 256)
+    let Ok ch = chan_new(s, 256) else Err e -> panic(chan_error_message(e))
     spawn_workers(s, ch, 64)
     accept_loop(ch, listen_or_die(8099))
 

@@ -39,6 +39,11 @@ void sprout_roots_free(SproutRoots* r);
  * to stable storage holding the GC pointer for the lifetime of `r`. */
 void sprout_roots_push_ptr(SproutRoots* r, void* slot);
 
+/* Make `r`'s first slot a SCAN root over `words` machine words starting at `base`, and mark it
+ * live (pool_top = 1). Calling it again re-points the root, e.g. after the scanned block was
+ * replaced by a larger one. `r` needs a pool of at least 1 slot and nothing else pushed. */
+void sprout_roots_set_scan(SproutRoots* r, void* base, size_t words);
+
 /* Runtime panic path (backtrace + abort), reusable from the scheduler TU. */
 __attribute__((noreturn)) void sprout_fail(const char* msg);
 

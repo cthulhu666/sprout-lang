@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, with_timeout, TimeoutResult, Completed, Expired)
-import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_recv)
+import stdlib.chan (Chan, Recv, Got, Closed, chan_new, chan_error_message, chan_recv)
 import stdlib.terminal as terminal
 
 # L0.8 with_timeout over a channel recv (EXPERIMENTAL). A timed body that parks in
@@ -23,7 +23,7 @@ fn timed_recv(ch: Chan Int) -> Int !{IO} =
 
 fn run(s: Scope) -> Unit !{IO} =
   do
-    ch <- chan_new(s, 1)
+    let Ok ch = chan_new(s, 1) else Err e -> panic(chan_error_message(e))
     let result = with_timeout(50, \_ -> timed_recv(ch))
     match result with
     | Completed v -> terminal.write("completed\n")

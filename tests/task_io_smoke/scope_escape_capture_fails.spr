@@ -1,5 +1,5 @@
 import stdlib.task (Scope, with_scope, task_spawn, task_sleep)
-import stdlib.chan (Chan, chan_new, chan_send)
+import stdlib.chan (Chan, chan_new, chan_error_message, chan_send)
 import stdlib.terminal as terminal
 
 # A task spawned into the OUTER scope captures a channel of the INNER scope. The inner join frees
@@ -13,7 +13,7 @@ fn late_send(ch: Chan Int) -> Unit !{IO} =
 
 fn inner_body(outer: Scope, inner: Scope) -> Unit !{IO} =
   do
-    ch <- chan_new(inner, 4)
+    let Ok ch = chan_new(inner, 4) else Err e -> panic(chan_error_message(e))
     task_spawn(outer, \_ -> late_send(ch))
 
 fn outer_body(outer: Scope) -> Unit !{IO} =

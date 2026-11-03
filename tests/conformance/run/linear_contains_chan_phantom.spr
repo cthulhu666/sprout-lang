@@ -15,7 +15,7 @@ fn drop_outer(o: Outer) -> Int = 0
 
 fn run(s: task.Scope) -> Int !{IO} =
   do
-    c <- chan.chan_new(s, 1)
+    let Ok c = chan.chan_new(s, 1) else Err e -> panic(chan.chan_error_message(e))
     let (p, q) = twice(Outer(c))
     drop_outer(p) + drop_outer(q) + 1
 
