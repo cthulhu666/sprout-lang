@@ -1785,6 +1785,12 @@ deferral happened, not for current behaviour. Still open:
   of `Int` makes ~2.5× the indirect calls of one keyed on a type that derives `Ord` (19.2M vs 7.8M
   `closure_apply` per 100 A* runs) and runs ~2.5× slower (`docs/linheap-v0.md` §5). Copying an
   instance at concrete context types would make the tuple key as cheap as the derived one.
+- [ ] `P3` **Fold the scalar-copy key into `specialise`'s key.** Two copy passes run back to back:
+  `specialise` (dictionaries) and `scalar_copies` (scalars for vector-creating type variables), so a
+  function with both is copied twice (`mutvec_sort_by$spec_Double$Double`) under two naming
+  schemes. They were kept apart while `specialise` was off by default; it is on now. One key of
+  evidence plus scalars would make one copy and one walker. `SPROUT_OPT_OFF=spec` must still leave
+  vectors flagged. `docs/pointer-free-vectors-v0.md` §4.3.
 - [ ] `P2` **Calls to Sprout functions root their operands, though the callee roots what it
   needs.** `op_exposes_operands` (`ir_rooting.sprout`) roots every call's heap operands, for
   runtime builtins that allocate before reading them; for a call to a Sprout function the pushes
