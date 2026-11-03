@@ -1336,6 +1336,8 @@ fn consume_blocks(blocks: List typed_ast.Evidence, pos: source.SourcePos, ctx: L
 #     ctx_fwd, so EvForward is optimistic. A metavar/phantom head (e.g. `Ord__` from
 #     an unresolved fresh tyvar) legitimately misses ctx_fwd and must null-fill exactly
 #     as the old resolve_tdict path did (guarded by test_unresolved_dict_nullfill).
+#     The exception is an existential head (`$ex_`): that key only comes from an unpack
+#     infer seeded a given for, so a miss is a compiler bug and panics.
 fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -> List typed_ast.TypedExpr =
   match ev with
   | typed_ast.EvForward class_name key ->
@@ -1344,8 +1346,11 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
           list_map(\m -> resolve_method_var(m, method_map, unresolved_slot_name(key), pos, ctx.env.scheme_env),
                    types.class_methods_for(class_name, ctx.env.class_order))
       | Nothing ->
-          list_map(\_ -> typed_ast.TVar(unresolved_slot_name(key), types.TVar(types.tyvar_id("?gen")), pos),
-                   types.class_methods_for(class_name, ctx.env.class_order))
+          match existential_slot_miss(key, pos) with
+          | Just msg -> panic(msg)
+          | Nothing ->
+              list_map(\_ -> typed_ast.TVar(unresolved_slot_name(key), types.TVar(types.tyvar_id("?gen")), pos),
+                       types.class_methods_for(class_name, ctx.env.class_order))
   | typed_ast.EvInstance class_name key children ->
       match typed_ast.instance_get(key, ctx.env.inst_table) with
       | Just method_map ->
@@ -1359,6 +1364,16 @@ fn consume_block(ev: typed_ast.Evidence, pos: source.SourcePos, ctx: LowerCtx) -
           panic("lowering: instance dict '" ++ typed_ast.instance_key_text(key) ++ "' at " ++ pos_loc(pos) ++
                 " absent from ctx_inst — resolve/lowering table disagreement")
   | _ -> panic("lowering: consume_block expected EvForward/EvInstance (internal error)")
+
+# The panic message for a ctx_fwd miss on `key` when it names an existential head;
+# Nothing for any other head, whose miss null-fills. consume_block and eta_from_evidence
+# both ask, so the call and value paths decide alike.
+fn existential_slot_miss(key: typed_ast.SlotKey, pos: source.SourcePos) -> Maybe String =
+  let Just arg = typed_ast.slot_key_sole_arg(key) else Nothing
+  in if types.is_existential_head(arg)
+     then Just("lowering: existential witness `" ++ arg ++ "` at " ++ pos_loc(pos) ++
+               " has no slot — infer/lowering pattern disagreement (internal error)")
+     else Nothing
 
 fn evidence_inst_arities(key: typed_ast.InstanceKey, ctx: LowerCtx) -> Dict (Int, Int) =
   match typed_ast.instance_get(key, ctx.env.inst_meta) with
@@ -1397,10 +1412,14 @@ fn eta_from_evidence(method: String, t: types.Type, pos: source.SourcePos, ev: t
   # find_fwd_method_for_key -> make_eta_lambda(fwd_slot): look up the forwarded
   # method_map by the same key consume_block uses, then the method's slot within it.
   # A ctx_fwd miss (a phantom fresh tyvar resolve emitted EvForward for
-  # optimistically) returns Nothing, so lower_value_var null-fills exactly as today.
+  # optimistically) returns Nothing, so lower_value_var null-fills exactly as today;
+  # an existential head's miss panics, as in consume_block.
   | typed_ast.EvForward _ key ->
       match typed_ast.slot_get(key, ctx.fwd) with
-      | Nothing -> Nothing
+      | Nothing ->
+          match existential_slot_miss(key, pos) with
+          | Just msg -> panic(msg)
+          | Nothing -> Nothing
       | Just method_map ->
           match dict_get(method, method_map) with
           | Nothing -> Nothing
@@ -1527,32 +1546,11 @@ fn lower_branches(branches: List typed_ast.TypedMatchBranch, ctx: LowerCtx) -> L
 # the constructor pattern and the existential var, so resolve's EvForward key and this
 # seeding agree.
 #
-# Walks tuple and constructor sub-patterns and must visit exactly the patterns
-# infer.extend_env_with_existential_givens does: a given infer seeds and this misses has
-# no slot. Each constructor appends to its own fields and seeds under its own position.
+# Walks with ast.map_accum_ctor_patterns, the walk infer.extend_env_with_existential_givens
+# uses: a given infer seeds and this misses has no slot. Each constructor appends to its
+# own fields and seeds under its own position.
 fn enrich_existential_pattern(pat: ast.Pattern, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
-  match pat with
-  | ast.ConstructorPattern name fields ppos ->
-      let (fields2, ctx2) = enrich_existential_patterns(fields, ctx)
-      in existential_ctor_build(name, fields2, ppos, ctx2)
-  | ast.TuplePattern pats ppos ->
-      let (pats2, ctx2) = enrich_existential_patterns(pats, ctx)
-      in (ast.TuplePattern(pats2, ppos), ctx2)
-  | ast.WildcardPattern _ -> (pat, ctx)
-  | ast.VarPattern _ _ -> (pat, ctx)
-  | ast.IntPattern _ _ -> (pat, ctx)
-  | ast.BoolPattern _ _ -> (pat, ctx)
-  | ast.StringPattern _ _ -> (pat, ctx)
-  | ast.CharPattern _ _ -> (pat, ctx)
-  | ast.UnitPattern _ -> (pat, ctx)
-
-fn enrich_existential_patterns(pats: List ast.Pattern, ctx: LowerCtx) -> (List ast.Pattern, LowerCtx) =
-  match pats with
-  | Nil -> (Nil, ctx)
-  | Cons p rest ->
-      let (p2, ctx2) = enrich_existential_pattern(p, ctx)
-          (rest2, ctx3) = enrich_existential_patterns(rest, ctx2)
-      in (Cons(p2, rest2), ctx3)
+  ast.map_accum_ctor_patterns(pat, ctx, existential_ctor_build)
 
 fn existential_ctor_build(name: String, fields: List ast.Pattern, ppos: source.SourcePos, ctx: LowerCtx) -> (ast.Pattern, LowerCtx) =
   let Just scheme = dict_get(name, ctx.env.scheme_env) else (ast.ConstructorPattern(name, fields, ppos), ctx)

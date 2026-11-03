@@ -90,6 +90,37 @@ export fn pattern_irrefutable(p: Pattern) -> Bool =
   | StringPattern _ _ -> false
   | CharPattern _ _ -> false
 
+# Folds `f` over every ConstructorPattern reachable through constructor fields and tuple
+# elements, innermost first; `f` gets the constructor's rebuilt fields and returns its
+# replacement. Infer and lowering share it. Order is irrelevant to both: infer's keys are
+# `@fwd:<skolem>:<class>`, fresh per pattern (unifier.fresh_skolem); lowering's are
+# `$ex_<var>_<pos.index>`, unique by source position.
+export fn map_accum_ctor_patterns(pat: Pattern, acc: a,
+                                  f: String -> List Pattern -> source.SourcePos -> a -> (Pattern, a)) -> (Pattern, a) =
+  match pat with
+  | ConstructorPattern name fields pos ->
+      let (fields2, acc2) = map_accum_ctor_pattern_list(fields, acc, f)
+      in f(name, fields2, pos, acc2)
+  | TuplePattern pats pos ->
+      let (pats2, acc2) = map_accum_ctor_pattern_list(pats, acc, f)
+      in (TuplePattern(pats2, pos), acc2)
+  | WildcardPattern _ -> (pat, acc)
+  | VarPattern _ _ -> (pat, acc)
+  | IntPattern _ _ -> (pat, acc)
+  | BoolPattern _ _ -> (pat, acc)
+  | StringPattern _ _ -> (pat, acc)
+  | CharPattern _ _ -> (pat, acc)
+  | UnitPattern _ -> (pat, acc)
+
+fn map_accum_ctor_pattern_list(pats: List Pattern, acc: a,
+                               f: String -> List Pattern -> source.SourcePos -> a -> (Pattern, a)) -> (List Pattern, a) =
+  match pats with
+  | Nil -> (Nil, acc)
+  | Cons p rest ->
+      let (p2, acc2) = map_accum_ctor_patterns(p, acc, f)
+          (rest2, acc3) = map_accum_ctor_pattern_list(rest, acc2, f)
+      in (Cons(p2, rest2), acc3)
+
 # --- Function parameters ---
 
 # How a parameter takes ownership of a LINEAR argument (M4.5 borrowing). An enum

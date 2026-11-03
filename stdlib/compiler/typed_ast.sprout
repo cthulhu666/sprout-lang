@@ -719,7 +719,7 @@ fn applied_base(te: ast.TypeExpr) -> ast.TypeExpr =
   | _ -> te
 
 # A position nothing names: `_`, or an inference variable (`$t<n>`, as
-# type_to_type_expr writes one). An existential (`$ex_<binder>`, a `$sk<n>`
+# type_to_type_expr writes one). An existential (`$ex_<binder>`, a `$sk<n>_<binder>`
 # skolem), an unannotated slot's placeholder and a headerless file's own type
 # (`$entry.Never`, source.entry_module_prefix) are types of their own; reading them as
 # unknown let `where Eq (Maybe a)` serve them with `a`'s dictionary.

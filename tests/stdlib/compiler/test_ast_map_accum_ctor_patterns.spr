@@ -1,0 +1,56 @@
+import stdlib.test (TestState, new_state, assert_eq, summary)
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.string as string
+
+fn at(index: Int) -> source.SourcePos = source.SourcePos(index = index, line = 0, column = 0)
+
+fn p() -> source.SourcePos = at(0)
+
+fn var(name: String) -> ast.Pattern = ast.VarPattern(name, p())
+
+fn ctor(name: String, fields: List ast.Pattern) -> ast.Pattern = ast.ConstructorPattern(name, fields, p())
+
+fn show(pat: ast.Pattern) -> String =
+  match pat with
+  | ast.VarPattern name _ -> name
+  | ast.TuplePattern pats _ -> "(" ++ string.join(",", list_map(show, pats)) ++ ")"
+  | ast.ConstructorPattern name pats _ -> name ++ "(" ++ string.join(",", list_map(show, pats)) ++ ")"
+  | _ -> "_"
+
+# Renames every constructor to `<name>'` and logs `<name>@<index>[<fields as received>]`.
+fn visit(name: String, fields: List ast.Pattern, pos: source.SourcePos, log: List String) -> (ast.Pattern, List String) =
+  (ast.ConstructorPattern(name ++ "'", fields, pos),
+   Cons(name ++ "@" ++ int_to_string(pos.index) ++ "[" ++ string.join(",", list_map(show, fields)) ++ "]", log))
+
+fn walk(pat: ast.Pattern) -> String =
+  let (out, log) = ast.map_accum_ctor_patterns(pat, Nil, visit)
+  in show(out) ++ " | " ++ string.join(";", list_reverse(log))
+
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    assert_eq(state, "a constructor inside a constructor is visited before its parent",
+      walk(ctor("Outer", [ctor("Inner", [var("x")]), var("y")])),
+      "Outer'(Inner'(x),y) | Inner@0[x];Outer@0[Inner'(x),y]")
+
+    assert_eq(state, "constructors in a tuple are visited left to right",
+      walk(ast.TuplePattern([ctor("A", [var("a")]), ctor("B", [var("b")])], p())),
+      "(A'(a),B'(b)) | A@0[a];B@0[b]")
+
+    assert_eq(state, "a constructor inside a tuple inside a constructor is reached",
+      walk(ctor("Outer", [ast.TuplePattern([ctor("Inner", [var("x")]), var("z")], p())])),
+      "Outer'((Inner'(x),z)) | Inner@0[x];Outer@0[(Inner'(x),z)]")
+
+    assert_eq(state, "the callback receives the constructor's own position",
+      walk(ast.ConstructorPattern("P", [], at(9))),
+      "P'() | P@9[]")
+
+    assert_eq(state, "non-constructor patterns pass through with the accumulator untouched",
+      walk(ast.TuplePattern([ast.WildcardPattern(p()), var("v"), ast.IntPattern(1, p()),
+                             ast.BoolPattern(true, p()), ast.StringPattern("s", p()),
+                             ast.CharPattern(97, p()), ast.UnitPattern(p())], p())),
+      "(_,v,_,_,_,_,_) | ")
+
+    summary(state)
