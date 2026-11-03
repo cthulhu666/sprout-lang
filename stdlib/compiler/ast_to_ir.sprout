@@ -4587,12 +4587,13 @@ fn finish_direct_call(fname: String, call_ty: types.Type,
     Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, Int) =
   Ok((arg_blocks, arg_cur_lbl,
        if noscan_creation(fname, call_ty)
-       then list_builder_add(sprout_ir.IRVecNoscan(result), list_builder_add(call_op, arg_cur_ops))
-       else list_builder_add(call_op, arg_cur_ops),
+       then list_builder_add(sprout_ir.IRVecNoscan(result), with_call)
+       else with_call,
        result, idx + 1))
   where result = fresh_name(idx)
         call_op = sprout_ir.IRCall(result, ret_irtype(call_ty),
                                    fname, arg_names)
+        with_call = list_builder_add(call_op, arg_cur_ops)
 
 # NOSCAN (docs/pointer-free-vectors-v0.md §4.2). The result of a creating extern is a fresh
 # vector, so flagging it touches no other value. The type is the call's own result type.

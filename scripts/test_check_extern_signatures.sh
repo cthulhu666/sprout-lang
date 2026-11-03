@@ -80,6 +80,14 @@ expect_pass "(B6) only the named function body is read"
 fixture b7 stdlib/foo.sprout 'extern fn fx_nodef(x: Int) -> Int' ''
 expect_pass "(B7) no C definition is skipped"
 
+fixture v1 stdlib/foo.sprout 'extern fn fx_nodef(x: Int) -> Int' ''
+expect_pass "(V1) no-C-definition note is silent by default"
+if grep -qF "no C definition" <<<"$OUT"; then fail "(V1) note printed without verbose: $OUT"; fi
+
+VOUT="$(SPROUT_EXTERN_CHECK_VERBOSE=1 SPROUT_EXTERN_CHECK_ROOT="$TMPD/v1" bash "$CHECK" 2>&1)" || fail "(V2) verbose run failed: $VOUT"
+grep -qF "no C definition: fx_nodef" <<<"$VOUT" || fail "(V2) verbose lacks note: $VOUT"
+echo "ok: (V2) verbose lists no-C-definition externs"
+
 fixture d1 stdlib/foo.sprout 'extern fn fx_dup(a: Int) -> Int
 extern fn fx_dup(a: Int, b: Int) -> Int' ''
 expect_fail "(D1) the duplicate rule still fires" "fx_dup" "declared more than once"
