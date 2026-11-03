@@ -49,12 +49,11 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 - **Effects in types, and they are checked** — pure functions are unannotated;
   effectful ones carry `!{IO}` (with singleton effect variables `!{e}` for
   higher-order helpers). A body that performs IO under a pure signature is a
-  compile error. **The check is on a declaration's own body, not on effects that
-  arrive through a function value** — passing an `!{IO}` function into a pure
-  arrow parameter is still accepted today, so a missing `!{IO}` is not yet a
-  guarantee about what runs (spec §7 enforcement note lists the four escapes).
-  Over-declaring is fine — the rule is *inferred ⊑ declared*, not
-  equality. Open effect rows are not supported yet. Aborting is *not* an effect:
+  compile error, and so is passing an `!{IO}` function where a pure one is
+  expected. One gap remains: a call through a parameter typed with an effect
+  variable (`g: Int -> Int !{e}`) is not checked against a pure signature
+  (spec §7, enforcement note). Over-declaring is fine — the rule is
+  *inferred ⊑ declared*, not equality. Open effect rows are not supported yet. Aborting is *not* an effect:
   `panic` is pure, so an unreachable-by-invariant arm does not make its function
   effectful ([why](docs/effect-enforcement-v0.md#6-is-panic-an-effect-decided-no)).
 - **Zero-cost `wrap` newtypes**, abstract across a module boundary unless declared
@@ -67,7 +66,7 @@ Running with `USER="  Ada  "` prints `Hello, Ada`. More in [`examples/`](./examp
 - **Beginner-friendly diagnostics** — `line:col` errors, exhaustiveness checks,
   unknown-name and missing-instance reporting.
 - **Editor and REPL tooling** — `sproutd` serves LSP (diagnostics, go-to-definition,
-  hover) and an interactive REPL (`just build-sproutd && just repl`); a JetBrains
+  hover, completion) and an interactive REPL (`just build-sproutd && just repl`); a JetBrains
   plugin lives in [`editors/intellij`](./editors/intellij).
 
 **Also in the spec:** modules, records (`type User = (name: String)` — parametric,
@@ -109,9 +108,10 @@ Linux, clone the repository and run the development setup:
 
 ```
 ./scripts/setup-dev.sh
-mise exec -- just compile-native examples/fizzbuzz.sprout /tmp/fizzbuzz
-/tmp/fizzbuzz
+mise exec -- just run examples/fizzbuzz.sprout
 ```
+
+`just compile-native <file> <out>` writes the native binary instead of running it.
 
 The setup installs the system and repository-managed toolchain, configures Git hooks, and
 bootstraps the self-hosted compiler. It supports Homebrew and the APT, DNF, Pacman, and Zypper
