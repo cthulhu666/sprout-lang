@@ -43,6 +43,18 @@ fn probe_via_match() -> String =
     ++ "  | Just v -> v\n"
     ++ "  | Nothing -> 0 - 1\n"
 
+# The read is the tail of a Maybe-returning worker (`stdlib.bytes.get`'s shape), which the caller
+# matches: the worker returns the (tag, payload) pair unboxed.
+fn probe_via_worker() -> String =
+  maybe_decl
+    ++ bytes_get_decl
+    ++ "fn fetch(b: Bytes, i: Int) -> Maybe Int =\n"
+    ++ "  bytes_get(b, i)\n\n"
+    ++ "fn probe(b: Bytes, i: Int) -> Int =\n"
+    ++ "  match fetch(b, i) with\n"
+    ++ "  | Just v -> v\n"
+    ++ "  | Nothing -> 0 - 1\n"
+
 # Returns the emitted IR, or a string starting "ERR: ". Not a `Result`: folding a broken fixture to
 # `false` would make every assert_false below pass vacuously.
 fn translate_or_msg(src: String) -> String !{IO} =
@@ -81,17 +93,24 @@ fn main() -> Unit !{IO} =
                  has(helper, "call i64 @bytes_get("))
     # Asserted on the CALL, not on the bare name: ir_lowering emits the `declare` for all eight
     # allow-listed names unconditionally, so `bytes_get_unboxed` is present either way.
-    assert_true(state, "a helper-consumed Maybe reaches CPR",
-                has(helper, "call i128 @bytes_get_unboxed"))
+    assert_true(state, "a helper-consumed Maybe reaches CPR, read inline",
+                has(helper, "load i8") && !has(helper, "call i128 @bytes_get_unboxed("))
     assert_true(state, "a helper-consumed Maybe goes to the argument worker",
                 has(helper, "@with_default_argw("))
 
     # The fix: a direct match with simple arms reaches the unboxed read.
     direct <- translate_or_msg(probe_via_match())
     assert_true(state, "match fixture translates", translated(direct))
-    assert_true(state, "a directly-matched Maybe keeps CPR (no allocation per read)",
-                has(direct, "call i128 @bytes_get_unboxed"))
+    assert_true(state, "a directly-matched Maybe keeps CPR (no allocation per read), read inline",
+                has(direct, "load i8") && !has(direct, "call i128 @bytes_get_unboxed("))
     assert_false(state, "a directly-matched Maybe emits no boxed call",
                  has(direct, "call i64 @bytes_get("))
+
+    # A worker whose tail is the read returns the inlined (tag, payload) pair.
+    worker <- translate_or_msg(probe_via_worker())
+    assert_true(state, "worker fixture translates", translated(worker))
+    assert_true(state, "the worker is emitted", has(worker, "define i128 @fetch_worker("))
+    assert_true(state, "a worker-tail read is inline",
+                has(worker, "load i8") && !has(worker, "call i128 @bytes_get_unboxed("))
 
     summary(state)

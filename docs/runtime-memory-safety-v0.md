@@ -118,8 +118,9 @@ Notes:
 
 1. ~~An O(1) bounds-checked byte read on a `String`.~~ Landed as `str_byte_at`
    ([string-byte-read-v0.md](string-byte-read-v0.md)). The moves of `str_len`, `str_char_at` and
-   its twin, `str_slice` and `str_find` stay open: they wait on inline byte reads (BACKLOG P2,
-   "Inline `Bytes` and `String` byte reads").
+   its twin, `str_slice` and `str_find` stay open: each
+   move still has to measure no slower, now that byte reads lower inline
+   ([inline-byte-reads-v0.md](inline-byte-reads-v0.md)).
 2. `unsafe_pure` for the prelude: a compiler change (`source.unsafe_pure_users` lists only
    `stdlib.linvec`), not a builtin. Unlocks `vector_set`, `vector_append`, `vector_concat`,
    `vector_from_list`, `vector_get` and its twin.

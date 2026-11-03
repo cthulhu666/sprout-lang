@@ -432,6 +432,14 @@ export type IROp (..) =
   # emitted only into a bce.sprout `$fast` clone. Unlike IRVecGetD the element may be a
   # heap pointer: <kind> is its IRType, so ir_rooting roots it as it does a call result.
   | IRVecGetU String String String IRType
+  # IRLoadWord <result> <base> <offset> — the i64 at <base> + <offset> bytes; <base> is an
+  # SSA i64 address, <offset> a literal (may be negative). Always scalar (a length, a header
+  # word or a non-heap pointer), so ir_rooting never roots it. Unchecked; non-allocating,
+  # never triggers GC.
+  | IRLoadWord String String Int
+  # IRLoadU8 <result> <base> <index> — the byte at <base> + <index>, zero-extended to i64.
+  # Always scalar. Unchecked; non-allocating, never triggers GC.
+  | IRLoadU8 String String String
   # IRAbortMatch
   # Lowers to:
   #   call void @sprout_abort_match()
@@ -631,6 +639,8 @@ export fn op_direct_callee(op: IROp) -> Maybe String =
   | IRVecGetD _ _ _ -> Nothing
   | IRVecSetD _ _ _ _ -> Nothing
   | IRVecGetU _ _ _ _ -> Nothing
+  | IRLoadWord _ _ _ -> Nothing
+  | IRLoadU8 _ _ _ -> Nothing
   | IRAbortMatch -> Nothing
   | IRPanic _ -> Nothing
   | IRZextI1ToI64 _ _ -> Nothing
@@ -835,6 +845,10 @@ export fn print_op(op: IROp) -> String =
       "    " ++ r ++ " = vec_set_d " ++ v ++ ", " ++ i ++ ", " ++ x
   | IRVecGetU r v i k ->
       "    " ++ r ++ " = vec_get_u " ++ v ++ ", " ++ i ++ " [" ++ print_ir_type(k) ++ "]"
+  | IRLoadWord r b off ->
+      "    " ++ r ++ " = load_word " ++ b ++ ", " ++ int_to_string(off)
+  | IRLoadU8 r b i ->
+      "    " ++ r ++ " = load_u8 " ++ b ++ ", " ++ i
   | IRAbortMatch ->
       "    abort_match; unreachable"
   | IRPanic msg ->
@@ -901,3 +915,14 @@ export fn print_ir_program(prog: IRProgram) -> String =
       match fns with
       | Nil -> "; sprout-ir: empty"
       | _ -> "; sprout-ir\n" ++ print_fns(fns)
+
+# A heap object's header word sits at payload - 8: the kind in the low 8 bits, the aux field
+# (a String's byte length) above the low 14. The inline String byte read decodes it with these.
+# SYNC WITH runtime/sprout_word.h sprout_hdr_kind (h & 0xFF).
+export let hdr_kind_mask: Int = 255
+
+# The kind of a String header. SYNC WITH runtime/sprout_word.h SPROUT_HEAP_CSTR.
+export let hdr_kind_cstr: Int = 10
+
+# Shift from a header word to its aux field. SYNC WITH runtime/sprout_runtime.c sprout_hdr_aux.
+export let hdr_aux_shift: Int = 14

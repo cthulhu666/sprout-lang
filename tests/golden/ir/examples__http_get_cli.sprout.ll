@@ -163,13 +163,14 @@ declare i64 @http_request(i64, i64, i64, i64, i64, i64, i64)
 @__sprout_sclo.__sprout_ir_lambda_18 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_18 }
 @.str.52 = private unnamed_addr constant { i64, [53 x i8] } { i64 851978, [53 x i8] c"usage: sprout run examples/http_get_cli.sprout <url>\00" }
 @.str.53 = private unnamed_addr constant { i64, [36 x i8] } { i64 573450, [36 x i8] c"the url argument is not valid UTF-8\00" }
-@.str.54 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@.str.55 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c" must be at least 1\00" }
-@.str.56 = private unnamed_addr constant { i64, [37 x i8] } { i64 589834, [37 x i8] c"url contains a space or control byte\00" }
-@.str.57 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"invalid header value: \00" }
-@.str.58 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
-@__sprout_sclo.__sprout_ir_lambda_19 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_19 }
+@.str.54 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"bytes_get_unboxed: null bytes\00" }
+@.str.55 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.56 = private unnamed_addr constant { i64, [20 x i8] } { i64 311306, [20 x i8] c" must be at least 1\00" }
+@.str.57 = private unnamed_addr constant { i64, [37 x i8] } { i64 589834, [37 x i8] c"url contains a space or control byte\00" }
+@.str.58 = private unnamed_addr constant { i64, [23 x i8] } { i64 360458, [23 x i8] c"invalid header value: \00" }
 @.str.59 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@__sprout_sclo.__sprout_ir_lambda_19 = private unnamed_addr constant { i64, ptr } { i64 70368744177666, ptr @__sprout_ir_lambda_19 }
+@.str.60 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -4346,15 +4347,41 @@ wrepack_next_25:
 
 define i128 @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index) {
 entry:
-  %t$0$st = call i128 @bytes_get_unboxed(i64 %p$value, i64 %p$index)
-  %t$0 = trunc i128 %t$0$st to i64
-  %t$0$hi = lshr i128 %t$0$st, 64
-  %t$1 = trunc i128 %t$0$hi to i64
-  %t$2$lo = zext i64 %t$0 to i128
-  %t$2$hw = zext i64 %t$1 to i128
-  %t$2$hi = shl i128 %t$2$hw, 64
-  %t$2$r = or i128 %t$2$hi, %t$2$lo
-  ret i128 %t$2$r
+  %t$0 = icmp eq i64 %p$value, 0
+  br i1 %t$0, label %ibr_null_0, label %ibr_len_0
+ibr_null_0:
+  %t$1 = getelementptr inbounds { i64, [30 x i8] }, ptr @.str.54, i64 0, i32 1, i64 0
+  %t$2 = ptrtoint ptr %t$1 to i64
+  call i64 @panic(i64 %t$2)
+  unreachable
+ibr_len_0:
+  %t$3$p = inttoptr i64 %p$value to ptr
+  %t$3$ep = getelementptr i8, ptr %t$3$p, i64 0
+  %t$3 = load i64, ptr %t$3$ep, align 8
+  %t$4 = icmp uge i64 %p$index, %t$3
+  br i1 %t$4, label %ibr_miss_0, label %ibr_hit_0
+ibr_hit_0:
+  %t$5$p = inttoptr i64 %p$value to ptr
+  %t$5$ep = getelementptr i8, ptr %t$5$p, i64 8
+  %t$5 = load i64, ptr %t$5$ep, align 8
+  %t$6$p = inttoptr i64 %t$5 to ptr
+  %t$6$bp = getelementptr i8, ptr %t$6$p, i64 %p$index
+  %t$6$b = load i8, ptr %t$6$bp
+  %t$6 = zext i8 %t$6$b to i64
+  %t$7 = add i64 0, 1
+  br label %ibr_join_0
+ibr_miss_0:
+  %t$8 = add i64 0, 0
+  %t$9 = add i64 0, 0
+  br label %ibr_join_0
+ibr_join_0:
+  %t$10 = phi i64 [%t$7, %ibr_hit_0], [%t$8, %ibr_miss_0]
+  %t$11 = phi i64 [%t$6, %ibr_hit_0], [%t$9, %ibr_miss_0]
+  %t$17$lo = zext i64 %t$10 to i128
+  %t$17$hw = zext i64 %t$11 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 }
 
 define i128 @stdlib.bytes.to_string_worker(i64 %p$value) {
@@ -4434,7 +4461,7 @@ do_short_3:
   %t$28 = call i64 @sprout_gc_pop_roots(i64 1)
   br label %do_done_3
 do_cont_3:
-  %t$7 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.54, i64 0, i32 1, i64 0
+  %t$7 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.55, i64 0, i32 1, i64 0
   %t$8 = ptrtoint ptr %t$7 to i64
   %t$9 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_client.header_line_9, i64 8) to i64
   %t$29 = alloca i64
@@ -4493,7 +4520,7 @@ entry:
   %t$1 = icmp sge i64 %p$limit, %t$0
   %t$2 = zext i1 %t$1 to i64
   %t$3 = call i64 @__tc_ToString_String_to_string(i64 %p$name)
-  %t$4 = getelementptr inbounds { i64, [20 x i8] }, ptr @.str.55, i64 0, i32 1, i64 0
+  %t$4 = getelementptr inbounds { i64, [20 x i8] }, ptr @.str.56, i64 0, i32 1, i64 0
   %t$5 = ptrtoint ptr %t$4 to i64
   %t$14 = alloca i64
   store i64 %t$3, ptr %t$14
@@ -4559,7 +4586,7 @@ entry:
   %t$13 = call i64 @sprout_gc_push_i64_root(ptr %t$12)
   %t$2 = call i64 @stdlib.bytes.all_bytes(i64 %t$0, i64 %t$1)
   %t$14 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$3 = getelementptr inbounds { i64, [37 x i8] }, ptr @.str.56, i64 0, i32 1, i64 0
+  %t$3 = getelementptr inbounds { i64, [37 x i8] }, ptr @.str.57, i64 0, i32 1, i64 0
   %t$4 = ptrtoint ptr %t$3 to i64
   %t$15 = alloca i64
   store i64 %t$4, ptr %t$15
@@ -4598,7 +4625,7 @@ entry:
 arm_0_1:
   %t$3 = ptrtoint ptr getelementptr inbounds (i8, ptr @__sprout_sclo.__sprout_ir_eta_stdlib.http_client.value_byte_7, i64 8) to i64
   %t$4 = call i64 @stdlib.bytes.all_bytes(i64 %t$3, i64 %t$0)
-  %t$5 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.57, i64 0, i32 1, i64 0
+  %t$5 = getelementptr inbounds { i64, [23 x i8] }, ptr @.str.58, i64 0, i32 1, i64 0
   %t$6 = ptrtoint ptr %t$5 to i64
   %t$7 = call i64 @__tc_ToString_String_to_string(i64 %p$name)
   %t$36 = alloca i64
@@ -4719,7 +4746,7 @@ entry:
   store i64 %t$0, ptr %t$18
   %t$19 = call i64 @sprout_gc_push_i64_root(ptr %t$18)
   %t$1 = call i64 @sprout_alloc_obj(i64 24, i64 0)
-  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.58, i64 0, i32 1, i64 0
+  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.59, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$20 = alloca i64
   store i64 %t$1, ptr %t$20
@@ -4988,7 +5015,7 @@ entry:
   call i64 @sprout_gc_register_i64_root(ptr @list_builder_empty)
   %t$1 = bitcast double 10000000000000000000000.0 to i64
   store i64 %t$1, ptr @pow10_exact_unit
-  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.59, i64 0, i32 1, i64 0
+  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.60, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$7 = alloca i64
   store i64 %t$3, ptr %t$7

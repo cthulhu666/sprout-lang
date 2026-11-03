@@ -38,8 +38,8 @@ Non-goals:
 - A `Byte` type. Bytes are `Int` 0–255, as `bytes_get` returns.
 - Moving `str_len`, `str_slice` and the rest. Each move still faces the no-slower rule on its own
   (§7).
-- An inline lowering. It needs new IR ops shared with `Bytes` reads, and is BACKLOG's P2 entry
-  "Inline `Bytes` and `String` byte reads" (§4).
+- An inline lowering. It needs new IR ops shared with `Bytes` reads, so it is designed in
+  [inline-byte-reads-v0.md](inline-byte-reads-v0.md) (§4).
 - An unchecked read. Bounds-check elimination is [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md)'s job.
 
 ## 3. Prior art
@@ -73,14 +73,14 @@ extern fn str_byte_at(s: String, i: Int) -> Maybe Int
 ```
 
 - **Total**, as `bytes_get`. `str_byte_at` joins `ast_to_ir.unboxed_maybe_extern_name`, so a
-  `match`, do-bind or let-else on the result calls `str_byte_at_unboxed` and builds no `Maybe`.
+  `match`, do-bind or let-else on the result reads the byte inline
+  ([inline-byte-reads-v0.md](inline-byte-reads-v0.md)) and builds no `Maybe`.
   A boxed use, such as `with_default(-1, str_byte_at(s, i))`, still allocates the `Maybe`.
   `string.byte_at_or(s, i, fallback)` mirrors `bytes.get_or`.
 - **No roots around the call.** `str_byte_at_unboxed` joins `ir_rooting.is_nonallocating_unboxed_read`,
   a hand-kept list that today equals `unboxed_maybe_extern_name`'s. The boxed `str_byte_at` goes
-  on no list: its `Just` allocates, as `bytes_get`'s does. The bound byte itself is still rooted
-  across a later allocation in the arm, because `emit_unboxed_call` gives the payload kind
-  `IRTUnknown`; `bytes_get` pays the same, and the fix is part of the P2 entry.
+  on no list: its `Just` allocates, as `bytes_get`'s does. The bound byte is a scalar payload
+  and is never rooted.
 - **C body**, in the runtime's block of unboxed variants beside `bytes_get_unboxed`, whose header
   states the no-allocation rule the rooting list relies on:
   - Load the header at `s - 8`; its kind must be CSTR. `len` is its aux; `i < 0 || i >= len`
@@ -118,9 +118,9 @@ they return.
 `scripts/link_whole_program.sh`) the C body can inline into the caller. Under separate units
 (`just test`'s binaries, the compiler bootstrap, `clang prog.ll runtime/*.c`) every read is a full
 C call ([cross-tu-inlining-v0.md](cross-tu-inlining-v0.md) §5.2); the compiler's lexer runs there.
-Inlining it there needs new IR ops for a header load and a byte load, a `Nothing` edge rather than
-B1's panic (`vec_guard`), and an arm in each of `ir_rooting`'s op tables and `ir_verify`. That is
-the same work BACKLOG's P2 entry needs for `bytes_get_unboxed`, so it is designed there, for both.
+The read is therefore lowered inline there, with `IRLoadWord` and `IRLoadU8`, for this read and
+`bytes_get_unboxed` alike ([inline-byte-reads-v0.md](inline-byte-reads-v0.md)); the C bodies serve a
+boxed or function-value use.
 
 ## 5. Alternatives
 
@@ -197,5 +197,5 @@ Compatibility: a new name; no caller changes, no migration. Diagnostics: none ne
 - Tests: in range, `-1`, `len`, a huge offset, an empty String, `"é"` reading exactly 0xC3 then
   0xA9, agreement with `bytes_get`, `byte_at_or`; no NUL case, since that String is corrupt
   and HDRCHECK aborts on it; an IR test that a `match`
-  emits `str_byte_at_unboxed` with no root push around the call; a `str_byte_at` probe in
+  reads the byte inline with no root push around the read; a `str_byte_at` probe in
   `tests/stdlib/test_byte_offset_cost.spr`, so an O(n) read fails CI under HDRCHECK.

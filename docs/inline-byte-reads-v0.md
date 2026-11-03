@@ -1,7 +1,7 @@
 # Inline byte reads — v0
 
-Status: design, 2026-11-02. BACKLOG P2 "Inline `Bytes` and `String` byte reads the way B1 inlines
-`Vector Double`". Not a language change: no syntax, typing or spec text moves.
+Status: landed (stages 1 and 2), 2026-11-02. Not a language change: no syntax, typing or spec text
+moves.
 
 ## 1. Problem
 
@@ -14,15 +14,13 @@ links `runtime/*.c` beside the program) every read is a full call. Measured in
 separate units, and `docs/byte-buffer-v0.md` §3 puts a base64 loop at 6.5× C with a call per byte
 and 2.6× with reads and writes inlined by hand.
 
-Second defect, same path: `emit_unboxed_call` gives the payload `IRTUnknown`, so `ir_rooting`
-treats an `Int` byte as a heap value and roots it across any later allocation in the arm.
-
 ## 2. Goals and non-goals
 
 Goals:
 - The unboxed `bytes_get` and `str_byte_at` reads lower to inline loads, with the same results and
   the same failure messages as the C bodies.
-- The payload of every unboxed `Maybe` extern carries its real kind, so a scalar is never rooted.
+- ~~The payload of every unboxed `Maybe` extern carries its real kind, so a scalar is never rooted.~~
+  Landed (§4.3).
 - No slower under the whole-program link; faster under separate units.
 
 Non-goals:
@@ -48,38 +46,39 @@ in each exhaustive match instead of four, and the Sprout runtime work in
 
 ### 4.1 Two IR ops (`sprout_ir.sprout`)
 
-- `IRLoadWord r base offset kind` — the `i64` at `base + offset` bytes. `offset` is a literal and
-  may be negative (`-8` reads a String header). `kind` is the result's `IRType`, as `IRVecGetU`
-  carries one: `IRTScalar` for a length, a header word or a pointer outside the GC heap, which
-  `ir_rooting` then never roots.
+- `IRLoadWord r base offset` — the `i64` at `base + offset` bytes. `offset` is a literal and
+  may be negative (`-8` reads a String header). Always scalar: a length, a header word or a
+  pointer outside the GC heap, so `ir_rooting` never roots it.
 - `IRLoadU8 r base index` — the byte at `base + index`, zero-extended to `i64`. Always scalar.
 
 Both are unchecked and non-allocating. Lowering (`ir_lowering.lower_op`): `inttoptr`, a
 `getelementptr i8`, then `load i64` (align 8), or `load i8` and `zext`.
 
 Arms: the seven exhaustive matches — `ir_rooting.op_triggers_gc`, `op_produces_simple_heap`
-(`IRLoadU8` → `Nothing`; `IRLoadWord` → by `kind`), `op_uses` (the base and index stay live),
+(both loads → `Nothing`), `op_uses` (the base and index stay live),
 `op_exposes_operands`, `sprout_ir.op_direct_callee`, `sprout_ir.print_op`,
 `ir_lowering.lower_op` — plus an explicit `ir_rooting.op_def` arm, which has a `_` fallback but
 needs the arm for liveness. `ir_verify` reuses `op_def` and `op_uses`.
 
 ### 4.2 The inline reads (`ast_to_ir.sprout`)
 
-Four sites emit an unboxed read. Three (`translate_unboxed_maybe_match`,
-`translate_do_bind_unboxed`, `translate_split_elem`) go through `emit_unboxed_call`; the fourth,
-`translate_argw_call`, builds its own `IRCallUnboxed2` for an `ExternProducer` — the
-`step(acc, str_byte_at(s, i))` loop shape. One emitter, `emit_inline_byte_read`, serves both:
-`emit_unboxed_call` and `translate_argw_call` call it for these two names and keep the
-`IRCallUnboxed2` for every other. Its `(tag, val)` feeds `@f_argw` unchanged. The blocks follow
-`vec_guard`:
+Five sites emit an unboxed read. Three (`translate_unboxed_maybe_match`,
+`translate_do_bind_unboxed`, `translate_split_elem`) go through `emit_unboxed_call`; a fourth,
+`translate_argw_call`, builds the call for an `ExternProducer` — the
+`step(acc, str_byte_at(s, i))` loop shape; the fifth, `translate_tail_chain`, is a worker whose
+tail is the read (`stdlib.bytes.get`), which returns the pair unboxed. One emitter,
+`emit_inline_byte_read`, serves all five: `emit_unboxed_call` and `translate_argw_call` reach it
+through `emit_unboxed_producer`, which keeps the `IRCallUnboxed2` for every other name and for
+a payload kind that is not scalar (the inline blocks define a byte and a constant, which cannot
+be rooted). Its `(tag, val)` feeds `@f_argw` unchanged. The blocks follow `vec_guard`:
 
 ```
 Bytes b, index i:                         String s, index i:
   b == 0      -> panic "bytes_get_unboxed:   s == 0          -> panic "str_byte_at: null input"
-                 null bytes"               h    = IRLoadWord s -8 Scalar
-  len = IRLoadWord b 0 Scalar              h & 255 != 10   -> panic "str_byte_at: String has
+                 null bytes"               h    = IRLoadWord s -8
+  len = IRLoadWord b 0                     h & 255 != 10   -> panic "str_byte_at: String has
   i >=u len   -> miss                                          no header"
-  data = IRLoadWord b 8 Scalar             len  = IRILShr h 14   (logical, as C's uint64_t)
+  data = IRLoadWord b 8                    len  = IRILShr h 14   (logical, as C's uint64_t)
   byte = IRLoadU8 data i  -> hit           i >=u len       -> miss
                                            byte = IRLoadU8 s i  -> hit
 hit:  tag = Just, val = byte
@@ -91,8 +90,9 @@ join: tag = phi, val = phi                (the tuple emit_unboxed_call returns t
 - Failure is `IRPanic`, which calls `panic`, which calls `sprout_fail`: the message and exit
   status match the C path exactly.
 - The tag values come from `prelude_ctor_tag`. `255`, `10` (`SPROUT_HEAP_CSTR`) and `14` (the aux
-  shift) join `ir_lowering.hdr_aux_unit` as named constants beside a "SYNC WITH" note, as
-  `hdr_aux_unit` has one.
+  shift) are `sprout_ir.hdr_kind_mask`, `hdr_kind_cstr` and `hdr_aux_shift`, each beside a "SYNC
+  WITH" note. `ir_lowering` derives its header constants (`hdr_aux_unit`, a String global's header)
+  from them, so each runtime fact has one source.
 
 Premises, each with a test or a gate:
 - The GC never moves an object, so a loaded `data` pointer stays valid for the read.
@@ -133,18 +133,20 @@ reads' `val` phi joins two scalars and is never rooted.
    payload live across an allocation gets no root push at a `match`, a `do` bind, a split and an
    `@f_argw` parameter; a `Vector String` payload, a `Result String Int` worker in a `do` bind,
    and a phantom `Maybe` whose `Just` holds a heap type stay rooted.
-2. **Inline reads.** §4.1 and §4.2, with:
-   - IR tests: a `match`, a `do` bind, a split and an argw call over each read emit no
-     `call i128` to it, emit the loads, and keep both panic messages.
-   - `ir_verify` unit tests for the two ops (`op_def`, `op_uses` are exported); rooting through
-     `insert_roots` as in §4.2.
-   - `tests/stdlib/test_ir_codegen_cpr_maybe_externs.spr` expects loads for these two names.
-     `scripts/ctor_tag_fold_check.sh` check (a) keys on a `call @..._unboxed` in the fixture and
-     would go blind; for these two it instead requires a `load i8` and no `call i128` to them.
-   - Behaviour: the existing `test_str_byte_at` and `test_bytes_byte_at_unboxed`, plus empty
-     Bytes and a split, run under HDRCHECK.
-   - Bench: `bench/str_byte_at` plus a `bytes_get` sum row, both link setups, ≥15 interleaved
-     rounds against master; no slower whole-program.
+2. **Inline reads.** Landed (§4.1, §4.2).
+   - ~~IR tests: a `match`, a `do` bind, a split, an argw call and a worker tail over each read emit
+     no `call i128` to it, emit the loads, and keep the panic messages.~~
+   - ~~`ir_verify` unit tests for the two ops (`op_def`, `op_uses` are exported); rooting through
+     `insert_roots` as in §4.2.~~ `tests/stdlib/compiler/test_ir_load_ops.spr`,
+     `test_ir_codegen_cpr_maybe_externs.spr`.
+   - ~~`scripts/ctor_tag_fold_check.sh` check (a).~~ Unchanged: it still fails on any remaining
+     `call` to the two reads, and the inline tags are constants from `prelude_ctor_tag`.
+   - ~~Behaviour: `test_str_byte_at`, `test_bytes_get` (empty Bytes, negative and huge indexes,
+     bytes above 127, every unboxed shape) under HDRCHECK.~~
+   - ~~Bench: `bench/str_byte_at` plus a `bytes_get` sum row, both link setups, ≥15 interleaved
+     rounds against master; no slower whole-program.~~
+     `bench/results-2026-11-03-inline-byte-reads.md`: no row slower; the read loops run
+     2.9–3.8× faster under separate units.
 
 Each stage is one PR, reseeded, with the golden IR diff read. Both `_unboxed` C bodies stay:
 the boxed `str_byte_at` wraps `str_byte_at_unboxed` (the boxed `bytes_get` has its own body), a

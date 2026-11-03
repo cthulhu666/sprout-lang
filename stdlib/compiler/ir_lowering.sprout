@@ -1,4 +1,5 @@
 module stdlib.compiler.ir_lowering
+import stdlib.bits
 import stdlib.compiler.sprout_ir as sprout_ir
 import stdlib.string as string
 import stdlib.bytes as bytes
@@ -390,6 +391,16 @@ fn lower_op(op: sprout_ir.IROp, ret_ty: String, str_table: Dict (String, Int), c
   | sprout_ir.IRVecGetU r v i _ ->
       vec_elem_addr_ir(r, v, i) ++ "\n" ++
       "  " ++ r ++ " = load i64, ptr " ++ r ++ "$ep"
+  # Raw loads at `base + offset`/`base + index` bytes. Unchecked; temps derive from the result SSA.
+  | sprout_ir.IRLoadWord r b off ->
+      "  " ++ r ++ "$p = inttoptr i64 " ++ b ++ " to ptr\n" ++
+      "  " ++ r ++ "$ep = getelementptr i8, ptr " ++ r ++ "$p, i64 " ++ int_to_string(off) ++ "\n" ++
+      "  " ++ r ++ " = load i64, ptr " ++ r ++ "$ep, align 8"
+  | sprout_ir.IRLoadU8 r b i ->
+      "  " ++ r ++ "$p = inttoptr i64 " ++ b ++ " to ptr\n" ++
+      "  " ++ r ++ "$bp = getelementptr i8, ptr " ++ r ++ "$p, i64 " ++ i ++ "\n" ++
+      "  " ++ r ++ "$b = load i8, ptr " ++ r ++ "$bp\n" ++
+      "  " ++ r ++ " = zext i8 " ++ r ++ "$b to i64"
   | sprout_ir.IRAbortMatch ->
       "  call void @sprout_abort_match()\n  unreachable"
   # W7/F-DIV: reuses the existing `panic` builtin. The call result is unused
@@ -491,9 +502,9 @@ fn lower_tco_back_stores(stores: List (String, String, String)) -> String =
       "  store " ++ ty ++ " " ++ newv ++ ", ptr " ++ slot ++ "\n" ++
       lower_tco_back_stores(rest)
 
-# One step of a header's aux field: aux sits above the low 14 bits (kind, colour, age).
-# SYNC WITH runtime/sprout_runtime.c sprout_hdr_make (aux << 14).
-let hdr_aux_unit: Int = 16384
+# One step of a header's aux field: aux sits above the low `hdr_aux_shift` bits (kind,
+# colour, age). The shift's SYNC WITH note is in sprout_ir.sprout.
+let hdr_aux_unit: Int = bit_shl(1, sprout_ir.hdr_aux_shift)
 
 # Rewrite a reused cell's header to constructor `tag`, keeping the low 14 bits
 # (kind, colour, age, REMEMBERED) and the arity. Keeping colour and REMEMBERED is what lets
@@ -934,7 +945,7 @@ export fn emit_str_global(idx: Int, s: String) -> (String, Int, String) =
         body = encode_str_for_ir(s) ++ "\\00"
         byte_len = str_byte_len(s)
         len = byte_len + 1
-        hdr = 10 + byte_len * hdr_aux_unit
+        hdr = sprout_ir.hdr_kind_cstr + byte_len * hdr_aux_unit
 
 # lower_program: top-level entry.  Returns the complete LLVM IR text.
 export fn lower_program(prog: sprout_ir.IRProgram) -> String =

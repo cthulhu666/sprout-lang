@@ -195,8 +195,9 @@ declare i64 @unsafe_pure(i64)
 @.str.77 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in * (line 1977, column 39)\00" }
 @.str.78 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1977, column 45)\00" }
 @.str.79 = private unnamed_addr constant { i64, [2 x i8] } { i64 16394, [2 x i8] c"-\00" }
-@.str.80 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 58)\00" }
-@.str.81 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
+@.str.80 = private unnamed_addr constant { i64, [30 x i8] } { i64 475146, [30 x i8] c"bytes_get_unboxed: null bytes\00" }
+@.str.81 = private unnamed_addr constant { i64, [41 x i8] } { i64 655370, [41 x i8] c"Int overflow in - (line 1985, column 58)\00" }
+@.str.82 = private unnamed_addr constant { i64, [1 x i8] } { i64 10, [1 x i8] c"\00" }
 @.cname.0 = private unnamed_addr constant [8 x i8] c"Nothing\00"
 @.cfkinds.0 = private unnamed_addr constant [1 x i8] c"\00"
 @.cname.1 = private unnamed_addr constant [5 x i8] c"Just\00"
@@ -4888,15 +4889,41 @@ wrepack_next_22:
 
 define i128 @stdlib.bytes.get_worker(i64 %p$value, i64 %p$index) {
 entry:
-  %t$0$st = call i128 @bytes_get_unboxed(i64 %p$value, i64 %p$index)
-  %t$0 = trunc i128 %t$0$st to i64
-  %t$0$hi = lshr i128 %t$0$st, 64
-  %t$1 = trunc i128 %t$0$hi to i64
-  %t$2$lo = zext i64 %t$0 to i128
-  %t$2$hw = zext i64 %t$1 to i128
-  %t$2$hi = shl i128 %t$2$hw, 64
-  %t$2$r = or i128 %t$2$hi, %t$2$lo
-  ret i128 %t$2$r
+  %t$0 = icmp eq i64 %p$value, 0
+  br i1 %t$0, label %ibr_null_0, label %ibr_len_0
+ibr_null_0:
+  %t$1 = getelementptr inbounds { i64, [30 x i8] }, ptr @.str.80, i64 0, i32 1, i64 0
+  %t$2 = ptrtoint ptr %t$1 to i64
+  call i64 @panic(i64 %t$2)
+  unreachable
+ibr_len_0:
+  %t$3$p = inttoptr i64 %p$value to ptr
+  %t$3$ep = getelementptr i8, ptr %t$3$p, i64 0
+  %t$3 = load i64, ptr %t$3$ep, align 8
+  %t$4 = icmp uge i64 %p$index, %t$3
+  br i1 %t$4, label %ibr_miss_0, label %ibr_hit_0
+ibr_hit_0:
+  %t$5$p = inttoptr i64 %p$value to ptr
+  %t$5$ep = getelementptr i8, ptr %t$5$p, i64 8
+  %t$5 = load i64, ptr %t$5$ep, align 8
+  %t$6$p = inttoptr i64 %t$5 to ptr
+  %t$6$bp = getelementptr i8, ptr %t$6$p, i64 %p$index
+  %t$6$b = load i8, ptr %t$6$bp
+  %t$6 = zext i8 %t$6$b to i64
+  %t$7 = add i64 0, 1
+  br label %ibr_join_0
+ibr_miss_0:
+  %t$8 = add i64 0, 0
+  %t$9 = add i64 0, 0
+  br label %ibr_join_0
+ibr_join_0:
+  %t$10 = phi i64 [%t$7, %ibr_hit_0], [%t$8, %ibr_miss_0]
+  %t$11 = phi i64 [%t$6, %ibr_hit_0], [%t$9, %ibr_miss_0]
+  %t$17$lo = zext i64 %t$10 to i128
+  %t$17$hw = zext i64 %t$11 to i128
+  %t$17$hi = shl i128 %t$17$hw, 64
+  %t$17$r = or i128 %t$17$hi, %t$17$lo
+  ret i128 %t$17$r
 }
 
 define i128 @stdlib.bytes.to_string_worker(i64 %p$value) {
@@ -5107,7 +5134,7 @@ else_10:
   %t$14$ovf = extractvalue { i64, i1 } %t$14$agg, 1
   br i1 %t$14$ovf, label %ovfpanic_14, label %ovfok_14
 ovfpanic_14:
-  %t$15 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.80, i64 0, i32 1, i64 0
+  %t$15 = getelementptr inbounds { i64, [41 x i8] }, ptr @.str.81, i64 0, i32 1, i64 0
   %t$16 = ptrtoint ptr %t$15 to i64
   call i64 @panic(i64 %t$16)
   unreachable
@@ -5135,7 +5162,7 @@ entry:
   call i64 @sprout_gc_register_i64_root(ptr @list_builder_empty)
   %t$1 = bitcast double 10000000000000000000000.0 to i64
   store i64 %t$1, ptr @pow10_exact_unit
-  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.81, i64 0, i32 1, i64 0
+  %t$2 = getelementptr inbounds { i64, [1 x i8] }, ptr @.str.82, i64 0, i32 1, i64 0
   %t$3 = ptrtoint ptr %t$2 to i64
   %t$7 = alloca i64
   store i64 %t$3, ptr %t$7

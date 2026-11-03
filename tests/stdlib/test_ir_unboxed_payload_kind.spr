@@ -138,6 +138,32 @@ fn root_pushes_in(src: String, header: String) -> Int !{IO} =
     let body = define_block(out, header)
     if translated(out) && body != "" then count(body, "call i64 @sprout_gc_push_") else -1
 
+# An inline read: no call to the C body, a byte load zero-extended, and the C bodies' panic texts
+# (docs/inline-byte-reads-v0.md §4.2). `bytes_get` fails on a null buffer only; `str_byte_at` also
+# on a missing header.
+fn inline_read_shape(out: String, name: String) -> Bool =
+  has(out, "load i8") && has(out, "zext i8")
+    && !has(out, "call i128 @" ++ name ++ "_unboxed(")
+    && has(out, panic_text(name, "null"))
+    && (name == "bytes_get" || has(out, panic_text(name, "header")))
+
+fn panic_text(name: String, which: String) -> String =
+  if name == "bytes_get" then "bytes_get_unboxed: null bytes"
+  else if which == "null" then "str_byte_at: null input"
+  else "str_byte_at: String has no header"
+
+fn check_inline_shapes(state: TestState, name: String) -> Unit !{IO} =
+  do
+    m <- translate_or_msg(match_src(name))
+    d <- translate_or_msg(do_src(name))
+    s <- translate_or_msg(split_src(name))
+    a <- translate_or_msg(argw_src(name))
+    assert_true(state, name ++ " match: inline read", translated(m) && inline_read_shape(m, name))
+    assert_true(state, name ++ " do bind: inline read", translated(d) && inline_read_shape(d, name))
+    assert_true(state, name ++ " split: inline read", translated(s) && inline_read_shape(s, name))
+    assert_true(state, name ++ " argw call: inline read, then @consume_argw",
+                translated(a) && inline_read_shape(a, name) && has(a, "call i64 @consume_argw("))
+
 fn main() -> Unit !{IO} =
   do
     state <- new_state()
@@ -152,16 +178,16 @@ fn main() -> Unit !{IO} =
     # (b) do bind in a Maybe do-block.
     dob <- translate_or_msg(do_src("bytes_get"))
     assert_true(state, "do-bind fixture translates", translated(dob))
-    assert_true(state, "do-bind fixture reaches the unboxed read",
-                has(dob, "call i128 @bytes_get_unboxed"))
+    assert_true(state, "do-bind fixture reaches the inline read",
+                has(dob, "load i8") && !has(dob, "call i128 @bytes_get_unboxed("))
     dos <- root_pushes_in(do_src("bytes_get"), "define i64 @probe(")
     assert_true(state, "do bind over bytes_get: Int payload not rooted", dos == 0)
 
     # (c) list-pattern split: each element is its own unboxed call.
     spl <- translate_or_msg(split_src("bytes_get"))
     assert_true(state, "split fixture translates", translated(spl))
-    assert_true(state, "split fixture makes two unboxed reads",
-                count(spl, "call i128 @bytes_get_unboxed(") == 2)
+    assert_true(state, "split fixture makes two inline reads",
+                count(spl, "load i8") == 2 && !has(spl, "call i128 @bytes_get_unboxed("))
     splp <- root_pushes_in(split_src("bytes_get"), probe_i64)
     assert_true(state, "split over bytes_get: Int payloads not rooted", splp == 0)
 
@@ -171,6 +197,10 @@ fn main() -> Unit !{IO} =
     assert_true(state, "argw fixture calls @consume_argw", has(arg, "call i64 @consume_argw("))
     argp <- root_pushes_in(argw_src("bytes_get"), "define i64 @consume_argw(")
     assert_true(state, "argw parameter over bytes_get: Int payload not rooted", argp == 0)
+
+    # (h) Every shape, both reads: the C body is not called and the panic texts are kept.
+    check_inline_shapes(state, "bytes_get")
+    check_inline_shapes(state, "str_byte_at")
 
     # (e) Mirror: a String payload (`vector_get` of a `Vector String`) is still rooted.
     vec <- translate_or_msg(heap_match_src())
@@ -183,8 +213,10 @@ fn main() -> Unit !{IO} =
     # The prelude-shaped `Maybe Int` (case (a)) still gets none.
     phn <- translate_or_msg(phantom_maybe_src())
     assert_true(state, "phantom Maybe fixture translates", translated(phn))
-    assert_true(state, "phantom Maybe fixture reaches the unboxed read",
-                has(phn, "call i128 @bytes_get_unboxed"))
+    # An unknown payload keeps the C call: the inline blocks define a scalar payload, which could
+    # not be rooted.
+    assert_true(state, "phantom Maybe fixture keeps the unboxed call",
+                has(phn, "call i128 @bytes_get_unboxed(") && !has(phn, "load i8"))
     phr <- root_pushes_in(phantom_maybe_src(), probe_i64)
     assert_true(state, "phantom Maybe: Box payload still rooted", phr > 0)
 

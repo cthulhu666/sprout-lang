@@ -2814,11 +2814,150 @@ fn emit_unboxed_call(ufn: String, call_args: List typed_ast.TypedExpr, kind: spr
   do
     (blocks, lbl, ops, arg_names, idx1) <-
       translate_args(call_args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-    let tag_ssa = fresh_name(idx1)
-    let val_ssa = fresh_name(idx1 + 1)
-    Ok((blocks, lbl,
-        list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, kind, ufn, arg_names), ops),
-        tag_ssa, val_ssa, idx1 + 2))
+    emit_unboxed_producer(ufn, kind, blocks, lbl, ops, arg_names, env.prog.ctors, idx1)
+
+# The unboxed read of `ufn` over translated `arg_names`: an inline block sequence for the two byte
+# reads, else one `IRCallUnboxed2`. Shared by `emit_unboxed_call` and `translate_argw_call`, so the
+# two sites cannot disagree on the lowering.
+fn emit_unboxed_producer(ufn: String, kind: sprout_ir.IRType, blocks: List sprout_ir.IRBlock,
+                         lbl: String, ops: ListBuilder sprout_ir.IROp, arg_names: List String,
+                         ctors: Dict sprout_ir.CtorInfo, idx: Int) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, String, Int) =
+  if inlines_byte_read(ufn, kind)
+  then emit_inline_byte_read(ufn, blocks, lbl, ops, arg_names, ctors, idx)
+  else
+    let tag_ssa = fresh_name(idx)
+        val_ssa = fresh_name(idx + 1)
+    in Ok((blocks, lbl,
+           list_builder_add(sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, kind, ufn, arg_names), ops),
+           tag_ssa, val_ssa, idx + 2))
+
+# `bytes_get` and `str_byte_at` lower inline, and only with a scalar payload: the inline blocks
+# define the payload from a byte load and a constant, which cannot be rooted, so a producer typed
+# with an unknown payload (a program-defined `Maybe` whose `Just` is not the type parameter) keeps
+# the call, whose result kind says "root it".
+fn inlines_byte_read(ufn: String, kind: sprout_ir.IRType) -> Bool =
+  is_byte_read_extern(ufn) && (match kind with | sprout_ir.IRTScalar _ -> true | _ -> false)
+
+fn is_byte_read_extern(ufn: String) -> Bool =
+  ufn == "bytes_get_unboxed" || ufn == "str_byte_at_unboxed"
+
+# `bytes_get_unboxed` / `str_byte_at_unboxed` as blocks, with the C bodies' checks and failure texts
+# (runtime/sprout_runtime.c). Built at the IRBlock layer like `vec_guard`: a text-layer split would
+# leave later phi predecessors naming the wrong block. Returns what `emit_unboxed_call` returns.
+# Reserves fresh-name slots idx..idx+16 and the labels `ibr_*_<idx>`.
+#
+#   Bytes b:  b == 0 -> panic; len = [b]; i >=u len -> miss; data = [b+8]; byte = data[i]
+#   String s: s == 0 -> panic; h = [s-8]; h & 255 != CSTR -> panic; len = h >>u 14;
+#             i >=u len -> miss; byte = s[i]
+#
+# One unsigned compare covers a negative index. The data load and the byte load are adjacent, with
+# no op between that could allocate. An empty Bytes has a NULL `data`; the bounds check runs first.
+fn emit_inline_byte_read(ufn: String, blocks: List sprout_ir.IRBlock, lbl: String,
+                         ops: ListBuilder sprout_ir.IROp, arg_names: List String,
+                         ctors: Dict sprout_ir.CtorInfo, idx: Int) ->
+    Result String (List sprout_ir.IRBlock, String, ListBuilder sprout_ir.IROp, String, String, Int) =
+  match arg_names with
+  | [x, i] ->
+      let (new_blocks, join_ops, tag_phi, val_phi) =
+            if ufn == "bytes_get_unboxed" then inline_bytes_read(lbl, ops, x, i, ctors, idx)
+            else inline_str_read(lbl, ops, x, i, ctors, idx)
+      in Ok((blocks ++ new_blocks, ibr_label("join", idx),
+             list_builder_extend(join_ops, list_builder_empty), tag_phi, val_phi, idx + 17))
+  | _ -> Err("ast_to_ir: " ++ ufn ++ " expects 2 arguments")
+
+fn ibr_label(what: String, idx: Int) -> String = "ibr_" ++ what ++ "_" ++ int_to_string(idx)
+
+# The entry block (the open block's ops, then the null test) and the null-panic block. A non-null
+# `x` continues at `next_lbl`. Uses slots idx..idx+2.
+fn ibr_null_guard(lbl: String, ops: ListBuilder sprout_ir.IROp, x: String, next_lbl: String,
+                  text: String, idx: Int) -> (sprout_ir.IRBlock, sprout_ir.IRBlock) =
+  (sprout_ir.IRBlock(lbl,
+     list_builder_build(list_builder_extend(
+       [sprout_ir.IRICmp(isnull, "eq", x, "0"), sprout_ir.IRCondBr(isnull, null_lbl, next_lbl)], ops))),
+   sprout_ir.IRBlock(null_lbl,
+     [sprout_ir.IRStrConst(msg, raw, text), sprout_ir.IRPanic(msg)]))
+  where isnull = fresh_name(idx)
+        raw = fresh_name(idx + 1)
+        msg = fresh_name(idx + 2)
+        null_lbl = ibr_label("null", idx)
+
+# The hit block (`hit_ops`, then the Just tag), the miss block (Nothing, payload 0) and the join
+# phis. Returns (hit and miss blocks, join ops, tag phi, payload phi). Slots idx+6..idx+11: the
+# byte is idx+6, and the caller's `hit_ops` define it.
+fn ibr_exits(hit_ops: List sprout_ir.IROp, ctors: Dict sprout_ir.CtorInfo, idx: Int) ->
+    (List sprout_ir.IRBlock, List sprout_ir.IROp, String, String) =
+  ([sprout_ir.IRBlock(hit_lbl,
+      list_append(hit_ops, [sprout_ir.IRConst(tag_hit, prelude_ctor_tag("Just", ctors)),
+                            sprout_ir.IRBr(join_lbl)])),
+    sprout_ir.IRBlock(miss_lbl,
+      [sprout_ir.IRConst(tag_miss, prelude_ctor_tag("Nothing", ctors)),
+       sprout_ir.IRConst(val_miss, 0),
+       sprout_ir.IRBr(join_lbl)])],
+   [sprout_ir.IRPhi(tag_phi, "i64", [(tag_hit, hit_lbl), (tag_miss, miss_lbl)]),
+    sprout_ir.IRPhi(val_phi, "i64", [(fresh_name(idx + 6), hit_lbl), (val_miss, miss_lbl)])],
+   tag_phi, val_phi)
+  where hit_lbl = ibr_label("hit", idx)
+        miss_lbl = ibr_label("miss", idx)
+        join_lbl = ibr_label("join", idx)
+        tag_hit = fresh_name(idx + 7)
+        tag_miss = fresh_name(idx + 8)
+        val_miss = fresh_name(idx + 9)
+        tag_phi = fresh_name(idx + 10)
+        val_phi = fresh_name(idx + 11)
+
+# The length block: `len_ops` (they define `len`), then the unsigned `i >= len` test branching to
+# the miss block or the hit block. Uses slot idx+4.
+fn ibr_bounds(lbl: String, len_ops: List sprout_ir.IROp, len: String, i: String, idx: Int) ->
+    sprout_ir.IRBlock =
+  sprout_ir.IRBlock(lbl,
+    list_append(len_ops, [sprout_ir.IRICmp(oob, "uge", i, len),
+                          sprout_ir.IRCondBr(oob, ibr_label("miss", idx), ibr_label("hit", idx))]))
+  where oob = fresh_name(idx + 4)
+
+fn inline_bytes_read(lbl: String, ops: ListBuilder sprout_ir.IROp, b: String, i: String,
+                     ctors: Dict sprout_ir.CtorInfo, idx: Int) ->
+    (List sprout_ir.IRBlock, List sprout_ir.IROp, String, String) =
+  let (entry_block, null_block) =
+        ibr_null_guard(lbl, ops, b, len_lbl, "bytes_get_unboxed: null bytes", idx)
+      (exit_blocks, join_ops, tag_phi, val_phi) =
+        ibr_exits([sprout_ir.IRLoadWord(data, b, 8),
+                   sprout_ir.IRLoadU8(fresh_name(idx + 6), data, i)], ctors, idx)
+      len_block = ibr_bounds(len_lbl, [sprout_ir.IRLoadWord(len, b, 0)], len, i, idx)
+  in ([entry_block, null_block, len_block] ++ exit_blocks, join_ops, tag_phi, val_phi)
+  where len_lbl = ibr_label("len", idx)
+        len = fresh_name(idx + 3)
+        data = fresh_name(idx + 5)
+
+fn inline_str_read(lbl: String, ops: ListBuilder sprout_ir.IROp, s: String, i: String,
+                   ctors: Dict sprout_ir.CtorInfo, idx: Int) ->
+    (List sprout_ir.IRBlock, List sprout_ir.IROp, String, String) =
+  let (entry_block, null_block) =
+        ibr_null_guard(lbl, ops, s, hdr_lbl, "str_byte_at: null input", idx)
+      (exit_blocks, join_ops, tag_phi, val_phi) =
+        ibr_exits([sprout_ir.IRLoadU8(fresh_name(idx + 6), s, i)], ctors, idx)
+      hdr_block = sprout_ir.IRBlock(hdr_lbl,
+                    [sprout_ir.IRLoadWord(h, s, -8),
+                     sprout_ir.IRIAnd(kbits, h, int_to_string(sprout_ir.hdr_kind_mask)),
+                     sprout_ir.IRICmp(nohdr, "ne", kbits, int_to_string(sprout_ir.hdr_kind_cstr)),
+                     sprout_ir.IRCondBr(nohdr, nohdr_lbl, len_lbl)])
+      nohdr_block = sprout_ir.IRBlock(nohdr_lbl,
+                      [sprout_ir.IRStrConst(hdr_msg, hdr_raw, "str_byte_at: String has no header"),
+                       sprout_ir.IRPanic(hdr_msg)])
+      len_block = ibr_bounds(len_lbl,
+                    [sprout_ir.IRILShr(len, h, int_to_string(sprout_ir.hdr_aux_shift))],
+                    len, i, idx)
+  in ([entry_block, null_block, hdr_block, nohdr_block, len_block] ++ exit_blocks,
+      join_ops, tag_phi, val_phi)
+  where hdr_lbl = ibr_label("hdr", idx)
+        nohdr_lbl = ibr_label("nohdr", idx)
+        len_lbl = ibr_label("len", idx)
+        len = fresh_name(idx + 3)
+        h = fresh_name(idx + 12)
+        kbits = fresh_name(idx + 13)
+        nohdr = fresh_name(idx + 14)
+        hdr_raw = fresh_name(idx + 15)
+        hdr_msg = fresh_name(idx + 16)
 
 # Seal the scrutinee block `scrut_lbl` (it holds the (tag, payload) in `tag_ssa`, `val_ssa`), dispatch
 # the arms and join them. Shared by the call-site match and `@f_argw`, whose tag and payload are
@@ -2965,12 +3104,11 @@ fn translate_argw_call(fname: String, site: ArgwSite, args: List typed_ast.Typed
           translate_args(before, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
         (b2, l2, o2, producer_names, idx2) <-
           translate_args(site.pargs, params, env, idx1, l1, o1, b1, Nil, captures)
-        let tag_ssa = fresh_name(idx2)
-        let val_ssa = fresh_name(idx2 + 1)
-        let unboxed_call = sprout_ir.IRCallUnboxed2(tag_ssa, val_ssa, site.payload_kind,
-                                                    argw_producer_symbol(site), producer_names)
+        (pb, pl, po, tag_ssa, val_ssa, idx2b) <-
+          emit_unboxed_producer(argw_producer_symbol(site), site.payload_kind, b2, l2, o2,
+                                producer_names, env.prog.ctors, idx2)
         (b3, l3, o3, after_names, idx3) <-
-          translate_args(after, params, env, idx2 + 2, l2, list_builder_add(unboxed_call, o2), b2, Nil, captures)
+          translate_args(after, params, env, idx2b, pl, po, pb, Nil, captures)
         let result = fresh_name(idx3)
         let call = sprout_ir.IRCall(result, ret_irtype(call_ty), fname ++ "_argw",
                                     list_append(before_names, Cons(tag_ssa, Cons(val_ssa, after_names))))
@@ -6770,11 +6908,21 @@ fn translate_tail_chain(target_fn: String, args: List typed_ast.TypedExpr, param
   do
     (ablocks, albl, aops, anames, idx1) <-
       translate_args(args, params, env, idx, cur_label, cur_ops, Nil, Nil, captures)
-    let w = if width == 3 then 3 else 2
-    let slots = fresh_name_run(idx1, w)
-    call <- call_unboxed(slots, sprout_ir.IRTUnknown, target_fn, anames)
-    ret <- ret_unboxed(fresh_name(idx1 + w), slots)
-    Ok((seal_ret(ablocks, albl, aops, [call, ret]), idx1 + w + 1))
+    if is_byte_read_extern(target_fn)
+    then
+      # The worker's payload is a byte whatever the source types it as: no kind to gate on.
+      do
+        (eblocks, elbl, eops, tag_ssa, val_ssa, idx2) <-
+          emit_inline_byte_read(target_fn, ablocks, albl, aops, anames, env.prog.ctors, idx1)
+        ret <- ret_unboxed(fresh_name(idx2), [tag_ssa, val_ssa])
+        Ok((seal_ret(eblocks, elbl, eops, [ret]), idx2 + 1))
+    else
+      do
+        let w = if width == 3 then 3 else 2
+        let slots = fresh_name_run(idx1, w)
+        call <- call_unboxed(slots, sprout_ir.IRTUnknown, target_fn, anames)
+        ret <- ret_unboxed(fresh_name(idx1 + w), slots)
+        Ok((seal_ret(ablocks, albl, aops, [call, ret]), idx1 + w + 1))
 
 # tail `if`: both arms return, so no join/phi — each branch recurses tail-unboxed.
 fn translate_tail_if(cond: typed_ast.TypedExpr, t: typed_ast.TypedExpr, e: typed_ast.TypedExpr,
