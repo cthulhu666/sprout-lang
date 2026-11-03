@@ -5,7 +5,8 @@ import stdlib.string as string
 import stdlib.terminal as terminal
 
 # L0.8 bounded buffered channels (EXPERIMENTAL). `chan_new(scope, cap)` creates a
-# cap-slot channel tied to `scope` (freed at scope close). `chan_send` parks the
+# channel that buffers at most `cap` values, tied to `scope` (freed at scope close), and
+# returns a `Result` (`Err` only for a negative `cap`). `chan_send` parks the
 # task when the buffer is full; `chan_recv` parks it when empty. Values are FIFO.
 # Backed by the scheduler's park/wake mechanism, with the buffer GC-rooted.
 #
@@ -167,15 +168,6 @@ fn nested_use(s: Scope) -> Int !{IO} =
 
 # --- the capacity is a bound, not an allocation: the buffer starts small and grows on demand. ---
 
-# Send i, i+1, .. n. Parks once the bound is reached, as any send does.
-fn send_range(ch: Chan Int, i: Int, n: Int) -> Unit !{IO} =
-  if i > n then
-    terminal.write("")
-  else
-    do
-      chan_send(ch, i)
-      send_range(ch, i + 1, n)
-
 # Receive n - i + 1 values and check they are exactly i, i+1, .. n in that order.
 fn recv_range(ch: Chan Int, i: Int, n: Int) -> Bool !{IO} =
   if i > n then
@@ -190,7 +182,7 @@ fn recv_range(ch: Chan Int, i: Int, n: Int) -> Bool !{IO} =
 fn huge_capacity(s: Scope, cap: Int) -> Bool !{IO} =
   do
     let Ok ch = chan_new(s, cap) else Err e -> panic(chan_error_message(e))
-    send_range(ch, 1, 40)
+    produce(ch, 40, 1)
     recv_range(ch, 1, 40)
 
 # Grow while the ring is wrapped: 10 in, 5 out leaves the head mid-buffer, then enough sends to
@@ -198,9 +190,9 @@ fn huge_capacity(s: Scope, cap: Int) -> Bool !{IO} =
 fn grow_wrapped(s: Scope) -> Bool !{IO} =
   do
     let Ok ch = chan_new(s, 100) else Err e -> panic(chan_error_message(e))
-    send_range(ch, 1, 10)
+    produce(ch, 10, 1)
     first <- recv_range(ch, 1, 5)
-    send_range(ch, 11, 70)
+    produce(ch, 70, 11)
     rest <- recv_range(ch, 6, 70)
     first && rest
 
@@ -216,7 +208,7 @@ fn bound_after_growth(s: Scope) -> (Bool, Bool) !{IO} =
   do
     let Ok ch = chan_new(s, 20) else Err e -> panic(chan_error_message(e))
     ran <- ref_new(false)
-    send_range(ch, 1, 20)
+    produce(ch, 20, 1)
     before <- ref_read(ran)
     h <- task_fork(s, \_ -> flag_then_recv(ran, ch))
     chan_send(ch, 21)  # full: parks, so the consumer gets to run
@@ -229,16 +221,8 @@ fn bound_after_growth(s: Scope) -> (Bool, Bool) !{IO} =
 fn grow_heap_strings(s: Scope) -> String !{IO} =
   do
     let Ok ch = chan_new(s, 64) else Err e -> panic(chan_error_message(e))
-    send_strings(ch, 1, 40)
+    produce_heap(ch, "s", 1, 40)
     drain_strings(ch, 40, "")
-
-fn send_strings(ch: Chan String, i: Int, n: Int) -> Unit !{IO} =
-  if i > n then
-    terminal.write("")
-  else
-    do
-      chan_send(ch, `s${i}`)
-      send_strings(ch, i + 1, n)
 
 fn drain_strings(ch: Chan String, n: Int, acc: String) -> String !{IO} =
   if n <= 0 then
@@ -247,14 +231,6 @@ fn drain_strings(ch: Chan String, n: Int, acc: String) -> String !{IO} =
     do
       v <- recv_str(ch)
       drain_strings(ch, n - 1, `${acc}${v},`)
-
-fn send_lists(ch: Chan (List Int), i: Int, n: Int) -> Unit !{IO} =
-  if i > n then
-    terminal.write("")
-  else
-    do
-      chan_send(ch, [i, i + 1, i + 2])
-      send_lists(ch, i + 1, n)
 
 fn recv_list_sum(ch: Chan (List Int), n: Int, acc: Int) -> Int !{IO} =
   if n <= 0 then
@@ -267,7 +243,7 @@ fn recv_list_sum(ch: Chan (List Int), n: Int, acc: Int) -> Int !{IO} =
 fn grow_heap_lists(s: Scope) -> Int !{IO} =
   do
     let Ok ch = chan_new(s, 64) else Err e -> panic(chan_error_message(e))
-    send_lists(ch, 1, 20)
+    range_each(\i -> chan_send(ch, [i, i + 1, i + 2]), range_up(1, 20))
     recv_list_sum(ch, 3, 0)  # the first three lists: sums 6, 9, 12
 
 fn negative_capacity_value(s: Scope) -> Int !{IO} =
