@@ -519,13 +519,12 @@ fn lower_reuse_header(r: String, tag: Int, arity: Int) -> String =
   "  " ++ r ++ "$h2 = or i64 " ++ r ++ "$h1, " ++ int_to_string((tag * 256 + arity) * hdr_aux_unit) ++ "\n" ++
   "  store i64 " ++ r ++ "$h2, ptr " ++ r ++ "$hp"
 
-# Set the NOSCAN bit (header bit 63, as an i64 literal) in a vector's header word at payload - 8.
-# SYNC WITH SPROUT_VEC_NOSCAN_BIT in runtime/sprout_word.h.
+# Set the NOSCAN bit (`sprout_ir.vec_noscan_bit`) in a vector's header word at payload - 8.
 fn lower_vec_noscan(v: String) -> String =
   "  " ++ v ++ "$nsp = inttoptr i64 " ++ v ++ " to ptr\n" ++
   "  " ++ v ++ "$nshp = getelementptr i8, ptr " ++ v ++ "$nsp, i64 -8\n" ++
   "  " ++ v ++ "$nsh0 = load i64, ptr " ++ v ++ "$nshp\n" ++
-  "  " ++ v ++ "$nsh1 = or i64 " ++ v ++ "$nsh0, -9223372036854775808\n" ++
+  "  " ++ v ++ "$nsh1 = or i64 " ++ v ++ "$nsh0, " ++ int_to_string(sprout_ir.vec_noscan_bit) ++ "\n" ++
   "  store i64 " ++ v ++ "$nsh1, ptr " ++ v ++ "$nshp"
 
 # Emit per-field store instructions for an IRMakeCtor (`tag` "$f") or IRMakeTuple

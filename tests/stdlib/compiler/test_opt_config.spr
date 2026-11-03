@@ -64,13 +64,14 @@ fn main() -> Unit !{IO} =
     check_true("pass_from_name spec", opt_config.pass_from_name("spec") == Just(opt_config.Spec)),
     check_eq("spec name round-trips", opt_config.pass_name(opt_config.Spec), "spec"),
     check_true("spec is implemented", opt_config.implemented(opt_config.Spec)),
-    # `Scalar` is implemented and on unless named.
+    # `Scalar` is a dry run that changes no program: on unless named, not implemented.
     check_true("unset: scalar on", opt_config.enabled(parsed(Nothing), opt_config.Scalar)),
     check_false("scalar off", opt_config.enabled(parsed(Just("scalar")), opt_config.Scalar)),
     check_true("scalar off leaves dle on", opt_config.enabled(parsed(Just("scalar")), opt_config.Dle)),
     check_eq("scalar name round-trips", opt_config.pass_name(opt_config.Scalar), "scalar"),
     check_true("pass_from_name scalar", opt_config.pass_from_name("scalar") == Just(opt_config.Scalar)),
-    check_true("scalar is implemented", opt_config.implemented(opt_config.Scalar)),
+    check_false("scalar is not implemented until the copies land",
+                opt_config.implemented(opt_config.Scalar)),
     check_eq("scalar is a known name", unrecognised_of("scalar"), ""),
     check_true("stats=1 on", stats_of(Just("1"))),
     check_true("stats=yes on", stats_of(Just("yes"))),

@@ -94,9 +94,16 @@ export fn is_vector_creator(fname: String) -> Bool =
 # negative only forgoes the flag; a false positive is a use-after-free, since the collector never
 # reads a flagged vector's elements.
 export fn type_is_noscan_vector(t: types.Type) -> Bool =
+  match vector_elem(t) with
+  | Just elem -> type_is_non_heap_scalar(elem)
+  | Nothing -> false
+
+# The element of `Vector T`. Matches the exact canonical name `Vector`, so a user type named
+# `Vector` (canonical `main.Vector`) gives Nothing.
+export fn vector_elem(t: types.Type) -> Maybe types.Type =
   match t with
-  | types.TApp (types.TConst vname) elem -> types.type_id_name(vname) == "Vector" && type_is_non_heap_scalar(elem)
-  | _ -> false
+  | types.TApp (types.TConst vname) elem -> if types.type_id_name(vname) == "Vector" then Just(elem) else Nothing
+  | _ -> Nothing
 
 # --- Constructor field codes ---
 

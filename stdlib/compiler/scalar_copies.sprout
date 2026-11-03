@@ -311,34 +311,21 @@ fn own_var(bound: Maybe types.Type, own: Sig, env: Dict types.Scheme) -> Maybe S
 # Keys
 # ---------------------------------------------------------------------------
 
-# A site of a candidate that has creating variables, with its instantiation.
-type Edge = (callee: String, theta: Dict types.Type, pos: source.SourcePos)
+# A candidate's sites, for the walk of a copy's body.
+fn sites_by_fn(sweeps: List Swept, ctx: Ctx) -> Dict (List Site) =
+  list_fold(\ (d, s) -> add_sites(s, ctx, d), dict_empty(), sweeps)
 
-type Edged = (owner: Maybe String, holder: String, edges: List Edge)
-
-fn edge_up(s: Swept, ctx: Ctx, creating: Dict (List String)) -> Edged =
-  Edged(owner = s.owner, holder = s.holder, edges = list_filter_map(site_edge(_, ctx, creating), s.sites))
-
-fn site_edge(site: Site, ctx: Ctx, creating: Dict (List String)) -> Maybe Edge =
-  let Just _ = dict_get(site.callee, ctx.cands) else Nothing
-      Just _ = dict_get(site.callee, creating) else Nothing
-  in Just(Edge(callee = site.callee, theta = site.theta, pos = site.pos))
-
-# A candidate's edges, for the walk of a copy's body.
-fn edges_by_fn(edged: List Edged, ctx: Ctx) -> Dict (List Edge) =
-  list_fold(\ (d, e) -> add_edges(e, ctx, d), dict_empty(), edged)
-
-fn add_edges(e: Edged, ctx: Ctx, d: Dict (List Edge)) -> Dict (List Edge) =
-  let Just name = e.owner else d
+fn add_sites(s: Swept, ctx: Ctx, d: Dict (List Site)) -> Dict (List Site) =
+  let Just name = s.owner else d
       Just _ = dict_get(name, ctx.cands) else d
-  in dict_set(name, e.edges, d)
+  in dict_set(name, s.sites, d)
 
 # The keys found so far, last admitted first, and those whose callee body is yet to be walked.
 type Walk = (seen: Dict Key, order: List Key, pending: List Key)
 
-# The scalar each creating variable of the edge's callee takes under `sub`, in signature order;
+# The scalar each creating variable of the site's callee takes under `sub`, in signature order;
 # Nothing unless every one is a non-heap scalar.
-fn edge_scalars(e: Edge, vars: List String, sub: spec_keys.Subst, env: Dict types.Scheme) -> Maybe (List String) =
+fn site_scalars(e: Site, vars: List String, sub: spec_keys.Subst, env: Dict types.Scheme) -> Maybe (List String) =
   let scalars = list_filter_map(scalar_of(_, e.theta, sub, env), vars)
   in if list_length(scalars) == list_length(vars) then Just(scalars) else Nothing
 
@@ -348,47 +335,43 @@ fn scalar_of(v: String, theta: Dict types.Type, sub: spec_keys.Subst, env: Dict 
       types.TConst id = resolved else Nothing
   in if type_kind.type_is_non_heap_scalar(resolved) then Just(types.type_id_name(id)) else Nothing
 
-# Admits the key of each edge, walked under `sub`: the program's own edges under none, a copy's
+# Admits the key of each site, walked under `sub`: the program's own sites under none, a copy's
 # under the scalars it substitutes.
-fn admit_edges(edges: List Edge, holder: String, sub: spec_keys.Subst, ctx: Ctx,
+fn admit_sites(sites: List Site, holder: String, sub: spec_keys.Subst, ctx: Ctx,
                creating: Dict (List String), w: Walk) -> Walk =
-  list_fold(\ (acc, e) -> admit(e, holder, sub, ctx, creating, acc), w, edges)
+  list_fold(\ (acc, e) -> admit(e, holder, sub, ctx, creating, acc), w, sites)
 
-fn admit(e: Edge, holder: String, sub: spec_keys.Subst, ctx: Ctx, creating: Dict (List String), w: Walk) -> Walk =
+fn admit(e: Site, holder: String, sub: spec_keys.Subst, ctx: Ctx, creating: Dict (List String), w: Walk) -> Walk =
   let Just cand = dict_get(e.callee, ctx.cands) else w
       Just vars = dict_get(e.callee, creating) else w
-      Just scalars = edge_scalars(e, vars, sub, ctx.env) else w
+      Just scalars = site_scalars(e, vars, sub, ctx.env) else w
       name = copy_name(e.callee, scalars)
       Nothing = dict_get(name, w.seen) else w
       k = Key(fn_name = e.callee, scalars = scalars, name = name, site = e.pos, holder = holder,
               nodes = typed_ast.decl_node_count(cand.decl))
   in Walk(seen = dict_set(name, k, w.seen), order = Cons(k, w.order), pending = Cons(k, w.pending))
 
-# The program's own edges seed the walk; they are visited in order.
-fn seed(edged: List Edged, ctx: Ctx, creating: Dict (List String)) -> Walk =
-  let w = list_fold(\ (acc, e) -> admit_edges(e.edges, e.holder, spec_keys.subst_empty(), ctx, creating, acc),
-                    Walk(seen = dict_empty(), order = [], pending = []), edged)
+# The program's own sites seed the walk; they are visited in order.
+fn seed(sweeps: List Swept, ctx: Ctx, creating: Dict (List String)) -> Walk =
+  let w = list_fold(\ (acc, s) -> admit_sites(s.sites, s.holder, spec_keys.subst_empty(), ctx, creating, acc),
+                    Walk(seen = dict_empty(), order = [], pending = []), sweeps)
   in w with (pending = list_reverse(w.pending))
 
 # Each key is visited once: its callee's body, walked under the key's scalars, gives the keys it calls.
-fn drain(w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Edge)) -> Walk =
+fn drain(w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Site)) -> Walk =
   match w.pending with
   | [] -> w
   | [k | rest] -> drain(visit(k, w with (pending = rest), ctx, creating, by_fn), ctx, creating, by_fn)
 
-fn visit(k: Key, w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Edge)) -> Walk =
-  let edges = maybe_with_default([], dict_get(k.fn_name, by_fn))
+fn visit(k: Key, w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Site)) -> Walk =
+  let sites = maybe_with_default([], dict_get(k.fn_name, by_fn))
       vars = maybe_with_default([], dict_get(k.fn_name, creating))
       sub = spec_keys.Subst(te = dict_empty(), ty = scalar_types(vars, k.scalars))
-  in admit_edges(edges, k.name, sub, ctx, creating, w)
+  in admit_sites(sites, k.name, sub, ctx, creating, w)
 
 # The key's substitution: each creating variable, by written name, to its scalar.
 fn scalar_types(vars: List String, scalars: List String) -> Dict types.Type =
-  list_fold(\ (d, p) -> bind_scalar(p, d), dict_empty(), zip(vars, scalars))
-
-fn bind_scalar(p: (String, String), d: Dict types.Type) -> Dict types.Type =
-  let (var, scalar) = p
-  in dict_set(var, types.TConst(types.type_id(scalar)), d)
+  dict_from_list(zip(vars, list_map(\s -> types.TConst(types.type_id(s)), scalars)))
 
 # ---------------------------------------------------------------------------
 # The analysis
@@ -402,8 +385,7 @@ fn analyse_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Ana
   let ctx = Ctx(cands = cand_table(decls), creators = creator_table(decls), env = env)
       sweeps = list_map(sweep(_, ctx), list_flat_map(decl_bodies, decls))
       creating = solve(list_filter(is_candidate_body(_, ctx), sweeps), ctx, creator_seed(ctx))
-      edged = list_map(edge_up(_, ctx, creating), sweeps)
-      closed = drain(seed(edged, ctx, creating), ctx, creating, edges_by_fn(edged, ctx))
+      closed = drain(seed(sweeps, ctx, creating), ctx, creating, sites_by_fn(sweeps, ctx))
       keys = list_reverse(closed.order)
   in Analysis(creating = creating, keys = keys, nodes = list_fold(\ (n, k) -> n + k.nodes, 0, keys))
 
