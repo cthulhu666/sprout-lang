@@ -1,0 +1,427 @@
+module stdlib.compiler.scalar_copies
+import stdlib.compiler.ast as ast
+import stdlib.compiler.source as source
+import stdlib.compiler.spec_keys as spec_keys
+import stdlib.compiler.type_kind as type_kind
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.compiler.types as types
+import stdlib.string as string
+
+# Scalar copies, dry run (docs/pointer-free-vectors-v0.md §4.3): finds the copies of generic
+# functions that a vector-creating type variable instantiated at a scalar would need, and
+# reports them. The program it returns is the one it was given. Runs on the RESOLVED program.
+#
+# A CANDIDATE is a top-level function with no constraints and a written type on every parameter
+# and on the result. A node type names a signature variable through an `@eta_fwdvar` marker, so
+# only a candidate's own variables can be named; an unannotated or constrained function is opaque.
+#
+# A variable of candidate `f` is CREATING when `f`'s body calls a creating extern (`vector_empty`,
+# `vector_from_list`, `vec_make_filled`) at `Vector a`, or calls or references a candidate whose
+# creating variable is instantiated at `a`. Only a bare variable counts: an element of `List a`
+# or `Vec a` is a pointer whatever `a` is. A KEY is a candidate with a non-heap scalar for each
+# of its creating variables, in signature order.
+#
+# Instantiation matches a callee's written signature against a node's types by whole-type
+# equality (`bind_te`), not `verify_dispatch.match_te`: that one compares heads only, and
+# rejects a written variable that meets the same inference variable twice, which is every
+# instantiation at an enclosing function's own variable.
+#
+# Keys are finite (candidates x four scalars per creating variable). A call at a larger type,
+# such as a polymorphic self-call at `Vec a`, is no scalar instantiation and makes no key, so
+# the worklist needs no growth guard.
+
+# `name` is the copy's IR name (`copy_name`), `site` the call that first produced the key and
+# `holder` the function whose body holds it (a key's name when a copy's body holds it).
+export type Key (..) = (fn_name: String, scalars: List String, name: String, site: source.SourcePos,
+                        holder: String, nodes: Int)
+
+# `creating` maps a function (candidates and the creating externs) to its creating variables in
+# signature order. `nodes` is what the copies would add: the callee node count of every key.
+export type Analysis (..) = (creating: Dict (List String), keys: List Key, nodes: Int)
+
+export type Output (..) = (program: typed_ast.TypedProgram, analysis: Analysis, trace: List String)
+
+# `$` cannot appear in a source name and `specialise`'s copies end `$spec_<types>`, so
+# `f$Int` collides with neither. No dot may follow the `$`, as `string.after_last_dot` would cut it.
+export fn copy_name(fn_name: String, scalars: List String) -> String =
+  fn_name ++ "$" ++ string.join("_", scalars)
+
+export fn run(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Output =
+  let a = analyse(prog, env)
+  in Output(program = prog, analysis = a, trace = list_map(copy_line, a.keys) ++ [summary_line(a)])
+
+# One line per key (`SPROUT_TRACE_SCALAR`), then the totals.
+fn copy_line(k: Key) -> String =
+  `[scalar] copy ${k.name} of ${k.fn_name} for the call at ${k.site.line}:${k.site.column} in ${k.holder} nodes=${k.nodes}`
+
+fn summary_line(a: Analysis) -> String = `[scalar] keys=${list_length(a.keys)} nodes=${a.nodes}`
+
+# ---------------------------------------------------------------------------
+# Signatures
+# ---------------------------------------------------------------------------
+
+# A callee's written signature, and its type variables in order of first appearance (parameters,
+# then the result).
+type Sig = (params: List ast.TypeExpr, ret: ast.TypeExpr, vars: List String)
+
+# `decl` is kept for its node count, taken only for a key.
+type Cand = (sig: Sig, decl: typed_ast.TypedDecl)
+
+type Ctx = (cands: Dict Cand, creators: Dict Sig, env: Dict types.Scheme)
+
+fn make_sig(params: List ast.TypeExpr, ret: ast.TypeExpr) -> Sig =
+  Sig(params = params, ret = ret, vars = te_vars(ret, list_fold(\ (acc, te) -> te_vars(te, acc), [], params)))
+
+fn te_vars(te: ast.TypeExpr, acc: List String) -> List String =
+  match te with
+  | ast.TypeName n -> if source.is_lowercase_name(n) && !list_member(n, acc) then list_append(acc, [n]) else acc
+  | ast.TypeApply base arg -> te_vars(arg, te_vars(base, acc))
+  | ast.TypeArrow param ret _ _ -> te_vars(ret, te_vars(param, acc))
+  | ast.TypeThunk ret _ -> te_vars(ret, acc)
+  | ast.TypeEffect inner _ -> te_vars(inner, acc)
+  | ast.TupleType items -> list_fold(\ (a, t) -> te_vars(t, a), acc, items)
+
+fn param_types(params: List ast.Param) -> Maybe (List ast.TypeExpr) =
+  match params with
+  | [] -> Just([])
+  | [ast.Param _ (Just te) _ | rest] ->
+      let Just tes = param_types(rest) else Nothing
+      in Just(Cons(te, tes))
+  | _ -> Nothing
+
+fn cand_table(decls: List typed_ast.TypedDecl) -> Dict Cand =
+  list_fold(\ (table, d) -> add_cand(d, table), dict_empty(), decls)
+
+fn add_cand(d: typed_ast.TypedDecl, table: Dict Cand) -> Dict Cand =
+  let typed_ast.TFnDecl name params (Just ret) _ [] _ = d else table
+      Just tes = param_types(params) else table
+  in dict_set(name, Cand(sig = make_sig(tes, ret), decl = d), table)
+
+fn creator_table(decls: List typed_ast.TypedDecl) -> Dict Sig =
+  list_fold(\ (table, d) -> add_creator(d, table), dict_empty(), decls)
+
+fn add_creator(d: typed_ast.TypedDecl, table: Dict Sig) -> Dict Sig =
+  let typed_ast.TExternFnDecl name params (Just ret) _ = d else table
+      Just tes = param_types(params) else table
+  in if type_kind.is_vector_creator(name) then dict_set(name, make_sig(tes, ret), table) else table
+
+# A creating extern's creating variable is its result's element: `Vector a`.
+fn creator_seed(ctx: Ctx) -> Dict (List String) =
+  list_fold(\ (d, kv) -> seed_creator(kv, d), dict_empty(), vec_to_list(dict_entries(ctx.creators)))
+
+fn seed_creator(kv: (String, Sig), d: Dict (List String)) -> Dict (List String) =
+  let (name, sig) = kv
+      ast.TypeApply(ast.TypeName "Vector")(ast.TypeName elem) = sig.ret else d
+  in if source.is_lowercase_name(elem) then dict_set(name, [elem], d) else d
+
+fn callee_sig(name: String, ctx: Ctx) -> Maybe Sig =
+  match dict_get(name, ctx.cands) with
+  | Just c -> Just(c.sig)
+  | Nothing -> dict_get(name, ctx.creators)
+
+# ---------------------------------------------------------------------------
+# Instantiation
+# ---------------------------------------------------------------------------
+
+# `te` against the type `t` at its place: each written variable of `te` takes the type there.
+# Nothing when the shapes differ or a variable meets two different types.
+fn bind_te(te: ast.TypeExpr, t: types.Type, acc: Dict types.Type) -> Maybe (Dict types.Type) =
+  match te with
+  | ast.TypeName n ->
+      if source.is_lowercase_name(n) then bind_var(n, t, acc)
+      else
+        let types.TConst id = t else Nothing
+        in if types.type_id_display(id) == string.after_last_dot(n) then Just(acc) else Nothing
+  | ast.TypeApply base arg ->
+      let types.TApp tbase targ = t else Nothing
+          Just acc1 = bind_te(base, tbase, acc) else Nothing
+      in bind_te(arg, targ, acc1)
+  | ast.TypeArrow param ret _ _ ->
+      let types.TFunc tparam tret _ _ = t else Nothing
+          Just acc1 = bind_te(param, tparam, acc) else Nothing
+      in bind_te(ret, tret, acc1)
+  | ast.TypeThunk ret _ ->
+      let types.TThunk tret _ = t else Nothing
+      in bind_te(ret, tret, acc)
+  | ast.TypeEffect inner _ -> bind_te(inner, t, acc)
+  | ast.TupleType items ->
+      let types.TTuple titems = t else Nothing
+      in bind_list(items, titems, acc)
+
+fn bind_list(tes: List ast.TypeExpr, ts: List types.Type, acc: Dict types.Type) -> Maybe (Dict types.Type) =
+  match (tes, ts) with
+  | ([], []) -> Just(acc)
+  | ([te | tes_rest], [t | ts_rest]) ->
+      let Just acc1 = bind_te(te, t, acc) else Nothing
+      in bind_list(tes_rest, ts_rest, acc1)
+  | _ -> Nothing
+
+fn bind_var(n: String, t: types.Type, acc: Dict types.Type) -> Maybe (Dict types.Type) =
+  match dict_get(n, acc) with
+  | Nothing -> Just(dict_set(n, t, acc))
+  | Just prev -> if prev == t then Just(acc) else Nothing
+
+# One position at a time: a position that fails to match binds nothing, and the rest still do.
+fn bind_all(tes: List ast.TypeExpr, ts: List types.Type, acc: Dict types.Type) -> Dict types.Type =
+  match (tes, ts) with
+  | ([te | tes_rest], [t | ts_rest]) -> bind_all(tes_rest, ts_rest, maybe_with_default(acc, bind_te(te, t, acc)))
+  | _ -> acc
+
+# What a call or reference fixes: each variable of the callee's signature, by written name, against
+# the parameter types and the result. The result counts: `mutvec_empty() -> MutVec a` binds `a` there only.
+fn instantiate(sig: Sig, params: List types.Type, ret: types.Type) -> Dict types.Type =
+  bind_all([sig.ret], [ret], bind_all(sig.params, params, dict_empty()))
+
+# ---------------------------------------------------------------------------
+# Sites
+# ---------------------------------------------------------------------------
+
+# A call to, or a reference to, a candidate or a creating extern: the types at the node.
+type Site = (callee: String, params: List types.Type, ret: types.Type, pos: source.SourcePos)
+
+# A body to sweep. `owner` is the function whose body it is.
+type Body = (holder: String, owner: Maybe String, locals: Dict Bool, expr: typed_ast.TypedExpr)
+
+type Swept = (owner: Maybe String, holder: String, sites: List Site)
+
+fn decl_bodies(d: typed_ast.TypedDecl) -> List Body =
+  match d with
+  | typed_ast.TFnDecl name params _ _ _ body ->
+      [Body(holder = name, owner = Just(name), locals = spec_keys.bind_params(params, dict_empty()), expr = body)]
+  | typed_ast.TLetDecl name value -> [Body(holder = name, owner = Nothing, locals = dict_empty(), expr = value)]
+  | typed_ast.TInstanceDecl _ _ methods -> list_map(method_body, methods)
+  | typed_ast.TExternFnDecl _ _ _ _ -> []
+  | typed_ast.TPassThrough _ -> []
+
+fn method_body(m: typed_ast.TypedInstanceMethod) -> Body =
+  match m with
+  | typed_ast.TypedInstanceMethod name params _ _ _ body ->
+      Body(holder = name, owner = Nothing, locals = spec_keys.bind_params(params, dict_empty()), expr = body)
+
+# Every site in a body, in source order.
+fn sweep(b: Body, ctx: Ctx) -> Swept =
+  Swept(owner = b.owner, holder = b.holder, sites = list_reverse(gather(b.expr, b.locals, ctx, [])))
+
+# Tracks the names bound locally as `spec_keys.scan` does, so a local that shares a candidate's
+# name is never a site. Every variant is listed, so a new binding form cannot fall through unbound.
+fn gather(e: typed_ast.TypedExpr, locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
+  match e with
+  | typed_ast.TCall callee args t pos -> gather_call(callee, args, t, pos, locals, ctx, acc)
+  | typed_ast.TVar name t pos -> note_ref(name, t, pos, locals, ctx, acc)
+  | typed_ast.TLambda params body _ _ -> gather(body, spec_keys.bind_params(params, locals), ctx, acc)
+  | typed_ast.TMatch scrut branches _ _ ->
+      list_fold(\ (a, b) -> gather_branch(b, locals, ctx, a), gather(scrut, locals, ctx, acc), branches)
+  | typed_ast.TDo steps _ _ -> gather_steps(steps, locals, ctx, acc)
+  | typed_ast.TInt _ _ _ -> acc
+  | typed_ast.TFloat _ _ _ -> acc
+  | typed_ast.TBool _ _ _ -> acc
+  | typed_ast.TString _ _ _ -> acc
+  | typed_ast.TChar _ _ _ -> acc
+  | typed_ast.TUnit _ _ -> acc
+  | typed_ast.TDict _ _ _ _ -> acc
+  | typed_ast.TMethodRef _ _ _ _ _ -> acc
+  | typed_ast.TTuple _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TIf _ _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TBinary _ _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TUnary _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TRange _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TRecord _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TGetField _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+  | typed_ast.TRecordUpdate _ _ _ _ -> gather_all(typed_ast.children(e), locals, ctx, acc)
+
+fn gather_all(es: List typed_ast.TypedExpr, locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
+  list_fold(\ (a, e) -> gather(e, locals, ctx, a), acc, es)
+
+fn gather_branch(b: typed_ast.TypedMatchBranch, locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
+  match b with
+  | typed_ast.TypedMatchBranch pat body -> gather(body, spec_keys.bind_names(ast.pattern_names(pat), locals), ctx, acc)
+
+# A step binds for the steps below it, not for its own value.
+fn gather_steps(steps: List typed_ast.TypedDoStep, locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
+  match steps with
+  | Nil -> acc
+  | Cons s rest ->
+      gather_steps(rest, spec_keys.step_binds(s, locals), ctx, gather(typed_ast.step_value(s), locals, ctx, acc))
+
+# A call to a named callee is a site and its arguments are walked; any other callee is walked.
+fn gather_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, t: types.Type,
+               pos: source.SourcePos, locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
+  match callee with
+  | typed_ast.TVar name _ _ -> gather_all(args, locals, ctx, note_call(name, args, t, pos, locals, ctx, acc))
+  | _ -> gather_all(Cons(callee, args), locals, ctx, acc)
+
+fn note_call(name: String, args: List typed_ast.TypedExpr, t: types.Type, pos: source.SourcePos,
+             locals: Dict Bool, ctx: Ctx, acc: List Site) -> List Site =
+  if (dict_member(name, ctx.cands) || dict_member(name, ctx.creators)) && !dict_member(name, locals)
+  then Cons(Site(callee = name, params = list_filter_map(value_arg_type, args), ret = t, pos = pos), acc)
+  else acc
+
+fn value_arg_type(a: typed_ast.TypedExpr) -> Maybe types.Type =
+  match a with
+  | typed_ast.TDict _ _ _ _ -> Nothing
+  | _ -> Just(typed_ast.typed_expr_type(a))
+
+# A candidate named outside a call head. A creating extern named so goes through an eta wrapper
+# that carries no element type, so only candidates count.
+fn note_ref(name: String, t: types.Type, pos: source.SourcePos, locals: Dict Bool, ctx: Ctx,
+            acc: List Site) -> List Site =
+  let Just cand = dict_get(name, ctx.cands) else acc
+      Nothing = dict_get(name, locals) else acc
+      Just(params, ret) = peel(list_length(cand.sig.params), t) else acc
+  in Cons(Site(callee = name, params = params, ret = ret, pos = pos), acc)
+
+# The `n` parameter types and the result of a curried function type; a zero-parameter function
+# is a thunk.
+fn peel(n: Int, t: types.Type) -> Maybe (List types.Type, types.Type) =
+  if n == 0 then
+    let types.TThunk ret _ = t else Nothing
+    in Just(([], ret))
+  else peel_params(n, t)
+
+fn peel_params(n: Int, t: types.Type) -> Maybe (List types.Type, types.Type) =
+  if n == 0 then Just(([], t))
+  else
+    let types.TFunc param rest _ _ = t else Nothing
+        Just(params, ret) = peel_params(n - 1, rest) else Nothing
+    in Just((Cons(param, params), ret))
+
+# ---------------------------------------------------------------------------
+# Creating variables
+# ---------------------------------------------------------------------------
+
+# A fixpoint over the sites of the candidates' bodies. The sets only grow, so it stops when no
+# set does.
+fn solve(sweeps: List Swept, ctx: Ctx, creating: Dict (List String)) -> Dict (List String) =
+  let next = list_fold(\ (c, s) -> grow(s, ctx, c), creating, sweeps)
+  in if total_vars(next) == total_vars(creating) then creating else solve(sweeps, ctx, next)
+
+fn total_vars(creating: Dict (List String)) -> Int =
+  list_fold(\ (n, vs) -> n + list_length(vs), 0, vec_to_list(dict_values(creating)))
+
+# `s.owner`'s creating variables, with those its sites add.
+fn grow(s: Swept, ctx: Ctx, creating: Dict (List String)) -> Dict (List String) =
+  let Just name = s.owner else creating
+      Just cand = dict_get(name, ctx.cands) else creating
+      found = list_flat_map(site_vars(_, cand.sig, ctx, creating), s.sites)
+      have = maybe_with_default([], dict_get(name, creating))
+      want = list_filter(\v -> list_member(v, have) || list_member(v, found), cand.sig.vars)
+  in if list_length(want) == list_length(have) then creating else dict_set(name, want, creating)
+
+# The variables of `own` that this site's callee creates at: its creating variables whose
+# instantiation is a variable of `own`.
+fn site_vars(site: Site, own: Sig, ctx: Ctx, creating: Dict (List String)) -> List String =
+  let Just vars = dict_get(site.callee, creating) else []
+      Just sig = callee_sig(site.callee, ctx) else []
+      theta = instantiate(sig, site.params, site.ret)
+  in list_filter_map(\v -> own_var(dict_get(v, theta), own, ctx.env), vars)
+
+# The written name, in `own`, of the type variable `bound` is, through its `@eta_fwdvar` marker.
+fn own_var(bound: Maybe types.Type, own: Sig, env: Dict types.Scheme) -> Maybe String =
+  let Just(types.TVar v) = bound else Nothing
+      Just name = types.eta_written_var(v, env) else Nothing
+  in if list_member(name, own.vars) then Just(name) else Nothing
+
+# ---------------------------------------------------------------------------
+# Keys
+# ---------------------------------------------------------------------------
+
+# A site of a candidate that has creating variables, with its instantiation.
+type Edge = (callee: String, theta: Dict types.Type, pos: source.SourcePos)
+
+type Edged = (owner: Maybe String, holder: String, edges: List Edge)
+
+fn edge_up(s: Swept, ctx: Ctx, creating: Dict (List String)) -> Edged =
+  Edged(owner = s.owner, holder = s.holder, edges = list_filter_map(site_edge(_, ctx, creating), s.sites))
+
+fn site_edge(site: Site, ctx: Ctx, creating: Dict (List String)) -> Maybe Edge =
+  let Just cand = dict_get(site.callee, ctx.cands) else Nothing
+      Just _ = dict_get(site.callee, creating) else Nothing
+  in Just(Edge(callee = site.callee, theta = instantiate(cand.sig, site.params, site.ret), pos = site.pos))
+
+# A candidate's edges, for the walk of a copy's body.
+fn edges_by_fn(edged: List Edged, ctx: Ctx) -> Dict (List Edge) =
+  list_fold(\ (d, e) -> add_edges(e, ctx, d), dict_empty(), edged)
+
+fn add_edges(e: Edged, ctx: Ctx, d: Dict (List Edge)) -> Dict (List Edge) =
+  let Just name = e.owner else d
+      Just _ = dict_get(name, ctx.cands) else d
+  in dict_set(name, e.edges, d)
+
+# The keys found so far, last admitted first, and those whose callee body is yet to be walked.
+type Walk = (seen: Dict Key, order: List Key, pending: List Key)
+
+# The scalar each creating variable of the edge's callee takes under `sub`, in signature order;
+# Nothing unless every one is a non-heap scalar.
+fn edge_scalars(e: Edge, vars: List String, sub: spec_keys.Subst, env: Dict types.Scheme) -> Maybe (List String) =
+  let scalars = list_filter_map(scalar_of(_, e.theta, sub, env), vars)
+  in if list_length(scalars) == list_length(vars) then Just(scalars) else Nothing
+
+fn scalar_of(v: String, theta: Dict types.Type, sub: spec_keys.Subst, env: Dict types.Scheme) -> Maybe String =
+  let Just t = dict_get(v, theta) else Nothing
+      resolved = spec_keys.sub_type(t, sub, env)
+      types.TConst id = resolved else Nothing
+  in if type_kind.type_is_non_heap_scalar(resolved) then Just(types.type_id_name(id)) else Nothing
+
+# Admits the key of each edge, walked under `sub`: the program's own edges under none, a copy's
+# under the scalars it substitutes.
+fn admit_edges(edges: List Edge, holder: String, sub: spec_keys.Subst, ctx: Ctx,
+               creating: Dict (List String), w: Walk) -> Walk =
+  list_fold(\ (acc, e) -> admit(e, holder, sub, ctx, creating, acc), w, edges)
+
+fn admit(e: Edge, holder: String, sub: spec_keys.Subst, ctx: Ctx, creating: Dict (List String), w: Walk) -> Walk =
+  let Just cand = dict_get(e.callee, ctx.cands) else w
+      Just vars = dict_get(e.callee, creating) else w
+      Just scalars = edge_scalars(e, vars, sub, ctx.env) else w
+      name = copy_name(e.callee, scalars)
+      Nothing = dict_get(name, w.seen) else w
+      k = Key(fn_name = e.callee, scalars = scalars, name = name, site = e.pos, holder = holder,
+              nodes = typed_ast.decl_node_count(cand.decl))
+  in Walk(seen = dict_set(name, k, w.seen), order = Cons(k, w.order), pending = Cons(k, w.pending))
+
+# The program's own edges seed the walk; they are visited in order.
+fn seed(edged: List Edged, ctx: Ctx, creating: Dict (List String)) -> Walk =
+  let w = list_fold(\ (acc, e) -> admit_edges(e.edges, e.holder, spec_keys.subst_empty(), ctx, creating, acc),
+                    Walk(seen = dict_empty(), order = [], pending = []), edged)
+  in w with (pending = list_reverse(w.pending))
+
+# Each key is visited once: its callee's body, walked under the key's scalars, gives the keys it calls.
+fn drain(w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Edge)) -> Walk =
+  match w.pending with
+  | [] -> w
+  | [k | rest] -> drain(visit(k, w with (pending = rest), ctx, creating, by_fn), ctx, creating, by_fn)
+
+fn visit(k: Key, w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Edge)) -> Walk =
+  let edges = maybe_with_default([], dict_get(k.fn_name, by_fn))
+      vars = maybe_with_default([], dict_get(k.fn_name, creating))
+      sub = spec_keys.Subst(te = dict_empty(), ty = scalar_types(vars, k.scalars))
+  in admit_edges(edges, k.name, sub, ctx, creating, w)
+
+# The key's substitution: each creating variable, by written name, to its scalar.
+fn scalar_types(vars: List String, scalars: List String) -> Dict types.Type =
+  list_fold(\ (d, p) -> bind_scalar(p, d), dict_empty(), zip(vars, scalars))
+
+fn bind_scalar(p: (String, String), d: Dict types.Type) -> Dict types.Type =
+  let (var, scalar) = p
+  in dict_set(var, types.TConst(types.type_id(scalar)), d)
+
+# ---------------------------------------------------------------------------
+# The analysis
+# ---------------------------------------------------------------------------
+
+export fn analyse(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Analysis =
+  match prog with
+  | typed_ast.TypedProgram decls -> analyse_decls(decls, env)
+
+fn analyse_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Analysis =
+  let ctx = Ctx(cands = cand_table(decls), creators = creator_table(decls), env = env)
+      sweeps = list_map(sweep(_, ctx), list_flat_map(decl_bodies, decls))
+      creating = solve(list_filter(is_candidate_body(_, ctx), sweeps), ctx, creator_seed(ctx))
+      edged = list_map(edge_up(_, ctx, creating), sweeps)
+      closed = drain(seed(edged, ctx, creating), ctx, creating, edges_by_fn(edged, ctx))
+      keys = list_reverse(closed.order)
+  in Analysis(creating = creating, keys = keys, nodes = list_fold(\ (n, k) -> n + k.nodes, 0, keys))
+
+fn is_candidate_body(s: Swept, ctx: Ctx) -> Bool =
+  match s.owner with
+  | Just name -> dict_member(name, ctx.cands)
+  | Nothing -> false

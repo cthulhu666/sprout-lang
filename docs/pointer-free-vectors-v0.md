@@ -48,7 +48,7 @@ Three more costs follow from the same blindness:
   kinds (`@.cfkinds`) already exist for objects. A separate, measured change.
 - Moving the arena base to make collisions rarer. That is a mitigation, not a fix.
 - Calls through class dictionaries: there the callee is unknown, so the vector stays scanned.
-- Constrained creating functions while `specialise` is off (§4.4).
+- Constrained creating functions with `SPROUT_OPT_OFF=spec` (§4.4).
 
 ## 3. Prior art
 
@@ -118,8 +118,11 @@ analysis service) pass through it. There a node type names its variables through
    function has no markers, so the pass cannot name its variables; it is opaque.
 2. **Instantiation.** At a call or a value reference to a candidate, the callee's written
    signature is matched against the node's type, parameters and result
-   (`verify_dispatch.match_te`). The result counts: `mutvec_empty() -> MutVec a` binds `a` only
+   (`scalar_copies.bind_te`). The result counts: `mutvec_empty() -> MutVec a` binds `a` only
    there. The match yields bindings by written name, which is what `spec_keys.sub_type` reads.
+   It is not `verify_dispatch.match_te`: that one compares heads only and fails when a written
+   variable meets the same inference variable twice, which is every call at an enclosing
+   function's own variable (`fn twin(x: a, y: a)` called inside a generic body).
 3. **Which variables matter.** Type variable `a` of a candidate `f` is *creating* when `f`'s body
    calls a creating extern at element type `a`, or calls or references a candidate whose creating
    variable is instantiated to `a`. A fixpoint over the call graph.
@@ -140,16 +143,15 @@ analysis service) pass through it. There a node type names its variables through
 6. **Clean-up.** `dce.elim_unreachable`, inside `ir_pipeline.compile_program_streaming`, drops an
    original with no reference left.
 
-With `SPROUT_OPT_ON=spec`, a function with a constraint and a creating variable
-(`mutvec_sort_by`) is copied twice in sequence: `specialise` removes the dictionary, then this pass
+A function with a constraint and a creating variable (`mutvec_sort_by`) is copied twice in
+sequence: `specialise` removes the dictionary, then this pass
 copies that copy at the scalar. Each copy carries its instantiation in its node types, so the
 order loses no key.
 
 **Why not inside `specialise`.** One key of evidence plus scalar types would give one copy
-mechanism and one copy per such function. But `specialise` is off by default
-(`opt_config.default_off`), its M2 turns it on only under a 5% growth budget, and its §2 makes
-monomorphisation a non-goal. A GC property that every build needs cannot live in a pass that most
-builds skip. Merging the two key types once `specialise` is on by default is a follow-up.
+mechanism and one copy per such function. The pass was kept apart while `specialise` was off by
+default, and its §2 makes monomorphisation a non-goal. `specialise` is now on by default, so
+merging the two key types is a follow-up; `SPROUT_OPT_OFF=spec` still leaves this pass running.
 **Why not after lowering.** `make_copy`'s substitution works on the resolved program, and whether
 type-variable identity survives lowering is unproven.
 
@@ -162,8 +164,8 @@ appears.
 
 **A copy is not only a renamed body.** `ast_to_ir` keys several decisions on concrete types that
 a generic body never had: B1's inline `f64` access through `vector_get_direct` on a
-`Vector Double` (in `sort_merge_all`, a creator; `mutvec_sort` reaches its copy only with
-`spec` on, since every public sort is constrained), the unboxed path for a `Maybe`-returning
+`Vector Double` (in `sort_merge_all`, a creator; `mutvec_sort` reaches its copy through `specialise`'s copy,
+since every public sort is constrained), the unboxed path for a `Maybe`-returning
 extern scrutinee (`vec_filter$Double` reads through `vector_get`), and CPR worker plans read from
 the signature's return type. A copied parameter typed `Int` is also rooted as a scalar. These are
 tested today only on hand-annotated fixtures, so §6.3 runs each creating stdlib function at `Int`
@@ -172,9 +174,10 @@ and `Double` against its generic result.
 ### 4.4 What stays scanned
 
 - A creating function reached only through a class dictionary.
-- A constrained creating function while `specialise` is off, the default: `mutvec_sort`'s
-  scratch buffer, `sort.sorted`'s result, `foldable_to_vec`. The user's own vectors from
-  `mutvec_new`, `mutvec_empty` or `vec_from_list` are still flagged.
+- A constrained creating function that `specialise` does not copy (a call whose dictionary is not
+  concrete, or any call under `SPROUT_OPT_OFF=spec`): `mutvec_sort`'s scratch buffer,
+  `sort.sorted`'s result, `foldable_to_vec`. The user's own vectors from `mutvec_new`,
+  `mutvec_empty` or `vec_from_list` are still flagged.
 - A creating function without a full written signature, and every caller that reaches the
   creator only through one.
 - A creating extern used as a value (`list_map(vector_from_list, xss)`): it goes through an
@@ -244,12 +247,10 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
    annotated helper that passes `vec_from_list` as a value is copied when called at `Int`;
    `Vec String`, a dictionary-dispatched builder and an unannotated helper do not flag.
 3. **Behaviour** (`tests/stdlib/`): the premise tests of §4.5 under `SPROUT_GC_STRESS=1`, and one
-   run per creating stdlib function at `Int` and `Double` (`mutvec_new` then `mutvec_sort` with
-   `SPROUT_OPT_ON=spec`, a
-   `MutVec Int` built by `mutvec_empty` and push, `vec_filter`, `vec_slice`, `vec_map`,
+   run per creating stdlib function at `Int` and `Double` (`mutvec_new` then `mutvec_sort`, a `MutVec Int` built by `mutvec_empty` and push, `vec_filter`, `vec_slice`, `vec_map`,
    `linvec.from_list`) with the result compared against `SPROUT_OPT_OFF=scalar`.
 4. **The suite** under `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1`, under `SPROUT_GC_HDRCHECK=1` as
-   CI runs it, and `just linvec-smoke`. Once more with `SPROUT_OPT_ON=spec`, for the double copy.
+   CI runs it, and `just linvec-smoke`. Once more with `SPROUT_OPT_OFF=spec`, without the double copy.
 5. **Measurement and gates.** `bench/gc_minor/ab.sh`, default settings, N = 6, with GC time for
    mutvec_int, astar and digit_recognizer, and galaxy's live set built from both `65d4cf0d` and
    master. Gates, as [specialisation-v0.md](specialisation-v0.md) §7 M1 set them: self-compile
@@ -265,5 +266,8 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
 3. ~~`check_extern_signatures.sh` gains premise 1's two rules.~~ Landed (`just check-extern-signatures`,
    [gates.md](gates.md) §Extern signatures).
 4. The scalar-copy pass; IR and behaviour tests; reseed; golden IR; the measurements of §6.5.
+   - 4a, landed: `scalar_copies` as a dry run (`just test`'s `test_scalar_copies.spr`,
+     `SPROUT_TRACE_SCALAR=1`). It finds keys and reports; the program is unchanged.
+   - 4b: the copies, retargeting, `verify_added`, the flag on by default.
 5. Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the
    flip.

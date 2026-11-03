@@ -1,0 +1,64 @@
+import stdlib.mutable (mutvec_new, mutvec_empty, mutvec_sort, mutvec_push)
+import stdlib.linvec as linvec
+
+# Fixture for `tests/stdlib/compiler/test_scalar_copies.spr` (docs/pointer-free-vectors-v0.md
+# §4.3). The test reads the resolved program's keys and creating sets; each shape says what
+# it is for. Nothing here runs.
+
+# Transitive: the creating variable reaches `build` through the prelude's `vec_from_list`.
+fn build(xs: List a) -> Vec a = vec_from_list(xs)
+
+# A value reference: `vec_from_list` is passed, not called, at `a`.
+fn build_all(xss: List (List a)) -> List (Vec a) = list_map(vec_from_list, xss)
+
+# Two creating variables, in signature order: `a` then `b`.
+fn pair_up(xs: List a, ys: List b) -> (Vec a, Vec b) = (vec_from_list(xs), vec_from_list(ys))
+
+# The same, with `b` written first: signature order is not alphabetical.
+fn swap_up(ys: List b, xs: List a) -> (Vec a, Vec b) = (vec_from_list(xs), vec_from_list(ys))
+
+# No creating variable: it only reads.
+fn first_of(v: Vec a) -> Maybe a = vec_get(0, v)
+
+# An unannotated helper is opaque, even though it creates.
+fn loose(xs) = vec_from_list(xs)
+
+# Polymorphic recursion: the self-call is at `Vec a`, which is not a scalar.
+fn poly(x: a, n: Int) -> Int =
+  if n == 0 then 0 else poly(vec_from_list([x]), n - 1)
+
+# One written variable meets the caller's own variable twice.
+fn build_two(x: a, y: a) -> Vec a = [x, y]
+
+fn twin(x: a, y: a) -> Vec a = build_two(x, y)
+
+fn ints() -> Vec Int = build([1, 2, 3])
+
+fn twins() -> Vec Int = twin(1, 2)
+
+fn doubles() -> Vec Double = vec_map(\x -> x * 2.0, vec_from_list([1.0, 2.0]))
+
+fn strings() -> Vec String = build(["a", "b"])
+
+fn pairs() -> (Vec Int, Vec Double) = pair_up([1], [1.0])
+
+fn swapped() -> (Vec Int, Vec Double) = swap_up([1.0], [1])
+
+fn through_loose() -> Vec Int = loose([1])
+
+fn recurse() -> Int = poly(1, 3)
+
+# `vec_from_list$Bool` exists only through the reference inside `build_all`.
+fn bools() -> List (Vec Bool) = build_all([[true]])
+
+fn mut_ints() -> Int !{IO} =
+  do
+    v <- mutvec_empty()
+    _ <- mutvec_push(v, 1)
+    w <- mutvec_new(3, 0)
+    let linv = linvec.new(2, 0)
+    _ <- linvec.drop(linv)
+    _ <- mutvec_sort(w)
+    0
+
+fn main() -> Unit !{IO} = print("ok")

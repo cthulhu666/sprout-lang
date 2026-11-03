@@ -23,6 +23,7 @@ export type Pass (..) deriving (Eq, ToString) =
   | Bce
   | Spec
   | Wsi
+  | Scalar
 
 export type OptConfig (..) =
   (disabled: List Pass, unrecognised: List String, stats: Bool)
@@ -35,6 +36,7 @@ export fn pass_name(p: Pass) -> String =
   | Bce -> "bce"
   | Spec -> "spec"
   | Wsi -> "wsi"
+  | Scalar -> "scalar"
 
 export fn pass_from_name(name: String) -> Maybe Pass =
   match name with
@@ -44,10 +46,11 @@ export fn pass_from_name(name: String) -> Maybe Pass =
   | "bce" -> Just(Bce)
   | "spec" -> Just(Spec)
   | "wsi" -> Just(Wsi)
+  | "scalar" -> Just(Scalar)
   | _ -> Nothing
 
 export let all_passes =
-  [Dle, Cse, Licm, Bce, Spec, Wsi]
+  [Dle, Cse, Licm, Bce, Spec, Wsi, Scalar]
 
 # Which of those the pipeline actually runs. `Cse`/`Licm` are named before they
 # exist because the switch's vocabulary is the roadmap — but disabling one must
@@ -62,6 +65,7 @@ export fn implemented(p: Pass) -> Bool =
   | Bce -> true
   | Spec -> true
   | Wsi -> true
+  | Scalar -> true
 
 export fn parse(off: Maybe String, stats: Maybe String) -> OptConfig =
   OptConfig(

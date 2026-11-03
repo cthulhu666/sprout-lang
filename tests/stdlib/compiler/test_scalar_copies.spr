@@ -1,0 +1,137 @@
+import stdlib.test (check_true, check_false, check_eq, run_suite)
+import stdlib.compiler.compiler as compiler
+import stdlib.compiler.scalar_copies as scalar_copies
+import stdlib.compiler.source as source
+import stdlib.compiler.typed_ast as typed_ast
+import stdlib.sort (sort)
+import stdlib.string as string
+import testsupport.envvar as envvar
+
+# Unit tests for the scalar-copy dry run (docs/pointer-free-vectors-v0.md §4.3). The fixture
+# `tests/scalar_copies/shapes.spr` is checked and resolved against the real stdlib, so the
+# creating sets and keys below are the ones the pass finds in `vec_map`, `mutvec_new` and the
+# rest. The pass reports only: the program it returns is the one it was given.
+
+type Loaded = (prog: typed_ast.TypedProgram, analysis: scalar_copies.Analysis, out: scalar_copies.Output)
+
+fn stdlib_root() -> String !{IO} =
+  match envvar.read("SPROUT_STDLIB_ROOT") with
+  | Just root -> root
+  | Nothing -> "stdlib"
+
+fn load() -> Loaded !{IO} =
+  do
+    root <- stdlib_root()
+    checked <- compiler.compile_phase_check(source.FilePath("tests/scalar_copies/shapes.spr"), source.StdlibRoot(root))
+    match checked with
+    | typed_ast.TypedErr _ msg -> panic("tests/scalar_copies/shapes.spr does not check: " ++ msg)
+    | typed_ast.TypedOk prog env ->
+        Loaded(prog = prog, analysis = scalar_copies.analyse(prog, env), out = scalar_copies.run(prog, env))
+
+fn key_names(l: Loaded) -> List String = sort(list_map(\k -> k.name, l.analysis.keys))
+
+fn has_key(l: Loaded, name: String) -> Bool = list_member(name, key_names(l))
+
+# How many keys have a name starting with `prefix`.
+fn keys_under(l: Loaded, prefix: String) -> Int =
+  count(\n -> string.starts_with(n, prefix), key_names(l))
+
+# The creating variables of a function, in signature order; none for a function that is
+# not a candidate or creates nothing.
+fn creating(l: Loaded, fn_name: String) -> List String =
+  maybe_with_default([], dict_get(fn_name, l.analysis.creating))
+
+fn decl_count(prog: typed_ast.TypedProgram) -> Int =
+  match prog with
+  | typed_ast.TypedProgram decls -> list_length(decls)
+
+fn is_copy_line(line: String) -> Bool = string.starts_with(line, "[scalar] copy ")
+
+fn summary_line(l: Loaded) -> String =
+  `[scalar] keys=${list_length(l.analysis.keys)} nodes=${l.analysis.nodes}`
+
+fn suite(l: Loaded) -> Unit !{IO} =
+  run_suite("scalar_copies", [
+    # --- creating sets ---
+    check_eq("creating: vec_from_list", creating(l, "vec_from_list"), ["a"]),
+    check_eq("creating: vec_map, through its helper, by its result variable", creating(l, "vec_map"), ["b"]),
+    check_eq("creating: mutvec_new", creating(l, "stdlib.mutable.mutvec_new"), ["a"]),
+    check_eq("creating: mutvec_empty, whose variable is only in its result",
+             creating(l, "stdlib.mutable.mutvec_empty"), ["a"]),
+    check_eq("creating: linvec.new", creating(l, "stdlib.linvec.new"), ["a"]),
+    check_eq("creating: a user function reaches it transitively", creating(l, "$entry.build"), ["a"]),
+    check_eq("creating: a value reference counts", creating(l, "$entry.build_all"), ["a"]),
+    check_eq("creating: a variable met twice at the caller's own variable", creating(l, "$entry.twin"), ["a"]),
+    check_eq("creating: two variables, written order", creating(l, "$entry.pair_up"), ["a", "b"]),
+    check_eq("creating: signature order is not alphabetical", creating(l, "$entry.swap_up"), ["b", "a"]),
+    check_eq("creating: a reader has none", creating(l, "$entry.first_of"), []),
+    check_eq("creating: an unannotated helper is opaque", creating(l, "$entry.loose"), []),
+    check_eq("creating: a constrained function is opaque", creating(l, "stdlib.mutable.mutvec_sort"), []),
+    check_eq("creating: polymorphic recursion", creating(l, "$entry.poly"), ["a"]),
+
+    # --- keys ---
+    check_true("key: a user builder at Int", has_key(l, "$entry.build$Int")),
+    check_true("key: its callee, at the same Int", has_key(l, "vec_from_list$Int")),
+    check_true("key: a call that meets the caller's variable twice", has_key(l, "$entry.build_two$Int")),
+    check_false("key: a builder at String has none", has_key(l, "$entry.build$String")),
+    check_false("key: and nothing at String is reached through it", has_key(l, "vec_from_list$String")),
+    check_true("key: vec_map at Double", has_key(l, "vec_map$Double")),
+    check_true("key: the helper vec_map reaches", has_key(l, "vec_map_indexed$Double")),
+    check_true("key: the creator vec_map_indexed reaches", has_key(l, "vec_from_list$Double")),
+    check_false("key: vec_map is keyed by its result variable alone", has_key(l, "vec_map$Int")),
+    check_true("key: two variables, written order", has_key(l, "$entry.pair_up$Int_Double")),
+    check_true("key: signature order, not alphabetical", has_key(l, "$entry.swap_up$Double_Int")),
+    check_false("key: and not the alphabetical one", has_key(l, "$entry.swap_up$Int_Double")),
+    check_true("key: a value reference makes the key of what it names", has_key(l, "vec_from_list$Bool")),
+    check_true("key: through a reference's holder", has_key(l, "$entry.build_all$Bool")),
+    check_true("key: mutvec_empty at Int", has_key(l, "stdlib.mutable.mutvec_empty$Int")),
+    check_true("key: mutvec_new at Int", has_key(l, "stdlib.mutable.mutvec_new$Int")),
+    check_true("key: linvec.new at Int", has_key(l, "stdlib.linvec.new$Int")),
+    check_eq("opaque: an unannotated helper has no key", keys_under(l, "$entry.loose"), 0),
+    check_eq("opaque: a constrained function has no key", keys_under(l, "stdlib.mutable.mutvec_sort"), 0),
+    check_eq("opaque: a reader has no key", keys_under(l, "$entry.first_of"), 0),
+
+    # --- termination ---
+    check_true("poly: the scalar call is a key", has_key(l, "$entry.poly$Int")),
+    check_eq("poly: its call at Vec a is not", keys_under(l, "$entry.poly$"), 1),
+
+    # --- names ---
+    check_eq("name: one scalar", scalar_copies.copy_name("f", ["Int"]), "f$Int"),
+    check_eq("name: several scalars joined in order", scalar_copies.copy_name("f", ["Int", "Double"]), "f$Int_Double"),
+    check_true("name: a specialise copy keeps its own suffix",
+               scalar_copies.copy_name("g$spec_Int", ["Int"]) != scalar_copies.copy_name("g", ["Int"])),
+    check_eq("name: nothing in the program names a key twice",
+             list_length(key_names(l)), list_length(dedupe(key_names(l)))),
+    check_eq("name: no key name has a dot after its $", count(\n -> string.contains(scalar_suffix(n), "."), key_names(l)), 0),
+    check_eq("name: and every suffix is scalar names alone, so none is a specialise copy's",
+             count(\n -> !all(is_scalar_name, string.split(scalar_suffix(n), "_")), key_names(l)), 0),
+
+    # --- the program is unchanged ---
+    check_eq("run: the program has the same nodes", typed_ast.node_count(l.out.program), typed_ast.node_count(l.prog)),
+    check_eq("run: and the same declarations", decl_count(l.out.program), decl_count(l.prog)),
+    check_true("run: it found keys", list_length(l.analysis.keys) > 0),
+    check_true("run: the callees' nodes are counted", l.analysis.nodes > 0),
+
+    # --- the trace ---
+    check_eq("trace: one line per key and a summary", list_length(l.out.trace), list_length(l.analysis.keys) + 1),
+    check_eq("trace: the key lines", count(is_copy_line, l.out.trace), list_length(l.analysis.keys)),
+    check_eq("trace: the summary closes it", last_of(l.out.trace), Just(summary_line(l)))
+  ])
+
+fn is_scalar_name(s: String) -> Bool = list_member(s, ["Int", "Bool", "Char", "Double"])
+
+# What a key name carries after its last `$`.
+fn scalar_suffix(name: String) -> String = maybe_with_default("", last_of(string.split(name, "$")))
+
+fn last_of(xs: List String) -> Maybe String =
+  match list_reverse(xs) with
+  | [x | _] -> Just(x)
+  | [] -> Nothing
+
+fn dedupe(xs: List String) -> List String =
+  vec_to_list(dict_keys(list_fold(\ (d, x) -> dict_set(x, true, d), dict_empty(), xs)))
+
+fn main() -> Unit !{IO} =
+  do
+    l <- load()
+    suite(l)
