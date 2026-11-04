@@ -1,8 +1,9 @@
 # Generational GC for Sprout — measurement and decision (v0, 2026-08-09)
 
-**Status:** §1–§13 are measurement. **§14 is the approved design for stage 1**
-(sticky mark bits, object barrier, verifier), not yet implemented. Normative GC
-behaviour remains [docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
+**Status:** §1–§13 are measurement. **§14 is stage 1** (sticky mark bits, object barrier,
+verifier): landed, and on by default since §14.8 step 6. §14.6 (bounding the sweep) is not
+designed. Normative GC behaviour remains
+[docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
 
 §1–§11 are about the nursery: whether to build one, and for what. **§12 answers a
 separate question — why the collector is not switchable per workload — and §13 measures
@@ -784,9 +785,10 @@ a self-compile. That is an estimate; §14.8 measures it.
 - **Goal:** a minor collection that does not mark objects that survived an earlier one.
 - **Goal:** a runtime check that fails when any store path lacks the barrier, so §7's
   list stops being the safety argument.
-- **Goal:** one switch, `SPROUT_GC_MINOR`, for A/B measurement in one binary. Off (`0`, the
-  default, which step 4 kept) runs today's collector unchanged: no pre-pass, and the sweep clears the
-  colour bit. On (`1`) chooses between minor and major per collection.
+- **Goal:** one switch, `SPROUT_GC_MINOR`, for A/B measurement in one binary. Off (`0`) runs
+  the earlier collector unchanged: no pre-pass, and the sweep clears the colour bit. On (`1`,
+  unset or empty; the default since step 6) chooses between minor and major per collection. Any
+  other value aborts at startup.
 - **Non-goal (stage 2, §14.6):** a minor sweep proportional to the young set. Stage 1
   still walks every slot.
 - **Non-goal:** moving objects, a nursery region, concurrent or incremental marking.
@@ -865,8 +867,8 @@ A major runs:
 
 `SPROUT_GC_MAJOR_EVERY=0` makes every collection a major. A value that is not a non-negative
 integer aborts at startup (`sprout_gc_gen_init`, called from `sprout_set_argv` with the other
-GC switches), before the program runs, but only with the mode on: with `SPROUT_GC_MINOR` unset
-or `0`, neither it nor `SPROUT_GC_GENCHECK` is read. The cycle line of `SPROUT_DEBUG_GC`
+GC switches), before the program runs, but only with the mode on: with `SPROUT_GC_MINOR=0`,
+neither it nor `SPROUT_GC_GENCHECK` is read. The cycle line of `SPROUT_DEBUG_GC`
 gains a trailing `kind=minor|major`, printed only with the mode on, so its output is unchanged
 with it off. With it on, `marked` counts what that collection marked: a minor's figure leaves
 out every old object. The "live after the previous collection" in the second rule is the heap
@@ -936,7 +938,7 @@ header and its owner's kind, header and field index (`owner: root` for a root). 
 the object it was first reached through, so the check runs at that first reach and no owner
 table is kept. Because the first unmarked object on any path has a marked or old owner, the
 owner named is the one holding the unbarriered edge. The check reads headers and writes none.
-`SPROUT_GC_GENCHECK=1` does nothing without `SPROUT_GC_MINOR=1`.
+`SPROUT_GC_GENCHECK=1` does nothing with `SPROUT_GC_MINOR=0`.
 
 This turns "every store into an existing object has a barrier" from a list into a checked
 property, with three limits:
@@ -1055,3 +1057,10 @@ barrier never sees an old object. Nothing goes red between steps.
    type is a scalar. Designed and landed in [scalar-store-inline-v0.md](scalar-store-inline-v0.md):
    `ast_to_ir` lowers a scalar `vector_mutset` inline, and the `wsi` pass expands a store
    wrapper such as `mutvec_set` to it. The re-measure and the flip are that doc's step 3.
+
+   **Measured; flipped** ([bench/results-2026-11-04-gc-minor-pfv.md](../bench/results-2026-11-04-gc-minor-pfv.md)).
+   `SPROUT_GC_MINOR` is now on by default; `0` turns it off. The compiler gains (CPU 0.80, GC
+   time 0.52, pause p90 0.49), no workload's CPU regresses beyond the spread, and astar is back
+   inside it. The cost is memory and pause: RSS 1.07 on the self-compile and 1.25 on mutvec_int,
+   whose p50 and p90 pauses rise (1.23, 1.51). Both come from the sweep that still walks the
+   whole heap (§14.6).

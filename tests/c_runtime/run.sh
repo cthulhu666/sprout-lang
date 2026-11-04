@@ -529,30 +529,30 @@ grep -q "owner: kind=REF .* field=0" "$TMP_DIR/gc_mb.err" || {
   cat "$TMP_DIR/gc_mb.err" >&2
   exit 1
 }
-if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" bad_every_on > "$TMP_DIR/gc_be.out" 2> "$TMP_DIR/gc_be.err"; then
-  echo "  a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on" >&2
-  exit 1
-fi
-grep -q "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" "$TMP_DIR/gc_be.err" || {
-  echo "  bad_every_on failed without the MAJOR_EVERY message:" >&2
-  cat "$TMP_DIR/gc_be.out" "$TMP_DIR/gc_be.err" >&2
-  exit 1
+# A case that must abort at startup: nonzero exit, and stderr carries the message.
+expect_abort() {
+  local sel="$1" msg="$2" fail_text="$3"
+  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err"; then
+    echo "  $fail_text" >&2
+    exit 1
+  fi
+  grep -q "$msg" "$TMP_DIR/gc_$sel.err" || {
+    echo "  $sel failed without the expected message:" >&2
+    cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2
+    exit 1
+  }
 }
+expect_abort bad_every_on "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" \
+  "a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on"
 # The bad value must fail at startup, not inside the atexit collection after the program ran.
-if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" bad_every_late > "$TMP_DIR/gc_bl.out" 2> "$TMP_DIR/gc_bl.err"; then
-  echo "  a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on (no collection before exit)" >&2
-  exit 1
-fi
-grep -q "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" "$TMP_DIR/gc_bl.err" || {
-  echo "  bad_every_late failed without the MAJOR_EVERY message:" >&2
-  cat "$TMP_DIR/gc_bl.out" "$TMP_DIR/gc_bl.err" >&2
-  exit 1
-}
-if grep -q "after-alloc" "$TMP_DIR/gc_bl.out"; then
+expect_abort bad_every_late "SPROUT_GC_MAJOR_EVERY: expected non-negative integer" \
+  "a bad SPROUT_GC_MAJOR_EVERY did not abort with the mode on (no collection before exit)"
+if grep -q "after-alloc" "$TMP_DIR/gc_bad_every_late.out"; then
   echo "  a bad SPROUT_GC_MAJOR_EVERY was reported only at exit, after the program ran" >&2
   exit 1
 fi
-for sel in barrier minor_keeps_old major_every clear_before_major doubling no_check bad_every_off; do
+expect_abort bad_minor "SPROUT_GC_MINOR: expected 0 or 1" "a bad SPROUT_GC_MINOR did not abort at startup"
+for sel in barrier minor_keeps_old major_every clear_before_major doubling no_check bad_every_off default_on empty_on; do
   ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$GC" "$sel" > "$TMP_DIR/gc_$sel.out" 2> "$TMP_DIR/gc_$sel.err" || {
     echo "  gen_check '$sel' failed:" >&2
     cat "$TMP_DIR/gc_$sel.out" "$TMP_DIR/gc_$sel.err" >&2

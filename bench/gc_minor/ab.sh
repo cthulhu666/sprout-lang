@@ -165,10 +165,11 @@ build_galaxy() { # mirrors uncharted-suns' `run-gfx`, minus the run; SPROUT_ROOT
   gfx_link="-lraylib -framework Cocoa -framework IOKit -framework CoreVideo -framework OpenGL -framework QuartzCore"
   if ! "$COMPILER" --emit-ir "$REPO/stdlib" --package-root "$root" "$root/game/app.sprout" > "$OUT/galaxy.ll" 2> "$OUT/galaxy.err"; then
     # The game repo lags this stdlib: `env.get`, `argv_get` and `args.parse_argv` now answer a
-    # Result or moved out of the prelude. Build a patched COPY of loam/ and game/ rather than touch
-    # the game repo (the patch only unwraps those three calls back to their old shapes), and say so.
+    # Result or moved out of the prelude, and `make_dirs` binds a `proc_run` Result in a Unit block.
+    # Build a patched COPY of loam/ and game/ rather than touch the game repo (the patch only
+    # unwraps those three calls and drops that binding), and say so.
     echo "WARNING: stock uncharted-suns does not compile against this stdlib: $(grep -m1 ERROR "$OUT/galaxy.err")" >&2
-    echo "WARNING: building a patched copy in $OUT/galaxy_src (env.get, argv_get, args.parse_argv unwrapped)" >&2
+    echo "WARNING: building a patched copy in $OUT/galaxy_src (env.get, argv_get, args.parse_argv unwrapped; the proc_run Result binding dropped)" >&2
     root="$OUT/galaxy_src"
     rm -rf "$root"; mkdir -p "$root"
     cp -R "$UNSUNS/loam" "$UNSUNS/game" "$root/" || return 1
@@ -179,6 +180,8 @@ build_galaxy() { # mirrors uncharted-suns' `run-gfx`, minus the run; SPROUT_ROOT
     patch_galaxy "$root" 'argv_get(' \
       's/argv_get\(([^)]*)\)/(match argv.get(\1) with | Ok m -> m | Err _ -> Nothing)/g' \
       'import stdlib.argv as argv' || return 1
+    patch_galaxy "$root" '_r <- proc_run(' \
+      's/_r <- proc_run\(/proc_run(/g' || return 1
     "$COMPILER" --emit-ir "$REPO/stdlib" --package-root "$root" "$root/game/app.sprout" > "$OUT/galaxy.ll" || return 1
   fi
   # shellcheck disable=SC2086
