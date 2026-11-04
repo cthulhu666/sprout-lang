@@ -10,9 +10,10 @@ self-compile RSS 1.07×, mutvec_int RSS 1.25× with longer pauses
 ([results](../bench/results-2026-11-04-gc-minor-pfv.md)). §14.8 blamed both on the minor sweep
 walking the whole heap. That is wrong for the memory. There are three causes, not one.
 
-All figures below are counts from one run each (`SPROUT_DEBUG_GC=1`). Collection counts, slot
-counts and object counts do not change from run to run, because collections fire on allocation
-counts. RSS varies by up to 3% (self-compile on master: 310–319 MB over three runs). No timing
+All figures below are counts from one run each (`SPROUT_DEBUG_GC=1`). For these two workloads,
+collection, slot and object counts do not change from run to run, because collections fire on
+allocation counts and neither program's allocation depends on time. That is not shown for the
+rest of the §14.8 set; step 2 measures each workload's spread. RSS varies by up to 3% (self-compile on master: 310–319 MB over three runs). No timing
 is quoted: load average was 13–21.
 
 **Cause 1: promotion after one survival makes medium-lived data old.** mutvec_int builds a
@@ -48,13 +49,15 @@ gain. Section 4 measures that.
 
 ## 2. Goals and non-goals
 
-- **Goal:** with minor collections on, no workload in the §14.8 set has higher peak RSS than with
-  them off, beyond run-to-run spread.
+- **Goal:** with minor collections on, no workload in the §14.8 set has peak slots more than 5%
+  above minor-off, nor peak RSS above it beyond run-to-run spread. Peak slots come first because
+  they vary far less than RSS (§1); §4's mutvec_int at K = 3 (1.07×) misses this today.
+- **Goal:** p50 and p90 pause no higher than minor-off beyond spread, per workload, read by
+  `bench/gc_minor/ab.sh`. K > 1 re-marks young survivors (§4), so this can fail.
 - **Goal:** a minor's sweep is proportional to the young set, not to the heap.
 - **Goal:** keep the self-compile's CPU and GC-time gain (0.80, 0.52).
 - **Goal:** every new invariant has a runtime check under `SPROUT_GC_GENCHECK=1`.
 - **Non-goal:** moving objects, a copying nursery, concurrent or incremental marking.
-- **Non-goal:** returning memory to the OS from a minor. Regions are released at majors only.
 - **Non-goal:** language changes. The spec does not specify the collector, and no Sprout program
   can observe these changes except through memory use and timing.
 
@@ -73,7 +76,7 @@ with sticky mark bits.
 | MMTk StickyImmix | lines consumed since the last GC > a proportion of the heap size (`collection_required`) | no: counts allocation |
 | Whippet | no hole or empty block left (`gc_allocate_slow`) | yes |
 | bdwgc 8.3.0 | bytes allocated ≥ (2 × composite in use + atomic in use / 4 + roots) / 3 (`min_bytes_allocd`) | yes: in-use counts sticky marks |
-| JSC | bytes allocated > an eden budget fixed at the last full GC from its live size (`updateAllocationLimits`) | no |
+| JSC | bytes allocated > a budget of at least `m_maxEdenSize`, which is set at the last full GC from its live size (`updateAllocationLimits`) | no |
 
 Lua and Boehm size the nursery from a quantity that includes dead old objects, as we do. JSC
 fixes the budget from the live size at the last full collection, which is §5.2's rule. Lua's
@@ -156,10 +159,10 @@ What it shows:
   close to it (peak slots 1.07× at K3, 1.20× at K2; RSS 12.8 MB against 12.5). These are single
   runs; step 2's A/B decides with spread.
 - **N needs the young-only sweep.** With today's sweep, N = 1 raises the self-compile's walked
-  slots (136 → 146M at K2) because minors are more frequent and each walks the heap. With a
-  young-only sweep the same runs visit 92M, 0.67× of master and 0.65× of minor-off.
-- **K costs marking.** Re-marking young survivors raises the self-compile's marked objects from
-  5.4M (K1) to 9.3M (K2) and 11.5M (K3), still a third of minor-off's 34.6M.
+  slots (K2: 122 → 146M) because minors are more frequent and each walks the heap. With a
+  young-only sweep K2 N1 visits 92M, 0.67× of master and 0.65× of minor-off.
+- **K costs marking.** Re-marking young survivors raises the self-compile's marked objects at
+  N = 1 from 7.0M (K1) to 9.3M (K2) and 11.5M (K3), still a third of minor-off's 34.6M.
 
 ## 5. Design
 
@@ -191,8 +194,10 @@ keeps bit 13 set while old, so the barrier's masked compare never records it aga
 
 **The live prediction.** `sprout_gc_gen_record` predicts the post-sweep count as
 `last_live + marked`. With K > 1 a minor re-marks young survivors that `last_live` already
-counts, so the prediction becomes `old after the previous sweep + marked`. The sweep counts the
-old objects it leaves. GENCHECK's existing count check covers the new formula.
+counts, so the prediction becomes `old after the previous sweep + marked`. The old count is kept,
+not walked for: a young-only minor adds the slots it promotes, a full walk recounts it, and a
+major's sweep that clears colour sets it to 0. GENCHECK's existing count check covers the new
+formula, and the premise 2 walk checks the old count.
 
 ### 5.2 Nursery size
 
@@ -236,8 +241,9 @@ Candidates:
 order alone, so step 1 can require output and collection counts identical to stage 1, with only
 slots visited changing. Scanning a bitmap a word at a time is how CRuby sweeps a page. Its cost is
 the region lookup on the reuse path, which step 1 measures on the allocation-heavy workloads
-(nqueens, http_log_middleware, gc_roots) and reports with each one's region count, since at 8
-regions or fewer the lookup is `region_find_slow`, not the index. B is the fallback if the lookup
+(nqueens, http_log_middleware, gc_roots) and reports with each one's region and overflow-region
+counts, since at 8 regions or fewer, and for a region outside the arena, the lookup is
+`region_find_slow`'s search, not the index. B is the fallback if the lookup
 shows up. The bitmap pointer lives in `SproutRegion` beside `slotmap`, so region-table inserts and
 removals carry it.
 
@@ -256,15 +262,31 @@ live one and leaves its bit clear.
 
 **Persistent free lists.** Today every sweep wipes and rebuilds the free lists from every region
 (`sprout_gc_sweep`, the staged build). A young-only minor pushes the young slots it frees onto
-the existing lists and leaves the rest alone. Ordinary regions are released only by a full walk,
-which keeps the full rebuild and its rollback, so no list entry can point into a released region.
-This is the BACKLOG entry "The freelists are still wiped and rebuilt from *all* regions every
-sweep". `vector_push`'s inline-tail split already pushes onto the live lists between collections.
+the existing lists and leaves the rest alone. This is the BACKLOG entry "The freelists are still
+wiped and rebuilt from *all* regions every sweep". `vector_push`'s inline-tail split already
+pushes onto the live lists between collections.
+
+**Region release.** Pass 2 of today's sweep releases every ordinary region left with no live and
+no poisoned slot, at every collection, and the staged build's rollback drops its slots from the
+lists. A young-only minor cannot drop them: the lists interleave every region, and removing one
+region's entries means walking the lists. So a minor first decides whether any region would
+empty. Each region keeps an old count and a young count (allocation finds the region for its
+young bit anyway), and the mark counts the young objects it reaches per region (its lookup,
+`sprout_heap_lookup_region`, already finds the region). After the mark, a region empties when it
+has no old and no poisoned slot and the mark reached none of its young ones. If any region would,
+the minor runs today's full sweep instead, which releases it exactly as master does. In master's
+logs no minor lowered the region count (self-compile 0 of 63, mutvec_int 0 of 352: promoting
+every survivor rarely leaves a region empty); in the K2 N1 prototype 105 of mutvec_int's 791
+minors did, so step 2 measures how often the fallback runs.
 
 **The free count.** The footprint floor reads `g_gc_free_after_sweep`, which the staged build
 counts during the walk (`fl_region_commit`). A young-only minor keeps it incrementally: the count
-after the last sweep, minus free-list reuses, plus slots freed, plus inline-tail splits. The reuse
-count is one increment on the reuse path. GENCHECK compares it with a full walk.
+after the last sweep, minus free-list reuses, plus slots it lists, plus inline-tail splits. Only
+listed slots count: in lineage mode (`sprout_gc_lineage_on`) a dead object is poisoned, not listed.
+The reuse count is one increment on the reuse path. GENCHECK compares it with a full walk.
+
+**Scan cost.** A region whose young count is 0 is skipped, so a minor touches only the bitmaps
+of regions that hold young slots, not 1/128 of the whole heap.
 
 **Large objects.** A large object is its own region. Young large objects are recorded the same
 way and freed by a minor, which releases their region as today; a large slot is never on a free
@@ -297,32 +319,48 @@ Each premise has a test or a check that fails when it breaks.
 3. After a collection, an old object points at a young one only if it is remembered, and when the
    next collection is a major the set is empty and no header has bit 13. GENCHECK's reachability
    check catches a missed edge only when it is the only path, so the walk of premise 2 also scans
-   every old, unremembered object's children and aborts on a young one.
+   every old, unremembered object's children and aborts on a young one. It skips OBJ fields that
+   `CtorMeta.field_kinds` marks scalar; for raw words (tuples, closure captures, unregistered
+   OBJs) a scalar equal to a young address is a false positive, reported with owner kind and field
+   index as §14.5 does.
 4. Free-list entries point only into live regions. No ordinary region is released outside a full
    walk (a minor releases a dead young large object's region, which is never on a list).
    `SPROUT_FL_VERIFY=1` checks the lists against a full walk after every collection, and
    `just gc-gen-check` gains a run with it on, beside GENCHECK.
 5. The live prediction equals the post-sweep count — stage 1's GENCHECK count check, with §5.1's
    formula.
-6. The incremental free count equals a full walk's — GENCHECK, at each young-only minor.
+6. The incremental free count equals a full walk's — GENCHECK, at each young-only minor, run
+   with and without `SPROUT_GC_LINEAGE=1`.
+7. A young-only minor never keeps a region that master would release — the emptiness test of
+   §5.3; GENCHECK's walk aborts on an ordinary region left with no live and no poisoned slot.
 
 ## 7. Steps
 
 1. **Young-only sweep and persistent free lists**, behind `SPROUT_GC_MINOR` as today (no new
-   switch: the result must equal stage 1's except for slots visited). Premises 2, 4 and 6 with
-   their checks. Output, collection counts and every cycle line's `threshold` must match master
-   exactly, since the trigger is unchanged and premise 6 keeps its input; `walked` falls. Measure
-   pause and the reuse path's cost with `bench/gc_minor/ab.sh`, reporting region counts (§5.3).
+   switch: the result must equal stage 1's except for slots visited). Premises 2, 4, 6 and 7 with
+   their checks. Output, collection counts and every cycle line's `threshold`, `free` and region
+   counts must match master exactly, since the trigger is unchanged, premise 6 keeps its input and
+   premise 7 keeps region release; `walked` falls. Measure pause, peak RSS and the reuse path's
+   cost with `bench/gc_minor/ab.sh`, reporting region counts (§5.3) and how often a minor fell back
+   to the full sweep.
 2. **Promotion age and nursery size**, together (§4: either alone regresses one workload). Two
    switches for the A/B, `SPROUT_GC_PROMOTE_AGE` and the nursery rule's on/off, premise 3 with
    its check, and the §14.8 workload set by `bench/gc_minor/ab.sh` (≥ 6 interleaved runs per arm)
-   with K ∈ {1, 2, 3}. Footprint is read as peak slots, which do not vary between runs, beside
-   RSS. Pick K, and decide the 2× rule's input (§5.2). Flip only if the §2 goals hold.
+   with K ∈ {1, 2, 3}, reporting peak slots, RSS and pause p50/p90 with each workload's spread.
+   Pick K, and decide the 2× rule's input (§5.2). Flip only if the §2 goals hold.
 3. Retire the switches that step 2 settled, and update `compiler-internals.md` and `gates.md`.
 
 ## 8. On landing
 
-- BACKLOG: step 1 closes "The freelists are still wiped and rebuilt from *all* regions every
-  sweep".
+Step 1:
+- BACKLOG: closes "The freelists are still wiped and rebuilt from *all* regions every sweep".
+- `compiler-internals.md` §Non-moving GC: the freelist paragraph ("rebuilt from scratch each
+  sweep") and the inline-tail paragraph ("safe only because the sweep memsets and rebuilds the
+  lists"); the same claims in `runtime/sprout_runtime.c` at the staged-build comment and
+  `sprout_vec_release_inline_tail`.
+- `gates.md`: `just gc-gen-check`'s FL_VERIFY and lineage runs.
+
+Step 2:
 - `compiler-internals.md` §Minor collections: promotion age, the remembered rule of §5.1 and the
-  nursery rule, at step 2.
+  nursery rule; §Non-moving GC's "Nothing in the collector's behaviour depends on [age]", and the
+  comment at `SPROUT_GC_AGE_MAX`.
