@@ -1,0 +1,22 @@
+module main
+
+# A class reached through an instance context (List's ToString), in a call and
+# as a method value, resolves to the class the constructor packs.
+
+type Pack = | exists a. Pack a where ToString a
+
+fn app2(f: a -> String, v: a) -> String = f(v)
+
+fn in_call(p: Pack) -> String =
+  match p with
+  | Pack x -> to_string([x])
+
+fn as_value(p: Pack) -> String =
+  match p with
+  | Pack x -> app2(to_string, [x])
+
+fn main() -> Unit !{IO} = do
+  print(in_call(Pack(1)))
+  print(as_value(Pack(1)))
+  print(in_call(Pack("q")))
+  print(as_value(Pack("q")))

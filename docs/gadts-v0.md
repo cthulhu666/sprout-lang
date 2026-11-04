@@ -204,8 +204,10 @@ strictly smaller, self-contained feature. So:
   works and two vars of one constructor stay distinct. The existential pattern may
   itself sit inside a tuple or another constructor (`(Pack x, Pack y)`,
   `Just(Pack x)`): infer and lowering share one walk (`ast.map_accum_ctor_patterns`), so
-  each nested unpack binds its own dictionaries, and an `$ex_` slot lowering lacks is a
-  compile-time internal error rather than a null dictionary. Missing-instance construction (`Shown(NoShow)`) is rejected at the
+  each nested unpack binds its own dictionaries. `resolve` walks each arm's pattern the
+  same way and rejects an `$ex_` slot the arm lacks at check ("No instance of `C` for the
+  unpacked existential value"); lowering's panic on one is a backstop for a resolve/lowering
+  disagreement, not a null dictionary. Missing-instance construction (`Shown(NoShow)`) is rejected at the
   construction site with the standard "No instance" diagnostic (§8). **Known gap:**
   an *ambiguous* existential construction whose element type is undetermined
   (`Bag([])` — an empty container) currently surfaces as an opaque ctor-arity

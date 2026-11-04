@@ -23,7 +23,8 @@ import stdlib.string as string
 # uses the instance table, variable head is forwarded. One case is checked anyway:
 # an instance's context at a NAMED variable (`Eq (Maybe a)` needing `Eq a`) that
 # the enclosing declaration does not forward, which lowering could only fill with
-# the poison thunk (#423). See VarCover.
+# the poison thunk (#423). See VarCover. An unpacked existential's `$ex_` head is
+# forwarded only when its match arm's constructor packs the class; any other is rejected.
 #
 # Owns its instance tables (built from the typed decls, exactly like lowering's
 # collect_instance_table / collect_inst_meta).  This is the first brick of the
@@ -324,16 +325,26 @@ fn check_constraint(
       [head_arg | _] = type_args else Nothing
       class_bare = string.after_last_dot(class_name)
   in
-    # Only diagnose constraints whose head is a concrete type constructor
-    # (uppercase head). A lowercase/`_`/non-letter head is a type variable —
-    # forwarded/polymorphic, resolved as a hidden parameter by lowering.
+    # In order: a constraint the declaration or the arm forwards needs nothing; an unpacked
+    # existential's `$ex_` head not forwarded is a class the constructor does not pack, rejected;
+    # any other variable head is forwarded/polymorphic (a hidden parameter in lowering); a
+    # concrete head (uppercase) needs an instance.
     if declares(class_name, type_args, cover) then Nothing
+    else if is_unpacked_existential(head_arg) then Just(unpacked_existential_error(class_name, pos))
     else if head_is_concrete(head_arg) == false then Nothing
     else
       let key = typed_ast.constraint_key_str(class_name, type_args)
       in if instance_exists(class_name, key, head_arg, tables)
          then check_context(key, class_name, head_arg, type_args, pos, cover, tables)
          else Just((pos, "No instance of " ++ class_bare ++ " for " ++ typed_ast.type_expr_head_name(head_arg)))
+
+# An `$ex_` head is an unpacked existential; its arm's packed slots are in the forwarded
+# table, so one not forwarded is a class the constructor does not pack.
+fn is_unpacked_existential(head_arg: ast.TypeExpr) -> Bool =
+  types.is_existential_head(typed_ast.type_expr_head_name(head_arg))
+
+fn unpacked_existential_error(class_name: String, pos: source.SourcePos) -> (source.SourcePos, String) =
+  (pos, "No instance of " ++ string.after_last_dot(class_name) ++ " for the unpacked existential value")
 
 # docs/linearity-bound-v0.md §6.7: a dictionary built from a generic instance
 # instantiates the instance head's variables, which no scheme shows. One the
@@ -544,8 +555,9 @@ fn context_head_bound(ic: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> Bool =
 # Only a variable the declaration's signature names is checked: one the program
 # wrote, or an unannotated parameter's placeholder (`_unann@<fn>/<param>`, named by
 # infer.seed_unann_names). `_` is a free variable no signature named, whose
-# dictionary is never invoked (`to_string(Empty)`), and `$ex_` heads are existential
-# givens, forwarded per match arm rather than per declaration.
+# dictionary is never invoked (`to_string(Empty)`). An `$ex_` head is an existential
+# given: the arm's unpacked slots are in `fwd_keys`, and one missing there is a class
+# the constructor does not pack.
 fn unsupplied_context_var(
   outer_class: String,
   outer_head: ast.TypeExpr,
@@ -558,8 +570,9 @@ fn unsupplied_context_var(
       [head_arg | _] = type_args else Nothing
       class_bare = string.after_last_dot(class_name)
   in
-    if is_checked_var(typed_ast.type_expr_head_name(head_arg)) == false then Nothing
-    else if forwards(class_name, type_args, fwd_keys) then Nothing
+    if forwards(class_name, type_args, fwd_keys) then Nothing
+    else if is_unpacked_existential(head_arg) then Just(unpacked_existential_error(class_name, pos))
+    else if is_checked_var(typed_ast.type_expr_head_name(head_arg)) == false then Nothing
     else Just((pos, "the `" ++ string.after_last_dot(outer_class) ++ "` instance for `"
                       ++ typed_ast.te_display(outer_head) ++ "` "
                       ++ unsupplied_remedy(kind, class_bare, head_arg)))
@@ -890,7 +903,8 @@ fn bound_vars(key: String, owner: String, tables: Tables) -> List BoundVar =
 # Every variant is listed, with no wildcard: a new one stops the build here, so
 # whether it needs a check is decided, not defaulted. A TDict or method reference
 # is checked before its Evidence is built; a node with children is rebuilt by
-# resolve_children. fwd_keys is constant within a body (lambdas add no constraints).
+# resolve_children. fwd_keys is constant within a body except across a match arm, which
+# adds the slots its pattern unpacks (lambdas add no constraints).
 fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
     -> Result(source.SourcePos, String) typed_ast.TypedExpr =
   match e with
@@ -911,7 +925,10 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
   | typed_ast.TUnit _ _ -> Ok(e)
   | typed_ast.TTuple _ _ _ -> resolve_children(e, kind, fwd_keys, tables)
   | typed_ast.TIf _ _ _ _ _ -> resolve_children(e, kind, fwd_keys, tables)
-  | typed_ast.TMatch _ _ _ _ -> resolve_children(e, kind, fwd_keys, tables)
+  | typed_ast.TMatch scrut branches t p ->
+      let s = try resolve_expr(scrut, kind, fwd_keys, tables)
+          bs = try resolve_all(resolve_branch(_, kind, fwd_keys, tables), branches)
+      in Ok(typed_ast.TMatch(s, bs, t, p))
   | typed_ast.TCall _ _ _ _ -> resolve_children(e, kind, fwd_keys, tables)
   | typed_ast.TLambda _ _ _ _ -> resolve_children(e, kind, fwd_keys, tables)
   | typed_ast.TBinary _ _ _ _ _ -> resolve_children(e, kind, fwd_keys, tables)
@@ -927,6 +944,32 @@ fn resolve_expr(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tab
 fn resolve_children(e: typed_ast.TypedExpr, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
     -> Result(source.SourcePos, String) typed_ast.TypedExpr =
   typed_ast.traverse_children(resolve_expr(_, kind, fwd_keys, tables), e)
+
+# A branch body is resolved under the enclosing keys plus the slots its pattern unpacks,
+# as lowering extends its ctx_fwd per arm (lower_branches).
+fn resolve_branch(b: typed_ast.TypedMatchBranch, kind: DeclKind, fwd_keys: Forwarded, tables: Tables)
+    -> Result(source.SourcePos, String) typed_ast.TypedMatchBranch =
+  let typed_ast.TypedMatchBranch pat body = b
+      x = try resolve_expr(body, kind, arm_fwd_keys(pat, fwd_keys, tables), tables)
+  in Ok(typed_ast.TypedMatchBranch(pat, x))
+
+fn arm_fwd_keys(pat: ast.Pattern, fwd_keys: Forwarded, tables: Tables) -> Forwarded =
+  let (_, keys) = ast.map_accum_ctor_patterns(pat, fwd_keys, unpack_slots_at_ctor(_, _, _, _, tables))
+  in keys
+
+# The walk lowering's existential_ctor_build makes: each slot of
+# typed_ast.existential_ctor_slots is forwarded under its `$ex_` binder.
+fn unpack_slots_at_ctor(name: String, fields: List ast.Pattern, ppos: source.SourcePos, acc: Forwarded,
+                        tables: Tables) -> (ast.Pattern, Forwarded) =
+  let pat = ast.ConstructorPattern(name, fields, ppos)
+      Just scheme = dict_get(name, tables_env(tables)) else (pat, acc)
+      slots = typed_ast.existential_ctor_slots(types.scheme_constraints(scheme), ppos.index, tables_super(tables))
+  in (pat, list_fold(add_unpack_slot, acc, slots))
+
+fn add_unpack_slot(acc: Forwarded, slot: (String, String)) -> Forwarded =
+  let (binder, eff) = slot
+      args = typed_ast.existential_slot_args(binder)
+  in add_slot(eff, args, args, acc)
 
 # traverse over Result without its dictionaries or per-element closures. Left to right,
 # stopping at the first Err: the first error reported depends on it. Tail recursive,

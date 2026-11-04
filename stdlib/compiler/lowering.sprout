@@ -1370,7 +1370,7 @@ fn or_existential_panic(key: typed_ast.SlotKey, pos: source.SourcePos, fallback:
   let Just arg = typed_ast.slot_key_sole_arg(key) else fallback
   in if types.is_existential_head(arg)
      then panic("lowering: existential witness `" ++ arg ++ "` at " ++ pos_loc(pos) ++
-                " has no slot — infer/lowering pattern disagreement (internal error)")
+                " has no slot — resolve and lowering disagree on the arm's slots (internal error)")
      else fallback
 
 fn evidence_inst_arities(key: typed_ast.InstanceKey, ctx: LowerCtx) -> Dict (Int, Int) =
@@ -1554,7 +1554,8 @@ fn existential_ctor_build(name: String, fields: List ast.Pattern, ppos: source.S
      | cons ->
          (ast.ConstructorPattern(name,
             list_append(fields, witness_patterns_for(cons, ppos, ctx.env.class_order, ctx.env.super_map)), ppos),
-          ctx_with_fwd(seed_fwd_for_cons(cons, ppos, ctx.fwd, ctx.env.class_order, ctx.env.super_map), ctx))
+          ctx_with_fwd(seed_fwd_for_cons(typed_ast.existential_ctor_slots(cons, ppos.index, ctx.env.super_map),
+                                         ctx.fwd, ctx.env.class_order), ctx))
 
 # One appended witness pattern PER SLOT — per method across the constraint's class
 # and its transitive superclasses, in types.witness_slots_for_class order, which
@@ -1584,36 +1585,19 @@ fn slot_patterns_for(binder: String, slots: List (String, String), ppos: source.
 fn witness_slot_var(vname: String, eff: String, method: String) -> String =
   string_concat_many(["$wtns_", vname, "_", string.after_last_dot(eff), "_", string.after_last_dot(method)])
 
-fn seed_fwd_for_cons(cons: List (String, String), ppos: source.SourcePos, fwd: typed_ast.SlotTable (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> typed_ast.SlotTable(Dict String) =
-  match cons with
+# Seed ONE ctx_fwd block per (binder, effective class) of typed_ast.existential_ctor_slots, so
+# a superclass method call on the unpacked value — which resolve emits as EvForward under the
+# SUPER's key — finds its packed witness. Each block maps that class's methods to their per-slot
+# binders, keyed as resolve's EvForward key and consume_block's lookup are.
+fn seed_fwd_for_cons(slots: List (String, String), fwd: typed_ast.SlotTable (Dict String), class_order: Dict (List String)) -> typed_ast.SlotTable(Dict String) =
+  match slots with
   | Nil -> fwd
-  | Cons entry rest ->
-      match entry with
-      | (existv, class_name) ->
-          seed_fwd_for_cons(rest, ppos,
-            seed_one_fwd(types.existential_binder(existv, ppos.index), class_name, fwd, class_order, super_map),
-            class_order, super_map)
-
-# Seed ONE ctx_fwd block per effective class (the constraint's class + its
-# transitive superclasses) so a superclass method call on the unpacked value —
-# which resolve emits as EvForward under the SUPER's key — finds its packed
-# witness. Each block maps that class's methods to their per-slot binders, keyed
-# by typed_ast.dict_slot_key(<eff>, [$ex_<binder>]) so it matches resolve's EvForward key
-# and consume_block's lookup.
-fn seed_one_fwd(binder: String, class_name: String, fwd: typed_ast.SlotTable (Dict String), class_order: Dict (List String), super_map: Dict (List String)) -> typed_ast.SlotTable(Dict String) =
-  # class_name as-is, to match super_map's keys and the effective classes
-  # witness_slots_for_class enumerates.
-  seed_eff_fwd_blocks(types.class_with_transitive_supers(class_name, super_map), binder, class_order, fwd)
-
-fn seed_eff_fwd_blocks(effs: List String, vname: String, class_order: Dict (List String), fwd: typed_ast.SlotTable (Dict String)) -> typed_ast.SlotTable(Dict String) =
-  match effs with
-  | Nil -> fwd
-  | Cons eff rest ->
-      seed_eff_fwd_blocks(rest, vname, class_order,
-        typed_ast.slot_set(typed_ast.dict_slot_key(eff,
-                                   Cons(ast.TypeName(types.existential_fwd_head(vname)), Nil)),
-                 eff_method_witness_map(eff, types.class_methods_for(eff, class_order), vname, dict_empty()),
-                 fwd))
+  | Cons (binder, eff) rest ->
+      seed_fwd_for_cons(rest,
+        typed_ast.slot_set(typed_ast.existential_slot_key(eff, binder),
+                 eff_method_witness_map(eff, types.class_methods_for(eff, class_order), binder, dict_empty()),
+                 fwd),
+        class_order)
 
 fn eff_method_witness_map(eff: String, methods: List String, vname: String, acc: Dict String) -> Dict String =
   match methods with
