@@ -8,6 +8,7 @@
 #   compiler — the seed compiler emitting stdlib/compiler/ast_to_ir.sprout (wall and peak RSS too)
 #   galaxy, system — uncharted-suns game/app.sprout, 1,200 frames, muted; `system` starts in-system
 #                    (perf.py's `belt` flags). Needs UNSUNS_DIR and UNSUNS_CATALOG, a display and a GPU.
+# Both arms pin SPROUT_GC_MINOR=0: the trigger is measured without minor collections.
 # Runs interleave arms (floor, off, floor, off, …) so drift lands on both. GC cost is reported per
 # allocation, because the game's allocation volume varies several-fold between runs.
 #
@@ -76,7 +77,7 @@ set_arm() { ARM_ENV=(); [ "$1" = off ] && ARM_ENV=(SPROUT_GC_THRESHOLD=4096); re
 run_compiler() { # <arm> <rep>
   local log="$OUT/compiler.$1.$2"
   set_arm "$1"
-  env -u SPROUT_GC_THRESHOLD ${ARM_ENV[@]+"${ARM_ENV[@]}"} SPROUT_DEBUG_GC=1 /usr/bin/time "$TIME_FLAG" \
+  env -u SPROUT_GC_THRESHOLD ${ARM_ENV[@]+"${ARM_ENV[@]}"} SPROUT_GC_MINOR=0 SPROUT_DEBUG_GC=1 /usr/bin/time "$TIME_FLAG" \
     "$COMPILER" --emit-ir "$REPO/stdlib" "$REPO/stdlib/compiler/ast_to_ir.sprout" \
     > /dev/null 2> "$log.gc" || { echo "ERROR: compiler run failed ($1 $2)" >&2; tail -3 "$log.gc" >&2; return 1; }
   grep -v '^\[sprout gc\]' "$log.gc" > "$log.time"
@@ -91,7 +92,7 @@ run_game() { # <scene> <arm> <rep>
   set_arm "$2"
   # `mise exec -- env` so SPROUT_ROOT here wins over one the game repo's mise config sets.
   (cd "$UNSUNS_DIR" && mise exec -- env -u SPROUT_GC_THRESHOLD SPROUT_ROOT="$REPO" ${ARM_ENV[@]+"${ARM_ENV[@]}"} \
-    SPROUT_AUDIO_MUTE=1 SPROUT_DEBUG_GC=1 SPROUT_GFX_MAX_FRAMES=1200 \
+    SPROUT_GC_MINOR=0 SPROUT_AUDIO_MUTE=1 SPROUT_DEBUG_GC=1 SPROUT_GFX_MAX_FRAMES=1200 \
     just run-gfx game/app.sprout "$UNSUNS_CATALOG" ${flags[@]+"${flags[@]}"}) > "$log" 2>&1 \
     || { echo "ERROR: game run failed ($1 $2 $3)" >&2; tail -3 "$log" >&2; return 1; }
   grep -q ' free=' "$log" || { echo "ERROR: $log has no free= field — the game linked another runtime" >&2; return 1; }

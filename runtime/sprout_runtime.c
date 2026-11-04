@@ -686,8 +686,8 @@ static void sprout_gc_log_cycle(
 ) {
   if (!g_debug_gc_enabled) return;
   /* walked= and free= go last: bench/gc_pause/pause_stats.py reads swept= and
-     elapsed_us= as adjacent fields.  kind= follows them, and only under
-     SPROUT_GC_MINOR=1, so the line is unchanged with the mode off. */
+     elapsed_us= as adjacent fields.  kind= follows them, and only with
+     the mode on (the default), so SPROUT_GC_MINOR=0 leaves the line unchanged. */
   fprintf(
     stderr,
     "[sprout gc] cycle=%lld reason=%s threshold=%lld heap_before=%lld heap_after=%lld live=%lld roots=%lld marked=%lld alloc_since_gc=%lld swept=%lld elapsed_us=%lld arena_regions=%lld overflow_regions=%lld walked=%lld free=%lld%s\n",
@@ -766,7 +766,7 @@ __attribute__((noreturn, cold, noinline)) void sprout_str_check_fail(int enterin
 /* ── Inline heap header (64-bit word at payload_ptr - 8) ────────────────────
  * Layout: bits 0-7  = SproutHeapKind (kind)
  *         bit 8     = GC color: marked during a collection; "old" between
- *                     collections under SPROUT_GC_MINOR=1, clear otherwise
+ *                     collections (the default), clear under SPROUT_GC_MINOR=0
  *         bits 9-12 = age (SPROUT_GC_AGE_*)
  *         bit 13    = REMEMBERED (SPROUT_GC_REMEMBERED_BIT)
  *         bits 14-63 = aux (50 bits); interpretation per kind:
@@ -933,13 +933,13 @@ static inline void sprout_wl_free(SproutWorklist* wl) {
  *
  * The collector state a per-domain heap would own.  The remembered set holds the
  * payloads of objects whose REMEMBERED bit is set, each once.  A minor collection
- * (SPROUT_GC_MINOR=1, sprout_gc_collect_with_reason) reads and empties it.  With
+ * (sprout_gc_collect_with_reason, unless SPROUT_GC_MINOR=0) reads and empties it.  With
  * the mode off the sweep clears every color bit, so between collections no object
  * is old and the barrier's fast path always exits.  Not thread-safe, like the
  * rest of the heap. */
 typedef struct {
   SproutWorklist remembered;     /* payload pointers */
-  int       on;                  /* SPROUT_GC_MINOR=1; set by sprout_gc_gen_init */
+  int       on;                  /* minor collections; SPROUT_GC_MINOR, set by sprout_gc_gen_init */
   int       check;               /* SPROUT_GC_GENCHECK=1; read only when `on` */
   long long major_every;         /* SPROUT_GC_MAJOR_EVERY: minors between majors */
   long long baseline;            /* heap count after the last major */
@@ -951,12 +951,15 @@ typedef struct {
 static SproutGenState g_gen = { .major_every = 19, .colorless = 1 };
 
 /* Reads the generational switches at startup (sprout_set_argv), so a bad value fails before
- * the program runs, not inside the atexit collection.  SPROUT_GC_GENCHECK and
- * SPROUT_GC_MAJOR_EVERY are read only with SPROUT_GC_MINOR=1, so a bad value is ignored while
- * the mode is off.  SPROUT_GC_MAJOR_EVERY=0 makes every collection a major. */
+ * the program runs, not inside the atexit collection.  SPROUT_GC_MINOR is on when unset or
+ * empty, `1` is on, `0` is off, and anything else fails.  SPROUT_GC_GENCHECK and
+ * SPROUT_GC_MAJOR_EVERY are read only with the mode on, so a bad value is ignored while it is
+ * off.  SPROUT_GC_MAJOR_EVERY=0 makes every collection a major. */
 static void sprout_gc_gen_init(void) {
   const char* m = getenv("SPROUT_GC_MINOR");
-  g_gen.on = (m != NULL && m[0] == '1');
+  if (m == NULL || m[0] == '\0' || strcmp(m, "1") == 0) g_gen.on = 1;
+  else if (strcmp(m, "0") == 0) g_gen.on = 0;
+  else sprout_fail("SPROUT_GC_MINOR: expected 0 or 1");
   if (!g_gen.on) return;
   const char* c = getenv("SPROUT_GC_GENCHECK");
   g_gen.check = (c != NULL && c[0] == '1');
@@ -2486,7 +2489,7 @@ static inline void gc_mark_wl_push(void* payload) {
 
 static void gc_mark_enqueue(void* payload) {
   if (payload == NULL) return;
-  /* Color bit in header (bit 8): marked this cycle or, under SPROUT_GC_MINOR, old. */
+  /* Color bit in header (bit 8): marked this cycle or, with minor collections on, old. */
   void* hdr_ptr = (char*)payload - 8;
   uint64_t h; memcpy(&h, hdr_ptr, 8);
   if (h & SPROUT_GC_COLOR_BIT) return;  /* already marked */
@@ -2585,7 +2588,7 @@ static inline void sprout_gc_mark_roots(SproutRootVisit visit) {
   }
 }
 
-/* ── Minor collections (SPROUT_GC_MINOR=1, docs/gc-generational-v0.md §14.4) ─────
+/* ── Minor collections (on by default, docs/gc-generational-v0.md §14.4) ─────────
  *
  * Between collections the color bit means OLD, except when `colorless` is set (the sweep
  * cleared it because the next collection is a major).  gc_mark_enqueue stops at a set color
@@ -3081,7 +3084,7 @@ static void sprout_fl_verify_against_full_walk(void) {
  * onto the per-class freelists.  Pass 2: release every region with no live and
  * no poison, dropping its staged freelist entries.  There is no third pass —
  * the freelists are complete when Pass 1 ends. */
-/* `keep_color`: a survivor keeps its color bit, which then means old (SPROUT_GC_MINOR).
+/* `keep_color`: a survivor keeps its color bit, which then means old (minor collections).
  * Otherwise the sweep clears it and no object is old between collections. */
 static void sprout_gc_sweep(int keep_color) {
   const uint64_t clear_color = keep_color ? 0 : SPROUT_GC_COLOR_BIT;
@@ -3389,7 +3392,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   SPROUT_PROF_COLD(g_prof_cycles++);
   SPROUT_PROF_COLD(g_prof_mark_slots += (unsigned long long)root_count);
   g_gc_marked_count = 0;
-  /* SPROUT_GC_MINOR=1: a minor marks only young objects (plus what the remembered set
+  /* With minor collections on, a minor marks only young objects (plus what the remembered set
      reaches); a major marks everything.  The kind of the NEXT collection is known before
      the sweep, so when it is a major the sweep clears the color bits itself and that major
      needs no clear walk.  Only a major after a color-keeping sweep (atexit) clears first.

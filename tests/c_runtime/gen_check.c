@@ -1,5 +1,5 @@
 /* Minor collections and the GENCHECK verifier (docs/gc-generational-v0.md §14.4, §14.5), driven
- * directly under SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1.
+ * directly with the mode on (the default) and SPROUT_GC_GENCHECK=1.
  *
  * An object is made old the real way: rooted across the first collection (a major, which keeps
  * the colour bit on every survivor). The runtime is included so the cases reach the static
@@ -19,6 +19,9 @@
  *                     sprout_set_argv, before any collection.
  *   bad_every_late  — the same, where the program's only collection is the atexit one: the abort
  *                     must come before the program prints anything.
+ *   default_on      — SPROUT_GC_MINOR unset turns the mode on, so a rooted survivor of a
+ *                     collection is old; empty_on, the same when it is empty.
+ *   bad_minor       — SPROUT_GC_MINOR=yes aborts at startup, in sprout_set_argv.
  *   major_every     — SPROUT_GC_MAJOR_EVERY=3: a major follows every three minors.
  *   clear_before_major — SPROUT_GC_MAJOR_EVERY=1: the minor's sweep clears every colour bit
  *                     because the next collection is a major; the barrier then remembers nothing,
@@ -155,6 +158,24 @@ static int bad_every_off(void) {
   return g_failed;
 }
 
+static int default_on(void) {
+  long long r = make_old_ref();  /* survivors are old only with the mode on */
+  check(g_gen.on == 1, "SPROUT_GC_MINOR unset turns the mode on");
+  check(is_old(r), "a rooted survivor stays old, so the mode is live");
+  return g_failed;
+}
+
+static int empty_on(void) {
+  check(g_gen.on == 1, "SPROUT_GC_MINOR empty turns the mode on");
+  return g_failed;
+}
+
+static int bad_minor(void) {
+  /* Not reached: sprout_set_argv aborts on the bad SPROUT_GC_MINOR. */
+  fprintf(stderr, "bad_minor: no abort\n");
+  return 1;
+}
+
 static int bad_every_on(void) {
   /* Not reached: sprout_set_argv aborts on the bad SPROUT_GC_MAJOR_EVERY. */
   fprintf(stderr, "bad_every_on: no abort\n");
@@ -178,7 +199,7 @@ static int no_check(void) {
 typedef struct {
   const char* name;
   int (*fn)(void);
-  const char* minor;        /* SPROUT_GC_MINOR */
+  const char* minor;        /* SPROUT_GC_MINOR, or NULL to leave it unset */
   int gencheck;             /* set SPROUT_GC_GENCHECK=1 */
   const char* major_every;  /* SPROUT_GC_MAJOR_EVERY, or NULL to leave it unset */
 } GenCase;
@@ -194,6 +215,9 @@ static const GenCase k_cases[] = {
   { "bad_every_off",   bad_every_off,   "0", 1, "abc" },
   { "bad_every_on",    bad_every_on,    "1", 1, "abc" },
   { "bad_every_late",  bad_every_late,  "1", 1, "abc" },
+  { "default_on",      default_on,      NULL, 0, NULL },
+  { "empty_on",        empty_on,        "", 0, NULL },
+  { "bad_minor",       bad_minor,       "yes", 0, NULL },
 };
 
 int main(int argc, char** argv) {
@@ -203,9 +227,12 @@ int main(int argc, char** argv) {
     if (strcmp(argv[1], k_cases[i].name) == 0) c = &k_cases[i];
   if (!c) return 2;
   setenv("SPROUT_GC_LINEAGE", "0", 1);
-  setenv("SPROUT_GC_MINOR", c->minor, 1);
+  if (c->minor) setenv("SPROUT_GC_MINOR", c->minor, 1);
+  else unsetenv("SPROUT_GC_MINOR");
   if (c->gencheck) setenv("SPROUT_GC_GENCHECK", "1", 1);
+  else unsetenv("SPROUT_GC_GENCHECK");
   if (c->major_every) setenv("SPROUT_GC_MAJOR_EVERY", c->major_every, 1);
+  else unsetenv("SPROUT_GC_MAJOR_EVERY");
   sprout_set_argv(argc, argv);  /* reads the switches, as a compiled program's main does */
   if (c->fn() || g_failed) return 1;
   printf("gen-check-%s\n", c->name);

@@ -206,10 +206,8 @@ int main(int argc, char** argv) {
   if (!c) return 2;
   setenv("SPROUT_GC_LINEAGE", "0", 1);
   setenv("SPROUT_GC_HDRCHECK", "1", 1);
-  if (c->minor) {
-    setenv("SPROUT_GC_MINOR", "1", 1);
-    setenv("SPROUT_GC_GENCHECK", "1", 1);
-  }
+  setenv("SPROUT_GC_MINOR", c->minor ? "1" : "0", 1);
+  if (c->minor) setenv("SPROUT_GC_GENCHECK", "1", 1);
   sprout_set_argv(argc, argv);  /* reads the switches, as a compiled program's main does */
   if (c->fn() || g_failed) return 1;
   printf("vec-noscan-%s\n", c->name);

@@ -1,13 +1,13 @@
 # Scalar stores through `MutVec` wrappers lower inline, with no barrier — v0
 
-**Status — steps 1 and 2 landed; step 3 (measurement) next.** Non-normative: an optimisation, with no syntax, typing or
+**Status — all steps landed.** Non-normative: an optimisation, with no syntax, typing or
 evaluation-order change, so `spec-v0.md` is untouched. It is
 [gc-generational-v0.md](gc-generational-v0.md) §14.8 step 6, and it replaces the store half of
 [accessor-inliner-design-2026-07-11.md](accessor-inliner-design-2026-07-11.md).
 
 ## 1. Problem
 
-Under `SPROUT_GC_MINOR=1` every `vector_mutset` runs the write barrier, whatever it stores. A
+With minor collections on, every `vector_mutset` runs the write barrier, whatever it stores. A
 `MutVec Int` that has survived a collection is then remembered on its first write and rescanned
 whole at every minor, though no slot holds a pointer. astar keeps two 10,000-element `MutVec Int`:
 its pause rises 1.6× and its GC time 1.5× against mode off
@@ -240,4 +240,5 @@ the larger and more frequent run.
    calls) and 2.~~
 2. ~~Shared recognisers module (`vec_wrappers.sprout`); the expansion pass behind `Wsi`
    (`wsi.sprout`); the rest of tests 1 and 3; `compiler-internals.md`.~~
-3. Test 4, and the results file.
+3. ~~Test 4, and the results file.~~ Landed:
+   [results-2026-11-04-gc-minor-pfv.md](../bench/results-2026-11-04-gc-minor-pfv.md).

@@ -1,8 +1,8 @@
 # Pointer-free vectors — v0
 
-**Status — steps 1–4 landed (§7); step 5 open.** Non-normative: an optimisation, with no syntax,
-typing or evaluation-order change, so `spec-v0.md` is untouched. It blocks
-[gc-generational-v0.md](gc-generational-v0.md) §14.8's flip of `SPROUT_GC_MINOR`.
+**Status — steps 1–5 landed (§7).** Non-normative: an optimisation, with no syntax,
+typing or evaluation-order change, so `spec-v0.md` is untouched. It preceded
+[gc-generational-v0.md](gc-generational-v0.md) §14.8's flip of `SPROUT_GC_MINOR`, which has landed.
 
 ## 1. Problem
 
@@ -313,5 +313,6 @@ any layout.
      `opt_config.implemented(Scalar)`.~~ Landed (`test_scalar_copies.spr`,
      `tests/stdlib/test_vec_noscan_copies.spr` in `just test-stress`'s list, the copy and dce
      fixtures of `just noscan-gate`, the store check of `just linvec-smoke`). Measured in §6.1.
-5. Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the
-   flip.
+5. ~~Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the
+   flip.~~ Landed: [results-2026-11-04-gc-minor-pfv.md](../bench/results-2026-11-04-gc-minor-pfv.md);
+   `SPROUT_GC_MINOR` is on by default.

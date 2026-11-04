@@ -388,8 +388,8 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   *slower*). Build it as a compiler/self-hosting optimisation or not at all. Barrier surface is
   `ref_write` + `vector_mutset` + `vector_push` and must be TYPED, not unconditional; non-moving
   caps the churn workloads regardless (Immix §5.3); the remembered set must be per-domain-shaped
-  from day one. `docs/gc-generational-v0.md`. **Stage 1 designed 2026-10-31 (§14):** sticky
-  marks, an object barrier at six sites (§7 re-derived), and a `SPROUT_GC_GENCHECK` verifier.
+  from day one. `docs/gc-generational-v0.md`. **Stage 1 (§14) is on by default (2026-11-04);**
+  open: §14.6, a minor sweep proportional to the young set (RSS up to 1.25, mutvec_int's pauses).
 - [ ] `P2` **GC-safety tooling follow-ups.** (5) Single source of truth for operand protection —
   `op_exposes_operands` is a hand-maintained list that can drift from runtime reality. (6) A
   GC-safety linter at the IR-rooting layer, modelling "allocates-then-stores ⇒ heap operands must

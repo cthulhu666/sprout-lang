@@ -1025,7 +1025,10 @@ that never returns.
 Calibrates `SPROUT_GC_AGEPROF=1` against two workloads with known answers. Details and the
 current bounds: [gc-generational-v0.md](gc-generational-v0.md) §4. It also checks the store
 counters' build flag: a default runtime reports them as `off`, and one built with
-`-DSPROUT_GC_AGEPROF_STORES` counts `test_mutvec_sort`'s stores.
+`-DSPROUT_GC_AGEPROF_STORES` counts `test_mutvec_sort`'s stores. It pins `SPROUT_GC_MINOR=0`,
+like the other gates that read whole-heap marks or exact cycle counts: a minor does not re-mark
+old objects, so `marked_total` stops measuring the live set (rule:
+[compiler-internals.md §Non-moving GC](compiler-internals.md)).
 
 ### An absolute ratio tracked the number of rooted globals, not what the gate measured
 
@@ -1098,17 +1101,28 @@ same deletion on its first cycle (walked 4,076 < 10 + 4,086).
 sparse answer needs (25 → 2.8 slots per object swept), and the pin turns the floor off. 4096 is the
 default, so the readings are the ones above. `gc-trigger-check` tests the floor itself.
 
+**It pins `SPROUT_GC_MINOR=0`.** With minor collections on, the sparse probe collects 8 times, not
+88: a minor keeps dead old objects in the heap count, so the adaptive target outruns the pinned
+threshold. It walked 873,028 slots for 373,592 swept (2.3 per object), under the ≥10 bound.
+
 ## Trigger footprint floor — `just gc-trigger-check`
 
 Tests the floor [gc-trigger-v0.md](gc-trigger-v0.md) §6.2 adds to the threshold, under the default
 trigger. Two known answers: `test_gc_walk_sparse` walks fewer than 4 slots per object swept (2.77
-at landing, 25 with the floor off), and `test_gc_trigger_adversary`'s free pool (`free=` on the
-cycle line) grows by at most 2% over the second half of the run (150,802 → 150,842).
+at landing, 25 with the floor off) with minor collections off, since with them on it passes
+without the floor (2.3), and `test_gc_trigger_adversary`'s footprint (`free=` plus
+`heap_after=` on the cycle line) grows by at most 2% over the second half of the run, with minor
+collections on (177,604 → 177,712) and off (152,435 → 152,557).
 
 **The second probe is there to fail the floor that looks right.** Counting free slots only in
 classes with allocation demand diverges on that fixture, and so does the floor without its `/ 3`.
 With the divisor at 1, the pool grew 210,570 → 718,250 and the gate went red; the first probe
 stayed green.
+
+**Footprint, not `free=` alone.** Under minors, dead old objects stay in the heap count until a
+major, which moves them to the free pool: the adversary's `free=` steps 139,623 → 175,944 at its
+first major after the build while free plus heap stays at ~177,600. The divisor-1 floor still fails
+in both modes (212,145 → 720,005).
 
 ## Optimisation-pass harness — `just opt-harness-check`
 

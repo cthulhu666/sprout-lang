@@ -66,6 +66,8 @@ def main():
     label, binary = argv[0], argv[1]
 
     env = dict(os.environ, SPROUT_DEBUG_GC="1")
+    # Major-only pauses reproduce §13; pass SPROUT_GC_MINOR=1 as an argument to measure minors.
+    env.setdefault("SPROUT_GC_MINOR", "0")
     for kv in argv[2:]:
         key, value = kv.split("=", 1)
         env[key] = value
