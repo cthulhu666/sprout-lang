@@ -640,6 +640,27 @@ export type SlotKey deriving (Eq) =
 export fn dict_slot_key(class_name: String, args: List ast.TypeExpr) -> SlotKey =
   SlotKey(class_name, list_map(slot_key_arg, args))
 
+# The arguments of the slot an unpacked existential's constraint is forwarded under, and
+# its key. Resolve and lowering both build their per-arm slots through these, so a slot
+# one pass records is the slot the other looks up.
+export fn existential_slot_args(binder: String) -> List ast.TypeExpr =
+  [ast.TypeName(types.existential_fwd_head(binder))]
+
+export fn existential_slot_key(eff: String, binder: String) -> SlotKey =
+  dict_slot_key(eff, existential_slot_args(binder))
+
+# The (binder, effective class) pairs a constructor pattern at index `index` unpacks: one per
+# constraint class and its transitive superclasses. Resolve and lowering both seed from it.
+export fn existential_ctor_slots(cons: List (String, String), index: Int,
+                                 super_map: Dict (List String)) -> List (String, String) =
+  list_flat_map(existential_constraint_slots(_, index, super_map), cons)
+
+fn existential_constraint_slots(constraint: (String, String), index: Int,
+                                super_map: Dict (List String)) -> List (String, String) =
+  let (existv, class_name) = constraint
+      binder = types.existential_binder(existv, index)
+  in list_map(\eff -> (binder, eff), types.class_with_transitive_supers(class_name, super_map))
+
 export fn slot_key_text(key: SlotKey) -> String =
   match key with
   | SlotKey class_name args -> string.join("_", Cons(class_name, args))

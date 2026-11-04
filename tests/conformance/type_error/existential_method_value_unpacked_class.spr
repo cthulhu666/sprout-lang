@@ -1,0 +1,21 @@
+module main
+
+# A method of a class the constructor does not pack, used as a value on the
+# unpacked existential, has no instance.
+
+class Step t
+  fn bump(x: t) -> t
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+
+type Pack = | exists a. Pack a where ToString a
+
+fn app(f: a -> a, v: a) -> a = f(v)
+
+fn show(p: Pack) -> String =
+  match p with
+  | Pack x -> to_string(app(bump, x))
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(show(Pack(1)))

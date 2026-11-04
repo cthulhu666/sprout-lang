@@ -1,0 +1,19 @@
+module main
+
+# ToString is reached through List's instance context, but the constructor
+# packs only Step, so the unpacked existential has no ToString.
+
+class Step t
+  fn bump(x: t) -> t
+
+instance Step Int
+  fn bump(x: Int) -> Int = x + 1
+
+type Pack = | exists a. Pack a where Step a
+
+fn show(p: Pack) -> String =
+  match p with
+  | Pack x -> to_string([bump(x)])
+#~^ ERROR
+
+fn main() -> Unit !{IO} = print(show(Pack(1)))

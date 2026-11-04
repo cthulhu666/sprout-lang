@@ -1314,7 +1314,11 @@ for `T`" error (§8). Matching binds the value at the abstract existential type
 dispatches through the packed witness — each element renders as its own concrete
 type would. A **multi-method** class packs one witness per method, and a class
 **with superclasses** packs its transitive-superclass methods too, so an inherited
-(superclass) method also dispatches on the unpacked value.
+(superclass) method also dispatches on the unpacked value. A method of class `C` on the
+unpacked value, whether called, passed as a value, or required by an instance context
+(`to_string([x])` needs `ToString` for `x`), is accepted only when the constructor packs
+`C` or a class with `C` as a superclass; otherwise it is rejected with "No instance of `C`
+for the unpacked existential value".
 
 **Explicit `exists … where` prefix.** The same feature is also spelled with an
 explicit constructor-level `exists` prefix and a trailing **`where`** constraint
