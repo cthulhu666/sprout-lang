@@ -194,16 +194,6 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.linvec.new(i64 %p$n, i64 %p$x) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$x, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$x)
-  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$0
-}
-
 define i64 @stdlib.linvec.get(i64 %p$i, i64 %p$v) {
 entry:
   br label %arm_0_0
@@ -614,7 +604,7 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 0
   %t$3 = add i64 0, 0
-  %t$4 = call i64 @stdlib.linvec.new(i64 %p$n, i64 %t$3)
+  %t$4 = call i64 @stdlib.linvec.new$Bool(i64 %p$n, i64 %t$3)
   %t$28$0 = getelementptr i64, ptr %t$28, i64 0
   store i64 %t$4, ptr %t$28$0
   %t$5 = add i64 0, 2
@@ -640,7 +630,7 @@ ovfpanic_10:
   unreachable
 ovfok_10:
   %t$13 = add i64 0, 0
-  %t$14 = call i64 @stdlib.linvec.new(i64 %t$10, i64 %t$13)
+  %t$14 = call i64 @stdlib.linvec.new$Bool(i64 %t$10, i64 %t$13)
   %t$28$1 = getelementptr i64, ptr %t$28, i64 1
   store i64 %t$14, ptr %t$28$1
   %t$15 = add i64 0, 2
@@ -666,7 +656,7 @@ ovfpanic_20:
   unreachable
 ovfok_20:
   %t$23 = add i64 0, 0
-  %t$24 = call i64 @stdlib.linvec.new(i64 %t$20, i64 %t$23)
+  %t$24 = call i64 @stdlib.linvec.new$Bool(i64 %t$20, i64 %t$23)
   %t$30 = alloca i64
   store i64 %t$24, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
@@ -984,6 +974,17 @@ entry:
   %t$0 = call i64 @__tc_ToString_String_to_string(i64 %p$value)
   %t$1 = call i64 @print_str(i64 %t$0)
   ret i64 %t$1
+}
+
+define i64 @stdlib.linvec.new$Bool(i64 %p$n, i64 %p$x) {
+entry:
+  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$x)
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  ret i64 %t$0
 }
 
 define i64 @__tc_ToString_String_to_string(i64 %p$value) {

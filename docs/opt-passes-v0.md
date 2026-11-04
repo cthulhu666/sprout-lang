@@ -11,7 +11,7 @@ happened; `spec-v0.md` is untouched, as planned.
 | **M3** — LLVM `declare` attributes / LTO | **open**, untouched by this arc. `BACKLOG.md` |
 | **BCE** — bounds-check elimination | **landed, stage 1**, a typed-AST pass under `SPROUT_OPT_OFF=bce`: [bounds-check-elimination-v0.md](bounds-check-elimination-v0.md) |
 | **WSI** — wrapper store inline | **landed**, a typed-AST pass under `SPROUT_OPT_OFF=wsi`: a scalar store through a wrapper such as `mutvec_set` becomes a direct inline `vector_mutset`, with no barrier: [scalar-store-inline-v0.md](scalar-store-inline-v0.md) |
-| **Scalar copies** — per-scalar copies of vector-creating generics | **dry run**, a typed-AST pass: reports the copies it would make (`SPROUT_TRACE_SCALAR=1`), changes no program yet, so `SPROUT_OPT_OFF=scalar` warns that it is not implemented: [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md) §4.3 |
+| **Scalar copies** — per-scalar copies of vector-creating generics | **landed**, a typed-AST pass: a generic function that creates a vector (`vec_map`, `mutvec_new`, …) gets a copy per `Int`/`Double`/`Bool`/`Char` instantiation (`vec_map$Int`), calls and value references are retargeted, and the copy's vector is flagged NOSCAN. `SPROUT_OPT_OFF=scalar` turns it off, `SPROUT_TRACE_SCALAR=1` lists the copies: [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md) §4.3 |
 
 **What this arc established, in one line:** the two passes it set out to add turned out not to be
 worth adding, and the instrument that proved it is the durable result. DLE removes zero nodes from

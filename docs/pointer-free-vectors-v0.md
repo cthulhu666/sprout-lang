@@ -1,8 +1,8 @@
 # Pointer-free vectors — v0
 
-**Status — proposed.** Non-normative: an optimisation, with no syntax, typing or evaluation-order
-change, so `spec-v0.md` is untouched. It blocks [gc-generational-v0.md](gc-generational-v0.md)
-§14.8's flip of `SPROUT_GC_MINOR`.
+**Status — steps 1–4 landed (§7); step 5 open.** Non-normative: an optimisation, with no syntax,
+typing or evaluation-order change, so `spec-v0.md` is untouched. It blocks
+[gc-generational-v0.md](gc-generational-v0.md) §14.8's flip of `SPROUT_GC_MINOR`.
 
 ## 1. Problem
 
@@ -125,7 +125,9 @@ analysis service) pass through it. There a node type names its variables through
    function's own variable (`fn twin(x: a, y: a)` called inside a generic body).
 3. **Which variables matter.** Type variable `a` of a candidate `f` is *creating* when `f`'s body
    calls a creating extern at element type `a`, or calls or references a candidate whose creating
-   variable is instantiated to `a`. A fixpoint over the call graph.
+   variable is instantiated to `a`. A fixpoint over the call graph. One function,
+   `scalar_copies.site_key`, decides whether a site has a key, so this analysis and the
+   retargeting in point 5 cannot disagree.
 4. **Keys.** A key is `f` plus a non-heap scalar for each creating variable, in signature order.
    The copy is named `f$<T1>_<T2>…` (`vec_map$Int`). `$` cannot appear in a source name, module
    qualification is a dot prefix, and `specialise`'s copies are `…$spec_…`, so no name collides.
@@ -133,7 +135,8 @@ analysis service) pass through it. There a node type names its variables through
    any other instantiation keeps the original. Only unconstrained references reach this step:
    `infer.value_ref_eta` already eta-expands a constrained function in value position.
 5. **Copies.** A copy is `f` with those variables substituted in its written signature and node
-   types. The pass has its own walker: `specialise.make_copy` is private and keyed by evidence. It
+   types. Retargeting uses `site_key` too, so a site is rewritten exactly when the analysis
+   admitted its key. The pass has its own walker: `specialise.make_copy` is private and keyed by evidence. It
    reuses the exported `spec_keys.sub_type`, `sub_param` and `Subst`. A copy's body is walked like
    the program, which admits the keys it calls. Keys are finite (candidates × four scalars per
    creating variable): a recursive call at a larger type such as `Vec a` is not a scalar
@@ -159,8 +162,10 @@ type-variable identity survives lowering is unproven.
 narrowed to one fact. Of §5's three obstacles to copying by representation, the first two do not
 apply: the type substituted is the real one, and `Vec`'s field is a heap pointer either way. The
 third does: a copy of a `stdlib.linvec` body could put a `vector_mutset` where `bce` assumes none.
-Today's `linvec` creators contain no store; §6.4 adds `just linvec-smoke`, which fails if one
-appears.
+Today's `linvec` creators contain no store; `just linvec-smoke` fails if a copied creator
+(`linvec.new$Int`, `from_vec$Double`, …) has a `store` that is neither to a stack slot nor the
+NOSCAN flag write, or a `call` outside an allowlist of creating externs and runtime helpers. It
+is an allowlist because a store can be lowered inline or sit behind a wrapper (`linvec.set`).
 
 **A copy is not only a renamed body.** `ast_to_ir` keys several decisions on concrete types that
 a generic body never had: B1's inline `f64` access through `vector_get_direct` on a
@@ -173,10 +178,13 @@ and `Double` against its generic result.
 
 ### 4.4 What stays scanned
 
-- A creating function reached only through a class dictionary.
+- A creating function reached through a class dictionary that `specialise` does not resolve (see
+  the next item). With a concrete dictionary, `specialise` copies the caller and the instance
+  method at `Int` calls `vec_from_list$Int`, so that vector is flagged.
 - A constrained creating function that `specialise` does not copy (a call whose dictionary is not
   concrete, or any call under `SPROUT_OPT_OFF=spec`): `mutvec_sort`'s scratch buffer,
-  `sort.sorted`'s result, `foldable_to_vec`. The user's own vectors from `mutvec_new`,
+  `sort.sorted`'s result, `foldable_to_vec`. `scalar_copies` copies only constraint-free
+  functions, so it does not catch these. The user's own vectors from `mutvec_new`,
   `mutvec_empty` or `vec_from_list` are still flagged.
 - A creating function without a full written signature, and every caller that reaches the
   creator only through one.
@@ -227,7 +235,7 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
 - **Compiler:** a new pass and module, an `opt_config` pass on by default, and an `ast_to_ir`
   change. Reseed; golden IR changes for every example that builds a scalar vector.
 - **Code size:** copies spread to every candidate caller that instantiates a creating variable,
-  at most four per creating variable. Gated in §6.5.
+  at most four per creating variable. Gated in §6 item 5; measured in §6.1.
 - **Docs:** `compiler-internals.md` (the flag, its inline write and its premise),
   `opt-passes-v0.md` (the pass), `persistent-array-v0.md` §6 (the row becomes a link here),
   `scalar-store-inline-v0.md` §4.2 (the GENCHECK false positive is removed). `BACKLOG.md`: merging
@@ -245,7 +253,10 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
    `Int` and at `Double`; `vec_map` at `Int`, `mutvec_new` at `Double` and `mutvec_empty()` at
    `Int` call copies that flag; `list_map(vec_from_list, xss)` at `Int` passes the copy; a generic
    annotated helper that passes `vec_from_list` as a value is copied when called at `Int`;
-   `Vec String`, a dictionary-dispatched builder and an unannotated helper do not flag.
+   `Vec String` and an unannotated helper do not flag; the instance method at `Int` of a
+   vector-building class and `specialise`'s copy of a constrained creator call the `Int` copy.
+   Emitted again with `SPROUT_OPT_OFF=spec`, a constrained creator and a dictionary-dispatched
+   builder keep the original, call no copy, are not flagged and have no copy defined (§4.4).
 3. **Behaviour** (`tests/stdlib/`): the premise tests of §4.5 under `SPROUT_GC_STRESS=1`, and one
    run per creating stdlib function at `Int` and `Double` (`mutvec_new` then `mutvec_sort`, a `MutVec Int` built by `mutvec_empty` and push, `vec_filter`, `vec_slice`, `vec_map`,
    `linvec.from_list`) with the result compared against `SPROUT_OPT_OFF=scalar`.
@@ -257,6 +268,36 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
    time within its 2.2% noise floor, `just rooting-cost-gate`, and the emitted binary size of the
    bench corpus and the compiler within 10%; plus the self-compile's node count within 10%.
 
+### 6.1 Results of item 5 (step 4b, 2026-11-04)
+
+Arm OFF is the same source compiled with `SPROUT_OPT_OFF=scalar`; its IR lacks only the copies.
+Medians of 6 runs per arm, default GC settings. The machine was loaded (load average 10–65 on 11
+cores), so wall clock is noisy; CPU time and instructions retired are the robust columns.
+
+| workload | GC ms, MINOR=0 OFF → ON | GC ms, MINOR=1 OFF → ON | CPU s, MINOR=0 OFF → ON |
+|---|---|---|---|
+| mutvec_int | 9,277 → 589 (−94%) | 1,424 → 445 (−69%) | 3.45 → 0.51 |
+| astar | 17.9 → 5.4 | 26.7 → 5.8 | 0.04 → 0.02 |
+| digit_recognizer | 12.2 → 7.3 | 37.0 → 11.7 | 0.49 → 0.47 |
+| galaxy_client | 181 → 150 | 174 → 144 | 11.1 → 9.9 |
+
+Only mutvec_int's ranges do not overlap; the other three are short runs (astar under 0.1 s) or
+noisy. Collection counts are equal in both arms, and outputs match.
+
+**Galaxy's live set.** Built from `65d4cf0d`, the steady live set is 96.7k objects (§1). At HEAD it
+is about 1.5k in both arms: the word misses at today's layout, so the live set cannot show the
+fix. The fix holds by construction: the `Bitset`'s `Vec Int` is now built by `vec_from_list$Int`,
+its scratch buffer by `mutvec_new$Int`, and both are flagged, so no element is read as a pointer at
+any layout.
+
+**Gates.**
+- Self-compile: instructions retired +0.15% (16 interleaved rounds; per-round paired delta median
+  0.00%). CPU and wall medians moved between −2.4% and +7.6% across subsets of 48 rounds, so they
+  cannot resolve 2.2% under this load. Max RSS 277.5 MB vs 277.4 MB.
+- `just rooting-cost-gate`: within budget.
+- Binary size: the four workloads and the compiler within ±0.5% (compiler `__TEXT` identical).
+- Self-compile node count: +26 nodes, +0.018% (`[scalar] keys=3 nodes=26`).
+
 ## 7. Steps
 
 1. ~~Runtime: the flag, its mask helper, marking, inheritance, barrier; C tests.~~ Landed
@@ -265,10 +306,12 @@ use-after-free that the GC's own verifier cannot see. It rests on five things:
    `just noscan-gate`, `tests/stdlib/test_vec_noscan.spr`).
 3. ~~`check_extern_signatures.sh` gains premise 1's two rules.~~ Landed (`just check-extern-signatures`,
    [gates.md](gates.md) §Extern signatures).
-4. The scalar-copy pass; IR and behaviour tests; reseed; golden IR; the measurements of §6.5.
-   - 4a, landed: `scalar_copies` as a dry run (`just test`'s `test_scalar_copies.spr`,
-     `SPROUT_TRACE_SCALAR=1`). It finds keys and reports; the program is unchanged.
-   - 4b: the copies, retargeting, `verify_added`, the flag on by default, and flipping
-     `opt_config.implemented(Scalar)` so `SPROUT_OPT_OFF=scalar` stops warning.
+4. The scalar-copy pass; IR and behaviour tests; reseed; golden IR; the measurements of §6 item 5.
+   - ~~4a: `scalar_copies` as a dry run.~~ Landed (`test_scalar_copies.spr`,
+     `SPROUT_TRACE_SCALAR=1`).
+   - ~~4b: the copies, retargeting, `verify_added`, the flag on by default, and flipping
+     `opt_config.implemented(Scalar)`.~~ Landed (`test_scalar_copies.spr`,
+     `tests/stdlib/test_vec_noscan_copies.spr` in `just test-stress`'s list, the copy and dce
+     fixtures of `just noscan-gate`, the store check of `just linvec-smoke`). Measured in §6.1.
 5. Back to [gc-generational-v0.md](gc-generational-v0.md) §14.8: re-run the A/B and decide the
    flip.

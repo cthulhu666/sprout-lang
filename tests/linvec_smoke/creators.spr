@@ -1,0 +1,32 @@
+module main
+import stdlib.linvec (LinVec)
+import stdlib.linvec as linvec
+
+# Every creator at Int and at Double, so scalar_copies makes `$Int` and `$Double` copies of
+# each. linvec-smoke checks that no copy contains a store (docs/pointer-free-vectors-v0.md §4.3).
+
+# `empty()` takes no argument, so only a written result fixes its element type.
+fn empty_int() -> LinVec Int = linvec.empty()
+
+fn empty_double() -> LinVec Double = linvec.empty()
+
+fn main() -> Unit !{IO} =
+  let a = linvec.new(3, 1)
+      b = empty_int()
+      c = linvec.from_list([1, 2])
+      d = linvec.from_vec(vec_from_list([1, 2]))
+      e = linvec.new(3, 1.5)
+      f = empty_double()
+      g = linvec.from_list([1.5, 2.5])
+      h = linvec.from_vec(vec_from_list([1.5, 2.5]))
+      n = linvec.length(a) + linvec.length(b) + linvec.length(c) + linvec.length(d)
+      m = linvec.length(e) + linvec.length(f) + linvec.length(g) + linvec.length(h)
+      _ = linvec.drop(a)
+      _ = linvec.drop(b)
+      _ = linvec.drop(c)
+      _ = linvec.drop(d)
+      _ = linvec.drop(e)
+      _ = linvec.drop(f)
+      _ = linvec.drop(g)
+      _ = linvec.drop(h)
+  in print(int_to_string(n + m))

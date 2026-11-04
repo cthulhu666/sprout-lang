@@ -42,6 +42,8 @@ else
 fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/golden_ir_lib.sh"
+# shellcheck source=ir_body_lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/ir_body_lib.sh"
 
 build() { # <fixture> <on|off> -> $TMP/<fixture>.<mode>{,.ll}; returns 1 on failure, 2 on timeout
   local fx="$1" mode="$2" ll="$TMP/$1.$2.ll" ec
@@ -66,11 +68,6 @@ run_one() { # <stress 0|1> <binary> -> combined output plus an exit line
     out="$(limited "$RUN_LIMIT" "$@" 2>&1)"; ec=$?
   fi
   printf '%s\nexit=%s\n' "$out" "$ec"
-}
-
-# <ll file> <fn> -> the text of that function's define, through its closing brace
-fn_body() {
-  awk -v n="@$2(" 'index($0, "define ") == 1 && index($0, n) { p = 1 } p { print } p && /^}/ { exit }' "$1"
 }
 
 # <fixture> -> checks every directive of the sidecar against the IR
@@ -101,7 +98,7 @@ check_ir() {
       body)
         fnname="${rest%% *}"; rest="${rest#* }"
         what="${rest%% *}"; text="${rest#* }"
-        body="$(fn_body "$ll" "$fnname")"
+        body="$(ir_fn_body "$ll" "$fnname")"
         if [ -z "$body" ]; then echo "  FAIL: $fx: $mode: no define for @$fnname"; fail=1; continue; fi
         case "$what" in
           has)

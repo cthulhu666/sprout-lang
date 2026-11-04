@@ -9,9 +9,9 @@ import stdlib.compiler.types as types
 import stdlib.compiler.verify_dispatch as verify_dispatch
 import stdlib.string as string
 
-# Scalar copies, dry run (docs/pointer-free-vectors-v0.md §4.3): finds the copies of generic
-# functions that a vector-creating type variable instantiated at a scalar would need, and
-# reports them. The program it returns is the one it was given. Runs on the RESOLVED program.
+# Scalar copies (docs/pointer-free-vectors-v0.md §4.3): copies each generic function that a
+# vector-creating type variable instantiated at a scalar needs, once per scalar, and retargets
+# the calls and references that name it. Runs on the RESOLVED program, before lowering.
 #
 # A CANDIDATE is a top-level function with no constraints and a written type on every parameter
 # and on the result. A node type names a signature variable through an `@eta_fwdvar` marker, so
@@ -31,6 +31,9 @@ import stdlib.string as string
 # Keys are finite (candidates x four scalars per creating variable). A call at a larger type,
 # such as a polymorphic self-call at `Vec a`, is no scalar instantiation and makes no key, so
 # the worklist needs no growth guard.
+#
+# One function, `site_key`, decides whether a site has a key. The analysis admits keys by it and
+# the rewrite retargets by it, so a call is retargeted exactly when its key was admitted.
 
 # `name` is the copy's IR name (`copy_name`), `site` the call that first produced the key and
 # `holder` the function whose body holds it (a key's name when a copy's body holds it).
@@ -41,7 +44,9 @@ export type Key (..) = (fn_name: String, scalars: List String, name: String, sit
 # signature order. `nodes` is what the copies would add: the callee node count of every key.
 export type Analysis (..) = (creating: Dict (List String), keys: List Key, nodes: Int)
 
-export type Output (..) = (program: typed_ast.TypedProgram, analysis: Analysis, trace: List String)
+# `added` holds the copies, one per key in `analysis.keys` order, which `program` ends with.
+export type Output (..) = (program: typed_ast.TypedProgram, added: List typed_ast.TypedDecl,
+                           analysis: Analysis, trace: List String)
 
 # `$` cannot appear in a source name and `specialise`'s copies end `$spec_<types>`, so
 # `f$Int` collides with neither. No dot may follow the `$`, as `string.after_last_dot` would cut it.
@@ -49,8 +54,27 @@ export fn copy_name(fn_name: String, scalars: List String) -> String =
   fn_name ++ "$" ++ string.join("_", scalars)
 
 export fn run(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Output =
-  let a = analyse(prog, env)
-  in Output(program = prog, analysis = a, trace = list_map(copy_line, a.keys) ++ [summary_line(a)])
+  match prog with
+  | typed_ast.TypedProgram decls -> run_decls(decls, env)
+
+fn run_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Output =
+  let s = solve_decls(decls, env)
+      a = s.analysis
+      rw = Rw(ctx = s.ctx, creating = s.creating, seen = s.seen, sub = spec_keys.subst_empty(), typed = false)
+      made = list_map(make_copy(_, rw), a.keys)
+  in Output(program = typed_ast.TypedProgram(list_append(rewrite_decls(decls, s.hits, rw, []), made)),
+            added = made, analysis = a, trace = list_map(copy_line, a.keys) ++ [summary_line(a)])
+
+# For a diagnostic in the copy `name`: the function it copies, the call that made it, and the
+# function that holds the call (a copy's holder is named by what it copies, not by its `$` name).
+export fn origin_note(a: Analysis, name: String) -> Maybe String =
+  let Just k = key_named(name, a.keys) else Nothing
+      holder = maybe_with_default(k.holder, fmap(fn_of, key_named(k.holder, a.keys)))
+  in Just(spec_keys.copy_note(k.fn_name, k.site, holder))
+
+fn key_named(name: String, keys: List Key) -> Maybe Key = find(\k -> k.name == name, keys)
+
+fn fn_of(k: Key) -> String = k.fn_name
 
 # One line per key (`SPROUT_TRACE_SCALAR`), then the totals.
 fn copy_line(k: Key) -> String =
@@ -339,23 +363,48 @@ fn scalar_of(v: String, theta: Dict types.Type, sub: spec_keys.Subst, env: Dict 
 # under the scalars it substitutes.
 fn admit_sites(sites: List Site, holder: String, sub: spec_keys.Subst, ctx: Ctx,
                creating: Dict (List String), w: Walk) -> Walk =
-  list_fold(\ (acc, e) -> admit(e, holder, sub, ctx, creating, acc), w, sites)
+  list_fold(\ (acc, e) -> admit(e, holder, site_key(e, sub, ctx, creating), ctx, acc), w, sites)
 
-fn admit(e: Site, holder: String, sub: spec_keys.Subst, ctx: Ctx, creating: Dict (List String), w: Walk) -> Walk =
+# The copy a site calls under `sub`: its name and scalars. Nothing unless the callee is a
+# candidate (an extern is the emitter's) with creating variables, all at scalars. `admit` and the
+# rewrite both ask this, so they cannot disagree.
+fn site_key(e: Site, sub: spec_keys.Subst, ctx: Ctx, creating: Dict (List String)) -> Maybe (String, List String) =
+  let Just _ = dict_get(e.callee, ctx.cands) else Nothing
+      Just vars = dict_get(e.callee, creating) else Nothing
+      [_ | _] = vars else Nothing
+      Just scalars = site_scalars(e, vars, sub, ctx.env) else Nothing
+  in Just((copy_name(e.callee, scalars), scalars))
+
+# `key` is `site_key`'s answer for `e`.
+fn admit(e: Site, holder: String, key: Maybe (String, List String), ctx: Ctx, w: Walk) -> Walk =
   let Just cand = dict_get(e.callee, ctx.cands) else w
-      Just vars = dict_get(e.callee, creating) else w
-      Just scalars = site_scalars(e, vars, sub, ctx.env) else w
-      name = copy_name(e.callee, scalars)
+      Just(name, scalars) = key else w
       Nothing = dict_get(name, w.seen) else w
       k = Key(fn_name = e.callee, scalars = scalars, name = name, site = e.pos, holder = holder,
               nodes = typed_ast.decl_node_count(cand.decl))
   in Walk(seen = dict_set(name, k, w.seen), order = Cons(k, w.order), pending = Cons(k, w.pending))
 
-# The program's own sites seed the walk; they are visited in order.
-fn seed(sweeps: List Swept, ctx: Ctx, creating: Dict (List String)) -> Walk =
-  let w = list_fold(\ (acc, s) -> admit_sites(s.sites, s.holder, spec_keys.subst_empty(), ctx, creating, acc),
-                    Walk(seen = dict_empty(), order = [], pending = []), sweeps)
-  in w with (pending = list_reverse(w.pending))
+# `hits` has one entry per declaration, in order: whether any of its own sites has a key.
+type Seeded = (walk: Walk, hits: List Bool)
+
+# The program's own sites seed the walk, under no substitution; they are visited in order.
+fn seed(per_decl: List (List Swept), ctx: Ctx, creating: Dict (List String)) -> Seeded =
+  let s = list_fold(\ (acc, ss) -> seed_decl(ss, ctx, creating, acc),
+                    Seeded(walk = Walk(seen = dict_empty(), order = [], pending = []), hits = []), per_decl)
+  in Seeded(walk = s.walk with (pending = list_reverse(s.walk.pending)), hits = list_reverse(s.hits))
+
+fn seed_decl(ss: List Swept, ctx: Ctx, creating: Dict (List String), acc: Seeded) -> Seeded =
+  let (w, hit) = list_fold(\ (a, s) -> seed_sites(s.sites, s.holder, ctx, creating, a), (acc.walk, false), ss)
+  in Seeded(walk = w, hits = Cons(hit, acc.hits))
+
+fn seed_sites(sites: List Site, holder: String, ctx: Ctx, creating: Dict (List String),
+              acc: (Walk, Bool)) -> (Walk, Bool) =
+  list_fold(\ (a, e) -> seed_site(e, holder, ctx, creating, a), acc, sites)
+
+fn seed_site(e: Site, holder: String, ctx: Ctx, creating: Dict (List String), acc: (Walk, Bool)) -> (Walk, Bool) =
+  let (w, hit) = acc
+      key = site_key(e, spec_keys.subst_empty(), ctx, creating)
+  in (admit(e, holder, key, ctx, w), hit || is_just(key))
 
 # Each key is visited once: its callee's body, walked under the key's scalars, gives the keys it calls.
 fn drain(w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Site)) -> Walk =
@@ -366,12 +415,13 @@ fn drain(w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Site
 fn visit(k: Key, w: Walk, ctx: Ctx, creating: Dict (List String), by_fn: Dict (List Site)) -> Walk =
   let sites = maybe_with_default([], dict_get(k.fn_name, by_fn))
       vars = maybe_with_default([], dict_get(k.fn_name, creating))
-      sub = spec_keys.Subst(te = dict_empty(), ty = scalar_types(vars, k.scalars))
-  in admit_sites(sites, k.name, sub, ctx, creating, w)
+  in admit_sites(sites, k.name, key_subst(vars, k.scalars), ctx, creating, w)
 
-# The key's substitution: each creating variable, by written name, to its scalar.
-fn scalar_types(vars: List String, scalars: List String) -> Dict types.Type =
-  dict_from_list(zip(vars, list_map(\s -> types.TConst(types.type_id(s)), scalars)))
+# The key's substitution: each creating variable, by written name, to its scalar. `te` is read
+# by a copy's written signature, `ty` by its node types.
+fn key_subst(vars: List String, scalars: List String) -> spec_keys.Subst =
+  spec_keys.Subst(te = dict_from_list(zip(vars, list_map(\s -> ast.TypeName(s), scalars))),
+                  ty = dict_from_list(zip(vars, list_map(\s -> types.TConst(types.type_id(s)), scalars))))
 
 # ---------------------------------------------------------------------------
 # The analysis
@@ -379,17 +429,170 @@ fn scalar_types(vars: List String, scalars: List String) -> Dict types.Type =
 
 export fn analyse(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> Analysis =
   match prog with
-  | typed_ast.TypedProgram decls -> analyse_decls(decls, env)
+  | typed_ast.TypedProgram decls -> solve_decls(decls, env).analysis
 
-fn analyse_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Analysis =
+# What the rewrite needs besides the analysis. `hits` has one entry per declaration: whether it
+# holds a site that a key stands for, which is the only reason to rebuild it.
+type Solved = (analysis: Analysis, ctx: Ctx, creating: Dict (List String), seen: Dict Key, hits: List Bool)
+
+fn solve_decls(decls: List typed_ast.TypedDecl, env: Dict types.Scheme) -> Solved =
   let ctx = Ctx(cands = cand_table(decls), creators = creator_table(decls), env = env)
-      sweeps = list_map(sweep(_, ctx), list_flat_map(decl_bodies, decls))
+      per_decl = list_map(\d -> list_map(sweep(_, ctx), decl_bodies(d)), decls)
+      sweeps = list_flat_map(\ss -> ss, per_decl)
       creating = solve(list_filter(is_candidate_body(_, ctx), sweeps), ctx, creator_seed(ctx))
-      closed = drain(seed(sweeps, ctx, creating), ctx, creating, sites_by_fn(sweeps, ctx))
+      seeded = seed(per_decl, ctx, creating)
+      closed = drain(seeded.walk, ctx, creating, sites_by_fn(sweeps, ctx))
       keys = list_reverse(closed.order)
-  in Analysis(creating = creating, keys = keys, nodes = list_fold(\ (n, k) -> n + k.nodes, 0, keys))
+  in Solved(analysis = Analysis(creating = creating, keys = keys,
+                                nodes = list_fold(\ (n, k) -> n + k.nodes, 0, keys)),
+            ctx = ctx, creating = creating, seen = closed.seen, hits = seeded.hits)
 
 fn is_candidate_body(s: Swept, ctx: Ctx) -> Bool =
   match s.owner with
   | Just name -> dict_member(name, ctx.cands)
   | Nothing -> false
+
+# ---------------------------------------------------------------------------
+# The rewrite
+# ---------------------------------------------------------------------------
+
+# `sub` is empty and `typed` false for the program, which needs only retargeted sites; for a copy
+# `sub` is the key's and every node type goes through it. `seen` holds every admitted key.
+type Rw = (ctx: Ctx, creating: Dict (List String), seen: Dict Key, sub: spec_keys.Subst, typed: Bool)
+
+# Only a declaration that holds a key is rebuilt. Tail recursive: the program is a long list.
+fn rewrite_decls(decls: List typed_ast.TypedDecl, hits: List Bool, rw: Rw,
+                 acc: List typed_ast.TypedDecl) -> List typed_ast.TypedDecl =
+  match (decls, hits) with
+  | ([d | ds], [h | hs]) -> rewrite_decls(ds, hs, rw, Cons(if h then rewrite_decl(d, rw) else d, acc))
+  | _ -> list_reverse(acc)
+
+fn rewrite_decl(d: typed_ast.TypedDecl, rw: Rw) -> typed_ast.TypedDecl =
+  match d with
+  | typed_ast.TFnDecl name params ret effects cs body ->
+      typed_ast.TFnDecl(name, params, ret, effects, cs, rewrite(body, spec_keys.bind_params(params, dict_empty()), rw))
+  | typed_ast.TLetDecl name value -> typed_ast.TLetDecl(name, rewrite(value, dict_empty(), rw))
+  | typed_ast.TInstanceDecl c ctx methods -> typed_ast.TInstanceDecl(c, ctx, list_map(rewrite_method(_, rw), methods))
+  | typed_ast.TExternFnDecl _ _ _ _ -> d
+  | typed_ast.TPassThrough _ -> d
+
+fn rewrite_method(m: typed_ast.TypedInstanceMethod, rw: Rw) -> typed_ast.TypedInstanceMethod =
+  match m with
+  | typed_ast.TypedInstanceMethod name params ret effects cs body ->
+      typed_ast.TypedInstanceMethod(name, params, ret, effects, cs,
+                                    rewrite(body, spec_keys.bind_params(params, dict_empty()), rw))
+
+# The copy of a key's candidate: no constraints, its written signature and every node type under
+# the key's substitution.
+fn make_copy(k: Key, rw: Rw) -> typed_ast.TypedDecl =
+  match dict_get(k.fn_name, rw.ctx.cands) with
+  | Nothing -> panic("scalar_copies.make_copy: a key names no candidate (internal error)")
+  | Just cand ->
+      match cand.decl with
+      | typed_ast.TFnDecl _ params ret effects _ body ->
+          let sub = key_subst(maybe_with_default([], dict_get(k.fn_name, rw.creating)), k.scalars)
+              crw = rw with (sub = sub, typed = true)
+          in typed_ast.TFnDecl(
+               k.name,
+               list_map(spec_keys.sub_param(_, sub.te), params),
+               fmap(ast.subst_type_expr(sub.te, _), ret),
+               effects,
+               [],
+               rewrite(body, spec_keys.bind_params(params, dict_empty()), crw))
+      | _ -> panic("scalar_copies.make_copy: a candidate is not a function (internal error)")
+
+fn ty(t: types.Type, rw: Rw) -> types.Type =
+  if rw.typed then spec_keys.sub_type(t, rw.sub, rw.ctx.env) else t
+
+fn params_in(params: List ast.Param, rw: Rw) -> List ast.Param =
+  if rw.typed then list_map(spec_keys.sub_param(_, rw.sub.te), params) else params
+
+# Rewrites `e`, tracking the names bound locally as `gather` does, so a local that shares a
+# candidate's name is never retargeted. Every variant is listed.
+fn rewrite(e: typed_ast.TypedExpr, locals: Dict Bool, rw: Rw) -> typed_ast.TypedExpr =
+  match e with
+  | typed_ast.TCall callee args t pos -> rewrite_call(callee, args, t, pos, locals, rw)
+  | typed_ast.TVar name t pos -> rewrite_ref(e, name, t, pos, locals, rw)
+  | typed_ast.TLambda params body t pos ->
+      typed_ast.TLambda(params_in(params, rw), rewrite(body, spec_keys.bind_params(params, locals), rw), ty(t, rw), pos)
+  | typed_ast.TMatch scrut branches t pos ->
+      typed_ast.TMatch(rewrite(scrut, locals, rw), list_map(rewrite_branch(_, locals, rw), branches), ty(t, rw), pos)
+  | typed_ast.TDo steps t pos -> typed_ast.TDo(rewrite_steps(steps, locals, rw), ty(t, rw), pos)
+  # A leaf is rebuilt only for a copy: the original program's keep their node.
+  | typed_ast.TDict c t pos ev ->
+      if rw.typed then typed_ast.TDict(spec_keys.sub_constraint(c, rw.sub.te), ty(t, rw), pos, ev) else e
+  | typed_ast.TMethodRef method cls t pos ev ->
+      if rw.typed then typed_ast.TMethodRef(method, cls, ty(t, rw), pos, ev) else e
+  | typed_ast.TInt n t pos -> if rw.typed then typed_ast.TInt(n, ty(t, rw), pos) else e
+  | typed_ast.TFloat text t pos -> if rw.typed then typed_ast.TFloat(text, ty(t, rw), pos) else e
+  | typed_ast.TBool b t pos -> if rw.typed then typed_ast.TBool(b, ty(t, rw), pos) else e
+  | typed_ast.TString s t pos -> if rw.typed then typed_ast.TString(s, ty(t, rw), pos) else e
+  | typed_ast.TChar c t pos -> if rw.typed then typed_ast.TChar(c, ty(t, rw), pos) else e
+  | typed_ast.TUnit t pos -> if rw.typed then typed_ast.TUnit(ty(t, rw), pos) else e
+  | typed_ast.TTuple items t pos -> typed_ast.TTuple(list_map(rewrite(_, locals, rw), items), ty(t, rw), pos)
+  | typed_ast.TIf c a b t pos ->
+      typed_ast.TIf(rewrite(c, locals, rw), rewrite(a, locals, rw), rewrite(b, locals, rw), ty(t, rw), pos)
+  | typed_ast.TBinary op l r t pos ->
+      typed_ast.TBinary(op, rewrite(l, locals, rw), rewrite(r, locals, rw), ty(t, rw), pos)
+  | typed_ast.TUnary op x t pos -> typed_ast.TUnary(op, rewrite(x, locals, rw), ty(t, rw), pos)
+  | typed_ast.TRange lo hi t pos -> typed_ast.TRange(rewrite(lo, locals, rw), rewrite(hi, locals, rw), ty(t, rw), pos)
+  | typed_ast.TRecord name fields t pos ->
+      typed_ast.TRecord(name, list_map(rewrite_field(_, locals, rw), fields), ty(t, rw), pos)
+  | typed_ast.TGetField base field t pos -> typed_ast.TGetField(rewrite(base, locals, rw), field, ty(t, rw), pos)
+  | typed_ast.TRecordUpdate base fields t pos ->
+      typed_ast.TRecordUpdate(rewrite(base, locals, rw), list_map(rewrite_field(_, locals, rw), fields), ty(t, rw), pos)
+
+fn rewrite_field(f: typed_ast.TypedRecordField, locals: Dict Bool, rw: Rw) -> typed_ast.TypedRecordField =
+  match f with
+  | typed_ast.TypedRecordField name value -> typed_ast.TypedRecordField(name, rewrite(value, locals, rw))
+
+fn rewrite_branch(b: typed_ast.TypedMatchBranch, locals: Dict Bool, rw: Rw) -> typed_ast.TypedMatchBranch =
+  match b with
+  | typed_ast.TypedMatchBranch pat body ->
+      typed_ast.TypedMatchBranch(pat, rewrite(body, spec_keys.bind_names(ast.pattern_names(pat), locals), rw))
+
+# A step binds for the steps below it, not for its own value.
+fn rewrite_steps(steps: List typed_ast.TypedDoStep, locals: Dict Bool, rw: Rw) -> List typed_ast.TypedDoStep =
+  match steps with
+  | Nil -> Nil
+  | Cons s rest -> Cons(rewrite_step(s, locals, rw), rewrite_steps(rest, spec_keys.step_binds(s, locals), rw))
+
+fn rewrite_step(s: typed_ast.TypedDoStep, locals: Dict Bool, rw: Rw) -> typed_ast.TypedDoStep =
+  match s with
+  | typed_ast.TDoBindStep pat value mode -> typed_ast.TDoBindStep(pat, rewrite(value, locals, rw), mode)
+  | typed_ast.TDoLetStep name value -> typed_ast.TDoLetStep(name, rewrite(value, locals, rw))
+  | typed_ast.TDoExprStep value -> typed_ast.TDoExprStep(rewrite(value, locals, rw))
+
+# A call to a named callee is a site, as in `gather_call`: if it has a key it names the copy.
+# Its callee is never rewritten as a reference. Candidates have no constraints, so the
+# arguments keep their positions.
+fn rewrite_call(callee: typed_ast.TypedExpr, args: List typed_ast.TypedExpr, t: types.Type,
+                pos: source.SourcePos, locals: Dict Bool, rw: Rw) -> typed_ast.TypedExpr =
+  let new_args = list_map(rewrite(_, locals, rw), args)
+  in match callee with
+     | typed_ast.TVar name callee_t callee_pos ->
+         let head = match retarget(note_call(name, args, t, pos, locals, rw.ctx, []), callee_t, callee_pos, rw) with
+                    | Just c -> c
+                    | Nothing -> keep_var(callee, name, callee_t, callee_pos, rw)
+         in typed_ast.TCall(head, new_args, ty(t, rw), pos)
+     | _ -> typed_ast.TCall(rewrite(callee, locals, rw), new_args, ty(t, rw), pos)
+
+# A variable outside a call head: the copy if it is a candidate with a key, else itself.
+fn rewrite_ref(e: typed_ast.TypedExpr, name: String, t: types.Type, pos: source.SourcePos,
+               locals: Dict Bool, rw: Rw) -> typed_ast.TypedExpr =
+  match retarget(note_ref(name, t, pos, locals, rw.ctx, []), t, pos, rw) with
+  | Just c -> c
+  | Nothing -> keep_var(e, name, t, pos, rw)
+
+# `e` is the variable `name`; rebuilt only for a copy, whose node types go through `sub`.
+fn keep_var(e: typed_ast.TypedExpr, name: String, t: types.Type, pos: source.SourcePos, rw: Rw) -> typed_ast.TypedExpr =
+  if rw.typed then typed_ast.TVar(name, ty(t, rw), pos) else e
+
+# The callee naming the copy of the one site `note_call` or `note_ref` found, if `site_key`
+# gives it a key. Every such key was admitted: the analysis walked the same sites under the same
+# substitution.
+fn retarget(sites: List Site, callee_t: types.Type, callee_pos: source.SourcePos, rw: Rw) -> Maybe typed_ast.TypedExpr =
+  let [site | _] = sites else Nothing
+      Just(name, _) = site_key(site, rw.sub, rw.ctx, rw.creating) else Nothing
+  in if dict_member(name, rw.seen) then Just(typed_ast.TVar(name, ty(callee_t, rw), callee_pos))
+     else panic(`scalar_copies.retarget: ${name} is not an admitted key (internal error)`)

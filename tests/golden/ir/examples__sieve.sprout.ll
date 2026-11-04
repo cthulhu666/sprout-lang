@@ -784,24 +784,6 @@ entry:
   ret i64 %t$1
 }
 
-define i64 @vec_from_list(i64 %p$xs) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$xs, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vector_from_list(i64 %p$xs)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$1 = call i64 @sprout_alloc_obj(i64 10, i64 1)
-  %t$1$ptr = inttoptr i64 %t$1 to ptr
-  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
-  store i64 %t$0, ptr %t$1$f0
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$1
-}
-
 define i64 @stdlib.mutable.mutvec_raw(i64 %p$v) {
 entry:
   br label %arm_0_0
@@ -813,24 +795,6 @@ arm_1_0:
   unreachable
 join_0:
   %t$1 = phi i64 [%t$2, %arm_0_0]
-  ret i64 %t$1
-}
-
-define i64 @stdlib.mutable.mutvec_new(i64 %p$n, i64 %p$val) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$val, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$val)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$1 = call i64 @sprout_alloc_obj(i64 16, i64 1)
-  %t$1$ptr = inttoptr i64 %t$1 to ptr
-  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
-  store i64 %t$0, ptr %t$1$f0
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 
@@ -942,16 +906,6 @@ join_0:
 define i64 @stdlib.linvec.set(i64 %p$i, i64 %p$x, i64 %p$v) {
 entry:
   %t$0 = call i64 @stdlib.linvec.linvec_set(i64 %p$i, i64 %p$x, i64 %p$v)
-  ret i64 %t$0
-}
-
-define i64 @stdlib.linvec.new(i64 %p$n, i64 %p$x) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$x, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$x)
-  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$0
 }
 
@@ -1165,7 +1119,7 @@ entry:
   %t$15 = alloca i64
   store i64 %t$5, ptr %t$15
   %t$16 = call i64 @sprout_gc_push_i64_root(ptr %t$15)
-  %t$6 = call i64 @vec_from_list(i64 %t$5)
+  %t$6 = call i64 @vec_from_list$Bool(i64 %t$5)
   %t$17 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$6
 }
@@ -1466,7 +1420,7 @@ ovfpanic_1:
   unreachable
 ovfok_1:
   %t$4 = add i64 0, 0
-  %t$5 = call i64 @stdlib.mutable.mutvec_new(i64 %t$1, i64 %t$4)
+  %t$5 = call i64 @stdlib.mutable.mutvec_new$Bool(i64 %t$1, i64 %t$4)
   %t$17 = alloca i64
   store i64 %t$5, ptr %t$17
   %t$18 = call i64 @sprout_gc_push_i64_root(ptr %t$17)
@@ -1827,7 +1781,7 @@ ovfpanic_2:
   unreachable
 ovfok_2:
   %t$5 = add i64 0, 0
-  %t$6 = call i64 @stdlib.linvec.new(i64 %t$2, i64 %t$5)
+  %t$6 = call i64 @stdlib.linvec.new$Bool(i64 %t$2, i64 %t$5)
   %t$10 = alloca i64
   store i64 %t$6, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
@@ -1955,7 +1909,7 @@ ovfpanic_2:
   unreachable
 ovfok_2:
   %t$5 = add i64 0, 0
-  %t$6 = call i64 @stdlib.linvec.new(i64 %t$2, i64 %t$5)
+  %t$6 = call i64 @stdlib.linvec.new$Bool(i64 %t$2, i64 %t$5)
   %t$10 = alloca i64
   store i64 %t$6, ptr %t$10
   %t$11 = call i64 @sprout_gc_push_i64_root(ptr %t$10)
@@ -2057,6 +2011,59 @@ entry:
   %t$0 = call i64 @__tc_ToString_String_to_string(i64 %p$value)
   %t$1 = call i64 @print_str(i64 %t$0)
   ret i64 %t$1
+}
+
+define i64 @vec_from_list$Bool(i64 %p$xs) {
+entry:
+  %t$2 = alloca i64
+  store i64 %p$xs, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$0 = call i64 @vector_from_list(i64 %p$xs)
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  %t$5 = alloca i64
+  store i64 %t$0, ptr %t$5
+  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
+  %t$1 = call i64 @sprout_alloc_obj(i64 10, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.mutable.mutvec_new$Bool(i64 %p$n, i64 %p$val) {
+entry:
+  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$val)
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @sprout_alloc_obj(i64 16, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
+define i64 @stdlib.linvec.new$Bool(i64 %p$n, i64 %p$x) {
+entry:
+  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$x)
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  ret i64 %t$0
 }
 
 define i64 @__cm_Eq_eq(i64 %p$left, i64 %p$right, i64 %p$__tc_Eq_0_eq) {

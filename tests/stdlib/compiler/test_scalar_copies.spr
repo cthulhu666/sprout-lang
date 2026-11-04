@@ -1,16 +1,20 @@
 import stdlib.test (check_true, check_false, check_eq, run_suite)
+import stdlib.compiler.ast as ast
 import stdlib.compiler.compiler as compiler
 import stdlib.compiler.scalar_copies as scalar_copies
 import stdlib.compiler.source as source
+import stdlib.compiler.spec_keys as spec_keys
+import stdlib.compiler.type_kind as type_kind
 import stdlib.compiler.typed_ast as typed_ast
 import stdlib.sort (sort)
 import stdlib.string as string
 import testsupport.envvar as envvar
 
-# Unit tests for the scalar-copy dry run (docs/pointer-free-vectors-v0.md §4.3). The fixture
+# Unit tests for the scalar-copy pass (docs/pointer-free-vectors-v0.md §4.3). The fixture
 # `tests/scalar_copies/shapes.spr` is checked and resolved against the real stdlib, so the
 # creating sets and keys below are the ones the pass finds in `vec_map`, `mutvec_new` and the
-# rest. The pass reports only: the program it returns is the one it was given.
+# rest. The program it returns holds one copy per key, and every call or value reference that
+# a key stands for names the copy.
 
 type Loaded = (prog: typed_ast.TypedProgram, analysis: scalar_copies.Analysis, out: scalar_copies.Output)
 
@@ -42,8 +46,65 @@ fn creating(l: Loaded, fn_name: String) -> List String =
   maybe_with_default([], dict_get(fn_name, l.analysis.creating))
 
 fn decl_count(prog: typed_ast.TypedProgram) -> Int =
+  list_length(decls_of(prog))
+
+fn decls_of(prog: typed_ast.TypedProgram) -> List typed_ast.TypedDecl =
   match prog with
-  | typed_ast.TypedProgram decls -> list_length(decls)
+  | typed_ast.TypedProgram decls -> decls
+
+fn fn_decl_name(d: typed_ast.TypedDecl) -> Maybe String =
+  match d with
+  | typed_ast.TFnDecl name _ _ _ _ _ -> Just(name)
+  | _ -> Nothing
+
+fn fn_names(prog: typed_ast.TypedProgram) -> List String =
+  list_filter_map(fn_decl_name, decls_of(prog))
+
+fn has_fn(prog: typed_ast.TypedProgram, name: String) -> Bool = list_member(name, fn_names(prog))
+
+# How many functions have a name starting with `prefix`.
+fn fns_under(prog: typed_ast.TypedProgram, prefix: String) -> Int =
+  count(\n -> string.starts_with(n, prefix), fn_names(prog))
+
+fn fn_body(name: String, d: typed_ast.TypedDecl) -> Maybe typed_ast.TypedExpr =
+  match d with
+  | typed_ast.TFnDecl n _ _ _ _ body -> if n == name then Just(body) else Nothing
+  | _ -> Nothing
+
+# Every variable a body names, callees included.
+fn var_names(e: typed_ast.TypedExpr) -> List String =
+  match e with
+  | typed_ast.TVar n _ _ -> [n]
+  | _ -> list_flat_map(var_names, typed_ast.children(e))
+
+# What function `name` of the output names; none for a function that is not there.
+fn names_in(prog: typed_ast.TypedProgram, name: String) -> List String =
+  match list_filter_map(fn_body(name, _), decls_of(prog)) with
+  | [body | _] -> var_names(body)
+  | [] -> []
+
+fn names_callee(l: Loaded, fn_name: String, callee: String) -> Bool =
+  list_member(callee, names_in(l.out.program, fn_name))
+
+# How many names in a function's body start with `prefix`.
+fn names_under(l: Loaded, fn_name: String, prefix: String) -> Int =
+  count(\n -> string.starts_with(n, prefix), names_in(l.out.program, fn_name))
+
+# The written result type of a function, as a copy's substituted signature shows it.
+fn written_ret(prog: typed_ast.TypedProgram, name: String) -> Maybe ast.TypeExpr =
+  match list_filter(\d -> fn_decl_name(d) == Just(name), decls_of(prog)) with
+  | [typed_ast.TFnDecl _ _ ret _ _ _ | _] -> ret
+  | _ -> Nothing
+
+fn is_vec_of(elem: String, te: Maybe ast.TypeExpr) -> Bool =
+  match te with
+  | Just (ast.TypeApply(ast.TypeName "Vec")(ast.TypeName n)) -> n == elem
+  | _ -> false
+
+# The stdlib's creating functions, sorted: the fixture's own functions and the externs left out.
+fn stdlib_creating(l: Loaded) -> List String =
+  sort(list_filter(\n -> !string.starts_with(n, "$entry.") && !type_kind.is_vector_creator(n),
+                   vec_to_list(dict_keys(l.analysis.creating))))
 
 fn is_copy_line(line: String) -> Bool = string.starts_with(line, "[scalar] copy ")
 
@@ -68,6 +129,17 @@ fn suite(l: Loaded) -> Unit !{IO} =
     check_eq("creating: an unannotated helper is opaque", creating(l, "$entry.loose"), []),
     check_eq("creating: a constrained function is opaque", creating(l, "stdlib.mutable.mutvec_sort"), []),
     check_eq("creating: polymorphic recursion", creating(l, "$entry.poly"), ["a"]),
+
+    # A new creating function must also get a behaviour run in tests/stdlib/test_vec_noscan_copies.spr:
+    # its copy at Int and Double is the first place a NOSCAN flag reaches it.
+    check_eq("creating: the stdlib's set", stdlib_creating(l),
+             ["dict_values", "stdlib.linvec.empty", "stdlib.linvec.from_list", "stdlib.linvec.from_vec",
+              "stdlib.linvec.new", "stdlib.mutable.mutmatrix_new", "stdlib.mutable.mutvec_empty",
+              "stdlib.mutable.mutvec_new", "stdlib.mutable.mutvec_sort_with", "stdlib.mutable.sort_merge_all",
+              "vec_empty", "vec_filter", "vec_filter_indexed", "vec_filter_map", "vec_filter_map_indexed",
+              "vec_from_list", "vec_map", "vec_map_indexed", "vec_partition", "vec_partition_indexed",
+              "vec_prepend", "vec_reverse", "vec_reverse_from", "vec_singleton", "vec_slice", "vec_slice_from",
+              "vec_zip_with"]),
 
     # --- keys ---
     check_true("key: a user builder at Int", has_key(l, "$entry.build$Int")),
@@ -107,11 +179,56 @@ fn suite(l: Loaded) -> Unit !{IO} =
     check_eq("name: and every suffix is scalar names alone, so none is a specialise copy's",
              count(\n -> !all(is_scalar_name, string.split(scalar_suffix(n), "_")), key_names(l)), 0),
 
-    # --- the program is unchanged ---
-    check_eq("run: the program has the same nodes", typed_ast.node_count(l.out.program), typed_ast.node_count(l.prog)),
-    check_eq("run: and the same declarations", decl_count(l.out.program), decl_count(l.prog)),
+    # --- the copies ---
     check_true("run: it found keys", list_length(l.analysis.keys) > 0),
     check_true("run: the callees' nodes are counted", l.analysis.nodes > 0),
+    check_eq("run: one new declaration per key", decl_count(l.out.program),
+             decl_count(l.prog) + list_length(l.analysis.keys)),
+    check_eq("run: the copies add the nodes the analysis counted", typed_ast.node_count(l.out.program),
+             typed_ast.node_count(l.prog) + l.analysis.nodes),
+    check_eq("run: every key is a function in the output",
+             count(\k -> has_fn(l.out.program, k.name), l.analysis.keys), list_length(l.analysis.keys)),
+    check_eq("run: no function name ends in a bare $",
+             count(\n -> string.ends_with(n, "$"), fn_names(l.out.program)), 0),
+    check_true("copy: a copy's result type is substituted", is_vec_of("Int", written_ret(l.out.program, "$entry.build$Int"))),
+    check_true("copy: the original's result type is not", !is_vec_of("Int", written_ret(l.out.program, "$entry.build"))),
+
+    # --- retargeting ---
+    check_true("retarget: a call at Int names the copy", names_callee(l, "$entry.ints", "$entry.build$Int")),
+    check_false("retarget: and no longer the original", names_callee(l, "$entry.ints", "$entry.build")),
+    check_true("retarget: vec_map at Double", names_callee(l, "$entry.doubles", "vec_map$Double")),
+    check_true("retarget: a call that meets the caller's variable twice", names_callee(l, "$entry.twins", "$entry.twin$Int")),
+    check_true("retarget: two variables, written order", names_callee(l, "$entry.pairs", "$entry.pair_up$Int_Double")),
+    check_true("retarget: a call inside a copy names the copy of its callee",
+               names_callee(l, "$entry.build$Int", "vec_from_list$Int")),
+    check_true("retarget: a value reference inside a copy names the copy",
+               names_callee(l, "$entry.build_all$Bool", "vec_from_list$Bool")),
+    check_true("retarget: a value reference at the caller names the copy", names_callee(l, "$entry.bools", "$entry.build_all$Bool")),
+    check_true("retarget: mutvec_new at Int", names_callee(l, "$entry.mut_ints", "stdlib.mutable.mutvec_new$Int")),
+    check_true("retarget: mutvec_empty at Int", names_callee(l, "$entry.mut_ints", "stdlib.mutable.mutvec_empty$Int")),
+    check_true("retarget: the creator reached through vec_map's helper", has_fn(l.out.program, "vec_map_indexed$Double")),
+    check_true("keep: a builder at String keeps the original", names_callee(l, "$entry.strings", "$entry.build")),
+    check_eq("keep: and names no copy of it", names_under(l, "$entry.strings", "$entry.build$"), 0),
+    check_true("keep: an unannotated helper keeps the original", names_callee(l, "$entry.through_loose", "$entry.loose")),
+    check_eq("keep: and no copy of it exists", fns_under(l.out.program, "$entry.loose$"), 0),
+    check_true("keep: a candidate with no creating variable keeps the original", names_callee(l, "$entry.reads", "$entry.first_of")),
+    check_eq("keep: its caller names no copy of it", names_under(l, "$entry.reads", "$entry.first_of$"), 0),
+    check_eq("keep: and none exists", fns_under(l.out.program, "$entry.first_of$"), 0),
+    check_true("keep: a direct vector_from_list call at Int is the emitter's", names_callee(l, "$entry.direct", "vector_from_list")),
+    check_eq("keep: so there is no copy of the extern", fns_under(l.out.program, "vector_from_list$"), 0),
+
+    # --- the diagnostic note ---
+    check_eq("note: a copy names what it copies, the call and the function holding it",
+             scalar_copies.origin_note(l.analysis, "$entry.build$Int"),
+             Just("in the copy of $entry.build made for the call at 35:29 in $entry.ints")),
+    check_eq("note: a copy made from a copy's body names the holder by what it copies",
+             scalar_copies.origin_note(l.analysis, "$entry.build_two$Int"),
+             Just("in the copy of $entry.build_two made for the call at 33:41 in $entry.twin")),
+    check_eq("note: an original function has none", scalar_copies.origin_note(l.analysis, "$entry.build"), Nothing),
+    check_eq("note: nor does an unknown name", scalar_copies.origin_note(l.analysis, "no_such$Int"), Nothing),
+    check_eq("note: the text is shared with specialise",
+             spec_keys.copy_note("f", source.SourcePos(index = 0, line = 3, column = 7), "g"),
+             "in the copy of f made for the call at 3:7 in g"),
 
     # --- the trace ---
     check_eq("trace: one line per key and a summary", list_length(l.out.trace), list_length(l.analysis.keys) + 1),

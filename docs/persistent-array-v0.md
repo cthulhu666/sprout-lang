@@ -679,7 +679,7 @@ value is unshared moves the ranking.
 | Change | Effect | Changes the ranking? |
 |---|---|---|
 | Byte-aware trigger (BACKLOG P2 **GC trigger is object-count-blind**) | BFS w=1000: `MutVec` 1,375 → 81 ms, linear 2,165 → 101 ms, taking §3.2's raised trigger as its stand-in | No: there, sieve and BFS are linear 7 and 101, transient 102 and 167, trie 652 and 304. `vec_set` stays O(n) per write. |
-| Pointer-free vectors | `sprout_gc_drain_marks` looks up every element of a vector, `Int` or not; a flag could skip a 1M-`Int` array. Not measured. | No: it helps every flat array alike. |
+| Pointer-free vectors | [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md): a NOSCAN header bit makes the mark skip the elements of a scalar vector. | No: it helps every flat array alike. |
 | Nursery | Cheaper trie allocation per write | No: [gc-generational-v0.md](gc-generational-v0.md) §8 builds one for the compiler only, and non-moving is the invariant. |
 | Reference counting (Lean 4, Koka) | `vec_set` writes in place when nothing else holds the vector; no linear type needed | Yes, but it needs counts, which Sprout's tracing collector does not keep ([byte-buffer-v0.md](byte-buffer-v0.md) §5.4); no doc prices adding them. |
 | Compiler proves a `vec_set` argument unshared | `owners` and meadow's folds speed up unedited | Partly. Needs escape analysis through lambdas; not designed. Would emit 5.3's builtin. |

@@ -129,13 +129,13 @@ pass the test.
 This rests on the premise that static types are true. An `extern fn` that misstates its return
 type breaks that premise, as it already breaks rooting. That is a known gap, filed in `BACKLOG.md`.
 
-**GENCHECK false positive.** The verifier and the mark treat every vector slot as a possible
-pointer. An `Int` slot whose value happens to equal a young object's address is a fake edge. Today
-the barrier remembers that vector, and the minor follows the fake edge. After this change it does
-not, so the verifier can report a missed barrier on a scalar vector. That is a false positive,
-because the edge is not a pointer. The chance is a value matching a live young payload address
-exactly. Removing the false positive needs an element kind in the vector header, which is out of
-scope.
+**GENCHECK and scalar vectors.** A scanned vector's slots are all possible pointers, so an `Int`
+slot equal to a young object's address is a fake edge. A flagged (NOSCAN) vector has no such edge:
+the mark and the verifier skip its elements, and a store into it needs no barrier
+([pointer-free-vectors-v0.md](pointer-free-vectors-v0.md)). A scalar vector that is not flagged
+(§4.4 there) keeps the old case: after this change a store into it remembers nothing, so the
+verifier can report a missed barrier that is a false positive. The chance is a value matching a
+live young payload address exactly.
 
 **Trap messages.** The C function fails with `vector_mutset: null vector` or
 `vector_mutset: index out of bounds`, and `tests/bce_fixtures/expected/*` pins the second. The

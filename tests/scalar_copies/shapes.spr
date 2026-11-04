@@ -51,6 +51,12 @@ fn recurse() -> Int = poly(1, 3)
 # `vec_from_list$Bool` exists only through the reference inside `build_all`.
 fn bools() -> List (Vec Bool) = build_all([[true]])
 
+# A candidate with no creating variable, called at Int: no copy, no retarget.
+fn reads() -> Maybe Int = first_of(ints())
+
+# A direct call to a creating extern at Int is the emitter's, not this pass's.
+fn direct() -> Vector Int = vector_from_list([1, 2])
+
 fn mut_ints() -> Int !{IO} =
   do
     v <- mutvec_empty()

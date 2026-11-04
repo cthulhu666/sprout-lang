@@ -1,0 +1,12 @@
+module main
+
+# Scalar-copy clean-up (docs/pointer-free-vectors-v0.md §4.3 step 6). `main` reaches `build` and
+# `vec_slice` only at Int, so each is retargeted to its copy and dead-code elimination drops the
+# original. This fixture has a `main`: dce keeps what `main` reaches, so a function that nothing
+# reaches is the evidence. The noscan-gate reads the emitted `define`s.
+fn build(xs: List a) -> Vec a = vec_from_list(xs)
+
+fn main() -> Unit !{IO} =
+  do
+    let v = build([1, 2, 3, 4])
+    print(int_to_string(vec_length(vec_slice(1, 2, v))))
