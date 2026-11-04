@@ -401,12 +401,20 @@ by `just backlog-shape`. Nothing else may split off without the same justificati
   the enum with no `default:` arms, add `-Werror=switch` to the runtime clang lines. Converts silent
   wrong-dispatch after a new heap kind into a build break.
   `docs/gc-phase2-retro-handoff-2026-07-05.md` §1.
-- [ ] `P3` **Three typed-AST walkers track local scope by hand and can drift.**
+- [ ] `P3` **Four typed-AST walkers track local scope by hand and can drift.**
   `spec_keys.scan` (with `bind_names`, `bind_params`, `step_binds`), `scalar_copies.gather` (with
-  `decl_bodies`) and `verify_dispatch.sprout` each re-implement the shadow-aware call walk. A
-  binding form taught to one and not the others makes a local named like a top-level function
-  count as a call in one pass only. Fix: one exported fold in `typed_ast` that yields each call
-  head, value reference and `TDict` with its locals in scope, used by all three.
+  `decl_bodies`), `scalar_copies.rewrite` and `verify_dispatch.sprout` each re-implement the
+  shadow-aware call walk. A binding form taught to one and not the others makes a local named like
+  a top-level function count as a call in one pass only; in `scalar_copies` it also lets `gather`
+  and `rewrite` disagree on a site. Fix: one exported fold in `typed_ast` that yields each call
+  head, value reference and `TDict` with its locals in scope, used by all of them.
+- [ ] `P3` **Two typed-AST rewriters are near-copies, so a new `TypedExpr` variant needs three
+  edits.** `scalar_copies.rewrite` (with `rewrite_decl`, `make_copy`, `ty`, `params_in`) repeats
+  `specialise`'s rewriter and differs only at the variable, dictionary and method-ref leaves and
+  the call head. A variant added to `spec_keys` gather, `specialise.rewrite` and this one must be
+  listed in all three; one missed silently skips retargeting. Fix: one substituting traversal in
+  `typed_ast` or `spec_keys`, with a per-pass hook for the call head, the variable reference and
+  the dictionary/method-ref leaf.
 - [ ] `P3` **Runtime-function facts are hand-written, unchecked name lists.**
   `is_nonallocating_read`, `is_nonallocating_unboxed_read`, `is_noreturn_extern`,
   `unboxed_maybe_extern_name`, `safe_io_externs` and five `op_triggers_gc` arms are claims about C

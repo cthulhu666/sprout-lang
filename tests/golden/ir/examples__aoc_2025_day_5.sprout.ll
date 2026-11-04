@@ -3800,7 +3800,7 @@ entry:
   %t$16 = alloca i64
   store i64 %t$0, ptr %t$16
   %t$17 = call i64 @sprout_gc_push_i64_root(ptr %t$16)
-  %t$1 = call i64 @vec_empty()
+  %t$1 = call i64 @vec_empty$Int()
   %t$2 = add i64 0, 0
   %t$18 = alloca i64
   store i64 %t$1, ptr %t$18
@@ -4379,6 +4379,25 @@ entry:
   %t$4 = call i64 @__cm_stdlib.sort.Sort_sort_by_values(i64 %p$key, i64 %p$xs, i64 %t$0, i64 %t$1, i64 %t$2, i64 %t$3)
   %t$9 = call i64 @sprout_gc_pop_roots(i64 2)
   ret i64 %t$4
+}
+
+define i64 @vec_empty$Int() {
+entry:
+  %t$0 = call i64 @vector_empty()
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @sprout_alloc_obj(i64 10, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
 }
 
 define i64 @__cm_Ord_compare(i64 %p$left, i64 %p$right, i64 %p$__tc_Ord_0_compare, i64 %p$__tc_Eq_0_eq) {

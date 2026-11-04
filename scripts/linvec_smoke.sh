@@ -22,8 +22,16 @@
 #   bce     bounds-check elimination versions no loop in a `stdlib.linvec.*`,
 #           `stdlib.linheap.*` or `stdlib.sort.*` declaration; why: stdlib/compiler/bce.sprout, above
 #           `safe_io_externs`.
+#   copies  a per-scalar copy of a `linvec` creator (`new$Int`, `from_vec$Double`, ...) writes
+#           only to stack slots and to the NOSCAN flag, and calls only an allowlist of creating
+#           externs and runtime helpers. A copy's vector is built NOSCAN, so a store into it
+#           would skip the barrier's pointer check (docs/pointer-free-vectors-v0.md §4.3). It is
+#           an allowlist because a store can hide as an inline `store` or behind a wrapper
+#           (`linvec.set`, `linvec.push`). Needs a compiler that makes the copies.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=ir_body_lib.sh
+source "$ROOT/scripts/ir_body_lib.sh"
 BIN="${SPROUT_LINVEC_BIN:-$ROOT/build/compile_driver_bin_stage1}"
 STDLIB="${SPROUT_LINVEC_STDLIB:-$ROOT/stdlib}"
 CC_EXTRA="${SPROUT_LINVEC_CC_EXTRA:-}"
@@ -201,6 +209,68 @@ for t in test_linvec test_linheap test_sort; do
 done
 # The trace must be live: test_linvec alone reports loops, so an empty one means no trace.
 grep -q '^\[bce\] ' "$TMPD/bce_test_linvec.err" || bad "the bce trace printed no [bce] line"
+
+# --- copies: no store inside a copied creator ---
+# Needs a compiler that makes scalar copies; a binary without them has none to check.
+# A store is judged by what it writes to, a call by its target, so a store that the compiler
+# lowers inline (`vector_mutset` on a scalar) or a wrapper (`linvec.set`, `linvec.push`) shows.
+#
+# Allowed callees of a copy: the creating externs, the rooting helpers, `sprout_field`, the
+# match abort, intrinsics and the vector externs that build a new vector. A new entry needs
+# judging (can it write into a vector it was handed?), not appending to make the check pass.
+CALL_OK='^(vector_empty|vector_from_list|vec_make_filled|vector_concat|sprout_gc_push_[a-z0-9_]+_root|sprout_gc_pop_roots|sprout_field|sprout_abort_match|llvm\..*)$'
+
+# <body file> -> one line per instruction a copy may not contain. A `store` must target a stack
+# slot (an `alloca`, or a `getelementptr` off one) or be the NOSCAN flag write: the store of
+# `%X$nsh1`, an `or` with bit 63, to `%X$nshp`. A `call` must name an allowed `@callee`.
+# SYNC WITH SPROUT_VEC_NOSCAN_BIT in runtime/sprout_word.h (also scripts/noscan_gate.sh).
+copy_violations() {
+  awk -v ok="$CALL_OK" -v bit='-9223372036854775808' '
+    function target(l) {
+      if (match(l, /, ptr %[^ ,)]+/)) return substr(l, RSTART + 6, RLENGTH - 6)
+      return ""
+    }
+    / = alloca / { slot[$1] = 1 }
+    / = getelementptr / { if (target($0) in slot) slot[$1] = 1 }
+    / = or i64 / { if (index($0, ", " bit) > 0) flag[$1] = 1 }
+    /^ *store / {
+      tgt = target($0); val = $0
+      sub(/^ *store [^ ]+ /, "", val); sub(/,.*/, "", val)
+      want = val; sub(/\$nsh1$/, "$nshp", want)
+      if (tgt in slot) next
+      if ((val in flag) && tgt == want) next
+      print; next
+    }
+    /(^|[ =])call / {
+      if (match($0, /@[^ (]+\(/)) { callee = substr($0, RSTART + 1, RLENGTH - 2); if (callee ~ ok) next }
+      print
+    }
+  ' "$1"
+}
+
+CREATORS="$TMPD/creators"
+if build "$SMOKE/creators.spr" "$STDLIB" "$CREATORS"; then
+  # Copies are named `<fn>$Int` or `<fn>$Double`, with an optional `_argw` worker suffix.
+  copies=$(sed -E -n 's/^define .* @(stdlib\.linvec\.[A-Za-z_]+[$](Int|Double)[A-Za-z_]*)\(.*/\1/p' "$CREATORS.ll")
+  if [ -z "$copies" ]; then
+    bad "copies: no stdlib.linvec.*\$Int or \$Double copy in the IR of creators.spr"
+  else
+    ncopies=0
+    for sym in $copies; do
+      ncopies=$((ncopies + 1))
+      ir_fn_body "$CREATORS.ll" "$sym" > "$TMPD/copy.ll"
+      [ -s "$TMPD/copy.ll" ] || { bad "copies: no body found for $sym"; continue; }
+      copy_violations "$TMPD/copy.ll" > "$TMPD/copy.bad"
+      if [ -s "$TMPD/copy.bad" ]; then
+        bad "copies: $sym may write into its vector"
+        cat "$TMPD/copy.bad" >&2
+      fi
+    done
+    echo "linvec-smoke: $ncopies linvec creator copies checked for stores"
+  fi
+else
+  fail=1
+fi
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "==> linvec-smoke ✓"

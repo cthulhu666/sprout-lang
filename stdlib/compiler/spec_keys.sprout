@@ -186,6 +186,11 @@ fn constraint_args(c: ast.TypeConstraint, subs: Dict ast.TypeExpr) -> List ast.T
   match c with
   | ast.TypeConstraint _ args -> list_map(ast.subst_type_expr(subs, _), args)
 
+# The note a diagnostic in a copy carries, shared by both copying passes. A call's position names
+# no file, so the call is placed by the function `holder` that holds it.
+export fn copy_note(fn_name: String, site: source.SourcePos, holder: String) -> String =
+  `in the copy of ${fn_name} made for the call at ${site.line}:${site.column} in ${holder}`
+
 # ---------------------------------------------------------------------------
 # Keys
 # ---------------------------------------------------------------------------

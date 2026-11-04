@@ -161,20 +161,6 @@ declare i64 @wall_time_micros()
 @pow10_exact_unit = global i64 zeroinitializer
 @pow10_finite_max = private constant i64 308
 
-define i64 @vec_empty() {
-entry:
-  %t$0 = call i64 @vector_empty()
-  %t$2 = alloca i64
-  store i64 %t$0, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$1 = call i64 @sprout_alloc_obj(i64 10, i64 1)
-  %t$1$ptr = inttoptr i64 %t$1 to ptr
-  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
-  store i64 %t$0, ptr %t$1$f0
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$1
-}
-
 define i64 @vec_append(i64 %p$value, i64 %p$vec) {
 entry:
   br label %arm_0_0
@@ -559,7 +545,7 @@ entry:
   %t$0 = add i64 0, 0
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 0
-  %t$3 = call i64 @vec_empty()
+  %t$3 = call i64 @vec_empty$Bool()
   %t$30 = alloca i64
   store i64 %t$3, ptr %t$30
   %t$31 = call i64 @sprout_gc_push_i64_root(ptr %t$30)
@@ -590,7 +576,7 @@ ovfpanic_10:
   unreachable
 ovfok_10:
   %t$13 = add i64 0, 0
-  %t$14 = call i64 @vec_empty()
+  %t$14 = call i64 @vec_empty$Bool()
   %t$33 = alloca i64
   store i64 %t$14, ptr %t$33
   %t$34 = call i64 @sprout_gc_push_i64_root(ptr %t$33)
@@ -621,7 +607,7 @@ ovfpanic_21:
   unreachable
 ovfok_21:
   %t$24 = add i64 0, 0
-  %t$25 = call i64 @vec_empty()
+  %t$25 = call i64 @vec_empty$Bool()
   %t$36 = alloca i64
   store i64 %t$25, ptr %t$36
   %t$37 = call i64 @sprout_gc_push_i64_root(ptr %t$36)
@@ -928,6 +914,25 @@ define i64 @print$spec_String(i64 %p$value) {
 entry:
   %t$0 = call i64 @__tc_ToString_String_to_string(i64 %p$value)
   %t$1 = call i64 @print_str(i64 %t$0)
+  ret i64 %t$1
+}
+
+define i64 @vec_empty$Bool() {
+entry:
+  %t$0 = call i64 @vector_empty()
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @sprout_alloc_obj(i64 10, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
   ret i64 %t$1
 }
 

@@ -242,24 +242,6 @@ join_0:
   ret i64 %t$1
 }
 
-define i64 @stdlib.mutable.mutvec_new(i64 %p$n, i64 %p$val) {
-entry:
-  %t$2 = alloca i64
-  store i64 %p$val, ptr %t$2
-  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
-  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$val)
-  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
-  %t$5 = alloca i64
-  store i64 %t$0, ptr %t$5
-  %t$6 = call i64 @sprout_gc_push_i64_root(ptr %t$5)
-  %t$1 = call i64 @sprout_alloc_obj(i64 16, i64 1)
-  %t$1$ptr = inttoptr i64 %t$1 to ptr
-  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
-  store i64 %t$0, ptr %t$1$f0
-  %t$7 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$1
-}
-
 define i64 @stdlib.mutable.mutvec_at(i64 %p$v, i64 %p$i) {
 entry:
   %t$0 = call i64 @stdlib.mutable.mutvec_raw(i64 %p$v)
@@ -1047,12 +1029,12 @@ entry:
   %t$28 = call i64 @sprout_gc_push_scan_root(ptr %t$27, i64 16)
   %t$0 = add i64 0, 10000
   %t$1 = add i64 0, 9999999
-  %t$2 = call i64 @stdlib.mutable.mutvec_new(i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @stdlib.mutable.mutvec_new$Int(i64 %t$0, i64 %t$1)
   %t$27$0 = getelementptr i64, ptr %t$27, i64 0
   store i64 %t$2, ptr %t$27$0
   %t$3 = add i64 0, 10000
   %t$4 = add i64 0, 0
-  %t$5 = call i64 @stdlib.mutable.mutvec_new(i64 %t$3, i64 %t$4)
+  %t$5 = call i64 @stdlib.mutable.mutvec_new$Int(i64 %t$3, i64 %t$4)
   %t$27$1 = getelementptr i64, ptr %t$27, i64 1
   store i64 %t$5, ptr %t$27$1
   %t$6 = call i64 @stdlib.mutable.mutvec_raw(i64 %t$2)
@@ -1583,6 +1565,25 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.mutable.mutvec_new$Int(i64 %p$n, i64 %p$val) {
+entry:
+  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$val)
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  %t$2 = alloca i64
+  store i64 %t$0, ptr %t$2
+  %t$3 = call i64 @sprout_gc_push_i64_root(ptr %t$2)
+  %t$1 = call i64 @sprout_alloc_obj(i64 16, i64 1)
+  %t$1$ptr = inttoptr i64 %t$1 to ptr
+  %t$1$f0 = getelementptr i64, ptr %t$1$ptr, i64 0
+  store i64 %t$0, ptr %t$1$f0
+  %t$4 = call i64 @sprout_gc_pop_roots(i64 1)
+  ret i64 %t$1
+}
+
 define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
   ret i64 %p$value
@@ -1595,12 +1596,12 @@ entry:
   %t$37 = call i64 @sprout_gc_push_scan_root(ptr %t$36, i64 16)
   %t$0 = add i64 0, 10000
   %t$1 = add i64 0, 9999999
-  %t$2 = call i64 @stdlib.mutable.mutvec_new(i64 %t$0, i64 %t$1)
+  %t$2 = call i64 @stdlib.mutable.mutvec_new$Int(i64 %t$0, i64 %t$1)
   %t$36$0 = getelementptr i64, ptr %t$36, i64 0
   store i64 %t$2, ptr %t$36$0
   %t$3 = add i64 0, 10000
   %t$4 = add i64 0, 0
-  %t$5 = call i64 @stdlib.mutable.mutvec_new(i64 %t$3, i64 %t$4)
+  %t$5 = call i64 @stdlib.mutable.mutvec_new$Int(i64 %t$3, i64 %t$4)
   %t$36$1 = getelementptr i64, ptr %t$36, i64 1
   store i64 %t$5, ptr %t$36$1
   %t$6 = call i64 @stdlib.mutable.mutvec_raw(i64 %t$2)

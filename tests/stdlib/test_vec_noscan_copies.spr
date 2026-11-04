@@ -1,0 +1,324 @@
+import stdlib.test (new_state, assert_eq, summary)
+import stdlib.mutable (MutVec, MutMatrix, mutvec_new, mutvec_empty, mutvec_push, mutvec_set, mutvec_sort,
+                       mutvec_len, mutvec_at, mutvec_fold, mutmatrix_new, mutmatrix_set, mutmatrix_at)
+import stdlib.linvec as linvec
+
+# Each creating stdlib function, built at Int and at Double, then read back after forced
+# collections (docs/pointer-free-vectors-v0.md §6.3). The scalar-copy pass retargets these calls
+# to per-scalar copies whose vectors the collector no longer scans, so a wrong copy shows as a
+# wrong or freed element. The creating set is pinned in tests/stdlib/compiler/test_scalar_copies.spr:
+# a new creating function needs a run here. Every call below is at a concrete type on purpose, so
+# a helper that is generic in the element would keep the original.
+#
+#   §4.5 premise 4  `Vec String` through vec_map and through a user generic builder keeps every
+#                   string; one builder called at Int and at String in one function
+#
+# Also run under SPROUT_GC_STRESS=1.
+
+fn churn(n: Int, acc: Int) -> Int =
+  if n <= 0 then acc
+  else churn(n - 1, acc + vector_length(vector_from_list(["a" ++ int_to_string(n), "b"])))
+
+fn ints(n: Int) -> List Int = [i * 10 for i in 1..n]
+
+fn doubles(n: Int) -> List Double = [to_double(i) * 10.0 + 0.5 for i in 1..n]
+
+# --- Int -------------------------------------------------------------------------------------
+
+fn int_from_list(n: Int) -> Vec Int = vec_from_list(ints(n))
+
+fn int_map(v: Vec Int) -> Vec Int = vec_map(\x -> x + 1, v)
+
+fn int_filter(v: Vec Int) -> Vec Int = vec_filter(\x -> x > 20, v)
+
+fn int_slice(v: Vec Int) -> Vec Int = vec_slice(1, 3, v)
+
+fn int_filter_map(v: Vec Int) -> Vec Int = vec_filter_map(\x -> if x > 20 then Just(x * 2) else Nothing, v)
+
+fn int_partition(v: Vec Int) -> (Vec Int, Vec Int) = vec_partition(\x -> x > 20, v)
+
+fn int_reverse(v: Vec Int) -> Vec Int = vec_reverse(v)
+
+fn int_prepend(v: Vec Int) -> Vec Int = vec_prepend(5, v)
+
+fn int_single() -> Vec Int = vec_singleton(7)
+
+fn int_appended() -> Vec Int = vec_append(9, vec_empty())
+
+fn int_zip(v: Vec Int) -> Vec Int = zip_with(\ (x, y) -> x + y, v, v)
+
+fn int_dict() -> Vec Int = dict_values(dict_set("b", 20, dict_set("a", 30, dict_set("c", 10, dict_empty()))))
+
+fn int_lin_from_list() -> Vec Int = linvec.freeze(linvec.from_list(ints(5)))
+
+fn int_lin_new() -> Vec Int = linvec.freeze(linvec.set(1, 9, linvec.new(3, 7)))
+
+fn int_lin_empty() -> Vec Int = linvec.freeze(linvec.push(2, linvec.push(1, linvec.empty())))
+
+fn int_lin_from_vec(v: Vec Int) -> Vec Int = linvec.freeze(linvec.set(0, 99, linvec.from_vec(v)))
+
+fn int_sorted() -> MutVec Int !{IO} =
+  do
+    m <- mutvec_new(5, 0)
+    mutvec_set(m, 0, 50)
+    mutvec_set(m, 1, 20)
+    mutvec_set(m, 2, 40)
+    mutvec_set(m, 3, 10)
+    mutvec_set(m, 4, 30)
+    mutvec_sort(m)
+    m
+
+fn int_pushed(n: Int) -> MutVec Int !{IO} =
+  do
+    m <- mutvec_empty()
+    list_each(\x -> mutvec_push(m, x), ints(n))
+    m
+
+fn int_matrix() -> MutMatrix Int !{IO} =
+  do
+    m <- mutmatrix_new(2, 3, 7)
+    mutmatrix_set(m, 1, 2, 99)
+    m
+
+# --- Double ----------------------------------------------------------------------------------
+
+fn dbl_from_list(n: Int) -> Vec Double = vec_from_list(doubles(n))
+
+fn dbl_map(v: Vec Double) -> Vec Double = vec_map(\x -> x + 1.0, v)
+
+fn dbl_filter(v: Vec Double) -> Vec Double = vec_filter(\x -> x > 20.5, v)
+
+fn dbl_slice(v: Vec Double) -> Vec Double = vec_slice(1, 3, v)
+
+fn dbl_filter_map(v: Vec Double) -> Vec Double =
+  vec_filter_map(\x -> if x > 20.5 then Just(x * 2.0) else Nothing, v)
+
+fn dbl_partition(v: Vec Double) -> (Vec Double, Vec Double) = vec_partition(\x -> x > 20.5, v)
+
+fn dbl_reverse(v: Vec Double) -> Vec Double = vec_reverse(v)
+
+fn dbl_prepend(v: Vec Double) -> Vec Double = vec_prepend(5.5, v)
+
+fn dbl_single() -> Vec Double = vec_singleton(7.5)
+
+fn dbl_appended() -> Vec Double = vec_append(9.5, vec_empty())
+
+fn dbl_zip(v: Vec Double) -> Vec Double = zip_with(\ (x, y) -> x + y, v, v)
+
+fn dbl_dict() -> Vec Double =
+  dict_values(dict_set("b", 20.5, dict_set("a", 30.5, dict_set("c", 10.5, dict_empty()))))
+
+fn dbl_lin_from_list() -> Vec Double = linvec.freeze(linvec.from_list(doubles(5)))
+
+fn dbl_lin_new() -> Vec Double = linvec.freeze(linvec.set(1, 9.5, linvec.new(3, 7.5)))
+
+fn dbl_lin_empty() -> Vec Double = linvec.freeze(linvec.push(2.5, linvec.push(1.5, linvec.empty())))
+
+fn dbl_lin_from_vec(v: Vec Double) -> Vec Double = linvec.freeze(linvec.set(0, 99.5, linvec.from_vec(v)))
+
+fn dbl_sorted() -> MutVec Double !{IO} =
+  do
+    m <- mutvec_new(5, 0.0)
+    mutvec_set(m, 0, 50.5)
+    mutvec_set(m, 1, 20.5)
+    mutvec_set(m, 2, 40.5)
+    mutvec_set(m, 3, 10.5)
+    mutvec_set(m, 4, 30.5)
+    mutvec_sort(m)
+    m
+
+fn dbl_pushed(n: Int) -> MutVec Double !{IO} =
+  do
+    m <- mutvec_empty()
+    list_each(\x -> mutvec_push(m, x), doubles(n))
+    m
+
+fn dbl_matrix() -> MutMatrix Double !{IO} =
+  do
+    m <- mutmatrix_new(2, 3, 7.5)
+    mutmatrix_set(m, 1, 2, 99.5)
+    m
+
+# --- Strings: the premise that no copy is made at a heap element -------------------------------
+
+fn label(i: Int) -> String = "s" ++ int_to_string(i)
+
+fn labels(n: Int) -> List String = [label(i) for i in 1..n]
+
+# An annotated, constraint-free builder: a candidate, copied at Int and left alone at String.
+fn twice(x: a) -> Vec a = [x, x]
+
+fn str_map(v: Vec Int) -> Vec String = vec_map(\x -> "m" ++ int_to_string(x), v)
+
+fn str_twice(i: Int) -> Vec String = twice(label(i))
+
+fn str_many(n: Int) -> List (Vec String) = [str_twice(i) for i in 1..n]
+
+fn str_filter(v: Vec String) -> Vec String = vec_filter(\s -> s != "s2", v)
+
+fn str_reverse(v: Vec String) -> Vec String = vec_reverse(v)
+
+# The same builder at Int and at String in one body.
+fn mixed(i: Int) -> (Vec Int, Vec String) = (twice(i), twice(label(i)))
+
+# --- Reads -----------------------------------------------------------------------------------
+
+fn mut_list(m: MutVec a) -> List a !{IO} =
+  do
+    rev <- mutvec_fold(\ (acc, x) -> Cons(x, acc), [], m)
+    list_reverse(rev)
+
+fn strs(v: Vec String) -> List String = vec_to_list(v)
+
+fn expected_twice(n: Int) -> List (List String) = [[label(i), label(i)] for i in 1..n]
+
+# The 600-element vectors are past the inline ceiling (508): their elements live in a
+# malloc'd buffer, a different path from the 5-element ones.
+fn main() -> Unit !{IO} =
+  do
+    state <- new_state()
+
+    # ── Int ─────────────────────────────────────────────────────────────────
+    let i_src = int_from_list(5)
+    let i_big = int_from_list(600)
+    let i_big_map = int_map(i_big)
+    let i_big_filter = int_filter(i_big)
+    let i_map = int_map(i_src)
+    let i_filter = int_filter(i_src)
+    let i_slice = int_slice(i_src)
+    let i_kept = int_filter_map(i_src)
+    let (i_hit, i_miss) = int_partition(i_src)
+    let i_rev = int_reverse(i_src)
+    let i_pre = int_prepend(i_src)
+    let i_single = int_single()
+    let i_appended = int_appended()
+    let i_zip = int_zip(i_src)
+    let i_dict = int_dict()
+    let i_lin = int_lin_from_list()
+    let i_lin_new = int_lin_new()
+    let i_lin_empty = int_lin_empty()
+    let i_lin_vec = int_lin_from_vec(i_src)
+    i_sorted <- int_sorted()
+    i_pushed <- int_pushed(600)
+    i_matrix <- int_matrix()
+
+    # ── Double ──────────────────────────────────────────────────────────────
+    let d_src = dbl_from_list(5)
+    let d_big = dbl_from_list(600)
+    let d_big_map = dbl_map(d_big)
+    let d_big_filter = dbl_filter(d_big)
+    let d_map = dbl_map(d_src)
+    let d_filter = dbl_filter(d_src)
+    let d_slice = dbl_slice(d_src)
+    let d_kept = dbl_filter_map(d_src)
+    let (d_hit, d_miss) = dbl_partition(d_src)
+    let d_rev = dbl_reverse(d_src)
+    let d_pre = dbl_prepend(d_src)
+    let d_single = dbl_single()
+    let d_appended = dbl_appended()
+    let d_zip = dbl_zip(d_src)
+    let d_dict = dbl_dict()
+    let d_lin = dbl_lin_from_list()
+    let d_lin_new = dbl_lin_new()
+    let d_lin_empty = dbl_lin_empty()
+    let d_lin_vec = dbl_lin_from_vec(d_src)
+    d_sorted <- dbl_sorted()
+    d_pushed <- dbl_pushed(600)
+    d_matrix <- dbl_matrix()
+
+    # ── Strings ─────────────────────────────────────────────────────────────
+    let s_src = vec_from_list(labels(700))
+    let s_map = str_map(i_src)
+    let s_many = str_many(40)
+    let s_filter = str_filter(vec_from_list(labels(3)))
+    let s_rev = str_reverse(vec_from_list(labels(3)))
+    let (m_ints, m_strs) = mixed(7)
+
+    let churned = churn(3000, 0)
+    assert_eq(state, "churn ran", churned, 6000)
+    let churned_again = churn(3000, 0)
+    assert_eq(state, "second churn ran", churned_again, 6000)
+
+    assert_eq(state, "int vec_from_list", vec_to_list(i_src), [10, 20, 30, 40, 50])
+    assert_eq(state, "int vec_from_list (out of line): length", vec_length(i_big), 600)
+    assert_eq(state, "int vec_from_list (out of line): interior", vec_get_or(299, -1, i_big), 3000)
+    assert_eq(state, "int vec_map", vec_to_list(i_map), [11, 21, 31, 41, 51])
+    assert_eq(state, "int vec_map (out of line): last", vec_get_or(599, -1, i_big_map), 6001)
+    assert_eq(state, "int vec_filter", vec_to_list(i_filter), [30, 40, 50])
+    assert_eq(state, "int vec_filter (out of line): length", vec_length(i_big_filter), 598)
+    assert_eq(state, "int vec_filter (out of line): first", vec_get_or(0, -1, i_big_filter), 30)
+    assert_eq(state, "int vec_filter (out of line): last", vec_get_or(597, -1, i_big_filter), 6000)
+    assert_eq(state, "int vec_slice", vec_to_list(i_slice), [20, 30, 40])
+    assert_eq(state, "int vec_filter_map", vec_to_list(i_kept), [60, 80, 100])
+    assert_eq(state, "int vec_partition: hit", vec_to_list(i_hit), [30, 40, 50])
+    assert_eq(state, "int vec_partition: miss", vec_to_list(i_miss), [10, 20])
+    assert_eq(state, "int vec_reverse", vec_to_list(i_rev), [50, 40, 30, 20, 10])
+    assert_eq(state, "int vec_prepend", vec_to_list(i_pre), [5, 10, 20, 30, 40, 50])
+    assert_eq(state, "int vec_singleton", vec_to_list(i_single), [7])
+    assert_eq(state, "int vec_empty then append", vec_to_list(i_appended), [9])
+    assert_eq(state, "int zip_with", vec_to_list(i_zip), [20, 40, 60, 80, 100])
+    assert_eq(state, "int dict_values", vec_to_list(i_dict), [30, 20, 10])
+    assert_eq(state, "int linvec.from_list", vec_to_list(i_lin), [10, 20, 30, 40, 50])
+    assert_eq(state, "int linvec.new", vec_to_list(i_lin_new), [7, 9, 7])
+    assert_eq(state, "int linvec.empty then push", vec_to_list(i_lin_empty), [1, 2])
+    assert_eq(state, "int linvec.from_vec: the copy", vec_to_list(i_lin_vec), [99, 20, 30, 40, 50])
+    assert_eq(state, "int linvec.from_vec: the source", vec_to_list(i_src), [10, 20, 30, 40, 50])
+    sorted_ints <- mut_list(i_sorted)
+    assert_eq(state, "int mutvec_new then mutvec_sort", sorted_ints, [10, 20, 30, 40, 50])
+    pushed_len <- mutvec_len(i_pushed)
+    assert_eq(state, "int mutvec_empty then push: length", pushed_len, 600)
+    pushed_last <- mutvec_at(i_pushed, 599)
+    assert_eq(state, "int mutvec_empty then push: last", pushed_last, 6000)
+    pushed_mid <- mutvec_at(i_pushed, 300)
+    assert_eq(state, "int mutvec_empty then push: interior", pushed_mid, 3010)
+    matrix_set <- mutmatrix_at(i_matrix, 1, 2)
+    matrix_fill <- mutmatrix_at(i_matrix, 1, 1)
+    assert_eq(state, "int mutmatrix_new: the set cell", matrix_set, 99)
+    assert_eq(state, "int mutmatrix_new: a filled cell", matrix_fill, 7)
+
+    assert_eq(state, "double vec_from_list", vec_to_list(d_src), [10.5, 20.5, 30.5, 40.5, 50.5])
+    assert_eq(state, "double vec_from_list (out of line): length", vec_length(d_big), 600)
+    assert_eq(state, "double vec_from_list (out of line): interior", vec_get_or(299, -1.0, d_big), 3000.5)
+    assert_eq(state, "double vec_map", vec_to_list(d_map), [11.5, 21.5, 31.5, 41.5, 51.5])
+    assert_eq(state, "double vec_map (out of line): last", vec_get_or(599, -1.0, d_big_map), 6001.5)
+    assert_eq(state, "double vec_filter", vec_to_list(d_filter), [30.5, 40.5, 50.5])
+    assert_eq(state, "double vec_filter (out of line): length", vec_length(d_big_filter), 598)
+    assert_eq(state, "double vec_filter (out of line): first", vec_get_or(0, -1.0, d_big_filter), 30.5)
+    assert_eq(state, "double vec_filter (out of line): last", vec_get_or(597, -1.0, d_big_filter), 6000.5)
+    assert_eq(state, "double vec_slice", vec_to_list(d_slice), [20.5, 30.5, 40.5])
+    assert_eq(state, "double vec_filter_map", vec_to_list(d_kept), [61.0, 81.0, 101.0])
+    assert_eq(state, "double vec_partition: hit", vec_to_list(d_hit), [30.5, 40.5, 50.5])
+    assert_eq(state, "double vec_partition: miss", vec_to_list(d_miss), [10.5, 20.5])
+    assert_eq(state, "double vec_reverse", vec_to_list(d_rev), [50.5, 40.5, 30.5, 20.5, 10.5])
+    assert_eq(state, "double vec_prepend", vec_to_list(d_pre), [5.5, 10.5, 20.5, 30.5, 40.5, 50.5])
+    assert_eq(state, "double vec_singleton", vec_to_list(d_single), [7.5])
+    assert_eq(state, "double vec_empty then append", vec_to_list(d_appended), [9.5])
+    assert_eq(state, "double zip_with", vec_to_list(d_zip), [21.0, 41.0, 61.0, 81.0, 101.0])
+    assert_eq(state, "double dict_values", vec_to_list(d_dict), [30.5, 20.5, 10.5])
+    assert_eq(state, "double linvec.from_list", vec_to_list(d_lin), [10.5, 20.5, 30.5, 40.5, 50.5])
+    assert_eq(state, "double linvec.new", vec_to_list(d_lin_new), [7.5, 9.5, 7.5])
+    assert_eq(state, "double linvec.empty then push", vec_to_list(d_lin_empty), [1.5, 2.5])
+    assert_eq(state, "double linvec.from_vec: the copy", vec_to_list(d_lin_vec), [99.5, 20.5, 30.5, 40.5, 50.5])
+    assert_eq(state, "double linvec.from_vec: the source", vec_to_list(d_src), [10.5, 20.5, 30.5, 40.5, 50.5])
+    sorted_doubles <- mut_list(d_sorted)
+    assert_eq(state, "double mutvec_new then mutvec_sort", sorted_doubles, [10.5, 20.5, 30.5, 40.5, 50.5])
+    dpushed_len <- mutvec_len(d_pushed)
+    assert_eq(state, "double mutvec_empty then push: length", dpushed_len, 600)
+    dpushed_last <- mutvec_at(d_pushed, 599)
+    assert_eq(state, "double mutvec_empty then push: last", dpushed_last, 6000.5)
+    dmatrix_set <- mutmatrix_at(d_matrix, 1, 2)
+    dmatrix_fill <- mutmatrix_at(d_matrix, 0, 0)
+    assert_eq(state, "double mutmatrix_new: the set cell", dmatrix_set, 99.5)
+    assert_eq(state, "double mutmatrix_new: a filled cell", dmatrix_fill, 7.5)
+
+    assert_eq(state, "Vec String: length", vec_length(s_src), 700)
+    assert_eq(state, "Vec String: last", vec_get_or(699, "?", s_src), "s700")
+    assert_eq(state, "Vec String via vec_map", strs(s_map), ["m10", "m20", "m30", "m40", "m50"])
+    assert_eq(state, "Vec String via a user builder at String: count", list_length(s_many), 40)
+    assert_eq(state, "Vec String via a user builder at String: every string", list_map(strs, s_many), expected_twice(40))
+    assert_eq(state, "Vec String via vec_filter", strs(s_filter), ["s1", "s3"])
+    assert_eq(state, "Vec String via vec_reverse", strs(s_rev), ["s3", "s2", "s1"])
+    assert_eq(state, "one builder at Int and String: the Int vector", vec_to_list(m_ints), [7, 7])
+    assert_eq(state, "one builder at Int and String: the String vector", strs(m_strs), ["s7", "s7"])
+
+    summary(state)

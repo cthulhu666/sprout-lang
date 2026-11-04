@@ -311,6 +311,18 @@ go wrong, so `scripts/linvec_smoke.sh` checks, in `just ci-fast-gates`:
 - The two shape rules of `unsafe_pure` (a lambda literal; no use as a value), in a copy of the
   stdlib root with a case appended to `linvec.sprout`, since a user module cannot get past the
   reference gate.
+- Every per-scalar copy of a `linvec` creator (`new$Int`, `from_list$Double`, `from_vec$Int_argw`, …;
+  from `tests/linvec_smoke/creators.spr`, which calls each creator at `Int` and `Double`) is read
+  against an allowlist. Each `store` must target a stack slot (an `alloca`, or a `getelementptr`
+  off one) or be the NOSCAN flag write itself (the `or` with bit 63 stored back to the header).
+  Each `call` must name a creating extern, a rooting helper, `sprout_field`, `sprout_abort_match`,
+  `llvm.*` or `vector_concat` (`CALL_OK` in the script; a new entry needs judging, not appending).
+  A blocklist of `vector_mutset`/`vector_push`/`linvec_set` calls missed a store lowered inline
+  (`vector_mutset` on a scalar becomes a bare `store`) and the wrappers `linvec.set` and
+  `linvec.push`. A copy's vector is flagged NOSCAN, so a store into it would skip the barrier's
+  pointer check, and `bce` assumes the creators hold none (pointer-free-vectors-v0.md §4.3). A
+  failure names the copy and prints the line. At least one copy must exist, so the recipe needs a
+  binary that makes copies: a seed older than `scalar_copies` fails here.
 - Bounds-check elimination (`SPROUT_TRACE_BCE=1`) versions no loop in a `stdlib.linvec.*` or
   `stdlib.linheap.*` declaration: the pass counts only `!{IO}` code as changing a length, which
   stays sound while a `LinVec`'s `Vector` never reaches an access that pass rewrites
@@ -402,7 +414,29 @@ followed by the header `or` with bit 63. At `Vector String`, a record, a `wrap` 
 pointer is a use-after-free that neither the mark nor GENCHECK can see. The flagged IR must also
 assemble. Design: [pointer-free-vectors-v0.md](pointer-free-vectors-v0.md) §4.2. The recipe runs
 the stage-1 binary, so an emitter change shows here only after `just refresh-seed`. The runtime
-side is `tests/stdlib/test_vec_noscan.spr`, also in `test-stress`.
+side is `tests/stdlib/test_vec_noscan.spr`, also in `test-stress`, as is
+`tests/stdlib/test_vec_noscan_copies.spr`, which runs the premise tests of §4.5 through the copies
+under `SPROUT_GC_STRESS=1` (`STRESS_FILES`).
+
+Two more fixtures cover the scalar copies (§4.3); both read each function's own IR:
+- `fixture_noscan_copies.spr` (no `main`, so dce drops nothing): a call to `vec_map`,
+  `mutvec_new`, `mutvec_empty`, `vec_from_list` or a generic helper at `Int`/`Double` calls the
+  `$Int`/`$Double` copy, and so does a value reference (`list_map(vec_from_list, xss)`). Each copy
+  has the header `or` after its creating call, and `vec_map$Int` reaches `vec_from_list$Int`
+  through its helper's copy. `Vec String` and an unannotated helper keep the original and are not
+  flagged; no `$String` copy is defined. The instance method at `Int` of a class whose method
+  builds a vector, and `specialise`'s copy of a constrained creator (`eq_vec$spec_Int`), call
+  `vec_from_list$Int`. The IR must assemble.
+  The same fixture is emitted again with `SPROUT_OPT_OFF=spec`, where a constrained creator has
+  no copy (§4.4): `through_eq_vec` keeps `main.eq_vec` and `through_dict` keeps `main.wrap_one`,
+  with no `$Int`/`$Double` call and no flag, and no `main.eq_vec$…` or `main.wrap_one$…` is
+  defined. `specialise` runs before `scalar_copies`, so with it on, `through_dict` calls
+  `wrap_one$spec_Int`, which has no type variable and could never show a copy; only the
+  spec-off run can fail here. (Dropping `eq_vec`'s constraint makes `scalar_copies` copy it and
+  fails that run.)
+- `fixture_noscan_dce.spr` (has a `main`): `build` and `vec_slice`, reached only at `Int`, are
+  defined as `$Int` copies and the originals are dropped.
+
 Wired into `just ci-fast-gates` as `noscan-gate`.
 
 ## Extern signatures — `just check-extern-signatures`

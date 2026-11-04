@@ -252,16 +252,6 @@ entry:
   ret i64 %t$0
 }
 
-define i64 @stdlib.linvec.new(i64 %p$n, i64 %p$x) {
-entry:
-  %t$1 = alloca i64
-  store i64 %p$x, ptr %t$1
-  %t$2 = call i64 @sprout_gc_push_i64_root(ptr %t$1)
-  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$x)
-  %t$3 = call i64 @sprout_gc_pop_roots(i64 1)
-  ret i64 %t$0
-}
-
 define i64 @stdlib.linvec.get(i64 %p$i, i64 %p$v) {
 entry:
   br label %arm_0_0
@@ -1225,7 +1215,7 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 10000
   %t$3 = add i64 0, 9999999
-  %t$4 = call i64 @stdlib.linvec.new(i64 %t$2, i64 %t$3)
+  %t$4 = call i64 @stdlib.linvec.new$Int(i64 %t$2, i64 %t$3)
   %t$5 = call i64 @stdlib.linvec.set(i64 %t$0, i64 %t$1, i64 %t$4)
   %t$23$0 = getelementptr i64, ptr %t$23, i64 0
   store i64 %t$5, ptr %t$23$0
@@ -1260,7 +1250,7 @@ arm_0_6:
 arm_0_16:
   %t$18 = add i64 0, 10000
   %t$19 = add i64 0, 0
-  %t$20 = call i64 @stdlib.linvec.new(i64 %t$18, i64 %t$19)
+  %t$20 = call i64 @stdlib.linvec.new$Int(i64 %t$18, i64 %t$19)
   %t$28 = alloca i64
   store i64 %t$20, ptr %t$28
   %t$29 = call i64 @sprout_gc_push_i64_root(ptr %t$28)
@@ -1756,6 +1746,17 @@ entry:
   ret i64 %t$1
 }
 
+define i64 @stdlib.linvec.new$Int(i64 %p$n, i64 %p$x) {
+entry:
+  %t$0 = call i64 @vec_make_filled(i64 %p$n, i64 %p$x)
+  %t$0$nsp = inttoptr i64 %t$0 to ptr
+  %t$0$nshp = getelementptr i8, ptr %t$0$nsp, i64 -8
+  %t$0$nsh0 = load i64, ptr %t$0$nshp
+  %t$0$nsh1 = or i64 %t$0$nsh0, -9223372036854775808
+  store i64 %t$0$nsh1, ptr %t$0$nshp
+  ret i64 %t$0
+}
+
 define i64 @__tc_ToString_String_to_string(i64 %p$value) {
 entry:
   ret i64 %p$value
@@ -1770,7 +1771,7 @@ entry:
   %t$1 = add i64 0, 0
   %t$2 = add i64 0, 10000
   %t$3 = add i64 0, 9999999
-  %t$4 = call i64 @stdlib.linvec.new(i64 %t$2, i64 %t$3)
+  %t$4 = call i64 @stdlib.linvec.new$Int(i64 %t$2, i64 %t$3)
   %t$5 = call i64 @stdlib.linvec.set(i64 %t$0, i64 %t$1, i64 %t$4)
   %t$32$0 = getelementptr i64, ptr %t$32, i64 0
   store i64 %t$5, ptr %t$32$0
@@ -1805,7 +1806,7 @@ arm_0_6:
 arm_0_16:
   %t$18 = add i64 0, 10000
   %t$19 = add i64 0, 0
-  %t$20 = call i64 @stdlib.linvec.new(i64 %t$18, i64 %t$19)
+  %t$20 = call i64 @stdlib.linvec.new$Int(i64 %t$18, i64 %t$19)
   %t$37 = alloca i64
   store i64 %t$20, ptr %t$37
   %t$38 = call i64 @sprout_gc_push_i64_root(ptr %t$37)

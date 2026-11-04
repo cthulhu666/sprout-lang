@@ -17,6 +17,7 @@ import stdlib.compiler.lowering as lowering
 import stdlib.compiler.dce as dce
 import stdlib.compiler.specialise as specialise
 import stdlib.compiler.scalar_copies as scalar_copies
+import stdlib.compiler.spec_keys as spec_keys
 import stdlib.compiler.opt_config as opt_config
 import stdlib.compiler.ir_pipeline as ir_pipeline
 import stdlib.compiler.source as source
@@ -609,44 +610,75 @@ export fn compile_phase_lower_with_roots(path: source.FilePath, stdlib_root: sou
     lower_checked(check_result)
 
 fn lower_checked(check_result: typed_ast.TypedResult) -> typed_ast.TypedResult !{IO} =
-  match check_result with
-  | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
-  | typed_ast.TypedOk typed_prog env ->
-      do
-        cfg <- opt_config.from_env()
-        specialised <- specialise_checked(cfg, typed_prog, env)
-        match specialised with
-        | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
-        | typed_ast.TypedOk spec_prog _ ->
-            do
-              scalar_prog <- scalar_checked(cfg, spec_prog, env)
-              optimised <- run_opt_passes(cfg, lowering.lower_program(scalar_prog, env))
-              typed_ast.TypedOk(optimised, env)
+  typed_then(check_result, lower_passes(_, _))
 
-let scalar_trace_var = "SPROUT_TRACE_SCALAR"
+# The pipeline after the check: each stage runs only on the program the one before it kept.
+fn lower_passes(prog: typed_ast.TypedProgram, env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
+  do
+    cfg <- opt_config.from_env()
+    specialised <- specialise_checked(cfg, prog, env)
+    scalared <- typed_then(specialised, scalar_checked(cfg, _, _))
+    typed_then(scalared, lower_and_optimise(cfg, _, _))
+
+fn lower_and_optimise(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
+                      env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
+  do
+    optimised <- run_opt_passes(cfg, lowering.lower_program(prog, env))
+    typed_ast.TypedOk(optimised, env)
+
+# An error passes through; a program goes to `f` with its environment.
+fn typed_then(r: typed_ast.TypedResult,
+              f: typed_ast.TypedProgram -> Dict types.Scheme -> typed_ast.TypedResult !{IO})
+    -> typed_ast.TypedResult !{IO} =
+  match r with
+  | typed_ast.TypedErr pos msg -> typed_ast.TypedErr(pos, msg)
+  | typed_ast.TypedOk prog env -> f(prog, env)
+
+# What a copying pass hands the driver: the program with its copies, the copies (`added`), the
+# trace lines, and the note for a diagnostic in a copy, Nothing for a name that is not one.
+type PassRun = (program: typed_ast.TypedProgram, added: List typed_ast.TypedDecl, trace: List String,
+                note_of: String -> Maybe String)
+
+# Runs a copying pass (`run`) when `pass` is enabled. Each copy is checked again by the dispatch
+# verifier (the rest of the program was checked in `resolve_checked`); a finding is fatal, and
+# names the function and the call that produced the copy.
+fn copying_checked(cfg: opt_config.OptConfig, pass: opt_config.Pass, trace_var: String,
+                   run: typed_ast.TypedProgram -> PassRun, prog: typed_ast.TypedProgram,
+                   env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
+  if !opt_config.enabled(cfg, pass) then
+    do
+      _ <- report_opt_stats(cfg, pass, false, prog, prog)
+      typed_ast.TypedOk(prog, env)
+  else
+    let out = run(prog)
+    in
+      do
+        _ <- report_opt_stats(cfg, pass, true, prog, out.program)
+        _ <- trace_switch(trace_var, out.trace)
+        match enforced_dispatch_finding(noted_finding(verify_dispatch.verify_added(out.program, out.added), out.note_of)) with
+        | Nothing -> typed_ast.TypedOk(out.program, env)
+        | Just (vpos, vmsg) -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
+
+# A finding in a copy is reported with the note for the copy, not its mangled name alone.
+fn noted_finding(found: Maybe (String, source.SourcePos, String), note_of: String -> Maybe String)
+    -> Maybe(source.SourcePos, String) =
+  match found with
+  | Nothing -> Nothing
+  | Just (fn_name, pos, msg) ->
+      match note_of(fn_name) with
+      | Nothing -> Just((pos, msg))
+      | Just note -> Just((pos, `${msg} (${note})`))
 
 # Scalar copies (docs/pointer-free-vectors-v0.md §4.3), after `specialise` so its copies are
-# candidates too. A dry run: it reports the copies it would make and returns the program as it is.
+# candidates too.
 fn scalar_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
-                  env: Dict types.Scheme) -> typed_ast.TypedProgram !{IO} =
-  if !opt_config.enabled(cfg, opt_config.Scalar) then
-    do
-      _ <- report_opt_stats(cfg, opt_config.Scalar, false, prog, prog)
-      prog
-  else
-    # The analysis is report-only until the copies land, so it runs only when it is read.
-    do
-      let traced = is_just(switches.env_switch(scalar_trace_var))
-      if cfg.stats || traced then scalar_dry_run(cfg, traced, prog, env) else prog
+                  env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
+  copying_checked(cfg, opt_config.Scalar, "SPROUT_TRACE_SCALAR", scalar_run(env, _), prog, env)
 
-fn scalar_dry_run(cfg: opt_config.OptConfig, traced: Bool, prog: typed_ast.TypedProgram,
-                  env: Dict types.Scheme) -> typed_ast.TypedProgram !{IO} =
+fn scalar_run(env: Dict types.Scheme, prog: typed_ast.TypedProgram) -> PassRun =
   let out = scalar_copies.run(prog, env)
-  in
-    do
-      _ <- report_opt_stats(cfg, opt_config.Scalar, true, prog, out.program)
-      _ <- if traced then list_each(eprint, out.trace) else ()
-      out.program
+  in PassRun(program = out.program, added = out.added, trace = out.trace,
+             note_of = scalar_copies.origin_note(out.analysis, _))
 
 # When `var` is set, one line per entry to stderr.
 fn trace_switch(var: String, lines: List String) -> Unit !{IO} =
@@ -655,38 +687,20 @@ fn trace_switch(var: String, lines: List String) -> Unit !{IO} =
   | Just _ -> list_each(eprint, lines)
 
 # Specialisation (docs/specialisation-v0.md §4) on the resolved program, before dictionary
-# lowering. Each copy is checked again by the dispatch verifier (the rest of the program was
-# checked in `resolve_checked`); a finding is fatal, and names the generic function and the
-# call that produced the copy.
+# lowering.
 fn specialise_checked(cfg: opt_config.OptConfig, prog: typed_ast.TypedProgram,
                       env: Dict types.Scheme) -> typed_ast.TypedResult !{IO} =
-  if !opt_config.enabled(cfg, opt_config.Spec) then
-    do
-      _ <- report_opt_stats(cfg, opt_config.Spec, false, prog, prog)
-      typed_ast.TypedOk(prog, env)
-  else
-    let out = specialise.run(prog, env)
-    in
-      do
-        _ <- report_opt_stats(cfg, opt_config.Spec, true, prog, out.program)
-        _ <- trace_switch("SPROUT_TRACE_SPEC", out.trace)
-        match enforced_dispatch_finding(copy_finding(out, verify_dispatch.verify_added(out.program, out.added))) with
-        | Nothing -> typed_ast.TypedOk(out.program, env)
-        | Just (vpos, vmsg) -> typed_ast.TypedErr(vpos, "check: dispatch-verify: " ++ vmsg)
+  copying_checked(cfg, opt_config.Spec, "SPROUT_TRACE_SPEC", spec_run(env, _), prog, env)
 
-# A finding in a copy is reported against the generic function and the call that made it,
-# not the mangled name. The call's position names no file, so it is placed by the function
-# that holds it: the generic function of the producing copy, or "the program" for a direct call.
-fn copy_finding(out: specialise.Output, found: Maybe (String, source.SourcePos, String))
-    -> Maybe(source.SourcePos, String) =
-  match found with
-  | Nothing -> Nothing
-  | Just (fn_name, pos, msg) ->
-      match dict_get(fn_name, out.origins) with
-      | Nothing -> Just((pos, msg))
-      | Just o ->
-          let holder = maybe_with_default("the program", o.holder)
-          in Just((pos, `${msg} (in the copy of ${o.fn_name} made for the call at ${o.site.line}:${o.site.column} in ${holder})`))
+fn spec_run(env: Dict types.Scheme, prog: typed_ast.TypedProgram) -> PassRun =
+  let out = specialise.run(prog, env)
+  in PassRun(program = out.program, added = out.added, trace = out.trace, note_of = spec_note(out.origins, _))
+
+# A finding is reported against the generic function and the call that made the copy, not the
+# mangled name. A direct call is held by "the program".
+fn spec_note(origins: Dict specialise.Origin, fn_name: String) -> Maybe String =
+  let Just o = dict_get(fn_name, origins) else Nothing
+  in Just(spec_keys.copy_note(o.fn_name, o.site, maybe_with_default("the program", o.holder)))
 
 export fn compile_phase_recheck(path: source.FilePath, stdlib_root: source.StdlibRoot) -> typed_ast.TypedResult !{IO} =
   compile_phase_recheck_with_roots(path, stdlib_root, Nil)

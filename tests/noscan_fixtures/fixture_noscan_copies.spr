@@ -1,0 +1,52 @@
+module main
+import stdlib.mutable (MutVec, mutvec_new, mutvec_empty, mutvec_push)
+
+# Scalar-copy IR gate (docs/pointer-free-vectors-v0.md §4.3, §6.2). A call to a vector-creating
+# generic at Int or Double is retargeted to a per-scalar copy (`vec_map$Int`), whose own body
+# carries the flag write. Every other instantiation keeps the original. The noscan-gate reads
+# each function's own IR. There is no `main` here, so dead-code elimination drops nothing.
+
+# Copies at Int and Double.
+fn map_int(v: Vec Int) -> Vec Int = vec_map(\x -> x + 1, v)
+
+fn new_double() -> MutVec Double !{IO} = mutvec_new(3, 0.0)
+
+fn empty_int() -> Unit !{IO} =
+  do
+    v <- mutvec_empty()
+    mutvec_push(v, 1)
+
+fn from_list_int(x: Int) -> Vec Int = [x, 2, 3]
+
+# `vec_from_list` as a value, directly and behind a generic helper that passes it on.
+fn each_int(xss: List (List Int)) -> List (Vec Int) = list_map(vec_from_list, xss)
+
+fn build_each(xss: List (List a)) -> List (Vec a) = list_map(vec_from_list, xss)
+
+fn through_helper(xss: List (List Int)) -> List (Vec Int) = build_each(xss)
+
+# Not copied: the element is a heap type.
+fn map_string(v: Vec Int) -> Vec String = vec_map(\x -> int_to_string(x), v)
+
+# Not copied: an unannotated helper is opaque.
+fn loose(xs) = vec_from_list(xs)
+
+fn through_loose() -> Vec Int = loose([1, 2])
+
+# A builder behind a class dictionary: `specialise` resolves `through_dict` to a copy of
+# `wrap_one` with no type variable, and the instance method at Int calls the `Int` copy.
+class Single a
+  fn single(x: a) -> Vec a
+
+instance Single Int
+  fn single(x: Int) -> Vec Int = [x]
+
+fn wrap_one(x: a) -> Vec a where Single a = single(x)
+
+fn through_dict() -> Vec Int = wrap_one(1)
+
+# A constrained creator. `specialise` copies it at Int; the copy calls `vec_from_list$Int`.
+# With `SPROUT_OPT_OFF=spec` nothing copies it, so `through_eq_vec` keeps `main.eq_vec`.
+fn eq_vec(x: a) -> (Bool, Vec a) where Eq a = (x == x, vec_from_list([x]))
+
+fn through_eq_vec() -> (Bool, Vec Int) = eq_vec(1)
