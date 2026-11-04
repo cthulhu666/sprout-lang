@@ -128,7 +128,7 @@ static inline void sprout_ctx_destroy(SproutCtx* c) {
 
 /* ucontext on macOS lives behind these; define before any include pulls in
  * <sys/ucontext.h>. _XOPEN_SOURCE alone hides a libc's extensions, so each libc's
- * macro that restores them sits beside it: glibc 2.36 gates MAP_ANONYMOUS. */
+ * macro that restores them sits beside it: glibc 2.36 gates MAP_ANON. */
 #define _XOPEN_SOURCE 700
 #define _DARWIN_C_SOURCE 1
 #define _DEFAULT_SOURCE 1
@@ -139,10 +139,6 @@ static inline void sprout_ctx_destroy(SproutCtx* c) {
 #include <ucontext.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-#ifndef MAP_ANON
-#define MAP_ANON MAP_ANONYMOUS
-#endif
 
 /* macOS marks getcontext/makecontext/swapcontext deprecated; we knowingly use
  * them. Scoped to this header, so the suppression covers the four calls that

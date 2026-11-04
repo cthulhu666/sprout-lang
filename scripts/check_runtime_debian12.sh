@@ -4,7 +4,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-docker run --rm -v "$ROOT/runtime":/work/runtime:ro -w /work debian:12 bash -euc '
+tar --no-xattrs -C "$ROOT" -cf - runtime | docker run --rm -i -w /work debian:12 bash -euc '
+  tar -xf -
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq >/dev/null
   apt-get install -y -qq --no-install-recommends clang-16 libc6-dev >/dev/null
