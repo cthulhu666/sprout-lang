@@ -1,0 +1,328 @@
+# GC stage 2 — promotion age, nursery size, a young-only sweep (v0, 2026-11-04)
+
+Status: design, for approval. Nothing here is implemented. Stage 1 is
+[gc-generational-v0.md §14](gc-generational-v0.md); this doc replaces its §14.6.
+
+## 1. Problem
+
+Stage 1 (minor collections, on by default since §14.8 step 6) costs memory and some pauses:
+self-compile RSS 1.07×, mutvec_int RSS 1.25× with longer pauses
+([results](../bench/results-2026-11-04-gc-minor-pfv.md)). §14.8 blamed both on the minor sweep
+walking the whole heap. That is wrong for the memory. There are three causes, not one.
+
+All figures below are counts from one run each (`SPROUT_DEBUG_GC=1`). Collection counts, slot
+counts and object counts do not change from run to run, because collections fire on allocation
+counts. RSS varies by up to 3% (self-compile on master: 310–319 MB over three runs). No timing
+is quoted: load average was 13–21.
+
+**Cause 1: promotion after one survival makes medium-lived data old.** mutvec_int builds a
+6,000-cell list per round. A minor that lands mid-round promotes the part already built
+(p50 6.4k objects), and that part dies a moment later. A minor cannot free a dead old object,
+so it stays until the next major.
+
+| mutvec_int | collections | majors | peak slots | RSS |
+|---|---|---|---|---|
+| minor off | 926 | — | 35,931 | 12.5 MB |
+| minor on (master) | 550 | 198 | 74,532 | 15.7 MB |
+
+**Cause 2: the trigger counts dead old objects as live.** The next collection runs when the heap
+count reaches `heap_count × 3` (`sprout_gc_collect_with_reason`). After a minor that count holds
+every old object that died since the last major, so the nursery grows with the dead objects.
+The 2× major rule reads the same count, so in mutvec_int it fires once the dead old objects equal
+the live set: 198 of 550 collections are majors, and each walks the inflated heap.
+
+The self-compile shows the same cause another way. Its footprint depends on when the last major
+happens. On master a major at cycle 65 resets the count. With promotion after two survivals the
+last major (cycle 61) leaves a baseline of 1.195M; the heap count then tops out at 1.99M, under
+2×, so no major follows, and the run ends on a 5.8M threshold computed mostly from dead objects:
+peak 7.16M slots against master's 5.64M.
+
+**Cause 3: a minor's cost is its sweep.** Self-compile minors, p50: 13k objects marked, 564k
+slots walked, of which 348k were allocated since the last collection. The mark is almost free;
+the sweep visits every old and free slot as well as the young ones.
+
+Cause 3 also explains why cause 2 exists. The footprint floor and the `× 3` target amortise a
+sweep that costs O(heap) over enough allocation to pay for it. While the sweep walks the whole
+heap, a nursery sized independently of the heap makes each minor walk everything for a small
+gain. Section 4 measures that.
+
+## 2. Goals and non-goals
+
+- **Goal:** with minor collections on, no workload in the §14.8 set has higher peak RSS than with
+  them off, beyond run-to-run spread.
+- **Goal:** a minor's sweep is proportional to the young set, not to the heap.
+- **Goal:** keep the self-compile's CPU and GC-time gain (0.80, 0.52).
+- **Goal:** every new invariant has a runtime check under `SPROUT_GC_GENCHECK=1`.
+- **Non-goal:** moving objects, a copying nursery, concurrent or incremental marking.
+- **Non-goal:** returning memory to the OS from a minor. Regions are released at majors only.
+- **Non-goal:** language changes. The spec does not specify the collector, and no Sprout program
+  can observe these changes except through memory use and timing.
+
+## 3. Prior art
+
+Read 2026-11-04. §14.3 covers barriers and full-collection triggers; this adds the three
+questions stage 2 turns on. JSC (JavaScriptCore's Riptide) is added: like ours it is non-moving
+with sticky mark bits.
+
+**Nursery size: what decides when the next minor runs.**
+
+| Collector | Next minor when | Base grows with dead old objects? |
+|---|---|---|
+| CRuby 3.4 | free slots run out and no page may be added (`heap_prepare`) | yes: dead old slots stay marked |
+| Lua 5.4.7 | `genminormul`% (20) of total bytes, measured after the last collection (`setminordebt`) | yes |
+| MMTk StickyImmix | lines consumed since the last GC > a proportion of the heap size (`collection_required`) | no: counts allocation |
+| Whippet | no hole or empty block left (`gc_allocate_slow`) | yes |
+| bdwgc 8.3.0 | bytes allocated ≥ (2 × composite in use + atomic in use / 4 + roots) / 3 (`min_bytes_allocd`) | yes: in-use counts sticky marks |
+| JSC | bytes allocated > an eden budget fixed at the last full GC from its live size (`updateAllocationLimits`) | no |
+
+Lua and Boehm size the nursery from a quantity that includes dead old objects, as we do. JSC
+fixes the budget from the live size at the last full collection, which is §5.2's rule. Lua's
+manual (§2.5.2) says the base is memory after the last major; the code uses current total bytes.
+
+**Promotion age.**
+
+| Collector | Promoted after | Parent promoted before its child |
+|---|---|---|
+| CRuby 3.4 | 3 (`RVALUE_OLD_AGE`) | remembered while marking: `rgengc_check_relation` remembers an old parent of a young child |
+| Lua 5.4.7 | 2 (`G_NEW → G_SURVIVAL → G_OLD1`) | `markold` re-traverses `OLD1` objects at the next minor |
+| MMTk, Whippet, bdwgc, JSC | 1 | cannot happen: the whole young closure is promoted together |
+
+Only the two collectors that keep ages need a rule for a parent that becomes old before its
+child; §5.1 takes CRuby's. No source states why its age was chosen.
+
+**Bounding the minor sweep.**
+
+| Collector | A minor sweeps | Free lists across a minor |
+|---|---|---|
+| CRuby 3.4 | every page, lazily, one bitmap word at a time (`gc_sweep_plane`) | per page, kept |
+| Lua 5.4.7 | only the young list segments (`sweepgen`) | none: malloc per object |
+| MMTk StickyImmix | every allocated block, per 256 B line (`Block::sweep`) | holes recomputed every GC |
+| Whippet | every block not promoted; a block with < 5% holes is promoted and not allocated into until a major (`nofl_should_promote_block`) | none: holes found from per-granule metadata |
+| bdwgc 8.3.0 | every block header; > 7/8 full skipped, the rest swept lazily (`GC_start_reclaim`) | cleared every collection, rebuilt lazily |
+| JSC | only eden blocks: the eden bits are OR-ed into the unswept bits (`snapshotUnsweptForEdenCollection`); a block becomes eden when the allocator sweeps it into a free list | per block, built when the allocator takes the block |
+
+Only JSC and Lua confine a minor's sweep to young memory. JSC does it per block, with zero cost
+per allocation, because its allocator takes one block's free list at a time. Ours takes from
+global per-class lists that interleave every region, which is why §5.3 records young slots
+individually.
+
+Sources: ruby v3_4_1 `gc/default/default.c`; lua 5.4.7 `lgc.c`, `lgc.h` and manual §2.5.2;
+mmtk-core v0.33.0 `src/plan/sticky/immix/global.rs`, `src/policy/immix/{immixspace,block,line}.rs`,
+`src/util/heap/gc_trigger.rs`; whippet `f9b54bb3` `src/mmc.c`, `src/nofl-space.h`; bdwgc 8.3.0
+(master) `alloc.c`, `reclaim.c`; WebKit `e569bd4c` `Source/JavaScriptCore/heap/{Heap,BlockDirectory,MarkedSpace}.cpp`,
+`MarkedBlockInlines.h`.
+
+## 4. Prototype
+
+A scratch copy of the runtime with two switches, measured on mutvec_int and the self-compile.
+Every run's output is byte-identical to minor-off, and the self-compile passes
+`SPROUT_GC_GENCHECK=1` at K = 2 with N = 1.
+
+- **K, promotion age.** The sweep keeps an object's colour bit (makes it old) only once it has
+  survived K collections; a younger survivor is swept back to young and re-marked by the next
+  minor. A parent that is, or is about to become, old and has a child that stays young is added
+  to the remembered set during the mark (§5.1). Without that rule K = 2 crashed the self-compile
+  with a freed object read (`runtime error: non-exhaustive match`).
+- **N, nursery size.** N = 0 is master's trigger. N = 1 runs the next collection after
+  `max(4096, baseline × 2)` more allocations, where `baseline` is the live count after the last
+  major (`g_gen.baseline`) and 2 is the adapt factor minus one.
+
+`walked` is what the sweep visited. `young-only` models the §5.3 sweep: a minor visits the slots
+allocated since the last collection plus the young survivors it re-marked; a major, and the
+minor just before it (which clears the colour bits, §5.4), visit everything.
+
+| run | collections | majors | marked M | walked M | young-only M | peak slots | RSS MB |
+|---|---|---|---|---|---|---|---|
+| self-compile, off | 92 | — | 34.60 | 140.92 | 140.92 | 5,290,286 | 298.8 |
+| K1 N0 (master) | 77 | 14 | 5.42 | 136.21 | 86.70 | 5,635,942 | 314.3 |
+| K1 N1 | 103 | 16 | 7.00 | 147.72 | 89.97 | 4,544,630 | 282.6 |
+| K2 N0 | 74 | 11 | 7.81 | 121.70 | 87.59 | 7,157,960 | 376.5 |
+| K2 N1 | 104 | 14 | 9.31 | 145.53 | 91.57 | 4,705,389 | 282.0 |
+| K3 N0 | 77 | 10 | 9.99 | 116.48 | 86.46 | 6,397,668 | 351.9 |
+| K3 N1 | 109 | 13 | 11.51 | 134.12 | 89.62 | 4,581,123 | 271.8 |
+| mutvec_int, off | 926 | — | 5.73 | 30.62 | 30.62 | 35,931 | 12.5 |
+| K1 N0 (master) | 550 | 198 | 3.38 | 28.34 | 24.78 | 74,532 | 15.7 |
+| K1 N1 | 1,076 | 396 | 6.39 | 41.89 | 36.57 | 58,970 | 13.3 |
+| K2 N0 | 908 | 70 | 5.11 | 30.90 | 21.06 | 42,366 | 13.0 |
+| K2 N1 | 791 | 60 | 5.34 | 26.43 | 21.21 | 43,125 | 12.8 |
+| K3 N0 | 926 | 65 | 5.72 | 30.62 | 21.36 | 35,931 | 12.6 |
+| K3 N1 | 791 | 60 | 5.34 | 25.79 | 21.14 | 38,329 | 12.8 |
+
+What it shows:
+- **No single lever is enough.** N alone fixes the self-compile but doubles mutvec_int's majors
+  (396), because promotion after one survival still feeds the 2× rule. K alone fixes mutvec_int
+  but makes the self-compile's footprint worse (cause 2). K ≥ 2 with N = 1 puts the self-compile
+  below minor-off (peak slots 0.87–0.89×, RSS 282 and 272 MB against 299) and brings mutvec_int
+  close to it (peak slots 1.07× at K3, 1.20× at K2; RSS 12.8 MB against 12.5). These are single
+  runs; step 2's A/B decides with spread.
+- **N needs the young-only sweep.** With today's sweep, N = 1 raises the self-compile's walked
+  slots (136 → 146M at K2) because minors are more frequent and each walks the heap. With a
+  young-only sweep the same runs visit 92M, 0.67× of master and 0.65× of minor-off.
+- **K costs marking.** Re-marking young survivors raises the self-compile's marked objects from
+  5.4M (K1) to 9.3M (K2) and 11.5M (K3), still a third of minor-off's 34.6M.
+
+## 5. Design
+
+### 5.1 Promotion age
+
+The header already keeps a saturating age in bits 9–12 (`sprout_hdr_age_bump`). The sweep keeps
+the colour bit only when the survivor's age before this sweep is at least K − 1; otherwise it
+clears it and the object stays young. K is `SPROUT_GC_PROMOTE_AGE`, default chosen by the A/B in
+§7 step 2 between 2 and 3, and 1 reproduces stage 1.
+
+**Old→young edges.** Stage 1 empties the remembered set after each minor because no young object
+survives one. With K > 1 young survivors exist, and an old object can point at one in two ways:
+1. a remembered object whose child was marked and stays young;
+2. an object promoted by this sweep whose child stays young. Immutable construction cannot do
+   this — a child exists before its parent, so it is never younger — but a store into a young
+   object can (`ref_write` on a young `Ref`, which takes no barrier because the target is not old).
+
+Both are caught where the mark scans a parent's children: if the parent is old or will be old
+after this sweep (age + 1 ≥ K) and a child will stay young (age + 1 < K), the parent goes into the
+remembered set. This is CRuby's rule (§3). It costs one header read per edge scanned, and minors
+scan few edges.
+
+Stage 1 can leave the set alone across a colour-clearing sweep because it empties the set before
+the drain and nothing adds to it during a collection. This rule adds entries during the drain,
+so when the next collection is a major the collector must also clear `REMEMBERED` on every entry
+and empty the set before that sweep; the sweep clears only the colour bit. Otherwise the major
+leaves a stale set: a dead entry is traced by the next minor (a freed-slot read), and a live one
+keeps bit 13 set while old, so the barrier's masked compare never records it again.
+
+**The live prediction.** `sprout_gc_gen_record` predicts the post-sweep count as
+`last_live + marked`. With K > 1 a minor re-marks young survivors that `last_live` already
+counts, so the prediction becomes `old after the previous sweep + marked`. The sweep counts the
+old objects it leaves. GENCHECK's existing count check covers the new formula.
+
+### 5.2 Nursery size
+
+After a collection, the next one runs after `max(g_gc_threshold_base, baseline ×
+(SPROUT_GC_ADAPT_FACTOR − 1))` allocations, with minor collections on. `baseline` is the live
+count after the last major, which no dead object inflates. A major still runs on the 2× rule and
+every `SPROUT_GC_MAJOR_EVERY` minors, so a growing live set raises the baseline at each major.
+A pinned threshold (`SPROUT_GC_THRESHOLD`, which sets `g_gc_threshold_pinned`) turns the rule
+off, as it turns the footprint floor off today.
+
+The footprint floor (`g_gc_footprint_k`) amortises a walk of the free pool. A young-only minor
+does not walk the pool, but a major and the minor before it do, and their rate follows the live
+count, not the pool's size: a free pool that dwarfs the live set (`gc-trigger-v0.md` §6.2's
+adversary) would be walked at every major again. So the floor stays on the collection before a
+major and on the major, and `just gc-trigger-check`'s adversary runs in the default mode, which
+fails if it does not.
+
+Open in this design: whether the 2× rule should read the old count instead of the heap count.
+The prototype kept the heap count; §7 step 2 measures the alternative.
+
+### 5.3 A young-only sweep
+
+A minor must visit exactly the slots that are young: allocated since the last collection, plus
+young survivors from earlier ones when K > 1. Free-list reuse puts those slots anywhere in the
+heap, between old ones (§14.3's reason Lua's list-prefix bound does not transfer), so the young
+set must be recorded at allocation.
+
+Every managed allocation goes through `sprout_gc_alloc_block`, at three points: a large object,
+a free-list reuse, a bump. That is the one place to record a young slot.
+
+Candidates:
+
+| | Per allocation | Memory | Minor visits | Changes placement? |
+|---|---|---|---|---|
+| **A. Young bitmap per region** | find the region and set one bit; bump knows the region, reuse calls `region_find` (the arena chunk index above 8 regions, `region_find_slow`'s search at or below) | 1 bit per 16 B, 1/128 of the heap | the set bits, found a word at a time | no |
+| B. Allocation log | append the payload pointer | 8 B per allocation in the nursery: 16 MB at the self-compile's K2 N1 peak (2.04M) | the log | no |
+| C. Eden regions (JSC) | none; a region is flagged when the allocator takes it | 1 bit per region | every slot of each flagged region | yes: per-region free lists |
+| D. Lazy sweep (CRuby, Whippet, bdwgc, JSC) | sweep a region before allocating from it | none | moves the sweep out of the pause; does not shrink it | no |
+
+**Recommendation: A.** It is exact like B at a fraction of B's memory, and it leaves allocation
+order alone, so step 1 can require output and collection counts identical to stage 1, with only
+slots visited changing. Scanning a bitmap a word at a time is how CRuby sweeps a page. Its cost is
+the region lookup on the reuse path, which step 1 measures on the allocation-heavy workloads
+(nqueens, http_log_middleware, gc_roots) and reports with each one's region count, since at 8
+regions or fewer the lookup is `region_find_slow`, not the index. B is the fallback if the lookup
+shows up. The bitmap pointer lives in `SproutRegion` beside `slotmap`, so region-table inserts and
+removals carry it.
+
+C needs no per-allocation work and has JSC behind it, but its bound is a whole region: a 1 MiB
+region with one hole is swept in full to reuse that hole, so it needs a density rule (JSC stops allocating
+into blocks fuller than `minMarkedBlockUtilization`, Whippet promotes blocks with < 5% holes) and changes where objects land, which
+moves footprint in ways step 1 could not isolate. It is the better shape if allocation locality
+becomes a goal of its own. D reduces pause, not work, and is independent of this choice.
+
+**A young bit's life.** Allocation sets it. A young-only minor visits every set bit and clears
+it: the slot is freed, promoted, or (K > 1) stays young, and only the last sets the bit again.
+A full walk (a major, or the minor before one) rebuilds the bitmaps from the headers. So a freed
+slot never keeps its bit; a stale bit would make the next minor list the FREE slot a second time,
+handing one slot to two objects. `vector_push`'s inline-tail split carves a FREE slot out of a
+live one and leaves its bit clear.
+
+**Persistent free lists.** Today every sweep wipes and rebuilds the free lists from every region
+(`sprout_gc_sweep`, the staged build). A young-only minor pushes the young slots it frees onto
+the existing lists and leaves the rest alone. Ordinary regions are released only by a full walk,
+which keeps the full rebuild and its rollback, so no list entry can point into a released region.
+This is the BACKLOG entry "The freelists are still wiped and rebuilt from *all* regions every
+sweep". `vector_push`'s inline-tail split already pushes onto the live lists between collections.
+
+**The free count.** The footprint floor reads `g_gc_free_after_sweep`, which the staged build
+counts during the walk (`fl_region_commit`). A young-only minor keeps it incrementally: the count
+after the last sweep, minus free-list reuses, plus slots freed, plus inline-tail splits. The reuse
+count is one increment on the reuse path. GENCHECK compares it with a full walk.
+
+**Large objects.** A large object is its own region. Young large objects are recorded the same
+way and freed by a minor, which releases their region as today; a large slot is never on a free
+list. Old ones are left to majors.
+
+### 5.4 The walk before a major
+
+When the next collection is a major, the minor before it sweeps with `sprout_gc_sweep(0)`, which
+clears every colour bit as it walks, so the major runs no `sprout_gc_clear_marks` walk (§14.8
+step 5). A young bitmap cannot find old objects, so that minor keeps the full walk; §4's model
+counts it. One full walk per major is what stage 1 pays today.
+
+Whippet avoids the walk by rotating the mark value at a major instead of clearing marks
+(`nofl_advance_current_mark`, called from `nofl_space_prepare_gc` only for non-minor
+collections). Here that would mean a global parity for bit 8: allocation writes the current
+"unmarked" value, the barrier's fast path compares against the parity, and every colour test in
+the runtime changes. That is a later step if step 1 shows the pre-major walk dominates; it is not
+part of this design.
+
+## 6. Premises
+
+Each premise has a test or a check that fails when it breaks.
+
+1. Every store of a heap pointer into an existing old object goes through the barrier — stage 1
+   premise 1, unchanged.
+2. **Restates stage 1 premise 4.** After every collection the young bits are exactly the young
+   objects: a slot has its bit set if and only if its kind is live and its colour bit is clear.
+   GENCHECK adds a full slot walk after each sweep and checks both directions. A set bit on a FREE
+   slot is the double-listing failure of §5.3.
+3. After a collection, an old object points at a young one only if it is remembered, and when the
+   next collection is a major the set is empty and no header has bit 13. GENCHECK's reachability
+   check catches a missed edge only when it is the only path, so the walk of premise 2 also scans
+   every old, unremembered object's children and aborts on a young one.
+4. Free-list entries point only into live regions. No ordinary region is released outside a full
+   walk (a minor releases a dead young large object's region, which is never on a list).
+   `SPROUT_FL_VERIFY=1` checks the lists against a full walk after every collection, and
+   `just gc-gen-check` gains a run with it on, beside GENCHECK.
+5. The live prediction equals the post-sweep count — stage 1's GENCHECK count check, with §5.1's
+   formula.
+6. The incremental free count equals a full walk's — GENCHECK, at each young-only minor.
+
+## 7. Steps
+
+1. **Young-only sweep and persistent free lists**, behind `SPROUT_GC_MINOR` as today (no new
+   switch: the result must equal stage 1's except for slots visited). Premises 2, 4 and 6 with
+   their checks. Output, collection counts and every cycle line's `threshold` must match master
+   exactly, since the trigger is unchanged and premise 6 keeps its input; `walked` falls. Measure
+   pause and the reuse path's cost with `bench/gc_minor/ab.sh`, reporting region counts (§5.3).
+2. **Promotion age and nursery size**, together (§4: either alone regresses one workload). Two
+   switches for the A/B, `SPROUT_GC_PROMOTE_AGE` and the nursery rule's on/off, premise 3 with
+   its check, and the §14.8 workload set by `bench/gc_minor/ab.sh` (≥ 6 interleaved runs per arm)
+   with K ∈ {1, 2, 3}. Footprint is read as peak slots, which do not vary between runs, beside
+   RSS. Pick K, and decide the 2× rule's input (§5.2). Flip only if the §2 goals hold.
+3. Retire the switches that step 2 settled, and update `compiler-internals.md` and `gates.md`.
+
+## 8. On landing
+
+- BACKLOG: step 1 closes "The freelists are still wiped and rebuilt from *all* regions every
+  sweep".
+- `compiler-internals.md` §Minor collections: promotion age, the remembered rule of §5.1 and the
+  nursery rule, at step 2.

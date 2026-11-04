@@ -1,8 +1,8 @@
 # Generational GC for Sprout — measurement and decision (v0, 2026-08-09)
 
 **Status:** §1–§13 are measurement. **§14 is stage 1** (sticky mark bits, object barrier,
-verifier): landed, and on by default since §14.8 step 6. §14.6 (bounding the sweep) is not
-designed. Normative GC behaviour remains
+verifier): landed, and on by default since §14.8 step 6. Stage 2 (promotion age, nursery size,
+a young-only sweep) is designed in [gc-stage2-v0.md](gc-stage2-v0.md). Normative GC behaviour remains
 [docs/compiler-internals.md §Non-moving GC](compiler-internals.md).
 
 §1–§11 are about the nursery: whether to build one, and for what. **§12 answers a
@@ -801,7 +801,7 @@ a self-compile. That is an estimate; §14.8 measures it.
 | Boehm-Demers-Weiser | unmarked; marks kept | 1 | dirty pages (mprotect and others) | lazy, per block on allocation; blocks with `hb_n_marks > HBLK_OBJS(sz) * 7 / 8` skipped (`reclaim.c`) | every `GC_full_freq` partials (19, `alloc.c`), or heap growth |
 | Demers et al. 1990 | unmarked; "neglect to reset the mark bits" | 1 | dirty cards | deferred to allocation; cards > 3/4 full ignored | when all cards > 3/4 full |
 | MMTk StickyImmix | `!is_marked` | 1 | the object, logged on first write | every allocated block, per 256 B line | page budget, request |
-| Whippet mmc/nofl | marks not rotated by a minor | 1 | the field, sequential store buffer | **only blocks allocated into since the last GC** | low yield |
+| Whippet mmc/nofl | marks not rotated by a minor | 1 | the field, sequential store buffer | every block not promoted; blocks with < 5% holes are promoted and skipped until a major (`nofl_should_promote_block`; corrected 2026-11-04, [gc-stage2-v0.md §3](gc-stage2-v0.md)) | low yield |
 | Lua 5.4 generational | NEW/SURVIVAL ages on a list | OLD1 after 2, OLD after 3 (`luaC_barrier_` comment) | old object turned grey (back barrier) | list prefix, stops at `old1` | memory > base × (1 + `genmajormul`%) |
 
 Where they agree: sticky marks, promotion after one survival, a barrier on the old
@@ -964,6 +964,9 @@ with it off).
 
 ### 14.6 Stage 2 — bounding the sweep (not designed yet)
 
+Superseded by [gc-stage2-v0.md](gc-stage2-v0.md), which also covers promotion age and nursery
+size. The candidates below are kept for history.
+
 Two candidates, chosen on stage 1's numbers:
 
 - **Skip regions** that served no allocation since the last collection, and take dense
@@ -1062,5 +1065,5 @@ barrier never sees an old object. Nothing goes red between steps.
    `SPROUT_GC_MINOR` is now on by default; `0` turns it off. The compiler gains (CPU 0.80, GC
    time 0.52, pause p90 0.49), no workload's CPU regresses beyond the spread, and astar is back
    inside it. The cost is memory and pause: RSS 1.07 on the self-compile and 1.25 on mutvec_int,
-   whose p50 and p90 pauses rise (1.23, 1.51). Both come from the sweep that still walks the
-   whole heap (§14.6).
+   whose p50 and p90 pauses rise (1.23, 1.51). The causes are promotion after one survival and
+   a trigger that counts dead old objects, more than the sweep ([gc-stage2-v0.md §1](gc-stage2-v0.md)).
