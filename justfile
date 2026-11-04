@@ -17,7 +17,9 @@ build_dir   := justfile_directory() / "build"
 # Used UNQUOTED in recipes so bash expands it; every runtime .c is compiled+linked.
 runtime_src := "runtime/*.c"
 # Container-backed Linux gate — see the "Linux gate" section near `task-io-smoke`.
-linux_image := "sprout-linux-smoke:ubuntu-24.04"
+# The tag is a content hash of the Dockerfile and the script it runs, so editing either one
+# makes the old image miss and forces a rebuild.
+linux_image := "sprout-linux-smoke:" + replace_regex(sha256(sha256_file(justfile_directory() / "scripts/linux_smoke.Dockerfile") + sha256_file(justfile_directory() / "scripts/ci_install_llvm.sh")), "^(.{12}).*$", "$1")
 # Host-side cache for the container's `just` binary. Outside build_dir on purpose: it
 # is a tool, not a build artifact, and must survive `just clean`.
 linux_cache := justfile_directory() / ".cache" / "linux-smoke"
@@ -2375,6 +2377,17 @@ runtime-warnings:
 test-runtime-warnings:
   bash scripts/test_check_runtime_warnings.sh
 
+# Every Ubuntu `runs-on` in ci.yml must equal the linux-smoke image's FROM version
+# (docs/gates.md §`just linux-smoke`).
+[group('smoke')]
+ci-image-pin:
+  bash scripts/check_ci_image_pin.sh
+
+# check_ci_image_pin.sh against fixtures, then on the real tree (docs/gates.md §`just linux-smoke`).
+[group('smoke')]
+test-ci-image-pin:
+  bash scripts/test_check_ci_image_pin.sh
+
 # gc_safety_check.sh against fixtures: braces in literals and comments must not hide a later
 # function, and brace drift must fail with exit 2 (docs/gates.md §GC safety linter).
 [group('smoke')]
@@ -3265,7 +3278,7 @@ task-io-smoke: bootstrap-from-seed
 # dependency. This is opt-in, before pushing changes to runtime/, the scheduler, or the
 # net/http_server stack.
 
-# Build the pinned Linux toolchain image if it is absent (one-off, ~1 GB, ~1min).
+# Build the pinned Linux toolchain image if it is absent (one-off, ~970MB, ~3min).
 [group('smoke')]
 linux-image:
   #!/usr/bin/env bash
@@ -3278,13 +3291,14 @@ linux-image:
   if docker image inspect "{{linux_image}}" >/dev/null 2>&1; then exit 0; fi
   LOG=$(mktemp /tmp/sprout_linux_image_XXXXXX.log)
   trap 'rm -f "$LOG"' EXIT
-  echo "==> Building {{linux_image}} (one-off, ~880MB)..."
-  # Dockerfile on stdin => EMPTY build context, so the repo is never uploaded to the
-  # daemon across colima's sshfs mount.
-  if ! docker build -t "{{linux_image}}" - < scripts/linux_smoke.Dockerfile 2>&1 | tee "$LOG"; then
+  echo "==> Building {{linux_image}} (one-off, ~970MB)..."
+  # A tar of the Dockerfile and ci_install_llvm.sh on stdin is the whole build context, so
+  # the repo is never uploaded to the daemon across colima's sshfs mount.
+  if ! tar --no-xattrs -cf - scripts/linux_smoke.Dockerfile scripts/ci_install_llvm.sh \
+      | docker build -f scripts/linux_smoke.Dockerfile -t "{{linux_image}}" - 2>&1 | tee "$LOG"; then
     if grep -q "No space left on device" "$LOG"; then
       echo "" >&2
-      echo "ERROR: the container VM's disk is full — the image is ~880MB plus transient apt space." >&2
+      echo "ERROR: the container VM's disk is full — the image is ~970MB plus transient apt space." >&2
       echo "  Inspect first (some 'reclaimable' volumes are real databases):" >&2
       echo "      docker system df -v" >&2
       echo "  Non-destructive fix — colima grows its disk in place on restart (>= v0.5.3):" >&2
@@ -3555,7 +3569,7 @@ runtime-diag-smoke: bootstrap-from-seed
 #     own check in `ast_to_ir.finish_checked_div`. An exit-code-only assertion
 #     cannot gate that check where CI runs: on x86-64 an UNGUARDED build faults
 #     with SIGFPE and exits 136, which is non-zero, so the gate passed whether or
-#     not the guard existed. CI is ubuntu-latest. Pinning the message is what
+#     not the guard existed. CI is ubuntu-26.04. Pinning the message is what
 #     makes this architecture-independent — on arm64 the unguarded division
 #     quietly returns INT_MIN and exits 0, which is the case exit code alone
 #     does catch.
@@ -4538,6 +4552,8 @@ ci-fast-gates: bootstrap-from-seed build-fmt-from-seed
     "stdlib-reference|stdlib-reference"
     # Includes the real-tree check, so `runtime-warnings` is not listed on its own.
     "test-runtime-warnings|test-runtime-warnings"
+    # Includes the real-tree check, so `ci-image-pin` is not listed on its own.
+    "test-ci-image-pin|test-ci-image-pin"
     # Includes the real-tree check, so `runtime-word-casts` is not listed on its own.
     "test-runtime-word-casts|test-runtime-word-casts"
     "cloexec-gate|cloexec-gate"

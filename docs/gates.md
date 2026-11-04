@@ -1241,6 +1241,13 @@ It stays a recommendation rather than a Definition of Done item because it needs
 runtime, and requires the repo to live under `$HOME` (the container sees it through the VM's `$HOME`
 mount).
 
+The image matches CI's distro and LLVM: `FROM ubuntu:26.04` against `runs-on: ubuntu-26.04`, with
+LLVM installed by the same `scripts/ci_install_llvm.sh`. `just ci-image-pin` (run by
+`just test-ci-image-pin` in `ci-fast-gates`) fails if an Ubuntu `runs-on` and the `FROM` version
+diverge, including a return to `ubuntu-latest`. The image tag is a content hash of the Dockerfile
+and that script, so editing either rebuilds it. Moving Ubuntu is a deliberate edit of both sides.
+Minor package versions can still differ by build date.
+
 ## Debian 12 — `just runtime-debian12`
 
 Compiles `runtime/*.c` with `clang-16 -fsyntax-only` in a `debian:12` container
@@ -1249,8 +1256,8 @@ runtime, so `just gate` leaves it out.
 
 A libc can change what a feature-test macro hides, so a compile on one glibc says little about
 another. glibc 2.36 defines `MAP_ANON` only under `__USE_MISC`, which `_XOPEN_SOURCE` alone turns
-off; glibc 2.39 (Ubuntu 24.04) and 2.43 (the `ubuntu-26.04` image behind CI's `ubuntu-latest`) define
-it unconditionally. So `sprout_context.h` broke every link on Debian 12 while all of CI stayed green.
+off; glibc 2.39 (Ubuntu 24.04) and 2.43 (CI's `ubuntu-26.04` runner) define it unconditionally.
+So `sprout_context.h` broke every link on Debian 12 while all of CI stayed green.
 
 The gating is in the libc headers, so the result does not depend on the compiler: clang-14, clang-16
 and gcc agree. `clang-16` is what the failing deploy used, not a supported Sprout toolchain. The gate

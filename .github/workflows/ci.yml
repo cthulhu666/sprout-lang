@@ -24,7 +24,7 @@ jobs:
     # conclusion, skipping WORK rather than skipping itself (a required check skipped
     # by a path filter stays Pending forever and blocks the merge — GitHub reports a
     # path-filtered workflow's checks as pending, not as success).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       run_compiler: ${{ steps.detect.outputs.run_compiler }}
       docs_only: ${{ steps.detect.outputs.docs_only }}
@@ -99,7 +99,7 @@ jobs:
   test-gates:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     # Turn the runtime's invariant enforcers ON for every binary the shards run.
     # These are runtime-read env vars (see sprout_runtime.c), so one declaration per
     # shard covers bootstrap, fixed-point verify, ci-fast-gates (incl. the example
@@ -205,7 +205,7 @@ jobs:
   test-core-1:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env: *invariant-env
     steps:
       - *checkout
@@ -233,7 +233,7 @@ jobs:
   test-core-2:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env: *invariant-env
     steps:
       - *checkout
@@ -252,7 +252,7 @@ jobs:
   test-compiler-1:
     needs: changes
     if: &compiler-if needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.run_compiler == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env: *invariant-env
     steps:
       - *checkout
@@ -267,7 +267,7 @@ jobs:
   test-compiler-2:
     needs: changes
     if: *compiler-if
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env: *invariant-env
     steps:
       - *checkout
@@ -286,7 +286,7 @@ jobs:
   # nightly run.
   spec-off-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env: *invariant-env
     steps:
       - *checkout
@@ -310,7 +310,7 @@ jobs:
   asan-core-1:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env: *invariant-env
     steps:
@@ -329,7 +329,7 @@ jobs:
   asan-core-2:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env: *invariant-env
     steps:
@@ -348,7 +348,7 @@ jobs:
   asan-compiler-1:
     needs: changes
     if: *compiler-if
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env: *invariant-env
     steps:
@@ -364,7 +364,7 @@ jobs:
   asan-compiler-2:
     needs: changes
     if: *compiler-if
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env: *invariant-env
     steps:
@@ -385,7 +385,7 @@ jobs:
     # A skipped shard counts only where `changes` says it should skip.
     needs: [changes, test-gates, test-core-1, test-core-2, test-compiler-1, test-compiler-2, asan-core-1, asan-core-2, asan-compiler-1, asan-compiler-2]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Every shard passed, or skipped where `changes` says it should
         env:
@@ -502,7 +502,7 @@ jobs:
   # (nothing exercised `--lsp` before), so it earns the required-check promotion after it has
   # proven itself stable rather than before.
   lsp:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     steps:
@@ -530,7 +530,7 @@ jobs:
   # push. It stays a pre-release gate — and it earns that status, having caught a real defect
   # (a plugin ID the Marketplace rejects) that compiling and testing both accepted.
   intellij-plugin:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     steps:
