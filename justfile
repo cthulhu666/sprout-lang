@@ -3405,6 +3405,11 @@ twelve-dollar-example: bootstrap-from-seed
 linux-smoke: (linux-run "task-io-smoke") (linux-run "c-runtime-test")
   @echo "==> linux-smoke ✓ (task-io-smoke and c-runtime-test on Linux, epoll+timerfd backend, HDRCHECK on)"
 
+# Compile runtime/*.c on Debian 12's older glibc (docs/gates.md §Debian 12). Needs a container runtime.
+[group('smoke')]
+runtime-debian12:
+  bash scripts/check_runtime_debian12.sh
+
 # Windows port W0a. DIAGNOSTIC, not a gate: the runtime is POSIX-only today, so a
 # non-zero "missing" count is the expected state and the output IS the port's work
 # list. Becomes a gate at W3, when all three TUs are meant to compile
@@ -4888,7 +4893,9 @@ gate-audit:
   #     needs only sproutd, which this repo builds itself, so it belongs in `gate` proper.
   #   plugin-split-check — same toolchain reason as plugin-test/plugin-build, which it
   #     depends on for the artifact it inspects.
-  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build plugin-split-check"
+  #   runtime-debian12 — CI-only: it needs a container runtime, which is not a required
+  #     contributor dependency (the linux-smoke rule).
+  EXCLUDE="bootstrap-from-seed build-fmt-from-seed refresh-seed ci-fast-gates test-stdlib-core-stage1 test-stdlib-compiler-stage1 windows-tu-check windows-poll-selftest plugin-test plugin-build plugin-split-check runtime-debian12"
   # Tasks gate runs from its BODY (not reachable via --show dependency expansion).
   BODY="gc-safety-check"
   expand() {  # print a recipe name and, recursively, its dependency recipe names
