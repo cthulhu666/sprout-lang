@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compile runtime/*.c on Debian 12, whose glibc 2.36 gates more names behind feature-test macros
-# than CI's Ubuntu 24.04 does (docs/gates.md §Debian 12).
+# than CI's Ubuntu runner does (docs/gates.md §Debian 12).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
