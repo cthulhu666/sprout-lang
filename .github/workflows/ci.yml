@@ -170,6 +170,12 @@ jobs:
         name: Bootstrap stage-1 from committed IR seed
         run: just bootstrap-from-seed
 
+      - name: Runtime compiles on Debian 12
+        # This runner's glibc defines names that older ones gate behind feature-test macros, so
+        # no other step here can see that failure (docs/gates.md §Debian 12).
+        timeout-minutes: 5
+        run: just runtime-debian12
+
       - name: CI fast gates (parallel)
         # Single-threaded gates fanned out JOBS-wide by `just ci-fast-gates`; the
         # GATES array in the justfile is the list, and the gate-audit recipe fails if

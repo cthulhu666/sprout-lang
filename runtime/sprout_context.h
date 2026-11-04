@@ -127,9 +127,11 @@ static inline void sprout_ctx_destroy(SproutCtx* c) {
 /* ──────────────────────────────── POSIX: ucontext ─────────────────────────── */
 
 /* ucontext on macOS lives behind these; define before any include pulls in
- * <sys/ucontext.h>. */
+ * <sys/ucontext.h>. _XOPEN_SOURCE alone hides a libc's extensions, so each libc's
+ * macro that restores them sits beside it: glibc 2.36 gates MAP_ANONYMOUS. */
 #define _XOPEN_SOURCE 700
 #define _DARWIN_C_SOURCE 1
+#define _DEFAULT_SOURCE 1
 
 #include <errno.h>
 #include <stdlib.h>

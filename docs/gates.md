@@ -1207,6 +1207,20 @@ It stays a recommendation rather than a Definition of Done item because it needs
 runtime, and requires the repo to live under `$HOME` (the container sees it through the VM's `$HOME`
 mount).
 
+## Debian 12 — `just runtime-debian12`
+
+Compiles `runtime/*.c` with `clang-16 -fsyntax-only` in a `debian:12` container
+(`scripts/check_runtime_debian12.sh`). A step of the `test-gates` CI job. It needs a container
+runtime and, locally, the repo under `$HOME`, so `just gate` leaves it out.
+
+A libc can change what a feature-test macro hides, so a compile on one glibc says little about
+another. glibc 2.36 defines `MAP_ANONYMOUS` only under `__USE_MISC`, which `_XOPEN_SOURCE` alone
+turns off; Ubuntu 24.04's glibc 2.39 defines it unconditionally. So `sprout_context.h` broke every
+link on Debian 12 while all of CI stayed green.
+
+It uses `clang-16` because Debian's default, clang 14, cannot read the IR Sprout emits (`ptr`), so
+compiling with it would not match a real build. It only compiles: nothing is linked or run.
+
 ## CI — the `changes` job, and what a 30-second green `test` means
 
 `test` is the only required check on `master`, and it is strict (branch must be up to date). A
