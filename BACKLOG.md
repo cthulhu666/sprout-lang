@@ -2906,7 +2906,7 @@ acting.
   `listen_local(0)` and `net.local_port`. What remains is moving each fixture to port 0 and
   passing the bound port to its client tasks. Parallel fixtures inside the gate need this too.
 - [ ] `P3` **CI has no arm64 Linux job, and `linux-smoke`'s value is latency, not OS coverage.**
-  `linux-smoke` adds no OS coverage — `ci.yml` is `ubuntu-latest` with the same env and
+  `linux-smoke` adds no OS coverage — `ci.yml` is `ubuntu-26.04` with the same env and
   `ci-fast-gates` already contains `task-io-smoke`. What it covers is the *architecture*: its
   container is the host's (aarch64 on an Apple-silicon Mac), CI is x86_64. So the scheduler,
   epoll/timerfd and GC are smoke-tested on arm64 Linux only on a contributor's Mac, by an opt-in
