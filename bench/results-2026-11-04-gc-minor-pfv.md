@@ -37,7 +37,8 @@ arms back to back, and minor is lower in all 6 (0.73–0.84). No workload's CPU 
   `MutVec Int` stores no longer take the barrier, so its minors rescan nothing.
 - **mutvec_int**'s mode-off GC fell 2,190 → 179 ms: its vectors are no longer scanned at all, so a
   minor has little left to save. Its pauses rise (p50 1.23, p90 1.51) with RSS 1.25: minors run
-  fewer, larger collections (926 → 550), and the sweep still walks the whole heap (§14.6).
+  fewer, larger collections (926 → 550), and 198 of them are majors. The cause is dead old objects
+  ([gc-stage2-v0.md §1](../docs/gc-stage2-v0.md)).
 - **galaxy_client**'s pause gain is gone (p50 0.39 → 0.91 ~). Its steady live set was mostly a
   `Bitset`'s `Vec Int` read as pointers; flagged, it shrank from 96.7k objects to about 1.5k, so a
   minor has almost no old object to skip.
@@ -46,5 +47,5 @@ arms back to back, and minor is lower in all 6 (0.73–0.84). No workload's CPU 
 
 §14.8 step 4's rule holds: the compiler gains (CPU 0.80, GC time 0.52, pause p90 0.49) and no
 workload's CPU regresses beyond the spread. `SPROUT_GC_MINOR` is on by default; `0` turns it off.
-The price is memory (self-compile RSS 1.07, mutvec_int 1.25) and mutvec_int's longer pauses, both
-from the unbounded sweep that §14.6 leaves open.
+The price is memory (self-compile RSS 1.07, mutvec_int 1.25) and mutvec_int's longer pauses.
+Their causes are measured in [gc-stage2-v0.md §1](../docs/gc-stage2-v0.md).
