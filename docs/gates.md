@@ -1215,8 +1215,8 @@ runtime, so `just gate` leaves it out.
 
 A libc can change what a feature-test macro hides, so a compile on one glibc says little about
 another. glibc 2.36 defines `MAP_ANON` only under `__USE_MISC`, which `_XOPEN_SOURCE` alone turns
-off; Ubuntu 24.04's glibc 2.39 defines it unconditionally. So `sprout_context.h` broke every link on
-Debian 12 while all of CI stayed green.
+off; glibc 2.39 (Ubuntu 24.04) and 2.43 (the `ubuntu-26.04` image behind CI's `ubuntu-latest`) define
+it unconditionally. So `sprout_context.h` broke every link on Debian 12 while all of CI stayed green.
 
 The gating is in the libc headers, so the result does not depend on the compiler: clang-14, clang-16
 and gcc agree. `clang-16` is what the failing deploy used, not a supported Sprout toolchain. The gate
