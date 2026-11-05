@@ -18,7 +18,8 @@
  *                    carries bit 13, and the child is still alive after that major.
  *   major_input_*  — the 2x rule reads the heap count, or the old count.
  *   nursery_*      — the next collection runs heap + max(base, baseline x 2) allocations on; a
- *                    pinned threshold turns the rule off; the footprint floor stays before a major.
+ *                    pinned threshold turns the rule off; the footprint floor is a lower bound before a major
+ *                    and at the major.
  *   census_age     — at K=3 the live census counts a young survivor once and drops one that dies.
  *   bad_*          — each aborts with a message the caller checks.
  *
@@ -250,7 +251,16 @@ static int nursery_pinned(void) {
   return g_failed;
 }
 
-/* The collection before a major keeps the footprint floor: master's rule, not the nursery's. */
+/* Heap + nursery, the nursery sized from the baseline at the last major. */
+static long long nursery_target(void) {
+  long long nursery = (long long)((double)g_gen.baseline * (g_gc_adapt_factor - 1.0));
+  return g_heap + imax(nursery, g_gc_threshold_base);
+}
+
+static long long footprint_floor(void) { return g_heap + (g_heap + g_gc_freelist_len) / g_gc_footprint_k; }
+
+/* The collection before a major and the major size the next one by heap + nursery, not
+ * heap x factor, when that exceeds the footprint floor. */
 static int nursery_floor_before_major(void) {
   register_roots();
   extend_chain(3000);
@@ -258,13 +268,29 @@ static int nursery_floor_before_major(void) {
   extend_chain(1500);
   collect();                               /* minors_since_major reaches MAJOR_EVERY: a major is next */
   check(g_gen.colorless == 1, "a major is next");
-  long long floor_ = g_heap + (g_heap + g_gc_freelist_len) / g_gc_footprint_k;
-  long long want = imax(imax(g_gc_threshold_base, (long long)((double)g_heap * g_gc_adapt_factor)), floor_);
-  check(g_thr == want, "the collection before a major sizes the next one with the footprint floor");
+  check(footprint_floor() < nursery_target(), "the floor is below heap + nursery here");
+  check(g_thr == nursery_target(), "the collection before a major sizes the next one heap + nursery");
   collect();                               /* the major */
-  check(g_thr == imax(imax(g_gc_threshold_base, (long long)((double)g_heap * g_gc_adapt_factor)),
-                      g_heap + (g_heap + g_gc_freelist_len) / g_gc_footprint_k),
-        "and so does the major");
+  check(footprint_floor() < nursery_target(), "the floor is below heap + nursery after the major");
+  check(g_thr == nursery_target(), "and so does the major");
+  return g_failed;
+}
+
+/* A large free pool makes the footprint floor exceed heap + nursery: the floor is the lower bound
+ * before a major and at the major. */
+static int nursery_floor_binds(void) {
+  register_roots();
+  garbage_refs(60000);
+  extend_chain(3000);
+  collect();                               /* the major: the garbage becomes the free pool */
+  extend_chain(10);
+  collect();                               /* the minor before a major */
+  check(g_gen.colorless == 1, "a major is next");
+  check(footprint_floor() > nursery_target(), "the floor exceeds heap + nursery here");
+  check(g_thr == footprint_floor(), "before a major the floor is the threshold");
+  collect();                               /* the major */
+  check(footprint_floor() > nursery_target(), "the floor exceeds heap + nursery after the major");
+  check(g_thr == footprint_floor(), "at the major the floor is the threshold");
   return g_failed;
 }
 
@@ -360,6 +386,7 @@ static const AgeCase k_cases[] = {
   { "nursery_sizing",            nursery_sizing,              1, 1, NULL,   "1000", NULL },
   { "nursery_pinned",            nursery_pinned,              1, 1, NULL,   "1000", "5000" },
   { "nursery_floor_before_major", nursery_floor_before_major, 1, 1, NULL,   "1",    NULL },
+  { "nursery_floor_binds",       nursery_floor_binds,         1, 1, NULL,   "1",    NULL },
   { "census_age",                census_age,                  3, 0, NULL,   "1000", NULL },
   { "bad_unremembered_edge",    bad_unremembered_edge,       2, 0, NULL,   "1000", NULL },
   { "bad_major_bit13",           bad_major_bit13,             2, 0, NULL,   "1",    NULL },

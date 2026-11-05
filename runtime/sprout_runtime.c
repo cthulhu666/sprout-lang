@@ -3893,14 +3893,19 @@ static void sprout_gc_collect_with_reason(const char* reason) {
      Damped by k, so the pool it lets the program build settles (gc-trigger-v0 §6.2). */
   if (g_gc_adapt_ratio > 0.0) {
     long long target;
-    if (g_gen.nursery && gen_on && minor && !next_major && !g_gc_threshold_pinned) {
-      /* SPROUT_GC_NURSERY=1: a minor followed by a minor (young-only, or the full sweep when a
-         region would empty) runs the next one after a nursery of allocations, sized from the live
-         set at the last major, which no dead old object inflates (gc-stage2-v0 §5.2).  The
-         collection before a major and the major keep the rule below, footprint floor included. */
+    if (g_gen.nursery && gen_on && !g_gc_threshold_pinned) {
+      /* SPROUT_GC_NURSERY=1: every collection runs the next one after a nursery of allocations,
+         sized from the live set at the last major, which no dead old object inflates
+         (gc-stage2-v0 §5.2).  The footprint floor stays a lower bound before a major and at the
+         major, whose successors walk the free pool. */
       long long nursery = (long long)((double)g_gen.baseline * (g_gc_adapt_factor - 1.0));
       if (nursery < g_gc_threshold_base) nursery = g_gc_threshold_base;
       target = g_managed_heap_count + nursery;
+      if (next_major || !minor) {
+        long long footprint_floor = g_managed_heap_count
+          + (g_managed_heap_count + g_gc_freelist_len) / g_gc_footprint_k;
+        if (target < footprint_floor) target = footprint_floor;
+      }
     } else {
       target = (long long)((double)g_managed_heap_count * g_gc_adapt_factor);
       if (target < g_gc_threshold_base) target = g_gc_threshold_base;
