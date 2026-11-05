@@ -135,13 +135,14 @@ declare i64 @__chan_recv(i64)
 declare i64 @__chan_close(i64)
 declare i64 @__chan_select(i64)
 declare i64 @json_stringify(i64)
+declare i64 @env_get_bytes(i64)
 declare i64 @read_file(i64)
 declare i64 @write_file(i64, i64)
 declare i64 @fs_list_dir(i64)
 declare i64 @fs_stat_path(i64, i64)
 declare i64 @fs_read_bytes(i64)
 declare i64 @fs_write_bytes(i64, i64)
-declare i64 @fs_make_dir(i64)
+declare i64 @fs_make_dir(i64, i64)
 declare i64 @fs_remove(i64)
 declare i64 @fs_rename(i64, i64)
 @.str.0 = private unnamed_addr constant { i64, [39 x i8] } { i64 622602, [39 x i8] c"Int overflow in - (line 55, column 25)\00" }
@@ -1233,6 +1234,8 @@ declare i64 @fs_rename(i64, i64)
 @stdlib.hex.digit_pairs = global i64 zeroinitializer
 @stdlib.json.null = global i64 zeroinitializer
 @stdlib.json.max_depth = private constant i64 128
+@stdlib.fs.mode_rwx_all = private constant i64 511
+@stdlib.fs.mode_rwx_owner = private constant i64 448
 @examples.http_web_server.list_template_path = global i64 zeroinitializer
 @examples.http_web_server.form_template_path = global i64 zeroinitializer
 

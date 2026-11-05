@@ -688,8 +688,13 @@ such as `accept(2)` does not match, and `freopen` and `fdopen` are not matched.
   `/* cloexec-gate: end wrappers */`; lines between them are not scanned.
 - A line ending in `/* cloexec-gate: fork child */` is skipped. The `dup2` calls in the two fork
   children use it: `dup2` clears the flag on its target by design.
-- `freopen(..., stderr)` in the analysis-service child stays inheritable, since it puts the log on
-  fd 2 for the exec'd daemon.
+- The analysis-service child opens its log with `cloexec_open` (through `sprout_open_service_log`)
+  and `dup2`s it onto fd 2, which stays inheritable by design so the exec'd daemon has it as its
+  stderr. The `dup2` lines carry the fork-child marker. When the parent had fd 0, 1 or 2 closed, a
+  pipe end or the log can be opened onto it; the child first moves each such descriptor above 2
+  with `fcntl(F_DUPFD_CLOEXEC)` (`sprout_fd_above_stdio`), so no `dup2` is a no-op or overwrites
+  another end. `tests/c_runtime/analysis_service_log.c` runs the service with each of fds 0, 1 and
+  2 closed.
 
 Known bypasses: a parenthesised name `(socket)(...)`, a macro or function pointer that hides the
 name, and a call whose `(` is on the next line. kqueue is not inherited across fork and is not

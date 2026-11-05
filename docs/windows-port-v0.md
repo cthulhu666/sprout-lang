@@ -648,7 +648,7 @@ blocked on a missing API. Score at W0a: **56 available, 22 missing.**
 | `termios` family | 14 | header **missing** | `SetConsoleMode`/`GetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_PROCESSING`. The escapes `stdlib.terminal` emits work on Windows 10+. |
 | `sigaction` / `sigaltstack` | 10 | `signal.h` present, but `sigaction`, `sigaltstack`, `sigemptyset` all **missing** | vectored exception handler (W4). `signal`/`raise` do exist, but not the POSIX surface the crash handler needs. |
 | `backtrace` (`execinfo.h`) | 13 | header **missing**; `dbghelp.h` also **absent from the sysroot** | `CaptureStackBackTrace` (in `windows.h`, present). DbgHelp is *not* an option here, so frames come back as addresses — symbolization is a separate question, not a W4 blocker. |
-| `fork` / `execvp` / `pipe` | 3 / 3 / 7 | `fork` **missing**, `pipe` **missing**, `execvp` present | `CreateProcessA` + `CreatePipe`. **Needed by Milestone B and the game's offline `gen-living` bake, not by the shipped game.** Note `analysis_service_driver.sprout:751` shells out via `["sh", "-c", …]` and there is no `sh` on Windows either way. |
+| `fork` / `execvp` / `pipe` | 3 / 3 / 7 | `fork` **missing**, `pipe` **missing**, `execvp` present | `CreateProcessA` + `CreatePipe`. **Needed by Milestone B and the game's offline `gen-living` bake, not by the shipped game.** Note the analysis service's eval path starts `clang` by argv and runs the linked binary, so it needs `CreateProcessA` too. |
 | `regcomp` (POSIX `<regex.h>`) | 1 (`regex_compile_ere`, `:6039`) | header **missing** | Vendor a small ERE implementation. **This is `sprout_runtime.c`'s *first* blocker (line 7)** — nothing else in that TU can be compile-checked until it is resolved or temporarily `#ifdef`'d out, which makes it an ordering constraint on top of being a feature question. Own backlog item: stubbing it removes a *language-visible* feature. |
 | `mmap(PROT_NONE)` GC arena | 2 + 4 `mprotect` | `sys/mman.h` **missing** | `VirtualAlloc` `MEM_RESERVE`/`MEM_COMMIT` — a direct equivalent, the easiest item here |
 | `pthread_create` (async DNS) | 2 | **`pthread.h` present**, and `pthread_create`/`_detach`/`_mutex_lock`/`_cond_wait` all available | **No work needed under mingw** (winpthreads). Corrects this table's pre-measurement claim that `CreateThread` was required. It *would* be required under MSVC, so §4.1's ship-target rule still applies — treat this as deferred, not free. |
@@ -656,6 +656,17 @@ blocked on a missing API. Score at W0a: **56 available, 22 missing.**
 | `getrlimit` | 1 | `sys/resource.h` **missing** | stub |
 | `ftell` | `:7241` | `ftello`, `fseeko`, `_ftelli64`, `_fseeki64` **all present** | Use **`_ftelli64`**, not `ftello`: the probe shows mingw provides both, but only `_ftelli64` also exists under MSVC, so it is the one choice that satisfies §4.1's write-to-the-strict-surface rule. |
 | `sys/wait.h`, `poll.h` | — | both **missing** | subsumed by `CreateProcessA` and `WSAPoll` respectively |
+
+**Filesystem open items (Windows).** `fs.make_temp_dir` and the create-mode argument of
+`fs_make_dir` are POSIX-shaped; a port needs three decisions:
+
+- **Owner-only directory.** The `0700` mode has no Windows meaning. The equivalent is a directory
+  whose ACL grants access to the owner only (Python 3.13's `tempfile.mkdtemp` does this on Windows
+  and documents it).
+- **Temp base.** `TMPDIR` or `/tmp` becomes `GetTempPath2` (falling back to `GetTempPathW`).
+- **Exclusive create.** `mkdir` fails with `EEXIST` on a name that exists; `CreateDirectoryW`
+  fails with `ERROR_ALREADY_EXISTS`. The retry on `FsAlreadyExists` must keep working with that
+  mapping.
 
 **Where each TU stops today** (a missing include is fatal, so each reports one blocker per run):
 

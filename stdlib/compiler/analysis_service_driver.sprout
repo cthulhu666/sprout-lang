@@ -15,7 +15,9 @@ import stdlib.string as string
 import stdlib.process as process
 import stdlib.terminal as terminal
 import stdlib.fs as fs
+import stdlib.fs.path as fspath
 import stdlib.env as env
+import stdlib.crypto as crypto
 
 # ---------------------------------------------------------------------------
 # Header stripping is source.strip_headers (line-preserving): stripped lines
@@ -453,11 +455,6 @@ fn op_symbol_inventory_in_source(src: String) -> json.Json =
 fn op_symbol_locations_in_source(src: String) -> json.Json =
   parse_symbol_locations(src)
 
-# Bundle the session source (inlining prelude + transitive imports) so every
-# instance is in scope, then match against the query.  A fixed /tmp path is fine:
-# the REPL is interactive, one request at a time (same rationale as the eval path).
-let instances_source_path: String = "/tmp/sprout_instances_repl.sprout"
-
 # The query is resolved in the *session's* naming context by appending a probe
 # signature `fn <probe>(__x: <query>) -> Int = 0` and reading back its parameter
 # type after bundling.  Bundling qualifies the probe's param type exactly as it
@@ -506,29 +503,35 @@ fn resolve_instances_from_bundle(result: bundler.BundleResult, query_display: St
 # an LSP hover — can call it directly): resolve the query in the session's naming
 # context via a probe signature, bundle, and return the rendered query plus the
 # sorted matches.  query_display is the user's original (unqualified) query, so
-# the REPL never surfaces the synthetic `app.session.` prefix.
-export fn resolve_instances(src: String, query: String, stdlib_root: source.StdlibRoot) -> InstancesResult !{IO} =
+# the REPL never surfaces the synthetic `app.session.` prefix.  `scratch_dir` is an existing
+# directory the caller owns; the probe source is written to `<scratch_dir>/instances.sprout`.
+export fn resolve_instances(src: String, query: String, stdlib_root: source.StdlibRoot,
+                            scratch_dir: String) -> InstancesResult !{IO} =
   if str_find(src, probe_name) != -1 then
     InstancesErr("source contains reserved name '" ++ probe_name ++ "'; cannot list instances")
   else
     match parse_query_type(query) with
     | Err msg -> InstancesErr(msg)
     | Ok query_display_te ->
-        match fs.write_text(instances_source_path, augment_probe_source(src, query)) with
+        match fs.write_text(probe_source_path, augment_probe_source(src, query)) with
         | Err msg -> InstancesErr("instances_in_source: write_file: " ++ msg)
         | Ok _ ->
             do
-              result <- bundler.bundle_file(source.FilePath(instances_source_path), stdlib_root)
+              result <- bundler.bundle_file(source.FilePath(probe_source_path), stdlib_root)
               resolve_instances_from_bundle(result, te_to_string(query_display_te))
+  where probe_source_path = fspath.join(scratch_dir, "instances.sprout")
 
 fn op_instances_in_source(src: String, query: String, state: StartupState) -> json.Json !{IO} =
-  do
-    result <- resolve_instances(src, query, source.StdlibRoot(state_stdlib_root(state)))
-    match result with
-    | InstancesErr msg -> error_response(msg)
-    | InstancesOk query_type matches ->
-        ok_response(json.object_from_pairs([("query_type", json.JsonString(query_type)),
-                                            ("matches", string_list_to_json(matches))]))
+  match ensure_scratch_dir(state) with
+  | Err msg -> error_response("instances_in_source: " ++ msg)
+  | Ok scratch_dir ->
+      do
+        result <- resolve_instances(src, query, source.StdlibRoot(state_stdlib_root(state)), scratch_dir)
+        match result with
+        | InstancesErr msg -> error_response(msg)
+        | InstancesOk query_type matches ->
+            ok_response(json.object_from_pairs([("query_type", json.JsonString(query_type)),
+                                                ("matches", string_list_to_json(matches))]))
 
 # ---------------------------------------------------------------------------
 # type_of_in_source — infer the type of an expression in a source context
@@ -564,17 +567,18 @@ fn op_type_of_in_source(src: String, expr: String, state: StartupState) -> json.
 #   3. Compile that program to LLVM IR in memory (compiler.compile_question_ir),
 #      reusing the session's LoadEnv (imports edited on disk are re-parsed);
 #      `eval_source_path` only names the buffer.
-#   4. Write the IR to a fixed /tmp path.
-#   5. Link IR against every runtime object (whole runtime/*.c) with clang.
+#   4. Write the IR to `<scratch>/eval.ll`.
+#   5. Link IR against every runtime object (whole runtime/*.c) with clang, into
+#      `<scratch>/eval_bin`.
 #   6. Execute the binary, capture stdout, return as a JSON array of lines.
 #
-# Fixed /tmp paths work because the REPL is interactive: one expression at a time.
+# `<scratch>` is the service's private temp dir (`ensure_scratch_dir`), made on the first
+# eval or instances request and removed by `shutdown_state`.
 # On macOS the -framework flags are added automatically (platform detected via
 # `uname`); SPROUT_DARWIN_FRAMEWORKS=1 forces them on regardless of platform.
 
-let eval_source_path: String = "/tmp/sprout_eval_repl.sprout"
-let eval_ir_path: String = "/tmp/sprout_eval_repl.ll"
-let eval_bin_path: String = "/tmp/sprout_eval_repl_bin"
+# Only names the buffer in the bundler's overlay and in diagnostics; nothing is written to it.
+let eval_source_path: String = "<repl>"
 
 # Directory holding every runtime .c (sprout_runtime.c, sprout_scheduler.c,
 # sprout_poll.c, …).  The whole directory is compiled and linked as a unit:
@@ -585,69 +589,116 @@ let eval_bin_path: String = "/tmp/sprout_eval_repl_bin"
 fn runtime_dir(stdlib_root: String) -> String =
   stdlib_root ++ "/../runtime"
 
-# Cache dir for the compiled runtime objects (one .o per runtime .c).
-let runtime_objs_dir: String = "/tmp/sprout_runtime_daemon_objs"
-
 # ---------------------------------------------------------------------------
-# StartupState — pre-compiled runtime objects dir, stdlib_root, and persistent module cache
+# StartupState — stdlib_root, scratch dir with its compiled runtime objects, and persistent module cache
 
-export type StartupState = StartupState String (Ref String) bundler.LoadEnv(Ref (Dict SessionState)) (Ref Int)
-  # stdlib_root, runtime_objs_dir ("" = not yet compiled), cache, sessions, next_session_id
+export type StartupState = StartupState String (Ref Bool) bundler.LoadEnv(Ref (Dict SessionState)) (Ref Int) (Ref (String, String))
+  # stdlib_root, runtime objects compiled into the scratch dir, cache, sessions, next_session_id,
+  # scratch dir and the token in its `owner` file (both "" = not yet made)
 
 fn state_stdlib_root(state: StartupState) -> String =
   match state with
-  | StartupState root _ _ _ _ -> root
+  | StartupState root _ _ _ _ _ -> root
 
-fn state_runtime_obj_ref(state: StartupState) -> Ref String =
+fn state_compiled_ref(state: StartupState) -> Ref Bool =
   match state with
-  | StartupState _ ref _ _ _ -> ref
+  | StartupState _ ref _ _ _ _ -> ref
 
 fn state_cache(state: StartupState) -> bundler.LoadEnv =
   match state with
-  | StartupState _ _ cache _ _ -> cache
+  | StartupState _ _ cache _ _ _ -> cache
 
 fn state_sessions(state: StartupState) -> Ref (Dict SessionState) =
   match state with
-  | StartupState _ _ _ sessions _ -> sessions
+  | StartupState _ _ _ sessions _ _ -> sessions
 
 fn state_next_id(state: StartupState) -> Ref Int =
   match state with
-  | StartupState _ _ _ _ next_id -> next_id
+  | StartupState _ _ _ _ next_id _ -> next_id
+
+fn state_scratch_ref(state: StartupState) -> Ref (String, String) =
+  match state with
+  | StartupState _ _ _ _ _ scratch -> scratch
 
 # Create the persistent service state. Runtime object compilation is deferred to
 # first eval so the service starts (and answers diagnostics/type-of/hover) even
 # when clang is not on PATH.
 export fn build_startup_state(stdlib_root: String) -> StartupState !{IO} =
   do
-    runtime_obj_ref <- ref_new("")
+    compiled_ref <- ref_new(false)
     load_env <- bundler.new_load_env()
     sessions <- ref_new(dict_empty())
     next_id <- ref_new(1)
-    StartupState(stdlib_root, runtime_obj_ref, load_env, sessions, next_id)
+    scratch_ref <- ref_new(("", ""))
+    StartupState(stdlib_root, compiled_ref, load_env, sessions, next_id, scratch_ref)
 
-# Shell command that compiles every runtime .c into fresh objects under
-# `objs_dir`.  proc_run is argv-based (no glob expansion), so the `*.c` glob is
-# expanded by `sh -c`.  `-c` with multiple sources and no `-o` writes one
-# `<base>.o` per source into the cwd, hence the `cd` into `objs_dir`.  `rt_dir`
-# is resolved to an absolute path first so the source glob still points at the
-# runtime dir after the `cd` (it may be relative to the caller's cwd).
-fn runtime_compile_cmd(rt_dir: String, objs_dir: String) -> String =
-  "RT=\"$(cd \"" ++ rt_dir ++ "\" && pwd)\" && mkdir -p \"" ++ objs_dir
-    ++ "\" && rm -f \"" ++ objs_dir ++ "\"/*.o && cd \"" ++ objs_dir
-    ++ "\" && clang -c \"$RT\"/*.c -O2"
-
-# Shell command that links the eval IR against every runtime object.
-fn eval_link_cmd(ir_path: String, objs_dir: String, bin_path: String, use_darwin: Bool) -> String =
-  "clang \"" ++ ir_path ++ "\" \"" ++ objs_dir ++ "\"/*.o -O2 "
-    ++ (if use_darwin then "-framework Security -framework CoreFoundation " else "")
-    ++ "-o \"" ++ bin_path ++ "\""
-
-# Cache the objects dir on first successful compile so subsequent evals skip
-# the clang -c step.
-fn write_objs_and_ok(objs_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
+# The scratch dir's path, "" while none has been made.
+export fn scratch_dir_of(state: StartupState) -> String !{IO} =
   do
-    ref_write(objs_ref, objs_dir)
-    Ok(objs_dir)
+    (dir, _) <- ref_read(state_scratch_ref(state))
+    dir
+
+# The file in the scratch dir that holds the token this service wrote there.
+fn owner_file(dir: String) -> String =
+  fspath.join(dir, "owner")
+
+# Is `dir` the one this service made? Only a dir whose owner file holds `token` is: a dir (or a
+# file) put at the same path since is not, nor is one whose owner file cannot be read.
+fn owns_scratch_dir(dir: String, token: String) -> Bool !{IO} =
+  match fs.read_text(owner_file(dir)) with
+  | Ok text -> text == token
+  | Err _ -> false
+
+# The service's private temp dir, made on first use so a service that only answers
+# diagnostics and type-of never touches the filesystem. The cached dir is checked on each call:
+# if it is gone, or is not the one this service made, a new one is made and the other is left
+# alone. A failure is that request's error.
+fn ensure_scratch_dir(state: StartupState) -> Result String String !{IO} =
+  do
+    (dir, token) <- ref_read(state_scratch_ref(state))
+    if dir != "" && owns_scratch_dir(dir, token) then Ok(dir) else make_scratch_dir(state)
+
+# Writes the token into the new dir; on failure the dir is removed again.
+fn write_owner_file(dir: String, token: String) -> Result String Unit !{IO} =
+  match fs.write_text(owner_file(dir), token) with
+  | Ok _ -> Ok(())
+  | Err msg ->
+      do
+        let _ = fs.remove_dir_all(dir)
+        Err("could not make the scratch dir: " ++ msg)
+
+# A new dir holds no runtime objects, so the compiled flag is cleared with it.
+fn make_scratch_dir(state: StartupState) -> Result String String !{IO} =
+  let dir = try fs_failure("could not make the scratch dir", fs.make_temp_dir("sprout-analysis-"))
+      raw = try result_map_error(\_ -> "could not make the scratch dir: no random bytes available",
+                                 crypto.random_bytes(16))
+      token = crypto.base64url_encode(raw)
+      _ = try write_owner_file(dir, token)
+  in do
+       ref_write(state_scratch_ref(state), (dir, token))
+       ref_write(state_compiled_ref(state), false)
+       Ok(dir)
+
+# Remove the scratch dir if this service made one, and forget it and the runtime objects inside
+# it. A dir at that path that is not ours is left alone. Called when the request stream ends; a
+# crash leaves the dir behind.
+export fn shutdown_state(state: StartupState) -> Unit !{IO} =
+  do
+    (dir, token) <- ref_read(state_scratch_ref(state))
+    ref_write(state_scratch_ref(state), ("", ""))
+    ref_write(state_compiled_ref(state), false)
+    if dir != "" && owns_scratch_dir(dir, token) then
+      match fs.remove_dir_all(dir) with
+      | Ok _ -> ()
+      | Err e -> eprint("analysis service: could not remove " ++ dir ++ ": " ++ fs.fs_error_message(e))
+    else ()
+
+# Set the flag on the first successful compile so subsequent evals skip the clang -c step.
+# A failed compile leaves the objects dir behind, so the flag, not the dir, says it is done.
+fn mark_compiled(compiled_ref: Ref Bool) -> Result String Unit !{IO} =
+  do
+    ref_write(compiled_ref, true)
+    Ok(())
 
 # Runs `argv`: `Ok` on exit 0, else `Err` with `prefix` and the reason (the error, or the stderr).
 fn run_checked(prefix: String, argv: List String) -> Result String Unit !{IO} =
@@ -657,28 +708,65 @@ fn run_checked(prefix: String, argv: List String) -> Result String Unit !{IO} =
       if process.proc_ok(result) then Ok(())
       else Err(prefix ++ ": " ++ process.proc_stderr_or(result, "<stderr was not valid UTF-8>"))
 
-fn compile_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
-  let _ = try run_checked("runtime compile failed", ["sh", "-c", runtime_compile_cmd(rt_dir, runtime_objs_dir)])
-  in write_objs_and_ok(runtime_objs_dir, objs_ref)
+fn fs_failure(prefix: String, r: Result fs.FsError a) -> Result String a =
+  result_map_error(\e -> prefix ++ ": " ++ fs.fs_error_message(e), r)
 
-fn ensure_runtime_objs(rt_dir: String, objs_ref: Ref String) -> Result String String !{IO} =
+# Names in `dir` that end in `suffix`, sorted, so the compile and link order does not depend on
+# the filesystem's listing order. Names starting with '.' are dropped: they are editor and OS
+# droppings (`._foo.c`, `.#foo.c`), not part of the runtime.
+fn sorted_names_ending(dir: String, suffix: String) -> Result fs.FsError (List String) !{IO} =
+  result_map(\names -> sort_strings(list_filter(\n -> !string.starts_with(n, ".") && string.ends_with(n, suffix), names)),
+             fs.list_dir(dir))
+
+# `foo.c` -> `foo.o`; the caller has already kept only names that end in `.c`.
+fn object_name(c_name: String) -> String =
+  string.drop_last(c_name, 2) ++ ".o"
+
+fn compile_runtime_sources(rt_dir: String, objs_dir: String, c_names: List String) -> Result String Unit !{IO} =
+  match c_names with
+  | Nil -> Ok(())
+  | Cons name rest ->
+      let _ = try run_checked("runtime compile failed",
+                ["clang", "-c", fspath.join(rt_dir, name), "-O2", "-o", fspath.join(objs_dir, object_name(name))])
+      in compile_runtime_sources(rt_dir, objs_dir, rest)
+
+# Compile every runtime .c in `rt_dir` into its own object under `objs_dir`. There is no `cd`:
+# `rt_dir` may be relative, and then resolves against the service's working directory.
+fn compile_runtime_objs(rt_dir: String, objs_dir: String, compiled_ref: Ref Bool) -> Result String Unit !{IO} =
+  let c_names = try fs_failure("runtime compile failed", sorted_names_ending(rt_dir, ".c"))
+      _ = try fs_failure("runtime compile failed", fs.make_dir_all(objs_dir))
+      _ = try compile_runtime_sources(rt_dir, objs_dir, c_names)
+  in mark_compiled(compiled_ref)
+
+fn ensure_runtime_objs(rt_dir: String, objs_dir: String, compiled_ref: Ref Bool) -> Result String Unit !{IO} =
   do
-    current <- ref_read(objs_ref)
-    if current == "" then compile_runtime_objs(rt_dir, objs_ref)
-    else Ok(current)
+    compiled <- ref_read(compiled_ref)
+    if compiled then Ok(()) else compile_runtime_objs(rt_dir, objs_dir, compiled_ref)
 
-# Compile the full runtime (cached in `objs_ref`, "" = not yet compiled) and
+# Link the eval IR against every runtime object in `objs_dir`.
+fn link_eval(ir_path: String, objs_dir: String, bin_path: String, use_darwin: Bool) -> Result String Unit !{IO} =
+  let o_names = try fs_failure("clang link failed", sorted_names_ending(objs_dir, ".o"))
+      frameworks = if use_darwin then ["-framework", "Security", "-framework", "CoreFoundation"] else []
+  in run_checked("clang link failed",
+       concat_all([["clang", ir_path], list_map(\n -> fspath.join(objs_dir, n), o_names),
+                   ["-O2"], frameworks, ["-o", bin_path]]))
+
+# Compile the full runtime into `objs_dir` (once: `compiled_ref` says it is done) and
 # link `ir_path` against every runtime object into `bin_path`.  Exported so a
 # regression test can drive the real link path: linking only sprout_runtime.o
 # leaves scheduler_park_on_fd (defined in sprout_scheduler.c) undefined.
 export fn compile_runtime_and_link_eval(
-    rt_dir: String, ir_path: String, bin_path: String,
-    objs_ref: Ref String, use_darwin: Bool) -> Result String String !{IO} =
-  match ensure_runtime_objs(rt_dir, objs_ref) with
-  | Err msg -> Err(msg)
-  | Ok objs_dir ->
-      let _ = try run_checked("clang link failed", ["sh", "-c", eval_link_cmd(ir_path, objs_dir, bin_path, use_darwin)])
-      in Ok(bin_path)
+    rt_dir: String, ir_path: String, bin_path: String, objs_dir: String,
+    compiled_ref: Ref Bool, use_darwin: Bool) -> Result String Unit !{IO} =
+  let _ = try ensure_runtime_objs(rt_dir, objs_dir, compiled_ref)
+  in match link_eval(ir_path, objs_dir, bin_path, use_darwin) with
+     | Ok _ -> Ok(())
+     | Err msg ->
+         # The objects may be the cause (removed or aged out of the temp dir), so the next call
+         # compiles them again.
+         do
+           ref_write(compiled_ref, false)
+           Err(msg)
 
 fn eval_main_for(type_str: String) -> Maybe compiler.EvalMain =
   if string.ends_with(type_str, " !{IO}") then
@@ -707,8 +795,8 @@ fn collect_eval_output(run_result: process.ProcResult) -> json.Json !{IO} =
     # now a non-text result is REPORTED as output instead of being fatal.
     ok_response(vec_strings_to_json_array(eval_output_lines(string.trim_right(process.proc_stdout_or(run_result, "<eval output was not valid UTF-8>")))))
 
-fn run_eval_binary() -> json.Json !{IO} =
-  match process.proc_run([eval_bin_path]) with
+fn run_eval_binary(bin_path: String) -> json.Json !{IO} =
+  match process.proc_run([bin_path]) with
   | Ok run_result -> collect_eval_output(run_result)
   | Err e -> error_response("eval_expr_in_source: could not run the eval binary: " ++ process.proc_error_message(e))
 
@@ -742,15 +830,19 @@ fn diag_msg(d: compiler.Diagnostic) -> String =
 fn link_and_run_eval(ir_result: compiler.IrFullResult, state: StartupState) -> json.Json !{IO} =
   let compiler.IrFullOk ir_text = ir_result
         else compiler.IrFullFail diags -> first_diag_response(diags, "eval_expr_in_source: codegen failed")
-      Ok _ = fs.write_text(eval_ir_path, ir_text)
-        else Err msg -> panic("write_file: eval.ir: " ++ msg)
+      Ok scratch_dir = ensure_scratch_dir(state)
+        else Err msg -> error_response("eval_expr_in_source: " ++ msg)
+      ir_path = fspath.join(scratch_dir, "eval.ll")
+      bin_path = fspath.join(scratch_dir, "eval_bin")
+      Ok _ = fs.write_text(ir_path, ir_text)
+        else Err msg -> error_response("eval_expr_in_source: write_file: eval.ll: " ++ msg)
       Ok use_darwin = use_darwin_frameworks()
         else Err msg -> error_response("eval_expr_in_source: " ++ msg)
       Ok _ = compile_runtime_and_link_eval(
-               runtime_dir(state_stdlib_root(state)), eval_ir_path, eval_bin_path,
-               state_runtime_obj_ref(state), use_darwin)
+               runtime_dir(state_stdlib_root(state)), ir_path, bin_path,
+               fspath.join(scratch_dir, "objs"), state_compiled_ref(state), use_darwin)
         else Err msg -> error_response("eval_expr_in_source: " ++ msg)
-  in run_eval_binary()
+  in run_eval_binary(bin_path)
 
 fn compile_and_run_eval(src: String, expr: String, how: compiler.EvalMain, state: StartupState) -> json.Json !{IO} =
   do
@@ -954,7 +1046,7 @@ fn response_text(response: json.Json) -> String =
 
 fn service_loop(state: StartupState) -> Unit !{IO} =
   match terminal.term_read_line() with
-  | Ok Nothing -> ()
+  | Ok Nothing -> shutdown_state(state)
   | Ok (Just line) ->
       if string.is_empty(line) then service_loop(state)
       else
@@ -971,13 +1063,7 @@ fn service_loop(state: StartupState) -> Unit !{IO} =
         service_loop(state)
 
 export fn run_service(stdlib_root: String) -> Unit !{IO} =
-  if stdlib_root == "" then do
-    runtime_obj_ref <- ref_new("")
-    load_env <- bundler.new_load_env()
-    sessions <- ref_new(dict_empty())
-    next_id <- ref_new(1)
-    service_loop(StartupState("", runtime_obj_ref, load_env, sessions, next_id))
-  else do
+  do
     state <- build_startup_state(stdlib_root)
     service_loop(state)
 

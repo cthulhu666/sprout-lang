@@ -4,6 +4,7 @@ import stdlib.compiler.analysis_service_driver as svc
 import stdlib.compiler.ast as ast
 import stdlib.compiler.source as source
 import stdlib.string as string
+import stdlib.fs as fs
 import testsupport.envvar as envvar
 
 # Synthetic-program builders — exercise the pure matcher without needing a real
@@ -102,22 +103,29 @@ fn main() -> Unit !{IO} =
     match envvar.read("SPROUT_STDLIB_ROOT") with
     | Nothing -> ()
     | Just stdlib_root ->
-        do
-          # `:i String` surfaces the prelude's String instances (bundling pulls the prelude in).
-          r_str <- svc.resolve_instances("module app.session", "String", source.StdlibRoot(stdlib_root))
-          assert_true(state, "resolve_instances String includes Eq String",
-            string.contains(instances_result_joined(r_str), "Eq String"))
-          assert_true(state, "resolve_instances String includes ToString String",
-            string.contains(instances_result_joined(r_str), "ToString String"))
-          # Session-defined type + instance: the probe resolves it in session
-          # context; the match renders with the module prefix stripped.
-          r_color <- svc.resolve_instances(
-            "module app.session\n\ntype Color = Red | Blue\n\ninstance ToString Color {\n  fn to_string(c: Color) -> String = \"c\"\n}",
-            "Color", source.StdlibRoot(stdlib_root))
-          assert_eq(state, "resolve_instances session type -> ToString Color",
-            instances_result_joined(r_color), "ToString Color")
-          # Malformed query is an error, not a silent empty result.
-          r_err <- svc.resolve_instances("module app.session", "->", source.StdlibRoot(stdlib_root))
-          assert_true(state, "resolve_instances malformed query errors", instances_result_is_err(r_err))
+        match fs.make_temp_dir("sprout-instances-test-") with
+        | Err e -> assert_true(state, "make a temp dir (" ++ fs.fs_error_message(e) ++ ")", false)
+        | Ok scratch ->
+            do
+              # `:i String` surfaces the prelude's String instances (bundling pulls the prelude in).
+              r_str <- svc.resolve_instances("module app.session", "String", source.StdlibRoot(stdlib_root), scratch)
+              assert_true(state, "resolve_instances String includes Eq String",
+                string.contains(instances_result_joined(r_str), "Eq String"))
+              assert_true(state, "resolve_instances String includes ToString String",
+                string.contains(instances_result_joined(r_str), "ToString String"))
+              # Session-defined type + instance: the probe resolves it in session
+              # context; the match renders with the module prefix stripped.
+              r_color <- svc.resolve_instances(
+                "module app.session\n\ntype Color = Red | Blue\n\ninstance ToString Color {\n  fn to_string(c: Color) -> String = \"c\"\n}",
+                "Color", source.StdlibRoot(stdlib_root), scratch)
+              assert_eq(state, "resolve_instances session type -> ToString Color",
+                instances_result_joined(r_color), "ToString Color")
+              # Malformed query is an error, not a silent empty result.
+              r_err <- svc.resolve_instances("module app.session", "->", source.StdlibRoot(stdlib_root), scratch)
+              assert_true(state, "resolve_instances malformed query errors", instances_result_is_err(r_err))
+              # The probe source goes into the caller's directory, not a shared fixed path.
+              assert_true(state, "resolve_instances writes its probe source under the scratch dir",
+                fs.is_file(scratch ++ "/instances.sprout"))
+              assert_true(state, "the scratch dir is removed", is_ok(fs.remove_dir_all(scratch)))
 
     summary(state)
