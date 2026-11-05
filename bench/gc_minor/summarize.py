@@ -20,19 +20,25 @@ METRICS = [
 ]
 
 
+OFF = ("0", "-", "")
+
+
 def arm_key(r):
-    """('0', '-') for the off arm; ('1', '-' | 'E') for minor, with its SPROUT_GC_MAJOR_EVERY."""
-    return (r["minor"], r["major_every"])
+    """('0', '-', '') for the off arm; ('1', '-' | 'E', label) for minor, with its
+    SPROUT_GC_MAJOR_EVERY and its `-a` arm label. Older TSVs have no arm column: label ''."""
+    return (r["minor"], r["major_every"], r.get("arm") or "")
 
 
 def arm_label(k):
     if k[0] == "0":
         return "off"
+    if k[2]:
+        return k[2]
     return "minor" if k[1] == "-" else f"minor E={k[1]}"
 
 
 def arm_order(k):
-    return (k[0], 0 if k[1] == "-" else int(k[1]))
+    return (k[0], 0 if k[1] == "-" else int(k[1]), k[2])
 
 
 def fmt(x):
@@ -65,7 +71,7 @@ def main(paths):
         if r["workload"] not in wl_order:
             wl_order.append(r["workload"])
 
-    for setting in ("fixed", "default", "every"):
+    for setting in ("fixed", "default", "every", "arms"):
         wls = [w for w in wl_order if any(g[0] == setting and g[1] == w for g in groups)]
         if not wls:
             continue
@@ -73,6 +79,7 @@ def main(paths):
             "fixed": "fixed: ADAPT_RATIO=0, fixed THRESHOLD (collection counts differ; compare per-collection p50/p90)",
             "default": "default: no GC env but the arm",
             "every": "every: SPROUT_GC_MAJOR_EVERY sweep, default settings, MINOR=0 baseline",
+            "arms": "arms: named MINOR=1 arms (-a) with extra env, default settings, MINOR=0 baseline",
         }[setting]
         print(f"\n## {title}\n")
         print("Cells: median (min-max). `ratio` = arm / off by medians; `~` = the ranges overlap,")
@@ -82,7 +89,7 @@ def main(paths):
         print("|" + "|".join(["---"] * len(head)) + "|")
         for w in wls:
             arms = sorted({g[2] for g in groups if g[0] == setting and g[1] == w}, key=arm_order)
-            base = groups.get((setting, w, ("0", "-")))
+            base = groups.get((setting, w, OFF))
             for a in arms:
                 rs = groups[(setting, w, a)]
                 cells = [w, arm_label(a), str(len(rs))]
@@ -92,7 +99,7 @@ def main(paths):
                 ma = statistics.median(int(r["majors"]) for r in rs)
                 cells.append(f"{cyc:,.0f} ({mi:,.0f}+{ma:,.0f})")
                 print("| " + " | ".join(cells) + " |")
-                if a != ("0", "-") and base:
+                if a != OFF and base:
                     ratios = []
                     for _, get in METRICS:
                         b, v = [get(r) for r in base], [get(r) for r in rs]
@@ -122,7 +129,8 @@ def main(paths):
     for r in rows:
         if r["exit"] != "0":
             bad = True
-            print(f"- NONZERO EXIT {r['exit']}: {r['workload']} {r['setting']} minor={r['minor']} run {r['run']}")
+            arm = f" arm={r['arm']}" if r.get("arm") else ""
+            print(f"- NONZERO EXIT {r['exit']}: {r['workload']} {r['setting']} minor={r['minor']}{arm} run {r['run']}")
 
     if not bad:
         print("- none: stdout hashes agree, all exits 0")
