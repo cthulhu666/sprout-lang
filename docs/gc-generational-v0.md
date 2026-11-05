@@ -850,7 +850,7 @@ just the marked ones). `SPROUT_GC_GENCHECK=1` aborts when the predicted count di
 
 **Trigger.** Minors fire through today's `sprout_gc_maybe_collect_threshold`, but the
 threshold does not stay today's. `sprout_gc_collect_with_reason` re-bases it on
-`g_managed_heap_count` and `g_gc_free_after_sweep`, and after a minor that count still holds
+`g_managed_heap_count` and `g_gc_freelist_len`, and after a minor that count still holds
 every old object that has died since the last major. So minors run fewer, larger cycles, and
 a default-settings A/B cannot isolate per-collection cost (§14.8 says how it is measured).
 

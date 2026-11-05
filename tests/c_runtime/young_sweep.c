@@ -7,7 +7,7 @@
  *
  *   walked_young   — a minor over a large old heap visits the young slots, not the old ones, and
  *                    a second one does too when the young slots are reused from the free lists.
- *   free_count     — g_gc_free_after_sweep equals a full walk's count after every young-only
+ *   free_count     — g_gc_freelist_len equals a full walk's count after every young-only
  *                    minor and after allocations that reuse listed slots and split inline tails.
  *   no_double_list — a slot freed by one minor and not reused is on its list once after the next.
  *   region_release — young garbage that fills fresh regions leaves none of them behind.
@@ -122,10 +122,10 @@ static void check_free_lists(const char* when) {
   long long dups = 0;
   long long entries = list_entries(&dups);
   long long walked = count_free_slots();
-  if (g_gc_free_after_sweep != walked || entries != walked || dups != 0) {
+  if (g_gc_freelist_len != walked || entries != walked || dups != 0) {
     g_failed = 1;
-    fprintf(stderr, "FAIL: free lists %s: g_gc_free_after_sweep=%lld entries=%lld full_walk=%lld dups=%lld\n",
-            when, g_gc_free_after_sweep, entries, walked, dups);
+    fprintf(stderr, "FAIL: free lists %s: g_gc_freelist_len=%lld entries=%lld full_walk=%lld dups=%lld\n",
+            when, g_gc_freelist_len, entries, walked, dups);
   }
 }
 
@@ -279,7 +279,7 @@ static int bad_young_bit_free(void) {
 static int bad_free_count(void) {
   setup_old(1000);
   garbage_refs(100);
-  g_gc_free_after_sweep += 1;
+  g_gc_freelist_len += 1;
   collect();                 /* the young-only minor keeps the count incrementally */
   fprintf(stderr, "bad_free_count: no abort\n");
   return 1;

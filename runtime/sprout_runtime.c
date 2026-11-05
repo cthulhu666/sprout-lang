@@ -299,10 +299,9 @@ static long long g_debug_gc_swept = 0;
    slot class nothing allocates, and invisible to a trigger that reads `live`.
    Under SPROUT_GC_LINEAGE it also counts every POISON corpse kept so far. */
 static long long g_debug_gc_walked = 0;
-/* Freelist length: pushes kept by fl_region_commit at a full sweep, then minus each reuse,
-   plus each slot a young-only minor lists and each inline-tail split. The trigger's footprint
-   floor reads it (sprout_gc_collect_with_reason). */
-static long long g_gc_free_after_sweep = 0;
+/* Slots on the free lists: set by a full sweep (fl_region_commit), then moved by every push and
+   pop. The trigger's footprint floor reads it (sprout_gc_collect_with_reason). */
+static long long g_gc_freelist_len = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
    are COMPUTED shows its growth instead of hiding it. Unguarded, unlike the
@@ -706,7 +705,7 @@ static void sprout_gc_log_cycle(
     g_arena_region_count,
     g_overflow_region_count,
     walked_delta,
-    g_gc_free_after_sweep,
+    g_gc_freelist_len,
     kind_suffix
   );
   fprintf(
@@ -1386,6 +1385,25 @@ static size_t        g_open_region_hint = 0;
  * Next pointer stored in payload word 0 (slot >= 16 bytes guarantees room). */
 static void* g_freelist[SPROUT_FREELIST_CLASSES];  /* index 0 unused */
 
+/* Push onto the live lists, out of range classes skipped.  Outside a full sweep's region
+ * walk this is the only push: fl_push_staged's touched-class flags are cleared only there. */
+static inline void fl_push_live(size_t cls, void* payload) {
+  if (cls < 1 || cls >= SPROUT_FREELIST_CLASSES) return;
+  memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in payload word 0 */
+  g_freelist[cls] = payload;
+  g_gc_freelist_len++;
+}
+
+/* Pop the head of a non-empty class list. */
+static inline void* fl_pop(size_t cls) {
+  void* payload = g_freelist[cls];
+  void* next;
+  memcpy(&next, payload, sizeof(void*));
+  g_freelist[cls] = next;
+  g_gc_freelist_len--;
+  return payload;
+}
+
 /* Round up to next multiple of 16. */
 static inline size_t round16(size_t n) {
   return (n + 15u) & ~(size_t)15u;
@@ -1664,15 +1682,11 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   if (cls < 1) cls = 1;
   /* Try freelist. */
   if (g_freelist[cls] != NULL) {
-    void* payload = g_freelist[cls];
-    void* next;
-    memcpy(&next, payload, sizeof(void*));  /* next-ptr in payload word 0 */
-    g_freelist[cls] = next;
+    void* payload = fl_pop(cls);
     /* Slotmap bit stayed set while the slot was FREE (sprout_heap_lookup
      * rejects FREE by header kind), so reuse is header-write only. */
     sprout_hdr_write(payload, kind, aux);
     SPROUT_PROF_HOT(g_prof_freelist_hits++);
-    g_gc_free_after_sweep--;  /* the list's length, kept between sweeps */
     if (g_gen.on) {
       SproutRegion* fr = region_find(payload);
       youngmap_set(fr, (size_t)((char*)payload - 8 - fr->base) / SPROUT_SLOT_GRAN);
@@ -2286,13 +2300,13 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
  * has to understand it.  Left in place the tail would be dead for the object's
  * lifetime — 4064 bytes of it for `mutvec_new(508, v)` followed by a push.
  *
- * The tail goes straight onto the live lists and counts in g_gc_free_after_sweep.
- * The full sweep memsets and rebuilds the lists, which re-lists it from the walk;
- * a young-only minor keeps them, so this push is the only one the tail gets.  Its
- * youngmap bit stays clear, so no minor frees it.  It must NOT go through
- * fl_push_staged: that marks the class touched for the per-region staging, and a
- * flag set outside a region walk is never cleared, which would disable the
- * rollback the freelist depends on.
+ * The tail goes straight onto the live lists (fl_push_live).  The full sweep
+ * memsets and rebuilds the lists, which re-lists it from the walk; a young-only
+ * minor keeps them, so this push is the only one the tail gets.  Its youngmap
+ * bit stays clear, so no minor frees it.  It must NOT go through fl_push_staged:
+ * that marks the class touched for the per-region staging, and a flag set
+ * outside a region walk is never cleared, which would disable the rollback the
+ * freelist depends on.
  *
  * The header is edited, not rewritten: sprout_hdr_write would reset the age and
  * clear the color bit, and this object is surviving, not being re-initialised.
@@ -2324,18 +2338,13 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
   uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)rest << 14);
   memcpy(tail, &free_hdr, 8);
   slotmap_set(r, (size_t)(tail - r->base) / SPROUT_SLOT_GRAN);
-  size_t cls = rest / SPROUT_SLOT_GRAN;
-  if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) {
-    void* payload = tail + 8;
-    /* The lineage anchor every other freelist push has (the sweep calls it just
-     * before fl_push_staged).  Without it `just gc-trace` shows the next object
-     * allocated here as a first allocation, hiding that it aliases a vector's
-     * old inline area — the aliasing that tool exists to find. */
-    if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(payload);
-    memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in word 0 */
-    g_freelist[cls] = payload;
-    g_gc_free_after_sweep++;
-  }
+  void* payload = tail + 8;
+  /* The lineage anchor every other freelist push has (the sweep calls it just
+   * before listing the slot).  Without it `just gc-trace` shows the next object
+   * allocated here as a first allocation, hiding that it aliases a vector's
+   * old inline area — the aliasing that tool exists to find. */
+  if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(payload);
+  fl_push_live(rest / SPROUT_SLOT_GRAN, payload);
 }
 
 /* Declared here for the two JSON/file readers below, which build a vector by
@@ -3001,7 +3010,7 @@ static inline void fl_region_begin(void) { g_fl_touched_n = 0; g_fl_region_pushe
 static inline void fl_region_commit(void) {
   for (size_t i = 0; i < g_fl_touched_n; i++) g_fl_touched[g_fl_touched_list[i]] = 0;
   g_fl_touched_n = 0;
-  g_gc_free_after_sweep += g_fl_region_pushed;
+  g_gc_freelist_len += g_fl_region_pushed;
   g_fl_region_pushed = 0;
 }
 
@@ -3175,6 +3184,103 @@ static void sprout_fl_verify_against_full_walk(void) {
   if (bad) abort();
 }
 
+/* The census line counts live slots by kind; a survivor joins it. */
+static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
+  switch (kind) {
+    case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
+    case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
+    case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
+    case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
+    case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
+    case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
+    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
+    case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
+    case SPROUT_HEAP_CSTR:
+      g_gc_live_cstr++;
+      g_gc_live_cstr_bytes += (long long)aux;
+      break;
+    default: break;
+  }
+}
+
+/* Free one unmarked slot (`slot` is its header address), the same way in both sweeps.  Under
+ * lineage an OBJ is poisoned and kept, not listed; any other slot releases its extras and gets
+ * a FREE header.  Returns 1 when the slot is FREE and the caller lists it, 0 when it is
+ * poisoned and the caller counts it. */
+static inline int sprout_gc_free_dead_slot(char* slot, uint64_t h, SproutHeapKind kind,
+                                           unsigned long long aux, size_t ssize,
+                                           int lineage_on, int hdrcheck_on) {
+  void* payload = slot + 8;
+  sprout_gc_invalidate_singleton(h, payload);
+  if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
+    size_t actual_len = strlen((const char*)payload);
+    if (aux != (unsigned long long)actual_len) {
+      fprintf(stderr, "[sprout] HDRCHECK: CSTR aux mismatch at sweep: hdr_aux=%llu strlen=%zu\n",
+              aux, actual_len);
+      abort();
+    }
+  }
+  if (lineage_on && kind == SPROUT_HEAP_OBJ) {
+    /* Poison: write poison header with slot_bytes in aux (for walk). */
+    uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)ssize << 14);
+    memcpy(slot, &phdr, 8);
+    void** frames = (void**)malloc(sizeof(void*) * 32);
+    int n = frames ? backtrace(frames, 32) : 0;
+    ((long long*)payload)[0] = sprout_ptr_word(frames);
+    ((long long*)payload)[1] = (long long)n;
+    /* Slotmap bit STAYS set (dangling reads must resolve to corpse).
+     * The corpse leaves the live count like any other dead object;
+     * only its memory is retained. */
+    g_managed_heap_count--;
+    g_debug_gc_swept++;
+    if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+    return 0;
+  }
+  /* Slotmap bit stays set for FREE slots; sprout_heap_lookup rejects
+   * them by header kind, and reuse rewrites the header in place. */
+  if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+  sprout_release_payload_extras(payload, kind);
+  uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)ssize << 14);
+  memcpy(slot, &free_hdr, 8);
+  g_managed_heap_count--;
+  g_debug_gc_swept++;
+  return 1;
+}
+
+/* A large region holds one slot.  Marked: it survives with its age bumped and `clear_color`
+ * taken off the header.  Unmarked: it is freed and r->base set NULL, for the caller's removal
+ * pass.  Returns 1 when it survived.  The caller sets the generational counts. */
+static inline int sprout_gc_sweep_large(SproutRegion* r, uint64_t clear_color,
+                                        int ageprof_on, int lineage_on) {
+  g_debug_gc_walked++;
+  /* OBJ (the only poisoned kind) is never large — max OBJ slot is 96 bytes
+   * — so large entries need no poison handling. */
+  void* payload = r->base + 8;
+  uint64_t h; memcpy(&h, r->base, 8);
+  if (h & SPROUT_GC_COLOR_BIT) {
+    h &= ~clear_color;
+    h = sprout_hdr_age_bump(h);
+    memcpy(r->base, &h, 8);
+    r->live_count = 1;
+    if (ageprof_on) g_ap_live_by_age[sprout_hdr_age(h)]++;
+    return 1;
+  }
+  if (ageprof_on) {
+    g_ap_freed_total++;
+    if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
+  }
+  SproutHeapKind kind = sprout_hdr_kind(h);
+  sprout_gc_invalidate_singleton(h, payload);
+  if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+  sprout_release_payload_extras(payload, kind);
+  free(r->base);
+  r->base = NULL;
+  g_managed_heap_count--;
+  g_debug_gc_swept++;
+  r->live_count = 0;
+  return 0;
+}
+
 /* Region-walking mark-sweep collector.  Pass 1: process every slot in every
  * region (live → clear color; dead → release extras + write FREE header, KEEPING
  * the slotmap bit set, OR poison in lineage mode) while staging that region's FREE slots
@@ -3189,7 +3295,7 @@ static void sprout_gc_sweep(int keep_color) {
      Safe here because nothing between this point and the end of the sweep
      allocates a managed object: Pass 1/2 only free(), malloc() and realloc(). */
   memset(g_freelist, 0, sizeof(g_freelist));
-  g_gc_free_after_sweep = 0;
+  g_gc_freelist_len = 0;
   g_gc_live_obj = g_gc_live_closure = g_gc_live_vec = 0;
   g_gc_live_map = g_gc_live_bytes = g_gc_live_builder = 0;
   g_gc_live_tuple = g_gc_live_ref = 0;
@@ -3209,33 +3315,9 @@ static void sprout_gc_sweep(int keep_color) {
   for (size_t ri = 0; ri < g_region_count; ri++) {
     SproutRegion* r = &g_regions[ri];
     if (r->is_large) {
-      g_debug_gc_walked++;  /* a large region is one slot */
-      /* OBJ (the only poisoned kind) is never large — max OBJ slot is 96 bytes
-       * — so large entries need no poison handling. */
-      void* payload = r->base + 8;
-      uint64_t h; memcpy(&h, r->base, 8);
-      if (h & SPROUT_GC_COLOR_BIT) {
-        h &= ~clear_color;
-        h = sprout_hdr_age_bump(h);
-        memcpy(r->base, &h, 8);
-        r->live_count = 1;
-        if (ageprof_on) g_ap_live_by_age[sprout_hdr_age(h)]++;
-      } else {
-        if (ageprof_on) {
-          g_ap_freed_total++;
-          if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
-        }
-        SproutHeapKind kind = sprout_hdr_kind(h);
-        sprout_gc_invalidate_singleton(h, payload);
-        if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-        sprout_release_payload_extras(payload, kind);
-        free(r->base);
-        r->base = NULL;  /* mark for removal in Pass 2 */
-        g_managed_heap_count--;
-        g_debug_gc_swept++;
-        r->live_count = 0;
-      }
-      r->old_count = r->live_count && keep_color;
+      /* A freed one has base NULL: Pass 2 removes it. */
+      int survived = sprout_gc_sweep_large(r, clear_color, ageprof_on, lineage_on);
+      r->old_count = survived && keep_color;
       r->young_count = 0;
       continue;
     }
@@ -3276,23 +3358,7 @@ static void sprout_gc_sweep(int keep_color) {
         memcpy(r->base + off, &h, 8);
         region_live++;
         if (ageprof_on) g_ap_live_by_age[sprout_hdr_age(h)]++;
-        if (g_debug_gc_enabled) {
-          switch (kind) {
-            case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
-            case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
-            case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
-            case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
-            case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
-            case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
-            case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
-            case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
-            case SPROUT_HEAP_CSTR:
-              g_gc_live_cstr++;
-              g_gc_live_cstr_bytes += (long long)aux;
-              break;
-            default: break;
-          }
-        }
+        if (g_debug_gc_enabled) sprout_gc_census_add(kind, aux);
       } else {
         /* Dead slot. */
         if (ageprof_on) {
@@ -3301,43 +3367,10 @@ static void sprout_gc_sweep(int keep_color) {
           g_ap_freed_total++;
           if (sprout_hdr_age(h) == 0) g_ap_freed_age0++;
         }
-        sprout_gc_invalidate_singleton(h, payload);
-
-        if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
-          size_t actual_len = strlen((const char*)payload);
-          if (aux != (unsigned long long)actual_len) {
-            fprintf(stderr, "[sprout] HDRCHECK: CSTR aux mismatch at sweep: hdr_aux=%llu strlen=%zu\n",
-                    aux, actual_len);
-            abort();
-          }
-        }
-
-        if (lineage_on && kind == SPROUT_HEAP_OBJ) {
-          /* Poison: write poison header with slot_bytes in aux (for walk). */
-          uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)ssize << 14);
-          memcpy(r->base + off, &phdr, 8);
-          void** frames = (void**)malloc(sizeof(void*) * 32);
-          int n = frames ? backtrace(frames, 32) : 0;
-          ((long long*)payload)[0] = sprout_ptr_word(frames);
-          ((long long*)payload)[1] = (long long)n;
-          region_poison++;
-          /* Slotmap bit STAYS set (dangling reads must resolve to corpse).
-           * The corpse leaves the live count like any other dead object;
-           * only its memory is retained. */
-          g_managed_heap_count--;
-          g_debug_gc_swept++;
-          if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-        } else {
-          /* Slotmap bit stays set for FREE slots; sprout_heap_lookup rejects
-           * them by header kind, and reuse rewrites the header in place. */
-          if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-          sprout_release_payload_extras(payload, kind);
-          uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)ssize << 14);
-          memcpy(r->base + off, &free_hdr, 8);
+        if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on))
           fl_push_staged(ssize / SPROUT_SLOT_GRAN, payload);
-          g_managed_heap_count--;
-          g_debug_gc_swept++;
-        }
+        else
+          region_poison++;
       }
       SPROUT_PROF_HOT(g_prof_sweep_visits++);
       off += ssize;
@@ -3433,7 +3466,7 @@ static void sprout_gc_sweep(int keep_color) {
  * set, a word at a time, in regions with young_count > 0.  A young slot with its colour set
  * is promoted (it keeps the colour); one without it is dead and freed exactly as the full
  * sweep frees it, except that the slot goes straight onto the live free lists, which this
- * sweep keeps: nothing is wiped or rebuilt, and g_gc_free_after_sweep is updated as slots
+ * sweep keeps: nothing is wiped or rebuilt, and g_gc_freelist_len is updated as slots
  * are listed.  The old slots are not touched, so a young bit must never outlive its object:
  * a stale bit on a FREE slot would list it a second time.
  *
@@ -3461,25 +3494,6 @@ static void sprout_gc_young_fail(const char* what, const SproutRegion* r, size_t
   abort();
 }
 
-/* The census line counts live slots by kind; a promoted slot joins it. */
-static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
-  switch (kind) {
-    case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
-    case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
-    case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
-    case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
-    case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
-    case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
-    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
-    case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
-    case SPROUT_HEAP_CSTR:
-      g_gc_live_cstr++;
-      g_gc_live_cstr_bytes += (long long)aux;
-      break;
-    default: break;
-  }
-}
-
 static void sprout_gc_sweep_young(void) {
   int lineage_on = sprout_gc_lineage_on();
   int hdrcheck_on = sprout_gc_hdrcheck_on();
@@ -3488,24 +3502,11 @@ static void sprout_gc_sweep_young(void) {
     SproutRegion* r = &g_regions[ri];
     if (r->young_count == 0) continue;
     if (r->is_large) {
-      g_debug_gc_walked++;
-      void* payload = r->base + 8;
-      uint64_t h; memcpy(&h, r->base, 8);
-      if (h & SPROUT_GC_COLOR_BIT) {
-        h = sprout_hdr_age_bump(h);
-        memcpy(r->base, &h, 8);
-        r->live_count = 1;
+      /* The colour stays set (it means old); AGEPROF forces the full sweep.  A freed one has
+         base NULL and is removed below, once the walk no longer indexes the table. */
+      if (sprout_gc_sweep_large(r, 0, 0, lineage_on)) {
         r->old_count = 1;  /* the census leaves large objects out, as the full sweep does */
       } else {
-        SproutHeapKind kind = sprout_hdr_kind(h);
-        sprout_gc_invalidate_singleton(h, payload);
-        if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-        sprout_release_payload_extras(payload, kind);
-        free(r->base);
-        r->base = NULL;  /* removed below, once the walk no longer indexes the table */
-        g_managed_heap_count--;
-        g_debug_gc_swept++;
-        r->live_count = 0;
         freed_large = 1;
       }
       r->young_count = 0;
@@ -3540,41 +3541,10 @@ static void sprout_gc_sweep_young(void) {
           region_old++;
           if (g_debug_gc_enabled) sprout_gc_census_add(kind, aux);
         } else {
-          sprout_gc_invalidate_singleton(h, payload);
-          if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
-            size_t actual_len = strlen((const char*)payload);
-            if (aux != (unsigned long long)actual_len) {
-              fprintf(stderr, "[sprout] HDRCHECK: CSTR aux mismatch at sweep: hdr_aux=%llu strlen=%zu\n",
-                      aux, actual_len);
-              abort();
-            }
-          }
-          if (lineage_on && kind == SPROUT_HEAP_OBJ) {
-            /* Poisoned and not listed, as in the full sweep. */
-            uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)ssize << 14);
-            memcpy(r->base + off, &phdr, 8);
-            void** frames = (void**)malloc(sizeof(void*) * 32);
-            int n = frames ? backtrace(frames, 32) : 0;
-            ((long long*)payload)[0] = sprout_ptr_word(frames);
-            ((long long*)payload)[1] = (long long)n;
+          if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on))
+            fl_push_live(ssize / SPROUT_SLOT_GRAN, payload);
+          else
             region_poison++;
-            g_managed_heap_count--;
-            g_debug_gc_swept++;
-            if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-          } else {
-            if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
-            sprout_release_payload_extras(payload, kind);
-            uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)ssize << 14);
-            memcpy(r->base + off, &free_hdr, 8);
-            size_t cls = ssize / SPROUT_SLOT_GRAN;
-            if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) {
-              memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in payload word 0 */
-              g_freelist[cls] = payload;
-              g_gc_free_after_sweep++;
-            }
-            g_managed_heap_count--;
-            g_debug_gc_swept++;
-          }
         }
         SPROUT_PROF_HOT(g_prof_sweep_visits++);
       } while (bits != 0);
@@ -3597,12 +3567,6 @@ static void sprout_gc_sweep_young(void) {
   sprout_fl_verify_against_full_walk();
 }
 
-/* SPROUT_GC_GENCHECK=1, after every sweep with minor collections on: a full slot walk that
- * checks the bookkeeping the young-only sweep depends on.
- *   - after a colour-keeping sweep, a youngmap bit is set exactly on a live slot whose colour
- *     is clear, and the region's young and old counts equal the walk's;
- *   - g_gc_free_after_sweep equals the FREE slots a full walk finds on the lists' classes;
- *   - after a young-only sweep, no ordinary region is left with no live and no poisoned slot. */
 __attribute__((noreturn, cold, noinline))
 static void sprout_gc_check_count_fail(const char* what, const SproutRegion* r, long long got, long long want) {
   fprintf(stderr, "[sprout] GENCHECK: %s (region=%p recorded=%lld walked=%lld)\n",
@@ -3611,6 +3575,12 @@ static void sprout_gc_check_count_fail(const char* what, const SproutRegion* r, 
   abort();
 }
 
+/* SPROUT_GC_GENCHECK=1, after every sweep with minor collections on: a full slot walk that
+ * checks the bookkeeping the young-only sweep depends on.
+ *   - after a colour-keeping sweep, a youngmap bit is set exactly on a live slot whose colour
+ *     is clear, and the region's young and old counts equal the walk's;
+ *   - g_gc_freelist_len equals the FREE slots a full walk finds on the lists' classes;
+ *   - after a young-only sweep, no ordinary region is left with no live and no poisoned slot. */
 static void sprout_gc_check_sweep(int kept_color, int young_only) {
   long long free_slots = 0;
   for (size_t ri = 0; ri < g_region_count; ri++) {
@@ -3653,8 +3623,8 @@ static void sprout_gc_check_sweep(int kept_color, int young_only) {
     if (young_only && live == 0 && poison == 0)
       sprout_gc_check_count_fail("a young-only minor left a region with no live slot", r, 0, 0);
   }
-  if (g_gc_free_after_sweep != free_slots)
-    sprout_gc_check_count_fail("free count", NULL, g_gc_free_after_sweep, free_slots);
+  if (g_gc_freelist_len != free_slots)
+    sprout_gc_check_count_fail("free count", NULL, g_gc_freelist_len, free_slots);
 }
 
 static void sprout_gc_collect(void) {
@@ -3739,7 +3709,7 @@ static void sprout_gc_collect_with_reason(const char* reason) {
     if (target < g_gc_threshold_base) target = g_gc_threshold_base;
     if (!g_gc_threshold_pinned) {
       long long footprint_floor = g_managed_heap_count
-        + (g_managed_heap_count + g_gc_free_after_sweep) / g_gc_footprint_k;
+        + (g_managed_heap_count + g_gc_freelist_len) / g_gc_footprint_k;
       if (target < footprint_floor) target = footprint_floor;
     }
     if (g_gc_adapt_cap > 0 && target > g_gc_adapt_cap) target = g_gc_adapt_cap;
