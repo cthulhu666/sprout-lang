@@ -6,7 +6,7 @@
 # (§13.6's first trap). Arms are interleaved in pairs and the first arm alternates (ABBA...), so
 # a drifting load lands on both. One TSV row per run; `summarize.py` turns the rows into tables.
 #
-# usage: ab.sh [-n runs] [-s fixed|default|both|none] [-w names] [-e every,...] [-o dir] [-B]
+# usage: ab.sh [-n runs] [-s fixed|default|both|none] [-w names] [-e every,...] [-a arms] [-o dir] [-B]
 #   -n  runs per arm (6)
 #   -s  fixed:   SPROUT_GC_ADAPT_RATIO=0 + a fixed SPROUT_GC_THRESHOLD per workload. Adaptation is
 #                off, but collection counts still differ after minors (the heap count then includes
@@ -16,6 +16,11 @@
 #   -w  comma-separated workload names (all)
 #   -e  SPROUT_GC_MAJOR_EVERY values for MINOR=1 at default settings, each round also runs one
 #       MINOR=0 baseline; the run order rotates every round
+#   -a  "<label>:ENV=V[,ENV=V...];<label>:..." named MINOR=1 arms at default settings, each with
+#       its extra env (a label with no env is plain MINOR=1); each round also runs one MINOR=0
+#       baseline, and the run order rotates every round. The label goes in the TSV's `arm` column
+#       and in summarize.py's tables, e.g. -a "K1:SPROUT_GC_PROMOTE_AGE=1;K2N1:SPROUT_GC_PROMOTE_AGE=2,SPROUT_GC_NURSERY=1"
+#       With -a and no -s, only the -a sweep runs (and the -e sweep, if given too).
 #   -o  output dir (/private/tmp/gc_minor_ab/<timestamp>)
 #   -B  reuse binaries already in <dir>/bin and append to its results.tsv; without -B a
 #       fresh results.tsv is started
@@ -42,22 +47,38 @@ SETTING=""
 WORKLOADS="$ALL_WORKLOADS"
 WL_NAMED=0
 EVERY=""
+ARM_LABELS=()   # -a: one label per arm, and its extra env ("A=1,B=2", maybe empty)
+ARM_ENVS=()
 OUT="/private/tmp/gc_minor_ab/$(date +%Y%m%d-%H%M%S)"
 REUSE=0
 
-while getopts "n:s:w:e:o:B" opt; do
+parse_arms() { # <spec>: fills ARM_LABELS and ARM_ENVS
+  local part label envs
+  local -a parts
+  IFS=';' read -ra parts <<< "$1"
+  for part in ${parts[@]+"${parts[@]}"}; do
+    [[ "$part" == *:* ]] || { echo "bad -a arm '$part': expected <label>:ENV=V[,ENV=V...]" >&2; exit 2; }
+    label="${part%%:*}"; envs="${part#*:}"
+    [[ "$label" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "bad -a label '$label': use letters, digits, _ . -" >&2; exit 2; }
+    ARM_LABELS+=("$label"); ARM_ENVS+=("$envs")
+  done
+  [[ ${#ARM_LABELS[@]} -gt 0 ]] || { echo "bad -a: no arms" >&2; exit 2; }
+}
+
+while getopts "n:s:w:e:a:o:B" opt; do
   case "$opt" in
     n) RUNS="$OPTARG" ;;
     s) SETTING="$OPTARG" ;;
     w) WORKLOADS="${OPTARG//,/ }"; WL_NAMED=1 ;;
     e) EVERY="${OPTARG//,/ }" ;;
+    a) parse_arms "$OPTARG" ;;
     o) OUT="$OPTARG" ;;
     B) REUSE=1 ;;
-    *) echo "usage: $0 [-n runs] [-s fixed|default|both|none] [-w names] [-e every,...] [-o dir] [-B]" >&2; exit 2 ;;
+    *) echo "usage: $0 [-n runs] [-s fixed|default|both|none] [-w names] [-e every,...] [-a arms] [-o dir] [-B]" >&2; exit 2 ;;
   esac
 done
 if [[ -z "$SETTING" ]]; then
-  if [[ -n "$EVERY" ]]; then SETTING=none; else SETTING=both; fi
+  if [[ -n "$EVERY" || ${#ARM_LABELS[@]} -gt 0 ]]; then SETTING=none; else SETTING=both; fi
 fi
 case "$SETTING" in fixed|default|both|none) ;; *) echo "bad -s: $SETTING" >&2; exit 2 ;; esac
 [[ "$(uname)" == "Darwin" ]] || { echo "ERROR: macOS only (/usr/bin/time -l)" >&2; exit 1; }
@@ -236,14 +257,21 @@ gc_summary() {
     END { printf "%d %d %d %d %d\n", c, mi, ma, t, m }' || echo "0 0 0 0 0"
 }
 
-# run_one <workload> <setting> <minor 0|1> <major_every or -> <run idx>
+# run_one <workload> <setting> <minor 0|1> <major_every or -> <run idx> [<arm label> <extra env>]
+# The arm label (-a) is "" for every other mode; the extra env is "A=1,B=2".
 run_one() {
-  local w="$1" setting="$2" minor="$3" every="$4" idx="$5"
+  local w="$1" setting="$2" minor="$3" every="$4" idx="$5" arm="${6:-}" extra="${7:-}"
   wl_def "$w"
   local tag="$w.$setting.m$minor.e$every.r$idx"
+  [[ -n "$arm" ]] && tag="$tag.a$arm"
   local rd="$OUT/runs/$tag"
   local envs=("${W_ENV[@]}" "SPROUT_DEBUG_GC=1" "SPROUT_GC_MINOR=$minor")
   [[ "$every" != "-" ]] && envs+=("SPROUT_GC_MAJOR_EVERY=$every")
+  if [[ -n "$extra" ]]; then
+    local -a xs
+    IFS=',' read -ra xs <<< "$extra"
+    envs+=("${xs[@]}")
+  fi
   [[ "$setting" == fixed ]] && envs+=("SPROUT_GC_ADAPT_RATIO=0" "SPROUT_GC_THRESHOLD=$W_THR")
 
   local load; load="$(sysctl -n vm.loadavg | awk '{print $2}')"
@@ -272,11 +300,11 @@ run_one() {
   fi
   [[ $rc != 0 ]] && echo "!!!!!! NONZERO EXIT ($rc): $tag !!!!!!" >&2
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$w" "$setting" "$minor" "$every" "$idx" "$load" "$real" "$user" "$sys" "$rss" \
-    "$cycles" "$minors" "$majors" "$gc_us" "$p50" "$p90" "$marked" "$hash" "$rc" >> "$TSV"
-  printf '  %-20s %-8s minor=%s every=%-5s run=%s real=%ss load=%s cycles=%s\n' \
-    "$w" "$setting" "$minor" "$every" "$idx" "$real" "$load" "$cycles" >&2
+    "$cycles" "$minors" "$majors" "$gc_us" "$p50" "$p90" "$marked" "$hash" "$rc" "$arm" >> "$TSV"
+  printf '  %-20s %-8s minor=%s every=%-5s run=%s real=%ss load=%s cycles=%s%s\n' \
+    "$w" "$setting" "$minor" "$every" "$idx" "$real" "$load" "$cycles" "${arm:+ arm=$arm}" >&2
 
   # Large outputs (the IR of a self-compile) are kept only as a hash.
   [[ "$(stat -f %z "$rd.out")" -gt 1048576 ]] && : > "$rd.out"
@@ -305,10 +333,23 @@ run_every() { # <workload>: per round one MINOR=0 baseline and one MINOR=1 run p
   done
 }
 
+run_arms() { # <workload>: per round one MINOR=0 baseline and one MINOR=1 run per -a arm
+  local w="$1" i k n arms=("-1") a
+  for ((a = 0; a < ${#ARM_LABELS[@]}; a++)); do arms+=("$a"); done
+  n=${#arms[@]}
+  for ((i = 1; i <= RUNS; i++)); do
+    for ((k = 0; k < n; k++)); do
+      a="${arms[$(((k + i - 1) % n))]}"
+      if ((a < 0)); then run_one "$w" arms 0 - "$i"
+      else run_one "$w" arms 1 - "$i" "${ARM_LABELS[$a]}" "${ARM_ENVS[$a]}"; fi
+    done
+  done
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────────────────────────
 START=$SECONDS
 if [[ $REUSE == 0 || ! -s "$TSV" ]]; then
-  printf 'workload\tsetting\tminor\tmajor_every\trun\tload\treal\tuser\tsys\tmax_rss_kb\tcycles\tminors\tmajors\tgc_us_total\tgc_us_steady_p50\tgc_us_steady_p90\tmarked_total\tstdout_hash\texit\n' > "$TSV"
+  printf 'workload\tsetting\tminor\tmajor_every\trun\tload\treal\tuser\tsys\tmax_rss_kb\tcycles\tminors\tmajors\tgc_us_total\tgc_us_steady_p50\tgc_us_steady_p90\tmarked_total\tstdout_hash\texit\tarm\n' > "$TSV"
 fi
 echo "==> output: $OUT" >&2
 build_all
@@ -317,6 +358,7 @@ for w in $WORKLOADS; do
   case "$SETTING" in fixed|both) run_pairs "$w" fixed ;; esac
   case "$SETTING" in default|both) run_pairs "$w" default ;; esac
   [[ -n "$EVERY" ]] && run_every "$w"
+  [[ ${#ARM_LABELS[@]} -gt 0 ]] && run_arms "$w"
 done
 echo "==> done in $((SECONDS - START)) s (builds included); rows in $TSV" >&2
 python3 -I "$DIR/summarize.py" "$TSV"
