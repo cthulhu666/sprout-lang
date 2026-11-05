@@ -347,9 +347,19 @@ Each premise has a test or a check that fails when it breaks.
    **Implemented** (`sprout_gc_sweep_young`, `sprout_gc_young_sweep_ok`, `sprout_gc_check_sweep`).
    Against master's runtime, with `walked=` and timing removed, every `[sprout gc]` line and the
    stdout are identical on the self-compile, mutvec_int, the §14.8 programs that build from this
-   repo, `tests/gc_gen/*` and `test_gc_freelist_reuse`. Walked slots: self-compile 136.2M → 82.5M,
-   mutvec_int 28.3M → 24.1M, nqueens 83.6M → 63.7M. Self-compile minors: 48 young-only, 12 full
-   before a major, 3 full because a region would empty.
+   repo except http_log_middleware, `tests/gc_gen/*` and `test_gc_freelist_reuse`.
+   http_log_middleware's cycle lines differ between two runs of one binary, so equality cannot be
+   shown for it. Walked slots: self-compile 136.2M → 82.5M, mutvec_int 28.3M → 24.1M, nqueens
+   83.6M → 63.7M. Self-compile minors: 48 young-only, 12 full before a major, 3 full because a
+   region would empty.
+
+   Measured against minor-off ([results-2026-11-05-gc-young-sweep.md](../bench/results-2026-11-05-gc-young-sweep.md)):
+   - GC time and pause fall against stage 1 wherever minors could skip old slots. Self-compile
+     GC 0.52 → 0.39 and p90 0.49 → 0.39; galaxy_client p50 0.91 → 0.58; digit_recognizer
+     p50 0.84 → 0.47.
+   - Minors fell back to the full sweep only before a major, except the self-compile's 3.
+   - RSS and region counts are stage 1's. mutvec_int still fails the §2 pause and memory goals
+     (p50 1.24, p90 1.57, RSS 1.23), and the self-compile's RSS is 1.09; both are step 2's.
 2. **Promotion age and nursery size**, together (§4: either alone regresses one workload). Two
    switches for the A/B, `SPROUT_GC_PROMOTE_AGE` and the nursery rule's on/off, premise 3 with
    its check, and the §14.8 workload set by `bench/gc_minor/ab.sh` (≥ 6 interleaved runs per arm)
