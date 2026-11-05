@@ -343,6 +343,13 @@ Each premise has a test or a check that fails when it breaks.
    premise 7 keeps region release; `walked` falls. Measure pause, peak RSS and the reuse path's
    cost with `bench/gc_minor/ab.sh`, reporting region counts (§5.3) and how often a minor fell back
    to the full sweep.
+
+   **Implemented** (`sprout_gc_sweep_young`, `sprout_gc_young_sweep_ok`, `sprout_gc_check_sweep`).
+   Against master's runtime, with `walked=` and timing removed, every `[sprout gc]` line and the
+   stdout are identical on the self-compile, mutvec_int, the §14.8 programs that build from this
+   repo, `tests/gc_gen/*` and `test_gc_freelist_reuse`. Walked slots: self-compile 136.2M → 82.5M,
+   mutvec_int 28.3M → 24.1M, nqueens 83.6M → 63.7M. Self-compile minors: 48 young-only, 12 full
+   before a major, 3 full because a region would empty.
 2. **Promotion age and nursery size**, together (§4: either alone regresses one workload). Two
    switches for the A/B, `SPROUT_GC_PROMOTE_AGE` and the nursery rule's on/off, premise 3 with
    its check, and the §14.8 workload set by `bench/gc_minor/ab.sh` (≥ 6 interleaved runs per arm)

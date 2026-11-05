@@ -1061,11 +1061,20 @@ Runs the write barrier under minor collections ([gc-generational-v0.md](gc-gener
 `linear_reuse`) runs with `SPROUT_GC_MINOR=1 SPROUT_GC_GENCHECK=1 SPROUT_GC_STRESS=1`. Its stdout
 must equal its sidecar `tests/gc_gen/<name>.out` byte for byte (a missing sidecar is an error), it
 must run at least 20 minor collections, and it must print the same output with
-`SPROUT_GC_MINOR=0`. The two static `sprout_analysis_*` helpers cannot be reached without a live
+`SPROUT_GC_MINOR=0`. It also runs each program with `SPROUT_FL_VERIFY=1` and with
+`SPROUT_GC_LINEAGE=1` (same switches, same output): the young-only sweep keeps the free lists
+between minors, FL_VERIFY compares them with a full walk after every collection, and lineage mode
+poisons dead OBJs instead of listing them, which is the case the incremental free count has to
+get right. The two static `sprout_analysis_*` helpers cannot be reached without a live
 analysis service, so `tests/c_runtime/analysis_strings.c` covers them under the same switches and
 the same 20-minor floor. `just c-runtime-test`
 holds the verifier's own test (`tests/c_runtime/gen_check.c`): an unbarriered old-to-young store
-must abort with the owner and field named.
+must abort with the owner and field named. `tests/c_runtime/young_sweep.c` holds the young-only
+sweep's: a minor over a large old heap walks only the young slots, the free count equals a full
+walk's after reuse and inline-tail splits, no slot is listed twice, fresh empty regions are
+released, large young objects are freed or promoted, lineage mode agrees, and three corrupting
+cases (a cleared young bit, a stale bit on a FREE slot, a perturbed free count) must abort with
+the `GENCHECK:` message.
 
 **Each site test was confirmed to fail with its barrier removed**, and the fact is the only reason
 to trust the gate: ref_write, vector_mutset, vector_push, each analysis helper, and the barrier

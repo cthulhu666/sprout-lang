@@ -299,8 +299,9 @@ static long long g_debug_gc_swept = 0;
    slot class nothing allocates, and invisible to a trigger that reads `live`.
    Under SPROUT_GC_LINEAGE it also counts every POISON corpse kept so far. */
 static long long g_debug_gc_walked = 0;
-/* Freelist length after the last sweep: pushes kept by fl_region_commit. The
-   trigger's footprint floor reads it (sprout_gc_collect_with_reason). */
+/* Freelist length: pushes kept by fl_region_commit at a full sweep, then minus each reuse,
+   plus each slot a young-only minor lists and each inline-tail split. The trigger's footprint
+   floor reads it (sprout_gc_collect_with_reason). */
 static long long g_gc_free_after_sweep = 0;
 /* The intern table is malloc'd outside the arena and never freed, so neither the
    alloc counters nor the live census can see it. Reported so a program whose keys
@@ -1141,6 +1142,13 @@ typedef struct {
   long long poison_count; /* lineage corpses in this region (never released while > 0) */
   uint8_t*  slotmap;    /* 8192-byte bitmap (NULL for is_large) */
   int       is_large;   /* 1 = single large-object region */
+  /* Young tracking, kept only with minor collections on (docs/gc-stage2-v0.md §5.3).  A bit per
+   * 16-byte granule, set at allocation for a slot that is a young object and cleared by the sweep
+   * that visits it.  A large region holds one object: young_count is 0 or 1, youngmap NULL. */
+  uint64_t* youngmap;     /* SPROUT_SLOTMAP_BYTES bytes, indexed like slotmap (NULL for is_large) */
+  long long young_count;  /* set bits */
+  long long old_count;    /* live objects that kept their colour bit through the last sweep */
+  long long marked_young; /* objects this collection's mark newly reached; in a minor all young */
 } SproutRegion;
 
 /* Slot index <-> slotmap bit.  One spelling: the sweep's HDRCHECK walk has to
@@ -1151,6 +1159,12 @@ static inline void slotmap_set(SproutRegion* r, size_t slot_idx) {
 }
 static inline int slotmap_test(const SproutRegion* r, size_t slot_idx) {
   return (r->slotmap[slot_idx / 8] >> (slot_idx % 8)) & 1;
+}
+static inline void youngmap_set(SproutRegion* r, size_t slot_idx) {
+  r->youngmap[slot_idx / 64] |= (uint64_t)1 << (slot_idx % 64);
+}
+static inline int youngmap_test(const SproutRegion* r, size_t slot_idx) {
+  return (int)((r->youngmap[slot_idx / 64] >> (slot_idx % 64)) & 1);
 }
 
 static SproutRegion* g_regions = NULL;  /* sorted by base address */
@@ -1460,9 +1474,12 @@ static SproutRegion* open_new_region(void) {
   if (base == NULL) base = (char*)malloc(SPROUT_REGION_SIZE);
   if (base == NULL) sprout_fail("open_new_region: out of memory");
   uint8_t* slotmap = (uint8_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
+  uint64_t* youngmap = (uint64_t*)calloc(SPROUT_SLOTMAP_BYTES, 1);
   /* base may be an arena chunk, which must NOT be passed to free(). */
-  if (slotmap == NULL) {
+  if (slotmap == NULL || youngmap == NULL) {
     if (arena_contains(base)) arena_chunk_release(base); else free(base);
+    free(slotmap);
+    free(youngmap);
     sprout_fail("open_new_region: out of memory for slotmap");
   }
   SproutRegion r;
@@ -1473,6 +1490,10 @@ static SproutRegion* open_new_region(void) {
   r.poison_count = 0;
   r.slotmap = slotmap;
   r.is_large = 0;
+  r.youngmap = youngmap;
+  r.young_count = 0;
+  r.old_count = 0;
+  r.marked_young = 0;
   region_table_insert(r);
   /* Binary search for the entry we just inserted (table may have realloc'd). */
   size_t lo = 0, hi = g_region_count;
@@ -1610,7 +1631,8 @@ __attribute__((destructor)) static void sprout_gc_profile_dump(void) {
 /* Allocate one heap slot from the region arena. Selects from per-class freelist,
  * bump-allocates in the current open region, or opens a new region. Large objects
  * (slot_bytes > SPROUT_LARGE_THRESHOLD) get a dedicated malloc block.
- * Writes the header, sets slotmap bit, increments counters, returns payload ptr. */
+ * Writes the header, sets slotmap bit, increments counters, returns payload ptr.
+ * With minor collections on, also records the new slot as young (youngmap, young_count). */
 static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
                                    size_t payload_bytes, const char* ctx) {
   size_t needed_slot = round16(8 + payload_bytes);
@@ -1628,6 +1650,10 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
     r.poison_count = 0;
     r.slotmap = NULL;
     r.is_large = 1;
+    r.youngmap = NULL;
+    r.young_count = g_gen.on ? 1 : 0;
+    r.old_count = 0;
+    r.marked_young = 0;
     region_table_insert(r);
     g_managed_heap_count++;
     g_managed_alloc_since_gc++;
@@ -1646,6 +1672,12 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
      * rejects FREE by header kind), so reuse is header-write only. */
     sprout_hdr_write(payload, kind, aux);
     SPROUT_PROF_HOT(g_prof_freelist_hits++);
+    g_gc_free_after_sweep--;  /* the list's length, kept between sweeps */
+    if (g_gen.on) {
+      SproutRegion* fr = region_find(payload);
+      youngmap_set(fr, (size_t)((char*)payload - 8 - fr->base) / SPROUT_SLOT_GRAN);
+      fr->young_count++;
+    }
     g_managed_heap_count++;
     g_managed_alloc_since_gc++;
     if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(payload);
@@ -1675,6 +1707,10 @@ static void* sprout_gc_alloc_block(SproutHeapKind kind, unsigned long long aux,
   char* slot_base = r->base + off;
   sprout_hdr_write(slot_base + 8, kind, aux);
   slotmap_set(r, off / SPROUT_SLOT_GRAN);
+  if (g_gen.on) {
+    youngmap_set(r, off / SPROUT_SLOT_GRAN);
+    r->young_count++;
+  }
   g_managed_heap_count++;
   g_managed_alloc_since_gc++;
   if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_alloc(slot_base + 8);
@@ -2250,11 +2286,13 @@ static long long* sprout_realloc_vector_data(long long* data, size_t count, cons
  * has to understand it.  Left in place the tail would be dead for the object's
  * lifetime — 4064 bytes of it for `mutvec_new(508, v)` followed by a push.
  *
- * Listing it now rather than at the next sweep is safe because sprout_gc_sweep
- * memsets the lists and rebuilds them from the heap walk.  It must NOT go
- * through fl_push_staged: that marks the class touched for the per-region
- * staging, and a flag set outside a region walk is never cleared, which would
- * disable the rollback the freelist depends on.
+ * The tail goes straight onto the live lists and counts in g_gc_free_after_sweep.
+ * The full sweep memsets and rebuilds the lists, which re-lists it from the walk;
+ * a young-only minor keeps them, so this push is the only one the tail gets.  Its
+ * youngmap bit stays clear, so no minor frees it.  It must NOT go through
+ * fl_push_staged: that marks the class touched for the per-region staging, and a
+ * flag set outside a region walk is never cleared, which would disable the
+ * rollback the freelist depends on.
  *
  * The header is edited, not rewritten: sprout_hdr_write would reset the age and
  * clear the color bit, and this object is surviving, not being re-initialised.
@@ -2296,6 +2334,7 @@ static void sprout_vec_release_inline_tail(VectorVal* v) {
     if (g_gc_stress == 1 || sprout_gc_lineage_on()) sprout_gc_trace_free(payload);
     memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in word 0 */
     g_freelist[cls] = payload;
+    g_gc_free_after_sweep++;
   }
 }
 
@@ -2487,7 +2526,8 @@ static inline void gc_mark_wl_push(void* payload) {
   sprout_wl_push(&g_gc_mark_wl, payload, "GC mark: out of memory for worklist");
 }
 
-static void gc_mark_enqueue(void* payload) {
+/* `r` is the region `payload` is in, which both callers have from their lookup. */
+static void gc_mark_enqueue(void* payload, SproutRegion* r) {
   if (payload == NULL) return;
   /* Color bit in header (bit 8): marked this cycle or, with minor collections on, old. */
   void* hdr_ptr = (char*)payload - 8;
@@ -2503,12 +2543,14 @@ static void gc_mark_enqueue(void* payload) {
   h |= SPROUT_GC_COLOR_BIT;
   memcpy(hdr_ptr, &h, 8);
   g_gc_marked_count++;
+  r->marked_young++;
   gc_mark_wl_push(payload);
 }
 
 static void sprout_gc_mark_ptr(void* ptr) {
-  void* hdr = sprout_heap_lookup(ptr);
-  if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8);
+  SproutRegion* r;
+  void* hdr = sprout_heap_lookup_region(ptr, &r);
+  if (hdr != NULL) gc_mark_enqueue((char*)hdr + 8, r);
 }
 
 #if defined(SPROUT_GC_PROFILE)
@@ -2537,9 +2579,10 @@ static void sprout_gc_drain_marks(void) {
     for (size_t i = 0; i < child_count; i++) {
       long long child_val = sprout_heap_child_value_payload(payload, i);
       SPROUT_PROF_HOT(g_prof_drain_edges++);
-      void* child_hdr = sprout_heap_lookup((void*)(uintptr_t)child_val);
+      SproutRegion* child_r;
+      void* child_hdr = sprout_heap_lookup_region((void*)(uintptr_t)child_val, &child_r);
       SPROUT_PROF_HOT(g_prof_edge_kind[sprout_prof_edge_bucket(payload, i)][child_hdr != NULL]++);
-      if (child_hdr != NULL) gc_mark_enqueue((char*)child_hdr + 8);
+      if (child_hdr != NULL) gc_mark_enqueue((char*)child_hdr + 8, child_r);
     }
   }
   SPROUT_PROF_HOT(g_gc_tracing = 0);
@@ -2842,6 +2885,55 @@ static inline int sprout_slot_kind_known(uint64_t kind_bits) {
   }
 }
 
+/* HDRCHECK for the slot at `off`: a walk that steps by a wrong size corrupts silently — the
+ * misaligned read lands in a payload word, and measured on this suite a 16-byte desync skips
+ * one small slot, reads as a plausible run of CSTRs and ends neatly on the bump, so neither the
+ * kind byte nor the bump bound sees it.  The slotmap does: it records where slots start, is
+ * never cleared or re-carved, and so must agree with the walk in BOTH directions — a bit where
+ * the walk stops, no bit strictly inside a step.  Shared by the full sweep's walk and the
+ * young-only sweep's visits. */
+static inline void sprout_hdrcheck_slot(const SproutRegion* r, size_t off, size_t ssize, uint64_t kind_bits) {
+  size_t walk_slot = off / SPROUT_SLOT_GRAN;
+  int start_ok = slotmap_test(r, walk_slot);
+  size_t end_slot = (off + ssize) / SPROUT_SLOT_GRAN;
+  size_t bump_slot = r->bump / SPROUT_SLOT_GRAN;
+  if (end_slot > bump_slot) end_slot = bump_slot;
+  /* A one-slot step has no interior, and 16- and 32-byte slots are most of
+   * the heap, so this skips the scan for the majority of slots. */
+  size_t interior = (ssize > SPROUT_SLOT_GRAN)
+                        ? slotmap_next_start(r, walk_slot + 1, end_slot)
+                        : end_slot;
+  int skipped_a_start = interior < end_slot;
+  if (!start_ok || skipped_a_start || !sprout_slot_kind_known(kind_bits) ||
+      off + ssize > r->bump) {
+    fprintf(stderr,
+            "[sprout] HDRCHECK: slot walk desync at region %p off=%zu: "
+            "kind=%llu step=%zu bump=%zu start_bit=%d skipped_a_start=%d "
+            "skipped_start_off=%zu\n",
+            (void*)r->base, off, (unsigned long long)kind_bits, ssize, r->bump,
+            start_ok, skipped_a_start,
+            skipped_a_start ? interior * SPROUT_SLOT_GRAN : (size_t)0);
+    abort();
+  }
+}
+
+/* HDRCHECK: a VECTOR's aux and its ->data must tell the same story — aux is the inline element
+ * count, so it is non-zero exactly when ->data points at the inline area.  A push that moved the
+ * elements out without dropping aux leaves the slot over-sized and, worse, lets the vacated
+ * tail be handed out while it still sits inside this slot. */
+static inline void sprout_hdrcheck_vector(void* payload, unsigned long long aux) {
+  VectorVal* hv = (VectorVal*)payload;
+  int inline_data = vec_data_is_inline(hv);
+  unsigned long long vec_count = aux & SPROUT_VEC_AUX_COUNT_MASK;
+  if ((vec_count != 0) != (inline_data != 0)) {
+    fprintf(stderr,
+            "[sprout] HDRCHECK: VECTOR aux/data disagree at sweep: aux=%llu "
+            "data=%p inline=%p len=%lld cap=%lld\n",
+            vec_count, (void*)hv->data, (void*)vec_inline_data(hv), hv->len, hv->cap);
+    abort();
+  }
+}
+
 /* ── Free lists are built DURING the sweep's classifying walk ───────────────
  *
  * The freelists must end up holding every FREE slot in every SURVIVING region.
@@ -2860,6 +2952,11 @@ static inline int sprout_slot_kind_known(uint64_t kind_bits) {
  * top of that saved head, so restoring the saved heads drops exactly R's
  * entries and nothing else.  Cost is O(classes touched), paid only for a region
  * that is about to be released anyway.
+ *
+ * This is the FULL sweep.  A young-only minor (sprout_gc_sweep_young) keeps the
+ * lists as they are and pushes only the young slots it frees; the lists then
+ * hold the slots of every earlier sweep, and the full sweep wipes and rebuilds
+ * them.
  *
  * Two things are easy to get wrong here, and both corrupt the freelist quietly
  * rather than crashing — see tests/stdlib/test_gc_freelist_reuse.spr:
@@ -3088,7 +3185,7 @@ static void sprout_fl_verify_against_full_walk(void) {
  * Otherwise the sweep clears it and no object is old between collections. */
 static void sprout_gc_sweep(int keep_color) {
   const uint64_t clear_color = keep_color ? 0 : SPROUT_GC_COLOR_BIT;
-  /* Rebuilt from scratch every cycle, as the old separate rebuild pass did.
+  /* A full sweep rebuilds the lists from scratch, as the old separate rebuild pass did.
      Safe here because nothing between this point and the end of the sweep
      allocates a managed object: Pass 1/2 only free(), malloc() and realloc(). */
   memset(g_freelist, 0, sizeof(g_freelist));
@@ -3138,6 +3235,8 @@ static void sprout_gc_sweep(int keep_color) {
         g_debug_gc_swept++;
         r->live_count = 0;
       }
+      r->old_count = r->live_count && keep_color;
+      r->young_count = 0;
       continue;
     }
 
@@ -3152,37 +3251,7 @@ static void sprout_gc_sweep(int keep_color) {
       uint64_t h; memcpy(&h, r->base + off, 8);
       size_t ssize = sprout_slot_step(h);
       uint64_t kind_bits = h & 0xFF;
-      /* HDRCHECK: a walk that steps by a wrong size corrupts silently — the
-       * misaligned read lands in a payload word, and measured on this suite a
-       * 16-byte desync skips one small slot, reads as a plausible run of CSTRs
-       * and ends neatly on the bump, so neither the kind byte nor the bump bound
-       * sees it.  The slotmap does: it records where slots start, is never
-       * cleared or re-carved, and so must agree with the walk in BOTH directions
-       * — a bit where the walk stops, no bit strictly inside a step. */
-      size_t walk_slot = off / SPROUT_SLOT_GRAN;
-      if (hdrcheck_on) {
-        int start_ok = slotmap_test(r, walk_slot);
-        size_t end_slot = (off + ssize) / SPROUT_SLOT_GRAN;
-        size_t bump_slot = r->bump / SPROUT_SLOT_GRAN;
-        if (end_slot > bump_slot) end_slot = bump_slot;
-        /* A one-slot step has no interior, and 16- and 32-byte slots are most of
-         * the heap, so this skips the scan for the majority of slots. */
-        size_t interior = (ssize > SPROUT_SLOT_GRAN)
-                              ? slotmap_next_start(r, walk_slot + 1, end_slot)
-                              : end_slot;
-        int skipped_a_start = interior < end_slot;
-        if (!start_ok || skipped_a_start || !sprout_slot_kind_known(kind_bits) ||
-            off + ssize > r->bump) {
-          fprintf(stderr,
-                  "[sprout] HDRCHECK: slot walk desync at region %p off=%zu: "
-                  "kind=%llu step=%zu bump=%zu start_bit=%d skipped_a_start=%d "
-                  "skipped_start_off=%zu\n",
-                  (void*)r->base, off, (unsigned long long)kind_bits, ssize, r->bump,
-                  start_ok, skipped_a_start,
-                  skipped_a_start ? interior * SPROUT_SLOT_GRAN : (size_t)0);
-          abort();
-        }
-      }
+      if (hdrcheck_on) sprout_hdrcheck_slot(r, off, ssize, kind_bits);
       if (kind_bits == SPROUT_HEAP_FREE) {
         /* Freed in an EARLIER cycle and never reused: still belongs on the
            freelist, which is rebuilt from scratch each sweep. */
@@ -3198,23 +3267,7 @@ static void sprout_gc_sweep(int keep_color) {
       SproutHeapKind kind = (SproutHeapKind)kind_bits;
       unsigned long long aux = h >> 14;
       void* payload = r->base + off + 8;
-      /* HDRCHECK: a VECTOR's aux and its ->data must tell the same story — aux
-       * is the inline element count, so it is non-zero exactly when ->data
-       * points at the inline area.  A push that moved the elements out without
-       * dropping aux leaves the slot over-sized and, worse, lets the vacated
-       * tail be handed out while it still sits inside this slot. */
-      if (hdrcheck_on && kind == SPROUT_HEAP_VECTOR) {
-        VectorVal* hv = (VectorVal*)payload;
-        int inline_data = vec_data_is_inline(hv);
-        unsigned long long vec_count = aux & SPROUT_VEC_AUX_COUNT_MASK;
-        if ((vec_count != 0) != (inline_data != 0)) {
-          fprintf(stderr,
-                  "[sprout] HDRCHECK: VECTOR aux/data disagree at sweep: aux=%llu "
-                  "data=%p inline=%p len=%lld cap=%lld\n",
-                  vec_count, (void*)hv->data, (void*)vec_inline_data(hv), hv->len, hv->cap);
-          abort();
-        }
-      }
+      if (hdrcheck_on && kind == SPROUT_HEAP_VECTOR) sprout_hdrcheck_vector(payload, aux);
       if (h & SPROUT_GC_COLOR_BIT) {
         h &= ~clear_color;
         /* Survived a collection: bump the age in the same store that clears the
@@ -3298,6 +3351,11 @@ static void sprout_gc_sweep(int keep_color) {
     g_debug_gc_walked += region_walked;
     r->live_count = region_live;
     r->poison_count = region_poison;
+    /* The walk saw every slot: a survivor is old (it kept its colour) or nothing is, and no
+       slot is young until the next allocation. */
+    r->old_count = keep_color ? region_live : 0;
+    r->young_count = 0;
+    if (g_gen.on) memset(r->youngmap, 0, SPROUT_SLOTMAP_BYTES);
     /* Pass 2 releases a region exactly when it has no live and no poison, so
        drop this region's staged entries in precisely that case. */
     if (region_live == 0 && region_poison == 0) fl_region_rollback();
@@ -3354,6 +3412,7 @@ static void sprout_gc_sweep(int keep_color) {
        * pages, so RSS falls exactly as it did when regions were malloc'd. */
       if (arena_contains(r->base)) arena_chunk_release(r->base); else free(r->base);
       free(r->slotmap);
+      free(r->youngmap);
       kept_normal--;
       region_table_remove(ri);
     }
@@ -3366,6 +3425,236 @@ static void sprout_gc_sweep(int keep_color) {
   }
 
   sprout_fl_verify_against_full_walk();
+}
+
+/* ── Young-only sweep (docs/gc-stage2-v0.md §5.3) ───────────────────────────────
+ *
+ * A minor whose next collection is also a minor visits only the slots whose youngmap bit is
+ * set, a word at a time, in regions with young_count > 0.  A young slot with its colour set
+ * is promoted (it keeps the colour); one without it is dead and freed exactly as the full
+ * sweep frees it, except that the slot goes straight onto the live free lists, which this
+ * sweep keeps: nothing is wiped or rebuilt, and g_gc_free_after_sweep is updated as slots
+ * are listed.  The old slots are not touched, so a young bit must never outlive its object:
+ * a stale bit on a FREE slot would list it a second time.
+ *
+ * No region is released here, since the lists interleave every region's slots and dropping
+ * one region's entries would walk them.  sprout_gc_young_sweep_ok says when a full sweep must
+ * run instead, which releases exactly the regions it did before. */
+
+/* Would the full sweep's Pass 2 release an ordinary region?  It does when the region ends the
+ * collection with no live and no poisoned slot: no old object, none lineage-poisoned, and no
+ * young one the mark reached. */
+static int sprout_gc_young_sweep_ok(void) {
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    const SproutRegion* r = &g_regions[ri];
+    if (r->is_large) continue;
+    if (r->old_count == 0 && r->poison_count == 0 && r->marked_young == 0) return 0;
+  }
+  return 1;
+}
+
+__attribute__((noreturn, cold, noinline))
+static void sprout_gc_young_fail(const char* what, const SproutRegion* r, size_t off, uint64_t h) {
+  fprintf(stderr, "[sprout] GENCHECK: young bit %s (region=%p off=%zu kind=%s header=0x%016llx)\n",
+          what, (void*)r->base, off, sprout_gc_kind_name(h & 0xFF), (unsigned long long)h);
+  fflush(stderr);
+  abort();
+}
+
+/* The census line counts live slots by kind; a promoted slot joins it. */
+static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long aux) {
+  switch (kind) {
+    case SPROUT_HEAP_OBJ:     g_gc_live_obj++;     break;
+    case SPROUT_HEAP_CLOSURE: g_gc_live_closure++;  break;
+    case SPROUT_HEAP_VECTOR:  g_gc_live_vec++;      break;
+    case SPROUT_HEAP_MAP:     g_gc_live_map++;      break;
+    case SPROUT_HEAP_BYTES:   g_gc_live_bytes++;    break;
+    case SPROUT_HEAP_BUILDER: g_gc_live_builder++;  break;
+    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple++;    break;
+    case SPROUT_HEAP_REF:     g_gc_live_ref++;      break;
+    case SPROUT_HEAP_CSTR:
+      g_gc_live_cstr++;
+      g_gc_live_cstr_bytes += (long long)aux;
+      break;
+    default: break;
+  }
+}
+
+static void sprout_gc_sweep_young(void) {
+  int lineage_on = sprout_gc_lineage_on();
+  int hdrcheck_on = sprout_gc_hdrcheck_on();
+  int freed_large = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    SproutRegion* r = &g_regions[ri];
+    if (r->young_count == 0) continue;
+    if (r->is_large) {
+      g_debug_gc_walked++;
+      void* payload = r->base + 8;
+      uint64_t h; memcpy(&h, r->base, 8);
+      if (h & SPROUT_GC_COLOR_BIT) {
+        h = sprout_hdr_age_bump(h);
+        memcpy(r->base, &h, 8);
+        r->live_count = 1;
+        r->old_count = 1;  /* the census leaves large objects out, as the full sweep does */
+      } else {
+        SproutHeapKind kind = sprout_hdr_kind(h);
+        sprout_gc_invalidate_singleton(h, payload);
+        if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+        sprout_release_payload_extras(payload, kind);
+        free(r->base);
+        r->base = NULL;  /* removed below, once the walk no longer indexes the table */
+        g_managed_heap_count--;
+        g_debug_gc_swept++;
+        r->live_count = 0;
+        freed_large = 1;
+      }
+      r->young_count = 0;
+      continue;
+    }
+
+    long long region_old = 0, region_poison = 0, region_walked = 0;
+    size_t words = (r->bump / SPROUT_SLOT_GRAN + 63) / 64;
+    for (size_t w = 0; w < words; w++) {
+      uint64_t bits = r->youngmap[w];
+      if (bits == 0) continue;
+      do {
+        size_t idx = w * 64 + (size_t)__builtin_ctzll(bits);
+        bits &= bits - 1;
+        size_t off = idx * SPROUT_SLOT_GRAN;
+        region_walked++;
+        uint64_t h; memcpy(&h, r->base + off, 8);
+        size_t ssize = sprout_slot_step(h);
+        uint64_t kind_bits = h & 0xFF;
+        if (kind_bits == SPROUT_HEAP_FREE || kind_bits == SPROUT_GC_POISON) {
+          /* Only with GENCHECK: a stale bit on a FREE slot would list it twice. */
+          if (g_gen.check) sprout_gc_young_fail("set on a slot that is not an object", r, off, h);
+        }
+        if (hdrcheck_on) sprout_hdrcheck_slot(r, off, ssize, kind_bits);
+        SproutHeapKind kind = (SproutHeapKind)kind_bits;
+        unsigned long long aux = h >> 14;
+        void* payload = r->base + off + 8;
+        if (hdrcheck_on && kind == SPROUT_HEAP_VECTOR) sprout_hdrcheck_vector(payload, aux);
+        if (h & SPROUT_GC_COLOR_BIT) {
+          h = sprout_hdr_age_bump(h);
+          memcpy(r->base + off, &h, 8);
+          region_old++;
+          if (g_debug_gc_enabled) sprout_gc_census_add(kind, aux);
+        } else {
+          sprout_gc_invalidate_singleton(h, payload);
+          if (hdrcheck_on && kind == SPROUT_HEAP_CSTR) {
+            size_t actual_len = strlen((const char*)payload);
+            if (aux != (unsigned long long)actual_len) {
+              fprintf(stderr, "[sprout] HDRCHECK: CSTR aux mismatch at sweep: hdr_aux=%llu strlen=%zu\n",
+                      aux, actual_len);
+              abort();
+            }
+          }
+          if (lineage_on && kind == SPROUT_HEAP_OBJ) {
+            /* Poisoned and not listed, as in the full sweep. */
+            uint64_t phdr = SPROUT_GC_POISON | ((uint64_t)ssize << 14);
+            memcpy(r->base + off, &phdr, 8);
+            void** frames = (void**)malloc(sizeof(void*) * 32);
+            int n = frames ? backtrace(frames, 32) : 0;
+            ((long long*)payload)[0] = sprout_ptr_word(frames);
+            ((long long*)payload)[1] = (long long)n;
+            region_poison++;
+            g_managed_heap_count--;
+            g_debug_gc_swept++;
+            if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+          } else {
+            if (g_gc_stress == 1 || lineage_on) sprout_gc_trace_free(payload);
+            sprout_release_payload_extras(payload, kind);
+            uint64_t free_hdr = (uint64_t)SPROUT_HEAP_FREE | ((uint64_t)ssize << 14);
+            memcpy(r->base + off, &free_hdr, 8);
+            size_t cls = ssize / SPROUT_SLOT_GRAN;
+            if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) {
+              memcpy(payload, &g_freelist[cls], sizeof(void*));  /* next-ptr in payload word 0 */
+              g_freelist[cls] = payload;
+              g_gc_free_after_sweep++;
+            }
+            g_managed_heap_count--;
+            g_debug_gc_swept++;
+          }
+        }
+        SPROUT_PROF_HOT(g_prof_sweep_visits++);
+      } while (bits != 0);
+      r->youngmap[w] = 0;
+    }
+    g_debug_gc_walked += region_walked;
+    r->young_count = 0;
+    r->old_count += region_old;
+    r->live_count += region_old;
+    r->poison_count += region_poison;
+  }
+
+  if (freed_large) {
+    size_t ri = g_region_count;
+    while (ri > 0) {
+      ri--;
+      if (g_regions[ri].is_large && g_regions[ri].base == NULL) region_table_remove(ri);
+    }
+  }
+  sprout_fl_verify_against_full_walk();
+}
+
+/* SPROUT_GC_GENCHECK=1, after every sweep with minor collections on: a full slot walk that
+ * checks the bookkeeping the young-only sweep depends on.
+ *   - after a colour-keeping sweep, a youngmap bit is set exactly on a live slot whose colour
+ *     is clear, and the region's young and old counts equal the walk's;
+ *   - g_gc_free_after_sweep equals the FREE slots a full walk finds on the lists' classes;
+ *   - after a young-only sweep, no ordinary region is left with no live and no poisoned slot. */
+__attribute__((noreturn, cold, noinline))
+static void sprout_gc_check_count_fail(const char* what, const SproutRegion* r, long long got, long long want) {
+  fprintf(stderr, "[sprout] GENCHECK: %s (region=%p recorded=%lld walked=%lld)\n",
+          what, r ? (void*)r->base : NULL, got, want);
+  fflush(stderr);
+  abort();
+}
+
+static void sprout_gc_check_sweep(int kept_color, int young_only) {
+  long long free_slots = 0;
+  for (size_t ri = 0; ri < g_region_count; ri++) {
+    const SproutRegion* r = &g_regions[ri];
+    if (r->is_large) {
+      if (!kept_color) continue;
+      uint64_t h; memcpy(&h, r->base, 8);
+      long long young = (h & SPROUT_GC_COLOR_BIT) ? 0 : 1;
+      if (r->young_count != young) sprout_gc_check_count_fail("young count of a large region", r, r->young_count, young);
+      if (r->old_count != 1 - young) sprout_gc_check_count_fail("old count of a large region", r, r->old_count, 1 - young);
+      continue;
+    }
+    long long young = 0, old = 0, live = 0, poison = 0;
+    size_t off = 0;
+    while (off < r->bump) {
+      uint64_t h; memcpy(&h, r->base + off, 8);
+      size_t ssize = sprout_slot_step(h);
+      uint64_t kind_bits = h & 0xFF;
+      int is_live = kind_bits != SPROUT_HEAP_FREE && kind_bits != SPROUT_GC_POISON;
+      if (kind_bits == SPROUT_HEAP_FREE) {
+        size_t cls = ssize / SPROUT_SLOT_GRAN;
+        if (cls >= 1 && cls < SPROUT_FREELIST_CLASSES) free_slots++;
+      }
+      if (kind_bits == SPROUT_GC_POISON) poison++;
+      if (is_live) live++;
+      if (kept_color) {
+        int bit = youngmap_test(r, off / SPROUT_SLOT_GRAN);
+        int want = is_live && !(h & SPROUT_GC_COLOR_BIT);
+        if (bit && !want) sprout_gc_young_fail("set on a slot that is not a young object", r, off, h);
+        if (!bit && want) sprout_gc_young_fail("clear on a young object", r, off, h);
+        young += want;
+        old += is_live && !want;
+      }
+      off += ssize;
+    }
+    if (kept_color) {
+      if (r->young_count != young) sprout_gc_check_count_fail("young count", r, r->young_count, young);
+      if (r->old_count != old) sprout_gc_check_count_fail("old count", r, r->old_count, old);
+    }
+    if (young_only && live == 0 && poison == 0)
+      sprout_gc_check_count_fail("a young-only minor left a region with no live slot", r, 0, 0);
+  }
+  if (g_gc_free_after_sweep != free_slots)
+    sprout_gc_check_count_fail("free count", NULL, g_gc_free_after_sweep, free_slots);
 }
 
 static void sprout_gc_collect(void) {
@@ -3400,12 +3689,20 @@ static void sprout_gc_collect_with_reason(const char* reason) {
   int gen_on = g_gen.on;
   int minor = gen_on && sprout_gc_gen_choose_minor(reason);
   if (gen_on && !minor && !g_gen.colorless) sprout_gc_clear_marks();
+  if (gen_on)
+    for (size_t ri = 0; ri < g_region_count; ri++) g_regions[ri].marked_young = 0;
   sprout_gc_mark_roots(sprout_gc_mark_ptr);
   if (minor) sprout_gc_mark_remembered();
   sprout_gc_drain_marks();
   if (minor && g_gen.check) sprout_gc_gen_verify();
   int next_major = gen_on && sprout_gc_gen_record(minor);
-  sprout_gc_sweep(gen_on && !next_major);
+  /* A minor followed by a minor sweeps only the young slots, unless that would keep a region the
+     full sweep releases.  A minor before a major walks everything to clear the colour bits, and
+     AGEPROF's age histogram needs every live slot. */
+  int young_only = minor && !next_major && !sprout_gc_ageprof_on() && sprout_gc_young_sweep_ok();
+  if (young_only) sprout_gc_sweep_young();
+  else            sprout_gc_sweep(gen_on && !next_major);
+  if (gen_on && g_gen.check) sprout_gc_check_sweep(!next_major, young_only);
   if (gen_on && g_gen.check && g_gen.last_live != g_managed_heap_count) {
     fprintf(stderr, "[sprout] GENCHECK: predicted %lld live objects after the sweep, found %lld\n",
             g_gen.last_live, g_managed_heap_count);

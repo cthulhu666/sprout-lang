@@ -561,6 +561,34 @@ for sel in barrier minor_keeps_old major_every clear_before_major doubling no_ch
   test "$(cat "$TMP_DIR/gc_$sel.out")" = "gen-check-$sel"
 done
 
+echo "==> c runtime: a minor sweeps only the young slots, keeps the free lists, and GENCHECK aborts on a bad young bit or free count"
+# young_sweep.c includes sprout_runtime.c (like gen_check.c). The corrupting cases must abort with
+# the GENCHECK message: a check that tests nothing fails here.
+YS="$TMP_DIR/young_sweep"
+clang "$ROOT/tests/c_runtime/young_sweep.c" "$ROOT/runtime/sprout_scheduler.c" "$ROOT/runtime/sprout_poll.c" \
+  "${CLANG_EXTRA[@]}" -O0 -g ${SAN[@]+"${SAN[@]}"} -o "$YS"
+for sel in bad_young_bit bad_young_bit_free bad_free_count; do
+  want="GENCHECK: young bit"
+  [[ "$sel" == bad_free_count ]] && want="GENCHECK: free count"
+  if ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$YS" "$sel" > "$TMP_DIR/ys_$sel.out" 2> "$TMP_DIR/ys_$sel.err"; then
+    echo "  young_sweep '$sel' did not abort" >&2
+    exit 1
+  fi
+  grep -q "$want" "$TMP_DIR/ys_$sel.err" || {
+    echo "  young_sweep '$sel' failed without the message '$want':" >&2
+    cat "$TMP_DIR/ys_$sel.out" "$TMP_DIR/ys_$sel.err" >&2
+    exit 1
+  }
+done
+for sel in walked_young free_count no_double_list region_release large_young lineage; do
+  ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}" "$YS" "$sel" > "$TMP_DIR/ys_$sel.out" 2> "$TMP_DIR/ys_$sel.err" || {
+    echo "  young_sweep '$sel' failed:" >&2
+    cat "$TMP_DIR/ys_$sel.out" "$TMP_DIR/ys_$sel.err" >&2
+    exit 1
+  }
+  test "$(cat "$TMP_DIR/ys_$sel.out")" = "young-sweep-$sel"
+done
+
 echo "==> c runtime: NOSCAN vectors are not scanned, keep the bit through set/append/concat/push, and skip the barrier"
 # vec_noscan.c includes sprout_runtime.c (like gen_check.c). Each case is its own process.
 VN="$TMP_DIR/vec_noscan"

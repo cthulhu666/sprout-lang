@@ -136,11 +136,9 @@ Sprout's sweep is **already staged per region** — `fl_push_staged` /
 drops exactly its own freelist entries. Sweeping a region at a time is closer than it
 looks.
 
-The blocker is filed already: *"The freelists are still wiped and rebuilt from all
-regions every sweep."* A sweep that rebuilds the whole heap's freelists cannot be
-resumed halfway. That entry is listed as the nursery's prerequisite; it is equally the
-prerequisite here, and that is an argument for its priority independent of either
-feature.
+The blocker was that every sweep wiped and rebuilt the whole heap's freelists, which
+cannot be resumed halfway. A young-only minor now keeps them ([gc-stage2-v0.md](gc-stage2-v0.md)
+§5.3); a full sweep, the one this section would split, still rebuilds them.
 
 ## 7. What Sprout cannot do yet
 
