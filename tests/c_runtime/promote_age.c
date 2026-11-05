@@ -19,6 +19,7 @@
  *   major_input_*  — the 2x rule reads the heap count, or the old count.
  *   nursery_*      — the next collection runs heap + max(base, baseline x 2) allocations on; a
  *                    pinned threshold turns the rule off; the footprint floor stays before a major.
+ *   census_age     — at K=3 the live census counts a young survivor once and drops one that dies.
  *   bad_*          — each aborts with a message the caller checks.
  *
  * `k_cases` lists every case with its environment; main sets it before sprout_set_argv. */
@@ -32,6 +33,7 @@ static void* g_chain;     /* permanent root: head of a chain of Refs */
 static long long g_tail;  /* last Ref of the chain */
 static void* g_keep;      /* permanent root: one rooted object */
 static void* g_keep2;
+static void* g_doom;      /* permanent root: a chain that census_age drops */
 static long long g_thr;   /* the threshold the last collection chose */
 static long long g_heap;  /* the heap count after it */
 static int g_k = 1;       /* the case's promotion age */
@@ -266,6 +268,33 @@ static int nursery_floor_before_major(void) {
   return g_failed;
 }
 
+/* K=3: the census ref count is the live count after every collection.  10 Refs live on, 4 die
+ * after one survival (age 1 in a young sweep), and 5 more arrive after the doomed ones are gone. */
+static int census_age(void) {
+  register_roots();
+  register_root_slot(&g_doom, SPROUT_ROOT_PTR, 0);
+  g_debug_gc_enabled = 1;
+  extend_chain(10);
+  for (int i = 0; i < 4; i++) {
+    long long x = ref_new(i);
+    ref_write(x, g_doom == NULL ? 0 : (long long)(uintptr_t)g_doom);
+    g_doom = (void*)(uintptr_t)x;
+  }
+  collect();                               /* the major recounts: 14 */
+  check(g_gc_live_ref == 14, "after the major the census holds all 14 Refs");
+  collect();                               /* minor: all 14 survive at age 1, already counted */
+  check(g_gc_live_ref == 14, "a young survivor that was counted is not counted again");
+  g_doom = NULL;
+  collect();                               /* minor: the 4 die at age 2, the 10 are promoted */
+  check(g_gc_live_ref == 10, "a dead young slot that was counted leaves the census");
+  extend_chain(5);
+  collect();                               /* minor: 5 new survivors are counted once */
+  check(g_gc_live_ref == 15, "a new survivor joins the census once");
+  collect();
+  check(g_gc_live_ref == 15, "and is not counted again at its next survival");
+  return g_failed;
+}
+
 /* An old object whose store skipped the barrier, with a young child that stays young: premise 3. */
 static int bad_unremembered_edge(void) {
   register_roots();
@@ -331,7 +360,8 @@ static const AgeCase k_cases[] = {
   { "nursery_sizing",            nursery_sizing,              1, 1, NULL,   "1000", NULL },
   { "nursery_pinned",            nursery_pinned,              1, 1, NULL,   "1000", "5000" },
   { "nursery_floor_before_major", nursery_floor_before_major, 1, 1, NULL,   "1",    NULL },
-  { "bad_unremembered_edge",     bad_unremembered_edge,       2, 0, NULL,   "1000", NULL },
+  { "census_age",                census_age,                  3, 0, NULL,   "1000", NULL },
+  { "bad_unremembered_edge",    bad_unremembered_edge,       2, 0, NULL,   "1000", NULL },
   { "bad_major_bit13",           bad_major_bit13,             2, 0, NULL,   "1",    NULL },
   { "bad_major_set",             bad_major_set,               2, 0, NULL,   "1",    NULL },
 };

@@ -3277,6 +3277,25 @@ static inline void sprout_gc_census_add(SproutHeapKind kind, unsigned long long 
   }
 }
 
+/* A counted slot that dies in a young sweep leaves the census: the mirror of the add. */
+static inline void sprout_gc_census_sub(SproutHeapKind kind, unsigned long long aux) {
+  switch (kind) {
+    case SPROUT_HEAP_OBJ:     g_gc_live_obj--;     break;
+    case SPROUT_HEAP_CLOSURE: g_gc_live_closure--;  break;
+    case SPROUT_HEAP_VECTOR:  g_gc_live_vec--;      break;
+    case SPROUT_HEAP_MAP:     g_gc_live_map--;      break;
+    case SPROUT_HEAP_BYTES:   g_gc_live_bytes--;    break;
+    case SPROUT_HEAP_BUILDER: g_gc_live_builder--;  break;
+    case SPROUT_HEAP_TUPLE:   g_gc_live_tuple--;    break;
+    case SPROUT_HEAP_REF:     g_gc_live_ref--;      break;
+    case SPROUT_HEAP_CSTR:
+      g_gc_live_cstr--;
+      g_gc_live_cstr_bytes -= (long long)aux;
+      break;
+    default: break;
+  }
+}
+
 /* Free one unmarked slot (`slot` is its header address), the same way in both sweeps.  Under
  * lineage an OBJ is poisoned and kept, not listed; any other slot releases its extras and gets
  * a FREE header.  Returns 1 when the slot is FREE and the caller lists it, 0 when it is
@@ -3645,10 +3664,12 @@ static void sprout_gc_sweep_young(void) {
           } else {
             region_old++;
           }
+          /* The census keeps the previous sweep's counts: only an age-0 slot is new to it. */
+          if (g_debug_gc_enabled && sprout_hdr_age(h) == 0) sprout_gc_census_add(kind, aux);
           h = sprout_hdr_age_bump(h);
           memcpy(r->base + off, &h, 8);
-          if (g_debug_gc_enabled) sprout_gc_census_add(kind, aux);
         } else {
+          if (g_debug_gc_enabled && sprout_hdr_age(h) >= 1) sprout_gc_census_sub(kind, aux);
           if (sprout_gc_free_dead_slot(r->base + off, h, kind, aux, ssize, lineage_on, hdrcheck_on))
             fl_push_live(ssize / SPROUT_SLOT_GRAN, payload);
           else
