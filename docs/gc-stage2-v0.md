@@ -279,7 +279,7 @@ logs no minor lowered the region count (self-compile 0 of 63, mutvec_int 0 of 35
 every survivor rarely leaves a region empty); in the K2 N1 prototype 105 of mutvec_int's 791
 minors did, so step 2 measures how often the fallback runs.
 
-**The free count.** The footprint floor reads `g_gc_free_after_sweep`, which the staged build
+**The free count.** The footprint floor reads `g_gc_freelist_len`, which the staged build
 counts during the walk (`fl_region_commit`). A young-only minor keeps it incrementally: the count
 after the last sweep, minus free-list reuses, plus slots it lists, plus inline-tail splits. Only
 listed slots count: in lineage mode (`sprout_gc_lineage_on`) a dead object is poisoned, not listed.
