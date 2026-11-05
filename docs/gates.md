@@ -1088,7 +1088,8 @@ the `GENCHECK:` message. `tests/c_runtime/promote_age.c` holds the stage-2 switc
 is young until its Kth collection (colour, youngmap bit, region counts, also for a large object),
 a major's colour-keeping sweep promotes only at age K−1, a store into a young `Ref` whose parent is
 then promoted keeps the child alive, the set is empty before a major, the 2× rule's two inputs and
-the nursery sizing (and its pinned and before-a-major exceptions) are pinned, and an unremembered
+the nursery sizing (and its pinned exception, and the footprint floor as its lower bound before a
+major and at it) are pinned, and an unremembered
 old-to-young edge, a stray bit 13 or a non-empty set before a major, and each bad switch value
 must abort with their messages.
 
@@ -1138,6 +1139,9 @@ at landing, 25 with the floor off) with minor collections off, since with them o
 without the floor (2.3), and `test_gc_trigger_adversary`'s footprint (`free=` plus
 `heap_after=` on the cycle line) grows by at most 2% over the second half of the run, with minor
 collections on (177,604 → 177,712) and off (152,435 → 152,557).
+The same probe runs with `SPROUT_GC_NURSERY=1`, and with `SPROUT_GC_PROMOTE_AGE=2` added: the
+nursery rule sizes every collection, so the floor must stay its lower bound before a major and at
+the major, or the free pool grows there too.
 
 **The second probe is there to fail the floor that looks right.** Counting free slots only in
 classes with allocation demand diverges on that fixture, and so does the floor without its `/ 3`.
